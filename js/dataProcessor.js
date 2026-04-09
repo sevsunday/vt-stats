@@ -1,25 +1,5 @@
-const WEAPON_NAMES = {
-  'plasball':         'Plasma Ball',
-  'plasstream':       'Plasma Stream',
-  'fsnip_c':          'Sniper',
-  'shellgun_c':       'Shell Gun',
-  'cphcg_c':          'Chain Gun',
-  'slicer_c':         'Slicer',
-  'epulse':           'Energy Pulse',
-  'xfbseek':          'Seeker Missile',
-  'xfbseeke':         'Seeker Explosion',
-  'mbolt':            'Mortar Bolt',
-  'gauss_c':          'Gauss Rifle',
-  'xcarxpl':          'Car Explosion',
-  'xvehxpl':          'Vehicle Explosion',
-  'leadcr_a':         'Lead Rounds',
-  'arcboltvsr':       'Arc Bolt',
-  'flaremine_s_vsr':  'Flare Mine',
-};
-
 function humanizeWeapon(odf) {
-  const key = odf.replace(/\.odf$/i, '');
-  return WEAPON_NAMES[key] || key;
+  return odf.replace(/\.odf$/i, '');
 }
 
 function buildNameResolver(header) {
