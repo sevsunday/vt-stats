@@ -1,5 +1,55 @@
-function humanizeWeapon(odf) {
-  return odf.replace(/\.odf$/i, '');
+function buildWeaponNameResolver(odfDb) {
+  const byOrdName = {};
+  const byObjectClass = {};
+  const byLeaderName = {};
+  const dispenserToWpn = {};
+
+  for (const [, wpn] of Object.entries(odfDb.Weapon || {})) {
+    const wc = wpn.WeaponClass || {};
+    const dc = wpn.DispenserClass || {};
+    const tg = wpn.TargetingGunClass || {};
+    const name = wc.wpnName;
+    if (!name) continue;
+
+    if (wc.ordName)       byOrdName[wc.ordName] = name;
+    if (dc.objectClass)   { byObjectClass[dc.objectClass] = name; dispenserToWpn[dc.objectClass] = name; }
+    if (tg.leaderName)    byLeaderName[tg.leaderName] = name;
+  }
+
+  const byExplosion = {};
+  for (const [vehKey, veh] of Object.entries(odfDb.Vehicle || {})) {
+    const gc = veh.GameObjectClass || {};
+    const tc = veh.TorpedoClass || {};
+    const vehBase = vehKey.replace(/\.odf$/i, '');
+    const parentWpn = dispenserToWpn[vehBase];
+    if (!parentWpn) continue;
+    if (tc.xplBlast)       byExplosion[tc.xplBlast] = parentWpn;
+    if (gc.explosionName)  byExplosion[gc.explosionName] = parentWpn;
+  }
+
+  return function (odfString) {
+    const key = odfString.replace(/\.odf$/i, '');
+    return byOrdName[key] || byObjectClass[key] || byLeaderName[key] || byExplosion[key] || key;
+  };
+}
+
+function disambiguateWeaponNames(ordnanceOdfs, lookupFn) {
+  const raw = {};
+  for (const odf of ordnanceOdfs) {
+    raw[odf] = lookupFn(odf);
+  }
+
+  const counts = {};
+  for (const name of Object.values(raw)) {
+    counts[name] = (counts[name] || 0) + 1;
+  }
+
+  const result = {};
+  for (const [odf, name] of Object.entries(raw)) {
+    const key = odf.replace(/\.odf$/i, '');
+    result[odf] = counts[name] > 1 ? `${name} (${key})` : name;
+  }
+  return result;
 }
 
 function buildNameResolver(header) {
@@ -10,11 +60,24 @@ function buildNameResolver(header) {
   return (id) => map[id] || 'Mystery Player';
 }
 
-function processMatchData(raw) {
+function processMatchData(raw, odfDb) {
   const header = raw.header;
   const events = raw.eventStream;
   const resolve = buildNameResolver(header);
   const tickRate = header.tickRate || 20;
+
+  const ordnanceOdfs = new Set();
+  for (const evt of events) {
+    if (evt.damageDealt)    ordnanceOdfs.add(evt.damageDealt.ordnanceOdf);
+    if (evt.damageReceived) ordnanceOdfs.add(evt.damageReceived.ordnanceOdf);
+  }
+
+  let weaponNameMap;
+  if (odfDb) {
+    const lookup = buildWeaponNameResolver(odfDb);
+    weaponNameMap = disambiguateWeaponNames(ordnanceOdfs, lookup);
+  }
+  const resolveWeapon = (odf) => (weaponNameMap && weaponNameMap[odf]) || odf.replace(/\.odf$/i, '');
 
   const playerStats = {};
   const rivalryMatrix = {};
@@ -38,7 +101,7 @@ function processMatchData(raw) {
     if (evt.damageDealt) {
       const d = evt.damageDealt;
       const shooter = resolve(d.shooter);
-      const weapon = humanizeWeapon(d.ordnanceOdf);
+      const weapon = resolveWeapon(d.ordnanceOdf);
       const amount = d.amount;
       const tick = d.tick;
 

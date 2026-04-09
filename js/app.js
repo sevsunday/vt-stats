@@ -3,12 +3,16 @@
   const $dashboard = document.getElementById('dashboard');
   const $select   = document.getElementById('match-select');
 
-  // ── Load manifest ──────────────────────────────────────────────
-  let manifest;
+  // ── Load manifest + ODF database in parallel ───────────────────
+  let manifest, odfDb;
   try {
-    const res = await fetch('data/matches.json');
-    if (!res.ok) throw new Error(res.status);
-    manifest = await res.json();
+    const [manifestRes, odfRes] = await Promise.all([
+      fetch('data/matches.json'),
+      fetch('data/odf.min.json'),
+    ]);
+    if (!manifestRes.ok) throw new Error('manifest ' + manifestRes.status);
+    manifest = await manifestRes.json();
+    if (odfRes.ok) odfDb = await odfRes.json();
   } catch {
     $loading.classList.remove('d-none');
     $loading.innerHTML = '<p class="text-danger text-center mt-5">Failed to load match manifest.</p>';
@@ -45,8 +49,8 @@
       return;
     }
 
-    const data = processMatchData(raw);
-    raw = null; // free memory
+    const data = processMatchData(raw, odfDb);
+    raw = null;
 
     $loading.classList.add('d-none');
     $dashboard.classList.remove('d-none');
