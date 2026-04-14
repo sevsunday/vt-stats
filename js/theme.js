@@ -324,9 +324,18 @@ function migrateOldTheme() {
  * Initialize theme system
  */
 function initThemeSystem() {
-    // Migrate old themes
-    migrateOldTheme();
-    
+    // Migrate old themes and restore saved state
+    const savedTheme = migrateOldTheme();
+    if (savedTheme) {
+        document.documentElement.dataset.theme = savedTheme;
+    }
+    try {
+        const savedMode = localStorage.getItem('kb-mode');
+        if (savedMode === 'light' || savedMode === 'dark') {
+            document.documentElement.dataset.mode = savedMode;
+        }
+    } catch (e) { /* localStorage not available */ }
+
     // Setup controls when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
