@@ -1,0 +1,54 @@
+---
+description: Styling standards — Bootstrap-first, theme-aware, CSS variable usage
+globs: "**/*.{html,css,js}"
+---
+
+# Styling Rules
+
+## Bootstrap-First
+
+Always use Bootstrap 5.3.2 utility classes before writing custom CSS. The entire UI is built on Bootstrap's grid, card, table, badge, button, and form components.
+
+## Theme System — `--kb-*` Variables
+
+This project uses a 44-theme system with light/dark mode support. All colors MUST come from CSS custom properties.
+
+### Semantic Color Variables
+- `--kb-primary`, `--kb-accent`, `--kb-info`, `--kb-success`, `--kb-warning`, `--kb-danger`
+- `--kb-primary-fg`, `--kb-accent-fg`, etc. (foreground for solid backgrounds)
+- `--kb-bg-body`, `--kb-bg-card`, `--kb-bg-subtle` (background hierarchy)
+- `--kb-text-primary`, `--kb-text-secondary`, `--kb-text-muted` (text hierarchy)
+- `--kb-border-subtle` (borders)
+
+### Rules
+
+1. **ZERO hardcoded colors** in HTML inline styles or JavaScript. Always use `var(--kb-*)`.
+2. For muted backgrounds, use `*-muted` variants — never `bg-*-opacity-*`.
+3. Solid background → pair with `text-*-fg`. Muted background → use `text-*`.
+4. Chart.js colors: read via `getComputedStyle(document.documentElement).getPropertyValue('--kb-primary')` at render time.
+5. Charts must re-render when theme changes (destroy and recreate).
+
+### HTML Attributes
+
+```html
+<html data-theme="default" data-mode="dark">
+```
+
+Theme switching via `window.KBTheme.setTheme(id)` and `window.KBTheme.setMode('light'|'dark')`. State persists in `localStorage` keys `kb-theme` and `kb-mode`.
+
+### CSS Load Order (required)
+
+```html
+<link rel="stylesheet" href="css/theme-system.css">  <!-- Variable foundation -->
+<link rel="stylesheet" href="css/themes.css">          <!-- 44 theme definitions -->
+<link rel="stylesheet" href="css/main.css">             <!-- Component styles -->
+<link rel="stylesheet" href="css/layout.css">           <!-- Layout/responsive -->
+```
+
+### JS Load Order
+
+```html
+<script src="js/theme.js"></script>    <!-- Theme system (must be first) -->
+<script src="js/charts.js"></script>   <!-- Chart renderers -->
+<script src="js/app.js"></script>      <!-- Main application -->
+```

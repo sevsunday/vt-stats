@@ -1,0 +1,1531 @@
+/**
+ * Knowledge Base Layout Styles
+ * 
+ * Fumadocs-inspired three-column layout for the user interface.
+ */
+
+/* ============================================================================
+   Main Layout Structure
+   ============================================================================ */
+
+/* Root layout - stacks header and content vertically */
+.kb-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* Full-width header */
+.kb-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--kb-bg-card);
+    border-bottom: 1px solid var(--kb-border-subtle);
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    backdrop-filter: blur(8px);
+}
+
+/* Header inner container - centered with max-width */
+.kb-header-inner {
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Centered content wrapper with three-column grid */
+.kb-content-wrapper {
+    flex: 1;
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 280px 1fr 220px;
+    grid-template-areas: "sidebar-left main sidebar-right";
+}
+
+/* No TOC layout - hide right sidebar, expand main content */
+.kb-content-wrapper.kb-no-toc {
+    grid-template-columns: 280px 1fr;
+    grid-template-areas: "sidebar-left main";
+}
+
+.kb-content-wrapper.kb-no-toc .kb-sidebar-right {
+    display: none;
+}
+
+/* Full-width layout - hide both sidebars on desktop, center content */
+.kb-content-wrapper.kb-full-width {
+    grid-template-columns: 1fr;
+    grid-template-areas: "main";
+    max-width: 1400px;
+}
+
+.kb-content-wrapper.kb-full-width .kb-sidebar-right {
+    display: none;
+}
+
+/* Hide left sidebar in grid on full-width - but keep it available for mobile slide-out */
+.kb-content-wrapper.kb-full-width .kb-sidebar-left {
+    position: fixed;
+    left: -300px;
+    top: 0;
+    width: 280px;
+    height: 100vh;
+    z-index: 200;
+    transition: left var(--kb-transition-normal);
+    padding-top: 1.5rem;
+}
+
+.kb-content-wrapper.kb-full-width .kb-sidebar-left.open {
+    left: 0;
+}
+
+/* Show sidebar header in full-width mode (needed for close button) */
+.kb-content-wrapper.kb-full-width .kb-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 1rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+/* Show close button in full-width mode */
+.kb-content-wrapper.kb-full-width .kb-mobile-nav-close {
+    display: block;
+}
+
+.kb-sidebar-left {
+    grid-area: sidebar-left;
+    position: sticky;
+    top: 64px;
+    height: calc(100vh - 64px);
+    overflow-y: auto;
+    background: var(--kb-bg-card);
+    border-right: 1px solid var(--kb-border-subtle);
+    padding: 1.5rem;
+}
+
+.kb-main {
+    grid-area: main;
+    padding: 2rem 2rem;
+    max-width: 100%;
+    overflow-x: hidden;
+    min-width: 0;
+}
+
+.kb-sidebar-right {
+    grid-area: sidebar-right;
+    position: sticky;
+    top: 64px;
+    height: calc(100vh - 64px);
+    overflow-y: auto;
+    padding: 2rem 1rem;
+    border-left: 1px solid var(--kb-border-subtle);
+}
+
+/* ============================================================================
+   Header Components
+   ============================================================================ */
+
+.kb-header-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-weight: 600;
+    font-size: 1.125rem;
+    color: var(--kb-text-primary);
+}
+
+.kb-header-brand img {
+    height: 32px;
+    width: auto;
+}
+
+.kb-header-nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.kb-theme-toggle {
+    transition: color var(--kb-transition-fast);
+}
+
+.kb-theme-toggle:hover {
+    color: var(--kb-text-primary) !important;
+}
+
+/* ============================================================================
+   Search Trigger (clickable bar that opens the search modal)
+   ============================================================================ */
+
+.kb-search-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 400px;
+    padding: 0.5rem 0.75rem 0.5rem 0.875rem;
+    background: var(--kb-bg-popover);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 10px;
+    color: var(--kb-text-muted);
+    font-size: 0.9375rem;
+    cursor: pointer;
+    transition: all var(--kb-transition-fast);
+    user-select: none;
+}
+
+.kb-search-trigger:hover {
+    border-color: var(--kb-primary);
+    box-shadow: 0 0 0 3px var(--kb-primary-muted);
+}
+
+.kb-search-trigger:focus-visible {
+    outline: none;
+    border-color: var(--kb-primary);
+    box-shadow: 0 0 0 3px var(--kb-primary-muted);
+}
+
+.kb-search-trigger-icon {
+    color: var(--kb-primary);
+    font-size: 0.875rem;
+    flex-shrink: 0;
+}
+
+.kb-search-trigger-text {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.kb-search-shortcut {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.125rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--kb-text-muted);
+    background: var(--kb-bg-muted);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 4px;
+    line-height: 1.4;
+    flex-shrink: 0;
+}
+
+/* ============================================================================
+   Search Modal (fullscreen overlay)
+   ============================================================================ */
+
+.kb-search-modal-dialog {
+    --bs-modal-margin: 8vh;
+    max-width: 680px;
+}
+
+.kb-search-modal-content {
+    background: var(--kb-bg-popover);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 12px;
+    box-shadow: var(--kb-shadow-xl);
+}
+
+.kb-search-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--kb-border-strong);
+}
+
+.kb-search-modal-icon {
+    color: var(--kb-primary);
+    font-size: 1.125rem;
+    flex-shrink: 0;
+}
+
+.kb-search-modal-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--kb-text-primary);
+    font-size: 1.0625rem;
+    padding: 0;
+    min-width: 0;
+}
+
+.kb-search-modal-input::placeholder {
+    color: var(--kb-text-muted);
+}
+
+/* Hide the browser-native search clear button */
+.kb-search-modal-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.kb-search-modal-body {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.kb-search-modal-body:empty {
+    display: none;
+}
+
+/* Initial state before any search */
+.kb-search-modal-start {
+    padding: 2.5rem 1.25rem;
+    text-align: center;
+    color: var(--kb-text-muted);
+    font-size: 0.875rem;
+}
+
+.kb-search-modal-footer {
+    padding: 0.625rem 1.25rem;
+    border-top: 1px solid var(--kb-border-subtle);
+}
+
+.kb-search-modal-hints {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+}
+
+.kb-search-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.kb-search-hint kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    padding: 0.0625rem 0.3rem;
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--kb-text-muted);
+    background: var(--kb-bg-muted);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 3px;
+    line-height: 1.4;
+}
+
+/* ============================================================================
+   Search Result Items (shared between modal and any future use)
+   ============================================================================ */
+
+.kb-search-item {
+    display: block;
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--kb-border-strong);
+    text-decoration: none;
+    transition: background var(--kb-transition-fast);
+}
+
+.kb-search-item:last-child {
+    border-bottom: none;
+}
+
+/* Mouse hover - muted background */
+.kb-search-item:hover {
+    background: var(--kb-bg-muted);
+}
+
+/* Suppress hover highlight during keyboard navigation */
+.kb-keyboard-nav .kb-search-item:hover:not(.active) {
+    background: transparent;
+}
+
+/* Active/selected result - primary background with contrasting foreground */
+.kb-search-item.active {
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+    border-bottom-color: color-mix(in oklab, var(--kb-primary-fg) 15%, transparent);
+}
+
+.kb-search-item.active .kb-search-title {
+    color: var(--kb-primary-fg);
+}
+
+.kb-search-item.active .kb-search-category {
+    color: color-mix(in oklab, var(--kb-primary-fg) 80%, transparent);
+}
+
+.kb-search-item.active .kb-search-snippet {
+    color: color-mix(in oklab, var(--kb-primary-fg) 75%, transparent);
+}
+
+.kb-search-item.active .kb-search-type-article,
+.kb-search-item.active .kb-search-type-faq {
+    background: color-mix(in oklab, var(--kb-primary-fg) 20%, transparent);
+    color: var(--kb-primary-fg);
+}
+
+.kb-search-item.active mark,
+.kb-search-item.active .highlight {
+    background: color-mix(in oklab, var(--kb-primary-fg) 25%, transparent);
+    color: var(--kb-primary-fg);
+    font-weight: 600;
+}
+
+.kb-search-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.kb-search-title {
+    font-weight: 500;
+    color: var(--kb-text-primary);
+    flex: 1;
+}
+
+.kb-search-type {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+    padding: 0.125rem 0.375rem;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.kb-search-type-article {
+    background: var(--kb-primary-muted);
+    color: var(--kb-primary);
+}
+
+.kb-search-type-faq {
+    background: var(--kb-info-muted);
+    color: var(--kb-info);
+}
+
+.kb-search-category {
+    display: inline-block;
+    font-size: 0.75rem;
+    color: var(--kb-primary);
+    margin-bottom: 0.25rem;
+}
+
+.kb-search-snippet {
+    font-size: 0.8125rem;
+    color: var(--kb-text-secondary);
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.kb-search-empty {
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--kb-text-muted);
+}
+
+/* ============================================================================
+   Navigation Tree
+   ============================================================================ */
+
+.kb-nav {
+    font-size: 0.9375rem;
+}
+
+.kb-nav-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.kb-nav-item {
+    margin-bottom: 0.125rem;
+}
+
+.kb-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    color: var(--kb-text-secondary);
+    border-radius: 6px;
+    text-decoration: none;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-nav-link:hover {
+    background: var(--kb-bg-muted);
+    color: var(--kb-text-primary);
+}
+
+.kb-nav-link.active {
+    background: var(--kb-primary-muted);
+    color: var(--kb-primary);
+}
+
+.kb-nav-link i {
+    font-size: 1rem;
+    opacity: 0.7;
+}
+
+.kb-nav-category {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    color: var(--kb-primary);
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-nav-category:hover {
+    background: var(--kb-bg-muted);
+    color: var(--kb-primary-hover);
+}
+
+.kb-nav-category.active {
+    background: var(--kb-primary-muted);
+    color: var(--kb-primary);
+}
+
+.kb-nav-category i {
+    font-size: 1rem;
+    opacity: 0.9;
+}
+
+.kb-nav-children {
+    list-style: none;
+    padding-left: 1.25rem;
+    margin: 0;
+}
+
+/* Collapsible category wrapper */
+.kb-nav-collapsible {
+    display: flex;
+    align-items: center;
+}
+
+.kb-nav-collapsible .kb-nav-category {
+    flex: 1;
+}
+
+.kb-nav-collapse-toggle {
+    background: none;
+    border: none;
+    padding: 0.5rem;
+    color: var(--kb-text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-nav-collapse-toggle:hover {
+    color: var(--kb-primary);
+    background: var(--kb-bg-muted);
+}
+
+.kb-nav-collapse-toggle i {
+    transition: transform var(--kb-transition-fast);
+}
+
+.kb-nav-collapse-toggle[aria-expanded="false"] i {
+    transform: rotate(-90deg);
+}
+
+/* Collapsible children - hidden when collapsed */
+.kb-nav-children[data-collapsible="true"].collapsed {
+    display: none;
+}
+
+.kb-nav-section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--kb-text-muted);
+    padding: 1rem 0.75rem 0.5rem;
+    margin-top: 0.5rem;
+}
+
+/* ============================================================================
+   Table of Contents (Right Sidebar)
+   ============================================================================ */
+
+.kb-toc {
+    font-size: 0.875rem;
+}
+
+.kb-toc-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--kb-text-muted);
+    margin-bottom: 1rem;
+}
+
+.kb-toc-nav ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.kb-toc-nav li {
+    margin-bottom: 0.25rem;
+}
+
+.kb-toc-nav a {
+    display: block;
+    padding: 0.375rem 0;
+    color: var(--kb-text-secondary);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    padding-left: 0.75rem;
+    margin-left: -2px;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-toc-nav a:hover {
+    color: var(--kb-text-primary);
+}
+
+.kb-toc-nav a.active {
+    color: var(--kb-primary);
+    border-left-color: var(--kb-primary);
+}
+
+.kb-toc-nav ul ul {
+    padding-left: 0.75rem;
+}
+
+.kb-toc-nav ul ul a {
+    font-size: 0.8125rem;
+}
+
+/* ============================================================================
+   Article Content
+   ============================================================================ */
+
+.kb-article {
+    max-width: 800px;
+}
+
+.kb-article-header {
+    margin-bottom: 2rem;
+}
+
+.kb-article-title {
+    font-size: 2.25rem;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: 1rem;
+    color: var(--kb-text-primary);
+}
+
+.kb-article-meta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.875rem;
+    color: var(--kb-text-secondary);
+}
+
+.kb-article-content {
+    line-height: 1.75;
+}
+
+.kb-article-content h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.kb-article-content h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+}
+
+.kb-article-content h4 {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.kb-article-content p {
+    margin-bottom: 1.25rem;
+}
+
+.kb-article-content ul,
+.kb-article-content ol {
+    margin-bottom: 1.25rem;
+    padding-left: 1.5rem;
+}
+
+.kb-article-content li {
+    margin-bottom: 0.5rem;
+}
+
+.kb-article-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 1rem 0;
+}
+
+.kb-article-content blockquote {
+    border-left: 4px solid var(--kb-primary);
+    padding: 0.5rem 0 0.5rem 1.25rem;
+    margin: 1.5rem 0;
+    background: var(--kb-bg-popover);
+    border-radius: 0 8px 8px 0;
+}
+
+.kb-article-content blockquote p {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.kb-article-content table {
+    width: 100%;
+    margin: 1.5rem 0;
+    border-collapse: collapse;
+}
+
+.kb-article-content th,
+.kb-article-content td {
+    padding: 0.75rem;
+    border: 1px solid var(--kb-border-default);
+    text-align: left;
+}
+
+.kb-article-content th {
+    background: var(--kb-bg-popover);
+    font-weight: 600;
+}
+
+/* Anchor links */
+.kb-anchor {
+    margin-left: 0.5rem;
+    opacity: 0;
+    color: var(--kb-text-muted);
+    text-decoration: none;
+    transition: opacity var(--kb-transition-fast);
+}
+
+.kb-article-content h2:hover .kb-anchor,
+.kb-article-content h3:hover .kb-anchor,
+.kb-article-content h4:hover .kb-anchor {
+    opacity: 1;
+}
+
+/* ============================================================================
+   Article Navigation
+   ============================================================================ */
+
+.kb-article-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--kb-border-subtle);
+}
+
+.kb-article-nav-item {
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 10px;
+    text-decoration: none;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-article-nav-item:hover {
+    border-color: var(--kb-primary);
+    background: var(--kb-bg-popover);
+}
+
+.kb-article-nav-item.next {
+    text-align: right;
+}
+
+.kb-article-nav-label {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.25rem;
+}
+
+.kb-article-nav-title {
+    font-weight: 500;
+    color: var(--kb-text-primary);
+}
+
+/* ============================================================================
+   Related Articles
+   ============================================================================ */
+
+.kb-related {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--kb-border-subtle);
+}
+
+.kb-related-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+.kb-related-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.kb-related-item {
+    padding: 1rem;
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 10px;
+    text-decoration: none;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-related-item:hover {
+    border-color: var(--kb-primary);
+    background: var(--kb-bg-popover);
+}
+
+.kb-related-item-title {
+    font-weight: 500;
+    color: var(--kb-text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.kb-related-item-category {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+}
+
+/* ============================================================================
+   Landing Page
+   ============================================================================ */
+
+.kb-hero {
+    text-align: center;
+    padding: 2rem 1.5rem;
+    margin-bottom: 2rem;
+    background: var(--kb-primary);
+    border-radius: 12px;
+    color: var(--kb-primary-fg);
+}
+
+.kb-hero-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+    color: var(--kb-primary-fg);
+}
+
+.kb-hero-subtitle {
+    font-size: 1.125rem;
+    color: var(--kb-primary-fg);
+    opacity: 0.9;
+    margin-bottom: 1.5rem;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.kb-hero-search {
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+/* Hero search trigger variant - uses inverse text on primary background */
+.kb-search-trigger-hero {
+    max-width: 100%;
+    background: color-mix(in oklab, var(--kb-primary-fg) 10%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-primary-fg) 60%, transparent);
+    color: color-mix(in oklab, var(--kb-primary-fg) 70%, transparent);
+}
+
+.kb-search-trigger-hero:hover {
+    border-color: var(--kb-primary-fg);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--kb-primary-fg) 20%, transparent);
+}
+
+.kb-search-trigger-hero:focus-visible {
+    border-color: var(--kb-primary-fg);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--kb-primary-fg) 20%, transparent);
+}
+
+.kb-search-trigger-hero .kb-search-trigger-icon {
+    color: color-mix(in oklab, var(--kb-primary-fg) 80%, transparent);
+}
+
+.kb-search-trigger-hero .kb-search-trigger-text {
+    color: color-mix(in oklab, var(--kb-primary-fg) 70%, transparent);
+}
+
+.kb-search-trigger-hero .kb-search-shortcut {
+    color: color-mix(in oklab, var(--kb-primary-fg) 80%, transparent);
+    background: color-mix(in oklab, var(--kb-primary-fg) 15%, transparent);
+    border-color: color-mix(in oklab, var(--kb-primary-fg) 40%, transparent);
+}
+
+/* Landing page split layout for categories + FAQ sidebar */
+.kb-landing-split {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 2rem;
+    align-items: start;
+}
+
+.kb-landing-categories {
+    min-width: 0;
+}
+
+.kb-landing-faq-section {
+    position: sticky;
+    top: 80px;
+}
+
+.kb-landing-faq-sidebar {
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 12px;
+    padding: 1.25rem;
+}
+
+/* FAQ Accordion styles for sidebar */
+.kb-faq-accordion {
+    --bs-accordion-bg: transparent;
+    --bs-accordion-border-color: var(--kb-border-subtle);
+}
+
+.kb-faq-accordion .accordion-item {
+    background: transparent;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    transition: border-color var(--kb-transition-fast);
+}
+
+.kb-faq-accordion .accordion-item:hover {
+    border-color: var(--kb-primary) !important;
+}
+
+.kb-faq-accordion .accordion-item:last-child {
+    border-bottom: none;
+}
+
+.kb-faq-accordion .accordion-button {
+    background: transparent;
+    color: var(--kb-text-primary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    padding: 0.75rem 1rem;
+    box-shadow: none;
+    line-height: 1.4;
+}
+
+.kb-faq-accordion .accordion-button:not(.collapsed) {
+    background: transparent;
+    color: var(--kb-primary);
+}
+
+.kb-faq-accordion .accordion-button:focus {
+    box-shadow: none;
+}
+
+.kb-faq-accordion .accordion-button::after {
+    display: none;
+}
+
+.kb-faq-accordion .accordion-body {
+    padding: 1rem;
+    font-size: 0.875rem;
+    color: var(--kb-text-secondary);
+}
+
+.kb-faq-accordion .accordion-body p:last-child {
+    margin-bottom: 0;
+}
+
+/* Responsive: stack on smaller screens */
+@media (max-width: 1024px) {
+    .kb-landing-split {
+        grid-template-columns: 1fr;
+    }
+    
+    .kb-landing-faq-section {
+        position: static;
+    }
+}
+
+.kb-categories-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+}
+
+.kb-category-card {
+    padding: 1.5rem;
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 12px;
+    text-decoration: none;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-category-card:hover {
+    border-color: var(--kb-primary);
+    box-shadow: var(--kb-shadow-md);
+    transform: translateY(-2px);
+}
+
+.kb-category-card-icon {
+    font-size: 1.5rem;
+    color: var(--kb-primary);
+    margin-bottom: 0.75rem;
+}
+
+.kb-category-card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.kb-category-card-desc {
+    font-size: 0.875rem;
+    color: var(--kb-text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+.kb-category-card-count {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+}
+
+/* ============================================================================
+   Article Cards
+   ============================================================================ */
+
+.kb-article-card {
+    display: block;
+    padding: 1.25rem;
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 10px;
+    text-decoration: none;
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-article-card:hover {
+    border-color: var(--kb-primary);
+    background: var(--kb-bg-popover);
+}
+
+.kb-article-card-category {
+    font-size: 0.75rem;
+    color: var(--kb-primary);
+    margin-bottom: 0.5rem;
+}
+
+.kb-article-card-title {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.kb-article-card-type {
+    font-size: 0.75rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.kb-article-card-excerpt {
+    font-size: 0.875rem;
+    color: var(--kb-text-secondary);
+    margin-bottom: 0.75rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.kb-article-card-meta {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+}
+
+/* ============================================================================
+   Mobile Navigation
+   ============================================================================ */
+
+.kb-mobile-nav-toggle {
+    display: none;
+    transition: color var(--kb-transition-fast);
+}
+
+.kb-mobile-nav-toggle:hover {
+    color: var(--kb-text-primary) !important;
+}
+
+.kb-mobile-nav-close {
+    display: none;
+    transition: color var(--kb-transition-fast);
+}
+
+.kb-mobile-nav-close:hover {
+    color: var(--kb-text-primary) !important;
+}
+
+.kb-mobile-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--kb-bg-overlay);
+    z-index: 99;
+}
+
+.kb-mobile-backdrop.active {
+    display: block;
+}
+
+/* Sidebar header - only visible on mobile */
+.kb-sidebar-header {
+    display: none;
+}
+
+/* Hide elements on mobile */
+.kb-hide-mobile {
+    display: flex;
+}
+
+/* ============================================================================
+   Responsive Breakpoints
+   ============================================================================ */
+
+/* Medium-large screens: collapse left nav to hamburger, keep right TOC */
+@media (max-width: 1199px) {
+    .kb-content-wrapper {
+        grid-template-columns: 1fr 220px;
+        grid-template-areas: "main sidebar-right";
+    }
+    
+    .kb-content-wrapper.kb-no-toc,
+    .kb-content-wrapper.kb-full-width {
+        grid-template-columns: 1fr;
+        grid-template-areas: "main";
+    }
+    
+    .kb-sidebar-left {
+        position: fixed;
+        left: -300px;
+        top: 0;
+        width: 280px;
+        height: 100vh;
+        z-index: 200;
+        transition: left var(--kb-transition-normal);
+        padding-top: 1.5rem;
+    }
+    
+    .kb-sidebar-left.open {
+        left: 0;
+    }
+    
+    .kb-mobile-nav-toggle {
+        display: flex;
+        margin-right: 1rem;
+    }
+    
+    .kb-mobile-nav-close {
+        display: block;
+    }
+    
+    /* Hide brand and theme toggle in main header on mobile */
+    .kb-hide-mobile {
+        display: none !important;
+    }
+    
+    /* Show sidebar header on mobile */
+    .kb-sidebar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 1rem;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid var(--kb-border-subtle);
+    }
+}
+
+/* Medium screens: hide right TOC as well */
+@media (max-width: 991px) {
+    .kb-content-wrapper {
+        grid-template-columns: 1fr;
+        grid-template-areas: "main";
+    }
+    
+    .kb-sidebar-right {
+        display: none;
+    }
+    
+    .kb-main {
+        padding: 1.5rem;
+    }
+    
+    .kb-article-title {
+        font-size: 1.75rem;
+    }
+    
+    .kb-hero-title {
+        font-size: 2rem;
+    }
+}
+
+/* Small screens */
+@media (max-width: 576px) {
+    .kb-header-inner {
+        padding: 0 1.5rem;
+    }
+    
+    .kb-search-trigger {
+        max-width: none;
+    }
+    
+    .kb-search-shortcut {
+        display: none;
+    }
+    
+    .kb-search-modal-dialog {
+        --bs-modal-margin: 0;
+        max-width: 100%;
+        min-height: 100vh;
+    }
+    
+    .kb-search-modal-content {
+        border-radius: 0;
+        border: none;
+        min-height: 100vh;
+    }
+    
+    .kb-search-modal-footer {
+        display: none;
+    }
+    
+    .kb-article-nav {
+        grid-template-columns: 1fr;
+    }
+    
+    .kb-categories-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ============================================================================
+   Admin Layout
+   ============================================================================ */
+
+.kb-admin-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+.kb-admin-sidebar {
+    width: 225px;
+    background: var(--kb-admin-sidebar-bg);
+    border-right: 1px solid var(--kb-border-subtle);
+    padding: 1rem;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    overflow-y: auto;
+    z-index: 100;
+}
+
+/* Theme dropdown in sidebar needs high z-index to appear above main content */
+.kb-admin-sidebar .dropdown-menu {
+    z-index: 1050;
+}
+
+/* Admin sidebar branding - theme aware */
+.kb-admin-brand a {
+    color: var(--kb-admin-brand-color);
+}
+
+.kb-admin-brand a h5 {
+    color: inherit;
+}
+
+/* Admin nav link styling */
+.kb-admin-nav .nav-link {
+    color: var(--kb-admin-nav-color);
+    transition: all var(--kb-transition-fast);
+}
+
+.kb-admin-nav .nav-link:hover {
+    color: var(--kb-admin-nav-hover-color);
+    background: var(--kb-admin-nav-hover-bg);
+}
+
+.kb-admin-nav .nav-link.active {
+    color: var(--kb-primary-fg) !important;
+    background: var(--kb-primary);
+    box-shadow: 0 2px 8px var(--kb-primary-muted);
+}
+
+.kb-admin-main {
+    flex: 1;
+    margin-left: 225px;
+    padding: 0;
+    background: var(--kb-bg-primary);
+}
+
+.kb-admin-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0;
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+    background: var(--kb-bg-card);
+}
+
+.kb-admin-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    margin-bottom: 0;
+}
+
+/* Admin content area with padding */
+.kb-admin-content {
+    padding: 2rem;
+}
+
+/* Admin sidebar toggle (hamburger) - always visible */
+.kb-admin-sidebar-toggle {
+    transition: color var(--kb-transition-fast);
+    position: relative;
+    left: 3px;
+}
+
+.kb-admin-sidebar-toggle:hover {
+    color: var(--kb-text-primary) !important;
+}
+
+/* Admin sidebar close button - hidden by default, shown on mobile */
+.kb-admin-sidebar-close {
+    display: none;
+    transition: color var(--kb-transition-fast);
+}
+
+.kb-admin-sidebar-close:hover {
+    color: var(--kb-text-primary) !important;
+}
+
+/* Admin backdrop - for mobile overlay */
+.kb-admin-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--kb-bg-overlay);
+    z-index: 99;
+}
+
+.kb-admin-backdrop.active {
+    display: block;
+}
+
+/* Admin sidebar collapsed state - Desktop (icon-only mode) */
+.kb-admin-sidebar {
+    transition: width var(--kb-transition-normal);
+}
+
+.kb-admin-sidebar.collapsed {
+    width: 60px;
+    padding: 1rem 0.5rem;
+}
+
+/* Hide text labels when collapsed */
+.kb-admin-sidebar.collapsed .kb-admin-brand a h5 {
+    display: none;
+}
+
+.kb-admin-sidebar.collapsed .kb-admin-nav .nav-link {
+    justify-content: center;
+    padding: 0.75rem;
+}
+
+.kb-admin-sidebar.collapsed .kb-admin-nav .nav-link i {
+    margin-right: 0 !important;
+}
+
+.kb-admin-sidebar.collapsed .kb-admin-nav .nav-link span,
+.kb-admin-sidebar.collapsed .kb-admin-nav .nav-link:not(i) {
+    font-size: 0;
+}
+
+/* Hide text in nav links when collapsed - target text nodes */
+.kb-admin-sidebar.collapsed .nav-link {
+    font-size: 0;
+}
+
+.kb-admin-sidebar.collapsed .nav-link i {
+    font-size: 1.25rem;
+}
+
+/* Collapsed state - center the hamburger icon */
+.kb-admin-sidebar.collapsed .kb-admin-brand {
+    justify-content: center !important;
+}
+
+.kb-admin-sidebar.collapsed .kb-admin-brand > div:first-child {
+    justify-content: center;
+}
+
+/* Hide title link when collapsed */
+.kb-admin-sidebar.collapsed .kb-admin-brand > div:first-child a {
+    display: none;
+}
+
+/* Hide theme toggle and close button when collapsed on desktop */
+.kb-admin-sidebar.collapsed .kb-admin-brand > div:last-child {
+    display: none !important;
+}
+
+/* Hide the hr separator when collapsed */
+.kb-admin-sidebar.collapsed .kb-admin-nav hr {
+    margin: 0.75rem 0;
+}
+
+.kb-admin-main {
+    transition: margin-left var(--kb-transition-normal);
+}
+
+.kb-admin-main.sidebar-collapsed {
+    margin-left: 60px;
+}
+
+/* Mobile admin layout */
+@media (max-width: 991px) {
+    .kb-admin-sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 280px !important;
+        height: 100vh;
+        z-index: 200;
+        transform: translateX(-100%);
+        padding: 1.5rem !important;
+    }
+    
+    .kb-admin-sidebar.open {
+        transform: translateX(0);
+    }
+    
+    /* On mobile, collapsed class uses transform, not width */
+    .kb-admin-sidebar.collapsed {
+        transform: translateX(-100%);
+        width: 280px !important;
+    }
+    
+    /* Reset collapsed styles on mobile - show full sidebar when open */
+    .kb-admin-sidebar.collapsed.open,
+    .kb-admin-sidebar.open {
+        transform: translateX(0);
+    }
+    
+    /* Show text labels on mobile when sidebar is open */
+    .kb-admin-sidebar.open .kb-admin-brand a h5 {
+        display: block;
+    }
+    
+    .kb-admin-sidebar.open .kb-admin-brand > div:first-child a {
+        display: block;
+    }
+    
+    .kb-admin-sidebar.open .nav-link {
+        font-size: inherit;
+        justify-content: flex-start;
+        padding: 0.5rem 0.75rem;
+    }
+    
+    .kb-admin-sidebar.open .nav-link i {
+        font-size: 1rem;
+        margin-right: 0.5rem !important;
+    }
+    
+    .kb-admin-sidebar.open .kb-admin-brand {
+        justify-content: space-between;
+    }
+    
+    .kb-admin-sidebar.open .kb-admin-brand > div:first-child {
+        gap: 0.5rem;
+        justify-content: flex-start;
+    }
+    
+    .kb-admin-sidebar.open .kb-admin-brand > div:last-child {
+        display: flex !important;
+    }
+    
+    .kb-admin-sidebar-close {
+        display: block;
+    }
+    
+    .kb-admin-main {
+        margin-left: 0 !important;
+    }
+    
+    .kb-admin-main.sidebar-collapsed {
+        margin-left: 0 !important;
+    }
+    
+    .kb-admin-layout {
+        flex-direction: column;
+    }
+    
+    .kb-admin-header {
+        padding: 1rem 1.5rem;
+    }
+    
+    .kb-admin-content {
+        padding: 1.5rem;
+    }
+}

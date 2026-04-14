@@ -1,0 +1,47 @@
+---
+description: VT Stats project architecture, data flow, and schema evolution expectations
+alwaysApply: true
+---
+
+# VT Stats — Project Context
+
+## Architecture
+
+Static-site dashboard for BattleZone match statistics. Two-part system:
+
+1. **Python pipeline** (`scripts/process_stats.py`) reads raw `.binpb` protobuf files from `data/stats/*.zip`, aggregates all statistics, and writes pre-computed JSON to `data/processed/`.
+2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/charts.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI. No raw event parsing happens in the browser.
+
+## Key File Locations
+
+- Proto schema: `scripts/statsgate.proto`
+- Pipeline: `scripts/process_stats.py`
+- ODF weapon DB: `data/odf.min.json`
+- Raw data: `data/stats/*.zip` (each contains one `.binpb`)
+- Processed output: `data/processed/*.json`
+- Technical spec: `DEVELOPER_GUIDE.md`
+
+## Data Flow
+
+```
+data/stats/*.zip → process_stats.py → data/processed/*.json → browser → dashboard
+                       ↑
+                 data/odf.min.json (weapon name resolution)
+```
+
+## Schema Evolution — Be Prepared For
+
+1. **Steam64 IDs on events**: `shooter`/`victim` fields may become `uint64` Steam64 IDs instead of `int32` slot numbers.
+2. **`UpdateTick` activation**: Position/speed data at 20 TPS — will massively increase event stream size. Pipeline already skips unknown event types.
+3. **New event types**: Kill, death, vehicle, capture events may be added to the proto.
+4. **Archive format change**: Current = per-map `.zip`. Future = one master `.gz` containing timestamped `.binpb.gz` files. Map name comes from header, not filename.
+
+## Player Identity
+
+Currently by slot number (1-10) and nickname from `header.teamnum_to_nick`. Slots 1-5 are typically Team 1, 6-10 Team 2. Slot assignments can change mid-match in rare cases (player leave/rejoin). Future: definitive tracking via Steam64 IDs.
+
+**Faction fallback:** The pipeline has a sanity check — if one team list is empty but players exist on both slot ranges, it rebuilds teams from slot convention. `slot_to_faction()` also falls back to 1-5 → Team 1, 6-10 → Team 2 for individual slots not in either header list.
+
+## Dependencies
+
+All dependencies are vendored locally in `vendor/`. No CDN usage. Bootstrap 5.3.2, Chart.js 4.4.7, Bootstrap Icons.
