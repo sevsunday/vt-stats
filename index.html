@@ -1,62 +1,118 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en" data-theme="default" data-mode="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VT Stats Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="css/theme-system.css">
+  <link rel="stylesheet" href="css/themes.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <style>
+    .chart-container { position: relative; min-height: 320px; }
+    .chart-container-sm { position: relative; min-height: 200px; }
+    .heatmap-cell { font-size: 0.75rem; min-width: 60px; padding: 4px !important; }
+    .heatmap-header { font-size: 0.7rem; writing-mode: vertical-rl; text-orientation: mixed; max-width: 40px; padding: 4px !important; white-space: nowrap; }
+    .heatmap-corner { width: 100px; }
+    .heatmap-row-header { font-size: 0.75rem; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+    .rivalry-card { background: var(--kb-bg-card); border: 1px solid var(--kb-border-subtle); }
+    .stat-card { text-align: center; }
+    .stat-card .stat-value { font-size: 1.5rem; font-weight: 700; }
+    .stat-label { font-size: 0.75rem; color: var(--kb-text-muted); }
+    th[data-sort] { cursor: pointer; user-select: none; }
+    th[data-sort]:hover { color: var(--kb-primary); }
+    th[data-sort].sort-active { color: var(--kb-primary); }
+    .badge-f1 { background: var(--kb-primary); color: var(--kb-primary-fg); }
+    .badge-f2 { background: var(--kb-accent); color: var(--kb-accent-fg); }
+    .config-mod { font-size: 0.7rem; color: var(--kb-text-muted); }
+    #all-matches-view { display: none; }
+  </style>
 </head>
 <body>
 
-  <!-- Navbar / Match Selector -->
-  <nav class="navbar navbar-expand-sm sticky-top border-bottom">
-    <div class="container-fluid">
-      <span class="navbar-brand fw-bold">VT Stats</span>
-      <div class="d-flex align-items-center gap-3">
-        <select id="match-select" class="form-select form-select-sm" style="width: auto;"></select>
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-sm sticky-top border-bottom" style="background: var(--kb-bg-card);">
+    <div class="container-fluid px-3 px-md-4">
+      <span class="navbar-brand fw-bold" style="color: var(--kb-text-primary);">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </span>
+      <div class="d-flex align-items-center gap-2">
+        <select id="match-select" class="form-select form-select-sm" style="width: auto; max-width: 220px;"></select>
+
+        <!-- Theme Dropdown -->
+        <div class="dropdown">
+          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+            <i class="bi bi-palette me-1"></i><span data-theme-name>Default</span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+        </div>
+
+        <!-- Mode Toggle -->
+        <button class="btn btn-sm btn-outline-secondary" data-mode-toggle title="Toggle light/dark mode">
+          <i class="bi bi-sun-fill"></i>
+        </button>
       </div>
     </div>
   </nav>
 
-  <!-- Loading Spinner -->
+  <!-- Loading -->
   <div id="loading">
     <div class="d-flex flex-column align-items-center justify-content-center" style="min-height: 60vh;">
-      <div class="spinner-border text-info mb-3" role="status" style="width: 3rem; height: 3rem;">
+      <div class="spinner-border mb-3" role="status" style="width: 3rem; height: 3rem; color: var(--kb-primary);">
         <span class="visually-hidden">Loading...</span>
       </div>
-      <p class="text-secondary">Loading match data&hellip;</p>
+      <p style="color: var(--kb-text-muted);">Loading match data&hellip;</p>
     </div>
   </div>
 
-  <!-- Dashboard Content (hidden until data loads) -->
+  <!-- Single Match Dashboard -->
   <div id="dashboard" class="container-fluid px-3 px-md-4 py-4 d-none">
 
     <!-- Match Info Banner -->
     <div id="match-info" class="card mb-4">
       <div class="card-body d-flex flex-wrap gap-4 align-items-center">
-        <div><span class="text-secondary small">Map</span><br><strong id="info-map">—</strong></div>
-        <div><span class="text-secondary small">Date</span><br><strong id="info-date">—</strong></div>
-        <div><span class="text-secondary small">Duration</span><br><strong id="info-duration">—</strong></div>
-        <div><span class="text-secondary small">Players</span><br><strong id="info-players">—</strong></div>
+        <div><span class="stat-label">Map</span><br><strong id="info-map">—</strong></div>
+        <div><span class="stat-label">Date</span><br><strong id="info-date">—</strong></div>
+        <div><span class="stat-label">Duration</span><br><strong id="info-duration">—</strong></div>
+        <div><span class="stat-label">Players</span><br><strong id="info-players">—</strong></div>
+        <div><span class="config-mod" id="info-config"></span></div>
       </div>
     </div>
 
-    <!-- Leaderboard -->
-    <div class="card mb-4">
-      <div class="card-header"><h5 class="mb-0">Player Leaderboard</h5></div>
+    <!-- Faction Scoreboard -->
+    <div class="card mb-4" id="section-faction">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0">Faction Scoreboard</h5>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-faction" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+      </div>
+      <div class="card-body">
+        <div class="row g-3" id="faction-content"></div>
+      </div>
+    </div>
+
+    <!-- Player Leaderboard -->
+    <div class="card mb-4" id="section-leaderboard">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0">Player Leaderboard</h5>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+      </div>
       <div class="card-body table-responsive">
-        <table id="leaderboard" class="table table-hover align-middle mb-0">
+        <table id="leaderboard" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
           <thead>
             <tr>
               <th>#</th>
               <th data-sort="name">Player</th>
-              <th data-sort="dealt" class="text-end">Damage Dealt</th>
-              <th data-sort="received" class="text-end">Damage Received</th>
-              <th data-sort="net" class="text-end">Net Damage</th>
+              <th data-sort="faction" class="text-center">Team</th>
+              <th data-sort="dealt" class="text-end">Dealt</th>
+              <th data-sort="received" class="text-end">Received</th>
+              <th data-sort="net" class="text-end">Net</th>
               <th data-sort="ratio" class="text-end">Ratio</th>
-              <th data-sort="favWeapon">Favorite Weapon</th>
-              <th data-sort="weaponCount" class="text-end">Weapons Used</th>
+              <th data-sort="accuracy" class="text-end">Accuracy</th>
+              <th data-sort="asset_dealt" class="text-end">Asset Dmg</th>
+              <th data-sort="fav_weapon">Fav Weapon</th>
+              <th data-sort="weapons_used" class="text-end"># Wpns</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -64,57 +120,180 @@
       </div>
     </div>
 
-    <!-- Row 2: Timeline + Weapon Meta -->
+    <!-- Timeline + Weapon Meta -->
     <div class="row g-4 mb-4">
       <div class="col-lg-7">
-        <div class="card h-100">
-          <div class="card-header"><h5 class="mb-0">Combat Timeline</h5></div>
-          <div class="card-body">
-            <canvas id="timeline-chart"></canvas>
+        <div class="card h-100" id="section-timeline">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Combat Timeline</h5>
+            <div class="d-flex align-items-center gap-2">
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary active" data-timeline-mode="player">Players</button>
+                <button class="btn btn-outline-secondary" data-timeline-mode="faction">Teams</button>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary" data-expand="section-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
           </div>
+          <div class="card-body"><div class="chart-container"><canvas id="timeline-chart"></canvas></div></div>
         </div>
       </div>
       <div class="col-lg-5">
-        <div class="card h-100">
-          <div class="card-header"><h5 class="mb-0">Weapon Meta</h5></div>
-          <div class="card-body">
-            <canvas id="weapon-meta-chart"></canvas>
+        <div class="card h-100" id="section-weapon-meta">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Weapon Meta</h5>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-weapon-meta" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
+          <div class="card-body"><div class="chart-container"><canvas id="weapon-meta-chart"></canvas></div></div>
         </div>
       </div>
     </div>
 
     <!-- Rivalry Heatmap -->
-    <div class="card mb-4">
-      <div class="card-header"><h5 class="mb-0">Rivalry Heatmap</h5></div>
+    <div class="card mb-4" id="section-heatmap">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0">Rivalry Heatmap</h5>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+      </div>
       <div class="card-body table-responsive">
         <table id="heatmap" class="table table-sm align-middle text-center mb-0"></table>
       </div>
     </div>
 
-    <!-- Row 4: Per-Player Weapons + Top Rivalries -->
+    <!-- Player Weapons + Top Rivalries -->
     <div class="row g-4 mb-4">
       <div class="col-lg-7">
-        <div class="card h-100">
-          <div class="card-header"><h5 class="mb-0">Per-Player Weapon Breakdown</h5></div>
-          <div class="card-body">
-            <canvas id="player-weapons-chart"></canvas>
+        <div class="card h-100" id="section-player-weapons">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Per-Player Weapon Breakdown</h5>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-player-weapons" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
+          <div class="card-body"><div class="chart-container"><canvas id="player-weapons-chart"></canvas></div></div>
         </div>
       </div>
       <div class="col-lg-5">
-        <div class="card h-100">
-          <div class="card-header"><h5 class="mb-0">Top Rivalries</h5></div>
+        <div class="card h-100" id="section-rivalries">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Top Rivalries</h5>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
           <div class="card-body" id="rivalries-container"></div>
         </div>
       </div>
     </div>
 
+    <!-- Accuracy + Weapon Accuracy -->
+    <div class="row g-4 mb-4">
+      <div class="col-lg-6">
+        <div class="card h-100" id="section-accuracy">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Shot Accuracy</h5>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body table-responsive">
+            <table id="accuracy-table" class="table table-hover table-sm align-middle mb-0" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th class="text-end">Fired</th>
+                  <th class="text-end">Hit</th>
+                  <th class="text-end">Accuracy</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100" id="section-weapon-accuracy">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Weapon Accuracy Ranking</h5>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-weapon-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body"><div class="chart-container-sm"><canvas id="weapon-accuracy-chart"></canvas></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Asset Damage -->
+    <div class="card mb-4" id="section-asset-damage">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0">AI / Structure Damage</h5>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-asset-damage" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+      </div>
+      <div class="card-body" id="asset-damage-content"></div>
+    </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="js/dataProcessor.js"></script>
+  <!-- All Matches View -->
+  <div id="all-matches-view" class="container-fluid px-3 px-md-4 py-4">
+    <div class="card mb-4">
+      <div class="card-body">
+        <h4>All Matches Overview</h4>
+        <div class="d-flex flex-wrap gap-4" id="agg-meta"></div>
+      </div>
+    </div>
+    <div class="card mb-4" id="section-career">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0">Career Leaderboard</h5>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-career" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+      </div>
+      <div class="card-body table-responsive">
+        <table id="career-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player</th>
+              <th class="text-end">Matches</th>
+              <th class="text-end">Total Dealt</th>
+              <th class="text-end">Total Received</th>
+              <th class="text-end">Accuracy</th>
+              <th class="text-end">Asset Dealt</th>
+              <th>Fav Weapon</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="row g-4 mb-4">
+      <div class="col-lg-6">
+        <div class="card h-100" id="section-global-weapon">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Global Weapon Meta</h5>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-global-weapon" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="global-weapon-chart"></canvas></div></div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100" id="section-global-rivalries">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Cross-Match Rivalries</h5>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-global-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body" id="global-rivalries-container"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Modal -->
+  <div class="modal fade" id="fullscreen-modal" tabindex="-1" aria-labelledby="fullscreen-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+      <div class="modal-content" style="background:var(--kb-bg-body);">
+        <div class="modal-header border-bottom" style="background:var(--kb-bg-card);">
+          <h5 class="modal-title" id="fullscreen-modal-title"></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="fullscreen-modal-body" style="overflow:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="vendor/chartjs/chart.umd.min.js"></script>
+  <script src="js/theme.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/app.js"></script>
 </body>

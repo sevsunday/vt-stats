@@ -1,0 +1,194 @@
+/**
+ * Theme System Infrastructure
+ * 
+ * Global styles that apply across all themes:
+ * - Color scheme declarations
+ * - Custom easing functions
+ * - Theme transition animations
+ * - Scrollbar styling
+ * - Focus ring styling
+ * - Selection highlighting
+ * 
+ * NOTE: Theme definitions (colors) are in themes.css
+ */
+
+/* ============================================================================
+   FALLBACK VALUES
+   Applied when no theme is set - ensures transitions are always available
+   ============================================================================ */
+
+:root {
+    /* Transitions - always available */
+    --kb-transition-fast: 0.15s ease;
+    --kb-transition-normal: 0.25s ease;
+    --kb-transition-slow: 0.4s ease;
+}
+
+/* ============================================================================
+   COLOR SCHEME
+   Tells browser which schemes are supported - affects native controls
+   ============================================================================ */
+
+:root {
+    color-scheme: light dark;
+}
+
+[data-mode="light"] {
+    color-scheme: light;
+}
+
+[data-mode="dark"] {
+    color-scheme: dark;
+}
+
+/* ============================================================================
+   CUSTOM EASING FUNCTIONS
+   Smoother than default ease/ease-in-out
+   Inspired by tweakcn's approach
+   ============================================================================ */
+
+:root {
+    /* Primary easing - smooth deceleration */
+    --kb-ease: cubic-bezier(0.4, 0.36, 0, 1);
+    
+    /* Bounce easing - for playful interactions */
+    --kb-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    
+    /* Quick ease - for micro-interactions */
+    --kb-ease-quick: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================================
+   THEME TRANSITIONS
+   Explicit property list for performance (better than transition: all)
+   ============================================================================ */
+
+*,
+*::before,
+*::after {
+    transition-property: color, background-color, border-color, 
+        outline-color, text-decoration-color, fill, stroke, 
+        opacity, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: var(--kb-ease);
+}
+
+/* Disable transitions on initial page load and during theme switch */
+.no-transitions *,
+.no-transitions *::before,
+.no-transitions *::after {
+    transition: none !important;
+}
+
+/* ============================================================================
+   SCROLLBAR STYLING
+   Uses theme variables for consistent appearance
+   ============================================================================ */
+
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--kb-scrollbar-thumb) var(--kb-scrollbar-track);
+}
+
+/* Webkit (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--kb-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--kb-scrollbar-thumb);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--kb-scrollbar-thumb-hover);
+}
+
+/* ============================================================================
+   FOCUS RING STYLING
+   Consistent, accessible focus indicators
+   ============================================================================ */
+
+:focus-visible {
+    outline: 2px solid var(--kb-focus-ring);
+    outline-offset: 2px;
+}
+
+/* Remove default focus ring for mouse users */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* ============================================================================
+   SELECTION HIGHLIGHTING
+   Themed text selection
+   ============================================================================ */
+
+::selection {
+    background: var(--kb-primary-muted);
+    color: var(--kb-text-primary);
+}
+
+::-moz-selection {
+    background: var(--kb-primary-muted);
+    color: var(--kb-text-primary);
+}
+
+/* ============================================================================
+   Bootstrap List Group Overrides
+   Justification: Default Bootstrap list-group borders are too bright in dark mode
+   ============================================================================ */
+
+.list-group-item {
+    background-color: var(--kb-bg-card);
+    border-color: var(--kb-border-subtle);
+    color: var(--kb-text-primary);
+}
+
+.list-group-item-action:hover,
+.list-group-item-action:focus {
+    background-color: var(--kb-bg-muted);
+    color: var(--kb-text-primary);
+}
+
+.list-group-flush > .list-group-item {
+    border-left: 0;
+    border-right: 0;
+    border-color: var(--kb-border-subtle);
+}
+
+/* ============================================================================
+   Theme Dropdown Styles
+   ============================================================================ */
+
+[data-theme-menu] .dropdown-item.active,
+[data-theme-menu] .dropdown-item:active {
+    background-color: var(--kb-primary-muted);
+    color: var(--kb-text-primary);
+}
+
+[data-theme-menu] .dropdown-header {
+    color: var(--kb-text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+[data-theme-menu] .theme-check {
+    color: var(--kb-primary);
+}
+
+/* Theme dropdown styling */
+.theme-dropdown .theme-list .dropdown-item {
+    padding: 0.4rem 0.75rem;
+}
+
+.theme-dropdown .theme-check {
+    color: var(--kb-primary);
+}

@@ -1,0 +1,68 @@
+---
+description: Data schema, damage event semantics, ODF resolution, pipeline output format
+globs: "**/*.{py,js,json}"
+---
+
+# Data Schema Rules
+
+## Protobuf Events
+
+The proto schema is at `scripts/statsgate.proto`. Event types in the `StatEvent.event_type` oneof:
+
+| Field # | Type | Key Fields |
+|---|---|---|
+| 1 | `BulletInit` | tick, shooter, ordnance_odf |
+| 2 | `BulletHit` | tick, shooter, ordnance_odf |
+| 3 | `DamageDealt` | tick, shooter, team, ordnance_odf, amount |
+| 4 | `DamageReceived` | tick, victim, team, ordnance_odf, amount |
+
+## Critical: Damage Semantics
+
+### The `team` Field
+
+The `team` field is **ALWAYS the owning player's slot number (1-10)**. It is NOT a faction ID. To get faction (Team 1 vs Team 2), cross-reference the slot against `header.team_1` / `header.team_2`.
+
+- `dd.team == 0` → world prop source → **skip shooter attribution only**; the paired DamageReceived victim side is still processed
+- `team > 0` → the slot of the player who owns the entity (player or their AI/structure)
+
+### Adjacent Pair Rule
+
+`DamageDealt` and `DamageReceived` events are **ALWAYS adjacent pairs** in the event stream. When processing, consume both events together.
+
+### Attribution Logic
+
+- `shooter > 0` → **personal** dealt credit to that player slot
+- `shooter == 0` → **asset** dealt credit to the owning slot (from `team` field)
+- `victim > 0` → **personal** received credit to that player slot
+- `victim == 0` → **asset** received credit to the owning slot (from `team` field)
+- Both `shooter > 0` AND `victim > 0` → add to **rivalry matrix** (player-on-player only)
+
+### Skip Conditions
+
+- `dd.team == 0` or `dd.amount == 0.0` → skip **shooter attribution only**; victim received damage from the paired DR is still processed
+- `dr.team == 0` → skip victim attribution (world prop victim)
+
+### Faction Fallback
+
+Faction is determined by `header.team_1` / `header.team_2`, with a fallback to standard BZ slot convention (1-5 = Team 1, 6-10 = Team 2) when header data is incomplete. See `slot_to_faction()` in the pipeline.
+
+## ODF Weapon Name Resolution
+
+Resolution chain (in order, first match wins):
+1. `WeaponClass.ordName` match → `wpnName`
+2. `DispenserClass.objectClass` match → `wpnName`
+3. `TargetingGunClass.leaderName` match → `wpnName`
+4. Explosion mapping (Vehicle → TorpedoClass/GameObjectClass → parent weapon)
+5. **Fallback**: raw ODF string minus `.odf` extension
+6. **Null ordnance**: `"Unknown"`
+
+When multiple ODFs resolve to the same display name, disambiguate by appending raw ODF in parentheses.
+
+## Pipeline Output
+
+Pre-computed JSON files in `data/processed/`:
+- `matches.json` — manifest array with id, name, file, map, date, duration, player_count
+- `<match>.json` — match data with sections: match, leaderboard, faction_totals, rivalry_matrix, top_rivalries, weapon_meta, timeline, asset_damage
+- `all_matches.json` — cross-match aggregate with: meta, career_stats, global_weapon_meta, global_rivalries
+
+All numeric values are pre-rounded (1 decimal for damage, 3 decimals for ratios/accuracy).
