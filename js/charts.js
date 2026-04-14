@@ -62,7 +62,7 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
 
   let datasets;
   if (mode === 'faction') {
-    const factionColors = { '1': t.primary, '2': t.accent };
+    const factionColors = { '1': t.primary, '2': t.success };
     datasets = Object.entries(timeline.by_faction).map(([fNum, data]) => ({
       label: `Team ${fNum}`,
       data: data,
