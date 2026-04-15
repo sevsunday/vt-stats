@@ -22,6 +22,7 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 ## Deep Reference
 
 - `DEVELOPER_GUIDE.md` — full technical specification: protobuf schema with field tables, damage event semantics, ODF weapon resolution, pre-computed JSON structure with examples, styling standards, chart architecture
+- `README.md` — project overview, quick start, features list
 - `scripts/statsgate.proto` — **definitive reference** for the raw data schema
 - `statsgate/` — upstream collector source code for schema reference
 
