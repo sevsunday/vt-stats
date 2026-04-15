@@ -9,38 +9,45 @@ alwaysApply: true
 
 Static-site dashboard for BattleZone match statistics. Two-part system:
 
-1. **Python pipeline** (`scripts/process_stats.py`) reads raw `.binpb` protobuf files from `data/stats/*.zip`, aggregates all statistics, and writes pre-computed JSON to `data/processed/`.
+1. **Python pipeline** (`scripts/process_stats.py`) reads raw `.binpb` protobuf files from `data/stats/`, aggregates all statistics, and writes pre-computed JSON to `data/processed/`.
 2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/charts.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI. No raw event parsing happens in the browser.
 
 ## Key File Locations
 
-- Proto schema: `scripts/statsgate.proto`
+- Proto schema (source of truth): `scripts/statsgate.proto`
 - Pipeline: `scripts/process_stats.py`
 - ODF weapon DB: `data/odf.min.json`
-- Raw data: `data/stats/*.zip` (each contains one `.binpb`)
+- Raw data: `data/stats/*.zip` (legacy) and `data/stats/*.binpb.gz` (new format)
 - Processed output: `data/processed/*.json`
 - Technical spec: `DEVELOPER_GUIDE.md`
+- Upstream collector source: `statsgate/` (reference copy of [statsgate](https://github.com/VTrider/statsgate))
 
 ## Data Flow
 
 ```
-data/stats/*.zip → process_stats.py → data/processed/*.json → browser → dashboard
-                       ↑
-                 data/odf.min.json (weapon name resolution)
+data/stats/*.zip or *.binpb.gz → process_stats.py → data/processed/*.json → browser → dashboard
+                                       ↑
+                                 data/odf.min.json (weapon name resolution)
 ```
 
-## Schema Evolution — Be Prepared For
+## Schema Evolution
 
-1. **Steam64 IDs on events**: `shooter`/`victim` fields may become `uint64` Steam64 IDs instead of `int32` slot numbers.
-2. **`UpdateTick` activation**: Position/speed data at 20 TPS — will massively increase event stream size. Pipeline already skips unknown event types.
-3. **New event types**: Kill, death, vehicle, capture events may be added to the proto.
-4. **Archive format change**: Current = per-map `.zip`. Future = one master `.gz` containing timestamped `.binpb.gz` files. Map name comes from header, not filename.
+`scripts/statsgate.proto` is the **definitive reference** for the raw data schema. It is kept in sync with the upstream statsgate collector. When it changes, follow `.cursor/rules/schema-migration.mdc`.
+
+Confirmed upstream changes already in the proto:
+- `shooter`/`victim` are now `uint64` Steam64 IDs (pipeline handles both old int32 and new uint64)
+- `s64_to_nick` replaces old `teamnum_to_s64`
+- `team_1`/`team_2` deprecated — slot convention (1-5/6-10) is the fallback
+- `UpdateTick` (field 5) and `UnitDestroyed` (field 6) are new event types
+- New file format: `.binpb.gz` (gzip compressed protobuf)
+
+Current local data still uses the **legacy format** (int32 slots, .zip archives). Pipeline code must work with both.
 
 ## Player Identity
 
-Currently by slot number (1-10) and nickname from `header.teamnum_to_nick`. Slots 1-5 are typically Team 1, 6-10 Team 2. Slot assignments can change mid-match in rare cases (player leave/rejoin). Future: definitive tracking via Steam64 IDs.
+Currently by slot number (1-10) and nickname from `header.teamnum_to_nick`. New data will use Steam64 IDs as primary identifiers. Pipeline detects format via `header.s64_to_nick` presence.
 
-**Faction fallback:** The pipeline has a sanity check — if one team list is empty but players exist on both slot ranges, it rebuilds teams from slot convention. `slot_to_faction()` also falls back to 1-5 → Team 1, 6-10 → Team 2 for individual slots not in either header list.
+**Faction fallback:** Pipeline has a sanity check — if one team list is empty but players exist on both slot ranges, it rebuilds teams from slot convention. `slot_to_faction()` also falls back to 1-5 → Team 1, 6-10 → Team 2.
 
 ## Dependencies
 

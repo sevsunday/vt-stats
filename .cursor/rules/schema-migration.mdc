@@ -1,0 +1,89 @@
+---
+description: Step-by-step playbook for adapting to protobuf schema changes
+globs: "**/*.{proto,py}"
+---
+
+# Schema Migration Playbook
+
+This checklist applies whenever `scripts/statsgate.proto` is updated with a new version from the upstream [statsgate](https://github.com/VTrider/statsgate) collector.
+
+## Step 0: Diff the Proto
+
+Before doing anything else, compare the new proto against the current `scripts/statsgate.proto`. Identify:
+- New messages or event types added to the `StatEvent` oneof
+- Changed field types (e.g. `int32` → `uint64`)
+- New fields on existing messages
+- Removed or deprecated fields
+- Changed field numbers (breaking wire format change)
+
+## Step 1: Update and Recompile
+
+1. Replace `scripts/statsgate.proto` with the new version
+2. Recompile: `python -m grpc_tools.protoc --proto_path=. --python_out=. statsgate.proto`
+3. Verify: run the pipeline against existing data to check for breakage
+
+## Step 2: Fix Pipeline Breakage
+
+Common issues when the proto changes:
+- **Removed/renamed fields**: The pipeline references the old field name (e.g. `header.teamnum_to_s64` → `header.s64_to_nick`). Update all references.
+- **Changed field types**: Same wire field number but different type means old data won't populate the new field. Add fallback logic.
+- **New event types**: The pipeline's main event loop (`while i < n`) uses `WhichOneof("event_type")`. Unknown event types fall through to the `else` branch and are skipped — this is safe.
+
+## Step 3: Handle Dual-Format Data
+
+When field types change (e.g. `int32` slot → `uint64` Steam64), the pipeline must handle both:
+- **Detection**: Check which header fields are populated. For example, `header.s64_to_nick` non-empty = new format.
+- **Slot-based fallback**: Old data uses slot numbers (1-10) for `shooter`/`victim`. New data uses Steam64 IDs. The `team` field (slot 1-10) is consistent across both formats.
+- **Keep backward compatibility** until all local data in `data/stats/` is replaced with new-format data.
+
+## Step 4: Process New Event Types
+
+For each new event type:
+1. Add a handler in the main event loop in `process_stats.py` (around line 238, the `elif event_type ==` chain)
+2. Add accumulators at the top of `process_match()` (around line 160)
+3. Add output fields in the JSON builder (around line 480)
+4. Add aggregation in `build_all_matches_aggregate()` if cross-match data is needed
+5. Update the output JSON structure documentation in `DEVELOPER_GUIDE.md` Section 5
+
+## Step 5: Update Frontend (if new data is output)
+
+1. Add HTML sections in `index.html` with card headers and `data-expand` buttons
+2. Add render functions in `js/app.js`
+3. Add chart functions in `js/charts.js` if visualization is needed
+4. Register chart renderers for fullscreen modal support
+
+## Step 6: Update Documentation
+
+1. `scripts/statsgate.proto` — already updated (Step 1)
+2. `.cursor/rules/data-schema.mdc` — update event table, field types, any changed semantics
+3. `DEVELOPER_GUIDE.md` — update Section 2 (schema tables), Section 3 (evolution status), Section 5 (JSON structure)
+4. `.cursor/rules/project-overview.mdc` — update if data flow or file formats changed
+
+## Step 7: Verify
+
+1. Re-run the pipeline: `cd scripts && python process_stats.py`
+2. Check all matches process without errors
+3. Spot-check processed JSON for correctness
+4. If dev provides a verification report, compare values
+5. Browser-test the dashboard: load each match, check all sections render
+
+## Pipeline Architecture Reference
+
+Key locations in `scripts/process_stats.py`:
+- **Event loop**: `while i < n` block starting around line 200
+- **Damage pairing**: `elif event_type == "damage_dealt"` with adjacent DR consumption
+- **Player accumulators**: `player_dealt`, `player_received`, `player_weapon_*` dicts (around line 160)
+- **Output builder**: starts around line 380 (leaderboard, faction_totals, weapon_meta, etc.)
+- **Aggregate builder**: `build_all_matches_aggregate()` function
+- **File discovery**: `discover_binpb_sources()` — handles both `.zip` and `.binpb.gz`
+
+Key locations in `js/app.js`:
+- **Match loading**: `loadMatch()` function
+- **All-matches loading**: `loadAllMatches()` function
+- **Chart registry**: `registerMatchCharts()` and `registerAllMatchesCharts()`
+- **Fullscreen modal**: `expandSection()` with `chartRenderers` map
+
+Key locations in `index.html`:
+- **Single match sections**: inside `<div id="dashboard">`
+- **All matches sections**: inside `<div id="all-matches-view">`
+- **Fullscreen modal**: `<div id="fullscreen-modal">`
