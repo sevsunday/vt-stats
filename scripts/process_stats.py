@@ -143,7 +143,15 @@ def process_match(session, source_file, resolve_weapon):
     team_2 = set(header.team_2)
     tick_rate = header.tick_rate or 20
     nick_map = dict(header.teamnum_to_nick)
-    s64_map = {k: str(v) for k, v in header.teamnum_to_s64.items()}
+
+    # Build slot→steam64 map. New schema has s64_to_nick (steam64→nick);
+    # invert and cross-reference with teamnum_to_nick to get slot→steam64.
+    s64_map = {}
+    if header.s64_to_nick:
+        nick_to_s64 = {nick: str(s64) for s64, nick in header.s64_to_nick.items()}
+        for slot, nick in nick_map.items():
+            if nick in nick_to_s64:
+                s64_map[slot] = nick_to_s64[nick]
 
     all_slots = set(nick_map.keys())
 

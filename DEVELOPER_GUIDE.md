@@ -78,11 +78,13 @@ The raw match data uses Protocol Buffers (protobuf). The canonical schema is at 
 | 3 | `author_nickname` | `string` | Recording player's name |
 | 4 | `author_steam64` | `uint64` | Recording player's Steam64 ID |
 | 5 | `tick_rate` | `uint32` | Simulation tick rate (typically 20) |
-| 6 | `teamnum_to_s64` | `map<uint32, uint64>` | Slot → Steam64 |
+| 6 | `s64_to_nick` | `map<uint64, string>` | Steam64 → Nickname |
 | 7 | `teamnum_to_nick` | `map<uint32, string>` | Slot → Nickname |
-| 8 | `team_1` | `repeated int32` | Player slots on Team 1 (typically 1-5) |
-| 9 | `team_2` | `repeated int32` | Player slots on Team 2 (typically 6-10) |
+| 8 | `team_1` | `repeated int32` | **DEPRECATED** — Player slots on Team 1 (typically 1-5) |
+| 9 | `team_2` | `repeated int32` | **DEPRECATED** — Player slots on Team 2 (typically 6-10) |
 | 10 | `active_config_mod` | `string` | Server configuration mod identifier |
+
+Team convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
 
 ### Event Types
 
@@ -92,7 +94,7 @@ A player fires a projectile.
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
-| `shooter` | `int32` | Player slot who fired |
+| `shooter` | `uint64` | Steam64 ID of player who fired (0 if not a recognized player) |
 | `ordnance_odf` | `string` | Weapon ODF identifier |
 
 #### `BulletHit` (field 2)
@@ -101,7 +103,7 @@ A projectile connects with a target.
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
-| `shooter` | `int32` | Player slot who fired |
+| `shooter` | `uint64` | Steam64 ID of player who fired (0 if not a recognized player) |
 | `ordnance_odf` | `string` | Weapon ODF identifier |
 
 #### `DamageDealt` (field 3) + `DamageReceived` (field 4)
@@ -112,7 +114,7 @@ These **always occur as adjacent pairs** in the event stream. A `DamageDealt` ev
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
-| `shooter` | `int32` | Damage source player slot (0 = non-player entity) |
+| `shooter` | `uint64` | Steam64 ID of damage source player (0 = non-player entity) |
 | `team` | `int32` | Owning player's slot (1-10), 0 = world prop |
 | `ordnance_odf` | `string` | Weapon ODF (may be null → "Unknown") |
 | `amount` | `float` | Damage amount |
@@ -122,7 +124,7 @@ These **always occur as adjacent pairs** in the event stream. A `DamageDealt` ev
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
-| `victim` | `int32` | Damage target player slot (0 = non-player entity) |
+| `victim` | `uint64` | Steam64 ID of damage target player (0 = non-player entity) |
 | `team` | `int32` | Owning player's slot (1-10), 0 = world prop |
 | `ordnance_odf` | `string` | Weapon ODF (may be null → "Unknown") |
 | `amount` | `float` | Damage amount |
@@ -150,9 +152,28 @@ The `team` field is **always the owning player's slot number (1-10)**, not a fac
 - `victim == 0` → asset received credit to `team` (the owning slot)
 - Both `shooter > 0` AND `victim > 0` (and shooter not skipped) → rivalry matrix entry
 
-#### Dormant / Future Event Types
+#### `UpdateTick` (field 5)
+Per-tick state snapshot for all players. Active in new data; pipeline currently skips these events.
 
-- **`UpdateTick`** (field 5): Per-tick player position and speed data. Currently commented out in the schema but will be enabled in the future. Will produce massive data volumes.
+| Field | Type | Description |
+|---|---|---|
+| `tick` | `uint32` | Game tick |
+| `players` | `repeated PlayerState` | State of each player |
+
+**PlayerState fields:** `player` (uint64 Steam64), `position` (Vec3), `speed` (float), `health` (float), `ammo` (float), `odf` (string — current vehicle ODF)
+
+#### `UnitDestroyed` (field 6)
+A unit (player vehicle, AI unit, or structure) was destroyed. New event — pipeline does not yet process this.
+
+| Field | Type | Description |
+|---|---|---|
+| `tick` | `uint32` | Game tick |
+| `killer` | `uint64` | Steam64 of killer (0 if not a player) |
+| `killer_team` | `uint32` | Killer's team slot |
+| `killer_odf` | `string` | Killer's vehicle ODF |
+| `victim` | `uint64` | Steam64 of victim (0 if not a player) |
+| `victim_team` | `uint32` | Victim's team slot |
+| `victim_odf` | `string` | Destroyed unit's ODF |
 
 ### Faction Resolution and Fallback
 
@@ -163,6 +184,26 @@ Faction (Team 1 vs Team 2) is determined by cross-referencing player slots again
 
 This ensures all active players are attributed to a faction even when recording clients produce incomplete header data.
 
+### Statsgate Collector Reference
+
+The raw data is produced by [statsgate](https://github.com/VTrider/statsgate), a C++ stats collection client. Key behaviors from the source code:
+
+- **Collision damage excluded**: `DAMAGE_TYPE_COLLISION` events are filtered at the source — they never appear in the data.
+- **Identical amounts**: `DamageDealt.amount` and `DamageReceived.amount` are always the same value (`dmg.value` in the engine).
+- **Nullable ordnance_odf**: `ordnance_odf` can be null for water damage and other environmental effects.
+- **Player-only bullet events**: `BulletInit` and `BulletHit` are only recorded for recognized players (those in `s64_to_nick`). AI/structure shots are not tracked.
+- **Header snapshot**: The header is captured at `first_tick` — player joins/leaves after that point are NOT reflected in team lists. This is a known limitation (TODO in the statsgate source).
+- **File format**: New data is saved as `.binpb.gz` (gzip-compressed protobuf). Legacy data is in `.zip` archives containing `.binpb` files.
+
+### Player Identity — Dual Mode
+
+The pipeline supports two data formats:
+
+- **Legacy data** (current local files): `shooter`/`victim` fields contain `int32` slot numbers (1-10). `teamnum_to_s64` mapped slots to Steam64 IDs. Old data parsed with the new proto has empty `s64_to_nick`.
+- **New data** (upcoming): `shooter`/`victim` fields contain `uint64` Steam64 IDs. `s64_to_nick` maps Steam64→nickname. `team_1`/`team_2` are deprecated; use slot convention.
+
+The pipeline detects format by checking `header.s64_to_nick` — if populated, it cross-references with `teamnum_to_nick` to build a slot→steam64 mapping.
+
 ### Fullscreen Modal
 
 Every dashboard card has an expand button (`data-expand="section-id"`) that opens the section in a Bootstrap fullscreen modal. For **chart sections**, a fresh `<canvas>` is created in the modal and the chart is re-rendered at full viewport size via registered renderer functions. For **non-chart sections** (tables, HTML content), the card body is cloned into the modal (with `id` attributes stripped to avoid duplicates, and `<canvas>` elements removed to avoid blank cloned charts). Modal charts are destroyed on close.
@@ -171,19 +212,27 @@ Every dashboard card has an expand button (`data-expand="section-id"`) that open
 
 ## 3. Schema Evolution
 
-The protobuf schema is actively developed. Expected changes:
+`scripts/statsgate.proto` is the **definitive reference** for the raw data schema. It is kept in sync with the upstream [statsgate](https://github.com/VTrider/statsgate) collector. The `statsgate/` folder in this repo contains a copy of the collector source for reference.
 
-1. **Steam64 IDs on events** — `shooter`/`victim` fields may change from `int32` slot numbers to `uint64` Steam64 IDs, enabling definitive cross-match player tracking.
-2. **`UpdateTick` activation** — Position/speed data at 20 TPS will dramatically increase event stream size. The Python pipeline is already designed to skip unknown event types gracefully.
-3. **New event types** — Kill, death, vehicle entry/exit, capture events may be added.
-4. **Archive format change** — Current: per-map `.zip` files. Future: one master `.gz` containing timestamped `.binpb.gz` files (e.g. `2026-04-05_20-10-54.binpb.gz`). Map name and metadata will come from the protobuf header, not the filename.
+### Confirmed Changes (upstream)
 
-**When the schema changes:**
-1. Update `scripts/statsgate.proto`
+| Change | Status | Impact |
+|---|---|---|
+| Steam64 IDs on events | **Done** — `shooter`/`victim` are `uint64` | Pipeline must detect old (slot) vs new (Steam64) format |
+| `s64_to_nick` header field | **Done** — replaces `teamnum_to_s64` | Pipeline cross-references with `teamnum_to_nick` |
+| `team_1`/`team_2` deprecated | **Done** — marked for removal | Slot convention fallback (1-5/6-10) becomes primary |
+| `UpdateTick` active | **Done** — includes position, speed, health, ammo, vehicle ODF | Pipeline skips these; future: heatmaps, movement analysis |
+| `UnitDestroyed` event | **Done** — kill/death with killer/victim Steam64, team, ODF | Pipeline does not yet process; future: kill leaderboards |
+| `.binpb.gz` file format | **Done** — gzip compressed protobuf | Pipeline needs `.gz` file discovery alongside `.zip` |
+
+### When the Schema Changes
+
+1. Replace `scripts/statsgate.proto` with the new version
 2. Recompile: `python -m grpc_tools.protoc --proto_path=. --python_out=. statsgate.proto`
-3. Update `process_stats.py` to handle new event types
-4. Re-run the pipeline
-5. Update this document and the Cursor rules
+3. Follow `.cursor/rules/schema-migration.mdc` checklist
+4. Update `process_stats.py` to handle new/changed event types
+5. Re-run the pipeline and verify output
+6. Update this document and `.cursor/rules/data-schema.mdc`
 
 ---
 
@@ -222,27 +271,172 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
 ]
 ```
 
-### Per-match JSON (e.g. `ragnarok.json`)
+### Per-match JSON Structure
 
-| Section | Key Fields |
-|---|---|
-| `match` | `id`, `map`, `date`, `duration_sec`, `tick_rate`, `player_count`, `config_mod`, `teams` (rosters with slot/name/steam64) |
-| `leaderboard[]` | `name`, `slot`, `faction`, `personal` (dealt/received/net/ratio/accuracy/fav_weapon/weapons_used), `assets` (dealt/received), `weapon_breakdown` |
-| `faction_totals` | `"1"/"2"` → player_dealt, asset_dealt, total_dealt, player_received, asset_received, total_received, shots, hits, accuracy |
-| `rivalry_matrix` | `{shooterName: {victimName: damage}}` — player-on-player only |
-| `top_rivalries[]` | `a`, `b`, `a_to_b`, `b_to_a`, `total` — top 5 bidirectional pairs |
-| `weapon_meta[]` | `weapon`, `odf`, `total_damage`, `total_shots`, `total_hits`, `accuracy`, `users` |
-| `timeline` | `bucket_seconds` (10), `labels[]`, `by_player`, `by_faction` — damage per bucket |
-| `asset_damage` | `by_player`, `by_faction` — AI/structure damage attribution |
+#### `match` object
 
-### `all_matches.json` (cross-match aggregate)
+```json
+{
+  "id": "2026-04-10T01-39-12",
+  "source_file": "wasteland.zip",
+  "map": "vsrmortwasteland.bzn",
+  "date": "2026-04-10T01:39:12.969961+00:00",
+  "duration_sec": 860.8,
+  "tick_range": [728, 17944],
+  "tick_rate": 20,
+  "player_count": 10,
+  "config_mod": "1325933293.cfg",
+  "teams": {
+    "1": [
+      { "slot": 1, "player_id": "Certified Bad Guy", "name": "Certified Bad Guy", "steam64": null }
+    ],
+    "2": [
+      { "slot": 6, "player_id": "Lithium", "name": "Lithium", "steam64": null }
+    ]
+  }
+}
+```
 
-| Section | Key Fields |
-|---|---|
-| `meta` | `match_count`, `total_duration_sec`, `maps_played[]`, `date_range` |
-| `career_stats[]` | `name`, `matches_played`, `total_dealt`, `total_received`, `overall_accuracy`, `fav_weapon`, `best_match`, `weapon_breakdown` |
-| `global_weapon_meta[]` | Same as per-match `weapon_meta` but aggregated |
-| `global_rivalries[]` | Top 10 cross-match bidirectional rivalries |
+#### `leaderboard[]` entry
+
+```json
+{
+  "player_id": "VTrider",
+  "name": "VTrider",
+  "slot": 9,
+  "faction": 2,
+  "personal": {
+    "dealt": 81416.4,
+    "received": 29635.2,
+    "net": 51781.2,
+    "ratio": 2.75,
+    "shots_fired": 2381,
+    "shots_hit": 1524,
+    "accuracy": 0.64,
+    "fav_weapon": "Shadower Msl",
+    "weapons_used": 12
+  },
+  "assets": {
+    "dealt": 0,
+    "received": 206.1
+  },
+  "weapon_breakdown": {
+    "Chain Gun": { "dealt": 20576.0, "received": 10288.0, "shots": 958, "hits": 651, "accuracy": 0.68 },
+    "Minigun": { "dealt": 14694.0, "received": 10109.0, "shots": 1088, "hits": 687, "accuracy": 0.631 }
+  }
+}
+```
+
+Note: `ratio` is `null` when received is 0 (infinite ratio). JS displays this as "∞".
+
+#### `faction_totals`
+
+```json
+{
+  "1": {
+    "player_dealt": 179320.3,
+    "asset_dealt": 3.0,
+    "total_dealt": 179323.3,
+    "player_received": 137305.9,
+    "asset_received": 144744.7,
+    "total_received": 282050.6,
+    "shots": 12615,
+    "hits": 7492,
+    "accuracy": 0.594
+  },
+  "2": { "..." : "..." }
+}
+```
+
+#### `rivalry_matrix`
+
+```json
+{
+  "Domakus": { "Lithium": 5850.3, "Nomad": 8428.7, "Just!ce": 10412.1 },
+  "Infinity": { "VTrider": 4196.9, "judgeguns": 2238.4 }
+}
+```
+
+Outer key = shooter name, inner key = victim name, value = total damage dealt.
+
+#### `top_rivalries[]` entry
+
+```json
+{ "a": "VTrider", "b": "dark", "a_to_b": 18900.1, "b_to_a": 6893.9, "total": 25794.0 }
+```
+
+Top 5 bidirectional pairs sorted by total.
+
+#### `weapon_meta[]` entry
+
+```json
+{ "weapon": "Chain Gun", "odf": "chainvsr_c.odf", "total_damage": 164756.0, "total_shots": 8172, "total_hits": 5637, "accuracy": 0.69, "users": 10 }
+```
+
+#### `timeline`
+
+```json
+{
+  "bucket_seconds": 10,
+  "labels": ["0:00", "0:10", "0:20"],
+  "by_player": {
+    "Domakus": [0, 0, 0, 352.0, 1111.0],
+    "VTrider": [0, 0, 0, 0, 589.0]
+  },
+  "by_faction": {
+    "1": [0, 0, 0, 352.0, 3853.9],
+    "2": [0, 0, 2128.0, 4264.5]
+  }
+}
+```
+
+Each array has one value per time bucket. Values are total damage dealt in that bucket.
+
+#### `asset_damage`
+
+```json
+{
+  "by_player": {
+    "Certified Bad Guy": { "dealt": 0, "received": 143768.4 },
+    "Lithium": { "dealt": 1500.0, "received": 56441.3 }
+  },
+  "by_faction": {
+    "1": { "dealt": 3.0, "received": 144744.7 },
+    "2": { "dealt": 1500.0, "received": 63864.2 }
+  }
+}
+```
+
+### `all_matches.json` — Cross-Match Aggregate
+
+#### `meta`
+
+```json
+{ "match_count": 4, "total_duration_sec": 3860.1, "maps_played": ["vsrmortwasteland.bzn"], "date_range": ["2026-04-10", "2026-04-10"] }
+```
+
+#### `career_stats[]` entry
+
+```json
+{
+  "player_id": "VTrider",
+  "name": "VTrider",
+  "matches_played": 4,
+  "total_dealt": 356440.3,
+  "total_received": 146729.3,
+  "total_asset_dealt": 1197.0,
+  "overall_accuracy": 0.678,
+  "fav_weapon": "Shadower Msl",
+  "best_match": { "id": "2026-04-10T03-01-53", "map": "vsrsttitan.bzn", "dealt": 99267.3 },
+  "weapon_breakdown": {
+    "Chain Gun": { "dealt": 78400.0, "shots": 3200, "hits": 2100, "accuracy": 0.656 }
+  }
+}
+```
+
+#### `global_weapon_meta[]` — same structure as per-match `weapon_meta`
+
+#### `global_rivalries[]` — same structure as per-match `top_rivalries`, top 10
 
 ---
 
@@ -290,9 +484,11 @@ Charts use Chart.js 4.4.7 (vendored locally). Key patterns:
 
 ## 8. Adding New Matches
 
-1. Place the `.zip` archive (containing `.binpb`) in `data/stats/`.
+1. Place the match archive in `data/stats/`:
+   - **Legacy format**: `.zip` containing a `.binpb` file
+   - **New format**: `.binpb.gz` file (gzip-compressed protobuf)
 2. Run: `cd scripts && python process_stats.py`
-3. The pipeline automatically discovers all `.zip` files and outputs to `data/processed/`.
+3. The pipeline automatically discovers all `.zip` and `.binpb.gz` files and outputs to `data/processed/`.
 4. Refresh the browser.
 
 ### Adding New Event Types
