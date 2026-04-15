@@ -10,34 +10,50 @@ message Vec3 {
   float z = 3;
 }
 
+// Important notes:
+
+// Players are identified by their steam64 id.
+//
+// Anything with a `team` refers to the team slot
+// from 1-10, NOT the teamplay team.
+// Team 1 is teams 1-5, Team 2 is teams 6-10
+
 message StatHeader {
   string map = 1;
   google.protobuf.Timestamp start_time = 2;
   string author_nickname = 3;
   uint64 author_steam64 = 4;
   uint32 tick_rate = 5;
-  map<uint32, uint64> teamnum_to_s64 = 6;
-  map<uint32, string> teamnum_to_nick = 7;
-  repeated int32 team_1 = 8;
-  repeated int32 team_2 = 9;
+  map<uint64, string> s64_to_nick = 6;
+  map<int32, string> teamnum_to_nick = 7;
+  repeated int32 team_1 = 8; // DEPRECATED SUBJECT TO REMOVAL
+  repeated int32 team_2 = 9; // DEPRECATED SUBJECT TO REMOVAL
   string active_config_mod = 10;
 }
 
 message BulletInit {
   uint32 tick = 1;
-  int32 shooter = 2;
+  uint64 shooter = 2;
   string ordnance_odf = 3;
 }
 
 message BulletHit {
   uint32 tick = 1;
-  int32 shooter = 2;
+  uint64 shooter = 2;
   string ordnance_odf = 3;
 }
 
+// Note on damage messages: shooter/victim are the steam64 id of the player if applicable,
+// otherwise the field is undefined. Team is the team slot that the message is associated with
+// (may not be a player, could be an ai or structure). If a player owns AI or structures
+// they will have the same team slot as the player.
+//
+// Given a damage event in-game, a damage dealt and received event will be recorded that represent
+// two sides of the same event
+
 message DamageDealt {
   uint32 tick = 1;
-  int32 shooter = 2;
+  uint64 shooter = 2; // undefined if not a player
   int32 team = 3;
   string ordnance_odf = 4;
   float amount = 5;
@@ -45,21 +61,36 @@ message DamageDealt {
 
 message DamageReceived {
   uint32 tick = 1;
-  int32 victim = 2;
+  uint64 victim = 2; // undefined if not a player
   int32 team = 3;
   string ordnance_odf = 4;
   float amount = 5;
 }
 
 message PlayerState {
-  int32 player = 1;
+  uint64 player = 1;
   Vec3 position = 2;
   float speed = 3;
+  float health = 4;
+  float ammo = 5;
+  string odf = 6;
 }
 
 message UpdateTick {
   uint32 tick = 1;
   repeated PlayerState players = 2;
+}
+
+message UnitDestroyed {
+  uint32 tick = 1;
+
+  uint64 killer = 2; // undefined if killer was not a player
+  uint32 killer_team = 3;
+  string killer_odf = 4;
+
+  uint64 victim = 5; // undefined if victim was not a player
+  uint32 victim_team = 6;
+  string victim_odf = 7;
 }
 
 message StatEvent {
@@ -68,7 +99,8 @@ message StatEvent {
     BulletHit bullet_hit = 2;
     DamageDealt damage_dealt = 3;
     DamageReceived damage_received = 4;
-    // UpdateTick update_tick = 5;
+    UpdateTick update_tick = 5;
+    UnitDestroyed unit_destroyed = 6;
   }
 }
 
