@@ -77,6 +77,7 @@ Dashboard content is organized into Bootstrap nav-pills tabs with lazy rendering
 - Charts only render on first tab activation (via `shown.bs.tab` event)
 - Match switch resets all tab render flags
 - Theme changes also trigger re-render of active tab charts
+- Active tab syncs to the `?tab=` URL query parameter via `history.replaceState`. Valid slugs are mapped in `MATCH_TAB_SLUGS` / `ALL_TAB_SLUGS` in `js/app.js`.
 
 ## Additional Rules
 
