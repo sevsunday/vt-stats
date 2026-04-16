@@ -37,6 +37,7 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 - **Geist** (vendored in `vendor/fonts/`) is the project typeface. Geist Sans for body/UI, Geist Mono for stat values.
 - All dashboard styles live in CSS files — **zero inline `<style>` blocks** in HTML.
 - Dashboard uses tabbed navigation with lazy rendering — charts render on first tab activation, not on page load.
+- Global player filter is client-side only — `getFilteredData()` derives filtered views from loaded JSON using the same lazy re-render pipeline as match switching. `weapon_meta` is recomputed from `leaderboard[].weapon_breakdown` when filtering. `kills.by_vehicle` is always unfiltered. No pipeline changes needed.
 - Processed JSON is the source of truth for the browser; the proto is the source of truth for the pipeline.
 - Players are identified by Steam64 IDs. Header maps: `s64_to_nick`, `teamnum_to_s64`, `s64_to_teamnum`.
 - Faction determined by slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2.

@@ -6,6 +6,10 @@
  *
  * Tab-based lazy rendering: only the active tab renders on match load.
  * Other tabs render on first activation via Bootstrap shown.bs.tab event.
+ *
+ * Global player/team filter: getFilteredData() derives filtered views from
+ * loaded JSON. weapon_meta is recomputed client-side when filtering.
+ * kills.by_vehicle is always unfiltered (match-global aggregate).
  */
 
 (async function () {
@@ -86,7 +90,6 @@
     else doLoad();
   });
 
-  // Brand click → reset to first match, Overview tab
   const $brandHome = document.getElementById('brand-home');
   if ($brandHome) {
     $brandHome.addEventListener('click', (e) => {
@@ -137,20 +140,415 @@
     });
   }
 
-  // Load first match (after lazy rendering infra is initialized)
-  if (manifest.length > 0) loadMatch(manifest[0].file);
+  // --- Filter State ---
+  let currentData = null;
+  let currentFilteredData = null;
+  let filterState = { mode: 'all', players: [], team: null, persist: false };
+  let timelineMode = 'player';
+  let sortState = { key: 'dealt', asc: false };
+
+  // Restore persist preference
+  if (localStorage.getItem('vt-filter-persist') === 'true') {
+    filterState.persist = true;
+    document.getElementById('filter-persist-toggle').checked = true;
+  }
+
+  // --- Filter Bar Event Listeners ---
+  document.querySelectorAll('[data-filter-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.filterMode;
+      document.querySelectorAll('[data-filter-mode]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      filterState.mode = mode;
+
+      document.getElementById('filter-team-select').classList.toggle('d-none', mode !== 'team');
+      document.getElementById('filter-player-picker').classList.toggle('d-none', mode !== 'player');
+
+      if (mode === 'all') {
+        filterState.players = [];
+        filterState.team = null;
+        document.getElementById('filter-clear').classList.add('d-none');
+      } else if (mode === 'team') {
+        filterState.team = document.getElementById('filter-team-select').value;
+        filterState.players = [];
+        document.getElementById('filter-clear').classList.remove('d-none');
+      } else {
+        filterState.team = null;
+        document.getElementById('filter-clear').classList.toggle('d-none', filterState.players.length === 0);
+      }
+      applyFilter();
+    });
+  });
+
+  document.getElementById('filter-team-select').addEventListener('change', (e) => {
+    filterState.team = e.target.value;
+    applyFilter();
+  });
+
+  document.getElementById('filter-clear').addEventListener('click', () => {
+    filterState.mode = 'all';
+    filterState.players = [];
+    filterState.team = null;
+    document.querySelectorAll('[data-filter-mode]').forEach(b => b.classList.remove('active'));
+    document.querySelector('[data-filter-mode="all"]').classList.add('active');
+    document.getElementById('filter-team-select').classList.add('d-none');
+    document.getElementById('filter-player-picker').classList.add('d-none');
+    document.getElementById('filter-clear').classList.add('d-none');
+    uncheckAllPlayers();
+    applyFilter();
+  });
+
+  document.getElementById('filter-persist-toggle').addEventListener('change', (e) => {
+    filterState.persist = e.target.checked;
+    localStorage.setItem('vt-filter-persist', e.target.checked ? 'true' : 'false');
+  });
+
+  function uncheckAllPlayers() {
+    document.querySelectorAll('#filter-player-menu input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    document.getElementById('filter-player-btn').textContent = 'Select players\u2026';
+  }
+
+  function onPlayerCheckChange() {
+    const checked = [...document.querySelectorAll('#filter-player-menu input[type="checkbox"]:checked')];
+    filterState.players = checked.map(cb => cb.value);
+    const btn = document.getElementById('filter-player-btn');
+    if (filterState.players.length === 0) {
+      btn.textContent = 'Select players\u2026';
+    } else if (filterState.players.length <= 2) {
+      btn.textContent = filterState.players.join(', ');
+    } else {
+      btn.textContent = `${filterState.players.length} players`;
+    }
+    document.getElementById('filter-clear').classList.toggle('d-none', filterState.players.length === 0);
+    applyFilter();
+  }
+
+  // Custom player picker dropdown. The menu is appended to <body> (not inside
+  // the match-info card) because any ancestor with backdrop-filter becomes the
+  // containing block for fixed descendants, which would clip a standard
+  // Bootstrap dropdown no matter the Popper strategy.
+  const $playerPickerToggle = document.getElementById('filter-player-btn');
+  const $playerPickerMenu = document.createElement('div');
+  $playerPickerMenu.id = 'filter-player-menu';
+  $playerPickerMenu.className = 'vt-player-picker vt-player-picker--floating';
+  document.body.appendChild($playerPickerMenu);
+
+  function positionPlayerMenu() {
+    const rect = $playerPickerToggle.getBoundingClientRect();
+    $playerPickerMenu.style.top = `${rect.bottom + 4}px`;
+    // Right-align to the toggle button
+    $playerPickerMenu.style.left = 'auto';
+    $playerPickerMenu.style.right = `${window.innerWidth - rect.right}px`;
+  }
+
+  function openPlayerMenu() {
+    $playerPickerMenu.classList.add('show');
+    positionPlayerMenu();
+    window.addEventListener('scroll', positionPlayerMenu, true);
+    window.addEventListener('resize', positionPlayerMenu);
+  }
+
+  function closePlayerMenu() {
+    $playerPickerMenu.classList.remove('show');
+    window.removeEventListener('scroll', positionPlayerMenu, true);
+    window.removeEventListener('resize', positionPlayerMenu);
+  }
+
+  function togglePlayerMenu() {
+    if ($playerPickerMenu.classList.contains('show')) closePlayerMenu();
+    else openPlayerMenu();
+  }
+
+  $playerPickerToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePlayerMenu();
+  });
+  document.addEventListener('click', (e) => {
+    if ($playerPickerMenu.classList.contains('show') &&
+        !$playerPickerMenu.contains(e.target) &&
+        !$playerPickerToggle.contains(e.target)) {
+      closePlayerMenu();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $playerPickerMenu.classList.contains('show')) closePlayerMenu();
+  });
+
+  function populatePlayerPicker(teams) {
+    const menu = $playerPickerMenu;
+    menu.innerHTML = '';
+    for (const [teamNum, roster] of Object.entries(teams)) {
+      roster.forEach(p => {
+        const label = document.createElement('label');
+        label.className = 'vt-player-option';
+        const dot = document.createElement('span');
+        dot.className = `vt-team-dot vt-team-dot--t${teamNum}`;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = p.name;
+        cb.checked = filterState.players.includes(p.name);
+        cb.addEventListener('change', onPlayerCheckChange);
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = p.name;
+        label.appendChild(cb);
+        label.appendChild(dot);
+        label.appendChild(nameSpan);
+        menu.appendChild(label);
+      });
+    }
+  }
 
   // Timeline mode toggle
-  let currentData = null;
-  let timelineMode = 'player';
   document.querySelectorAll('[data-timeline-mode]').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('[data-timeline-mode]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       timelineMode = btn.dataset.timelineMode;
-      if (currentData && tabRendered['#tab-combat']) renderTimelineSection(currentData);
+      if (currentFilteredData && tabRendered['#tab-combat']) renderTimelineSection(currentFilteredData);
     });
   });
+
+  // --- Core Filter Logic ---
+  function getFilteredData(data, filter) {
+    if (filter.mode === 'all') return data;
+
+    let allowedNames;
+    if (filter.mode === 'team') {
+      const teamRoster = data.match.teams[filter.team] || [];
+      allowedNames = new Set(teamRoster.map(p => p.name));
+    } else {
+      if (filter.players.length === 0) return data;
+      allowedNames = new Set(filter.players);
+    }
+
+    const isSingle = filter.mode === 'player' && filter.players.length === 1;
+    const allNames = data.leaderboard.map(p => p.name);
+
+    const leaderboard = data.leaderboard.filter(p => allowedNames.has(p.name));
+
+    // Rivalry matrix
+    let rivalry_matrix;
+    if (isSingle) {
+      rivalry_matrix = {};
+      const name = filter.players[0];
+      if (data.rivalry_matrix[name]) rivalry_matrix[name] = data.rivalry_matrix[name];
+    } else {
+      rivalry_matrix = {};
+      for (const shooter of allNames) {
+        if (!allowedNames.has(shooter)) continue;
+        const row = data.rivalry_matrix[shooter];
+        if (!row) continue;
+        const filtered = {};
+        for (const victim of allNames) {
+          if (allowedNames.has(victim) && row[victim]) filtered[victim] = row[victim];
+        }
+        if (Object.keys(filtered).length > 0) rivalry_matrix[shooter] = filtered;
+      }
+    }
+
+    // Top rivalries
+    let top_rivalries;
+    if (isSingle) {
+      const name = filter.players[0];
+      top_rivalries = data.top_rivalries.filter(r => r.a === name || r.b === name);
+    } else {
+      top_rivalries = data.top_rivalries.filter(r => allowedNames.has(r.a) && allowedNames.has(r.b));
+    }
+
+    // Kills
+    let kills_feed;
+    if (isSingle) {
+      const name = filter.players[0];
+      kills_feed = (data.kills.feed || []).filter(e => e.killer === name || e.victim === name);
+    } else {
+      kills_feed = (data.kills.feed || []).filter(e => allowedNames.has(e.killer) || allowedNames.has(e.victim));
+    }
+
+    let kill_rivalry_matrix;
+    if (isSingle) {
+      kill_rivalry_matrix = {};
+      const name = filter.players[0];
+      if (data.kills.kill_rivalry_matrix[name]) kill_rivalry_matrix[name] = data.kills.kill_rivalry_matrix[name];
+    } else {
+      kill_rivalry_matrix = {};
+      for (const killer of allNames) {
+        if (!allowedNames.has(killer)) continue;
+        const row = data.kills.kill_rivalry_matrix[killer];
+        if (!row) continue;
+        const filtered = {};
+        for (const victim of allNames) {
+          if (allowedNames.has(victim) && row[victim]) filtered[victim] = row[victim];
+        }
+        if (Object.keys(filtered).length > 0) kill_rivalry_matrix[killer] = filtered;
+      }
+    }
+
+    const kills_leaderboard = (data.kills.leaderboard || []).filter(p => allowedNames.has(p.name));
+
+    // Timeline — only filter by_player, pass by_faction through
+    const by_player = {};
+    for (const name of allNames) {
+      if (allowedNames.has(name) && data.timeline.by_player[name]) {
+        by_player[name] = data.timeline.by_player[name];
+      }
+    }
+    const timeline = { ...data.timeline, by_player };
+
+    // Weapon meta — recompute from filtered leaderboard weapon_breakdown
+    const weaponAgg = {};
+    leaderboard.forEach(p => {
+      for (const [weapon, stats] of Object.entries(p.weapon_breakdown)) {
+        if (!weaponAgg[weapon]) weaponAgg[weapon] = { weapon, total_damage: 0, total_shots: 0, total_hits: 0, users: 0 };
+        weaponAgg[weapon].total_damage += stats.dealt;
+        weaponAgg[weapon].total_shots += stats.shots;
+        weaponAgg[weapon].total_hits += stats.hits;
+        weaponAgg[weapon].users++;
+      }
+    });
+    const weapon_meta = Object.values(weaponAgg)
+      .map(w => ({ ...w, accuracy: w.total_shots > 0 ? w.total_hits / w.total_shots : 0 }))
+      .sort((a, b) => b.total_damage - a.total_damage);
+
+    // Asset damage
+    const assetByPlayer = {};
+    for (const [name, val] of Object.entries(data.asset_damage.by_player || {})) {
+      if (allowedNames.has(name)) assetByPlayer[name] = val;
+    }
+    const assetByFaction = {};
+    for (const fNum of ['1', '2']) {
+      let dealt = 0, received = 0;
+      const teamRoster = data.match.teams[fNum] || [];
+      teamRoster.forEach(p => {
+        if (assetByPlayer[p.name]) {
+          dealt += assetByPlayer[p.name].dealt;
+          received += assetByPlayer[p.name].received;
+        }
+      });
+      assetByFaction[fNum] = { dealt, received };
+    }
+    const asset_damage = { by_player: assetByPlayer, by_faction: assetByFaction };
+
+    // Faction totals — recompute from filtered leaderboard
+    const faction_totals = {};
+    for (const fNum of ['1', '2']) {
+      const fPlayers = leaderboard.filter(p => String(p.faction) === fNum);
+      let player_dealt = 0, player_received = 0, asset_dealt = 0, asset_received = 0, shots = 0, hits = 0;
+      fPlayers.forEach(p => {
+        player_dealt += p.personal.dealt;
+        player_received += p.personal.received;
+        asset_dealt += p.assets.dealt;
+        asset_received += p.assets.received;
+        shots += p.personal.shots_fired;
+        hits += p.personal.shots_hit;
+      });
+      faction_totals[fNum] = {
+        player_dealt, asset_dealt,
+        total_dealt: player_dealt + asset_dealt,
+        player_received, asset_received,
+        total_received: player_received + asset_received,
+        shots, hits,
+        accuracy: shots > 0 ? hits / shots : 0,
+      };
+    }
+
+    return {
+      ...data,
+      leaderboard,
+      rivalry_matrix,
+      top_rivalries,
+      kills: {
+        ...data.kills,
+        feed: kills_feed,
+        kill_rivalry_matrix,
+        leaderboard: kills_leaderboard,
+      },
+      timeline,
+      weapon_meta,
+      asset_damage,
+      faction_totals,
+      _allNames: allNames,
+      _isSinglePlayer: isSingle,
+    };
+  }
+
+  // --- Apply Filter ---
+  function applyFilter() {
+    if (!currentData) return;
+    const filtered = getFilteredData(currentData, filterState);
+    const doRender = () => renderMatchData(filtered);
+    if (window.VTFx) VTFx.withViewTransition(doRender);
+    else doRender();
+  }
+
+  // --- Render Match Data (shared by loadMatch + applyFilter) ---
+  function renderMatchData(data) {
+    currentFilteredData = data;
+    destroyAllCharts();
+    resetTabState();
+
+    const isSingle = data._isSinglePlayer;
+    const allNames = data._allNames || data.leaderboard.map(p => p.name);
+
+    // Banner always from unfiltered data
+    renderBanner(currentData.match);
+
+    // Overview: profile card vs faction scoreboard
+    const $profile = document.getElementById('section-player-profile');
+    const $faction = document.getElementById('section-faction');
+    if (isSingle) {
+      $profile.classList.remove('d-none');
+      $faction.classList.add('d-none');
+      renderPlayerProfile(data.leaderboard[0], currentData);
+    } else {
+      $profile.classList.add('d-none');
+      $faction.classList.remove('d-none');
+      // Show unfiltered totals for context; mark which teams are active in the filter
+      const activeFactions = computeActiveFactions();
+      renderFactionScoreboard(currentData.faction_totals, currentData.match.teams, activeFactions);
+    }
+    renderLeaderboard(data.leaderboard);
+    tabRendered['#tab-overview'] = true;
+
+    // Deferred tab renderers
+    registerTabRenderer('#tab-combat', () => {
+      renderTimelineSection(data);
+      renderWeaponMeta('weapon-meta-chart', data.weapon_meta);
+      renderKillFeed(data.kills, currentData.match.tick_rate, currentData.match.tick_range[0]);
+      renderVehicleKills('vehicle-kills-chart', currentData.kills.by_vehicle);
+    });
+
+    registerTabRenderer('#tab-rivalries', () => {
+      renderHeatmap(data.rivalry_matrix, isSingle ? allNames : data.leaderboard.map(p => p.name));
+      renderRivalries(data.top_rivalries);
+      renderKillHeatmap(data.kills.kill_rivalry_matrix, isSingle ? allNames : data.leaderboard.map(p => p.name));
+      if (window.VTFx) requestAnimationFrame(() => VTFx.staggerHeatmapCells());
+    });
+
+    registerTabRenderer('#tab-weapons', () => {
+      renderPlayerWeapons('player-weapons-chart', data.leaderboard, data.weapon_meta);
+      renderAccuracyTable(data.leaderboard);
+      renderWeaponAccuracy('weapon-accuracy-chart', data.weapon_meta);
+      renderHitTargets(data.leaderboard);
+    });
+
+    registerTabRenderer('#tab-assets', () => {
+      renderAssetDamage(data.asset_damage, data.faction_totals);
+    });
+
+    registerMatchCharts(data, allNames);
+
+    // Render currently active non-overview tab if needed
+    const activeTab = document.querySelector('#match-tabs .nav-link.active');
+    if (activeTab) {
+      const target = activeTab.getAttribute('data-bs-target');
+      if (target && target !== '#tab-overview') renderTabIfNeeded(target);
+    }
+
+    if (window.VTFx) {
+      const activePane = document.querySelector('#match-tab-content > .tab-pane.active');
+      if (activePane) requestAnimationFrame(() => VTFx.staggerEntrance(activePane));
+    }
+  }
 
   // --- Match Loading ---
   async function loadMatch(file) {
@@ -172,53 +570,57 @@
 
     currentData = data;
 
+    // Populate player picker for this match
+    populatePlayerPicker(data.match.teams);
+
+    // Persistence: reconcile filter with new match roster
+    if (filterState.persist && filterState.mode === 'player' && filterState.players.length > 0) {
+      const matchNames = new Set(data.leaderboard.map(p => p.name));
+      filterState.players = filterState.players.filter(n => matchNames.has(n));
+      if (filterState.players.length === 0) {
+        filterState.mode = 'all';
+        syncFilterUI();
+      }
+    } else if (!filterState.persist) {
+      filterState.mode = 'all';
+      filterState.players = [];
+      filterState.team = null;
+      syncFilterUI();
+    }
+
     if (window.VTFx) VTFx.hidePreloader();
     $loading.classList.add('d-none');
     $dashboard.classList.remove('d-none');
 
-    renderBanner(data.match);
-    renderFactionScoreboard(data.faction_totals, data.match.teams);
-    renderLeaderboard(data.leaderboard);
-    tabRendered['#tab-overview'] = true;
+    const filtered = getFilteredData(data, filterState);
+    renderMatchData(filtered);
 
     if (!activateTabFromUrl(MATCH_TAB_SLUGS)) {
       const overviewBtn = document.getElementById('tab-overview-btn');
       if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
       syncTabToUrl('overview');
     }
+  }
 
-    if (window.VTFx) {
-      const overviewPane = document.getElementById('tab-overview');
-      requestAnimationFrame(() => VTFx.staggerEntrance(overviewPane));
+  function syncFilterUI() {
+    document.querySelectorAll('[data-filter-mode]').forEach(b => b.classList.remove('active'));
+    document.querySelector(`[data-filter-mode="${filterState.mode}"]`).classList.add('active');
+    document.getElementById('filter-team-select').classList.toggle('d-none', filterState.mode !== 'team');
+    document.getElementById('filter-player-picker').classList.toggle('d-none', filterState.mode !== 'player');
+    document.getElementById('filter-clear').classList.toggle('d-none', filterState.mode === 'all');
+    if (filterState.mode === 'team') {
+      document.getElementById('filter-team-select').value = filterState.team || '1';
     }
-
-    // Register deferred renderers for other tabs
-    registerTabRenderer('#tab-combat', () => {
-      renderTimelineSection(data);
-      renderWeaponMeta('weapon-meta-chart', data.weapon_meta);
-      renderKillFeed(data.kills, data.match.tick_rate, data.match.tick_range[0]);
-      renderVehicleKills('vehicle-kills-chart', data.kills.by_vehicle);
-    });
-
-    registerTabRenderer('#tab-rivalries', () => {
-      renderHeatmap(data.rivalry_matrix, data.leaderboard.map(p => p.name));
-      renderRivalries(data.top_rivalries);
-      renderKillHeatmap(data.kills.kill_rivalry_matrix, data.leaderboard.map(p => p.name));
-      if (window.VTFx) requestAnimationFrame(() => VTFx.staggerHeatmapCells());
-    });
-
-    registerTabRenderer('#tab-weapons', () => {
-      renderPlayerWeapons('player-weapons-chart', data.leaderboard, data.weapon_meta);
-      renderAccuracyTable(data.leaderboard);
-      renderWeaponAccuracy('weapon-accuracy-chart', data.weapon_meta);
-      renderHitTargets(data.leaderboard);
-    });
-
-    registerTabRenderer('#tab-assets', () => {
-      renderAssetDamage(data.asset_damage, data.faction_totals);
-    });
-
-    registerMatchCharts(data);
+    uncheckAllPlayers();
+    if (filterState.mode === 'player') {
+      document.querySelectorAll('#filter-player-menu input[type="checkbox"]').forEach(cb => {
+        cb.checked = filterState.players.includes(cb.value);
+      });
+      const btn = document.getElementById('filter-player-btn');
+      if (filterState.players.length === 0) btn.textContent = 'Select players\u2026';
+      else if (filterState.players.length <= 2) btn.textContent = filterState.players.join(', ');
+      else btn.textContent = `${filterState.players.length} players`;
+    }
   }
 
   async function loadAllMatches() {
@@ -257,7 +659,6 @@
       requestAnimationFrame(() => VTFx.staggerEntrance(allOverviewPane));
     }
 
-    // Register deferred renderer for Weapons & Rivalries tab
     registerTabRenderer('#all-tab-weapons', () => {
       renderGlobalWeaponMeta('global-weapon-chart', data.global_weapon_meta);
       renderGlobalRivalries(data.global_rivalries);
@@ -273,8 +674,8 @@
       existingChart.destroy();
       activeCharts = activeCharts.filter(c => c !== existingChart);
     }
-    const names = data.leaderboard.map(p => p.name);
-    renderTimeline('timeline-chart', data.timeline, names, timelineMode);
+    const allNames = data._allNames || data.leaderboard.map(p => p.name);
+    renderTimeline('timeline-chart', data.timeline, allNames, timelineMode);
   }
 
   // --- Banner ---
@@ -298,11 +699,119 @@
     }
   }
 
+  // --- Player Profile (Single-Player Mode) ---
+  function renderPlayerProfile(player, fullData) {
+    const container = document.getElementById('player-profile-content');
+    const title = document.getElementById('player-profile-title');
+    title.textContent = player.name;
+
+    const ps = player.personal;
+    const borderColor = player.faction === 1 ? 'var(--kb-primary)' : 'var(--kb-accent)';
+    const fBadge = player.faction === 1 ? 'badge-f1' : 'badge-f2';
+    const ratioStr = ps.ratio === null ? '∞' : Number(ps.ratio).toFixed(2);
+    const kdStr = player.kd_ratio === null ? (player.kills > 0 ? '∞' : '—') : Number(player.kd_ratio).toFixed(2);
+
+    // Top rival from full rivalry matrix
+    let topRivalHtml = '';
+    const myRow = fullData.rivalry_matrix[player.name];
+    if (myRow) {
+      let topName = null, topDmg = 0;
+      for (const [victim, dmg] of Object.entries(myRow)) {
+        if (victim !== player.name && dmg > topDmg) { topName = victim; topDmg = dmg; }
+      }
+      if (topName) {
+        const theirDmg = (fullData.rivalry_matrix[topName] && fullData.rivalry_matrix[topName][player.name]) || 0;
+        topRivalHtml = `
+          <div class="vt-profile-rival mt-3">
+            <div class="small fw-semibold mb-1" style="color:var(--kb-text-muted);">Top Rival</div>
+            <div class="fw-bold" style="color:var(--kb-text-primary);">${esc(topName)}</div>
+            <div class="small" style="color:var(--kb-text-secondary);">
+              Dealt ${fmt(topDmg)} → ${esc(topName)} &nbsp;|&nbsp; Took ${fmt(theirDmg)} back
+            </div>
+          </div>`;
+      }
+    }
+
+    // Top hit targets
+    let hitTargetsHtml = '';
+    if (player.hit_targets && Object.keys(player.hit_targets).length > 0) {
+      const topTargets = Object.entries(player.hit_targets).sort((a, b) => b[1].hits - a[1].hits).slice(0, 3);
+      hitTargetsHtml = `
+        <div class="mt-3">
+          <div class="small fw-semibold mb-1" style="color:var(--kb-text-muted);">Most Hit</div>
+          ${topTargets.map(([name, d]) => `<div class="small" style="color:var(--kb-text-secondary);">${esc(name)}: ${d.hits.toLocaleString()} hits, ${fmt(d.damage)} dmg</div>`).join('')}
+        </div>`;
+    }
+
+    container.innerHTML = `
+      <div class="vt-profile-panel" style="border-left-color:${borderColor};">
+        <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
+          <span class="vt-profile-name">${esc(player.name)}</span>
+          <span class="badge ${fBadge}">Team ${player.faction}</span>
+          <span class="small" style="color:var(--kb-text-muted);">Slot ${player.slot}</span>
+        </div>
+        <div class="d-flex flex-wrap gap-4 mb-3">
+          <div class="stat-card"><div class="stat-value">${fmt(ps.dealt)}</div><div class="stat-label">Dealt</div></div>
+          <div class="stat-card"><div class="stat-value">${fmt(ps.received)}</div><div class="stat-label">Received</div></div>
+          <div class="stat-card"><div class="stat-value">${ratioStr}</div><div class="stat-label">Ratio</div></div>
+          <div class="stat-card"><div class="stat-value">${(ps.accuracy * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
+          <div class="stat-card"><div class="stat-value">${player.kills || 0}</div><div class="stat-label">Kills</div></div>
+          <div class="stat-card"><div class="stat-value">${player.deaths || 0}</div><div class="stat-label">Deaths</div></div>
+          <div class="stat-card"><div class="stat-value">${kdStr}</div><div class="stat-label">K/D</div></div>
+          <div class="vt-profile-chart-wrap"><canvas id="profile-doughnut"></canvas></div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 mb-2">
+          <span class="badge bg-secondary">${esc(ps.fav_weapon)}</span>
+          <span class="small" style="color:var(--kb-text-muted);">${ps.weapons_used} weapons used</span>
+        </div>
+        ${topRivalHtml}
+        ${hitTargetsHtml}
+      </div>`;
+
+    // Dealt vs Received doughnut
+    const dCtx = document.getElementById('profile-doughnut');
+    if (dCtx) {
+      const t = getThemeColors();
+      const chart = new Chart(dCtx.getContext('2d'), {
+        type: 'doughnut',
+        data: {
+          labels: ['Dealt', 'Received'],
+          datasets: [{ data: [ps.dealt, ps.received], backgroundColor: [t.success + 'cc', t.danger + 'cc'], borderWidth: 0 }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: true, cutout: '60%',
+          plugins: { legend: { display: false }, tooltip: { enabled: true } },
+        },
+      });
+      activeCharts.push(chart);
+    }
+  }
+
   // --- Faction Scoreboard ---
-  function renderFactionScoreboard(factionTotals, teams) {
+  // Determine which factions are "active" under the current filter.
+  // Returns a Set of faction numbers ('1' / '2'). An empty filter returns
+  // a set containing both, meaning no team should be dimmed.
+  function computeActiveFactions() {
+    if (filterState.mode === 'all') return new Set(['1', '2']);
+    if (filterState.mode === 'team') return new Set([String(filterState.team || '1')]);
+    // Player mode: active factions are those with at least one selected player
+    const active = new Set();
+    if (filterState.players.length === 0) return new Set(['1', '2']);
+    const byName = {};
+    currentData.leaderboard.forEach(p => { byName[p.name] = p; });
+    filterState.players.forEach(name => {
+      const p = byName[name];
+      if (p) active.add(String(p.faction));
+    });
+    return active.size > 0 ? active : new Set(['1', '2']);
+  }
+
+  function renderFactionScoreboard(factionTotals, teams, activeFactions) {
     const container = document.getElementById('faction-content');
     const f1 = factionTotals['1'] || {};
     const f2 = factionTotals['2'] || {};
+    const active = activeFactions || new Set(['1', '2']);
+    const bothActive = active.has('1') && active.has('2');
 
     const rosterHtml = (teamList) => {
       if (!teamList || teamList.length === 0) return '<em style="color:var(--kb-text-muted)">No players</em>';
@@ -321,10 +830,14 @@
     const t1Leader = leaderName(teams['1'], 1) || 'TBD';
     const t2Leader = leaderName(teams['2'], 6) || 'TBD';
 
+    const t1Muted = !bothActive && !active.has('1');
+    const t2Muted = !bothActive && !active.has('2');
+    const mutedNote = '<span class="vt-faction-muted-badge" title="Not included in current filter"><i class="bi bi-eye-slash me-1"></i>Filtered out</span>';
+
     container.innerHTML = `
       <div class="col-md-6">
-        <div class="vt-faction-panel" style="border-left-color:var(--kb-primary);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Leader}</span></h6>
+        <div class="vt-faction-panel ${t1Muted ? 'vt-faction-panel--muted' : ''}" style="border-left-color:var(--kb-primary);">
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Leader}</span>${t1Muted ? mutedNote : ''}</h6>
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
@@ -335,8 +848,8 @@
         </div>
       </div>
       <div class="col-md-6">
-        <div class="vt-faction-panel" style="border-left-color:var(--kb-accent);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Leader}</span></h6>
+        <div class="vt-faction-panel ${t2Muted ? 'vt-faction-panel--muted' : ''}" style="border-left-color:var(--kb-accent);">
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Leader}</span>${t2Muted ? mutedNote : ''}</h6>
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
@@ -350,8 +863,6 @@
   }
 
   // --- Leaderboard ---
-  let sortState = { key: 'dealt', asc: false };
-
   function renderLeaderboard(rows) {
     const tbody = document.querySelector('#leaderboard tbody');
     const sorted = [...rows].sort(leaderboardSort(sortState.key, sortState.asc));
@@ -455,6 +966,10 @@
   function renderRivalries(rivalries) {
     const container = document.getElementById('rivalries-container');
     container.innerHTML = '';
+    if (rivalries.length === 0) {
+      container.innerHTML = '<p style="color:var(--kb-text-muted)">No rivalries for this selection.</p>';
+      return;
+    }
     rivalries.forEach(r => {
       const card = document.createElement('div');
       card.className = 'rivalry-card d-flex align-items-center gap-3 p-3 mb-3 rounded';
@@ -526,7 +1041,13 @@
     const table = document.getElementById('kill-heatmap');
     if (!matrix || Object.keys(matrix).length === 0) {
       table.innerHTML = '';
-      container.querySelector('table').outerHTML = '<p style="color:var(--kb-text-muted)">No kill events recorded.</p>';
+      const existing = container.querySelector('p');
+      if (!existing) {
+        const p = document.createElement('p');
+        p.style.color = 'var(--kb-text-muted)';
+        p.textContent = 'No kill events recorded.';
+        container.appendChild(p);
+      }
       return;
     }
     let maxVal = 0;
@@ -732,9 +1253,9 @@
     if (btn) expandSection(btn.dataset.expand);
   });
 
-  function registerMatchCharts(data) {
+  function registerMatchCharts(data, allNames) {
     registerChartRenderer('section-timeline', (canvasId) => {
-      const names = data.leaderboard.map(p => p.name);
+      const names = allNames || data.leaderboard.map(p => p.name);
       return renderTimeline(canvasId, data.timeline, names, timelineMode);
     });
     registerChartRenderer('section-weapon-meta', (canvasId) => {
@@ -747,7 +1268,7 @@
       return renderWeaponAccuracy(canvasId, data.weapon_meta);
     });
     registerChartRenderer('section-vehicle-kills', (canvasId) => {
-      return renderVehicleKills(canvasId, data.kills.by_vehicle);
+      return renderVehicleKills(canvasId, currentData.kills.by_vehicle);
     });
   }
 
@@ -764,4 +1285,7 @@
     d.textContent = s;
     return d.innerHTML;
   }
+
+  // Load first match
+  if (manifest.length > 0) loadMatch(manifest[0].file);
 })();
