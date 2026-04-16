@@ -519,6 +519,15 @@ Dashboard content is organized into Bootstrap nav-pills tabs:
 
 Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags.
 
+### URL Tab Parameter
+
+The active tab is synced to the `tab` query parameter. Visiting `index.html?tab=combat` opens the Combat tab directly. Switching tabs updates the URL via `history.replaceState` (no history pollution). The `tab` param is omitted when on the default Overview tab.
+
+**Valid slugs (per-match):** `overview`, `combat`, `rivalries`, `weapons`, `assets`
+**Valid slugs (all-matches):** `overview`, `weapons-rivalries`
+
+Slug-to-button mappings are defined in `MATCH_TAB_SLUGS` and `ALL_TAB_SLUGS` at the top of `js/app.js`.
+
 ### CSS Load Order (required)
 
 ```html
