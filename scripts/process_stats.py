@@ -23,6 +23,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 SESSIONS_DIR = PROJECT_ROOT / "data" / "sessions"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 ODF_PATH = PROJECT_ROOT / "data" / "odf.min.json"
+PLAYER_IDS_PATH = PROJECT_ROOT / "data" / "playerids.txt"
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -147,7 +148,32 @@ def slot_to_faction(slot):
     return 0
 
 
-def process_match(session, source_file, submitter, resolve_weapon):
+def load_known_players(path=PLAYER_IDS_PATH):
+    """Load canonical player names from the known-players registry.
+
+    Parses playerids.txt, extracts Steam-prefixed entries ('S'),
+    and returns a dict mapping Steam64 int -> canonical display name.
+    GOG entries are ignored (not present in session data).
+    """
+    known = {}
+    if not path.exists():
+        print(f"WARNING: {path.name} not found, no canonical player names available")
+        return known
+
+    with open(path, encoding="utf-16") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            m = re.match(r'"S(\d+)"="(.+)"', line)
+            if m:
+                known[int(m.group(1))] = m.group(2)
+
+    print(f"Loaded {len(known)} known player names from {path.name}")
+    return known
+
+
+def process_match(session, source_file, submitter, resolve_weapon, known_players=None):
     """Process a single match session into pre-computed stats."""
     header = session.header
     events = session.event_stream
@@ -159,14 +185,17 @@ def process_match(session, source_file, submitter, resolve_weapon):
     s64_to_slot = dict(header.s64_to_teamnum)
     s64_to_nick = dict(header.s64_to_nick)
 
+    if known_players is None:
+        known_players = {}
+
     nick_map = {}  # slot -> display name
     for slot, s64 in slot_to_s64.items():
-        nick_map[slot] = s64_to_nick.get(s64, f"Player {slot}")
+        nick_map[slot] = known_players.get(s64) or s64_to_nick.get(s64, f"Player {slot}")
 
     all_slots = set(nick_map.keys())
 
     def nick_for_s64(s64):
-        return s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
+        return known_players.get(s64) or s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
 
     # Per-player accumulators (keyed on Steam64)
     player_dealt = defaultdict(float)
@@ -866,6 +895,9 @@ def main():
 
     resolve_weapon = build_weapon_name_resolver(odf_db)
 
+    # Load canonical player names
+    known_players = load_known_players()
+
     # Discover sessions
     sources = discover_sessions()
     if not sources:
@@ -885,7 +917,7 @@ def main():
         session = load_session(session_path)
         print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
 
-        match_data = process_match(session, session_path.name, submitter, resolve_weapon)
+        match_data = process_match(session, session_path.name, submitter, resolve_weapon, known_players)
         all_match_data.append(match_data)
 
         match_id = match_data["match"]["id"]
