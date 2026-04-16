@@ -32,7 +32,8 @@
   manifest.forEach(m => {
     const opt = document.createElement('option');
     opt.value = m.file;
-    opt.textContent = `${m.name} — ${m.map}`;
+    const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    opt.textContent = `${m.name} — ${shortDate}`;
     $select.appendChild(opt);
   });
 
@@ -156,11 +157,14 @@
     registerTabRenderer('#tab-combat', () => {
       renderTimelineSection(data);
       renderWeaponMeta('weapon-meta-chart', data.weapon_meta);
+      renderKillFeed(data.kills, data.match.tick_rate, data.match.tick_range[0]);
+      renderVehicleKills('vehicle-kills-chart', data.kills.by_vehicle);
     });
 
     registerTabRenderer('#tab-rivalries', () => {
       renderHeatmap(data.rivalry_matrix, data.leaderboard.map(p => p.name));
       renderRivalries(data.top_rivalries);
+      renderKillHeatmap(data.kills.kill_rivalry_matrix, data.leaderboard.map(p => p.name));
       if (window.VTFx) requestAnimationFrame(() => VTFx.staggerHeatmapCells());
     });
 
@@ -168,6 +172,7 @@
       renderPlayerWeapons('player-weapons-chart', data.leaderboard, data.weapon_meta);
       renderAccuracyTable(data.leaderboard);
       renderWeaponAccuracy('weapon-accuracy-chart', data.weapon_meta);
+      renderHitTargets(data.leaderboard);
     });
 
     registerTabRenderer('#tab-assets', () => {
@@ -243,8 +248,14 @@
     const s = Math.floor(info.duration_sec % 60);
     document.getElementById('info-duration').textContent = `${m}m ${s}s`;
     document.getElementById('info-players').textContent = info.player_count;
-    const configEl = document.getElementById('info-config');
-    configEl.textContent = '';
+    document.getElementById('info-submitter').textContent = info.submitter || '—';
+    const snipesWrap = document.getElementById('info-snipes-wrap');
+    if (info.snipe_count > 0) {
+      document.getElementById('info-snipes').textContent = info.snipe_count;
+      snipesWrap.classList.remove('d-none');
+    } else {
+      snipesWrap.classList.add('d-none');
+    }
   }
 
   // --- Faction Scoreboard ---
@@ -319,6 +330,8 @@
         <td class="text-end" style="${netClass}">${ps.net > 0 ? '+' : ''}${fmt(ps.net)}</td>
         <td class="text-end">${ratioStr}</td>
         <td class="text-end">${(ps.accuracy * 100).toFixed(1)}%</td>
+        <td class="text-end">${r.kills || 0}</td>
+        <td class="text-end">${r.deaths || 0}</td>
         <td class="text-end">${fmt(r.assets.dealt)}</td>
         <td><span class="badge bg-secondary">${esc(ps.fav_weapon)}</span></td>
         <td class="text-end">${ps.weapons_used}</td>
@@ -349,6 +362,8 @@
           vb = b.personal.ratio === null ? 1e9 : Number(b.personal.ratio);
           break;
         case 'accuracy': va = a.personal.accuracy; vb = b.personal.accuracy; break;
+        case 'kills': va = a.kills || 0; vb = b.kills || 0; break;
+        case 'deaths': va = a.deaths || 0; vb = b.deaths || 0; break;
         case 'asset_dealt': va = a.assets.dealt; vb = b.assets.dealt; break;
         case 'fav_weapon': va = a.personal.fav_weapon.toLowerCase(); vb = b.personal.fav_weapon.toLowerCase(); break;
         case 'weapons_used': va = a.personal.weapons_used; vb = b.personal.weapons_used; break;
@@ -438,6 +453,99 @@
     }).join('');
   }
 
+  // --- Kill Feed ---
+  function renderKillFeed(kills, tickRate, minTick) {
+    const container = document.getElementById('kill-feed-content');
+    if (!kills || !kills.feed || kills.feed.length === 0) {
+      container.innerHTML = '<p style="color:var(--kb-text-muted)">No kill events recorded.</p>';
+      return;
+    }
+    const stripOdf = (s) => s ? s.replace(/\.odf$/i, '').replace(/_/g, ' ') : '?';
+    let html = '<div style="max-height:320px;overflow-y:auto;">';
+    kills.feed.forEach(entry => {
+      const sec = tickRate > 0 ? (entry.tick - minTick) / tickRate : 0;
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      const ts = `${m}:${String(s).padStart(2, '0')}`;
+      html += `<div class="d-flex align-items-center gap-2 py-1" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
+      html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>`;
+      html += `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.killer_odf))})</span>`;
+      html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>`;
+      html += `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.victim_odf))})</span>`;
+      html += `</div>`;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  // --- Kill Rivalry Heatmap ---
+  function renderKillHeatmap(matrix, names) {
+    const container = document.getElementById('kill-heatmap-content');
+    const table = document.getElementById('kill-heatmap');
+    if (!matrix || Object.keys(matrix).length === 0) {
+      table.innerHTML = '';
+      container.querySelector('table').outerHTML = '<p style="color:var(--kb-text-muted)">No kill events recorded.</p>';
+      return;
+    }
+    let maxVal = 0;
+    for (const killer of names) {
+      for (const victim of names) {
+        const v = (matrix[killer] && matrix[killer][victim]) || 0;
+        if (v > maxVal) maxVal = v;
+      }
+    }
+    let html = '<thead><tr><th class="heatmap-corner"></th>';
+    names.forEach(n => { html += `<th class="heatmap-header">${esc(n)}</th>`; });
+    html += '</tr></thead><tbody>';
+    names.forEach(killer => {
+      html += `<tr><th class="heatmap-row-header text-start">${esc(killer)}</th>`;
+      names.forEach(victim => {
+        const val = (matrix[killer] && matrix[killer][victim]) || 0;
+        const intensity = maxVal > 0 ? val / maxVal : 0;
+        const isSelf = killer === victim;
+        let bg;
+        if (isSelf) {
+          bg = 'transparent';
+        } else {
+          bg = val > 0 ? `color-mix(in srgb, var(--kb-warning) ${Math.round(15 + intensity * 65)}%, transparent)` : 'transparent';
+        }
+        const title = `${killer} → ${victim}: ${val} kills`;
+        html += `<td class="heatmap-cell" style="background:${bg}" title="${esc(title)}">${val > 0 ? val : ''}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody>';
+    table.innerHTML = html;
+  }
+
+  // --- Hit Distribution by Target ---
+  function renderHitTargets(leaderboard) {
+    const container = document.getElementById('hit-targets-content');
+    const players = leaderboard.filter(p => p.hit_targets && Object.keys(p.hit_targets).length > 0);
+    if (players.length === 0) {
+      container.innerHTML = '<p style="color:var(--kb-text-muted)">No per-target hit data available.</p>';
+      return;
+    }
+    let html = '<table class="table table-sm table-hover align-middle mb-0" style="font-size:0.8rem;">';
+    html += '<thead><tr><th>Player</th><th>Target</th><th class="text-end">Hits</th><th class="text-end">Damage</th><th class="text-end">Dmg/Hit</th><th class="text-end">% of Hits</th></tr></thead><tbody>';
+    players.forEach(p => {
+      const totalHits = Object.values(p.hit_targets).reduce((s, v) => s + (v.hits || 0), 0);
+      const entries = Object.entries(p.hit_targets).slice(0, 3);
+      entries.forEach(([target, data], idx) => {
+        const hits = data.hits || 0;
+        const dmg = data.damage || 0;
+        const dph = hits > 0 ? (dmg / hits).toFixed(1) : '—';
+        const pct = totalHits > 0 ? ((hits / totalHits) * 100).toFixed(1) : '0';
+        const playerCell = idx === 0 ? `<td class="fw-semibold" rowspan="${entries.length}">${esc(p.name)}</td>` : '';
+        html += `<tr>${playerCell}<td>${esc(target)}</td><td class="text-end">${hits.toLocaleString()}</td><td class="text-end">${fmt(dmg)}</td><td class="text-end">${dph}</td><td class="text-end">${pct}%</td></tr>`;
+      });
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
   // --- Asset Damage ---
   function renderAssetDamage(assetData, factionTotals) {
     const container = document.getElementById('asset-damage-content');
@@ -478,10 +586,12 @@
     const container = document.getElementById('agg-meta');
     const dur = meta.total_duration_sec;
     const m = Math.floor(dur / 60);
+    const submitters = meta.submitters || [];
     container.innerHTML = `
       <div><span class="stat-label">Matches</span><br><strong>${meta.match_count}</strong></div>
       <div><span class="stat-label">Total Play Time</span><br><strong>${m} min</strong></div>
       <div><span class="stat-label">Maps</span><br><strong>${meta.maps_played.length}</strong></div>
+      <div><span class="stat-label">Submitters</span><br><strong>${submitters.length}</strong></div>
       <div><span class="stat-label">Date Range</span><br><strong>${meta.date_range.join(' — ')}</strong></div>
     `;
   }
@@ -495,6 +605,8 @@
       <td class="text-end">${fmt(c.total_dealt)}</td>
       <td class="text-end">${fmt(c.total_received)}</td>
       <td class="text-end">${(c.overall_accuracy * 100).toFixed(1)}%</td>
+      <td class="text-end">${c.total_kills || 0}</td>
+      <td class="text-end">${c.total_deaths || 0}</td>
       <td class="text-end">${fmt(c.total_asset_dealt)}</td>
       <td><span class="badge bg-secondary">${esc(c.fav_weapon)}</span></td>
     </tr>`).join('');
@@ -593,6 +705,9 @@
     });
     registerChartRenderer('section-weapon-accuracy', (canvasId) => {
       return renderWeaponAccuracy(canvasId, data.weapon_meta);
+    });
+    registerChartRenderer('section-vehicle-kills', (canvasId) => {
+      return renderVehicleKills(canvasId, data.kills.by_vehicle);
     });
   }
 

@@ -2,7 +2,7 @@
 
 ## Project
 
-VT Stats — static-site dashboard for BattleZone match statistics. Python pipeline processes raw protobuf match data into pre-computed JSON; static HTML/JS/CSS dashboard renders it.
+VT Stats — static-site dashboard for BattleZone match statistics. Python pipeline processes raw protobuf session data into pre-computed JSON; static HTML/JS/CSS dashboard renders it.
 
 ## Before Making Any Change
 
@@ -38,7 +38,9 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 - All dashboard styles live in CSS files — **zero inline `<style>` blocks** in HTML.
 - Dashboard uses tabbed navigation with lazy rendering — charts render on first tab activation, not on page load.
 - Processed JSON is the source of truth for the browser; the proto is the source of truth for the pipeline.
-- Current local data uses the **legacy format** (int32 slot-based). Pipeline must remain backward-compatible until all data is replaced.
+- Players are identified by Steam64 IDs. Header maps: `s64_to_nick`, `teamnum_to_s64`, `s64_to_teamnum`.
+- Faction determined by slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
+- Session data lives in `data/sessions/<username>/*.binpb.gz`, organized by submitter.
 
 ## When Schema Changes
 
