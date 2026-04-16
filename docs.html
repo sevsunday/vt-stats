@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VT Stats — Documentation</title>
+  <link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="css/theme-system.css">
+  <link rel="stylesheet" href="css/themes.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/vtstats-theme.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-sm sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4">
+      <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+      <div class="d-flex align-items-center gap-2">
+        <a href="docs.html" class="btn btn-sm btn-outline-secondary active">
+          <i class="bi bi-book me-1"></i>Docs
+        </a>
+
+        <!-- Theme Dropdown -->
+        <div class="dropdown">
+          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+            <i class="bi bi-palette me-1"></i><span data-theme-name>Default</span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+        </div>
+
+        <!-- Mode Toggle -->
+        <button class="btn btn-sm btn-outline-secondary" data-mode-toggle title="Toggle light/dark mode">
+          <i class="bi bi-sun-fill"></i>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Documentation Content -->
+  <div class="container-fluid docs-container px-3 px-md-4 py-4">
+
+    <!-- Mobile TOC toggle (visible below lg) -->
+    <div class="d-lg-none mb-3">
+      <button class="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-between" type="button" data-bs-toggle="collapse" data-bs-target="#docs-toc-mobile" aria-expanded="false" aria-controls="docs-toc-mobile">
+        <span><i class="bi bi-list-nested me-2"></i>On this page</span>
+        <i class="bi bi-chevron-down"></i>
+      </button>
+      <div class="collapse mt-2" id="docs-toc-mobile">
+        <nav id="docs-toc-mobile-nav" class="docs-toc docs-toc--mobile" aria-label="Table of contents"></nav>
+      </div>
+    </div>
+
+    <div class="row">
+      <!-- Sidebar TOC (visible at lg+) -->
+      <div class="col-lg-3 d-none d-lg-block">
+        <div class="docs-toc-sticky">
+          <nav id="docs-toc" class="docs-toc" aria-label="Table of contents">
+            <div class="docs-toc-progress"><div class="docs-toc-progress-bar"></div></div>
+            <div class="docs-toc-title">On this page</div>
+          </nav>
+        </div>
+      </div>
+
+      <!-- Main content -->
+      <div class="col-lg-9">
+        <div id="docs-loading" class="text-center py-5">
+          <div class="spinner-border spinner-border-sm" style="color: var(--kb-primary);" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <span class="ms-2" style="color: var(--kb-text-muted);">Loading documentation&hellip;</span>
+        </div>
+        <article id="docs-content" class="docs-prose d-none"></article>
+        <div id="docs-error" class="d-none">
+          <div class="alert" style="background: var(--kb-bg-subtle); border: 1px solid var(--kb-border-subtle); color: var(--kb-text-primary);">
+            <i class="bi bi-exclamation-triangle me-2" style="color: var(--kb-warning);"></i>
+            Failed to load documentation. Please make sure <code>docs/DATA_DICTIONARY.md</code> exists.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Back to Top -->
+  <button id="back-to-top" class="docs-back-to-top" title="Back to top" aria-label="Back to top">
+    <i class="bi bi-arrow-up"></i>
+  </button>
+
+  <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="vendor/marked/marked.min.js"></script>
+  <script src="js/theme.js"></script>
+  <script>
+    (async function () {
+      const content = document.getElementById('docs-content');
+      const loading = document.getElementById('docs-loading');
+      const error = document.getElementById('docs-error');
+
+      try {
+        const res = await fetch('docs/DATA_DICTIONARY.md');
+        if (!res.ok) throw new Error(res.statusText);
+        const md = await res.text();
+
+        content.innerHTML = marked.parse(md);
+
+        // Post-render: style tables
+        content.querySelectorAll('table').forEach(t => {
+          t.classList.add('table', 'table-sm', 'table-hover', 'table-striped', 'align-middle');
+          if (!t.parentElement.classList.contains('table-responsive')) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'table-responsive';
+            t.parentNode.insertBefore(wrapper, t);
+            wrapper.appendChild(t);
+          }
+        });
+
+        // Post-render: style code blocks
+        content.querySelectorAll('pre > code').forEach(block => {
+          block.parentElement.classList.add('docs-code-block');
+        });
+
+        // Post-render: assign heading IDs and inject anchor links
+        function slugify(text) {
+          return text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        }
+
+        const usedIds = new Set();
+        content.querySelectorAll('h1, h2, h3, h4').forEach(heading => {
+          let id = slugify(heading.textContent);
+          if (usedIds.has(id)) {
+            let n = 2;
+            while (usedIds.has(id + '-' + n)) n++;
+            id = id + '-' + n;
+          }
+          usedIds.add(id);
+          heading.id = id;
+
+          if (heading.tagName !== 'H1') {
+            const anchor = document.createElement('a');
+            anchor.className = 'docs-heading-anchor';
+            anchor.href = '#' + id;
+            anchor.setAttribute('aria-label', 'Link to ' + heading.textContent);
+            anchor.innerHTML = '<i class="bi bi-link-45deg"></i>';
+            heading.appendChild(anchor);
+          }
+        });
+
+        // Build collapsible TOC from h2 and h3 elements
+        function buildToc(container) {
+          const list = document.createElement('ul');
+          list.className = 'docs-toc-list';
+          let currentH2Item = null;
+          let currentSubList = null;
+
+          content.querySelectorAll('h2, h3').forEach(heading => {
+            if (heading.tagName === 'H2') {
+              const li = document.createElement('li');
+              li.className = 'docs-toc-section';
+
+              const row = document.createElement('div');
+              row.className = 'docs-toc-h2-row';
+
+              const a = document.createElement('a');
+              a.href = '#' + heading.id;
+              a.className = 'docs-toc-link docs-toc-link--h2';
+              a.textContent = heading.textContent.replace(/\s*$/, '');
+              a.dataset.target = heading.id;
+
+              row.appendChild(a);
+              li.appendChild(row);
+              list.appendChild(li);
+              currentH2Item = li;
+              currentSubList = null;
+            } else {
+              if (!currentSubList) {
+                currentSubList = document.createElement('ul');
+                currentSubList.className = 'docs-toc-sublist';
+                if (currentH2Item) {
+                  currentH2Item.appendChild(currentSubList);
+                  const chevron = document.createElement('button');
+                  chevron.className = 'docs-toc-chevron';
+                  chevron.setAttribute('aria-label', 'Toggle subsections');
+                  chevron.innerHTML = '<i class="bi bi-chevron-right"></i>';
+                  currentH2Item.querySelector('.docs-toc-h2-row').prepend(chevron);
+                } else {
+                  list.appendChild(currentSubList);
+                }
+              }
+              const li = document.createElement('li');
+              const a = document.createElement('a');
+              a.href = '#' + heading.id;
+              a.className = 'docs-toc-link docs-toc-link--h3';
+              a.textContent = heading.textContent.replace(/\s*$/, '');
+              a.dataset.target = heading.id;
+              li.appendChild(a);
+              currentSubList.appendChild(li);
+            }
+          });
+
+          container.appendChild(list);
+
+          // Chevron toggle behavior
+          container.querySelectorAll('.docs-toc-chevron').forEach(btn => {
+            btn.addEventListener('click', e => {
+              e.stopPropagation();
+              const section = btn.closest('.docs-toc-section');
+              const wasOpen = section.classList.contains('docs-toc-section--open');
+              if (!wasOpen) {
+                container.querySelectorAll('.docs-toc-section--open').forEach(s => {
+                  if (s !== section) s.classList.remove('docs-toc-section--open');
+                });
+              }
+              section.classList.toggle('docs-toc-section--open');
+            });
+          });
+        }
+
+        const tocDesktop = document.getElementById('docs-toc');
+        const tocMobile = document.getElementById('docs-toc-mobile-nav');
+        buildToc(tocDesktop);
+        buildToc(tocMobile);
+
+        // Expand a TOC section by its heading id (used by scroll-spy)
+        function expandSectionForId(targetId) {
+          document.querySelectorAll('.docs-toc').forEach(toc => {
+            const link = toc.querySelector('.docs-toc-link[data-target="' + targetId + '"]');
+            if (!link) return;
+            const section = link.closest('.docs-toc-section');
+            if (!section) return;
+            if (!section.classList.contains('docs-toc-section--open')) {
+              toc.querySelectorAll('.docs-toc-section--open').forEach(s => {
+                if (s !== section) s.classList.remove('docs-toc-section--open');
+              });
+              section.classList.add('docs-toc-section--open');
+            }
+          });
+        }
+
+        // Scroll-spy via IntersectionObserver
+        const allTocLinks = document.querySelectorAll('.docs-toc-link');
+        const headingEls = content.querySelectorAll('h2, h3');
+        let activeId = null;
+
+        const observer = new IntersectionObserver(entries => {
+          const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+          if (visible.length > 0) {
+            const newId = visible[0].target.id;
+            if (newId !== activeId) {
+              activeId = newId;
+              allTocLinks.forEach(link => {
+                const isActive = link.dataset.target === activeId;
+                link.classList.toggle('docs-toc-link--active', isActive);
+              });
+              // Also highlight the parent H2 when a child H3 is active
+              document.querySelectorAll('.docs-toc-section').forEach(sec => {
+                const h2Link = sec.querySelector('.docs-toc-link--h2');
+                const hasActiveChild = sec.querySelector('.docs-toc-link--active');
+                sec.classList.toggle('docs-toc-section--active', !!hasActiveChild || (h2Link && h2Link.dataset.target === activeId));
+              });
+              expandSectionForId(activeId);
+            }
+          }
+        }, { rootMargin: '-60px 0px -75% 0px', threshold: 0 });
+
+        headingEls.forEach(h => observer.observe(h));
+
+        // Smooth scroll for TOC links
+        document.querySelectorAll('.docs-toc-link, .docs-heading-anchor').forEach(a => {
+          a.addEventListener('click', e => {
+            e.preventDefault();
+            const targetId = a.getAttribute('href').slice(1);
+            const target = document.getElementById(targetId);
+            if (target) {
+              const offset = 70;
+              const y = target.getBoundingClientRect().top + window.scrollY - offset;
+              window.scrollTo({ top: y, behavior: 'smooth' });
+              history.replaceState(null, '', '#' + targetId);
+            }
+            const mobileCollapse = document.getElementById('docs-toc-mobile');
+            if (mobileCollapse && mobileCollapse.classList.contains('show')) {
+              bootstrap.Collapse.getOrCreateInstance(mobileCollapse).hide();
+            }
+          });
+        });
+
+        loading.classList.add('d-none');
+        content.classList.remove('d-none');
+
+        // Jump to hash on load
+        if (location.hash) {
+          const target = document.getElementById(location.hash.slice(1));
+          if (target) {
+            setTimeout(() => {
+              const y = target.getBoundingClientRect().top + window.scrollY - 70;
+              window.scrollTo({ top: y, behavior: 'smooth' });
+            }, 100);
+          }
+        }
+      } catch (e) {
+        loading.classList.add('d-none');
+        error.classList.remove('d-none');
+        console.error('Failed to load documentation:', e);
+      }
+
+      // Back-to-top button + scroll progress bar
+      const btn = document.getElementById('back-to-top');
+      const progressBars = document.querySelectorAll('.docs-toc-progress-bar');
+      let ticking = false;
+
+      window.addEventListener('scroll', () => {
+        if (!ticking) {
+          requestAnimationFrame(() => {
+            btn.classList.toggle('docs-back-to-top--visible', window.scrollY > 400);
+            const scrollMax = document.documentElement.scrollHeight - window.innerHeight;
+            const pct = scrollMax > 0 ? Math.min(100, (window.scrollY / scrollMax) * 100) : 0;
+            progressBars.forEach(bar => { bar.style.width = pct + '%'; });
+            ticking = false;
+          });
+          ticking = true;
+        }
+      }, { passive: true });
+
+      btn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    })();
+  </script>
+</body>
+</html>

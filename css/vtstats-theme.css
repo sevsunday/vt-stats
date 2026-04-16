@@ -588,3 +588,408 @@ body::before {
 @keyframes vt-view-fade-in {
     from { opacity: 0; }
 }
+
+/* ============================================================================
+   DOCUMENTATION PAGE — Layout, TOC, prose, tables, code blocks
+   ============================================================================ */
+
+.docs-container {
+    max-width: 1200px;
+}
+
+/* --- Sticky sidebar TOC (desktop) ---------------------------------------- */
+
+.docs-toc-sticky {
+    position: sticky;
+    top: 70px;
+    max-height: calc(100vh - 90px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--kb-text-muted), transparent 60%) transparent;
+}
+
+.docs-toc {
+    background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent);
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+    border-radius: 10px;
+    padding: 1rem;
+}
+
+/* --- Scroll progress bar ------------------------------------------------- */
+
+.docs-toc-progress {
+    height: 3px;
+    border-radius: 3px;
+    background: color-mix(in oklab, var(--kb-border-subtle), transparent 50%);
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+}
+
+.docs-toc-progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 3px;
+    background: var(--kb-primary);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--kb-primary), transparent 50%);
+    transition: width 0.1s linear;
+}
+
+/* --- TOC title ----------------------------------------------------------- */
+
+.docs-toc-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.75rem;
+    padding-left: 0.5rem;
+}
+
+/* --- TOC list structure -------------------------------------------------- */
+
+.docs-toc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.docs-toc-section {
+    margin-bottom: 2px;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 70%);
+    padding-bottom: 4px;
+}
+
+.docs-toc-section:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+/* H2 row: chevron + link side by side */
+.docs-toc-h2-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* Chevron toggle button */
+.docs-toc-chevron {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--kb-text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.6rem;
+    transition: color 0.15s ease, transform 0.2s ease, background-color 0.15s ease;
+}
+
+.docs-toc-chevron:hover {
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-bg-muted) 50%, transparent);
+}
+
+.docs-toc-chevron i {
+    transition: transform 0.2s ease;
+    display: block;
+}
+
+.docs-toc-section--open > .docs-toc-h2-row > .docs-toc-chevron i {
+    transform: rotate(90deg);
+}
+
+/* H2 and H3 links */
+.docs-toc-link {
+    display: block;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: var(--kb-text-muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    border-radius: 0 4px 4px 0;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.docs-toc-link--h2 {
+    font-weight: 500;
+    color: var(--kb-text-secondary);
+    flex: 1;
+    min-width: 0;
+}
+
+.docs-toc-link--h3 {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+}
+
+.docs-toc-link:hover {
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-bg-muted) 50%, transparent);
+}
+
+.docs-toc-link--active {
+    color: var(--kb-primary) !important;
+    border-left-color: var(--kb-primary);
+    font-weight: 500;
+}
+
+/* Active section: H2 gets accent indicator */
+.docs-toc-section--active > .docs-toc-h2-row > .docs-toc-link--h2 {
+    color: var(--kb-primary);
+    border-left-color: var(--kb-primary);
+}
+
+/* --- Collapsible H3 sublists --------------------------------------------- */
+
+.docs-toc-sublist {
+    list-style: none;
+    padding-left: 0.5rem;
+    margin: 0;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin 0.25s ease;
+    border-left: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 40%);
+    margin-left: 9px;
+}
+
+.docs-toc-section--open > .docs-toc-sublist {
+    max-height: 600px;
+    opacity: 1;
+    margin-top: 2px;
+    margin-bottom: 4px;
+}
+
+.docs-toc-sublist > li {
+    margin-bottom: 1px;
+}
+
+/* Sections without children (no chevron) get consistent left padding */
+.docs-toc-section:not(:has(.docs-toc-chevron)) > .docs-toc-h2-row {
+    padding-left: 22px;
+}
+
+/* Mobile TOC variant */
+.docs-toc--mobile {
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+/* --- Heading anchor links ------------------------------------------------ */
+
+.docs-heading-anchor {
+    color: var(--kb-text-muted);
+    text-decoration: none !important;
+    margin-left: 0.4em;
+    opacity: 0;
+    transition: opacity 0.2s ease, color 0.2s ease;
+    font-size: 0.8em;
+    vertical-align: middle;
+}
+
+h2:hover .docs-heading-anchor,
+h3:hover .docs-heading-anchor,
+h4:hover .docs-heading-anchor,
+.docs-heading-anchor:focus {
+    opacity: 0.6;
+}
+
+.docs-heading-anchor:hover {
+    opacity: 1 !important;
+    color: var(--kb-primary);
+}
+
+/* --- Back-to-top button -------------------------------------------------- */
+
+.docs-back-to-top {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+    background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent);
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    color: var(--kb-text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    box-shadow: var(--vt-shadow-elevation-1);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+    transition: opacity 0.25s ease, transform 0.25s ease, color 0.15s ease, box-shadow 0.15s ease;
+    z-index: 1020;
+}
+
+.docs-back-to-top--visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.docs-back-to-top:hover {
+    color: var(--kb-primary);
+    box-shadow: var(--vt-shadow-elevation-2);
+}
+
+/* --- Prose typography ---------------------------------------------------- */
+
+.docs-prose {
+    color: var(--kb-text-primary);
+    line-height: 1.7;
+}
+
+.docs-prose h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid var(--kb-primary);
+}
+
+.docs-prose h2 {
+    font-size: 1.5rem;
+    font-weight: 650;
+    margin-top: 3rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+    scroll-margin-top: 70px;
+}
+
+.docs-prose h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    color: var(--kb-text-primary);
+    scroll-margin-top: 70px;
+}
+
+.docs-prose h4 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+    color: var(--kb-text-secondary);
+    scroll-margin-top: 70px;
+}
+
+.docs-prose p {
+    margin-bottom: 1rem;
+    color: var(--kb-text-secondary);
+}
+
+.docs-prose strong {
+    color: var(--kb-text-primary);
+    font-weight: 600;
+}
+
+.docs-prose a:not(.docs-heading-anchor) {
+    color: var(--kb-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.docs-prose a:not(.docs-heading-anchor):hover {
+    color: var(--kb-accent);
+}
+
+.docs-prose ul,
+.docs-prose ol {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+    color: var(--kb-text-secondary);
+}
+
+.docs-prose li {
+    margin-bottom: 0.35rem;
+}
+
+.docs-prose hr {
+    border-color: var(--kb-border-subtle);
+    margin: 2.5rem 0;
+    opacity: 0.5;
+}
+
+.docs-prose code {
+    font-family: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+    font-size: 0.85em;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    color: var(--kb-primary);
+}
+
+.docs-prose pre {
+    margin-bottom: 1.25rem;
+}
+
+.docs-prose pre > code {
+    display: block;
+    padding: 0;
+    background: none;
+    color: var(--kb-text-primary);
+    font-size: 0.82rem;
+    line-height: 1.6;
+}
+
+.docs-prose .docs-code-block {
+    background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent);
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+}
+
+.docs-prose .table {
+    font-size: 0.85rem;
+    color: var(--kb-text-primary);
+    margin-bottom: 1.25rem;
+    --bs-table-striped-bg: color-mix(in oklab, var(--kb-bg-subtle), transparent 50%);
+}
+
+.docs-prose .table th {
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--kb-text-primary);
+    border-bottom-color: var(--kb-border-subtle);
+    position: sticky;
+    top: 0;
+    background: var(--kb-bg-card);
+    z-index: 1;
+}
+
+.docs-prose .table td {
+    color: var(--kb-text-secondary);
+    border-bottom-color: color-mix(in oklab, var(--kb-border-subtle), transparent 50%);
+}
+
+.docs-prose .table td code {
+    font-size: 0.82em;
+}
+
+.docs-prose blockquote {
+    border-left: 3px solid var(--kb-primary);
+    padding: 0.5rem 1rem;
+    margin: 1rem 0;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 50%, transparent);
+    border-radius: 0 6px 6px 0;
+    color: var(--kb-text-secondary);
+}
