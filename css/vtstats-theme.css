@@ -1,0 +1,590 @@
+/**
+ * VT Stats — Premium Glassmorphic Theme Layer
+ *
+ * Additive visual layer: Geist typography, glass surfaces, depth shadows,
+ * animations, and ambient effects. Loads AFTER layout.css. Uses --kb-*
+ * variables for colors (all 44 themes supported), --vt-* for effects.
+ *
+ * Geist fonts v1.8.0 — vendored from https://github.com/vercel/geist-font
+ */
+
+/* ============================================================================
+   FONT FACES
+   Variable fonts — single file covers weight range 100-900
+   ============================================================================ */
+
+@font-face {
+    font-family: 'Geist';
+    src: url('../vendor/fonts/GeistVF.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Geist Mono';
+    src: url('../vendor/fonts/GeistMonoVF.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* ============================================================================
+   TYPOGRAPHY
+   Global font override + data-oriented refinements
+   ============================================================================ */
+
+body {
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    position: relative;
+    z-index: 0;
+}
+
+h1, h2, h3, h4, h5, h6,
+.h1, .h2, .h3, .h4, .h5, .h6 {
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    letter-spacing: -0.01em;
+}
+
+.card-header h5 {
+    letter-spacing: -0.015em;
+    font-weight: 600;
+}
+
+.vt-mono {
+    font-family: 'Geist Mono', ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-value {
+    font-family: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.table td.text-end,
+.table th.text-end {
+    font-variant-numeric: tabular-nums;
+}
+
+code, pre, .font-monospace {
+    font-family: 'Geist Mono', ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+}
+
+.navbar-brand {
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    letter-spacing: -0.02em;
+}
+
+/* ============================================================================
+   MIGRATED INLINE STYLES
+   Moved from index.html <style> block for modularity
+   ============================================================================ */
+
+.chart-container {
+    position: relative;
+    min-height: 320px;
+}
+
+.chart-container-sm {
+    position: relative;
+    min-height: 200px;
+}
+
+.heatmap-cell {
+    font-size: 0.75rem;
+    min-width: 60px;
+    padding: 4px !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.heatmap-header {
+    font-size: 0.7rem;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    max-width: 40px;
+    padding: 4px !important;
+    white-space: nowrap;
+}
+
+.heatmap-corner {
+    width: 100px;
+}
+
+.heatmap-row-header {
+    font-size: 0.75rem;
+    white-space: nowrap;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rivalry-card {
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+.stat-card {
+    text-align: center;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+}
+
+th[data-sort] {
+    cursor: pointer;
+    user-select: none;
+}
+
+th[data-sort]:hover {
+    color: var(--kb-primary);
+}
+
+th[data-sort].sort-active {
+    color: var(--kb-primary);
+}
+
+.badge-f1 {
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+}
+
+.badge-f2 {
+    background: var(--kb-accent);
+    color: var(--kb-accent-fg);
+}
+
+.config-mod {
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+}
+
+#all-matches-view {
+    display: none;
+}
+
+/* ============================================================================
+   FULLSCREEN BUTTONS — Borderless icon style
+   ============================================================================ */
+
+[data-expand] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--kb-text-muted);
+    padding: 0.375rem;
+    border-radius: 6px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+[data-expand]:hover {
+    color: var(--kb-text-primary);
+    background: var(--kb-bg-muted) !important;
+}
+
+[data-expand]:focus {
+    box-shadow: none !important;
+}
+
+/* ============================================================================
+   EFFECT CUSTOM PROPERTIES — --vt-* namespace
+   Controls visual effects; --kb-* controls colors
+   ============================================================================ */
+
+:root {
+    /* Glass */
+    --vt-glass-blur: 14px;
+    --vt-glass-opacity: 87%;
+    --vt-glass-border-luminance: 8%;
+
+    /* Depth — multi-layer shadow tokens */
+    --vt-shadow-elevation-1:
+        0 1px 2px rgba(0, 0, 0, 0.12),
+        0 4px 8px rgba(0, 0, 0, 0.08);
+    --vt-shadow-elevation-2:
+        0 2px 4px rgba(0, 0, 0, 0.12),
+        0 8px 24px rgba(0, 0, 0, 0.12);
+    --vt-shadow-elevation-3:
+        0 4px 8px rgba(0, 0, 0, 0.12),
+        0 16px 48px rgba(0, 0, 0, 0.16);
+
+    /* Animation */
+    --vt-anim-stagger: 50ms;
+    --vt-anim-duration: 0.4s;
+    --vt-anim-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Chart effects */
+    --vt-chart-shadow-blur: 5px;
+    --vt-chart-shadow-opacity: 0.12;
+
+    /* Ambient background */
+    --vt-ambient-opacity: 0.06;
+}
+
+/* Light mode — same effects, reduced intensity */
+[data-mode="light"] {
+    --vt-glass-blur: 10px;
+    --vt-glass-opacity: 92%;
+    --vt-glass-border-luminance: 5%;
+
+    --vt-shadow-elevation-1:
+        0 1px 2px rgba(0, 0, 0, 0.06),
+        0 4px 8px rgba(0, 0, 0, 0.04);
+    --vt-shadow-elevation-2:
+        0 2px 4px rgba(0, 0, 0, 0.06),
+        0 8px 24px rgba(0, 0, 0, 0.06);
+    --vt-shadow-elevation-3:
+        0 4px 8px rgba(0, 0, 0, 0.06),
+        0 16px 48px rgba(0, 0, 0, 0.08);
+
+    --vt-ambient-opacity: 0.03;
+    --vt-chart-shadow-blur: 3px;
+    --vt-chart-shadow-opacity: 0.06;
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --vt-anim-duration: 0s;
+        --vt-anim-stagger: 0ms;
+    }
+}
+
+/* ============================================================================
+   AMBIENT BACKGROUND
+   Two soft radial gradient washes — adapts to active theme palette
+   ============================================================================ */
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+        radial-gradient(ellipse 60% 50% at 10% 90%,
+            color-mix(in oklab, var(--kb-primary) 6%, transparent),
+            transparent 60%),
+        radial-gradient(ellipse 50% 60% at 85% 15%,
+            color-mix(in oklab, var(--kb-accent) 6%, transparent),
+            transparent 60%);
+}
+
+[data-mode="light"] body::before {
+    background:
+        radial-gradient(ellipse 60% 50% at 10% 90%,
+            color-mix(in oklab, var(--kb-primary) 3%, transparent),
+            transparent 60%),
+        radial-gradient(ellipse 50% 60% at 85% 15%,
+            color-mix(in oklab, var(--kb-accent) 3%, transparent),
+            transparent 60%);
+}
+
+/* ============================================================================
+   GLASS SURFACES
+   Translucent backgrounds with backdrop blur on primary surfaces
+   ============================================================================ */
+
+.card {
+    background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent) !important;
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent) !important;
+    box-shadow: var(--vt-shadow-elevation-1),
+        inset 0 1px 0 color-mix(in oklab, white, transparent 92%) !important;
+    transition: transform 0.25s var(--vt-anim-ease), box-shadow 0.25s var(--vt-anim-ease) !important;
+}
+
+.card:hover {
+    box-shadow: var(--vt-shadow-elevation-2),
+        inset 0 1px 0 color-mix(in oklab, white, transparent 88%) !important;
+    transform: translateY(-2px);
+    border-color: color-mix(in oklab, var(--kb-text-primary) 12%, transparent) !important;
+}
+
+.navbar {
+    background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent) !important;
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent) !important;
+}
+
+.modal-content {
+    background: color-mix(in oklab, var(--kb-bg-card) 92%, transparent) !important;
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    box-shadow: var(--vt-shadow-elevation-3);
+}
+
+.dropdown-menu {
+    background: color-mix(in oklab, var(--kb-bg-card) 92%, transparent) !important;
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    box-shadow: var(--vt-shadow-elevation-2);
+}
+
+/* Light mode: flip inset shadow from light edge to subtle dark edge */
+[data-mode="light"] .card {
+    box-shadow: var(--vt-shadow-elevation-1),
+        inset 0 1px 0 color-mix(in oklab, black, transparent 96%);
+}
+
+[data-mode="light"] .card:hover {
+    box-shadow: var(--vt-shadow-elevation-2),
+        inset 0 1px 0 color-mix(in oklab, black, transparent 94%);
+}
+
+/* ============================================================================
+   NAV-PILLS — Glass-styled tab navigation
+   ============================================================================ */
+
+#match-tabs,
+#all-tabs {
+    background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 10px;
+    padding: 0.375rem;
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) 5%, transparent);
+}
+
+#match-tabs .nav-link,
+#all-tabs .nav-link {
+    color: var(--kb-text-secondary);
+    font-weight: 500;
+    font-size: 0.875rem;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+#match-tabs .nav-link:hover,
+#all-tabs .nav-link:hover {
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+}
+
+#match-tabs .nav-link.active,
+#all-tabs .nav-link.active {
+    background: var(--kb-primary) !important;
+    color: var(--kb-primary-fg) !important;
+    box-shadow: 0 2px 8px color-mix(in oklab, var(--kb-primary), transparent 60%);
+}
+
+/* ============================================================================
+   TABLE ROW HOVER — Subtle left-border indicator + text color fix
+   ============================================================================ */
+
+.table {
+    --bs-table-hover-color: var(--kb-text-primary);
+    --bs-table-hover-bg: var(--kb-bg-muted);
+}
+
+.table > tbody > tr {
+    position: relative;
+    transition: background-color 0.15s ease;
+    color: var(--kb-text-primary);
+}
+
+.table > tbody > tr:hover {
+    color: var(--kb-text-primary) !important;
+}
+
+.table > tbody > tr:hover td {
+    color: inherit;
+}
+
+.table > tbody > tr::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--kb-primary);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.table > tbody > tr:hover::after {
+    opacity: 0.7;
+}
+
+/* ============================================================================
+   RIVALRY CARD — Glass treatment
+   ============================================================================ */
+
+.rivalry-card {
+    background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent) !important;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent) !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.rivalry-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--vt-shadow-elevation-1);
+}
+
+/* ============================================================================
+   ANIMATION KEYFRAMES
+   ============================================================================ */
+
+@keyframes vt-card-enter {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.vt-enter {
+    animation: vt-card-enter var(--vt-anim-duration) var(--vt-anim-ease) both;
+    animation-delay: var(--vt-delay, 0ms);
+}
+
+/* Scroll-triggered reveal (fallback for non-tab content) */
+.vt-scroll-reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity var(--vt-anim-duration) var(--vt-anim-ease),
+                transform var(--vt-anim-duration) var(--vt-anim-ease);
+}
+
+.vt-scroll-reveal.vt-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Tab content fade transition enhancement */
+.tab-pane.fade {
+    transition: opacity 0.2s ease;
+}
+
+/* ============================================================================
+   PRELOADER STYLES
+   ============================================================================ */
+
+.vt-preloader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    gap: 1.25rem;
+}
+
+.vt-preloader-ring {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 3px solid color-mix(in oklab, var(--kb-primary), transparent 75%);
+    border-top-color: var(--kb-primary);
+    animation: vt-spin 0.8s linear infinite;
+}
+
+@keyframes vt-spin {
+    to { transform: rotate(360deg); }
+}
+
+.vt-preloader-brand {
+    font-family: 'Geist', sans-serif;
+    font-weight: 700;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+    color: var(--kb-text-primary);
+}
+
+.vt-preloader-status {
+    font-size: 0.875rem;
+    color: var(--kb-text-muted);
+}
+
+/* Preloader fade-out */
+.vt-preloader.vt-fade-out {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+/* ============================================================================
+   FACTION SCOREBOARD — Hero Treatment
+   First visual in the Overview tab — elevated presentation
+   ============================================================================ */
+
+#section-faction .card-body {
+    padding: 1.5rem;
+}
+
+.vt-faction-panel {
+    padding: 1.5rem;
+    border-radius: 10px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-left-width: 3px;
+    border-left-style: solid;
+    transition: box-shadow 0.2s ease;
+}
+
+.vt-faction-panel:hover {
+    box-shadow: var(--vt-shadow-elevation-1);
+}
+
+.vt-faction-panel .stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+.vt-faction-panel .stat-label {
+    margin-top: 0.125rem;
+}
+
+/* ============================================================================
+   RIVALRY CARDS — Breathing Room
+   Larger doughnut charts, more whitespace
+   ============================================================================ */
+
+#rivalries-container .rivalry-card,
+#global-rivalries-container .rivalry-card {
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    border-radius: 10px;
+}
+
+#rivalries-container .rivalry-card canvas,
+#global-rivalries-container .rivalry-card canvas {
+    width: 100px !important;
+    height: 100px !important;
+}
+
+/* ============================================================================
+   VIEW TRANSITION STYLES
+   ============================================================================ */
+
+::view-transition-old(root) {
+    animation: 250ms ease-out both vt-view-fade-out;
+}
+
+::view-transition-new(root) {
+    animation: 250ms ease-in both vt-view-fade-in;
+}
+
+@keyframes vt-view-fade-out {
+    to { opacity: 0; }
+}
+
+@keyframes vt-view-fade-in {
+    from { opacity: 0; }
+}

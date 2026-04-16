@@ -10,7 +10,7 @@ alwaysApply: true
 Static-site dashboard for BattleZone match statistics. Two-part system:
 
 1. **Python pipeline** (`scripts/process_stats.py`) reads raw `.binpb` protobuf files from `data/stats/`, aggregates all statistics, and writes pre-computed JSON to `data/processed/`.
-2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/charts.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI. No raw event parsing happens in the browser.
+2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/vtstats-fx.js`, `js/charts.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI with tabbed navigation and glassmorphic theme layer. No raw event parsing happens in the browser.
 
 ## Key File Locations
 
@@ -19,6 +19,9 @@ Static-site dashboard for BattleZone match statistics. Two-part system:
 - ODF weapon DB: `data/odf.min.json`
 - Raw data: `data/stats/*.zip` (legacy) and `data/stats/*.binpb.gz` (new format)
 - Processed output: `data/processed/*.json`
+- Theme layer: `css/vtstats-theme.css` (glass surfaces, typography, animations, migrated inline styles)
+- Effects engine: `js/vtstats-fx.js` (animated counters, entrance stagger, Chart.js shadow plugin)
+- Vendored fonts: `vendor/fonts/` (Geist Sans + Geist Mono variable woff2)
 - Technical spec: `DEVELOPER_GUIDE.md`
 - Upstream collector source: `statsgate/` (reference copy of [statsgate](https://github.com/VTrider/statsgate))
 
@@ -51,4 +54,4 @@ Currently by slot number (1-10) and nickname from `header.teamnum_to_nick`. New 
 
 ## Dependencies
 
-All dependencies are vendored locally in `vendor/`. No CDN usage. Bootstrap 5.3.2, Chart.js 4.4.7, Bootstrap Icons.
+All dependencies are vendored locally in `vendor/`. No CDN usage. Bootstrap 5.3.2, Chart.js 4.4.7, Bootstrap Icons, Geist Sans 1.8.0, Geist Mono 1.8.0.

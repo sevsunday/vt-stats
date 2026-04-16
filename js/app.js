@@ -3,6 +3,9 @@
  *
  * Loads pre-computed match stats from data/processed/ and renders
  * all dashboard panels. No raw event parsing happens in the browser.
+ *
+ * Tab-based lazy rendering: only the active tab renders on match load.
+ * Other tabs render on first activation via Bootstrap shown.bs.tab event.
  */
 
 (async function () {
@@ -21,7 +24,6 @@
     return;
   }
 
-  // Populate match selector
   const allOpt = document.createElement('option');
   allOpt.value = '__all__';
   allOpt.textContent = 'All Matches';
@@ -39,11 +41,64 @@
   }
 
   $select.addEventListener('change', () => {
-    if ($select.value === '__all__') loadAllMatches();
-    else loadMatch($select.value);
+    const doLoad = () => {
+      if ($select.value === '__all__') loadAllMatches();
+      else loadMatch($select.value);
+    };
+    if (window.VTFx) VTFx.withViewTransition(doLoad);
+    else doLoad();
   });
 
-  // Load first match
+  // Brand click → reset to first match, Overview tab
+  const $brandHome = document.getElementById('brand-home');
+  if ($brandHome) {
+    $brandHome.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (manifest.length > 0) {
+        $select.value = manifest[0].file;
+        const doLoad = () => loadMatch(manifest[0].file);
+        if (window.VTFx) VTFx.withViewTransition(doLoad);
+        else doLoad();
+      }
+    });
+  }
+
+  // --- Lazy Tab Rendering ---
+  const tabRendered = {};
+  const tabRenderers = {};
+
+  function registerTabRenderer(tabId, renderFn) {
+    tabRenderers[tabId] = renderFn;
+  }
+
+  function resetTabState() {
+    Object.keys(tabRendered).forEach(k => { tabRendered[k] = false; });
+  }
+
+  function renderTabIfNeeded(tabId) {
+    if (!tabRendered[tabId] && tabRenderers[tabId]) {
+      tabRenderers[tabId]();
+      tabRendered[tabId] = true;
+    }
+  }
+
+  const matchTabsEl = document.getElementById('match-tabs');
+  if (matchTabsEl) {
+    matchTabsEl.addEventListener('shown.bs.tab', (e) => {
+      const target = e.target.getAttribute('data-bs-target');
+      if (target) renderTabIfNeeded(target);
+    });
+  }
+
+  const allTabsEl = document.getElementById('all-tabs');
+  if (allTabsEl) {
+    allTabsEl.addEventListener('shown.bs.tab', (e) => {
+      const target = e.target.getAttribute('data-bs-target');
+      if (target) renderTabIfNeeded(target);
+    });
+  }
+
+  // Load first match (after lazy rendering infra is initialized)
   if (manifest.length > 0) loadMatch(manifest[0].file);
 
   // Timeline mode toggle
@@ -54,15 +109,17 @@
       document.querySelectorAll('[data-timeline-mode]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       timelineMode = btn.dataset.timelineMode;
-      if (currentData) renderTimelineSection(currentData);
+      if (currentData && tabRendered['#tab-combat']) renderTimelineSection(currentData);
     });
   });
 
+  // --- Match Loading ---
   async function loadMatch(file) {
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
     destroyAllCharts();
+    resetTabState();
 
     let data;
     try {
@@ -75,20 +132,48 @@
     }
 
     currentData = data;
+
+    if (window.VTFx) VTFx.hidePreloader();
     $loading.classList.add('d-none');
     $dashboard.classList.remove('d-none');
 
+    // Reset to Overview tab
+    const overviewBtn = document.getElementById('tab-overview-btn');
+    if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
+
+    // Render Overview immediately
     renderBanner(data.match);
     renderFactionScoreboard(data.faction_totals, data.match.teams);
     renderLeaderboard(data.leaderboard);
-    renderTimelineSection(data);
-    renderWeaponMeta('weapon-meta-chart', data.weapon_meta);
-    renderHeatmap(data.rivalry_matrix, data.leaderboard.map(p => p.name));
-    renderPlayerWeapons('player-weapons-chart', data.leaderboard, data.weapon_meta);
-    renderRivalries(data.top_rivalries);
-    renderAccuracyTable(data.leaderboard);
-    renderWeaponAccuracy('weapon-accuracy-chart', data.weapon_meta);
-    renderAssetDamage(data.asset_damage, data.faction_totals);
+    tabRendered['#tab-overview'] = true;
+
+    if (window.VTFx) {
+      const overviewPane = document.getElementById('tab-overview');
+      requestAnimationFrame(() => VTFx.staggerEntrance(overviewPane));
+    }
+
+    // Register deferred renderers for other tabs
+    registerTabRenderer('#tab-combat', () => {
+      renderTimelineSection(data);
+      renderWeaponMeta('weapon-meta-chart', data.weapon_meta);
+    });
+
+    registerTabRenderer('#tab-rivalries', () => {
+      renderHeatmap(data.rivalry_matrix, data.leaderboard.map(p => p.name));
+      renderRivalries(data.top_rivalries);
+      if (window.VTFx) requestAnimationFrame(() => VTFx.staggerHeatmapCells());
+    });
+
+    registerTabRenderer('#tab-weapons', () => {
+      renderPlayerWeapons('player-weapons-chart', data.leaderboard, data.weapon_meta);
+      renderAccuracyTable(data.leaderboard);
+      renderWeaponAccuracy('weapon-accuracy-chart', data.weapon_meta);
+    });
+
+    registerTabRenderer('#tab-assets', () => {
+      renderAssetDamage(data.asset_damage, data.faction_totals);
+    });
+
     registerMatchCharts(data);
   }
 
@@ -97,6 +182,7 @@
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
     destroyAllCharts();
+    resetTabState();
 
     let data;
     try {
@@ -108,13 +194,30 @@
       return;
     }
 
+    if (window.VTFx) VTFx.hidePreloader();
     $loading.classList.add('d-none');
     $allView.style.display = 'block';
 
+    // Reset to Overview tab
+    const allOverviewBtn = document.getElementById('all-tab-overview-btn');
+    if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
+
+    // Render Overview immediately
     renderAggMeta(data.meta);
     renderCareerTable(data.career_stats);
-    renderGlobalWeaponMeta('global-weapon-chart', data.global_weapon_meta);
-    renderGlobalRivalries(data.global_rivalries);
+    tabRendered['#all-tab-overview'] = true;
+
+    if (window.VTFx) {
+      const allOverviewPane = document.getElementById('all-tab-overview');
+      requestAnimationFrame(() => VTFx.staggerEntrance(allOverviewPane));
+    }
+
+    // Register deferred renderer for Weapons & Rivalries tab
+    registerTabRenderer('#all-tab-weapons', () => {
+      renderGlobalWeaponMeta('global-weapon-chart', data.global_weapon_meta);
+      renderGlobalRivalries(data.global_rivalries);
+    });
+
     registerAllMatchesCharts(data);
   }
 
@@ -169,9 +272,9 @@
 
     container.innerHTML = `
       <div class="col-md-6">
-        <div class="p-3 rounded" style="background:var(--kb-bg-subtle);border-left:3px solid var(--kb-primary);">
-          <h6 class="d-flex align-items-center gap-2" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Leader}</span></h6>
-          <div class="d-flex flex-wrap gap-3 mb-2">
+        <div class="vt-faction-panel" style="border-left-color:var(--kb-primary);">
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Leader}</span></h6>
+          <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
             <div class="stat-card"><div class="stat-value">${((f1.accuracy || 0) * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
@@ -181,9 +284,9 @@
         </div>
       </div>
       <div class="col-md-6">
-        <div class="p-3 rounded" style="background:var(--kb-bg-subtle);border-left:3px solid var(--kb-accent);">
-          <h6 class="d-flex align-items-center gap-2" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Leader}</span></h6>
-          <div class="d-flex flex-wrap gap-3 mb-2">
+        <div class="vt-faction-panel" style="border-left-color:var(--kb-accent);">
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Leader}</span></h6>
+          <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
             <div class="stat-card"><div class="stat-value">${((f2.accuracy || 0) * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
@@ -477,7 +580,6 @@
     if (btn) expandSection(btn.dataset.expand);
   });
 
-  // Register chart renderers after data is loaded
   function registerMatchCharts(data) {
     registerChartRenderer('section-timeline', (canvasId) => {
       const names = data.leaderboard.map(p => p.name);

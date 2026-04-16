@@ -3,6 +3,9 @@
  *
  * All chart colors are read from CSS custom properties at render time
  * so they adapt to theme changes automatically on re-render.
+ *
+ * Glass tooltips, refined animation config, and shadow plugin (registered
+ * in vtstats-fx.js) provide the premium visual treatment.
  */
 
 let activeCharts = [];
@@ -31,6 +34,83 @@ function getThemeColors() {
   };
 }
 
+// --- Glass Tooltip Renderer ---
+
+let glassTooltipEl = null;
+
+function getOrCreateGlassTooltip() {
+  if (!glassTooltipEl) {
+    glassTooltipEl = document.createElement('div');
+    glassTooltipEl.className = 'vt-chart-tooltip';
+    glassTooltipEl.style.cssText = [
+      'position:absolute',
+      'pointer-events:none',
+      'opacity:0',
+      'transition:opacity 0.15s ease',
+      'font-family:Geist,sans-serif',
+      'font-size:0.8125rem',
+      'line-height:1.5',
+      'padding:0.625rem 0.875rem',
+      'border-radius:8px',
+      'z-index:1000',
+      'max-width:280px',
+      'backdrop-filter:blur(12px)',
+      '-webkit-backdrop-filter:blur(12px)',
+    ].join(';');
+    document.body.appendChild(glassTooltipEl);
+  }
+  return glassTooltipEl;
+}
+
+function glassTooltipHandler(context) {
+  const tooltip = getOrCreateGlassTooltip();
+  const { chart, tooltip: tooltipModel } = context;
+
+  if (tooltipModel.opacity === 0) {
+    tooltip.style.opacity = '0';
+    return;
+  }
+
+  const bgCard = getCSSVar('--kb-bg-card') || '#111118';
+  const borderColor = getCSSVar('--kb-border-default') || '#2a2a36';
+  const textColor = getCSSVar('--kb-text-primary') || '#f0f0f5';
+  const mutedColor = getCSSVar('--kb-text-muted') || '#606070';
+
+  tooltip.style.background = `color-mix(in oklab, ${bgCard} 88%, transparent)`;
+  tooltip.style.border = `1px solid ${borderColor}`;
+  tooltip.style.color = textColor;
+  tooltip.style.boxShadow = '0 4px 16px rgba(0,0,0,0.2)';
+
+  if (tooltipModel.body) {
+    const titleLines = tooltipModel.title || [];
+    const bodyLines = tooltipModel.body.map(b => b.lines);
+
+    let html = '';
+    if (titleLines.length) {
+      html += `<div style="font-weight:600;margin-bottom:0.25rem;color:${textColor}">${titleLines.join('<br>')}</div>`;
+    }
+    bodyLines.forEach((lines, i) => {
+      const colors = tooltipModel.labelColors[i];
+      const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${colors.backgroundColor};margin-right:6px;vertical-align:middle;"></span>`;
+      lines.forEach(line => {
+        html += `<div style="color:${mutedColor}">${dot}${line}</div>`;
+      });
+    });
+    tooltip.innerHTML = html;
+  }
+
+  const pos = chart.canvas.getBoundingClientRect();
+  tooltip.style.opacity = '1';
+  tooltip.style.left = pos.left + window.scrollX + tooltipModel.caretX + 'px';
+  tooltip.style.top = pos.top + window.scrollY + tooltipModel.caretY - 10 + 'px';
+  tooltip.style.transform = 'translateX(-50%)';
+}
+
+const glassTooltipConfig = {
+  enabled: false,
+  external: glassTooltipHandler,
+};
+
 const PLAYER_PALETTE = [
   '#36a2eb', '#ff6384', '#ffce56', '#4bc0c0', '#9966ff',
   '#ff9f40', '#c9cbcf', '#e74c3c', '#2ecc71', '#1abc9c',
@@ -51,6 +131,9 @@ function applyThemeDefaults() {
   const t = getThemeColors();
   Chart.defaults.color = t.textMuted;
   Chart.defaults.borderColor = t.border;
+  Chart.defaults.animation.duration = 1000;
+  Chart.defaults.animation.easing = 'easeOutQuart';
+  Chart.defaults.font.family = "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 }
 
 // --- Stacked Area: Combat Timeline ---
@@ -96,6 +179,7 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         tooltip: {
+          ...glassTooltipConfig,
           callbacks: {
             label: (item) => `${item.dataset.label}: ${Math.round(item.raw).toLocaleString()}`,
           },
@@ -140,6 +224,7 @@ function renderWeaponMeta(canvasId, weaponMeta, limit) {
       plugins: {
         legend: { display: false },
         tooltip: {
+          ...glassTooltipConfig,
           callbacks: {
             label: (item) => {
               const w = data[item.dataIndex];
@@ -210,6 +295,7 @@ function renderPlayerWeapons(canvasId, leaderboard, weaponMeta) {
       plugins: {
         legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } },
         tooltip: {
+          ...glassTooltipConfig,
           callbacks: { label: (item) => `${item.dataset.label}: ${Math.round(item.raw).toLocaleString()}` },
         },
       },
@@ -228,8 +314,8 @@ function renderPlayerWeapons(canvasId, leaderboard, weaponMeta) {
 function renderRivalryDoughnut(container, rivalry) {
   const t = getThemeColors();
   const canvas = document.createElement('canvas');
-  canvas.width = 80;
-  canvas.height = 80;
+  canvas.width = 100;
+  canvas.height = 100;
   container.appendChild(canvas);
   const ctx = canvas.getContext('2d');
 
@@ -249,6 +335,7 @@ function renderRivalryDoughnut(container, rivalry) {
       plugins: {
         legend: { display: false },
         tooltip: {
+          ...glassTooltipConfig,
           callbacks: { label: (item) => `${item.label}: ${Math.round(item.raw).toLocaleString()} dmg` },
         },
       },
@@ -295,6 +382,7 @@ function renderWeaponAccuracy(canvasId, weaponMeta) {
       plugins: {
         legend: { display: false },
         tooltip: {
+          ...glassTooltipConfig,
           callbacks: {
             label: (item) => {
               const w = data[item.dataIndex];
