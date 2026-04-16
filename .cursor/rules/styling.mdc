@@ -39,16 +39,46 @@ Theme switching via `window.KBTheme.setTheme(id)` and `window.KBTheme.setMode('l
 ### CSS Load Order (required)
 
 ```html
-<link rel="stylesheet" href="css/theme-system.css">  <!-- Variable foundation -->
-<link rel="stylesheet" href="css/themes.css">          <!-- 44 theme definitions -->
-<link rel="stylesheet" href="css/main.css">             <!-- Component styles -->
-<link rel="stylesheet" href="css/layout.css">           <!-- Layout/responsive -->
+<link rel="stylesheet" href="css/theme-system.css">    <!-- Variable foundation -->
+<link rel="stylesheet" href="css/themes.css">           <!-- 44 theme definitions -->
+<link rel="stylesheet" href="css/main.css">              <!-- Component styles -->
+<link rel="stylesheet" href="css/layout.css">            <!-- Layout/responsive -->
+<link rel="stylesheet" href="css/vtstats-theme.css">    <!-- Glass theme layer + migrated inline styles -->
 ```
 
 ### JS Load Order
 
 ```html
-<script src="js/theme.js"></script>    <!-- Theme system (must be first) -->
-<script src="js/charts.js"></script>   <!-- Chart renderers -->
-<script src="js/app.js"></script>      <!-- Main application -->
+<script src="js/theme.js"></script>       <!-- Theme system (must be first) -->
+<script src="js/vtstats-fx.js"></script>  <!-- Effects engine (registers Chart.js plugin) -->
+<script src="js/charts.js"></script>      <!-- Chart renderers -->
+<script src="js/app.js"></script>         <!-- Main application -->
 ```
+
+## Typography — Geist
+
+The project uses **Geist** (Vercel's typeface, vendored in `vendor/fonts/`):
+- **Geist Sans** — body text, headings, UI elements
+- **Geist Mono** — stat values, table number columns, accuracy figures. Always with `font-variant-numeric: tabular-nums`
+
+Use the `.vt-mono` utility class or `.stat-value` class for monospace data presentation.
+
+## Visual Effect Variables — `--vt-*`
+
+The `--vt-*` namespace controls visual effects (glass, depth, animation). The `--kb-*` namespace controls colors.
+
+Key `--vt-*` variables: `--vt-glass-blur`, `--vt-glass-opacity`, `--vt-shadow-elevation-1/2/3`, `--vt-anim-duration`, `--vt-anim-ease`, `--vt-chart-shadow-blur`.
+
+All `--vt-*` variables have `[data-mode="light"]` overrides for reduced intensity. `@media (prefers-reduced-motion: reduce)` zeros animation durations.
+
+## Tab Navigation
+
+Dashboard content is organized into Bootstrap nav-pills tabs with lazy rendering:
+- Charts only render on first tab activation (via `shown.bs.tab` event)
+- Match switch resets all tab render flags
+- Theme changes also trigger re-render of active tab charts
+
+## Additional Rules
+
+6. **Zero inline `<style>` blocks** in HTML files. All styles live in CSS files (`vtstats-theme.css` for dashboard-specific rules).
+7. Tab content uses lazy rendering — never render charts in hidden tab panes.

@@ -11,21 +11,24 @@ VT Stats is a **static-site dashboard** for BattleZone match statistics. There i
 
 ```
 vt-stats/
-├── index.html                  # Dashboard entry point
+├── index.html                  # Dashboard entry point (tabbed layout)
 ├── css/
 │   ├── theme-system.css        # CSS variable foundation (--kb-*)
 │   ├── themes.css              # 44 theme definitions (light + dark modes)
 │   ├── main.css                # Component styles (cards, badges, tables, etc.)
-│   └── layout.css              # Page layout (sidebar, content, responsive)
+│   ├── layout.css              # Page layout (sidebar, content, responsive)
+│   └── vtstats-theme.css       # Glassmorphic theme layer (glass, depth, typography, animations)
 ├── js/
 │   ├── theme.js                # Theme switching, search, persistence
-│   ├── charts.js               # Chart.js renderers (theme-aware)
-│   └── app.js                  # Main application logic, data loading, DOM rendering
+│   ├── vtstats-fx.js           # Effects engine (counters, stagger, Chart.js shadow plugin)
+│   ├── charts.js               # Chart.js renderers (theme-aware, glass tooltips)
+│   └── app.js                  # Main application logic, lazy tab rendering
 ├── vendor/
 │   ├── bootstrap/css/          # Bootstrap 5.3.2 (minified)
 │   ├── bootstrap/js/           # Bootstrap 5.3.2 JS bundle (minified)
 │   ├── bootstrap-icons/        # Bootstrap Icons CSS + woff/woff2 fonts
-│   └── chartjs/                # Chart.js 4.4.7 UMD bundle
+│   ├── chartjs/                # Chart.js 4.4.7 UMD bundle
+│   └── fonts/                  # Geist Sans 1.8.0 + Geist Mono 1.8.0 (variable woff2)
 ├── data/
 │   ├── odf.min.json            # Weapon name resolution database (ODF)
 │   ├── stats/                  # Raw match archives (.zip containing .binpb)
@@ -462,12 +465,56 @@ The project uses a CSS variable system prefixed with `--kb-*`. All 44 themes are
 - For muted backgrounds, use `*-muted` variants, never `bg-*-opacity-*`.
 - For solid backgrounds, pair with `text-*-fg`. For muted backgrounds, use `text-*`.
 - Chart.js colors are read from CSS variables via `getComputedStyle()` at render time.
+- **Zero inline `<style>` blocks** in HTML. All dashboard-specific styles live in `css/vtstats-theme.css`.
+
+### Typography — Geist
+
+The project uses **Geist** (Vercel's typeface, v1.8.0, vendored in `vendor/fonts/`):
+- **Geist Sans** (variable woff2) — body text, headings, UI elements
+- **Geist Mono** (variable woff2) — stat values, table number columns, accuracy figures. Always paired with `font-variant-numeric: tabular-nums`
+
+### Glassmorphic Theme Layer
+
+`css/vtstats-theme.css` is an additive visual layer loaded after `layout.css`. It provides:
+- Glass surfaces (`backdrop-filter: blur()`, translucent backgrounds) on cards, navbar, modals, dropdowns
+- Multi-layer depth shadows (`--vt-shadow-elevation-1/2/3`)
+- Ambient background (soft gradient washes using theme colors)
+- Card entrance animations and animated number counters
+- `--vt-*` custom properties control visual effects. `--kb-*` controls colors. Both have `[data-mode="light"]` overrides.
+- `@media (prefers-reduced-motion: reduce)` disables all animation.
 
 ### Theme Switching
 
 `theme.js` exposes `window.KBTheme` with methods for `setTheme()`, `setMode()`, `toggleMode()`. State is persisted in `localStorage` keys `kb-theme` and `kb-mode`.
 
 HTML attributes: `<html data-theme="default" data-mode="dark">`.
+
+### Tab Navigation
+
+Dashboard content is organized into Bootstrap nav-pills tabs:
+- **Per-match:** Overview, Combat, Rivalries, Weapons & Accuracy, Assets
+- **All Matches:** Overview, Weapons & Rivalries
+
+Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags. This prevents Chart.js zero-dimension issues in hidden panes and improves initial load performance.
+
+### CSS Load Order (required)
+
+```html
+<link rel="stylesheet" href="css/theme-system.css">    <!-- Variable foundation -->
+<link rel="stylesheet" href="css/themes.css">           <!-- 44 theme definitions -->
+<link rel="stylesheet" href="css/main.css">              <!-- Component styles -->
+<link rel="stylesheet" href="css/layout.css">            <!-- Layout/responsive -->
+<link rel="stylesheet" href="css/vtstats-theme.css">    <!-- Glass theme layer -->
+```
+
+### JS Load Order
+
+```html
+<script src="js/theme.js"></script>       <!-- Theme system (must be first) -->
+<script src="js/vtstats-fx.js"></script>  <!-- Effects engine (registers Chart.js plugin) -->
+<script src="js/charts.js"></script>      <!-- Chart renderers -->
+<script src="js/app.js"></script>         <!-- Main application -->
+```
 
 ---
 
@@ -479,6 +526,9 @@ Charts use Chart.js 4.4.7 (vendored locally). Key patterns:
 2. **Destroy on switch**: Call `destroyAllCharts()` before rendering new match data.
 3. **Player palette**: A fixed 15-color palette for consistent player coloring within a match.
 4. **Chart types used**: Line (stacked area for timeline), Bar (horizontal for weapon meta, stacked for player weapons), Doughnut (rivalry cards), Bar (horizontal for weapon accuracy).
+5. **Shadow plugin**: `vtstats-fx.js` registers a global Chart.js plugin that adds subtle `shadowBlur` to chart datasets using `--vt-chart-shadow-blur` and `--kb-primary`.
+6. **Glass tooltips**: Custom external tooltip renderer replaces Chart.js defaults with translucent, blur-backed tooltip panels that respect the active theme.
+7. **Animation**: Default duration 1000ms with `easeOutQuart` easing.
 
 ---
 
@@ -512,5 +562,7 @@ All dependencies are vendored locally. No CDN usage.
 | Bootstrap JS | 5.3.2 | `vendor/bootstrap/js/` |
 | Bootstrap Icons | — | `vendor/bootstrap-icons/` |
 | Chart.js | 4.4.7 | `vendor/chartjs/` |
+| Geist Sans | 1.8.0 | `vendor/fonts/GeistVF.woff2` |
+| Geist Mono | 1.8.0 | `vendor/fonts/GeistMonoVF.woff2` |
 | Python protobuf | >=4.25.0 | `scripts/requirements.txt` |
 | grpcio-tools | (dev only) | For `protoc` compilation — **not** in `requirements.txt`; install manually with `pip install grpcio-tools` |

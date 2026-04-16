@@ -10,34 +10,16 @@
   <link rel="stylesheet" href="css/themes.css">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/layout.css">
-  <style>
-    .chart-container { position: relative; min-height: 320px; }
-    .chart-container-sm { position: relative; min-height: 200px; }
-    .heatmap-cell { font-size: 0.75rem; min-width: 60px; padding: 4px !important; }
-    .heatmap-header { font-size: 0.7rem; writing-mode: vertical-rl; text-orientation: mixed; max-width: 40px; padding: 4px !important; white-space: nowrap; }
-    .heatmap-corner { width: 100px; }
-    .heatmap-row-header { font-size: 0.75rem; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
-    .rivalry-card { background: var(--kb-bg-card); border: 1px solid var(--kb-border-subtle); }
-    .stat-card { text-align: center; }
-    .stat-card .stat-value { font-size: 1.5rem; font-weight: 700; }
-    .stat-label { font-size: 0.75rem; color: var(--kb-text-muted); }
-    th[data-sort] { cursor: pointer; user-select: none; }
-    th[data-sort]:hover { color: var(--kb-primary); }
-    th[data-sort].sort-active { color: var(--kb-primary); }
-    .badge-f1 { background: var(--kb-primary); color: var(--kb-primary-fg); }
-    .badge-f2 { background: var(--kb-accent); color: var(--kb-accent-fg); }
-    .config-mod { font-size: 0.7rem; color: var(--kb-text-muted); }
-    #all-matches-view { display: none; }
-  </style>
+  <link rel="stylesheet" href="css/vtstats-theme.css">
 </head>
 <body>
 
   <!-- Navbar -->
-  <nav class="navbar navbar-expand-sm sticky-top border-bottom" style="background: var(--kb-bg-card);">
+  <nav class="navbar navbar-expand-sm sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4">
-      <span class="navbar-brand fw-bold" style="color: var(--kb-text-primary);">
+      <a class="navbar-brand fw-bold" href="#" id="brand-home" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
-      </span>
+      </a>
       <div class="d-flex align-items-center gap-2">
         <select id="match-select" class="form-select form-select-sm" style="width: auto; max-width: 220px;"></select>
 
@@ -59,18 +41,19 @@
 
   <!-- Loading -->
   <div id="loading">
-    <div class="d-flex flex-column align-items-center justify-content-center" style="min-height: 60vh;">
-      <div class="spinner-border mb-3" role="status" style="width: 3rem; height: 3rem; color: var(--kb-primary);">
+    <div class="vt-preloader">
+      <div class="vt-preloader-ring" role="status">
         <span class="visually-hidden">Loading...</span>
       </div>
-      <p style="color: var(--kb-text-muted);">Loading match data&hellip;</p>
+      <div class="vt-preloader-brand"><i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats</div>
+      <div class="vt-preloader-status">Loading match data&hellip;</div>
     </div>
   </div>
 
   <!-- Single Match Dashboard -->
   <div id="dashboard" class="container-fluid px-3 px-md-4 py-4 d-none">
 
-    <!-- Match Info Banner -->
+    <!-- Match Info Banner (always visible above tabs) -->
     <div id="match-info" class="card mb-4">
       <div class="card-body d-flex flex-wrap gap-4 align-items-center">
         <div><span class="stat-label">Map</span><br><strong id="info-map">—</strong></div>
@@ -81,122 +64,59 @@
       </div>
     </div>
 
-    <!-- Faction Scoreboard -->
-    <div class="card mb-4" id="section-faction">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <h5 class="mb-0">Faction Scoreboard</h5>
-        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-faction" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-      </div>
-      <div class="card-body">
-        <div class="row g-3" id="faction-content"></div>
-      </div>
-    </div>
+    <!-- Match Tab Navigation -->
+    <ul class="nav nav-pills mb-4" id="match-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-overview-btn" data-bs-toggle="pill" data-bs-target="#tab-overview" type="button" role="tab" aria-controls="tab-overview" aria-selected="true">Overview</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-combat-btn" data-bs-toggle="pill" data-bs-target="#tab-combat" type="button" role="tab" aria-controls="tab-combat" aria-selected="false">Combat</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-rivalries-btn" data-bs-toggle="pill" data-bs-target="#tab-rivalries" type="button" role="tab" aria-controls="tab-rivalries" aria-selected="false">Rivalries</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#tab-weapons" type="button" role="tab" aria-controls="tab-weapons" aria-selected="false">Weapons &amp; Accuracy</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-assets-btn" data-bs-toggle="pill" data-bs-target="#tab-assets" type="button" role="tab" aria-controls="tab-assets" aria-selected="false">Assets</button>
+      </li>
+    </ul>
 
-    <!-- Player Leaderboard -->
-    <div class="card mb-4" id="section-leaderboard">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <h5 class="mb-0">Player Leaderboard</h5>
-        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-      </div>
-      <div class="card-body table-responsive">
-        <table id="leaderboard" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th data-sort="name">Player</th>
-              <th data-sort="faction" class="text-center">Team</th>
-              <th data-sort="dealt" class="text-end">Dealt</th>
-              <th data-sort="received" class="text-end">Received</th>
-              <th data-sort="net" class="text-end">Net</th>
-              <th data-sort="ratio" class="text-end">Ratio</th>
-              <th data-sort="accuracy" class="text-end">Accuracy</th>
-              <th data-sort="asset_dealt" class="text-end">Asset Dmg</th>
-              <th data-sort="fav_weapon">Fav Weapon</th>
-              <th data-sort="weapons_used" class="text-end"># Wpns</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
+    <!-- Match Tab Content -->
+    <div class="tab-content" id="match-tab-content">
 
-    <!-- Timeline + Weapon Meta -->
-    <div class="row g-4 mb-4">
-      <div class="col-lg-7">
-        <div class="card h-100" id="section-timeline">
+      <!-- Tab: Overview -->
+      <div class="tab-pane fade show active" id="tab-overview" role="tabpanel" aria-labelledby="tab-overview-btn">
+        <div class="card mb-4" id="section-faction">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Combat Timeline</h5>
-            <div class="d-flex align-items-center gap-2">
-              <div class="btn-group btn-group-sm">
-                <button class="btn btn-outline-secondary active" data-timeline-mode="player">Players</button>
-                <button class="btn btn-outline-secondary" data-timeline-mode="faction">Teams</button>
-              </div>
-              <button class="btn btn-sm btn-outline-secondary" data-expand="section-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
+            <h5 class="mb-0">Faction Scoreboard</h5>
+            <button class="btn btn-sm" data-expand="section-faction" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
-          <div class="card-body"><div class="chart-container"><canvas id="timeline-chart"></canvas></div></div>
-        </div>
-      </div>
-      <div class="col-lg-5">
-        <div class="card h-100" id="section-weapon-meta">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Weapon Meta</h5>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-weapon-meta" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          <div class="card-body">
+            <div class="row g-3" id="faction-content"></div>
           </div>
-          <div class="card-body"><div class="chart-container"><canvas id="weapon-meta-chart"></canvas></div></div>
         </div>
-      </div>
-    </div>
-
-    <!-- Rivalry Heatmap -->
-    <div class="card mb-4" id="section-heatmap">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <h5 class="mb-0">Rivalry Heatmap</h5>
-        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-      </div>
-      <div class="card-body table-responsive">
-        <table id="heatmap" class="table table-sm align-middle text-center mb-0"></table>
-      </div>
-    </div>
-
-    <!-- Player Weapons + Top Rivalries -->
-    <div class="row g-4 mb-4">
-      <div class="col-lg-7">
-        <div class="card h-100" id="section-player-weapons">
+        <div class="card mb-4" id="section-leaderboard">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Per-Player Weapon Breakdown</h5>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-player-weapons" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="player-weapons-chart"></canvas></div></div>
-        </div>
-      </div>
-      <div class="col-lg-5">
-        <div class="card h-100" id="section-rivalries">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Top Rivalries</h5>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body" id="rivalries-container"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Accuracy + Weapon Accuracy -->
-    <div class="row g-4 mb-4">
-      <div class="col-lg-6">
-        <div class="card h-100" id="section-accuracy">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Shot Accuracy</h5>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            <h5 class="mb-0">Player Leaderboard</h5>
+            <button class="btn btn-sm" data-expand="section-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body table-responsive">
-            <table id="accuracy-table" class="table table-hover table-sm align-middle mb-0" style="font-size: 0.8rem;">
+            <table id="leaderboard" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
               <thead>
                 <tr>
-                  <th>Player</th>
-                  <th class="text-end">Fired</th>
-                  <th class="text-end">Hit</th>
-                  <th class="text-end">Accuracy</th>
+                  <th>#</th>
+                  <th data-sort="name">Player</th>
+                  <th data-sort="faction" class="text-center">Team</th>
+                  <th data-sort="dealt" class="text-end">Dealt</th>
+                  <th data-sort="received" class="text-end">Received</th>
+                  <th data-sort="net" class="text-end">Net</th>
+                  <th data-sort="ratio" class="text-end">Ratio</th>
+                  <th data-sort="accuracy" class="text-end">Accuracy</th>
+                  <th data-sort="asset_dealt" class="text-end">Asset Dmg</th>
+                  <th data-sort="fav_weapon">Fav Weapon</th>
+                  <th data-sort="weapons_used" class="text-end"># Wpns</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -204,89 +124,201 @@
           </div>
         </div>
       </div>
-      <div class="col-lg-6">
-        <div class="card h-100" id="section-weapon-accuracy">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Weapon Accuracy Ranking</h5>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-weapon-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+
+      <!-- Tab: Combat -->
+      <div class="tab-pane fade" id="tab-combat" role="tabpanel" aria-labelledby="tab-combat-btn">
+        <div class="row g-4 mb-4">
+          <div class="col-lg-7">
+            <div class="card h-100" id="section-timeline">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Combat Timeline</h5>
+                <div class="d-flex align-items-center gap-2">
+                  <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary active" data-timeline-mode="player">Players</button>
+                    <button class="btn btn-outline-secondary" data-timeline-mode="faction">Teams</button>
+                  </div>
+                  <button class="btn btn-sm" data-expand="section-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
+              </div>
+              <div class="card-body"><div class="chart-container"><canvas id="timeline-chart"></canvas></div></div>
+            </div>
           </div>
-          <div class="card-body"><div class="chart-container-sm"><canvas id="weapon-accuracy-chart"></canvas></div></div>
+          <div class="col-lg-5">
+            <div class="card h-100" id="section-weapon-meta">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Weapon Meta</h5>
+                <button class="btn btn-sm" data-expand="section-weapon-meta" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container"><canvas id="weapon-meta-chart"></canvas></div></div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Asset Damage -->
-    <div class="card mb-4" id="section-asset-damage">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <h5 class="mb-0">AI / Structure Damage</h5>
-        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-asset-damage" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+      <!-- Tab: Rivalries -->
+      <div class="tab-pane fade" id="tab-rivalries" role="tabpanel" aria-labelledby="tab-rivalries-btn">
+        <div class="card mb-4" id="section-heatmap">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Rivalry Heatmap</h5>
+            <button class="btn btn-sm" data-expand="section-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body table-responsive">
+            <table id="heatmap" class="table table-sm align-middle text-center mb-0"></table>
+          </div>
+        </div>
+        <div class="card mb-4" id="section-rivalries">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Top Rivalries</h5>
+            <button class="btn btn-sm" data-expand="section-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body" id="rivalries-container"></div>
+        </div>
       </div>
-      <div class="card-body" id="asset-damage-content"></div>
+
+      <!-- Tab: Weapons & Accuracy -->
+      <div class="tab-pane fade" id="tab-weapons" role="tabpanel" aria-labelledby="tab-weapons-btn">
+        <div class="card mb-4" id="section-player-weapons">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Per-Player Weapon Breakdown</h5>
+            <button class="btn btn-sm" data-expand="section-player-weapons" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="player-weapons-chart"></canvas></div></div>
+        </div>
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-accuracy">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Shot Accuracy</h5>
+                <button class="btn btn-sm" data-expand="section-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body table-responsive">
+                <table id="accuracy-table" class="table table-hover table-sm align-middle mb-0" style="font-size: 0.8rem;">
+                  <thead>
+                    <tr>
+                      <th>Player</th>
+                      <th class="text-end">Fired</th>
+                      <th class="text-end">Hit</th>
+                      <th class="text-end">Accuracy</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-weapon-accuracy">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Weapon Accuracy Ranking</h5>
+                <button class="btn btn-sm" data-expand="section-weapon-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container-sm"><canvas id="weapon-accuracy-chart"></canvas></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Assets -->
+      <div class="tab-pane fade" id="tab-assets" role="tabpanel" aria-labelledby="tab-assets-btn">
+        <div class="card mb-4" id="section-asset-damage">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">AI / Structure Damage</h5>
+            <button class="btn btn-sm" data-expand="section-asset-damage" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body" id="asset-damage-content"></div>
+        </div>
+      </div>
+
     </div>
   </div>
 
   <!-- All Matches View -->
   <div id="all-matches-view" class="container-fluid px-3 px-md-4 py-4">
+
+    <!-- Aggregate Meta (always visible above tabs) -->
     <div class="card mb-4">
       <div class="card-body">
         <h4>All Matches Overview</h4>
         <div class="d-flex flex-wrap gap-4" id="agg-meta"></div>
       </div>
     </div>
-    <div class="card mb-4" id="section-career">
-      <div class="card-header d-flex align-items-center justify-content-between">
-        <h5 class="mb-0">Career Leaderboard</h5>
-        <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-career" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-      </div>
-      <div class="card-body table-responsive">
-        <table id="career-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Player</th>
-              <th class="text-end">Matches</th>
-              <th class="text-end">Total Dealt</th>
-              <th class="text-end">Total Received</th>
-              <th class="text-end">Accuracy</th>
-              <th class="text-end">Asset Dealt</th>
-              <th>Fav Weapon</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="row g-4 mb-4">
-      <div class="col-lg-6">
-        <div class="card h-100" id="section-global-weapon">
+
+    <!-- All Matches Tab Navigation -->
+    <ul class="nav nav-pills mb-4" id="all-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="all-tab-overview-btn" data-bs-toggle="pill" data-bs-target="#all-tab-overview" type="button" role="tab" aria-controls="all-tab-overview" aria-selected="true">Overview</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons &amp; Rivalries</button>
+      </li>
+    </ul>
+
+    <!-- All Matches Tab Content -->
+    <div class="tab-content" id="all-tab-content">
+
+      <!-- All Tab: Overview -->
+      <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
+        <div class="card mb-4" id="section-career">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Global Weapon Meta</h5>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-global-weapon" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            <h5 class="mb-0">Career Leaderboard</h5>
+            <button class="btn btn-sm" data-expand="section-career" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
-          <div class="card-body"><div class="chart-container"><canvas id="global-weapon-chart"></canvas></div></div>
+          <div class="card-body table-responsive">
+            <table id="career-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Player</th>
+                  <th class="text-end">Matches</th>
+                  <th class="text-end">Total Dealt</th>
+                  <th class="text-end">Total Received</th>
+                  <th class="text-end">Accuracy</th>
+                  <th class="text-end">Asset Dealt</th>
+                  <th>Fav Weapon</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <div class="col-lg-6">
-        <div class="card h-100" id="section-global-rivalries">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Cross-Match Rivalries</h5>
-            <button class="btn btn-sm btn-outline-secondary ms-auto" data-expand="section-global-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+
+      <!-- All Tab: Weapons & Rivalries -->
+      <div class="tab-pane fade" id="all-tab-weapons" role="tabpanel" aria-labelledby="all-tab-weapons-btn">
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-global-weapon">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Global Weapon Meta</h5>
+                <button class="btn btn-sm" data-expand="section-global-weapon" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container"><canvas id="global-weapon-chart"></canvas></div></div>
+            </div>
           </div>
-          <div class="card-body" id="global-rivalries-container"></div>
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-global-rivalries">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Cross-Match Rivalries</h5>
+                <button class="btn btn-sm" data-expand="section-global-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body" id="global-rivalries-container"></div>
+            </div>
+          </div>
         </div>
       </div>
+
     </div>
   </div>
 
   <!-- Fullscreen Modal -->
   <div class="modal fade" id="fullscreen-modal" tabindex="-1" aria-labelledby="fullscreen-modal-title" aria-hidden="true">
     <div class="modal-dialog modal-fullscreen">
-      <div class="modal-content" style="background:var(--kb-bg-body);">
-        <div class="modal-header border-bottom" style="background:var(--kb-bg-card);">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
           <h5 class="modal-title" id="fullscreen-modal-title"></h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="modal-body" id="fullscreen-modal-body" style="overflow:auto;"></div>
+        <div class="modal-body" id="fullscreen-modal-body" style="overflow:auto"></div>
       </div>
     </div>
   </div>
@@ -294,6 +326,7 @@
   <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="vendor/chartjs/chart.umd.min.js"></script>
   <script src="js/theme.js"></script>
+  <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/app.js"></script>
 </body>

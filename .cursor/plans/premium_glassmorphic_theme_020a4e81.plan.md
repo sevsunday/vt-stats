@@ -4,28 +4,28 @@ overview: "Add a premium glassmorphic visual layer to VT Stats: Geist typography
 todos:
   - id: phase-1-fonts
     content: "Phase 1: Download Geist Sans + Mono variable woff2, create vtstats-theme.css with @font-face and typography system"
-    status: pending
+    status: completed
   - id: phase-2-tabs
     content: "Phase 2: Restructure index.html into tabbed layout, refactor app.js for lazy rendering, migrate ALL inline styles to theme CSS, restyle fullscreen buttons borderless"
-    status: pending
+    status: completed
   - id: phase-3-glass
     content: "Phase 3: Glass surfaces, depth shadows, ambient background, --vt-* properties, nav-pills glass, light/dark tuning"
-    status: pending
+    status: completed
   - id: phase-4-animations
     content: "Phase 4: Create vtstats-fx.js — animated counters, entrance stagger, tab-entrance hooks, keyframes in CSS"
-    status: pending
+    status: completed
   - id: phase-5-charts
     content: "Phase 5: Chart.js shadow plugin, glass tooltips, refined animation config"
-    status: pending
+    status: completed
   - id: phase-6-preloader
     content: "Phase 6: Branded preloader, preloader lifecycle, View Transition API for match switching"
-    status: pending
+    status: completed
   - id: phase-7-polish
     content: "Phase 7: Faction scoreboard hero treatment, rivalry breathing room, heatmap stagger, Geist Mono everywhere, cross-theme testing, reduced-motion testing, inline style audit in app.js render functions"
-    status: pending
+    status: completed
   - id: phase-8-docs
     content: "Phase 8: Update DEVELOPER_GUIDE.md (file map, load order, tab arch, --vt-* vars), styling.mdc (font, load order, tab rules, no inline styles), AGENTS.md (new files, conventions), project-overview.mdc (file locations, dependencies)"
-    status: pending
+    status: completed
 isProject: false
 ---
 
