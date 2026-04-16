@@ -14,6 +14,42 @@
   const $allView = document.getElementById('all-matches-view');
   const $select = document.getElementById('match-select');
 
+  const MATCH_TAB_SLUGS = {
+    overview:  'tab-overview-btn',
+    combat:    'tab-combat-btn',
+    rivalries: 'tab-rivalries-btn',
+    weapons:   'tab-weapons-btn',
+    assets:    'tab-assets-btn',
+  };
+  const ALL_TAB_SLUGS = {
+    overview:          'all-tab-overview-btn',
+    'weapons-rivalries': 'all-tab-weapons-btn',
+  };
+
+  function btnIdToSlug(btnId) {
+    for (const [slug, id] of Object.entries(MATCH_TAB_SLUGS)) { if (id === btnId) return slug; }
+    for (const [slug, id] of Object.entries(ALL_TAB_SLUGS))   { if (id === btnId) return slug; }
+    return null;
+  }
+
+  function syncTabToUrl(slug) {
+    const params = new URLSearchParams(window.location.search);
+    if (!slug || slug === 'overview') params.delete('tab');
+    else params.set('tab', slug);
+    const qs = params.toString();
+    const url = window.location.pathname + (qs ? '?' + qs : '');
+    history.replaceState(null, '', url);
+  }
+
+  function activateTabFromUrl(slugMap) {
+    const slug = new URLSearchParams(window.location.search).get('tab');
+    if (slug && slugMap[slug]) {
+      const btn = document.getElementById(slugMap[slug]);
+      if (btn) { bootstrap.Tab.getOrCreateInstance(btn).show(); return true; }
+    }
+    return false;
+  }
+
   let manifest;
   try {
     const res = await fetch('data/processed/matches.json');
@@ -88,6 +124,7 @@
     matchTabsEl.addEventListener('shown.bs.tab', (e) => {
       const target = e.target.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
+      syncTabToUrl(btnIdToSlug(e.target.id));
     });
   }
 
@@ -96,6 +133,7 @@
     allTabsEl.addEventListener('shown.bs.tab', (e) => {
       const target = e.target.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
+      syncTabToUrl(btnIdToSlug(e.target.id));
     });
   }
 
@@ -138,15 +176,16 @@
     $loading.classList.add('d-none');
     $dashboard.classList.remove('d-none');
 
-    // Reset to Overview tab
-    const overviewBtn = document.getElementById('tab-overview-btn');
-    if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
-
-    // Render Overview immediately
     renderBanner(data.match);
     renderFactionScoreboard(data.faction_totals, data.match.teams);
     renderLeaderboard(data.leaderboard);
     tabRendered['#tab-overview'] = true;
+
+    if (!activateTabFromUrl(MATCH_TAB_SLUGS)) {
+      const overviewBtn = document.getElementById('tab-overview-btn');
+      if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
+      syncTabToUrl('overview');
+    }
 
     if (window.VTFx) {
       const overviewPane = document.getElementById('tab-overview');
@@ -203,14 +242,15 @@
     $loading.classList.add('d-none');
     $allView.style.display = 'block';
 
-    // Reset to Overview tab
-    const allOverviewBtn = document.getElementById('all-tab-overview-btn');
-    if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
-
-    // Render Overview immediately
     renderAggMeta(data.meta);
     renderCareerTable(data.career_stats);
     tabRendered['#all-tab-overview'] = true;
+
+    if (!activateTabFromUrl(ALL_TAB_SLUGS)) {
+      const allOverviewBtn = document.getElementById('all-tab-overview-btn');
+      if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
+      syncTabToUrl('overview');
+    }
 
     if (window.VTFx) {
       const allOverviewPane = document.getElementById('all-tab-overview');
