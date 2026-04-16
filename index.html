@@ -63,7 +63,8 @@
         <div><span class="stat-label">Date</span><br><strong id="info-date">—</strong></div>
         <div><span class="stat-label">Duration</span><br><strong id="info-duration">—</strong></div>
         <div><span class="stat-label">Players</span><br><strong id="info-players">—</strong></div>
-        <div><span class="config-mod" id="info-config"></span></div>
+        <div><span class="stat-label">Submitted by</span><br><strong id="info-submitter">—</strong></div>
+        <div id="info-snipes-wrap" class="d-none"><span class="stat-label">Snipes</span><br><strong id="info-snipes">0</strong></div>
       </div>
     </div>
 
@@ -117,6 +118,8 @@
                   <th data-sort="net" class="text-end">Net</th>
                   <th data-sort="ratio" class="text-end">Ratio</th>
                   <th data-sort="accuracy" class="text-end">Accuracy</th>
+                  <th data-sort="kills" class="text-end">Kills</th>
+                  <th data-sort="deaths" class="text-end">Deaths</th>
                   <th data-sort="asset_dealt" class="text-end">Asset Dmg</th>
                   <th data-sort="fav_weapon">Fav Weapon</th>
                   <th data-sort="weapons_used" class="text-end"># Wpns</th>
@@ -156,6 +159,26 @@
             </div>
           </div>
         </div>
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-kill-feed">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Kill Feed</h5>
+                <button class="btn btn-sm" data-expand="section-kill-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body" id="kill-feed-content"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-vehicle-kills">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Vehicle Destruction Breakdown</h5>
+                <button class="btn btn-sm" data-expand="section-vehicle-kills" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body" id="vehicle-kills-content"><div class="chart-container"><canvas id="vehicle-kills-chart"></canvas></div></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Tab: Rivalries -->
@@ -175,6 +198,15 @@
             <button class="btn btn-sm" data-expand="section-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body" id="rivalries-container"></div>
+        </div>
+        <div class="card mb-4" id="section-kill-heatmap">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Kill Rivalry Heatmap</h5>
+            <button class="btn btn-sm" data-expand="section-kill-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body table-responsive" id="kill-heatmap-content">
+            <table id="kill-heatmap" class="table table-sm align-middle text-center mb-0"></table>
+          </div>
         </div>
       </div>
 
@@ -218,6 +250,13 @@
               <div class="card-body"><div class="chart-container-sm"><canvas id="weapon-accuracy-chart"></canvas></div></div>
             </div>
           </div>
+        </div>
+        <div class="card mb-4" id="section-hit-targets">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Hit Distribution by Target</h5>
+            <button class="btn btn-sm" data-expand="section-hit-targets" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body" id="hit-targets-content"></div>
         </div>
       </div>
 
@@ -276,6 +315,8 @@
                   <th class="text-end">Total Dealt</th>
                   <th class="text-end">Total Received</th>
                   <th class="text-end">Accuracy</th>
+                  <th class="text-end">Kills</th>
+                  <th class="text-end">Deaths</th>
                   <th class="text-end">Asset Dealt</th>
                   <th>Fav Weapon</th>
                 </tr>

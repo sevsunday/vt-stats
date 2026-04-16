@@ -406,3 +406,51 @@ function renderWeaponAccuracy(canvasId, weaponMeta) {
 function renderGlobalWeaponMeta(canvasId, weaponMeta) {
   return renderWeaponMeta(canvasId, weaponMeta, 20);
 }
+
+// --- Vehicle Kill Breakdown ---
+
+function renderVehicleKills(canvasId, vehicleData) {
+  const container = document.getElementById(canvasId)?.parentElement?.parentElement;
+  if (!vehicleData || vehicleData.length === 0) {
+    if (container) container.innerHTML = '<p style="color:var(--kb-text-muted)">No kill events recorded.</p>';
+    return null;
+  }
+  applyThemeDefaults();
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const labels = vehicleData.map(v => v.name);
+  const values = vehicleData.map(v => v.count);
+  const colors = vehicleData.map((_, i) => getPlayerColor(i));
+
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors.map(c => c + 'cc'),
+        borderColor: colors,
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            label: (item) => `${item.raw} destroyed`,
+          },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: 'Times Destroyed' }, beginAtZero: true },
+        y: { ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}

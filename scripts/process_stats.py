@@ -2,16 +2,17 @@
 """
 VT Stats Processing Pipeline
 
-Reads .binpb protobuf files from data/stats/*.zip, aggregates match statistics,
-and outputs pre-computed JSON files to data/processed/ for browser consumption.
+Reads .binpb.gz protobuf session files from data/sessions/<username>/,
+aggregates match statistics, and outputs pre-computed JSON files to
+data/processed/ for browser consumption.
 """
 
+import gzip
 import json
 import os
 import re
 import sys
-import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,11 +20,13 @@ import statsgate_pb2
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-STATS_DIR = PROJECT_ROOT / "data" / "stats"
+SESSIONS_DIR = PROJECT_ROOT / "data" / "sessions"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 ODF_PATH = PROJECT_ROOT / "data" / "odf.min.json"
 
 TIMELINE_BUCKET_SECONDS = 10
+
+MAP_NAME_PREFIXES = ["vsrmort", "vsrstt", "vsr"]
 
 
 def build_weapon_name_resolver(odf_db):
@@ -97,36 +100,46 @@ def disambiguate_weapon_names(ordnance_set, resolve_fn):
     return result
 
 
-def discover_binpb_sources():
-    """Find all .zip files containing .binpb in data/stats/."""
+def prettify_map_name(raw_map):
+    """Turn a raw map filename like 'vsrragnor.bzn' into a display name like 'Ragnor'."""
+    name = re.sub(r"\.bzn$", "", raw_map, flags=re.IGNORECASE)
+    lower = name.lower()
+    for tag in MAP_NAME_PREFIXES:
+        if lower.startswith(tag):
+            name = name[len(tag):]
+            break
+        elif lower.endswith(tag):
+            name = name[:-len(tag)]
+            break
+    return name.title() if name else raw_map
+
+
+def discover_sessions():
+    """Find all .binpb.gz session files under data/sessions/<username>/."""
     sources = []
-    if not STATS_DIR.exists():
+    if not SESSIONS_DIR.exists():
         return sources
-    for entry in sorted(STATS_DIR.iterdir()):
-        if entry.suffix == ".zip":
-            sources.append(entry)
+    for user_dir in sorted(SESSIONS_DIR.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        submitter = user_dir.name
+        for entry in sorted(user_dir.iterdir()):
+            if entry.suffix == ".gz" and entry.stem.endswith(".binpb"):
+                sources.append((entry, submitter))
     return sources
 
 
-def extract_binpb_from_zip(zip_path):
-    """Extract and parse the .binpb file from a zip archive."""
-    with zipfile.ZipFile(zip_path) as zf:
-        for info in zf.infolist():
-            if info.filename.endswith(".binpb"):
-                data = zf.read(info.filename)
-                session = statsgate_pb2.ClientStatSession()
-                session.ParseFromString(data)
-                return session, info.filename
-    return None, None
+def load_session(path):
+    """Load and parse a .binpb.gz session file."""
+    with gzip.open(path, "rb") as f:
+        data = f.read()
+    session = statsgate_pb2.ClientStatSession()
+    session.ParseFromString(data)
+    return session
 
 
-def slot_to_faction(slot, team_1, team_2):
-    """Determine which faction (1 or 2) a slot belongs to. Returns 0 if unknown."""
-    if slot in team_1:
-        return 1
-    if slot in team_2:
-        return 2
-    # Fallback: standard BZ convention (slots 1-5 = team 1, 6-10 = team 2)
+def slot_to_faction(slot):
+    """Determine which faction (1 or 2) a slot belongs to using BZ convention."""
     if 1 <= slot <= 5:
         return 1
     if 6 <= slot <= 10:
@@ -134,37 +147,28 @@ def slot_to_faction(slot, team_1, team_2):
     return 0
 
 
-def process_match(session, source_file, resolve_weapon):
+def process_match(session, source_file, submitter, resolve_weapon):
     """Process a single match session into pre-computed stats."""
     header = session.header
     events = session.event_stream
 
-    team_1 = set(header.team_1)
-    team_2 = set(header.team_2)
     tick_rate = header.tick_rate or 20
-    nick_map = dict(header.teamnum_to_nick)
 
-    # Build slot→steam64 map. New schema has s64_to_nick (steam64→nick);
-    # invert and cross-reference with teamnum_to_nick to get slot→steam64.
-    s64_map = {}
-    if header.s64_to_nick:
-        nick_to_s64 = {nick: str(s64) for s64, nick in header.s64_to_nick.items()}
-        for slot, nick in nick_map.items():
-            if nick in nick_to_s64:
-                s64_map[slot] = nick_to_s64[nick]
+    # Build identity maps from new header fields
+    slot_to_s64 = dict(header.teamnum_to_s64)
+    s64_to_slot = dict(header.s64_to_teamnum)
+    s64_to_nick = dict(header.s64_to_nick)
+
+    nick_map = {}  # slot -> display name
+    for slot, s64 in slot_to_s64.items():
+        nick_map[slot] = s64_to_nick.get(s64, f"Player {slot}")
 
     all_slots = set(nick_map.keys())
 
-    # Sanity check: if one team is empty but players exist on both sides
-    # of the slot convention (1-5 and 6-10), the header is incomplete.
-    # Fall back to pure slot convention.
-    has_low = any(1 <= s <= 5 for s in all_slots)
-    has_high = any(6 <= s <= 10 for s in all_slots)
-    if has_low and has_high and (not team_1 or not team_2):
-        team_1 = {s for s in all_slots if 1 <= s <= 5}
-        team_2 = {s for s in all_slots if 6 <= s <= 10}
+    def nick_for_s64(s64):
+        return s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
 
-    # Per-player accumulators
+    # Per-player accumulators (keyed on Steam64)
     player_dealt = defaultdict(float)
     player_received = defaultdict(float)
     player_weapon_dealt = defaultdict(lambda: defaultdict(float))
@@ -177,7 +181,7 @@ def process_match(session, source_file, resolve_weapon):
     asset_dealt = defaultdict(float)
     asset_received = defaultdict(float)
 
-    # Rivalry matrix (player-on-player only)
+    # Rivalry matrix (player-on-player only, keyed on Steam64)
     rivalry = defaultdict(lambda: defaultdict(float))
 
     # Faction totals
@@ -199,6 +203,17 @@ def process_match(session, source_file, resolve_weapon):
     weapon_total_hits = defaultdict(int)
     weapon_users = defaultdict(set)
 
+    # Per-victim hit tracking (from BulletHit)
+    player_hits_by_victim = defaultdict(lambda: defaultdict(int))
+
+    # Kill/death tracking (from UnitDestroyed)
+    player_kills = Counter()
+    player_deaths = Counter()
+    kill_feed = []
+    kill_rivalry = defaultdict(lambda: defaultdict(int))
+    vehicle_destruction_count = Counter()
+    snipe_count = 0
+
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
 
@@ -215,9 +230,11 @@ def process_match(session, source_file, resolve_weapon):
             if shooter > 0 and odf:
                 all_ordnance.add(odf)
                 player_shots_fired[shooter][odf] += 1
-                faction = slot_to_faction(shooter, team_1, team_2)
-                if faction:
-                    faction_shots[faction] += 1
+                slot = s64_to_slot.get(shooter)
+                if slot:
+                    faction = slot_to_faction(slot)
+                    if faction:
+                        faction_shots[faction] += 1
                 weapon_total_shots[odf] += 1
             if bi.tick > max_tick:
                 max_tick = bi.tick
@@ -232,10 +249,14 @@ def process_match(session, source_file, resolve_weapon):
             if shooter > 0 and odf:
                 all_ordnance.add(odf)
                 player_shots_hit[shooter][odf] += 1
-                faction = slot_to_faction(shooter, team_1, team_2)
-                if faction:
-                    faction_hits[faction] += 1
+                slot = s64_to_slot.get(shooter)
+                if slot:
+                    faction = slot_to_faction(slot)
+                    if faction:
+                        faction_hits[faction] += 1
                 weapon_total_hits[odf] += 1
+            if shooter > 0 and bh.victim > 0:
+                player_hits_by_victim[shooter][bh.victim] += 1
             if bh.tick > max_tick:
                 max_tick = bh.tick
             if bh.tick < min_tick:
@@ -246,7 +267,6 @@ def process_match(session, source_file, resolve_weapon):
             dd = evt.damage_dealt
             dr = None
 
-            # DamageDealt + DamageReceived are always adjacent pairs
             if i + 1 < n and events[i + 1].WhichOneof("event_type") == "damage_received":
                 dr = events[i + 1].damage_received
                 i += 2
@@ -265,10 +285,9 @@ def process_match(session, source_file, resolve_weapon):
             if odf:
                 all_ordnance.add(odf)
 
-            # Shooter attribution (skip for world props / zero dealt)
             if not skip_shooter:
                 shooter = dd.shooter
-                shooter_faction = slot_to_faction(dd.team, team_1, team_2)
+                shooter_faction = slot_to_faction(dd.team)
 
                 if shooter > 0:
                     player_dealt[shooter] += dd.amount
@@ -284,19 +303,9 @@ def process_match(session, source_file, resolve_weapon):
                 if shooter_faction:
                     faction_dealt[shooter_faction] += dd.amount
 
-                # Timeline bucketing
-                bucket_size = TIMELINE_BUCKET_SECONDS * tick_rate
-                if bucket_size > 0 and min_tick < float("inf"):
-                    bucket_idx = (tick - min_tick) // bucket_size if min_tick != float("inf") else 0
-                    if shooter > 0:
-                        timeline_player[shooter][bucket_idx] += dd.amount
-                    if shooter_faction:
-                        timeline_faction[shooter_faction][bucket_idx] += dd.amount
-
-            # Victim attribution (always process if DR exists, even for world prop sources)
             if dr and dr.team != 0 and dr.amount != 0.0:
                 victim = dr.victim
-                victim_faction = slot_to_faction(dr.team, team_1, team_2)
+                victim_faction = slot_to_faction(dr.team)
 
                 if victim > 0:
                     player_received[victim] += dr.amount
@@ -308,18 +317,47 @@ def process_match(session, source_file, resolve_weapon):
                 if victim_faction:
                     faction_received[victim_faction] += dr.amount
 
-                # Rivalry (player-on-player only; skip if shooter side was a world prop)
                 if not skip_shooter and dd.shooter > 0 and victim > 0:
                     rivalry[dd.shooter][victim] += dd.amount
+
+        elif event_type == "unit_destroyed":
+            ud = evt.unit_destroyed
+            if ud.tick > max_tick:
+                max_tick = ud.tick
+            if ud.tick < min_tick:
+                min_tick = ud.tick
+
+            if ud.killer > 0:
+                player_kills[ud.killer] += 1
+            if ud.victim > 0:
+                player_deaths[ud.victim] += 1
+            if ud.killer > 0 and ud.victim > 0:
+                kill_rivalry[ud.killer][ud.victim] += 1
+            if ud.victim_odf:
+                vehicle_destruction_count[ud.victim_odf] += 1
+
+            kill_feed.append({
+                "tick": ud.tick,
+                "killer": nick_for_s64(ud.killer) if ud.killer > 0 else f"Team {ud.killer_team}",
+                "killer_odf": ud.killer_odf,
+                "victim": nick_for_s64(ud.victim) if ud.victim > 0 else f"Team {ud.victim_team}",
+                "victim_odf": ud.victim_odf,
+            })
+            i += 1
+
+        elif event_type == "unit_sniped":
+            snipe_count += 1
+            us = evt.unit_sniped
+            if us.tick > max_tick:
+                max_tick = us.tick
+            if us.tick < min_tick:
+                min_tick = us.tick
+            i += 1
 
         else:
             i += 1
 
-    # Fix timeline: we used min_tick before it was final. Re-bucket everything.
-    # Actually min_tick is updated as we go, so initial buckets may be off.
-    # Simpler: do a second pass for timeline only, now that we know min/max tick.
-    timeline_player.clear()
-    timeline_faction.clear()
+    # Timeline: recompute with known min/max tick
     bucket_size = TIMELINE_BUCKET_SECONDS * tick_rate
 
     if bucket_size > 0 and min_tick < float("inf"):
@@ -331,27 +369,16 @@ def process_match(session, source_file, resolve_weapon):
             if dd.team == 0 or dd.amount == 0.0:
                 continue
             shooter = dd.shooter
-            if shooter <= 0:
-                continue
             bucket_idx = (dd.tick - min_tick) // bucket_size
-            timeline_player[shooter][bucket_idx] += dd.amount
-            faction = slot_to_faction(dd.team, team_1, team_2)
-            if faction:
-                timeline_faction[faction][bucket_idx] += dd.amount
+            shooter_faction = slot_to_faction(dd.team)
 
-    # Also include asset damage in faction timeline
-    for evt in events:
-        et = evt.WhichOneof("event_type")
-        if et != "damage_dealt":
-            continue
-        dd = evt.damage_dealt
-        if dd.team == 0 or dd.amount == 0.0 or dd.shooter > 0:
-            continue
-        if bucket_size > 0 and min_tick < float("inf"):
-            bucket_idx = (dd.tick - min_tick) // bucket_size
-            faction = slot_to_faction(dd.team, team_1, team_2)
-            if faction:
-                timeline_faction[faction][bucket_idx] += dd.amount
+            if shooter > 0:
+                timeline_player[shooter][bucket_idx] += dd.amount
+            else:
+                pass  # asset only goes to faction timeline below
+
+            if shooter_faction:
+                timeline_faction[shooter_faction][bucket_idx] += dd.amount
 
     # Build weapon name map
     weapon_name_map = disambiguate_weapon_names(all_ordnance, resolve_weapon)
@@ -370,22 +397,23 @@ def process_match(session, source_file, resolve_weapon):
     match_id = start_dt.strftime("%Y-%m-%dT%H-%M-%S")
     date_str = start_dt.isoformat()
 
-    # Build team rosters (include players inferred by slot convention)
-    roster_slots = {1: set(team_1), 2: set(team_2)}
+    # Build team rosters
+    roster_slots = {1: set(), 2: set()}
     for slot in all_slots:
-        faction = slot_to_faction(slot, team_1, team_2)
+        faction = slot_to_faction(slot)
         if faction in (1, 2):
             roster_slots[faction].add(slot)
 
     teams = {}
-    for faction_num, slot_set in [(1, roster_slots[1]), (2, roster_slots[2])]:
+    for faction_num in [1, 2]:
         roster = []
-        for slot in sorted(slot_set):
+        for slot in sorted(roster_slots[faction_num]):
+            s64 = slot_to_s64.get(slot)
             roster.append({
                 "slot": slot,
                 "player_id": nick_map.get(slot, f"Player {slot}"),
                 "name": nick_map.get(slot, f"Player {slot}"),
-                "steam64": s64_map.get(slot),
+                "steam64": str(s64) if s64 else None,
             })
         teams[str(faction_num)] = roster
 
@@ -393,32 +421,34 @@ def process_match(session, source_file, resolve_weapon):
     leaderboard = []
     for slot in sorted(all_slots):
         name = nick_map.get(slot, f"Player {slot}")
-        faction = slot_to_faction(slot, team_1, team_2)
-        dealt = player_dealt.get(slot, 0)
-        received = player_received.get(slot, 0)
+        s64 = slot_to_s64.get(slot)
+        faction = slot_to_faction(slot)
+        dealt = player_dealt.get(s64, 0) if s64 else 0
+        received = player_received.get(s64, 0) if s64 else 0
         net = dealt - received
         ratio = dealt / received if received > 0 else (float("inf") if dealt > 0 else 0)
 
-        total_fired = sum(player_shots_fired[slot].values())
-        total_hit = sum(player_shots_hit[slot].values())
+        total_fired = sum(player_shots_fired[s64].values()) if s64 else 0
+        total_hit = sum(player_shots_hit[s64].values()) if s64 else 0
         accuracy = total_hit / total_fired if total_fired > 0 else 0
 
-        # Favorite weapon by damage dealt
         fav_weapon = "—"
         fav_max = 0
-        for odf, dmg in player_weapon_dealt[slot].items():
-            if dmg > fav_max:
-                fav_max = dmg
-                fav_weapon = wpn_name(odf)
+        if s64:
+            for odf, dmg in player_weapon_dealt[s64].items():
+                if dmg > fav_max:
+                    fav_max = dmg
+                    fav_weapon = wpn_name(odf)
 
-        # Per-weapon breakdown
-        all_wpn_odfs = set(player_weapon_dealt[slot].keys()) | set(player_shots_fired[slot].keys())
+        all_wpn_odfs = set()
+        if s64:
+            all_wpn_odfs = set(player_weapon_dealt[s64].keys()) | set(player_shots_fired[s64].keys())
         weapon_breakdown = {}
         for odf in all_wpn_odfs:
-            w_dealt = player_weapon_dealt[slot].get(odf, 0)
-            w_recv = player_weapon_received[slot].get(odf, 0)
-            w_shots = player_shots_fired[slot].get(odf, 0)
-            w_hits = player_shots_hit[slot].get(odf, 0)
+            w_dealt = player_weapon_dealt[s64].get(odf, 0)
+            w_recv = player_weapon_received[s64].get(odf, 0)
+            w_shots = player_shots_fired[s64].get(odf, 0)
+            w_hits = player_shots_hit[s64].get(odf, 0)
             w_acc = w_hits / w_shots if w_shots > 0 else 0
             weapon_breakdown[wpn_name(odf)] = {
                 "dealt": round(w_dealt, 1),
@@ -428,11 +458,18 @@ def process_match(session, source_file, resolve_weapon):
                 "accuracy": round(w_acc, 3),
             }
 
+        kills = player_kills.get(s64, 0) if s64 else 0
+        deaths = player_deaths.get(s64, 0) if s64 else 0
+
         leaderboard.append({
             "player_id": name,
             "name": name,
             "slot": slot,
+            "steam64": str(s64) if s64 else None,
             "faction": faction,
+            "kills": kills,
+            "deaths": deaths,
+            "kd_ratio": round(kills / deaths, 2) if deaths > 0 else (None if kills == 0 else None),
             "personal": {
                 "dealt": round(dealt, 1),
                 "received": round(received, 1),
@@ -442,13 +479,23 @@ def process_match(session, source_file, resolve_weapon):
                 "shots_hit": total_hit,
                 "accuracy": round(accuracy, 3),
                 "fav_weapon": fav_weapon,
-                "weapons_used": len(player_weapons_used.get(slot, set())),
+                "weapons_used": len(player_weapons_used.get(s64, set())) if s64 else 0,
             },
             "assets": {
                 "dealt": round(asset_dealt.get(slot, 0), 1),
                 "received": round(asset_received.get(slot, 0), 1),
             },
             "weapon_breakdown": weapon_breakdown,
+            "hit_targets": {
+                nick_for_s64(victim_s64): {
+                    "hits": count,
+                    "damage": round(rivalry[s64].get(victim_s64, 0), 1),
+                }
+                for victim_s64, count in sorted(
+                    player_hits_by_victim[s64].items(),
+                    key=lambda x: x[1], reverse=True
+                )
+            } if s64 else {},
         })
 
     leaderboard.sort(key=lambda p: p["personal"]["dealt"], reverse=True)
@@ -457,18 +504,12 @@ def process_match(session, source_file, resolve_weapon):
     faction_totals = {}
     for f_num in [1, 2]:
         f_slots = roster_slots[f_num]
-        f_player_dealt = sum(
-            player_dealt.get(s, 0) for s in f_slots
-        )
-        f_asset_dealt = sum(
-            asset_dealt.get(s, 0) for s in f_slots
-        )
-        f_player_recv = sum(
-            player_received.get(s, 0) for s in f_slots
-        )
-        f_asset_recv = sum(
-            asset_received.get(s, 0) for s in f_slots
-        )
+        f_s64s = {slot_to_s64[s] for s in f_slots if s in slot_to_s64}
+
+        f_player_dealt = sum(player_dealt.get(s64, 0) for s64 in f_s64s)
+        f_asset_dealt = sum(asset_dealt.get(s, 0) for s in f_slots)
+        f_player_recv = sum(player_received.get(s64, 0) for s64 in f_s64s)
+        f_asset_recv = sum(asset_received.get(s, 0) for s in f_slots)
         f_shots = faction_shots.get(f_num, 0)
         f_hits = faction_hits.get(f_num, 0)
         f_acc = f_hits / f_shots if f_shots > 0 else 0
@@ -487,10 +528,10 @@ def process_match(session, source_file, resolve_weapon):
 
     # Rivalry matrix (use display names)
     rivalry_matrix = {}
-    for shooter_slot, victims in rivalry.items():
-        shooter_name = nick_map.get(shooter_slot, f"Player {shooter_slot}")
-        for victim_slot, dmg in victims.items():
-            victim_name = nick_map.get(victim_slot, f"Player {victim_slot}")
+    for shooter_s64, victims in rivalry.items():
+        shooter_name = nick_for_s64(shooter_s64)
+        for victim_s64, dmg in victims.items():
+            victim_name = nick_for_s64(victim_s64)
             if shooter_name not in rivalry_matrix:
                 rivalry_matrix[shooter_name] = {}
             rivalry_matrix[shooter_name][victim_name] = round(dmg, 1)
@@ -549,8 +590,8 @@ def process_match(session, source_file, resolve_weapon):
         labels.append(f"{m}:{s:02d}")
 
     tl_by_player = {}
-    for slot, buckets in timeline_player.items():
-        name = nick_map.get(slot, f"Player {slot}")
+    for s64, buckets in timeline_player.items():
+        name = nick_for_s64(s64)
         tl_by_player[name] = [round(buckets.get(b, 0), 1) for b in range(total_buckets)]
 
     tl_by_faction = {}
@@ -573,7 +614,7 @@ def process_match(session, source_file, resolve_weapon):
             }
 
     for f_num in [1, 2]:
-        slots = team_1 if f_num == 1 else team_2
+        slots = roster_slots[f_num]
         ad = sum(asset_dealt.get(s, 0) for s in slots)
         ar = sum(asset_received.get(s, 0) for s in slots)
         asset_damage["by_faction"][str(f_num)] = {
@@ -581,17 +622,37 @@ def process_match(session, source_file, resolve_weapon):
             "received": round(ar, 1),
         }
 
+    # Kills section
+    kills_leaderboard = []
+    for slot in sorted(all_slots):
+        s64 = slot_to_s64.get(slot)
+        if not s64:
+            continue
+        k = player_kills.get(s64, 0)
+        d = player_deaths.get(s64, 0)
+        if k > 0 or d > 0:
+            kills_leaderboard.append({
+                "player_id": nick_map.get(slot, f"Player {slot}"),
+                "name": nick_map.get(slot, f"Player {slot}"),
+                "kills": k,
+                "deaths": d,
+                "kd_ratio": round(k / d, 2) if d > 0 else None,
+            })
+    kills_leaderboard.sort(key=lambda p: p["kills"], reverse=True)
+
     return {
         "match": {
             "id": match_id,
             "source_file": source_file,
+            "submitter": submitter,
             "map": header.map,
             "date": date_str,
             "duration_sec": round(duration_sec, 1),
-            "tick_range": [min_tick, max_tick],
+            "tick_range": [min_tick if min_tick != float("inf") else 0, max_tick],
             "tick_rate": tick_rate,
-            "player_count": len(nick_map),
+            "player_count": header.player_count or len(nick_map),
             "config_mod": header.active_config_mod,
+            "snipe_count": snipe_count,
             "teams": teams,
         },
         "leaderboard": leaderboard,
@@ -606,6 +667,25 @@ def process_match(session, source_file, resolve_weapon):
             "by_faction": tl_by_faction,
         },
         "asset_damage": asset_damage,
+        "kills": {
+            "leaderboard": kills_leaderboard,
+            "feed": kill_feed,
+            "by_vehicle": [
+                {
+                    "odf": odf,
+                    "name": re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE).replace("_", " ").title(),
+                    "count": count,
+                }
+                for odf, count in vehicle_destruction_count.most_common(15)
+            ],
+            "kill_rivalry_matrix": {
+                nick_for_s64(killer): {
+                    nick_for_s64(victim): count
+                    for victim, count in victims.items()
+                }
+                for killer, victims in kill_rivalry.items()
+            },
+        },
     }
 
 
@@ -620,6 +700,8 @@ def build_all_matches_aggregate(all_match_data):
         "total_asset_dealt": 0,
         "total_shots_fired": 0,
         "total_shots_hit": 0,
+        "total_kills": 0,
+        "total_deaths": 0,
         "weapon_totals": defaultdict(lambda: {"dealt": 0, "shots": 0, "hits": 0}),
         "best_match": None,
     })
@@ -633,12 +715,14 @@ def build_all_matches_aggregate(all_match_data):
     maps_played = set()
     dates = []
     total_duration = 0
+    submitters = set()
 
     for match_data in all_match_data:
         m = match_data["match"]
         maps_played.add(m["map"])
         dates.append(m["date"][:10])
         total_duration += m["duration_sec"]
+        submitters.add(m["submitter"])
 
         for p in match_data["leaderboard"]:
             pid = p["player_id"]
@@ -651,6 +735,8 @@ def build_all_matches_aggregate(all_match_data):
             c["total_asset_dealt"] += p["assets"]["dealt"]
             c["total_shots_fired"] += p["personal"]["shots_fired"]
             c["total_shots_hit"] += p["personal"]["shots_hit"]
+            c["total_kills"] += p.get("kills", 0)
+            c["total_deaths"] += p.get("deaths", 0)
 
             for wpn_name, wpn_data in p["weapon_breakdown"].items():
                 c["weapon_totals"][wpn_name]["dealt"] += wpn_data["dealt"]
@@ -703,6 +789,8 @@ def build_all_matches_aggregate(all_match_data):
             "total_received": round(c["total_received"], 1),
             "total_asset_dealt": round(c["total_asset_dealt"], 1),
             "overall_accuracy": round(acc, 3),
+            "total_kills": c["total_kills"],
+            "total_deaths": c["total_deaths"],
             "fav_weapon": fav_weapon,
             "best_match": c["best_match"],
             "weapon_breakdown": weapon_breakdown,
@@ -754,6 +842,7 @@ def build_all_matches_aggregate(all_match_data):
             "total_duration_sec": round(total_duration, 1),
             "maps_played": sorted(maps_played),
             "date_range": [sorted_dates[0], sorted_dates[-1]] if sorted_dates else [],
+            "submitters": sorted(submitters),
         },
         "career_stats": career_stats,
         "global_weapon_meta": gwm,
@@ -777,47 +866,43 @@ def main():
 
     resolve_weapon = build_weapon_name_resolver(odf_db)
 
-    # Discover sources
-    sources = discover_binpb_sources()
+    # Discover sessions
+    sources = discover_sessions()
     if not sources:
-        print("No .zip files found in data/stats/")
+        print(f"No .binpb.gz files found in {SESSIONS_DIR}")
         sys.exit(1)
 
-    print(f"Found {len(sources)} match archive(s)")
+    print(f"Found {len(sources)} session file(s)")
 
     # Process each match
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     all_match_data = []
     manifest = []
 
-    for zip_path in sources:
-        match_name = zip_path.stem
-        print(f"\nProcessing {zip_path.name}...")
+    for session_path, submitter in sources:
+        print(f"\nProcessing {submitter}/{session_path.name}...")
 
-        session, binpb_name = extract_binpb_from_zip(zip_path)
-        if session is None:
-            print(f"  WARNING: No .binpb found in {zip_path.name}, skipping")
-            continue
+        session = load_session(session_path)
+        print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
 
-        print(f"  Parsed {binpb_name}: {len(session.event_stream)} events")
-
-        match_data = process_match(session, zip_path.name, resolve_weapon)
+        match_data = process_match(session, session_path.name, submitter, resolve_weapon)
         all_match_data.append(match_data)
 
-        # Write per-match output
-        out_path = OUTPUT_DIR / f"{match_name}.json"
+        match_id = match_data["match"]["id"]
+        out_path = OUTPUT_DIR / f"{match_id}.json"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(match_data, f, indent=2, ensure_ascii=False)
         print(f"  Output: {out_path.name} ({out_path.stat().st_size:,} bytes)")
 
         manifest.append({
-            "id": match_data["match"]["id"],
-            "name": match_name.replace("-", " ").title(),
-            "file": f"{match_name}.json",
+            "id": match_id,
+            "name": prettify_map_name(match_data["match"]["map"]),
+            "file": f"{match_id}.json",
             "map": match_data["match"]["map"],
             "date": match_data["match"]["date"],
             "duration_sec": match_data["match"]["duration_sec"],
             "player_count": match_data["match"]["player_count"],
+            "submitter": submitter,
         })
 
     # Sort manifest by date

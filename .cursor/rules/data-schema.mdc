@@ -16,24 +16,25 @@ Event types in `StatEvent.event_type` oneof:
 | Field # | Type | Key Fields |
 |---|---|---|
 | 1 | `BulletInit` | tick, shooter (uint64 Steam64), ordnance_odf |
-| 2 | `BulletHit` | tick, shooter (uint64 Steam64), ordnance_odf |
+| 2 | `BulletHit` | tick, shooter (uint64 Steam64), ordnance_odf, victim (uint64 Steam64), victim_odf, shooter_odf |
 | 3 | `DamageDealt` | tick, shooter (uint64 Steam64), team (int32 slot), ordnance_odf, amount |
 | 4 | `DamageReceived` | tick, victim (uint64 Steam64), team (int32 slot), ordnance_odf, amount |
 | 5 | `UpdateTick` | tick, repeated PlayerState (Steam64, position, speed, health, ammo, odf) |
 | 6 | `UnitDestroyed` | tick, killer/victim Steam64, killer/victim team slot, killer/victim odf |
+| 7 | `UnitSniped` | tick |
 
-## Player Identity — Dual Mode
+## Player Identity
 
-- **Legacy data** (current local files): `shooter`/`victim` are `int32` slot numbers (1-10). `s64_to_nick` is empty.
-- **New data** (upcoming): `shooter`/`victim` are `uint64` Steam64 IDs. `s64_to_nick` maps Steam64→nickname.
-- **Detection**: check `header.s64_to_nick` — if populated, data uses new format.
-- Pipeline must handle both formats until all local data is replaced.
+Players are identified by `uint64` Steam64 IDs. The header provides three lookup maps:
+- `s64_to_nick` — Steam64 → display name
+- `teamnum_to_s64` — slot (1-10) → Steam64
+- `s64_to_teamnum` — Steam64 → slot (reverse of above)
 
 ## Critical: Damage Semantics
 
 ### The `team` Field
 
-The `team` field is **ALWAYS the owning player's slot number (1-10)**. It is NOT a faction ID. To get faction, use slot convention: 1-5 = Team 1, 6-10 = Team 2. Legacy data also has `header.team_1`/`team_2` (deprecated).
+The `team` field is **ALWAYS the owning player's slot number (1-10)**. It is NOT a faction ID. Faction is determined by slot convention: 1-5 = Team 1, 6-10 = Team 2.
 
 ### Adjacent Pair Rule
 
@@ -56,9 +57,9 @@ These are applied by the statsgate collector before data reaches us:
 - `ordnance_odf` can be null (water/environmental damage) — display as "Unknown"
 - BulletInit/BulletHit only recorded for recognized players (in `s64_to_nick`)
 
-### Faction Fallback
+### Faction Determination
 
-Faction is determined by `header.team_1`/`team_2` (deprecated), with fallback to slot convention (1-5 = Team 1, 6-10 = Team 2). Pipeline has a sanity check that rebuilds teams from convention when header data is incomplete. See `slot_to_faction()`.
+Faction is determined purely by slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2. The `slot_to_faction()` function in the pipeline encodes this.
 
 ## ODF Weapon Name Resolution
 
@@ -76,8 +77,10 @@ Disambiguate collisions by appending raw ODF in parentheses.
 
 Pre-computed JSON in `data/processed/`. See `DEVELOPER_GUIDE.md` Section 5 for full JSON structure with examples.
 
-- `matches.json` — manifest
-- `<match>.json` — per-match: match, leaderboard, faction_totals, rivalry_matrix, top_rivalries, weapon_meta, timeline, asset_damage
-- `all_matches.json` — aggregate: meta, career_stats, global_weapon_meta, global_rivalries
+- `matches.json` — manifest (includes `submitter` field per match)
+- `<match_id>.json` — per-match: match, leaderboard (with kills/deaths/hit_targets), faction_totals, rivalry_matrix, top_rivalries, weapon_meta, timeline, asset_damage, kills (leaderboard/feed/by_vehicle/kill_rivalry_matrix)
+- `all_matches.json` — aggregate: meta (with submitters list), career_stats (with total_kills/total_deaths), global_weapon_meta, global_rivalries
+
+Output files are named by match ID (timestamp-derived, e.g. `2026-04-16T01-27-48.json`). Match display names are derived from `header.map` via prettification (strip `vsr`/`vsrmort`/`vsrstt` prefix/suffix, strip `.bzn`, title-case).
 
 All numeric values pre-rounded (1 decimal for damage, 3 for ratios/accuracy). Ratio is `null` for infinite (dealt > 0, received = 0).
