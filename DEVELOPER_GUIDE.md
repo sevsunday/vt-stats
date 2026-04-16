@@ -22,7 +22,7 @@ vt-stats/
 │   ├── theme.js                # Theme switching, search, persistence
 │   ├── vtstats-fx.js           # Effects engine (counters, stagger, Chart.js shadow plugin)
 │   ├── charts.js               # Chart.js renderers (theme-aware, glass tooltips)
-│   └── app.js                  # Main application logic, lazy tab rendering
+│   └── app.js                  # Main application logic, lazy tab rendering, global player/team filter
 ├── vendor/
 │   ├── bootstrap/css/          # Bootstrap 5.3.2 (minified)
 │   ├── bootstrap/js/           # Bootstrap 5.3.2 JS bundle (minified)
@@ -517,7 +517,23 @@ Dashboard content is organized into Bootstrap nav-pills tabs:
 - **Per-match:** Overview, Combat, Rivalries, Weapons & Accuracy, Assets
 - **All Matches:** Overview, Weapons & Rivalries
 
-Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags.
+Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags. Global filter changes also trigger the same lazy re-render pipeline — `destroyAllCharts()` + `resetTabState()` + re-register deferred renderers + re-register fullscreen chart renderers.
+
+### Global Player Filter
+
+The match info banner contains a filter bar that lets users switch between three modes:
+
+- **All Players** (default) — no filtering, all visuals show the full match data
+- **Team** — select Team 1 or Team 2; all visuals scope to that faction's players
+- **Player** — select one or more players via checkbox dropdown; all visuals scope to the selection. When exactly one player is selected, a dedicated profile card replaces the faction scoreboard.
+
+The filter is implemented entirely client-side in `app.js`. `getFilteredData(data, filter)` derives a filtered data object from the loaded JSON. The filtered object replaces `leaderboard`, `rivalry_matrix`, `top_rivalries`, `kills` (feed/kill_rivalry_matrix/leaderboard), `timeline.by_player`, `asset_damage`, and `faction_totals`.
+
+`weapon_meta` is recomputed client-side by aggregating `leaderboard[].weapon_breakdown` across the filtered player set (summing dealt/shots/hits, recalculating accuracy). The pre-aggregated `weapon_meta` array is only used for the unfiltered "All Players" view. `kills.by_vehicle` always passes through unchanged (match-global aggregate, not per-player attributed).
+
+The filtered data is stored in `currentFilteredData` — all renderers and the timeline toggle reference this instead of `currentData`. `renderMatchData(data)` is the shared render function called by both `loadMatch()` and `applyFilter()`.
+
+A "Persist" toggle saves the filter selection across match switches. When enabled, the filter is reconciled with the new match's roster — players that don't exist in the new match are dropped.
 
 ### URL Tab Parameter
 
@@ -556,8 +572,9 @@ Charts use Chart.js 4.4.7 (vendored locally). Key patterns:
 1. **Theme-aware colors**: Read `--kb-primary`, `--kb-accent`, etc. via `getComputedStyle()` at render time.
 2. **Destroy on switch**: Call `destroyAllCharts()` before rendering new match data.
 3. **Player palette**: A fixed 15-color palette for consistent player coloring within a match.
-4. **Chart types used**: Line (stacked area for timeline), Bar (horizontal for weapon meta, stacked for player weapons), Doughnut (rivalry cards), Bar (horizontal for weapon accuracy).
-5. **Shadow plugin**: `vtstats-fx.js` registers a global Chart.js plugin that adds subtle `shadowBlur` to chart datasets using `--vt-chart-shadow-blur` and `--kb-primary`.
+4. **Chart types used**: Line (stacked area for timeline), Bar (horizontal for weapon meta, stacked for player weapons, horizontal for vehicle kills), Doughnut (rivalry cards, player profile dealt/received), Bar (horizontal for weapon accuracy).
+5. **Partial data handling**: Chart renderers handle filtered/partial data gracefully. When a single player is selected, the timeline renders as a non-stacked line with point markers. Empty `weapon_meta` after filtering shows a placeholder message. Heatmaps accept the full player names array for axes while the matrix may contain only one row (single-player mode).
+6. **Shadow plugin**: `vtstats-fx.js` registers a global Chart.js plugin that adds subtle `shadowBlur` to chart datasets using `--vt-chart-shadow-blur` and `--kb-primary`.
 6. **Glass tooltips**: Custom external tooltip renderer replaces Chart.js defaults with translucent, blur-backed tooltip panels that respect the active theme.
 7. **Animation**: Default duration 1000ms with `easeOutQuart` easing.
 

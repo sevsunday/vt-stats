@@ -76,8 +76,11 @@ All `--vt-*` variables have `[data-mode="light"]` overrides for reduced intensit
 Dashboard content is organized into Bootstrap nav-pills tabs with lazy rendering:
 - Charts only render on first tab activation (via `shown.bs.tab` event)
 - Match switch resets all tab render flags
+- Global filter changes also trigger the same lazy re-render cycle (`destroyAllCharts` + `resetTabState` + re-register renderers)
 - Theme changes also trigger re-render of active tab charts
 - Active tab syncs to the `?tab=` URL query parameter via `history.replaceState`. Valid slugs are mapped in `MATCH_TAB_SLUGS` / `ALL_TAB_SLUGS` in `js/app.js`.
+
+The filter bar, player picker dropdown, and player profile card use existing glass surface and `--kb-*` variable patterns from `vtstats-theme.css`.
 
 ## Additional Rules
 

@@ -157,19 +157,22 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
       pointRadius: 0,
     }));
   } else {
+    const playerNames = Object.keys(timeline.by_player);
     const colorMap = buildPlayerColorMap(allNames);
-    datasets = allNames.map(name => ({
+    const isSingle = playerNames.length === 1;
+    datasets = playerNames.map(name => ({
       label: name,
       data: timeline.by_player[name] || [],
-      backgroundColor: (colorMap[name] || '#999') + '55',
+      backgroundColor: (colorMap[name] || '#999') + (isSingle ? '33' : '55'),
       borderColor: colorMap[name] || '#999',
-      borderWidth: 1,
-      fill: true,
+      borderWidth: isSingle ? 2 : 1,
+      fill: !isSingle,
       tension: 0.3,
-      pointRadius: 0,
+      pointRadius: isSingle ? 2 : 0,
     }));
   }
 
+  const isStacked = datasets.length > 1;
   const chart = new Chart(ctx, {
     type: 'line',
     data: { labels: timeline.labels, datasets },
@@ -188,7 +191,7 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
       },
       scales: {
         x: { title: { display: true, text: 'Match Time' }, ticks: { maxTicksLimit: 20 } },
-        y: { stacked: true, title: { display: true, text: `Damage (per ${timeline.bucket_seconds}s)` }, beginAtZero: true },
+        y: { stacked: isStacked, title: { display: true, text: `Damage (per ${timeline.bucket_seconds}s)` }, beginAtZero: true },
       },
     },
   });
@@ -199,6 +202,11 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
 // --- Horizontal Bar: Weapon Meta ---
 
 function renderWeaponMeta(canvasId, weaponMeta, limit) {
+  const container = document.getElementById(canvasId)?.parentElement?.parentElement;
+  if (!weaponMeta || weaponMeta.length === 0) {
+    if (container) container.innerHTML = '<p style="color:var(--kb-text-muted)">No weapon data for selection.</p>';
+    return null;
+  }
   applyThemeDefaults();
   const ctx = document.getElementById(canvasId).getContext('2d');
   const data = weaponMeta.slice(0, limit || 15);
@@ -348,6 +356,11 @@ function renderRivalryDoughnut(container, rivalry) {
 // --- Horizontal Bar: Weapon Accuracy Ranking ---
 
 function renderWeaponAccuracy(canvasId, weaponMeta) {
+  const container = document.getElementById(canvasId)?.parentElement?.parentElement;
+  if (!weaponMeta || weaponMeta.length === 0) {
+    if (container) container.innerHTML = '<p style="color:var(--kb-text-muted)">No weapon data for selection.</p>';
+    return null;
+  }
   applyThemeDefaults();
   const t = getThemeColors();
   const ctx = document.getElementById(canvasId).getContext('2d');

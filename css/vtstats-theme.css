@@ -519,6 +519,151 @@ body::before {
 }
 
 /* ============================================================================
+   GLOBAL FILTER BAR
+   Player/team filter controls inside the match-info banner
+   Positioned as a right-side column, separated from metadata by a vertical rule
+   ============================================================================ */
+
+.vt-filter-bar--right {
+    border-left: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 30%);
+    padding-left: 1.25rem;
+    margin-left: auto;
+    min-width: 260px;
+}
+
+.vt-filter-bar-label {
+    margin-bottom: 0.4rem;
+}
+
+/* Collapse to stacked layout below md so the filter slides beneath metadata */
+@media (max-width: 767.98px) {
+    .vt-filter-bar--right {
+        border-left: none;
+        border-top: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 30%);
+        padding-left: 0;
+        padding-top: 0.75rem;
+        margin-left: 0;
+        width: 100%;
+    }
+}
+
+#filter-mode .btn {
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.3rem 0.75rem;
+}
+
+#filter-mode .btn.active {
+    background: var(--kb-primary) !important;
+    border-color: var(--kb-primary) !important;
+    color: var(--kb-primary-fg) !important;
+}
+
+/* --- Player picker dropdown --- */
+
+.vt-player-picker {
+    min-width: 240px;
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 0.5rem;
+    background: color-mix(in oklab, var(--kb-bg-card) 96%, transparent);
+    backdrop-filter: blur(var(--vt-glass-blur));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+    border-radius: 8px;
+    box-shadow: var(--vt-shadow-elevation-3);
+}
+
+/* Floating variant — appended to <body>, positioned manually so it can
+   escape any ancestor with backdrop-filter (which would otherwise trap
+   even position: fixed descendants). */
+.vt-player-picker--floating {
+    position: fixed;
+    z-index: 1080;
+    display: none;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.vt-player-picker--floating.show {
+    display: block;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.vt-player-picker .vt-player-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: var(--kb-text-secondary);
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.vt-player-picker .vt-player-option:hover {
+    background: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    color: var(--kb-text-primary);
+}
+
+.vt-player-picker .vt-player-option input[type="checkbox"] {
+    flex-shrink: 0;
+}
+
+.vt-player-picker .vt-team-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.vt-player-picker .vt-team-dot--t1 {
+    background: var(--kb-primary);
+}
+
+.vt-player-picker .vt-team-dot--t2 {
+    background: var(--kb-accent);
+}
+
+/* --- Player profile card --- */
+
+.vt-profile-panel {
+    padding: 1.5rem;
+    border-radius: 10px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-left-width: 3px;
+    border-left-style: solid;
+}
+
+.vt-profile-panel .vt-profile-name {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--kb-text-primary);
+}
+
+.vt-profile-panel .stat-value {
+    font-size: 1.5rem;
+}
+
+.vt-profile-rival {
+    padding: 0.75rem;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 50%);
+}
+
+.vt-profile-chart-wrap {
+    width: 120px;
+    height: 120px;
+}
+
+/* ============================================================================
    FACTION SCOREBOARD — Hero Treatment
    First visual in the Overview tab — elevated presentation
    ============================================================================ */
@@ -549,6 +694,44 @@ body::before {
 
 .vt-faction-panel .stat-label {
     margin-top: 0.125rem;
+}
+
+/* Muted state — team is outside the current filter scope.
+   Kept visible for context but clearly deprioritized. */
+.vt-faction-panel--muted {
+    position: relative;
+    opacity: 0.55;
+    filter: saturate(0.4);
+    transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.vt-faction-panel--muted::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: color-mix(in oklab, var(--kb-bg-body) 35%, transparent);
+    pointer-events: none;
+}
+
+.vt-faction-panel--muted:hover {
+    opacity: 0.85;
+    filter: saturate(0.7);
+}
+
+.vt-faction-muted-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: auto;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.68rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--kb-text-muted);
+    background: color-mix(in oklab, var(--kb-bg-muted) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 40%);
+    border-radius: 999px;
 }
 
 /* ============================================================================

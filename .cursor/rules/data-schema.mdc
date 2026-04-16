@@ -84,3 +84,5 @@ Pre-computed JSON in `data/processed/`. See `DEVELOPER_GUIDE.md` Section 5 for f
 Output files are named by match ID (timestamp-derived, e.g. `2026-04-16T01-27-48.json`). Match display names are derived from `header.map` via prettification (strip `vsr`/`vsrmort`/`vsrstt` prefix/suffix, strip `.bzn`, title-case).
 
 All numeric values pre-rounded (1 decimal for damage, 3 for ratios/accuracy). Ratio is `null` for infinite (dealt > 0, received = 0).
+
+**Client-side filtering note:** When the global player filter is active, `weapon_meta` is recomputed client-side by aggregating `leaderboard[].weapon_breakdown` across the filtered player set. The pre-aggregated `weapon_meta` array is used only for the unfiltered "All Players" view. The `odf` field is unavailable in client-recomputed weapon_meta (no renderer uses it). `kills.by_vehicle` is always unfiltered (match-global, not per-player attributed).
