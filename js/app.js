@@ -36,17 +36,219 @@
     return null;
   }
 
-  function syncTabToUrl(slug) {
-    const params = new URLSearchParams(window.location.search);
-    if (!slug || slug === 'overview') params.delete('tab');
-    else params.set('tab', slug);
-    const qs = params.toString();
-    const url = window.location.pathname + (qs ? '?' + qs : '');
-    history.replaceState(null, '', url);
+  // --- URL State ---
+  // URL schema:
+  //   ?match=<id>|all   (omitted => load first match)
+  //   ?filter=all|team|player
+  //   ?team=1|2         (only when filter=team)
+  //   ?players=<csv>    (only when filter=player; tokens may be canonical names or Steam64 IDs)
+  //   ?tab=<slug>       (omitted or 'overview' => default)
+
+  function parseUrlState() {
+    const p = new URLSearchParams(window.location.search);
+    return {
+      match: p.get('match'),
+      filter: p.get('filter'),
+      team: p.get('team'),
+      players: (p.get('players') || '').split(',').map(s => s.trim()).filter(Boolean),
+      tab: p.get('tab'),
+    };
   }
 
-  function activateTabFromUrl(slugMap) {
-    const slug = new URLSearchParams(window.location.search).get('tab');
+  // Resolve URL player tokens (names or Steam64) to canonical leaderboard names.
+  // Tokens matching /^\d{16,}$/ are treated as Steam64; otherwise matched by
+  // name (case-insensitive). Unresolved tokens are dropped silently.
+  function resolvePlayerTokens(tokens, leaderboard) {
+    const resolved = [];
+    for (const token of tokens) {
+      const isSteam64 = /^\d{16,}$/.test(token);
+      const match = leaderboard.find(p =>
+        isSteam64 ? p.steam64 === token : p.name.toLowerCase() === token.toLowerCase()
+      );
+      if (match && !resolved.includes(match.name)) resolved.push(match.name);
+    }
+    return resolved;
+  }
+
+  function getActiveTabSlug() {
+    const activeBtn = document.querySelector('#match-tabs .nav-link.active, #all-tabs .nav-link.active');
+    return activeBtn ? btnIdToSlug(activeBtn.id) : null;
+  }
+
+  // --- Live URL Sync ---
+  // When off (default), URL writes from in-app state changes are suppressed so
+  // the browser URL stays clean. Incoming shared URLs still apply on load.
+  // When on, every syncUrl() call rewrites the URL via history.replaceState.
+  // Two one-time bypasses exist: setLiveSync(true) catches the URL up to
+  // current state on toggle-on, and showMatchNotFound clears stale bad-match
+  // URLs on error recovery.
+  let liveSyncEnabled = localStorage.getItem('vt-url-sync') === 'true';
+
+  // Pure: computes the URL string representing current state, without writing
+  // to history. Used by both the gated syncUrl() and the explicit Share action.
+  function buildShareUrl() {
+    const params = new URLSearchParams();
+
+    if ($select.value === '__all__') {
+      params.set('match', 'all');
+    } else if (currentData) {
+      params.set('match', currentData.match.id);
+    }
+
+    const isAllMatchesView = $select.value === '__all__';
+    if (!isAllMatchesView) {
+      if (filterState.mode === 'team' && filterState.team) {
+        params.set('filter', 'team');
+        params.set('team', String(filterState.team));
+      } else if (filterState.mode === 'player' && filterState.players.length > 0) {
+        params.set('filter', 'player');
+        params.set('players', filterState.players.join(','));
+      }
+    }
+
+    const slug = getActiveTabSlug();
+    if (slug && slug !== 'overview') params.set('tab', slug);
+
+    const qs = params.toString();
+    return window.location.pathname + (qs ? '?' + qs : '');
+  }
+
+  // Gated URL writer — no-op unless live sync is enabled.
+  function syncUrl() {
+    if (!liveSyncEnabled) return;
+    history.replaceState(null, '', buildShareUrl());
+  }
+
+  // Explicit share action: build the URL from current state and copy to
+  // clipboard. Prefers the modern async Clipboard API; falls back to a hidden
+  // textarea + document.execCommand('copy') for insecure contexts (file://,
+  // plain http://). The button flashes success/error for 1500ms either way.
+  async function copyShareUrl() {
+    const url = new URL(buildShareUrl(), window.location.origin).href;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        ta.style.pointerEvents = 'none';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        if (!ok) throw new Error('execCommand copy failed');
+      }
+      flashShareButton(true);
+    } catch {
+      flashShareButton(false);
+    }
+  }
+
+  const SHARE_ICON_DEFAULT = 'bi-link-45deg';
+  const SHARE_ICON_SUCCESS = 'bi-check2';
+  const SHARE_ICON_ERROR = 'bi-exclamation-triangle';
+  let shareFlashTimer = null;
+
+  function flashShareButton(success) {
+    const btn = document.getElementById('share-url-btn');
+    if (!btn) return;
+    const icon = btn.querySelector('i');
+    if (!icon) return;
+    icon.classList.remove(SHARE_ICON_DEFAULT, SHARE_ICON_SUCCESS, SHARE_ICON_ERROR);
+    btn.classList.remove('flash-success', 'flash-error');
+    if (success) {
+      icon.classList.add(SHARE_ICON_SUCCESS);
+      btn.classList.add('flash-success');
+    } else {
+      icon.classList.add(SHARE_ICON_ERROR);
+      btn.classList.add('flash-error');
+    }
+    if (shareFlashTimer) clearTimeout(shareFlashTimer);
+    shareFlashTimer = setTimeout(() => {
+      icon.classList.remove(SHARE_ICON_SUCCESS, SHARE_ICON_ERROR);
+      icon.classList.add(SHARE_ICON_DEFAULT);
+      btn.classList.remove('flash-success', 'flash-error');
+      shareFlashTimer = null;
+    }, 1500);
+  }
+
+  // Turning ON catches the URL up to current state (one-time bypass of the
+  // gate). Turning OFF leaves the URL intact — "off" means stop tracking
+  // changes, not wipe current state. Preference persists in localStorage.
+  function setLiveSync(on) {
+    liveSyncEnabled = on;
+    localStorage.setItem('vt-url-sync', on ? 'true' : 'false');
+    const btn = document.getElementById('live-sync-toggle');
+    if (btn) {
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', String(on));
+    }
+    if (on) {
+      history.replaceState(null, '', buildShareUrl());
+    }
+  }
+
+  // Wire up topnav buttons. Init the live-sync button's visual state to match
+  // the persisted preference without writing to the URL (a page load should
+  // never write, regardless of the pref).
+  {
+    const shareBtn = document.getElementById('share-url-btn');
+    if (shareBtn) shareBtn.addEventListener('click', copyShareUrl);
+
+    const syncBtn = document.getElementById('live-sync-toggle');
+    if (syncBtn) {
+      syncBtn.classList.toggle('active', liveSyncEnabled);
+      syncBtn.setAttribute('aria-pressed', String(liveSyncEnabled));
+      syncBtn.addEventListener('click', () => setLiveSync(!liveSyncEnabled));
+    }
+  }
+
+  // Apply a previously-parsed URL state to filterState after a match has
+  // loaded. URL wins over the persist preference on initial load. Unresolved
+  // players are dropped; if the list empties, fall back to 'all'.
+  function hydrateFilterFromUrl(urlState, leaderboard) {
+    if (!urlState.filter || urlState.filter === 'all') {
+      filterState.mode = 'all';
+      filterState.players = [];
+      filterState.team = null;
+      return;
+    }
+    if (urlState.filter === 'team') {
+      if (urlState.team === '1' || urlState.team === '2') {
+        filterState.mode = 'team';
+        filterState.team = urlState.team;
+        filterState.players = [];
+        return;
+      }
+      filterState.mode = 'all';
+      filterState.players = [];
+      filterState.team = null;
+      return;
+    }
+    if (urlState.filter === 'player') {
+      const resolved = resolvePlayerTokens(urlState.players, leaderboard);
+      if (resolved.length > 0) {
+        filterState.mode = 'player';
+        filterState.players = resolved;
+        filterState.team = null;
+        return;
+      }
+      filterState.mode = 'all';
+      filterState.players = [];
+      filterState.team = null;
+      return;
+    }
+    // Unknown filter value
+    filterState.mode = 'all';
+    filterState.players = [];
+    filterState.team = null;
+  }
+
+  // Activate a tab from a pre-parsed URL state. Returns true if a valid tab
+  // slug was found and activated.
+  function activateTabFromSlug(slug, slugMap) {
     if (slug && slugMap[slug]) {
       const btn = document.getElementById(slugMap[slug]);
       if (btn) { bootstrap.Tab.getOrCreateInstance(btn).show(); return true; }
@@ -127,7 +329,7 @@
     matchTabsEl.addEventListener('shown.bs.tab', (e) => {
       const target = e.target.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
-      syncTabToUrl(btnIdToSlug(e.target.id));
+      syncUrl();
     });
   }
 
@@ -136,7 +338,7 @@
     allTabsEl.addEventListener('shown.bs.tab', (e) => {
       const target = e.target.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
-      syncTabToUrl(btnIdToSlug(e.target.id));
+      syncUrl();
     });
   }
 
@@ -478,6 +680,7 @@
     const doRender = () => renderMatchData(filtered);
     if (window.VTFx) VTFx.withViewTransition(doRender);
     else doRender();
+    syncUrl();
   }
 
   // --- Render Match Data (shared by loadMatch + applyFilter) ---
@@ -551,10 +754,15 @@
   }
 
   // --- Match Loading ---
-  async function loadMatch(file) {
+  // `urlState` is provided on initial page load only. When present, its
+  // filter/tab fields take precedence over any in-memory state or persist
+  // preference — URL is explicit user intent.
+  async function loadMatch(file, urlState) {
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
+    // Restore default preloader content in case a prior error replaced it
+    restorePreloader();
     destroyAllCharts();
     resetTabState();
 
@@ -573,8 +781,12 @@
     // Populate player picker for this match
     populatePlayerPicker(data.match.teams);
 
-    // Persistence: reconcile filter with new match roster
-    if (filterState.persist && filterState.mode === 'player' && filterState.players.length > 0) {
+    // Filter hydration: URL state wins on initial load; otherwise the
+    // persist preference governs whether filter carries across matches.
+    if (urlState) {
+      hydrateFilterFromUrl(urlState, data.leaderboard);
+      syncFilterUI();
+    } else if (filterState.persist && filterState.mode === 'player' && filterState.players.length > 0) {
       const matchNames = new Set(data.leaderboard.map(p => p.name));
       filterState.players = filterState.players.filter(n => matchNames.has(n));
       if (filterState.players.length === 0) {
@@ -595,11 +807,15 @@
     const filtered = getFilteredData(data, filterState);
     renderMatchData(filtered);
 
-    if (!activateTabFromUrl(MATCH_TAB_SLUGS)) {
+    // Initial load uses URL's tab param; subsequent in-session match switches
+    // preserve whatever tab was active. Invalid slugs fall back to overview.
+    const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
+    if (!activateTabFromSlug(tabSlug, MATCH_TAB_SLUGS)) {
       const overviewBtn = document.getElementById('tab-overview-btn');
       if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
-      syncTabToUrl('overview');
     }
+
+    syncUrl();
   }
 
   function syncFilterUI() {
@@ -623,10 +839,11 @@
     }
   }
 
-  async function loadAllMatches() {
+  async function loadAllMatches(urlState) {
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
+    restorePreloader();
     destroyAllCharts();
     resetTabState();
 
@@ -648,10 +865,10 @@
     renderCareerTable(data.career_stats);
     tabRendered['#all-tab-overview'] = true;
 
-    if (!activateTabFromUrl(ALL_TAB_SLUGS)) {
+    const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
+    if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
       const allOverviewBtn = document.getElementById('all-tab-overview-btn');
       if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
-      syncTabToUrl('overview');
     }
 
     if (window.VTFx) {
@@ -665,6 +882,8 @@
     });
 
     registerAllMatchesCharts(data);
+
+    syncUrl();
   }
 
   function renderTimelineSection(data) {
@@ -1286,6 +1505,79 @@
     return d.innerHTML;
   }
 
-  // Load first match
-  if (manifest.length > 0) loadMatch(manifest[0].file);
+  // --- Match Not Found Error State ---
+  // Captured once at init so we can restore it after showing errors.
+  const preloaderHtml = $loading.innerHTML;
+
+  function restorePreloader() {
+    if ($loading.innerHTML !== preloaderHtml) {
+      $loading.innerHTML = preloaderHtml;
+    }
+  }
+
+  function showMatchNotFound(badId) {
+    $dashboard.classList.add('d-none');
+    $allView.style.display = 'none';
+    destroyAllCharts();
+
+    const panel = document.createElement('div');
+    panel.className = 'vt-error-panel';
+    panel.innerHTML = `
+      <div class="vt-error-icon"><i class="bi bi-exclamation-triangle"></i></div>
+      <div class="vt-error-title">Match not found</div>
+      <div class="vt-error-detail"><code>${esc(badId)}</code></div>
+      <div class="vt-error-action">
+        <label for="vt-error-match-picker" class="stat-label d-block mb-2">Pick a match instead:</label>
+        <select id="vt-error-match-picker" class="form-select form-select-sm" style="max-width:320px;margin:0 auto;">
+          <option value="" disabled selected>Select a match&hellip;</option>
+          <option value="__all__">All Matches</option>
+          ${manifest.map(m => {
+            const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            return `<option value="${esc(m.file)}">${esc(m.name)} — ${shortDate}</option>`;
+          }).join('')}
+        </select>
+      </div>
+    `;
+    $loading.innerHTML = '';
+    $loading.appendChild(panel);
+    $loading.classList.remove('d-none');
+
+    panel.querySelector('#vt-error-match-picker').addEventListener('change', (e) => {
+      const val = e.target.value;
+      if (!val) return;
+      $select.value = val;
+      // One-time bypass of the live-sync gate: strip the stale bad-match URL
+      // before loading, regardless of the live-sync preference. The bad ID is
+      // actively misleading and the user has explicitly chosen a different
+      // match, so clearing is unambiguous intent.
+      history.replaceState(null, '', window.location.pathname);
+      const doLoad = () => {
+        if (val === '__all__') loadAllMatches();
+        else loadMatch(val);
+      };
+      if (window.VTFx) VTFx.withViewTransition(doLoad);
+      else doLoad();
+    });
+  }
+
+  // --- Initial Boot ---
+  // Parse URL state once, then branch to the appropriate loader.
+  const initialUrlState = parseUrlState();
+
+  if (initialUrlState.match === 'all') {
+    $select.value = '__all__';
+    loadAllMatches(initialUrlState);
+  } else if (initialUrlState.match) {
+    const entry = manifest.find(m => m.id === initialUrlState.match);
+    if (entry) {
+      $select.value = entry.file;
+      loadMatch(entry.file, initialUrlState);
+    } else {
+      showMatchNotFound(initialUrlState.match);
+    }
+  } else if (manifest.length > 0) {
+    // No match param — load first match. Still pass urlState so any filter/tab
+    // params hydrate correctly even without an explicit match.
+    loadMatch(manifest[0].file, initialUrlState);
+  }
 })();

@@ -535,14 +535,79 @@ The filtered data is stored in `currentFilteredData` — all renderers and the t
 
 A "Persist" toggle saves the filter selection across match switches. When enabled, the filter is reconciled with the new match's roster — players that don't exist in the new match are dropped.
 
-### URL Tab Parameter
+### URL Parameters
 
-The active tab is synced to the `tab` query parameter. Visiting `index.html?tab=combat` opens the Combat tab directly. Switching tabs updates the URL via `history.replaceState` (no history pollution). The `tab` param is omitted when on the default Overview tab.
+Any combination of match, filter, and tab is shareable via query parameters. All writes use `history.replaceState` (no history pollution).
 
-**Valid slugs (per-match):** `overview`, `combat`, `rivalries`, `weapons`, `assets`
-**Valid slugs (all-matches):** `overview`, `weapons-rivalries`
+**URL writes are gated by the Live Sync toggle** (topnav icon, `bi-arrow-repeat`). When OFF (default), `syncUrl()` is a no-op and the URL stays clean during normal use. When ON, every state change writes to the URL. The preference persists in `localStorage` under the `vt-url-sync` key.
+
+The Share button (topnav, `bi-link-45deg`) copies a URL representing the current state to the clipboard regardless of the Live Sync toggle — it calls `buildShareUrl()` directly. The button briefly flips to a checkmark on success or a warning on failure. The Clipboard API is used when available (`navigator.clipboard.writeText` under a secure context), with a hidden-textarea + `document.execCommand('copy')` fallback for `file://` and plain `http://` contexts.
+
+| Param | Values | Notes |
+|---|---|---|
+| `match` | match ID (e.g. `2026-04-16T01-27-48`) or `all` | Omitted -> load first match in manifest |
+| `filter` | `all` \| `team` \| `player` | Omitted or `all` means no filter |
+| `team` | `1` \| `2` | Only valid when `filter=team` |
+| `players` | comma-separated canonical names or Steam64 IDs | Only valid when `filter=player`; tokens are resolved case-insensitively |
+| `tab` | see slug tables below | Omitted when on the default Overview tab |
+
+**Valid tab slugs (per-match):** `overview`, `combat`, `rivalries`, `weapons`, `assets`
+**Valid tab slugs (all-matches):** `overview`, `weapons-rivalries`
 
 Slug-to-button mappings are defined in `MATCH_TAB_SLUGS` and `ALL_TAB_SLUGS` at the top of `js/app.js`.
+
+#### Player Identifier Resolution
+
+`leaderboard[].name` is already canonical per the pipeline (it applies `data/playerids.txt` before JSON emission). The browser does not load `playerids.txt`.
+
+- **Write:** `syncUrl()` always emits `leaderboard[].name` — readable and canonical.
+- **Read:** for each token in `players=`, `resolvePlayerTokens()` matches against the current match's leaderboard:
+  1. Tokens matching `/^\d{16,}$/` are matched against `leaderboard[].steam64` (Steam64 fallback for players not in `playerids.txt`)
+  2. Otherwise, case-insensitive match against `leaderboard[].name`
+  3. Unresolved tokens are dropped silently
+- Mixed tokens are allowed: `?players=VTrider,76561198025561228`
+
+#### Load Flow
+
+On page init, `parseUrlState()` reads all params once and the boot block branches:
+
+- `match=all` -> `loadAllMatches(urlState)`
+- `match=<valid ID>` -> `loadMatch(file, urlState)`
+- `match=<unknown ID>` -> `showMatchNotFound(badId)` renders an error panel with a match-picker dropdown built from the manifest (mirrors the topnav selector). Selecting from it triggers a normal load.
+- No `match` param -> load first match, still pass `urlState` so filter/tab hydrate correctly.
+
+Inside the loader, `hydrateFilterFromUrl()` applies the URL's filter state. **URL wins over the persist preference on initial load** — URL is explicit user intent. The `vt-filter-persist` checkbox stays at whatever the user set; the preference governs subsequent in-session match switches but not the initial URL-driven load.
+
+#### Two Independent Preferences
+
+`vt-url-sync` and `vt-filter-persist` are separate preferences with no interaction:
+
+- **`vt-url-sync`** (Live Sync toggle, topnav): governs whether state changes write to the browser URL. Defaults to off.
+- **`vt-filter-persist`** (Persist checkbox in the filter bar): governs whether the filter carries across in-session match switches. Defaults to off.
+
+A user can have either, both, or neither enabled.
+
+#### Live Sync Gate Bypasses
+
+Two specific paths bypass the `liveSyncEnabled` gate and write to the URL unconditionally:
+
+1. **`setLiveSync(true)`** — when the user turns Live Sync ON mid-session, we write the current state immediately so the URL catches up. (Turning it OFF does not touch the URL; the current URL is left intact so a refresh still preserves state, and the user can still hit Share.)
+2. **Match-not-found recovery** — when a user visits `?match=<bogus-id>` and picks a valid match from the error panel, the stale bad-match URL is cleared via `history.replaceState(null, '', pathname)` before loading. Clearing a misleading URL is the user's unambiguous intent.
+
+#### Edge Cases
+
+| Input | Behavior |
+|---|---|
+| Default home visit | URL stays clean (no params) regardless of Live Sync state; preloader shows, first match loads silently |
+| Shared URL opened, Live Sync off | Applied on load, URL preserved verbatim (even if some players unresolvable) |
+| Shared URL opened, Live Sync on | Applied, then rewritten cleanly by `syncUrl()` at end of load |
+| `?match=all&filter=team` | Filter ignored on All Matches view; `buildShareUrl()` omits it |
+| `?filter=team` missing `team=` | Falls back to `all` |
+| `?filter=player` with empty/unresolved players | Falls back to `all` |
+| Some `players=` tokens unresolved, some valid | Valid ones kept; if list empties, falls back to `all` |
+| `?tab=bogus` | Invalid slug falls back to overview via `slugMap[slug]` guard |
+| Insecure context (`file://`, plain `http://`) | Share button uses textarea + `execCommand` fallback |
+| Share clicked before first match loads | `buildShareUrl()` returns the bare pathname; harmless |
 
 ### CSS Load Order (required)
 
