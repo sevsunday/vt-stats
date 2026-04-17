@@ -705,9 +705,31 @@
     } else {
       $profile.classList.add('d-none');
       $faction.classList.remove('d-none');
-      // Show unfiltered totals for context; mark which teams are active in the filter
+      // In multi-player mode, per-team: if the team has selected players,
+      // render its subset-aggregated totals + filtered roster; otherwise
+      // fall back to the full unfiltered team totals + full roster, dimmed
+      // with the existing "Filtered out" badge via activeFactions.
+      // Team mode and All Players mode: always pass full unfiltered totals
+      // and the full roster (dim handled by activeFactions for team mode).
       const activeFactions = computeActiveFactions();
-      renderFactionScoreboard(currentData.faction_totals, currentData.match.teams, activeFactions);
+      const isMulti = filterState.mode === 'player' && filterState.players.length >= 2;
+      const t1Selected = isMulti && hasSelectedOnTeam(currentData, '1');
+      const t2Selected = isMulti && hasSelectedOnTeam(currentData, '2');
+
+      const scoreboardTotals = {
+        '1': t1Selected ? data.faction_totals['1'] : currentData.faction_totals['1'],
+        '2': t2Selected ? data.faction_totals['2'] : currentData.faction_totals['2'],
+      };
+      const scoreboardTeams = {
+        '1': t1Selected ? filterTeamRoster(currentData.match.teams['1'], filterState.players) : currentData.match.teams['1'],
+        '2': t2Selected ? filterTeamRoster(currentData.match.teams['2'], filterState.players) : currentData.match.teams['2'],
+      };
+
+      renderFactionScoreboard(scoreboardTotals, scoreboardTeams, activeFactions, {
+        multiPlayer: isMulti,
+        t1Subset: t1Selected,
+        t2Subset: t2Selected,
+      });
     }
     renderLeaderboard(data.leaderboard);
     tabRendered['#tab-overview'] = true;
@@ -1025,7 +1047,24 @@
     return active.size > 0 ? active : new Set(['1', '2']);
   }
 
-  function renderFactionScoreboard(factionTotals, teams, activeFactions) {
+  // Return a copy of a team's roster containing only players whose names are
+  // in selectedNames. Preserves original roster ordering.
+  function filterTeamRoster(roster, selectedNames) {
+    if (!roster) return [];
+    const set = new Set(selectedNames);
+    return roster.filter(p => set.has(p.name));
+  }
+
+  // True if the current filterState.players list has at least one member on
+  // the given team. Looks up against currentData's match roster (the source
+  // of truth for team membership, independent of any filtered leaderboard).
+  function hasSelectedOnTeam(sourceData, fNum) {
+    if (!sourceData || !sourceData.match || !sourceData.match.teams) return false;
+    const teamNames = new Set((sourceData.match.teams[fNum] || []).map(p => p.name));
+    return filterState.players.some(n => teamNames.has(n));
+  }
+
+  function renderFactionScoreboard(factionTotals, teams, activeFactions, opts) {
     const container = document.getElementById('faction-content');
     const f1 = factionTotals['1'] || {};
     const f2 = factionTotals['2'] || {};
@@ -1046,8 +1085,16 @@
       return null;
     };
 
-    const t1Leader = leaderName(teams['1'], 1) || 'TBD';
-    const t2Leader = leaderName(teams['2'], 6) || 'TBD';
+    // Header annotation: in multi-player mode for teams that are rendering
+    // their filtered subset, show "N selected" instead of the team-leader
+    // name. Non-subset teams (and team/all modes) keep the leader-name.
+    const o = opts || {};
+    const t1Header = (o.multiPlayer && o.t1Subset)
+      ? `${(teams['1'] || []).length} selected`
+      : (leaderName(teams['1'], 1) || 'TBD');
+    const t2Header = (o.multiPlayer && o.t2Subset)
+      ? `${(teams['2'] || []).length} selected`
+      : (leaderName(teams['2'], 6) || 'TBD');
 
     const t1Muted = !bothActive && !active.has('1');
     const t2Muted = !bothActive && !active.has('2');
@@ -1056,7 +1103,7 @@
     container.innerHTML = `
       <div class="col-md-6">
         <div class="vt-faction-panel ${t1Muted ? 'vt-faction-panel--muted' : ''}" style="border-left-color:var(--kb-primary);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Leader}</span>${t1Muted ? mutedNote : ''}</h6>
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Header}</span>${t1Muted ? mutedNote : ''}</h6>
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
@@ -1068,7 +1115,7 @@
       </div>
       <div class="col-md-6">
         <div class="vt-faction-panel ${t2Muted ? 'vt-faction-panel--muted' : ''}" style="border-left-color:var(--kb-accent);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Leader}</span>${t2Muted ? mutedNote : ''}</h6>
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Header}</span>${t2Muted ? mutedNote : ''}</h6>
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
