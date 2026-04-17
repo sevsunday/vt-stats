@@ -27,6 +27,7 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 - `statsgate/` — upstream collector source code for schema reference
 - `css/vtstats-theme.css` — premium glassmorphic theme layer: glass surfaces, Geist typography, depth shadows, animations, migrated inline styles, `--vt-*` effect variables
 - `js/vtstats-fx.js` — effects engine: animated counters, staggered entrances, tab-entrance hooks, Chart.js shadow plugin, preloader lifecycle, View Transition API
+- `js/timeline-player.js` — replay tab engine: animated Chart.js playback of `timeline` damage data with transport controls (play/pause/step/scrub/speed), running leaderboard, faction tug-of-war, bucket spotlight, momentum chip, and kill-marker plugin overlay
 
 ## Key Conventions
 

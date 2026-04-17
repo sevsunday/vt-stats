@@ -390,6 +390,24 @@ Top 5 bidirectional pairs sorted by total.
 }
 ```
 
+The same `timeline` structure drives two UIs:
+
+1. The **Combat tab** static stacked-area chart (`renderTimeline` in `js/charts.js`).
+2. The **Replay tab** animated playback (`js/timeline-player.js`, exposed as `window.VTReplay`).
+
+The Replay Player adds transport controls (play/pause, step, reset, scrub, speeds: 0.5x, 1x, 2x default, 5x, 10x, 20x), a Players/Teams mode toggle, and four live companion panels computed from cumulative prefixes of the timeline arrays:
+
+- **Running leaderboard** — cumulative `by_player[name]` up to the current bucket, sorted descending and visually reordered via CSS flex order with transitions.
+- **Faction tug-of-war** — cumulative `by_faction["1"]` vs `by_faction["2"]` as a two-segment bar.
+- **Bucket spotlight** — argmax of `by_player[*][currentIndex]` highlighting the biggest contributor in the current bucket.
+- **Momentum chip** — rolling 3-bucket sum per faction; whichever faction leads by >10% drives the arrow direction.
+
+When `kills.feed` is non-empty, a custom Chart.js plugin (registered per-chart, not globally) draws small markers at kill bucket indices computed from `(tick - tick_range[0]) / tick_rate / bucket_seconds`. The plugin only draws markers up to `currentIndex`, so kills "appear" during playback in the correct temporal order.
+
+**Lifecycle:** `VTReplay.init(container, data, match)` is idempotent — it calls `destroy()` first. Both `loadMatch()`/`loadAllMatches()`/`showMatchNotFound()` and `renderMatchData()` (the filter re-render path) call `VTReplay.destroy()` before `destroyAllCharts()` to stop the playback interval before the Chart.js instance is torn down. The tab is registered via `registerTabRenderer('#tab-replay', ...)` and follows the same lazy-render pattern as every other match tab.
+
+**Filter integration:** The Replay tab honors the existing global filter bar via the `data` argument. `getFilteredData()` already reduces `timeline.by_player` to the selected player set and passes `by_faction` through — the player consumes the result directly. Filter changes fire `renderMatchData(filtered)` which re-registers the `#tab-replay` renderer; if Replay is the active tab, `renderTabIfNeeded` re-invokes `VTReplay.init()` automatically.
+
 #### `asset_damage`
 
 ```json
@@ -622,10 +640,11 @@ Two specific paths bypass the `liveSyncEnabled` gate and write to the URL uncond
 ### JS Load Order
 
 ```html
-<script src="js/theme.js"></script>       <!-- Theme system (must be first) -->
-<script src="js/vtstats-fx.js"></script>  <!-- Effects engine (registers Chart.js plugin) -->
-<script src="js/charts.js"></script>      <!-- Chart renderers -->
-<script src="js/app.js"></script>         <!-- Main application -->
+<script src="js/theme.js"></script>           <!-- Theme system (must be first) -->
+<script src="js/vtstats-fx.js"></script>      <!-- Effects engine (registers Chart.js plugin) -->
+<script src="js/charts.js"></script>          <!-- Chart renderers -->
+<script src="js/timeline-player.js"></script> <!-- Replay tab engine (exposes window.VTReplay) -->
+<script src="js/app.js"></script>             <!-- Main application -->
 ```
 
 ---
@@ -637,7 +656,7 @@ Charts use Chart.js 4.4.7 (vendored locally). Key patterns:
 1. **Theme-aware colors**: Read `--kb-primary`, `--kb-accent`, etc. via `getComputedStyle()` at render time.
 2. **Destroy on switch**: Call `destroyAllCharts()` before rendering new match data.
 3. **Player palette**: A fixed 15-color palette for consistent player coloring within a match.
-4. **Chart types used**: Line (stacked area for timeline), Bar (horizontal for weapon meta, stacked for player weapons, horizontal for vehicle kills), Doughnut (rivalry cards, player profile dealt/received), Bar (horizontal for weapon accuracy).
+4. **Chart types used**: Line (stacked area for Combat Timeline and Replay Player, the latter with a custom kill-marker plugin), Bar (horizontal for weapon meta, stacked for player weapons, horizontal for vehicle kills), Doughnut (rivalry cards, player profile dealt/received), Bar (horizontal for weapon accuracy).
 5. **Partial data handling**: Chart renderers handle filtered/partial data gracefully. When a single player is selected, the timeline renders as a non-stacked line with point markers. Empty `weapon_meta` after filtering shows a placeholder message. Heatmaps accept the full player names array for axes while the matrix may contain only one row (single-player mode).
 6. **Shadow plugin**: `vtstats-fx.js` registers a global Chart.js plugin that adds subtle `shadowBlur` to chart datasets using `--vt-chart-shadow-blur` and `--kb-primary`.
 6. **Glass tooltips**: Custom external tooltip renderer replaces Chart.js defaults with translucent, blur-backed tooltip panels that respect the active theme.
