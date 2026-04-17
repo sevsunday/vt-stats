@@ -16,17 +16,24 @@
 
   <!-- Navbar -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom">
-    <div class="container-fluid px-3 px-md-4">
+    <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="#" id="brand-home" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
+      <!-- Docs link (desktop only). Sits left of the match-select on desktop
+           via `order-md-1` + `ms-md-auto` (which absorbs free space so this
+           and everything after packs to the right edge). Hidden on mobile,
+           where Docs is duplicated inside the collapsed burger menu below. -->
+      <a href="docs.html" class="vt-nav-icon-btn d-none d-md-inline-flex ms-md-auto order-md-1">
+        <i class="bi bi-book me-1"></i>Docs
+      </a>
+
       <!-- Always-visible primary controls (match select + burger).
-           `ms-auto` pushes this + the subsequent collapse to the right edge on
-           desktop (recreating the navbar's original brand-left / controls-right
-           layout). `order-md-1` keeps match-select before the collapse content
-           on desktop. -->
-      <div class="d-flex align-items-center gap-2 ms-auto order-md-1 vt-nav-primary">
+           On mobile `ms-auto` pushes these to the right edge; on desktop
+           `ms-md-0` cancels that so the desktop Docs link (above) handles
+           the right-push via its own `ms-md-auto`. -->
+      <div class="d-flex align-items-center gap-2 ms-auto ms-md-0 order-md-2 vt-nav-primary">
         <select id="match-select" class="form-select form-select-sm vt-match-select" style="width: auto; max-width: 220px;"></select>
         <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none" type="button"
                 data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
@@ -35,11 +42,16 @@
         </button>
       </div>
 
-      <!-- Collapsible menu -->
-      <div class="collapse navbar-collapse order-md-2" id="topnav-collapse">
+      <!-- Collapsible menu. `flex-md-grow-0` disables Bootstrap's default
+           `flex-grow: 1` on .navbar-collapse so on desktop it shrinks to its
+           content width and packs next to the primary controls on the right. -->
+      <div class="collapse navbar-collapse flex-md-grow-0 order-md-3" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a href="docs.html" class="vt-nav-icon-btn">
-            <i class="bi bi-book me-1"></i><span class="vt-nav-label">Docs</span>
+          <!-- Docs link (mobile burger only). Duplicate of the desktop
+               version above; responsive visibility hides whichever isn't
+               appropriate for the current breakpoint. -->
+          <a href="docs.html" class="vt-nav-icon-btn d-md-none">
+            <i class="bi bi-book me-1"></i>Docs
           </a>
 
           <!-- URL Sharing: Share + Live Sync Toggle -->

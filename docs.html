@@ -16,7 +16,7 @@
 
   <!-- Navbar -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom">
-    <div class="container-fluid px-3 px-md-4">
+    <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
@@ -28,15 +28,13 @@
         <i class="bi bi-list"></i>
       </button>
 
-      <!-- Collapsible menu.
-           `ms-md-auto` pushes this to the right edge on desktop (recreating
-           the navbar's original brand-left / controls-right layout). On
-           mobile the collapse drops below via `flex-basis: 100%` and the
-           auto margin has no effect. -->
-      <div class="collapse navbar-collapse ms-md-auto order-md-2" id="topnav-collapse">
+      <!-- Collapsible menu. `flex-md-grow-0` disables Bootstrap's default
+           `flex-grow: 1` on .navbar-collapse so on desktop it shrinks to its
+           content width; `ms-md-auto` then pushes it to the right edge. -->
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-2" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
           <a href="docs.html" class="vt-nav-icon-btn active" aria-current="page">
-            <i class="bi bi-book me-1"></i><span class="vt-nav-label">Docs</span>
+            <i class="bi bi-book me-1"></i>Docs
           </a>
 
           <!-- Theme Dropdown -->
