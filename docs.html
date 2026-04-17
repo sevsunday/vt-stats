@@ -15,28 +15,45 @@
 <body>
 
   <!-- Navbar -->
-  <nav class="navbar navbar-expand-sm sticky-top border-bottom">
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4">
       <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
-      <div class="d-flex align-items-center gap-2">
-        <a href="docs.html" class="vt-nav-icon-btn active" aria-current="page">
-          <i class="bi bi-book me-1"></i>Docs
-        </a>
 
-        <!-- Theme Dropdown -->
-        <div class="dropdown">
-          <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
-            <i class="bi bi-palette"></i>
+      <!-- Burger (mobile only) -->
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto order-md-3" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <!-- Collapsible menu.
+           `ms-md-auto` pushes this to the right edge on desktop (recreating
+           the navbar's original brand-left / controls-right layout). On
+           mobile the collapse drops below via `flex-basis: 100%` and the
+           auto margin has no effect. -->
+      <div class="collapse navbar-collapse ms-md-auto order-md-2" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="docs.html" class="vt-nav-icon-btn active" aria-current="page">
+            <i class="bi bi-book me-1"></i><span class="vt-nav-label">Docs</span>
+          </a>
+
+          <!-- Theme Dropdown -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i><span class="vt-nav-label ms-2">Theme</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+
+          <!-- Mode Toggle -->
+          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+            <i class="bi bi-sun-fill"></i>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
           </button>
-          <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
         </div>
-
-        <!-- Mode Toggle -->
-        <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-          <i class="bi bi-sun-fill"></i>
-        </button>
       </div>
     </div>
   </nav>

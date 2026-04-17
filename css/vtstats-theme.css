@@ -1564,3 +1564,205 @@ h4:hover .docs-heading-anchor,
         flex: 1 0 100%;
     }
 }
+
+/* ============================================================================
+   MOBILE RESPONSIVENESS
+   Topnav hamburger (<md), tab horizontal-scroll strip, match-info grid,
+   filter bar compaction, player picker clamp, container spacing.
+   ============================================================================ */
+
+/* ---------- Label helpers (hidden on desktop, shown inside collapsed nav) ---------- */
+
+.vt-nav-label {
+    display: none;
+}
+
+/* Mode label pair: show only the one matching current root mode */
+[data-mode="dark"] .vt-nav-label--mode-light,
+[data-mode="light"] .vt-nav-label--mode-dark {
+    display: none !important;
+}
+
+/* ---------- Burger button ---------- */
+
+.vt-navbar-toggler {
+    border: none;
+    box-shadow: none;
+    font-size: 1.25rem;
+    padding: 0.375rem 0.5rem;
+    line-height: 1;
+}
+
+.vt-navbar-toggler:focus,
+.vt-navbar-toggler:focus-visible {
+    box-shadow: none;
+    outline: none;
+}
+
+/* ---------- Horizontal-scroll tab strip wrapper ---------- */
+
+.vt-tab-scroll-wrap {
+    position: relative;
+}
+
+/* ---------- Breakpoint: below md (<768px) ---------- */
+
+@media (max-width: 767.98px) {
+    /* -- Navbar collapsed menu -- */
+    .navbar-collapse {
+        flex-basis: 100%;
+        margin-top: 0.5rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+    }
+
+    /* Inner flex column fills the collapsed row so stacked items align flush */
+    .vt-nav-menu {
+        width: 100%;
+    }
+
+    .vt-nav-menu .vt-nav-icon-btn {
+        justify-content: flex-start;
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+    }
+
+    .vt-nav-menu .vt-nav-label {
+        display: inline;
+    }
+
+    /* Share + Live Sync btn-group stays horizontal, fills menu width */
+    .vt-nav-menu .vt-nav-share-group {
+        width: 100%;
+    }
+
+    .vt-nav-menu .vt-nav-share-group > .btn {
+        flex: 1;
+    }
+
+    /* Theme dropdown: render its menu inline with the collapsed menu
+       so it doesn't float off the viewport edge. */
+    .vt-nav-menu .dropdown {
+        width: 100%;
+    }
+
+    .vt-nav-menu .dropdown-menu {
+        position: static !important;
+        transform: none !important;
+        inset: auto !important;
+        width: 100%;
+        min-width: 0 !important;
+        border: none;
+        box-shadow: none;
+        background: transparent !important;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        padding-left: 0.5rem;
+    }
+
+    /* Keep match-select tappable but allow some shrink in the always-on row */
+    .vt-match-select {
+        max-width: 180px !important;
+    }
+
+    /* -- Tab navigation: horizontal scroll strip -- */
+    #match-tabs,
+    #all-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scroll-snap-type: x proximity;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    #match-tabs::-webkit-scrollbar,
+    #all-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    #match-tabs .nav-item,
+    #all-tabs .nav-item {
+        flex: 0 0 auto;
+        scroll-snap-align: start;
+    }
+
+    #match-tabs .nav-link,
+    #all-tabs .nav-link {
+        white-space: nowrap;
+    }
+
+    /* Right-edge fade hint: suggests more tabs are off-screen.
+       Only applied to the 6-tab match-tabs wrapper (always overflows on
+       mobile); the 2-tab all-tabs fits without scrolling. */
+    .vt-tab-scroll-wrap:has(#match-tabs)::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 2rem;
+        pointer-events: none;
+        background: linear-gradient(to right, transparent, var(--kb-bg-body) 85%);
+        border-top-right-radius: 10px;
+        border-bottom-right-radius: 10px;
+    }
+
+    /* -- Match-info banner: 2-column grid for stat blocks -- */
+    #match-info .card-body {
+        gap: 0.75rem !important;
+        padding: 1rem;
+    }
+
+    #match-info .card-body > .d-flex:first-child {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem 1.25rem;
+        width: 100%;
+    }
+
+    #match-info .card-body > .d-flex:first-child > div {
+        min-width: 0;
+    }
+
+    /* -- Filter mode btn-group: compact so 3 buttons fit one row -- */
+    #filter-mode .btn {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.75rem;
+    }
+}
+
+/* ---------- Breakpoint: below sm (<576px) ---------- */
+
+@media (max-width: 575.98px) {
+    /* Tighter container spacing on phones */
+    #dashboard,
+    #all-matches-view {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+    }
+
+    /* Match-select shrinks further on very narrow screens */
+    .vt-match-select {
+        max-width: 150px !important;
+        font-size: 0.8rem;
+    }
+
+    /* Even tighter filter btn-group */
+    #filter-mode .btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.7rem;
+    }
+
+    /* Player picker floating dropdown: pin to both sides so it never clips.
+       The JS sets `right: Xpx` + `left: auto` to right-anchor against the
+       toggle; on phones we override both to stretch full-width with 8px
+       margins, keeping it on-screen at 320px. */
+    .vt-player-picker--floating {
+        left: 0.5rem !important;
+        right: 0.5rem !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        max-height: 60vh;
+    }
+}
