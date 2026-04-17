@@ -15,42 +15,61 @@
 <body>
 
   <!-- Navbar -->
-  <nav class="navbar navbar-expand-sm sticky-top border-bottom">
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4">
       <a class="navbar-brand fw-bold" href="#" id="brand-home" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
-      <div class="d-flex align-items-center gap-2">
-        <a href="docs.html" class="vt-nav-icon-btn">
-          <i class="bi bi-book me-1"></i>Docs
-        </a>
-        <select id="match-select" class="form-select form-select-sm" style="width: auto; max-width: 220px;"></select>
 
-        <!-- URL Sharing: Share + Live Sync Toggle -->
-        <div class="btn-group btn-group-sm" role="group" aria-label="URL sharing">
-          <button class="btn btn-outline-secondary" id="share-url-btn"
-                  title="Copy shareable link to clipboard" aria-label="Copy shareable link to clipboard">
-            <span class="me-1">Share</span><i class="bi bi-link-45deg"></i>
-          </button>
-          <button class="btn btn-outline-secondary" id="live-sync-toggle"
-                  title="Keep URL in sync with current view" aria-label="Toggle live URL sync"
-                  aria-pressed="false">
-            <i class="bi bi-broadcast"></i>
-          </button>
-        </div>
-
-        <!-- Theme Dropdown -->
-        <div class="dropdown">
-          <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
-            <i class="bi bi-palette"></i>
-          </button>
-          <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
-        </div>
-
-        <!-- Mode Toggle -->
-        <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-          <i class="bi bi-sun-fill"></i>
+      <!-- Always-visible primary controls (match select + burger).
+           `ms-auto` pushes this + the subsequent collapse to the right edge on
+           desktop (recreating the navbar's original brand-left / controls-right
+           layout). `order-md-1` keeps match-select before the collapse content
+           on desktop. -->
+      <div class="d-flex align-items-center gap-2 ms-auto order-md-1 vt-nav-primary">
+        <select id="match-select" class="form-select form-select-sm vt-match-select" style="width: auto; max-width: 220px;"></select>
+        <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none" type="button"
+                data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+                aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+          <i class="bi bi-list"></i>
         </button>
+      </div>
+
+      <!-- Collapsible menu -->
+      <div class="collapse navbar-collapse order-md-2" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="docs.html" class="vt-nav-icon-btn">
+            <i class="bi bi-book me-1"></i><span class="vt-nav-label">Docs</span>
+          </a>
+
+          <!-- URL Sharing: Share + Live Sync Toggle -->
+          <div class="btn-group btn-group-sm vt-nav-share-group" role="group" aria-label="URL sharing">
+            <button class="btn btn-outline-secondary" id="share-url-btn"
+                    title="Copy shareable link to clipboard" aria-label="Copy shareable link to clipboard">
+              <span class="me-1">Share</span><i class="bi bi-link-45deg"></i>
+            </button>
+            <button class="btn btn-outline-secondary" id="live-sync-toggle"
+                    title="Keep URL in sync with current view" aria-label="Toggle live URL sync"
+                    aria-pressed="false">
+              <i class="bi bi-broadcast"></i><span class="vt-nav-label ms-2">Live sync</span>
+            </button>
+          </div>
+
+          <!-- Theme Dropdown -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i><span class="vt-nav-label ms-2">Theme</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+
+          <!-- Mode Toggle -->
+          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+            <i class="bi bi-sun-fill"></i>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
+          </button>
+        </div>
       </div>
     </div>
   </nav>
@@ -108,26 +127,28 @@
     </div>
 
     <!-- Match Tab Navigation -->
-    <ul class="nav nav-pills mb-4" id="match-tabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="tab-overview-btn" data-bs-toggle="pill" data-bs-target="#tab-overview" type="button" role="tab" aria-controls="tab-overview" aria-selected="true">Overview</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-combat-btn" data-bs-toggle="pill" data-bs-target="#tab-combat" type="button" role="tab" aria-controls="tab-combat" aria-selected="false">Combat</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-rivalries-btn" data-bs-toggle="pill" data-bs-target="#tab-rivalries" type="button" role="tab" aria-controls="tab-rivalries" aria-selected="false">Rivalries</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#tab-weapons" type="button" role="tab" aria-controls="tab-weapons" aria-selected="false">Weapons &amp; Accuracy</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-assets-btn" data-bs-toggle="pill" data-bs-target="#tab-assets" type="button" role="tab" aria-controls="tab-assets" aria-selected="false">Assets</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tab-replay-btn" data-bs-toggle="pill" data-bs-target="#tab-replay" type="button" role="tab" aria-controls="tab-replay" aria-selected="false">Replay</button>
-      </li>
-    </ul>
+    <div class="vt-tab-scroll-wrap mb-4">
+      <ul class="nav nav-pills" id="match-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-overview-btn" data-bs-toggle="pill" data-bs-target="#tab-overview" type="button" role="tab" aria-controls="tab-overview" aria-selected="true">Overview</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-combat-btn" data-bs-toggle="pill" data-bs-target="#tab-combat" type="button" role="tab" aria-controls="tab-combat" aria-selected="false">Combat</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-rivalries-btn" data-bs-toggle="pill" data-bs-target="#tab-rivalries" type="button" role="tab" aria-controls="tab-rivalries" aria-selected="false">Rivalries</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#tab-weapons" type="button" role="tab" aria-controls="tab-weapons" aria-selected="false">Weapons &amp; Accuracy</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-assets-btn" data-bs-toggle="pill" data-bs-target="#tab-assets" type="button" role="tab" aria-controls="tab-assets" aria-selected="false">Assets</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-replay-btn" data-bs-toggle="pill" data-bs-target="#tab-replay" type="button" role="tab" aria-controls="tab-replay" aria-selected="false">Replay</button>
+        </li>
+      </ul>
+    </div>
 
     <!-- Match Tab Content -->
     <div class="tab-content" id="match-tab-content">
@@ -337,14 +358,16 @@
     </div>
 
     <!-- All Matches Tab Navigation -->
-    <ul class="nav nav-pills mb-4" id="all-tabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="all-tab-overview-btn" data-bs-toggle="pill" data-bs-target="#all-tab-overview" type="button" role="tab" aria-controls="all-tab-overview" aria-selected="true">Overview</button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons &amp; Rivalries</button>
-      </li>
-    </ul>
+    <div class="vt-tab-scroll-wrap mb-4">
+      <ul class="nav nav-pills" id="all-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="all-tab-overview-btn" data-bs-toggle="pill" data-bs-target="#all-tab-overview" type="button" role="tab" aria-controls="all-tab-overview" aria-selected="true">Overview</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons &amp; Rivalries</button>
+        </li>
+      </ul>
+    </div>
 
     <!-- All Matches Tab Content -->
     <div class="tab-content" id="all-tab-content">
