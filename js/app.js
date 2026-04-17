@@ -24,6 +24,7 @@
     rivalries: 'tab-rivalries-btn',
     weapons:   'tab-weapons-btn',
     assets:    'tab-assets-btn',
+    replay:    'tab-replay-btn',
   };
   const ALL_TAB_SLUGS = {
     overview:          'all-tab-overview-btn',
@@ -686,6 +687,7 @@
   // --- Render Match Data (shared by loadMatch + applyFilter) ---
   function renderMatchData(data) {
     currentFilteredData = data;
+    if (window.VTReplay) window.VTReplay.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -760,6 +762,12 @@
       renderAssetDamage(data.asset_damage, data.faction_totals);
     });
 
+    registerTabRenderer('#tab-replay', () => {
+      if (window.VTReplay) {
+        window.VTReplay.init(document.getElementById('tab-replay'), data, currentData.match);
+      }
+    });
+
     registerMatchCharts(data, allNames);
 
     // Render currently active non-overview tab if needed
@@ -785,6 +793,7 @@
     $loading.classList.remove('d-none');
     // Restore default preloader content in case a prior error replaced it
     restorePreloader();
+    if (window.VTReplay) window.VTReplay.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -866,6 +875,7 @@
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
     restorePreloader();
+    if (window.VTReplay) window.VTReplay.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -1536,6 +1546,12 @@
     registerChartRenderer('section-vehicle-kills', (canvasId) => {
       return renderVehicleKills(canvasId, currentData.kills.by_vehicle);
     });
+    registerChartRenderer('section-replay', (canvasId) => {
+      if (window.VTReplay && window.VTReplay.hasInstance()) {
+        return window.VTReplay.renderFullscreenSnapshot(canvasId);
+      }
+      return null;
+    });
   }
 
   function registerAllMatchesCharts(data) {
@@ -1565,6 +1581,7 @@
   function showMatchNotFound(badId) {
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
+    if (window.VTReplay) window.VTReplay.destroy();
     destroyAllCharts();
 
     const panel = document.createElement('div');

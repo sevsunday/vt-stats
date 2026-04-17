@@ -10,7 +10,7 @@ alwaysApply: true
 Static-site dashboard for BattleZone match statistics. Two-part system:
 
 1. **Python pipeline** (`scripts/process_stats.py`) reads raw `.binpb.gz` protobuf session files from `data/sessions/<username>/`, aggregates all statistics, and writes pre-computed JSON to `data/processed/`.
-2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/vtstats-fx.js`, `js/charts.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI with tabbed navigation and glassmorphic theme layer. A client-side global filter layer derives player/team-scoped views from the loaded JSON without re-fetching. No raw event parsing happens in the browser.
+2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/vtstats-fx.js`, `js/charts.js`, `js/timeline-player.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI with tabbed navigation and glassmorphic theme layer. A client-side global filter layer derives player/team-scoped views from the loaded JSON without re-fetching. No raw event parsing happens in the browser.
 
 ## Key File Locations
 
@@ -21,6 +21,7 @@ Static-site dashboard for BattleZone match statistics. Two-part system:
 - Processed output: `data/processed/*.json`
 - Theme layer: `css/vtstats-theme.css` (glass surfaces, typography, animations, migrated inline styles)
 - Effects engine: `js/vtstats-fx.js` (animated counters, entrance stagger, Chart.js shadow plugin)
+- Replay player: `js/timeline-player.js` (Replay tab engine: animated timeline playback, transport controls, companion stats)
 - Vendored fonts: `vendor/fonts/` (Geist Sans + Geist Mono variable woff2)
 - Technical spec: `DEVELOPER_GUIDE.md`
 - Upstream collector source: `statsgate/` (reference copy of [statsgate](https://github.com/VTrider/statsgate))
