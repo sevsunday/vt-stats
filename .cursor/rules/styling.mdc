@@ -78,7 +78,7 @@ Dashboard content is organized into Bootstrap nav-pills tabs with lazy rendering
 - Match switch resets all tab render flags
 - Global filter changes also trigger the same lazy re-render cycle (`destroyAllCharts` + `resetTabState` + re-register renderers)
 - Theme changes also trigger re-render of active tab charts
-- Active tab syncs to the `?tab=` URL query parameter via `history.replaceState`. Valid slugs are mapped in `MATCH_TAB_SLUGS` / `ALL_TAB_SLUGS` in `js/app.js`.
+- URL state (`?match=`, `?filter=`/`?team=`/`?players=`, `?tab=`) syncs via `history.replaceState`. `buildShareUrl()` in `js/app.js` computes the URL from current state; `syncUrl()` writes it only when the Live Sync toggle is on (`vt-url-sync` in localStorage). The topnav Share button copies the URL via `copyShareUrl()` regardless of the toggle. See `DEVELOPER_GUIDE.md` section "URL Parameters" for the full schema and the two gate-bypass paths.
 
 The filter bar, player picker dropdown, and player profile card use existing glass surface and `--kb-*` variable patterns from `vtstats-theme.css`.
 

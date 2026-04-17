@@ -473,6 +473,53 @@ body::before {
 }
 
 /* ============================================================================
+   ERROR PANEL — Shown in place of the preloader when a shareable URL
+   references a match that no longer exists. Provides a picker to recover.
+   ============================================================================ */
+
+.vt-error-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    min-height: 60vh;
+    text-align: center;
+    padding: 1.5rem;
+}
+
+.vt-error-icon {
+    font-size: 2.5rem;
+    color: var(--kb-warning);
+    line-height: 1;
+}
+
+.vt-error-title {
+    font-family: 'Geist', sans-serif;
+    font-weight: 600;
+    font-size: 1.15rem;
+    color: var(--kb-text-primary);
+    letter-spacing: -0.01em;
+}
+
+.vt-error-detail {
+    font-size: 0.85rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-error-detail code {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    padding: 0.2em 0.5em;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    color: var(--kb-primary);
+}
+
+.vt-error-action {
+    margin-top: 0.5rem;
+}
+
+/* ============================================================================
    PRELOADER STYLES
    ============================================================================ */
 
@@ -516,6 +563,80 @@ body::before {
     opacity: 0;
     transition: opacity 0.3s ease;
     pointer-events: none;
+}
+
+/* ============================================================================
+   TOPNAV ICON BUTTONS
+   Borderless, lone-icon style for lightweight nav controls (Docs, Theme,
+   Mode). Muted by default; brighten + subtle backdrop on hover/active.
+   Kept separate from Bootstrap's btn system so there's no default padding,
+   border, or background-color fight.
+   ============================================================================ */
+
+.vt-nav-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: 0.375rem 0.5rem;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--kb-text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.vt-nav-icon-btn:hover,
+.vt-nav-icon-btn:focus-visible {
+    color: var(--kb-text-primary);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    outline: none;
+}
+
+.vt-nav-icon-btn.active,
+.vt-nav-icon-btn[aria-current="page"] {
+    color: var(--kb-primary);
+}
+
+/* Suppress Bootstrap's dropdown-toggle ::after caret when we're using the
+   borderless nav-icon treatment (the palette button shows icon only). */
+.vt-nav-icon-btn.dropdown-toggle::after,
+.dropdown > .vt-nav-icon-btn::after {
+    display: none !important;
+}
+
+/* ============================================================================
+   TOPNAV URL-SYNC BUTTONS
+   Share (one-shot copy) + Live Sync toggle, grouped via .btn-group so they
+   visually read as related URL-sharing controls.
+   ============================================================================ */
+
+#share-url-btn,
+#live-sync-toggle {
+    transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+/* Live Sync "on" state — soft primary tint matches the glass aesthetic and
+   remains visible within the button group. Overrides Bootstrap's default
+   .active background on btn-outline-secondary. */
+#live-sync-toggle.active {
+    color: var(--kb-primary) !important;
+    border-color: var(--kb-primary) !important;
+    background-color: color-mix(in oklab, var(--kb-primary) 14%, transparent) !important;
+}
+
+#share-url-btn.flash-success {
+    color: var(--kb-success);
+    border-color: var(--kb-success);
+}
+
+#share-url-btn.flash-error {
+    color: var(--kb-danger);
+    border-color: var(--kb-danger);
 }
 
 /* ============================================================================
