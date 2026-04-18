@@ -1934,6 +1934,38 @@ h4:hover .docs-heading-anchor,
     color: var(--kb-info);
 }
 
+/* Bootstrap tooltips — dark-theme correction.
+   Bootstrap's defaults derive tooltip text color from --bs-body-bg, which this
+   project remaps to a dark color, collapsing tooltip text to invisible.
+   Remap the tooltip tokens directly to our --kb-* surface/text variables. */
+.tooltip {
+    --bs-tooltip-color: var(--kb-text-primary);
+    --bs-tooltip-bg: var(--kb-bg-card);
+    --bs-tooltip-max-width: 260px;
+    --bs-tooltip-padding-x: 0.6rem;
+    --bs-tooltip-padding-y: 0.45rem;
+    --bs-tooltip-font-size: 0.78rem;
+    --bs-tooltip-opacity: 1;
+}
+
+.tooltip .tooltip-inner {
+    border: 1px solid var(--kb-border-default);
+    text-align: left;
+    line-height: 1.4;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+/* Arrow color must match the background per placement — Bootstrap hardcodes
+   these and does not read --bs-tooltip-bg for the arrow. */
+.tooltip.bs-tooltip-top    .tooltip-arrow::before { border-top-color:    var(--kb-bg-card); }
+.tooltip.bs-tooltip-bottom .tooltip-arrow::before { border-bottom-color: var(--kb-bg-card); }
+.tooltip.bs-tooltip-start  .tooltip-arrow::before { border-left-color:   var(--kb-bg-card); }
+.tooltip.bs-tooltip-end    .tooltip-arrow::before { border-right-color:  var(--kb-bg-card); }
+.tooltip.bs-tooltip-auto[data-popper-placement^="top"]    .tooltip-arrow::before { border-top-color:    var(--kb-bg-card); }
+.tooltip.bs-tooltip-auto[data-popper-placement^="bottom"] .tooltip-arrow::before { border-bottom-color: var(--kb-bg-card); }
+.tooltip.bs-tooltip-auto[data-popper-placement^="left"]   .tooltip-arrow::before { border-left-color:   var(--kb-bg-card); }
+.tooltip.bs-tooltip-auto[data-popper-placement^="right"]  .tooltip-arrow::before { border-right-color:  var(--kb-bg-card); }
+
 /* Split columns (PvP / PvE breakdowns) — visually secondary vs the combined total */
 .vt-col-split,
 td.vt-col-split {

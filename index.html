@@ -197,18 +197,63 @@
                   <th>#</th>
                   <th data-sort="name">Player</th>
                   <th data-sort="faction" class="text-center">Team</th>
-                  <th data-sort="pvp_dealt" class="text-end vt-col-split">PvP</th>
-                  <th data-sort="pve_dealt" class="text-end vt-col-split">PvE</th>
-                  <th data-sort="dealt" class="text-end">Dealt</th>
-                  <th data-sort="pvp_received" class="text-end vt-col-split">PvP In</th>
-                  <th data-sort="pve_received" class="text-end vt-col-split">PvE In</th>
-                  <th data-sort="received" class="text-end">Received</th>
-                  <th data-sort="net" class="text-end">Net</th>
-                  <th data-sort="ratio" class="text-end">Ratio</th>
+                  <th data-sort="pvp_dealt" class="text-end vt-col-split">
+                    PvP
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvP Dealt</strong><br>Damage dealt directly to other human players.<br>Includes friendly-fire. Subset of Dealt."></i>
+                  </th>
+                  <th data-sort="pve_dealt" class="text-end vt-col-split">
+                    PvE
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvE Dealt</strong><br>Damage dealt to AI units and world props.<br>Equals Dealt &minus; PvP."></i>
+                  </th>
+                  <th data-sort="dealt" class="text-end">
+                    Dealt
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Asset Dmg)."></i>
+                  </th>
+                  <th data-sort="pvp_received" class="text-end vt-col-split">
+                    PvP In
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvP Received</strong><br>Damage taken from other human players.<br>Subset of Received."></i>
+                  </th>
+                  <th data-sort="pve_received" class="text-end vt-col-split">
+                    PvE In
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvE Received</strong><br>Damage taken from AI units and world/environmental sources.<br>Equals Received &minus; PvP In."></i>
+                  </th>
+                  <th data-sort="received" class="text-end">
+                    Received
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Total Damage Received</strong><br>All damage this player personally took.<br>Equals PvP In + PvE In."></i>
+                  </th>
+                  <th data-sort="net" class="text-end">
+                    Net
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Net Damage</strong><br>Dealt &minus; Received. Positive = more output than taken."></i>
+                  </th>
+                  <th data-sort="ratio" class="text-end">
+                    Ratio
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Damage Ratio</strong><br>Dealt &divide; Received.<br>&infin; shown when the player took zero damage."></i>
+                  </th>
                   <th data-sort="accuracy" class="text-end">Accuracy</th>
                   <th data-sort="kills" class="text-end">Kills</th>
                   <th data-sort="deaths" class="text-end">Deaths</th>
-                  <th data-sort="asset_dealt" class="text-end">Asset Dmg</th>
+                  <th data-sort="asset_dealt" class="text-end">
+                    Asset Dmg
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Asset Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt."></i>
+                  </th>
                   <th data-sort="activity_score" class="text-center" style="min-width:130px;">
                     <i class="bi bi-compass me-1"></i>Movement
                     <i class="bi bi-info-circle vt-col-info ms-1"
