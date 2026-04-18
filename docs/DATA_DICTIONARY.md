@@ -316,9 +316,13 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 | Displayed | JSON Path | Computed From |
 |---|---|---|
 | Player Dealt | `faction_totals[n].player_dealt` | Sum of `player_dealt` for all Steam64s in faction |
+| PvP Dealt | `faction_totals[n].pvp_dealt` | Sum of rivalry rows for all faction Steam64s (shooter > 0 AND victim > 0) |
+| PvE Dealt | `faction_totals[n].pve_dealt` | `player_dealt − pvp_dealt` — damage to AI units + world props |
 | Asset Dealt | `faction_totals[n].asset_dealt` | Sum of `asset_dealt` for all slots in faction |
 | Total Dealt | `faction_totals[n].total_dealt` | Running total from `faction_dealt` accumulator |
 | Player Received | `faction_totals[n].player_received` | Sum of `player_received` for all Steam64s in faction |
+| PvP Received | `faction_totals[n].pvp_received` | Sum of rivalry columns for all faction Steam64s (damage from other humans) |
+| PvE Received | `faction_totals[n].pve_received` | `player_received − pvp_received` — damage from AI units + world props |
 | Asset Received | `faction_totals[n].asset_received` | Sum of `asset_received` for all slots in faction |
 | Total Received | `faction_totals[n].total_received` | Running total from `faction_received` accumulator |
 | Shots | `faction_totals[n].shots` | Count of `BulletInit` events for faction |
@@ -331,8 +335,12 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 |---|---|---|
 | Player | `leaderboard[].name` | `s64_to_nick[steam64]` |
 | Team | `leaderboard[].faction` | `slot_to_faction(slot)` — slot convention |
-| Dealt | `leaderboard[].personal.dealt` | Sum of `DamageDealt.amount` where `shooter` = this player's Steam64 |
-| Received | `leaderboard[].personal.received` | Sum of `DamageReceived.amount` where `victim` = this player's Steam64 |
+| PvP | `leaderboard[].personal.pvp_dealt` | Player-on-player subset of `dealt` — sum of `rivalry_matrix[name]` (shooter > 0 AND victim > 0). Includes friendly-fire between humans. |
+| PvE | `leaderboard[].personal.pve_dealt` | `dealt − pvp_dealt` — damage to AI units and world props (single bucket) |
+| Dealt | `leaderboard[].personal.dealt` | Sum of `DamageDealt.amount` where `shooter` = this player's Steam64. Equals `pvp_dealt + pve_dealt` within ±0.1 rounding. |
+| PvP In | `leaderboard[].personal.pvp_received` | Damage received from other humans — column sum of `rivalry_matrix` for this victim |
+| PvE In | `leaderboard[].personal.pve_received` | `received − pvp_received` — damage received from AI units / world |
+| Received | `leaderboard[].personal.received` | Sum of `DamageReceived.amount` where `victim` = this player's Steam64. Equals `pvp_received + pve_received` within ±0.1 rounding. |
 | Net | `leaderboard[].personal.net` | `dealt - received` |
 | Ratio | `leaderboard[].personal.ratio` | `dealt / received` — `null` when received = 0 and dealt > 0 (displayed as ∞) |
 | Accuracy | `leaderboard[].personal.accuracy` | `shots_hit / shots_fired` from bullet events |
@@ -521,8 +529,12 @@ Each entry represents one player, sorted by personal damage dealt (descending).
 
 | Field | Type | Description |
 |---|---|---|
-| `dealt` | `number` | Total personal damage dealt |
-| `received` | `number` | Total personal damage received |
+| `dealt` | `number` | Total personal damage dealt (equals `pvp_dealt + pve_dealt` within ±0.1 rounding) |
+| `received` | `number` | Total personal damage received (equals `pvp_received + pve_received` within ±0.1 rounding) |
+| `pvp_dealt` | `number` | Player-on-player subset of `dealt`. Row sum of `rivalry_matrix[name]`. Includes friendly-fire between humans. |
+| `pve_dealt` | `number` | `dealt − pvp_dealt`. Damage to AI units and world props in one bucket. |
+| `pvp_received` | `number` | Damage received from other humans. Column sum of `rivalry_matrix` for this victim. |
+| `pve_received` | `number` | `received − pvp_received`. Damage received from AI units / world. |
 | `net` | `number` | `dealt - received` |
 | `ratio` | `number\|null` | `dealt / received`. `null` when infinite (dealt > 0, received = 0). |
 | `shots_fired` | `number` | Total `BulletInit` count |
@@ -538,9 +550,13 @@ Keyed by `"1"` and `"2"` (faction number as string).
 | Field | Type | Description |
 |---|---|---|
 | `player_dealt` | `number` | Sum of all players' personal dealt in this faction |
+| `pvp_dealt` | `number` | Player-on-player subset of `player_dealt` (sum of rivalry rows for faction Steam64s) |
+| `pve_dealt` | `number` | `player_dealt − pvp_dealt` — damage to AI units / world props |
 | `asset_dealt` | `number` | Sum of asset dealt for slots in this faction |
 | `total_dealt` | `number` | Total damage dealt by this faction (from running accumulator) |
 | `player_received` | `number` | Sum of all players' personal received |
+| `pvp_received` | `number` | Damage received from humans — sum of rivalry columns for faction Steam64s |
+| `pve_received` | `number` | `player_received − pvp_received` — damage received from AI / world |
 | `asset_received` | `number` | Sum of asset received for slots in this faction |
 | `total_received` | `number` | Total damage received by this faction |
 | `shots` | `number` | Total shots fired by this faction |
@@ -742,6 +758,10 @@ Per-player career totals, sorted by total dealt (descending).
 | `matches_played` | `number` | Number of matches this player appeared in |
 | `total_dealt` | `number` | Lifetime personal damage dealt |
 | `total_received` | `number` | Lifetime personal damage received |
+| `total_pvp_dealt` | `number` | Lifetime player-on-player damage dealt (sum of per-match `personal.pvp_dealt`) |
+| `total_pve_dealt` | `number` | Lifetime player-on-AI damage dealt (sum of per-match `personal.pve_dealt`) |
+| `total_pvp_received` | `number` | Lifetime damage received from other humans |
+| `total_pve_received` | `number` | Lifetime damage received from AI units / world |
 | `total_asset_dealt` | `number` | Lifetime asset damage dealt |
 | `overall_accuracy` | `number` | `total_shots_hit / total_shots_fired` across all matches |
 | `total_kills` | `number` | Lifetime kills from UnitDestroyed events |

@@ -50,6 +50,17 @@ The `team` field is **ALWAYS the owning player's slot number (1-10)**. It is NOT
 - `victim == 0` → **asset** received credit to the owning slot (from `team` field)
 - Both `shooter > 0` AND `victim > 0` (and shooter not skipped) → **rivalry matrix**
 
+### Derived Leaderboard Fields (PvP/PvE Split)
+
+The pipeline adds four derived fields to each `leaderboard[].personal` entry, decomposing `dealt` / `received` into human-vs-human and human-vs-non-player components:
+
+- `pvp_dealt` = `sum(rivalry[s64].values())` — player-on-player subset (shooter > 0 AND victim > 0). Includes friendly-fire between humans.
+- `pve_dealt` = `dealt − pvp_dealt` — damage to AI units + world props (single combined bucket).
+- `pvp_received` = column sum of `rivalry[*][s64]` — damage received from humans.
+- `pve_received` = `received − pvp_received` — damage received from AI units / world.
+
+Each is rounded independently to 1 decimal, so `pvp + pve` may differ from the combined `dealt`/`received` by up to ±0.1. The same split is mirrored at the faction level in `faction_totals[n].{pvp_dealt, pve_dealt, pvp_received, pve_received}` and at the career level in `all_matches.json → career_stats[].{total_pvp_dealt, total_pve_dealt, total_pvp_received, total_pve_received}`.
+
 ### Source-Level Filters
 
 These are applied by the statsgate collector before data reaches us:

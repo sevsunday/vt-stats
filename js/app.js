@@ -637,9 +637,14 @@
     for (const fNum of ['1', '2']) {
       const fPlayers = leaderboard.filter(p => String(p.faction) === fNum);
       let player_dealt = 0, player_received = 0, asset_dealt = 0, asset_received = 0, shots = 0, hits = 0;
+      let pvp_dealt = 0, pve_dealt = 0, pvp_received = 0, pve_received = 0;
       fPlayers.forEach(p => {
         player_dealt += p.personal.dealt;
         player_received += p.personal.received;
+        pvp_dealt += p.personal.pvp_dealt || 0;
+        pve_dealt += p.personal.pve_dealt || 0;
+        pvp_received += p.personal.pvp_received || 0;
+        pve_received += p.personal.pve_received || 0;
         asset_dealt += p.assets.dealt;
         asset_received += p.assets.received;
         shots += p.personal.shots_fired;
@@ -647,6 +652,8 @@
       });
       faction_totals[fNum] = {
         player_dealt, asset_dealt,
+        pvp_dealt, pve_dealt,
+        pvp_received, pve_received,
         total_dealt: player_dealt + asset_dealt,
         player_received, asset_received,
         total_received: player_received + asset_received,
@@ -1209,7 +1216,7 @@
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
             <div class="stat-card"><div class="stat-value">${((f1.accuracy || 0) * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
           </div>
-          <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f1.player_dealt || 0)} | Assets: ${fmt(f1.asset_dealt || 0)}</div>
+          <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f1.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f1.pvp_dealt || 0)} · PvE ${fmt(f1.pve_dealt || 0)})</span> | Assets: ${fmt(f1.asset_dealt || 0)}</div>
           <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['1'])}</div>
         </div>
       </div>
@@ -1221,7 +1228,7 @@
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
             <div class="stat-card"><div class="stat-value">${((f2.accuracy || 0) * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
           </div>
-          <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f2.player_dealt || 0)} | Assets: ${fmt(f2.asset_dealt || 0)}</div>
+          <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f2.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f2.pvp_dealt || 0)} · PvE ${fmt(f2.pve_dealt || 0)})</span> | Assets: ${fmt(f2.asset_dealt || 0)}</div>
           <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['2'])}</div>
         </div>
       </div>
@@ -1246,7 +1253,11 @@
         <td>${i + 1}</td>
         <td class="fw-semibold">${esc(r.name)}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
+        <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
+        <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>
         <td class="text-end">${fmt(ps.dealt)}</td>
+        <td class="text-end vt-col-split">${fmt(ps.pvp_received || 0)}</td>
+        <td class="text-end vt-col-split">${fmt(ps.pve_received || 0)}</td>
         <td class="text-end">${fmt(ps.received)}</td>
         <td class="text-end" style="${netClass}">${ps.net > 0 ? '+' : ''}${fmt(ps.net)}</td>
         <td class="text-end">${ratioStr}</td>
@@ -1278,6 +1289,10 @@
         case 'faction': va = a.faction; vb = b.faction; break;
         case 'dealt': va = a.personal.dealt; vb = b.personal.dealt; break;
         case 'received': va = a.personal.received; vb = b.personal.received; break;
+        case 'pvp_dealt': va = a.personal.pvp_dealt || 0; vb = b.personal.pvp_dealt || 0; break;
+        case 'pve_dealt': va = a.personal.pve_dealt || 0; vb = b.personal.pve_dealt || 0; break;
+        case 'pvp_received': va = a.personal.pvp_received || 0; vb = b.personal.pvp_received || 0; break;
+        case 'pve_received': va = a.personal.pve_received || 0; vb = b.personal.pve_received || 0; break;
         case 'net': va = a.personal.net; vb = b.personal.net; break;
         case 'ratio':
           va = a.personal.ratio === null ? 1e9 : Number(a.personal.ratio);

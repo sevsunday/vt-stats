@@ -1012,6 +1012,13 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         net = dealt - received
         ratio = dealt / received if received > 0 else (float("inf") if dealt > 0 else 0)
 
+        # PvP/PvE split derived from rivalry matrix (shooter > 0 AND victim > 0).
+        # PvE = remainder = damage to AI units + world props.
+        pvp_d = sum(rivalry[s64].values()) if s64 else 0.0
+        pvp_r = sum(v.get(s64, 0) for v in rivalry.values()) if s64 else 0.0
+        pve_d = max(0.0, dealt - pvp_d)
+        pve_r = max(0.0, received - pvp_r)
+
         total_fired = sum(player_shots_fired[s64].values()) if s64 else 0
         total_hit = sum(player_shots_hit[s64].values()) if s64 else 0
         accuracy = total_hit / total_fired if total_fired > 0 else 0
@@ -1057,6 +1064,10 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "personal": {
                 "dealt": round(dealt, 1),
                 "received": round(received, 1),
+                "pvp_dealt": round(pvp_d, 1),
+                "pve_dealt": round(pve_d, 1),
+                "pvp_received": round(pvp_r, 1),
+                "pve_received": round(pve_r, 1),
                 "net": round(net, 1),
                 "ratio": round(ratio, 2) if ratio != float("inf") else None,
                 "shots_fired": total_fired,
@@ -1094,15 +1105,23 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         f_asset_dealt = sum(asset_dealt.get(s, 0) for s in f_slots)
         f_player_recv = sum(player_received.get(s64, 0) for s64 in f_s64s)
         f_asset_recv = sum(asset_received.get(s, 0) for s in f_slots)
+        f_pvp_dealt = sum(rivalry[s64].get(v, 0) for s64 in f_s64s for v in rivalry[s64])
+        f_pvp_recv = sum(v.get(s64, 0) for s64 in f_s64s for v in rivalry.values())
+        f_pve_dealt = max(0.0, f_player_dealt - f_pvp_dealt)
+        f_pve_recv = max(0.0, f_player_recv - f_pvp_recv)
         f_shots = faction_shots.get(f_num, 0)
         f_hits = faction_hits.get(f_num, 0)
         f_acc = f_hits / f_shots if f_shots > 0 else 0
 
         faction_totals[str(f_num)] = {
             "player_dealt": round(f_player_dealt, 1),
+            "pvp_dealt": round(f_pvp_dealt, 1),
+            "pve_dealt": round(f_pve_dealt, 1),
             "asset_dealt": round(f_asset_dealt, 1),
             "total_dealt": round(faction_dealt.get(f_num, 0), 1),
             "player_received": round(f_player_recv, 1),
+            "pvp_received": round(f_pvp_recv, 1),
+            "pve_received": round(f_pve_recv, 1),
             "asset_received": round(f_asset_recv, 1),
             "total_received": round(faction_received.get(f_num, 0), 1),
             "shots": f_shots,
@@ -1305,6 +1324,10 @@ def build_all_matches_aggregate(all_match_data):
         "matches_played": 0,
         "total_dealt": 0,
         "total_received": 0,
+        "total_pvp_dealt": 0,
+        "total_pve_dealt": 0,
+        "total_pvp_received": 0,
+        "total_pve_received": 0,
         "total_asset_dealt": 0,
         "total_shots_fired": 0,
         "total_shots_hit": 0,
@@ -1353,6 +1376,10 @@ def build_all_matches_aggregate(all_match_data):
             c["matches_played"] += 1
             c["total_dealt"] += p["personal"]["dealt"]
             c["total_received"] += p["personal"]["received"]
+            c["total_pvp_dealt"] += p["personal"].get("pvp_dealt", 0)
+            c["total_pve_dealt"] += p["personal"].get("pve_dealt", 0)
+            c["total_pvp_received"] += p["personal"].get("pvp_received", 0)
+            c["total_pve_received"] += p["personal"].get("pve_received", 0)
             c["total_asset_dealt"] += p["assets"]["dealt"]
             c["total_shots_fired"] += p["personal"]["shots_fired"]
             c["total_shots_hit"] += p["personal"]["shots_hit"]
@@ -1448,6 +1475,10 @@ def build_all_matches_aggregate(all_match_data):
             "matches_played": c["matches_played"],
             "total_dealt": round(c["total_dealt"], 1),
             "total_received": round(c["total_received"], 1),
+            "total_pvp_dealt": round(c["total_pvp_dealt"], 1),
+            "total_pve_dealt": round(c["total_pve_dealt"], 1),
+            "total_pvp_received": round(c["total_pvp_received"], 1),
+            "total_pve_received": round(c["total_pve_received"], 1),
             "total_asset_dealt": round(c["total_asset_dealt"], 1),
             "overall_accuracy": round(acc, 3),
             "total_kills": c["total_kills"],
