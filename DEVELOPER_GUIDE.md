@@ -313,6 +313,10 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
   "personal": {
     "dealt": 75489.3,
     "received": 33462.1,
+    "pvp_dealt": 35058.7,
+    "pve_dealt": 40430.6,
+    "pvp_received": 31936.1,
+    "pve_received": 1526.0,
     "net": 42027.2,
     "ratio": 2.26,
     "shots_fired": 3700,
@@ -337,15 +341,21 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
 
 Note: `ratio` is `null` when received is 0 (infinite ratio). JS displays this as "∞". `kd_ratio` is `null` when kills and deaths are both 0 or deaths is 0. `hit_targets` maps victim display names to `{ hits, damage }` — hit count from `BulletHit` events and total player-on-player damage from the rivalry matrix. The dashboard derives Dmg/Hit (average damage per projectile hit) from these two values.
 
+**PvP/PvE split (derived):** `pvp_dealt` is the player-on-player subset of `dealt` — i.e. the row sum of `rivalry_matrix[name]` (shooter > 0 AND victim > 0, includes friendly-fire between human teammates). `pve_dealt = dealt − pvp_dealt` lumps damage to AI units and world props into a single PvE bucket. `pvp_received` / `pve_received` are the symmetric split of `received`, derived from the column sum of the rivalry matrix for this victim. Each field is rounded independently to 1 decimal, so `pvp + pve` may differ from the combined total by up to ±0.1.
+
 #### `faction_totals`
 
 ```json
 {
   "1": {
     "player_dealt": 179320.3,
+    "pvp_dealt": 111047.7,
+    "pve_dealt": 68272.6,
     "asset_dealt": 3.0,
     "total_dealt": 179323.3,
     "player_received": 137305.9,
+    "pvp_received": 132414.2,
+    "pve_received": 4891.7,
     "asset_received": 144744.7,
     "total_received": 282050.6,
     "shots": 12615,
