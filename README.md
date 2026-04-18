@@ -44,6 +44,9 @@ Then visit `http://localhost:8080`.
 - **Top Rivalries** — bidirectional damage cards with doughnut charts
 - **Shot Accuracy** — per-player table and weapon accuracy ranking
 - **AI/Structure Damage** — asset damage attribution per player and faction
+- **Replay** — animated playback of the damage timeline with transport controls (play/pause/step/scrub + 0.5x-20x speeds), a live running leaderboard, faction tug-of-war, bucket spotlight, and momentum indicator
+- **Positioning** — top-down movement heatmaps (combined + per-player small multiples with a shared viewport and shared p95 intensity scale + legend), distance-from-spawn line chart, ring histogram of time by distance band, and an animated trail player with transport controls
+- **Movement Profile** — 0-100 activity score per player, match-self-calibrated, with bands from Defensive to Aggressive; surfaces in the main leaderboard, a dedicated Movement Leaderboard, and career aggregates across all matches
 - **Fullscreen Expand** — view any chart, table, or section in a fullscreen modal
 - **44 Themes** with light/dark mode support
 

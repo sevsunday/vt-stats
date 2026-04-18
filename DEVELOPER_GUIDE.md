@@ -261,10 +261,13 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
     "date": "2026-04-16T01:27:48.000000+00:00",
     "duration_sec": 1130.7,
     "player_count": 10,
-    "submitter": "VTrider"
+    "submitter": "VTrider",
+    "has_position_data": true
   }
 ]
 ```
+
+`has_position_data` mirrors the per-match `positioning.has_position_data` flag. Frontend uses it to gate Positioning-tab UI cues (e.g. the small-multiples grid only renders when true; otherwise the empty-state card is shown).
 
 ### Per-match JSON Structure
 
@@ -281,6 +284,7 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
   "tick_range": [283, 22897],
   "tick_rate": 20,
   "player_count": 10,
+  "has_position_data": true,
   "config_mod": "1325933293.cfg",
   "snipe_count": 0,
   "teams": {
@@ -408,6 +412,32 @@ When `kills.feed` is non-empty, a custom Chart.js plugin (registered per-chart, 
 
 **Filter integration:** The Replay tab honors the existing global filter bar via the `data` argument. `getFilteredData()` already reduces `timeline.by_player` to the selected player set and passes `by_faction` through — the player consumes the result directly. Filter changes fire `renderMatchData(filtered)` which re-registers the `#tab-replay` renderer; if Replay is the active tab, `renderTabIfNeeded` re-invokes `VTReplay.init()` automatically.
 
+### Positioning Tab
+
+The `positioning` JSON block drives a dedicated tab that visualizes where players spent the match. Two UIs share the same data source, mirroring the Combat/Replay pairing for damage:
+
+1. **Static renderers** in `js/positioning-charts.js`:
+   - **Movement Leaderboard** (`renderMovementLeaderboard`) — per-player activity score bar, band pill, mean / max / path / time-in-base columns; sortable; row-hover tooltip reveals Area Covered, First Leave, Returns, P95.
+   - **Distance-from-Spawn Timeline** (`renderDistanceTimeline`) — Chart.js line chart, one series per player, `x = match time (seconds)`, `y = horizontal distance from personal spawn`. Gaps between segments so teleports don't draw straight flyovers.
+   - **Combined Top-down Heatmap** (`renderCombinedHeatmap`) — imperative 2D canvas showing summed `heatmap_grid_xz` across all players over the shared world-space viewport, with spawn markers, faction-tint halves (gated by `base_separation / map_diagonal > 0.3`), and compass rose.
+   - **Per-player Small-multiples Heatmap Grid** (`renderHeatmapGrid`) — one card per player using **shared viewport** (all cards use the same world-space extent fitted to everyone's p95 positions) and **shared p95 intensity scale** (one cell's brightness means the same thing on every card). A compact legend strip above the grid explains the visual language: diamond = spawn, color-intensity gradient = visit density, compass + per-match `~u per cell` scale.
+   - **Ring Histogram** (`renderRingHistogram`) — stacked horizontal bar per player: time spent in Inner Base / Outer Base / Front Line / Deep Push bands, where band thresholds derive from `base_separation`.
+
+2. **Animated Positioning Timeline Player** (`js/positioning-player.js`, exposed as `window.VTPositionPlayer`):
+   - Transport controls (play / pause / step back / step forward / scrub / speeds 0.5x, 1x, 2x, 5x, 10x, 20x; default 4x).
+   - **Animated top-down map** — plain 2D canvas; each player's trail polyline grows with `progressSec`, current position rendered as a pulsing dot colored by faction. Teleport segments render as gaps (no flyovers).
+   - **Animated distance chart** — Chart.js line chart synchronized to `progressSec`, drawing each player's distance-from-spawn up to the current time with a linearly-interpolated leading edge.
+   - **Live ticker** — per-player "in base / ## u out" chips updated each frame.
+   - **Sub-second interpolation** — binary-search on sparse `trail.t[]` per frame so trails are smooth at every playback speed (1 Hz sample density is sparser than rAF).
+   - Respects `prefers-reduced-motion` by falling back to per-second stepping with `setInterval`; skips sub-second interpolation.
+   - **Keyboard shortcuts** (space/arrows/0-9) are bound on tab activation and unbound on tab leave so they don't conflict with the Replay tab.
+
+**Lifecycle:** `VTPositionPlayer.init(container, data, match)` is idempotent — it calls `destroy()` first. Every teardown path in `js/app.js` that calls `VTReplay.destroy()` also calls `VTPositionPlayer.destroy()` (match switch, filter change, theme swap, load error) so playback state never leaks. The tab is registered via `registerTabRenderer('#tab-positioning', ...)` and follows the same lazy-render pattern as every other match tab.
+
+**Filter integration:** `renderPositioningTab` narrows `positioning.players` to the filtered leaderboard for the Movement Leaderboard + small-multiples highlighting, but always passes the full `positioning` block so the combined heatmap backdrop, team centroids, and opposing-team spawn markers still render for spatial context.
+
+**Empty state:** when `match.has_position_data === false`, `renderPositioningTab` toggles `#section-positioning-empty` visible and hides every other card. Legal to click the tab on any match regardless of data availability.
+
 #### `asset_damage`
 
 ```json
@@ -441,6 +471,112 @@ When `kills.feed` is non-empty, a custom Chart.js plugin (registered per-chart, 
 ```
 
 Note: `UnitDestroyed` events are not yet produced by the collector, so `kills.leaderboard`, `kills.feed`, `kills.by_vehicle`, and `kills.kill_rivalry_matrix` will be empty in current data. The structure is ready for when the collector starts emitting these events.
+
+#### `positioning`
+
+Player movement analytics derived from `UpdateTick` events. Downsampled to 1 Hz sparse samples per player. Axis convention: **+X East, +Y Up, +Z North** (left-handed). All distance math is horizontal-plane only (`sqrt(dx² + dz²)`).
+
+Top-level shape:
+
+```json
+{
+  "has_position_data": true,
+  "sample_rate_hz": 1,
+  "match_sample_count": 848,
+  "map_bounds": { "min": {"x": -553.6, "z": -552.9}, "max": {"x": 587.4, "z": 555.4} },
+  "map_diagonal": 1590.7,
+  "base_separation": 756.0,
+  "observed_max_range": 1055.1,
+  "p99_speed": 57.6,
+  "teleport_threshold": 300.0,
+  "team_base": {
+    "1": { "centroid": {"x": 288.5, "z": 256.7}, "radius": 18.0 },
+    "2": { "centroid": {"x": -283.5, "z": -237.6}, "radius": 18.0 }
+  },
+  "players": {
+    "VTrider": { /* per-player block, see below */ }
+  }
+}
+```
+
+Per-player block:
+
+```json
+{
+  "spawn": {"x": -600.0, "y": 52.0, "z": -525.0},
+  "personal_base_radius": 100.0,
+  "sample_count": 848,
+  "first_seen_sec": 0,
+  "last_seen_sec": 847,
+  "metrics": {
+    "mean_dist": 475.0,
+    "max_dist": 1024.0,
+    "p50_dist": 418.0,
+    "p90_dist": 912.0,
+    "p95_dist": 960.0,
+    "time_in_base_pct": 0.256,
+    "time_to_first_leave_sec": 5,
+    "path_length": 17154.2,
+    "path_length_per_sec": 20.25,
+    "convex_hull_area": 623670.8,
+    "bounding_box_area": 832450.0,
+    "return_to_base_count": 4,
+    "activity_score": 84,
+    "movement_band": "Aggressive"
+  },
+  "trail": {
+    "t": [0, 1, 2, 5, 6, 8, ...],
+    "x": [...], "z": [...], "y": [...],
+    "segments": [[0, 412], [413, 678], [679, 847]]
+  },
+  "heatmap_grid_xz": [[...32×32 bin counts over map_bounds...]],
+  "heatmap_polar": [[...16×8 angular×radial bin counts around spawn...]]
+}
+```
+
+Key behaviors:
+
+- `trail.t[]` is **sparse** — values may skip (player absent from an `UpdateTick` due to death/disconnect/out-of-scope). All time math iterates `t[i]` as authoritative seconds, never array index.
+- `trail.segments[]` splits the trail at teleport detections (death/respawn warps). Frontends draw one polyline per segment; renderers must not interpolate across gaps.
+- When no `UpdateTick` data is present, the block emits with `has_position_data: false`, empty `players: {}`, and nulls/zeros elsewhere. Frontend gates Positioning-tab UI off this flag.
+- Full schema with field tables, derivations, and known limitations lives in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) under "Positioning Block".
+
+#### Activity Score / Movement Profile
+
+A single 0-100 number per player summarizing how active they were across the map. Higher = more active / more map coverage. Lower = stayed at base.
+
+Formula (second pass in `_compute_positioning`):
+
+```
+activity_score = round(100 × (
+  0.5 × (1 − time_in_base_pct)
+  + 0.3 × normalized_max_dist
+  + 0.2 × normalized_path_per_sec
+))
+```
+
+Both normalizers are **match-relative p95** values (computed across all players in the match), so the score self-calibrates per match — a "Balanced" score means the same thing on any map regardless of scale or pace.
+
+Movement bands:
+
+| Score | Band | Meaning |
+|---|---|---|
+| 0-20 | Defensive | Stays at or near spawn almost the entire match |
+| 21-40 | Territorial | Orbits the base, short pushes |
+| 41-60 | Balanced | Mix of defense and offense |
+| 61-80 | Mobile | Regular rotations, meaningful time out of base |
+| 81-100 | Aggressive | Pushes deep, rarely returns, covered most of the map |
+
+Supporting details:
+
+- **Returns-count hysteresis gate**: `return_to_base_count` only increments when a player stays outside `R_base × 1.2` for ≥ 5 seconds before re-entering `R_base × 0.8`. Filters boundary-noise oscillations.
+- **Career aggregation** in `all_matches.json`:
+  - `mean_movement_score` — average across matches with positioning data
+  - `movement_score_stddev` — exposes bimodal players whose mean looks "balanced" but who alternate between camp and rotate
+  - `movement_band_dominant` — modal band
+  - `movement_band_distribution` — count per band
+  - `matches_with_positioning` — denominator (< `matches_played` when older sessions lack `UpdateTick` data)
+- Full derivation: [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) "Positioning Block" section.
 
 ### `all_matches.json` — Cross-Match Aggregate
 
@@ -569,10 +705,12 @@ The Share button (topnav, `bi-link-45deg`) copies a URL representing the current
 | `players` | comma-separated canonical names or Steam64 IDs | Only valid when `filter=player`; tokens are resolved case-insensitively |
 | `tab` | see slug tables below | Omitted when on the default Overview tab |
 
-**Valid tab slugs (per-match):** `overview`, `combat`, `rivalries`, `weapons`, `assets`
+**Valid tab slugs (per-match):** `overview`, `combat`, `rivalries`, `weapons`, `assets`, `positioning`, `replay`
 **Valid tab slugs (all-matches):** `overview`, `weapons-rivalries`
 
 Slug-to-button mappings are defined in `MATCH_TAB_SLUGS` and `ALL_TAB_SLUGS` at the top of `js/app.js`.
+
+The Replay Player's transport state (play position, speed) and the Positioning Timeline Player's transport state are **not** URL-synced. Keeping URLs small means sharing a match + filter + tab slug is enough context; detailed playback scrubbing is an in-session interaction.
 
 #### Player Identifier Resolution
 
@@ -640,11 +778,13 @@ Two specific paths bypass the `liveSyncEnabled` gate and write to the URL uncond
 ### JS Load Order
 
 ```html
-<script src="js/theme.js"></script>           <!-- Theme system (must be first) -->
-<script src="js/vtstats-fx.js"></script>      <!-- Effects engine (registers Chart.js plugin) -->
-<script src="js/charts.js"></script>          <!-- Chart renderers -->
-<script src="js/timeline-player.js"></script> <!-- Replay tab engine (exposes window.VTReplay) -->
-<script src="js/app.js"></script>             <!-- Main application -->
+<script src="js/theme.js"></script>              <!-- Theme system (must be first) -->
+<script src="js/vtstats-fx.js"></script>         <!-- Effects engine (registers Chart.js plugin) -->
+<script src="js/charts.js"></script>             <!-- Chart renderers -->
+<script src="js/positioning-charts.js"></script> <!-- Positioning tab renderers (heatmaps, movement leaderboard) -->
+<script src="js/timeline-player.js"></script>    <!-- Replay tab engine (exposes window.VTReplay) -->
+<script src="js/positioning-player.js"></script> <!-- Positioning animated trail player (exposes window.VTPositionPlayer) -->
+<script src="js/app.js"></script>                <!-- Main application -->
 ```
 
 ---
@@ -661,6 +801,7 @@ Charts use Chart.js 4.4.7 (vendored locally). Key patterns:
 6. **Shadow plugin**: `vtstats-fx.js` registers a global Chart.js plugin that adds subtle `shadowBlur` to chart datasets using `--vt-chart-shadow-blur` and `--kb-primary`.
 6. **Glass tooltips**: Custom external tooltip renderer replaces Chart.js defaults with translucent, blur-backed tooltip panels that respect the active theme.
 7. **Animation**: Default duration 1000ms with `easeOutQuart` easing.
+8. **Imperative canvas for spatial layouts**: The combined top-down heatmap, per-player small-multiples heatmaps, and the animated positioning map (Positioning Timeline Player) are drawn directly on a 2D canvas rather than through Chart.js — Chart.js doesn't cleanly express arbitrary XY trail polylines over a fitted world-space viewport with shared cross-card viewport and intensity normalization. These renderers live in `js/positioning-charts.js` and `js/positioning-player.js` and read the same `--kb-*` CSS variables at draw time so theme swaps still apply on re-render.
 
 ---
 

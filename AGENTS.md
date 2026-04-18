@@ -28,6 +28,8 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 - `css/vtstats-theme.css` — premium glassmorphic theme layer: glass surfaces, Geist typography, depth shadows, animations, migrated inline styles, `--vt-*` effect variables
 - `js/vtstats-fx.js` — effects engine: animated counters, staggered entrances, tab-entrance hooks, Chart.js shadow plugin, preloader lifecycle, View Transition API
 - `js/timeline-player.js` — replay tab engine: animated Chart.js playback of `timeline` damage data with transport controls (play/pause/step/scrub/speed), running leaderboard, faction tug-of-war, bucket spotlight, momentum chip, and kill-marker plugin overlay
+- `js/positioning-charts.js` — Positioning tab renderers: Movement Leaderboard, distance-from-spawn line chart, combined top-down heatmap, per-player small-multiples heatmap grid (shared viewport + shared p95 intensity + legend), ring histogram
+- `js/positioning-player.js` — Positioning Timeline Player: animated trail playback with transport controls, sub-second interpolation on sparse `trail.t[]`, teleport-segment gap rendering, pulsing current-position dots; exposes `window.VTPositionPlayer`
 
 ## Key Conventions
 
@@ -43,6 +45,7 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 - Players are identified by Steam64 IDs. Header maps: `s64_to_nick`, `teamnum_to_s64`, `s64_to_teamnum`.
 - Faction determined by slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
 - Session data lives in `data/sessions/<username>/*.binpb.gz`, organized by submitter.
+- Movement Profile (0-100 `activity_score` per player, career-aggregated) is derived from `UpdateTick` position samples in the pipeline. Higher = more active / covered more map. See `.cursor/rules/data-schema.mdc` for the formula and band thresholds, `docs/DATA_DICTIONARY.md` for the full positioning JSON schema.
 
 ## When Schema Changes
 
