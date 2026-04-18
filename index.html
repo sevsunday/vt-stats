@@ -157,6 +157,9 @@
           <button class="nav-link" id="tab-assets-btn" data-bs-toggle="pill" data-bs-target="#tab-assets" type="button" role="tab" aria-controls="tab-assets" aria-selected="false">Assets</button>
         </li>
         <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-positioning-btn" data-bs-toggle="pill" data-bs-target="#tab-positioning" type="button" role="tab" aria-controls="tab-positioning" aria-selected="false">Positioning</button>
+        </li>
+        <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-replay-btn" data-bs-toggle="pill" data-bs-target="#tab-replay" type="button" role="tab" aria-controls="tab-replay" aria-selected="false">Replay</button>
         </li>
       </ul>
@@ -202,6 +205,12 @@
                   <th data-sort="kills" class="text-end">Kills</th>
                   <th data-sort="deaths" class="text-end">Deaths</th>
                   <th data-sort="asset_dealt" class="text-end">Asset Dmg</th>
+                  <th data-sort="activity_score" class="text-center" style="min-width:130px;">
+                    <i class="bi bi-compass me-1"></i>Movement
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Movement Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort."></i>
+                  </th>
                   <th data-sort="fav_weapon">Fav Weapon</th>
                   <th data-sort="weapons_used" class="text-end"># Wpns</th>
                 </tr>
@@ -352,6 +361,107 @@
         </div>
       </div>
 
+      <!-- Tab: Positioning -->
+      <div class="tab-pane fade" id="tab-positioning" role="tabpanel" aria-labelledby="tab-positioning-btn">
+        <!-- Always-on intro banner explaining the Movement Profile concept -->
+        <div class="vt-info-banner mb-4" id="positioning-intro-banner">
+          <i class="bi bi-info-circle"></i>
+          <div>
+            <strong>Movement Profile (0-100)</strong> &mdash; how much a player roamed the map (high) vs. stayed near their spawn (low). Combines time out of base, farthest venture, and total ground covered. Scores are self-calibrated per match, so <em>Aggressive</em> here means the same thing on every map.
+          </div>
+        </div>
+        <!-- Empty state shown when this match has no UpdateTick data -->
+        <div class="card mb-4 d-none" id="section-positioning-empty">
+          <div class="card-body text-center py-5">
+            <div class="vt-empty-icon mb-3"><i class="bi bi-geo-alt" style="font-size: 2.5rem; color: var(--kb-text-muted);"></i></div>
+            <h5 class="mb-2">No positioning data for this match</h5>
+            <p style="color: var(--kb-text-muted); max-width: 480px; margin: 0 auto;">
+              This session predates player-position capture. Newer recordings will include movement trails, top-down heatmaps, and Movement Profile scores here.
+            </p>
+          </div>
+        </div>
+
+        <!-- Movement Leaderboard -->
+        <div class="card mb-4" id="section-movement-leaderboard">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Movement Leaderboard</h5>
+            <button class="btn btn-sm" data-expand="section-movement-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body table-responsive">
+            <table id="movement-leaderboard" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Player</th>
+                  <th class="text-center">Team</th>
+                  <th data-sort="activity_score" class="text-center" style="min-width:160px;">
+                    <i class="bi bi-compass me-1"></i>Movement Profile
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Movement Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a row for hidden details."></i>
+                  </th>
+                  <th data-sort="mean_dist" class="text-end">Mean Dist</th>
+                  <th data-sort="max_dist" class="text-end">Max Dist</th>
+                  <th data-sort="path_length" class="text-end">Path Length</th>
+                  <th data-sort="time_in_base_pct" class="text-end">Time in Base</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Distance-from-spawn timeline + Combined top-down heatmap -->
+        <div class="row g-4 mb-4">
+          <div class="col-lg-7">
+            <div class="card h-100" id="section-distance-timeline">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Distance from Spawn</h5>
+                <button class="btn btn-sm" data-expand="section-distance-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container"><canvas id="distance-timeline-chart"></canvas></div></div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="card h-100" id="section-combined-heatmap">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">All Players Heatmap</h5>
+                <button class="btn btn-sm" data-expand="section-combined-heatmap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="vt-heatmap-wrap"><canvas id="combined-heatmap-canvas"></canvas></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Per-player small-multiple top-down heatmaps -->
+        <div class="card mb-4" id="section-heatmap-grid">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Per-Player Movement Heatmaps</h5>
+            <button class="btn btn-sm" data-expand="section-heatmap-grid" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body">
+            <div class="vt-heatmap-grid" id="heatmap-grid-content"></div>
+          </div>
+        </div>
+
+        <!-- Ring histogram -->
+        <div class="card mb-4" id="section-ring-histogram">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Time by Distance Band</h5>
+            <button class="btn btn-sm" data-expand="section-ring-histogram" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="ring-histogram-chart"></canvas></div></div>
+        </div>
+
+        <!-- Positioning Timeline Player (DOM built by js/positioning-player.js on activation, Stage 3) -->
+        <div class="card mb-4" id="section-positioning-player">
+          <div class="card-header">
+            <h5 class="mb-0">Animated Positioning Timeline</h5>
+          </div>
+          <div class="card-body" id="positioning-player-content"></div>
+        </div>
+      </div>
+
       <!-- Tab: Replay (DOM built by js/timeline-player.js on activation) -->
       <div class="tab-pane fade" id="tab-replay" role="tabpanel" aria-labelledby="tab-replay-btn"></div>
 
@@ -404,6 +514,12 @@
                   <th class="text-end">Kills</th>
                   <th class="text-end">Deaths</th>
                   <th class="text-end">Asset Dealt</th>
+                  <th class="text-center" style="min-width:130px;">
+                    <i class="bi bi-compass me-1"></i>Movement Profile
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Movement Profile (career)</strong><br>Average activity score across this player's matches with positioning data. Higher&nbsp;=&nbsp;more map coverage. Hover a cell for the standard deviation and match count."></i>
+                  </th>
                   <th>Fav Weapon</th>
                 </tr>
               </thead>
@@ -458,7 +574,9 @@
   <script src="js/theme.js"></script>
   <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>
+  <script src="js/positioning-charts.js"></script>
   <script src="js/timeline-player.js"></script>
+  <script src="js/positioning-player.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

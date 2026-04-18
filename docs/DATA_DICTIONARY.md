@@ -608,6 +608,115 @@ Kill/death data from UnitDestroyed events.
 | `by_vehicle` | `array` | Vehicle types destroyed, sorted by count descending. Each: `{ odf, name, count }` |
 | `kill_rivalry_matrix` | `object` | Nested `{ "KillerName": { "VictimName": killCount } }`. Only player-on-player kills. |
 
+#### `positioning`
+
+Player movement analytics derived from `UpdateTick` events. Captured positions are downsampled to **1 Hz** in the processed JSON regardless of source `tick_rate`. When a session has no `UpdateTick` events, the block is still emitted with `has_position_data: false` and empty `players`.
+
+##### Axis Convention
+
+- **+X = East, −X = West**
+- **+Y = Up, −Y = Down**
+- **+Z = North, −Z = South** (developer-confirmed)
+- Left-handed, Y-up. All distance / path / hull math is horizontal-only: `dist = sqrt(dx² + dz²)`.
+- Rendering: screen-X = world-X (east right), screen-Y = `−world-Z` (north up).
+
+##### Top-level fields
+
+| Field | Type | Description |
+|---|---|---|
+| `has_position_data` | `boolean` | `true` when the session contained `UpdateTick` events |
+| `sample_rate_hz` | `number` | Always 1 (downsample target) |
+| `match_sample_count` | `number` | Total seconds covered by any player (drives animation duration) |
+| `map_bounds` | `object` | `{ min: {x, z}, max: {x, z} }` from observed extents |
+| `map_diagonal` | `number` | Horizontal distance between bounds min/max. Used to gate faction-tint overlays |
+| `base_separation` | `number` | Horizontal distance between team spawn centroids. Floored at `max(computed, 500, observed_max_range × 0.3)` |
+| `observed_max_range` | `number` | Max horizontal distance any player reached from their personal spawn |
+| `p99_speed` | `number` | 99th percentile of per-step speeds (non-teleport filtered) — used for diagnostics |
+| `teleport_threshold` | `number` | Self-calibrated: `max(300, p99_speed × 2)` u/s |
+| `team_base` | `object` | `"1"` / `"2"` → `{ centroid: {x, z}, radius }` or `null` for an empty team |
+| `players` | `object` | Player name → per-player positioning block (see below) |
+
+##### Per-player block
+
+| Field | Type | Description |
+|---|---|---|
+| `spawn` | `{x, y, z}` | Median of first 3 kept samples — robust against tick-0 jitter |
+| `personal_base_radius` | `number` | Clip of `team_radius × 1.1` to the `[100, 400]` range; 150 fallback |
+| `sample_count` | `number` | Per-player kept-sample count (may be less than `match_sample_count` for late joiners / early disconnects) |
+| `first_seen_sec` | `number` | First `trail.t[]` value |
+| `last_seen_sec` | `number` | Last `trail.t[]` value |
+| `metrics` | `object` | Derived metrics (see below) |
+| `trail` | `object` | Downsampled position arrays + segment breaks |
+| `heatmap_grid_xz` | `number[][]` | 32×32 bin counts over `map_bounds`. `[row][col]` where row = x-index (0 = west), col = z-index (0 = south) |
+| `heatmap_polar` | `number[][]` | 16 angular × 8 radial bin counts around personal spawn. Angular bin 0 = due East (+X), increasing counter-clockwise. Radial bins span `0 .. p95_dist` |
+
+##### Per-player `metrics`
+
+All distances computed on the `(x, z)` horizontal plane against the player's personal spawn.
+
+| Metric | Type | Description |
+|---|---|---|
+| `mean_dist` | `number` | Arithmetic mean of per-sample distances from spawn |
+| `max_dist` | `number` | Farthest horizontal distance from spawn |
+| `p50_dist`, `p90_dist`, `p95_dist` | `number` | Percentile distances |
+| `time_in_base_pct` | `number` | Fraction of this player's samples with `dist < personal_base_radius`. Denominator is **per-player** `sample_count`, not match total |
+| `time_to_first_leave_sec` | `number \| null` | First `t` where `dist > personal_base_radius`; `null` if never left |
+| `path_length` | `number` | Sum of non-teleport deltas |
+| `path_length_per_sec` | `number` | `path_length / (last_seen − first_seen)`. Uses observed presence duration |
+| `convex_hull_area` | `number` | Area of convex hull of all positions. 0 when `sample_count < 3` |
+| `bounding_box_area` | `number` | Axis-aligned bounding box area. 0 when `sample_count < 2` |
+| `return_to_base_count` | `number` | Hysteresis-counted re-entries: cross `R_base × 1.2` out, **stay outside ≥ 5 seconds**, then re-enter past `R_base × 0.8`. Post-teleport re-entries excluded. The min-outside gate filters boundary-noise oscillations |
+| `activity_score` | `number` | 0–100. **Higher = more active / more map coverage; lower = stayed at base.** `round(100 × (0.5 × (1 − time_in_base_pct) + 0.3 × normalized_max_dist + 0.2 × normalized_path_per_sec))` where `normalized_max_dist = min(max_dist / p95_max_dist_in_match, 1.0)` and `normalized_path_per_sec = min(path_length_per_sec / p95_path_per_sec_in_match, 1.0)`. p95 is computed across all players in this match, making the score self-calibrate per match (so spread is meaningful even on tightly contested or sluggish games) |
+| `movement_band` | `string` | Bucketed `activity_score`: 0-20 Defensive, 21-40 Territorial, 41-60 Balanced, 61-80 Mobile, 81-100 Aggressive |
+
+##### Per-player `trail`
+
+| Field | Type | Description |
+|---|---|---|
+| `t` | `number[]` | Sparse per-sample seconds-from-match-start. May skip values if the player was absent from an `UpdateTick` (dead, disconnected, out of scope) |
+| `x` | `number[]` | Per-sample world X (east/west) |
+| `z` | `number[]` | Per-sample world Z (north/south) |
+| `y` | `number[]` | Per-sample world Y (up/down). Stored but not used by v1 metrics; available for future elevation features |
+| `segments` | `[number, number][]` | Index ranges `[start, end]` (inclusive) split at teleport detections. Frontend draws one polyline per segment; the first sample of each post-teleport segment is excluded from `return_to_base_count` |
+
+##### Teleport detection
+
+Teleports happen when a player dies and respawns: the next `UpdateTick` can "jump" hundreds of units instantly. Left uncorrected these jumps inflate `path_length` and draw spurious lines across the map.
+
+The threshold is **self-calibrated per match**: compute per-step speeds across all players, take the 99th percentile of values below the floor (`300 u/s`), then set `teleport_threshold = max(300, p99 × 2)`. Steps exceeding the threshold are:
+
+- Excluded from `path_length`
+- Recorded as a segment break in `trail.segments`
+- First re-entry of each new segment excluded from `return_to_base_count`
+
+But still counted in `time_in_base_pct` because the player genuinely was at their base during the respawn window.
+
+##### `base_separation` derivation
+
+Used as the scale unit that makes `activity_score` comparable across maps of different sizes.
+
+1. Compute each team's spawn centroid from its players' personal spawns (median-of-first-3-samples).
+2. `computed_separation = horizontal_dist(team1_centroid, team2_centroid)`.
+3. Final value: `max(computed_separation, 500, observed_max_range × 0.3)` — three-way floor protects against maps where both teams spawn close together (FFA / mod variants).
+
+If one team has zero populated spawns, `team_base[n] = null` and the computed separation falls back to the safety floor.
+
+##### Movement band thresholds
+
+| `activity_score` | Band | Interpretation |
+|---|---|---|
+| 0–20 | Defensive | Stays at or near spawn almost the entire match |
+| 21–40 | Territorial | Orbits the base, short pushes |
+| 41–60 | Balanced | Mix of defense and offense |
+| 61–80 | Mobile | Regular rotations, meaningful time out of base |
+| 81–100 | Aggressive | Pushes deep, rarely returns, high path length |
+
+##### Known limitations
+
+- **Pilot-eject deflates "active" reading.** Foot speed (~5 u/s) is well below vehicle speed; frequent ejectors score less active than their play warrants. V1 does not filter by `PlayerState.odf`.
+- **`trail.t[]` is sparse.** Players can be absent from `UpdateTick` events (dead, disconnected, out of sim scope). Renderers must iterate using `t[i]` as authoritative time, not array index.
+- **Unit scale is map-specific.** BZ "world units" are not meters. All thresholds scale with `base_separation`, so activity_score is unit-agnostic.
+
 ### all_matches.json (Cross-Match Aggregate)
 
 Only generated when more than one match is processed.

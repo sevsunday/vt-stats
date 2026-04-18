@@ -1766,3 +1766,237 @@ h4:hover .docs-heading-anchor,
         max-height: 60vh;
     }
 }
+
+/* ============================================================================
+   POSITIONING TAB
+   Movement Profile: top-down heatmaps, radial small multiples, score bars.
+   Honors the same glass + kb-* theme system as the rest of the dashboard.
+   ============================================================================ */
+
+/* Movement score cell in main leaderboard + movement leaderboard */
+.vt-movement-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 110px;
+}
+
+.vt-movement-cell-top {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    justify-content: space-between;
+}
+
+.vt-movement-score {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.vt-movement-band-label {
+    color: var(--kb-text-muted);
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+}
+
+.vt-movement-bar {
+    height: 4px;
+    background: var(--kb-border-subtle);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.vt-movement-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 300ms ease;
+}
+
+.vt-movement-chip {
+    display: inline-block;
+    padding: 0 0.4em;
+    border-radius: 4px;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+
+/* Heatmap canvas wrappers */
+.vt-heatmap-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    max-height: 520px;
+}
+
+.vt-heatmap-wrap canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 8px;
+    border: 1px solid var(--kb-border-subtle);
+}
+
+/* Per-player small-multiples grid */
+.vt-heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.vt-heatmap-grid-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.5rem;
+    border-radius: 8px;
+    background: var(--kb-bg-subtle);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-heatmap-grid-title {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+}
+
+.vt-heatmap-small {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+}
+
+.vt-heatmap-small canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    border-radius: 6px;
+}
+
+/* Empty-state card */
+.vt-empty-icon {
+    opacity: 0.45;
+}
+
+/* ============================================================================
+   POSITIONING POLISH PASS
+   Intro banner, info icons on column headers, band pill chip.
+   ============================================================================ */
+
+.vt-info-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--kb-info) 10%, var(--kb-bg-card));
+    border: 1px solid color-mix(in oklab, var(--kb-info) 30%, transparent);
+    color: var(--kb-text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.vt-info-banner > i.bi {
+    color: var(--kb-info);
+    font-size: 1.1rem;
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+}
+
+.vt-info-banner strong {
+    color: var(--kb-text-primary);
+    font-weight: 600;
+}
+
+.vt-info-banner em {
+    color: var(--kb-text-primary);
+    font-style: normal;
+    font-weight: 600;
+}
+
+/* Info icon on column headers */
+.vt-col-info {
+    color: var(--kb-text-muted);
+    font-size: 0.85em;
+    cursor: help;
+    transition: color 0.15s ease;
+    vertical-align: baseline;
+}
+
+.vt-col-info:hover {
+    color: var(--kb-info);
+}
+
+/* Movement band pill (replaces the muted band-label text) */
+.vt-movement-band-pill {
+    padding: 0.1em 0.5em;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+
+.vt-sort-caret {
+    color: var(--kb-info);
+    font-size: 0.75em;
+    margin-left: 0.15em;
+    vertical-align: baseline;
+}
+
+/* ============================================================================
+   HEATMAP LEGEND
+   Compact strip rendered above the per-player small-multiples grid.
+   Spans the full grid row via grid-column: 1 / -1 so it sits above the cards.
+   ============================================================================ */
+
+.vt-heatmap-legend {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    padding: 0.5rem 0.25rem 0.75rem;
+    margin-bottom: 0.5rem;
+    color: var(--kb-text-muted);
+    font-size: 0.75rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.vt-heatmap-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.vt-heatmap-legend-diamond {
+    width: 8px;
+    height: 8px;
+    background: var(--kb-info);
+    transform: rotate(45deg);
+    display: inline-block;
+}
+
+.vt-heatmap-legend-gradient {
+    display: inline-block;
+    width: 80px;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(
+        to right,
+        color-mix(in oklab, var(--kb-info) 10%, transparent),
+        color-mix(in oklab, var(--kb-info) 85%, transparent)
+    );
+}
+
+.vt-heatmap-legend-label {
+    font-size: 0.7rem;
+}
