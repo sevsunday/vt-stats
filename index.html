@@ -298,6 +298,13 @@
             </div>
           </div>
         </div>
+        <div class="card mb-4" id="section-faction-radar">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Team Performance Radar</h5>
+            <button class="btn btn-sm" data-expand="section-faction-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="faction-radar-canvas"></canvas></div></div>
+        </div>
         <div class="row g-4 mb-4">
           <div class="col-lg-6">
             <div class="card h-100" id="section-kill-feed">
@@ -322,6 +329,27 @@
 
       <!-- Tab: Rivalries -->
       <div class="tab-pane fade" id="tab-rivalries" role="tabpanel" aria-labelledby="tab-rivalries-btn">
+        <div class="card mb-4" id="section-rivalry-radar">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Rivalry Radar</h5>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="rivalry-radar-custom-toggle" type="button">Custom&hellip;</button>
+              <button class="btn btn-sm" data-expand="section-rivalry-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="vt-radar-custom-picker d-none mb-3" id="rivalry-radar-custom-picker">
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <span class="small" style="color:var(--kb-text-muted);">Compare:</span>
+                <select class="form-select form-select-sm vt-radar-picker-select" id="rivalry-radar-pick-a" aria-label="First player"></select>
+                <span class="small" style="color:var(--kb-text-muted);">vs</span>
+                <select class="form-select form-select-sm vt-radar-picker-select" id="rivalry-radar-pick-b" aria-label="Second player"></select>
+              </div>
+            </div>
+            <div class="chart-container"><canvas id="rivalry-radar-canvas"></canvas></div>
+            <p class="small mt-2 mb-0 d-none vt-radar-hint" id="rivalry-radar-hint">Pick two different players to compare.</p>
+          </div>
+        </div>
         <div class="card mb-4" id="section-heatmap">
           <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0">Rivalry Heatmap</h5>
@@ -545,6 +573,27 @@
 
       <!-- All Tab: Overview -->
       <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
+        <div class="card mb-4" id="section-career-radar">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Career Radar</h5>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="career-radar-compare-toggle" type="button">Compare</button>
+              <button class="btn btn-sm" data-expand="section-career-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="vt-radar-custom-picker mb-3" id="career-radar-picker">
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <span class="small" style="color:var(--kb-text-muted);">Player:</span>
+                <select class="form-select form-select-sm vt-radar-picker-select" id="career-radar-pick-a" aria-label="First player"></select>
+                <span class="small d-none vt-career-radar-vs" style="color:var(--kb-text-muted);">vs</span>
+                <select class="form-select form-select-sm vt-radar-picker-select d-none" id="career-radar-pick-b" aria-label="Second player"></select>
+              </div>
+            </div>
+            <div class="chart-container"><canvas id="career-radar-canvas"></canvas></div>
+            <p class="small mt-2 mb-0 d-none vt-radar-hint" id="career-radar-hint">Need at least two players in career stats to compare.</p>
+          </div>
+        </div>
         <div class="card mb-4" id="section-career">
           <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0">Career Leaderboard</h5>
@@ -623,6 +672,7 @@
   <script src="js/theme.js"></script>
   <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>
+  <script src="js/charts-radar.js"></script>
   <script src="js/positioning-charts.js"></script>
   <script src="js/timeline-player.js"></script>
   <script src="js/positioning-player.js"></script>

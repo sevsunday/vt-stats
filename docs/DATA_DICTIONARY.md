@@ -383,6 +383,35 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 | Vehicle names | `kills.by_vehicle[].name` | Vehicle ODF with `.odf` stripped and title-cased |
 | Destruction count | `kills.by_vehicle[].count` | Count of `UnitDestroyed` events per `victim_odf` |
 
+### Player Performance Radar (spiderweb)
+
+Seven-axis normalized shape chart, rendered in four modes across Overview (single), Rivalries (compare), Combat (team), and All Matches (career). All axes normalize to the range 0–100 so shapes are directly comparable within a single polygon and across overlaid polygons. Values closer to the outer ring are always "better" — the Survivability axis inverts damage-received internally so low `received` reads as a wide shape, not a pinched one.
+
+| Axis | Source field | Normalizer | Tooltip content |
+|---|---|---|---|
+| Damage Dealt | `leaderboard[].personal.dealt` | match max of `dealt` (match-level) · career max of `total_dealt` (career-level) | Raw damage |
+| Accuracy | `leaderboard[].personal.accuracy` · `career_stats[].overall_accuracy` | already 0–1 | Percentage |
+| Kills | `leaderboard[].kills` · `career_stats[].total_kills` | match max of `kills` (floor 1) · career max | Raw count + derived K/D |
+| Survivability | `leaderboard[].personal.received` · `career_stats[].total_received` | `1 − received / max(received)` | Received damage + deaths |
+| Mobility | `positioning.players[name].metrics.activity_score` | `/ 100` | Score + movement band. 0 with "no position data" footnote when `positioning.has_position_data === false` or in career mode (no aggregate is shipped) |
+| Weapon Diversity | `leaderboard[].personal.weapons_used` · `len(career_stats[].weapon_breakdown)` | match max of `weapons_used` (floor 1) · career max | Count + `fav_weapon` |
+| PvP Share | `personal.pvp_dealt / personal.dealt` · `career_stats[].total_pvp_dealt / total_dealt` | already 0–1 | PvP dealt + PvE dealt |
+
+**Mode-specific details:**
+
+| Mode | Home | Data source | Pair selection |
+|---|---|---|---|
+| single | Overview player profile card | Unfiltered `currentData` so the ghost median reflects the whole match roster | N/A — follows the selected player |
+| compare | Rivalries tab (`#section-rivalry-radar`) | Client-filtered `data` | Click a top-rivalry card to drill in (default = `top_rivalries[0]`); **Custom...** reveals two dropdowns for arbitrary pairs. On filter change the selection reconciles against the filtered roster with fallback to the first visible `top_rivalries[]` entry |
+| team | Combat tab (`#section-faction-radar`) | Client-filtered `data` | Aggregated from `faction_totals` + per-faction leaderboard subsets. Mobility = mean `activity_score` across faction members with positioning data |
+| career | All Matches tab (`#section-career-radar`) | `all_matches.json → career_stats[]` | Single mode with ghost median by default; the **Compare** toggle reveals a second dropdown. Mobility always 0 (no career-level aggregate) |
+
+**Empty states:**
+
+- Zero players in view → the canvas draws "No player data for current selection." and persists the canvas element so subsequent renders can recover.
+- Same player picked twice in compare mode → falls through to a single polygon with an inline hint.
+- Career tab with fewer than 2 players → Compare toggle is disabled and the median overlay is suppressed.
+
 ### Replay Tab — Timeline Player
 
 Animated playback of the same `timeline` data shown on the Combat tab, with transport controls and live companion stats.

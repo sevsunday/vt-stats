@@ -350,6 +350,16 @@
   let filterState = { mode: 'all', players: [], team: null, persist: false };
   let timelineMode = 'player';
   let sortState = { key: 'dealt', asc: false };
+  // Currently selected pair for the compare-mode radar on the Rivalries tab.
+  // Reset on match switch; reconciled against the filtered leaderboard on
+  // filter change, falling back to the first visible top_rivalries entry.
+  let rivalryRadarPair = { a: null, b: null };
+  // Whether the Custom... picker is expanded. Persists across re-renders of
+  // the Rivalries tab but resets on match switch.
+  let rivalryRadarCustom = false;
+  // Career Radar state (All Matches tab). Persists across All Matches re-entries
+  // within a session. Reset by loadAllMatches on fresh data loads.
+  let careerRadarState = { a: null, b: null, compare: false };
 
   // Restore persist preference
   if (localStorage.getItem('vt-filter-persist') === 'true') {
@@ -750,11 +760,15 @@
     registerTabRenderer('#tab-combat', () => {
       renderTimelineSection(data);
       renderWeaponMeta('weapon-meta-chart', data.weapon_meta);
+      if (typeof renderPlayerRadar === 'function') {
+        renderPlayerRadar('faction-radar-canvas', data, { mode: 'team' });
+      }
       renderKillFeed(data.kills, currentData.match.tick_rate, currentData.match.tick_range[0]);
       renderVehicleKills('vehicle-kills-chart', currentData.kills.by_vehicle);
     });
 
     registerTabRenderer('#tab-rivalries', () => {
+      renderRivalryRadar(data);
       renderHeatmap(data.rivalry_matrix, isSingle ? allNames : data.leaderboard.map(p => p.name));
       renderRivalries(data.top_rivalries);
       renderKillHeatmap(data.kills.kill_rivalry_matrix, isSingle ? allNames : data.leaderboard.map(p => p.name));
@@ -811,6 +825,10 @@
     if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
+    // Reset Rivalry Radar state on match switch so each match starts fresh
+    // on its own top_rivalries[0]. Preserved across filter changes.
+    rivalryRadarPair = { a: null, b: null };
+    rivalryRadarCustom = false;
 
     let data;
     try {
@@ -909,8 +927,16 @@
     $loading.classList.add('d-none');
     $allView.style.display = 'block';
 
+    // Reset Career Radar state to defaults for a fresh All Matches load.
+    // Dropdown values will re-default from career_stats[0] in the renderer.
+    careerRadarState = { a: null, b: null, compare: false };
+
     renderAggMeta(data.meta);
     renderCareerTable(data.career_stats);
+    renderCareerRadar(data);
+    // Stash the aggregate data on window so the Career Radar event handlers
+    // can re-render without having to thread the object through tab renderers.
+    window.__vtAllMatchesData = data;
     tabRendered['#all-tab-overview'] = true;
 
     const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
@@ -1107,6 +1133,7 @@
           <div class="stat-card"><div class="stat-value">${player.deaths || 0}</div><div class="stat-label">Deaths</div></div>
           <div class="stat-card"><div class="stat-value">${kdStr}</div><div class="stat-label">K/D</div></div>
           <div class="vt-profile-chart-wrap"><canvas id="profile-doughnut"></canvas></div>
+          <div class="vt-profile-radar-wrap"><canvas id="radar-profile-canvas"></canvas></div>
         </div>
         <div class="d-flex flex-wrap gap-2 mb-2">
           <span class="badge bg-secondary">${esc(ps.fav_weapon)}</span>
@@ -1132,6 +1159,17 @@
         },
       });
       activeCharts.push(chart);
+    }
+
+    // Single-mode player radar - normalized composite alongside the doughnut.
+    // Consumes fullData (unfiltered) so normalizers reflect the whole match
+    // roster, giving the single polygon a stable "vs the match" frame.
+    if (typeof renderPlayerRadar === 'function') {
+      renderPlayerRadar('radar-profile-canvas', fullData, {
+        mode: 'single',
+        focusNames: [player.name],
+        showMedian: true,
+      });
     }
   }
 
@@ -1364,9 +1402,16 @@
       container.innerHTML = '<p style="color:var(--kb-text-muted)">No rivalries for this selection.</p>';
       return;
     }
+    const active = rivalryRadarPair;
     rivalries.forEach(r => {
       const card = document.createElement('div');
-      card.className = 'rivalry-card d-flex align-items-center gap-3 p-3 mb-3 rounded';
+      const isActive = active && active.a && active.b &&
+        ((active.a === r.a && active.b === r.b) || (active.a === r.b && active.b === r.a));
+      card.className = 'rivalry-card vt-rivalry-card--interactive d-flex align-items-center gap-3 p-3 mb-3 rounded' +
+        (isActive ? ' is-active' : '');
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.dataset.rivalryPair = `${r.a}|${r.b}`;
       const info = document.createElement('div');
       info.className = 'flex-grow-1';
       info.innerHTML = `
@@ -1383,6 +1428,79 @@
       card.appendChild(chartWrap);
       container.appendChild(card);
       renderRivalryDoughnut(chartWrap, r);
+    });
+  }
+
+  // Rivalry Radar (compare mode). Persists the selected pair in
+  // rivalryRadarPair across filter changes, reconciling against the filtered
+  // roster and falling back to the first visible top_rivalries entry.
+  function renderRivalryRadar(data) {
+    const canvas = document.getElementById('rivalry-radar-canvas');
+    if (!canvas) return;
+
+    const names = data.leaderboard.map(p => p.name);
+    const namesInView = new Set(names);
+    const topRivs = (data.top_rivalries || []).filter(r =>
+      namesInView.has(r.a) && namesInView.has(r.b)
+    );
+
+    const pairStillValid = rivalryRadarPair.a && rivalryRadarPair.b &&
+      namesInView.has(rivalryRadarPair.a) && namesInView.has(rivalryRadarPair.b) &&
+      rivalryRadarPair.a !== rivalryRadarPair.b;
+    if (!pairStillValid) {
+      if (topRivs.length) {
+        rivalryRadarPair = { a: topRivs[0].a, b: topRivs[0].b };
+      } else if (names.length >= 2) {
+        rivalryRadarPair = { a: names[0], b: names[1] };
+      } else {
+        rivalryRadarPair = { a: names[0] || null, b: null };
+      }
+    }
+
+    // Populate Custom... dropdowns from the current match roster
+    const selA = document.getElementById('rivalry-radar-pick-a');
+    const selB = document.getElementById('rivalry-radar-pick-b');
+    const buildOpts = (sel, selectedName) => {
+      if (!sel) return;
+      sel.innerHTML = names.map(n =>
+        `<option value="${esc(n)}"${n === selectedName ? ' selected' : ''}>${esc(n)}</option>`
+      ).join('');
+    };
+    buildOpts(selA, rivalryRadarPair.a);
+    buildOpts(selB, rivalryRadarPair.b);
+
+    const picker = document.getElementById('rivalry-radar-custom-picker');
+    if (picker) picker.classList.toggle('d-none', !rivalryRadarCustom);
+
+    const samePair = rivalryRadarPair.a && rivalryRadarPair.b &&
+      rivalryRadarPair.a === rivalryRadarPair.b;
+    const tooFewForCompare = names.length < 2;
+    const hint = document.getElementById('rivalry-radar-hint');
+    if (hint) {
+      hint.classList.toggle('d-none', !(samePair || tooFewForCompare));
+      hint.textContent = tooFewForCompare
+        ? 'Need at least two players in view to compare.'
+        : 'Pick two different players to compare.';
+    }
+
+    if (typeof renderPlayerRadar === 'function') {
+      renderPlayerRadar('rivalry-radar-canvas', data, {
+        mode: 'compare',
+        focusNames: [rivalryRadarPair.a, rivalryRadarPair.b],
+      });
+    }
+  }
+
+  // Sync .is-active outline on all currently rendered rivalry cards to match
+  // the selected rivalryRadarPair. Cheap alternative to re-running
+  // renderRivalries (which would destroy/recreate the mini doughnuts).
+  function syncRivalryCardActive() {
+    const cards = document.querySelectorAll('#rivalries-container .vt-rivalry-card--interactive');
+    const a = rivalryRadarPair.a, b = rivalryRadarPair.b;
+    cards.forEach(card => {
+      const [ca, cb] = (card.dataset.rivalryPair || '').split('|');
+      const match = a && b && ((ca === a && cb === b) || (ca === b && cb === a));
+      card.classList.toggle('is-active', !!match);
     });
   }
 
@@ -1599,6 +1717,87 @@
     ensureTooltips(document.getElementById('career-table'));
   }
 
+  // Career Radar (All Matches tab). Supports single mode (with ghost median)
+  // and compare mode (two players). State persists in careerRadarState across
+  // All Matches re-entries; reset in loadAllMatches on each fetch.
+  function renderCareerRadar(data) {
+    const canvas = document.getElementById('career-radar-canvas');
+    if (!canvas) return;
+
+    const stats = (data && data.career_stats) || [];
+    const toggleBtn = document.getElementById('career-radar-compare-toggle');
+    const vsLabel = document.querySelector('.vt-career-radar-vs');
+    const selB = document.getElementById('career-radar-pick-b');
+    const hint = document.getElementById('career-radar-hint');
+
+    if (!stats.length) {
+      if (toggleBtn) toggleBtn.disabled = true;
+      if (hint) {
+        hint.textContent = 'No career data available.';
+        hint.classList.remove('d-none');
+      }
+      if (typeof renderPlayerRadar === 'function') {
+        renderPlayerRadar('career-radar-canvas', data, { mode: 'career' });
+      }
+      return;
+    }
+    if (toggleBtn) toggleBtn.disabled = stats.length < 2;
+
+    const names = stats.map(c => c.name);
+    const valid = new Set(names);
+
+    if (!careerRadarState.a || !valid.has(careerRadarState.a)) {
+      careerRadarState.a = names[0];
+    }
+    if (careerRadarState.compare) {
+      if (!careerRadarState.b || !valid.has(careerRadarState.b) || careerRadarState.b === careerRadarState.a) {
+        careerRadarState.b = names.find(n => n !== careerRadarState.a) || null;
+      }
+    }
+    if (stats.length < 2 && careerRadarState.compare) {
+      careerRadarState.compare = false;
+    }
+
+    const selA = document.getElementById('career-radar-pick-a');
+    const buildOpts = (sel, selectedName) => {
+      if (!sel) return;
+      sel.innerHTML = names.map(n =>
+        `<option value="${esc(n)}"${n === selectedName ? ' selected' : ''}>${esc(n)}</option>`
+      ).join('');
+    };
+    buildOpts(selA, careerRadarState.a);
+    buildOpts(selB, careerRadarState.b);
+
+    if (vsLabel) vsLabel.classList.toggle('d-none', !careerRadarState.compare);
+    if (selB) selB.classList.toggle('d-none', !careerRadarState.compare);
+    if (toggleBtn) toggleBtn.classList.toggle('active', careerRadarState.compare);
+
+    const samePair = careerRadarState.compare && careerRadarState.a &&
+      careerRadarState.b && careerRadarState.a === careerRadarState.b;
+    if (hint) {
+      if (samePair) {
+        hint.textContent = 'Pick two different players to compare.';
+        hint.classList.remove('d-none');
+      } else if (stats.length < 2) {
+        hint.textContent = 'Need at least two players in career stats to compare.';
+        hint.classList.remove('d-none');
+      } else {
+        hint.classList.add('d-none');
+      }
+    }
+
+    if (typeof renderPlayerRadar === 'function') {
+      const focusNames = careerRadarState.compare
+        ? [careerRadarState.a, careerRadarState.b].filter(Boolean)
+        : [careerRadarState.a];
+      renderPlayerRadar('career-radar-canvas', data, {
+        mode: 'career',
+        focusNames,
+        showMedian: !careerRadarState.compare,
+      });
+    }
+  }
+
   function renderGlobalRivalries(rivalries) {
     const container = document.getElementById('global-rivalries-container');
     container.innerHTML = '';
@@ -1676,7 +1875,76 @@
 
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-expand]');
-    if (btn) expandSection(btn.dataset.expand);
+    if (btn) { expandSection(btn.dataset.expand); return; }
+
+    // Rivalry-card drill-down: click or keyboard-activate a top-rivalry card
+    // to drive the compare-mode radar.
+    const rivCard = e.target.closest('[data-rivalry-pair]');
+    if (rivCard && rivCard.closest('#rivalries-container')) {
+      const [a, b] = (rivCard.dataset.rivalryPair || '').split('|');
+      if (a && b && currentFilteredData) {
+        rivalryRadarPair = { a, b };
+        renderRivalryRadar(currentFilteredData);
+        syncRivalryCardActive();
+      }
+      return;
+    }
+
+    // Custom... toggle on the Rivalry Radar card
+    const customBtn = e.target.closest('#rivalry-radar-custom-toggle');
+    if (customBtn && currentFilteredData) {
+      rivalryRadarCustom = !rivalryRadarCustom;
+      const picker = document.getElementById('rivalry-radar-custom-picker');
+      if (picker) picker.classList.toggle('d-none', !rivalryRadarCustom);
+      customBtn.classList.toggle('active', rivalryRadarCustom);
+      return;
+    }
+
+    // Compare toggle on the Career Radar card
+    const careerCompareBtn = e.target.closest('#career-radar-compare-toggle');
+    if (careerCompareBtn && window.__vtAllMatchesData) {
+      careerRadarState.compare = !careerRadarState.compare;
+      renderCareerRadar(window.__vtAllMatchesData);
+      return;
+    }
+  });
+
+  // Keyboard activation (Enter/Space) for rivalry cards
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const rivCard = e.target.closest && e.target.closest('[data-rivalry-pair]');
+    if (rivCard && rivCard.closest('#rivalries-container')) {
+      e.preventDefault();
+      const [a, b] = (rivCard.dataset.rivalryPair || '').split('|');
+      if (a && b && currentFilteredData) {
+        rivalryRadarPair = { a, b };
+        renderRivalryRadar(currentFilteredData);
+        syncRivalryCardActive();
+      }
+    }
+  });
+
+  // Custom... / Career dropdown change handlers (delegated via 'change')
+  document.addEventListener('change', (e) => {
+    if (!e.target) return;
+    if ((e.target.id === 'rivalry-radar-pick-a' || e.target.id === 'rivalry-radar-pick-b') && currentFilteredData) {
+      const a = document.getElementById('rivalry-radar-pick-a');
+      const b = document.getElementById('rivalry-radar-pick-b');
+      if (a && b) {
+        rivalryRadarPair = { a: a.value, b: b.value };
+        renderRivalryRadar(currentFilteredData);
+        syncRivalryCardActive();
+      }
+      return;
+    }
+    if ((e.target.id === 'career-radar-pick-a' || e.target.id === 'career-radar-pick-b') && window.__vtAllMatchesData) {
+      const a = document.getElementById('career-radar-pick-a');
+      const b = document.getElementById('career-radar-pick-b');
+      if (a) careerRadarState.a = a.value;
+      if (b && careerRadarState.compare) careerRadarState.b = b.value;
+      renderCareerRadar(window.__vtAllMatchesData);
+      return;
+    }
   });
 
   function registerMatchCharts(data, allNames) {
@@ -1696,6 +1964,17 @@
     registerChartRenderer('section-vehicle-kills', (canvasId) => {
       return renderVehicleKills(canvasId, currentData.kills.by_vehicle);
     });
+    registerChartRenderer('section-rivalry-radar', (canvasId) => {
+      if (typeof renderPlayerRadar !== 'function') return null;
+      return renderPlayerRadar(canvasId, data, {
+        mode: 'compare',
+        focusNames: [rivalryRadarPair.a, rivalryRadarPair.b],
+      });
+    });
+    registerChartRenderer('section-faction-radar', (canvasId) => {
+      if (typeof renderPlayerRadar !== 'function') return null;
+      return renderPlayerRadar(canvasId, data, { mode: 'team' });
+    });
     registerChartRenderer('section-replay', (canvasId) => {
       if (window.VTReplay && window.VTReplay.hasInstance()) {
         return window.VTReplay.renderFullscreenSnapshot(canvasId);
@@ -1707,6 +1986,17 @@
   function registerAllMatchesCharts(data) {
     registerChartRenderer('section-global-weapon', (canvasId) => {
       return renderGlobalWeaponMeta(canvasId, data.global_weapon_meta);
+    });
+    registerChartRenderer('section-career-radar', (canvasId) => {
+      if (typeof renderPlayerRadar !== 'function') return null;
+      const focusNames = careerRadarState.compare
+        ? [careerRadarState.a, careerRadarState.b].filter(Boolean)
+        : [careerRadarState.a].filter(Boolean);
+      return renderPlayerRadar(canvasId, data, {
+        mode: 'career',
+        focusNames,
+        showMedian: !careerRadarState.compare,
+      });
     });
   }
 
