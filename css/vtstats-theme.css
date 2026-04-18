@@ -784,6 +784,109 @@ body::before {
     height: 120px;
 }
 
+/* Player Performance Radar wrapper inside the Overview profile panel.
+   Square aspect, a touch larger than the adjacent doughnut so the 7-axis
+   shape is readable without crowding the stat cards. */
+.vt-profile-radar-wrap {
+    width: 220px;
+    height: 220px;
+    position: relative;
+}
+
+.vt-profile-radar-wrap canvas {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* ============================================================================
+   PLAYER PERFORMANCE RADAR — card-level styling
+   Clickable top-rivalry drill-down, Custom... picker, empty-state hints.
+   ============================================================================ */
+
+/* Clickable rivalry card (drives the compare-mode Rivalry Radar). */
+.vt-rivalry-card--interactive {
+    cursor: pointer;
+    outline: none;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.vt-rivalry-card--interactive:focus-visible {
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--kb-primary) 55%, transparent);
+}
+
+.vt-rivalry-card--interactive.is-active {
+    border-color: var(--kb-primary) !important;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--kb-primary) 35%, transparent),
+                var(--vt-shadow-elevation-1);
+}
+
+.vt-rivalry-card--interactive.is-active::after {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--kb-primary);
+    margin-left: 0.5rem;
+    align-self: center;
+}
+
+/* Custom... dropdown block inside the Rivalry / Career Radar cards. */
+.vt-radar-custom-picker {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 65%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-radar-picker-select {
+    min-width: 160px;
+    max-width: 220px;
+    background: var(--kb-bg-card);
+    color: var(--kb-text-primary);
+    border-color: var(--kb-border-subtle);
+}
+
+.vt-radar-picker-select:focus {
+    border-color: var(--kb-primary);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--kb-primary) 25%, transparent);
+}
+
+/* Toggle button "active" state for Custom... / Compare. */
+.vt-radar-custom-toggle.active,
+.vt-radar-custom-toggle.active:hover,
+.vt-radar-custom-toggle.active:focus {
+    background: color-mix(in oklab, var(--kb-primary) 18%, transparent);
+    border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+    color: var(--kb-text-primary);
+}
+
+/* Inline hint paragraph shown below the radar in edge cases (same player
+   picked twice, too few players to compare, etc.). */
+.vt-radar-hint {
+    color: var(--kb-text-muted);
+    text-align: center;
+}
+
+/* Radar charts are intrinsically square. Centre the canvas within its wide
+   chart-container so a 7-axis spiderweb stays readable instead of stretching
+   into an ellipse. Fullscreen modals have their own sizing and bypass this. */
+#section-rivalry-radar .chart-container,
+#section-faction-radar .chart-container,
+#section-career-radar .chart-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 380px;
+}
+
+#section-rivalry-radar .chart-container > canvas,
+#section-faction-radar .chart-container > canvas,
+#section-career-radar .chart-container > canvas {
+    max-width: 480px;
+    max-height: 380px;
+}
+
 /* ============================================================================
    FACTION SCOREBOARD — Hero Treatment
    First visual in the Overview tab — elevated presentation
