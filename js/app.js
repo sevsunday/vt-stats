@@ -19,12 +19,13 @@
   const $select = document.getElementById('match-select');
 
   const MATCH_TAB_SLUGS = {
-    overview:  'tab-overview-btn',
-    combat:    'tab-combat-btn',
-    rivalries: 'tab-rivalries-btn',
-    weapons:   'tab-weapons-btn',
-    assets:    'tab-assets-btn',
-    replay:    'tab-replay-btn',
+    overview:    'tab-overview-btn',
+    combat:      'tab-combat-btn',
+    rivalries:   'tab-rivalries-btn',
+    weapons:     'tab-weapons-btn',
+    assets:      'tab-assets-btn',
+    positioning: 'tab-positioning-btn',
+    replay:      'tab-replay-btn',
   };
   const ALL_TAB_SLUGS = {
     overview:          'all-tab-overview-btn',
@@ -688,6 +689,7 @@
   function renderMatchData(data) {
     currentFilteredData = data;
     if (window.VTReplay) window.VTReplay.destroy();
+    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -734,6 +736,7 @@
       });
     }
     renderLeaderboard(data.leaderboard);
+    ensureTooltips(document.getElementById('leaderboard'));
     tabRendered['#tab-overview'] = true;
 
     // Deferred tab renderers
@@ -760,6 +763,10 @@
 
     registerTabRenderer('#tab-assets', () => {
       renderAssetDamage(data.asset_damage, data.faction_totals);
+    });
+
+    registerTabRenderer('#tab-positioning', () => {
+      renderPositioningTab(data);
     });
 
     registerTabRenderer('#tab-replay', () => {
@@ -794,6 +801,7 @@
     // Restore default preloader content in case a prior error replaced it
     restorePreloader();
     if (window.VTReplay) window.VTReplay.destroy();
+    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -876,6 +884,7 @@
     $loading.classList.remove('d-none');
     restorePreloader();
     if (window.VTReplay) window.VTReplay.destroy();
+    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -927,6 +936,87 @@
     }
     const allNames = data._allNames || data.leaderboard.map(p => p.name);
     renderTimeline('timeline-chart', data.timeline, allNames, timelineMode);
+  }
+
+  // --- Positioning Tab ---
+  // Built-in empty state when the match has no UpdateTick data. Otherwise
+  // renders movement leaderboard, distance timeline, combined heatmap,
+  // per-player heatmap grid, and ring histogram. Reacts to global filter
+  // by narrowing to data.leaderboard (already filtered upstream) while
+  // keeping positioning.players intact so opposing-team spawns still
+  // render for spatial context.
+  let positioningSortState = { key: 'activity_score', asc: false };
+
+  function renderPositioningTab(data) {
+    const positioning = currentData && currentData.positioning;
+    const emptyEl = document.getElementById('section-positioning-empty');
+    const sectionIds = [
+      'section-movement-leaderboard',
+      'section-distance-timeline',
+      'section-combined-heatmap',
+      'section-heatmap-grid',
+      'section-ring-histogram',
+      'section-positioning-player',
+    ];
+
+    const hasData = positioning && positioning.has_position_data;
+    if (emptyEl) emptyEl.classList.toggle('d-none', hasData);
+    sectionIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('d-none', !hasData);
+    });
+    if (!hasData) return;
+
+    // Narrow positioning to the filtered leaderboard for highlight purposes,
+    // but always pass the full positioning block so heatmap backdrops, team
+    // centroids, and opposing-team spawn markers render for spatial context.
+    const filteredNames = new Set(data.leaderboard.map(p => p.name));
+    const filteredView = {
+      ...positioning,
+      players: Object.fromEntries(
+        Object.entries(positioning.players).filter(([n]) => filteredNames.has(n))
+      ),
+    };
+
+    renderMovementLeaderboard('movement-leaderboard', filteredView, data.leaderboard, positioningSortState);
+    wireMovementLeaderboardSort(data);
+    ensureTooltips(document.getElementById('movement-leaderboard'));
+    renderDistanceTimeline('distance-timeline-chart', filteredView, data.leaderboard.map(p => p.name));
+    renderCombinedHeatmap('combined-heatmap-canvas', positioning);
+    renderHeatmapGrid('heatmap-grid-content', filteredView);
+    renderRingHistogram('ring-histogram-chart', filteredView);
+
+    // Stage 3 player mount-point is already in the DOM; the player will
+    // self-init here once its module is shipped.
+    if (window.VTPositionPlayer) {
+      window.VTPositionPlayer.init(
+        document.getElementById('positioning-player-content'),
+        filteredView,
+        currentData.match
+      );
+    }
+  }
+
+  function wireMovementLeaderboardSort(data) {
+    const positioning = currentData && currentData.positioning;
+    const filteredNames = new Set(data.leaderboard.map(p => p.name));
+    const filteredView = positioning ? {
+      ...positioning,
+      players: Object.fromEntries(
+        Object.entries(positioning.players).filter(([n]) => filteredNames.has(n))
+      ),
+    } : null;
+    document.querySelectorAll('#movement-leaderboard th[data-sort]').forEach(th => {
+      th.classList.toggle('sort-active', th.dataset.sort === positioningSortState.key);
+      th.onclick = () => {
+        if (positioningSortState.key === th.dataset.sort) positioningSortState.asc = !positioningSortState.asc;
+        else { positioningSortState.key = th.dataset.sort; positioningSortState.asc = false; }
+        if (filteredView) {
+          renderMovementLeaderboard('movement-leaderboard', filteredView, data.leaderboard, positioningSortState);
+          wireMovementLeaderboardSort(data);
+        }
+      };
+    });
   }
 
   // --- Banner ---
@@ -1143,11 +1233,15 @@
     const tbody = document.querySelector('#leaderboard tbody');
     const sorted = [...rows].sort(leaderboardSort(sortState.key, sortState.asc));
 
+    const positioning = currentData && currentData.positioning;
     tbody.innerHTML = sorted.map((r, i) => {
       const ps = r.personal;
       const netClass = ps.net > 0 ? 'color:var(--kb-success)' : ps.net < 0 ? 'color:var(--kb-danger)' : '';
       const ratioStr = ps.ratio === null ? '∞' : Number(ps.ratio).toFixed(2);
       const fBadge = r.faction === 1 ? 'badge-f1' : r.faction === 2 ? 'badge-f2' : 'bg-secondary';
+      const moveCell = typeof renderMovementCell === 'function'
+        ? renderMovementCell(positioning, r.name)
+        : '<span style="color:var(--kb-text-muted);">—</span>';
       return `<tr>
         <td>${i + 1}</td>
         <td class="fw-semibold">${esc(r.name)}</td>
@@ -1160,6 +1254,7 @@
         <td class="text-end">${r.kills || 0}</td>
         <td class="text-end">${r.deaths || 0}</td>
         <td class="text-end">${fmt(r.assets.dealt)}</td>
+        <td>${moveCell}</td>
         <td><span class="badge bg-secondary">${esc(ps.fav_weapon)}</span></td>
         <td class="text-end">${ps.weapons_used}</td>
       </tr>`;
@@ -1192,6 +1287,14 @@
         case 'kills': va = a.kills || 0; vb = b.kills || 0; break;
         case 'deaths': va = a.deaths || 0; vb = b.deaths || 0; break;
         case 'asset_dealt': va = a.assets.dealt; vb = b.assets.dealt; break;
+        case 'activity_score': {
+          const pos = currentData && currentData.positioning;
+          const pa = pos && pos.players && pos.players[a.name];
+          const pb = pos && pos.players && pos.players[b.name];
+          va = pa ? pa.metrics.activity_score : -1;
+          vb = pb ? pb.metrics.activity_score : -1;
+          break;
+        }
         case 'fav_weapon': va = a.personal.fav_weapon.toLowerCase(); vb = b.personal.fav_weapon.toLowerCase(); break;
         case 'weapons_used': va = a.personal.weapons_used; vb = b.personal.weapons_used; break;
         default: va = a.personal.dealt; vb = b.personal.dealt;
@@ -1424,29 +1527,61 @@
     const dur = meta.total_duration_sec;
     const m = Math.floor(dur / 60);
     const submitters = meta.submitters || [];
+    const posCount = meta.matches_with_positioning || 0;
+    const posBlock = posCount > 0
+      ? `<div><span class="stat-label">With Positioning</span><br><strong>${posCount} / ${meta.match_count}</strong></div>`
+      : '';
     container.innerHTML = `
       <div><span class="stat-label">Matches</span><br><strong>${meta.match_count}</strong></div>
       <div><span class="stat-label">Total Play Time</span><br><strong>${m} min</strong></div>
       <div><span class="stat-label">Maps</span><br><strong>${meta.maps_played.length}</strong></div>
       <div><span class="stat-label">Submitters</span><br><strong>${submitters.length}</strong></div>
       <div><span class="stat-label">Date Range</span><br><strong>${meta.date_range.join(' — ')}</strong></div>
+      ${posBlock}
     `;
   }
 
   function renderCareerTable(stats) {
     const tbody = document.querySelector('#career-table tbody');
-    tbody.innerHTML = stats.map((c, i) => `<tr>
-      <td>${i + 1}</td>
-      <td class="fw-semibold">${esc(c.name)}</td>
-      <td class="text-end">${c.matches_played}</td>
-      <td class="text-end">${fmt(c.total_dealt)}</td>
-      <td class="text-end">${fmt(c.total_received)}</td>
-      <td class="text-end">${(c.overall_accuracy * 100).toFixed(1)}%</td>
-      <td class="text-end">${c.total_kills || 0}</td>
-      <td class="text-end">${c.total_deaths || 0}</td>
-      <td class="text-end">${fmt(c.total_asset_dealt)}</td>
-      <td><span class="badge bg-secondary">${esc(c.fav_weapon)}</span></td>
-    </tr>`).join('');
+    tbody.innerHTML = stats.map((c, i) => {
+      let moveCell = '<span style="color:var(--kb-text-muted);">—</span>';
+      if (c.matches_with_positioning > 0 && c.mean_movement_score != null) {
+        const score = Math.round(c.mean_movement_score);
+        const band = c.movement_band_dominant || 'Balanced';
+        const stdev = c.movement_score_stddev;
+        const color = score >= 75
+          ? 'var(--kb-success)'
+          : score >= 45
+            ? 'var(--kb-warning)'
+            : 'var(--kb-danger)';
+        const pct = Math.max(0, Math.min(100, score));
+        const n = c.matches_with_positioning;
+        const denom = c.matches_played;
+        const titleText = `Avg ${score} (${band}), \u03c3 ${stdev} across ${n}/${denom} matches`;
+        moveCell = `
+          <div class="vt-movement-cell" title="${esc(titleText)}">
+            <div class="vt-movement-cell-top">
+              <span class="vt-movement-score" style="color:${color};">${score}</span>
+              <span class="vt-movement-band-label">${esc(band)}</span>
+            </div>
+            <div class="vt-movement-bar"><div class="vt-movement-bar-fill" style="width:${pct}%;background:${color};"></div></div>
+          </div>`;
+      }
+      return `<tr>
+        <td>${i + 1}</td>
+        <td class="fw-semibold">${esc(c.name)}</td>
+        <td class="text-end">${c.matches_played}</td>
+        <td class="text-end">${fmt(c.total_dealt)}</td>
+        <td class="text-end">${fmt(c.total_received)}</td>
+        <td class="text-end">${(c.overall_accuracy * 100).toFixed(1)}%</td>
+        <td class="text-end">${c.total_kills || 0}</td>
+        <td class="text-end">${c.total_deaths || 0}</td>
+        <td class="text-end">${fmt(c.total_asset_dealt)}</td>
+        <td>${moveCell}</td>
+        <td><span class="badge bg-secondary">${esc(c.fav_weapon)}</span></td>
+      </tr>`;
+    }).join('');
+    ensureTooltips(document.getElementById('career-table'));
   }
 
   function renderGlobalRivalries(rivalries) {
@@ -1568,6 +1703,15 @@
     return d.innerHTML;
   }
 
+  // Idempotent Bootstrap tooltip initializer. Targets a container's
+  // `[data-bs-toggle="tooltip"]` elements (typically column headers in <thead>,
+  // which are static across body re-renders). Safe to call multiple times.
+  function ensureTooltips(container) {
+    if (!container || !window.bootstrap || !window.bootstrap.Tooltip) return;
+    const els = container.querySelectorAll('[data-bs-toggle="tooltip"]');
+    els.forEach(el => bootstrap.Tooltip.getOrCreateInstance(el));
+  }
+
   // --- Match Not Found Error State ---
   // Captured once at init so we can restore it after showing errors.
   const preloaderHtml = $loading.innerHTML;
@@ -1582,6 +1726,7 @@
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     if (window.VTReplay) window.VTReplay.destroy();
+    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
 
     const panel = document.createElement('div');

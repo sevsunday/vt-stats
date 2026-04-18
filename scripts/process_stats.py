@@ -29,6 +29,37 @@ TIMELINE_BUCKET_SECONDS = 10
 
 MAP_NAME_PREFIXES = ["vsrmort", "vsrstt", "vsr"]
 
+# --- Positioning (player movement) constants ---
+# Axis convention: +X East, +Y Up, +Z North (developer-confirmed for Z).
+# Horizontal plane = (x, z); all distance/path math ignores y.
+
+POSITIONING_SAMPLE_RATE_HZ = 1  # downsample UpdateTicks to 1 Hz regardless of source tick_rate
+POSITIONING_SPAWN_SAMPLES = 3  # median of first N kept samples = spawn reference
+POSITIONING_TELEPORT_MIN_SPEED = 300.0  # u/s floor for teleport detection (self-calibrates upward)
+POSITIONING_TELEPORT_P99_MULT = 2.0  # teleport_threshold = max(MIN, p99_speed * this)
+POSITIONING_BASE_RADIUS_FRACTION = 0.15  # R_base = this * base_separation
+POSITIONING_MIN_BASE_SEPARATION = 500.0  # safety floor for base_separation
+POSITIONING_BASE_SEP_MAXRANGE_FRAC = 0.3  # base_separation also floored at observed_max_range * this
+POSITIONING_PERSONAL_RADIUS_MIN = 100.0
+POSITIONING_PERSONAL_RADIUS_MAX = 400.0
+POSITIONING_PERSONAL_RADIUS_FALLBACK = 150.0
+POSITIONING_RETURN_HYSTERESIS_OUT = 1.2  # out when dist > R_base * this
+POSITIONING_RETURN_HYSTERESIS_IN = 0.8  # in when dist < R_base * this
+POSITIONING_RETURN_MIN_OUT_SEC = 5  # must be sustained outside this many seconds before a return counts
+POSITIONING_HEATMAP_GRID_SIZE = 32
+POSITIONING_POLAR_ANGULAR_BINS = 16
+POSITIONING_POLAR_RADIAL_BINS = 8
+
+# Movement band thresholds on activity_score (0-100): Defensive ... Aggressive
+# 0 = camper (stayed at base), 100 = roamer (covered map).
+POSITIONING_BANDS = [
+    (20, "Defensive"),
+    (40, "Territorial"),
+    (60, "Balanced"),
+    (80, "Mobile"),
+    (100, "Aggressive"),
+]
+
 
 def build_weapon_name_resolver(odf_db):
     """Port of the JS weapon name resolver from the original dataProcessor.js."""
@@ -148,6 +179,499 @@ def slot_to_faction(slot):
     return 0
 
 
+# --- Positioning helpers ---
+
+
+def _horiz_dist(ax, az, bx, bz):
+    """Horizontal distance on the (x, z) plane. y is ignored per axis convention."""
+    dx = ax - bx
+    dz = az - bz
+    return (dx * dx + dz * dz) ** 0.5
+
+
+def _median(values):
+    """Median of a list of floats. Assumes non-empty input."""
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    mid = n // 2
+    if n % 2 == 0:
+        return (sorted_vals[mid - 1] + sorted_vals[mid]) / 2.0
+    return sorted_vals[mid]
+
+
+def _median_xyz(samples):
+    """Component-wise median of a list of (t, x, y, z) tuples."""
+    xs = _median([s[1] for s in samples])
+    ys = _median([s[2] for s in samples])
+    zs = _median([s[3] for s in samples])
+    return xs, ys, zs
+
+
+def _percentile(sorted_values, p):
+    """Linear-interpolation percentile on an already-sorted list. p in [0, 1]."""
+    if not sorted_values:
+        return 0.0
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    rank = p * (len(sorted_values) - 1)
+    lo = int(rank)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    frac = rank - lo
+    return sorted_values[lo] * (1 - frac) + sorted_values[hi] * frac
+
+
+def _convex_hull_area_xz(points):
+    """Andrew's monotone chain convex hull + shoelace area.
+
+    Input: iterable of (x, z) tuples. Returns area in world units^2.
+    Returns 0 for < 3 distinct points or colinear point sets.
+    """
+    pts = sorted(set((round(x, 3), round(z, 3)) for x, z in points))
+    if len(pts) < 3:
+        return 0.0
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        return 0.0
+
+    area = 0.0
+    n = len(hull)
+    for i in range(n):
+        x1, z1 = hull[i]
+        x2, z2 = hull[(i + 1) % n]
+        area += x1 * z2 - x2 * z1
+    return abs(area) / 2.0
+
+
+def _band_for_score(score):
+    for threshold, band in POSITIONING_BANDS:
+        if score <= threshold:
+            return band
+    return POSITIONING_BANDS[-1][1]
+
+
+def _compute_step_speeds(trails):
+    """Compute per-step speeds across all players. Returns a flat list of u/s values.
+
+    Used to self-calibrate the teleport threshold. Values exceeding
+    POSITIONING_TELEPORT_MIN_SPEED are excluded from the p99 calculation
+    (they're obvious outliers).
+    """
+    all_speeds = []
+    for trail in trails.values():
+        t_arr = trail["t"]
+        x_arr = trail["x"]
+        z_arr = trail["z"]
+        for i in range(1, len(t_arr)):
+            dt = t_arr[i] - t_arr[i - 1]
+            if dt <= 0:
+                continue
+            d = _horiz_dist(x_arr[i], z_arr[i], x_arr[i - 1], z_arr[i - 1])
+            speed = d / dt
+            if speed <= POSITIONING_TELEPORT_MIN_SPEED:
+                all_speeds.append(speed)
+    return all_speeds
+
+
+def _compute_segments_and_path(trail, teleport_threshold):
+    """Walk a trail, split into segments at teleport jumps, and compute path length.
+
+    Returns (segments, path_length) where segments is a list of [start_idx, end_idx]
+    ranges (inclusive) and path_length sums horizontal deltas excluding teleport gaps.
+    """
+    t_arr = trail["t"]
+    x_arr = trail["x"]
+    z_arr = trail["z"]
+    n = len(t_arr)
+    if n == 0:
+        return [], 0.0
+
+    segments = []
+    seg_start = 0
+    path_length = 0.0
+
+    for i in range(1, n):
+        dt = t_arr[i] - t_arr[i - 1]
+        d = _horiz_dist(x_arr[i], z_arr[i], x_arr[i - 1], z_arr[i - 1])
+        speed = d / dt if dt > 0 else 0.0
+        if speed > teleport_threshold:
+            segments.append([seg_start, i - 1])
+            seg_start = i
+        else:
+            path_length += d
+
+    segments.append([seg_start, n - 1])
+    return segments, path_length
+
+
+def _compute_return_count(dists, segments, personal_base_radius, t_arr,
+                          min_out_sec=POSITIONING_RETURN_MIN_OUT_SEC):
+    """Count voluntary returns to base using hysteresis + minimum-outside time.
+
+    A return is: cross out past (R_base * HYSTERESIS_OUT), stay outside for at
+    least min_out_sec seconds (real wall time, derived from t_arr), then re-enter
+    past (R_base * HYSTERESIS_IN). First re-entry of each post-teleport segment
+    is excluded so respawn returns don't count.
+
+    The min-outside gate filters boundary-noise returns where a player oscillates
+    near the base edge (which would otherwise inflate the count with 1 Hz samples).
+    """
+    if not dists:
+        return 0
+    r_out = personal_base_radius * POSITIONING_RETURN_HYSTERESIS_OUT
+    r_in = personal_base_radius * POSITIONING_RETURN_HYSTERESIS_IN
+
+    post_teleport_starts = {seg[0] for seg in segments[1:]}
+    returns = 0
+    state = "in" if dists[0] < personal_base_radius else "out"
+    outbound_t = None  # t_sec when the most recent outbound crossing happened
+    for i, d in enumerate(dists):
+        if i in post_teleport_starts:
+            # Snap state without counting a return
+            state = "in" if d < personal_base_radius else "out"
+            outbound_t = None
+            continue
+        if state == "in" and d > r_out:
+            state = "out"
+            outbound_t = t_arr[i]
+        elif state == "out" and d < r_in:
+            elapsed = (t_arr[i] - outbound_t) if outbound_t is not None else 0
+            if elapsed >= min_out_sec:
+                returns += 1
+            state = "in"
+            outbound_t = None
+    return returns
+
+
+def _build_heatmap_grid(trail, map_min_x, map_max_x, map_min_z, map_max_z):
+    """32x32 bin counts over map_bounds. [row][col] where row=x-index, col=z-index."""
+    size = POSITIONING_HEATMAP_GRID_SIZE
+    grid = [[0] * size for _ in range(size)]
+    if map_max_x <= map_min_x or map_max_z <= map_min_z:
+        return grid
+    dx = map_max_x - map_min_x
+    dz = map_max_z - map_min_z
+    for x, z in zip(trail["x"], trail["z"]):
+        col_x = int((x - map_min_x) / dx * size)
+        col_z = int((z - map_min_z) / dz * size)
+        if 0 <= col_x < size and 0 <= col_z < size:
+            grid[col_x][col_z] += 1
+    return grid
+
+
+def _build_polar_heatmap(trail, spawn_x, spawn_z, p95_dist):
+    """16 angular x 8 radial bin counts centered on the personal spawn.
+
+    Angular bin 0 = due East (+X), increasing counter-clockwise (standard math angle).
+    Radial bins span 0 .. p95_dist so that the visible tail doesn't dominate.
+    """
+    import math
+
+    ang_bins = POSITIONING_POLAR_ANGULAR_BINS
+    rad_bins = POSITIONING_POLAR_RADIAL_BINS
+    grid = [[0] * rad_bins for _ in range(ang_bins)]
+    if p95_dist <= 0:
+        return grid
+    for x, z in zip(trail["x"], trail["z"]):
+        dx = x - spawn_x
+        dz = z - spawn_z
+        r = (dx * dx + dz * dz) ** 0.5
+        if r <= 0:
+            grid[0][0] += 1
+            continue
+        theta = math.atan2(dz, dx)  # -pi..pi
+        if theta < 0:
+            theta += 2 * math.pi
+        a = int(theta / (2 * math.pi) * ang_bins) % ang_bins
+        r_idx = int(min(r / p95_dist, 0.999) * rad_bins)
+        grid[a][r_idx] += 1
+    return grid
+
+
+def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
+                         slot_to_s64, roster_slots, nick_for_s64):
+    """Compute the positioning block from raw per-player samples.
+
+    raw_samples_by_s64: dict[s64] -> list of (t_sec, x, y, z) tuples, in tick order.
+    Returns the full positioning dict per the JSON schema in the plan.
+    """
+    empty_block = {
+        "has_position_data": False,
+        "sample_rate_hz": POSITIONING_SAMPLE_RATE_HZ,
+        "match_sample_count": 0,
+        "map_bounds": None,
+        "map_diagonal": 0.0,
+        "base_separation": 0.0,
+        "observed_max_range": 0.0,
+        "p99_speed": 0.0,
+        "teleport_threshold": POSITIONING_TELEPORT_MIN_SPEED,
+        "team_base": {"1": None, "2": None},
+        "players": {},
+    }
+    if not raw_samples_by_s64:
+        return empty_block
+
+    # Build per-player sparse trails (already downsampled in the main loop)
+    trails = {}
+    for s64, samples in raw_samples_by_s64.items():
+        if not samples:
+            continue
+        t_arr = [s[0] for s in samples]
+        x_arr = [s[1] for s in samples]
+        y_arr = [s[2] for s in samples]
+        z_arr = [s[3] for s in samples]
+        trails[s64] = {
+            "t": t_arr, "x": x_arr, "y": y_arr, "z": z_arr,
+            "first_seen": t_arr[0], "last_seen": t_arr[-1],
+            "sample_count": len(t_arr),
+        }
+
+    if not trails:
+        return empty_block
+
+    # --- Spawn (median of first N kept samples, per player) ---
+    spawns = {}
+    for s64, tr in trails.items():
+        n_spawn = min(POSITIONING_SPAWN_SAMPLES, len(tr["t"]))
+        first_samples = list(zip(tr["t"], tr["x"], tr["y"], tr["z"]))[:n_spawn]
+        sx, sy, sz = _median_xyz(first_samples)
+        spawns[s64] = (sx, sy, sz)
+
+    # --- Team-level scaling: centroids, stddevs, base_separation ---
+    team_spawns = {1: [], 2: []}
+    for s64, spawn in spawns.items():
+        slot = None
+        for sl, ss in slot_to_s64.items():
+            if ss == s64:
+                slot = sl
+                break
+        if slot is None:
+            continue
+        faction = slot_to_faction(slot)
+        if faction in (1, 2):
+            team_spawns[faction].append((spawn[0], spawn[2]))  # (x, z) only
+
+    def _centroid_and_radius(pts):
+        if not pts:
+            return None, POSITIONING_PERSONAL_RADIUS_FALLBACK
+        cx = sum(p[0] for p in pts) / len(pts)
+        cz = sum(p[1] for p in pts) / len(pts)
+        if len(pts) < 2:
+            return (cx, cz), POSITIONING_PERSONAL_RADIUS_FALLBACK
+        mean_sq = sum(_horiz_dist(p[0], p[1], cx, cz) ** 2 for p in pts) / len(pts)
+        return (cx, cz), mean_sq ** 0.5
+
+    team_info = {}
+    for f in (1, 2):
+        centroid, stddev = _centroid_and_radius(team_spawns[f])
+        team_info[f] = {"centroid": centroid, "radius": stddev}
+
+    if team_info[1]["centroid"] and team_info[2]["centroid"]:
+        c1 = team_info[1]["centroid"]
+        c2 = team_info[2]["centroid"]
+        computed_sep = _horiz_dist(c1[0], c1[1], c2[0], c2[1])
+    else:
+        computed_sep = 0.0
+
+    # --- Observed max range (any player's max dist from their own spawn) ---
+    observed_max_range = 0.0
+    for s64, tr in trails.items():
+        sx, _, sz = spawns[s64]
+        for x, z in zip(tr["x"], tr["z"]):
+            d = _horiz_dist(x, z, sx, sz)
+            if d > observed_max_range:
+                observed_max_range = d
+
+    # Apply three-way floor
+    base_separation = max(
+        computed_sep,
+        POSITIONING_MIN_BASE_SEPARATION,
+        observed_max_range * POSITIONING_BASE_SEP_MAXRANGE_FRAC,
+    )
+
+    # --- Map bounds + diagonal (from observed extents) ---
+    all_xs = []
+    all_zs = []
+    for tr in trails.values():
+        all_xs.extend(tr["x"])
+        all_zs.extend(tr["z"])
+    map_min_x, map_max_x = min(all_xs), max(all_xs)
+    map_min_z, map_max_z = min(all_zs), max(all_zs)
+    map_diagonal = _horiz_dist(map_min_x, map_min_z, map_max_x, map_max_z)
+
+    # --- Self-calibrated teleport threshold ---
+    sample_speeds = _compute_step_speeds(trails)
+    sample_speeds.sort()
+    p99_speed = _percentile(sample_speeds, 0.99)
+    teleport_threshold = max(
+        POSITIONING_TELEPORT_MIN_SPEED,
+        p99_speed * POSITIONING_TELEPORT_P99_MULT,
+    )
+
+    # --- Per-player metrics ---
+    players_out = {}
+    match_sample_count = max(tr["last_seen"] for tr in trails.values()) + 1 if trails else 0
+
+    for s64, tr in trails.items():
+        sx, sy, sz = spawns[s64]
+        sample_count = tr["sample_count"]
+
+        # Distance series
+        dists = [_horiz_dist(x, z, sx, sz) for x, z in zip(tr["x"], tr["z"])]
+        sorted_d = sorted(dists)
+        mean_dist = sum(dists) / sample_count if sample_count else 0.0
+        max_dist = max(dists) if dists else 0.0
+        p50_dist = _percentile(sorted_d, 0.50)
+        p90_dist = _percentile(sorted_d, 0.90)
+        p95_dist = _percentile(sorted_d, 0.95)
+
+        # Personal base radius (clip team stddev or fallback)
+        slot = None
+        for sl, ss in slot_to_s64.items():
+            if ss == s64:
+                slot = sl
+                break
+        team_radius = team_info[slot_to_faction(slot)]["radius"] if slot else POSITIONING_PERSONAL_RADIUS_FALLBACK
+        personal_base_radius = max(
+            POSITIONING_PERSONAL_RADIUS_MIN,
+            min(POSITIONING_PERSONAL_RADIUS_MAX, team_radius * 1.1),
+        )
+
+        # Segments + path length (teleport-aware)
+        segments, path_length = _compute_segments_and_path(tr, teleport_threshold)
+        duration_for_player = max(1.0, tr["last_seen"] - tr["first_seen"])
+        path_length_per_sec = path_length / duration_for_player
+
+        # Time in base + first leave
+        ticks_in_base = sum(1 for d in dists if d < personal_base_radius)
+        time_in_base_pct = ticks_in_base / sample_count if sample_count else 0.0
+        time_to_first_leave = None
+        for idx, d in enumerate(dists):
+            if d > personal_base_radius:
+                time_to_first_leave = tr["t"][idx]
+                break
+
+        # Returns with hysteresis + minimum-time-outside gate
+        return_count = _compute_return_count(dists, segments, personal_base_radius, tr["t"])
+
+        # Hulls
+        hull_area = _convex_hull_area_xz(zip(tr["x"], tr["z"]))
+        bbox_area = 0.0
+        if sample_count >= 2:
+            px_min, px_max = min(tr["x"]), max(tr["x"])
+            pz_min, pz_max = min(tr["z"]), max(tr["z"])
+            bbox_area = (px_max - px_min) * (pz_max - pz_min)
+
+        # Activity score is computed in a second pass below using match-relative
+        # p95 normalizers, so spread is meaningful within any match. Placeholder
+        # zero here gets overwritten before the function returns.
+        activity_score = 0
+        band = _band_for_score(activity_score)
+
+        # Heatmaps
+        heatmap_grid_xz = _build_heatmap_grid(tr, map_min_x, map_max_x, map_min_z, map_max_z)
+        heatmap_polar = _build_polar_heatmap(tr, sx, sz, p95_dist or 1.0)
+
+        name = nick_for_s64(s64)
+        players_out[name] = {
+            "spawn": {"x": round(sx, 2), "y": round(sy, 2), "z": round(sz, 2)},
+            "personal_base_radius": round(personal_base_radius, 2),
+            "sample_count": sample_count,
+            "first_seen_sec": tr["first_seen"],
+            "last_seen_sec": tr["last_seen"],
+            "metrics": {
+                "mean_dist": round(mean_dist, 1),
+                "max_dist": round(max_dist, 1),
+                "p50_dist": round(p50_dist, 1),
+                "p90_dist": round(p90_dist, 1),
+                "p95_dist": round(p95_dist, 1),
+                "time_in_base_pct": round(time_in_base_pct, 3),
+                "time_to_first_leave_sec": time_to_first_leave,
+                "path_length": round(path_length, 1),
+                "path_length_per_sec": round(path_length_per_sec, 2),
+                "convex_hull_area": round(hull_area, 1),
+                "bounding_box_area": round(bbox_area, 1),
+                "return_to_base_count": return_count,
+                "activity_score": activity_score,
+                "movement_band": band,
+            },
+            "trail": {
+                "t": tr["t"],
+                "x": [round(v, 2) for v in tr["x"]],
+                "z": [round(v, 2) for v in tr["z"]],
+                "y": [round(v, 2) for v in tr["y"]],
+                "segments": segments,
+            },
+            "heatmap_grid_xz": heatmap_grid_xz,
+            "heatmap_polar": heatmap_polar,
+        }
+
+    # --- Activity score: second pass with match-relative p95 normalizers ---
+    # Higher score = more active player (covered more map, spent less time at base).
+    # Using fixed normalizers (e.g. base_separation * 0.7) saturates 80% of the
+    # formula on active matches, leaving only time_in_base_pct as the differentiator.
+    # Match-relative normalization makes the score self-calibrate so spread is
+    # meaningful within any given match.
+    if players_out:
+        all_max = sorted(v["metrics"]["max_dist"] for v in players_out.values())
+        all_pps = sorted(v["metrics"]["path_length_per_sec"] for v in players_out.values())
+        p95_max = _percentile(all_max, 0.95) or 1.0
+        p95_pps = _percentile(all_pps, 0.95) or 1.0
+        for v in players_out.values():
+            m = v["metrics"]
+            norm_max = min(m["max_dist"] / p95_max, 1.0) if p95_max > 0 else 0.0
+            norm_pps = min(m["path_length_per_sec"] / p95_pps, 1.0) if p95_pps > 0 else 0.0
+            score = round(100 * (
+                0.5 * (1 - m["time_in_base_pct"])
+                + 0.3 * norm_max
+                + 0.2 * norm_pps
+            ))
+            m["activity_score"] = max(0, min(100, score))
+            m["movement_band"] = _band_for_score(m["activity_score"])
+
+    # --- Assemble team_base dict (None for empty teams) ---
+    team_base_out = {}
+    for f in (1, 2):
+        info = team_info[f]
+        if info["centroid"] is None:
+            team_base_out[str(f)] = None
+        else:
+            team_base_out[str(f)] = {
+                "centroid": {"x": round(info["centroid"][0], 2), "z": round(info["centroid"][1], 2)},
+                "radius": round(info["radius"], 2),
+            }
+
+    return {
+        "has_position_data": True,
+        "sample_rate_hz": POSITIONING_SAMPLE_RATE_HZ,
+        "match_sample_count": int(match_sample_count),
+        "map_bounds": {
+            "min": {"x": round(map_min_x, 2), "z": round(map_min_z, 2)},
+            "max": {"x": round(map_max_x, 2), "z": round(map_max_z, 2)},
+        },
+        "map_diagonal": round(map_diagonal, 2),
+        "base_separation": round(base_separation, 2),
+        "observed_max_range": round(observed_max_range, 2),
+        "p99_speed": round(p99_speed, 2),
+        "teleport_threshold": round(teleport_threshold, 2),
+        "team_base": team_base_out,
+        "players": players_out,
+    }
+
+
 def load_known_players(path=PLAYER_IDS_PATH):
     """Load canonical player names from the known-players registry.
 
@@ -245,6 +769,12 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
 
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
+
+    # Positioning: per-player raw sample buffer (downsampled to ~1 Hz in the loop below).
+    # Keyed by Steam64 -> list of (t_sec, x, y, z) tuples in tick order.
+    position_samples = defaultdict(list)
+    position_last_kept_tick = {}  # s64 -> last tick we kept a sample for (for 1 Hz downsample)
+    tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
 
     i = 0
     n = len(events)
@@ -381,6 +911,31 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 max_tick = us.tick
             if us.tick < min_tick:
                 min_tick = us.tick
+            i += 1
+
+        elif event_type == "update_tick":
+            ut = evt.update_tick
+            tick = ut.tick
+            if tick > max_tick:
+                max_tick = tick
+            if tick < min_tick:
+                min_tick = tick
+            # Downsample to POSITIONING_SAMPLE_RATE_HZ per player. Use per-player
+            # "last kept tick" so gaps don't drift the cadence.
+            for ps in ut.players:
+                s64 = ps.player
+                if s64 <= 0 or s64 not in s64_to_nick:
+                    continue
+                last_kept = position_last_kept_tick.get(s64)
+                if last_kept is not None and (tick - last_kept) < tick_stride:
+                    continue
+                position_last_kept_tick[s64] = tick
+                position_samples[s64].append((
+                    tick,  # store raw tick; convert to seconds after min_tick is known
+                    float(ps.position.x),
+                    float(ps.position.y),
+                    float(ps.position.z),
+                ))
             i += 1
 
         else:
@@ -651,6 +1206,28 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "received": round(ar, 1),
         }
 
+    # Normalize positioning sample ticks -> seconds from match start.
+    # Raw buffer stores absolute ticks; here we subtract min_tick and divide by tick_rate.
+    if min_tick != float("inf") and position_samples:
+        normalized_samples = {}
+        for s64, samples in position_samples.items():
+            normalized = []
+            for t_raw, x, y, z in samples:
+                t_sec = int((t_raw - min_tick) / tick_rate)
+                normalized.append((t_sec, x, y, z))
+            normalized_samples[s64] = normalized
+    else:
+        normalized_samples = {}
+
+    positioning_block = _compute_positioning(
+        normalized_samples,
+        min_tick if min_tick != float("inf") else 0,
+        tick_rate,
+        slot_to_s64,
+        roster_slots,
+        nick_for_s64,
+    )
+
     # Kills section
     kills_leaderboard = []
     for slot in sorted(all_slots):
@@ -683,6 +1260,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "config_mod": header.active_config_mod,
             "snipe_count": snipe_count,
             "teams": teams,
+            "has_position_data": positioning_block["has_position_data"],
         },
         "leaderboard": leaderboard,
         "faction_totals": faction_totals,
@@ -715,6 +1293,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 for killer, victims in kill_rivalry.items()
             },
         },
+        "positioning": positioning_block,
     }
 
 
@@ -733,6 +1312,11 @@ def build_all_matches_aggregate(all_match_data):
         "total_deaths": 0,
         "weapon_totals": defaultdict(lambda: {"dealt": 0, "shots": 0, "hits": 0}),
         "best_match": None,
+        # Positioning accumulators. Only populated for matches where the player
+        # had UpdateTick data; skipped matches don't add to these lists.
+        "movement_scores": [],  # per-match activity_score values
+        "movement_bands": [],   # per-match band names
+        "movement_path_total": 0.0,
     })
 
     global_weapon = defaultdict(lambda: {
@@ -746,12 +1330,20 @@ def build_all_matches_aggregate(all_match_data):
     total_duration = 0
     submitters = set()
 
+    matches_with_positioning_count = 0
+
     for match_data in all_match_data:
         m = match_data["match"]
         maps_played.add(m["map"])
         dates.append(m["date"][:10])
         total_duration += m["duration_sec"]
         submitters.add(m["submitter"])
+        if m.get("has_position_data"):
+            matches_with_positioning_count += 1
+
+        # Per-match positioning data (may be absent on older sessions)
+        match_positioning = match_data.get("positioning") or {}
+        pos_players = match_positioning.get("players") or {}
 
         for p in match_data["leaderboard"]:
             pid = p["player_id"]
@@ -766,6 +1358,14 @@ def build_all_matches_aggregate(all_match_data):
             c["total_shots_hit"] += p["personal"]["shots_hit"]
             c["total_kills"] += p.get("kills", 0)
             c["total_deaths"] += p.get("deaths", 0)
+
+            # Career positioning aggregation: include only if this match had
+            # UpdateTick data AND this player has a positioning entry.
+            if match_positioning.get("has_position_data") and p["name"] in pos_players:
+                pm = pos_players[p["name"]]["metrics"]
+                c["movement_scores"].append(pm["activity_score"])
+                c["movement_bands"].append(pm["movement_band"])
+                c["movement_path_total"] += pm["path_length"]
 
             for wpn_name, wpn_data in p["weapon_breakdown"].items():
                 c["weapon_totals"][wpn_name]["dealt"] += wpn_data["dealt"]
@@ -810,6 +1410,38 @@ def build_all_matches_aggregate(all_match_data):
                 "accuracy": round(w_acc, 3),
             }
 
+        # Career movement aggregation
+        movement_scores = c["movement_scores"]
+        movement_bands = c["movement_bands"]
+        if movement_scores:
+            mean_score = sum(movement_scores) / len(movement_scores)
+            if len(movement_scores) > 1:
+                variance = sum((s - mean_score) ** 2 for s in movement_scores) / len(movement_scores)
+                stddev_score = variance ** 0.5
+            else:
+                stddev_score = 0.0
+            band_counts = Counter(movement_bands)
+            dominant_band = band_counts.most_common(1)[0][0]
+            band_dist = dict(band_counts)
+            matches_with_pos = len(movement_scores)
+            movement_fields = {
+                "mean_movement_score": round(mean_score, 1),
+                "movement_score_stddev": round(stddev_score, 2),
+                "movement_band_dominant": dominant_band,
+                "movement_band_distribution": band_dist,
+                "total_path_length": round(c["movement_path_total"], 1),
+                "matches_with_positioning": matches_with_pos,
+            }
+        else:
+            movement_fields = {
+                "mean_movement_score": None,
+                "movement_score_stddev": None,
+                "movement_band_dominant": None,
+                "movement_band_distribution": {},
+                "total_path_length": 0.0,
+                "matches_with_positioning": 0,
+            }
+
         career_stats.append({
             "player_id": pid,
             "name": c["name"],
@@ -823,6 +1455,7 @@ def build_all_matches_aggregate(all_match_data):
             "fav_weapon": fav_weapon,
             "best_match": c["best_match"],
             "weapon_breakdown": weapon_breakdown,
+            **movement_fields,
         })
     career_stats.sort(key=lambda c: c["total_dealt"], reverse=True)
 
@@ -872,6 +1505,7 @@ def build_all_matches_aggregate(all_match_data):
             "maps_played": sorted(maps_played),
             "date_range": [sorted_dates[0], sorted_dates[-1]] if sorted_dates else [],
             "submitters": sorted(submitters),
+            "matches_with_positioning": matches_with_positioning_count,
         },
         "career_stats": career_stats,
         "global_weapon_meta": gwm,
@@ -935,6 +1569,7 @@ def main():
             "duration_sec": match_data["match"]["duration_sec"],
             "player_count": match_data["match"]["player_count"],
             "submitter": submitter,
+            "has_position_data": match_data["match"].get("has_position_data", False),
         })
 
     # Sort manifest by date

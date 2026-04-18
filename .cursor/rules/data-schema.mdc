@@ -77,9 +77,25 @@ Disambiguate collisions by appending raw ODF in parentheses.
 
 Pre-computed JSON in `data/processed/`. See `DEVELOPER_GUIDE.md` Section 5 for full JSON structure with examples.
 
-- `matches.json` — manifest (includes `submitter` field per match)
-- `<match_id>.json` — per-match: match, leaderboard (with kills/deaths/hit_targets), faction_totals, rivalry_matrix, top_rivalries, weapon_meta, timeline, asset_damage, kills (leaderboard/feed/by_vehicle/kill_rivalry_matrix)
+- `matches.json` — manifest (includes `submitter` and `has_position_data` fields per match)
+- `<match_id>.json` — per-match: match (with `has_position_data`), leaderboard (with kills/deaths/hit_targets), faction_totals, rivalry_matrix, top_rivalries, weapon_meta, timeline, asset_damage, kills (leaderboard/feed/by_vehicle/kill_rivalry_matrix), positioning
 - `all_matches.json` — aggregate: meta (with submitters list), career_stats (with total_kills/total_deaths), global_weapon_meta, global_rivalries
+
+## UpdateTick Processing (Positioning)
+
+Axis convention: **+X East, +Y Up, +Z North** (developer-confirmed). Horizontal plane = `(x, z)`; all distance / path / hull math uses `sqrt(dx² + dz²)`. `y` is stored in `trail.y[]` but not consumed by v1 metrics.
+
+Downsample target: **1 Hz** regardless of source `tick_rate`. Keep a sample if `(tick - min_tick) % (tick_rate / 1) == 0` per player (gaps don't drift cadence because each player has its own `last_kept_tick`).
+
+Spawn: **median of first 3 kept samples** per player (robust against tick-0 jitter).
+
+Teleport detection: self-calibrated `max(300, p99_speed × 2)` u/s on horizontal delta only. Teleport gaps excluded from `path_length`, split `trail.segments`, and exclude first re-entry of each new segment from `return_to_base_count`. Teleport ticks still count for `time_in_base_pct`.
+
+`base_separation`: horizontal distance between Team 1 and Team 2 spawn centroids; floored at `max(computed, 500, observed_max_range × 0.3)`. `R_base = 0.15 × base_separation`. Personal base radius: team stddev × 1.1 clipped to `[100, 400]`; 150 fallback for unknown/small teams.
+
+Activity score (0–100, higher = more active / more map coverage): weighted combo of `(1 − time_in_base_pct)` (0.5), `normalized_max_dist` (0.3), and `normalized_path_per_sec` (0.2). Normalizers are **match-relative p95** values (computed across all players in the match), so the score self-calibrates per match. Movement bands: 0-20 Defensive, 21-40 Territorial, 41-60 Balanced, 61-80 Mobile, 81-100 Aggressive. Returns count requires `>= 5s` outside `R_base × 1.2` before crossing back through `R_base × 0.8` (filters boundary noise). Full derivation in `docs/DATA_DICTIONARY.md`.
+
+When no `UpdateTick` events present, emit `positioning = { has_position_data: false, players: {}, ... }` and set `match.has_position_data = false`. Manifest entry gets the same flag.
 
 Output files are named by match ID (timestamp-derived, e.g. `2026-04-16T01-27-48.json`). Match display names are derived from `header.map` via prettification (strip `vsr`/`vsrmort`/`vsrstt` prefix/suffix, strip `.bzn`, title-case).
 
