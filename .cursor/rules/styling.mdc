@@ -49,11 +49,13 @@ Theme switching via `window.KBTheme.setTheme(id)` and `window.KBTheme.setMode('l
 ### JS Load Order
 
 ```html
-<script src="js/theme.js"></script>           <!-- Theme system (must be first) -->
-<script src="js/vtstats-fx.js"></script>      <!-- Effects engine (registers Chart.js plugin) -->
-<script src="js/charts.js"></script>          <!-- Chart renderers -->
-<script src="js/timeline-player.js"></script> <!-- Replay tab engine (exposes window.VTReplay) -->
-<script src="js/app.js"></script>             <!-- Main application -->
+<script src="js/theme.js"></script>              <!-- Theme system (must be first) -->
+<script src="js/vtstats-fx.js"></script>         <!-- Effects engine (registers Chart.js plugin) -->
+<script src="js/charts.js"></script>             <!-- Chart renderers -->
+<script src="js/positioning-charts.js"></script> <!-- Positioning tab renderers (heatmaps, movement leaderboard) -->
+<script src="js/timeline-player.js"></script>    <!-- Replay tab engine (exposes window.VTReplay) -->
+<script src="js/positioning-player.js"></script> <!-- Positioning animated trail player (exposes window.VTPositionPlayer) -->
+<script src="js/app.js"></script>                <!-- Main application -->
 ```
 
 ## Typography — Geist
@@ -80,6 +82,7 @@ Dashboard content is organized into Bootstrap nav-pills tabs with lazy rendering
 - Global filter changes also trigger the same lazy re-render cycle (`destroyAllCharts` + `resetTabState` + re-register renderers)
 - Theme changes also trigger re-render of active tab charts
 - The Replay tab (`#tab-replay`) owns its own lifecycle via `window.VTReplay`: `init(container, data, match)` builds the player UI + Chart.js instance, and `destroy()` tears down the interval, chart, and DOM. Both `loadMatch()`/`loadAllMatches()`/`showMatchNotFound()` and `renderMatchData()` call `VTReplay.destroy()` before `destroyAllCharts()` so playback state never leaks across matches or filter changes.
+- The Positioning tab (`#tab-positioning`) owns its own lifecycle via `window.VTPositionPlayer`: `init(container, data, match)` builds the animated map (plain 2D canvas) + distance chart (Chart.js) + transport controls + keyboard shortcut handler; `destroy()` tears down rAF, the chart, the keyboard handler, the visibility listener, and the DOM. Every teardown path that calls `VTReplay.destroy()` also calls `VTPositionPlayer.destroy()` so playback state never leaks across matches, filter changes, or theme swaps. Small-multiples heatmaps use a shared viewport + shared p95 intensity so visual footprint correlates directly with `activity_score`.
 - URL state (`?match=`, `?filter=`/`?team=`/`?players=`, `?tab=`) syncs via `history.replaceState`. `buildShareUrl()` in `js/app.js` computes the URL from current state; `syncUrl()` writes it only when the Live Sync toggle is on (`vt-url-sync` in localStorage). The topnav Share button copies the URL via `copyShareUrl()` regardless of the toggle. See `DEVELOPER_GUIDE.md` section "URL Parameters" for the full schema and the two gate-bypass paths.
 
 The filter bar, player picker dropdown, and player profile card use existing glass surface and `--kb-*` variable patterns from `vtstats-theme.css`.
