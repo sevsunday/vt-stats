@@ -666,6 +666,31 @@ Player movement analytics derived from `UpdateTick` events. Captured positions a
 | `heatmap_grid_xz` | `number[][]` | 32×32 bin counts over `map_bounds`. `[row][col]` where row = x-index (0 = west), col = z-index (0 = south) |
 | `heatmap_polar` | `number[][]` | 16 angular × 8 radial bin counts around personal spawn. Angular bin 0 = due East (+X), increasing counter-clockwise. Radial bins span `0 .. p95_dist` |
 
+##### Pipeline overview
+
+Raw `UpdateTick` events pass through a six-stage funnel before metrics are emitted. Each stage feeds the next; the score at the end is a function of every upstream decision.
+
+```mermaid
+flowchart TD
+  Raw["Raw UpdateTick PlayerStates"] --> Down["1. Downsample to 1 Hz per player"]
+  Down --> Spawn["2. Spawn ref = median of first 3 kept samples"]
+  Spawn --> Teleport["3. Self-calibrated teleport threshold"]
+  Teleport --> Scale["4. Team-scale constants (base_separation, radii)"]
+  Scale --> Metrics["5. Per-player metrics (dist, path, hull, returns, time_in_base)"]
+  Metrics --> Score["6. Match-relative p95 normalize -> activity_score -> band"]
+```
+
+Stage-by-stage code anchors in `scripts/process_stats.py`:
+
+1. **Downsample to 1 Hz per player.** Independent cadence per player so absences don't drift sampling. Constants: `POSITIONING_SAMPLE_RATE_HZ = 1` at [scripts/process_stats.py:36](scripts/process_stats.py); downsample gate lives in the raw UpdateTick loop around [scripts/process_stats.py:773-776](scripts/process_stats.py).
+2. **Spawn reference = median of first 3 kept samples.** Robust against tick-0 jitter. Constant `POSITIONING_SPAWN_SAMPLES = 3` at [scripts/process_stats.py:37](scripts/process_stats.py); computed at [scripts/process_stats.py:446-451](scripts/process_stats.py).
+3. **Self-calibrated teleport threshold.** `max(300 u/s, p99_speed × 2)` — see Teleport detection below. Computed at [scripts/process_stats.py:515-522](scripts/process_stats.py).
+4. **Team-scale constants.** `base_separation` (three-way floor) and per-team base radii. Computed at [scripts/process_stats.py:453-499](scripts/process_stats.py).
+5. **Per-player metrics.** Distances, path length (teleport-aware), convex hull, hysteresis-gated returns, time-in-base. First-pass loop at [scripts/process_stats.py:528-620](scripts/process_stats.py).
+6. **Match-relative p95 normalize → `activity_score` → band.** Second pass once all first-pass metrics exist. At [scripts/process_stats.py:622-643](scripts/process_stats.py).
+
+The two-pass structure exists because the `activity_score` normalizers (`p95_max_dist`, `p95_path_per_sec`) are computed across all players in the match — the score of any one player depends on the whole roster's performance in the same match.
+
 ##### Per-player `metrics`
 
 All distances computed on the `(x, z)` horizontal plane against the player's personal spawn.
@@ -677,12 +702,12 @@ All distances computed on the `(x, z)` horizontal plane against the player's per
 | `p50_dist`, `p90_dist`, `p95_dist` | `number` | Percentile distances |
 | `time_in_base_pct` | `number` | Fraction of this player's samples with `dist < personal_base_radius`. Denominator is **per-player** `sample_count`, not match total |
 | `time_to_first_leave_sec` | `number \| null` | First `t` where `dist > personal_base_radius`; `null` if never left |
-| `path_length` | `number` | Sum of non-teleport deltas |
+| `path_length` | `number` | Sum of non-teleport deltas. Teleport-aware (see Teleport detection below) |
 | `path_length_per_sec` | `number` | `path_length / (last_seen − first_seen)`. Uses observed presence duration |
 | `convex_hull_area` | `number` | Area of convex hull of all positions. 0 when `sample_count < 3` |
 | `bounding_box_area` | `number` | Axis-aligned bounding box area. 0 when `sample_count < 2` |
-| `return_to_base_count` | `number` | Hysteresis-counted re-entries: cross `R_base × 1.2` out, **stay outside ≥ 5 seconds**, then re-enter past `R_base × 0.8`. Post-teleport re-entries excluded. The min-outside gate filters boundary-noise oscillations |
-| `activity_score` | `number` | 0–100. **Higher = more active / more map coverage; lower = stayed at base.** `round(100 × (0.5 × (1 − time_in_base_pct) + 0.3 × normalized_max_dist + 0.2 × normalized_path_per_sec))` where `normalized_max_dist = min(max_dist / p95_max_dist_in_match, 1.0)` and `normalized_path_per_sec = min(path_length_per_sec / p95_path_per_sec_in_match, 1.0)`. p95 is computed across all players in this match, making the score self-calibrate per match (so spread is meaningful even on tightly contested or sluggish games) |
+| `return_to_base_count` | `number` | Hysteresis-counted re-entries: cross `R_base × 1.2` out, **stay outside ≥ 5 seconds**, then re-enter past `R_base × 0.8`. Post-teleport re-entries excluded (see Teleport detection below for why respawn returns are filtered out). The min-outside gate filters boundary-noise oscillations |
+| `activity_score` | `number` | 0–100. **Higher = more active / more map coverage; lower = stayed at base.** `round(100 × (0.5 × (1 − time_in_base_pct) + 0.3 × normalized_max_dist + 0.2 × normalized_path_per_sec))` where `normalized_max_dist = min(max_dist / p95_max_dist_in_match, 1.0)` and `normalized_path_per_sec = min(path_length_per_sec / p95_path_per_sec_in_match, 1.0)`. p95 is computed across all players in this match, making the score self-calibrate per match (so spread is meaningful even on tightly contested or sluggish games). See Pipeline overview above for where this is computed and Worked example below for a numeric walkthrough |
 | `movement_band` | `string` | Bucketed `activity_score`: 0-20 Defensive, 21-40 Territorial, 41-60 Balanced, 61-80 Mobile, 81-100 Aggressive |
 
 ##### Per-player `trail`
@@ -727,11 +752,53 @@ If one team has zero populated spawns, `team_base[n] = null` and the computed se
 | 61–80 | Mobile | Regular rotations, meaningful time out of base |
 | 81–100 | Aggressive | Pushes deep, rarely returns, high path length |
 
+**Operational definition of each band:** bands are pure thresholds on `activity_score`. "Aggressive" means `activity_score >= 81`, which in practice requires a player near the top-5%-roamer in both `max_dist` and `path_length_per_sec` **and** `time_in_base_pct` close to zero. No single metric alone can push someone into the band — the three terms (weighted 0.5 / 0.3 / 0.2) must all be favorable.
+
 ##### Known limitations
 
 - **Pilot-eject deflates "active" reading.** Foot speed (~5 u/s) is well below vehicle speed; frequent ejectors score less active than their play warrants. V1 does not filter by `PlayerState.odf`.
 - **`trail.t[]` is sparse.** Players can be absent from `UpdateTick` events (dead, disconnected, out of sim scope). Renderers must iterate using `t[i]` as authoritative time, not array index.
 - **Unit scale is map-specific.** BZ "world units" are not meters. All thresholds scale with `base_separation`, so activity_score is unit-agnostic.
+- **Scores are match-relative, not universal.** Because the `max_dist` and `path_length_per_sec` normalizers are this-match p95s, a score of 90 in a low-action match is not directly comparable to a score of 90 in a high-action match. Absolute comparison across matches should go through the `career_stats` aggregates (`mean_movement_score`, `movement_band_dominant`), which average per-match relative scores.
+
+##### Worked example
+
+Walking through VTrider's score on match `2026-04-16T01-27-48.json` (the published sample match). All numbers pulled live from the processed JSON.
+
+Match-level normalizers (computed across all 10 players in this match):
+
+```
+p95_max_dist        = 1051.8
+p95_path_per_sec    = 22.80
+```
+
+VTrider's first-pass metrics:
+
+```
+time_in_base_pct    = 0.256     (25.6% of kept samples were inside personal base radius)
+max_dist            = 1024.0    (farthest point from spawn, in world units)
+path_length_per_sec = 20.25     (non-teleport path / observed presence duration)
+```
+
+Score derivation:
+
+```
+term_a = 0.50 × (1 − 0.256)                        = 0.3720
+term_b = 0.30 × min(1024.0 / 1051.8, 1.0)
+       = 0.30 × 0.9736                             = 0.2921
+term_c = 0.20 × min(20.25 / 22.80, 1.0)
+       = 0.20 × 0.8883                             = 0.1777
+
+activity_score = round(100 × (0.3720 + 0.2921 + 0.1777))
+               = round(84.18)
+               = 84
+
+movement_band  = _band_for_score(84) = "Aggressive"    (since 84 >= 81)
+```
+
+Reading: VTrider spent ~74% of the match outside their base, reached ~97% of the top-roamer's max distance, and covered ~89% of the top-roamer's path rate. All three terms land near their ceilings, which is what pushes the score over the Aggressive threshold.
+
+Contrast with F9bomber on the same match: `time_in_base_pct = 0.469`, `max_dist = 1006.1`, `path_length_per_sec = 18.62` → `term_a = 0.266`, `term_b = 0.287`, `term_c = 0.163` → score `72` → **Mobile**. Same map, same normalizers — the lower share of time outside base alone drops them a full band.
 
 ### all_matches.json (Cross-Match Aggregate)
 
