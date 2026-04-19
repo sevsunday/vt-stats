@@ -23,7 +23,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 SESSIONS_DIR = PROJECT_ROOT / "data" / "sessions"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 ODF_PATH = PROJECT_ROOT / "data" / "odf.min.json"
-PLAYER_IDS_PATH = PROJECT_ROOT / "data" / "playerids.txt"
+STEAMID_TO_NAME_PATH = PROJECT_ROOT / "data" / "steamid_to_name.txt"
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -692,26 +692,30 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
     }
 
 
-def load_known_players(path=PLAYER_IDS_PATH):
+def load_known_players(path=STEAMID_TO_NAME_PATH):
     """Load canonical player names from the known-players registry.
 
-    Parses playerids.txt, extracts Steam-prefixed entries ('S'),
+    Parses steamid_to_name.txt (UTF-8, one `<steam64>=<name>` per line)
     and returns a dict mapping Steam64 int -> canonical display name.
-    GOG entries are ignored (not present in session data).
+    Blank lines and entries with empty names are skipped so the pipeline
+    falls back to in-session nicknames for those Steam IDs.
     """
     known = {}
     if not path.exists():
         print(f"WARNING: {path.name} not found, no canonical player names available")
         return known
 
-    with open(path, encoding="utf-16") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line:
+            if not line or "=" not in line:
                 continue
-            m = re.match(r'"S(\d+)"="(.+)"', line)
-            if m:
-                known[int(m.group(1))] = m.group(2)
+            sid_str, name = line.split("=", 1)
+            sid_str = sid_str.strip()
+            name = name.strip()
+            if not sid_str.isdigit() or not name:
+                continue
+            known[int(sid_str)] = name
 
     print(f"Loaded {len(known)} known player names from {path.name}")
     return known
