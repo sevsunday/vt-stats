@@ -763,12 +763,14 @@
       if (typeof renderPlayerRadar === 'function') {
         renderPlayerRadar('faction-radar-canvas', data, { mode: 'team' });
       }
+      applyRadarInfoTooltips(document.getElementById('section-faction-radar'));
       renderKillFeed(data.kills, currentData.match.tick_rate, currentData.match.tick_range[0]);
       renderVehicleKills('vehicle-kills-chart', currentData.kills.by_vehicle);
     });
 
     registerTabRenderer('#tab-rivalries', () => {
       renderRivalryRadar(data);
+      applyRadarInfoTooltips(document.getElementById('section-rivalry-radar'));
       renderHeatmap(data.rivalry_matrix, isSingle ? allNames : data.leaderboard.map(p => p.name));
       renderRivalries(data.top_rivalries);
       renderKillHeatmap(data.kills.kill_rivalry_matrix, isSingle ? allNames : data.leaderboard.map(p => p.name));
@@ -934,6 +936,7 @@
     renderAggMeta(data.meta);
     renderCareerTable(data.career_stats);
     renderCareerRadar(data);
+    applyRadarInfoTooltips(document.getElementById('section-career-radar'));
     // Stash the aggregate data on window so the Career Radar event handlers
     // can re-render without having to thread the object through tab renderers.
     window.__vtAllMatchesData = data;
@@ -1133,7 +1136,13 @@
           <div class="stat-card"><div class="stat-value">${player.deaths || 0}</div><div class="stat-label">Deaths</div></div>
           <div class="stat-card"><div class="stat-value">${kdStr}</div><div class="stat-label">K/D</div></div>
           <div class="vt-profile-chart-wrap"><canvas id="profile-doughnut"></canvas></div>
-          <div class="vt-profile-radar-wrap"><canvas id="radar-profile-canvas"></canvas></div>
+          <div class="vt-profile-radar-wrap">
+            <i class="bi bi-info-circle vt-col-info vt-profile-radar-info"
+               data-vt-radar-info="per-match"
+               data-bs-toggle="tooltip" data-bs-placement="left" data-bs-html="true"
+               title="Loading&hellip;"></i>
+            <canvas id="radar-profile-canvas"></canvas>
+          </div>
         </div>
         <div class="d-flex flex-wrap gap-2 mb-2">
           <span class="badge bg-secondary">${esc(ps.fav_weapon)}</span>
@@ -1171,6 +1180,7 @@
         showMedian: true,
       });
     }
+    applyRadarInfoTooltips(container);
   }
 
   // --- Faction Scoreboard ---
@@ -2015,6 +2025,24 @@
     if (!container || !window.bootstrap || !window.bootstrap.Tooltip) return;
     const els = container.querySelectorAll('[data-bs-toggle="tooltip"]');
     els.forEach(el => bootstrap.Tooltip.getOrCreateInstance(el));
+  }
+
+  // Populates the `title` attribute of any radar info icon in `container`
+  // with the rendered tooltip HTML for its mode, then initializes Bootstrap
+  // tooltips. Idempotent: once an icon's real title is set, subsequent calls
+  // are no-ops (Bootstrap has already cached the original title).
+  function applyRadarInfoTooltips(container) {
+    if (!container || typeof buildRadarInfoTooltipHtml !== 'function') return;
+    const icons = container.querySelectorAll('[data-vt-radar-info]');
+    icons.forEach(el => {
+      // Skip icons that Bootstrap has already initialized — their real title
+      // has been moved to data-bs-original-title and the `title` attr is
+      // replaced with a placeholder. Re-setting at this stage has no effect.
+      if (el.hasAttribute('data-bs-original-title')) return;
+      const mode = el.getAttribute('data-vt-radar-info') || 'per-match';
+      el.setAttribute('title', buildRadarInfoTooltipHtml(mode));
+    });
+    ensureTooltips(container);
   }
 
   // --- Match Not Found Error State ---
