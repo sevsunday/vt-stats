@@ -2,14 +2,18 @@
  * VT Stats - Player Performance Radar (Spiderweb)
  *
  * Eight normalized axes (0-100) per polygon:
- *   1. Damage Dealt     personal.dealt            vs match max
- *   2. Accuracy         personal.accuracy         already 0-1
- *   3. Kills            leaderboard.kills         vs match max
- *   4. Survivability    1 - received/max          already 0-1
+ *   1. Damage Dealt     personal.dealt                      vs match max
+ *   2. Accuracy         personal.accuracy                   already 0-1
+ *   3. Kills            leaderboard.kills                   vs match max
+ *   4. Survivability    composite(dealt/received, K/D)      p95-clipped;
+ *                       career mode adds Bayesian shrinkage toward the
+ *                       league mean with a 10-match prior (so few-match
+ *                       players are pulled toward average rather than
+ *                       scoring extreme on single-match noise).
  *   5. Mobility         activity_score / 100
- *   6. Weapon Diversity personal.weapons_used     vs match max
- *   7. PvP Share        pvp_dealt / dealt         already 0-1
- *   8. T-Key Usage      target_lock_pct           already 0-1 (absolute)
+ *   6. Weapon Diversity personal.weapons_used               vs match max
+ *   7. PvP Share        pvp_dealt / dealt                   already 0-1
+ *   8. T-Key Usage      target_lock_pct                     already 0-1 (absolute)
  *
  * Modes: single | compare | team | career.
  *
@@ -29,26 +33,155 @@ const RADAR_AXIS_LABELS = [
   'T-Key Usage',
 ];
 
+// ----- Card-header info tooltip -----
+// Returns HTML for the "i" tooltip attached to each radar card header.
+// `mode` is either 'per-match' (Combat team / Rivalry / Profile) or 'career'.
+// Acronym convention: every acronym is expanded on first use as
+// `ACRONYM (Expansion)`. The two tooltips (per-match and career) are
+// independent surfaces, so each re-introduces acronyms on its own.
+function buildRadarInfoTooltipHtml(mode) {
+  const isCareer = mode === 'career';
+
+  const polygonLine = isCareer
+    ? "Each polygon represents one player's career; the further an edge sits from the center, the better they perform on that axis."
+    : "Each polygon represents a player or team; the further an edge sits from the center, the stronger they performed on that axis.";
+
+  const survivabilityLine = isCareer
+    ? "Career-wide measure of how efficiently this player survives fights, blending damage-trade ratio (lifetime damage dealt divided by lifetime damage absorbed) and K/D (Kill-to-Death ratio - lifetime kills divided by lifetime deaths). Shrunk toward the league average so a player with very few matches does not get an extreme score from a single blowout."
+    : "How efficiently this player survives fights. Blends two things: the damage-trade ratio (damage dealt divided by damage absorbed) and the K/D (Kill-to-Death ratio - kills divided by deaths). Higher on the chart = gave more damage than taken and stayed alive longer.";
+
+  const mobilityLine = isCareer
+    ? "Average map-coverage score across all of this player's matches that had position tracking. Matches without tracking are excluded from the average."
+    : 'How much of the map this player roamed versus stayed near their spawn base. 100 means they covered the whole map; 0 means they barely moved. Shows "no data" for matches without position tracking.';
+
+  const weaponsLine = isCareer
+    ? 'Number of different weapons this player fired across their career. Compared against the player who used the most weapons.'
+    : 'Number of different weapons this player actually fired during the match. Compared against the player who used the most weapons.';
+
+  const damageDealtLine = isCareer
+    ? 'Total damage this player has dealt across their career to other players, AI (Artificial Intelligence) units, and world props. Compared against the highest-damage player on record.'
+    : 'Total damage this player personally inflicted on other players, AI (Artificial Intelligence) units, and world props during the match. Compared against the single highest-damage player in view.';
+
+  const killsLine = isCareer
+    ? 'Total units this player has destroyed across their career, counting both other human players and AI units. Compared against the highest career kill count on record.'
+    : 'Number of units this player destroyed during the match, counting both other human players and AI units. Compared against the highest kill count in view.';
+
+  return [
+    '<div class="text-start" style="max-width:360px;">',
+      '<strong>All 8 axes normalize to 0-100 and higher is always better.</strong> ',
+      polygonLine,
+      '<hr class="my-2">',
+      '<strong>Damage Dealt</strong> &mdash; ', damageDealtLine, '<br><br>',
+      '<strong>Accuracy</strong> &mdash; Percentage of fired shots that connected with a target. Computed as shots-hit divided by shots-fired.<br><br>',
+      '<strong>Kills</strong> &mdash; ', killsLine, '<br><br>',
+      '<strong>Survivability</strong> &mdash; ', survivabilityLine, '<br><br>',
+      '<strong>Mobility</strong> &mdash; ', mobilityLine, '<br><br>',
+      '<strong>Weapon Diversity</strong> &mdash; ', weaponsLine, '<br><br>',
+      "<strong>PvP Share</strong> &mdash; PvP (Player-versus-Player) share. The fraction of this player's damage output that hit other human players, as opposed to PvE (Player-versus-Environment - AI units, turrets, and world props). 0 means they only farmed AI; 1 means they only fought other humans.<br><br>",
+      '<strong>T-Key Usage</strong> &mdash; T-Key (Target-lock key) usage. Fraction of the match this player spent holding the target-lock key (bound to T by default), which locks the camera and aiming solution onto the nearest enemy. Shows "no data" for older matches recorded before this measurement existed.',
+    '</div>',
+  ].join('');
+}
+
 // ----- Match-level normalizers -----
 
 function _computeRadarAxes(leaderboard) {
-  let maxDealt = 0, maxKills = 0, maxReceived = 0, maxWeapons = 0;
+  let maxDealt = 0, maxKills = 0, maxWeapons = 0;
+  const ratios = [];
+  const kds = [];
   for (const p of leaderboard) {
     const ps = p.personal || {};
-    if ((ps.dealt || 0) > maxDealt) maxDealt = ps.dealt || 0;
-    if ((p.kills || 0) > maxKills) maxKills = p.kills || 0;
-    if ((ps.received || 0) > maxReceived) maxReceived = ps.received || 0;
-    if ((ps.weapons_used || 0) > maxWeapons) maxWeapons = ps.weapons_used || 0;
+    const dealt = ps.dealt || 0;
+    const received = ps.received || 0;
+    const kills = p.kills || 0;
+    const deaths = p.deaths || 0;
+    const weaponsUsed = ps.weapons_used || 0;
+
+    if (dealt > maxDealt) maxDealt = dealt;
+    if (kills > maxKills) maxKills = kills;
+    if (weaponsUsed > maxWeapons) maxWeapons = weaponsUsed;
+
+    // Spectators and AFK players contribute nothing to the ratio
+    // distribution - their ratio would be 0/0=0 and would pull down the
+    // percentile for everyone who actually engaged.
+    const engaged = dealt > 0 || received > 0 || kills > 0 || deaths > 0;
+    if (!engaged) continue;
+    const r = _safeRatio(dealt, received);
+    const k = _safeRatio(kills, deaths);
+    if (Number.isFinite(r) && r > 0) ratios.push(r);
+    if (Number.isFinite(k) && k > 0) kds.push(k);
   }
+  ratios.sort((a, b) => a - b);
+  kds.sort((a, b) => a - b);
   return {
     maxDealt: Math.max(1, maxDealt),
     maxKills: Math.max(1, maxKills),
-    maxReceived: Math.max(1, maxReceived),
     maxWeapons: Math.max(1, maxWeapons),
+    ratioP95: _percentile(ratios, 0.95),
+    kdP95: _percentile(kds, 0.95),
   };
 }
 
 function _clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+// ----- Composite Survivability helpers (Option D) -----
+//
+// Survivability replaces the old `1 - received/max` with a weighted blend of
+// two ratios, each clipped at the 95th-percentile of its peer distribution:
+//   ratio = dealt / received   (damage trade; continuous signal)
+//   kd    = kills / deaths     (kill-to-death; discrete events)
+// The 60/40 weighting favors damage-trade slightly because it's a continuous
+// measurement with more information than the integer K/D.
+//
+// Career mode additionally applies Bayesian shrinkage toward the league mean
+// with a 10-match prior, so a player with very few matches gets pulled toward
+// average rather than scoring extreme on single-match noise.
+//
+// Match and team modes do NOT shrink - per-match samples ARE the event being
+// measured, not a noisy estimate.
+
+const SURV_RATIO_WEIGHT = 0.6;
+const SURV_KD_WEIGHT = 0.4;
+const CAREER_PRIOR_MATCHES = 10;
+
+// Safe ratio: finite numerator/denominator, Infinity when num>0 and den=0
+// (player/team dealt damage but took none - they get clipped to p95), and
+// 0 when both are zero (no engagement).
+function _safeRatio(num, den) {
+  if (den > 0) return num / den;
+  return num > 0 ? Infinity : 0;
+}
+
+// Percentile of a pre-sorted ascending array. Returns a tiny positive floor
+// when the array is empty so callers can divide safely.
+function _percentile(sortedFinite, p) {
+  if (!sortedFinite.length) return 1e-6;
+  const idx = Math.min(sortedFinite.length - 1, Math.floor(sortedFinite.length * p));
+  return Math.max(1e-6, sortedFinite[idx]);
+}
+
+// Mean of the finite, positive values (Infinity and zero excluded). Used
+// as the league-average prior for the career-mode Bayesian shrinkage.
+function _finiteMean(values) {
+  const finite = values.filter(v => Number.isFinite(v) && v > 0);
+  if (!finite.length) return 0;
+  return finite.reduce((s, v) => s + v, 0) / finite.length;
+}
+
+// Clip a ratio at its p95 ceiling and normalize to 0..1. Infinity collapses
+// to 1.0 (maxes the axis), matching the intuition that a player who took no
+// damage at all deserves the top score on that sub-component.
+function _clipNorm(value, p95) {
+  if (!(p95 > 0)) return 0;
+  const v = Number.isFinite(value) ? value : p95;
+  return Math.max(0, Math.min(1, v / p95));
+}
+
+// 60/40 composite of clipped damage-trade ratio and K/D ratio, in [0, 1].
+function _compositeSurvivability(ratio, kd, ratioP95, kdP95) {
+  return SURV_RATIO_WEIGHT * _clipNorm(ratio, ratioP95)
+       + SURV_KD_WEIGHT    * _clipNorm(kd, kdP95);
+}
 
 // Transform one leaderboard entry into 8-axis normalized values (0-100).
 // `positioning` may be null/has_position_data=false - Mobility falls to 0.
@@ -82,7 +215,11 @@ function _playerToAxes(player, positioning, norms) {
   }
 
   const pvpShare = dealt > 0 ? _clamp01(pvpDealt / dealt) : 0;
-  const survivability = _clamp01(1 - (received / norms.maxReceived));
+  const dmgRatio = _safeRatio(dealt, received);
+  const kd = _safeRatio(kills, deaths);
+  const survivability = _clamp01(
+    _compositeSurvivability(dmgRatio, kd, norms.ratioP95, norms.kdP95)
+  );
 
   return {
     values: [
@@ -124,26 +261,37 @@ function _medianAxes(axesList) {
 }
 
 // ----- Team-level (Combat tab) -----
+// Only two data points (Team 1 vs Team 2), so "p95" collapses to the max
+// of the two teams for the damage-trade ratio and K/D ratio.
 
 function _computeFactionNorms(data) {
-  let maxTeamDealt = 0, maxTeamKills = 0, maxTeamReceived = 0, maxTeamWeapons = 0;
+  let maxTeamDealt = 0, maxTeamKills = 0, maxTeamWeapons = 0;
+  let maxTeamRatio = 0, maxTeamKD = 0;
   for (const t of ['1', '2']) {
     const totals = (data.faction_totals && data.faction_totals[t]) || {};
     const roster = data.leaderboard.filter(p => p.faction === Number(t));
     const teamKills = roster.reduce((s, p) => s + (p.kills || 0), 0);
+    const teamDeaths = roster.reduce((s, p) => s + (p.deaths || 0), 0);
+    const teamDealt = totals.total_dealt || 0;
+    const teamReceived = totals.total_received || 0;
     const teamWeaponsAvg = roster.length
       ? roster.reduce((s, p) => s + ((p.personal && p.personal.weapons_used) || 0), 0) / roster.length
       : 0;
-    if ((totals.total_dealt || 0) > maxTeamDealt) maxTeamDealt = totals.total_dealt || 0;
+    if (teamDealt > maxTeamDealt) maxTeamDealt = teamDealt;
     if (teamKills > maxTeamKills) maxTeamKills = teamKills;
-    if ((totals.total_received || 0) > maxTeamReceived) maxTeamReceived = totals.total_received || 0;
     if (teamWeaponsAvg > maxTeamWeapons) maxTeamWeapons = teamWeaponsAvg;
+
+    const tRatio = _safeRatio(teamDealt, teamReceived);
+    const tKD = _safeRatio(teamKills, teamDeaths);
+    if (Number.isFinite(tRatio) && tRatio > maxTeamRatio) maxTeamRatio = tRatio;
+    if (Number.isFinite(tKD) && tKD > maxTeamKD) maxTeamKD = tKD;
   }
   return {
     maxTeamDealt: Math.max(1, maxTeamDealt),
     maxTeamKills: Math.max(1, maxTeamKills),
-    maxTeamReceived: Math.max(1, maxTeamReceived),
     maxTeamWeapons: Math.max(1, maxTeamWeapons),
+    teamRatioP95: Math.max(1e-6, maxTeamRatio),
+    teamKDP95: Math.max(1e-6, maxTeamKD),
   };
 }
 
@@ -184,12 +332,18 @@ function _teamAxes(factionNum, data, norms) {
   const tKeyAvg = tKeyN > 0 ? tKeySum / tKeyN : 0;
   const tKeyAvailable = tKeyN > 0;
 
+  const teamRatio = _safeRatio(teamDealt, teamReceived);
+  const teamKD = _safeRatio(teamKills, teamDeaths);
+  const survivability = _clamp01(
+    _compositeSurvivability(teamRatio, teamKD, norms.teamRatioP95, norms.teamKDP95)
+  );
+
   return {
     values: [
       _clamp01(teamDealt / norms.maxTeamDealt) * 100,
       _clamp01(teamAccuracy) * 100,
       _clamp01(teamKills / norms.maxTeamKills) * 100,
-      _clamp01(1 - (teamReceived / norms.maxTeamReceived)) * 100,
+      survivability * 100,
       _clamp01(mobilityAvg / 100) * 100,
       _clamp01(teamWeaponsAvg / norms.maxTeamWeapons) * 100,
       pvpShare * 100,
@@ -222,19 +376,39 @@ function _teamAxes(factionNum, data, norms) {
 // because target_lock_pct is absolute.
 
 function _computeCareerNorms(careerStats) {
-  let maxDealt = 0, maxKills = 0, maxReceived = 0, maxWeapons = 0;
+  let maxDealt = 0, maxKills = 0, maxWeapons = 0;
+  const ratios = [];
+  const kds = [];
   for (const c of careerStats) {
-    if ((c.total_dealt || 0) > maxDealt) maxDealt = c.total_dealt || 0;
-    if ((c.total_kills || 0) > maxKills) maxKills = c.total_kills || 0;
-    if ((c.total_received || 0) > maxReceived) maxReceived = c.total_received || 0;
+    const dealt = c.total_dealt || 0;
+    const received = c.total_received || 0;
+    const kills = c.total_kills || 0;
+    const deaths = c.total_deaths || 0;
+    if (dealt > maxDealt) maxDealt = dealt;
+    if (kills > maxKills) maxKills = kills;
     const w = c.weapon_breakdown ? Object.keys(c.weapon_breakdown).length : 0;
     if (w > maxWeapons) maxWeapons = w;
+
+    const engaged = dealt > 0 || received > 0 || kills > 0 || deaths > 0;
+    if (!engaged) continue;
+    const r = _safeRatio(dealt, received);
+    const k = _safeRatio(kills, deaths);
+    if (Number.isFinite(r) && r > 0) ratios.push(r);
+    if (Number.isFinite(k) && k > 0) kds.push(k);
   }
+  ratios.sort((a, b) => a - b);
+  kds.sort((a, b) => a - b);
   return {
     maxDealt: Math.max(1, maxDealt),
     maxKills: Math.max(1, maxKills),
-    maxReceived: Math.max(1, maxReceived),
     maxWeapons: Math.max(1, maxWeapons),
+    ratioP95: _percentile(ratios, 0.95),
+    kdP95: _percentile(kds, 0.95),
+    // League-average prior for Bayesian shrinkage. Computed from finite
+    // positive ratios only - Infinity values (players who never took
+    // damage) would otherwise poison the mean.
+    meanRatio: _finiteMean(ratios),
+    meanKD: _finiteMean(kds),
   };
 }
 
@@ -246,6 +420,7 @@ function _careerToAxes(entry, norms) {
   const accuracy = entry.overall_accuracy || 0;
   const kills = entry.total_kills || 0;
   const deaths = entry.total_deaths || 0;
+  const matches = entry.matches_played || 0;
   const weaponsUsed = entry.weapon_breakdown ? Object.keys(entry.weapon_breakdown).length : 0;
   const pvpShare = dealt > 0 ? _clamp01(pvpDealt / dealt) : 0;
 
@@ -257,12 +432,28 @@ function _careerToAxes(entry, norms) {
   const tKeyAvailable = matchesWithTKey > 0 && entry.mean_target_lock_pct != null;
   const tKeyPct = tKeyAvailable ? _clamp01(entry.mean_target_lock_pct || 0) : 0;
 
+  // Survivability: composite + Bayesian shrinkage toward the league mean.
+  // A 10-match prior pulls few-match players toward average so a single
+  // blowout doesn't produce an extreme score. Infinity (no damage taken /
+  // no deaths) is treated as p95 for the shrinkage blend so the player
+  // still gets the top sub-score after clipping.
+  const playerRatio = _safeRatio(dealt, received);
+  const playerKD = _safeRatio(kills, deaths);
+  const blendRatio = Number.isFinite(playerRatio) ? playerRatio : norms.ratioP95;
+  const blendKD = Number.isFinite(playerKD) ? playerKD : norms.kdP95;
+  const w = matches > 0 ? matches / (matches + CAREER_PRIOR_MATCHES) : 0;
+  const shrunkRatio = w * blendRatio + (1 - w) * norms.meanRatio;
+  const shrunkKD = w * blendKD + (1 - w) * norms.meanKD;
+  const survivability = _clamp01(
+    _compositeSurvivability(shrunkRatio, shrunkKD, norms.ratioP95, norms.kdP95)
+  );
+
   return {
     values: [
       _clamp01(dealt / norms.maxDealt) * 100,
       _clamp01(accuracy) * 100,
       _clamp01(kills / norms.maxKills) * 100,
-      _clamp01(1 - (received / norms.maxReceived)) * 100,
+      survivability * 100,
       mobility * 100,
       _clamp01(weaponsUsed / norms.maxWeapons) * 100,
       pvpShare * 100,
@@ -294,7 +485,15 @@ function _axisTooltipLine(axisIndex, raw) {
         : (raw.kills > 0 ? '\u221e' : '0.00');
       return `${raw.kills} kills (K/D ${kd})`;
     }
-    case 3: return `Received ${fmt(raw.received)} | ${raw.deaths} deaths`;
+    case 3: {
+      const ratio = raw.received > 0
+        ? (raw.dealt / raw.received).toFixed(2)
+        : (raw.dealt > 0 ? '\u221e' : '0.00');
+      const kd = raw.deaths > 0
+        ? (raw.kills / raw.deaths).toFixed(2)
+        : (raw.kills > 0 ? '\u221e' : '0.00');
+      return `Damage trade ${ratio} (dealt per received) \u2014 K/D (Kill-to-Death) ${kd}`;
+    }
     case 4: return raw.mobilityAvailable
       ? `Mobility ${raw.mobilityScore}/100${raw.mobilityBand ? ` (${raw.mobilityBand})` : ''}`
       : 'Mobility: no position data';

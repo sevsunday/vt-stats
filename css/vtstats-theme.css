@@ -798,6 +798,23 @@ body::before {
     max-height: 100%;
 }
 
+/* Inline info icon overlayed on the Profile Radar. The radar wrap is small
+   (220px) and has no header, so the icon sits in the top-right corner with
+   a subtle hover lift to flag that hovering shows the axis legend. */
+.vt-profile-radar-info {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    z-index: 2;
+    cursor: help;
+    opacity: 0.65;
+    transition: opacity 0.15s ease-in-out;
+}
+
+.vt-profile-radar-info:hover {
+    opacity: 1;
+}
+
 /* ============================================================================
    PLAYER PERFORMANCE RADAR — card-level styling
    Clickable top-rivalry drill-down, Custom... picker, empty-state hints.

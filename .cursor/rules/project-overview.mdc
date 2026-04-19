@@ -16,7 +16,7 @@ Static-site dashboard for BattleZone match statistics. Two-part system:
 
 - Proto schema (source of truth): `scripts/statsgate.proto`
 - Pipeline: `scripts/process_stats.py`
-- Radar renderer: `js/charts-radar.js` (Player Performance Radar — 7-axis spiderweb with single / compare / team / career modes; reuses `activeCharts` and `glassTooltipConfig` from `js/charts.js`)
+- Radar renderer: `js/charts-radar.js` (Player Performance Radar — 8-axis spiderweb with single / compare / team / career modes; Survivability is a p95-clipped composite of damage-trade ratio and K/D, career mode adds Bayesian shrinkage toward the league mean; reuses `activeCharts` and `glassTooltipConfig` from `js/charts.js`)
 - ODF weapon DB: `data/odf.min.json`
 - Raw data: `data/sessions/<username>/*.binpb.gz` (gzip-compressed protobuf, organized by submitter)
 - Processed output: `data/processed/*.json`
