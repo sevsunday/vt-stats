@@ -745,11 +745,11 @@ The Replay Player's transport state (play position, speed) and the Positioning T
 
 #### Player Identifier Resolution
 
-`leaderboard[].name` is already canonical per the pipeline (it applies `data/playerids.txt` before JSON emission). The browser does not load `playerids.txt`.
+`leaderboard[].name` is already canonical per the pipeline (it applies `data/steamid_to_name.txt` before JSON emission). The browser does not load `steamid_to_name.txt`.
 
 - **Write:** `syncUrl()` always emits `leaderboard[].name` — readable and canonical.
 - **Read:** for each token in `players=`, `resolvePlayerTokens()` matches against the current match's leaderboard:
-  1. Tokens matching `/^\d{16,}$/` are matched against `leaderboard[].steam64` (Steam64 fallback for players not in `playerids.txt`)
+  1. Tokens matching `/^\d{16,}$/` are matched against `leaderboard[].steam64` (Steam64 fallback for players not in `steamid_to_name.txt`)
   2. Otherwise, case-insensitive match against `leaderboard[].name`
   3. Unresolved tokens are dropped silently
 - Mixed tokens are allowed: `?players=VTrider,76561198025561228`
