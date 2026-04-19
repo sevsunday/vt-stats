@@ -19,7 +19,7 @@ Event types in `StatEvent.event_type` oneof:
 | 2 | `BulletHit` | tick, shooter (uint64 Steam64), ordnance_odf, victim (uint64 Steam64), victim_odf, shooter_odf |
 | 3 | `DamageDealt` | tick, shooter (uint64 Steam64), team (int32 slot), ordnance_odf, amount |
 | 4 | `DamageReceived` | tick, victim (uint64 Steam64), team (int32 slot), ordnance_odf, amount |
-| 5 | `UpdateTick` | tick, repeated PlayerState (Steam64, position, speed, health, ammo, odf) |
+| 5 | `UpdateTick` | tick, repeated PlayerState (Steam64, position, speed, health, ammo, odf, has_target) |
 | 6 | `UnitDestroyed` | tick, killer/victim Steam64, killer/victim team slot, killer/victim odf |
 | 7 | `UnitSniped` | tick |
 
@@ -106,10 +106,12 @@ Teleport detection: self-calibrated `max(300, p99_speed × 2)` u/s on horizontal
 
 Activity score (0–100, higher = more active / more map coverage): weighted combo of `(1 − time_in_base_pct)` (0.5), `normalized_max_dist` (0.3), and `normalized_path_per_sec` (0.2). Normalizers are **match-relative p95** values (computed across all players in the match), so the score self-calibrates per match. Movement bands are fixed thresholds on `activity_score`: 0-20 Defensive, 21-40 Territorial, 41-60 Balanced, 61-80 Mobile, **81-100 Aggressive**. Because the score is match-relative, cross-match comparisons must go through the `career_stats` aggregates (`mean_movement_score`, `movement_band_dominant`) rather than per-match scores. Returns count requires `>= 5s` outside `R_base × 1.2` before crossing back through `R_base × 0.8` (filters boundary noise). Full derivation and worked example in `docs/DATA_DICTIONARY.md`.
 
+Target lock (T-key) usage: per player, `metrics.target_lock_pct = sum(has_target) / sample_count` — an absolute 0-1 ratio over the kept 1 Hz samples. Match-global availability flag `positioning.has_target_lock_data` (mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `PlayerState.has_target=true` sample was observed. Career aggregation: `career_stats[].mean_target_lock_pct` is a valid direct average over matches where the flag is true; denominator exposed as `career_stats[].matches_with_target_lock_data` and `meta.matches_with_target_lock_data`. Unlike `activity_score`, `target_lock_pct` is absolute and cross-match comparable. Rendered on the Player Performance Radar's 8th "T-Key Usage" axis.
+
 When no `UpdateTick` events present, emit `positioning = { has_position_data: false, players: {}, ... }` and set `match.has_position_data = false`. Manifest entry gets the same flag.
 
 Output files are named by match ID (timestamp-derived, e.g. `2026-04-16T01-27-48.json`). Match display names are derived from `header.map` via prettification (strip `vsr`/`vsrmort`/`vsrstt` prefix/suffix, strip `.bzn`, title-case).
 
 All numeric values pre-rounded (1 decimal for damage, 3 for ratios/accuracy). Ratio is `null` for infinite (dealt > 0, received = 0).
 
-**Client-side filtering note:** When the global player filter is active, `weapon_meta` is recomputed client-side by aggregating `leaderboard[].weapon_breakdown` across the filtered player set. The pre-aggregated `weapon_meta` array is used only for the unfiltered "All Players" view. The `odf` field is unavailable in client-recomputed weapon_meta (no renderer uses it). `kills.by_vehicle` is always unfiltered (match-global, not per-player attributed).
+**Client-side filtering note:** When the global player filter is active, `weapon_meta` is recomputed client-side by aggregating `leaderboard[].weapon_breakdown` across the filtered player set. The pre-aggregated `weapon_meta` array is used only for the unfiltered "All Players" view. The `odf` field is unavailable in client-recomputed weapon_meta (no renderer uses it). `kills.by_vehicle` is always unfiltered (match-global, not per-player attributed). See `filter-contract.mdc` for the full filter contract and the checklist that every new output field must satisfy.

@@ -163,7 +163,7 @@ Per-tick state snapshot for all players. Pipeline currently skips these events.
 | `tick` | `uint32` | Game tick |
 | `players` | `repeated PlayerState` | State of each player |
 
-**PlayerState fields:** `player` (uint64 Steam64), `position` (Vec3), `speed` (float), `health` (float — actual HP, not ratio), `ammo` (float — actual ammo, not ratio), `odf` (string — current vehicle ODF)
+**PlayerState fields:** `player` (uint64 Steam64), `position` (Vec3), `speed` (float), `health` (float — actual HP, not ratio), `ammo` (float — actual ammo, not ratio), `odf` (string — current vehicle ODF), `has_target` (bool — player is holding T / target-lock key at this tick)
 
 #### `UnitDestroyed` (field 6)
 A unit (player vehicle, AI unit, or structure) was destroyed. Pipeline tracks kills/deaths from this event.
@@ -491,6 +491,7 @@ Top-level shape:
 ```json
 {
   "has_position_data": true,
+  "has_target_lock_data": true,
   "sample_rate_hz": 1,
   "match_sample_count": 848,
   "map_bounds": { "min": {"x": -553.6, "z": -552.9}, "max": {"x": 587.4, "z": 555.4} },
@@ -508,6 +509,8 @@ Top-level shape:
   }
 }
 ```
+
+`has_target_lock_data` is a match-global availability flag: `true` iff any `PlayerState.has_target=true` sample was observed in the match. It's `false` for pre-schema matches (the proto field didn't exist yet) and also for new-schema matches where no player ever held T. Combined with per-player `metrics.target_lock_pct`, it distinguishes "no data" (pre-schema) from "0% lock" (field present, never pressed).
 
 Per-player block:
 
@@ -532,7 +535,8 @@ Per-player block:
     "bounding_box_area": 832450.0,
     "return_to_base_count": 4,
     "activity_score": 84,
-    "movement_band": "Aggressive"
+    "movement_band": "Aggressive",
+    "target_lock_pct": 0.237
   },
   "trail": {
     "t": [0, 1, 2, 5, 6, 8, ...],
@@ -581,11 +585,13 @@ Supporting details:
 
 - **Returns-count hysteresis gate**: `return_to_base_count` only increments when a player stays outside `R_base × 1.2` for ≥ 5 seconds before re-entering `R_base × 0.8`. Filters boundary-noise oscillations.
 - **Career aggregation** in `all_matches.json`:
-  - `mean_movement_score` — average across matches with positioning data
+  - `mean_movement_score` — average across matches with positioning data. Note: this is an average of match-relative (p95-normalized) scores, so it carries a minor approximation — the Career Radar surfaces it anyway for rough Mobility comparison.
   - `movement_score_stddev` — exposes bimodal players whose mean looks "balanced" but who alternate between camp and rotate
   - `movement_band_dominant` — modal band
   - `movement_band_distribution` — count per band
   - `matches_with_positioning` — denominator (< `matches_played` when older sessions lack `UpdateTick` data)
+  - `mean_target_lock_pct` — direct average of per-match `target_lock_pct` (absolute ratio), across matches with `has_target_lock_data=true`. `null` when the player has no such matches.
+  - `matches_with_target_lock_data` — denominator for `mean_target_lock_pct`. Always `<= matches_with_positioning`.
 - Full derivation: [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) "Positioning Block" section.
 
 ### `all_matches.json` — Cross-Match Aggregate
@@ -598,7 +604,9 @@ Supporting details:
   "total_duration_sec": 3827.1,
   "maps_played": ["havenvsr.bzn", "vsrremnant.bzn"],
   "date_range": ["2026-04-16", "2026-04-16"],
-  "submitters": ["VTrider"]
+  "submitters": ["VTrider"],
+  "matches_with_positioning": 4,
+  "matches_with_target_lock_data": 2
 }
 ```
 
@@ -619,7 +627,11 @@ Supporting details:
   "best_match": { "id": "2026-04-16T02-11-20", "map": "vsrremnant.bzn", "dealt": 99267.3 },
   "weapon_breakdown": {
     "Chain Gun": { "dealt": 78400.0, "shots": 3200, "hits": 2100, "accuracy": 0.656 }
-  }
+  },
+  "mean_movement_score": 72.5,
+  "matches_with_positioning": 4,
+  "mean_target_lock_pct": 0.192,
+  "matches_with_target_lock_data": 2
 }
 ```
 
@@ -685,6 +697,10 @@ Tabs use **lazy rendering**: only the active tab renders charts on match load. O
 
 ### Global Player Filter
 
+**Scope.** The global filter applies to the **per-match view only**. The All Matches view consumes `all_matches.json` directly; `career_stats[]` fields render unfiltered, and the Career Radar's A/B picker (`careerRadarState` in `app.js`) is a chart-local selection mechanism with no interaction with `filterState`.
+
+**Canonical filter contract.** For the full filter contract and the six-question checklist that every new pipeline output field must satisfy, see `.cursor/rules/filter-contract.mdc`. That rule is the single source of truth; this section is the human-readable companion.
+
 The match info banner contains a filter bar that lets users switch between three modes:
 
 - **All Players** (default) — no filtering, all visuals show the full match data
@@ -694,6 +710,11 @@ The match info banner contains a filter bar that lets users switch between three
 The filter is implemented entirely client-side in `app.js`. `getFilteredData(data, filter)` derives a filtered data object from the loaded JSON. The filtered object replaces `leaderboard`, `rivalry_matrix`, `top_rivalries`, `kills` (feed/kill_rivalry_matrix/leaderboard), `timeline.by_player`, `asset_damage`, and `faction_totals`.
 
 `weapon_meta` is recomputed client-side by aggregating `leaderboard[].weapon_breakdown` across the filtered player set (summing dealt/shots/hits, recalculating accuracy). The pre-aggregated `weapon_meta` array is only used for the unfiltered "All Players" view. `kills.by_vehicle` always passes through unchanged (match-global aggregate, not per-player attributed).
+
+**Positioning block (including `activity_score` and `target_lock_pct`).** The `positioning` block passes through `getFilteredData` unchanged; `positioning.players` is narrowed at render-time by `renderPositioningTab`. This lets spatial renderers (combined heatmap, spawn markers) keep their full-match context while per-player charts still scope to the focused player.
+
+- `positioning.players[].metrics.activity_score` is **match-relative** (p95-normalized across the full match roster). Its career aggregate `career_stats[].mean_movement_score` is an average-of-relatives — labeled as an approximation, not a true cross-match metric.
+- `positioning.players[].metrics.target_lock_pct` is **absolute** (0-1 ratio — fraction of 1 Hz positioning samples where the player was holding T). Cross-match comparable. Its career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average and renders on the Career Radar's 8th "T-Key Usage" axis. The match-global `positioning.has_target_lock_data` / `match.has_target_lock_data` / `career_stats[].matches_with_target_lock_data` flags distinguish "no data" (pre-schema match, or no player ever used T) from "0% lock" in tooltips.
 
 The filtered data is stored in `currentFilteredData` — all renderers and the timeline toggle reference this instead of `currentData`. `renderMatchData(data)` is the shared render function called by both `loadMatch()` and `applyFilter()`.
 

@@ -18,6 +18,7 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 | `data-schema.mdc` | py, js, json files | Proto schema, damage semantics, pipeline output format |
 | `styling.mdc` | html, css, js files | Bootstrap-first, `--kb-*` theme variables, `--vt-*` effect variables, Geist font, load order, tab architecture |
 | `schema-migration.mdc` | proto, py files | Step-by-step playbook for adapting to proto/schema changes |
+| `filter-contract.mdc` | py, js files | Client-side global filter contract and checklist for new pipeline output fields |
 
 ## Deep Reference
 
@@ -46,6 +47,7 @@ VT Stats — static-site dashboard for BattleZone match statistics. Python pipel
 - Faction determined by slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
 - Session data lives in `data/sessions/<username>/*.binpb.gz`, organized by submitter.
 - Movement Profile (0-100 `activity_score` per player, career-aggregated) is derived from `UpdateTick` position samples in the pipeline. Higher = more active / covered more map. See `.cursor/rules/data-schema.mdc` for the formula and band thresholds, `docs/DATA_DICTIONARY.md` for the full positioning JSON schema.
+- T-Key Usage (`positioning.players[].metrics.target_lock_pct`, 0-1 ratio) is captured from `PlayerState.has_target`. Availability is gated by the match-global `has_target_lock_data` flag (mirrored on `positioning`, `match`, and manifest entries) which is `false` for pre-schema sessions and matches where no player held T. Unlike `activity_score`, `target_lock_pct` is absolute (cross-match comparable) and averaged directly in `career_stats[].mean_target_lock_pct`. Rendered on the 8th "T-Key Usage" axis of the Player Performance Radar.
 
 ## When Schema Changes
 

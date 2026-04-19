@@ -1,0 +1,95 @@
+---
+description: Client-side global filter contract and checklist for new pipeline output fields
+globs: "**/*.{py,js}"
+---
+
+# Filter Contract — Pipeline Output Fields
+
+The dashboard has a client-side global player/team filter (`filterState` in `js/app.js`) plus a small number of chart-local pickers. Every time a new field is added to the processed JSON output, it has to fit into this contract explicitly — otherwise the field silently does the wrong thing under `team` / `player` filter modes, or is double-aggregated in career mode.
+
+This rule codifies that contract and gives the checklist for adding new fields. Apply it during any schema migration (see `schema-migration.mdc`) or feature work that emits new output JSON.
+
+## Scope
+
+**The global filter applies only to the per-match view**, rendered from `data/processed/<match_id>.json`. `getFilteredData(data, filterState)` in `js/app.js` runs exactly once per per-match render pass.
+
+**The All Matches view** (`data/processed/all_matches.json`) consumes the aggregate directly — `career_stats[]` fields render without any `getFilteredData()` call. The Career Radar's A/B picker (`careerRadarState` in `js/app.js`) is a local, chart-scoped selector that picks which one or two `career_stats[]` entries to draw; it has no cross-chart effect and no interaction with `filterState`.
+
+Every new field must answer the checklist below for **both** scopes.
+
+## Six-Question Checklist
+
+For every new field emitted by `scripts/process_stats.py` into the processed JSON, answer these before shipping:
+
+1. **Scope** — per-player / per-faction / per-match / match-global?
+2. **Filter behavior (per-match view)** — one of:
+   - Passes through unchanged (positioning-style: downstream renderer narrows at render-time).
+   - Narrowed upstream in `getFilteredData()` (leaderboard-style).
+   - Narrowed at render-time in a specific `renderX` function.
+   - Recomputed client-side from a finer-grained field (weapon_meta style).
+3. **Relativity** — absolute value, or match-relative (depends on match-scoped normalizers like p95)?
+4. **Cross-match aggregation** — if the field has a career aggregate, how is it combined? Direct average is valid only for absolute metrics. Match-relative metrics need per-match normalization before aggregation, or the career aggregate is an average-of-relatives (approximation) that must be labeled as such.
+5. **All Matches surface** — does the field (or a derived aggregate) appear in `career_stats[]`, the career table, or the Career Radar? If yes, note that it renders **without global filtering** — the Career Radar's A/B picker is the only selection UI, and it operates on the full aggregate.
+6. **Documentation surface** — which of these need the classification noted?
+   - `DEVELOPER_GUIDE.md` Section 5 (JSON structure) + Global Player Filter section
+   - `docs/DATA_DICTIONARY.md` (per-field entry)
+   - `AGENTS.md` Key Conventions (only for filter-affecting conventions)
+   - This rule's reference table below
+
+## Reference Table — How Existing Fields Behave
+
+Unless noted otherwise, entries describe per-match-view behavior; the All Matches column is called out explicitly where relevant.
+
+| Field | Per-match filter behavior | Relativity / aggregation notes |
+|---|---|---|
+| `leaderboard[]` | Narrowed upstream by `getFilteredData` based on `filter.mode` | Absolute totals; career rollups via `career_stats[]` |
+| `faction_totals` | Narrowed upstream (team/single reduces to relevant factions) | Absolute |
+| `rivalry_matrix`, `top_rivalries` | Narrowed upstream (single = one player's row/column; multi = allowedNames × allowedNames intersection) | Absolute |
+| `timeline.by_player` | Narrowed upstream | Absolute buckets |
+| `timeline.by_faction` | Passes through unchanged | Absolute buckets |
+| `asset_damage.by_player` | Narrowed upstream | Absolute |
+| `asset_damage.by_faction` | Passes through | Absolute |
+| `kills.feed`, `kills.leaderboard`, `kills.kill_rivalry_matrix` | Narrowed upstream | Absolute |
+| `kills.by_vehicle` | Always full-match (never narrowed) | Match-global aggregate — not per-player attributed |
+| `weapon_meta` | **Recomputed client-side** from `leaderboard[].weapon_breakdown` when any filter is active; pre-aggregated array used only for "All Players" view | Absolute per-weapon totals |
+| `positioning` (block) | Passes through unchanged | — |
+| `positioning.players` | Narrowed at render-time in `renderPositioningTab` (NOT in `getFilteredData`) — other renderers (heatmap, spawn markers) need the full-match block for spatial context | — |
+| `positioning.players[].metrics.activity_score` | Narrowed at render-time (same as `positioning.players`) | **Match-relative** (p95-normalized across full match roster). Career aggregation via `career_stats[].mean_movement_score` is an average-of-relatives — labeled approximation, not a true cross-match metric. **All Matches surface:** renders in the career table and the Career Radar Mobility axis, unfiltered. |
+| `positioning.players[].metrics.target_lock_pct` | Narrowed at render-time (same as `positioning.players`) | **Absolute** (0-1 direct ratio). Cross-match comparable. Career aggregation via `career_stats[].mean_target_lock_pct` is a valid direct average. **All Matches surface:** renders on the Career Radar's 8th T-Key Usage axis; selection via the Career Radar A/B picker only. |
+| `positioning.has_target_lock_data`, `match.has_target_lock_data` | Match-global flag, passes through | Availability signal; `false` for pre-schema matches and also for new-schema matches where no player ever used T. Used to distinguish "no data" from "0% lock" in tooltips. |
+| `career_stats[]` (All Matches view generally) | Consumed directly from `all_matches.json`; never passes through `getFilteredData`. | Per-chart pickers (e.g. Career Radar A/B) are the only selection UI. |
+
+## Guidance
+
+### "Narrow upstream vs. narrow at render-time"
+
+Narrow **upstream** inside `getFilteredData` when:
+- The field is consumed by multiple renderers, all of which want the same filtered shape.
+- The filtered shape is a natural subset (e.g. leaderboard rows).
+
+Narrow **at render-time** when:
+- Other renderers need the full-match block for spatial/contextual rendering (e.g. the combined heatmap wants all players' samples to set viewport extents and shared p95 intensity; single-player charts still want to narrow to the focused player).
+- The block is structurally nested (e.g. `positioning.players` sits inside a block with match-global metadata like `base_separation`, `map_bounds`, `teleport_threshold`).
+
+### "Match-relative vs. absolute"
+
+Match-relative metrics (normalized against match-scoped stats like p95 across the match roster) must **not** be naively averaged in `career_stats` — the result is average-of-relatives, which loses cross-match meaning. Options:
+- Label the career aggregate as an approximation and surface it only in contexts where that's acceptable (current `mean_movement_score` treatment).
+- Store the raw per-match absolutes and recompute the relative career-wide (more work, not done anywhere yet).
+
+The `mean_movement_score` (match-relative) vs `mean_target_lock_pct` (absolute) contrast in `js/charts-radar.js` is the canonical worked example — target-lock is a valid direct average and renders on the Career Radar; Mobility in career mode carries a caveat in its tooltip.
+
+### All Matches surface rules of thumb
+
+- If a new field is per-player and useful across matches, emit a `career_stats[]` aggregate and add it to the Career Radar if the axis story is strong.
+- If the career aggregate is match-relative, set the Career Radar tooltip to annotate the approximation (see axis 5 Mobility tooltip).
+- The career table (`renderCareerTable` in `js/app.js`) is a separate surface — adding a column there is an explicit decision, not automatic.
+
+## Cross-references
+
+- `schema-migration.mdc` Step 3 — run this checklist for every new output field.
+- `DEVELOPER_GUIDE.md` Global Player Filter section — human-readable companion.
+- `docs/DATA_DICTIONARY.md` — per-field documentation surface.
+- `AGENTS.md` Key Conventions — filter-level conventions only.
+- `js/app.js` `getFilteredData()` — the single narrowing function for per-match view.
+- `js/charts-radar.js` `_playerToAxes` / `_factionToAxes` / `_careerToAxes` — worked examples of render-time narrowing and career-aggregate handling.
