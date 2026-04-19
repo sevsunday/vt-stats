@@ -1,14 +1,15 @@
 /**
  * VT Stats - Player Performance Radar (Spiderweb)
  *
- * Seven normalized axes (0-100) per polygon:
- *   1. Damage Dealt     personal.dealt          vs match max
- *   2. Accuracy         personal.accuracy       already 0-1
- *   3. Kills            leaderboard.kills       vs match max
- *   4. Survivability    1 - received/max        already 0-1
+ * Eight normalized axes (0-100) per polygon:
+ *   1. Damage Dealt     personal.dealt            vs match max
+ *   2. Accuracy         personal.accuracy         already 0-1
+ *   3. Kills            leaderboard.kills         vs match max
+ *   4. Survivability    1 - received/max          already 0-1
  *   5. Mobility         activity_score / 100
- *   6. Weapon Diversity personal.weapons_used   vs match max
- *   7. PvP Share        pvp_dealt / dealt       already 0-1
+ *   6. Weapon Diversity personal.weapons_used     vs match max
+ *   7. PvP Share        pvp_dealt / dealt         already 0-1
+ *   8. T-Key Usage      target_lock_pct           already 0-1 (absolute)
  *
  * Modes: single | compare | team | career.
  *
@@ -25,6 +26,7 @@ const RADAR_AXIS_LABELS = [
   'Mobility',
   'Weapon Diversity',
   'PvP Share',
+  'T-Key Usage',
 ];
 
 // ----- Match-level normalizers -----
@@ -48,8 +50,10 @@ function _computeRadarAxes(leaderboard) {
 
 function _clamp01(v) { return Math.max(0, Math.min(1, v)); }
 
-// Transform one leaderboard entry into 7-axis normalized values (0-100).
+// Transform one leaderboard entry into 8-axis normalized values (0-100).
 // `positioning` may be null/has_position_data=false - Mobility falls to 0.
+// T-Key Usage gates separately on has_target_lock_data so pre-schema matches
+// render "no data" instead of a misleading zero bar.
 function _playerToAxes(player, positioning, norms) {
   const ps = player.personal || {};
   const dealt = ps.dealt || 0;
@@ -64,11 +68,17 @@ function _playerToAxes(player, positioning, norms) {
   let mobility = 0;
   let mobilityBand = null;
   let mobilityAvailable = false;
+  let tKeyPct = 0;
+  let tKeyAvailable = false;
   if (positioning && positioning.has_position_data && positioning.players && positioning.players[player.name]) {
     const mp = positioning.players[player.name].metrics || {};
     mobility = _clamp01((mp.activity_score || 0) / 100);
     mobilityBand = mp.movement_band || null;
     mobilityAvailable = true;
+    if (positioning.has_target_lock_data) {
+      tKeyPct = _clamp01(mp.target_lock_pct || 0);
+      tKeyAvailable = true;
+    }
   }
 
   const pvpShare = dealt > 0 ? _clamp01(pvpDealt / dealt) : 0;
@@ -83,6 +93,7 @@ function _playerToAxes(player, positioning, norms) {
       mobility * 100,
       _clamp01(weaponsUsed / norms.maxWeapons) * 100,
       pvpShare * 100,
+      tKeyPct * 100,
     ],
     raw: {
       dealt, accuracy, kills, deaths, received,
@@ -92,6 +103,8 @@ function _playerToAxes(player, positioning, norms) {
       weaponsUsed,
       favWeapon: ps.fav_weapon || '',
       pvpDealt, pveDealt,
+      tKeyPct,
+      tKeyAvailable,
     },
   };
 }
@@ -151,6 +164,7 @@ function _teamAxes(factionNum, data, norms) {
   const pvpShare = teamDealt > 0 ? _clamp01(pvpDealt / teamDealt) : 0;
 
   let mobilitySum = 0, mobilityN = 0;
+  let tKeySum = 0, tKeyN = 0;
   const positioning = data.positioning;
   if (positioning && positioning.has_position_data && positioning.players) {
     for (const p of roster) {
@@ -158,11 +172,17 @@ function _teamAxes(factionNum, data, norms) {
       if (pp && pp.metrics) {
         mobilitySum += pp.metrics.activity_score || 0;
         mobilityN++;
+        if (positioning.has_target_lock_data) {
+          tKeySum += pp.metrics.target_lock_pct || 0;
+          tKeyN++;
+        }
       }
     }
   }
   const mobilityAvg = mobilityN > 0 ? mobilitySum / mobilityN : 0;
   const mobilityAvailable = mobilityN > 0;
+  const tKeyAvg = tKeyN > 0 ? tKeySum / tKeyN : 0;
+  const tKeyAvailable = tKeyN > 0;
 
   return {
     values: [
@@ -173,6 +193,7 @@ function _teamAxes(factionNum, data, norms) {
       _clamp01(mobilityAvg / 100) * 100,
       _clamp01(teamWeaponsAvg / norms.maxTeamWeapons) * 100,
       pvpShare * 100,
+      _clamp01(tKeyAvg) * 100,
     ],
     raw: {
       dealt: teamDealt,
@@ -186,13 +207,19 @@ function _teamAxes(factionNum, data, norms) {
       weaponsUsed: Math.round(teamWeaponsAvg * 10) / 10,
       favWeapon: '',
       pvpDealt, pveDealt,
+      tKeyPct: tKeyAvg,
+      tKeyAvailable,
     },
   };
 }
 
 // ----- Career-level (All Matches tab) -----
-// Mobility is not aggregated in career_stats, so axis 5 is always 0 with a
-// footnoted tooltip in career mode.
+// Mobility uses `mean_movement_score` directly from career_stats. That field
+// is an average of match-relative (p95-normalized) activity_scores, so the
+// career Mobility value is an average-of-relatives — still meaningful relative
+// to other players in the same aggregate, but carries a caveat (see tooltip).
+// T-Key Usage uses `mean_target_lock_pct`, which IS a valid direct average
+// because target_lock_pct is absolute.
 
 function _computeCareerNorms(careerStats) {
   let maxDealt = 0, maxKills = 0, maxReceived = 0, maxWeapons = 0;
@@ -222,24 +249,35 @@ function _careerToAxes(entry, norms) {
   const weaponsUsed = entry.weapon_breakdown ? Object.keys(entry.weapon_breakdown).length : 0;
   const pvpShare = dealt > 0 ? _clamp01(pvpDealt / dealt) : 0;
 
+  const matchesWithPos = entry.matches_with_positioning || 0;
+  const mobilityAvailable = matchesWithPos > 0 && entry.mean_movement_score != null;
+  const mobility = mobilityAvailable ? _clamp01((entry.mean_movement_score || 0) / 100) : 0;
+
+  const matchesWithTKey = entry.matches_with_target_lock_data || 0;
+  const tKeyAvailable = matchesWithTKey > 0 && entry.mean_target_lock_pct != null;
+  const tKeyPct = tKeyAvailable ? _clamp01(entry.mean_target_lock_pct || 0) : 0;
+
   return {
     values: [
       _clamp01(dealt / norms.maxDealt) * 100,
       _clamp01(accuracy) * 100,
       _clamp01(kills / norms.maxKills) * 100,
       _clamp01(1 - (received / norms.maxReceived)) * 100,
-      0,
+      mobility * 100,
       _clamp01(weaponsUsed / norms.maxWeapons) * 100,
       pvpShare * 100,
+      tKeyPct * 100,
     ],
     raw: {
       dealt, accuracy, kills, deaths, received,
-      mobilityScore: 0,
-      mobilityBand: null,
-      mobilityAvailable: false,
+      mobilityScore: Math.round(mobility * 100),
+      mobilityBand: entry.movement_band_dominant || null,
+      mobilityAvailable,
       weaponsUsed,
       favWeapon: entry.fav_weapon || '',
       pvpDealt, pveDealt,
+      tKeyPct,
+      tKeyAvailable,
     },
   };
 }
@@ -262,6 +300,9 @@ function _axisTooltipLine(axisIndex, raw) {
       : 'Mobility: no position data';
     case 5: return `${raw.weaponsUsed} weapons${raw.favWeapon ? ` | Fav: ${raw.favWeapon}` : ''}`;
     case 6: return `PvP ${fmt(raw.pvpDealt)} | PvE ${fmt(raw.pveDealt)}`;
+    case 7: return raw.tKeyAvailable
+      ? `T-Key ${(raw.tKeyPct * 100).toFixed(1)}%`
+      : 'T-Key: no data';
     default: return '';
   }
 }

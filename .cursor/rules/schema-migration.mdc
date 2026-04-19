@@ -37,6 +37,7 @@ For each new event type:
 3. Add output fields in the JSON builder
 4. Add aggregation in `build_all_matches_aggregate()` if cross-match data is needed
 5. Update the output JSON structure documentation in `DEVELOPER_GUIDE.md` Section 5
+6. **For every new field added to the output JSON**, run the filter-contract checklist in `.cursor/rules/filter-contract.mdc` and record the classification in `DEVELOPER_GUIDE.md` Global Player Filter section + `docs/DATA_DICTIONARY.md`. This applies to new fields on `PlayerState` too, once they flow through to the processed JSON.
 
 ## Step 4: Update Frontend (if new data is output)
 

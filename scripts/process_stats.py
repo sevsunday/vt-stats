@@ -402,14 +402,20 @@ def _build_polar_heatmap(trail, spawn_x, spawn_z, p95_dist):
 
 
 def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
-                         slot_to_s64, roster_slots, nick_for_s64):
+                         slot_to_s64, roster_slots, nick_for_s64,
+                         match_has_target_lock_data=False):
     """Compute the positioning block from raw per-player samples.
 
-    raw_samples_by_s64: dict[s64] -> list of (t_sec, x, y, z) tuples, in tick order.
+    raw_samples_by_s64: dict[s64] -> list of (t_sec, x, y, z, has_target) tuples,
+    in tick order. match_has_target_lock_data is the match-global flag captured
+    in the main event loop (True iff any PlayerState had has_target=True during
+    the match).
+
     Returns the full positioning dict per the JSON schema in the plan.
     """
     empty_block = {
         "has_position_data": False,
+        "has_target_lock_data": False,
         "sample_rate_hz": POSITIONING_SAMPLE_RATE_HZ,
         "match_sample_count": 0,
         "map_bounds": None,
@@ -424,7 +430,8 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
     if not raw_samples_by_s64:
         return empty_block
 
-    # Build per-player sparse trails (already downsampled in the main loop)
+    # Build per-player sparse trails (already downsampled in the main loop).
+    # `target` is parallel to t/x/y/z and carries the has_target bool per sample.
     trails = {}
     for s64, samples in raw_samples_by_s64.items():
         if not samples:
@@ -433,8 +440,10 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         x_arr = [s[1] for s in samples]
         y_arr = [s[2] for s in samples]
         z_arr = [s[3] for s in samples]
+        target_arr = [bool(s[4]) for s in samples]
         trails[s64] = {
             "t": t_arr, "x": x_arr, "y": y_arr, "z": z_arr,
+            "target": target_arr,
             "first_seen": t_arr[0], "last_seen": t_arr[-1],
             "sample_count": len(t_arr),
         }
@@ -581,6 +590,15 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         activity_score = 0
         band = _band_for_score(activity_score)
 
+        # Target lock (T-key) usage: fraction of kept 1 Hz samples where the
+        # player was holding T. Absolute 0-1 ratio, cross-match comparable.
+        # Sums to zero for pre-schema matches (has_target field defaults to
+        # False), matching has_target_lock_data=False for the same match.
+        target_samples = tr.get("target") or []
+        target_lock_pct = round(
+            sum(1 for v in target_samples if v) / sample_count, 3
+        ) if sample_count else 0.0
+
         # Heatmaps
         heatmap_grid_xz = _build_heatmap_grid(tr, map_min_x, map_max_x, map_min_z, map_max_z)
         heatmap_polar = _build_polar_heatmap(tr, sx, sz, p95_dist or 1.0)
@@ -607,6 +625,7 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                 "return_to_base_count": return_count,
                 "activity_score": activity_score,
                 "movement_band": band,
+                "target_lock_pct": target_lock_pct,
             },
             "trail": {
                 "t": tr["t"],
@@ -656,6 +675,7 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
 
     return {
         "has_position_data": True,
+        "has_target_lock_data": bool(match_has_target_lock_data),
         "sample_rate_hz": POSITIONING_SAMPLE_RATE_HZ,
         "match_sample_count": int(match_sample_count),
         "map_bounds": {
@@ -771,10 +791,16 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
     all_ordnance = set()
 
     # Positioning: per-player raw sample buffer (downsampled to ~1 Hz in the loop below).
-    # Keyed by Steam64 -> list of (t_sec, x, y, z) tuples in tick order.
+    # Keyed by Steam64 -> list of (t_sec, x, y, z, has_target) tuples in tick order.
     position_samples = defaultdict(list)
     position_last_kept_tick = {}  # s64 -> last tick we kept a sample for (for 1 Hz downsample)
     tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
+    # Target-lock availability for this match. Any observed has_target=True sample
+    # flips this to True. Stays False for pre-schema matches (field defaults to
+    # False) and new-schema matches where no player ever held T. The flag is
+    # propagated to positioning.has_target_lock_data, match.has_target_lock_data,
+    # and on to career_stats[].matches_with_target_lock_data.
+    match_has_target_lock_data = False
 
     i = 0
     n = len(events)
@@ -926,6 +952,9 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 s64 = ps.player
                 if s64 <= 0 or s64 not in s64_to_nick:
                     continue
+                has_target = bool(ps.has_target)
+                if has_target:
+                    match_has_target_lock_data = True
                 last_kept = position_last_kept_tick.get(s64)
                 if last_kept is not None and (tick - last_kept) < tick_stride:
                     continue
@@ -935,6 +964,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                     float(ps.position.x),
                     float(ps.position.y),
                     float(ps.position.z),
+                    has_target,
                 ))
             i += 1
 
@@ -1231,9 +1261,9 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         normalized_samples = {}
         for s64, samples in position_samples.items():
             normalized = []
-            for t_raw, x, y, z in samples:
+            for t_raw, x, y, z, has_target in samples:
                 t_sec = int((t_raw - min_tick) / tick_rate)
-                normalized.append((t_sec, x, y, z))
+                normalized.append((t_sec, x, y, z, has_target))
             normalized_samples[s64] = normalized
     else:
         normalized_samples = {}
@@ -1245,6 +1275,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         slot_to_s64,
         roster_slots,
         nick_for_s64,
+        match_has_target_lock_data=match_has_target_lock_data,
     )
 
     # Kills section
@@ -1280,6 +1311,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "snipe_count": snipe_count,
             "teams": teams,
             "has_position_data": positioning_block["has_position_data"],
+            "has_target_lock_data": positioning_block.get("has_target_lock_data", False),
         },
         "leaderboard": leaderboard,
         "faction_totals": faction_totals,
@@ -1340,6 +1372,10 @@ def build_all_matches_aggregate(all_match_data):
         "movement_scores": [],  # per-match activity_score values
         "movement_bands": [],   # per-match band names
         "movement_path_total": 0.0,
+        # Target-lock (T-key) accumulator. Only populated when the match had
+        # positioning data AND the match-global has_target_lock_data flag is True.
+        # target_lock_pct is absolute (0-1), so direct averaging is valid.
+        "target_lock_pcts": [],
     })
 
     global_weapon = defaultdict(lambda: {
@@ -1354,6 +1390,7 @@ def build_all_matches_aggregate(all_match_data):
     submitters = set()
 
     matches_with_positioning_count = 0
+    matches_with_target_lock_data_count = 0
 
     for match_data in all_match_data:
         m = match_data["match"]
@@ -1363,10 +1400,13 @@ def build_all_matches_aggregate(all_match_data):
         submitters.add(m["submitter"])
         if m.get("has_position_data"):
             matches_with_positioning_count += 1
+        if m.get("has_target_lock_data"):
+            matches_with_target_lock_data_count += 1
 
         # Per-match positioning data (may be absent on older sessions)
         match_positioning = match_data.get("positioning") or {}
         pos_players = match_positioning.get("players") or {}
+        match_has_target_lock = bool(match_positioning.get("has_target_lock_data"))
 
         for p in match_data["leaderboard"]:
             pid = p["player_id"]
@@ -1393,6 +1433,11 @@ def build_all_matches_aggregate(all_match_data):
                 c["movement_scores"].append(pm["activity_score"])
                 c["movement_bands"].append(pm["movement_band"])
                 c["movement_path_total"] += pm["path_length"]
+                # Target-lock career aggregation. Only record a sample for
+                # matches where the match-global flag is True; that prevents
+                # pre-schema zero-fill from diluting real averages.
+                if match_has_target_lock and "target_lock_pct" in pm:
+                    c["target_lock_pcts"].append(pm["target_lock_pct"])
 
             for wpn_name, wpn_data in p["weapon_breakdown"].items():
                 c["weapon_totals"][wpn_name]["dealt"] += wpn_data["dealt"]
@@ -1469,6 +1514,22 @@ def build_all_matches_aggregate(all_match_data):
                 "matches_with_positioning": 0,
             }
 
+        # Career target-lock (T-key) aggregation. Direct average of absolute
+        # ratios — valid because target_lock_pct is not match-relative.
+        target_lock_pcts = c["target_lock_pcts"]
+        if target_lock_pcts:
+            target_lock_fields = {
+                "mean_target_lock_pct": round(
+                    sum(target_lock_pcts) / len(target_lock_pcts), 3
+                ),
+                "matches_with_target_lock_data": len(target_lock_pcts),
+            }
+        else:
+            target_lock_fields = {
+                "mean_target_lock_pct": None,
+                "matches_with_target_lock_data": 0,
+            }
+
         career_stats.append({
             "player_id": pid,
             "name": c["name"],
@@ -1487,6 +1548,7 @@ def build_all_matches_aggregate(all_match_data):
             "best_match": c["best_match"],
             "weapon_breakdown": weapon_breakdown,
             **movement_fields,
+            **target_lock_fields,
         })
     career_stats.sort(key=lambda c: c["total_dealt"], reverse=True)
 
@@ -1537,6 +1599,7 @@ def build_all_matches_aggregate(all_match_data):
             "date_range": [sorted_dates[0], sorted_dates[-1]] if sorted_dates else [],
             "submitters": sorted(submitters),
             "matches_with_positioning": matches_with_positioning_count,
+            "matches_with_target_lock_data": matches_with_target_lock_data_count,
         },
         "career_stats": career_stats,
         "global_weapon_meta": gwm,
@@ -1601,6 +1664,7 @@ def main():
             "player_count": match_data["match"]["player_count"],
             "submitter": submitter,
             "has_position_data": match_data["match"].get("has_position_data", False),
+            "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),
         })
 
     # Sort manifest by date

@@ -161,6 +161,7 @@ Periodic state snapshots of all players. Currently captured by the collector but
 | `health` | `float` | Current health (actual HP, not ratio) |
 | `ammo` | `float` | Current ammo (actual value, not ratio) |
 | `odf` | `string` | Current vehicle ODF |
+| `has_target` | `bool` | `true` when the player is holding T / target-lock key at this tick (minor aim/tracking advantage). Defaults to `false` for pre-schema collector versions. |
 
 ### UnitDestroyed
 
@@ -385,7 +386,7 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 
 ### Player Performance Radar (spiderweb)
 
-Seven-axis normalized shape chart, rendered in four modes across Overview (single), Rivalries (compare), Combat (team), and All Matches (career). All axes normalize to the range 0–100 so shapes are directly comparable within a single polygon and across overlaid polygons. Values closer to the outer ring are always "better" — the Survivability axis inverts damage-received internally so low `received` reads as a wide shape, not a pinched one.
+Eight-axis normalized shape chart, rendered in four modes across Overview (single), Rivalries (compare), Combat (team), and All Matches (career). All axes normalize to the range 0–100 so shapes are directly comparable within a single polygon and across overlaid polygons. Values closer to the outer ring are always "better" — the Survivability axis inverts damage-received internally so low `received` reads as a wide shape, not a pinched one.
 
 | Axis | Source field | Normalizer | Tooltip content |
 |---|---|---|---|
@@ -393,9 +394,10 @@ Seven-axis normalized shape chart, rendered in four modes across Overview (singl
 | Accuracy | `leaderboard[].personal.accuracy` · `career_stats[].overall_accuracy` | already 0–1 | Percentage |
 | Kills | `leaderboard[].kills` · `career_stats[].total_kills` | match max of `kills` (floor 1) · career max | Raw count + derived K/D |
 | Survivability | `leaderboard[].personal.received` · `career_stats[].total_received` | `1 − received / max(received)` | Received damage + deaths |
-| Mobility | `positioning.players[name].metrics.activity_score` | `/ 100` | Score + movement band. 0 with "no position data" footnote when `positioning.has_position_data === false` or in career mode (no aggregate is shipped) |
+| Mobility | `positioning.players[name].metrics.activity_score` · `career_stats[].mean_movement_score` | `/ 100` | Score + movement band. "Mobility: no position data" when `positioning.has_position_data === false` (per-match) or `matches_with_positioning === 0` (career). Career value is an average of match-relative scores — carries a minor approximation |
 | Weapon Diversity | `leaderboard[].personal.weapons_used` · `len(career_stats[].weapon_breakdown)` | match max of `weapons_used` (floor 1) · career max | Count + `fav_weapon` |
 | PvP Share | `personal.pvp_dealt / personal.dealt` · `career_stats[].total_pvp_dealt / total_dealt` | already 0–1 | PvP dealt + PvE dealt |
+| T-Key Usage | `positioning.players[name].metrics.target_lock_pct` · `career_stats[].mean_target_lock_pct` | already 0–1 (absolute — no normalizer) | `T-Key NN.N%` when `positioning.has_target_lock_data === true` (per-match) or `matches_with_target_lock_data > 0` (career); otherwise "T-Key: no data". Cross-match comparable — career value is a valid direct average |
 
 **Mode-specific details:**
 
@@ -403,8 +405,8 @@ Seven-axis normalized shape chart, rendered in four modes across Overview (singl
 |---|---|---|---|
 | single | Overview player profile card | Unfiltered `currentData` so the ghost median reflects the whole match roster | N/A — follows the selected player |
 | compare | Rivalries tab (`#section-rivalry-radar`) | Client-filtered `data` | Click a top-rivalry card to drill in (default = `top_rivalries[0]`); **Custom...** reveals two dropdowns for arbitrary pairs. On filter change the selection reconciles against the filtered roster with fallback to the first visible `top_rivalries[]` entry |
-| team | Combat tab (`#section-faction-radar`) | Client-filtered `data` | Aggregated from `faction_totals` + per-faction leaderboard subsets. Mobility = mean `activity_score` across faction members with positioning data |
-| career | All Matches tab (`#section-career-radar`) | `all_matches.json → career_stats[]` | Single mode with ghost median by default; the **Compare** toggle reveals a second dropdown. Mobility always 0 (no career-level aggregate) |
+| team | Combat tab (`#section-faction-radar`) | Client-filtered `data` | Aggregated from `faction_totals` + per-faction leaderboard subsets. Mobility = mean `activity_score` across faction members with positioning data; T-Key Usage = mean `target_lock_pct` across the same subset |
+| career | All Matches tab (`#section-career-radar`) | `all_matches.json → career_stats[]` | Single mode with ghost median by default; the **Compare** toggle reveals a second dropdown. Mobility uses `mean_movement_score` (match-relative average — approximation); T-Key Usage uses `mean_target_lock_pct` (absolute — valid direct average). The All Matches view does **not** apply the global filter — the A/B picker here is the only selection UI |
 
 **Empty states:**
 
@@ -670,6 +672,7 @@ Player movement analytics derived from `UpdateTick` events. Captured positions a
 | Field | Type | Description |
 |---|---|---|
 | `has_position_data` | `boolean` | `true` when the session contained `UpdateTick` events |
+| `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed in the match. `false` for pre-schema matches AND for new-schema matches where no player ever held T. Distinguishes "no data" from "0% lock" in the UI (see T-Key Usage subsection below) |
 | `sample_rate_hz` | `number` | Always 1 (downsample target) |
 | `match_sample_count` | `number` | Total seconds covered by any player (drives animation duration) |
 | `map_bounds` | `object` | `{ min: {x, z}, max: {x, z} }` from observed extents |
@@ -738,6 +741,7 @@ All distances computed on the `(x, z)` horizontal plane against the player's per
 | `return_to_base_count` | `number` | Hysteresis-counted re-entries: cross `R_base × 1.2` out, **stay outside ≥ 5 seconds**, then re-enter past `R_base × 0.8`. Post-teleport re-entries excluded (see Teleport detection below for why respawn returns are filtered out). The min-outside gate filters boundary-noise oscillations |
 | `activity_score` | `number` | 0–100. **Higher = more active / more map coverage; lower = stayed at base.** `round(100 × (0.5 × (1 − time_in_base_pct) + 0.3 × normalized_max_dist + 0.2 × normalized_path_per_sec))` where `normalized_max_dist = min(max_dist / p95_max_dist_in_match, 1.0)` and `normalized_path_per_sec = min(path_length_per_sec / p95_path_per_sec_in_match, 1.0)`. p95 is computed across all players in this match, making the score self-calibrate per match (so spread is meaningful even on tightly contested or sluggish games). See Pipeline overview above for where this is computed and Worked example below for a numeric walkthrough |
 | `movement_band` | `string` | Bucketed `activity_score`: 0-20 Defensive, 21-40 Territorial, 41-60 Balanced, 61-80 Mobile, 81-100 Aggressive |
+| `target_lock_pct` | `number` | 0–1 ratio: fraction of this player's kept 1 Hz samples where `PlayerState.has_target=true` (T-key held). Absolute value — directly comparable across matches, unlike `activity_score`. See T-Key Usage subsection below. 0.0 when `has_target_lock_data=false` at the top level; use the flag to distinguish "no data" from "0% lock" |
 
 ##### Per-player `trail`
 
@@ -789,6 +793,18 @@ If one team has zero populated spawns, `team_base[n] = null` and the computed se
 - **`trail.t[]` is sparse.** Players can be absent from `UpdateTick` events (dead, disconnected, out of sim scope). Renderers must iterate using `t[i]` as authoritative time, not array index.
 - **Unit scale is map-specific.** BZ "world units" are not meters. All thresholds scale with `base_separation`, so activity_score is unit-agnostic.
 - **Scores are match-relative, not universal.** Because the `max_dist` and `path_length_per_sec` normalizers are this-match p95s, a score of 90 in a low-action match is not directly comparable to a score of 90 in a high-action match. Absolute comparison across matches should go through the `career_stats` aggregates (`mean_movement_score`, `movement_band_dominant`), which average per-match relative scores.
+
+##### T-Key Usage (Target Lock)
+
+BattleZone lets a pilot hold the **T-key** to lock the crosshair onto the nearest enemy, giving a small tracking / aim-assist advantage. The collector captures this as a per-tick boolean in `PlayerState.has_target`; the pipeline distills it into a per-player ratio.
+
+- **Signal**: raw `has_target` booleans in `UpdateTick.players[]`, downsampled to 1 Hz parallel to positioning samples.
+- **Per-player metric**: `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. 0 means "never held T"; 1 means "held T every kept sample"; in practice expect 0.05–0.40 for active pilots, near 0 for FPS-style ground players or pre-schema matches.
+- **Match-global flag**: `positioning.has_target_lock_data` (also mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed in the match. It gates the T-Key Usage UI so a pre-schema match (where the field did not exist) renders "no data" instead of an indistinguishable 0% bar.
+- **Edge case — field present but no player ever held T**: collapses to `has_target_lock_data=false`, same as pre-schema. This is an unavoidable limitation of protobuf's implicit presence: the wire format cannot distinguish "never set" from "explicit false". In practice both cases are correctly labeled "no data" because neither carries a meaningful T-key signal.
+- **Contrast with `activity_score`**: unlike `activity_score` (match-relative, p95-normalized across the roster), `target_lock_pct` is **absolute** — a 0.25 ratio means the player held T for a quarter of their kept samples regardless of how anyone else played. This is why `career_stats[].mean_target_lock_pct` is a **straight direct average** across matches (valid), whereas `mean_movement_score` is an average-of-relatives (approximation, noted in the career Mobility tooltip).
+- **Career aggregation**: `career_stats[].mean_target_lock_pct` and `career_stats[].matches_with_target_lock_data`; also surfaced as `meta.matches_with_target_lock_data` in `all_matches.json`. Only matches where `has_target_lock_data=true` contribute to the average — that prevents pre-schema zero-fill from diluting real values.
+- **UI surface**: the 8th "T-Key Usage" axis on the Player Performance Radar in all four modes (single / compare / team / career). The career Radar reads `mean_target_lock_pct` directly; the per-match Radar reads per-player `target_lock_pct`. Both tooltips fall back to "T-Key: no data" when the availability flag is false.
 
 ##### Worked example
 
@@ -842,6 +858,8 @@ Only generated when more than one match is processed.
 | `maps_played` | `string[]` | Sorted list of unique map names |
 | `date_range` | `[string, string]` | Earliest and latest match dates |
 | `submitters` | `string[]` | Sorted list of unique submitter usernames |
+| `matches_with_positioning` | `number` | Count of matches whose top-level `match.has_position_data` is `true` |
+| `matches_with_target_lock_data` | `number` | Count of matches whose top-level `match.has_target_lock_data` is `true` (i.e. at least one player held T at least once during the match) |
 
 #### `career_stats[]`
 
@@ -865,6 +883,14 @@ Per-player career totals, sorted by total dealt (descending).
 | `fav_weapon` | `string` | Weapon with highest total dealt across all matches |
 | `best_match` | `object` | `{ id, map, dealt }` — match with highest personal dealt |
 | `weapon_breakdown` | `object` | Weapon name → `{ dealt, shots, hits, accuracy }` |
+| `mean_movement_score` | `number \| null` | Mean `activity_score` across matches where this player had positioning data. `null` when `matches_with_positioning = 0`. Approximation — averages match-relative scores (see Positioning Block Known limitations) |
+| `movement_score_stddev` | `number \| null` | Population stddev of per-match `activity_score`s. 0 when only one match; `null` when no matches contribute |
+| `movement_band_dominant` | `string \| null` | Modal `movement_band` across contributing matches |
+| `movement_band_distribution` | `object` | Band name → count of matches in that band |
+| `total_path_length` | `number` | Sum of `metrics.path_length` across contributing matches |
+| `matches_with_positioning` | `number` | Denominator for `mean_movement_score` / `total_path_length` — number of matches where this player had a positioning entry |
+| `mean_target_lock_pct` | `number \| null` | Mean `target_lock_pct` across matches where `has_target_lock_data=true` and the player has a positioning entry. **Valid direct average** (target_lock_pct is absolute). `null` when `matches_with_target_lock_data = 0` |
+| `matches_with_target_lock_data` | `number` | Denominator for `mean_target_lock_pct`. Always `<= matches_with_positioning`; the delta is the count of pre-schema or no-T-pressed matches that contributed positioning but no T-key signal |
 
 #### `global_weapon_meta[]` — same structure as per-match `weapon_meta` but summed across all matches.
 
