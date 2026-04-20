@@ -53,10 +53,12 @@
   const DESCRIPTOR_URL = 'vendor/protobufjs/statsgate.proto.json';
   const ROOT_MESSAGE = 'statsgate.ClientStatSession';
   const PROTO_DOCS_URL = 'data/proto-docs.json';
+  const FIELD_DOCS_MANUAL_URL = 'data/field-docs-manual.json';
 
-  // Path-prefix → proto message type, used for Decoded-tier field tooltips.
-  // Numeric segments (array indices, map keys) are normalized to `*` before
-  // lookup. See `lookupProtoType()` and `lookupProtoFieldDoc()`.
+  // Path-prefix → proto message type, used by lookupFieldDoc()'s
+  // type-based fallback for Decoded-tier fields that don't have a
+  // manual path-keyed entry. Numeric segments (array indices, map keys)
+  // are normalized to `*` before lookup.
   const PROTO_TYPE_MAP = {
     '': 'ClientStatSession',
     'header': 'StatHeader',
@@ -140,9 +142,14 @@
     sizes: { binpb: null, processed: null },
     // Phase 2 — events mode model (decoded view only). Built once per match.
     events: null,
-    // Phase 3 — proto schema docs, loaded once on page init.
-    // { "MessageName.fieldName": "comment" } keyed camelCase.
-    protoDocs: null,
+    // Field-level doc strings, loaded once on page init. Merged from two
+    // sources: data/proto-docs.json (auto-extracted from statsgate.proto
+    // via scripts/extract_proto_docs.py, keyed as "MessageName.fieldName"
+    // and "MessageName") and data/field-docs-manual.json (hand-curated,
+    // keyed as dot-joined path segments with '*' wildcard for numeric
+    // indices, e.g. "leaderboard.*.personal.pvp_dealt"). Manual entries
+    // take precedence on key collision. See lookupFieldDoc().
+    fieldDocs: null,
   };
 
   // events shape, built by buildEventsModel():
@@ -300,50 +307,78 @@
     history.replaceState(null, '', next);
   }
 
-  // --- Proto schema docs (once per page) ---
+  // --- Field docs (once per page) ---
+  //
+  // Two sources merged into state.fieldDocs:
+  //   1. data/proto-docs.json — auto-extracted from scripts/statsgate.proto
+  //      by scripts/extract_proto_docs.py. Keys: "MessageName" for a
+  //      message-level doc, "MessageName.fieldName" for a field doc.
+  //   2. data/field-docs-manual.json — hand-curated, covers fields the
+  //      proto extractor can't reach (most notably the whole Processed
+  //      tier: leaderboard, rivals, match aggregates). Keys are the raw
+  //      JS path's segments joined by '.', with '*' for any numeric
+  //      segment: "leaderboard.*.personal.pvp_dealt".
+  //
+  // Manual entries win on key collision so a human description can
+  // override a terser proto comment.
 
-  async function loadProtoDocs() {
-    if (state.protoDocs) return state.protoDocs;
+  async function fetchJsonOrEmpty(url, label) {
     try {
-      const res = await fetch(PROTO_DOCS_URL);
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      state.protoDocs = await res.json();
+      return await res.json();
     } catch (err) {
-      // Non-fatal: tooltips are a nice-to-have, absence just means they're
-      // missing. Log once and move on.
-      console.warn(`Proto docs unavailable (${err.message}); field tooltips disabled.`);
-      state.protoDocs = {};
+      console.warn(`${label} unavailable (${err.message}); affected tooltips disabled.`);
+      return {};
     }
-    return state.protoDocs;
+  }
+
+  async function loadFieldDocs() {
+    if (state.fieldDocs) return state.fieldDocs;
+    const [proto, manual] = await Promise.all([
+      fetchJsonOrEmpty(PROTO_DOCS_URL, 'Proto docs'),
+      fetchJsonOrEmpty(FIELD_DOCS_MANUAL_URL, 'Manual field docs'),
+    ]);
+    // Strip the manual file's convenience comment key before merge.
+    delete manual._comment;
+    state.fieldDocs = Object.assign({}, proto, manual);
+    return state.fieldDocs;
   }
 
   // Given a tree row's path segments, return the proto message name at
   // that path (for message-level tooltips) or null.
   function lookupProtoType(pathSegments) {
-    if (!state.protoDocs) return null;
     const norm = pathSegments.map(s => /^\d+$/.test(s) ? '*' : s).join('.');
     return PROTO_TYPE_MAP[norm] || null;
   }
 
-  // Given a tree row's path segments, return the proto doc comment for the
-  // field that row represents (if any). Used by the tree and events-table
-  // renderers. Returns null when the path doesn't correspond to a known
-  // proto field (e.g. map keys, processed-tier paths).
-  function lookupProtoFieldDoc(pathSegments) {
-    if (!state.protoDocs || pathSegments.length === 0) return null;
-    const parentPath = pathSegments.slice(0, -1);
+  // Given a tree row's path segments, return the doc string for that row
+  // (if any). Used by both tree tiers (decoded + processed) and by the
+  // events-table column-header tooltips.
+  //
+  // Lookup order:
+  //   1. Path-based key — "header.matchStartTime", "leaderboard.*.personal.dealt".
+  //      Matches anything in the manual JSON and any path an extractor
+  //      chooses to emit under the same scheme.
+  //   2. Proto type-based key — "PlayerState.health". Requires a
+  //      PROTO_TYPE_MAP entry for the parent path, so in practice this
+  //      only resolves against the decoded tier. Acts as fallback when
+  //      the manual JSON has no path-keyed override.
+  function lookupFieldDoc(pathSegments) {
+    if (!state.fieldDocs || pathSegments.length === 0) return null;
+    const normPath = pathSegments.map(s => /^\d+$/.test(s) ? '*' : s).join('.');
+    if (state.fieldDocs[normPath]) return state.fieldDocs[normPath];
     const fieldName = pathSegments[pathSegments.length - 1];
-    // Field names must look like a field, not an array index / map key.
     if (!/^[a-z][\w$]*$/.test(fieldName)) return null;
-    const type = lookupProtoType(parentPath);
+    const type = lookupProtoType(pathSegments.slice(0, -1));
     if (!type) return null;
-    return state.protoDocs[`${type}.${fieldName}`] || null;
+    return state.fieldDocs[`${type}.${fieldName}`] || null;
   }
 
   // For the events-table type-tag tooltip.
   function lookupProtoMessageDoc(messageName) {
-    if (!state.protoDocs) return null;
-    return state.protoDocs[messageName] || null;
+    if (!state.fieldDocs) return null;
+    return state.fieldDocs[messageName] || null;
   }
 
   // --- Protobuf descriptor loading (once per page) ---
@@ -1339,6 +1374,10 @@
 
   function render() {
     if (!state.tree) return;
+    // Doc-icon tooltips live in <body> (attached by Bootstrap on hover),
+    // but their trigger element is inside $tree which we're about to
+    // wipe. Dismiss first to avoid an orphaned tooltip hanging in space.
+    dismissDocTooltips();
     const tree = state.tree;
     const viewportH = $tree.clientHeight;
     const scrollTop = $tree.scrollTop;
@@ -1360,6 +1399,15 @@
     $tree.innerHTML = parts.join('');
   }
 
+  // Remove any live doc tooltips from the DOM. Cheap no-op when nothing
+  // is shown. Called before re-render (the trigger icon is about to be
+  // recreated, so the Bootstrap Tooltip instance tied to the old one
+  // would otherwise linger) and on events-body scroll.
+  function dismissDocTooltips() {
+    const nodes = document.querySelectorAll('.tooltip.vt-raw-doc-tooltip');
+    for (const n of nodes) n.remove();
+  }
+
   function renderRow(row, idx) {
     const top = idx * ROW_HEIGHT;
     const indent = row.depth * 16;
@@ -1373,13 +1421,16 @@
       ? (row.expanded ? '<i class="bi bi-caret-down-fill"></i>' : '<i class="bi bi-caret-right-fill"></i>')
       : '';
 
-    // Proto field-level tooltip — Decoded tier only, skipped in Processed.
-    const docTitle = (state.view === 'decoded')
-      ? lookupProtoFieldDoc(row.path)
-      : null;
+    // Field-level doc tooltip. Runs for both Decoded and Processed tiers
+    // now that path-based lookup in lookupFieldDoc() covers both. When
+    // a doc exists, an info icon is appended next to the key; hovering
+    // or focusing the icon opens a themed Bootstrap Tooltip (the
+    // delegated instance lives on <body>; see wireEvents).
+    const docTitle = lookupFieldDoc(row.path);
+    const docIcon = docTitle ? renderDocIcon(docTitle) : '';
     const keyLabel = row.depth === 0
-      ? `<span class="vt-raw-tree-key"${docTitle ? ` title="${escapeAttr(docTitle)}"` : ''}>${escapeHtml(row.key)}</span>`
-      : renderKey(row, docTitle);
+      ? `<span class="vt-raw-tree-key">${escapeHtml(row.key)}</span>${docIcon}`
+      : renderKey(row, docIcon);
 
     const valuePart = renderValue(row);
 
@@ -1398,16 +1449,27 @@
       </div>`;
   }
 
-  function renderKey(row, docTitle) {
+  function renderKey(row, docIcon) {
     const parent = row.depth > 0 ? row.path[row.path.length - 2] : null;
-    // Numeric key in an array context → render as [n] (no tooltip).
+    // Numeric key in an array context → render as [n]. Array index rows
+    // don't get an info icon (the array parent already carries any doc).
     const parentRow = parent != null ? getParentRow(row) : null;
     if (parentRow && parentRow.kind === 'array') {
       return `<span class="vt-raw-tree-key vt-raw-tree-key--array-index">[${escapeHtml(row.key)}]</span><span class="vt-raw-tree-punc">:&nbsp;</span>`;
     }
-    const titleAttr = docTitle ? ` title="${escapeAttr(docTitle)}"` : '';
-    const schemaClass = docTitle ? ' vt-raw-tree-key--has-doc' : '';
-    return `<span class="vt-raw-tree-key${schemaClass}"${titleAttr}>${escapeHtml(row.key)}</span><span class="vt-raw-tree-punc">:&nbsp;</span>`;
+    return `<span class="vt-raw-tree-key">${escapeHtml(row.key)}</span>${docIcon || ''}<span class="vt-raw-tree-punc">:&nbsp;</span>`;
+  }
+
+  // Info-circle icon that triggers the delegated Bootstrap Tooltip
+  // initialized in wireEvents(). Plain-text doc — Bootstrap escapes
+  // the title attribute on render.
+  function renderDocIcon(docTitle) {
+    return `<i class="bi bi-info-circle vt-raw-tree-info"
+               data-bs-toggle="tooltip"
+               data-bs-placement="top"
+               data-bs-title="${escapeAttr(docTitle)}"
+               aria-label="Field description"
+               tabindex="0"></i>`;
   }
 
   function getParentRow(row) {
@@ -2600,6 +2662,10 @@
       });
     });
     $eventsBody.addEventListener('scroll', () => {
+      // Events table rows don't host doc icons today, but the shared
+      // helper keeps parity with the tree's scroll/render teardown and
+      // costs a single querySelectorAll in the common empty case.
+      dismissDocTooltips();
       if (state.mode === 'events') {
         requestAnimationFrame(renderEvents);
       }
@@ -2630,6 +2696,23 @@
       html: true,
       container: 'body',
       customClass: 'vt-raw-help-popover',
+    });
+  }
+
+  // Single body-level tooltip with selector delegation. Each tree-row
+  // re-render recreates dozens of `.vt-raw-tree-info` icons; using
+  // `selector` means Bootstrap wires one event listener on <body> and
+  // lazily constructs per-element Tooltip instances on hover/focus,
+  // avoiding both init cost and leak-on-destroy concerns.
+  function initDocTooltip() {
+    if (!window.bootstrap || !bootstrap.Tooltip) return;
+    new bootstrap.Tooltip(document.body, {
+      selector: '.vt-raw-tree-info',
+      trigger: 'hover focus',
+      placement: 'top',
+      container: 'body',
+      customClass: 'vt-raw-doc-tooltip',
+      delay: { show: 120, hide: 0 },
     });
   }
 
@@ -2700,15 +2783,16 @@
     grabDom();
     wireEvents();
     initHelpPopover();
+    initDocTooltip();
 
     let manifest;
     try {
-      // Proto docs + manifest both tiny; fetch in parallel and await both
+      // Field docs + manifest both tiny; fetch in parallel and await both
       // before the first render so tooltips are available from the start.
-      // The proto-docs loader swallows its own errors and installs an empty
-      // dict — a missing file just disables tooltips without breaking the
-      // page.
-      const [, m] = await Promise.all([loadProtoDocs(), loadManifest()]);
+      // loadFieldDocs swallows its own errors and installs an empty dict
+      // for each source — a missing file just disables that subset of
+      // tooltips without breaking the page.
+      const [, m] = await Promise.all([loadFieldDocs(), loadManifest()]);
       manifest = m;
     } catch (err) {
       $loading.classList.add('d-none');

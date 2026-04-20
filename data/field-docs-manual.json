@@ -1,0 +1,19 @@
+{
+  "_comment": "Hand-curated field docs that extend data/proto-docs.json. Keys are dot-joined path segments with '*' for array indices and map keys. Path-keyed entries take precedence over proto-extracted TypeName.fieldName entries. Both the Decoded and Processed tiers are looked up against this file.",
+
+  "eventStream": "Per-event records emitted by the in-game collector, in wire-time order. Large matches can contain 100k+ entries.",
+  "header.startTime": "Match start timestamp (google.protobuf.Timestamp).",
+  "header.tickRate": "Ticks per second the collector sampled at. Divide any tick count by this to convert to seconds.",
+  "header.s64ToNick": "Steam64 -> display name at match-join. Used by the UI to resolve every numeric player identifier.",
+  "header.s64ToTeamnum": "Steam64 -> team slot 1-10. Team 0 == world / environment.",
+  "header.teamnumToS64": "Inverse of s64ToTeamnum: team slot -> Steam64. Team slots 1-5 are Team 1, 6-10 are Team 2.",
+  "header.activeConfigMod": "Config mod / gameplay rule set active for the match.",
+
+  "match.snipe_count": "Total snipes across all players in the match.",
+  "match.kill_count": "Total kills across all players in the match.",
+  "leaderboard.*.personal.dealt": "Total damage dealt by this player (any target, including environment).",
+  "leaderboard.*.personal.received": "Total damage received by this player from any source.",
+  "leaderboard.*.personal.pvp_dealt": "Damage dealt by this player specifically TO other players (paired DamageReceived.victim was a player).",
+  "leaderboard.*.rivals.*.dealt": "Damage dealt to the named rival. Rivalry is player-on-player only.",
+  "odf_map": "Raw ordnance ODF filename -> prettified weapon/unit name. Used by the UI to humanize otherwise cryptic ODF strings."
+}
