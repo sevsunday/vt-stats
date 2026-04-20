@@ -504,9 +504,23 @@
         <div class="row g-4 mb-4">
           <div class="col-lg-7">
             <div class="card h-100" id="section-distance-timeline">
-              <div class="card-header d-flex align-items-center justify-content-between">
+              <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <h5 class="mb-0">Distance from Spawn</h5>
-                <button class="btn btn-sm" data-expand="section-distance-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                  <div class="btn-group btn-group-sm" role="group" aria-label="Distance timeline view mode" id="distance-mode-toggle">
+                    <button type="button" class="btn btn-outline-secondary active" data-distance-mode="bands" title="Team IQR bands + median line — best for a quick read">Team bands</button>
+                    <button type="button" class="btn btn-outline-secondary" data-distance-mode="all" title="All players at once; hover a line or leaderboard row to highlight">All players</button>
+                    <button type="button" class="btn btn-outline-secondary" data-distance-mode="focus" title="One player highlighted against faint team bands. Click a Movement Leaderboard row to pick.">Focused</button>
+                  </div>
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="distance-smooth-toggle">
+                    <label class="form-check-label small" for="distance-smooth-toggle" title="Apply a centered 5-second rolling median to reduce tick-to-tick noise">Smooth (5s)</label>
+                  </div>
+                  <i class="bi bi-info-circle vt-col-info"
+                     data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                     title="<div class='text-start' style='max-width:340px;'><strong>Distance from Spawn</strong> &mdash; each player's horizontal distance from their personal spawn point, sampled once per second.<hr class='my-2'><strong>Team bands mode</strong> &mdash; solid line is the team <em>median</em>; the shaded band around it is the <em>IQR</em> (Inter-Quartile Range, p25-p75) &mdash; half the team lives inside the band at that moment. Blue is Team 1, purple is Team 2.<br><br><strong>All players mode</strong> &mdash; every player drawn at low opacity. Hover a line or a Movement Leaderboard row to highlight one.<br><br><strong>Focused mode</strong> &mdash; one player drawn on top of faded team bands for context. Click a row in the Movement Leaderboard above to pick the player; click it again to clear.<br><br><strong>Smooth (5s)</strong> &mdash; centered 5-second rolling median applied before the band is computed, to suppress tick-to-tick noise.<br><br><strong>Gaps in a line</strong> mean the player teleported &mdash; the trail intentionally breaks rather than flying across the map.</div>"></i>
+                  <button class="btn btn-sm" data-expand="section-distance-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
               </div>
               <div class="card-body"><div class="chart-container"><canvas id="distance-timeline-chart"></canvas></div></div>
             </div>
