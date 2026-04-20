@@ -261,14 +261,33 @@
     flex-shrink: 0;
 }
 
-.vt-raw-tree-key--has-doc {
-    text-decoration: underline dotted color-mix(in oklab, var(--kb-accent) 60%, transparent);
-    text-underline-offset: 3px;
-    cursor: help;
-}
-
 .vt-raw-tree-key--array-index {
     color: var(--kb-text-muted);
+}
+
+/* Info-circle icon rendered next to documented keys. Triggers the
+   delegated Bootstrap Tooltip initialized in js/raw-browser.js
+   (initDocTooltip). Plain-text tooltip body. Horizontal spacing comes
+   from the parent row's flex `gap` (0.25rem) — no margin here. */
+.vt-raw-tree-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    font-size: 0.8rem;
+    line-height: 1;
+    color: color-mix(in oklab, var(--kb-text-muted) 70%, transparent);
+    cursor: help;
+    border-radius: 50%;
+    transition: color 120ms ease;
+    flex-shrink: 0;
+}
+
+.vt-raw-tree-info:hover,
+.vt-raw-tree-info:focus-visible {
+    color: var(--kb-accent);
+    outline: none;
 }
 
 .vt-raw-tree-punc {
@@ -758,6 +777,27 @@
 .vt-raw-help-popover .popover-arrow::before {
     border-bottom-color: var(--kb-bg-card);
 }
+
+/* Themed Bootstrap Tooltip variant used by the field-doc icon
+   (.vt-raw-tree-info). Bootstrap's default tooltip is a dark pill
+   regardless of theme; these overrides lean on the theme's card
+   surface so tooltips match the rest of the raw browser chrome. */
+.vt-raw-doc-tooltip.tooltip {
+    --bs-tooltip-bg: var(--kb-bg-card);
+    --bs-tooltip-color: var(--kb-text-primary);
+    --bs-tooltip-max-width: 320px;
+    --bs-tooltip-font-size: 0.8rem;
+    --bs-tooltip-padding-x: 0.65rem;
+    --bs-tooltip-padding-y: 0.5rem;
+    --bs-tooltip-opacity: 1;
+}
+
+.vt-raw-doc-tooltip .tooltip-inner {
+    border: 1px solid var(--kb-border-subtle);
+    text-align: left;
+    line-height: 1.35;
+}
+
 
 /* --- Fullscreen mode ---
  *
