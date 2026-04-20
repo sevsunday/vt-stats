@@ -1177,41 +1177,72 @@
     }
   }
 
-  // Ensure the row for a given pointer exists by expanding ancestors.
-  // Returns the VIRTUAL index of the target row, or -1 if the pointer
-  // doesn't resolve (or, in Phase A, if it lies deeper than a projected
-  // bulk child — graduation support lands in Phase B).
+  // Ensure the row for a given pointer exists by expanding (and, when
+  // necessary, graduating) ancestors along the path. Returns the VIRTUAL
+  // index of the target row, or -1 if the pointer doesn't resolve in the
+  // data.
+  //
+  // Crossing a bulk boundary:
+  //   - Terminal segment: target is a direct projected child; compute its
+  //     virtual index without materializing (accounts for graduated
+  //     siblings pushing projected slots downward).
+  //   - Non-terminal segment: graduate the targeted sibling so tree.rows
+  //     hosts a real row we can keep walking past.
   function ensurePathVisible(tree, path) {
     if (!path || path.length === 0) return 0;
     const segments = Array.isArray(path) ? path : pointerToPath(path);
     const existing = tree.pathToIndex.get(pathToPointer(segments));
     if (existing != null) return virtualIndexOfReal(tree, existing);
 
-    // Walk from root, expanding each ancestor whose pointer we hit.
     let cur = '';
     let curIdx = tree.pathToIndex.get('') || 0;
     for (let i = 0; i < segments.length; i++) {
       const parentRow = tree.rows[curIdx];
       cur = cur + '/' + escapePointerToken(segments[i]);
       if (!tree.pathToIndex.has(cur)) {
-        // Parent must be expanded for `cur` to become visible. If the
-        // parent bulk-expands, no per-child rows appear in tree.rows; we
-        // fall into the projected-child branch below.
         if (!parentRow.expanded) expandRow(tree, curIdx);
       }
       const parentAfter = tree.rows[curIdx];
+
       if (parentAfter.bulkChildren) {
-        // Target is inside a bulk segment. Projected-direct-child path
-        // resolves to a virtual index without materializing. Anything
-        // deeper requires Phase B graduation.
-        const isTerminalSegment = (i === segments.length - 1);
         const siblingIdx = parseInt(segments[i], 10);
-        if (!isTerminalSegment) return -1;
         if (isNaN(siblingIdx) || siblingIdx < 0 || siblingIdx >= parentAfter.bulkChildren.count) return -1;
-        const anchorVIdx = virtualIndexOfReal(tree, curIdx);
-        if (anchorVIdx < 0) return -1;
-        return anchorVIdx + 1 + siblingIdx;
+        const isTerminal = (i === segments.length - 1);
+        if (isTerminal) {
+          // Direct projected child — compute its vIdx in place.
+          const anchorVIdx = virtualIndexOfReal(tree, curIdx);
+          if (anchorVIdx < 0) return -1;
+          let offset = siblingIdx;
+          let j = curIdx + 1;
+          while (j < tree.rows.length && tree.rows[j].bulkSiblingOf === parentAfter) {
+            const graduated = tree.rows[j];
+            if (graduated.bulkSiblingIdx >= siblingIdx) break;
+            let subCount = 0;
+            let k = j + 1;
+            while (k < tree.rows.length && tree.rows[k].depth > graduated.depth) {
+              subCount++;
+              k++;
+            }
+            offset += subCount;
+            j = k;
+          }
+          return anchorVIdx + 1 + offset;
+        }
+        // Non-terminal: graduate so we can continue deeper. If this
+        // sibling is already graduated, pathToIndex hits it on the next
+        // iteration; graduateProjected() is a no-op duplicate otherwise
+        // (it re-splices + re-expands), so guard via pathToIndex first.
+        const projectedPtr = cur;
+        let gradIdx = tree.pathToIndex.get(projectedPtr);
+        if (gradIdx == null) {
+          const projected = synthesizeProjected(parentAfter, siblingIdx);
+          gradIdx = graduateProjected(tree, projected);
+          if (gradIdx < 0) return -1;
+        }
+        curIdx = gradIdx;
+        continue;
       }
+
       const idx = tree.pathToIndex.get(cur);
       if (idx == null) return -1;
       curIdx = idx;
