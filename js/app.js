@@ -86,6 +86,183 @@
   // URLs on error recovery.
   let liveSyncEnabled = localStorage.getItem('vt-url-sync') === 'true';
 
+  // --- Landing Preferences ---
+  // First-visit modal prompts the user to pick a default landing view.
+  // Stored as JSON in localStorage under LANDING_PREF_KEY. Schema:
+  //   { version: 1, mode: 'ask' | 'recent' | 'all' | 'specific', matchId?: string }
+  // Shared links (any URL intent) always bypass this entirely.
+  const LANDING_PREF_KEY = 'vt-landing-pref';
+  const LANDING_PREF_VERSION = 1;
+  const LANDING_MODES = new Set(['ask', 'recent', 'all', 'specific']);
+
+  function readLandingPref() {
+    try {
+      const raw = localStorage.getItem(LANDING_PREF_KEY);
+      if (!raw) return null;
+      const pref = JSON.parse(raw);
+      if (!pref || pref.version !== LANDING_PREF_VERSION) return null;
+      if (!LANDING_MODES.has(pref.mode)) return null;
+      return pref;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeLandingPref(pref) {
+    try {
+      localStorage.setItem(LANDING_PREF_KEY, JSON.stringify(pref));
+    } catch {
+      // Private mode / storage blocked — silently ignore.
+    }
+  }
+
+  function clearLandingPref() {
+    try {
+      localStorage.removeItem(LANDING_PREF_KEY);
+    } catch {
+      // No-op.
+    }
+  }
+
+  // Resolves a landing choice into an actual view load. Always sets
+  // $select.value so the navbar dropdown stays in sync with what loads,
+  // matching the existing URL-driven boot branches. Unknown modes and
+  // missing specific-matchIds silently fall back to most recent.
+  function applyLandingChoice(choice) {
+    const mode = choice && choice.mode;
+    if (mode === 'all') {
+      $select.value = '__all__';
+      loadAllMatches();
+      return;
+    }
+    if (mode === 'specific' && choice.matchId) {
+      const entry = manifest.find(m => m.id === choice.matchId);
+      if (entry) {
+        $select.value = entry.file;
+        loadMatch(entry.file);
+        return;
+      }
+      // Fall through to recent if the saved match is gone.
+    }
+    if (manifest.length > 0) {
+      $select.value = manifest[0].file;
+      loadMatch(manifest[0].file);
+    }
+  }
+
+  // Builds and shows the landing preferences modal. Called on first-visit
+  // boot (when no URL intent and no stored pref) and from the Preferences
+  // gear button in the nav. The two entry points differ only in their
+  // onCancel handling: first-visit falls back to loading the most recent
+  // match; gear re-open is a no-op so dismissing doesn't disturb the view.
+  function showLandingModal({ current, onConfirm, onCancel }) {
+    const $modal = document.getElementById('landing-modal');
+    if (!$modal || !window.bootstrap) return;
+
+    const $recentRadio   = document.getElementById('landing-mode-recent');
+    const $allRadio      = document.getElementById('landing-mode-all');
+    const $specificRadio = document.getElementById('landing-mode-specific');
+    const $specificWrap  = document.getElementById('landing-specific-wrap');
+    const $specificSel   = document.getElementById('landing-specific-select');
+    const $recentHint    = document.getElementById('landing-mode-recent-hint');
+    const $persistYes    = document.getElementById('landing-persist-yes');
+    const $persistNo     = document.getElementById('landing-persist-no');
+    const $confirmBtn    = document.getElementById('landing-modal-confirm');
+
+    // Fill the "Most recent" label with the actual map + date so the
+    // default option is concrete rather than abstract.
+    if (manifest.length > 0 && $recentHint) {
+      const m = manifest[0];
+      const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      $recentHint.textContent = `${m.name} — ${shortDate}`;
+    }
+
+    // Populate the specific-match select from manifest (mirrors the
+    // navbar dropdown's label format).
+    if ($specificSel) {
+      $specificSel.innerHTML = '';
+      manifest.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        opt.textContent = `${m.name} — ${shortDate}`;
+        $specificSel.appendChild(opt);
+      });
+    }
+
+    // Pre-select based on `current` (gear re-open) or defaults (first visit).
+    if (current && current.mode === 'all') {
+      $allRadio.checked = true;
+    } else if (current && current.mode === 'specific') {
+      $specificRadio.checked = true;
+      if (current.matchId && $specificSel) {
+        const exists = manifest.some(m => m.id === current.matchId);
+        if (exists) $specificSel.value = current.matchId;
+      }
+    } else {
+      $recentRadio.checked = true;
+    }
+    // If we have a saved pref (even 'ask'), "Remember" is implicitly the
+    // current stance; treat missing pref as Remember-pre-selected per the
+    // plan's default.
+    if (current && current.mode === 'ask') $persistNo.checked = true;
+    else $persistYes.checked = true;
+
+    // Toggle specific-match select visibility with the radio.
+    function syncSpecificVisibility() {
+      if ($specificRadio.checked) $specificWrap.classList.remove('d-none');
+      else $specificWrap.classList.add('d-none');
+    }
+    function handleSpecificFocus() {
+      $specificRadio.checked = true;
+      syncSpecificVisibility();
+    }
+    syncSpecificVisibility();
+    const modeRadios = [$recentRadio, $allRadio, $specificRadio];
+    modeRadios.forEach(r => r.addEventListener('change', syncSpecificVisibility));
+    // Focusing the dropdown implies they want "specific".
+    if ($specificSel) $specificSel.addEventListener('focus', handleSpecificFocus);
+
+    let confirmed = false;
+
+    function getChoice() {
+      let mode = 'recent';
+      if ($allRadio.checked) mode = 'all';
+      else if ($specificRadio.checked) mode = 'specific';
+      const persist = $persistYes.checked;
+      const choice = { mode, persist };
+      if (mode === 'specific' && $specificSel) choice.matchId = $specificSel.value;
+      return choice;
+    }
+
+    const instance = bootstrap.Modal.getOrCreateInstance($modal);
+
+    function handleConfirm() {
+      confirmed = true;
+      const choice = getChoice();
+      instance.hide();
+      if (typeof onConfirm === 'function') onConfirm(choice);
+    }
+
+    function handleHidden() {
+      // Tear down every listener we added so re-opens don't accumulate.
+      $confirmBtn.removeEventListener('click', handleConfirm);
+      $modal.removeEventListener('hidden.bs.modal', handleHidden);
+      modeRadios.forEach(r => r.removeEventListener('change', syncSpecificVisibility));
+      if ($specificSel) $specificSel.removeEventListener('focus', handleSpecificFocus);
+      if (!confirmed && typeof onCancel === 'function') onCancel();
+    }
+
+    $confirmBtn.addEventListener('click', handleConfirm);
+    $modal.addEventListener('hidden.bs.modal', handleHidden);
+
+    // Hide the preloader spinner behind the modal so the welcome screen
+    // reads cleanly. Loaders re-show #loading themselves when they run.
+    $loading.classList.add('d-none');
+
+    instance.show();
+  }
+
   // Pure: computes the URL string representing current state, without writing
   // to history. Used by both the gated syncUrl() and the explicit Share action.
   function buildShareUrl() {
@@ -267,6 +444,15 @@
     $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load match manifest.</p>';
     return;
   }
+
+  // Sort newest-first. The Python pipeline writes matches.json sorted
+  // ascending by date, but every JS call site that uses manifest[0]
+  // (default dropdown value, brand-home click, boot fallback, landing
+  // modal's "Most recent") means "most recent match". Flipping it here
+  // in one place makes `manifest[0]` the intended most-recent entry and
+  // also shows newest-first in the navbar dropdown, the landing modal's
+  // specific-match picker, and the not-found error picker.
+  manifest.sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const allOpt = document.createElement('option');
   allOpt.value = '__all__';
@@ -2247,9 +2433,34 @@
     });
   }
 
+  // --- Preferences Gear ---
+  // Re-opens the landing modal pre-filled with the current saved pref so
+  // users can change their mind later. onCancel is a no-op here so
+  // dismissing the modal doesn't disturb whatever they're currently viewing.
+  document.getElementById('landing-prefs-btn')?.addEventListener('click', () => {
+    showLandingModal({
+      current: readLandingPref(),
+      onConfirm: ({ mode, matchId, persist }) => {
+        if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
+        else clearLandingPref();
+        const doLoad = () => applyLandingChoice({ mode, matchId });
+        if (window.VTFx) VTFx.withViewTransition(doLoad);
+        else doLoad();
+      },
+      onCancel: () => { /* no-op: keep current view */ },
+    });
+  });
+
   // --- Initial Boot ---
   // Parse URL state once, then branch to the appropriate loader.
+  // Shared URLs (any match/tab/filter/team/players intent) always win and
+  // fully bypass the landing preferences modal. Only when no URL intent
+  // exists do we consult the stored pref (or show the first-visit modal).
   const initialUrlState = parseUrlState();
+  const hasOtherUrlIntent = initialUrlState.tab
+    || initialUrlState.filter
+    || initialUrlState.team
+    || (initialUrlState.players && initialUrlState.players.length);
 
   if (initialUrlState.match === 'all') {
     $select.value = '__all__';
@@ -2262,9 +2473,24 @@
     } else {
       showMatchNotFound(initialUrlState.match);
     }
-  } else if (manifest.length > 0) {
-    // No match param — load first match. Still pass urlState so any filter/tab
-    // params hydrate correctly even without an explicit match.
+  } else if (manifest.length > 0 && hasOtherUrlIntent) {
+    // Partial shared link (e.g. ?tab=positioning). Preserve prior behavior:
+    // load first match and apply the URL state so filter/tab hydrate.
     loadMatch(manifest[0].file, initialUrlState);
+  } else if (manifest.length > 0) {
+    // No URL intent at all — consult landing pref.
+    const pref = readLandingPref();
+    if (!pref || pref.mode === 'ask') {
+      showLandingModal({
+        current: null,
+        onConfirm: ({ mode, matchId, persist }) => {
+          if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
+          applyLandingChoice({ mode, matchId });
+        },
+        onCancel: () => applyLandingChoice({ mode: 'recent' }),
+      });
+    } else {
+      applyLandingChoice(pref);
+    }
   }
 })();
