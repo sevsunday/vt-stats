@@ -2,7 +2,7 @@
 
 ## Project
 
-VT Stats — static-site dashboard for BattleZone match statistics. Python pipeline processes raw protobuf session data into pre-computed JSON; static HTML/JS/CSS dashboard renders it.
+VT Stats — static-site dashboard for Battlezone: Combat Commander match statistics. Python pipeline processes raw protobuf session data into pre-computed JSON; static HTML/JS/CSS dashboard renders it.
 
 ## Before Making Any Change
 

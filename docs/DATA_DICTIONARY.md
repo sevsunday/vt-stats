@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-VT Stats is a static-site dashboard for BattleZone match statistics. The system has three stages:
+VT Stats is a static-site dashboard for Battlezone: Combat Commander match statistics. The system has three stages:
 
 1. **Raw Data** — Match events are captured by the [statsgate](https://github.com/VTrider/statsgate) collector as Protocol Buffer (protobuf) binary files.
 2. **Processing Pipeline** — A Python script (`scripts/process_stats.py`) reads the raw protobuf data, aggregates statistics, and writes pre-computed JSON files.
@@ -808,7 +808,7 @@ If one team has zero populated spawns, `team_base[n] = null` and the computed se
 
 ##### T-Key Usage (Target Lock)
 
-BattleZone lets a pilot hold the **T-key** to lock the crosshair onto the nearest enemy, giving a small tracking / aim-assist advantage. The collector captures this as a per-tick boolean in `PlayerState.has_target`; the pipeline distills it into a per-player ratio.
+BZCC lets a pilot hold the **T-key** to lock the crosshair onto the nearest enemy, giving a small tracking / aim-assist advantage. The collector captures this as a per-tick boolean in `PlayerState.has_target`; the pipeline distills it into a per-player ratio.
 
 - **Signal**: raw `has_target` booleans in `UpdateTick.players[]`, downsampled to 1 Hz parallel to positioning samples.
 - **Per-player metric**: `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. 0 means "never held T"; 1 means "held T every kept sample"; in practice expect 0.05–0.40 for active pilots, near 0 for FPS-style ground players or pre-schema matches.
@@ -933,7 +933,7 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Favorite Weapon** | Weapon a player dealt the most damage with | `DamageDealt` per player per ODF | Weapon name with `max(dealt)` |
 | **Kill Rivalry** | How many times one player killed another | `UnitDestroyed` where both `killer > 0` and `victim > 0` | Count grouped by killer → victim pair |
 | **Kills** | Times a player destroyed a unit | `UnitDestroyed` where `killer` = player Steam64 | Count per player |
-| **Map** | The BattleZone map played | `StatHeader.map` | Direct from header |
+| **Map** | The BZCC map played | `StatHeader.map` | Direct from header |
 | **Matches Played** | Number of matches a player appeared in | Match presence | Count of matches containing this `player_id` |
 | **Momentum (Replay)** | Which faction is dominating the current phase of playback | `timeline.by_faction` rolling 3-bucket sums | Faction ahead by >10% drives the arrow direction; otherwise "Even" or "Quiet" |
 | **Net Damage** | Difference between damage dealt and received | `DamageDealt`, `DamageReceived` | `personal_dealt - personal_received` |
