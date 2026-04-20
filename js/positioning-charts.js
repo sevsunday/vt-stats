@@ -110,7 +110,7 @@ Area covered: ${Math.round(r.convex_hull_area).toLocaleString()} u\u00b2
 First leave: ${firstLeave}
 Returns to base: ${r.return_to_base_count}
 P95 distance: ${Math.round(r.p95_dist).toLocaleString()}u`;
-    return `<tr title="${_attr(rowTitle)}">
+    return `<tr class="vt-movement-row" data-name="${_attr(r.name)}" title="${_attr(rowTitle)}">
       <td>${i + 1}</td>
       <td class="fw-semibold">${_esc(r.name)}</td>
       <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
@@ -155,11 +155,268 @@ function _attr(s) {
 }
 
 // --- Distance-from-Spawn Timeline ---
+//
+// Three view modes handle the "10 overlapping lines" legibility problem:
+//   - 'bands'  (default): per-faction IQR envelope (p25-p75) + median line.
+//                         Collapses 10 series into 2 team stories.
+//   - 'all':   Every player at low opacity; hover-to-highlight one at a time
+//              (triggered by canvas hover OR Movement Leaderboard row hover).
+//   - 'focus': One player's line in full color on top of a faint band backdrop
+//              for team context. Focus name is set by clicking a Movement
+//              Leaderboard row.
+//
+// The optional Smooth toggle applies a centered 5-second rolling median to
+// every per-player series BEFORE the quantile step so bands also smooth.
 
-function renderDistanceTimeline(canvasId, positioning, allNames) {
+const DISTANCE_SMOOTH_WINDOW = 5;
+// Max per-player null-run length (in seconds) that gets linearly interpolated
+// across before the quantile step. Typical respawn/eject pauses fall inside
+// this window; anything longer is treated as a genuine absence and left as a
+// gap so the chart still reflects team-wipe events honestly.
+const DISTANCE_GAP_BRIDGE = 5;
+
+// Resample all players onto a uniform 1-second grid [0..duration].
+// Linear interpolation within each trail.segments span; ticks outside any
+// segment stay `null` so quantile computation and line drawing both skip them
+// (no teleport flyovers, no polluted IQR).
+function _buildDistanceSeries(positioning, factionMap) {
+  const names = Object.keys(positioning.players);
+  let duration = 0;
+  for (const name of names) {
+    const tr = positioning.players[name].trail;
+    if (tr && tr.t && tr.t.length) {
+      const last = tr.t[tr.t.length - 1];
+      if (last > duration) duration = last;
+    }
+  }
+  duration = Math.max(1, Math.ceil(duration));
+  const tGrid = new Array(duration + 1);
+  for (let i = 0; i <= duration; i++) tGrid[i] = i;
+
+  const perPlayer = {};
+  for (const name of names) {
+    const p = positioning.players[name];
+    const tr = p.trail;
+    const sx = p.spawn.x;
+    const sz = p.spawn.z;
+    const d = new Array(tGrid.length).fill(null);
+    if (!tr || !tr.t || !tr.t.length) {
+      perPlayer[name] = { d, faction: (factionMap && factionMap[name]) || 0 };
+      continue;
+    }
+    const segs = tr.segments && tr.segments.length ? tr.segments : [[0, tr.t.length - 1]];
+    // Walk each segment and interpolate into the integer-second grid. The
+    // sample rate is already ~1 Hz (see positioning.sample_rate_hz=1), so
+    // this is usually a direct index map with occasional gaps to interpolate.
+    for (const [a, b] of segs) {
+      for (let i = a; i < b; i++) {
+        const t0 = tr.t[i];
+        const t1 = tr.t[i + 1];
+        const dx0 = tr.x[i] - sx, dz0 = tr.z[i] - sz;
+        const dx1 = tr.x[i + 1] - sx, dz1 = tr.z[i + 1] - sz;
+        const d0 = Math.sqrt(dx0 * dx0 + dz0 * dz0);
+        const d1 = Math.sqrt(dx1 * dx1 + dz1 * dz1);
+        const gStart = Math.max(0, Math.ceil(t0));
+        const gEnd = Math.min(duration, Math.floor(t1));
+        for (let g = gStart; g <= gEnd; g++) {
+          const span = t1 - t0;
+          const frac = span > 0 ? (g - t0) / span : 0;
+          d[g] = d0 + (d1 - d0) * frac;
+        }
+      }
+      // Ensure endpoint is captured even when segment is a single sample
+      const endT = tr.t[b];
+      if (endT >= 0 && endT <= duration) {
+        const g = Math.round(endT);
+        if (d[g] == null) {
+          const dxE = tr.x[b] - sx, dzE = tr.z[b] - sz;
+          d[g] = Math.sqrt(dxE * dxE + dzE * dzE);
+        }
+      }
+    }
+    perPlayer[name] = { d, faction: (factionMap && factionMap[name]) || 0 };
+  }
+  return { perPlayer, tGrid, duration };
+}
+
+// Linearly interpolates across contiguous null runs of length <= maxGap, so
+// normal respawn flicker doesn't shatter the team IQR band. Longer null runs
+// (true team-wipes, late joiners, early leavers) are preserved as gaps so the
+// line honestly breaks there. Only bridges runs that have finite samples on
+// both sides; leading/trailing null runs are left untouched.
+function _bridgeShortGaps(arr, maxGap) {
+  const out = arr.slice();
+  let i = 0;
+  while (i < out.length) {
+    if (out[i] != null) { i++; continue; }
+    let j = i;
+    while (j < out.length && out[j] == null) j++;
+    const runLen = j - i;
+    const hasLeft = i > 0 && out[i - 1] != null && Number.isFinite(out[i - 1]);
+    const hasRight = j < out.length && out[j] != null && Number.isFinite(out[j]);
+    if (runLen <= maxGap && hasLeft && hasRight) {
+      const left = out[i - 1];
+      const right = out[j];
+      for (let k = 0; k < runLen; k++) {
+        const frac = (k + 1) / (runLen + 1);
+        out[i + k] = left + (right - left) * frac;
+      }
+    }
+    i = j;
+  }
+  return out;
+}
+
+// Centered rolling median. Ignores nulls inside the window; leaves positions
+// whose window has no finite samples as null.
+function _smoothMedian(arr, window) {
+  const w = window || DISTANCE_SMOOTH_WINDOW;
+  const half = Math.floor(w / 2);
+  const out = new Array(arr.length);
+  const buf = [];
+  for (let i = 0; i < arr.length; i++) {
+    buf.length = 0;
+    const lo = Math.max(0, i - half);
+    const hi = Math.min(arr.length - 1, i + half);
+    for (let j = lo; j <= hi; j++) {
+      const v = arr[j];
+      if (v != null && Number.isFinite(v)) buf.push(v);
+    }
+    if (!buf.length) { out[i] = null; continue; }
+    buf.sort((a, b) => a - b);
+    const mid = buf.length >> 1;
+    out[i] = buf.length % 2 ? buf[mid] : (buf[mid - 1] + buf[mid]) / 2;
+  }
+  return out;
+}
+
+// Compute p25/p50/p75 at each tick across all players in `faction`.
+// Behavior by sample count at that tick:
+//   0 players -> all three null (band hidden, median hidden)
+//   1 player  -> median = that value, p25/p75 null (line continues through
+//                the single surviving player; band correctly hides since IQR
+//                of a single point is meaningless, and Chart.js with
+//                `fill: '-1'` skips rendering the band when either edge
+//                is null)
+//   2+ players -> full IQR + median
+function _quantileBands(perPlayer, tGrid, faction) {
+  const names = Object.keys(perPlayer).filter(n => perPlayer[n].faction === faction);
+  const p25 = new Array(tGrid.length);
+  const p50 = new Array(tGrid.length);
+  const p75 = new Array(tGrid.length);
+  for (let i = 0; i < tGrid.length; i++) {
+    const col = [];
+    for (const n of names) {
+      const v = perPlayer[n].d[i];
+      if (v != null && Number.isFinite(v)) col.push(v);
+    }
+    if (col.length === 0) {
+      p25[i] = p50[i] = p75[i] = null;
+      continue;
+    }
+    if (col.length === 1) {
+      p50[i] = col[0];
+      p25[i] = null;
+      p75[i] = null;
+      continue;
+    }
+    col.sort((a, b) => a - b);
+    const q = (p) => {
+      const idx = (col.length - 1) * p;
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      if (lo === hi) return col[lo];
+      return col[lo] + (col[hi] - col[lo]) * (idx - lo);
+    };
+    p25[i] = q(0.25);
+    p50[i] = q(0.50);
+    p75[i] = q(0.75);
+  }
+  return { p25, p50, p75 };
+}
+
+function _toXY(tGrid, d) {
+  const out = new Array(tGrid.length);
+  for (let i = 0; i < tGrid.length; i++) {
+    out[i] = { x: tGrid[i], y: d[i] };
+  }
+  return out;
+}
+
+function _bandDatasets(faction, bands, tGrid, color, mode) {
+  // IQR band is rendered as two datasets: upper (p75) fills DOWN to the
+  // previous dataset (the lower/p25 line) via `fill: '-1'`. Median sits on top
+  // as a solid line. In 'focus' mode the band is faded to serve as backdrop.
+  const bandFill = mode === 'focus' ? color + '1a' : color + '33';
+  const lineAlpha = mode === 'focus' ? 'aa' : 'ff';
+  const label = `Team ${faction}`;
+  return [
+    {
+      label: `${label} p25`,
+      data: _toXY(tGrid, bands.p25),
+      borderColor: 'transparent',
+      backgroundColor: bandFill,
+      borderWidth: 0,
+      pointRadius: 0,
+      fill: false,
+      cubicInterpolationMode: 'monotone',
+      spanGaps: false,
+      _bandRole: 'lower',
+      _faction: faction,
+    },
+    {
+      label: `${label} p75`,
+      data: _toXY(tGrid, bands.p75),
+      borderColor: 'transparent',
+      backgroundColor: bandFill,
+      borderWidth: 0,
+      pointRadius: 0,
+      fill: '-1',
+      cubicInterpolationMode: 'monotone',
+      spanGaps: false,
+      _bandRole: 'upper',
+      _faction: faction,
+    },
+    {
+      label: `${label} median (shaded: IQR p25-p75)`,
+      data: _toXY(tGrid, bands.p50),
+      borderColor: color + lineAlpha,
+      backgroundColor: 'transparent',
+      borderWidth: mode === 'focus' ? 1.5 : 2,
+      pointRadius: 0,
+      fill: false,
+      cubicInterpolationMode: 'monotone',
+      spanGaps: false,
+      _bandRole: 'median',
+      _faction: faction,
+    },
+  ];
+}
+
+function _playerDataset(name, perPlayer, tGrid, baseColor, mode) {
+  // In 'all' mode every line is dimmed by default and boosted on hover. In
+  // 'focus' mode only the focused player is drawn via this helper at full
+  // strength. Other modes don't call this.
+  const isAll = mode === 'all';
+  return {
+    label: name,
+    data: _toXY(tGrid, perPlayer[name].d),
+    borderColor: baseColor + (isAll ? '55' : 'ff'),
+    backgroundColor: baseColor + '33',
+    borderWidth: isAll ? 1 : 2,
+    pointRadius: 0,
+    cubicInterpolationMode: 'monotone',
+    spanGaps: false,
+    _playerName: name,
+    _baseColor: baseColor,
+    _dimmed: isAll,
+  };
+}
+
+function renderDistanceTimeline(canvasId, positioning, allNames, opts) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
-  const container = canvas.parentElement?.parentElement;
+  const container = canvas.parentElement && canvas.parentElement.parentElement;
   if (!positioning || !positioning.has_position_data || !Object.keys(positioning.players).length) {
     if (container) container.innerHTML = '<p style="color:var(--kb-text-muted);padding:1rem;">No positioning data.</p>';
     return null;
@@ -167,39 +424,86 @@ function renderDistanceTimeline(canvasId, positioning, allNames) {
   applyThemeDefaults();
   const t = getThemeColors();
 
-  const colorMap = buildPlayerColorMap(allNames);
-  const datasets = [];
+  const mode = (opts && opts.mode) || 'bands';
+  const smooth = !!(opts && opts.smooth);
+  const factionMap = (opts && opts.factionMap) || {};
+  const focusName = (opts && opts.focusName) || null;
 
-  // Build {x: t_sec, y: distance} arrays per player using sparse t[] correctly
-  for (const name of Object.keys(positioning.players)) {
-    const p = positioning.players[name];
-    const tr = p.trail;
-    const sx = p.spawn.x;
-    const sz = p.spawn.z;
-    const points = [];
-    // Iterate per segment, break with {x: t, y: null} between segments so
-    // Chart.js draws gaps across teleports rather than straight flyovers.
-    const segs = tr.segments && tr.segments.length ? tr.segments : [[0, tr.t.length - 1]];
-    for (let si = 0; si < segs.length; si++) {
-      const [a, b] = segs[si];
-      for (let i = a; i <= b; i++) {
-        const dx = tr.x[i] - sx;
-        const dz = tr.z[i] - sz;
-        const d = Math.sqrt(dx * dx + dz * dz);
-        points.push({ x: tr.t[i], y: d });
+  // If we previously rendered here, tear down the old chart so we don't leak
+  // into activeCharts. This function is called on every mode/smooth toggle.
+  if (typeof Chart !== 'undefined' && Chart.getChart) {
+    const existing = Chart.getChart(canvas);
+    if (existing) {
+      if (typeof activeCharts !== 'undefined') {
+        const idx = activeCharts.indexOf(existing);
+        if (idx >= 0) activeCharts.splice(idx, 1);
       }
-      if (si < segs.length - 1) points.push({ x: null, y: null });
+      existing.destroy();
     }
-    datasets.push({
-      label: name,
-      data: points,
-      borderColor: colorMap[name] || t.textMuted,
-      backgroundColor: (colorMap[name] || t.textMuted) + '33',
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.2,
-      spanGaps: false,
-    });
+  }
+
+  const colorMap = buildPlayerColorMap(allNames);
+  const series = _buildDistanceSeries(positioning, factionMap);
+  // Bridge BEFORE smoothing so the rolling median sees a continuous series
+  // across short respawn pauses; otherwise the smoother would either skip
+  // those windows or pull in noise from the boundaries.
+  for (const n of Object.keys(series.perPlayer)) {
+    series.perPlayer[n].d = _bridgeShortGaps(series.perPlayer[n].d, DISTANCE_GAP_BRIDGE);
+  }
+  if (smooth) {
+    for (const n of Object.keys(series.perPlayer)) {
+      series.perPlayer[n].d = _smoothMedian(series.perPlayer[n].d, DISTANCE_SMOOTH_WINDOW);
+    }
+  }
+
+  const factionsPresent = new Set();
+  for (const n of Object.keys(series.perPlayer)) {
+    const f = series.perPlayer[n].faction;
+    if (f === 1 || f === 2) factionsPresent.add(f);
+  }
+  const f1Color = getCSSVar('--kb-primary') || '#6366f1';
+  const f2Color = getCSSVar('--kb-accent') || '#8b5cf6';
+
+  const datasets = [];
+  if (mode === 'bands' || mode === 'focus') {
+    if (factionsPresent.has(1)) {
+      const b = _quantileBands(series.perPlayer, series.tGrid, 1);
+      datasets.push(..._bandDatasets(1, b, series.tGrid, f1Color, mode));
+    }
+    if (factionsPresent.has(2)) {
+      const b = _quantileBands(series.perPlayer, series.tGrid, 2);
+      datasets.push(..._bandDatasets(2, b, series.tGrid, f2Color, mode));
+    }
+  }
+  if (mode === 'all') {
+    for (const name of Object.keys(series.perPlayer)) {
+      datasets.push(_playerDataset(name, series.perPlayer, series.tGrid,
+        colorMap[name] || t.textMuted, 'all'));
+    }
+  } else if (mode === 'focus' && focusName && series.perPlayer[focusName]) {
+    datasets.push(_playerDataset(focusName, series.perPlayer, series.tGrid,
+      colorMap[focusName] || t.textMuted, 'focus'));
+  }
+
+  // Tooltip helpers: bands mode aggregates the three triplet datasets into a
+  // single "Team N median (IQR a-b)" line per team. All/focus modes keep the
+  // per-player "Name: Nu from spawn" format.
+  function bandsTooltipLabel(item) {
+    const ds = item.dataset;
+    if (!ds || !ds._faction || ds._bandRole !== 'median') return null;
+    const i = item.dataIndex;
+    const allDs = item.chart.data.datasets;
+    let lo = null, hi = null;
+    for (const d of allDs) {
+      if (d._faction !== ds._faction) continue;
+      if (d._bandRole === 'lower') lo = d.data[i] && d.data[i].y;
+      if (d._bandRole === 'upper') hi = d.data[i] && d.data[i].y;
+    }
+    const med = Math.round(item.parsed.y).toLocaleString();
+    if (lo != null && hi != null) {
+      return `Team ${ds._faction} median: ${med}u (IQR ${Math.round(lo).toLocaleString()}-${Math.round(hi).toLocaleString()}u)`;
+    }
+    return `Team ${ds._faction} median: ${med}u`;
   }
 
   const ctx = canvas.getContext('2d');
@@ -214,6 +518,15 @@ function renderDistanceTimeline(canvasId, positioning, allNames) {
       plugins: {
         tooltip: {
           ...glassTooltipConfig,
+          filter: (item) => {
+            const ds = item.dataset || {};
+            // Bands mode: only show the median row per faction (skip p25/p75
+            // synthetic datasets, which are style-only).
+            if (mode === 'bands' || mode === 'focus') {
+              if (ds._bandRole && ds._bandRole !== 'median') return false;
+            }
+            return true;
+          },
           callbacks: {
             title: (items) => {
               const sec = items[0].parsed.x;
@@ -221,10 +534,30 @@ function renderDistanceTimeline(canvasId, positioning, allNames) {
               const s = Math.floor(sec % 60);
               return `${m}:${String(s).padStart(2, '0')}`;
             },
-            label: (item) => `${item.dataset.label}: ${Math.round(item.parsed.y).toLocaleString()}u from spawn`,
+            label: (item) => {
+              const ds = item.dataset;
+              if (ds && ds._bandRole === 'median') {
+                const line = bandsTooltipLabel(item);
+                if (line) return line;
+              }
+              return `${ds.label}: ${Math.round(item.parsed.y).toLocaleString()}u from spawn`;
+            },
           },
         },
-        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } },
+        legend: {
+          position: 'bottom',
+          labels: {
+            boxWidth: 12,
+            padding: 8,
+            font: { size: 11 },
+            // Hide the synthetic band boundary datasets; keep medians + players.
+            filter: (legendItem, data) => {
+              const ds = data.datasets[legendItem.datasetIndex];
+              if (ds && ds._bandRole && ds._bandRole !== 'median') return false;
+              return true;
+            },
+          },
+        },
       },
       scales: {
         x: {
@@ -245,8 +578,69 @@ function renderDistanceTimeline(canvasId, positioning, allNames) {
       },
     },
   });
+
+  // Stash metadata on the chart instance so cross-component hover handlers
+  // (Movement Leaderboard row hover) can locate it and mutate dataset styles
+  // without a full re-render.
+  chart.$vtDistance = { mode, focusName, smooth };
+
+  // 'all' mode: hover a line on the canvas to bring it to full opacity.
+  // Listener is attached directly to the canvas element; prior listeners are
+  // cleared in the Chart.destroy() teardown above because the canvas element
+  // itself is reused only within this function's lifetime.
+  if (mode === 'all') {
+    _attachAllModeHover(chart);
+  }
+
   activeCharts.push(chart);
   return chart;
+}
+
+// Hover-to-highlight implementation for 'all' mode. Finds the nearest dataset
+// under the cursor and boosts its borderWidth/opacity while dimming siblings.
+// Resets everything on mouseleave. Uses chart.update('none') to skip the
+// animation frame - hover tracking needs to feel instant.
+function _attachAllModeHover(chart) {
+  const canvas = chart.canvas;
+  function setHighlight(name) {
+    let dirty = false;
+    for (const ds of chart.data.datasets) {
+      if (!ds._playerName) continue;
+      const base = ds._baseColor || '#999';
+      const want = name == null
+        ? { w: 1, c: base + '55' }
+        : (ds._playerName === name ? { w: 2.5, c: base + 'ff' } : { w: 1, c: base + '22' });
+      if (ds.borderWidth !== want.w || ds.borderColor !== want.c) {
+        ds.borderWidth = want.w;
+        ds.borderColor = want.c;
+        dirty = true;
+      }
+    }
+    if (dirty) chart.update('none');
+  }
+  function onMove(ev) {
+    const pts = chart.getElementsAtEventForMode(ev, 'nearest', { intersect: false }, false);
+    if (!pts.length) { setHighlight(null); return; }
+    const ds = chart.data.datasets[pts[0].datasetIndex];
+    setHighlight(ds && ds._playerName ? ds._playerName : null);
+  }
+  function onLeave() { setHighlight(null); }
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseleave', onLeave);
+  // Expose for programmatic highlighting from Movement Leaderboard row hover.
+  chart.$vtDistance.setHighlight = setHighlight;
+}
+
+// Public helper: called by Movement Leaderboard row hover handlers in app.js
+// so the distance chart reacts without a re-render.
+function distanceTimelineHighlight(name) {
+  const canvas = document.getElementById('distance-timeline-chart');
+  if (!canvas) return;
+  const chart = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(canvas) : null;
+  if (!chart || !chart.$vtDistance) return;
+  if (typeof chart.$vtDistance.setHighlight === 'function') {
+    chart.$vtDistance.setHighlight(name);
+  }
 }
 
 // --- Top-down heatmap (imperative canvas) ---

@@ -93,6 +93,20 @@ code, pre, .font-monospace {
     min-height: 200px;
 }
 
+/* Distance from Spawn card: stretch the chart container to fill all space the
+   card offers (so it visually matches the neighbour All Players Heatmap card
+   in the same row). Scoped to this one section so other chart cards keep
+   their current 320px fixed-ish behavior. */
+#section-distance-timeline .card-body {
+    display: flex;
+    flex-direction: column;
+}
+
+#section-distance-timeline .card-body > .chart-container {
+    flex: 1 1 auto;
+    min-height: 320px;
+}
+
 .heatmap-cell {
     font-size: 0.75rem;
     min-width: 60px;
@@ -159,6 +173,23 @@ th[data-sort].sort-active {
 .badge-f2 {
     background: var(--kb-accent);
     color: var(--kb-accent-fg);
+}
+
+/* Movement Leaderboard rows double as the focus selector for the Distance
+   from Spawn chart — clicking a row sets focus mode, clicking the same row
+   again clears it. The `vt-row-focused` tint mirrors the card-header toggle
+   so it's obvious which row the chart is tracking. */
+#movement-leaderboard tr.vt-movement-row {
+    cursor: pointer;
+}
+
+#movement-leaderboard tr.vt-row-focused {
+    background: var(--kb-primary-muted);
+    box-shadow: inset 3px 0 0 0 var(--kb-primary);
+}
+
+#movement-leaderboard tr.vt-row-focused > td {
+    background: transparent;
 }
 
 .config-mod {

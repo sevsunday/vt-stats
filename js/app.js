@@ -1017,7 +1017,10 @@
     renderMovementLeaderboard('movement-leaderboard', filteredView, data.leaderboard, positioningSortState);
     wireMovementLeaderboardSort(data);
     ensureTooltips(document.getElementById('movement-leaderboard'));
-    renderDistanceTimeline('distance-timeline-chart', filteredView, data.leaderboard.map(p => p.name));
+    renderDistanceChart(data, filteredView);
+    wireDistanceTimelineControls(data, filteredView);
+    wireMovementLeaderboardFocus(data, filteredView);
+    ensureTooltips(document.getElementById('section-distance-timeline'));
     renderCombinedHeatmap('combined-heatmap-canvas', positioning);
     renderHeatmapGrid('heatmap-grid-content', filteredView);
     renderRingHistogram('ring-histogram-chart', filteredView);
@@ -1050,9 +1053,151 @@
         if (filteredView) {
           renderMovementLeaderboard('movement-leaderboard', filteredView, data.leaderboard, positioningSortState);
           wireMovementLeaderboardSort(data);
+          // Re-bind click/hover handlers since the sort re-rendered the <tbody>.
+          // applyFocusedRowClass() is called inside wireMovementLeaderboardFocus.
+          wireMovementLeaderboardFocus(data, filteredView);
         }
       };
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Distance-from-Spawn timeline: per-session view preferences.
+  //
+  // `mode` is one of 'bands' (default) | 'all' | 'focus', remembered across
+  // matches in localStorage so a user who prefers the raw view keeps it.
+  // `smooth` is a 5s centered rolling median toggle, off by default so the
+  // chart still reflects the raw samples unless explicitly requested.
+  // `focusName` is only meaningful in 'focus' mode; set by clicking a row
+  // in the Movement Leaderboard. Not persisted because it's match-specific.
+  // ------------------------------------------------------------------
+  const DISTANCE_PREFS_KEY = {
+    mode: 'vtstats.distanceTimeline.mode',
+    smooth: 'vtstats.distanceTimeline.smooth',
+  };
+  let distanceMode = _readDistanceMode();
+  let distanceSmooth = _readDistanceSmooth();
+  let distanceFocusName = null;
+
+  function _readDistanceMode() {
+    try {
+      const v = localStorage.getItem(DISTANCE_PREFS_KEY.mode);
+      return (v === 'bands' || v === 'all' || v === 'focus') ? v : 'bands';
+    } catch (_) { return 'bands'; }
+  }
+  function _writeDistanceMode(v) {
+    try { localStorage.setItem(DISTANCE_PREFS_KEY.mode, v); } catch (_) { /* ignore */ }
+  }
+  function _readDistanceSmooth() {
+    try { return localStorage.getItem(DISTANCE_PREFS_KEY.smooth) === '1'; }
+    catch (_) { return false; }
+  }
+  function _writeDistanceSmooth(v) {
+    try { localStorage.setItem(DISTANCE_PREFS_KEY.smooth, v ? '1' : '0'); }
+    catch (_) { /* ignore */ }
+  }
+
+  function _factionMapFor(data) {
+    const map = {};
+    for (const p of data.leaderboard) map[p.name] = p.faction;
+    return map;
+  }
+
+  function renderDistanceChart(data, filteredView) {
+    // If the stored mode is 'focus' but no player is selected yet (or the
+    // selected player is filtered out), fall back to 'bands' so we never show
+    // an empty chart on first render.
+    const effectiveMode = (distanceMode === 'focus' && (!distanceFocusName
+      || !filteredView.players[distanceFocusName])) ? 'bands' : distanceMode;
+    renderDistanceTimeline(
+      'distance-timeline-chart',
+      filteredView,
+      data.leaderboard.map(p => p.name),
+      {
+        mode: effectiveMode,
+        focusName: distanceFocusName,
+        smooth: distanceSmooth,
+        factionMap: _factionMapFor(data),
+      }
+    );
+  }
+
+  function wireDistanceTimelineControls(data, filteredView) {
+    const group = document.getElementById('distance-mode-toggle');
+    if (group) {
+      group.querySelectorAll('[data-distance-mode]').forEach(btn => {
+        const m = btn.dataset.distanceMode;
+        btn.classList.toggle('active', m === distanceMode);
+        btn.onclick = () => {
+          distanceMode = m;
+          _writeDistanceMode(m);
+          group.querySelectorAll('[data-distance-mode]').forEach(b => {
+            b.classList.toggle('active', b.dataset.distanceMode === m);
+          });
+          renderDistanceChart(data, filteredView);
+        };
+      });
+    }
+    const smoothEl = document.getElementById('distance-smooth-toggle');
+    if (smoothEl) {
+      smoothEl.checked = distanceSmooth;
+      smoothEl.onchange = () => {
+        distanceSmooth = !!smoothEl.checked;
+        _writeDistanceSmooth(distanceSmooth);
+        renderDistanceChart(data, filteredView);
+      };
+    }
+  }
+
+  function applyFocusedRowClass() {
+    const rows = document.querySelectorAll('#movement-leaderboard tr.vt-movement-row');
+    rows.forEach(r => {
+      r.classList.toggle('vt-row-focused',
+        distanceMode === 'focus' && r.dataset.name === distanceFocusName);
+    });
+  }
+
+  function wireMovementLeaderboardFocus(data, filteredView) {
+    const rows = document.querySelectorAll('#movement-leaderboard tr.vt-movement-row');
+    rows.forEach(row => {
+      const name = row.dataset.name;
+      row.onclick = (ev) => {
+        // Let sortable header clicks through; rows don't contain <th> but a
+        // click inside the row shouldn't also trigger button/link handlers.
+        if (ev.target && ev.target.closest && ev.target.closest('a, button')) return;
+        // Toggle off if clicking the already-focused row while in focus mode.
+        if (distanceMode === 'focus' && distanceFocusName === name) {
+          distanceFocusName = null;
+          distanceMode = 'bands';
+          _writeDistanceMode('bands');
+        } else {
+          distanceFocusName = name;
+          distanceMode = 'focus';
+          _writeDistanceMode('focus');
+        }
+        const group = document.getElementById('distance-mode-toggle');
+        if (group) {
+          group.querySelectorAll('[data-distance-mode]').forEach(b => {
+            b.classList.toggle('active', b.dataset.distanceMode === distanceMode);
+          });
+        }
+        applyFocusedRowClass();
+        renderDistanceChart(data, filteredView);
+      };
+      row.onmouseenter = () => {
+        // Programmatic highlight only applies to 'all' mode. Other modes are
+        // visually distinct enough that hover nudging would be noise.
+        if (distanceMode === 'all' && typeof distanceTimelineHighlight === 'function') {
+          distanceTimelineHighlight(name);
+        }
+      };
+      row.onmouseleave = () => {
+        if (distanceMode === 'all' && typeof distanceTimelineHighlight === 'function') {
+          distanceTimelineHighlight(null);
+        }
+      };
+    });
+    applyFocusedRowClass();
   }
 
   // --- Banner ---
