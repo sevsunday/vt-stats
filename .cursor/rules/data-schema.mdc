@@ -89,8 +89,12 @@ Disambiguate collisions by appending raw ODF in parentheses.
 Pre-computed JSON in `data/processed/`. See `DEVELOPER_GUIDE.md` Section 5 for full JSON structure with examples.
 
 - `matches.json` — manifest (includes `submitter` and `has_position_data` fields per match)
-- `<match_id>.json` — per-match: match (with `has_position_data`), leaderboard (with kills/deaths/hit_targets), faction_totals, rivalry_matrix, top_rivalries, weapon_meta, timeline, asset_damage, kills (leaderboard/feed/by_vehicle/kill_rivalry_matrix), positioning
+- `<match_id>.json` — per-match: match (with `has_position_data`), leaderboard (with kills/deaths/hit_targets), faction_totals, rivalry_matrix, top_rivalries, weapon_meta, **odf_map**, timeline, asset_damage, kills (leaderboard/feed/by_vehicle/kill_rivalry_matrix), positioning
 - `all_matches.json` — aggregate: meta (with submitters list), career_stats (with total_kills/total_deaths), global_weapon_meta, global_rivalries
+
+### `odf_map` (per-match, match-global)
+
+Top-level object on each per-match JSON. Keys are raw ODF strings exactly as they appear in the binpb wire format (including the `.odf` suffix); values are the best human-readable name. Weapons resolve via the ODF DB chain (`build_weapon_name_resolver`); non-weapon ODFs (vehicles, structures, player craft) fall through to a title-cased form of the raw stem, matching the convention used in `kills.by_vehicle`. Populated from every `*_odf` field encountered in the match: `BulletInit.ordnance_odf`, `BulletHit.{ordnance_odf, victim_odf, shooter_odf}`, `DamageDealt.ordnance_odf`, `DamageReceived.ordnance_odf`, `UnitDestroyed.{killer_odf, victim_odf}`, and `PlayerState.odf`. Typically 10–50 entries per match. Consumed primarily by the Raw Data Browser (`js/raw-browser.js`) to annotate raw ODF strings inline with their resolved name. **Match-global: always unfiltered** (see `.cursor/rules/filter-contract.mdc`).
 
 ## UpdateTick Processing (Positioning)
 

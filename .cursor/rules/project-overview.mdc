@@ -7,10 +7,11 @@ alwaysApply: true
 
 ## Architecture
 
-Static-site dashboard for Battlezone: Combat Commander match statistics. Two-part system:
+Static-site dashboard for Battlezone: Combat Commander match statistics. Three-part system:
 
 1. **Python pipeline** (`scripts/process_stats.py`) reads raw `.binpb.gz` protobuf session files from `data/sessions/<username>/`, aggregates all statistics, and writes pre-computed JSON to `data/processed/`.
-2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/vtstats-fx.js`, `js/charts.js`, `js/charts-radar.js`, `js/positioning-charts.js`, `js/timeline-player.js`, `js/positioning-player.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI with tabbed navigation and glassmorphic theme layer. A client-side global filter layer derives player/team-scoped views from the loaded JSON without re-fetching. No raw event parsing happens in the browser.
+2. **Browser dashboard** (`index.html`, `js/theme.js`, `js/vtstats-fx.js`, `js/charts.js`, `js/charts-radar.js`, `js/positioning-charts.js`, `js/timeline-player.js`, `js/positioning-player.js`, `js/app.js`) loads the tiny pre-computed JSON files and renders interactive UI with tabbed navigation and glassmorphic theme layer. A client-side global filter layer derives player/team-scoped views from the loaded JSON without re-fetching. No statistical aggregation happens in the browser — aggregates are always the pipeline's responsibility.
+3. **Raw Data Browser** (`raw.html`, `js/raw-browser.js`, `css/raw-browser.css`) is a standalone, isolated page for inspecting per-match data at every layer: raw binpb metadata + download, faithful client-side decode of the protobuf (vendored protobufjs-light + native `DecompressionStream`), and the processed JSON. Rendered as a virtualized JSON tree with domain-aware resolvers (Steam64 → nickname, ODF → prettified weapon/unit name via match-global `odf_map`). Loaded on demand per match from the main dashboard's "View raw" button on the match-info banner, or from the `docs.html` navbar.
 
 ## Key File Locations
 
@@ -25,6 +26,10 @@ Static-site dashboard for Battlezone: Combat Commander match statistics. Two-par
 - Replay player: `js/timeline-player.js` (Replay tab engine: animated timeline playback, transport controls, companion stats)
 - Positioning renderers: `js/positioning-charts.js` (Positioning tab: Movement Leaderboard, combined + per-player heatmaps with shared viewport/intensity + legend, distance timeline, ring histogram)
 - Positioning player: `js/positioning-player.js` (Positioning tab animated trail playback with transport controls, sub-second trail interpolation, teleport-segment gaps; exposes `window.VTPositionPlayer`)
+- Raw data browser: `raw.html` / `js/raw-browser.js` / `css/raw-browser.css` (standalone page: binpb metadata + decoded JSON + processed JSON; virtualized tree with Steam64/ODF resolvers; events-mode virtualized table with tick slider + filter chips + Replay cross-link; Reconcile view verifying tier-3 aggregates against tier-2 event sums; JSONPath subset search; proto schema tooltips)
+- Vendored protobufjs + descriptor: `vendor/protobufjs/protobuf.min.js` (light build v7) and `vendor/protobufjs/statsgate.proto.json` (pre-compiled from `scripts/statsgate.proto` via `pbjs -t json`)
+- Proto docs extractor + generated file: `scripts/extract_proto_docs.py` / `data/proto-docs.json` (parses inline proto comments for raw-browser field tooltips; invoked as part of `scripts/process_stats.py`)
+- Schema-migration verify tool: `scripts/verify_proto_decode.mjs` (Node-based decode-and-compare against Python pipeline output; requires one-off `npm i --no-save protobufjs@7`)
 - Vendored fonts: `vendor/fonts/` (Geist Sans + Geist Mono variable woff2)
 - Technical spec: `DEVELOPER_GUIDE.md`
 - Upstream collector source: `statsgate/` (reference copy of [statsgate](https://github.com/VTrider/statsgate))

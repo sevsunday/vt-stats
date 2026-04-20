@@ -884,6 +884,33 @@
     return escapeHtml(s).replace(/"/g, '&quot;');
   }
 
+  // Seek the playhead to the bucket containing a given raw tick. Used by
+  // cross-links from the Raw Data Browser's event-stream table
+  // (`raw.html?mode=events` rows → `index.html?tab=replay&t=<tick>`).
+  //
+  // Granularity: `progressBuckets` is float, but companion panels snap per
+  // whole bucket (TIMELINE_BUCKET_SECONDS = 10s), so the visible jump lands
+  // on the bucket that contains the event. Sub-bucket seek is intentionally
+  // out of scope (see DEVELOPER_GUIDE §10 "Raw Data Browser").
+  //
+  // Returns true if the seek was accepted, false if there's no active
+  // replay state or the match metadata is missing tick info.
+  function jumpToTick(tick) {
+    if (!state || !state.match) return false;
+    const t = Number(tick);
+    if (!isFinite(t)) return false;
+    const tickRate = state.match.tick_rate || 20;
+    const startTick = (state.match.tick_range && state.match.tick_range[0]) || 0;
+    const bucketSec = (state.timeline && state.timeline.bucket_seconds) || 10;
+    const sec = Math.max(0, (t - startTick) / tickRate);
+    const target = sec / bucketSec;
+    pause();
+    state.progressBuckets = Math.min(state.totalBuckets, Math.max(0, target));
+    reanchorPlayback();
+    render();
+    return true;
+  }
+
   // --- Public API ---
 
   window.VTReplay = {
@@ -891,5 +918,6 @@
     destroy,
     renderFullscreenSnapshot,
     hasInstance: () => state !== null,
+    jumpToTick,
   };
 })();

@@ -1,0 +1,760 @@
+/*
+ * Raw Data Browser (raw.html) — styles.
+ *
+ * Loaded ONLY on raw.html (after the shared theme/layout stack). All colors
+ * use --kb-* variables; all effects use --vt-* variables; no hardcoded
+ * palette. Fixed-height virtualized rows (28px) are the core contract for
+ * the tree renderer in js/raw-browser.js.
+ */
+
+/* --- Shared utility (scoped to this page) --- */
+
+.vt-muted {
+    color: var(--kb-text-muted);
+}
+
+/* --- Header card --- */
+
+.vt-raw-header .stat-label {
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+
+.vt-raw-stats-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed color-mix(in oklab, var(--kb-border-subtle), transparent 50%);
+}
+
+.vt-raw-stat-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 40%);
+    font-size: 0.8rem;
+}
+
+.vt-raw-stat-chip--total {
+    background: color-mix(in oklab, var(--kb-primary) 18%, transparent);
+    border-color: color-mix(in oklab, var(--kb-primary) 35%, transparent);
+    color: var(--kb-text-primary);
+}
+
+.vt-raw-stat-chip-label {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.vt-raw-stat-chip-value {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+/* --- Match picker (when no ?match= param) --- */
+
+.vt-raw-picker-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.75rem;
+}
+
+.vt-raw-picker-item {
+    display: block;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 60%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+    color: var(--kb-text-primary);
+    text-decoration: none;
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-raw-picker-item:hover,
+.vt-raw-picker-item:focus-visible {
+    border-color: var(--kb-primary);
+    transform: translateY(-1px);
+    color: var(--kb-text-primary);
+    text-decoration: none;
+    outline: none;
+}
+
+.vt-raw-picker-item-title {
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+}
+
+.vt-raw-picker-item-meta {
+    font-size: 0.8rem;
+    color: var(--kb-text-muted);
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- Controls row (search + breadcrumb) --- */
+
+.vt-raw-controls {
+    background: color-mix(in oklab, var(--kb-bg-card) 96%, transparent);
+}
+
+.vt-raw-search-group {
+    flex: 0 1 420px;
+    min-width: 260px;
+}
+
+.vt-raw-search-group input {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.vt-raw-search-count {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    min-width: 5.5em;
+    justify-content: center;
+    color: var(--kb-text-muted);
+}
+
+.vt-raw-search-group input[data-regex="true"] {
+    background: color-mix(in oklab, var(--kb-accent) 10%, transparent);
+    border-color: color-mix(in oklab, var(--kb-accent) 45%, transparent);
+}
+
+.vt-raw-search-group input[data-jsonpath="true"] {
+    background: color-mix(in oklab, var(--kb-info) 10%, transparent);
+    border-color: color-mix(in oklab, var(--kb-info) 45%, transparent);
+}
+
+.vt-raw-search-group input[data-jsonpath="error"] {
+    background: color-mix(in oklab, var(--kb-danger) 12%, transparent);
+    border-color: color-mix(in oklab, var(--kb-danger) 55%, transparent);
+}
+
+.vt-raw-breadcrumb {
+    flex: 1 1 260px;
+    min-width: 0;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.35rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 60%, transparent);
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+.vt-raw-breadcrumb:hover {
+    border-color: var(--kb-primary);
+}
+
+.vt-raw-breadcrumb--copied {
+    border-color: var(--kb-success);
+    background: color-mix(in oklab, var(--kb-success) 15%, transparent);
+}
+
+/* --- Tree card + body --- */
+
+.vt-raw-tree-card {
+    min-height: 420px;
+}
+
+.vt-raw-tree-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3rem 1rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-raw-tree-status-text {
+    font-size: 0.9rem;
+}
+
+.vt-raw-tree-error {
+    padding: 1.5rem;
+    color: var(--kb-danger);
+    border-left: 3px solid var(--kb-danger);
+    background: color-mix(in oklab, var(--kb-danger) 8%, transparent);
+    margin: 1rem;
+    border-radius: 0.35rem;
+    font-size: 0.9rem;
+}
+
+/* Virtualized tree container: scrollable viewport with absolutely-positioned rows.
+   Fixed 28px row height is the contract between render & hit-testing logic
+   in js/raw-browser.js — do not change without updating ROW_HEIGHT there. */
+.vt-raw-tree {
+    position: relative;
+    height: min(70vh, 820px);
+    overflow: auto;
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.825rem;
+    line-height: 1.6;
+    outline: none;
+}
+
+.vt-raw-tree:focus-visible {
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--kb-primary) 40%, transparent);
+}
+
+.vt-raw-tree-spacer {
+    width: 1px;
+    pointer-events: none;
+}
+
+.vt-raw-tree-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 28px;
+    padding: 3px 12px 3px 0;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: default;
+}
+
+.vt-raw-tree-row:hover {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+}
+
+.vt-raw-tree-row--current {
+    background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+}
+
+.vt-raw-tree-indent {
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.vt-raw-tree-toggle {
+    display: inline-flex;
+    width: 1.1em;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--kb-text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.vt-raw-tree-toggle--leaf {
+    cursor: default;
+    visibility: hidden;
+}
+
+.vt-raw-tree-key {
+    color: var(--kb-text-primary);
+    flex-shrink: 0;
+}
+
+.vt-raw-tree-key--has-doc {
+    text-decoration: underline dotted color-mix(in oklab, var(--kb-accent) 60%, transparent);
+    text-underline-offset: 3px;
+    cursor: help;
+}
+
+.vt-raw-tree-key--array-index {
+    color: var(--kb-text-muted);
+}
+
+.vt-raw-tree-punc {
+    color: var(--kb-text-muted);
+    flex-shrink: 0;
+}
+
+.vt-raw-tree-summary {
+    color: var(--kb-text-muted);
+    font-style: italic;
+    flex-shrink: 0;
+}
+
+.vt-raw-tree-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.vt-raw-tree-value--string {
+    color: var(--kb-success);
+}
+
+.vt-raw-tree-value--number {
+    color: var(--kb-info);
+}
+
+.vt-raw-tree-value--bool {
+    color: var(--kb-warning);
+    font-weight: 600;
+}
+
+.vt-raw-tree-value--null {
+    color: var(--kb-text-muted);
+    font-style: italic;
+}
+
+/* Domain-aware resolver inline annotations (Steam64 -> nickname, ODF -> name) */
+.vt-raw-tree-resolved {
+    color: var(--kb-accent);
+    margin-left: 0.45rem;
+    padding: 0 0.35rem;
+    border-radius: 0.25rem;
+    background: color-mix(in oklab, var(--kb-accent) 14%, transparent);
+    font-size: 0.75rem;
+    font-style: normal;
+}
+
+/* Search-hit highlight */
+.vt-raw-tree-hit {
+    background: color-mix(in oklab, var(--kb-warning) 25%, transparent);
+    border-radius: 0.2rem;
+}
+
+.vt-raw-tree-hit--current {
+    background: color-mix(in oklab, var(--kb-warning) 55%, transparent);
+    outline: 1px solid var(--kb-warning);
+}
+
+/* Context menu (right-click on a row) */
+.vt-raw-context-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 180px;
+    padding: 0.25rem;
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.35rem;
+    box-shadow: var(--vt-shadow-elevation-2, 0 6px 24px rgba(0, 0, 0, 0.25));
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.85rem;
+}
+
+.vt-raw-context-menu button {
+    display: block;
+    width: 100%;
+    padding: 0.35rem 0.75rem;
+    background: none;
+    border: none;
+    border-radius: 0.25rem;
+    text-align: left;
+    color: var(--kb-text-primary);
+    cursor: pointer;
+}
+
+.vt-raw-context-menu button:hover,
+.vt-raw-context-menu button:focus-visible {
+    background: color-mix(in oklab, var(--kb-primary) 20%, transparent);
+    outline: none;
+}
+
+/* Inline "expand this long string" button */
+.vt-raw-tree-more {
+    margin-left: 0.35rem;
+    padding: 0 0.35rem;
+    font-size: 0.72rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 70%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.2rem;
+    color: var(--kb-text-muted);
+    cursor: pointer;
+}
+
+.vt-raw-tree-more:hover {
+    color: var(--kb-text-primary);
+    border-color: var(--kb-primary);
+}
+
+/* Full-screen preloader local to this page (mirrors index.html pattern) */
+#raw-loading {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1020;
+    background: var(--kb-bg-body);
+}
+
+/* ==========================================================================
+ * Phase 2 — Event-stream table
+ * ==========================================================================
+ *
+ * Shown when view=decoded AND mode=events. Virtualized table sharing the
+ * ROW_HEIGHT contract with the tree (28px). Pair-highlight uses --kb-accent
+ * to visually link adjacent DamageDealt + DamageReceived rows on hover.
+ */
+
+/* Event-type filter chips */
+.vt-raw-events-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.vt-raw-events-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 40%);
+    color: var(--kb-text-secondary);
+    font-size: 0.78rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-raw-events-chip:hover {
+    border-color: var(--kb-primary);
+    color: var(--kb-text-primary);
+}
+
+.vt-raw-events-chip--on {
+    background: color-mix(in oklab, var(--kb-primary) 22%, transparent);
+    border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+    color: var(--kb-text-primary);
+}
+
+.vt-raw-events-chip-count {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-raw-events-chip--on .vt-raw-events-chip-count {
+    color: var(--kb-text-primary);
+}
+
+/* Dual-handle tick range slider. Uses stacked native range inputs;
+   the visual track is a separate div below the labels. */
+.vt-raw-events-slider {
+    padding: 0 0.25rem;
+}
+
+.vt-raw-events-slider-labels {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    padding-bottom: 0.1rem;
+}
+
+.vt-raw-events-slider-track {
+    position: relative;
+    height: 4px;
+    border-radius: 2px;
+    background: color-mix(in oklab, var(--kb-border-subtle), transparent 30%);
+    margin: 0.3rem 0;
+}
+
+.vt-raw-events-slider-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: color-mix(in oklab, var(--kb-primary) 70%, transparent);
+    border-radius: 2px;
+}
+
+.vt-raw-events-slider-inputs {
+    position: relative;
+    height: 18px;
+}
+
+.vt-raw-events-slider-inputs input[type="range"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 18px;
+    pointer-events: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    margin: 0;
+}
+
+.vt-raw-events-slider-inputs input[type="range"]::-webkit-slider-thumb {
+    pointer-events: auto;
+    appearance: none;
+    -webkit-appearance: none;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: var(--kb-primary);
+    border: 2px solid var(--kb-bg-card);
+    cursor: ew-resize;
+    box-shadow: 0 1px 3px color-mix(in oklab, var(--kb-text-primary) 20%, transparent);
+}
+
+.vt-raw-events-slider-inputs input[type="range"]::-moz-range-thumb {
+    pointer-events: auto;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: var(--kb-primary);
+    border: 2px solid var(--kb-bg-card);
+    cursor: ew-resize;
+}
+
+.vt-raw-events-slider-inputs input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    background: transparent;
+}
+
+.vt-raw-events-slider-inputs input[type="range"]::-moz-range-track {
+    height: 4px;
+    background: transparent;
+}
+
+/* Summary + player-filter badge */
+.vt-raw-events-summary {
+    font-size: 0.85rem;
+}
+
+.vt-raw-events-player-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-accent) 20%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-accent) 45%, transparent);
+    color: var(--kb-text-primary);
+    font-size: 0.78rem;
+}
+
+/* Virtualized table. thead is sticky; tbody is the virtualized scroll area.
+   Fixed 28px row height matches ROW_HEIGHT in js/raw-browser.js. */
+.vt-raw-events-table {
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.35rem;
+    overflow: hidden;
+}
+
+.vt-raw-events-thead {
+    display: grid;
+    grid-template-columns:
+        72px       /* tick */
+        76px       /* time */
+        130px      /* type */
+        minmax(140px, 1.3fr)  /* shooter */
+        minmax(140px, 1.3fr)  /* victim */
+        minmax(140px, 1.5fr)  /* ordnance */
+        100px;     /* amount */
+    align-items: center;
+    padding: 0 0.35rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 70%, transparent);
+    border-bottom: 1px solid var(--kb-border-subtle);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--kb-text-muted);
+    height: 32px;
+}
+
+.vt-raw-events-th {
+    padding: 0 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-raw-events-col-amount {
+    text-align: right;
+}
+
+.vt-raw-events-body {
+    position: relative;
+    height: min(65vh, 760px);
+    overflow: auto;
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.82rem;
+    outline: none;
+}
+
+.vt-raw-events-body:focus-visible {
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--kb-primary) 40%, transparent);
+}
+
+.vt-raw-events-spacer {
+    width: 1px;
+    pointer-events: none;
+}
+
+.vt-raw-events-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: grid;
+    grid-template-columns:
+        72px
+        76px
+        130px
+        minmax(140px, 1.3fr)
+        minmax(140px, 1.3fr)
+        minmax(140px, 1.5fr)
+        100px;
+    align-items: center;
+    padding: 0 0.35rem;
+    height: 28px;
+    cursor: pointer;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 75%);
+}
+
+.vt-raw-events-row:hover {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+}
+
+.vt-raw-events-cell {
+    padding: 0 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-raw-events-cell--player {
+    cursor: pointer;
+}
+
+.vt-raw-events-cell--player:hover {
+    color: var(--kb-primary);
+    text-decoration: underline dotted;
+}
+
+.vt-raw-events-cell--amount {
+    text-align: right;
+}
+
+.vt-raw-events-type-tag {
+    display: inline-block;
+    padding: 0 0.45rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    color: var(--kb-text-secondary);
+}
+
+/* Event-type chip coloring — uses existing --kb-* semantic colors so theme
+   changes track automatically. Groups are semantic (hits/damage/etc.). */
+.vt-raw-events-type--bulletInit,
+.vt-raw-events-type--bulletHit { background: color-mix(in oklab, var(--kb-info) 22%, transparent); color: var(--kb-info); }
+.vt-raw-events-type--damageDealt,
+.vt-raw-events-type--damageReceived { background: color-mix(in oklab, var(--kb-warning) 22%, transparent); color: var(--kb-warning); }
+.vt-raw-events-type--updateTick { background: color-mix(in oklab, var(--kb-text-muted) 22%, transparent); color: var(--kb-text-muted); }
+.vt-raw-events-type--unitDestroyed { background: color-mix(in oklab, var(--kb-danger) 22%, transparent); color: var(--kb-danger); }
+.vt-raw-events-type--unitSniped { background: color-mix(in oklab, var(--kb-accent) 22%, transparent); color: var(--kb-accent); }
+
+/* Pair highlight: DamageDealt hover finds its adjacent DamageReceived (and
+   vice versa) via data-pair-idx on the row. JS adds .vt-raw-pair-highlight
+   to both rows on hover. Outline uses --kb-accent. */
+.vt-raw-events-row.vt-raw-pair-highlight {
+    background: color-mix(in oklab, var(--kb-accent) 14%, transparent);
+    outline: 1px solid color-mix(in oklab, var(--kb-accent) 55%, transparent);
+    outline-offset: -1px;
+}
+
+.vt-raw-events-row.vt-raw-pair-highlight--origin {
+    background: color-mix(in oklab, var(--kb-accent) 22%, transparent);
+}
+
+/* ==========================================================================
+ * Phase 3 — Reconciliation view
+ * ========================================================================== */
+
+.vt-raw-reconcile-table th {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--kb-text-muted);
+    font-weight: 500;
+}
+
+.vt-raw-reconcile-table td {
+    font-size: 0.85rem;
+    vertical-align: middle;
+}
+
+.vt-raw-reconcile-table td:nth-child(2),
+.vt-raw-reconcile-table td:nth-child(3),
+.vt-raw-reconcile-table td:nth-child(4) {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.vt-raw-reconcile-rule {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 48ch;
+    display: inline-block;
+}
+
+.vt-raw-reconcile-row--ok td:nth-child(4) {
+    color: var(--kb-success);
+}
+
+.vt-raw-reconcile-row--delta td:nth-child(4) {
+    color: var(--kb-danger);
+    font-weight: 600;
+}
+
+.vt-raw-reconcile-row--delta {
+    background: color-mix(in oklab, var(--kb-danger) 8%, transparent);
+}
+
+.vt-raw-reconcile-row--skip td {
+    color: var(--kb-text-muted);
+    font-style: italic;
+}
+
+/* Help popover — themed to match the dark chrome. Bootstrap's default
+   popover is white regardless of theme; this overrides it. */
+.vt-raw-help-popover.popover {
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    max-width: 340px;
+    font-size: 0.85rem;
+}
+
+.vt-raw-help-popover .popover-header {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    color: var(--kb-text-primary);
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.vt-raw-help-popover .popover-body {
+    color: var(--kb-text-primary);
+}
+
+.vt-raw-help-popover .popover-body code {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.2rem;
+    color: var(--kb-text-primary);
+}
+
+.vt-raw-help-popover .popover-arrow::after,
+.vt-raw-help-popover .popover-arrow::before {
+    border-bottom-color: var(--kb-bg-card);
+}

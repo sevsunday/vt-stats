@@ -54,6 +54,12 @@
       team: p.get('team'),
       players: (p.get('players') || '').split(',').map(s => s.trim()).filter(Boolean),
       tab: p.get('tab'),
+      // `?t=<tick>` — initial-load-only Replay seek target, produced by the
+      // Raw Data Browser's event-stream table row click (see
+      // js/raw-browser.js `onEventsBodyClick`). Honored exactly once when
+      // the Replay tab first renders for this match; subsequent renders
+      // ignore it (the user has already landed and can scrub freely).
+      t: p.get('t'),
     };
   }
 
@@ -85,6 +91,12 @@
   // current state on toggle-on, and showMatchNotFound clears stale bad-match
   // URLs on error recovery.
   let liveSyncEnabled = localStorage.getItem('vt-url-sync') === 'true';
+
+  // Pending Replay seek target from `?t=<tick>` on initial page load. Set by
+  // loadMatch() when urlState.t is present; consumed once by the Replay tab
+  // renderer (and cleared after). See raw-browser.js onEventsBodyClick for
+  // the producer (event-stream table row click).
+  let pendingReplayTick = null;
 
   // --- Landing Preferences ---
   // First-visit modal prompts the user to pick a default landing view.
@@ -981,6 +993,13 @@
     registerTabRenderer('#tab-replay', () => {
       if (window.VTReplay) {
         window.VTReplay.init(document.getElementById('tab-replay'), data, currentData.match);
+        // One-shot jump to a URL-specified tick (from raw.html events-table
+        // row click). Consume-and-clear: subsequent renders ignore it so
+        // scrubbing stays user-controlled.
+        if (pendingReplayTick != null && typeof window.VTReplay.jumpToTick === 'function') {
+          window.VTReplay.jumpToTick(pendingReplayTick);
+          pendingReplayTick = null;
+        }
       }
     });
 
@@ -1056,12 +1075,24 @@
     $loading.classList.add('d-none');
     $dashboard.classList.remove('d-none');
 
+    // `?t=<tick>` is consumed exactly once on initial load. Set it here so
+    // the Replay tab renderer picks it up whether the tab is activated via
+    // `?tab=replay` (primary cross-link path) or opened later.
+    if (urlState && urlState.t != null && urlState.t !== '') {
+      const parsed = Number(urlState.t);
+      pendingReplayTick = isFinite(parsed) ? parsed : null;
+    }
+
     const filtered = getFilteredData(data, filterState);
     renderMatchData(filtered);
 
     // Initial load uses URL's tab param; subsequent in-session match switches
     // preserve whatever tab was active. Invalid slugs fall back to overview.
-    const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
+    // If `?t=<tick>` is present, force the Replay tab so the seek actually
+    // lands on a visible chart — otherwise the one-shot jump would be wasted
+    // if the user started on a different tab.
+    const tabSlug = (urlState && urlState.t && !urlState.tab) ? 'replay'
+      : (urlState ? urlState.tab : getActiveTabSlug());
     if (!activateTabFromSlug(tabSlug, MATCH_TAB_SLUGS)) {
       const overviewBtn = document.getElementById('tab-overview-btn');
       if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
@@ -1398,6 +1429,10 @@
     document.getElementById('info-duration').textContent = `${m}m ${s}s`;
     document.getElementById('info-players').textContent = info.player_count;
     document.getElementById('info-submitter').textContent = info.submitter || '—';
+    const rawLink = document.getElementById('info-raw-link');
+    if (rawLink && info.id) {
+      rawLink.href = `raw.html?match=${encodeURIComponent(info.id)}`;
+    }
     const snipesWrap = document.getElementById('info-snipes-wrap');
     if (info.snipe_count > 0) {
       document.getElementById('info-snipes').textContent = info.snipe_count;

@@ -735,6 +735,7 @@ The Share button (topnav, `bi-link-45deg`) copies a URL representing the current
 | `team` | `1` \| `2` | Only valid when `filter=team` |
 | `players` | comma-separated canonical names or Steam64 IDs | Only valid when `filter=player`; tokens are resolved case-insensitively |
 | `tab` | see slug tables below | Omitted when on the default Overview tab |
+| `t` | raw tick (uint32) | One-shot Replay seek target. Produced by the Raw Data Browser's events-table row click. Forces `tab=replay` when no explicit `tab` is provided. Consumed once by `VTReplay.jumpToTick` on initial load and cleared — subsequent renders ignore it. |
 
 **Valid tab slugs (per-match):** `overview`, `combat`, `rivalries`, `weapons`, `assets`, `positioning`, `replay`
 **Valid tab slugs (all-matches):** `overview`, `weapons-rivalries`
@@ -869,5 +870,155 @@ All dependencies are vendored locally. No CDN usage.
 | Chart.js | 4.4.7 | `vendor/chartjs/` |
 | Geist Sans | 1.8.0 | `vendor/fonts/GeistVF.woff2` |
 | Geist Mono | 1.8.0 | `vendor/fonts/GeistMonoVF.woff2` |
+| protobufjs (light build) | 7.4.0 | `vendor/protobufjs/protobuf.min.js` + generated descriptor `vendor/protobufjs/statsgate.proto.json` |
 | Python protobuf | >=4.25.0 | `scripts/requirements.txt` |
 | grpcio-tools | (dev only) | For `protoc` compilation — **not** in `requirements.txt`; install manually with `pip install grpcio-tools` |
+| protobufjs-cli (dev only) | 1.1.3 | For regenerating `vendor/protobufjs/statsgate.proto.json` after schema changes — run `npx pbjs -t json scripts/statsgate.proto > vendor/protobufjs/statsgate.proto.json` |
+
+---
+
+## 10. Raw Data Browser (`raw.html`)
+
+The Raw Data Browser is a standalone, isolated page for inspecting per-match data at every layer. It is **not** part of the main dashboard — it lives in its own file with its own CSS + JS and has no shared state with `index.html`.
+
+### Three tiers
+
+| Tier | What | Where surfaced |
+|---|---|---|
+| **1. Raw binpb** | Gzipped protobuf wire format, exactly as produced by `statsgate` | Header card (metadata + download button). No tree view — bytes aren't useful as a tree. |
+| **2. Decoded JSON** | Faithful 1-to-1 JSON mirror of `scripts/statsgate.proto`. Every `StatEvent` in `event_stream` fully deserialized. Nothing summed or attributed. | View tab "Decoded JSON". Rendered as a virtualized tree. |
+| **3. Processed JSON** | The pre-aggregated `data/processed/<match_id>.json` the main dashboard consumes | View tab "Processed JSON". Rendered as a virtualized tree. |
+
+Tier 2 does not exist as an on-disk artifact — it is materialized on demand in the browser from tier 1.
+
+### Decode pipeline
+
+1. `fetch('data/sessions/<submitter>/<basename>.binpb.gz')` — the binpb is served statically, same as the processed JSON.
+2. Gunzip via the native `DecompressionStream('gzip')` API (no vendored lib).
+3. `protobuf.Root.fromJSON(...)` on `vendor/protobufjs/statsgate.proto.json` (pre-compiled descriptor) → `ClientStatSession.decode(bytes)`.
+4. `ClientStatSession.toObject(msg, { longs: String, defaults: false, oneofs: true, bytes: String, enums: String })` → plain JS object suitable for the tree renderer.
+   - `longs: String` preserves 64-bit values losslessly (Steam64 IDs).
+   - `defaults: false` omits zero-valued scalars — matches the Edition 2023 implicit-presence wire format and the proto's `// undefined if not a player` comment semantics.
+   - `oneofs: true` adds an `eventType` discriminator on `StatEvent` identifying which arm is active.
+
+### URL schema
+
+```
+raw.html?match=<id>
+        &view=decoded|processed|reconcile
+        &mode=tree|events        (only meaningful when view=decoded)
+        &path=<json-pointer>     (tree mode only)
+        &q=<search>              (tree mode only; see "Search" + "JSONPath" below)
+        &types=<csv>             (events mode only; comma-separated oneof arm names)
+        &tick=<lo>-<hi>          (events mode only; inclusive tick range)
+        &player=<steam64>        (events mode only; filter to rows involving this player)
+```
+
+- Absent `match` → match picker UI.
+- Absent `view` → defaults to `decoded`.
+- Absent `mode` → defaults to `tree`.
+- On `view` change, `path` and `q` reset (paths don't translate across tiers).
+- `path` uses RFC 6901 JSON Pointer format (e.g. `/eventStream/5/damageDealt/amount`).
+- `types` accepts any subset of `bulletInit,bulletHit,damageDealt,damageReceived,updateTick,unitDestroyed,unitSniped`. Empty → treated as "all".
+
+### Domain-aware resolvers
+
+Resolvers augment the tree at render time — they never mutate the decoded object.
+
+- **Steam64 → nickname**: any `uint64`-shaped string (`/^\d{15,20}$/`) that exists as a key in `header.s64_to_nick` renders with the player's nickname chip.
+- **ODF → pretty name**: any string matching a key in the match's top-level `odf_map` (from the processed JSON) renders with the prettified weapon/unit name. See `odf_map` in `.cursor/rules/data-schema.mdc` for scope.
+
+### Virtualization contract
+
+Fixed 28px row height (`ROW_HEIGHT` in `js/raw-browser.js`, `.vt-raw-tree-row` in `css/raw-browser.css` — these must stay in sync). Rows are absolutely positioned inside a scroll container; only `firstVisible - OVERSCAN` through `lastVisible + OVERSCAN` are rendered. The tree model is lazy-expanded: collapsed subtrees exist only as a single summary row (`{ n items }` / `{ n keys }`) in the visible list. Default expansion depth on load is 2.
+
+### Search
+
+Case-insensitive substring match on keys AND string/number/bool values, across the entire underlying object (not just visible rows). Ctrl+Enter toggles regex mode (JS `RegExp` with `i` flag). Enter = next hit; Shift+Enter = prev hit. Jumping to a hit expands collapsed ancestors to make it visible and scrolls it into view.
+
+### Entry surfaces
+
+- **Main dashboard**: "View raw" button on the match-info banner (`#info-raw-link` in `index.html`), href updated per-match by `renderBanner()` in `js/app.js`.
+- **Docs page**: "Raw data" link in the `docs.html` top nav.
+- **Direct URL**: `raw.html?match=<id>` works without going through either.
+
+### Schema-migration verify tool
+
+`scripts/verify_proto_decode.mjs` is a one-off Node script that decodes a real `*.binpb.gz` with protobufjs + the generated descriptor and prints the header summary + per-oneof event counts. Compare its output against the Python pipeline's printed event count for the same file. Required after any change to `scripts/statsgate.proto`; see the script header for one-off setup (`npm i --no-save protobufjs@7`).
+
+### Events-mode view (`view=decoded&mode=events`)
+
+A virtualized alternate rendering of `event_stream`. Row for each event with columns: `Tick · Time (sec, derived from match.tick_rate) · Type · Shooter · Victim · Ordnance · Amount`. Pre-extracts hot columns into a packed array once per match load; filter/sort/render are cheap from that array.
+
+**Filters** (all URL-synced):
+
+- **Event-type chips** (7) — multi-select, one per oneof arm. At least one must stay enabled; clicking the last-enabled chip is a no-op.
+- **Tick range slider** — dual-handle; seconds labels are derived from `match.tick_rate`.
+- **Player cell click** — clicking any Steam64 cell narrows to rows where that s64 is the shooter or victim. A dismissable badge above the table shows the active filter.
+- **Reset** — a single button that restores all filters to their initial state.
+
+**Pair highlight** — hovering a `DamageDealt` row outlines the adjacent `DamageReceived` row (and vice versa) per the [adjacent-pair rule](.cursor/rules/data-schema.mdc). A one-pass precompute (`pairIdx: Int32Array`) indexes the pairs at load time so hover is O(1).
+
+**Cross-link to Replay** — clicking a row navigates to `index.html?match=<id>&tab=replay&t=<tick>`. The Replay tab honors `?t=<tick>` via `VTReplay.jumpToTick(tick)` — see below. The jump is consumed exactly once on initial page load and does not persist across subsequent renders (so the user can freely scrub after).
+
+### Search + JSONPath subset (tree mode)
+
+The search input accepts two kinds of query, auto-detected by the first character:
+
+1. **Plain text** (default) — case-insensitive substring match against keys AND string/number/bool values. Ctrl+Enter toggles regex mode (JS `RegExp` with `i` flag). Enter = next hit; Shift+Enter = prev.
+2. **JSONPath** (when the query starts with `$`) — evaluated against the current tier's root. Explicit subset, **not** a full JSONPath spec:
+
+```
+path     = '$' segment*
+segment  = ('.' name)
+         | ('[' integer ']')
+         | ('[' '*' ']')            # wildcard — all array elements / object keys
+         | ('[?(' predicate ')]')   # filter expression
+name     = identifier (letters / digits / _ / $)
+predicate = @[.name | [n]]* OP (number | 'str' | "str" | true | false | null)
+          | @[.name | [n]]*          # truthy test
+OP       = == | != | < | <= | > | >=
+```
+
+Examples:
+
+- `$.leaderboard[*].name` — every name in the leaderboard
+- `$.leaderboard[?(@.kills >= 5)].name` — names of all players with 5+ kills
+- `$.leaderboard[?(@.faction == 1)].personal.pvp_dealt` — PvP damage dealt by Team 1 players
+- `$.eventStream[?(@.eventType == 'damageDealt')]` — every damageDealt event (decoded tier)
+
+Unsupported on purpose: deep descent (`..`), unions (`[1,2,3]`), slices (`[1:3]`), function calls, multi-predicate boolean ops (`&&`/`||`). Syntax errors surface as "bad path" in the result count; the input is tinted danger-red.
+
+### Reconciliation view (`view=reconcile`)
+
+Verifies the processed JSON's aggregates against sums/counts computed from the decoded event stream. The reconciliation mappings are a **fixed, predefined list** (plan-confirmed). Adding a new mapping is an explicit plan update, not a freeform feature.
+
+Initial set (v1):
+
+| Processed field | Tier-2 rule |
+|---|---|
+| `match.snipe_count` | `count(unitSniped)` |
+| `leaderboard[i].personal.dealt` | `Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0` |
+| `leaderboard[i].personal.received` | `Σ damageReceived.amount where victim == s64 ∧ team > 0 ∧ amount > 0` |
+| `leaderboard[i].personal.pvp_dealt` | `Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ paired dr.victim > 0` |
+| `leaderboard[i].kills` | `count(unitDestroyed where killer == s64)` |
+
+Delta tolerance: `±0.1` for float fields (rounding slop per `.cursor/rules/data-schema.mdc`), exact match required for integer fields. Rows that exceed the tolerance are highlighted in danger-red and the Δ column carries the offset — those represent either pipeline bugs or a schema change that the reconcile rules haven't caught up to yet.
+
+Both `shooter`/`victim` and `team` checks follow the Edition 2023 implicit-presence semantics (unset scalars are absent after `toObject(defaults: false)`), so `(team > 0)` correctly rejects unset / zero team, matching the pipeline's `skip_shooter = (dd.team == 0 or dd.amount == 0.0)` logic.
+
+### Proto schema tooltips
+
+Field name tooltips in the Decoded tier come from `data/proto-docs.json`, generated by `scripts/extract_proto_docs.py` (invoked as part of `scripts/process_stats.py`). The extractor parses inline `//` comments from `scripts/statsgate.proto` into a flat `{ "MessageName.fieldName": "comment" }` dict keyed in camelCase (matching protobufjs's `toObject` output). Message-level comments (e.g. the `// Either shooter or victim must be a player...` block above `message BulletHit`) render in the events-table type-tag tooltip.
+
+Documented fields render with a dotted underline in the Decoded tree (`.vt-raw-tree-key--has-doc`). Lookup is scoped to the Decoded tier only — the Processed tier uses snake_case field names that don't come from the proto.
+
+Field-to-type resolution is a static map in `js/raw-browser.js` (`PROTO_TYPE_MAP`) because protobufjs's runtime reflection would need significantly more plumbing to navigate nested oneofs correctly. If a new message is added to the schema, the map needs an entry — this is listed as a step in `.cursor/rules/schema-migration.mdc`.
+
+### `VTReplay.jumpToTick(tick)` contract
+
+Exposed by `js/timeline-player.js` (added alongside `init` / `destroy` / `renderFullscreenSnapshot` / `hasInstance`). Seeks the internal playhead (`state.progressBuckets`) to the bucket containing the given tick, pauses playback, and re-anchors timing so a subsequent play resumes from there.
+
+Granularity: `progressBuckets` is floating-point, but companion panels (leaderboard, spotlight, momentum) snap per whole `TIMELINE_BUCKET_SECONDS = 10`-second bucket — so the visible jump lands on the bucket that contains the event. Sub-bucket seek is intentionally out of scope; events inside a bucket are distinguishable in the Raw Data Browser but not in the Replay view.
+
+Returns `true` if the seek was accepted, `false` if there's no active replay state or `match.tick_range` / `match.tick_rate` are missing. Callers should not assume success if the Replay tab hasn't been rendered yet — `app.js` gates this by only calling `jumpToTick` inside the registered `#tab-replay` renderer, and by forcing `tab=replay` when `?t=<tick>` is provided without an explicit `tab`.

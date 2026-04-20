@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VT Stats — Raw Data Browser</title>
+  <link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="css/theme-system.css">
+  <link rel="stylesheet" href="css/themes.css">
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/vtstats-theme.css">
+  <link rel="stylesheet" href="css/raw-browser.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <!-- Always-visible primary controls (match select + burger) -->
+      <div class="d-flex align-items-center gap-2 ms-auto ms-md-0 order-md-2 vt-nav-primary">
+        <select id="match-select" class="form-select form-select-sm vt-match-select" style="width: auto; max-width: 220px;" aria-label="Select match"></select>
+        <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none" type="button"
+                data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+                aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+          <i class="bi bi-list"></i>
+        </button>
+      </div>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="index.html" class="vt-nav-icon-btn">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="docs.html" class="vt-nav-icon-btn">
+            <i class="bi bi-book me-1"></i>Docs
+          </a>
+
+          <!-- Theme Dropdown -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i><span class="vt-nav-label ms-2">Theme</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+
+          <!-- Mode Toggle -->
+          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+            <i class="bi bi-sun-fill"></i>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Loading (full-page, shown until the match list loads) -->
+  <div id="raw-loading">
+    <div class="vt-preloader">
+      <div class="vt-preloader-ring" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <div class="vt-preloader-brand"><i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats</div>
+      <div class="vt-preloader-status">Loading match index&hellip;</div>
+    </div>
+  </div>
+
+  <!-- Match picker (shown when no ?match= param) -->
+  <div id="raw-picker" class="container-fluid px-3 px-md-4 py-4 d-none">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="h4 mb-2"><i class="bi bi-code-square me-2" style="color: var(--kb-primary);"></i>Raw Data Browser</h1>
+        <p class="vt-muted mb-4">Inspect every layer of a match's data: the raw protobuf wire format, the faithful JSON decode, and the processed per-match aggregates. Choose a match below or open one directly from the main dashboard's "View raw" button.</p>
+        <div class="vt-raw-picker-list" id="raw-picker-list">
+          <!-- Populated by js/raw-browser.js -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main browser (shown when ?match= is set and decode begins) -->
+  <div id="raw-browser" class="container-fluid px-3 px-md-4 py-4 d-none">
+
+    <!-- Header card: match info + binpb metadata + downloads + stats banner -->
+    <div class="card mb-3 vt-raw-header">
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-4 align-items-start mb-3">
+          <div>
+            <span class="stat-label">Match</span><br>
+            <strong id="rh-map">—</strong>
+            <span class="vt-muted ms-2" id="rh-date">—</span>
+          </div>
+          <div>
+            <span class="stat-label">Duration</span><br>
+            <strong id="rh-duration">—</strong>
+          </div>
+          <div>
+            <span class="stat-label">Players</span><br>
+            <strong id="rh-players">—</strong>
+          </div>
+          <div>
+            <span class="stat-label">Submitted by</span><br>
+            <strong id="rh-submitter">—</strong>
+          </div>
+          <div>
+            <span class="stat-label">Raw file</span><br>
+            <strong id="rh-rawsize" class="vt-mono">—</strong>
+            <span class="vt-muted ms-1" id="rh-rawratio">&nbsp;</span>
+          </div>
+          <div>
+            <span class="stat-label">Decode</span><br>
+            <strong id="rh-decode" class="vt-mono">—</strong>
+          </div>
+        </div>
+
+        <!-- Stats banner: total events + per-oneof breakdown -->
+        <div class="vt-raw-stats-banner" id="rh-stats-banner">
+          <!-- Populated by js/raw-browser.js -->
+        </div>
+
+        <!-- Download buttons -->
+        <div class="d-flex flex-wrap gap-2 mt-3" id="rh-downloads">
+          <button class="btn btn-sm btn-outline-secondary" id="rh-dl-binpb" type="button" disabled>
+            <i class="bi bi-download me-1"></i>Raw binpb <span class="vt-muted ms-1" id="rh-dl-binpb-size"></span>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" id="rh-dl-decoded" type="button" disabled>
+            <i class="bi bi-filetype-json me-1"></i>Decoded JSON <span class="vt-muted ms-1" id="rh-dl-decoded-size"></span>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" id="rh-dl-processed" type="button" disabled>
+            <i class="bi bi-filetype-json me-1"></i>Processed JSON <span class="vt-muted ms-1" id="rh-dl-processed-size"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- View tab switcher: Decoded / Processed -->
+    <div class="vt-tab-scroll-wrap mb-3 d-flex flex-wrap gap-3 align-items-center">
+      <ul class="nav nav-pills" id="raw-view-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="raw-tab-decoded-btn" data-view="decoded" type="button" role="tab" aria-selected="true">
+            <i class="bi bi-diagram-3 me-1"></i>Decoded JSON
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="raw-tab-processed-btn" data-view="processed" type="button" role="tab" aria-selected="false">
+            <i class="bi bi-bar-chart-steps me-1"></i>Processed JSON
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="raw-tab-reconcile-btn" data-view="reconcile" type="button" role="tab" aria-selected="false"
+                  title="Verify pipeline output against raw event sums (tier 2 &rarr; tier 3)">
+            <i class="bi bi-arrow-left-right me-1"></i>Reconcile
+          </button>
+        </li>
+      </ul>
+      <!-- Mode toggle (only meaningful for view=decoded). Hidden when view=processed. -->
+      <div class="btn-group btn-group-sm d-none" id="raw-mode-toggle" role="group" aria-label="Decoded view mode">
+        <button type="button" class="btn btn-outline-secondary active" data-mode="tree" title="Tree view">
+          <i class="bi bi-diagram-2 me-1"></i>Tree
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-mode="events" title="Event-stream table view">
+          <i class="bi bi-table me-1"></i>Events
+        </button>
+      </div>
+    </div>
+
+    <!-- Controls row: search + breadcrumb -->
+    <div class="card mb-3 vt-raw-controls">
+      <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <div class="input-group input-group-sm vt-raw-search-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="search" class="form-control" id="raw-search-input"
+                   placeholder="Search (Ctrl+Enter = regex · $... = JSONPath)"
+                   aria-label="Search tree">
+            <span class="input-group-text vt-raw-search-count" id="raw-search-count">—</span>
+            <button class="btn btn-outline-secondary" type="button" id="raw-search-prev" title="Previous match" aria-label="Previous match">
+              <i class="bi bi-chevron-up"></i>
+            </button>
+            <button class="btn btn-outline-secondary" type="button" id="raw-search-next" title="Next match" aria-label="Next match">
+              <i class="bi bi-chevron-down"></i>
+            </button>
+          </div>
+          <div class="vt-raw-breadcrumb vt-mono" id="raw-breadcrumb" title="Current row path (click to copy)">
+            <span class="vt-muted">$</span>
+          </div>
+          <div class="ms-auto d-flex gap-2 align-items-center">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="raw-help-btn"
+                    title="Search tips" aria-label="Search tips"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom"
+                    data-bs-html="true"
+                    data-bs-title="Search &amp; navigation"
+                    data-bs-content="<ul class='mb-0 ps-3'><li><strong>Plain text</strong>: substring match on keys &amp; values (case-insensitive)</li><li><strong>Ctrl+Enter</strong>: toggle regex mode</li><li><strong>Start with $</strong>: JSONPath (e.g. <code>$.leaderboard[?(@.kills &gt;= 5)].name</code>)</li><li><strong>Enter</strong> / <strong>Shift+Enter</strong>: next / prev hit</li><li><strong>←/→/Enter</strong> in tree: collapse / expand / toggle</li><li><strong>Click path bar</strong>: copy to clipboard</li></ul>">
+              <i class="bi bi-question-circle"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" id="raw-expand-btn" type="button" title="Expand all to depth 3">
+              <i class="bi bi-arrows-expand me-1"></i>Expand
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" id="raw-collapse-btn" type="button" title="Collapse all">
+              <i class="bi bi-arrows-collapse me-1"></i>Collapse
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tree body with its own decode/load spinner -->
+    <div class="card vt-raw-tree-card" id="raw-tree-card">
+      <div class="card-body p-0">
+        <div id="raw-tree-status" class="vt-raw-tree-status d-none" role="status">
+          <div class="vt-preloader-ring" aria-hidden="true"></div>
+          <div class="vt-raw-tree-status-text">Decoding&hellip;</div>
+        </div>
+        <div id="raw-tree-error" class="vt-raw-tree-error d-none" role="alert"></div>
+        <div id="raw-tree" class="vt-raw-tree" tabindex="0"
+             role="tree" aria-label="Raw data tree"></div>
+      </div>
+    </div>
+
+    <!-- Reconcile view: verify tier-3 (processed JSON) values against
+         sums/counts computed from tier-2 (decoded event_stream). Fixed,
+         documented mapping list — see DEVELOPER_GUIDE.md §10. -->
+    <div class="card vt-raw-reconcile-card d-none" id="raw-reconcile-card">
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
+          <div>
+            <span class="stat-label">Player</span><br>
+            <select id="raw-reconcile-player" class="form-select form-select-sm vt-mono" aria-label="Select player for per-player reconciliation" style="min-width: 200px;">
+              <option value="">— Match-level only —</option>
+            </select>
+          </div>
+          <div class="flex-grow-1 vt-muted" style="font-size: 0.85rem;">
+            Verifies processed-JSON aggregates against sums/counts derived from the raw event stream. Deltas greater than the ±0.1 rounding slop are highlighted. See
+            <a href="docs.html" class="text-decoration-underline">Docs</a> for the attribution rules.
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle vt-raw-reconcile-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th class="text-end">Processed (tier 3)</th>
+                <th class="text-end">Computed (tier 2)</th>
+                <th class="text-end">Δ</th>
+                <th>Rule</th>
+              </tr>
+            </thead>
+            <tbody id="raw-reconcile-body">
+              <!-- Populated by js/raw-browser.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Events-mode container: filter bar + virtualized event-stream table.
+         Shown only when view=decoded AND mode=events. -->
+    <div class="card vt-raw-events-card d-none" id="raw-events-card">
+      <div class="card-body">
+        <!-- Event-type filter chips -->
+        <div class="vt-raw-events-filters mb-2" id="raw-events-chips" role="toolbar" aria-label="Event type filters">
+          <!-- Populated by js/raw-browser.js -->
+        </div>
+
+        <!-- Tick range slider (dual-handle) -->
+        <div class="vt-raw-events-slider mb-2">
+          <div class="d-flex justify-content-between vt-raw-events-slider-labels vt-mono">
+            <span id="raw-slider-lo-label">—</span>
+            <span id="raw-slider-hi-label">—</span>
+          </div>
+          <div class="vt-raw-events-slider-track" id="raw-slider-track" aria-hidden="true">
+            <div class="vt-raw-events-slider-fill" id="raw-slider-fill"></div>
+          </div>
+          <div class="vt-raw-events-slider-inputs">
+            <input type="range" id="raw-slider-lo" min="0" max="1" step="1" value="0" aria-label="Tick range minimum">
+            <input type="range" id="raw-slider-hi" min="0" max="1" step="1" value="1" aria-label="Tick range maximum">
+          </div>
+        </div>
+
+        <!-- Player-filter badge + summary + reset -->
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2 vt-raw-events-summary">
+          <span class="stat-label">Rows</span>
+          <strong id="raw-events-count" class="vt-mono">—</strong>
+          <span class="vt-muted">of</span>
+          <span id="raw-events-total" class="vt-mono">—</span>
+          <span class="vt-raw-events-player-badge d-none" id="raw-events-player-badge">
+            <i class="bi bi-person-fill me-1"></i><span id="raw-events-player-name">—</span>
+            <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Clear player filter" id="raw-events-player-clear"></button>
+          </span>
+          <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="raw-events-reset">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset filters
+          </button>
+        </div>
+
+        <!-- Virtualized table -->
+        <div class="vt-raw-events-table">
+          <div class="vt-raw-events-thead">
+            <div class="vt-raw-events-th vt-raw-events-col-tick">Tick</div>
+            <div class="vt-raw-events-th vt-raw-events-col-time">Time</div>
+            <div class="vt-raw-events-th vt-raw-events-col-type">Type</div>
+            <div class="vt-raw-events-th vt-raw-events-col-shooter">Shooter</div>
+            <div class="vt-raw-events-th vt-raw-events-col-victim">Victim</div>
+            <div class="vt-raw-events-th vt-raw-events-col-ordnance">Ordnance</div>
+            <div class="vt-raw-events-th vt-raw-events-col-amount">Amount</div>
+          </div>
+          <div id="raw-events-body" class="vt-raw-events-body" tabindex="0" aria-label="Event stream rows"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="vendor/protobufjs/protobuf.min.js"></script>
+  <script src="js/theme.js"></script>
+  <script src="js/raw-browser.js"></script>
+</body>
+</html>
