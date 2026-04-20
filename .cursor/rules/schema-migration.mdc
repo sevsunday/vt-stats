@@ -19,8 +19,11 @@ Before doing anything else, compare the new proto against the current `scripts/s
 ## Step 1: Update and Recompile
 
 1. Replace `scripts/statsgate.proto` with the new version
-2. Recompile: `python -m grpc_tools.protoc --proto_path=. --python_out=. statsgate.proto`
-3. Verify: run the pipeline against existing data to check for breakage
+2. Recompile Python: `python -m grpc_tools.protoc --proto_path=. --python_out=. statsgate.proto`
+3. Regenerate the protobufjs descriptor used by the Raw Data Browser:
+   `npx pbjs -t json scripts/statsgate.proto > vendor/protobufjs/statsgate.proto.json`
+4. Verify browser decode still agrees with Python via `scripts/verify_proto_decode.mjs` (see the script header for setup). Total event count and per-oneof counts must match the Python pipeline's output for the same file.
+5. Run the pipeline against existing data to check for breakage
 
 ## Step 2: Fix Pipeline Breakage
 
@@ -49,10 +52,14 @@ For each new event type:
 ## Step 5: Update Documentation
 
 1. `scripts/statsgate.proto` — already updated (Step 1)
-2. `.cursor/rules/data-schema.mdc` — update event table, field types, any changed semantics
-3. `DEVELOPER_GUIDE.md` — update Section 2 (schema tables), Section 3 (evolution status), Section 5 (JSON structure)
-4. `.cursor/rules/project-overview.mdc` — update if data flow or file formats changed
-5. `README.md` — update if data workflow, features, or setup instructions changed
+2. `vendor/protobufjs/statsgate.proto.json` — already regenerated (Step 1)
+3. `.cursor/rules/data-schema.mdc` — update event table, field types, any changed semantics
+4. `DEVELOPER_GUIDE.md` — update Section 2 (schema tables), Section 3 (evolution status), Section 5 (JSON structure), Section 10 (Raw Data Browser) if decode semantics change
+5. `.cursor/rules/project-overview.mdc` — update if data flow or file formats changed
+6. `README.md` — update if data workflow, features, or setup instructions changed
+7. If new `*_odf` fields are added, ensure the pipeline collects them into `odf_map` in `scripts/process_stats.py` (the Raw Data Browser's ODF resolver consumes it)
+8. If new messages or oneof arms are added, update `PROTO_TYPE_MAP` in `js/raw-browser.js` so the new paths resolve to message types for field-name tooltips. Also update `EVENT_ARMS` / `EVENT_ARM_LABELS` if the change affects the `StatEvent` oneof, and consider whether a new reconciliation mapping in `renderReconcile()` is warranted (Phase 3 section of DEVELOPER_GUIDE.md).
+9. Rerun the pipeline (`python scripts/process_stats.py`); confirm `data/proto-docs.json` is regenerated with the new field comments and all per-match JSON files have the expected new fields.
 
 ## Step 6: Verify
 

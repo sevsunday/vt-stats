@@ -51,6 +51,7 @@ Unless noted otherwise, entries describe per-match-view behavior; the All Matche
 | `asset_damage.by_faction` | Passes through | Absolute |
 | `kills.feed`, `kills.leaderboard`, `kills.kill_rivalry_matrix` | Narrowed upstream | Absolute |
 | `kills.by_vehicle` | Always full-match (never narrowed) | Match-global aggregate — not per-player attributed |
+| `odf_map` | Always full-match (never narrowed) | Match-global reference data — not per-player attributed. Consumed by the Raw Data Browser (`js/raw-browser.js`) to resolve raw ODF strings to human-readable names; no dashboard tab depends on it today. See `data-schema.mdc` for the full entry. |
 | `weapon_meta` | **Recomputed client-side** from `leaderboard[].weapon_breakdown` when any filter is active; pre-aggregated array used only for "All Players" view | Absolute per-weapon totals |
 | `positioning` (block) | Passes through unchanged | — |
 | `positioning.players` | Narrowed at render-time in `renderPositioningTab` (NOT in `getFilteredData`) — other renderers (heatmap, spawn markers) need the full-match block for spatial context | — |

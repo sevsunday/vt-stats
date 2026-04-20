@@ -793,6 +793,11 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
 
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
+    # Collect all non-ordnance ODFs seen in this match (vehicle/unit ODFs from
+    # bullet_hit victim/shooter, unit_destroyed killer/victim, and PlayerState).
+    # Fed into `odf_map` in the match output so the Raw Data Browser can resolve
+    # every raw ODF string to a human-readable name.
+    all_unit_odfs = set()
 
     # Positioning: per-player raw sample buffer (downsampled to ~1 Hz in the loop below).
     # Keyed by Steam64 -> list of (t_sec, x, y, z, has_target) tuples in tick order.
@@ -846,6 +851,10 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 weapon_total_hits[odf] += 1
             if shooter > 0 and bh.victim > 0:
                 player_hits_by_victim[shooter][bh.victim] += 1
+            if bh.victim_odf:
+                all_unit_odfs.add(bh.victim_odf)
+            if bh.shooter_odf:
+                all_unit_odfs.add(bh.shooter_odf)
             if bh.tick > max_tick:
                 max_tick = bh.tick
             if bh.tick < min_tick:
@@ -924,6 +933,9 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 kill_rivalry[ud.killer][ud.victim] += 1
             if ud.victim_odf:
                 vehicle_destruction_count[ud.victim_odf] += 1
+                all_unit_odfs.add(ud.victim_odf)
+            if ud.killer_odf:
+                all_unit_odfs.add(ud.killer_odf)
 
             kill_feed.append({
                 "tick": ud.tick,
@@ -956,6 +968,8 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 s64 = ps.player
                 if s64 <= 0 or s64 not in s64_to_nick:
                     continue
+                if ps.odf:
+                    all_unit_odfs.add(ps.odf)
                 has_target = bool(ps.has_target)
                 if has_target:
                     match_has_target_lock_data = True
@@ -1003,6 +1017,25 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
 
     def wpn_name(odf):
         return weapon_name_map.get(odf, resolve_weapon(odf))
+
+    # Build match-global ODF map for the Raw Data Browser. Keys are raw ODF
+    # strings as they appear in the binpb; values are the best human-readable
+    # name. Weapons resolve via `wpn_name` (which uses the ODF DB chain).
+    # Non-weapon ODFs (vehicles, structures, player craft) fall through to a
+    # title-cased form of the raw stem, matching the convention used elsewhere
+    # (e.g. `kills.by_vehicle`). Match-global (always unfiltered).
+    def prettify_odf(odf):
+        resolved = wpn_name(odf)
+        raw_stem = re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE)
+        if resolved == raw_stem:
+            return raw_stem.replace("_", " ").title()
+        return resolved
+
+    odf_map = {
+        odf: prettify_odf(odf)
+        for odf in sorted(all_ordnance | all_unit_odfs)
+        if odf
+    }
 
     # Compute match duration
     duration_sec = (max_tick - min_tick) / tick_rate if max_tick > min_tick else 0
@@ -1322,6 +1355,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         "rivalry_matrix": rivalry_matrix,
         "top_rivalries": top_rivalries,
         "weapon_meta": weapon_meta,
+        "odf_map": odf_map,
         "timeline": {
             "bucket_seconds": TIMELINE_BUCKET_SECONDS,
             "labels": labels,
@@ -1687,6 +1721,18 @@ def main():
         with open(agg_path, "w", encoding="utf-8") as f:
             json.dump(aggregate, f, indent=2, ensure_ascii=False)
         print(f"Aggregate: {agg_path.name} ({agg_path.stat().st_size:,} bytes)")
+
+    # Extract proto doc comments for the Raw Data Browser's schema tooltips.
+    # Lives next to the ODF resolver output (data/) and is consumed by
+    # js/raw-browser.js on page load.
+    try:
+        import extract_proto_docs
+        docs = extract_proto_docs.extract()
+        proto_docs_path = PROJECT_ROOT / "data" / "proto-docs.json"
+        extract_proto_docs.write(docs, proto_docs_path)
+        print(f"Proto docs: {proto_docs_path.name} ({len(docs)} entries)")
+    except Exception as e:
+        print(f"WARN: failed to extract proto docs ({e}); skipping.")
 
     print("\nDone!")
 
