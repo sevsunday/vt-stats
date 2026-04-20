@@ -96,7 +96,7 @@
   let $dlBinpb, $dlDecoded, $dlProcessed,
       $dlBinpbSize, $dlDecodedSize, $dlProcessedSize;
   let $tabsRoot, $search, $searchCount, $searchPrev, $searchNext,
-      $breadcrumb, $expandBtn, $collapseBtn;
+      $breadcrumb, $expandBtn, $collapseBtn, $fullscreenBtn;
   let $tree, $treeCard, $treeStatus, $treeStatusText, $treeError, $matchSelect;
 
   // Phase 2 — events mode DOM
@@ -1626,6 +1626,37 @@
     }
   }
 
+  // --- Fullscreen toggle ---
+  //
+  // CSS-driven (no native Fullscreen API). The `vt-raw-fullscreen-active`
+  // class on <body> promotes #raw-browser to position:fixed and hides the
+  // non-essential chrome; see css/raw-browser.css for the layout rules.
+  // A re-render on toggle lets the virtualizer pick up the new viewport
+  // height (both the tree's clientHeight and the events-body's height
+  // grow significantly in fullscreen).
+
+  function toggleFullscreen(force) {
+    const active = document.body.classList.toggle('vt-raw-fullscreen-active', force);
+    if ($fullscreenBtn) {
+      $fullscreenBtn.setAttribute('aria-pressed', String(active));
+      const icon = $fullscreenBtn.querySelector('i');
+      if (icon) {
+        icon.classList.toggle('bi-arrows-fullscreen', !active);
+        icon.classList.toggle('bi-fullscreen-exit', active);
+      }
+    }
+    // Let the browser lay out the new flex sizes, then tell the
+    // virtualizers to repaint at the new viewport height.
+    requestAnimationFrame(() => {
+      scheduleRender();
+      if (state.mode === 'events' && state.events) renderEvents();
+    });
+  }
+
+  function isFullscreenActive() {
+    return document.body.classList.contains('vt-raw-fullscreen-active');
+  }
+
   // --- Search ---
 
   // Case-insensitive substring search (default) on keys AND string/number
@@ -2518,6 +2549,21 @@
       expandToDepth(state.tree, 3);
       render();
     });
+    if ($fullscreenBtn) {
+      $fullscreenBtn.addEventListener('click', () => toggleFullscreen());
+    }
+    // Global Escape: exit fullscreen. Skipped when Escape originated
+    // from an input/textarea so the existing "Esc blurs the search box"
+    // gesture still works — two Escapes to fully exit fullscreen from
+    // the search field.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!isFullscreenActive()) return;
+      const t = e.target;
+      if (t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]')) return;
+      e.preventDefault();
+      toggleFullscreen(false);
+    });
     $collapseBtn.addEventListener('click', () => {
       collapseAll(state.tree);
       // Keep current on root if current was deep.
@@ -2618,6 +2664,7 @@
     $breadcrumb = document.getElementById('raw-breadcrumb');
     $expandBtn = document.getElementById('raw-expand-btn');
     $collapseBtn = document.getElementById('raw-collapse-btn');
+    $fullscreenBtn = document.getElementById('raw-fullscreen-btn');
 
     $tree = document.getElementById('raw-tree');
     $treeCard = document.getElementById('raw-tree-card');
