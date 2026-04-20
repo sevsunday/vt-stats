@@ -807,21 +807,70 @@
   function collapseRow(tree, idx) {
     const row = tree.rows[idx];
     if (!row || !row.expanded) return 0;
+
+    // Graduated row: caret-click collapses both the subtree AND the
+    // graduation itself, returning the slot to its projected form. A
+    // graduated row's only purpose is to host children; keeping it around
+    // "collapsed" would just be clutter.
+    //
+    // virtualCount delta: the graduated row contributed +1 real row
+    // minus 1 graduated (net 0) to the formula; its subtree contributed
+    // +subCount. After removal, both disappear; net delta = -subCount.
+    if (row.bulkSiblingOf) {
+      let end = idx + 1;
+      while (end < tree.rows.length && tree.rows[end].depth > row.depth) {
+        tree.expanded.delete(tree.rows[end].ptr);
+        end++;
+      }
+      const subCount = end - (idx + 1);
+      tree.expanded.delete(row.ptr);
+      tree.rows.splice(idx, end - idx);
+      tree.virtualCount -= subCount;
+      rebuildIndex(tree);
+      return subCount + 1;
+    }
+
     row.expanded = false;
     tree.expanded.delete(row.ptr);
 
-    // Bulk-expanded row: drop the lazy projection in O(1). Phase B will
-    // also need to clean up any graduated descendants (real rows with
-    // bulkSiblingOf === row) here; in Phase A there are none.
+    // Bulk-expanded anchor: drop the projection AND any graduated
+    // descendants (with their subtrees) so we can't be left with orphaned
+    // graduated rows whose anchor no longer exists.
+    //
+    // virtualCount delta derivation:
+    //   before = tree.rows.length + projectedCount − graduatedCount
+    //   after  = tree.rows.length − (graduatedCount + subtreeCount) + 0 − 0
+    //   delta  = −(projectedCount + subtreeCount)
+    // (graduatedCount cancels: each graduated row removed drops a real
+    // row AND removes itself from the graduated-subtraction term.)
     if (row.bulkChildren) {
       const projectedCount = row.bulkChildren.count;
       row.bulkChildren = null;
-      tree.virtualCount -= projectedCount;
-      return projectedCount;
+      let graduatedCount = 0;
+      let subtreeCount = 0;
+      let j = idx + 1;
+      while (j < tree.rows.length && tree.rows[j].bulkSiblingOf === row) {
+        const graduated = tree.rows[j];
+        tree.expanded.delete(graduated.ptr);
+        graduatedCount++;
+        j++;
+        while (j < tree.rows.length && tree.rows[j].depth > graduated.depth) {
+          tree.expanded.delete(tree.rows[j].ptr);
+          subtreeCount++;
+          j++;
+        }
+      }
+      const totalRemoved = graduatedCount + subtreeCount;
+      if (totalRemoved > 0) {
+        tree.rows.splice(idx + 1, totalRemoved);
+        rebuildIndex(tree);
+      }
+      tree.virtualCount -= (projectedCount + subtreeCount);
+      return projectedCount + totalRemoved;
     }
 
-    // Remove all descendants (rows with deeper depth immediately after idx
-    // until a sibling/ancestor returns).
+    // Regular collapse: remove all descendants (rows with deeper depth
+    // immediately after idx until a sibling/ancestor returns).
     let end = idx + 1;
     while (end < tree.rows.length && tree.rows[end].depth > row.depth) {
       tree.expanded.delete(tree.rows[end].ptr);
@@ -832,6 +881,50 @@
     tree.virtualCount -= removed;
     rebuildIndex(tree);
     return removed;
+  }
+
+  // Phase B — graduation: a projected row (child of a bulk anchor) becomes
+  // a "real" row in tree.rows so its own children can live there. Called
+  // when the user caret-clicks a projected row. Replaces the projected
+  // slot in-place (virtualCount stays the same); the graduated row's
+  // subsequent expansion adds its subtree's virtual slots normally.
+  function graduateProjected(tree, projectedRow) {
+    if (!projectedRow || projectedRow.path.length === 0) return -1;
+    const anchorPath = projectedRow.path.slice(0, -1);
+    const aIdx = tree.pathToIndex.get(pathToPointer(anchorPath));
+    if (aIdx == null) return -1;
+    const anchor = tree.rows[aIdx];
+    if (!anchor.bulkChildren) return -1;
+
+    const siblingIdx = parseInt(projectedRow.path[projectedRow.path.length - 1], 10);
+    if (isNaN(siblingIdx) || siblingIdx < 0 || siblingIdx >= anchor.bulkChildren.count) return -1;
+
+    const graduated = synthesizeProjected(anchor, siblingIdx);
+    graduated.bulkSiblingOf = anchor;
+    graduated.bulkSiblingIdx = siblingIdx;
+
+    // Insert in siblingIdx-sorted position among existing graduated
+    // siblings of this anchor. Maintains the invariant that
+    // getVirtualRow can do a forward-only scan over the anchor's
+    // segment.
+    let insertAt = aIdx + 1;
+    while (insertAt < tree.rows.length && tree.rows[insertAt].bulkSiblingOf === anchor) {
+      const other = tree.rows[insertAt];
+      if (other.bulkSiblingIdx >= siblingIdx) break;
+      insertAt++;
+      while (insertAt < tree.rows.length && tree.rows[insertAt].depth > other.depth) {
+        insertAt++;
+      }
+    }
+
+    tree.rows = tree.rows.slice(0, insertAt).concat([graduated], tree.rows.slice(insertAt));
+    // virtualCount unchanged: graduated row replaces its projected slot.
+    rebuildIndex(tree);
+    // Expand the graduated row via the normal (non-bulk) path. Per-event
+    // objects have a handful of keys — no RangeError risk, no need to
+    // bulk-project recursively.
+    expandRow(tree, insertAt);
+    return insertAt;
   }
 
   // --- Virtual-index helpers ---
@@ -866,44 +959,127 @@
   function getVirtualRow(tree, vIdx) {
     if (vIdx < 0 || vIdx >= tree.virtualCount) return null;
     let cumulative = 0;
-    for (let i = 0; i < tree.rows.length; i++) {
+    let i = 0;
+    while (i < tree.rows.length) {
       const row = tree.rows[i];
-      // Graduated rows are positioned virtually inside their anchor's bulk
-      // range, not at their tree.rows position. Skip in the main scan; the
-      // anchor branch below handles them (Phase B).
-      if (row.bulkSiblingOf) continue;
+      // Graduated rows (and their descendants) are positioned virtually
+      // INSIDE their anchor's bulk range, not at their tree.rows position.
+      // The anchor branch below handles them; any top-level encounter
+      // means we're iterating past the anchor we should have jumped over.
+      // Defensive skip.
+      if (row.bulkSiblingOf) { i++; continue; }
       if (cumulative === vIdx) return row;
       cumulative++;
+
       if (row.bulkChildren) {
         const count = row.bulkChildren.count;
-        if (vIdx >= cumulative && vIdx < cumulative + count) {
-          const siblingIdx = vIdx - cumulative;
-          // Phase B will check for a graduated sibling at this slot and
-          // return that real row (and its subtree) instead of synthesizing.
-          const underlying = row.bulkChildren.underlying;
-          const childValue = underlying[siblingIdx];
-          const childKey = String(siblingIdx);
-          return makeRow(row.path.concat([childKey]), childKey, childValue, row.depth + 1);
+        // Walk graduated siblings of this anchor in tree.rows order,
+        // interleaving their subtrees with the projected slots they
+        // replace. Graduated siblings are always kept sorted by
+        // bulkSiblingIdx within the anchor's segment (see
+        // graduateProjected), so a single forward scan is enough.
+        let bulkOffset = 0;
+        let j = i + 1;
+        while (bulkOffset < count && j < tree.rows.length &&
+               tree.rows[j].bulkSiblingOf === row) {
+          const graduated = tree.rows[j];
+          const gSib = graduated.bulkSiblingIdx;
+          // Projected gap between the last processed sibling and gSib.
+          const gap = gSib - bulkOffset;
+          if (gap > 0) {
+            if (vIdx >= cumulative && vIdx < cumulative + gap) {
+              const siblingIdx = bulkOffset + (vIdx - cumulative);
+              return synthesizeProjected(row, siblingIdx);
+            }
+            cumulative += gap;
+            bulkOffset += gap;
+          }
+          // The graduated row itself occupies the slot at gSib.
+          if (cumulative === vIdx) return graduated;
+          cumulative++;
+          bulkOffset++;
+          // Walk graduated's subtree: rows with depth > graduated.depth,
+          // contiguous immediately after the graduated row. These ADD
+          // virtual slots (they don't replace projected ones).
+          let subEnd = j + 1;
+          while (subEnd < tree.rows.length && tree.rows[subEnd].depth > graduated.depth) {
+            if (cumulative === vIdx) return tree.rows[subEnd];
+            cumulative++;
+            subEnd++;
+          }
+          j = subEnd;
         }
-        cumulative += count;
+        // Projected tail after the last graduated sibling (or the whole
+        // bulk if none).
+        const remaining = count - bulkOffset;
+        if (remaining > 0) {
+          if (vIdx >= cumulative && vIdx < cumulative + remaining) {
+            const siblingIdx = bulkOffset + (vIdx - cumulative);
+            return synthesizeProjected(row, siblingIdx);
+          }
+          cumulative += remaining;
+        }
+        // Skip the outer loop past the anchor's entire segment.
+        i = j;
+      } else {
+        i++;
       }
     }
     return null;
   }
 
-  // Given a tree.rows index, return its virtual index (or -1 for graduated
-  // rows — Phase B). Used to translate current-row state across renders.
+  function synthesizeProjected(anchor, siblingIdx) {
+    const underlying = anchor.bulkChildren.underlying;
+    const childKey = String(siblingIdx);
+    return makeRow(anchor.path.concat([childKey]), childKey,
+                   underlying[siblingIdx], anchor.depth + 1);
+  }
+
+  // Given a tree.rows index, return its virtual index. Works for all three
+  // row kinds: plain real rows, bulk anchors, and graduated rows (and their
+  // subtree descendants) — graduated rows resolve by being reached during
+  // the anchor-bulk scan of the target's enclosing anchor.
   function virtualIndexOfReal(tree, realIdx) {
     if (realIdx < 0 || realIdx >= tree.rows.length) return -1;
-    if (tree.rows[realIdx].bulkSiblingOf) return -1; // Phase B handles graduated
     let cumulative = 0;
-    for (let i = 0; i < realIdx; i++) {
+    let i = 0;
+    while (i < tree.rows.length) {
+      if (i === realIdx) return cumulative;
       const row = tree.rows[i];
-      if (row.bulkSiblingOf) continue;
+      if (row.bulkSiblingOf) { i++; continue; } // handled via anchor below
       cumulative++;
-      if (row.bulkChildren) cumulative += row.bulkChildren.count;
+      if (row.bulkChildren) {
+        const count = row.bulkChildren.count;
+        let bulkOffset = 0;
+        let j = i + 1;
+        while (bulkOffset < count && j < tree.rows.length &&
+               tree.rows[j].bulkSiblingOf === row) {
+          const graduated = tree.rows[j];
+          const gSib = graduated.bulkSiblingIdx;
+          const gap = gSib - bulkOffset;
+          if (gap > 0) {
+            cumulative += gap;
+            bulkOffset += gap;
+          }
+          if (j === realIdx) return cumulative;
+          cumulative++;
+          bulkOffset++;
+          let subEnd = j + 1;
+          while (subEnd < tree.rows.length && tree.rows[subEnd].depth > graduated.depth) {
+            if (subEnd === realIdx) return cumulative;
+            cumulative++;
+            subEnd++;
+          }
+          j = subEnd;
+        }
+        const remaining = count - bulkOffset;
+        cumulative += remaining;
+        i = j;
+      } else {
+        i++;
+      }
     }
-    return cumulative;
+    return -1;
   }
 
   // Resolve any row object (real or synthesized-projected) to its virtual
@@ -914,7 +1090,9 @@
     const realIdx = tree.pathToIndex.get(row.ptr);
     if (realIdx != null) return virtualIndexOfReal(tree, realIdx);
     // Projected row: find the enclosing bulk anchor by walking up the
-    // pointer until we hit a real row with bulkChildren.
+    // path. Only direct projected children of an anchor resolve here;
+    // deeper descendants would have been graduated (thus real-row present)
+    // for their virtual index to exist.
     for (let up = row.path.length - 1; up >= 0; up--) {
       const ancestorPath = row.path.slice(0, up);
       const aIdx = tree.pathToIndex.get(pathToPointer(ancestorPath));
@@ -923,13 +1101,27 @@
       if (!anchor.bulkChildren) continue;
       const siblingIdx = parseInt(row.path[up], 10);
       if (isNaN(siblingIdx)) return -1;
-      // Only direct projected children resolve in Phase A. Anything deeper
-      // than a projected slot would require Phase B graduation to have a
-      // proper virtual index; returning -1 lets callers fall back safely.
       if (up !== row.path.length - 1) return -1;
       const anchorVIdx = virtualIndexOfReal(tree, aIdx);
       if (anchorVIdx < 0) return -1;
-      return anchorVIdx + 1 + siblingIdx;
+      // Within-bulk offset = siblingIdx + Σ (subtreeSize of every graduated
+      // sibling with smaller bulkSiblingIdx). Graduated siblings push
+      // projected slots downward by the size of their own subtree.
+      let offset = siblingIdx;
+      let j = aIdx + 1;
+      while (j < tree.rows.length && tree.rows[j].bulkSiblingOf === anchor) {
+        const graduated = tree.rows[j];
+        if (graduated.bulkSiblingIdx >= siblingIdx) break;
+        let subCount = 0;
+        let k = j + 1;
+        while (k < tree.rows.length && tree.rows[k].depth > graduated.depth) {
+          subCount++;
+          k++;
+        }
+        offset += subCount;
+        j = k;
+      }
+      return anchorVIdx + 1 + offset;
     }
     return -1;
   }
@@ -965,13 +1157,17 @@
   }
 
   function collapseAll(tree) {
-    // Collapse everything except the synthetic root (depth 0).
+    // Collapse everything except the synthetic root (depth 0). Iterate
+    // from the end so deeper expansions unwind before their ancestors.
+    // Length can shrink mid-iteration (graduated rows splice themselves
+    // OUT of tree.rows on collapse), so guard index bounds defensively.
     for (let i = tree.rows.length - 1; i > 0; i--) {
+      if (i >= tree.rows.length) continue;
       if (tree.rows[i].expanded) collapseRow(tree, i);
     }
-    // Defensive post-pass: ensure no stale bulkChildren lingers (e.g. if
-    // a graduated row shifted the anchor's position mid-iteration in a
-    // future Phase B change and we missed it above).
+    // Defensive post-pass: ensure no stale bulkChildren lingers and no
+    // graduated rows stayed behind (collapseRow should handle both, but
+    // this keeps the invariant as an explicit reconciliation).
     for (const r of tree.rows) {
       if (r.bulkChildren) {
         tree.virtualCount -= r.bulkChildren.count;
@@ -1269,23 +1465,33 @@
     const tree = state.tree;
     const row = getVirtualRow(tree, vIdx);
     if (!row || !row.expandable) return;
-    // Phase A: projected rows (direct children of a bulk anchor that
-    // aren't in tree.rows) cannot be toggled — Phase B introduces
-    // graduation to turn them into real rows first. Silently no-op so the
-    // caret click feels inert rather than broken.
     const realIdx = tree.pathToIndex.get(row.ptr);
-    if (realIdx == null) return;
-    if (row.expanded) collapseRow(tree, realIdx);
-    else expandRow(tree, realIdx);
-    // Current row's tree.rows index may have shifted from the splice.
+    if (realIdx == null) {
+      // Projected row: graduate it into a real row and expand in one
+      // step. Also make it current so the breadcrumb / URL point at the
+      // graduated target rather than wherever the user came from.
+      const gradIdx = graduateProjected(tree, row);
+      if (gradIdx >= 0) tree.current = tree.rows[gradIdx];
+    } else if (row.expanded) {
+      // Graduated + expanded: collapseRow collapses AND ungrates.
+      // Bulk anchor + expanded: collapseRow drops projection + graduated
+      // descendants. Plain row: regular collapse.
+      collapseRow(tree, realIdx);
+    } else {
+      expandRow(tree, realIdx);
+    }
+    // Re-resolve current row; its tree.rows index may have shifted.
     if (tree.current) {
       const curRealIdx = tree.pathToIndex.get(tree.current.ptr);
       if (curRealIdx != null) tree.current = tree.rows[curRealIdx];
-      // If current was a descendant of a just-collapsed ancestor, it's
-      // gone; fall back to the root.
-      else tree.current = tree.rows[0];
+      // If current was a descendant of a just-collapsed ancestor OR was
+      // a projected row whose anchor got collapsed, virtualIndexOfRow
+      // would also fail to resolve it. Fall back to root.
+      else if (virtualIndexOfRow(tree, tree.current) < 0) tree.current = tree.rows[0];
     }
+    updateBreadcrumb();
     render();
+    syncUrl();
   }
 
   function expandLongString(vIdx) {
