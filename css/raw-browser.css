@@ -758,3 +758,104 @@
 .vt-raw-help-popover .popover-arrow::before {
     border-bottom-color: var(--kb-bg-card);
 }
+
+/* --- Fullscreen mode ---
+ *
+ * Toggled by adding `vt-raw-fullscreen-active` to <body>. We promote
+ * #raw-browser to a fixed-position viewport-filling container, flex its
+ * interior so the active data card (tree / events / reconcile) claims
+ * the remaining vertical space, and hide the chrome we don't need
+ * (navbar, header card, stats banner, view-tab pills).
+ *
+ * d-none utility keeps its `!important` display:none, so inactive cards
+ * stay hidden even under the fullscreen flex layout. ROW_HEIGHT (28px)
+ * stays the same, so the virtualizer just paints more rows — no JS
+ * layout contract changes.
+ */
+body.vt-raw-fullscreen-active {
+    overflow: hidden;
+}
+
+body.vt-raw-fullscreen-active > nav.navbar,
+body.vt-raw-fullscreen-active #raw-loading,
+body.vt-raw-fullscreen-active #raw-picker,
+body.vt-raw-fullscreen-active .vt-raw-header,
+body.vt-raw-fullscreen-active #raw-view-tabs {
+    display: none !important;
+}
+
+body.vt-raw-fullscreen-active #raw-browser {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    background: var(--kb-bg, #0c0f14);
+    margin: 0;
+    padding: 0.75rem 1rem 1rem;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+body.vt-raw-fullscreen-active #raw-browser > :not(.vt-raw-controls):not(.vt-raw-tree-card):not(.vt-raw-events-card):not(.vt-raw-reconcile-card) {
+    display: none !important;
+}
+
+body.vt-raw-fullscreen-active .vt-raw-controls {
+    flex: 0 0 auto;
+    margin-bottom: 0 !important;
+}
+
+body.vt-raw-fullscreen-active .vt-raw-tree-card,
+body.vt-raw-fullscreen-active .vt-raw-events-card,
+body.vt-raw-fullscreen-active .vt-raw-reconcile-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-bottom: 0 !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+body.vt-raw-fullscreen-active .vt-raw-tree-card > .card-body,
+body.vt-raw-fullscreen-active .vt-raw-events-card > .card-body,
+body.vt-raw-fullscreen-active .vt-raw-reconcile-card > .card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+body.vt-raw-fullscreen-active .vt-raw-tree {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+}
+
+body.vt-raw-fullscreen-active .vt-raw-events-table {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+body.vt-raw-fullscreen-active .vt-raw-events-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+body.vt-raw-fullscreen-active .vt-raw-reconcile-card .table-responsive {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+#raw-fullscreen-btn[aria-pressed="true"] {
+    background: color-mix(in oklab, var(--kb-primary) 18%, transparent);
+    border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+    color: var(--kb-text-primary);
+}
+
