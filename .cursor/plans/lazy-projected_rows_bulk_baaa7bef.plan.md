@@ -1,26 +1,25 @@
 ---
 name: Lazy-projected rows bulk
-overview: Future refactor of the raw-browser tree model so megasized arrays (e.g. `eventStream` with 130k items) can be "expanded" in O(1) by leaving the array lazily projected into visible rows rather than materializing 130k row objects upfront. Deferred for later — this file is a reference spec, not an immediate action plan.
+overview: Reference spec for the lazy-projection refactor of the raw-browser tree model so megasized arrays (e.g. `eventStream` with 130k items) expand in O(1). Implemented in PRs titled "Raw browser: lazy bulk-projected rows (Phase A/B/C)".
 todos:
   - id: phase-a-bulk
     content: "Phase A: bulk-expand large arrays via row.bulkChildren; render() iterates virtual indices; drill-in falls back to full materialize"
-    status: pending
+    status: completed
   - id: phase-b-graduation
     content: "Phase B: caret-click on projected row graduates it to a real row with bulkSiblingOf back-ref; collapse reverses cleanly"
-    status: pending
+    status: completed
   - id: phase-c-nav
     content: "Phase C: ensurePathVisible walks bulk segments; setCurrent uses pointer identity; search/JSONPath jumpToHit graduates correctly"
-    status: pending
+    status: completed
   - id: phase-verify
     content: "Verification: DevTools Performance on 130k-event expand (<50ms target); memory snapshot; deep-link restoration with bulk path; collapse cleanup"
     status: pending
 isProject: false
 ---
 
-
 ## Status
 
-**DEFERRED** — reference plan for a future performance pass. Current behavior uses eager materialization with a loading-indicator overlay (see sibling plan `Loading indicator heavy expand`). Revisit this plan if a) real usage hits matches with > 500k events, or b) users complain about scroll jank after expanding `eventStream`.
+**IMPLEMENTED** — shipped across four commits (Phase A, B, C + a fullscreen-toggle Phase D on top of the same foundation). `BULK_THRESHOLD = 2000`. Also fixed a latent `RangeError: Maximum call stack size exceeded` in `expandRow` (V8 splice-spread cap) that was crashing on 12k+ arrays. See the execution plan `lazy_bulk_projected_rows_ba168f6f` for the actual landed scope. Phase A differed slightly from this reference in that drill-in never fell back to eager materialization — it was disabled in Phase A and then implemented via graduation in Phase B, which is cleaner than the plan's original fallback path.
 
 ## Goal
 
