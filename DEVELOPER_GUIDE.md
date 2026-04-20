@@ -2,7 +2,7 @@
 
 ## 1. Project Architecture
 
-VT Stats is a **static-site dashboard** for BattleZone match statistics. There is no backend framework, no build tools (Webpack/Vite), and no server-side rendering. The architecture has two parts:
+VT Stats is a **static-site dashboard** for Battlezone: Combat Commander match statistics. There is no backend framework, no build tools (Webpack/Vite), and no server-side rendering. The architecture has two parts:
 
 1. **Python Data Pipeline** — reads raw `.binpb.gz` protobuf session data, aggregates stats, and outputs small pre-computed JSON files.
 2. **Static Browser Dashboard** — loads the pre-computed JSON and renders interactive charts and tables.
@@ -232,7 +232,7 @@ Every dashboard card has an expand button (`data-expand="section-id"`) that open
 
 ## 4. ODF Integration — Weapon Name Resolution
 
-The `odf.min.json` file contains BattleZone Object Definition File data used to resolve raw ordnance ODF strings (e.g. `chaingun_c.odf`) into human-readable weapon names (e.g. `Chain Gun`).
+The `odf.min.json` file contains BZCC Object Definition File data used to resolve raw ordnance ODF strings (e.g. `chaingun_c.odf`) into human-readable weapon names (e.g. `Chain Gun`).
 
 ### Resolution Chain
 

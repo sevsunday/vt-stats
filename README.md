@@ -1,6 +1,6 @@
 # VT Stats
 
-A static-site dashboard for BattleZone match statistics. Processes raw protobuf match data through a Python pipeline and displays interactive charts, leaderboards, and analysis in the browser.
+A static-site dashboard for Battlezone: Combat Commander match statistics. Processes raw protobuf match data through a Python pipeline and displays interactive charts, leaderboards, and analysis in the browser.
 
 ## Quick Start
 
