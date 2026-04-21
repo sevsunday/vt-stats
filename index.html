@@ -21,31 +21,25 @@
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
-      <!-- Docs link (desktop only). Sits left of the match-select on desktop
-           via `order-md-1` + `ms-md-auto` (which absorbs free space so this
-           and everything after packs to the right edge). Hidden on mobile,
-           where Docs is duplicated inside the collapsed burger menu below. -->
+      <!-- Docs link (desktop only). The match selector lives in the hero
+           cards now (rich picker, see #match-picker-modal), so this is the
+           only thing flex-auto-pushing the collapse menu right on desktop. -->
       <a href="docs.html" class="vt-nav-icon-btn d-none d-md-inline-flex ms-md-auto order-md-1">
         <i class="bi bi-book me-1"></i>Docs
       </a>
 
-      <!-- Always-visible primary controls (match select + burger).
-           On mobile `ms-auto` pushes these to the right edge; on desktop
-           `ms-md-0` cancels that so the desktop Docs link (above) handles
-           the right-push via its own `ms-md-auto`. -->
-      <div class="d-flex align-items-center gap-2 ms-auto ms-md-0 order-md-2 vt-nav-primary">
-        <select id="match-select" class="form-select form-select-sm vt-match-select" style="width: auto; max-width: 220px;"></select>
-        <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none" type="button"
-                data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
-                aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
-          <i class="bi bi-list"></i>
-        </button>
-      </div>
+      <!-- Burger (mobile only). On desktop the collapse menu is always
+           expanded and packs to the right after the Docs link. -->
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
 
       <!-- Collapsible menu. `flex-md-grow-0` disables Bootstrap's default
            `flex-grow: 1` on .navbar-collapse so on desktop it shrinks to its
-           content width and packs next to the primary controls on the right. -->
-      <div class="collapse navbar-collapse flex-md-grow-0 order-md-3" id="topnav-collapse">
+           content width and packs next to the burger/docs on the right. -->
+      <div class="collapse navbar-collapse flex-md-grow-0 order-md-2" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
           <!-- Docs link (mobile burger only). Duplicate of the desktop
                version above; responsive visibility hides whichever isn't
@@ -110,8 +104,22 @@
     <div id="match-info" class="card mb-4">
       <div class="card-body d-flex flex-wrap gap-4 align-items-center">
         <div class="d-flex flex-wrap gap-4 align-items-center flex-grow-1">
-          <div><span class="stat-label">Map</span><br><strong id="info-map">—</strong></div>
-          <div><span class="stat-label">Date</span><br><strong id="info-date">—</strong></div>
+          <!-- Rich match picker trigger. Looks like a dropdown, opens the
+               #match-picker-modal. Both this trigger and its twin inside
+               #all-matches-view are kept in sync by js/app.js. -->
+          <button id="match-picker-trigger" class="vt-match-picker-trigger" type="button"
+                  data-bs-toggle="modal" data-bs-target="#match-picker-modal"
+                  aria-haspopup="dialog" aria-expanded="false"
+                  aria-label="Change match">
+            <span class="stat-label">Match</span>
+            <span class="vt-match-picker-trigger-primary">
+              <span class="vt-match-picker-trigger-name" id="trigger-name">—</span>
+              <i class="bi bi-chevron-down"></i>
+            </span>
+            <span class="vt-match-picker-trigger-secondary">
+              <span id="trigger-sub" class="vt-muted">—</span>
+            </span>
+          </button>
           <div><span class="stat-label">Duration</span><br><strong id="info-duration">—</strong></div>
           <div><span class="stat-label">Players</span><br><strong id="info-players">—</strong></div>
           <div><span class="stat-label">Submitted by</span><br><strong id="info-submitter">—</strong></div>
@@ -586,7 +594,24 @@
     <!-- Aggregate Meta (always visible above tabs) -->
     <div class="card mb-4">
       <div class="card-body">
-        <h4>All Matches Overview</h4>
+        <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
+          <!-- Twin of the #match-picker-trigger in #match-info. Kept in sync
+               by js/app.js: both reflect the same currentTarget. -->
+          <button id="match-picker-trigger-all" class="vt-match-picker-trigger" type="button"
+                  data-bs-toggle="modal" data-bs-target="#match-picker-modal"
+                  aria-haspopup="dialog" aria-expanded="false"
+                  aria-label="Change match">
+            <span class="stat-label">Match</span>
+            <span class="vt-match-picker-trigger-primary">
+              <span class="vt-match-picker-trigger-name" id="trigger-name-all">—</span>
+              <i class="bi bi-chevron-down"></i>
+            </span>
+            <span class="vt-match-picker-trigger-secondary">
+              <span id="trigger-sub-all" class="vt-muted">—</span>
+            </span>
+          </button>
+          <h4 class="mb-0">All Matches Overview</h4>
+        </div>
         <div class="d-flex flex-wrap gap-4" id="agg-meta"></div>
       </div>
     </div>
@@ -759,6 +784,33 @@
         <div class="modal-footer border-top">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-primary btn-sm" id="landing-modal-confirm">Continue</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Match Picker Modal -->
+  <div class="modal fade vt-match-picker-modal" id="match-picker-modal" tabindex="-1"
+       aria-labelledby="match-picker-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="match-picker-title">Select a match</h5>
+          <div class="input-group input-group-sm vt-match-picker-search">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="search" id="match-picker-search" class="form-control"
+                   placeholder="Search map, submitter, commander, date..."
+                   aria-label="Filter matches" autocomplete="off">
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="vt-match-picker-grid" id="match-picker-grid" role="list">
+            <!-- Populated by js/app.js buildMatchPicker() -->
+          </div>
+          <div class="vt-match-picker-empty d-none" id="match-picker-empty" role="status">
+            <i class="bi bi-search me-2"></i>No matches match your search.
+          </div>
         </div>
       </div>
     </div>

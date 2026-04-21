@@ -16,7 +16,30 @@
   const $loading = document.getElementById('loading');
   const $dashboard = document.getElementById('dashboard');
   const $allView = document.getElementById('all-matches-view');
-  const $select = document.getElementById('match-select');
+
+  // --- Match picker DOM handles ---
+  // Two twin triggers (one per hero card) + a shared XL modal containing
+  // the rich card grid. Both triggers reflect the same `currentTarget`
+  // (either a manifest entry or the sentinel string '__all__') via
+  // updateMatchPickerTriggers().
+  const $trigger        = document.getElementById('match-picker-trigger');
+  const $triggerAll     = document.getElementById('match-picker-trigger-all');
+  const $triggerName    = document.getElementById('trigger-name');
+  const $triggerNameAll = document.getElementById('trigger-name-all');
+  const $triggerSub     = document.getElementById('trigger-sub');
+  const $triggerSubAll  = document.getElementById('trigger-sub-all');
+  const $pickerModalEl  = document.getElementById('match-picker-modal');
+  const $pickerGrid     = document.getElementById('match-picker-grid');
+  const $pickerEmpty    = document.getElementById('match-picker-empty');
+  const $pickerSearch   = document.getElementById('match-picker-search');
+  // Bootstrap Modal instance (lazy-initialized on first trigger click). We
+  // hold a reference so card-click handlers can programmatically dismiss.
+  let pickerModalInstance = null;
+
+  // Current selection target. '__all__' for the aggregate view, otherwise
+  // the manifest entry object (not just its id/file — we need name + sub
+  // text for the trigger). null before boot completes.
+  let currentTarget = null;
 
   const MATCH_TAB_SLUGS = {
     overview:    'tab-overview-btn',
@@ -136,28 +159,28 @@
     }
   }
 
-  // Resolves a landing choice into an actual view load. Always sets
-  // $select.value so the navbar dropdown stays in sync with what loads,
-  // matching the existing URL-driven boot branches. Unknown modes and
-  // missing specific-matchIds silently fall back to most recent.
+  // Resolves a landing choice into an actual view load. Always keeps the
+  // picker triggers in sync via updateMatchPickerTriggers(), matching the
+  // existing URL-driven boot branches. Unknown modes and missing
+  // specific-matchIds silently fall back to most recent.
   function applyLandingChoice(choice) {
     const mode = choice && choice.mode;
     if (mode === 'all') {
-      $select.value = '__all__';
+      updateMatchPickerTriggers('__all__');
       loadAllMatches();
       return;
     }
     if (mode === 'specific' && choice.matchId) {
       const entry = manifest.find(m => m.id === choice.matchId);
       if (entry) {
-        $select.value = entry.file;
+        updateMatchPickerTriggers(entry);
         loadMatch(entry.file);
         return;
       }
       // Fall through to recent if the saved match is gone.
     }
     if (manifest.length > 0) {
-      $select.value = manifest[0].file;
+      updateMatchPickerTriggers(manifest[0]);
       loadMatch(manifest[0].file);
     }
   }
@@ -280,13 +303,13 @@
   function buildShareUrl() {
     const params = new URLSearchParams();
 
-    if ($select.value === '__all__') {
+    if (currentTarget === '__all__') {
       params.set('match', 'all');
     } else if (currentData) {
       params.set('match', currentData.match.id);
     }
 
-    const isAllMatchesView = $select.value === '__all__';
+    const isAllMatchesView = currentTarget === '__all__';
     if (!isAllMatchesView) {
       if (filterState.mode === 'team' && filterState.team) {
         params.set('filter', 'team');
@@ -466,42 +489,252 @@
   // specific-match picker, and the not-found error picker.
   manifest.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-  const allOpt = document.createElement('option');
-  allOpt.value = '__all__';
-  allOpt.textContent = 'All Matches';
-  $select.appendChild(allOpt);
+  // --- Match picker: format helpers ---
+  // Kept local to this scope so every renderer uses the same date / duration
+  // formatting as the trigger buttons.
 
-  manifest.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m.file;
-    const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    opt.textContent = `${m.name} — ${shortDate}`;
-    $select.appendChild(opt);
-  });
-
-  if (manifest.length > 0) {
-    $select.value = manifest[0].file;
+  function fmtDurationShort(sec) {
+    if (!Number.isFinite(sec) || sec <= 0) return '—';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}m ${s}s`;
   }
 
-  $select.addEventListener('change', () => {
+  function fmtDateFull(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  }
+
+  // --- Match picker: build + wire ---
+
+  function buildMatchPickerCardHtml(entry) {
+    const leaders = entry.team_leaders || {};
+    const l1 = leaders['1'] && leaders['1'].name;
+    const l2 = leaders['2'] && leaders['2'].name;
+    let leadersHtml = '';
+    if (l1 || l2) {
+      leadersHtml = `
+        <div class="vt-match-picker-card-leaders">
+          <span class="vt-match-picker-card-leader vt-match-picker-card-leader--t1">${esc(l1 || '—')}</span>
+          <span class="vt-match-picker-card-leader-vs">v</span>
+          <span class="vt-match-picker-card-leader vt-match-picker-card-leader--t2">${esc(l2 || '—')}</span>
+        </div>`;
+    }
+    const mapRaw = entry.map && entry.map !== entry.name
+      ? `<div class="vt-match-picker-card-rawmap vt-mono">${esc(entry.map)}</div>`
+      : '';
+    return `
+      <button type="button" class="vt-match-picker-card" data-target="${esc(entry.file)}" role="listitem">
+        <div class="vt-match-picker-card-head">
+          <span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}</span>
+          <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${entry.player_count || '?'}p</span>
+        </div>
+        ${mapRaw}
+        <div class="vt-match-picker-card-submeta">
+          <span class="vt-match-picker-card-submitter"><i class="bi bi-person-circle"></i> ${esc(entry.submitter || '—')}</span>
+          <span class="vt-match-picker-card-date">${esc(fmtDateFull(entry.date))}</span>
+        </div>
+        ${leadersHtml}
+      </button>`;
+  }
+
+  function buildMatchPickerAllCardHtml() {
+    const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
+    return `
+      <button type="button" class="vt-match-picker-card vt-match-picker-card--all" data-target="__all__" role="listitem">
+        <div class="vt-match-picker-card-head">
+          <span class="vt-match-picker-card-name"><i class="bi bi-collection me-1"></i>All Matches</span>
+          <span class="vt-match-picker-card-meta">${manifest.length} matches &middot; ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}</span>
+        </div>
+        <div class="vt-match-picker-card-submeta">
+          <span class="vt-muted">Career overview across every recorded match.</span>
+        </div>
+      </button>`;
+  }
+
+  function buildMatchPicker() {
+    if (!$pickerGrid) return;
+    // Newest-first: `manifest` has already been sorted desc-by-date above.
+    const cards = [buildMatchPickerAllCardHtml()]
+      .concat(manifest.map(buildMatchPickerCardHtml));
+    $pickerGrid.innerHTML = cards.join('');
+
+    // Stash a lowercased search blob on each card element. Searched on
+    // every keystroke; cheaper than re-querying DOM.
+    $pickerGrid.querySelectorAll('.vt-match-picker-card').forEach(el => {
+      const tgt = el.dataset.target;
+      if (tgt === '__all__') {
+        el.dataset.searchBlob = 'all matches';
+        return;
+      }
+      const entry = manifest.find(m => m.file === tgt);
+      if (!entry) return;
+      const l1 = entry.team_leaders && entry.team_leaders['1'] && entry.team_leaders['1'].name;
+      const l2 = entry.team_leaders && entry.team_leaders['2'] && entry.team_leaders['2'].name;
+      el.dataset.searchBlob = [
+        entry.name, entry.map, entry.submitter,
+        fmtDateFull(entry.date),
+        l1, l2,
+      ].filter(Boolean).join(' ').toLowerCase();
+    });
+
+    // Delegated click: one listener for the whole grid.
+    $pickerGrid.addEventListener('click', (e) => {
+      const card = e.target.closest('.vt-match-picker-card');
+      if (!card) return;
+      e.preventDefault();
+      selectMatch(card.dataset.target);
+    });
+  }
+
+  // Resolve a target ('__all__' or a file string) to manifest entry, or null.
+  function resolveTarget(target) {
+    if (target === '__all__' || target === null) return target;
+    // Accept either a file string or an entry object (for internal callers).
+    if (typeof target === 'object' && target !== null) return target;
+    return manifest.find(m => m.file === target) || null;
+  }
+
+  // Click / activation handler — dismisses the modal, updates triggers,
+  // and routes to loadMatch / loadAllMatches with the same view-transition
+  // wrapper the old <select> change handler used.
+  function selectMatch(target) {
+    const resolved = resolveTarget(target);
+    if (resolved === null) return;
+    // No-op if already on this target (pure click on the active card).
+    if (resolved === currentTarget) {
+      if (pickerModalInstance) pickerModalInstance.hide();
+      return;
+    }
+    updateMatchPickerTriggers(resolved);
+    if (pickerModalInstance) pickerModalInstance.hide();
     const doLoad = () => {
-      if ($select.value === '__all__') loadAllMatches();
-      else loadMatch($select.value);
+      if (resolved === '__all__') loadAllMatches();
+      else loadMatch(resolved.file);
     };
     if (window.VTFx) VTFx.withViewTransition(doLoad);
     else doLoad();
-  });
+  }
+
+  // Update both trigger buttons + the active-card highlight in the grid.
+  // Called from every place that used to do `$select.value = ...`.
+  function updateMatchPickerTriggers(target) {
+    const resolved = resolveTarget(target);
+    currentTarget = resolved;
+
+    let name, sub;
+    if (resolved === '__all__') {
+      const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
+      name = 'All Matches';
+      sub = `${manifest.length} matches \u00B7 ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}`;
+    } else if (resolved && typeof resolved === 'object') {
+      name = resolved.name || resolved.id;
+      const rawMap = resolved.map && resolved.map !== resolved.name ? `${resolved.map} \u00B7 ` : '';
+      sub = `${rawMap}${fmtDateFull(resolved.date)}`;
+    } else {
+      name = '—';
+      sub = '—';
+    }
+
+    if ($triggerName)    $triggerName.textContent = name;
+    if ($triggerNameAll) $triggerNameAll.textContent = name;
+    if ($triggerSub)     $triggerSub.textContent = sub;
+    if ($triggerSubAll)  $triggerSubAll.textContent = sub;
+
+    // Active-card highlight in the grid.
+    if ($pickerGrid) {
+      const activeKey = resolved === '__all__'
+        ? '__all__'
+        : (resolved && typeof resolved === 'object' ? resolved.file : null);
+      $pickerGrid.querySelectorAll('.vt-match-picker-card').forEach(el => {
+        el.classList.toggle('is-active', el.dataset.target === activeKey);
+      });
+    }
+  }
+
+  buildMatchPicker();
+
+  // --- Match picker: search filter ---
+
+  function applyMatchPickerSearch(query) {
+    const q = (query || '').trim().toLowerCase();
+    if (!$pickerGrid) return;
+    let visibleRegular = 0;
+    $pickerGrid.querySelectorAll('.vt-match-picker-card').forEach(el => {
+      const isAll = el.dataset.target === '__all__';
+      // "All Matches" card always renders regardless of search.
+      if (isAll) {
+        el.classList.remove('d-none');
+        return;
+      }
+      const blob = el.dataset.searchBlob || '';
+      const match = !q || blob.includes(q);
+      el.classList.toggle('d-none', !match);
+      if (match) visibleRegular++;
+    });
+    if ($pickerEmpty) {
+      $pickerEmpty.classList.toggle('d-none', !q || visibleRegular > 0);
+    }
+  }
+
+  if ($pickerSearch) {
+    let searchTimer = null;
+    $pickerSearch.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => applyMatchPickerSearch($pickerSearch.value), 80);
+    });
+  }
+
+  // --- Match picker: modal lifecycle ---
+
+  if ($pickerModalEl) {
+    // Lazy-init the Bootstrap instance on first show.
+    $pickerModalEl.addEventListener('show.bs.modal', () => {
+      if (!pickerModalInstance && window.bootstrap && window.bootstrap.Modal) {
+        pickerModalInstance = window.bootstrap.Modal.getOrCreateInstance($pickerModalEl);
+      }
+      // Reflect aria-expanded on both triggers.
+      if ($trigger) $trigger.setAttribute('aria-expanded', 'true');
+      if ($triggerAll) $triggerAll.setAttribute('aria-expanded', 'true');
+    });
+    $pickerModalEl.addEventListener('shown.bs.modal', () => {
+      // Focus the search input + scroll active card into view.
+      if ($pickerSearch) {
+        $pickerSearch.focus();
+        $pickerSearch.select();
+      }
+      const active = $pickerGrid && $pickerGrid.querySelector('.vt-match-picker-card.is-active');
+      if (active && typeof active.scrollIntoView === 'function') {
+        active.scrollIntoView({ block: 'nearest' });
+      }
+    });
+    $pickerModalEl.addEventListener('hidden.bs.modal', () => {
+      if ($trigger) $trigger.setAttribute('aria-expanded', 'false');
+      if ($triggerAll) $triggerAll.setAttribute('aria-expanded', 'false');
+      // Reset search on close so next open starts fresh.
+      if ($pickerSearch) {
+        $pickerSearch.value = '';
+        applyMatchPickerSearch('');
+      }
+    });
+  }
+
+  // Default selection (most-recent). Callers below will overwrite this
+  // via updateMatchPickerTriggers() as they kick off loadMatch/loadAll.
+  if (manifest.length > 0) {
+    updateMatchPickerTriggers(manifest[0]);
+  }
 
   const $brandHome = document.getElementById('brand-home');
   if ($brandHome) {
     $brandHome.addEventListener('click', (e) => {
       e.preventDefault();
-      if (manifest.length > 0) {
-        $select.value = manifest[0].file;
-        const doLoad = () => loadMatch(manifest[0].file);
-        if (window.VTFx) VTFx.withViewTransition(doLoad);
-        else doLoad();
-      }
+      if (manifest.length > 0) selectMatch(manifest[0]);
     });
   }
 
@@ -1418,12 +1651,10 @@
   }
 
   // --- Banner ---
+  // Map name + date no longer live here — they've moved into the rich match
+  // picker trigger button (updateMatchPickerTriggers) which sits at the start
+  // of the hero flex row.
   function renderBanner(info) {
-    document.getElementById('info-map').textContent = info.map;
-    const d = new Date(info.date);
-    document.getElementById('info-date').textContent = d.toLocaleDateString(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    });
     const m = Math.floor(info.duration_sec / 60);
     const s = Math.floor(info.duration_sec % 60);
     document.getElementById('info-duration').textContent = `${m}m ${s}s`;
@@ -2453,12 +2684,17 @@
     panel.querySelector('#vt-error-match-picker').addEventListener('change', (e) => {
       const val = e.target.value;
       if (!val) return;
-      $select.value = val;
       // One-time bypass of the live-sync gate: strip the stale bad-match URL
       // before loading, regardless of the live-sync preference. The bad ID is
       // actively misleading and the user has explicitly chosen a different
       // match, so clearing is unambiguous intent.
       history.replaceState(null, '', window.location.pathname);
+      if (val === '__all__') {
+        updateMatchPickerTriggers('__all__');
+      } else {
+        const entry = manifest.find(m => m.file === val);
+        if (entry) updateMatchPickerTriggers(entry);
+      }
       const doLoad = () => {
         if (val === '__all__') loadAllMatches();
         else loadMatch(val);
@@ -2498,12 +2734,12 @@
     || (initialUrlState.players && initialUrlState.players.length);
 
   if (initialUrlState.match === 'all') {
-    $select.value = '__all__';
+    updateMatchPickerTriggers('__all__');
     loadAllMatches(initialUrlState);
   } else if (initialUrlState.match) {
     const entry = manifest.find(m => m.id === initialUrlState.match);
     if (entry) {
-      $select.value = entry.file;
+      updateMatchPickerTriggers(entry);
       loadMatch(entry.file, initialUrlState);
     } else {
       showMatchNotFound(initialUrlState.match);
@@ -2511,6 +2747,7 @@
   } else if (manifest.length > 0 && hasOtherUrlIntent) {
     // Partial shared link (e.g. ?tab=positioning). Preserve prior behavior:
     // load first match and apply the URL state so filter/tab hydrate.
+    updateMatchPickerTriggers(manifest[0]);
     loadMatch(manifest[0].file, initialUrlState);
   } else if (manifest.length > 0) {
     // No URL intent at all — consult landing pref.

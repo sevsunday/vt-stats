@@ -1811,11 +1811,6 @@ h4:hover .docs-heading-anchor,
         padding-left: 0.5rem;
     }
 
-    /* Keep match-select tappable but allow some shrink in the always-on row */
-    .vt-match-select {
-        max-width: 180px !important;
-    }
-
     /* -- Tab navigation: horizontal scroll strip -- */
     #match-tabs,
     #all-tabs {
@@ -1891,12 +1886,6 @@ h4:hover .docs-heading-anchor,
     #all-matches-view {
         padding-top: 1rem !important;
         padding-bottom: 1rem !important;
-    }
-
-    /* Match-select shrinks further on very narrow screens */
-    .vt-match-select {
-        max-width: 150px !important;
-        font-size: 0.8rem;
     }
 
     /* Even tighter filter btn-group */
@@ -2195,3 +2184,348 @@ td.vt-col-split {
 .vt-heatmap-legend-label {
     font-size: 0.7rem;
 }
+
+/* =====================================================================
+   Rich Match Picker
+   ---------------------------------------------------------------------
+   Faux-dropdown trigger in both hero cards (#match-info and
+   #all-matches-view's agg-meta card) opens #match-picker-modal, which
+   houses a searchable card grid. Phase 2 will add a filter toolbar
+   above the grid.
+   ===================================================================== */
+
+/* --- Trigger button (lives in each hero) --- */
+
+.vt-match-picker-trigger {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.4rem 0.85rem 0.45rem;
+    min-width: 180px;
+    max-width: 320px;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 50%, transparent);
+    color: var(--kb-text-primary);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                background var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-match-picker-trigger:hover,
+.vt-match-picker-trigger:focus-visible {
+    border-color: var(--kb-primary);
+    transform: translateY(-1px);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 75%, transparent);
+    outline: none;
+}
+
+.vt-match-picker-trigger .stat-label {
+    font-size: 0.65rem;
+    line-height: 1;
+    opacity: 0.9;
+}
+
+.vt-match-picker-trigger-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    font-size: 1rem;
+    line-height: 1.1;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-match-picker-trigger-primary .bi-chevron-down {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    transition: transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-match-picker-trigger[aria-expanded="true"] .bi-chevron-down {
+    transform: rotate(180deg);
+}
+
+.vt-match-picker-trigger-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+
+.vt-match-picker-trigger-secondary {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* --- Modal --- */
+
+.vt-match-picker-modal .modal-content {
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-match-picker-modal .modal-header {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.75rem;
+    align-items: center;
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.vt-match-picker-modal .modal-title {
+    flex: 0 0 auto;
+}
+
+.vt-match-picker-search {
+    flex: 1 1 260px;
+    max-width: 360px;
+    margin-left: auto;
+}
+
+.vt-match-picker-modal .modal-body {
+    background: transparent;
+}
+
+/* --- Grid --- */
+
+.vt-match-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 0.75rem;
+}
+
+/* --- Card (rendered as <button>, visually a card) --- */
+
+.vt-match-picker-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.55rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 55%, transparent);
+    color: var(--kb-text-primary);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                background var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+    position: relative;
+}
+
+.vt-match-picker-card:hover,
+.vt-match-picker-card:focus-visible {
+    border-color: var(--kb-primary);
+    transform: translateY(-1px);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 75%, transparent);
+    outline: none;
+}
+
+.vt-match-picker-card.is-active {
+    border-color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 10%, var(--kb-bg-subtle));
+}
+
+.vt-match-picker-card.is-active::after {
+    content: "\F26A"; /* bi-check-lg */
+    font-family: "bootstrap-icons";
+    position: absolute;
+    top: 0.55rem;
+    right: 0.6rem;
+    color: var(--kb-primary);
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.vt-match-picker-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.vt-match-picker-card-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.vt-match-picker-card-meta {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.vt-match-picker-card-rawmap {
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    opacity: 0.8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-match-picker-card-submeta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-match-picker-card-submitter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.vt-match-picker-card-date {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vt-match-picker-card-leaders {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-top: 0.4rem;
+    margin-top: 0.15rem;
+    border-top: 1px dashed var(--kb-border-subtle);
+    font-size: 0.8rem;
+    min-width: 0;
+}
+
+.vt-match-picker-card-leader {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 0;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.vt-match-picker-card-leader::before {
+    content: "";
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.vt-match-picker-card-leader--t1::before {
+    background: var(--kb-primary);
+}
+
+.vt-match-picker-card-leader--t2::before {
+    background: var(--kb-accent);
+}
+
+.vt-match-picker-card-leader--t2 {
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.vt-match-picker-card-leader--t2::before {
+    order: 2;
+}
+
+.vt-match-picker-card-leader-vs {
+    color: var(--kb-text-muted);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex: 0 0 auto;
+}
+
+/* --- "All Matches" pinned card --- */
+
+.vt-match-picker-card--all {
+    background: color-mix(in oklab, var(--kb-primary) 6%, var(--kb-bg-subtle));
+    border-style: dashed;
+}
+
+.vt-match-picker-card--all:hover,
+.vt-match-picker-card--all:focus-visible {
+    background: color-mix(in oklab, var(--kb-primary) 12%, var(--kb-bg-subtle));
+}
+
+/* --- Empty state (search yields zero matches) --- */
+
+.vt-match-picker-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--kb-text-muted);
+    border: 1px dashed var(--kb-border-subtle);
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 30%, transparent);
+    margin-top: 0.5rem;
+}
+
+/* --- Responsive --- */
+
+@media (max-width: 768px) {
+    .vt-match-picker-trigger {
+        min-width: 0;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .vt-match-picker-trigger-name {
+        max-width: 100%;
+    }
+
+    .vt-match-picker-modal .modal-dialog {
+        margin: 0;
+    }
+
+    .vt-match-picker-modal .modal-content {
+        min-height: 100vh;
+        border-radius: 0;
+    }
+
+    .vt-match-picker-modal .modal-header {
+        flex-wrap: wrap;
+    }
+
+    .vt-match-picker-search {
+        order: 3;
+        flex: 1 1 100%;
+        max-width: 100%;
+        margin-left: 0;
+    }
+
+    .vt-match-picker-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
