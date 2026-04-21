@@ -554,7 +554,7 @@
       leadersHtml = `
         <div class="vt-match-picker-card-leaders">
           <span class="vt-match-picker-card-leader vt-match-picker-card-leader--t1">${esc(l1 || '—')}</span>
-          <span class="vt-match-picker-card-leader-vs">v</span>
+          <span class="vt-match-picker-card-leader-vs">vs</span>
           <span class="vt-match-picker-card-leader vt-match-picker-card-leader--t2">${esc(l2 || '—')}</span>
         </div>`;
     }
