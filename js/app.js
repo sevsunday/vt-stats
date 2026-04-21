@@ -31,7 +31,25 @@
   const $pickerModalEl  = document.getElementById('match-picker-modal');
   const $pickerGrid     = document.getElementById('match-picker-grid');
   const $pickerEmpty    = document.getElementById('match-picker-empty');
+  const $pickerEmptyText  = document.getElementById('match-picker-empty-text');
+  const $pickerEmptyClear = document.getElementById('match-picker-empty-clear');
   const $pickerSearch   = document.getElementById('match-picker-search');
+  // Phase 2: filter toolbar DOM.
+  const $triggerBadge       = document.getElementById('trigger-badge');
+  const $triggerBadgeAll    = document.getElementById('trigger-badge-all');
+  const $filtersRoot        = document.getElementById('match-picker-filters');
+  const $filtersToggle      = document.getElementById('match-picker-filters-toggle');
+  const $filtersBadgeInline = document.getElementById('match-picker-filters-badge-inline');
+  const $filtersBody        = document.getElementById('match-picker-filters-body');
+  const $sortSelect         = document.getElementById('match-picker-sort');
+  const $resultCount        = document.getElementById('match-picker-result-count');
+  const $clearBtn           = document.getElementById('match-picker-clear');
+  const $facetDuration      = $filtersBody && $filtersBody.querySelector('[data-facet="duration"]');
+  const $facetPlayers       = document.getElementById('match-picker-facet-players');
+  const $facetSubmitters    = document.getElementById('match-picker-facet-submitters');
+  const $facetCommanders    = document.getElementById('match-picker-facet-commanders');
+  const $commanderSearch    = document.getElementById('match-picker-commanders-search');
+  const $commanderModeBtns  = $filtersBody && $filtersBody.querySelectorAll('[data-versus-mode]');
   // Bootstrap Modal instance (lazy-initialized on first trigger click). We
   // hold a reference so card-click handlers can programmatically dismiss.
   let pickerModalInstance = null;
@@ -40,6 +58,21 @@
   // the manifest entry object (not just its id/file — we need name + sub
   // text for the trigger). null before boot completes.
   let currentTarget = null;
+
+  // Phase 2: picker filter + sort state. All AND-combine with each other
+  // and with the free-text search. Persisted in sessionStorage under the
+  // vt.picker.filters.v1 key; cleared on tab close.
+  const PICKER_STATE_KEY = 'vt.picker.filters.v1';
+  const DEFAULT_PICKER_STATE = () => ({
+    query: '',
+    duration: 'any',                // 'any' | 'short' (<10m) | 'medium' (10-20m) | 'long' (>=20m)
+    players: [],                    // array of player_count numbers; empty = any
+    submitters: [],                 // array of submitter strings; empty = any
+    commanders: [],                 // array of nickname strings; empty = any
+    versusMode: 'any',              // 'any' | 'both'
+    sort: 'date-desc',
+  });
+  let pickerState = DEFAULT_PICKER_STATE();
 
   const MATCH_TAB_SLUGS = {
     overview:    'tab-overview-btn',
@@ -659,36 +692,404 @@
 
   buildMatchPicker();
 
-  // --- Match picker: search filter ---
+  // --- Match picker: Phase 2 — facet derivation + filter model ---
 
-  function applyMatchPickerSearch(query) {
-    const q = (query || '').trim().toLowerCase();
-    if (!$pickerGrid) return;
-    let visibleRegular = 0;
-    $pickerGrid.querySelectorAll('.vt-match-picker-card').forEach(el => {
-      const isAll = el.dataset.target === '__all__';
-      // "All Matches" card always renders regardless of search.
-      if (isAll) {
-        el.classList.remove('d-none');
-        return;
-      }
-      const blob = el.dataset.searchBlob || '';
-      const match = !q || blob.includes(q);
-      el.classList.toggle('d-none', !match);
-      if (match) visibleRegular++;
-    });
-    if ($pickerEmpty) {
-      $pickerEmpty.classList.toggle('d-none', !q || visibleRegular > 0);
+  // Duration bucket thresholds. Expressed once here so chip labels (HTML)
+  // and predicate (JS) stay in sync at a single glance.
+  const DURATION_BUCKETS = {
+    short:  { min: 0,    max: 600  },  // <10m
+    medium: { min: 600,  max: 1200 },  // 10-20m
+    long:   { min: 1200, max: Infinity }, // 20m+
+  };
+
+  // Derive unique facet option lists from the manifest once.
+  function deriveFacets() {
+    const playerCounts = Array.from(new Set(
+      manifest.map(m => m.player_count).filter(n => Number.isFinite(n) && n > 0)
+    )).sort((a, b) => a - b);
+
+    const submitters = Array.from(new Set(
+      manifest.map(m => m.submitter).filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b));
+
+    const commanders = Array.from(new Set(
+      manifest.flatMap(m => {
+        const tl = m.team_leaders || {};
+        return [tl['1'] && tl['1'].name, tl['2'] && tl['2'].name];
+      }).filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b));
+
+    return { playerCounts, submitters, commanders };
+  }
+
+  const pickerFacets = deriveFacets();
+
+  function buildMatchPickerFilters() {
+    if (!$facetPlayers || !$facetSubmitters || !$facetCommanders) return;
+
+    // Player-count chips.
+    $facetPlayers.innerHTML = pickerFacets.playerCounts.map(pc =>
+      `<button type="button" class="vt-match-picker-chip" data-value="${pc}" role="checkbox" aria-checked="false">${pc}</button>`
+    ).join('');
+
+    // Submitter chips.
+    $facetSubmitters.innerHTML = pickerFacets.submitters.map(s =>
+      `<button type="button" class="vt-match-picker-chip" data-value="${esc(s)}" role="checkbox" aria-checked="false">${esc(s)}</button>`
+    ).join('');
+
+    // Commander chips (with per-chip searchable visibility via commander-search input).
+    $facetCommanders.innerHTML = pickerFacets.commanders.map(name =>
+      `<button type="button" class="vt-match-picker-chip" data-value="${esc(name)}" data-name-lc="${esc(name.toLowerCase())}" role="checkbox" aria-checked="false">${esc(name)}</button>`
+    ).join('');
+
+    // Empty-state handling when a facet has no options (e.g. fresh repo).
+    if (!pickerFacets.commanders.length) {
+      $facetCommanders.innerHTML = `<span class="vt-muted small">No commanders captured yet.</span>`;
     }
   }
+
+  // Predicate: does this manifest entry pass the current filter state?
+  function entryMatchesState(entry, state) {
+    // Free-text query — matches the same fields the Phase 1 searchBlob used.
+    if (state.query) {
+      const blob = (entry.__searchBlob ||= buildEntrySearchBlob(entry));
+      if (!blob.includes(state.query)) return false;
+    }
+
+    // Duration band.
+    if (state.duration && state.duration !== 'any') {
+      const bucket = DURATION_BUCKETS[state.duration];
+      if (!bucket) return false;
+      const d = entry.duration_sec || 0;
+      if (d < bucket.min || d >= bucket.max) return false;
+    }
+
+    // Players (multi-select: match any selected count).
+    if (state.players.length && !state.players.includes(entry.player_count)) return false;
+
+    // Submitter (multi-select: match any selected).
+    if (state.submitters.length && !state.submitters.includes(entry.submitter)) return false;
+
+    // Commanders (any / both mode).
+    if (state.commanders.length) {
+      const tl = entry.team_leaders || {};
+      const entryCommanders = [tl['1'] && tl['1'].name, tl['2'] && tl['2'].name].filter(Boolean);
+      if (state.versusMode === 'both') {
+        // Every selected name must appear as one of this match's commanders.
+        const ok = state.commanders.every(name => entryCommanders.includes(name));
+        if (!ok) return false;
+      } else {
+        // Any: at least one selected name must appear.
+        const ok = state.commanders.some(name => entryCommanders.includes(name));
+        if (!ok) return false;
+      }
+    }
+
+    return true;
+  }
+
+  function buildEntrySearchBlob(entry) {
+    const tl = entry.team_leaders || {};
+    return [
+      entry.name, entry.map, entry.submitter,
+      fmtDateFull(entry.date),
+      tl['1'] && tl['1'].name, tl['2'] && tl['2'].name,
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  // Stable comparator per sort key.
+  function comparatorForSort(sort) {
+    switch (sort) {
+      case 'date-asc':      return (a, b) => new Date(a.date) - new Date(b.date);
+      case 'duration-desc': return (a, b) => (b.duration_sec || 0) - (a.duration_sec || 0);
+      case 'duration-asc':  return (a, b) => (a.duration_sec || 0) - (b.duration_sec || 0);
+      case 'players-desc':  return (a, b) => (b.player_count || 0) - (a.player_count || 0);
+      case 'players-asc':   return (a, b) => (a.player_count || 0) - (b.player_count || 0);
+      case 'name-asc':      return (a, b) => (a.name || '').localeCompare(b.name || '');
+      case 'date-desc':
+      default:              return (a, b) => new Date(b.date) - new Date(a.date);
+    }
+  }
+
+  // Count how many facets are engaged — for the badge / empty-state copy.
+  function activeFilterCount(state) {
+    let n = 0;
+    if (state.duration && state.duration !== 'any') n++;
+    if (state.players.length) n++;
+    if (state.submitters.length) n++;
+    if (state.commanders.length) n++;
+    if (state.sort && state.sort !== 'date-desc') n++;
+    return n;
+  }
+
+  function hasAnyFilterEngaged(state) {
+    return activeFilterCount(state) > 0 || !!state.query;
+  }
+
+  // Apply current state: toggle visibility + reorder cards + update feedback.
+  function applyPickerFilters() {
+    if (!$pickerGrid) return;
+    const state = pickerState;
+    const cards = Array.from($pickerGrid.querySelectorAll('.vt-match-picker-card'));
+    const allCard = cards.find(c => c.dataset.target === '__all__');
+    const regularCards = cards.filter(c => c.dataset.target !== '__all__');
+
+    // Build a file->entry index once for O(1) lookup during sort/filter.
+    const entryByFile = new Map(manifest.map(m => [m.file, m]));
+
+    // Sort the regular cards by comparator; reorder DOM (cheap: 8-ish nodes).
+    const comparator = comparatorForSort(state.sort);
+    regularCards.sort((a, b) => {
+      const ea = entryByFile.get(a.dataset.target);
+      const eb = entryByFile.get(b.dataset.target);
+      if (!ea || !eb) return 0;
+      return comparator(ea, eb);
+    });
+
+    // Reinsert in sorted order (all-card stays first).
+    if (allCard) $pickerGrid.appendChild(allCard);
+    regularCards.forEach(c => $pickerGrid.appendChild(c));
+
+    // Filter visibility.
+    let visibleRegular = 0;
+    regularCards.forEach(el => {
+      const entry = entryByFile.get(el.dataset.target);
+      if (!entry) { el.classList.add('d-none'); return; }
+      const ok = entryMatchesState(entry, state);
+      el.classList.toggle('d-none', !ok);
+      if (ok) visibleRegular++;
+    });
+    if (allCard) allCard.classList.remove('d-none');
+
+    // Result counter.
+    if ($resultCount) {
+      $resultCount.textContent = `${visibleRegular} of ${manifest.length} match${manifest.length === 1 ? '' : 'es'}`;
+    }
+
+    // Empty state (with variant copy depending on whether it's search vs filters).
+    if ($pickerEmpty) {
+      const showEmpty = visibleRegular === 0 && hasAnyFilterEngaged(state);
+      $pickerEmpty.classList.toggle('d-none', !showEmpty);
+      if (showEmpty && $pickerEmptyText) {
+        const facetsEngaged = activeFilterCount(state) > 0;
+        $pickerEmptyText.textContent = facetsEngaged
+          ? 'No matches match the current filters.'
+          : 'No matches match your search.';
+        if ($pickerEmptyClear) $pickerEmptyClear.classList.toggle('d-none', !facetsEngaged);
+      }
+    }
+
+    // Active-filter badge on both triggers + inline (mobile toolbar).
+    const count = activeFilterCount(state);
+    [$triggerBadge, $triggerBadgeAll].forEach(el => {
+      if (!el) return;
+      el.textContent = String(count);
+      el.classList.toggle('d-none', count === 0);
+    });
+    if ($filtersBadgeInline) {
+      $filtersBadgeInline.textContent = String(count);
+      $filtersBadgeInline.classList.toggle('d-none', count === 0);
+    }
+
+    // Clear-all button visibility.
+    if ($clearBtn) $clearBtn.classList.toggle('d-none', !hasAnyFilterEngaged(state));
+
+    // Persist.
+    savePickerStateToStorage();
+  }
+
+  // --- Persistence ---
+
+  function loadPickerStateFromStorage() {
+    try {
+      const raw = sessionStorage.getItem(PICKER_STATE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!saved || typeof saved !== 'object') return;
+      const d = DEFAULT_PICKER_STATE();
+      pickerState = {
+        query:      typeof saved.query === 'string' ? saved.query : d.query,
+        duration:   ['any', 'short', 'medium', 'long'].includes(saved.duration) ? saved.duration : d.duration,
+        players:    Array.isArray(saved.players) ? saved.players.filter(n => Number.isFinite(n)) : d.players,
+        submitters: Array.isArray(saved.submitters) ? saved.submitters.filter(s => typeof s === 'string') : d.submitters,
+        commanders: Array.isArray(saved.commanders) ? saved.commanders.filter(s => typeof s === 'string') : d.commanders,
+        versusMode: saved.versusMode === 'both' ? 'both' : 'any',
+        sort:       typeof saved.sort === 'string' ? saved.sort : d.sort,
+      };
+    } catch (_) { /* corrupt JSON — ignore */ }
+  }
+
+  function savePickerStateToStorage() {
+    try {
+      sessionStorage.setItem(PICKER_STATE_KEY, JSON.stringify(pickerState));
+    } catch (_) { /* quota / private mode — ignore */ }
+  }
+
+  // Push pickerState into the UI controls (chip active classes, sort select,
+  // commander mode toggle, search input). Called on boot + after Clear-all.
+  function applyPickerStateToUI() {
+    if ($pickerSearch) $pickerSearch.value = pickerState.query || '';
+    if ($sortSelect) $sortSelect.value = pickerState.sort;
+
+    if ($facetDuration) {
+      $facetDuration.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = c.dataset.value === pickerState.duration;
+        c.classList.toggle('is-active', active);
+        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
+    }
+    if ($facetPlayers) {
+      $facetPlayers.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = pickerState.players.includes(Number(c.dataset.value));
+        c.classList.toggle('is-active', active);
+        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
+    }
+    if ($facetSubmitters) {
+      $facetSubmitters.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = pickerState.submitters.includes(c.dataset.value);
+        c.classList.toggle('is-active', active);
+        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
+    }
+    if ($facetCommanders) {
+      $facetCommanders.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = pickerState.commanders.includes(c.dataset.value);
+        c.classList.toggle('is-active', active);
+        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
+    }
+    if ($commanderModeBtns) {
+      $commanderModeBtns.forEach(btn => {
+        const active = btn.dataset.versusMode === pickerState.versusMode;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
+  }
+
+  function clearAllFilters() {
+    pickerState = DEFAULT_PICKER_STATE();
+    // Preserve current free-text search query? No — Clear-all means clear everything.
+    applyPickerStateToUI();
+    applyPickerFilters();
+    // Reset commander visibility search too.
+    if ($commanderSearch) {
+      $commanderSearch.value = '';
+      filterCommanderChipVisibility('');
+    }
+  }
+
+  // --- Wiring: search input ---
 
   if ($pickerSearch) {
     let searchTimer = null;
     $pickerSearch.addEventListener('input', () => {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => applyMatchPickerSearch($pickerSearch.value), 80);
+      searchTimer = setTimeout(() => {
+        pickerState.query = ($pickerSearch.value || '').trim().toLowerCase();
+        applyPickerFilters();
+      }, 80);
     });
   }
+
+  // --- Wiring: facet chipsets (event delegation per chipset) ---
+
+  // Duration is single-select (radiogroup) — clicking a chip sets the value.
+  if ($facetDuration) {
+    $facetDuration.addEventListener('click', (e) => {
+      const chip = e.target.closest('.vt-match-picker-chip');
+      if (!chip) return;
+      pickerState.duration = chip.dataset.value || 'any';
+      applyPickerStateToUI();
+      applyPickerFilters();
+    });
+  }
+
+  // Players, Submitters, Commanders are multi-select (group) — click toggles.
+  function wireMultiChipset(container, stateKey, coerce) {
+    if (!container) return;
+    container.addEventListener('click', (e) => {
+      const chip = e.target.closest('.vt-match-picker-chip');
+      if (!chip) return;
+      const raw = chip.dataset.value;
+      const val = coerce ? coerce(raw) : raw;
+      const arr = pickerState[stateKey];
+      const idx = arr.indexOf(val);
+      if (idx >= 0) arr.splice(idx, 1);
+      else arr.push(val);
+      applyPickerStateToUI();
+      applyPickerFilters();
+    });
+  }
+  wireMultiChipset($facetPlayers, 'players', v => Number(v));
+  wireMultiChipset($facetSubmitters, 'submitters', null);
+  wireMultiChipset($facetCommanders, 'commanders', null);
+
+  // --- Wiring: commander search (visibility-only — does NOT filter matches) ---
+
+  function filterCommanderChipVisibility(query) {
+    if (!$facetCommanders) return;
+    const q = (query || '').trim().toLowerCase();
+    $facetCommanders.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+      const name = c.dataset.nameLc || '';
+      const active = c.classList.contains('is-active');
+      // Always show active chips so users can un-toggle them without scrolling.
+      c.classList.toggle('d-none', !active && q && !name.includes(q));
+    });
+  }
+
+  if ($commanderSearch) {
+    $commanderSearch.addEventListener('input', () => {
+      filterCommanderChipVisibility($commanderSearch.value);
+    });
+  }
+
+  // --- Wiring: versus-mode toggle (Any / Both) ---
+
+  if ($commanderModeBtns) {
+    $commanderModeBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        pickerState.versusMode = btn.dataset.versusMode === 'both' ? 'both' : 'any';
+        applyPickerStateToUI();
+        applyPickerFilters();
+      });
+    });
+  }
+
+  // --- Wiring: sort ---
+
+  if ($sortSelect) {
+    $sortSelect.addEventListener('change', () => {
+      pickerState.sort = $sortSelect.value;
+      applyPickerFilters();
+    });
+  }
+
+  // --- Wiring: Clear-all ---
+
+  if ($clearBtn) $clearBtn.addEventListener('click', clearAllFilters);
+  if ($pickerEmptyClear) $pickerEmptyClear.addEventListener('click', clearAllFilters);
+
+  // --- Wiring: mobile Filters disclosure ---
+
+  if ($filtersToggle && $filtersRoot) {
+    $filtersToggle.addEventListener('click', () => {
+      const expanded = $filtersRoot.dataset.expanded === 'true';
+      $filtersRoot.dataset.expanded = expanded ? 'false' : 'true';
+      $filtersToggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    });
+  }
+
+  // --- Init: after all Phase 2 defs are in place, hydrate the UI once. ---
+  // buildMatchPickerFilters() needs `pickerFacets` (declared a few blocks up
+  // as `const pickerFacets = deriveFacets()`), so this must run after that
+  // initializer executes — hence it lives here at the end of the Phase 2
+  // block rather than next to buildMatchPicker() above.
+  buildMatchPickerFilters();
+  loadPickerStateFromStorage();
+  applyPickerStateToUI();
+  applyPickerFilters();
 
   // --- Match picker: modal lifecycle ---
 
@@ -716,11 +1117,8 @@
     $pickerModalEl.addEventListener('hidden.bs.modal', () => {
       if ($trigger) $trigger.setAttribute('aria-expanded', 'false');
       if ($triggerAll) $triggerAll.setAttribute('aria-expanded', 'false');
-      // Reset search on close so next open starts fresh.
-      if ($pickerSearch) {
-        $pickerSearch.value = '';
-        applyMatchPickerSearch('');
-      }
+      // Filter state (query + facets) persists in sessionStorage so it
+      // survives close/reopen within a tab. No reset here.
     });
   }
 
