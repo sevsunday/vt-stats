@@ -742,6 +742,17 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
 
     all_slots = set(nick_map.keys())
 
+    # Team commanders: slot 1 = Team 1 commander, slot 6 = Team 2 commander.
+    # Consumed by the rich match picker (js/app.js) via the manifest entry.
+    team_leaders = {}
+    for slot, team_key in ((1, "1"), (6, "2")):
+        s64 = slot_to_s64.get(slot)
+        if s64 and s64 in s64_to_nick:
+            team_leaders[team_key] = {
+                "name": nick_map.get(slot) or s64_to_nick.get(s64),
+                "s64": str(s64),
+            }
+
     def nick_for_s64(s64):
         return known_players.get(s64) or s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
 
@@ -1347,6 +1358,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "config_mod": header.active_config_mod,
             "snipe_count": snipe_count,
             "teams": teams,
+            "team_leaders": team_leaders,
             "has_position_data": positioning_block["has_position_data"],
             "has_target_lock_data": positioning_block.get("has_target_lock_data", False),
         },
@@ -1701,6 +1713,7 @@ def main():
             "duration_sec": match_data["match"]["duration_sec"],
             "player_count": match_data["match"]["player_count"],
             "submitter": submitter,
+            "team_leaders": match_data["match"].get("team_leaders", {}),
             "has_position_data": match_data["match"].get("has_position_data", False),
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),
         })

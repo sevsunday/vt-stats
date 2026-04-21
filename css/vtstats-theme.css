@@ -1811,11 +1811,6 @@ h4:hover .docs-heading-anchor,
         padding-left: 0.5rem;
     }
 
-    /* Keep match-select tappable but allow some shrink in the always-on row */
-    .vt-match-select {
-        max-width: 180px !important;
-    }
-
     /* -- Tab navigation: horizontal scroll strip -- */
     #match-tabs,
     #all-tabs {
@@ -1891,12 +1886,6 @@ h4:hover .docs-heading-anchor,
     #all-matches-view {
         padding-top: 1rem !important;
         padding-bottom: 1rem !important;
-    }
-
-    /* Match-select shrinks further on very narrow screens */
-    .vt-match-select {
-        max-width: 150px !important;
-        font-size: 0.8rem;
     }
 
     /* Even tighter filter btn-group */
@@ -2195,3 +2184,569 @@ td.vt-col-split {
 .vt-heatmap-legend-label {
     font-size: 0.7rem;
 }
+
+/* =====================================================================
+   Rich Match Picker
+   ---------------------------------------------------------------------
+   Faux-dropdown trigger in both hero cards (#match-info and
+   #all-matches-view's agg-meta card) opens #match-picker-modal, which
+   houses a searchable card grid. Phase 2 will add a filter toolbar
+   above the grid.
+   ===================================================================== */
+
+/* --- Trigger button (lives in each hero) --- */
+
+.vt-match-picker-trigger {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.4rem 0.85rem 0.45rem;
+    min-width: 180px;
+    max-width: 320px;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 50%, transparent);
+    color: var(--kb-text-primary);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                background var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-match-picker-trigger:hover,
+.vt-match-picker-trigger:focus-visible {
+    border-color: var(--kb-primary);
+    transform: translateY(-1px);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 75%, transparent);
+    outline: none;
+}
+
+.vt-match-picker-trigger .stat-label {
+    font-size: 0.65rem;
+    line-height: 1;
+    opacity: 0.9;
+}
+
+.vt-match-picker-trigger-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    font-size: 1rem;
+    line-height: 1.1;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-match-picker-trigger-primary .bi-chevron-down {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    transition: transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-match-picker-trigger[aria-expanded="true"] .bi-chevron-down {
+    transform: rotate(180deg);
+}
+
+.vt-match-picker-trigger-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+
+.vt-match-picker-trigger-secondary {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* --- Modal --- */
+
+.vt-match-picker-modal .modal-content {
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-match-picker-modal .modal-header {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.75rem;
+    align-items: center;
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.vt-match-picker-modal .modal-title {
+    flex: 0 0 auto;
+}
+
+.vt-match-picker-search {
+    flex: 1 1 260px;
+    max-width: 360px;
+    margin-left: auto;
+}
+
+.vt-match-picker-modal .modal-body {
+    background: transparent;
+}
+
+/* --- Grid --- */
+
+.vt-match-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 0.75rem;
+}
+
+/* --- Card (rendered as <button>, visually a card) --- */
+
+.vt-match-picker-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.55rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 55%, transparent);
+    color: var(--kb-text-primary);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                background var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+    position: relative;
+}
+
+.vt-match-picker-card:hover,
+.vt-match-picker-card:focus-visible {
+    border-color: var(--kb-primary);
+    transform: translateY(-1px);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 75%, transparent);
+    outline: none;
+}
+
+.vt-match-picker-card.is-active {
+    border-color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 10%, var(--kb-bg-subtle));
+}
+
+.vt-match-picker-card.is-active::after {
+    content: "\F26A"; /* bi-check-lg */
+    font-family: "bootstrap-icons";
+    position: absolute;
+    top: 0.55rem;
+    right: 0.6rem;
+    color: var(--kb-primary);
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.vt-match-picker-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.vt-match-picker-card-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.vt-match-picker-card-meta {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.vt-match-picker-card-rawmap {
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    opacity: 0.8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-match-picker-card-submeta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-match-picker-card-submitter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.vt-match-picker-card-date {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vt-match-picker-card-leaders {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-top: 0.4rem;
+    margin-top: 0.15rem;
+    border-top: 1px dashed var(--kb-border-subtle);
+    font-size: 0.8rem;
+    min-width: 0;
+}
+
+.vt-match-picker-card-leader {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.vt-match-picker-card-leader::before {
+    content: "";
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.vt-match-picker-card-leader--t1::before {
+    background: var(--kb-primary);
+}
+
+.vt-match-picker-card-leader--t2::before {
+    background: var(--kb-accent);
+}
+
+.vt-match-picker-card-leader-vs {
+    color: var(--kb-text-muted);
+    font-size: 0.75rem;
+    font-style: italic;
+    flex: 0 0 auto;
+}
+
+/* --- "All Matches" pinned card --- */
+
+.vt-match-picker-card--all {
+    background: color-mix(in oklab, var(--kb-primary) 6%, var(--kb-bg-subtle));
+    border-style: dashed;
+}
+
+.vt-match-picker-card--all:hover,
+.vt-match-picker-card--all:focus-visible {
+    background: color-mix(in oklab, var(--kb-primary) 12%, var(--kb-bg-subtle));
+}
+
+/* --- Empty state (search / filters yield zero matches) --- */
+
+.vt-match-picker-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--kb-text-muted);
+    border: 1px dashed var(--kb-border-subtle);
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 30%, transparent);
+    margin-top: 0.5rem;
+}
+
+/* --- Phase 2: Filter toolbar --- */
+
+.vt-match-picker-filters {
+    margin-bottom: 0.85rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.55rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 35%, transparent);
+    overflow: hidden;
+}
+
+.vt-match-picker-filters-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.75rem 0.9rem;
+}
+
+.vt-match-picker-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    min-height: 1.9rem;
+}
+
+.vt-match-picker-filter-row--controls {
+    justify-content: space-between;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px dashed var(--kb-border-subtle);
+    margin-bottom: 0.1rem;
+}
+
+.vt-match-picker-filter-label {
+    flex: 0 0 84px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+}
+
+.vt-match-picker-filter-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.vt-match-picker-filter-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.8rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-match-picker-sort {
+    min-width: 150px;
+    max-width: 220px;
+}
+
+.vt-match-picker-chipset {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.vt-match-picker-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-bg-card) 88%, transparent);
+    color: var(--kb-text-primary);
+    font-size: 0.78rem;
+    font-weight: 500;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                background var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-match-picker-chip:hover,
+.vt-match-picker-chip:focus-visible {
+    border-color: var(--kb-primary);
+    outline: none;
+}
+
+.vt-match-picker-chip.is-active {
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+    border-color: var(--kb-primary);
+}
+
+.vt-match-picker-chip.is-active:hover,
+.vt-match-picker-chip.is-active:focus-visible {
+    background: color-mix(in oklab, var(--kb-primary) 85%, white);
+}
+
+/* --- Commanders section (chip list with own search + mode toggle) --- */
+
+.vt-match-picker-filter-row--commanders {
+    align-items: flex-start;
+}
+
+.vt-match-picker-commanders {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.vt-match-picker-commanders-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.vt-match-picker-commanders-search {
+    flex: 1 1 200px;
+    max-width: 280px;
+}
+
+.vt-match-picker-commanders-mode {
+    flex: 0 0 auto;
+}
+
+.vt-match-picker-chipset--commanders {
+    max-height: 132px;
+    overflow-y: auto;
+    padding: 0.35rem;
+    border: 1px dashed var(--kb-border-subtle);
+    border-radius: 0.4rem;
+    background: color-mix(in oklab, var(--kb-bg-subtle) 50%, transparent);
+}
+
+/* Keep scrollbar visible but themed on modern browsers. */
+.vt-match-picker-chipset--commanders {
+    scrollbar-width: thin;
+    scrollbar-color: var(--kb-border-subtle) transparent;
+}
+
+/* --- Active-filter badge on trigger + inline mobile toggle --- */
+
+.vt-match-picker-trigger-badge,
+.vt-match-picker-filters-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 999px;
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+}
+
+/* --- Clear-all button spacing --- */
+
+.vt-match-picker-clear {
+    white-space: nowrap;
+}
+
+/* --- Responsive: mobile Filters disclosure --- */
+
+.vt-match-picker-filters-toggle {
+    display: none;
+    width: 100%;
+    padding: 0.55rem 0.85rem;
+    border: none;
+    border-bottom: 1px solid var(--kb-border-subtle);
+    background: transparent;
+    color: var(--kb-text-primary);
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.vt-match-picker-filters-toggle:focus-visible {
+    outline: 2px solid var(--kb-primary);
+    outline-offset: -2px;
+}
+
+.vt-match-picker-filters[data-expanded="true"] .vt-match-picker-filters-toggle .bi-chevron-down {
+    transform: rotate(180deg);
+}
+
+@media (max-width: 768px) {
+    .vt-match-picker-filters-toggle {
+        display: flex;
+    }
+
+    .vt-match-picker-filters-body {
+        display: none;
+    }
+
+    .vt-match-picker-filters[data-expanded="true"] .vt-match-picker-filters-body {
+        display: flex;
+    }
+
+    /* Labels stack above chipsets on narrow screens for readability. */
+    .vt-match-picker-filter-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.35rem;
+    }
+
+    .vt-match-picker-filter-label {
+        flex: 0 0 auto;
+    }
+
+    .vt-match-picker-filter-row--controls {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+}
+
+/* --- Responsive --- */
+
+@media (max-width: 768px) {
+    .vt-match-picker-trigger {
+        min-width: 0;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .vt-match-picker-trigger-name {
+        max-width: 100%;
+    }
+
+    .vt-match-picker-modal .modal-dialog {
+        margin: 0;
+    }
+
+    .vt-match-picker-modal .modal-content {
+        min-height: 100vh;
+        border-radius: 0;
+    }
+
+    .vt-match-picker-modal .modal-header {
+        flex-wrap: wrap;
+    }
+
+    .vt-match-picker-search {
+        order: 3;
+        flex: 1 1 100%;
+        max-width: 100%;
+        margin-left: 0;
+    }
+
+    .vt-match-picker-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
