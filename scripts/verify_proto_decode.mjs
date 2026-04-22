@@ -96,6 +96,12 @@ const headerSummary = {
   author_nickname: header.authorNickname,
   author_steam64_type: typeof header.authorSteam64,
   author_steam64_sample: header.authorSteam64,
+  terrain_min_x: header.terrainMinX,
+  terrain_max_x: header.terrainMaxX,
+  terrain_min_y: header.terrainMinY,
+  terrain_max_y: header.terrainMaxY,
+  terrain_min_z: header.terrainMinZ,
+  terrain_max_z: header.terrainMaxZ,
 };
 
 console.log(JSON.stringify({

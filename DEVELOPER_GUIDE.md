@@ -83,6 +83,14 @@ The raw match data uses Protocol Buffers (protobuf). The canonical schema is at 
 | 9 | `s64_to_teamnum` | `map<uint64, int32>` | Steam64 → Slot (reverse of field 7) |
 | 10 | `player_count` | `uint32` | Number of players in the match |
 | 11 | `last_tick` | `uint32` | Final game tick (0 if not populated by collector) |
+| 12 | `terrain_min_x` | `float` | World-space minimum X (west edge). Axis convention: +X East, +Y Up, +Z North |
+| 13 | `terrain_max_x` | `float` | World-space maximum X (east edge) |
+| 14 | `terrain_min_y` | `float` | World-space minimum Y (lowest elevation) |
+| 15 | `terrain_max_y` | `float` | World-space maximum Y (highest elevation) |
+| 16 | `terrain_min_z` | `float` | World-space minimum Z (south edge) |
+| 17 | `terrain_max_z` | `float` | World-space maximum Z (north edge) |
+
+All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions, edition-2023 implicit field presence). The pipeline treats all-zero as "unset" and falls back to observed player extents for `map_bounds`.
 
 Team convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
 
@@ -284,7 +292,6 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
   "tick_range": [283, 22897],
   "tick_rate": 20,
   "player_count": 10,
-  "has_position_data": true,
   "config_mod": "1325933293.cfg",
   "snipe_count": 0,
   "teams": {
@@ -294,9 +301,21 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
     "2": [
       { "slot": 6, "player_id": "DesUxS?sU", "name": "DesUxS?sU", "steam64": "76561198025561228" }
     ]
-  }
+  },
+  "has_position_data": true,
+  "has_target_lock_data": false,
+  "terrain_bounds": {
+    "min": {"x": -1024.0, "y": 0.0, "z": -1024.0},
+    "max": {"x": 1024.0, "y": 320.25, "z": 1024.0}
+  },
+  "base_to_base_distance": 756.96
 }
 ```
+
+Match-level spatial context fields:
+
+- `terrain_bounds` — `{min, max}` of 3D world-space terrain extents from `StatHeader.terrain_*` (new-schema only). `null` for pre-schema sessions. Mirrored from `positioning.terrain_bounds` for convenience on non-positioning renderers. Match-global, always-unfiltered.
+- `base_to_base_distance` — raw horizontal distance (units, horizontal-plane only) between Team 1 and Team 2 spawn centroids. `null` when either team has zero players. Distinct from `positioning.base_separation`, which is a floored internal scaling value used by the `R_base` / `time_in_base_pct` heuristics. Mirrored from `positioning.base_to_base_distance`. Match-global, always-unfiltered.
 
 #### `leaderboard[]` entry
 
@@ -494,9 +513,15 @@ Top-level shape:
   "has_target_lock_data": true,
   "sample_rate_hz": 1,
   "match_sample_count": 848,
-  "map_bounds": { "min": {"x": -553.6, "z": -552.9}, "max": {"x": 587.4, "z": 555.4} },
-  "map_diagonal": 1590.7,
+  "map_bounds": { "min": {"x": -1024.0, "z": -1024.0}, "max": {"x": 1024.0, "z": 1024.0} },
+  "map_bounds_source": "terrain",
+  "terrain_bounds": {
+    "min": {"x": -1024.0, "y": 0.0, "z": -1024.0},
+    "max": {"x": 1024.0, "y": 320.25, "z": 1024.0}
+  },
+  "map_diagonal": 2896.3,
   "base_separation": 756.0,
+  "base_to_base_distance": 756.0,
   "observed_max_range": 1055.1,
   "p99_speed": 57.6,
   "teleport_threshold": 300.0,
@@ -509,6 +534,14 @@ Top-level shape:
   }
 }
 ```
+
+Top-level fields worth calling out:
+
+- `map_bounds` — 2D `{min:{x,z}, max:{x,z}}` box used as the reference frame for `heatmap_grid_xz` binning and all canvas projections. Derived from `terrain_bounds` when available (new-schema sessions), otherwise from observed player extents. Always non-null when `has_position_data: true`.
+- `map_bounds_source` — `"terrain"` when `map_bounds` came from header terrain fields, `"observed"` when it was derived from player extents, `null` when `has_position_data: false`. Frontends can use this to label tooltips / axis ticks as absolute vs. match-relative.
+- `terrain_bounds` — full 3D `{min:{x,y,z}, max:{x,y,z}}` from `StatHeader.terrain_*`. `null` for pre-schema sessions. Mirrored onto the `match` object.
+- `base_separation` — floored internal scaling value `max(computed_centroid_dist, 500, observed_max_range × 0.3)`. Drives `R_base` and `time_in_base_pct` heuristics. Not a user-facing measurement.
+- `base_to_base_distance` — raw horizontal distance between Team 1 and Team 2 spawn centroids, **no floor applied**. `null` when either team has zero players. This is the "how far apart are the bases" measurement; use this, not `base_separation`, for display.
 
 `has_target_lock_data` is a match-global availability flag: `true` iff any `PlayerState.has_target=true` sample was observed in the match. It's `false` for pre-schema matches (the proto field didn't exist yet) and also for new-schema matches where no player ever held T. Combined with per-player `metrics.target_lock_pct`, it distinguishes "no data" (pre-schema) from "0% lock" (field present, never pressed).
 
