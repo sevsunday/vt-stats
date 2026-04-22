@@ -1916,6 +1916,16 @@ def main():
     except Exception as e:
         print(f"WARN: failed to extract proto docs ({e}); skipping.")
 
+    # Build/refresh the map registry (metadata + images) from iondriver's
+    # gamelistassets API. Non-blocking: per-map network failures log but do
+    # not abort the pipeline; idempotent on maps already cached. Output at
+    # `data/maps/*` and `data/map-registry.json`. See build_map_registry.py.
+    try:
+        import build_map_registry
+        build_map_registry.build_registry()
+    except Exception as e:
+        print(f"WARN: failed to build map registry ({e}); skipping.")
+
     print("\nDone!")
 
 
