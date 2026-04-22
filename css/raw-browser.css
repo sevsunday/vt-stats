@@ -747,6 +747,38 @@
     font-style: italic;
 }
 
+/* Sentinel filter badge. Rendered above the Reconcile table when the
+ * current match contains any `amount > 1e6` damage events (see
+ * docs/sentinel-damage.md). Hidden on clean matches. */
+.vt-reconcile-sentinel-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    padding: 0.4rem 0.75rem;
+    margin-bottom: 0.75rem;
+    border-radius: 999px;
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-warning) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 35%, transparent);
+}
+
+.vt-reconcile-sentinel-badge i.bi {
+    color: var(--kb-warning);
+}
+
+.vt-reconcile-sentinel-badge a {
+    color: var(--kb-text-primary);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--kb-warning) 60%, transparent);
+    text-underline-offset: 2px;
+    font-weight: 500;
+}
+
+.vt-reconcile-sentinel-badge a:hover {
+    text-decoration-color: var(--kb-warning);
+}
+
 /* Help popover — themed to match the dark chrome. Bootstrap's default
    popover is white regardless of theme; this overrides it. */
 .vt-raw-help-popover.popover {

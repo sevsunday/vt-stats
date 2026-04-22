@@ -55,6 +55,18 @@
   const PROTO_DOCS_URL = 'data/proto-docs.json';
   const FIELD_DOCS_MANUAL_URL = 'data/field-docs-manual.json';
 
+  // Sentinel damage filter — kept in sync with SENTINEL_DAMAGE_THRESHOLD in
+  // scripts/process_stats.py. Engine's DAMAGE_TYPE_UNKNOWN force-kill
+  // pathway emits DamageDealt/DamageReceived with amount = 2^28
+  // (268,435,456.0); any amount above 1e6 is treated as sentinel. See
+  // docs/sentinel-damage.md for full evidence chain. The Reconcile view
+  // filters these out so its sums agree with the pipeline's processed
+  // tier; the raw events table still displays them verbatim.
+  const SENTINEL_DAMAGE_THRESHOLD = 1e6;
+  function isSentinelDamage(amount) {
+    return Number.isFinite(amount) && amount > SENTINEL_DAMAGE_THRESHOLD;
+  }
+
   // Path-prefix → proto message type, used by lookupFieldDoc()'s
   // type-based fallback for Decoded-tier fields that don't have a
   // manual path-keyed entry. Numeric segments (array indices, map keys)
@@ -2391,9 +2403,11 @@
   function renderReconcile() {
     if (!state.decoded || !state.processed) {
       $reconcileBody.innerHTML = `<tr><td colspan="5" class="text-center vt-muted py-3">Data not ready.</td></tr>`;
+      renderReconcileSentinelBadge({ pairs: 0, totalAmount: 0 });
       return;
     }
     ensureEventsModel(); // reuse the events-mode row extraction
+    renderReconcileSentinelBadge(computeSentinelSummary());
     const rows = [];
     rows.push(renderReconcileRow(computeSnipes()));
     const s64 = $reconcilePlayer.value;
@@ -2407,6 +2421,30 @@
       rows.push(`<tr class="vt-raw-reconcile-row--skip"><td colspan="5" class="text-center py-3">Select a player above to reconcile personal damage and kill totals.</td></tr>`);
     }
     $reconcileBody.innerHTML = rows.join('');
+  }
+
+  // Render (or clear) the sentinel-filter badge above the Reconcile table.
+  // Writes to #reconcile-sentinel-badge when present; no-op otherwise.
+  // The badge surfaces the literal observed total rather than assuming 2^28,
+  // so any future sentinel variant still reports honestly.
+  function renderReconcileSentinelBadge({ pairs, totalAmount }) {
+    const el = document.getElementById('reconcile-sentinel-badge');
+    if (!el) return;
+    if (!pairs) {
+      el.classList.add('d-none');
+      el.innerHTML = '';
+      return;
+    }
+    el.classList.remove('d-none');
+    const fmt = new Intl.NumberFormat();
+    const pairsLabel = pairs === 1 ? '1 sentinel pair' : `${pairs} sentinel pairs`;
+    el.innerHTML = `
+      <i class="bi bi-shield-exclamation me-2" aria-hidden="true"></i>
+      <span>${pairsLabel} filtered (total dropped: ${fmt.format(Math.round(totalAmount))})</span>
+      <a class="ms-2" href="docs.html?doc=sentinel" target="_blank" rel="noopener">why?</a>
+    `;
+    el.title = `Engine DAMAGE_TYPE_UNKNOWN force-kill sentinels (amount > 1e6). ` +
+      `Filtered out of Reconcile sums to match processed JSON; the raw events table below still shows them verbatim.`;
   }
 
   // Each computeX returns:
@@ -2441,13 +2479,14 @@
       if (r.shooter !== s64) continue;
       if (!(r.team > 0)) continue;       // skip_shooter check
       if (!(r.amount > 0)) continue;     // ditto
+      if (isSentinelDamage(r.amount)) continue; // sentinel filter — match processed tier
       sum += r.amount;
     }
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.dealt`,
       processed: entry && entry.personal ? Number(entry.personal.dealt) : 0,
       computed: sum,
-      rule: 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0',
+      rule: 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6',
       kind: 'float',
     };
   }
@@ -2464,13 +2503,14 @@
       if (r.victim !== s64) continue;
       if (!(r.team > 0)) continue;
       if (!(r.amount > 0)) continue;
+      if (isSentinelDamage(r.amount)) continue;
       sum += r.amount;
     }
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.received`,
       processed: entry && entry.personal ? Number(entry.personal.received) : 0,
       computed: sum,
-      rule: 'Σ damageReceived.amount where victim == s64 ∧ team > 0 ∧ amount > 0',
+      rule: 'Σ damageReceived.amount where victim == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6',
       kind: 'float',
     };
   }
@@ -2486,6 +2526,7 @@
       if (r.shooter !== s64) continue;
       if (!(r.team > 0)) continue;
       if (!(r.amount > 0)) continue;
+      if (isSentinelDamage(r.amount)) continue;
       const j = pairIdx[i];
       if (j < 0) continue;
       const dr = rows[j];
@@ -2499,9 +2540,26 @@
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.pvp_dealt`,
       processed: entry && entry.personal ? Number(entry.personal.pvp_dealt) : 0,
       computed: sum,
-      rule: 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ paired dr.victim > 0',
+      rule: 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim > 0',
       kind: 'float',
     };
+  }
+
+  // Scan the current match's event stream for sentinel-amount events. Returns
+  // { pairs, totalAmount } where `pairs` counts DD+DR pairs (matches pipeline
+  // telemetry shape) and `totalAmount` is the literal sum of DD-side amounts.
+  // Used by the Reconcile view's top badge to surface the filter's effect.
+  function computeSentinelSummary() {
+    if (!state.events || !state.events.rows) return { pairs: 0, totalAmount: 0 };
+    let pairs = 0;
+    let totalAmount = 0;
+    for (const r of state.events.rows) {
+      if (r.arm !== 'damageDealt') continue;
+      if (!isSentinelDamage(r.amount)) continue;
+      pairs++;
+      totalAmount += r.amount;
+    }
+    return { pairs, totalAmount };
   }
 
   function computeKills(s64) {
