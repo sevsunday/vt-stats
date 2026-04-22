@@ -59,7 +59,7 @@ For each new event type:
 6. `README.md` — update if data workflow, features, or setup instructions changed
 7. If new `*_odf` fields are added, ensure the pipeline collects them into `odf_map` in `scripts/process_stats.py` (the Raw Data Browser's ODF resolver consumes it)
 8. If new messages or oneof arms are added, update `PROTO_TYPE_MAP` in `js/raw-browser.js` so the new paths resolve to message types for field-name tooltips. Also update `EVENT_ARMS` / `EVENT_ARM_LABELS` if the change affects the `StatEvent` oneof, and consider whether a new reconciliation mapping in `renderReconcile()` is warranted (Phase 3 section of DEVELOPER_GUIDE.md).
-9. Rerun the pipeline (`python scripts/process_stats.py`); confirm `data/proto-docs.json` is regenerated with the new field comments and all per-match JSON files have the expected new fields.
+9. Rerun the pipeline (`python scripts/process_stats.py`); confirm `data/proto-docs.json` is regenerated with the new field comments and all per-match JSON files have the expected new fields. The pipeline also refreshes `data/map-registry.json` + `data/maps/*` via `scripts/build_map_registry.py` (idempotent; only new maps hit the network).
 
 ## Step 6: Verify
 
