@@ -62,6 +62,7 @@ Unless noted otherwise, entries describe per-match-view behavior; the All Matche
 | `match.base_to_base_distance`, `positioning.base_to_base_distance` | Match-global, passes through | Raw centroid-to-centroid horizontal distance (no floor). Always unfiltered. Distinct from `positioning.base_separation` (floored internal scaling value, already unfiltered). |
 | `positioning.map_bounds_source` | Match-global, passes through | `"terrain"` / `"observed"` / `null`; renderers use it to label axes as absolute vs match-relative. Unfiltered. |
 | `match.sentinel_damage`, `meta.total_sentinel_damage_dropped`, `meta.matches_with_sentinel_damage` | Match-global, always unfiltered | Engine-sentinel telemetry from the `amount > 1e6` filter. See `data-schema.mdc` "Sentinel Damage Filter" + `docs/sentinel-damage.md`. |
+| `data/map-registry.json[key].image_path` / `image_calibration` / `canonical_*` / `author` / `title` / `net_vars` | Match-global, external reference, always unfiltered | Top-down map image + metadata fetched at build time by `scripts/build_map_registry.py`. Consumed by `js/app.js` (hero thumbnail, match-picker thumbs), `js/positioning-charts.js` (heatmap background), `js/positioning-player.js` (trail background). Projection contract in `DEVELOPER_GUIDE.md` §10 "Map Assets & Overlays". |
 | `career_stats[]` (All Matches view generally) | Consumed directly from `all_matches.json`; never passes through `getFilteredData`. | Per-chart pickers (e.g. Career Radar A/B) are the only selection UI. |
 
 ## Guidance

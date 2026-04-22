@@ -2376,7 +2376,7 @@
 
   // --- Phase 3: Reconciliation ---
   //
-  // Fixed list of tier-2 -> tier-3 mappings. See DEVELOPER_GUIDE.md §10 for
+  // Fixed list of tier-2 -> tier-3 mappings. See DEVELOPER_GUIDE.md §11 for
   // the rules and .cursor/rules/data-schema.mdc for the underlying damage
   // attribution semantics. This list is intentionally closed; adding a new
   // mapping is an explicit plan update, not a freeform feature.

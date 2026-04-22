@@ -2325,8 +2325,9 @@ td.vt-col-split {
 
 .vt-match-picker-card {
     display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.75rem;
     padding: 0.75rem 0.9rem;
     border: 1px solid var(--kb-border-subtle);
     border-radius: 0.55rem;
@@ -2370,6 +2371,53 @@ td.vt-col-split {
     align-items: baseline;
     justify-content: space-between;
     gap: 0.5rem;
+}
+
+/* Thumbnail on the left of each match-picker card. Top-down map image
+ * from data/map-registry.json; when unavailable (map not in registry
+ * or registry not fetched yet), renders a neutral placeholder so card
+ * heights stay stable. Square to preserve aspect ratio regardless of
+ * source image dimensions. */
+.vt-match-picker-card-thumb {
+    flex: 0 0 auto;
+    width: 96px;
+    height: 96px;
+    border-radius: 0.4rem;
+    border: 1px solid var(--kb-border-subtle);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    object-fit: cover;
+    align-self: center;
+}
+
+.vt-match-picker-card-thumb--placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--kb-text-muted);
+    font-size: 1.5rem;
+}
+
+/* Wrapper around the text side of the card. flex-column so the existing
+ * head/meta/submeta/leaders rows still stack vertically inside. */
+.vt-match-picker-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+@media (max-width: 480px) {
+    /* On narrow viewports the left thumb eats too much of the card width.
+     * Fold to a top thumb / bottom text layout at 64px height. */
+    .vt-match-picker-card {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .vt-match-picker-card-thumb {
+        width: 100%;
+        height: 72px;
+    }
 }
 
 .vt-match-picker-card-name {

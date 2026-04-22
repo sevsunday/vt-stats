@@ -575,18 +575,32 @@
     const mapRaw = entry.map && entry.map !== entry.name
       ? `<div class="vt-match-picker-card-rawmap vt-mono">${esc(entry.map)}</div>`
       : '';
+
+    // Thumbnail from the map registry. Lookup by normalized mapFile key.
+    // When the map isn't in the registry (or hasn't been fetched), render
+    // a neutral placeholder so card sizing stays stable.
+    const mapKey = (entry.map || '').replace(/\.bzn$/i, '').toLowerCase();
+    const regEntry = (mapRegistry && mapRegistry[mapKey]) || null;
+    const thumbSrc = regEntry && regEntry.image_path ? ('data/' + regEntry.image_path) : '';
+    const thumbHtml = thumbSrc
+      ? `<img class="vt-match-picker-card-thumb" src="${esc(thumbSrc)}" alt="" decoding="async" loading="lazy">`
+      : `<div class="vt-match-picker-card-thumb vt-match-picker-card-thumb--placeholder" aria-hidden="true"><i class="bi bi-map"></i></div>`;
+
     return `
       <button type="button" class="vt-match-picker-card" data-target="${esc(entry.file)}" role="listitem">
-        <div class="vt-match-picker-card-head">
-          <span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}</span>
-          <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${entry.player_count || '?'}p</span>
+        ${thumbHtml}
+        <div class="vt-match-picker-card-body">
+          <div class="vt-match-picker-card-head">
+            <span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}</span>
+            <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${entry.player_count || '?'}p</span>
+          </div>
+          ${mapRaw}
+          <div class="vt-match-picker-card-submeta">
+            <span class="vt-match-picker-card-submitter"><i class="bi bi-person-circle"></i> ${esc(entry.submitter || '—')}</span>
+            <span class="vt-match-picker-card-date">${esc(fmtDateFull(entry.date))}</span>
+          </div>
+          ${leadersHtml}
         </div>
-        ${mapRaw}
-        <div class="vt-match-picker-card-submeta">
-          <span class="vt-match-picker-card-submitter"><i class="bi bi-person-circle"></i> ${esc(entry.submitter || '—')}</span>
-          <span class="vt-match-picker-card-date">${esc(fmtDateFull(entry.date))}</span>
-        </div>
-        ${leadersHtml}
       </button>`;
   }
 
@@ -594,12 +608,17 @@
     const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
     return `
       <button type="button" class="vt-match-picker-card vt-match-picker-card--all" data-target="__all__" role="listitem">
-        <div class="vt-match-picker-card-head">
-          <span class="vt-match-picker-card-name"><i class="bi bi-collection me-1"></i>All Matches</span>
-          <span class="vt-match-picker-card-meta">${manifest.length} matches &middot; ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}</span>
+        <div class="vt-match-picker-card-thumb vt-match-picker-card-thumb--placeholder" aria-hidden="true">
+          <i class="bi bi-collection"></i>
         </div>
-        <div class="vt-match-picker-card-submeta">
-          <span class="vt-muted">Career overview across every recorded match.</span>
+        <div class="vt-match-picker-card-body">
+          <div class="vt-match-picker-card-head">
+            <span class="vt-match-picker-card-name">All Matches</span>
+            <span class="vt-match-picker-card-meta">${manifest.length} matches &middot; ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}</span>
+          </div>
+          <div class="vt-match-picker-card-submeta">
+            <span class="vt-muted">Career overview across every recorded match.</span>
+          </div>
         </div>
       </button>`;
   }
@@ -1883,8 +1902,8 @@
     wireDistanceTimelineControls(data, filteredView);
     wireMovementLeaderboardFocus(data, filteredView);
     ensureTooltips(document.getElementById('section-distance-timeline'));
-    renderCombinedHeatmap('combined-heatmap-canvas', positioning);
-    renderHeatmapGrid('heatmap-grid-content', filteredView);
+    renderCombinedHeatmap('combined-heatmap-canvas', positioning, data.match);
+    renderHeatmapGrid('heatmap-grid-content', filteredView, data.match);
     renderRingHistogram('ring-histogram-chart', filteredView);
 
     // Stage 3 player mount-point is already in the DOM; the player will
@@ -2090,8 +2109,20 @@
   }
 
   // Merge sources for map metadata into a single object used by the hero
-  // banner. Precedence: match.terrain_bounds > data/map-registry.json >
-  // BZ2API.VSR_MAP_DATA. Any field may be null/undefined when unavailable.
+  // banner and the overlay renderers (positioning-charts, positioning-player,
+  // match-picker thumbnails). Precedence for imageBounds (the projection
+  // basis shared by the image background and all data points rendered on
+  // top of it):
+  //   1. data/map-registry.json -> image_calibration.image_bounds_world
+  //      (hand-tuned 2D override when iondriver's image doesn't line up
+  //      with terrain_bounds exactly)
+  //   2. match.terrain_bounds (projected to 2D xz — what the pipeline emits
+  //      from StatHeader terrain fields)
+  //   3. match.map_bounds when positioning is present but terrain_bounds
+  //      isn't (pre-schema matches)
+  //   4. null -> graceful no-overlay fallback (map image still renders if
+  //      present via `imagePath`, but data points won't be projected).
+  // Any field may be null/undefined when unavailable.
   function getMapMeta(match) {
     const rawMap = (match && match.map) || '';
     const key = rawMap.replace(/\.bzn$/i, '').toLowerCase();
@@ -2103,10 +2134,26 @@
     // extends +-size around origin); full edge = size * 2.
     const librarySize = vsr.size ? vsr.size * 2 : null;
 
+    // Resolve imageBounds for overlay projection. Registry calibration wins
+    // when present; otherwise fall back to terrain_bounds (2D xz slice) or
+    // the positioning block's map_bounds.
+    const calib = registry && registry.image_calibration;
+    const calibBounds = (calib && calib.image_bounds_world) || null;
+    let imageBounds = null;
+    if (calibBounds && calibBounds.min && calibBounds.max) {
+      imageBounds = calibBounds;
+    } else if (terrain && terrain.min && terrain.max) {
+      imageBounds = {
+        min: { x: terrain.min.x, z: terrain.min.z },
+        max: { x: terrain.max.x, z: terrain.max.z },
+      };
+    }
+
     return {
       key,
       title: registry.title || null,
       imagePath: registry.image_path || null,
+      imageBounds,
       author: (registry.author || vsr.author || null),
       canonicalB2B: (registry.canonical_b2b != null ? registry.canonical_b2b : (vsr.baseToBase || null)),
       canonicalSize: (registry.canonical_size != null ? registry.canonical_size : librarySize),
@@ -2120,6 +2167,32 @@
       boundsSource: terrain ? 'terrain' : (librarySize ? 'library' : 'none'),
     };
   }
+
+  // Cache of HTMLImageElement keyed by map_file stem (e.g. "havenvsr").
+  // Reused across renderer calls within the page session so switching
+  // between Positioning and Replay tabs doesn't re-fetch. Populated lazily
+  // on first request per map.
+  const mapImageCache = new Map();
+
+  function getMapImage(mapFileKey, imagePath) {
+    if (!mapFileKey || !imagePath) return null;
+    if (mapImageCache.has(mapFileKey)) return mapImageCache.get(mapFileKey);
+    const img = new Image();
+    img.decoding = 'async';
+    img.loading = 'eager';
+    img.src = 'data/' + imagePath;
+    mapImageCache.set(mapFileKey, img);
+    return img;
+  }
+
+  // Expose the meta helper + image cache to other renderer modules that live
+  // outside this IIFE (positioning-charts, positioning-player). They read
+  // through window.VTMapRegistry rather than re-implementing the precedence
+  // rules. No-op for consumers that don't need it.
+  window.VTMapRegistry = {
+    getMapMeta,
+    getMapImage,
+  };
 
   // Populate the map-dimension blocks + thumbnail. All fall back to "—"
   // gracefully when a particular source is unavailable, so the hero row

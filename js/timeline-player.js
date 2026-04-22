@@ -891,7 +891,7 @@
   // Granularity: `progressBuckets` is float, but companion panels snap per
   // whole bucket (TIMELINE_BUCKET_SECONDS = 10s), so the visible jump lands
   // on the bucket that contains the event. Sub-bucket seek is intentionally
-  // out of scope (see DEVELOPER_GUIDE §10 "Raw Data Browser").
+  // out of scope (see DEVELOPER_GUIDE §11 "Raw Data Browser").
   //
   // Returns true if the seek was accepted, false if there's no active
   // replay state or the match metadata is missing tick info.
