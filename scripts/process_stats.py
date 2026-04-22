@@ -401,9 +401,39 @@ def _build_polar_heatmap(trail, spawn_x, spawn_z, p95_dist):
     return grid
 
 
+def _extract_terrain_bounds(header):
+    """Read StatHeader terrain bounds fields into a 3D {min, max} dict.
+
+    Returns None when all six terrain fields are 0 (pre-schema sessions, where
+    edition-2023 implicit presence defaults missing floats to 0.0). Callers
+    should fall back to observed-extent logic in that case. Axis convention
+    is +X East, +Y Up, +Z North; values are world-space units.
+    """
+    vals = (
+        header.terrain_min_x, header.terrain_max_x,
+        header.terrain_min_y, header.terrain_max_y,
+        header.terrain_min_z, header.terrain_max_z,
+    )
+    if all(v == 0.0 for v in vals):
+        return None
+    return {
+        "min": {
+            "x": round(header.terrain_min_x, 2),
+            "y": round(header.terrain_min_y, 2),
+            "z": round(header.terrain_min_z, 2),
+        },
+        "max": {
+            "x": round(header.terrain_max_x, 2),
+            "y": round(header.terrain_max_y, 2),
+            "z": round(header.terrain_max_z, 2),
+        },
+    }
+
+
 def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                          slot_to_s64, roster_slots, nick_for_s64,
-                         match_has_target_lock_data=False):
+                         match_has_target_lock_data=False,
+                         terrain_bounds=None):
     """Compute the positioning block from raw per-player samples.
 
     raw_samples_by_s64: dict[s64] -> list of (t_sec, x, y, z, has_target) tuples,
@@ -419,8 +449,11 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         "sample_rate_hz": POSITIONING_SAMPLE_RATE_HZ,
         "match_sample_count": 0,
         "map_bounds": None,
+        "map_bounds_source": None,
+        "terrain_bounds": terrain_bounds,
         "map_diagonal": 0.0,
         "base_separation": 0.0,
+        "base_to_base_distance": None,
         "observed_max_range": 0.0,
         "p99_speed": 0.0,
         "teleport_threshold": POSITIONING_TELEPORT_MIN_SPEED,
@@ -492,8 +525,10 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         c1 = team_info[1]["centroid"]
         c2 = team_info[2]["centroid"]
         computed_sep = _horiz_dist(c1[0], c1[1], c2[0], c2[1])
+        base_to_base_distance = round(computed_sep, 2)
     else:
         computed_sep = 0.0
+        base_to_base_distance = None
 
     # --- Observed max range (any player's max dist from their own spawn) ---
     observed_max_range = 0.0
@@ -511,14 +546,26 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         observed_max_range * POSITIONING_BASE_SEP_MAXRANGE_FRAC,
     )
 
-    # --- Map bounds + diagonal (from observed extents) ---
-    all_xs = []
-    all_zs = []
-    for tr in trails.values():
-        all_xs.extend(tr["x"])
-        all_zs.extend(tr["z"])
-    map_min_x, map_max_x = min(all_xs), max(all_xs)
-    map_min_z, map_max_z = min(all_zs), max(all_zs)
+    # --- Map bounds + diagonal ---
+    # Prefer header-provided terrain bounds when the collector populates them
+    # (new-schema sessions). Fall back to observed player extents otherwise.
+    # Surface the choice via map_bounds_source so downstream / docs can reason
+    # about it. Heatmap binning uses whichever bounds win.
+    if terrain_bounds is not None:
+        map_min_x = terrain_bounds["min"]["x"]
+        map_max_x = terrain_bounds["max"]["x"]
+        map_min_z = terrain_bounds["min"]["z"]
+        map_max_z = terrain_bounds["max"]["z"]
+        map_bounds_source = "terrain"
+    else:
+        all_xs = []
+        all_zs = []
+        for tr in trails.values():
+            all_xs.extend(tr["x"])
+            all_zs.extend(tr["z"])
+        map_min_x, map_max_x = min(all_xs), max(all_xs)
+        map_min_z, map_max_z = min(all_zs), max(all_zs)
+        map_bounds_source = "observed"
     map_diagonal = _horiz_dist(map_min_x, map_min_z, map_max_x, map_max_z)
 
     # --- Self-calibrated teleport threshold ---
@@ -682,8 +729,11 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
             "min": {"x": round(map_min_x, 2), "z": round(map_min_z, 2)},
             "max": {"x": round(map_max_x, 2), "z": round(map_max_z, 2)},
         },
+        "map_bounds_source": map_bounds_source,
+        "terrain_bounds": terrain_bounds,
         "map_diagonal": round(map_diagonal, 2),
         "base_separation": round(base_separation, 2),
+        "base_to_base_distance": base_to_base_distance,
         "observed_max_range": round(observed_max_range, 2),
         "p99_speed": round(p99_speed, 2),
         "teleport_threshold": round(teleport_threshold, 2),
@@ -727,6 +777,11 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
     events = session.event_stream
 
     tick_rate = header.tick_rate or 20
+
+    # Header-provided terrain bounds (new-schema sessions). None when absent so
+    # _compute_positioning falls back to observed-extent map_bounds. Also
+    # mirrored onto the top-level `match` object below.
+    terrain_bounds = _extract_terrain_bounds(header)
 
     # Build identity maps from new header fields
     slot_to_s64 = dict(header.teamnum_to_s64)
@@ -1324,6 +1379,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         roster_slots,
         nick_for_s64,
         match_has_target_lock_data=match_has_target_lock_data,
+        terrain_bounds=terrain_bounds,
     )
 
     # Kills section
@@ -1361,6 +1417,8 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "team_leaders": team_leaders,
             "has_position_data": positioning_block["has_position_data"],
             "has_target_lock_data": positioning_block.get("has_target_lock_data", False),
+            "terrain_bounds": terrain_bounds,
+            "base_to_base_distance": positioning_block.get("base_to_base_distance"),
         },
         "leaderboard": leaderboard,
         "faction_totals": faction_totals,

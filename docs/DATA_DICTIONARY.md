@@ -57,6 +57,14 @@ Metadata captured at the start of the match.
 | 9 | `s64_to_teamnum` | `map<uint64, int32>` | Steam64 ID → Slot number (reverse of field 7) |
 | 10 | `player_count` | `uint32` | Number of players in the match |
 | 11 | `last_tick` | `uint32` | Final game tick (0 if not populated by collector) |
+| 12 | `terrain_min_x` | `float` | World-space minimum X (west edge). Axis convention: +X East, +Y Up, +Z North |
+| 13 | `terrain_max_x` | `float` | World-space maximum X (east edge) |
+| 14 | `terrain_min_y` | `float` | World-space minimum Y (lowest elevation) |
+| 15 | `terrain_max_y` | `float` | World-space maximum Y (highest elevation) |
+| 16 | `terrain_min_z` | `float` | World-space minimum Z (south edge) |
+| 17 | `terrain_max_z` | `float` | World-space maximum Z (north edge) |
+
+All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions). The pipeline treats all-zero as "unset" and falls back to observed player extents for `positioning.map_bounds`; the source choice is surfaced via `positioning.map_bounds_source` (`"terrain"` vs `"observed"`).
 
 ### StatEvent
 
@@ -687,9 +695,12 @@ Player movement analytics derived from `UpdateTick` events. Captured positions a
 | `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed in the match. `false` for pre-schema matches AND for new-schema matches where no player ever held T. Distinguishes "no data" from "0% lock" in the UI (see T-Key Usage subsection below) |
 | `sample_rate_hz` | `number` | Always 1 (downsample target) |
 | `match_sample_count` | `number` | Total seconds covered by any player (drives animation duration) |
-| `map_bounds` | `object` | `{ min: {x, z}, max: {x, z} }` from observed extents |
-| `map_diagonal` | `number` | Horizontal distance between bounds min/max. Used to gate faction-tint overlays |
-| `base_separation` | `number` | Horizontal distance between team spawn centroids. Floored at `max(computed, 500, observed_max_range × 0.3)` |
+| `map_bounds` | `object` | `{ min: {x, z}, max: {x, z} }`. 2D reference frame used for `heatmap_grid_xz` binning and all canvas projections. Sourced from `terrain_bounds` when the header provides it, otherwise from observed player extents. `null` when `has_position_data: false` |
+| `map_bounds_source` | `string \| null` | `"terrain"` when `map_bounds` came from the header, `"observed"` when derived from player extents, `null` when `has_position_data: false`. Lets frontends label tooltips / axis ticks as absolute-map vs. match-relative |
+| `terrain_bounds` | `object \| null` | Full 3D `{ min: {x, y, z}, max: {x, y, z} }` from `StatHeader.terrain_*` (+X East, +Y Up, +Z North). `null` for pre-schema sessions. Mirrored onto the `match` object for convenience |
+| `map_diagonal` | `number` | Horizontal distance between `map_bounds` min/max. Used to gate faction-tint overlays |
+| `base_separation` | `number` | Floored internal scaling value `max(computed_centroid_dist, 500, observed_max_range × 0.3)`. Drives `R_base = 0.15 × base_separation` for `time_in_base_pct` heuristics. **Not** the user-facing measurement — see `base_to_base_distance` |
+| `base_to_base_distance` | `number \| null` | Raw horizontal distance between Team 1 and Team 2 spawn centroids, no floor applied. `null` when either team has zero players. This is the "how far apart are the bases" measurement. Mirrored onto the `match` object |
 | `observed_max_range` | `number` | Max horizontal distance any player reached from their personal spawn |
 | `p99_speed` | `number` | 99th percentile of per-step speeds (non-teleport filtered) — used for diagnostics |
 | `teleport_threshold` | `number` | Self-calibrated: `max(300, p99_speed × 2)` u/s |
@@ -920,6 +931,7 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Accuracy (Weapon)** | Per-weapon hit rate across all users | `BulletInit`, `BulletHit` | `total_hits / total_shots` per ODF |
 | **Asset Damage Dealt** | Damage credited to a player's AI units or structures | `DamageDealt` where `shooter = 0` | Sum of `amount` grouped by owning slot (`team` field) |
 | **Asset Damage Received** | Damage taken by a player's AI units or structures | `DamageReceived` where `victim = 0` | Sum of `amount` grouped by owning slot (`team` field) |
+| **Base-to-Base Distance** | Raw horizontal distance between Team 1 and Team 2 spawn centroids (no floor applied) | `UpdateTick.players[].position` (first 3 kept samples per player) | Median of first-3 samples per player → per-team centroid of (x, z) → `sqrt(dx² + dz²)`. `null` if either team empty. See `positioning.base_to_base_distance` and the mirrored `match.base_to_base_distance` |
 | **Best Match** | The match where a player dealt the most personal damage | `leaderboard[].personal.dealt` | Max dealt across matches (career view only) |
 | **Bucket Spotlight (Replay)** | Biggest contributor in the current playback bucket | `timeline.by_player[name][currentIndex]` | `argmax` of per-player damage at `currentIndex` |
 | **Config Mod** | Server configuration identifier | `StatHeader.active_config_mod` | Direct from header |
@@ -946,6 +958,7 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Shots Hit** | Number of projectiles that connected | `BulletHit` | Count per player |
 | **Snipe Count** | Number of snipe events in a match | `UnitSniped` | Count per match |
 | **Submitter** | Who submitted the session data | Filesystem | Parent folder name of the `.binpb.gz` file |
+| **Terrain Bounds** | Full 3D world-space extents of the map | `StatHeader.terrain_min_*` / `terrain_max_*` (fields 12-17) | `{min:{x,y,z}, max:{x,y,z}}`, axis convention +X East / +Y Up / +Z North. `null` for pre-schema sessions (all-zero fallback). Surfaced on `positioning.terrain_bounds` and mirrored to `match.terrain_bounds`. Drives `positioning.map_bounds` when present (`map_bounds_source = "terrain"`); observed player extents fallback otherwise |
 | **Timeline** | Damage over time in 10-second windows | `DamageDealt` | Damage per bucket = `(tick - min_tick) / (bucket_seconds * tick_rate)` |
 | **Tug-of-War (Replay)** | Cumulative faction damage as a two-segment bar during playback | `timeline.by_faction["1" / "2"]` | Segment width = `cumulative_faction_total / combined_total × 100%` |
 | **Vehicle Kills** | How many times each vehicle type was destroyed | `UnitDestroyed` grouped by `victim_odf` | Count per vehicle ODF |
