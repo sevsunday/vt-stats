@@ -50,6 +50,30 @@ POSITIONING_HEATMAP_GRID_SIZE = 32
 POSITIONING_POLAR_ANGULAR_BINS = 16
 POSITIONING_POLAR_RADIAL_BINS = 8
 
+# Sentinel damage filter. The BZCC engine's DAMAGE_TYPE_UNKNOWN force-kill
+# pathway emits DamageDealt/DamageReceived pairs with amount = 2^28
+# (268435456.0) through the mission DLL's damage callback at
+# misnexport2 + 0x1c. These events have no shooter, no victim, and no
+# ordnance_odf, and are not real combat damage. Any event with
+# amount > SENTINEL_DAMAGE_THRESHOLD is dropped before aggregation.
+# Threshold matches the upstream collector's unusual_damage.txt diagnostic
+# threshold (real BZCC combat per-event amounts top out in low tens of
+# thousands; SENTINEL threshold is ~100x above any legitimate event).
+# See docs/sentinel-damage.md for full evidence chain.
+SENTINEL_DAMAGE_THRESHOLD = 1e6
+
+
+def _is_sentinel_damage(amount):
+    """True when a damage amount is the engine's DAMAGE_TYPE_UNKNOWN sentinel.
+
+    Any amount > 1e6 is treated as a sentinel. Today the only observed value
+    is exactly 268435456.0 (= 2^28); using a threshold instead of the exact
+    value catches future sentinel variants the engine might emit from other
+    DAMAGE_TYPE_UNKNOWN paths and aligns with the upstream collector's own
+    "unusual damage" diagnostic threshold.
+    """
+    return amount is not None and amount > SENTINEL_DAMAGE_THRESHOLD
+
 # Movement band thresholds on activity_score (0-100): Defensive ... Aggressive
 # 0 = camper (stayed at base), 100 = roamer (covered map).
 POSITIONING_BANDS = [
@@ -857,6 +881,19 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
     vehicle_destruction_count = Counter()
     snipe_count = 0
 
+    # Sentinel damage telemetry. Counts PAIRS (DD+DR together = 1 pair);
+    # total_amount sums the DD-side amount only (DR amount is always equal,
+    # so double-counting would misrepresent the "impact sum"). See the
+    # _is_sentinel_damage helper and docs/sentinel-damage.md.
+    sentinel_damage = {
+        "count": 0,
+        "total_amount": 0.0,
+        "first_tick": None,
+        "last_tick": None,
+    }
+    # Dedup key for log lines; one line per unique (tick, team, amount) tuple.
+    sentinel_log_seen = set()
+
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
     # Collect all non-ordnance ODFs seen in this match (vehicle/unit ODFs from
@@ -930,9 +967,39 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         elif event_type == "damage_dealt":
             dd = evt.damage_dealt
             dr = None
-
-            if i + 1 < n and events[i + 1].WhichOneof("event_type") == "damage_received":
+            has_paired_dr = (
+                i + 1 < n
+                and events[i + 1].WhichOneof("event_type") == "damage_received"
+            )
+            if has_paired_dr:
                 dr = events[i + 1].damage_received
+
+            # Sentinel filter: DAMAGE_TYPE_UNKNOWN force-kill events have
+            # amount > 1e6. Skip the whole pair (DD + paired DR) before any
+            # accumulator touches the values. Either side being sentinel
+            # triggers the skip — in practice they carry identical amounts.
+            if _is_sentinel_damage(dd.amount) or (
+                dr is not None and _is_sentinel_damage(dr.amount)
+            ):
+                sentinel_damage["count"] += 1
+                sentinel_damage["total_amount"] += float(dd.amount)
+                tick_val = int(dd.tick)
+                if sentinel_damage["first_tick"] is None or tick_val < sentinel_damage["first_tick"]:
+                    sentinel_damage["first_tick"] = tick_val
+                if sentinel_damage["last_tick"] is None or tick_val > sentinel_damage["last_tick"]:
+                    sentinel_damage["last_tick"] = tick_val
+                log_key = (tick_val, int(dd.team), float(dd.amount))
+                if log_key not in sentinel_log_seen:
+                    sentinel_log_seen.add(log_key)
+                    print(
+                        f"  sentinel damage: tick={tick_val} team={dd.team} "
+                        f"shooter={dd.shooter} victim={dr.victim if dr else 0} "
+                        f"amount={dd.amount} odf='{dd.ordnance_odf or ''}'"
+                    )
+                i += 2 if has_paired_dr else 1
+                continue
+
+            if has_paired_dr:
                 i += 2
             else:
                 i += 1
@@ -1064,6 +1131,8 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             if et != "damage_dealt":
                 continue
             dd = evt.damage_dealt
+            if _is_sentinel_damage(dd.amount):
+                continue
             if dd.team == 0 or dd.amount == 0.0:
                 continue
             shooter = dd.shooter
@@ -1168,7 +1237,9 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
         if s64:
             all_wpn_odfs = set(player_weapon_dealt[s64].keys()) | set(player_shots_fired[s64].keys())
         weapon_breakdown = {}
-        for odf in all_wpn_odfs:
+        # Sort by display name for deterministic output across pipeline reruns
+        # (set iteration order over all_wpn_odfs is non-deterministic).
+        for odf in sorted(all_wpn_odfs, key=lambda o: wpn_name(o).lower()):
             w_dealt = player_weapon_dealt[s64].get(odf, 0)
             w_recv = player_weapon_received[s64].get(odf, 0)
             w_shots = player_shots_fired[s64].get(odf, 0)
@@ -1226,7 +1297,8 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             } if s64 else {},
         })
 
-    leaderboard.sort(key=lambda p: p["personal"]["dealt"], reverse=True)
+    # Deterministic tie-break: player name (guards against identical personal.dealt).
+    leaderboard.sort(key=lambda p: (-p["personal"]["dealt"], (p.get("name") or "").lower()))
 
     # Faction totals
     faction_totals = {}
@@ -1292,13 +1364,15 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
              "a_to_b": round(p["a_to_b"], 1), "b_to_a": round(p["b_to_a"], 1)}
             for p in pair_map.values()
         ],
-        key=lambda p: p["total"],
-        reverse=True,
+        # Deterministic tie-break: participant names.
+        key=lambda p: (-p["total"], str(p["a"]).lower(), str(p["b"]).lower()),
     )[:5]
 
-    # Weapon meta
+    # Weapon meta. Iterate in sorted ODF order so per-match weapon_meta keeps
+    # a stable insertion order before the final sort (protects against a
+    # slight tie-break drift under identical total_damage values).
     weapon_meta = []
-    for odf in all_ordnance:
+    for odf in sorted(all_ordnance):
         dmg = weapon_total_damage.get(odf, 0)
         shots = weapon_total_shots.get(odf, 0)
         hits = weapon_total_hits.get(odf, 0)
@@ -1314,7 +1388,9 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 "accuracy": round(acc, 3),
                 "users": users,
             })
-    weapon_meta.sort(key=lambda w: w["total_damage"], reverse=True)
+    # Secondary sort by weapon name to break ties deterministically
+    # (support weapons often carry total_damage = 0).
+    weapon_meta.sort(key=lambda w: (-w["total_damage"], w["weapon"].lower()))
 
     # Timeline
     total_buckets = ((max_tick - min_tick) // bucket_size + 1) if bucket_size > 0 and max_tick > min_tick else 0
@@ -1398,7 +1474,16 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                 "deaths": d,
                 "kd_ratio": round(k / d, 2) if d > 0 else None,
             })
-    kills_leaderboard.sort(key=lambda p: p["kills"], reverse=True)
+    # Deterministic tie-break: player name.
+    kills_leaderboard.sort(key=lambda p: (-p["kills"], (p.get("name") or "").lower()))
+
+    # End-of-match sentinel summary (only when anything was dropped).
+    if sentinel_damage["count"] > 0:
+        print(
+            f"  sentinel damage filtered: count={sentinel_damage['count']} "
+            f"total={sentinel_damage['total_amount']:,.2f} "
+            f"ticks={sentinel_damage['first_tick']}..{sentinel_damage['last_tick']}"
+        )
 
     return {
         "match": {
@@ -1419,6 +1504,12 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "has_target_lock_data": positioning_block.get("has_target_lock_data", False),
             "terrain_bounds": terrain_bounds,
             "base_to_base_distance": positioning_block.get("base_to_base_distance"),
+            "sentinel_damage": {
+                "count": sentinel_damage["count"],
+                "total_amount": round(sentinel_damage["total_amount"], 2),
+                "first_tick": sentinel_damage["first_tick"],
+                "last_tick": sentinel_damage["last_tick"],
+            },
         },
         "leaderboard": leaderboard,
         "faction_totals": faction_totals,
@@ -1581,7 +1672,9 @@ def build_all_matches_aggregate(all_match_data):
                 fav_weapon = wname
 
         weapon_breakdown = {}
-        for wname, wdata in c["weapon_totals"].items():
+        # Sort by display name for deterministic output across pipeline reruns.
+        for wname in sorted(c["weapon_totals"].keys(), key=lambda n: n.lower()):
+            wdata = c["weapon_totals"][wname]
             w_acc = wdata["hits"] / wdata["shots"] if wdata["shots"] > 0 else 0
             weapon_breakdown[wname] = {
                 "dealt": round(wdata["dealt"], 1),
@@ -1658,7 +1751,8 @@ def build_all_matches_aggregate(all_match_data):
             **movement_fields,
             **target_lock_fields,
         })
-    career_stats.sort(key=lambda c: c["total_dealt"], reverse=True)
+    # Secondary sort by name to break ties deterministically across runs.
+    career_stats.sort(key=lambda c: (-c["total_dealt"], c["name"].lower()))
 
     # Global weapon meta
     gwm = []
@@ -1671,7 +1765,10 @@ def build_all_matches_aggregate(all_match_data):
             "total_hits": wd["total_hits"],
             "accuracy": round(acc, 3),
         })
-    gwm.sort(key=lambda w: w["total_damage"], reverse=True)
+    # Secondary sort by weapon name to break ties deterministically
+    # (many support weapons carry total_damage = 0; set-iter order was
+    # previously producing inconsistent arrangements across runs).
+    gwm.sort(key=lambda w: (-w["total_damage"], w["weapon"].lower()))
 
     # Global rivalries
     pair_map = {}
@@ -1693,11 +1790,23 @@ def build_all_matches_aggregate(all_match_data):
              "a_to_b": round(p["a_to_b"], 1), "b_to_a": round(p["b_to_a"], 1)}
             for p in pair_map.values()
         ],
-        key=lambda p: p["total"],
-        reverse=True,
+        # Secondary sort by participant names for deterministic tie-breaking.
+        key=lambda p: (-p["total"], str(p["a"]).lower(), str(p["b"]).lower()),
     )[:10]
 
     sorted_dates = sorted(dates)
+
+    # Sentinel damage aggregate rollup (pair count across all matches).
+    # See SENTINEL_DAMAGE_THRESHOLD / _is_sentinel_damage + docs/sentinel-damage.md.
+    total_sentinel_damage_dropped = sum(
+        (md.get("match") or {}).get("sentinel_damage", {}).get("count", 0)
+        for md in all_match_data
+    )
+    matches_with_sentinel_damage = [
+        (md.get("match") or {}).get("id")
+        for md in all_match_data
+        if (md.get("match") or {}).get("sentinel_damage", {}).get("count", 0) > 0
+    ]
 
     return {
         "meta": {
@@ -1708,6 +1817,8 @@ def build_all_matches_aggregate(all_match_data):
             "submitters": sorted(submitters),
             "matches_with_positioning": matches_with_positioning_count,
             "matches_with_target_lock_data": matches_with_target_lock_data_count,
+            "total_sentinel_damage_dropped": total_sentinel_damage_dropped,
+            "matches_with_sentinel_damage": matches_with_sentinel_damage,
         },
         "career_stats": career_stats,
         "global_weapon_meta": gwm,
