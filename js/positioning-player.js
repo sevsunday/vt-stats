@@ -460,6 +460,42 @@
     ctx.fillStyle = getCSSVar('--kb-bg-subtle') || '#1a1a24';
     ctx.fillRect(0, 0, w, h);
 
+    // Map image overlay (from data/map-registry.json). Drawn between the
+    // solid backdrop and faction tints so tints + trails read on top.
+    // Silently skipped when the match has no registry entry or no
+    // terrain_bounds / image_calibration basis. Re-renders on image load.
+    if (state.match && window.VTMapRegistry) {
+      const meta = window.VTMapRegistry.getMapMeta(state.match);
+      if (meta && meta.imagePath && meta.imageBounds) {
+        const img = window.VTMapRegistry.getMapImage(meta.key, meta.imagePath);
+        if (img) {
+          if (img.complete && img.naturalWidth) {
+            const ib = meta.imageBounds;
+            const dx0 = worldToScreenX(ib.min.x, w);
+            const dy0 = worldToScreenY(ib.max.z, h); // north edge -> top
+            const dx1 = worldToScreenX(ib.max.x, w);
+            const dy1 = worldToScreenY(ib.min.z, h);
+            const dw = dx1 - dx0;
+            const dh = dy1 - dy0;
+            if (dw > 0 && dh > 0) {
+              ctx.save();
+              ctx.globalAlpha = 0.45;
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
+              ctx.drawImage(img, dx0, dy0, dw, dh);
+              ctx.restore();
+            }
+          } else if (!state._mapImagePending) {
+            state._mapImagePending = true;
+            img.addEventListener('load', () => {
+              state._mapImagePending = false;
+              render();
+            }, { once: true });
+          }
+        }
+      }
+    }
+
     // Faction-tint halves (gated)
     const bs = state.positioning.base_separation || 0;
     const md = state.positioning.map_diagonal || 1;

@@ -693,6 +693,41 @@ function _computeSharedViewport(positioning) {
   return _computeHeatmapViewport(positioning);
 }
 
+// Draw the top-down map image (from data/maps/<mapFile>.png) as a tinted
+// background layer. Called between the solid-color fill and the heatmap
+// cells / trails so data still reads clearly on top. Projection uses
+// imageBounds, which either comes from the registry's image_calibration
+// override or falls back to match.terrain_bounds via getMapMeta() in
+// js/app.js. When either `img` or `imageBounds` is missing, this is a
+// no-op and the caller's existing backdrop renders unchanged.
+//
+// Image coordinate contract:
+//   - Image's top-left pixel represents world point (imageBounds.min.x,
+//     imageBounds.max.z) — north-west corner (image top = north, per
+//     positioning-charts convention).
+//   - Image's bottom-right pixel represents (imageBounds.max.x,
+//     imageBounds.min.z) — south-east corner.
+// We project those two corners through the current viewport (vp) and
+// drawImage stretches the bitmap between them. When vp matches imageBounds
+// exactly (default case), the image fills the canvas; when the viewport
+// is tighter (zoomed in), portions of the image fall off-canvas naturally.
+function _drawMapImageLayer(ctx, img, imageBounds, vp, w, h) {
+  if (!img || !imageBounds || !img.complete || !img.naturalWidth) return;
+  const dx0 = _worldToScreenX(imageBounds.min.x, vp, w);
+  const dy0 = _worldToScreenY(imageBounds.max.z, vp, h); // north edge -> top
+  const dx1 = _worldToScreenX(imageBounds.max.x, vp, w);
+  const dy1 = _worldToScreenY(imageBounds.min.z, vp, h); // south edge -> bottom
+  const dw = dx1 - dx0;
+  const dh = dy1 - dy0;
+  if (dw <= 0 || dh <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, dx0, dy0, dw, dh);
+  ctx.restore();
+}
+
 function _drawHeatmapBackdrop(ctx, vp, positioning, t, w, h) {
   // Solid card background via CSS variable (approx)
   ctx.fillStyle = getCSSVar('--kb-bg-subtle') || '#1a1a24';
@@ -871,7 +906,19 @@ function _sizeCanvas(canvas) {
   return { ctx, w, h };
 }
 
-function renderCombinedHeatmap(canvasId, positioning) {
+// Resolve { img, imageBounds } for the current match via the VTMapRegistry
+// exposed by js/app.js. Returns { img: null, imageBounds: null } when the
+// match has no map registry entry or no bounds — overlay renderers should
+// gracefully skip drawing the image layer in that case.
+function _resolveMapOverlay(match) {
+  if (!match || !window.VTMapRegistry) return { img: null, imageBounds: null };
+  const meta = window.VTMapRegistry.getMapMeta(match);
+  if (!meta || !meta.imagePath || !meta.imageBounds) return { img: null, imageBounds: null };
+  const img = window.VTMapRegistry.getMapImage(meta.key, meta.imagePath);
+  return { img, imageBounds: meta.imageBounds };
+}
+
+function renderCombinedHeatmap(canvasId, positioning, match) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
   if (!positioning || !positioning.has_position_data) {
@@ -883,6 +930,23 @@ function renderCombinedHeatmap(canvasId, positioning) {
   const t = getThemeColors();
   const vp = _computeHeatmapViewport(positioning);
   _drawHeatmapBackdrop(ctx, vp, positioning, t, w, h);
+
+  // Draw map image background (if available) between the backdrop and
+  // the heatmap cells so data stays legible.
+  const { img, imageBounds } = _resolveMapOverlay(match);
+  if (img) {
+    if (img.complete && img.naturalWidth) {
+      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h);
+    } else {
+      img.addEventListener('load', () => {
+        // Re-render once the image is ready. Cheap: whole canvas refresh
+        // via the same entry point so all downstream layers repaint in
+        // the correct order. Cross-origin caching means this only fires
+        // once per map per page lifetime.
+        renderCombinedHeatmap(canvasId, positioning, match);
+      }, { once: true });
+    }
+  }
 
   // Combined heatmap: sum grids across all players
   const players = Object.values(positioning.players);
@@ -911,7 +975,7 @@ function renderCombinedHeatmap(canvasId, positioning) {
 // scale so aggressive players visibly fill more of the card. When omitted
 // (combined heatmap, future fullscreen drill-down), falls back to per-player
 // auto-zoom and per-grid intensity.
-function renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, sharedMaxV) {
+function renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, sharedMaxV, match) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
   if (!positioning || !positioning.has_position_data) return null;
@@ -921,6 +985,18 @@ function renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, shared
   const t = getThemeColors();
   const vp = sharedVp || _computeHeatmapViewport(positioning, playerName);
   _drawHeatmapBackdrop(ctx, vp, positioning, t, w, h);
+  // Optional map image background (drawn between backdrop and cells so
+  // the per-player intensity stays on top). Non-fatal when absent.
+  const { img, imageBounds } = _resolveMapOverlay(match);
+  if (img) {
+    if (img.complete && img.naturalWidth) {
+      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h);
+    } else {
+      img.addEventListener('load', () => {
+        renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, sharedMaxV, match);
+      }, { once: true });
+    }
+  }
   const color = _factionColorForPlayer(playerName, positioning);
   _drawHeatmapCells(ctx, pl.heatmap_grid_xz, positioning.map_bounds, vp, w, h, color, sharedMaxV);
   _drawSpawnMarkers(ctx, positioning, vp, w, h, playerName);
@@ -968,7 +1044,7 @@ function _computeSharedHeatmapMax(positioning) {
   return all[idx] || 1;
 }
 
-function renderHeatmapGrid(containerId, positioning) {
+function renderHeatmapGrid(containerId, positioning, match) {
   const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = '';
@@ -1005,7 +1081,7 @@ function renderHeatmapGrid(containerId, positioning) {
   requestAnimationFrame(() => {
     for (const name of names) {
       const cid = 'heatmap-canvas-' + name.replace(/[^A-Za-z0-9]/g, '_');
-      renderPlayerHeatmap(cid, positioning, name, sharedVp, sharedMaxV);
+      renderPlayerHeatmap(cid, positioning, name, sharedVp, sharedMaxV, match);
     }
   });
 }

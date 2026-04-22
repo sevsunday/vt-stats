@@ -954,7 +954,82 @@ All dependencies are vendored locally. No CDN usage.
 
 ---
 
-## 10. Raw Data Browser (`raw.html`)
+## 10. Map Assets & Overlays
+
+Top-down map images from iondriver's `gamelistassets` API are fetched at pipeline time (`scripts/build_map_registry.py`) and consumed by the frontend as visual context for the match-info hero thumbnail, the Positioning tab's heatmap background, the Replay tab's trail background, and the match-picker modal card thumbnails.
+
+### Projection contract
+
+Every overlay (image background + data drawn on top) uses the **same** world-to-screen projection so images and data stay aligned:
+
+```
+imageBounds = registry.image_calibration.image_bounds_world  // hand-tuned override
+           ?? match.terrain_bounds (2D xz slice)              // from StatHeader (new-schema)
+           ?? match.map_bounds                                // from positioning (pre-schema)
+
+px = (worldX - imageBounds.min.x) / (imageBounds.max.x - imageBounds.min.x) * canvasW
+py = (imageBounds.max.z - worldZ) / (imageBounds.max.z - imageBounds.min.z) * canvasH
+```
+
+Axis convention: +X East, +Z North, image top = north. `py` is inverted so world +Z renders up on screen.
+
+Single source of truth: `getMapMeta(match)` in `js/app.js` computes `imageBounds` once per match and exposes it plus the image `HTMLImageElement` (cached by `mapFile` key) via `window.VTMapRegistry`. Positioning-charts and positioning-player both read through this helper.
+
+### Calibration workflow
+
+iondriver's images are content-addressed (SHA-named), high-quality, and stable forever — but their exact world-space extents aren't always `terrain_bounds`. Some images have a visual border around the playable area; some are cropped inside it. To compensate, each per-map JSON at `data/maps/<mapFile>.json` carries an optional `image_calibration`:
+
+```json
+{
+  "image_calibration": {
+    "image_bounds_world": {
+      "min": { "x": -1200, "z": -1200 },
+      "max": { "x":  1200, "z":  1200 }
+    },
+    "note": "image shows ~12% buffer around terrain; widen projection to compensate"
+  }
+}
+```
+
+When `null` (default), the frontend falls back to `match.terrain_bounds`. When populated, `image_bounds_world` is treated as the authoritative image-to-world mapping. Calibration is preserved across `scripts/build_map_registry.py` reruns (the builder reads the existing value and passes it through rather than clobbering with null).
+
+**Tuning loop**:
+
+1. Open `_investigation/output/alignment_test.html` (regenerate via `python _investigation/build_alignment_page.py`).
+2. For each new-schema match, verify the Team 1 / Team 2 spawn centroid dots land on plausible recycler/base locations. Pre-schema matches have no terrain_bounds so their cards render without overlay.
+3. If a dot is off, edit `data/maps/<mapFile>.json` → set `image_calibration.image_bounds_world` to a wider or shifted rectangle.
+4. Re-run `python _investigation/build_alignment_page.py` to confirm visually.
+5. Reload the dashboard — `getMapMeta()` picks up the new calibration on next match load.
+
+No iondriver re-fetches are required during tuning; calibration is purely a local override.
+
+### Per-surface integration
+
+| Surface | Renderer | Image use |
+|-|-|-|
+| Hero thumbnail | `js/app.js` `renderMapBannerFields()` | 48×48 `<img>` directly from `registry.image_path` |
+| Match picker card | `js/app.js` `buildMatchPickerCardHtml()` | 96×96 `<img>` per card; placeholder icon when map not in registry |
+| Combined heatmap | `js/positioning-charts.js` `renderCombinedHeatmap()` | `_drawMapImageLayer()` at `globalAlpha: 0.45` between the solid backdrop and heatmap cells |
+| Per-player heatmap grid | `js/positioning-charts.js` `renderPlayerHeatmap()` | Same pattern; image re-used via `VTMapRegistry.getMapImage()` cache |
+| Replay trail canvas | `js/positioning-player.js` `render()` | Same pattern; drawn under faction-tint gradient and trails |
+
+All renderers gracefully no-op when `imagePath` is absent (map not in registry, registry fetch failed, pre-schema match) — the pre-overlay rendering is preserved.
+
+### Filter-contract classification
+
+- `registry[key].image_path`, `registry[key].image_calibration`, `registry[key].canonical_*` — external reference data; match-global; always-unfiltered.
+- `match.terrain_bounds` — already classified (C1).
+- No per-player narrowing; no aggregation.
+
+See `.cursor/rules/filter-contract.mdc` for the complete table.
+
+### Known limitation
+
+First-render spawn centroids on the 4 new-schema maps currently show a consistent ~10% centripetal compression relative to the map images' visible base structures. This is a semantic difference between our measurement (player spawn centroid from first UpdateTick) and iondriver's image framing — not a code bug. The calibration field above is the fix; ship default (`null`) on every map, tune per-map as needed.
+
+---
+
+## 11. Raw Data Browser (`raw.html`)
 
 The Raw Data Browser is a standalone, isolated page for inspecting per-match data at every layer. It is **not** part of the main dashboard — it lives in its own file with its own CSS + JS and has no shared state with `index.html`.
 

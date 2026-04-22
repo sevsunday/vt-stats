@@ -204,6 +204,18 @@ def build_per_map(
         if cached_img_rel:
             cached_img_abs = PROJECT_ROOT / "data" / cached_img_rel
             if cached_img_abs.exists():
+                # Additively backfill new schema fields on older per-map JSONs
+                # so bumping the schema doesn't force a full refetch. New
+                # fields added here must default to a safe "unset" value.
+                dirty = False
+                if "image_calibration" not in cached:
+                    cached["image_calibration"] = None
+                    dirty = True
+                if dirty:
+                    per_map_json.write_text(
+                        json.dumps(cached, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
                 return cached
         # Metadata present but image missing — fall through to refetch.
 
@@ -250,6 +262,18 @@ def build_per_map(
         if vsr_entry.get("baseToBase"):
             canonical_b2b = vsr_entry["baseToBase"]
 
+    # Preserve any hand-tuned image_calibration across registry rebuilds.
+    # Calibration is a local override (not something iondriver provides), so
+    # if the map has an existing per-map JSON we read its current value
+    # through rather than clobbering it with null.
+    preserved_calibration = None
+    if per_map_json.exists():
+        try:
+            existing = json.loads(per_map_json.read_text(encoding="utf-8"))
+            preserved_calibration = existing.get("image_calibration")
+        except (json.JSONDecodeError, OSError):
+            preserved_calibration = None
+
     per_map = {
         "map_file": map_file,
         "title": resp.get("title") or None,
@@ -260,6 +284,16 @@ def build_per_map(
         "author": author,
         "canonical_size": canonical_size,
         "canonical_b2b": canonical_b2b,
+        # Optional local override for how the image maps onto world space.
+        # When null, frontend projections fall back to `match.terrain_bounds`
+        # (2D xz). When populated, frontend uses `image_bounds_world` as the
+        # authoritative image-to-world mapping. Schema:
+        #   { "image_bounds_world": { "min": {"x": <number>, "z": <number>},
+        #                              "max": {"x": <number>, "z": <number>} },
+        #     "note": "<human-readable calibration rationale>" }
+        # See docs/DEVELOPER_GUIDE.md "Map Assets & Overlays" for the
+        # calibration workflow. Preserved across registry rebuilds.
+        "image_calibration": preserved_calibration,
         "attribution": {
             "source": "iondriver.com / gamelistassets",
             "map_author": author,
