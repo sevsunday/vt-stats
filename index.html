@@ -104,6 +104,10 @@
     <div id="match-info" class="card mb-4">
       <div class="card-body d-flex flex-wrap gap-4 align-items-center">
         <div class="d-flex flex-wrap gap-4 align-items-center flex-grow-1">
+          <!-- Map thumbnail (top-down, from data/map-registry.json). Hidden
+               when the match's map isn't in the registry. Populated by
+               renderBanner() in js/app.js. -->
+          <img id="info-map-thumb" class="vt-map-thumb d-none" alt="" decoding="async" loading="lazy">
           <!-- Rich match picker trigger. Looks like a dropdown, opens the
                #match-picker-modal. Both this trigger and its twin inside
                #all-matches-view are kept in sync by js/app.js. -->
@@ -124,6 +128,17 @@
           <div><span class="stat-label">Duration</span><br><strong id="info-duration">—</strong></div>
           <div><span class="stat-label">Players</span><br><strong id="info-players">—</strong></div>
           <div><span class="stat-label">Submitted by</span><br><strong id="info-submitter">—</strong></div>
+          <!-- Map dimension fields. All match-global / always-unfiltered.
+               Sourced from match.terrain_bounds (primary) + data/map-registry.json
+               (fetched) + BZ2API.VSR_MAP_DATA (baked-in library fallback).
+               See .cursor/rules/filter-contract.mdc and docs/DATA_DICTIONARY.md. -->
+          <div><span class="stat-label">Map size</span><br><strong id="info-map-size">—</strong></div>
+          <div><span class="stat-label">Elevation</span><br><strong id="info-map-elevation">—</strong></div>
+          <div id="info-b2b-wrap">
+            <span class="stat-label">Base to base</span><br>
+            <strong id="info-base-to-base" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true">—</strong>
+          </div>
+          <div><span class="stat-label">Author</span><br><strong id="info-map-author">—</strong></div>
           <div id="info-snipes-wrap" class="d-none"><span class="stat-label">Snipes</span><br><strong id="info-snipes">0</strong></div>
           <a id="info-raw-link" class="vt-nav-icon-btn" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
             <i class="bi bi-code-square me-1"></i><span>View raw</span>
@@ -970,6 +985,10 @@
   <script src="js/positioning-charts.js"></script>
   <script src="js/timeline-player.js"></script>
   <script src="js/positioning-player.js"></script>
+  <!-- BZ2API: baked-in VSR_MAP_DATA catalog + iondriver map API client.
+       Consumed by js/app.js's getMapMeta() for hero banner fields. Loaded
+       before app.js so window.BZ2API is available during init. -->
+  <script src="js/bz2api.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

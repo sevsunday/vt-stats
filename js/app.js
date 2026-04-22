@@ -513,6 +513,20 @@
     return;
   }
 
+  // Map registry: built by scripts/build_map_registry.py at pipeline time,
+  // keyed by lowercase `<mapFile>` (stripped `.bzn`). Consumed by
+  // getMapMeta() below for hero banner fields + thumbnails. Non-blocking:
+  // if the registry fetch fails (local dev without registry; CDN miss in
+  // prod), getMapMeta() gracefully falls back to BZ2API.VSR_MAP_DATA or
+  // dashes out missing fields.
+  let mapRegistry = {};
+  try {
+    const regRes = await fetch('data/map-registry.json');
+    if (regRes.ok) mapRegistry = await regRes.json();
+  } catch {
+    // registry is optional — nothing to do
+  }
+
   // Sort newest-first. The Python pipeline writes matches.json sorted
   // ascending by date, but every JS call site that uses manifest[0]
   // (default dropdown value, brand-home click, boot fallback, landing
@@ -2068,6 +2082,139 @@
       snipesWrap.classList.remove('d-none');
     } else {
       snipesWrap.classList.add('d-none');
+    }
+
+    // Map-dimension stat blocks (Map size, Elevation, Base-to-base, Author)
+    // + thumbnail. Sources are merged by getMapMeta() below.
+    renderMapBannerFields(info);
+  }
+
+  // Merge sources for map metadata into a single object used by the hero
+  // banner. Precedence: match.terrain_bounds > data/map-registry.json >
+  // BZ2API.VSR_MAP_DATA. Any field may be null/undefined when unavailable.
+  function getMapMeta(match) {
+    const rawMap = (match && match.map) || '';
+    const key = rawMap.replace(/\.bzn$/i, '').toLowerCase();
+    const registry = (mapRegistry && mapRegistry[key]) || {};
+    const vsr = (window.BZ2API && window.BZ2API.VSR_MAP_DATA && window.BZ2API.VSR_MAP_DATA[key]) || {};
+    const terrain = match && match.terrain_bounds;
+
+    // Library's `size` field stores half-edge (0..size means terrain
+    // extends +-size around origin); full edge = size * 2.
+    const librarySize = vsr.size ? vsr.size * 2 : null;
+
+    return {
+      key,
+      title: registry.title || null,
+      imagePath: registry.image_path || null,
+      author: (registry.author || vsr.author || null),
+      canonicalB2B: (registry.canonical_b2b != null ? registry.canonical_b2b : (vsr.baseToBase || null)),
+      canonicalSize: (registry.canonical_size != null ? registry.canonical_size : librarySize),
+      terrainSize: terrain
+        ? { x: terrain.max.x - terrain.min.x, y: terrain.max.y - terrain.min.y, z: terrain.max.z - terrain.min.z }
+        : null,
+      elevation: terrain
+        ? { min: terrain.min.y, max: terrain.max.y }
+        : null,
+      empiricalB2B: (match && match.base_to_base_distance != null) ? match.base_to_base_distance : null,
+      boundsSource: terrain ? 'terrain' : (librarySize ? 'library' : 'none'),
+    };
+  }
+
+  // Populate the map-dimension blocks + thumbnail. All fall back to "—"
+  // gracefully when a particular source is unavailable, so the hero row
+  // layout stays stable across pre-schema vs terrain-schema matches.
+  function renderMapBannerFields(info) {
+    const meta = getMapMeta(info);
+
+    // Thumbnail: show/hide based on image availability.
+    const thumb = document.getElementById('info-map-thumb');
+    if (thumb) {
+      if (meta.imagePath) {
+        thumb.src = 'data/' + meta.imagePath;
+        thumb.alt = meta.title || info.name || meta.key;
+        thumb.title = meta.title || '';
+        thumb.classList.remove('d-none');
+      } else {
+        thumb.removeAttribute('src');
+        thumb.alt = '';
+        thumb.title = '';
+        thumb.classList.add('d-none');
+      }
+    }
+
+    // Map size: prefer terrain (actual collected extents) over library canonical.
+    const sizeEl = document.getElementById('info-map-size');
+    if (sizeEl) {
+      if (meta.terrainSize) {
+        sizeEl.textContent = `${Math.round(meta.terrainSize.x)} \u00D7 ${Math.round(meta.terrainSize.z)}u`;
+        sizeEl.title = 'Terrain bounds from StatHeader (actual collected data).';
+      } else if (meta.canonicalSize) {
+        sizeEl.textContent = `~${Math.round(meta.canonicalSize)}u`;
+        sizeEl.title = 'Canonical size from VSR_MAP_DATA (pre-schema session — no terrain bounds on wire).';
+      } else {
+        sizeEl.textContent = '—';
+        sizeEl.title = '';
+      }
+    }
+
+    // Elevation range: only meaningful when terrain data is present. Otherwise
+    // render "—" (keep the row visible to preserve hero flex layout).
+    const elevEl = document.getElementById('info-map-elevation');
+    if (elevEl) {
+      if (meta.elevation) {
+        elevEl.textContent = `${Math.round(meta.elevation.min)} \u2192 ${Math.round(meta.elevation.max)}u`;
+        elevEl.title = 'Terrain Y range (min \u2192 max) from StatHeader.';
+      } else {
+        elevEl.textContent = '—';
+        elevEl.title = 'No terrain bounds on wire for this session.';
+      }
+    }
+
+    // Base-to-base: show empirical (always available post-terrain fix) with
+    // tooltip containing canonical reference. Bootstrap tooltip lifecycle:
+    // dispose existing instance before re-init to avoid leaks across
+    // renderBanner re-calls on match switches.
+    const b2bEl = document.getElementById('info-base-to-base');
+    if (b2bEl) {
+      if (meta.empiricalB2B != null) {
+        b2bEl.textContent = `${Math.round(meta.empiricalB2B)}u`;
+        let tipHtml;
+        if (meta.canonicalB2B != null) {
+          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}u ` +
+            `(spawn centroid distance this match)<br>` +
+            `<strong>Canonical:</strong> ${Math.round(meta.canonicalB2B)}u ` +
+            `<small>(map-design reference)</small>`;
+        } else {
+          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}u ` +
+            `(spawn centroid distance this match)`;
+        }
+        b2bEl.setAttribute('data-bs-original-title', tipHtml);
+        b2bEl.setAttribute('title', tipHtml);
+        // Dispose-before-init guards against leaked Bootstrap Tooltip
+        // instances on match switches (first-ever banner-level tooltip;
+        // establishes the pattern for future hero tooltips).
+        if (window.bootstrap && window.bootstrap.Tooltip) {
+          const prev = window.bootstrap.Tooltip.getInstance(b2bEl);
+          if (prev) prev.dispose();
+          new window.bootstrap.Tooltip(b2bEl, { html: true });
+        }
+      } else {
+        b2bEl.textContent = '—';
+        b2bEl.removeAttribute('data-bs-original-title');
+        b2bEl.setAttribute('title', '');
+        if (window.bootstrap && window.bootstrap.Tooltip) {
+          const prev = window.bootstrap.Tooltip.getInstance(b2bEl);
+          if (prev) prev.dispose();
+        }
+      }
+    }
+
+    // Map author from VSR_MAP_DATA (via registry).
+    const authorEl = document.getElementById('info-map-author');
+    if (authorEl) {
+      authorEl.textContent = meta.author || '—';
+      authorEl.title = meta.author ? `Map by ${meta.author}` : '';
     }
   }
 
