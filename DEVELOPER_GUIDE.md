@@ -163,6 +163,8 @@ The `team` field is **always the owning player's slot number (1-10)**, not a fac
 - `victim == 0` → asset received credit to `team` (the owning slot)
 - Both `shooter > 0` AND `victim > 0` (and shooter not skipped) → rivalry matrix entry
 
+**Sentinel damage filter.** The pipeline drops any `DamageDealt` / `DamageReceived` event whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value exactly `268,435,456.0` = `2^28`), not real combat. Skipping happens before any accumulator and is mirrored in the timeline recompute loop. Both DD and paired DR are consumed together. Per-match diagnostic at `match.sentinel_damage`; aggregate at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage`. Counts are **pair counts** (one DD+DR pair = 1). Full evidence chain, struct layout, and the `misnexport2 + 0x1c` decompile are in [docs/sentinel-damage.md](docs/sentinel-damage.md). The Raw Browser Reconcile view applies the same filter and surfaces the dropped total via an inline badge; the raw events table still shows sentinel values verbatim.
+
 #### `UpdateTick` (field 5)
 Per-tick state snapshot for all players. Pipeline currently skips these events.
 
@@ -236,6 +238,12 @@ Every dashboard card has an expand button (`data-expand="section-id"`) that open
 5. Re-run the pipeline and verify output
 6. Update this document and `.cursor/rules/data-schema.mdc`
 
+### Future Schema Considerations
+
+Items flagged for the upstream collector / proto, not blocking for current dashboard work:
+
+- **`DamageType` enum on `DamageDealt` / `DamageReceived`.** The engine's internal `DAMAGE` struct already carries a `type` byte (`DAMAGE_TYPE_UNKNOWN` / `ORDNANCE` / `EXPLOSION` / `COLLISION` / `WATER` / `UNDERWATER` / `SCRIPT`). Propagating it on the wire would (a) let us defensively drop `DAMAGE_TYPE_UNKNOWN` events without relying on the current amount-based sentinel heuristic, and (b) unlock source-type breakdowns (e.g. "damage by cause"). Backwards-compatible if added with default 0. See [docs/sentinel-damage.md](docs/sentinel-damage.md) "Future schema enhancement" for a proposed proto shape.
+
 ---
 
 ## 4. ODF Integration — Weapon Name Resolution
@@ -308,7 +316,13 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
     "min": {"x": -1024.0, "y": 0.0, "z": -1024.0},
     "max": {"x": 1024.0, "y": 320.25, "z": 1024.0}
   },
-  "base_to_base_distance": 756.96
+  "base_to_base_distance": 756.96,
+  "sentinel_damage": {
+    "count": 0,
+    "total_amount": 0.0,
+    "first_tick": null,
+    "last_tick": null
+  }
 }
 ```
 
@@ -316,6 +330,7 @@ Match-level spatial context fields:
 
 - `terrain_bounds` — `{min, max}` of 3D world-space terrain extents from `StatHeader.terrain_*` (new-schema only). `null` for pre-schema sessions. Mirrored from `positioning.terrain_bounds` for convenience on non-positioning renderers. Match-global, always-unfiltered.
 - `base_to_base_distance` — raw horizontal distance (units, horizontal-plane only) between Team 1 and Team 2 spawn centroids. `null` when either team has zero players. Distinct from `positioning.base_separation`, which is a floored internal scaling value used by the `R_base` / `time_in_base_pct` heuristics. Mirrored from `positioning.base_to_base_distance`. Match-global, always-unfiltered.
+- `sentinel_damage` — telemetry for engine sentinel events dropped by the `> 1e6` pipeline filter. `count` is the number of DD+DR pairs dropped (not individual events); `total_amount` is the sum of DD-side amounts (same as DR-side; double-counting is avoided for clarity). `first_tick` / `last_tick` are `null` on clean matches, set on affected matches. Always present (zeros on clean matches). Match-global, always-unfiltered. See [docs/sentinel-damage.md](docs/sentinel-damage.md).
 
 #### `leaderboard[]` entry
 
@@ -639,7 +654,9 @@ Supporting details:
   "date_range": ["2026-04-16", "2026-04-16"],
   "submitters": ["VTrider"],
   "matches_with_positioning": 4,
-  "matches_with_target_lock_data": 2
+  "matches_with_target_lock_data": 2,
+  "total_sentinel_damage_dropped": 5,
+  "matches_with_sentinel_damage": ["2026-04-22T01-58-26"]
 }
 ```
 

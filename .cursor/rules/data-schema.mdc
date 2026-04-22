@@ -68,6 +68,10 @@ These are applied by the statsgate collector before data reaches us:
 - `ordnance_odf` can be null (water/environmental damage) — display as "Unknown"
 - BulletInit/BulletHit only recorded for recognized players (in `s64_to_nick`)
 
+### Sentinel Damage Filter
+
+The pipeline drops `DamageDealt` / `DamageReceived` events whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value: `268,435,456.0` = `2^28`), not real combat. The guard is applied at the top of the `damage_dealt` branch and the timeline recompute loop in `scripts/process_stats.py` before any accumulator touches the amount. Both the DD and its paired DR are consumed together. Per-match telemetry lives on `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` (counts **pairs**, not individual events); aggregate rollup at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage`. All match-global / always-unfiltered. The Raw Browser Reconcile view mirrors this filter (same helper constant, inline pill surfaces the literal dropped total); the raw events table still displays sentinel values verbatim. Full evidence chain + decompile + struct layout: [docs/sentinel-damage.md](../../docs/sentinel-damage.md).
+
 ### Faction Determination
 
 Faction is determined purely by slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2. The `slot_to_faction()` function in the pipeline encodes this.

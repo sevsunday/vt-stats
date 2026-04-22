@@ -87,6 +87,10 @@
 
       <!-- Main content -->
       <div class="col-lg-9">
+        <!-- Additional docs picker. Primary doc is DATA_DICTIONARY; others
+             are standalone reference docs accessible via ?doc=<slug>. When
+             more docs land, add them to the DOC_REGISTRY in the script below. -->
+        <nav class="docs-picker mb-3 d-flex flex-wrap gap-2" id="docs-picker" aria-label="Additional docs"></nav>
         <div id="docs-loading" class="text-center py-5">
           <div class="spinner-border spinner-border-sm" style="color: var(--kb-primary);" role="status">
             <span class="visually-hidden">Loading...</span>
@@ -97,7 +101,7 @@
         <div id="docs-error" class="d-none">
           <div class="alert" style="background: var(--kb-bg-subtle); border: 1px solid var(--kb-border-subtle); color: var(--kb-text-primary);">
             <i class="bi bi-exclamation-triangle me-2" style="color: var(--kb-warning);"></i>
-            Failed to load documentation. Please make sure <code>docs/DATA_DICTIONARY.md</code> exists.
+            <span id="docs-error-message">Failed to load documentation.</span>
           </div>
         </div>
       </div>
@@ -113,13 +117,41 @@
   <script src="vendor/marked/marked.min.js"></script>
   <script src="js/theme.js"></script>
   <script>
+    // Registry of available docs pages. The default (dictionary) is the main
+    // technical spec; the other entries are standalone references linked from
+    // rules and the developer guide. Add a row here when a new standalone doc
+    // needs to be surfaced from docs.html. Slugs are case-insensitive.
+    const DOC_REGISTRY = [
+      { slug: 'dictionary', file: 'docs/DATA_DICTIONARY.md', label: 'Data Dictionary', icon: 'bi-journal-text' },
+      { slug: 'sentinel', file: 'docs/sentinel-damage.md', label: 'Sentinel Damage Filter', icon: 'bi-shield-exclamation' },
+    ];
+
     (async function () {
       const content = document.getElementById('docs-content');
       const loading = document.getElementById('docs-loading');
       const error = document.getElementById('docs-error');
+      const errorMsg = document.getElementById('docs-error-message');
+      const picker = document.getElementById('docs-picker');
+
+      // Pick active doc from ?doc=<slug>; fall back to dictionary.
+      const params = new URLSearchParams(location.search);
+      const wanted = (params.get('doc') || 'dictionary').toLowerCase();
+      const active = DOC_REGISTRY.find(d => d.slug === wanted) || DOC_REGISTRY[0];
+
+      // Render picker tabs. Hidden when only one doc is registered.
+      if (DOC_REGISTRY.length > 1) {
+        DOC_REGISTRY.forEach(d => {
+          const a = document.createElement('a');
+          a.href = d.slug === DOC_REGISTRY[0].slug ? 'docs.html' : `docs.html?doc=${d.slug}`;
+          a.className = 'vt-nav-icon-btn' + (d.slug === active.slug ? ' active' : '');
+          a.innerHTML = `<i class="bi ${d.icon} me-1"></i>${d.label}`;
+          if (d.slug === active.slug) a.setAttribute('aria-current', 'page');
+          picker.appendChild(a);
+        });
+      }
 
       try {
-        const res = await fetch('docs/DATA_DICTIONARY.md');
+        const res = await fetch(active.file);
         if (!res.ok) throw new Error(res.statusText);
         const md = await res.text();
 
@@ -321,6 +353,7 @@
       } catch (e) {
         loading.classList.add('d-none');
         error.classList.remove('d-none');
+        errorMsg.textContent = `Failed to load ${active.file}.`;
         console.error('Failed to load documentation:', e);
       }
 
