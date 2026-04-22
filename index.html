@@ -69,17 +69,17 @@
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>
 
-          <!-- Landing Preferences -->
+          <!-- About / Source Repos -->
+          <button class="vt-nav-icon-btn" id="about-btn" type="button"
+                  data-bs-toggle="modal" data-bs-target="#about-modal"
+                  title="About / source repositories" aria-label="About / source repositories">
+            <i class="bi bi-info-circle"></i>
+          </button>
+
+          <!-- Landing Preferences (kept last so gear sits on the far right) -->
           <button class="vt-nav-icon-btn" id="landing-prefs-btn" type="button"
                   title="Landing preferences" aria-label="Landing preferences">
             <i class="bi bi-gear"></i><span class="vt-nav-label ms-2">Preferences</span>
-          </button>
-
-          <!-- Mode Toggle -->
-          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-            <i class="bi bi-sun-fill"></i>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
           </button>
         </div>
       </div>
@@ -719,6 +719,53 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- About / Source Repos Modal -->
+  <div class="modal fade" id="about-modal" tabindex="-1" aria-labelledby="about-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="about-modal-title">
+            <i class="bi bi-info-circle me-2"></i>About VT Stats
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3" style="color: var(--kb-text-muted); font-size: 0.9rem;">
+            VT Stats is a static dashboard for Battlezone: Combat Commander match statistics,
+            built on top of VT's protobuf-based stats collector.
+          </p>
+
+          <div class="mb-3">
+            <div class="stat-label mb-1" style="font-size: 0.75rem;">Source repository</div>
+            <a href="https://github.com/sevsunday/vt-stats" target="_blank" rel="noopener noreferrer"
+               class="d-inline-flex align-items-center">
+              <i class="bi bi-github me-2"></i>sevsunday/vt-stats
+              <i class="bi bi-box-arrow-up-right ms-2 small"></i>
+            </a>
+            <div class="small" style="color: var(--kb-text-muted);">
+              Dashboard, processing pipeline, and theme system.
+            </div>
+          </div>
+
+          <div class="mb-0">
+            <div class="stat-label mb-1" style="font-size: 0.75rem;">Stats collector (VT's repo)</div>
+            <a href="https://github.com/VTrider/statsgate" target="_blank" rel="noopener noreferrer"
+               class="d-inline-flex align-items-center">
+              <i class="bi bi-github me-2"></i>VTrider/statsgate
+              <i class="bi bi-box-arrow-up-right ms-2 small"></i>
+            </a>
+            <div class="small" style="color: var(--kb-text-muted);">
+              In-game client that captures match data and writes the <code>.binpb</code> sessions this dashboard consumes.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
     </div>
   </div>
 
