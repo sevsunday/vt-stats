@@ -332,11 +332,24 @@ def discover_map_files() -> list[tuple[str, str | None]]:
     return sorted(map_to_mod.items())
 
 
-def build_registry() -> dict:
+def build_registry(
+    map_mod_entries: list[tuple[str, str | None]] | None = None,
+) -> dict:
     """Main entry: resolve all distinct maps, write per-map JSONs +
-    the combined registry. Returns the registry dict."""
+    the combined registry. Returns the registry dict.
+
+    When `map_mod_entries` is provided, use it directly as the
+    `(normalized_map_file, primary_mod_id)` source list. This is the
+    fast path used by `scripts/process_stats.py`, which has the data
+    in memory and avoids re-reading per-match JSON files. When omitted
+    (e.g. standalone `python scripts/build_map_registry.py` invocation
+    for an ad-hoc registry refresh), fall back to scanning
+    `data/processed/matches.json` via `discover_map_files()`.
+    """
     vsr_data = load_vsr_map_data()
-    entries = discover_map_files()
+    entries = (
+        map_mod_entries if map_mod_entries is not None else discover_map_files()
+    )
     print(f"Map registry: {len(entries)} distinct map(s)")
 
     registry: dict[str, dict] = {}

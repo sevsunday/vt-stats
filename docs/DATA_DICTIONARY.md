@@ -526,7 +526,7 @@ An array of match summaries used to populate the match selector dropdown.
 | Field | Type | Description |
 |---|---|---|
 | `id` | `string` | Match ID derived from start_time (`YYYY-MM-DDTHH-MM-SS`) |
-| `name` | `string` | Prettified map name (e.g. `havenvsr.bzn` → `Haven`) |
+| `name` | `string` | Display name resolved from `data/map-registry.json[<key>].title` with iteratively-stripped `XYZ: ` prefixes (e.g. `"VSR: Ancient Hills"` → `"Ancient Hills"`, `"ST: VSR: TVD: Ebola"` → `"Ebola"`). Falls back to the raw filename minus `.bzn` (case preserved) when the registry has no title. See `resolve_match_name()` in `scripts/process_stats.py` |
 | `file` | `string` | Per-match JSON filename |
 | `map` | `string` | Raw map name from header |
 | `date` | `string` | ISO datetime from `start_time` |

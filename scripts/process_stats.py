@@ -27,8 +27,6 @@ STEAMID_TO_NAME_PATH = PROJECT_ROOT / "data" / "steamid_to_name.txt"
 
 TIMELINE_BUCKET_SECONDS = 10
 
-MAP_NAME_PREFIXES = ["vsrmort", "vsrstt", "vsr"]
-
 # --- Positioning (player movement) constants ---
 # Axis convention: +X East, +Y Up, +Z North (developer-confirmed for Z).
 # Horizontal plane = (x, z); all distance/path math ignores y.
@@ -156,18 +154,29 @@ def disambiguate_weapon_names(ordnance_set, resolve_fn):
     return result
 
 
-def prettify_map_name(raw_map):
-    """Turn a raw map filename like 'vsrragnor.bzn' into a display name like 'Ragnor'."""
-    name = re.sub(r"\.bzn$", "", raw_map, flags=re.IGNORECASE)
-    lower = name.lower()
-    for tag in MAP_NAME_PREFIXES:
-        if lower.startswith(tag):
-            name = name[len(tag):]
+def resolve_match_name(raw_map: str, registry: dict) -> str:
+    """Resolve a match's display name from a raw map filename.
+
+    Preference order:
+      1. `registry[<key>].title` with iteratively-stripped `TOKEN: ` prefixes
+         (so "ST: VSR: TVD: Ebola" -> "Ebola", "VSR: Haven" -> "Haven").
+         Internal whitespace and special characters (e.g. the `*~V8~*+`
+         decoration on the V8 map title) are preserved as-is.
+      2. The raw filename minus a trailing `.bzn`, case preserved
+         (used when the registry has no entry / no title for this map,
+         e.g. when the iondriver fetch failed across all mod-id fallbacks).
+    """
+    key = re.sub(r"\.bzn$", "", raw_map or "", flags=re.IGNORECASE).lower()
+    title = (registry.get(key, {}) or {}).get("title") or ""
+    while True:
+        nxt = re.sub(r"^[^:]+:\s*", "", title, count=1)
+        if nxt == title:
             break
-        elif lower.endswith(tag):
-            name = name[:-len(tag)]
-            break
-    return name.title() if name else raw_map
+        title = nxt
+    title = title.strip()
+    if title:
+        return title
+    return re.sub(r"\.bzn$", "", raw_map or "", flags=re.IGNORECASE)
 
 
 def discover_sessions():
@@ -1856,7 +1865,7 @@ def main():
     # Process each match
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     all_match_data = []
-    manifest = []
+    submitter_by_id: dict[str, str] = {}
 
     for session_path, submitter in sources:
         print(f"\nProcessing {submitter}/{session_path.name}...")
@@ -1866,6 +1875,7 @@ def main():
 
         match_data = process_match(session, session_path.name, submitter, resolve_weapon, known_players)
         all_match_data.append(match_data)
+        submitter_by_id[match_data["match"]["id"]] = submitter
 
         match_id = match_data["match"]["id"]
         out_path = OUTPUT_DIR / f"{match_id}.json"
@@ -1873,30 +1883,54 @@ def main():
             json.dump(match_data, f, indent=2, ensure_ascii=False)
         print(f"  Output: {out_path.name} ({out_path.stat().st_size:,} bytes)")
 
+    # Build/refresh the map registry BEFORE the manifest so we can resolve
+    # each match's display name from the iondriver `title` field (with
+    # `XYZ: ` prefixes stripped). Non-blocking: per-map network failures
+    # log but do not abort the pipeline; idempotent on maps already cached.
+    # Output at `data/maps/*` and `data/map-registry.json`. We feed the
+    # in-memory `(map_file_key, config_mod)` list directly so the builder
+    # doesn't need to re-read matches.json (it doesn't exist yet on a
+    # fresh run, anyway). See build_map_registry.py.
+    registry: dict = {}
+    try:
+        import build_map_registry
+        seen_map: dict[str, str | None] = {}
+        for m in all_match_data:
+            raw_map = m["match"].get("map") or ""
+            key = build_map_registry.map_key(raw_map)
+            if not key or key in seen_map:
+                continue
+            seen_map[key] = m["match"].get("config_mod")
+        registry = build_map_registry.build_registry(sorted(seen_map.items()))
+    except Exception as e:
+        print(f"WARN: failed to build map registry ({e}); skipping.")
+
+    # Build manifest using registry-resolved names (with filename fallback
+    # for any map the registry couldn't satisfy).
+    manifest = []
+    for match_data in all_match_data:
+        match_id = match_data["match"]["id"]
         manifest.append({
             "id": match_id,
-            "name": prettify_map_name(match_data["match"]["map"]),
+            "name": resolve_match_name(match_data["match"]["map"], registry),
             "file": f"{match_id}.json",
             "map": match_data["match"]["map"],
             "date": match_data["match"]["date"],
             "duration_sec": match_data["match"]["duration_sec"],
             "player_count": match_data["match"]["player_count"],
-            "submitter": submitter,
+            "submitter": submitter_by_id.get(match_id, ""),
             "team_leaders": match_data["match"].get("team_leaders", {}),
             "has_position_data": match_data["match"].get("has_position_data", False),
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),
         })
 
-    # Sort manifest by date
     manifest.sort(key=lambda m: m["date"])
 
-    # Write manifest
     manifest_path = OUTPUT_DIR / "matches.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     print(f"\nManifest: {manifest_path.name} ({len(manifest)} matches)")
 
-    # Build and write all-matches aggregate
     if len(all_match_data) > 1:
         aggregate = build_all_matches_aggregate(all_match_data)
         agg_path = OUTPUT_DIR / "all_matches.json"
@@ -1915,16 +1949,6 @@ def main():
         print(f"Proto docs: {proto_docs_path.name} ({len(docs)} entries)")
     except Exception as e:
         print(f"WARN: failed to extract proto docs ({e}); skipping.")
-
-    # Build/refresh the map registry (metadata + images) from iondriver's
-    # gamelistassets API. Non-blocking: per-map network failures log but do
-    # not abort the pipeline; idempotent on maps already cached. Output at
-    # `data/maps/*` and `data/map-registry.json`. See build_map_registry.py.
-    try:
-        import build_map_registry
-        build_map_registry.build_registry()
-    except Exception as e:
-        print(f"WARN: failed to build map registry ({e}); skipping.")
 
     print("\nDone!")
 
