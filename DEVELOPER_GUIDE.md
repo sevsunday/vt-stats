@@ -298,6 +298,8 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
 ]
 ```
 
+`name` is the display name shown in the match picker, dropdown, hero banner, and page title. It is resolved by `resolve_match_name()` in `scripts/process_stats.py` from `data/map-registry.json[<key>].title` (sourced from iondriver's `gamelistassets` API by `scripts/build_map_registry.py`), with leading `XYZ:\s*` tokens stripped iteratively so `"ST: VSR: TVD: Ebola"` becomes `"Ebola"` and `"VSR: Ancient Hills"` becomes `"Ancient Hills"`. Internal whitespace and special characters are preserved as-is (e.g. `vsrv8` resolves to `Island of *~V8~*+`). When the registry has no title for a map (e.g. iondriver returned 404 across all mod-id fallbacks), the manifest falls back to the raw map filename minus the trailing `.bzn`, case preserved. The pipeline reorders so the registry is built *before* the manifest is written; on the standalone CLI path (`python scripts/build_map_registry.py`) the builder still scans `matches.json` itself via `discover_map_files()`.
+
 `has_position_data` mirrors the per-match `positioning.has_position_data` flag. Frontend uses it to gate Positioning-tab UI cues (e.g. the small-multiples grid only renders when true; otherwise the empty-state card is shown).
 
 ### Per-match JSON Structure
