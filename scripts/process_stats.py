@@ -1910,6 +1910,11 @@ def main():
     manifest = []
     for match_data in all_match_data:
         match_id = match_data["match"]["id"]
+        lb = match_data.get("leaderboard") or []
+        manifest_players = sorted(
+            {(p.get("name") or "").strip() for p in lb if (p.get("name") or "").strip()},
+            key=lambda n: n.lower(),
+        )
         manifest.append({
             "id": match_id,
             "name": resolve_match_name(match_data["match"]["map"], registry),
@@ -1920,6 +1925,7 @@ def main():
             "player_count": match_data["match"]["player_count"],
             "submitter": submitter_by_id.get(match_id, ""),
             "team_leaders": match_data["match"].get("team_leaders", {}),
+            "players": manifest_players,
             "has_position_data": match_data["match"].get("has_position_data", False),
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),
         })
