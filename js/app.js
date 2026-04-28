@@ -1224,6 +1224,29 @@
   // within a session. Reset by loadAllMatches on fresh data loads.
   let careerRadarState = { a: null, b: null, compare: false };
 
+  /** Maps career sort keys: totals column -> per-match avg column (for view remapping). */
+  const CAREER_TOTAL_TO_AVG_SORT = {
+    total_pvp_dealt: 'avg_pvp_dealt',
+    total_pve_dealt: 'avg_pve_dealt',
+    total_dealt: 'avg_total_dealt',
+    total_pvp_received: 'avg_pvp_received',
+    total_pve_received: 'avg_pve_received',
+    total_received: 'avg_total_received',
+    net: 'avg_net',
+    total_kills: 'avg_kills',
+    total_deaths: 'avg_deaths',
+    total_asset_dealt: 'avg_asset_dealt',
+  };
+  const CAREER_AVG_TO_TOTAL_SORT = Object.fromEntries(
+    Object.entries(CAREER_TOTAL_TO_AVG_SORT).map(([k, v]) => [v, k])
+  );
+
+  let careerColumnView = 'per-match';
+  try {
+    const stored = localStorage.getItem('vt-career-cols-view');
+    if (stored === 'per-match' || stored === 'totals' || stored === 'all') careerColumnView = stored;
+  } catch (e) { /* ignore */ }
+
   // Restore persist preference
   if (localStorage.getItem('vt-filter-persist') === 'true') {
     filterState.persist = true;
@@ -1815,8 +1838,10 @@
     // Dropdown values will re-default from career_stats[0] in the renderer.
     careerRadarState = { a: null, b: null, compare: false };
     careerSortState = { key: 'total_dealt', asc: false };
+    remapCareerSortKeyForColumnView(careerColumnView);
 
     renderAggMeta(data.meta);
+    initCareerColumnViewControls();
     renderCareerTable(data.career_stats);
     renderCareerRadar(data);
     applyRadarInfoTooltips(document.getElementById('section-career-radar'));
@@ -2906,6 +2931,11 @@
     return Object.values(wb).filter(w => (w.dealt || 0) > 0).length;
   }
 
+  function careerPerMatchAvg(total, matchesPlayed) {
+    const m = matchesPlayed || 0;
+    return m > 0 ? total / m : 0;
+  }
+
   function careerNet(c) {
     return (c.total_dealt || 0) - (c.total_received || 0);
   }
@@ -2999,6 +3029,46 @@
           va = careerWeaponsUsedCount(a);
           vb = careerWeaponsUsedCount(b);
           break;
+        case 'avg_pvp_dealt':
+          va = careerPerMatchAvg(a.total_pvp_dealt || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_pvp_dealt || 0, b.matches_played);
+          break;
+        case 'avg_pve_dealt':
+          va = careerPerMatchAvg(a.total_pve_dealt || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_pve_dealt || 0, b.matches_played);
+          break;
+        case 'avg_total_dealt':
+          va = careerPerMatchAvg(a.total_dealt || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_dealt || 0, b.matches_played);
+          break;
+        case 'avg_pvp_received':
+          va = careerPerMatchAvg(a.total_pvp_received || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_pvp_received || 0, b.matches_played);
+          break;
+        case 'avg_pve_received':
+          va = careerPerMatchAvg(a.total_pve_received || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_pve_received || 0, b.matches_played);
+          break;
+        case 'avg_total_received':
+          va = careerPerMatchAvg(a.total_received || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_received || 0, b.matches_played);
+          break;
+        case 'avg_net':
+          va = careerPerMatchAvg(careerNet(a), a.matches_played);
+          vb = careerPerMatchAvg(careerNet(b), b.matches_played);
+          break;
+        case 'avg_kills':
+          va = careerPerMatchAvg(a.total_kills || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_kills || 0, b.matches_played);
+          break;
+        case 'avg_deaths':
+          va = careerPerMatchAvg(a.total_deaths || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_deaths || 0, b.matches_played);
+          break;
+        case 'avg_asset_dealt':
+          va = careerPerMatchAvg(a.total_asset_dealt || 0, a.matches_played);
+          vb = careerPerMatchAvg(b.total_asset_dealt || 0, b.matches_played);
+          break;
         default:
           va = a.total_dealt || 0;
           vb = b.total_dealt || 0;
@@ -3013,15 +3083,62 @@
     };
   }
 
+  function remapCareerSortKeyForColumnView(mode) {
+    if (mode === 'per-match') {
+      const next = CAREER_TOTAL_TO_AVG_SORT[careerSortState.key];
+      if (next) careerSortState.key = next;
+    } else if (mode === 'totals') {
+      const next = CAREER_AVG_TO_TOTAL_SORT[careerSortState.key];
+      if (next) careerSortState.key = next;
+    }
+  }
+
+  function syncCareerTableColumnViewClass() {
+    const table = document.getElementById('career-table');
+    if (!table) return;
+    table.classList.remove('vt-career-cols-per-match', 'vt-career-cols-totals', 'vt-career-cols-all');
+    table.classList.add('vt-career-cols-' + careerColumnView);
+  }
+
+  function updateCareerColumnViewButtons() {
+    document.querySelectorAll('#section-career [data-career-cols]').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-career-cols') === careerColumnView);
+    });
+  }
+
+  function initCareerColumnViewControls() {
+    const section = document.getElementById('section-career');
+    if (!section || section.dataset.vtCareerColInit === '1') return;
+    section.dataset.vtCareerColInit = '1';
+    section.querySelectorAll('[data-career-cols]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.getAttribute('data-career-cols');
+        if (!mode || mode === careerColumnView) return;
+        careerColumnView = mode;
+        try { localStorage.setItem('vt-career-cols-view', mode); } catch (e) { /* ignore */ }
+        remapCareerSortKeyForColumnView(mode);
+        const agg = window.__vtAllMatchesData;
+        if (agg && agg.career_stats) renderCareerTable(agg.career_stats);
+        else updateCareerColumnViewButtons();
+      });
+    });
+  }
+
   function renderCareerTable(stats) {
+    syncCareerTableColumnViewClass();
     const tbody = document.querySelector('#career-table tbody');
     const sorted = [...stats].sort(careerLeaderboardSort(careerSortState.key, careerSortState.asc));
     tbody.innerHTML = sorted.map((c, i) => {
+      const m = c.matches_played || 0;
       const netVal = careerNet(c);
       const netClass = netVal > 0 ? 'color:var(--kb-success)' : netVal < 0 ? 'color:var(--kb-danger)' : '';
+      const netAvg = careerPerMatchAvg(netVal, m);
+      const netAvgClass = netAvg > 0 ? 'color:var(--kb-success)' : netAvg < 0 ? 'color:var(--kb-danger)' : '';
       const ratioStr = careerRatioDisplayStr(c);
       const accPct = (c.overall_accuracy != null ? c.overall_accuracy : 0) * 100;
       const wpns = careerWeaponsUsedCount(c);
+      const avgK = careerPerMatchAvg(c.total_kills || 0, m);
+      const avgD = careerPerMatchAvg(c.total_deaths || 0, m);
 
       let moveCell = '<span style="color:var(--kb-text-muted);">—</span>';
       if (c.matches_with_positioning > 0 && c.mean_movement_score != null) {
@@ -3047,25 +3164,35 @@
           </div>`;
       }
       return `<tr>
-        <td>${i + 1}</td>
-        <td class="fw-semibold">${esc(c.name)}</td>
-        <td class="text-center"><span style="color:var(--kb-text-muted);" title="Not applicable across matches">—</span></td>
-        <td class="text-end">${c.matches_played}</td>
-        <td class="text-end vt-col-split">${fmt(c.total_pvp_dealt || 0)}</td>
-        <td class="text-end vt-col-split">${fmt(c.total_pve_dealt || 0)}</td>
-        <td class="text-end">${fmt(c.total_dealt)}</td>
-        <td class="text-end vt-col-split">${fmt(c.total_pvp_received || 0)}</td>
-        <td class="text-end vt-col-split">${fmt(c.total_pve_received || 0)}</td>
-        <td class="text-end">${fmt(c.total_received)}</td>
-        <td class="text-end" style="${netClass}">${netVal > 0 ? '+' : ''}${fmt(netVal)}</td>
-        <td class="text-end">${ratioStr}</td>
-        <td class="text-end">${accPct.toFixed(1)}%</td>
-        <td class="text-end">${c.total_kills || 0}</td>
-        <td class="text-end">${c.total_deaths || 0}</td>
-        <td class="text-end">${fmt(c.total_asset_dealt)}</td>
-        <td>${moveCell}</td>
-        <td><span class="badge bg-secondary">${esc(c.fav_weapon)}</span></td>
-        <td class="text-end">${wpns}</td>
+        <td class="vt-career-col-shared">${i + 1}</td>
+        <td class="vt-career-col-shared fw-semibold">${esc(c.name)}</td>
+        <td class="text-center vt-career-col-shared"><span style="color:var(--kb-text-muted);" title="Not applicable across matches">—</span></td>
+        <td class="text-end vt-career-col-shared">${c.matches_played}</td>
+        <td class="text-end vt-col-split vt-career-col-total">${fmt(c.total_pvp_dealt || 0)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_pvp_dealt || 0, m))}</td>
+        <td class="text-end vt-col-split vt-career-col-total">${fmt(c.total_pve_dealt || 0)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_pve_dealt || 0, m))}</td>
+        <td class="text-end vt-career-col-total">${fmt(c.total_dealt)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_dealt || 0, m))}</td>
+        <td class="text-end vt-col-split vt-career-col-total">${fmt(c.total_pvp_received || 0)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_pvp_received || 0, m))}</td>
+        <td class="text-end vt-col-split vt-career-col-total">${fmt(c.total_pve_received || 0)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_pve_received || 0, m))}</td>
+        <td class="text-end vt-career-col-total">${fmt(c.total_received)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_received || 0, m))}</td>
+        <td class="text-end vt-career-col-total" style="${netClass}">${netVal > 0 ? '+' : ''}${fmt(netVal)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg" style="${netAvgClass}">${netAvg > 0 ? '+' : ''}${fmt(netAvg)}</td>
+        <td class="text-end vt-career-col-shared">${ratioStr}</td>
+        <td class="text-end vt-career-col-shared">${accPct.toFixed(1)}%</td>
+        <td class="text-end vt-career-col-total">${c.total_kills || 0}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${avgK.toFixed(1)}</td>
+        <td class="text-end vt-career-col-total">${c.total_deaths || 0}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${avgD.toFixed(1)}</td>
+        <td class="text-end vt-career-col-total">${fmt(c.total_asset_dealt)}</td>
+        <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_asset_dealt || 0, m))}</td>
+        <td class="vt-career-col-shared">${moveCell}</td>
+        <td class="vt-career-col-shared"><span class="badge bg-secondary">${esc(c.fav_weapon)}</span></td>
+        <td class="text-end vt-career-col-shared">${wpns}</td>
       </tr>`;
     }).join('');
 
@@ -3077,6 +3204,7 @@
         renderCareerTable(stats);
       };
     });
+    updateCareerColumnViewButtons();
     ensureTooltips(document.getElementById('career-table'));
   }
 
