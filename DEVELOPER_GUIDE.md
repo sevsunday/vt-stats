@@ -724,6 +724,10 @@ Supporting details:
 
 The All Matches **Career Leaderboard** renders these fields in the same column order as the per-match Player Leaderboard (plus **Matches**); **Net**, **Ratio**, and **# Wpns** are derived in the browser from totals and `weapon_breakdown` (distinct weapons with `dealt > 0`). **Team** is shown as unavailable for aggregates.
 
+**Per-match average columns** (headers like PvP/m, Dealt/m, K/m) are computed only in the browser as **career total ÷ `matches_played`** (matches with zeros still count). **Accuracy** remains **career hits ÷ career shots** (`overall_accuracy` from the pipeline), not an average of each match’s accuracy percentage.
+
+The Career Leaderboard card header **Per match / Totals / All** control (`careerColumnView` in `js/app.js`, persisted as `vt-career-cols-view`) toggles CSS classes `vt-career-col-total` vs `vt-career-col-avg` on `#career-table`; **shared** columns (Ratio, Accuracy, Movement, etc.) stay visible in every mode.
+
 #### `global_weapon_meta[]` — same structure as per-match `weapon_meta`
 
 #### `global_rivalries[]` — same structure as per-match `top_rivalries`, top 10

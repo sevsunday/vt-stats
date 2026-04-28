@@ -678,88 +678,160 @@
           </div>
         </div>
         <div class="card mb-4" id="section-career">
-          <div class="card-header d-flex align-items-center justify-content-between">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0">Career Leaderboard</h5>
-            <button class="btn btn-sm" data-expand="section-career" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <div class="btn-group btn-group-sm" role="group" aria-label="Career table columns">
+                <button type="button" class="btn btn-outline-secondary" data-career-cols="per-match" title="Per-match averages only">Per match</button>
+                <button type="button" class="btn btn-outline-secondary" data-career-cols="totals" title="Career totals only">Totals</button>
+                <button type="button" class="btn btn-outline-secondary" data-career-cols="all" title="Totals and per-match columns">All</button>
+              </div>
+              <button class="btn btn-sm" data-expand="section-career" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
           </div>
           <div class="card-body table-responsive">
-            <table id="career-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+            <table id="career-table" class="table table-hover align-middle mb-0 vt-career-cols-per-match" style="font-size: 0.85rem;">
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th data-sort="name">Player</th>
-                  <th class="text-center">
+                  <th class="vt-career-col-shared">#</th>
+                  <th class="vt-career-col-shared" data-sort="name">Player</th>
+                  <th class="text-center vt-career-col-shared">
                     Team
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Team (career)</strong><br>Not applicable as a single value — players may be on either team across different matches."></i>
                   </th>
-                  <th data-sort="matches_played" class="text-end">Matches</th>
-                  <th data-sort="total_pvp_dealt" class="text-end vt-col-split">
+                  <th data-sort="matches_played" class="text-end vt-career-col-shared">Matches</th>
+                  <th data-sort="total_pvp_dealt" class="text-end vt-col-split vt-career-col-total">
                     PvP
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>PvP Dealt</strong><br>Damage dealt directly to other human players.<br>Includes friendly-fire. Subset of Dealt.<br><em>Summed across matches.</em>"></i>
                   </th>
-                  <th data-sort="total_pve_dealt" class="text-end vt-col-split">
+                  <th data-sort="avg_pvp_dealt" class="text-end vt-col-split vt-career-col-avg">
+                    PvP/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvP Dealt per match</strong><br>Career PvP total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                  </th>
+                  <th data-sort="total_pve_dealt" class="text-end vt-col-split vt-career-col-total">
                     PvE
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>PvE Dealt</strong><br>Damage dealt to AI units and world props.<br>Equals Dealt &minus; PvP.<br><em>Summed across matches.</em>"></i>
                   </th>
-                  <th data-sort="total_dealt" class="text-end">
+                  <th data-sort="avg_pve_dealt" class="text-end vt-col-split vt-career-col-avg">
+                    PvE/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvE Dealt per match</strong><br>Career PvE total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                  </th>
+                  <th data-sort="total_dealt" class="text-end vt-career-col-total">
                     Dealt
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Asset Dmg).<br><em>Summed across matches.</em>"></i>
                   </th>
-                  <th data-sort="total_pvp_received" class="text-end vt-col-split">
+                  <th data-sort="avg_total_dealt" class="text-end vt-col-split vt-career-col-avg">
+                    Dealt/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Dealt per match</strong><br>Career dealt total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                  </th>
+                  <th data-sort="total_pvp_received" class="text-end vt-col-split vt-career-col-total">
                     PvP In
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>PvP Received</strong><br>Damage taken from other human players.<br>Subset of Received.<br><em>Summed across matches.</em>"></i>
                   </th>
-                  <th data-sort="total_pve_received" class="text-end vt-col-split">
+                  <th data-sort="avg_pvp_received" class="text-end vt-col-split vt-career-col-avg">
+                    PvP In/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvP Received per match</strong><br>Career PvP received total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                  </th>
+                  <th data-sort="total_pve_received" class="text-end vt-col-split vt-career-col-total">
                     PvE In
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>PvE Received</strong><br>Damage taken from AI units and world/environmental sources.<br>Equals Received &minus; PvP In.<br><em>Summed across matches.</em>"></i>
                   </th>
-                  <th data-sort="total_received" class="text-end">
+                  <th data-sort="avg_pve_received" class="text-end vt-col-split vt-career-col-avg">
+                    PvE In/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvE Received per match</strong><br>Career PvE received total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                  </th>
+                  <th data-sort="total_received" class="text-end vt-career-col-total">
                     Received
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Total Damage Received</strong><br>All damage this player personally took.<br>Equals PvP In + PvE In.<br><em>Summed across matches.</em>"></i>
                   </th>
-                  <th data-sort="net" class="text-end">
+                  <th data-sort="avg_total_received" class="text-end vt-col-split vt-career-col-avg">
+                    Rcvd/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Received per match</strong><br>Career received total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                  </th>
+                  <th data-sort="net" class="text-end vt-career-col-total">
                     Net
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Net Damage</strong><br>Total Dealt &minus; Total Received. Positive = more output than taken.<br><em>Career totals.</em>"></i>
                   </th>
-                  <th data-sort="ratio" class="text-end">
+                  <th data-sort="avg_net" class="text-end vt-col-split vt-career-col-avg">
+                    Net/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Net per match</strong><br>Career net total &divide; matches played.<br>Same as average dealt minus average received."></i>
+                  </th>
+                  <th data-sort="ratio" class="text-end vt-career-col-shared">
                     Ratio
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Damage Ratio</strong><br>Total Dealt &divide; Total Received.<br>&infin; when total received is zero but dealt is not.<br><em>Career totals.</em>"></i>
                   </th>
-                  <th data-sort="overall_accuracy" class="text-end">Accuracy</th>
-                  <th data-sort="total_kills" class="text-end">Kills</th>
-                  <th data-sort="total_deaths" class="text-end">Deaths</th>
-                  <th data-sort="total_asset_dealt" class="text-end">
+                  <th data-sort="overall_accuracy" class="text-end vt-career-col-shared">
+                    Accuracy
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Career accuracy</strong><br>Total hits &divide; total shots across all matches (not a simple average of each match&rsquo;s accuracy)."></i>
+                  </th>
+                  <th data-sort="total_kills" class="text-end vt-career-col-total">Kills</th>
+                  <th data-sort="avg_kills" class="text-end vt-col-split vt-career-col-avg">
+                    K/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Kills per match</strong><br>Career kills &divide; matches played."></i>
+                  </th>
+                  <th data-sort="total_deaths" class="text-end vt-career-col-total">Deaths</th>
+                  <th data-sort="avg_deaths" class="text-end vt-col-split vt-career-col-avg">
+                    D/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Deaths per match</strong><br>Career deaths &divide; matches played."></i>
+                  </th>
+                  <th data-sort="total_asset_dealt" class="text-end vt-career-col-total">
                     Asset Dmg
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Asset Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt.<br><em>Summed across matches.</em>"></i>
                   </th>
-                  <th data-sort="mean_movement_score" class="text-center" style="min-width:130px;">
+                  <th data-sort="avg_asset_dealt" class="text-end vt-col-split vt-career-col-avg">
+                    Asset/m
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Asset damage per match</strong><br>Career asset dealt total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                  </th>
+                  <th data-sort="mean_movement_score" class="text-center vt-career-col-shared" style="min-width:130px;">
                     <i class="bi bi-compass me-1"></i>Movement
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Movement Profile (career)</strong><br>Average activity score across matches with positioning data (scores are match-relative before averaging). Higher = more map coverage. Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a cell for standard deviation and match count."></i>
                   </th>
-                  <th data-sort="fav_weapon">Fav Weapon</th>
-                  <th data-sort="weapons_used" class="text-end">
+                  <th class="vt-career-col-shared" data-sort="fav_weapon">Fav Weapon</th>
+                  <th data-sort="weapons_used" class="text-end vt-career-col-shared">
                     # Wpns
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
