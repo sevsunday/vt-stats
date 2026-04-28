@@ -823,10 +823,12 @@
 
   function buildEntrySearchBlob(entry) {
     const tl = entry.team_leaders || {};
+    const roster = Array.isArray(entry.players) ? entry.players : [];
     return [
       entry.name, entry.map, entry.submitter,
       fmtDateFull(entry.date),
       tl['1'] && tl['1'].name, tl['2'] && tl['2'].name,
+      ...roster,
     ].filter(Boolean).join(' ').toLowerCase();
   }
 

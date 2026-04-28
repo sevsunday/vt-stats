@@ -293,10 +293,14 @@ When multiple ODF strings resolve to the same display name, the raw ODF key is a
     "duration_sec": 1130.7,
     "player_count": 10,
     "submitter": "VTrider",
+    "team_leaders": { "1": { "name": "…", "s64": "…" }, "2": { "name": "…", "s64": "…" } },
+    "players": ["blue", "VTrider", "…"],
     "has_position_data": true
   }
 ]
 ```
+
+`players` is a sorted list of unique display names from that match’s **`leaderboard[]`** (same nicknames as the dashboard). It is used only for **match picker free-text search** in `js/app.js` (`buildEntrySearchBlob`); the commander facet chips remain limited to **`team_leaders`** slot 1 and 2 names.
 
 `name` is the display name shown in the match picker, dropdown, hero banner, and page title. It is resolved by `resolve_match_name()` in `scripts/process_stats.py` from `data/map-registry.json[<key>].title` (sourced from iondriver's `gamelistassets` API by `scripts/build_map_registry.py`), with leading `XYZ:\s*` tokens stripped iteratively so `"ST: VSR: TVD: Ebola"` becomes `"Ebola"` and `"VSR: Ancient Hills"` becomes `"Ancient Hills"`. Internal whitespace and special characters are preserved as-is (e.g. `vsrv8` resolves to `Island of *~V8~*+`). When the registry has no title for a map (e.g. iondriver returned 404 across all mod-id fallbacks), the manifest falls back to the raw map filename minus the trailing `.bzn`, case preserved. The pipeline reorders so the registry is built *before* the manifest is written; on the standalone CLI path (`python scripts/build_map_registry.py`) the builder still scans `matches.json` itself via `discover_map_files()`.
 
