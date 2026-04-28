@@ -1212,6 +1212,7 @@
   let filterState = { mode: 'all', players: [], team: null, persist: false };
   let timelineMode = 'player';
   let sortState = { key: 'dealt', asc: false };
+  let careerSortState = { key: 'total_dealt', asc: false };
   // Currently selected pair for the compare-mode radar on the Rivalries tab.
   // Reset on match switch; reconciled against the filtered leaderboard on
   // filter change, falling back to the first visible top_rivalries entry.
@@ -1813,6 +1814,7 @@
     // Reset Career Radar state to defaults for a fresh All Matches load.
     // Dropdown values will re-default from career_stats[0] in the renderer.
     careerRadarState = { a: null, b: null, compare: false };
+    careerSortState = { key: 'total_dealt', asc: false };
 
     renderAggMeta(data.meta);
     renderCareerTable(data.career_stats);
@@ -2899,9 +2901,128 @@
     `;
   }
 
+  function careerWeaponsUsedCount(c) {
+    const wb = c.weapon_breakdown || {};
+    return Object.values(wb).filter(w => (w.dealt || 0) > 0).length;
+  }
+
+  function careerNet(c) {
+    return (c.total_dealt || 0) - (c.total_received || 0);
+  }
+
+  function careerRatioSortValue(c) {
+    const d = c.total_dealt || 0;
+    const r = c.total_received || 0;
+    if (r > 0) return d / r;
+    if (d > 0) return 1e9;
+    return 0;
+  }
+
+  function careerRatioDisplayStr(c) {
+    const d = c.total_dealt || 0;
+    const r = c.total_received || 0;
+    if (r > 0) return Number(d / r).toFixed(2);
+    if (d > 0) return '∞';
+    return '0.00';
+  }
+
+  function careerLeaderboardSort(key, asc) {
+    return (a, b) => {
+      let va; let vb;
+      switch (key) {
+        case 'name':
+          va = (a.name || '').toLowerCase();
+          vb = (b.name || '').toLowerCase();
+          break;
+        case 'matches_played':
+          va = a.matches_played || 0;
+          vb = b.matches_played || 0;
+          break;
+        case 'total_pvp_dealt':
+          va = a.total_pvp_dealt || 0;
+          vb = b.total_pvp_dealt || 0;
+          break;
+        case 'total_pve_dealt':
+          va = a.total_pve_dealt || 0;
+          vb = b.total_pve_dealt || 0;
+          break;
+        case 'total_dealt':
+          va = a.total_dealt || 0;
+          vb = b.total_dealt || 0;
+          break;
+        case 'total_pvp_received':
+          va = a.total_pvp_received || 0;
+          vb = b.total_pvp_received || 0;
+          break;
+        case 'total_pve_received':
+          va = a.total_pve_received || 0;
+          vb = b.total_pve_received || 0;
+          break;
+        case 'total_received':
+          va = a.total_received || 0;
+          vb = b.total_received || 0;
+          break;
+        case 'net':
+          va = careerNet(a);
+          vb = careerNet(b);
+          break;
+        case 'ratio':
+          va = careerRatioSortValue(a);
+          vb = careerRatioSortValue(b);
+          break;
+        case 'overall_accuracy':
+          va = a.overall_accuracy || 0;
+          vb = b.overall_accuracy || 0;
+          break;
+        case 'total_kills':
+          va = a.total_kills || 0;
+          vb = b.total_kills || 0;
+          break;
+        case 'total_deaths':
+          va = a.total_deaths || 0;
+          vb = b.total_deaths || 0;
+          break;
+        case 'total_asset_dealt':
+          va = a.total_asset_dealt || 0;
+          vb = b.total_asset_dealt || 0;
+          break;
+        case 'mean_movement_score': {
+          va = a.mean_movement_score != null ? a.mean_movement_score : -1;
+          vb = b.mean_movement_score != null ? b.mean_movement_score : -1;
+          break;
+        }
+        case 'fav_weapon':
+          va = (a.fav_weapon || '').toLowerCase();
+          vb = (b.fav_weapon || '').toLowerCase();
+          break;
+        case 'weapons_used':
+          va = careerWeaponsUsedCount(a);
+          vb = careerWeaponsUsedCount(b);
+          break;
+        default:
+          va = a.total_dealt || 0;
+          vb = b.total_dealt || 0;
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      const na = (a.name || '').toLowerCase();
+      const nb = (b.name || '').toLowerCase();
+      if (na < nb) return -1;
+      if (na > nb) return 1;
+      return 0;
+    };
+  }
+
   function renderCareerTable(stats) {
     const tbody = document.querySelector('#career-table tbody');
-    tbody.innerHTML = stats.map((c, i) => {
+    const sorted = [...stats].sort(careerLeaderboardSort(careerSortState.key, careerSortState.asc));
+    tbody.innerHTML = sorted.map((c, i) => {
+      const netVal = careerNet(c);
+      const netClass = netVal > 0 ? 'color:var(--kb-success)' : netVal < 0 ? 'color:var(--kb-danger)' : '';
+      const ratioStr = careerRatioDisplayStr(c);
+      const accPct = (c.overall_accuracy != null ? c.overall_accuracy : 0) * 100;
+      const wpns = careerWeaponsUsedCount(c);
+
       let moveCell = '<span style="color:var(--kb-text-muted);">—</span>';
       if (c.matches_with_positioning > 0 && c.mean_movement_score != null) {
         const score = Math.round(c.mean_movement_score);
@@ -2913,9 +3034,9 @@
             ? 'var(--kb-warning)'
             : 'var(--kb-danger)';
         const pct = Math.max(0, Math.min(100, score));
-        const n = c.matches_with_positioning;
+        const nPos = c.matches_with_positioning;
         const denom = c.matches_played;
-        const titleText = `Avg ${score} (${band}), \u03c3 ${stdev} across ${n}/${denom} matches`;
+        const titleText = `Avg ${score} (${band}), \u03c3 ${stdev} across ${nPos}/${denom} matches`;
         moveCell = `
           <div class="vt-movement-cell" title="${esc(titleText)}">
             <div class="vt-movement-cell-top">
@@ -2928,17 +3049,34 @@
       return `<tr>
         <td>${i + 1}</td>
         <td class="fw-semibold">${esc(c.name)}</td>
+        <td class="text-center"><span style="color:var(--kb-text-muted);" title="Not applicable across matches">—</span></td>
         <td class="text-end">${c.matches_played}</td>
+        <td class="text-end vt-col-split">${fmt(c.total_pvp_dealt || 0)}</td>
+        <td class="text-end vt-col-split">${fmt(c.total_pve_dealt || 0)}</td>
         <td class="text-end">${fmt(c.total_dealt)}</td>
+        <td class="text-end vt-col-split">${fmt(c.total_pvp_received || 0)}</td>
+        <td class="text-end vt-col-split">${fmt(c.total_pve_received || 0)}</td>
         <td class="text-end">${fmt(c.total_received)}</td>
-        <td class="text-end">${(c.overall_accuracy * 100).toFixed(1)}%</td>
+        <td class="text-end" style="${netClass}">${netVal > 0 ? '+' : ''}${fmt(netVal)}</td>
+        <td class="text-end">${ratioStr}</td>
+        <td class="text-end">${accPct.toFixed(1)}%</td>
         <td class="text-end">${c.total_kills || 0}</td>
         <td class="text-end">${c.total_deaths || 0}</td>
         <td class="text-end">${fmt(c.total_asset_dealt)}</td>
         <td>${moveCell}</td>
         <td><span class="badge bg-secondary">${esc(c.fav_weapon)}</span></td>
+        <td class="text-end">${wpns}</td>
       </tr>`;
     }).join('');
+
+    document.querySelectorAll('#career-table th[data-sort]').forEach(th => {
+      th.classList.toggle('sort-active', th.dataset.sort === careerSortState.key);
+      th.onclick = () => {
+        if (careerSortState.key === th.dataset.sort) careerSortState.asc = !careerSortState.asc;
+        else { careerSortState.key = th.dataset.sort; careerSortState.asc = false; }
+        renderCareerTable(stats);
+      };
+    });
     ensureTooltips(document.getElementById('career-table'));
   }
 

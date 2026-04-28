@@ -698,6 +698,10 @@ Supporting details:
   "matches_played": 4,
   "total_dealt": 356440.3,
   "total_received": 146729.3,
+  "total_pvp_dealt": 201000.0,
+  "total_pve_dealt": 155440.3,
+  "total_pvp_received": 120000.0,
+  "total_pve_received": 26729.3,
   "total_asset_dealt": 1197.0,
   "overall_accuracy": 0.678,
   "total_kills": 0,
@@ -708,11 +712,17 @@ Supporting details:
     "Chain Gun": { "dealt": 78400.0, "shots": 3200, "hits": 2100, "accuracy": 0.656 }
   },
   "mean_movement_score": 72.5,
+  "movement_score_stddev": 8.2,
+  "movement_band_dominant": "Mobile",
+  "movement_band_distribution": { "Mobile": 2, "Aggressive": 2 },
+  "total_path_length": 125000.0,
   "matches_with_positioning": 4,
   "mean_target_lock_pct": 0.192,
   "matches_with_target_lock_data": 2
 }
 ```
+
+The All Matches **Career Leaderboard** renders these fields in the same column order as the per-match Player Leaderboard (plus **Matches**); **Net**, **Ratio**, and **# Wpns** are derived in the browser from totals and `weapon_breakdown` (distinct weapons with `dealt > 0`). **Team** is shown as unavailable for aggregates.
 
 #### `global_weapon_meta[]` — same structure as per-match `weapon_meta`
 

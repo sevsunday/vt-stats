@@ -687,21 +687,84 @@
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Player</th>
-                  <th class="text-end">Matches</th>
-                  <th class="text-end">Total Dealt</th>
-                  <th class="text-end">Total Received</th>
-                  <th class="text-end">Accuracy</th>
-                  <th class="text-end">Kills</th>
-                  <th class="text-end">Deaths</th>
-                  <th class="text-end">Asset Dealt</th>
-                  <th class="text-center" style="min-width:130px;">
-                    <i class="bi bi-compass me-1"></i>Movement Profile
+                  <th data-sort="name">Player</th>
+                  <th class="text-center">
+                    Team
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Movement Profile (career)</strong><br>Average activity score across this player's matches with positioning data. Higher&nbsp;=&nbsp;more map coverage. Hover a cell for the standard deviation and match count."></i>
+                       title="<strong>Team (career)</strong><br>Not applicable as a single value — players may be on either team across different matches."></i>
                   </th>
-                  <th>Fav Weapon</th>
+                  <th data-sort="matches_played" class="text-end">Matches</th>
+                  <th data-sort="total_pvp_dealt" class="text-end vt-col-split">
+                    PvP
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvP Dealt</strong><br>Damage dealt directly to other human players.<br>Includes friendly-fire. Subset of Dealt.<br><em>Summed across matches.</em>"></i>
+                  </th>
+                  <th data-sort="total_pve_dealt" class="text-end vt-col-split">
+                    PvE
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvE Dealt</strong><br>Damage dealt to AI units and world props.<br>Equals Dealt &minus; PvP.<br><em>Summed across matches.</em>"></i>
+                  </th>
+                  <th data-sort="total_dealt" class="text-end">
+                    Dealt
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Asset Dmg).<br><em>Summed across matches.</em>"></i>
+                  </th>
+                  <th data-sort="total_pvp_received" class="text-end vt-col-split">
+                    PvP In
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvP Received</strong><br>Damage taken from other human players.<br>Subset of Received.<br><em>Summed across matches.</em>"></i>
+                  </th>
+                  <th data-sort="total_pve_received" class="text-end vt-col-split">
+                    PvE In
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>PvE Received</strong><br>Damage taken from AI units and world/environmental sources.<br>Equals Received &minus; PvP In.<br><em>Summed across matches.</em>"></i>
+                  </th>
+                  <th data-sort="total_received" class="text-end">
+                    Received
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Total Damage Received</strong><br>All damage this player personally took.<br>Equals PvP In + PvE In.<br><em>Summed across matches.</em>"></i>
+                  </th>
+                  <th data-sort="net" class="text-end">
+                    Net
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Net Damage</strong><br>Total Dealt &minus; Total Received. Positive = more output than taken.<br><em>Career totals.</em>"></i>
+                  </th>
+                  <th data-sort="ratio" class="text-end">
+                    Ratio
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Damage Ratio</strong><br>Total Dealt &divide; Total Received.<br>&infin; when total received is zero but dealt is not.<br><em>Career totals.</em>"></i>
+                  </th>
+                  <th data-sort="overall_accuracy" class="text-end">Accuracy</th>
+                  <th data-sort="total_kills" class="text-end">Kills</th>
+                  <th data-sort="total_deaths" class="text-end">Deaths</th>
+                  <th data-sort="total_asset_dealt" class="text-end">
+                    Asset Dmg
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Asset Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt.<br><em>Summed across matches.</em>"></i>
+                  </th>
+                  <th data-sort="mean_movement_score" class="text-center" style="min-width:130px;">
+                    <i class="bi bi-compass me-1"></i>Movement
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Movement Profile (career)</strong><br>Average activity score across matches with positioning data (scores are match-relative before averaging). Higher = more map coverage. Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a cell for standard deviation and match count."></i>
+                  </th>
+                  <th data-sort="fav_weapon">Fav Weapon</th>
+                  <th data-sort="weapons_used" class="text-end">
+                    # Wpns
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong># Weapons (career)</strong><br>Distinct weapons with dealt damage across all career matches.<br>Not the sum of per-match weapon counts."></i>
+                  </th>
                 </tr>
               </thead>
               <tbody></tbody>

@@ -13,7 +13,7 @@ This rule codifies that contract and gives the checklist for adding new fields. 
 
 **The global filter applies only to the per-match view**, rendered from `data/processed/<match_id>.json`. `getFilteredData(data, filterState)` in `js/app.js` runs exactly once per per-match render pass.
 
-**The All Matches view** (`data/processed/all_matches.json`) consumes the aggregate directly — `career_stats[]` fields render without any `getFilteredData()` call. The Career Radar's A/B picker (`careerRadarState` in `js/app.js`) is a local, chart-scoped selector that picks which one or two `career_stats[]` entries to draw; it has no cross-chart effect and no interaction with `filterState`.
+**The All Matches view** (`data/processed/all_matches.json`) consumes the aggregate directly — `career_stats[]` fields render without any `getFilteredData()` call. The Career Radar's A/B picker (`careerRadarState` in `js/app.js`) is a local, chart-scoped selector that picks which one or two `career_stats[]` entries to draw; it has no cross-chart effect and no interaction with `filterState`. The **Career Leaderboard** table (`#career-table`) mirrors the per-match Player Leaderboard columns on career totals; column sort uses `careerSortState` in `js/app.js` and likewise does not interact with `filterState`.
 
 Every new field must answer the checklist below for **both** scopes.
 
