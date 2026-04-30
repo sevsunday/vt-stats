@@ -48,18 +48,19 @@
             <i class="bi bi-book me-1"></i>Docs
           </a>
 
-          <!-- URL Sharing: Share + Live Sync Toggle -->
-          <div class="btn-group btn-group-sm vt-nav-share-group" role="group" aria-label="URL sharing">
-            <button class="btn btn-outline-secondary" id="share-url-btn"
-                    title="Copy shareable link to clipboard" aria-label="Copy shareable link to clipboard">
-              <span class="me-1">Share</span><i class="bi bi-link-45deg"></i>
-            </button>
-            <button class="btn btn-outline-secondary" id="live-sync-toggle"
-                    title="Keep URL in sync with current view" aria-label="Toggle live URL sync"
-                    aria-pressed="false">
-              <i class="bi bi-broadcast"></i><span class="vt-nav-label ms-2">Live sync</span>
-            </button>
-          </div>
+          <!-- URL Sharing: Share (one-shot copy) + Live Sync (toggle).
+               Both styled as standalone vt-nav-icon-btn to match the rest of
+               the topnav. Active/flash states are handled by per-id CSS in
+               vtstats-theme.css. -->
+          <button class="vt-nav-icon-btn" id="share-url-btn"
+                  title="Copy shareable link to clipboard" aria-label="Copy shareable link to clipboard">
+            <i class="bi bi-link-45deg"></i><span class="vt-nav-label ms-2">Share</span>
+          </button>
+          <button class="vt-nav-icon-btn" id="live-sync-toggle"
+                  title="Keep URL in sync with current view" aria-label="Toggle live URL sync"
+                  aria-pressed="false">
+            <i class="bi bi-broadcast"></i><span class="vt-nav-label ms-2">Live sync</span>
+          </button>
 
           <!-- Theme Dropdown -->
           <div class="dropdown">
@@ -68,6 +69,13 @@
             </button>
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>
+
+          <!-- Mode Toggle (light/dark). Handler wired by js/theme.js. -->
+          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+            <i class="bi bi-sun-fill"></i>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
+          </button>
 
           <!-- About / Source Repos -->
           <button class="vt-nav-icon-btn" id="about-btn" type="button"
@@ -246,7 +254,7 @@
                     Dealt
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Asset Dmg)."></i>
+                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Unit Dmg)."></i>
                   </th>
                   <th data-sort="pvp_received" class="text-end vt-col-split">
                     PvP In
@@ -282,16 +290,16 @@
                   <th data-sort="kills" class="text-end">Kills</th>
                   <th data-sort="deaths" class="text-end">Deaths</th>
                   <th data-sort="asset_dealt" class="text-end">
-                    Asset Dmg
+                    Unit Dmg
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Asset Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt."></i>
+                       title="<strong>Unit Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt."></i>
                   </th>
                   <th data-sort="activity_score" class="text-center" style="min-width:130px;">
-                    <i class="bi bi-compass me-1"></i>Movement
+                    <i class="bi bi-compass me-1"></i>Movemint
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Movement Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort."></i>
+                       title="<strong>Movemint Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort."></i>
                   </th>
                   <th data-sort="fav_weapon">Fav Weapon</th>
                   <th data-sort="weapons_used" class="text-end"># Wpns</th>
@@ -311,6 +319,10 @@
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0">Combat Timeline</h5>
                 <div class="d-flex align-items-center gap-2">
+                  <button class="btn btn-sm btn-outline-secondary" id="timeline-zoom-reset" type="button"
+                          title="Reset zoom" aria-label="Reset zoom">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                  </button>
                   <div class="btn-group btn-group-sm">
                     <button class="btn btn-outline-secondary active" data-timeline-mode="player">Players</button>
                     <button class="btn btn-outline-secondary" data-timeline-mode="faction">Teams</button>
@@ -371,24 +383,58 @@
         <div class="card mb-4" id="section-rivalry-radar">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0">Rivalry Radar</h5>
+              <h5 class="mb-0">Rivalry Comparison</h5>
               <i class="bi bi-info-circle vt-col-info"
                  data-vt-radar-info="per-match"
                  data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
                  title="Loading&hellip;"></i>
             </div>
             <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="rivalry-radar-custom-toggle" type="button">Custom&hellip;</button>
+              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="rivalry-radar-custom-toggle" type="button">
+                <i class="bi bi-person-fill-gear me-1"></i>Pick players
+              </button>
               <button class="btn btn-sm" data-expand="section-rivalry-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
             </div>
           </div>
           <div class="card-body">
-            <div class="vt-radar-custom-picker d-none mb-3" id="rivalry-radar-custom-picker">
-              <div class="d-flex flex-wrap gap-2 align-items-center">
-                <span class="small" style="color:var(--kb-text-muted);">Compare:</span>
-                <select class="form-select form-select-sm vt-radar-picker-select" id="rivalry-radar-pick-a" aria-label="First player"></select>
-                <span class="small" style="color:var(--kb-text-muted);">vs</span>
-                <select class="form-select form-select-sm vt-radar-picker-select" id="rivalry-radar-pick-b" aria-label="Second player"></select>
+            <!-- Chip-based two-slot picker. Each slot is a Bootstrap dropdown
+                 (data-bs-toggle="dropdown") so keyboard nav (arrows, Esc,
+                 Enter, focus management) comes for free. Menus are
+                 populated dynamically by renderRivalryRadar() in js/app.js
+                 from the current filtered roster. -->
+            <div class="vt-radar-picker d-none mb-3" id="rivalry-radar-custom-picker">
+              <div class="vt-radar-picker-slots">
+                <div class="dropdown vt-radar-picker-dropdown">
+                  <button class="vt-radar-picker-slot" id="rivalry-radar-slot-a" type="button"
+                          data-bs-toggle="dropdown" data-bs-auto-close="true" data-bs-display="dynamic"
+                          aria-expanded="false" aria-label="Pick first player">
+                    <span class="vt-radar-picker-slot-label">Player A</span>
+                    <span class="vt-radar-picker-slot-name">Pick player</span>
+                    <i class="bi bi-chevron-down vt-radar-picker-slot-caret"></i>
+                  </button>
+                  <ul class="dropdown-menu vt-radar-picker-menu" id="rivalry-radar-menu-a"
+                      aria-labelledby="rivalry-radar-slot-a"></ul>
+                </div>
+                <span class="vt-radar-picker-vs">vs</span>
+                <div class="dropdown vt-radar-picker-dropdown">
+                  <button class="vt-radar-picker-slot" id="rivalry-radar-slot-b" type="button"
+                          data-bs-toggle="dropdown" data-bs-auto-close="true" data-bs-display="dynamic"
+                          aria-expanded="false" aria-label="Pick second player">
+                    <span class="vt-radar-picker-slot-label">Player B</span>
+                    <span class="vt-radar-picker-slot-name">Pick player</span>
+                    <i class="bi bi-chevron-down vt-radar-picker-slot-caret"></i>
+                  </button>
+                  <ul class="dropdown-menu vt-radar-picker-menu" id="rivalry-radar-menu-b"
+                      aria-labelledby="rivalry-radar-slot-b"></ul>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary vt-radar-picker-action" id="rivalry-radar-swap"
+                        type="button" title="Swap A and B" aria-label="Swap A and B">
+                  <i class="bi bi-arrow-left-right"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary vt-radar-picker-action" id="rivalry-radar-clear"
+                        type="button" title="Reset to top rivalry" aria-label="Reset to top rivalry">
+                  <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
               </div>
             </div>
             <div class="chart-container"><canvas id="rivalry-radar-canvas"></canvas></div>
@@ -485,11 +531,11 @@
 
       <!-- Tab: Positioning -->
       <div class="tab-pane fade" id="tab-positioning" role="tabpanel" aria-labelledby="tab-positioning-btn">
-        <!-- Always-on intro banner explaining the Movement Profile concept -->
+        <!-- Always-on intro banner explaining the Movemint Profile concept -->
         <div class="vt-info-banner mb-4" id="positioning-intro-banner">
           <i class="bi bi-info-circle"></i>
           <div>
-            <strong>Movement Profile (0-100)</strong> &mdash; how much a player roamed the map (high) vs. stayed near their spawn (low). Combines time out of base, farthest venture, and total ground covered. Scores are self-calibrated per match, so <em>Aggressive</em> here means the same thing on every map.
+            <strong>Movemint Profile (0-100)</strong> &mdash; how much a player roamed the map (high) vs. stayed near their spawn (low). Combines time out of base, farthest venture, and total ground covered. Scores are self-calibrated per match, so <em>Aggressive</em> here means the same thing on every map.
           </div>
         </div>
         <!-- Empty state shown when this match has no UpdateTick data -->
@@ -498,15 +544,15 @@
             <div class="vt-empty-icon mb-3"><i class="bi bi-geo-alt" style="font-size: 2.5rem; color: var(--kb-text-muted);"></i></div>
             <h5 class="mb-2">No positioning data for this match</h5>
             <p style="color: var(--kb-text-muted); max-width: 480px; margin: 0 auto;">
-              This session predates player-position capture. Newer recordings will include movement trails, top-down heatmaps, and Movement Profile scores here.
+              This session predates player-position capture. Newer recordings will include movement trails, top-down heatmaps, and Movemint Profile scores here.
             </p>
           </div>
         </div>
 
-        <!-- Movement Leaderboard -->
+        <!-- Movemint Leaderboard -->
         <div class="card mb-4" id="section-movement-leaderboard">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Movement Leaderboard</h5>
+            <h5 class="mb-0">Movemint Leaderboard</h5>
             <button class="btn btn-sm" data-expand="section-movement-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body table-responsive">
@@ -517,10 +563,10 @@
                   <th>Player</th>
                   <th class="text-center">Team</th>
                   <th data-sort="activity_score" class="text-center" style="min-width:160px;">
-                    <i class="bi bi-compass me-1"></i>Movement Profile
+                    <i class="bi bi-compass me-1"></i>Movemint Profile
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Movement Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a row for hidden details."></i>
+                       title="<strong>Movemint Profile</strong><br>0&nbsp;=&nbsp;stayed at base<br>100&nbsp;=&nbsp;covered most of the map.<br>Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a row for hidden details."></i>
                   </th>
                   <th data-sort="mean_dist" class="text-end">Mean Dist</th>
                   <th data-sort="max_dist" class="text-end">Max Dist</th>
@@ -543,7 +589,7 @@
                   <div class="btn-group btn-group-sm" role="group" aria-label="Distance timeline view mode" id="distance-mode-toggle">
                     <button type="button" class="btn btn-outline-secondary active" data-distance-mode="bands" title="Team IQR bands + median line — best for a quick read">Team bands</button>
                     <button type="button" class="btn btn-outline-secondary" data-distance-mode="all" title="All players at once; hover a line or leaderboard row to highlight">All players</button>
-                    <button type="button" class="btn btn-outline-secondary" data-distance-mode="focus" title="One player highlighted against faint team bands. Click a Movement Leaderboard row to pick.">Focused</button>
+                    <button type="button" class="btn btn-outline-secondary" data-distance-mode="focus" title="One player highlighted against faint team bands. Click a Movemint Leaderboard row to pick.">Focused</button>
                   </div>
                   <div class="form-check form-switch mb-0">
                     <input class="form-check-input" type="checkbox" role="switch" id="distance-smooth-toggle">
@@ -551,7 +597,7 @@
                   </div>
                   <i class="bi bi-info-circle vt-col-info"
                      data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                     title="<div class='text-start' style='max-width:340px;'><strong>Distance from Spawn</strong> &mdash; each player's horizontal distance from their personal spawn point, sampled once per second.<hr class='my-2'><strong>Team bands mode</strong> &mdash; solid line is the team <em>median</em>; the shaded band around it is the <em>IQR</em> (Inter-Quartile Range, p25-p75) &mdash; half the team lives inside the band at that moment. Blue is Team 1, purple is Team 2.<br><br><strong>All players mode</strong> &mdash; every player drawn at low opacity. Hover a line or a Movement Leaderboard row to highlight one.<br><br><strong>Focused mode</strong> &mdash; one player drawn on top of faded team bands for context. Click a row in the Movement Leaderboard above to pick the player; click it again to clear.<br><br><strong>Smooth (5s)</strong> &mdash; centered 5-second rolling median applied before the band is computed, to suppress tick-to-tick noise.<br><br><strong>Gaps in a line</strong> mean the player teleported &mdash; the trail intentionally breaks rather than flying across the map.</div>"></i>
+                     title="<div class='text-start' style='max-width:340px;'><strong>Distance from Spawn</strong> &mdash; each player's horizontal distance from their personal spawn point, sampled once per second.<hr class='my-2'><strong>Team bands mode</strong> &mdash; solid line is the team <em>median</em>; the shaded band around it is the <em>IQR</em> (Inter-Quartile Range, p25-p75) &mdash; half the team lives inside the band at that moment. Blue is Team 1, purple is Team 2.<br><br><strong>All players mode</strong> &mdash; every player drawn at low opacity. Hover a line or a Movemint Leaderboard row to highlight one.<br><br><strong>Focused mode</strong> &mdash; one player drawn on top of faded team bands for context. Click a row in the Movemint Leaderboard above to pick the player; click it again to clear.<br><br><strong>Smooth (5s)</strong> &mdash; centered 5-second rolling median applied before the band is computed, to suppress tick-to-tick noise.<br><br><strong>Gaps in a line</strong> mean the player teleported &mdash; the trail intentionally breaks rather than flying across the map.</div>"></i>
                   <button class="btn btn-sm" data-expand="section-distance-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
                 </div>
               </div>
@@ -572,7 +618,7 @@
         <!-- Per-player small-multiple top-down heatmaps -->
         <div class="card mb-4" id="section-heatmap-grid">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Per-Player Movement Heatmaps</h5>
+            <h5 class="mb-0">Per-Player Movemint Heatmaps</h5>
             <button class="btn btn-sm" data-expand="section-heatmap-grid" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body">
@@ -730,7 +776,7 @@
                     Dealt
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Asset Dmg).<br><em>Summed across matches.</em>"></i>
+                       title="<strong>Total Damage Dealt</strong><br>All damage this player personally dealt.<br>Equals PvP + PvE. Does <em>not</em> include damage from their owned AI (see Unit Dmg).<br><em>Summed across matches.</em>"></i>
                   </th>
                   <th data-sort="avg_total_dealt" class="text-end vt-col-split vt-career-col-avg">
                     Dealt/m
@@ -813,22 +859,22 @@
                        title="<strong>Deaths per match</strong><br>Career deaths &divide; matches played."></i>
                   </th>
                   <th data-sort="total_asset_dealt" class="text-end vt-career-col-total">
-                    Asset Dmg
+                    Unit Dmg
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Asset Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt.<br><em>Summed across matches.</em>"></i>
+                       title="<strong>Unit Damage Dealt</strong><br>Damage output by AI units this player owned (turrets, scavs, etc.).<br>Counted separately from personal Dealt.<br><em>Summed across matches.</em>"></i>
                   </th>
                   <th data-sort="avg_asset_dealt" class="text-end vt-col-split vt-career-col-avg">
-                    Asset/m
+                    Unit/m
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Asset damage per match</strong><br>Career asset dealt total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
+                       title="<strong>Unit damage per match</strong><br>Career unit dealt total &divide; matches played.<br>Matches with zero still count in the denominator."></i>
                   </th>
                   <th data-sort="mean_movement_score" class="text-center vt-career-col-shared" style="min-width:130px;">
-                    <i class="bi bi-compass me-1"></i>Movement
+                    <i class="bi bi-compass me-1"></i>Movemint
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Movement Profile (career)</strong><br>Average activity score across matches with positioning data (scores are match-relative before averaging). Higher = more map coverage. Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a cell for standard deviation and match count."></i>
+                       title="<strong>Movemint Profile (career)</strong><br>Average activity score across matches with positioning data (scores are match-relative before averaging). Higher = more map coverage. Bands: Defensive, Territorial, Balanced, Mobile, Aggressive.<br>Click to sort. Hover a cell for standard deviation and match count."></i>
                   </th>
                   <th class="vt-career-col-shared" data-sort="fav_weapon">Fav Weapon</th>
                   <th data-sort="weapons_used" class="text-end vt-career-col-shared">
@@ -1125,6 +1171,15 @@
 
   <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="vendor/chartjs/chart.umd.min.js"></script>
+  <!-- Hammer.js: gesture lib required by chartjs-plugin-zoom for click-drag
+       pan and pinch-zoom. Wheel-zoom alone would work without it, but
+       drag-pan needs it. ~21KB. -->
+  <script src="vendor/chartjs/hammer.min.js"></script>
+  <!-- chartjs-plugin-zoom v2.2.0: enables wheel-zoom + drag-pan on charts
+       that opt in via options.plugins.zoom. The plugin self-registers
+       (Chart.register at the bottom of the UMD bundle). Currently wired
+       only on the Combat Timeline; see js/charts.js renderTimeline(). -->
+  <script src="vendor/chartjs/chartjs-plugin-zoom.umd.min.js"></script>
   <script src="js/theme.js"></script>
   <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>

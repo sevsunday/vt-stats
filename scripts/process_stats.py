@@ -908,6 +908,20 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
     def nick_for_s64(s64):
         return known_players.get(s64) or s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
 
+    def in_game_nick_for(s64, resolved_name):
+        """Return the raw in-game nick if it differs from `resolved_name`
+        (case-insensitive, trimmed). Otherwise return None so consumers
+        can suppress the subtext entirely. Surfaces the in-game alias on
+        the dashboard only when it adds new information beyond what the
+        canonical/known-name registry already shows.
+        """
+        raw = s64_to_nick.get(s64)
+        if not raw or not resolved_name:
+            return None
+        if raw.strip().casefold() == resolved_name.strip().casefold():
+            return None
+        return raw
+
     # Per-player accumulators (keyed on Steam64)
     player_dealt = defaultdict(float)
     player_received = defaultdict(float)
@@ -1143,11 +1157,19 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             if ud.killer_odf:
                 all_unit_odfs.add(ud.killer_odf)
 
+            killer_name = nick_for_s64(ud.killer) if ud.killer > 0 else f"Team {ud.killer_team}"
+            victim_name = nick_for_s64(ud.victim) if ud.victim > 0 else f"Team {ud.victim_team}"
             kill_feed.append({
                 "tick": ud.tick,
-                "killer": nick_for_s64(ud.killer) if ud.killer > 0 else f"Team {ud.killer_team}",
+                "killer": killer_name,
+                # In-game nicks parallel to leaderboard[].in_game_nick.
+                # null when killer/victim is not a Steam64 (a "Team N"
+                # placeholder), or when the in-game nick matches the
+                # resolved name. UI uses the same suppression rule.
+                "killer_in_game_nick": in_game_nick_for(ud.killer, killer_name) if ud.killer > 0 else None,
                 "killer_odf": ud.killer_odf,
-                "victim": nick_for_s64(ud.victim) if ud.victim > 0 else f"Team {ud.victim_team}",
+                "victim": victim_name,
+                "victim_in_game_nick": in_game_nick_for(ud.victim, victim_name) if ud.victim > 0 else None,
                 "victim_odf": ud.victim_odf,
             })
             i += 1
@@ -1277,11 +1299,16 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
         roster = []
         for slot in sorted(roster_slots[faction_num]):
             s64 = slot_to_s64.get(slot)
+            display_name = nick_map.get(slot, f"Player {slot}")
             roster.append({
                 "slot": slot,
-                "player_id": nick_map.get(slot, f"Player {slot}"),
-                "name": nick_map.get(slot, f"Player {slot}"),
+                "player_id": display_name,
+                "name": display_name,
                 "steam64": str(s64) if s64 else None,
+                # Mirrors leaderboard[].in_game_nick so faction roster UI
+                # can render the same subtle subtext when the in-game alias
+                # differs from the canonical/known name.
+                "in_game_nick": in_game_nick_for(s64, display_name) if s64 else None,
             })
         teams[str(faction_num)] = roster
 
@@ -1341,6 +1368,12 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
         leaderboard.append({
             "player_id": name,
             "name": name,
+            # In-game nick from header.s64_to_nick, surfaced as a subtle
+            # subtext in the UI (leaderboard, kill feed, faction roster) when
+            # it differs from the canonical/known-name `name` field
+            # (case-insensitive, trimmed). None when the canonical name and
+            # the in-game nick match -- the UI suppresses the subtext.
+            "in_game_nick": in_game_nick_for(s64, name) if s64 else None,
             "slot": slot,
             "steam64": str(s64) if s64 else None,
             "faction": faction,

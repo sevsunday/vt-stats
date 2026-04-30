@@ -35,7 +35,7 @@
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
           <a href="index.html" class="vt-nav-icon-btn">
-            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+            <i class="bi bi-speedometer2"></i><span class="vt-nav-label ms-2">Dashboard</span>
           </a>
           <a href="docs.html" class="vt-nav-icon-btn">
             <i class="bi bi-book me-1"></i>Docs
@@ -90,6 +90,16 @@
     <!-- Header card: match info + binpb metadata + downloads + stats banner -->
     <div class="card mb-3 vt-raw-header">
       <div class="card-body">
+        <!-- Back-to-dashboard CTA: preserves match id so the user lands on the
+             same match they were viewing. Filter/tab state is NOT preserved
+             (acceptable v1 limitation; restoring full state would require
+             encoding it on the outbound "View raw" link too). -->
+        <div class="mb-3">
+          <a href="index.html" class="vt-nav-icon-btn vt-raw-back-link" id="rh-back-link"
+             title="Return to dashboard for this match">
+            <i class="bi bi-arrow-left me-1"></i>Back to dashboard
+          </a>
+        </div>
         <div class="d-flex flex-wrap gap-4 align-items-start mb-3">
           <div>
             <span class="stat-label">Match</span><br>

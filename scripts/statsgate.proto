@@ -30,14 +30,12 @@ message StatHeader {
   map<uint64, int32> s64_to_teamnum = 9;
   uint32 player_count = 10;
   uint32 last_tick = 11;
-  // Terrain bounds in world-space units. Axis convention: +X East, +Y Up, +Z North.
-  // All six fields are 0 when the collector does not populate terrain (pre-schema sessions).
-  float terrain_min_x = 12; // World-space minimum X (west edge)
-  float terrain_max_x = 13; // World-space maximum X (east edge)
-  float terrain_min_y = 14; // World-space minimum Y (lowest elevation)
-  float terrain_max_y = 15; // World-space maximum Y (highest elevation)
-  float terrain_min_z = 16; // World-space minimum Z (south edge)
-  float terrain_max_z = 17; // World-space maximum Z (north edge)
+  float terrain_min_x = 12;
+  float terrain_max_x = 13;
+  float terrain_min_y = 14;
+  float terrain_max_y = 15;
+  float terrain_min_z = 16;
+  float terrain_max_z = 17;
 }
 
 // As of now these events only track player shots
@@ -110,8 +108,30 @@ message UnitDestroyed {
   string victim_odf = 7;
 }
 
+// Shooter and undefined if they are not players, this is probably rare but it might occur in mods that use
+// sniping ai, or projectiles that are sniper shells with travel time (shooter might be dead)
 message UnitSniped {
   uint32 tick = 1;
+
+  uint64 shooter = 2;
+  uint32 shooter_team = 3;
+  string shooter_odf = 4;
+
+  uint64 victim = 5;
+  uint32 victim_team = 6;
+  string victim_odf = 7;
+}
+
+// This detects pod and crate pickups
+message PickupPowerup {
+  uint32 tick = 1;
+
+  uint64 picker = 2; // if an AI picks up the powerup this is undefined
+  uint32 picker_team = 3;
+  string picker_odf = 4;
+
+  uint32 powerup_team = 5; // the team that owns the powerup
+  string powerup_odf = 6;
 }
 
 message StatEvent {
@@ -123,6 +143,7 @@ message StatEvent {
     UpdateTick update_tick = 5;
     UnitDestroyed unit_destroyed = 6;
     UnitSniped unit_sniped = 7;
+    PickupPowerup pickup_powerup = 8;
   }
 }
 

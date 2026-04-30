@@ -642,32 +642,54 @@ body::before {
 
 /* ============================================================================
    TOPNAV URL-SYNC BUTTONS
-   Share (one-shot copy) + Live Sync toggle, grouped via .btn-group so they
-   visually read as related URL-sharing controls.
+   Share (one-shot copy) + Live Sync (toggle). Both render as standalone
+   .vt-nav-icon-btn buttons (borderless, transparent) so they match the
+   rest of the topnav. The base .vt-nav-icon-btn rule above already supplies
+   the color/background transitions; these per-id rules only encode the
+   stateful color tints (Live Sync .active, Share flash-success/error).
    ============================================================================ */
 
-#share-url-btn,
-#live-sync-toggle {
-    transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
-}
-
-/* Live Sync "on" state — soft primary tint matches the glass aesthetic and
-   remains visible within the button group. Overrides Bootstrap's default
-   .active background on btn-outline-secondary. */
+/* Live Sync "on" state — soft primary tint, painted on top of the
+   borderless base button. */
 #live-sync-toggle.active {
-    color: var(--kb-primary) !important;
-    border-color: var(--kb-primary) !important;
-    background-color: color-mix(in oklab, var(--kb-primary) 14%, transparent) !important;
+    color: var(--kb-primary);
+    background-color: color-mix(in oklab, var(--kb-primary) 14%, transparent);
 }
 
 #share-url-btn.flash-success {
     color: var(--kb-success);
-    border-color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 14%, transparent);
 }
 
 #share-url-btn.flash-error {
     color: var(--kb-danger);
-    border-color: var(--kb-danger);
+    background-color: color-mix(in oklab, var(--kb-danger) 14%, transparent);
+}
+
+/* ============================================================================
+   IN-GAME NICK SUBTEXT
+   Subtle alias rendered alongside the canonical/known player name when the
+   two differ. Pipeline emits `in_game_nick` (null when names match
+   case-insensitively); UI checks truthiness and renders one of these two
+   variants. Used in: leaderboard rows (block sub), faction roster (inline),
+   and kill feed entries (inline).
+   ============================================================================ */
+
+.vt-nick-sub,
+.vt-nick-inline {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    font-weight: 400;
+    opacity: 0.85;
+}
+
+.vt-nick-sub {
+    display: block;
+    margin-top: -2px;
+}
+
+.vt-nick-inline {
+    margin-left: 0.35em;
 }
 
 /* ============================================================================
@@ -880,24 +902,128 @@ body::before {
 }
 
 /* Custom... dropdown block inside the Rivalry / Career Radar cards. */
-.vt-radar-custom-picker {
+/* Chip-based two-slot rivalry picker (replaces the old dual-select picker).
+   Each slot is a Bootstrap dropdown trigger; menu list is populated
+   dynamically by populateRivalryPickerMenu() in js/app.js. */
+
+.vt-radar-picker {
     padding: 0.5rem 0.75rem;
     border-radius: 8px;
     background: color-mix(in oklab, var(--kb-bg-subtle) 65%, transparent);
     border: 1px solid var(--kb-border-subtle);
 }
 
-.vt-radar-picker-select {
-    min-width: 160px;
-    max-width: 220px;
-    background: var(--kb-bg-card);
-    color: var(--kb-text-primary);
-    border-color: var(--kb-border-subtle);
+.vt-radar-picker-slots {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
 }
 
-.vt-radar-picker-select:focus {
+.vt-radar-picker-dropdown {
+    /* Wrapper for each slot trigger + menu. The Bootstrap .dropdown class
+       handles toggle plumbing. */
+}
+
+.vt-radar-picker-slot {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+    padding: 0.45rem 1.85rem 0.45rem 0.85rem;
+    min-width: 180px;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--kb-bg-card) 80%, transparent);
+    color: var(--kb-text-primary);
+    cursor: pointer;
+    position: relative;
+    text-align: left;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.vt-radar-picker-slot:hover,
+.vt-radar-picker-slot:focus-visible,
+.vt-radar-picker-slot[aria-expanded="true"] {
     border-color: var(--kb-primary);
-    box-shadow: 0 0 0 2px color-mix(in oklab, var(--kb-primary) 25%, transparent);
+    outline: none;
+    background: color-mix(in oklab, var(--kb-bg-card) 95%, transparent);
+}
+
+.vt-radar-picker-slot-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--kb-text-muted);
+    font-weight: 600;
+}
+
+.vt-radar-picker-slot-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    line-height: 1.2;
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Faction-tinted name color to telegraph which side of the comparison
+   each slot represents. */
+.vt-radar-picker-slot[data-faction="1"] .vt-radar-picker-slot-name {
+    color: var(--kb-primary);
+}
+
+.vt-radar-picker-slot[data-faction="2"] .vt-radar-picker-slot-name {
+    color: var(--kb-accent);
+}
+
+/* Empty slot: muted/italic placeholder so it reads as "click to pick". */
+.vt-radar-picker-slot[data-empty="true"] .vt-radar-picker-slot-name {
+    color: var(--kb-text-muted);
+    font-style: italic;
+    font-weight: 400;
+}
+
+.vt-radar-picker-slot-caret {
+    position: absolute;
+    right: 0.65rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.85rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-radar-picker-vs {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--kb-text-muted);
+    text-transform: lowercase;
+    letter-spacing: 0.06em;
+    padding: 0 0.15rem;
+}
+
+.vt-radar-picker-menu {
+    max-height: 320px;
+    overflow-y: auto;
+    min-width: 200px;
+}
+
+.vt-radar-picker-menu .dropdown-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.vt-radar-picker-menu .dropdown-item.is-current i {
+    color: var(--kb-success);
+}
+
+.vt-radar-picker-action {
+    /* Inherits btn-outline-secondary; just keep alignment honest. */
+    align-self: stretch;
 }
 
 /* Toggle button "active" state for Custom... / Compare. */
@@ -1780,15 +1906,6 @@ h4:hover .docs-heading-anchor,
 
     .vt-nav-menu .vt-nav-label {
         display: inline;
-    }
-
-    /* Share + Live Sync btn-group stays horizontal, fills menu width */
-    .vt-nav-menu .vt-nav-share-group {
-        width: 100%;
-    }
-
-    .vt-nav-menu .vt-nav-share-group > .btn {
-        flex: 1;
     }
 
     /* Theme dropdown: render its menu inline with the collapsed menu
