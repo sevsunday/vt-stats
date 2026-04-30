@@ -152,14 +152,67 @@ def build_weapon_name_resolver(odf_db):
     return resolve
 
 
-def disambiguate_weapon_names(ordnance_set, resolve_fn):
-    """When multiple ODF strings resolve to the same display name, append the raw ODF."""
-    raw = {odf: resolve_fn(odf) for odf in ordnance_set}
+def build_unit_name_resolver(odf_db):
+    """Resolve in-game object ODF strings to GameObjectClass.unitName.
+
+    Indexes every top-level category in the ODF DB (Vehicle, Building,
+    Powerup, Pilot, Ordnance, etc.). `unitName` lives on `GameObjectClass`,
+    which every game-object ODF inherits regardless of which top-level
+    bucket it ends up in (BZCC's `apeburst.odf` is bucketed under `Powerup`,
+    `ibscav_vsr.odf` under `Building`, `esuser_m.odf` under `Pilot`, etc.).
+    The flattened ODF DB at `data/odf.min.json` carries each entry's
+    `unitName` directly (no inheritance walk required). VSR-overridden
+    variants whose `unitName` differs from the stock parent are picked up
+    automatically via direct key lookup. Returns `None` when no entry / no
+    `unitName` is available so callers can fall through.
+    """
+    by_key = {}
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            goc = (entry or {}).get("GameObjectClass", {}) or {}
+            name = (goc.get("unitName") or "").strip()
+            if not name:
+                continue
+            key = re.sub(r"\.odf$", "", odf_key, flags=re.IGNORECASE)
+            by_key[key] = name
+
+    def resolve(odf_string):
+        if not odf_string:
+            return None
+        key = re.sub(r"\.odf$", "", odf_string, flags=re.IGNORECASE)
+        return by_key.get(key)
+
+    return resolve
+
+
+def disambiguate_names(odf_set, resolve_fn):
+    """When multiple ODF strings resolve to the same display name, append the raw ODF stem.
+
+    Category-agnostic: works for both weapon ordnance ODFs and vehicle/structure
+    ODFs. Same-name collisions render as `Name (raw_stem)`, e.g.
+    `Pulse (epulse)` / `Pulse (fpulse)` and `Scavenger (ivscav)` /
+    `Scavenger (ivscav_vsr)`.
+
+    Resolvers may return `None` to signal "no name in the DB" (the unit
+    resolver does this so callers can fall through to a title-case stem).
+    Such entries are passed through as `None` and are not counted toward
+    collision detection — otherwise multiple unrecognized ODFs would all
+    falsely collide on `None` and render as the literal string
+    `"None (raw_stem)"`.
+    """
+    raw = {odf: resolve_fn(odf) for odf in odf_set}
     counts = defaultdict(int)
     for name in raw.values():
+        if name is None:
+            continue
         counts[name] += 1
     result = {}
     for odf, name in raw.items():
+        if name is None:
+            result[odf] = None
+            continue
         key = re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE)
         result[odf] = f"{name} ({key})" if counts[name] > 1 else name
     return result
@@ -815,7 +868,7 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
-def process_match(session, source_file, submitter, resolve_weapon, known_players=None):
+def process_match(session, source_file, submitter, resolve_weapon, resolve_unit, known_players=None):
     """Process a single match session into pre-computed stats."""
     header = session.header
     events = session.event_stream
@@ -1167,24 +1220,33 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             if shooter_faction:
                 timeline_faction[shooter_faction][bucket_idx] += dd.amount
 
-    # Build weapon name map
-    weapon_name_map = disambiguate_weapon_names(all_ordnance, resolve_weapon)
+    # Build weapon and unit name maps. Both are scoped to the ODFs the match
+    # actually used so disambiguation suffixes only appear when there is a
+    # genuine collision in this match.
+    weapon_name_map = disambiguate_names(all_ordnance, resolve_weapon)
+    unit_name_map = disambiguate_names(all_unit_odfs, resolve_unit)
 
     def wpn_name(odf):
         return weapon_name_map.get(odf, resolve_weapon(odf))
 
+    def unit_name(odf):
+        return unit_name_map.get(odf) or resolve_unit(odf)
+
     # Build match-global ODF map for the Raw Data Browser. Keys are raw ODF
     # strings as they appear in the binpb; values are the best human-readable
-    # name. Weapons resolve via `wpn_name` (which uses the ODF DB chain).
-    # Non-weapon ODFs (vehicles, structures, player craft) fall through to a
-    # title-cased form of the raw stem, matching the convention used elsewhere
-    # (e.g. `kills.by_vehicle`). Match-global (always unfiltered).
+    # name. Resolution chain: weapons via `wpn_name` (ODF DB Weapon.* chain),
+    # then vehicles/structures via `unit_name` (Vehicle.*.GameObjectClass.unitName),
+    # then a title-cased form of the raw stem as a last-resort fallback for
+    # ODFs the DB does not recognize. Match-global (always unfiltered).
     def prettify_odf(odf):
         resolved = wpn_name(odf)
         raw_stem = re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE)
-        if resolved == raw_stem:
-            return raw_stem.replace("_", " ").title()
-        return resolved
+        if resolved != raw_stem:
+            return resolved
+        unit = unit_name(odf)
+        if unit:
+            return unit
+        return raw_stem.replace("_", " ").title()
 
     odf_map = {
         odf: prettify_odf(odf)
@@ -1550,7 +1612,7 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
             "by_vehicle": [
                 {
                     "odf": odf,
-                    "name": re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE).replace("_", " ").title(),
+                    "name": prettify_odf(odf),
                     "count": count,
                 }
                 for odf, count in vehicle_destruction_count.most_common()
@@ -1862,6 +1924,7 @@ def main():
         print("WARNING: odf.min.json not found, weapon names will be raw ODF strings")
 
     resolve_weapon = build_weapon_name_resolver(odf_db)
+    resolve_unit = build_unit_name_resolver(odf_db)
 
     # Load canonical player names
     known_players = load_known_players()
@@ -1885,7 +1948,7 @@ def main():
         session = load_session(session_path)
         print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
 
-        match_data = process_match(session, session_path.name, submitter, resolve_weapon, known_players)
+        match_data = process_match(session, session_path.name, submitter, resolve_weapon, resolve_unit, known_players)
         all_match_data.append(match_data)
         submitter_by_id[match_data["match"]["id"]] = submitter
 

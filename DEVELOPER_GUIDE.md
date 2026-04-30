@@ -261,11 +261,13 @@ Items flagged for the upstream collector / proto, not blocking for current dashb
 
 ---
 
-## 4. ODF Integration — Weapon Name Resolution
+## 4. ODF Integration — Name Resolution
 
-The `odf.min.json` file contains BZCC Object Definition File data used to resolve raw ordnance ODF strings (e.g. `chaingun_c.odf`) into human-readable weapon names (e.g. `Chain Gun`).
+The `odf.min.json` file contains BZCC Object Definition File data used to resolve raw ODF strings into human-readable names. Two complementary resolvers cover the two categories of ODFs the pipeline encounters: ordnance/weapons and vehicles/structures.
 
-### Resolution Chain
+### Weapon Resolution Chain (`build_weapon_name_resolver`)
+
+Resolves ordnance ODFs (e.g. `chaingun_c.odf` → `Chain Gun`):
 
 1. `WeaponClass.ordName` → `WeaponClass.wpnName`
 2. `DispenserClass.objectClass` → `WeaponClass.wpnName`
@@ -274,7 +276,19 @@ The `odf.min.json` file contains BZCC Object Definition File data used to resolv
 5. **Fallback**: Strip `.odf` extension and display the raw ODF key
 6. **Null ordnance**: Display `"Unknown"`
 
-When multiple ODF strings resolve to the same display name, the raw ODF key is appended in parentheses for disambiguation (e.g. `Shell Gun (shellgun_c)`).
+### Unit Resolution Chain (`build_unit_name_resolver`)
+
+Resolves any in-game object ODF (vehicles, buildings, deployable powerups, pilots, etc.) to its `GameObjectClass.unitName`. The resolver indexes every top-level category in the ODF DB — `Vehicle.*`, `Building.*` (recyclers/factories/extractors like `ibscav_vsr.odf` → `Extractor`), `Powerup.*` (deployable weapon pods like `apeburst.odf` → `Burst Gun` and `apchainvsr.odf` → `Chain Gun`), `Pilot.*`, `Ordnance.*`. `unitName` lives on `GameObjectClass`, which every game-object ODF inherits regardless of which top-level bucket it ends up in. The flattened ODF DB carries each entry's `unitName` directly, so VSR-overridden variants whose `unitName` differs from the stock parent are picked up automatically. Returns `None` when no entry / no `unitName` is available so callers can fall through.
+
+### Combined `prettify_odf` Chain
+
+`prettify_odf` is the canonical pipeline-side entry point used to populate both `odf_map` and `kills.by_vehicle[].name`:
+
+1. Try the weapon resolver. If it returns a real hit (anything other than the raw stem), use it.
+2. Otherwise try the unit resolver (`Vehicle.*.GameObjectClass.unitName`). If it returns a name, use it.
+3. Otherwise fall back to the title-cased stem (`ivscav_vsr.odf` → `Ivscav Vsr`).
+
+Same-name collisions inside a match — including `_vsr` siblings of stock units — disambiguate as `Name (raw_stem)` via the shared `disambiguate_names` helper (e.g. `Pulse (epulse)` / `Pulse (fpulse)`, `Scavenger (ivscav)` / `Scavenger (ivscav_vsr)`). Disambiguation is scoped to the ODFs the match actually used so suffixes only appear when there is a genuine collision.
 
 ---
 

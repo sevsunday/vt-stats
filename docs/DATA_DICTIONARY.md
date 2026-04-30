@@ -389,7 +389,7 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 
 | Displayed | JSON Path | Computed From |
 |---|---|---|
-| Vehicle names | `kills.by_vehicle[].name` | Vehicle ODF with `.odf` stripped and title-cased |
+| Vehicle names | `kills.by_vehicle[].name` | Resolved via `prettify_odf` — weapon ODFs via the `Weapon.*` chain, otherwise via `GameObjectClass.unitName` across every top-level ODF DB category (`Vehicle`, `Building`, `Powerup`, `Pilot`, `Ordnance`). Same-name collisions (including `_vsr` siblings) disambiguate as `Name (raw_stem)`. Falls back to a title-cased stem only for ODFs the DB does not recognize at all. |
 | Destruction count | `kills.by_vehicle[].count` | Count of `UnitDestroyed` events per `victim_odf` |
 
 ### Player Performance Radar (spiderweb)
@@ -672,7 +672,7 @@ Kill/death data from UnitDestroyed events.
 |---|---|---|
 | `leaderboard` | `array` | Sorted by kills descending. Each: `{ player_id, name, kills, deaths, kd_ratio }` |
 | `feed` | `array` | Chronological kill events. Each: `{ tick, killer, killer_odf, victim, victim_odf }` |
-| `by_vehicle` | `array` | Vehicle types destroyed, sorted by count descending. Each: `{ odf, name, count }` |
+| `by_vehicle` | `array` | Vehicle types destroyed, sorted by count descending. Each: `{ odf, name, count }`. `name` is resolved via the same `prettify_odf` chain that powers `odf_map` (weapons → vehicle `unitName` → title-cased stem), with `Name (raw_stem)` disambiguation when multiple ODFs in the match share a display name. Capped to top 15 after filtering ignored ODFs (see `VEHICLE_DESTRUCTION_IGNORE_ODFS` in `scripts/process_stats.py`). |
 | `kill_rivalry_matrix` | `object` | Nested `{ "KillerName": { "VictimName": killCount } }`. Only player-on-player kills. |
 
 #### `positioning`
