@@ -173,6 +173,40 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
   }
 
   const isStacked = datasets.length > 1;
+  // X-axis only zoom via chartjs-plugin-zoom (vendored). The plugin
+  // self-registers when its UMD bundle loads; this options block opts the
+  // timeline chart in.
+  //   - Drag (no modifier): rectangle-select an X-range to zoom into it.
+  //     Primary gesture for time-series UX -- pick a window of interest
+  //     and dive in.
+  //   - Wheel: smooth zoom in/out at cursor.
+  //   - Shift+drag: pan the visible X-range (drag-zoom + drag-pan would
+  //     conflict without a modifier; selection wins as the default).
+  //   - Y-axis is locked; pinch is off (mouse-only for v1).
+  // Zoom state is intentionally NOT preserved across re-renders -- mode
+  // toggle / filter change / match switch all destroy + recreate the chart,
+  // and a fresh dataset deserves a fresh viewport.
+  const zoomEnabled = typeof window !== 'undefined'
+    && (window.ChartZoom || window['chartjs-plugin-zoom']);
+  const zoomPluginConfig = zoomEnabled ? {
+    zoom: {
+      pan: { enabled: true, mode: 'x', modifierKey: 'shift' },
+      zoom: {
+        wheel: { enabled: true, speed: 0.08 },
+        drag: {
+          enabled: true,
+          backgroundColor: 'rgba(99, 102, 241, 0.18)',
+          borderColor: 'rgba(99, 102, 241, 0.55)',
+          borderWidth: 1,
+          threshold: 5,
+        },
+        pinch: { enabled: false },
+        mode: 'x',
+      },
+      limits: { x: { min: 'original', max: 'original' } },
+    },
+  } : {};
+
   const chart = new Chart(ctx, {
     type: 'line',
     data: { labels: timeline.labels, datasets },
@@ -188,6 +222,7 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
           },
         },
         legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } },
+        ...zoomPluginConfig,
       },
       scales: {
         x: { title: { display: true, text: 'Match Time' }, ticks: { maxTicksLimit: 20 } },

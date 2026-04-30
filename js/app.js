@@ -1410,6 +1410,19 @@
     });
   });
 
+  // Combat Timeline: Reset Zoom button. Walks activeCharts to find the
+  // timeline-chart instance and calls plugin-zoom's resetZoom() helper.
+  // No-op when the plugin isn't loaded or no timeline chart exists.
+  const timelineZoomResetBtn = document.getElementById('timeline-zoom-reset');
+  if (timelineZoomResetBtn) {
+    timelineZoomResetBtn.addEventListener('click', () => {
+      const canvas = document.getElementById('timeline-chart');
+      if (!canvas) return;
+      const chart = activeCharts.find(c => c && c.canvas === canvas);
+      if (chart && typeof chart.resetZoom === 'function') chart.resetZoom();
+    });
+  }
+
   // --- Core Filter Logic ---
   function getFilteredData(data, filter) {
     if (filter.mode === 'all') return data;
@@ -2249,10 +2262,10 @@
     const sizeEl = document.getElementById('info-map-size');
     if (sizeEl) {
       if (meta.terrainSize) {
-        sizeEl.textContent = `${Math.round(meta.terrainSize.x)} \u00D7 ${Math.round(meta.terrainSize.z)}u`;
+        sizeEl.textContent = `${Math.round(meta.terrainSize.x)} \u00D7 ${Math.round(meta.terrainSize.z)}m`;
         sizeEl.title = 'Terrain bounds from StatHeader (actual collected data).';
       } else if (meta.canonicalSize) {
-        sizeEl.textContent = `~${Math.round(meta.canonicalSize)}u`;
+        sizeEl.textContent = `~${Math.round(meta.canonicalSize)}m`;
         sizeEl.title = 'Canonical size from VSR_MAP_DATA (pre-schema session — no terrain bounds on wire).';
       } else {
         sizeEl.textContent = '—';
@@ -2265,7 +2278,7 @@
     const elevEl = document.getElementById('info-map-elevation');
     if (elevEl) {
       if (meta.elevation) {
-        elevEl.textContent = `${Math.round(meta.elevation.min)} \u2192 ${Math.round(meta.elevation.max)}u`;
+        elevEl.textContent = `${Math.round(meta.elevation.min)} \u2192 ${Math.round(meta.elevation.max)}m`;
         elevEl.title = 'Terrain Y range (min \u2192 max) from StatHeader.';
       } else {
         elevEl.textContent = '—';
@@ -2280,15 +2293,15 @@
     const b2bEl = document.getElementById('info-base-to-base');
     if (b2bEl) {
       if (meta.empiricalB2B != null) {
-        b2bEl.textContent = `${Math.round(meta.empiricalB2B)}u`;
+        b2bEl.textContent = `${Math.round(meta.empiricalB2B)}m`;
         let tipHtml;
         if (meta.canonicalB2B != null) {
-          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}u ` +
+          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}m ` +
             `(spawn centroid distance this match)<br>` +
-            `<strong>Canonical:</strong> ${Math.round(meta.canonicalB2B)}u ` +
+            `<strong>Canonical:</strong> ${Math.round(meta.canonicalB2B)}m ` +
             `<small>(map-design reference)</small>`;
         } else {
-          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}u ` +
+          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}m ` +
             `(spawn centroid distance this match)`;
         }
         b2bEl.setAttribute('data-bs-original-title', tipHtml);
@@ -2472,7 +2485,16 @@
 
     const rosterHtml = (teamList) => {
       if (!teamList || teamList.length === 0) return '<em style="color:var(--kb-text-muted)">No players</em>';
-      return teamList.map(p => esc(p.name)).join(', ');
+      // Render each name with optional inline in-game-nick subtext when the
+      // canonical/known name differs from the in-game alias. The subtext is
+      // emitted by the pipeline (in_game_nick is null when they match) so
+      // we just check truthiness here.
+      return teamList.map(p => {
+        const nick = p.in_game_nick
+          ? `<span class="vt-nick-inline">@${esc(p.in_game_nick)}</span>`
+          : '';
+        return `${esc(p.name)}${nick}`;
+      }).join(', ');
     };
 
     const leaderName = (teamList, leaderSlot) => {
@@ -2541,9 +2563,12 @@
       const moveCell = typeof renderMovementCell === 'function'
         ? renderMovementCell(positioning, r.name)
         : '<span style="color:var(--kb-text-muted);">—</span>';
+      const nickSub = r.in_game_nick
+        ? `<small class="vt-nick-sub">@${esc(r.in_game_nick)}</small>`
+        : '';
       return `<tr>
         <td>${i + 1}</td>
-        <td class="fw-semibold">${esc(r.name)}</td>
+        <td class="fw-semibold">${esc(r.name)}${nickSub}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
         <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>
@@ -2685,6 +2710,51 @@
     });
   }
 
+  // Update one slot chip's visible label + faction tint. `slotKey` is 'a'/'b'.
+  // factionMap is name -> faction-number; falsy faction means unknown.
+  function updateRivalryPickerSlot(slotKey, currentName, factionMap) {
+    const slot = document.getElementById('rivalry-radar-slot-' + slotKey);
+    if (!slot) return;
+    const nameEl = slot.querySelector('.vt-radar-picker-slot-name');
+    if (!nameEl) return;
+    if (currentName) {
+      nameEl.textContent = currentName;
+      slot.dataset.empty = 'false';
+      const faction = factionMap.get(currentName);
+      if (faction === 1 || faction === 2) {
+        slot.dataset.faction = String(faction);
+      } else {
+        delete slot.dataset.faction;
+      }
+    } else {
+      nameEl.textContent = 'Pick player';
+      slot.dataset.empty = 'true';
+      delete slot.dataset.faction;
+    }
+  }
+
+  // Rebuild one slot's dropdown menu from the current filtered roster.
+  // Marks the currently-selected name with a check-mark icon (visual hint
+  // only; actual selection state lives on rivalryRadarPair).
+  function populateRivalryPickerMenu(slotKey, names, currentName) {
+    const menu = document.getElementById('rivalry-radar-menu-' + slotKey);
+    if (!menu) return;
+    if (!names.length) {
+      menu.innerHTML = '<li><span class="dropdown-item-text vt-muted small">No players in view</span></li>';
+      return;
+    }
+    menu.innerHTML = names.map(n => {
+      const isCurrent = n === currentName;
+      const check = isCurrent ? '<i class="bi bi-check2 ms-2"></i>' : '';
+      return `<li><button type="button"
+        class="dropdown-item${isCurrent ? ' is-current' : ''}"
+        data-rivalry-pick-slot="${slotKey}"
+        data-rivalry-pick-name="${esc(n)}">
+        <span>${esc(n)}</span>${check}
+      </button></li>`;
+    }).join('');
+  }
+
   // Rivalry Radar (compare mode). Persists the selected pair in
   // rivalryRadarPair across filter changes, reconciling against the filtered
   // roster and falling back to the first visible top_rivalries entry.
@@ -2711,17 +2781,18 @@
       }
     }
 
-    // Populate Custom... dropdowns from the current match roster
-    const selA = document.getElementById('rivalry-radar-pick-a');
-    const selB = document.getElementById('rivalry-radar-pick-b');
-    const buildOpts = (sel, selectedName) => {
-      if (!sel) return;
-      sel.innerHTML = names.map(n =>
-        `<option value="${esc(n)}"${n === selectedName ? ' selected' : ''}>${esc(n)}</option>`
-      ).join('');
-    };
-    buildOpts(selA, rivalryRadarPair.a);
-    buildOpts(selB, rivalryRadarPair.b);
+    // Populate the chip-based two-slot picker from the current match roster.
+    // Each slot is a Bootstrap dropdown; we update both the visible slot
+    // label (current selection) and the menu list (all roster names).
+    // Faction colors come from data.leaderboard so each chip tints to its
+    // player's faction (Team 1 = primary, Team 2 = accent).
+    const factionByName = new Map(
+      (data.leaderboard || []).map(p => [p.name, p.faction])
+    );
+    updateRivalryPickerSlot('a', rivalryRadarPair.a, factionByName);
+    updateRivalryPickerSlot('b', rivalryRadarPair.b, factionByName);
+    populateRivalryPickerMenu('a', names, rivalryRadarPair.a);
+    populateRivalryPickerMenu('b', names, rivalryRadarPair.b);
 
     const picker = document.getElementById('rivalry-radar-custom-picker');
     if (picker) picker.classList.toggle('d-none', !rivalryRadarCustom);
@@ -2788,12 +2859,18 @@
       const m = Math.floor(sec / 60);
       const s = Math.floor(sec % 60);
       const ts = `${m}:${String(s).padStart(2, '0')}`;
+      const killerNick = entry.killer_in_game_nick
+        ? `<span class="vt-nick-inline">@${esc(entry.killer_in_game_nick)}</span>`
+        : '';
+      const victimNick = entry.victim_in_game_nick
+        ? `<span class="vt-nick-inline">@${esc(entry.victim_in_game_nick)}</span>`
+        : '';
       html += `<div class="d-flex align-items-center gap-2 py-1" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
       html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
-      html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>${killerNick}`;
       html += `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.killer_odf))})</span>`;
       html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
-      html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>${victimNick}`;
       html += `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.victim_odf))})</span>`;
       html += `</div>`;
     });
@@ -3417,25 +3494,49 @@
     }
   });
 
-  // Custom... / Career dropdown change handlers (delegated via 'change')
+  // Career dropdown change handler (delegated via 'change'). Career compare
+  // still uses native <select>s; the rivalry-radar picker was rebuilt in
+  // Phase 2 as chip-based dropdowns and uses click handlers instead.
   document.addEventListener('change', (e) => {
     if (!e.target) return;
-    if ((e.target.id === 'rivalry-radar-pick-a' || e.target.id === 'rivalry-radar-pick-b') && currentFilteredData) {
-      const a = document.getElementById('rivalry-radar-pick-a');
-      const b = document.getElementById('rivalry-radar-pick-b');
-      if (a && b) {
-        rivalryRadarPair = { a: a.value, b: b.value };
-        renderRivalryRadar(currentFilteredData);
-        syncRivalryCardActive();
-      }
-      return;
-    }
     if ((e.target.id === 'career-radar-pick-a' || e.target.id === 'career-radar-pick-b') && window.__vtAllMatchesData) {
       const a = document.getElementById('career-radar-pick-a');
       const b = document.getElementById('career-radar-pick-b');
       if (a) careerRadarState.a = a.value;
       if (b && careerRadarState.compare) careerRadarState.b = b.value;
       renderCareerRadar(window.__vtAllMatchesData);
+      return;
+    }
+  });
+
+  // Rivalry picker: click on a menu item, swap, or clear button.
+  document.addEventListener('click', (e) => {
+    if (!currentFilteredData) return;
+
+    const pickItem = e.target.closest('[data-rivalry-pick-slot]');
+    if (pickItem) {
+      const slotKey = pickItem.dataset.rivalryPickSlot;
+      const name = pickItem.dataset.rivalryPickName;
+      if (slotKey === 'a') rivalryRadarPair = { ...rivalryRadarPair, a: name };
+      else if (slotKey === 'b') rivalryRadarPair = { ...rivalryRadarPair, b: name };
+      renderRivalryRadar(currentFilteredData);
+      syncRivalryCardActive();
+      return;
+    }
+
+    if (e.target.closest('#rivalry-radar-swap')) {
+      rivalryRadarPair = { a: rivalryRadarPair.b, b: rivalryRadarPair.a };
+      renderRivalryRadar(currentFilteredData);
+      syncRivalryCardActive();
+      return;
+    }
+
+    if (e.target.closest('#rivalry-radar-clear')) {
+      // Force a re-reconcile to the default top-rivalry pair by clearing the
+      // current pair so renderRivalryRadar's reconciliation logic kicks in.
+      rivalryRadarPair = { a: null, b: null };
+      renderRivalryRadar(currentFilteredData);
+      syncRivalryCardActive();
       return;
     }
   });

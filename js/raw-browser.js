@@ -519,6 +519,11 @@
     $rhPlayers.textContent = entry.player_count != null ? String(entry.player_count) : '—';
     $rhSubmitter.textContent = entry.submitter || '—';
 
+    // Wire the Back-to-dashboard link with match-id passthrough so the user
+    // lands on the same match they were viewing in raw mode.
+    const backLink = document.getElementById('rh-back-link');
+    if (backLink) backLink.href = `index.html?match=${encodeURIComponent(matchId)}`;
+
     // URLs for the three artifacts.
     const processedUrl = `data/processed/${entry.file}`;
     const binpbUrl = buildBinpbUrl(entry);

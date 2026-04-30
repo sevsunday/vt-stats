@@ -40,7 +40,7 @@ function renderMovementCell(positioning, name) {
   const band = p.metrics.movement_band;
   const color = _movementScoreColor(score);
   const pct = Math.max(0, Math.min(100, score));
-  const barTitle = `${band} (${score}/100) \u2014 mean ${Math.round(p.metrics.mean_dist)}u, max ${Math.round(p.metrics.max_dist)}u, ${Math.round(p.metrics.time_in_base_pct * 100)}% in base`;
+  const barTitle = `${band} (${score}/100) \u2014 mean ${Math.round(p.metrics.mean_dist)}m, max ${Math.round(p.metrics.max_dist)}m, ${Math.round(p.metrics.time_in_base_pct * 100)}% in base`;
   return `
     <div class="vt-movement-cell" title="${barTitle.replace(/"/g, '&quot;')}">
       <div class="vt-movement-cell-top">
@@ -106,10 +106,10 @@ function renderMovementLeaderboard(tableId, positioning, leaderboard, sortState)
       (r.time_to_first_leave_sec < 60 ? `${r.time_to_first_leave_sec}s` :
         `${Math.floor(r.time_to_first_leave_sec / 60)}m ${r.time_to_first_leave_sec % 60}s`);
     const rowTitle = `${r.band} (${r.score}/100)
-Area covered: ${Math.round(r.convex_hull_area).toLocaleString()} u\u00b2
+Area covered: ${Math.round(r.convex_hull_area).toLocaleString()} m\u00b2
 First leave: ${firstLeave}
 Returns to base: ${r.return_to_base_count}
-P95 distance: ${Math.round(r.p95_dist).toLocaleString()}u`;
+P95 distance: ${Math.round(r.p95_dist).toLocaleString()}m`;
     return `<tr class="vt-movement-row" data-name="${_attr(r.name)}" title="${_attr(rowTitle)}">
       <td>${i + 1}</td>
       <td class="fw-semibold">${_esc(r.name)}</td>
@@ -501,9 +501,9 @@ function renderDistanceTimeline(canvasId, positioning, allNames, opts) {
     }
     const med = Math.round(item.parsed.y).toLocaleString();
     if (lo != null && hi != null) {
-      return `Team ${ds._faction} median: ${med}u (IQR ${Math.round(lo).toLocaleString()}-${Math.round(hi).toLocaleString()}u)`;
+      return `Team ${ds._faction} median: ${med}m (IQR ${Math.round(lo).toLocaleString()}-${Math.round(hi).toLocaleString()}m)`;
     }
-    return `Team ${ds._faction} median: ${med}u`;
+    return `Team ${ds._faction} median: ${med}m`;
   }
 
   const ctx = canvas.getContext('2d');
@@ -540,7 +540,7 @@ function renderDistanceTimeline(canvasId, positioning, allNames, opts) {
                 const line = bandsTooltipLabel(item);
                 if (line) return line;
               }
-              return `${ds.label}: ${Math.round(item.parsed.y).toLocaleString()}u from spawn`;
+              return `${ds.label}: ${Math.round(item.parsed.y).toLocaleString()}m from spawn`;
             },
           },
         },
@@ -572,7 +572,7 @@ function renderDistanceTimeline(canvasId, positioning, allNames, opts) {
           },
         },
         y: {
-          title: { display: true, text: 'Distance from Spawn (units)' },
+          title: { display: true, text: 'Distance from Spawn (meters)' },
           beginAtZero: true,
         },
       },
@@ -1005,7 +1005,7 @@ function renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, shared
 }
 
 // JS-side mirror of POSITIONING_HEATMAP_GRID_SIZE in scripts/process_stats.py.
-// Drives the "~X u per cell" label in the legend.
+// Drives the "~X m per cell" label in the legend.
 const HEATMAP_GRID_SIZE = 32;
 
 // Build the small-multiples legend. Generated in JS so the per-match scale
@@ -1013,7 +1013,7 @@ const HEATMAP_GRID_SIZE = 32;
 function _buildHeatmapLegend(positioning) {
   const mb = positioning.map_bounds;
   const cellU = mb ? Math.round((mb.max.x - mb.min.x) / HEATMAP_GRID_SIZE) : null;
-  const scaleLabel = cellU ? `~${cellU}u per cell` : '';
+  const scaleLabel = cellU ? `~${cellU}m per cell` : '';
   return `
     <div class="vt-heatmap-legend">
       <span class="vt-heatmap-legend-item"><span class="vt-heatmap-legend-diamond"></span> spawn</span>

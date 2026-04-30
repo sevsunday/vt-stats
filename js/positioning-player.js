@@ -236,7 +236,7 @@
             ...glassTooltipConfig,
             callbacks: {
               title: (items) => formatSec(items[0].parsed.x),
-              label: (item) => `${item.dataset.label}: ${Math.round(item.parsed.y).toLocaleString()}u`,
+              label: (item) => `${item.dataset.label}: ${Math.round(item.parsed.y).toLocaleString()}m`,
             },
           },
         },
@@ -663,7 +663,7 @@
       const d = Math.hypot(interp.x - p.spawn.x, interp.z - p.spawn.z);
       const color = factionColor(name);
       const inBase = d < p.personal_base_radius;
-      const chip = inBase ? 'in base' : `${Math.round(d)}u out`;
+      const chip = inBase ? 'in base' : `${Math.round(d)}m out`;
       const chipStyle = inBase
         ? `background:var(--kb-success)22;color:var(--kb-success);`
         : `background:${color}22;color:${color};`;

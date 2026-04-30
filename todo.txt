@@ -1,0 +1,86 @@
+VT Stats - TODO (Phase 3 + Phase 4)
+
+==============================================================
+Phase 3 - Pipeline + new schema (REQUIRES proto regen + rerun)
+==============================================================
+
+Trigger: scripts/statsgate.proto adds PickupPowerup message + pickup_powerup = 8.
+Goal:    distinguish crate/pod pickups from real destructions; trim noise.
+
+Tasks:
+  1. Regenerate scripts/statsgate_pb2.py from the new .proto (protoc).
+  2. Regenerate vendor/protobufjs/statsgate.proto.json (npx pbjs -t json).
+  3. Run scripts/verify_proto_decode.mjs to confirm Python <-> Node parity.
+  4. In scripts/process_stats.py:
+     - Add a `pickup_powerup` branch in the event loop (around line 1195).
+     - Track pickups: (tick, picker_s64, powerup_team, powerup_odf).
+     - When walking unit_destroyed, suppress entries from kills.by_vehicle
+       and kills.feed if a matching pickup_powerup exists at same tick
+       (or +/- a small window) with same victim_odf <-> powerup_odf.
+     - Optionally emit a new pickups.{feed, by_player} block per match.
+  5. Add fball2c.odf (and other flame-mine related ODFs) to
+     VEHICLE_DESTRUCTION_IGNORE_ODFS for the "remove flame mines from
+     destruction feed" goal.
+  6. Optionally consume the new UnitSniped fields (shooter_odf,
+     shooter_team, victim, victim_team, victim_odf) -- the proto now
+     ships this context. Build out a Snipe Feed UI if worth it.
+  7. Update js/raw-browser.js event-stream filter chips so pickup_powerup
+     shows up in the events tier.
+  8. Update .cursor/rules/data-schema.mdc + DEVELOPER_GUIDE.md.
+  9. Reprocess: python scripts/process_stats.py.
+
+Risks:
+  - Verify with real session data whether the engine emits BOTH a
+    UnitDestroyed AND a PickupPowerup for the same crate, or only the
+    new event. The dedup logic depends on this.
+  - VEHICLE_DESTRUCTION_IGNORE_ODFS only affects kills.by_vehicle (the
+    chart). Kill_feed and odf_map still surface every event - confirm
+    the user wants flame mines hidden in the chart only or everywhere.
+
+==========================================================
+Phase 4 - Heatmap calibration (data tuning, no pipeline)
+==========================================================
+
+Trigger: per-player heatmap overlays don't always align with map images.
+Goal:    fix image-vs-data alignment without writing more code.
+
+Hypothesis: the iondriver-fetched top-down image for a given map covers
+a DIFFERENT region than the engine's terrain_bounds. Most maps have
+playable area smaller than full terrain extents; iondriver screenshots
+typically show only the playable area.
+
+Already in place:
+  - data/map-registry.json[<map>].image_calibration.image_bounds_world
+    is a hand-tuned per-map override, preserved across registry rebuilds.
+  - js/app.js getMapMeta() prefers calibration over terrain_bounds.
+
+Tasks:
+  1. Identify which specific maps are visually misaligned. Open each in
+     the dashboard, eyeball the heatmap vs the underlying image.
+  2. For each broken map, hand-tune `image_bounds_world` in the registry
+     entry. Reload, iterate.
+  3. Document the calibration workflow in DEVELOPER_GUIDE.md "Map Assets
+     and Overlays" section so future maps can be tuned the same way.
+  4. (Stretch) Build a tiny dev-only calibration tool: a slider UI in
+     the dashboard that lets you nudge image_bounds_world live and copy
+     the resulting JSON.
+
+Do NOT:
+  - Auto-derive image bounds from terrain_bounds. They're often genuinely
+    different and any heuristic will be wrong as often as right.
+  - Crop/resize images. Calibrate the projection, not the asset.
+
+==========================================================
+Other deferred decisions (revisit before Phase 3)
+==========================================================
+
+- Distance from Spawn chart - is it earning its real estate?
+  Three options on the table:
+    (a) Keep + improve (shade base radius, mark first-leave events).
+    (b) Replace with Map Coverage Over Time (cumulative unique cells).
+    (c) Demote from tab-level to per-player drilldown only.
+  Recommendation in earlier convo: option (c). Decide before next pass.
+
+- Per-player heatmap fix vs Distance chart removal - both relate to
+  positioning visualizations. Consider doing them in the same pass for
+  a unified Movemint UX refresh.
