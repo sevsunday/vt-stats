@@ -60,6 +60,17 @@ POSITIONING_POLAR_RADIAL_BINS = 8
 # See docs/sentinel-damage.md for full evidence chain.
 SENTINEL_DAMAGE_THRESHOLD = 1e6
 
+# ODFs to drop from `kills.by_vehicle` only. Non-combatant objects that the
+# engine emits UnitDestroyed events for (e.g. APC-deployed scrap/service pods)
+# spam the Vehicle Destruction Breakdown chart with counts an order of
+# magnitude larger than real player vehicles, squashing every real bar against
+# the y-axis. The raw events still flow through `kill_feed`, `odf_map`, and
+# the Raw Data Browser untouched -- only the leaderboard summary is filtered.
+# Match keys lowercased for safety.
+VEHICLE_DESTRUCTION_IGNORE_ODFS = frozenset({
+    "apserv_vsr.odf",
+})
+
 
 def _is_sentinel_damage(amount):
     """True when a damage amount is the engine's DAMAGE_TYPE_UNKNOWN sentinel.
@@ -1542,8 +1553,9 @@ def process_match(session, source_file, submitter, resolve_weapon, known_players
                     "name": re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE).replace("_", " ").title(),
                     "count": count,
                 }
-                for odf, count in vehicle_destruction_count.most_common(15)
-            ],
+                for odf, count in vehicle_destruction_count.most_common()
+                if odf.lower() not in VEHICLE_DESTRUCTION_IGNORE_ODFS
+            ][:15],
             "kill_rivalry_matrix": {
                 nick_for_s64(killer): {
                     nick_for_s64(victim): count
