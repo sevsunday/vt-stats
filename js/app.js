@@ -1590,20 +1590,20 @@
       by_player: pickups_by_player,
     };
 
-    // Powerup denials (per-player on `killer`). Same scoping pattern.
-    const denialsBlock = data.powerup_destructions || {};
-    let denials_feed;
+    // Powerup/crate destructions (per-player on `killer`). Same scoping pattern.
+    const destructionsBlock = data.powerup_destructions || {};
+    let destructions_feed;
     if (isSingle) {
       const name = filter.players[0];
-      denials_feed = (denialsBlock.feed || []).filter(e => e.killer === name);
+      destructions_feed = (destructionsBlock.feed || []).filter(e => e.killer === name);
     } else {
-      denials_feed = (denialsBlock.feed || []).filter(e => allowedNames.has(e.killer));
+      destructions_feed = (destructionsBlock.feed || []).filter(e => allowedNames.has(e.killer));
     }
-    const denials_by_player = (denialsBlock.by_player || []).filter(r => allowedNames.has(r.name));
+    const destructions_by_player = (destructionsBlock.by_player || []).filter(r => allowedNames.has(r.name));
     const powerup_destructions = {
-      ...denialsBlock,
-      feed: denials_feed,
-      by_player: denials_by_player,
+      ...destructionsBlock,
+      feed: destructions_feed,
+      by_player: destructions_by_player,
     };
 
     // Deployable destructions (no feed; just by_player + by_odf + totals).
@@ -1729,7 +1729,7 @@
       renderKillFeed(data.kills, currentData.match.tick_rate, currentData.match.tick_range[0]);
       renderVehicleKills('vehicle-kills-chart', currentData.kills.by_vehicle);
       renderSnipeFeed(data.snipes, currentData.match.tick_rate, currentData.match.tick_range[0]);
-      renderPowerupDenials('powerup-denials-chart', data.powerup_destructions);
+      renderPowerupDestructions('powerup-destructions-chart', data.powerup_destructions);
     });
 
     registerTabRenderer('#tab-rivalries', () => {
@@ -2984,18 +2984,18 @@
     container.innerHTML = html;
   }
 
-  // --- Powerup Denial Breakdown (Phase 3) ---
-  // Mirrors renderVehicleKills; auto-hides the card when zero denials.
-  function renderPowerupDenials(canvasId, powerupDestructions) {
-    const card = document.getElementById('section-powerup-denials');
+  // --- Powerup/Crate Destruction Breakdown (Phase 3) ---
+  // Mirrors renderVehicleKills; auto-hides the card when zero destructions.
+  function renderPowerupDestructions(canvasId, powerupDestructions) {
+    const card = document.getElementById('section-powerup-destructions');
     const byOdf = (powerupDestructions && powerupDestructions.by_odf) || [];
     if (byOdf.length === 0) {
       if (card) card.classList.add('vt-hide');
       return;
     }
     if (card) card.classList.remove('vt-hide');
-    if (typeof renderPowerupDenialsChart === 'function') {
-      renderPowerupDenialsChart(canvasId, byOdf);
+    if (typeof renderPowerupDestructionsChart === 'function') {
+      renderPowerupDestructionsChart(canvasId, byOdf);
     }
   }
 

@@ -13,7 +13,7 @@
  *     synthesized for every base entry. unit_destroyed events with
  *     victim_odf in this set + killer_team == 0 are treated as pickups
  *     (suppressed; new-schema matches get rich pickup_powerup events).
- *     killer_team != 0 -> denial bucket. The DB is the source of truth;
+ *     killer_team != 0 -> destruction bucket. The DB is the source of truth;
  *     this script reads the same `data/odf.min.json` as the pipeline.
  *   - KNOWN_DEPLOYABLE_ODFS - hand-curated ground-deployed utilities
  *     (mines, decoys). Always routed to the deployable_destructions

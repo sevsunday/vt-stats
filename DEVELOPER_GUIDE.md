@@ -236,7 +236,7 @@ Every `UnitDestroyed` event is routed into one of four buckets at the top of the
 |---|---|---|
 | Real vehicle | victim_odf NOT in either constant | Existing kill accumulators |
 | Powerup pickup | victim_odf in `KNOWN_POWERUP_ODFS` AND `killer_team == 0` | Suppressed. New-schema gets full picker context from the real `PickupPowerup` event. |
-| Powerup denial | victim_odf in `KNOWN_POWERUP_ODFS` AND `killer_team != 0` | Routed to `powerup_destructions` block (player shot the crate before pickup) |
+| Powerup/crate destruction | victim_odf in `KNOWN_POWERUP_ODFS` AND `killer_team != 0` | Routed to `powerup_destructions` block (player shot the crate before pickup, effectively denying the enemy economy) |
 | Deployable destruction | victim_odf in `KNOWN_DEPLOYABLE_ODFS` (regardless of killer_team) | Routed to `deployable_destructions` block (mines self-detonate, expire, or get shot) |
 
 **Powerup classification** is built per pipeline run by `_load_known_powerup_odfs(odf_db)` from `data/odf.min.json -> Powerup` (currently 159 entries) plus synthesized `*vsr.odf` and `*_vsr.odf` variants for every base entry (covering VSR-mod ODFs that inherit from stock parents at runtime via `[GameObjectClass]\nbaseName`). Threaded into `process_match()` as a `known_powerup_odfs` parameter (symmetric with `resolve_weapon` / `resolve_unit`). The DB is the source of truth -- if a powerup is missing, extend the upstream DB rather than hand-curating a list.
@@ -608,7 +608,7 @@ The `positioning` JSON block drives a dedicated tab that visualizes where player
 }
 ```
 
-Note: `kills.feed` excludes powerup pickups, powerup denials, and deployable destructions — those are routed by the **UnitDestroyed Classification** (Section 2) into the dedicated `pickups`, `powerup_destructions`, and `deployable_destructions` blocks below. `kills.by_vehicle` additionally excludes `apserv_vsr.odf` via the legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` filter.
+Note: `kills.feed` excludes powerup pickups, powerup/crate destructions, and deployable destructions — those are routed by the **UnitDestroyed Classification** (Section 2) into the dedicated `pickups`, `powerup_destructions`, and `deployable_destructions` blocks below. `kills.by_vehicle` additionally excludes `apserv_vsr.odf` via the legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` filter.
 
 #### `pickups` (Phase 3)
 
@@ -638,7 +638,7 @@ Crate / pod pickups, sourced from `PickupPowerup` events (new-schema only). Alwa
 
 #### `powerup_destructions` (Phase 3)
 
-Powerups destroyed in combat — denial stats. Sourced from `UnitDestroyed` events whose `victim_odf` is in the DB-derived powerup set AND `killer_team != 0`. Populated for both old and new schema (the team-zero filter discriminates regardless of source).
+Powerups/crates destroyed in real combat (not picked up). Effectively denying the enemy economy by removing the pickup before someone could grab it. Sourced from `UnitDestroyed` events whose `victim_odf` is in the DB-derived powerup set AND `killer_team != 0`. Populated for both old and new schema (the team-zero filter discriminates regardless of source).
 
 ```json
 {

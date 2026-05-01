@@ -666,7 +666,7 @@ AI and structure damage attribution.
 
 #### `kills`
 
-Kill/death data from UnitDestroyed events. After Phase 3, only **real-vehicle** destructions reach this block — powerup pickups, powerup denials, and deployable destructions are routed away by the four-way classification (see `.cursor/rules/data-schema.mdc` "UnitDestroyed Four-Way Classification" + `docs/pickup-powerup-semantics.md`).
+Kill/death data from UnitDestroyed events. After Phase 3, only **real-vehicle** destructions reach this block — powerup pickups, powerup/crate destructions, and deployable destructions are routed away by the four-way classification (see `.cursor/rules/data-schema.mdc` "UnitDestroyed Four-Way Classification" + `docs/pickup-powerup-semantics.md`).
 
 | Field | Type | Description |
 |---|---|---|
@@ -690,11 +690,11 @@ Crate / pod pickups from `PickupPowerup` events (new-schema only). Always emitte
 
 #### `powerup_destructions` (Phase 3)
 
-Denial stats — powerups destroyed in real combat (not picked up). Sourced from `UnitDestroyed` events with `victim_odf in KNOWN_POWERUP_ODFS` AND `killer_team != 0`. Populated for both old and new schema (the team-zero filter discriminates regardless of source).
+Powerups/crates destroyed in real combat (not picked up). Effectively denies the enemy economy by removing the pickup before someone could grab it. Sourced from `UnitDestroyed` events with `victim_odf in KNOWN_POWERUP_ODFS` AND `killer_team != 0`. Populated for both old and new schema (the team-zero filter discriminates regardless of source).
 
 | Field | Type | Description |
 |---|---|---|
-| `feed` | `array` | Chronological denial events. Each: `{ tick, killer, killer_in_game_nick, killer_odf, powerup_odf, powerup_name, powerup_team }`. |
+| `feed` | `array` | Chronological powerup/crate destruction events. Each: `{ tick, killer, killer_in_game_nick, killer_odf, powerup_odf, powerup_name, powerup_team }`. |
 | `feed[].powerup_name` | `string` | Same disambiguated display name as `pickups.feed[].powerup_name` (see above). |
 | `by_player` | `array` | Per-killer counts. Each: `{ name, count }`. |
 | `by_odf` | `array` | Per-powerup counts. Each: `{ odf, name, count }`. |
@@ -946,7 +946,7 @@ Per-player career totals, sorted by total dealt (descending).
 | `total_pve_received` | `number` | Lifetime damage received from AI units / world |
 | `total_asset_dealt` | `number` | Lifetime asset damage dealt |
 | `overall_accuracy` | `number` | `total_shots_hit / total_shots_fired` across all matches |
-| `total_kills` | `number` | Lifetime kills from real-vehicle `UnitDestroyed` events. Phase 3: powerup pickups, denials, and deployable destructions no longer count (the four-way classification routes them away from `kills.*` at the source). |
+| `total_kills` | `number` | Lifetime kills from real-vehicle `UnitDestroyed` events. Phase 3: powerup pickups, powerup/crate destructions, and deployable destructions no longer count (the four-way classification routes them away from `kills.*` at the source). |
 | `total_deaths` | `number` | Lifetime deaths from real-vehicle `UnitDestroyed` events |
 | `total_pickups` | `number` | Phase 3. Sum of `pickups.by_player[name].count` across all matches the player appeared in. Old-schema matches contribute zero (their `pickups` block is empty). |
 | `fav_weapon` | `string` | Weapon with highest total dealt across all matches |

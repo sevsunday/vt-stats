@@ -65,7 +65,7 @@ SENTINEL_DAMAGE_THRESHOLD = 1e6
 # spam the Vehicle Destruction Breakdown chart with counts an order of
 # magnitude larger than real player vehicles, squashing every real bar against
 # the y-axis. After the 4-way classification (KNOWN_POWERUP_ODFS /
-# KNOWN_DEPLOYABLE_ODFS) suppresses pickups + denials + deployables, the
+# KNOWN_DEPLOYABLE_ODFS) suppresses pickups + destructions + deployables, the
 # remaining ~13% of `apserv_vsr.odf` destructions still come from real
 # combat shots; this chart-only filter hides those residual events from
 # the Vehicle Destruction Breakdown so it stays focused on real vehicles.
@@ -81,9 +81,10 @@ VEHICLE_DESTRUCTION_IGNORE_ODFS = frozenset({
 #   - killer_team == 0: pickup. Suppressed from kills aggregation; new-schema
 #     matches separately emit a real PickupPowerup event with full picker
 #     context (consumed by the pickup_powerup branch in the event loop).
-#   - killer_team != 0: denial. A real player shot the powerup before
-#     someone else could pick it up. Routed to the powerup_destructions
-#     output block (the "deny the enemy economy" tactical lens).
+#   - killer_team != 0: destruction. A real player shot the powerup
+#     before someone else could pick it up. Routed to the
+#     powerup_destructions output block (effectively denies the enemy
+#     economy by removing the pickup).
 # Either way, NEVER counted as a vehicle kill. Match keys lowercased.
 #
 # Authoritative set: the `Powerup` bucket of `data/odf.min.json` (159 entries
@@ -163,7 +164,7 @@ def _is_sentinel_damage(amount):
 def _faction_totals_for_player_counts(counter, s64_to_slot, slot_to_faction):
     """Sum a Steam64-keyed Counter into per-faction totals (team_1/team_2).
 
-    Used by the pickup, denial, and similar blocks to roll Steam64-indexed
+    Used by the pickup, destruction, and similar blocks to roll Steam64-indexed
     counts up into team totals. Counts not associated with a known team
     slot land in the `ai` bucket via a separate caller-supplied count.
 
@@ -242,11 +243,12 @@ def _build_powerup_destructions_block(
     feed, count_by_player, count_by_odf, nick_for_s64, powerup_display_name,
     s64_to_slot, slot_to_faction,
 ):
-    """Per-match powerup-denial block. Same shape for old and new schema.
+    """Per-match powerup/crate destruction block. Same shape for old and
+    new schema.
 
-    `feed` is pre-built by the caller (process_match's denial branch) with
-    `powerup_name` already populated; we only need `powerup_display_name`
-    here to label the by_odf rollup."""
+    `feed` is pre-built by the caller (process_match's destruction branch)
+    with `powerup_name` already populated; we only need
+    `powerup_display_name` here to label the by_odf rollup."""
     team_1, team_2 = _faction_totals_for_player_counts(
         count_by_player, s64_to_slot, slot_to_faction,
     )
@@ -1201,11 +1203,12 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
     pickup_count_by_odf = Counter()
     match_has_pickup_data = False
 
-    # Powerup destructions (denials). Populated for BOTH old and new schema
+    # Powerup/crate destructions. Populated for BOTH old and new schema
     # from unit_destroyed events whose victim_odf is in KNOWN_POWERUP_ODFS
-    # AND killer_team != 0 (real player shot the powerup before pickup).
+    # AND killer_team != 0 (real player shot the powerup before pickup,
+    # effectively denying the enemy economy).
     powerup_destruction_feed = []
-    powerup_destruction_by_player = Counter()  # s64 -> denial count
+    powerup_destruction_by_player = Counter()  # s64 -> destruction count
     powerup_destruction_by_odf = Counter()
 
     # Deployable destructions (mines/utilities). Populated for both schemas
@@ -1429,12 +1432,12 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
                     # the real PickupPowerup event in new-schema sessions
                     # (see audit data). For old-schema sessions, this is
                     # the only signal we have and the pickup data is lost.
-                    # Either way: not a kill, not a denial, just suppress.
+                    # Either way: not a kill, not a destruction, just suppress.
                     pass
                 else:
-                    # CATEGORY 3: Denial. A real player shot the powerup
-                    # before someone else could pick it up. Track for the
-                    # powerup_destructions block.
+                    # CATEGORY 3: Powerup/crate destruction. A real player
+                    # shot the powerup before someone else could pick it
+                    # up. Track for the powerup_destructions block.
                     killer_name = nick_for_s64(ud.killer) if ud.killer > 0 else f"Team {ud.killer_team}"
                     powerup_destruction_feed.append({
                         "tick": ud.tick,
@@ -1652,8 +1655,8 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             return base
         return f"{base} Powerup"
 
-    # Inject powerup_name into denial-feed entries collected during the
-    # event loop. The closure couldn't run inside the loop because it
+    # Inject powerup_name into destruction-feed entries collected during
+    # the event loop. The closure couldn't run inside the loop because it
     # depends on weapon_name_map / unit_name_map which are built only
     # after all ODFs have been collected. Rebuild each dict in canonical
     # field order (powerup_name immediately after powerup_odf, matching

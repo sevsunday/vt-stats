@@ -49,7 +49,7 @@ Unless noted otherwise, entries describe per-match-view behavior; the All Matche
 | `timeline.by_faction` | Passes through unchanged | Absolute buckets |
 | `asset_damage.by_player` | Narrowed upstream | Absolute |
 | `asset_damage.by_faction` | Passes through | Absolute |
-| `kills.feed`, `kills.leaderboard`, `kills.kill_rivalry_matrix` | Narrowed upstream | Absolute. Phase 3: pickup/denial/deployable events are routed away from `kills.*` by the 4-way classification in `process_stats.py` (see `docs/pickup-powerup-semantics.md`); only real-vehicle destructions reach these fields. |
+| `kills.feed`, `kills.leaderboard`, `kills.kill_rivalry_matrix` | Narrowed upstream | Absolute. Phase 3: pickup/destruction/deployable events are routed away from `kills.*` by the 4-way classification in `process_stats.py` (see `docs/pickup-powerup-semantics.md`); only real-vehicle destructions reach these fields. |
 | `kills.by_vehicle` | Always full-match (never narrowed) | Match-global aggregate — not per-player attributed |
 | `pickups.feed` | Narrowed upstream on `picker` | Absolute. Empty for old-schema matches (`pickups.has_pickup_data == false`). Phase 3.5: each entry carries a `powerup_name` field (disambiguated " Powerup" suffix); follows the same per-entry passthrough as the other fields, no special filter logic. |
 | `pickups.by_player` | Narrowed upstream on `name` | Absolute |
