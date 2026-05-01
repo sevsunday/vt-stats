@@ -44,6 +44,7 @@ Then visit `http://localhost:8080`.
 - **Top Rivalries** — bidirectional damage cards with doughnut charts
 - **Shot Accuracy** — per-player table and weapon accuracy ranking
 - **AI/Structure Damage** — asset damage attribution per player and faction
+- **Powerup Economy** — separates real vehicle kills from crate/pod pickups, denials (powerups shot before pickup), and deployable mine destructions; surfaces a Powerup Denial Breakdown chart and a Snipe Feed on the Combat tab
 - **Replay** — animated playback of the damage timeline with transport controls (play/pause/step/scrub + 0.5x-20x speeds), a live running leaderboard, faction tug-of-war, bucket spotlight, and momentum indicator
 - **Positioning** — top-down movement heatmaps (combined + per-player small multiples with a shared viewport and shared p95 intensity scale + legend), distance-from-spawn line chart, ring histogram of time by distance band, and an animated trail player with transport controls
 - **Movement Profile** — 0-100 activity score per player, match-self-calibrated, with bands from Defensive to Aggressive; surfaces in the main leaderboard, a dedicated Movement Leaderboard, and career aggregates across all matches

@@ -376,6 +376,34 @@
             </div>
           </div>
         </div>
+        <!-- Snipe Feed + Powerup Denial Breakdown (Phase 3). Both auto-hide
+             via .vt-hide when their respective feeds are empty. -->
+        <div class="row g-4 mb-4" id="section-snipe-denial-row">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-snipe-feed">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Snipe Feed</h5>
+                <i class="bi bi-info-circle vt-col-info"
+                   data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                   title="<strong>Snipe Feed</strong> &mdash; pilot snipes (UnitSniped events) for this match. Card hides when no snipes occurred."></i>
+                <button class="btn btn-sm" data-expand="section-snipe-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body" id="snipe-feed-content"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-powerup-denials">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0">Powerup Denial Breakdown</h5>
+                <i class="bi bi-info-circle vt-col-info"
+                   data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                   title="<strong>Powerup Denial</strong> &mdash; powerup pods/crates a real player destroyed before someone could pick them up. Tactical denial of enemy economy. Sourced from unit_destroyed events with non-zero killer_team and a known powerup ODF. Card hides when zero denials."></i>
+                <button class="btn btn-sm" data-expand="section-powerup-denials" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body" id="powerup-denials-content"><div class="chart-container"><canvas id="powerup-denials-chart"></canvas></div></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Tab: Rivalries -->

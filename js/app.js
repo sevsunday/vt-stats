@@ -1573,6 +1573,63 @@
       };
     }
 
+    // Pickups (per-player on `picker`). Keep `by_odf` + `totals` +
+    // `has_pickup_data` unfiltered (match-global, like `kills.by_vehicle`).
+    const pickupsBlock = data.pickups || {};
+    let pickups_feed;
+    if (isSingle) {
+      const name = filter.players[0];
+      pickups_feed = (pickupsBlock.feed || []).filter(e => e.picker === name);
+    } else {
+      pickups_feed = (pickupsBlock.feed || []).filter(e => allowedNames.has(e.picker));
+    }
+    const pickups_by_player = (pickupsBlock.by_player || []).filter(r => allowedNames.has(r.name));
+    const pickups = {
+      ...pickupsBlock,
+      feed: pickups_feed,
+      by_player: pickups_by_player,
+    };
+
+    // Powerup denials (per-player on `killer`). Same scoping pattern.
+    const denialsBlock = data.powerup_destructions || {};
+    let denials_feed;
+    if (isSingle) {
+      const name = filter.players[0];
+      denials_feed = (denialsBlock.feed || []).filter(e => e.killer === name);
+    } else {
+      denials_feed = (denialsBlock.feed || []).filter(e => allowedNames.has(e.killer));
+    }
+    const denials_by_player = (denialsBlock.by_player || []).filter(r => allowedNames.has(r.name));
+    const powerup_destructions = {
+      ...denialsBlock,
+      feed: denials_feed,
+      by_player: denials_by_player,
+    };
+
+    // Deployable destructions (no feed; just by_player + by_odf + totals).
+    const deployBlock = data.deployable_destructions || {};
+    const deploy_by_player = (deployBlock.by_player || []).filter(r => allowedNames.has(r.name));
+    const deployable_destructions = {
+      ...deployBlock,
+      by_player: deploy_by_player,
+    };
+
+    // Snipes (per-player on `sniper` OR `victim`, mirroring kills.feed).
+    const snipesBlock = data.snipes || {};
+    let snipes_feed;
+    if (isSingle) {
+      const name = filter.players[0];
+      snipes_feed = (snipesBlock.feed || []).filter(e => e.sniper === name || e.victim === name);
+    } else {
+      snipes_feed = (snipesBlock.feed || []).filter(e => allowedNames.has(e.sniper) || allowedNames.has(e.victim));
+    }
+    const snipes_by_player = (snipesBlock.by_player || []).filter(r => allowedNames.has(r.name));
+    const snipes = {
+      ...snipesBlock,
+      feed: snipes_feed,
+      by_player: snipes_by_player,
+    };
+
     return {
       ...data,
       leaderboard,
@@ -1584,6 +1641,10 @@
         kill_rivalry_matrix,
         leaderboard: kills_leaderboard,
       },
+      pickups,
+      powerup_destructions,
+      deployable_destructions,
+      snipes,
       timeline,
       weapon_meta,
       asset_damage,
@@ -1667,6 +1728,8 @@
       applyRadarInfoTooltips(document.getElementById('section-faction-radar'));
       renderKillFeed(data.kills, currentData.match.tick_rate, currentData.match.tick_range[0]);
       renderVehicleKills('vehicle-kills-chart', currentData.kills.by_vehicle);
+      renderSnipeFeed(data.snipes, currentData.match.tick_rate, currentData.match.tick_range[0]);
+      renderPowerupDenials('powerup-denials-chart', data.powerup_destructions);
     });
 
     registerTabRenderer('#tab-rivalries', () => {
@@ -2876,6 +2939,64 @@
     });
     html += '</div>';
     container.innerHTML = html;
+  }
+
+  // --- Snipe Feed (Phase 3) ---
+  // Mirrors renderKillFeed; auto-hides the entire card when feed is empty.
+  function renderSnipeFeed(snipes, tickRate, minTick) {
+    const card = document.getElementById('section-snipe-feed');
+    const container = document.getElementById('snipe-feed-content');
+    if (!container) return;
+    const feed = (snipes && snipes.feed) || [];
+    if (feed.length === 0) {
+      if (card) card.classList.add('vt-hide');
+      container.innerHTML = '';
+      return;
+    }
+    if (card) card.classList.remove('vt-hide');
+    const stripOdf = (s) => s ? s.replace(/\.odf$/i, '').replace(/_/g, ' ') : '?';
+    let html = '<div style="max-height:320px;overflow-y:auto;">';
+    feed.forEach(entry => {
+      const sec = tickRate > 0 ? (entry.tick - minTick) / tickRate : 0;
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      const ts = `${m}:${String(s).padStart(2, '0')}`;
+      const sniperNick = entry.sniper_in_game_nick
+        ? `<span class="vt-nick-inline">@${esc(entry.sniper_in_game_nick)}</span>`
+        : '';
+      const victimNick = entry.victim_in_game_nick
+        ? `<span class="vt-nick-inline">@${esc(entry.victim_in_game_nick)}</span>`
+        : '';
+      const sniperOdf = entry.sniper_odf
+        ? `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.sniper_odf))})</span>`
+        : '';
+      const victimOdf = entry.victim_odf
+        ? `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.victim_odf))})</span>`
+        : '';
+      html += `<div class="d-flex align-items-center gap-2 py-1" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
+      html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.sniper)}</span>${sniperNick}${sniperOdf}`;
+      html += `<i class="bi bi-crosshair" style="color:var(--kb-accent);"></i>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>${victimNick}${victimOdf}`;
+      html += `</div>`;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  // --- Powerup Denial Breakdown (Phase 3) ---
+  // Mirrors renderVehicleKills; auto-hides the card when zero denials.
+  function renderPowerupDenials(canvasId, powerupDestructions) {
+    const card = document.getElementById('section-powerup-denials');
+    const byOdf = (powerupDestructions && powerupDestructions.by_odf) || [];
+    if (byOdf.length === 0) {
+      if (card) card.classList.add('vt-hide');
+      return;
+    }
+    if (card) card.classList.remove('vt-hide');
+    if (typeof renderPowerupDenialsChart === 'function') {
+      renderPowerupDenialsChart(canvasId, byOdf);
+    }
   }
 
   // --- Kill Rivalry Heatmap ---

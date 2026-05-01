@@ -502,3 +502,53 @@ function renderVehicleKills(canvasId, vehicleData) {
   activeCharts.push(chart);
   return chart;
 }
+
+// --- Powerup Denial Breakdown (Phase 3) ---
+//
+// Bar chart mirror of renderVehicleKills, but counts powerup pods/crates
+// destroyed by real players (killer_team != 0). Card visibility is
+// managed by app.js renderPowerupDenials() which hides the card when
+// the byOdf list is empty.
+function renderPowerupDenialsChart(canvasId, byOdf) {
+  if (!byOdf || byOdf.length === 0) return null;
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const labels = byOdf.map(v => v.name);
+  const values = byOdf.map(v => v.count);
+  const colors = byOdf.map((_, i) => getPlayerColor(i));
+
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors.map(c => c + 'cc'),
+        borderColor: colors,
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            label: (item) => `${item.raw} denied`,
+          },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: 'Powerups Denied (shot before pickup)' }, beginAtZero: true },
+        y: { ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}

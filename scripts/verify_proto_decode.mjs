@@ -62,6 +62,7 @@ const counts = {
   update_tick: 0,
   unit_destroyed: 0,
   unit_sniped: 0,
+  pickup_powerup: 0,
 };
 
 const camelToSnake = {
@@ -72,6 +73,7 @@ const camelToSnake = {
   updateTick: 'update_tick',
   unitDestroyed: 'unit_destroyed',
   unitSniped: 'unit_sniped',
+  pickupPowerup: 'pickup_powerup',
 };
 
 const stream = obj.eventStream || [];

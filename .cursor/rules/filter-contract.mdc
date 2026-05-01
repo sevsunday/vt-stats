@@ -49,8 +49,22 @@ Unless noted otherwise, entries describe per-match-view behavior; the All Matche
 | `timeline.by_faction` | Passes through unchanged | Absolute buckets |
 | `asset_damage.by_player` | Narrowed upstream | Absolute |
 | `asset_damage.by_faction` | Passes through | Absolute |
-| `kills.feed`, `kills.leaderboard`, `kills.kill_rivalry_matrix` | Narrowed upstream | Absolute |
+| `kills.feed`, `kills.leaderboard`, `kills.kill_rivalry_matrix` | Narrowed upstream | Absolute. Phase 3: pickup/denial/deployable events are routed away from `kills.*` by the 4-way classification in `process_stats.py` (see `docs/pickup-powerup-semantics.md`); only real-vehicle destructions reach these fields. |
 | `kills.by_vehicle` | Always full-match (never narrowed) | Match-global aggregate — not per-player attributed |
+| `pickups.feed` | Narrowed upstream on `picker` | Absolute. Empty for old-schema matches (`pickups.has_pickup_data == false`). |
+| `pickups.by_player` | Narrowed upstream on `name` | Absolute |
+| `pickups.by_odf`, `pickups.totals`, `pickups.has_pickup_data` | Always full-match (never narrowed) | Match-global aggregates / flag |
+| `powerup_destructions.feed` | Narrowed upstream on `killer` | Absolute. Populated for both old and new schema from `unit_destroyed` events whose `victim_odf` is a known powerup AND `killer_team != 0`. |
+| `powerup_destructions.by_player` | Narrowed upstream on `name` | Absolute |
+| `powerup_destructions.by_odf`, `powerup_destructions.totals` | Always full-match (never narrowed) | Match-global |
+| `deployable_destructions.by_player` | Narrowed upstream on `name` | Absolute |
+| `deployable_destructions.by_odf`, `deployable_destructions.totals` | Always full-match (never narrowed) | Match-global |
+| `snipes.feed` | Narrowed upstream on `sniper` OR `victim` (mirrors `kills.feed`) | Absolute. New-schema sessions only carry full sniper/victim/odfs context; pre-schema matches have only `tick` (the rest are protobuf defaults). |
+| `snipes.by_player` | Narrowed upstream on `name` | Absolute |
+| `snipes.totals` | Always full-match (never narrowed) | Match-global |
+| `match.has_pickup_data` (mirrored on `meta` + manifest entry) | Match-global flag, passes through | Availability signal; `false` for pre-Phase-3 sessions captured before the proto added `PickupPowerup`. UI may badge legacy matches as "pickup data unavailable". |
+| `meta.schema_version` | Match-global, passes through | Per-match schema version. `1` after Phase 3; absence means legacy data. |
+| `career_stats[].total_pickups` | Career field, consumed directly | Sum of `pickups.by_player[name].count` across every match the player appeared in. Old-schema matches contribute zero. |
 | `odf_map` | Always full-match (never narrowed) | Match-global reference data — not per-player attributed. Consumed by the Raw Data Browser (`js/raw-browser.js`) to resolve raw ODF strings to human-readable names; no dashboard tab depends on it today. See `data-schema.mdc` for the full entry. |
 | `weapon_meta` | **Recomputed client-side** from `leaderboard[].weapon_breakdown` when any filter is active; pre-aggregated array used only for "All Players" view | Absolute per-weapon totals |
 | `positioning` (block) | Passes through unchanged | — |

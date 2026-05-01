@@ -64,11 +64,50 @@ SENTINEL_DAMAGE_THRESHOLD = 1e6
 # engine emits UnitDestroyed events for (e.g. APC-deployed scrap/service pods)
 # spam the Vehicle Destruction Breakdown chart with counts an order of
 # magnitude larger than real player vehicles, squashing every real bar against
-# the y-axis. The raw events still flow through `kill_feed`, `odf_map`, and
-# the Raw Data Browser untouched -- only the leaderboard summary is filtered.
-# Match keys lowercased for safety.
+# the y-axis. After the 4-way classification (KNOWN_POWERUP_ODFS /
+# KNOWN_DEPLOYABLE_ODFS) suppresses pickups + denials + deployables, the
+# remaining ~13% of `apserv_vsr.odf` destructions still come from real
+# combat shots; this chart-only filter hides those residual events from
+# the Vehicle Destruction Breakdown so it stays focused on real vehicles.
+# The raw events still flow through `kill_feed`, `odf_map`,
+# `powerup_destructions.feed`, and the Raw Data Browser untouched -- only
+# the leaderboard summary is filtered. Match keys lowercased for safety.
 VEHICLE_DESTRUCTION_IGNORE_ODFS = frozenset({
     "apserv_vsr.odf",
+})
+
+# Powerups: collectible items dropped on the map. Their unit_destroyed
+# events are routed by killer_team:
+#   - killer_team == 0: pickup. Suppressed from kills aggregation; new-schema
+#     matches separately emit a real PickupPowerup event with full picker
+#     context (consumed by the pickup_powerup branch in the event loop).
+#   - killer_team != 0: denial. A real player shot the powerup before
+#     someone else could pick it up. Routed to the powerup_destructions
+#     output block (the "deny the enemy economy" tactical lens).
+# Either way, NEVER counted as a vehicle kill. Match keys lowercased.
+#
+# Set composition derived from the corpus audit (>=80% team-zero, total
+# >= 5 events) plus domain knowledge of BZCC ap*/ep*/fp* powerup naming.
+# IMPORTANT: do not auto-promote new ODFs based on team-zero alone --
+# fball2c.odf shows 79% team-zero but is a deployable mine, not a powerup.
+# See docs/pickup-powerup-semantics.md for evidence + maintenance procedure.
+KNOWN_POWERUP_ODFS = frozenset({
+    # American faction powerups (ap*)
+    "apserv_vsr.odf", "apchainvsr.odf", "apsnipvsr.odf", "apeburst.odf",
+    "apslicer.odf", "aplasevsr.odf", "apshdwvsr.odf", "aptaggvsr.odf",
+    "apphanvsr.odf", "aplockvsr.odf", "apdragb.odf", "apblst.odf",
+    "apredfvsr.odf", "apsonicvsr.odf", "approxvsr.odf", "apcphan.odf",
+    # Other-faction powerups
+    "epsnip_vsr.odf", "fpsnipvsr.odf",
+})
+
+# Deployable utilities: ground-deployed objects (mines, decoys, traps) that
+# detonate, expire, or get shot but are NEVER kills in any meaningful sense.
+# Routed to the deployable_destructions block regardless of killer_team.
+# Distinguished from powerups by domain knowledge, not by team-zero %.
+# See docs/pickup-powerup-semantics.md for the curation rationale.
+KNOWN_DEPLOYABLE_ODFS = frozenset({
+    "fball2c.odf",  # flame mine
 })
 
 
@@ -82,6 +121,143 @@ def _is_sentinel_damage(amount):
     "unusual damage" diagnostic threshold.
     """
     return amount is not None and amount > SENTINEL_DAMAGE_THRESHOLD
+
+
+def _faction_totals_for_player_counts(counter, s64_to_slot, slot_to_faction):
+    """Sum a Steam64-keyed Counter into per-faction totals (team_1/team_2).
+
+    Used by the pickup, denial, and similar blocks to roll Steam64-indexed
+    counts up into team totals. Counts not associated with a known team
+    slot land in the `ai` bucket via a separate caller-supplied count.
+
+    `slot_to_faction` returns int 1/2 (BZ convention: slots 1-5 = Team 1,
+    slots 6-10 = Team 2; 0 for unknown).
+    """
+    team_1 = 0
+    team_2 = 0
+    for s64, count in counter.items():
+        slot = s64_to_slot.get(s64, 0)
+        faction = slot_to_faction(slot)
+        if faction == 1:
+            team_1 += count
+        elif faction == 2:
+            team_2 += count
+    return team_1, team_2
+
+
+def _build_pickups_block(
+    has_pickup_data, pickup_events, pickup_count_by_player,
+    pickup_count_by_odf, nick_for_s64, in_game_nick_for, prettify_odf,
+    s64_to_slot, slot_to_faction,
+):
+    """Per-match pickups block. Always emitted; empty for legacy sessions."""
+    feed = []
+    for pe in pickup_events:
+        picker_s64 = pe["picker_s64"]
+        if picker_s64 > 0:
+            picker_name = nick_for_s64(picker_s64)
+            picker_in_game_nick = in_game_nick_for(picker_s64, picker_name)
+        else:
+            picker_name = f"Team {pe['picker_team']}"
+            picker_in_game_nick = None
+        feed.append({
+            "tick": pe["tick"],
+            "picker": picker_name,
+            "picker_in_game_nick": picker_in_game_nick,
+            "picker_odf": pe["picker_odf"],
+            "powerup_odf": pe["powerup_odf"],
+            "powerup_team": pe["powerup_team"],
+        })
+
+    team_1, team_2 = _faction_totals_for_player_counts(
+        pickup_count_by_player, s64_to_slot, slot_to_faction,
+    )
+    ai_total = sum(1 for pe in pickup_events if pe["picker_s64"] == 0)
+
+    return {
+        "has_pickup_data": has_pickup_data,
+        "feed": feed,
+        "by_player": [
+            {"name": nick_for_s64(s64), "count": cnt}
+            for s64, cnt in pickup_count_by_player.most_common()
+        ],
+        "by_odf": [
+            {"odf": odf, "name": prettify_odf(odf), "count": cnt}
+            for odf, cnt in pickup_count_by_odf.most_common()
+        ],
+        "totals": {
+            "total": len(feed),
+            "team_1": team_1,
+            "team_2": team_2,
+            "ai": ai_total,
+        },
+    }
+
+
+def _build_powerup_destructions_block(
+    feed, count_by_player, count_by_odf, nick_for_s64, prettify_odf,
+    s64_to_slot, slot_to_faction,
+):
+    """Per-match powerup-denial block. Same shape for old and new schema."""
+    team_1, team_2 = _faction_totals_for_player_counts(
+        count_by_player, s64_to_slot, slot_to_faction,
+    )
+    return {
+        "feed": feed,
+        "by_player": [
+            {"name": nick_for_s64(s64), "count": cnt}
+            for s64, cnt in count_by_player.most_common()
+        ],
+        "by_odf": [
+            {"odf": odf, "name": prettify_odf(odf), "count": cnt}
+            for odf, cnt in count_by_odf.most_common()
+        ],
+        "totals": {
+            "total": len(feed),
+            "team_1": team_1,
+            "team_2": team_2,
+        },
+    }
+
+
+def _build_deployable_destructions_block(
+    count_by_player, count_by_odf, nick_for_s64, prettify_odf,
+):
+    """Per-match deployable-destruction stats. No feed (too noisy)."""
+    return {
+        "by_player": [
+            {"name": nick_for_s64(s64), "count": cnt}
+            for s64, cnt in count_by_player.most_common()
+        ],
+        "by_odf": [
+            {"odf": odf, "name": prettify_odf(odf), "count": cnt}
+            for odf, cnt in count_by_odf.most_common()
+        ],
+        "totals": {
+            "total": sum(count_by_odf.values()),
+        },
+    }
+
+
+def _build_snipes_block(
+    feed, count_by_player, nick_for_s64, s64_to_slot, slot_to_faction,
+):
+    """Per-match snipe block. Empty feed when no UnitSniped events."""
+    team_1, team_2 = _faction_totals_for_player_counts(
+        count_by_player, s64_to_slot, slot_to_faction,
+    )
+    return {
+        "feed": feed,
+        "by_player": [
+            {"name": nick_for_s64(s64), "count": cnt}
+            for s64, cnt in count_by_player.most_common()
+        ],
+        "totals": {
+            "total": len(feed),
+            "team_1": team_1,
+            "team_2": team_2,
+        },
+    }
 
 # Movement band thresholds on activity_score (0-100): Defensive ... Aggressive
 # 0 = camper (stayed at base), 100 = roamer (covered map).
@@ -968,6 +1144,35 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
     vehicle_destruction_count = Counter()
     snipe_count = 0
 
+    # Pickups (from PickupPowerup events). Empty for pre-schema sessions.
+    # match_has_pickup_data flips True on the first pickup_powerup event
+    # seen; mirrored to meta.has_pickup_data + manifest entry, lets the UI
+    # gate "no pickup data" badges on legacy matches.
+    pickup_events = []
+    pickup_count_by_player = Counter()  # s64 -> count (excludes AI pickers)
+    pickup_count_by_odf = Counter()
+    match_has_pickup_data = False
+
+    # Powerup destructions (denials). Populated for BOTH old and new schema
+    # from unit_destroyed events whose victim_odf is in KNOWN_POWERUP_ODFS
+    # AND killer_team != 0 (real player shot the powerup before pickup).
+    powerup_destruction_feed = []
+    powerup_destruction_by_player = Counter()  # s64 -> denial count
+    powerup_destruction_by_odf = Counter()
+
+    # Deployable destructions (mines/utilities). Populated for both schemas
+    # from unit_destroyed events whose victim_odf is in KNOWN_DEPLOYABLE_ODFS
+    # (regardless of killer_team -- mines self-detonate or get shot, neither
+    # is a "kill" in any meaningful sense).
+    deployable_destruction_by_player = Counter()
+    deployable_destruction_by_odf = Counter()
+
+    # Snipes (from UnitSniped events). Pre-Phase-3 sessions only carry
+    # `tick`; new-schema adds shooter / victim / odfs / teams. Empty feed
+    # for matches with zero snipes; UI hides the card.
+    snipe_feed = []
+    snipe_count_by_player = Counter()  # s64 -> count
+
     # Sentinel damage telemetry. Counts PAIRS (DD+DR together = 1 pair);
     # total_amount sums the DD-side amount only (DR amount is always equal,
     # so double-counting would misrepresent the "impact sum"). See the
@@ -1145,6 +1350,61 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             if ud.tick < min_tick:
                 min_tick = ud.tick
 
+            victim_lower = (ud.victim_odf or "").lower()
+
+            # Four-way classification of unit_destroyed events. See
+            # docs/pickup-powerup-semantics.md for evidence + rationale.
+            #
+            # CATEGORY 1: Deployable utility (mine, decoy). Never a kill.
+            # Track for the deployable_destructions stats block, then skip
+            # all kill aggregations.
+            if victim_lower in KNOWN_DEPLOYABLE_ODFS:
+                deployable_destruction_by_odf[victim_lower] += 1
+                if ud.killer > 0:
+                    deployable_destruction_by_player[ud.killer] += 1
+                if ud.victim_odf:
+                    all_unit_odfs.add(ud.victim_odf)
+                if ud.killer_odf:
+                    all_unit_odfs.add(ud.killer_odf)
+                i += 1
+                continue
+
+            # CATEGORY 2 & 3: Powerup. Split by killer_team semantic.
+            if victim_lower in KNOWN_POWERUP_ODFS:
+                if ud.victim_odf:
+                    all_unit_odfs.add(ud.victim_odf)
+                if ud.killer_odf:
+                    all_unit_odfs.add(ud.killer_odf)
+                if ud.killer_team == 0:
+                    # CATEGORY 2: Pickup disguised as destruction. The
+                    # engine emits this synthetic UnitDestroyed alongside
+                    # the real PickupPowerup event in new-schema sessions
+                    # (see audit data). For old-schema sessions, this is
+                    # the only signal we have and the pickup data is lost.
+                    # Either way: not a kill, not a denial, just suppress.
+                    pass
+                else:
+                    # CATEGORY 3: Denial. A real player shot the powerup
+                    # before someone else could pick it up. Track for the
+                    # powerup_destructions block.
+                    killer_name = nick_for_s64(ud.killer) if ud.killer > 0 else f"Team {ud.killer_team}"
+                    powerup_destruction_feed.append({
+                        "tick": ud.tick,
+                        "killer": killer_name,
+                        "killer_in_game_nick": in_game_nick_for(ud.killer, killer_name) if ud.killer > 0 else None,
+                        "killer_odf": ud.killer_odf,
+                        "powerup_odf": ud.victim_odf,
+                        "powerup_team": ud.victim_team,
+                    })
+                    powerup_destruction_by_odf[victim_lower] += 1
+                    if ud.killer > 0:
+                        powerup_destruction_by_player[ud.killer] += 1
+                i += 1
+                continue
+
+            # CATEGORY 4: Real vehicle/structure/soldier. Existing
+            # accumulators (player_kills, player_deaths, kill_rivalry,
+            # vehicle_destruction_count, kill_feed) handle these.
             if ud.killer > 0:
                 player_kills[ud.killer] += 1
             if ud.victim > 0:
@@ -1175,12 +1435,58 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             i += 1
 
         elif event_type == "unit_sniped":
-            snipe_count += 1
             us = evt.unit_sniped
             if us.tick > max_tick:
                 max_tick = us.tick
             if us.tick < min_tick:
                 min_tick = us.tick
+            snipe_count += 1
+            # New-schema fields: shooter / shooter_team / shooter_odf /
+            # victim / victim_team / victim_odf. Pre-schema sessions only
+            # carry `tick`; the protobuf defaults make those branches
+            # safely no-op (no shooter Steam64, empty odf strings).
+            if us.shooter_odf:
+                all_unit_odfs.add(us.shooter_odf)
+            if us.victim_odf:
+                all_unit_odfs.add(us.victim_odf)
+            sniper_name = nick_for_s64(us.shooter) if us.shooter > 0 else f"Team {us.shooter_team}"
+            victim_name = nick_for_s64(us.victim) if us.victim > 0 else f"Team {us.victim_team}"
+            snipe_feed.append({
+                "tick": us.tick,
+                "sniper": sniper_name,
+                "sniper_in_game_nick": in_game_nick_for(us.shooter, sniper_name) if us.shooter > 0 else None,
+                "sniper_odf": us.shooter_odf or "",
+                "victim": victim_name,
+                "victim_in_game_nick": in_game_nick_for(us.victim, victim_name) if us.victim > 0 else None,
+                "victim_odf": us.victim_odf or "",
+            })
+            if us.shooter > 0:
+                snipe_count_by_player[us.shooter] += 1
+            i += 1
+
+        elif event_type == "pickup_powerup":
+            pp = evt.pickup_powerup
+            if pp.tick > max_tick:
+                max_tick = pp.tick
+            if pp.tick < min_tick:
+                min_tick = pp.tick
+            match_has_pickup_data = True
+            if pp.powerup_odf:
+                all_unit_odfs.add(pp.powerup_odf)
+            if pp.picker_odf:
+                all_unit_odfs.add(pp.picker_odf)
+            pickup_events.append({
+                "tick": pp.tick,
+                "picker_s64": pp.picker,
+                "picker_team": pp.picker_team,
+                "picker_odf": pp.picker_odf,
+                "powerup_team": pp.powerup_team,
+                "powerup_odf": pp.powerup_odf,
+            })
+            if pp.picker > 0:
+                pickup_count_by_player[pp.picker] += 1
+            if pp.powerup_odf:
+                pickup_count_by_odf[pp.powerup_odf.lower()] += 1
             i += 1
 
         elif event_type == "update_tick":
@@ -1617,6 +1923,15 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             "team_leaders": team_leaders,
             "has_position_data": positioning_block["has_position_data"],
             "has_target_lock_data": positioning_block.get("has_target_lock_data", False),
+            # True when the match contains at least one pickup_powerup
+            # event. False for pre-Phase-3 sessions captured before the
+            # proto added PickupPowerup. Mirrored on manifest entries so
+            # the dashboard can badge legacy matches without loading the
+            # full per-match JSON.
+            "has_pickup_data": match_has_pickup_data,
+            # Per-match schema version. Introduced in Phase 3; absence
+            # means legacy data (anything written before this PR).
+            "schema_version": 1,
             "terrain_bounds": terrain_bounds,
             "base_to_base_distance": positioning_block.get("base_to_base_distance"),
             "sentinel_damage": {
@@ -1659,6 +1974,24 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
                 for killer, victims in kill_rivalry.items()
             },
         },
+        "pickups": _build_pickups_block(
+            match_has_pickup_data, pickup_events, pickup_count_by_player,
+            pickup_count_by_odf, nick_for_s64, in_game_nick_for, prettify_odf,
+            s64_to_slot, slot_to_faction,
+        ),
+        "powerup_destructions": _build_powerup_destructions_block(
+            powerup_destruction_feed, powerup_destruction_by_player,
+            powerup_destruction_by_odf, nick_for_s64, prettify_odf,
+            s64_to_slot, slot_to_faction,
+        ),
+        "deployable_destructions": _build_deployable_destructions_block(
+            deployable_destruction_by_player, deployable_destruction_by_odf,
+            nick_for_s64, prettify_odf,
+        ),
+        "snipes": _build_snipes_block(
+            snipe_feed, snipe_count_by_player, nick_for_s64,
+            s64_to_slot, slot_to_faction,
+        ),
         "positioning": positioning_block,
     }
 
@@ -1680,6 +2013,10 @@ def build_all_matches_aggregate(all_match_data):
         "total_shots_hit": 0,
         "total_kills": 0,
         "total_deaths": 0,
+        # Pickups career stat. Sums match.pickups.by_player[name].count
+        # across every match the player appeared in. Old-schema matches
+        # contribute zero (their pickups block is empty).
+        "total_pickups": 0,
         "weapon_totals": defaultdict(lambda: {"dealt": 0, "shots": 0, "hits": 0}),
         "best_match": None,
         # Positioning accumulators. Only populated for matches where the player
@@ -1723,6 +2060,13 @@ def build_all_matches_aggregate(all_match_data):
         pos_players = match_positioning.get("players") or {}
         match_has_target_lock = bool(match_positioning.get("has_target_lock_data"))
 
+        # Per-match pickups by player name (always present, may be empty
+        # for old-schema matches with has_pickup_data=false).
+        pickups_by_player_name = {
+            row["name"]: row["count"]
+            for row in (match_data.get("pickups", {}).get("by_player") or [])
+        }
+
         for p in match_data["leaderboard"]:
             pid = p["player_id"]
             c = career[pid]
@@ -1740,6 +2084,7 @@ def build_all_matches_aggregate(all_match_data):
             c["total_shots_hit"] += p["personal"]["shots_hit"]
             c["total_kills"] += p.get("kills", 0)
             c["total_deaths"] += p.get("deaths", 0)
+            c["total_pickups"] += pickups_by_player_name.get(p["name"], 0)
 
             # Career positioning aggregation: include only if this match had
             # UpdateTick data AND this player has a positioning entry.
@@ -1861,6 +2206,7 @@ def build_all_matches_aggregate(all_match_data):
             "overall_accuracy": round(acc, 3),
             "total_kills": c["total_kills"],
             "total_deaths": c["total_deaths"],
+            "total_pickups": c["total_pickups"],
             "fav_weapon": fav_weapon,
             "best_match": c["best_match"],
             "weapon_breakdown": weapon_breakdown,
@@ -2036,6 +2382,7 @@ def main():
             "players": manifest_players,
             "has_position_data": match_data["match"].get("has_position_data", False),
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),
+            "has_pickup_data": match_data["match"].get("has_pickup_data", False),
         })
 
     manifest.sort(key=lambda m: m["date"])
