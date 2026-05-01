@@ -17,6 +17,15 @@
  *
  * Modes: single | compare | team | career.
  *
+ * Career mode supports a sub-scale toggle via opts.careerScale:
+ *   'totals'    (default) — axes 1/3/6 use lifetime totals; players with
+ *                           more matches naturally rank higher.
+ *   'per-match' — axes 1/3/6 use per-match averages (dealt/matches_played,
+ *                 kills/matches_played, mean_weapons_used). The other 5
+ *                 axes are already match-agnostic and identical between
+ *                 scales. Powers the Career Radar's Totals|Per match
+ *                 toggle in the All Matches view.
+ *
  * Reuses activeCharts / glassTooltipConfig / applyThemeDefaults /
  * getThemeColors / getCSSVar / getPlayerColor / buildPlayerColorMap
  * from js/charts.js (loaded earlier).
@@ -36,11 +45,15 @@ const RADAR_AXIS_LABELS = [
 // ----- Card-header info tooltip -----
 // Returns HTML for the "i" tooltip attached to each radar card header.
 // `mode` is either 'per-match' (Combat team / Rivalry / Profile) or 'career'.
+// `careerScale` is 'totals' (default) or 'per-match' and is only consulted
+// when mode === 'career'; it adds a top-of-tooltip note explaining which
+// axes are affected by the current scale and the lens being shown.
 // Acronym convention: every acronym is expanded on first use as
 // `ACRONYM (Expansion)`. The two tooltips (per-match and career) are
 // independent surfaces, so each re-introduces acronyms on its own.
-function buildRadarInfoTooltipHtml(mode) {
+function buildRadarInfoTooltipHtml(mode, careerScale) {
   const isCareer = mode === 'career';
+  const isPerMatchScale = isCareer && careerScale === 'per-match';
 
   const polygonLine = isCareer
     ? "Each polygon represents one player's career; the further an edge sits from the center, the better they perform on that axis."
@@ -54,20 +67,46 @@ function buildRadarInfoTooltipHtml(mode) {
     ? "Average map-coverage score across all of this player's matches that had position tracking. Matches without tracking are excluded from the average."
     : 'How much of the map this player roamed versus stayed near their spawn base. 100 means they covered the whole map; 0 means they barely moved. Shows "no data" for matches without position tracking.';
 
-  const weaponsLine = isCareer
-    ? 'Number of different weapons this player fired across their career. Compared against the player who used the most weapons.'
-    : 'Number of different weapons this player actually fired during the match. Compared against the player who used the most weapons.';
+  let weaponsLine;
+  if (isPerMatchScale) {
+    weaponsLine = 'Average number of different weapons this player fires per match. Compared against the player with the highest per-match weapon variety.';
+  } else if (isCareer) {
+    weaponsLine = 'Number of different weapons this player fired across their career. Compared against the player who used the most weapons. Players with more matches naturally sample more weapons.';
+  } else {
+    weaponsLine = 'Number of different weapons this player actually fired during the match. Compared against the player who used the most weapons.';
+  }
 
-  const damageDealtLine = isCareer
-    ? 'Total damage this player has dealt across their career to other players, AI (Artificial Intelligence) units, and world props. Compared against the highest-damage player on record.'
-    : 'Total damage this player personally inflicted on other players, AI (Artificial Intelligence) units, and world props during the match. Compared against the single highest-damage player in view.';
+  let damageDealtLine;
+  if (isPerMatchScale) {
+    damageDealtLine = "Average damage per match this player has dealt to other players, AI (Artificial Intelligence) units, and world props. Compared against the highest per-match damage average. Removes the volume advantage of players with many recorded matches.";
+  } else if (isCareer) {
+    damageDealtLine = 'Total damage this player has dealt across their career to other players, AI (Artificial Intelligence) units, and world props. Compared against the highest-damage player on record. Heavily favored by match volume.';
+  } else {
+    damageDealtLine = 'Total damage this player personally inflicted on other players, AI (Artificial Intelligence) units, and world props during the match. Compared against the single highest-damage player in view.';
+  }
 
-  const killsLine = isCareer
-    ? 'Total units this player has destroyed across their career, counting both other human players and AI units. Compared against the highest career kill count on record.'
-    : 'Number of units this player destroyed during the match, counting both other human players and AI units. Compared against the highest kill count in view.';
+  let killsLine;
+  if (isPerMatchScale) {
+    killsLine = 'Average kills per match this player records, counting both other human players and AI units. Compared against the highest per-match kill average.';
+  } else if (isCareer) {
+    killsLine = 'Total units this player has destroyed across their career, counting both other human players and AI units. Compared against the highest career kill count on record. Heavily favored by match volume.';
+  } else {
+    killsLine = 'Number of units this player destroyed during the match, counting both other human players and AI units. Compared against the highest kill count in view.';
+  }
+
+  // Career mode shows a small note up top so the viewer knows whether they
+  // are looking at lifetime totals or per-match averages, and which axes
+  // change between modes.
+  let scaleNote = '';
+  if (isCareer) {
+    scaleNote = isPerMatchScale
+      ? '<div class="small mb-2" style="opacity:0.85;"><strong>Per-match scale.</strong> Damage Dealt, Kills, and Weapon Diversity are normalized by matches played so a player with many matches does not automatically rank higher. Switch to Totals on the card header for the lifetime view.</div>'
+      : '<div class="small mb-2" style="opacity:0.85;"><strong>Totals scale.</strong> Damage Dealt, Kills, and Weapon Diversity show lifetime totals; players with more matches naturally rank higher. Switch to Per match on the card header for a quality-focused view.</div>';
+  }
 
   return [
     '<div class="text-start" style="max-width:360px;">',
+      scaleNote,
       '<strong>All 8 axes normalize to 0-100 and higher is always better.</strong> ',
       polygonLine,
       '<hr class="my-2">',
@@ -375,7 +414,13 @@ function _teamAxes(factionNum, data, norms) {
 // T-Key Usage uses `mean_target_lock_pct`, which IS a valid direct average
 // because target_lock_pct is absolute.
 
-function _computeCareerNorms(careerStats) {
+// `mode` is 'totals' (default) or 'per-match'. In per-match mode the
+// volume peers (maxDealt/maxKills/maxWeapons) are computed against
+// per-match averages so the axes are normalized to a like-for-like
+// scale. The ratio peers (ratioP95/kdP95/meanRatio/meanKD) are
+// match-agnostic and identical between modes.
+function _computeCareerNorms(careerStats, mode) {
+  const perMatch = mode === 'per-match';
   let maxDealt = 0, maxKills = 0, maxWeapons = 0;
   const ratios = [];
   const kds = [];
@@ -384,9 +429,14 @@ function _computeCareerNorms(careerStats) {
     const received = c.total_received || 0;
     const kills = c.total_kills || 0;
     const deaths = c.total_deaths || 0;
-    if (dealt > maxDealt) maxDealt = dealt;
-    if (kills > maxKills) maxKills = kills;
-    const w = c.weapon_breakdown ? Object.keys(c.weapon_breakdown).length : 0;
+    const matches = Math.max(1, c.matches_played || 0);
+    const dealtForPeer = perMatch ? dealt / matches : dealt;
+    const killsForPeer = perMatch ? kills / matches : kills;
+    if (dealtForPeer > maxDealt) maxDealt = dealtForPeer;
+    if (killsForPeer > maxKills) maxKills = killsForPeer;
+    const w = perMatch
+      ? (c.mean_weapons_used || 0)
+      : (c.weapon_breakdown ? Object.keys(c.weapon_breakdown).length : 0);
     if (w > maxWeapons) maxWeapons = w;
 
     const engaged = dealt > 0 || received > 0 || kills > 0 || deaths > 0;
@@ -412,7 +462,12 @@ function _computeCareerNorms(careerStats) {
   };
 }
 
-function _careerToAxes(entry, norms) {
+// `mode` is 'totals' (default) or 'per-match'. In per-match mode axes
+// 1 (Damage Dealt), 3 (Kills), and 6 (Weapon Diversity) are computed
+// from per-match averages; the other 5 axes are already match-agnostic
+// (ratios or pre-aggregated means) and pass through unchanged.
+function _careerToAxes(entry, norms, mode) {
+  const perMatch = mode === 'per-match';
   const dealt = entry.total_dealt || 0;
   const received = entry.total_received || 0;
   const pvpDealt = entry.total_pvp_dealt || 0;
@@ -421,7 +476,14 @@ function _careerToAxes(entry, norms) {
   const kills = entry.total_kills || 0;
   const deaths = entry.total_deaths || 0;
   const matches = entry.matches_played || 0;
-  const weaponsUsed = entry.weapon_breakdown ? Object.keys(entry.weapon_breakdown).length : 0;
+  const safeMatches = Math.max(1, matches);
+  const totalWeaponsUsed = entry.weapon_breakdown
+    ? Object.keys(entry.weapon_breakdown).length : 0;
+  const meanWeaponsUsed = entry.mean_weapons_used != null
+    ? entry.mean_weapons_used : 0;
+  const dealtForAxis = perMatch ? dealt / safeMatches : dealt;
+  const killsForAxis = perMatch ? kills / safeMatches : kills;
+  const weaponsForAxis = perMatch ? meanWeaponsUsed : totalWeaponsUsed;
   const pvpShare = dealt > 0 ? _clamp01(pvpDealt / dealt) : 0;
 
   const matchesWithPos = entry.matches_with_positioning || 0;
@@ -450,12 +512,12 @@ function _careerToAxes(entry, norms) {
 
   return {
     values: [
-      _clamp01(dealt / norms.maxDealt) * 100,
+      _clamp01(dealtForAxis / norms.maxDealt) * 100,
       _clamp01(accuracy) * 100,
-      _clamp01(kills / norms.maxKills) * 100,
+      _clamp01(killsForAxis / norms.maxKills) * 100,
       survivability * 100,
       mobility * 100,
-      _clamp01(weaponsUsed / norms.maxWeapons) * 100,
+      _clamp01(weaponsForAxis / norms.maxWeapons) * 100,
       pvpShare * 100,
       tKeyPct * 100,
     ],
@@ -464,25 +526,50 @@ function _careerToAxes(entry, norms) {
       mobilityScore: Math.round(mobility * 100),
       mobilityBand: entry.movement_band_dominant || null,
       mobilityAvailable,
-      weaponsUsed,
+      // Lifetime + per-match weapon-diversity values both stashed so the
+      // tooltip can show whichever is appropriate for the current mode.
+      weaponsUsed: totalWeaponsUsed,
+      meanWeaponsUsed,
       favWeapon: entry.fav_weapon || '',
       pvpDealt, pveDealt,
       tKeyPct,
       tKeyAvailable,
+      // Per-match context for tooltip strings in 'per-match' mode.
+      matchesPlayed: matches,
+      mode: perMatch ? 'per-match' : 'totals',
     },
   };
 }
 
 // ----- Tooltip per-axis formatter -----
 
+// Per-axis tooltip text. In career-mode per-match scale, axes 1/3/6
+// switch to per-match averages (the volume-biased axes); the other 5
+// axes have the same string in both scales because they are already
+// match-agnostic. `raw.mode` is set by `_careerToAxes` to 'per-match'
+// when applicable; absent or 'totals' falls through to the default
+// totals strings.
 function _axisTooltipLine(axisIndex, raw) {
   const fmt = (n) => Math.round(n).toLocaleString();
+  const perMatch = raw && raw.mode === 'per-match';
+  const matches = (raw && raw.matchesPlayed) || 0;
+  const safeMatches = Math.max(1, matches);
   switch (axisIndex) {
-    case 0: return `Dealt ${fmt(raw.dealt)}`;
+    case 0: {
+      if (perMatch) {
+        const avg = raw.dealt / safeMatches;
+        return `Dealt ${fmt(avg)} / match (avg over ${matches} matches)`;
+      }
+      return `Dealt ${fmt(raw.dealt)}`;
+    }
     case 1: return `Accuracy ${(raw.accuracy * 100).toFixed(1)}%`;
     case 2: {
       const kd = raw.deaths > 0 ? (raw.kills / raw.deaths).toFixed(2)
         : (raw.kills > 0 ? '\u221e' : '0.00');
+      if (perMatch) {
+        const kpm = (raw.kills / safeMatches).toFixed(2);
+        return `${kpm} kills/match \u2014 K/D ${kd}`;
+      }
       return `${raw.kills} kills (K/D ${kd})`;
     }
     case 3: {
@@ -497,7 +584,13 @@ function _axisTooltipLine(axisIndex, raw) {
     case 4: return raw.mobilityAvailable
       ? `Mobility ${raw.mobilityScore}/100${raw.mobilityBand ? ` (${raw.mobilityBand})` : ''}`
       : 'Mobility: no position data';
-    case 5: return `${raw.weaponsUsed} weapons${raw.favWeapon ? ` | Fav: ${raw.favWeapon}` : ''}`;
+    case 5: {
+      if (perMatch) {
+        const mwu = (raw.meanWeaponsUsed != null ? raw.meanWeaponsUsed : 0).toFixed(1);
+        return `${mwu} weapons/match${raw.favWeapon ? ` | Fav: ${raw.favWeapon}` : ''}`;
+      }
+      return `${raw.weaponsUsed} weapons${raw.favWeapon ? ` | Fav: ${raw.favWeapon}` : ''}`;
+    }
     case 6: return `PvP ${fmt(raw.pvpDealt)} | PvE ${fmt(raw.pveDealt)}`;
     case 7: return raw.tKeyAvailable
       ? `T-Key ${(raw.tKeyPct * 100).toFixed(1)}%`
@@ -640,6 +733,11 @@ function renderPlayerRadar(canvasId, data, opts) {
   const mode = (opts && opts.mode) || 'single';
   const focusNames = (opts && opts.focusNames) || [];
   const showMedian = !opts || opts.showMedian !== false;
+  // Career sub-mode: 'totals' (default — preserves legacy behavior) or
+  // 'per-match' (axes 1/3/6 normalized by matches_played). Has no
+  // effect on single/compare/team modes.
+  const careerScale = (opts && opts.careerScale === 'per-match')
+    ? 'per-match' : 'totals';
 
   applyThemeDefaults();
   const theme = getThemeColors();
@@ -650,23 +748,23 @@ function renderPlayerRadar(canvasId, data, opts) {
     if (!careerStats.length) {
       return _radarEmpty(canvas, 'No career data available.');
     }
-    const norms = _computeCareerNorms(careerStats);
+    const norms = _computeCareerNorms(careerStats, careerScale);
     const byName = {};
     careerStats.forEach(c => { byName[c.name] = c; });
-    const allAxes = careerStats.map(c => _careerToAxes(c, norms));
+    const allAxes = careerStats.map(c => _careerToAxes(c, norms, careerScale));
 
     const valid = focusNames.filter(n => byName[n]);
     let datasets;
     if (valid.length >= 2 && valid[0] !== valid[1]) {
-      const a = _careerToAxes(byName[valid[0]], norms);
-      const b = _careerToAxes(byName[valid[1]], norms);
+      const a = _careerToAxes(byName[valid[0]], norms, careerScale);
+      const b = _careerToAxes(byName[valid[1]], norms, careerScale);
       datasets = [
         _makeDataset(valid[0], a, getPlayerColor(0)),
         _makeDataset(valid[1], b, getPlayerColor(1)),
       ];
     } else {
       const focus = valid[0] || careerStats[0].name;
-      const axes = _careerToAxes(byName[focus], norms);
+      const axes = _careerToAxes(byName[focus], norms, careerScale);
       datasets = [_makeDataset(focus, axes, getPlayerColor(0))];
       if (showMedian && careerStats.length > 1) {
         const med = _medianAxes(allAxes);

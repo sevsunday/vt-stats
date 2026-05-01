@@ -2248,6 +2248,11 @@ def build_all_matches_aggregate(all_match_data):
         # positioning data AND the match-global has_target_lock_data flag is True.
         # target_lock_pct is absolute (0-1), so direct averaging is valid.
         "target_lock_pcts": [],
+        # Per-match distinct-weapon counts. Averaged at the end into
+        # `mean_weapons_used` for the Career Radar's per-match mode (axis
+        # 6 — Weapon Diversity). Lifetime distinct count is still the
+        # length of `weapon_breakdown`, so totals mode is unaffected.
+        "weapons_used_per_match": [],
     })
 
     global_weapon = defaultdict(lambda: {
@@ -2323,6 +2328,7 @@ def build_all_matches_aggregate(all_match_data):
                 c["weapon_totals"][wpn_name]["dealt"] += wpn_data["dealt"]
                 c["weapon_totals"][wpn_name]["shots"] += wpn_data["shots"]
                 c["weapon_totals"][wpn_name]["hits"] += wpn_data["hits"]
+            c["weapons_used_per_match"].append(len(p["weapon_breakdown"]))
 
             if c["best_match"] is None or p["personal"]["dealt"] > c["best_match"]["dealt"]:
                 c["best_match"] = {
@@ -2412,6 +2418,17 @@ def build_all_matches_aggregate(all_match_data):
                 "matches_with_target_lock_data": 0,
             }
 
+        # Mean distinct weapons used per match. Direct average of an
+        # absolute per-match count — valid because each match's
+        # len(weapon_breakdown) is independent of total match count.
+        # Powers axis 6 (Weapon Diversity) on the Career Radar's
+        # per-match mode; totals mode keeps the lifetime distinct count.
+        weapons_used_per_match = c["weapons_used_per_match"]
+        mean_weapons_used = (
+            sum(weapons_used_per_match) / len(weapons_used_per_match)
+            if weapons_used_per_match else 0
+        )
+
         career_stats.append({
             "player_id": pid,
             "name": c["name"],
@@ -2430,6 +2447,7 @@ def build_all_matches_aggregate(all_match_data):
             "fav_weapon": fav_weapon,
             "best_match": c["best_match"],
             "weapon_breakdown": weapon_breakdown,
+            "mean_weapons_used": round(mean_weapons_used, 1),
             **movement_fields,
             **target_lock_fields,
         })
