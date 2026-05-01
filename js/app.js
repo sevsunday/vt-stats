@@ -124,6 +124,21 @@
   //   ?team=1|2         (only when filter=team)
   //   ?players=<csv>    (only when filter=player; tokens may be canonical names or Steam64 IDs)
   //   ?tab=<slug>       (omitted or 'overview' => default)
+  //   ?t=<tick>         (initial-load Replay seek target — see comment below)
+  //
+  // Picker filter axis (separate from per-match filter/team/players above).
+  // Each field hydrates `pickerState` and is omitted from the URL whenever
+  // its value matches the default. Multi-selects are CSV. `roster` is the
+  // picker's full-roster nickname filter — deliberately distinct from the
+  // per-match `players` param above.
+  //   ?q=<text>            (free-text search; non-empty)
+  //   ?dur=short|medium|long
+  //   ?cnt=<csv-of-ints>   (player_count multi-select, e.g. 8,10)
+  //   ?sub=<csv>           (submitters multi-select)
+  //   ?roster=<csv>        (full-roster nickname multi-select)
+  //   ?mode=all            (Match-mode toggle; 'any' is default and omitted)
+  //   ?role=commander|thug (Role toggle; 'any' is default and omitted)
+  //   ?sort=<picker-sort>  (e.g. duration-desc; 'date-desc' is default and omitted)
 
   function parseUrlState() {
     const p = new URLSearchParams(window.location.search);
@@ -139,6 +154,20 @@
       // the Replay tab first renders for this match; subsequent renders
       // ignore it (the user has already landed and can scrub freely).
       t: p.get('t'),
+      // Picker filter axis (separate from per-match filter/team/players).
+      // Consumed by hydratePickerStateFromUrl() during init. Each field
+      // here is a raw string (or CSV split into an array) — validation
+      // against pickerFacets happens in the hydrator, not here.
+      picker: {
+        q:      p.get('q'),
+        dur:    p.get('dur'),
+        cnt:    (p.get('cnt') || '').split(',').map(s => s.trim()).filter(Boolean),
+        sub:    (p.get('sub') || '').split(',').map(s => s.trim()).filter(Boolean),
+        roster: (p.get('roster') || '').split(',').map(s => s.trim()).filter(Boolean),
+        mode:   p.get('mode'),
+        role:   p.get('role'),
+        sort:   p.get('sort'),
+      },
     };
   }
 
@@ -376,6 +405,22 @@
       }
     }
 
+    // Picker filter axis — emitted only when non-default so links to the
+    // common case stay short (e.g. `?match=all` with no filters set).
+    // These hydrate `pickerState` on initial load via parseUrlState() +
+    // hydratePickerStateFromUrl(), and apply globally regardless of the
+    // currently-loaded match (the picker layer is independent of the
+    // per-match filterState above).
+    const ps = pickerState;
+    if (ps.query)                                 params.set('q', ps.query);
+    if (ps.duration && ps.duration !== 'any')     params.set('dur', ps.duration);
+    if (ps.playerCounts.length)                   params.set('cnt', ps.playerCounts.join(','));
+    if (ps.submitters.length)                     params.set('sub', ps.submitters.join(','));
+    if (ps.players.length)                        params.set('roster', ps.players.join(','));
+    if (ps.matchMode === 'all')                   params.set('mode', 'all');
+    if (ps.role && ps.role !== 'any')             params.set('role', ps.role);
+    if (ps.sort && ps.sort !== 'date-desc')       params.set('sort', ps.sort);
+
     const slug = getActiveTabSlug();
     if (slug && slug !== 'overview') params.set('tab', slug);
 
@@ -387,6 +432,38 @@
   function syncUrl() {
     if (!liveSyncEnabled) return;
     history.replaceState(null, '', buildShareUrl());
+  }
+
+  // The eight picker query keys, in the order buildShareUrl() emits them.
+  // Single source of truth for `syncPickerUrl()` and any future helper
+  // that needs to know what counts as "picker state" on the URL.
+  const PICKER_URL_KEYS = ['q', 'dur', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort'];
+
+  // Picker-only URL writer — always fires (unlike `syncUrl()`), but only
+  // touches the eight picker keys. Existing non-picker params (match,
+  // filter, team, players, tab, t) in the URL are preserved as-is.
+  //
+  // Why bypass the live-sync gate: picker filters are deliberately
+  // user-configured global state, not transient per-view selection. They
+  // are exactly the kind of thing the user wants in the URL bar so they
+  // can copy the URL at any time. The gate still meaningfully covers
+  // the chattier per-match filter axis (filterState).
+  function syncPickerUrl() {
+    const cur = new URLSearchParams(window.location.search);
+    PICKER_URL_KEYS.forEach(k => cur.delete(k));
+
+    const ps = pickerState;
+    if (ps.query)                                 cur.set('q', ps.query);
+    if (ps.duration && ps.duration !== 'any')     cur.set('dur', ps.duration);
+    if (ps.playerCounts.length)                   cur.set('cnt', ps.playerCounts.join(','));
+    if (ps.submitters.length)                     cur.set('sub', ps.submitters.join(','));
+    if (ps.players.length)                        cur.set('roster', ps.players.join(','));
+    if (ps.matchMode === 'all')                   cur.set('mode', 'all');
+    if (ps.role && ps.role !== 'any')             cur.set('role', ps.role);
+    if (ps.sort && ps.sort !== 'date-desc')       cur.set('sort', ps.sort);
+
+    const qs = cur.toString();
+    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
   }
 
   // Explicit share action: build the URL from current state and copy to
@@ -1089,6 +1166,21 @@
 
     // Persist.
     savePickerStateToStorage();
+
+    // Reflect picker state in the URL on every chip toggle, regardless
+    // of the live-sync gate — picker filters are deliberately
+    // user-configured global state and the user's mental model is "I
+    // changed a filter, so the URL reflects it". `syncPickerUrl()`
+    // touches only the eight picker keys; non-picker params (match,
+    // filter, team, players, tab) stay whatever the gated `syncUrl()`
+    // path last wrote. (When live-sync is on, the gated path keeps the
+    // rest of the URL fresh too; when off, only picker bits update —
+    // which is the right scope for the Share affordance.)
+    //
+    // Skipped during initial boot (before any loader has set
+    // `currentTarget`) so we don't briefly clobber a shared `?match=...`
+    // URL while picker state hydrates from sessionStorage + URL overlay.
+    if (currentTarget != null) syncPickerUrl();
   }
 
   // --- Persistence ---
@@ -1149,6 +1241,48 @@
     try {
       sessionStorage.setItem(PICKER_STATE_KEY, JSON.stringify(pickerState));
     } catch (_) { /* quota / private mode — ignore */ }
+  }
+
+  // Overlay any URL-supplied picker params on top of the just-loaded
+  // sessionStorage state. URL > storage on initial page load (mirrors how
+  // hydrateFilterFromUrl handles the per-match filterState). Each field is
+  // independently validated; missing or malformed values leave the existing
+  // pickerState[k] untouched. Multi-selects (cnt / sub / roster) are
+  // additionally whitelisted against `pickerFacets` so unknown tokens drop
+  // silently — matching `resolvePlayerTokens`'s posture for stale links.
+  function hydratePickerStateFromUrl(u) {
+    if (!u) return;
+    if (typeof u.q === 'string') {
+      pickerState.query = u.q.trim().toLowerCase();
+    }
+    if (['short', 'medium', 'long', 'any'].includes(u.dur)) {
+      pickerState.duration = u.dur;
+    }
+    if (Array.isArray(u.cnt) && u.cnt.length) {
+      const allowed = new Set(pickerFacets.playerCounts);
+      pickerState.playerCounts = u.cnt
+        .map(Number)
+        .filter(n => Number.isFinite(n) && allowed.has(n));
+    }
+    if (Array.isArray(u.sub) && u.sub.length) {
+      const allowed = new Set(pickerFacets.submitters);
+      pickerState.submitters = u.sub.filter(s => allowed.has(s));
+    }
+    if (Array.isArray(u.roster) && u.roster.length) {
+      const lookup = new Map(pickerFacets.roster.map(n => [n.toLowerCase(), n]));
+      pickerState.players = u.roster
+        .map(n => lookup.get(String(n).toLowerCase()))
+        .filter(Boolean);
+    }
+    if (u.mode === 'all' || u.mode === 'any') {
+      pickerState.matchMode = u.mode;
+    }
+    if (['any', 'commander', 'thug'].includes(u.role)) {
+      pickerState.role = u.role;
+    }
+    if (typeof u.sort === 'string') {
+      pickerState.sort = u.sort;
+    }
   }
 
   // Push pickerState into the UI controls (chip active classes, sort select,
@@ -1337,8 +1471,15 @@
   // as `const pickerFacets = deriveFacets()`), so this must run after that
   // initializer executes — hence it lives here at the end of the Phase 2
   // block rather than next to buildMatchPicker() above.
+  //
+  // URL hydration order: storage first, then URL overlay. URL > storage on
+  // initial page load so a shared link reproducibly wins regardless of the
+  // current tab's sessionStorage. `initialUrlState` is parsed once here and
+  // reused later in the Initial Boot block at the bottom of the IIFE.
   buildMatchPickerFilters();
+  const initialUrlState = parseUrlState();
   loadPickerStateFromStorage();
+  hydratePickerStateFromUrl(initialUrlState.picker);
   applyPickerStateToUI();
   applyPickerFilters();
 
@@ -4130,11 +4271,12 @@
   });
 
   // --- Initial Boot ---
-  // Parse URL state once, then branch to the appropriate loader.
-  // Shared URLs (any match/tab/filter/team/players intent) always win and
-  // fully bypass the landing preferences modal. Only when no URL intent
-  // exists do we consult the stored pref (or show the first-visit modal).
-  const initialUrlState = parseUrlState();
+  // Branch to the appropriate loader based on the URL state we already
+  // parsed earlier (during picker init — `const initialUrlState` is in
+  // scope from the Phase 2 init block above). Shared URLs (any
+  // match/tab/filter/team/players intent) always win and fully bypass the
+  // landing preferences modal. Only when no URL intent exists do we
+  // consult the stored pref (or show the first-visit modal).
   const hasOtherUrlIntent = initialUrlState.tab
     || initialUrlState.filter
     || initialUrlState.team
