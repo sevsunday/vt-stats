@@ -25,6 +25,17 @@
 (function () {
   'use strict';
 
+  // Players appearing in fewer than this many matches *in the current
+  // aggregate scope* are hidden from cross-match aggregates
+  // (`career_stats` and `global_rivalries`). Per-match views and
+  // `global_weapon_meta` / `meta` are unaffected. Surfaced in the output
+  // under `meta.min_career_matches` so the UI can label the threshold
+  // without duplicating the value. When picker filters narrow the
+  // aggregate, the threshold reads `matches_played` *after* filtering —
+  // i.e. "5 matches in the current view scope", not "5 career matches
+  // overall".
+  const MIN_CAREER_MATCHES = 5;
+
   // Round to 1 decimal — mirrors round(x, 1) in the Python pipeline so
   // numeric output is byte-identical between the two paths.
   const r1 = (x) => Math.round((x + Number.EPSILON) * 10) / 10;
@@ -302,6 +313,17 @@
       return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
     });
 
+    // --- 5-match minimum (configurable via MIN_CAREER_MATCHES) ---
+    // Hide players with too few matches *in the current scope* from
+    // cross-match aggregates. `keptNames` cascades the prune into
+    // `global_rivalries` so we don't surface a rivalry pair touching a
+    // player who's hidden everywhere else. `global_weapon_meta` is left
+    // alone — it's a cumulative weapon metric, not per-player.
+    const careerStatsAll  = careerStats;
+    const careerStatsKept = careerStats.filter(c => c.matches_played >= MIN_CAREER_MATCHES);
+    const keptNames       = new Set(careerStatsKept.map(c => c.name));
+    const playersDropped  = careerStatsAll.length - careerStatsKept.length;
+
     // --- global_weapon_meta list ---
     const gwm = [];
     for (const [wname, wd] of globalWeapon) {
@@ -337,7 +359,7 @@
       a_to_b: r1(p.a_to_b),
       b_to_a: r1(p.b_to_a),
       total:  r1(p.a_to_b + p.b_to_a),
-    })).sort((x, y) => {
+    })).filter(p => keptNames.has(p.a) && keptNames.has(p.b)).sort((x, y) => {
       if (y.total !== x.total) return y.total - x.total;
       const xa = String(x.a).toLowerCase(), ya = String(y.a).toLowerCase();
       if (xa !== ya) return xa.localeCompare(ya);
@@ -357,8 +379,10 @@
         matches_with_target_lock_data: matchesWithTargetLock,
         total_sentinel_damage_dropped: totalSentinelDamageDropped,
         matches_with_sentinel_damage:  matchesWithSentinel,
+        min_career_matches:            MIN_CAREER_MATCHES,
+        players_dropped_by_min_matches: playersDropped,
       },
-      career_stats:       careerStats,
+      career_stats:       careerStatsKept,
       global_weapon_meta: gwm,
       global_rivalries:   globalRivalries,
     };

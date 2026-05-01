@@ -685,9 +685,19 @@
     if (txt) {
       const k = filteredCount;
       const N = manifest.length;
+      // Read the latest aggregate meta from the window stash so the
+      // parenthetical reflects whatever VTAggregate.build() last produced
+      // for the current filter scope. May be stale by ~one debounce tick
+      // when filters change rapidly; the next reaggregate fixes it.
+      const aggMeta = (window.__vtAllMatchesData && window.__vtAllMatchesData.meta) || {};
+      const dropped = aggMeta.players_dropped_by_min_matches || 0;
+      const minMatches = aggMeta.min_career_matches || 0;
+      const droppedSuffix = (k > 0 && dropped > 0 && minMatches > 0)
+        ? ` <small class="text-muted">(${dropped} player${dropped === 1 ? '' : 's'} hidden by ${minMatches}-match minimum.)</small>`
+        : '';
       txt.innerHTML = k === 0
         ? `<strong>No matches</strong> match the current filters.`
-        : `Aggregate of <strong>${k}</strong> of ${N} match${N === 1 ? '' : 'es'} matching the active filters.`;
+        : `Aggregate of <strong>${k}</strong> of ${N} match${N === 1 ? '' : 'es'} matching the active filters.${droppedSuffix}`;
     }
   }
 
@@ -2176,6 +2186,13 @@
     $loading.classList.add('d-none');
     $allView.style.display = 'block';
 
+    // Stash the aggregate data on window so the Career Radar event handlers
+    // can re-render without having to thread the object through tab renderers.
+    // Done *before* updateAllMatchesFilterBanner() so the banner can read
+    // the freshly-built meta (players_dropped_by_min_matches) for the
+    // hidden-count parenthetical.
+    window.__vtAllMatchesData = data;
+
     // Surface filter-aware banner + filtered subset size.
     updateAllMatchesFilterBanner(fileIds.length);
 
@@ -2190,9 +2207,6 @@
     renderCareerTable(data.career_stats);
     renderCareerRadar(data);
     applyRadarInfoTooltips(document.getElementById('section-career-radar'));
-    // Stash the aggregate data on window so the Career Radar event handlers
-    // can re-render without having to thread the object through tab renderers.
-    window.__vtAllMatchesData = data;
     tabRendered['#all-tab-overview'] = true;
 
     const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
@@ -3395,6 +3409,11 @@
     const posBlock = posCount > 0
       ? `<div><span class="stat-label">With Positioning</span><br><strong>${posCount} / ${meta.match_count}</strong></div>`
       : '';
+    const minMatches = meta.min_career_matches || 0;
+    const dropped = meta.players_dropped_by_min_matches || 0;
+    const minBlock = (minMatches > 0 && dropped > 0)
+      ? `<div><span class="stat-label">Career Roster</span><br><strong>${minMatches}+ matches</strong><br><span class="stat-label">${dropped} hidden</span></div>`
+      : '';
     container.innerHTML = `
       <div><span class="stat-label">Matches</span><br><strong>${meta.match_count}</strong></div>
       <div><span class="stat-label">Total Play Time</span><br><strong>${m} min</strong></div>
@@ -3402,6 +3421,7 @@
       <div><span class="stat-label">Submitters</span><br><strong>${submitters.length}</strong></div>
       <div><span class="stat-label">Date Range</span><br><strong>${meta.date_range.join(' — ')}</strong></div>
       ${posBlock}
+      ${minBlock}
     `;
   }
 
