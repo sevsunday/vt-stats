@@ -2953,7 +2953,13 @@
       container.innerHTML = '';
       return;
     }
-    if (card) card.classList.remove('vt-hide');
+    if (card) {
+      card.classList.remove('vt-hide');
+      // Init the card's info-circle tooltip(s). Idempotent; needed
+      // because the card is initially hidden via .vt-hide and Bootstrap
+      // skips hidden elements during page-wide tooltip auto-init.
+      ensureTooltips(card);
+    }
     const stripOdf = (s) => s ? s.replace(/\.odf$/i, '').replace(/_/g, ' ') : '?';
     let html = '<div style="max-height:320px;overflow-y:auto;">';
     feed.forEach(entry => {
@@ -2993,7 +2999,13 @@
       if (card) card.classList.add('vt-hide');
       return;
     }
-    if (card) card.classList.remove('vt-hide');
+    if (card) {
+      card.classList.remove('vt-hide');
+      // Init the card's info-circle tooltip(s). Idempotent; needed
+      // because the card is initially hidden via .vt-hide and Bootstrap
+      // skips hidden elements during page-wide tooltip auto-init.
+      ensureTooltips(card);
+    }
     if (typeof renderPowerupDestructionsChart === 'function') {
       renderPowerupDestructionsChart(canvasId, byOdf);
     }

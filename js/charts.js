@@ -515,7 +515,12 @@ function renderPowerupDestructionsChart(canvasId, byOdf) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
   const ctx = canvas.getContext('2d');
-  const labels = byOdf.map(v => v.name);
+  // The pipeline emits powerup_destructions.by_odf[].name suffixed with
+  // " Powerup" (via powerup_display_name) so the same field can be
+  // used outside this chart without losing the disambiguation. The
+  // chart's card title already says "Powerup Destruction Breakdown",
+  // so the suffix is redundant noise on the y-axis -- strip it here.
+  const labels = byOdf.map(v => (v.name || '').replace(/ Powerup$/, ''));
   const values = byOdf.map(v => v.count);
   const colors = byOdf.map((_, i) => getPlayerColor(i));
 
