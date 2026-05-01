@@ -86,29 +86,66 @@ VEHICLE_DESTRUCTION_IGNORE_ODFS = frozenset({
 #     output block (the "deny the enemy economy" tactical lens).
 # Either way, NEVER counted as a vehicle kill. Match keys lowercased.
 #
-# Set composition derived from the corpus audit (>=80% team-zero, total
-# >= 5 events) plus domain knowledge of BZCC ap*/ep*/fp* powerup naming.
-# IMPORTANT: do not auto-promote new ODFs based on team-zero alone --
-# fball2c.odf shows 79% team-zero but is a deployable mine, not a powerup.
+# Authoritative set: the `Powerup` bucket of `data/odf.min.json` (159 entries
+# in the current DB) plus VSR-mod variants synthesized via `_strip_vsr_suffix`
+# inverse (append `vsr` and `_vsr` suffixes). VSR mod ODFs typically inherit
+# from stock parents at runtime via [GameObjectClass]\nbaseName, but the
+# flattened DB doesn't capture inheritance, so we synthesize the variants.
+# Built once per pipeline run via `_load_known_powerup_odfs(odf_db)` in
+# `main()` and threaded through `process_match()` as a parameter (symmetric
+# with `resolve_weapon` / `resolve_unit`).
+#
 # See docs/pickup-powerup-semantics.md for evidence + maintenance procedure.
-KNOWN_POWERUP_ODFS = frozenset({
-    # American faction powerups (ap*)
-    "apserv_vsr.odf", "apchainvsr.odf", "apsnipvsr.odf", "apeburst.odf",
-    "apslicer.odf", "aplasevsr.odf", "apshdwvsr.odf", "aptaggvsr.odf",
-    "apphanvsr.odf", "aplockvsr.odf", "apdragb.odf", "apblst.odf",
-    "apredfvsr.odf", "apsonicvsr.odf", "approxvsr.odf", "apcphan.odf",
-    # Other-faction powerups
-    "epsnip_vsr.odf", "fpsnipvsr.odf",
-})
 
 # Deployable utilities: ground-deployed objects (mines, decoys, traps) that
 # detonate, expire, or get shot but are NEVER kills in any meaningful sense.
 # Routed to the deployable_destructions block regardless of killer_team.
 # Distinguished from powerups by domain knowledge, not by team-zero %.
+# fball2c.odf shows 79% team-zero but is a deployable mine (not in the DB
+# Powerup bucket), so it lives here rather than sharing the powerup path.
 # See docs/pickup-powerup-semantics.md for the curation rationale.
 KNOWN_DEPLOYABLE_ODFS = frozenset({
     "fball2c.odf",  # flame mine
 })
+
+
+def _strip_vsr_suffix(odf):
+    """Map apserv_vsr.odf -> apserv.odf, apchain_vsr.odf -> apchain.odf,
+    apchainvsr.odf -> apchain.odf. Returns None when no suffix to strip
+    (i.e. the ODF doesn't end in vsr or _vsr).
+
+    Mirrors BZ's runtime [GameObjectClass]\\nbaseName inheritance for
+    VSR-mod variants whose stock parent IS in the flattened odf.min.json
+    but the variant itself is not. Highest-volume case: apserv_vsr.odf
+    (110,589 pickup_powerup events in the current corpus) is absent from
+    the DB Powerup bucket but the stock apserv.odf is present with
+    `unitName = "Service Pod"`.
+    """
+    m = re.match(r"^(.*?)_?vsr\.odf$", odf, flags=re.IGNORECASE)
+    return f"{m.group(1)}.odf" if m else None
+
+
+def _load_known_powerup_odfs(odf_db):
+    """Authoritative powerup ODF set, sourced from data/odf.min.json's
+    Powerup bucket plus VSR-mod variants. The mod variants typically
+    inherit from stock ODFs via [GameObjectClass]\\nbaseName but the
+    flattened DB doesn't capture inheritance, so we synthesize the
+    common `_vsr` / `vsr` suffix variants for every stock entry.
+
+    Returns an empty frozenset when odf_db lacks a Powerup bucket
+    (degrades gracefully -- pipeline behaves like Phase 3 minus
+    suppression). Membership lookup is O(1) per event.
+    """
+    base = set()
+    for k in (odf_db.get("Powerup") or {}).keys():
+        odfl = (k if k.lower().endswith(".odf") else f"{k}.odf").lower()
+        base.add(odfl)
+    expanded = set(base)
+    for odf in base:
+        stem = odf[:-4]  # strip .odf
+        expanded.add(f"{stem}vsr.odf")
+        expanded.add(f"{stem}_vsr.odf")
+    return frozenset(expanded)
 
 
 def _is_sentinel_damage(amount):
@@ -147,10 +184,16 @@ def _faction_totals_for_player_counts(counter, s64_to_slot, slot_to_faction):
 
 def _build_pickups_block(
     has_pickup_data, pickup_events, pickup_count_by_player,
-    pickup_count_by_odf, nick_for_s64, in_game_nick_for, prettify_odf,
+    pickup_count_by_odf, nick_for_s64, in_game_nick_for, powerup_display_name,
     s64_to_slot, slot_to_faction,
 ):
-    """Per-match pickups block. Always emitted; empty for legacy sessions."""
+    """Per-match pickups block. Always emitted; empty for legacy sessions.
+
+    Uses `powerup_display_name` (NOT `prettify_odf`) for both the per-feed
+    `powerup_name` field and the `by_odf[].name` so collectibles are
+    suffixed with " Powerup" to disambiguate from the same-named weapon
+    ordnance (e.g. apchainvsr.odf -> "Chain Gun Powerup", vs the
+    apchain.odf weapon ordnance -> "Chain Gun")."""
     feed = []
     for pe in pickup_events:
         picker_s64 = pe["picker_s64"]
@@ -166,6 +209,7 @@ def _build_pickups_block(
             "picker_in_game_nick": picker_in_game_nick,
             "picker_odf": pe["picker_odf"],
             "powerup_odf": pe["powerup_odf"],
+            "powerup_name": powerup_display_name(pe["powerup_odf"]),
             "powerup_team": pe["powerup_team"],
         })
 
@@ -182,7 +226,7 @@ def _build_pickups_block(
             for s64, cnt in pickup_count_by_player.most_common()
         ],
         "by_odf": [
-            {"odf": odf, "name": prettify_odf(odf), "count": cnt}
+            {"odf": odf, "name": powerup_display_name(odf), "count": cnt}
             for odf, cnt in pickup_count_by_odf.most_common()
         ],
         "totals": {
@@ -195,10 +239,14 @@ def _build_pickups_block(
 
 
 def _build_powerup_destructions_block(
-    feed, count_by_player, count_by_odf, nick_for_s64, prettify_odf,
+    feed, count_by_player, count_by_odf, nick_for_s64, powerup_display_name,
     s64_to_slot, slot_to_faction,
 ):
-    """Per-match powerup-denial block. Same shape for old and new schema."""
+    """Per-match powerup-denial block. Same shape for old and new schema.
+
+    `feed` is pre-built by the caller (process_match's denial branch) with
+    `powerup_name` already populated; we only need `powerup_display_name`
+    here to label the by_odf rollup."""
     team_1, team_2 = _faction_totals_for_player_counts(
         count_by_player, s64_to_slot, slot_to_faction,
     )
@@ -209,7 +257,7 @@ def _build_powerup_destructions_block(
             for s64, cnt in count_by_player.most_common()
         ],
         "by_odf": [
-            {"odf": odf, "name": prettify_odf(odf), "count": cnt}
+            {"odf": odf, "name": powerup_display_name(odf), "count": cnt}
             for odf, cnt in count_by_odf.most_common()
         ],
         "totals": {
@@ -1044,7 +1092,7 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
-def process_match(session, source_file, submitter, resolve_weapon, resolve_unit, known_players=None):
+def process_match(session, source_file, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, known_players=None):
     """Process a single match session into pre-computed stats."""
     header = session.header
     events = session.event_stream
@@ -1370,7 +1418,7 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
                 continue
 
             # CATEGORY 2 & 3: Powerup. Split by killer_team semantic.
-            if victim_lower in KNOWN_POWERUP_ODFS:
+            if victim_lower in known_powerup_odfs:
                 if ud.victim_odf:
                     all_unit_odfs.add(ud.victim_odf)
                 if ud.killer_odf:
@@ -1394,6 +1442,10 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
                         "killer_in_game_nick": in_game_nick_for(ud.killer, killer_name) if ud.killer > 0 else None,
                         "killer_odf": ud.killer_odf,
                         "powerup_odf": ud.victim_odf,
+                        # `powerup_name` is injected post-loop once the
+                        # `powerup_display_name` closure is defined (it
+                        # depends on `weapon_name_map` / `unit_name_map`
+                        # which are built after this event loop completes).
                         "powerup_team": ud.victim_team,
                     })
                     powerup_destruction_by_odf[victim_lower] += 1
@@ -1559,6 +1611,63 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
 
     def unit_name(odf):
         return unit_name_map.get(odf) or resolve_unit(odf)
+
+    def powerup_display_name(odf):
+        """Friendly name for a powerup pod ODF, disambiguated from the
+        weapon of the same name. Used by pickups.by_odf,
+        powerup_destructions.by_odf, and per-feed powerup_name so
+        'Chain Gun' (the weapon) and 'Chain Gun Powerup' (the pod)
+        are distinct in the UI.
+
+        Resolution order: unit_name -> stripped-vsr unit_name ->
+        wpn_name -> stripped-vsr wpn_name -> title-cased stem.
+        Suffixes with ' Powerup' unless the resolved name already
+        ends in 'Powerup'.
+
+        Highest-volume case: apserv_vsr.odf -> stripped-vsr unit_name
+        path returns "Service Pod" -> "Service Pod Powerup".
+        """
+        if not odf:
+            return ""  # empty proto3 default; don't synthesize " Powerup"
+        base = unit_name(odf)
+        raw_stem = re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE)
+        if not base:
+            stripped = _strip_vsr_suffix(odf)
+            if stripped:
+                base = unit_name(stripped)
+        if not base:
+            cand = wpn_name(odf)
+            if cand and cand != raw_stem:
+                base = cand
+        if not base:
+            stripped = _strip_vsr_suffix(odf)
+            if stripped:
+                cand = wpn_name(stripped)
+                stripped_stem = re.sub(r"\.odf$", "", stripped, flags=re.IGNORECASE)
+                if cand and cand != stripped_stem:
+                    base = cand
+        if not base:
+            base = raw_stem.replace("_", " ").title()
+        if base.lower().endswith("powerup"):
+            return base
+        return f"{base} Powerup"
+
+    # Inject powerup_name into denial-feed entries collected during the
+    # event loop. The closure couldn't run inside the loop because it
+    # depends on weapon_name_map / unit_name_map which are built only
+    # after all ODFs have been collected. Rebuild each dict in canonical
+    # field order (powerup_name immediately after powerup_odf, matching
+    # the pickups.feed[] shape) for JSON-output consistency.
+    for idx, entry in enumerate(powerup_destruction_feed):
+        powerup_destruction_feed[idx] = {
+            "tick": entry["tick"],
+            "killer": entry["killer"],
+            "killer_in_game_nick": entry["killer_in_game_nick"],
+            "killer_odf": entry["killer_odf"],
+            "powerup_odf": entry["powerup_odf"],
+            "powerup_name": powerup_display_name(entry["powerup_odf"]),
+            "powerup_team": entry["powerup_team"],
+        }
 
     # Build match-global ODF map for the Raw Data Browser. Keys are raw ODF
     # strings as they appear in the binpb; values are the best human-readable
@@ -1976,12 +2085,12 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
         },
         "pickups": _build_pickups_block(
             match_has_pickup_data, pickup_events, pickup_count_by_player,
-            pickup_count_by_odf, nick_for_s64, in_game_nick_for, prettify_odf,
+            pickup_count_by_odf, nick_for_s64, in_game_nick_for, powerup_display_name,
             s64_to_slot, slot_to_faction,
         ),
         "powerup_destructions": _build_powerup_destructions_block(
             powerup_destruction_feed, powerup_destruction_by_player,
-            powerup_destruction_by_odf, nick_for_s64, prettify_odf,
+            powerup_destruction_by_odf, nick_for_s64, powerup_display_name,
             s64_to_slot, slot_to_faction,
         ),
         "deployable_destructions": _build_deployable_destructions_block(
@@ -2304,6 +2413,8 @@ def main():
 
     resolve_weapon = build_weapon_name_resolver(odf_db)
     resolve_unit = build_unit_name_resolver(odf_db)
+    known_powerup_odfs = _load_known_powerup_odfs(odf_db)
+    print(f"  Powerup classification set: {len(known_powerup_odfs)} ODFs (DB Powerup bucket + VSR variants)")
 
     # Load canonical player names
     known_players = load_known_players()
@@ -2327,7 +2438,7 @@ def main():
         session = load_session(session_path)
         print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
 
-        match_data = process_match(session, session_path.name, submitter, resolve_weapon, resolve_unit, known_players)
+        match_data = process_match(session, session_path.name, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, known_players)
         all_match_data.append(match_data)
         submitter_by_id[match_data["match"]["id"]] = submitter
 

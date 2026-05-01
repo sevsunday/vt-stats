@@ -239,7 +239,13 @@ Every `UnitDestroyed` event is routed into one of four buckets at the top of the
 | Powerup denial | victim_odf in `KNOWN_POWERUP_ODFS` AND `killer_team != 0` | Routed to `powerup_destructions` block (player shot the crate before pickup) |
 | Deployable destruction | victim_odf in `KNOWN_DEPLOYABLE_ODFS` (regardless of killer_team) | Routed to `deployable_destructions` block (mines self-detonate, expire, or get shot) |
 
-`KNOWN_POWERUP_ODFS` (18 entries, audit-derived + domain-curated) and `KNOWN_DEPLOYABLE_ODFS` (1 entry: `fball2c.odf`) live as frozensets in [scripts/process_stats.py](scripts/process_stats.py). Audit script: [scripts/audit_pickup_powerup.mjs](scripts/audit_pickup_powerup.mjs). Full evidence chain + maintenance procedure: [docs/pickup-powerup-semantics.md](docs/pickup-powerup-semantics.md).
+**Powerup classification** is built per pipeline run by `_load_known_powerup_odfs(odf_db)` from `data/odf.min.json -> Powerup` (currently 159 entries) plus synthesized `*vsr.odf` and `*_vsr.odf` variants for every base entry (covering VSR-mod ODFs that inherit from stock parents at runtime via `[GameObjectClass]\nbaseName`). Threaded into `process_match()` as a `known_powerup_odfs` parameter (symmetric with `resolve_weapon` / `resolve_unit`). The DB is the source of truth -- if a powerup is missing, extend the upstream DB rather than hand-curating a list.
+
+**Display naming** is handled by the `powerup_display_name(odf)` closure in `process_match` (next to `wpn_name` / `unit_name`). Resolution order: `unit_name` -> stripped-vsr `unit_name` -> `wpn_name` -> stripped-vsr `wpn_name` -> title-cased stem fallback. Suffixed with " Powerup" to disambiguate from the same-named weapon ordnance (e.g. `apchainvsr.odf` -> "Chain Gun Powerup", vs `apchain.odf` weapon ordnance -> "Chain Gun"). Used by `pickups.feed[].powerup_name`, `pickups.by_odf[].name`, `powerup_destructions.feed[].powerup_name`, and `powerup_destructions.by_odf[].name`.
+
+**Highest-volume edge case**: `apserv_vsr.odf` (110,589 pickup events) is absent from `Powerup` directly, but `_strip_vsr_suffix` resolves it via stock `apserv.odf` -> "Service Pod" -> "Service Pod Powerup".
+
+`KNOWN_DEPLOYABLE_ODFS` (1 entry: `fball2c.odf`) stays hand-curated -- mines/utilities aren't in the Powerup bucket and need domain-knowledge curation. Lives as a module-level frozenset in [scripts/process_stats.py](scripts/process_stats.py). Audit script: [scripts/audit_pickup_powerup.mjs](scripts/audit_pickup_powerup.mjs) loads the same DB and surfaces "promotion candidates" if the corpus shows powerup-shaped ODFs the DB lacks. Full evidence chain + maintenance procedure: [docs/pickup-powerup-semantics.md](docs/pickup-powerup-semantics.md).
 
 The legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` filter (currently just `apserv_vsr.odf`) coexists with the new classification — even after the team-zero filter, the residual ~13% of real-combat service-pod destructions still flow into `powerup_destructions.feed` and would dominate the Vehicle Destruction Breakdown chart without the chart-level filter.
 
@@ -612,25 +618,43 @@ Crate / pod pickups, sourced from `PickupPowerup` events (new-schema only). Alwa
 {
   "has_pickup_data": true,
   "feed": [
-    { "tick": 1234, "picker": "VTrider", "picker_in_game_nick": null, "picker_odf": "ivtank_vsr.odf", "powerup_odf": "apsnipvsr.odf", "powerup_team": 6 }
+    {
+      "tick": 1234,
+      "picker": "VTrider",
+      "picker_in_game_nick": null,
+      "picker_odf": "ivtank_vsr.odf",
+      "powerup_odf": "apsnipvsr.odf",
+      "powerup_name": "ISDF Pulse Rifle Powerup",
+      "powerup_team": 6
+    }
   ],
   "by_player": [{ "name": "VTrider", "count": 17 }],
-  "by_odf": [{ "odf": "apsnipvsr.odf", "name": "Sniper Powerup", "count": 8 }],
+  "by_odf": [{ "odf": "apsnipvsr.odf", "name": "ISDF Pulse Rifle Powerup", "count": 8 }],
   "totals": { "total": 42, "team_1": 18, "team_2": 23, "ai": 1 }
 }
 ```
 
+`powerup_name` is built by `powerup_display_name(odf)` (closure in `process_match`) -- see Section 2 "UnitDestroyed Classification" for the resolution chain. Disambiguates the powerup pod from the same-named weapon ordnance.
+
 #### `powerup_destructions` (Phase 3)
 
-Powerups destroyed in combat — denial stats. Sourced from `UnitDestroyed` events whose `victim_odf` is in `KNOWN_POWERUP_ODFS` AND `killer_team != 0`. Populated for both old and new schema (the team-zero filter discriminates regardless of source).
+Powerups destroyed in combat — denial stats. Sourced from `UnitDestroyed` events whose `victim_odf` is in the DB-derived powerup set AND `killer_team != 0`. Populated for both old and new schema (the team-zero filter discriminates regardless of source).
 
 ```json
 {
   "feed": [
-    { "tick": 5000, "killer": "VTrider", "killer_in_game_nick": null, "killer_odf": "ivscoutm_vsr.odf", "powerup_odf": "apserv_vsr.odf", "powerup_team": 6 }
+    {
+      "tick": 5000,
+      "killer": "VTrider",
+      "killer_in_game_nick": null,
+      "killer_odf": "ivscoutm_vsr.odf",
+      "powerup_odf": "apserv_vsr.odf",
+      "powerup_name": "Service Pod Powerup",
+      "powerup_team": 6
+    }
   ],
   "by_player": [{ "name": "VTrider", "count": 9 }],
-  "by_odf": [{ "odf": "apserv_vsr.odf", "name": "Service Pod", "count": 5 }],
+  "by_odf": [{ "odf": "apserv_vsr.odf", "name": "Service Pod Powerup", "count": 5 }],
   "totals": { "total": 12, "team_1": 7, "team_2": 5 }
 }
 ```

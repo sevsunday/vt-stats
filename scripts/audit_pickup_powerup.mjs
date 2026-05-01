@@ -7,19 +7,24 @@
  * surface which ODFs behave like powerups (pickup-disguised-as-destruction)
  * vs real combat targets.
  *
- * The pipeline (scripts/process_stats.py) consumes the findings via two
- * hand-curated frozensets:
- *   - KNOWN_POWERUP_ODFS  - collectible powerup ODFs (ap, ep, fp prefixes).
- *     unit_destroyed events with victim_odf in this set + killer_team == 0
- *     are treated as pickups (suppressed; new-schema matches get rich
- *     pickup_powerup events). killer_team != 0 -> denial bucket.
- *   - KNOWN_DEPLOYABLE_ODFS - ground-deployed utilities (mines, etc.).
- *     Always routed to the deployable_destructions block; never a kill.
+ * The pipeline (scripts/process_stats.py) classifies events via:
+ *   - KNOWN_POWERUP_ODFS  - the `Powerup` bucket of `data/odf.min.json`
+ *     (159 entries) plus VSR-mod variants (`*vsr.odf` and `*_vsr.odf`)
+ *     synthesized for every base entry. unit_destroyed events with
+ *     victim_odf in this set + killer_team == 0 are treated as pickups
+ *     (suppressed; new-schema matches get rich pickup_powerup events).
+ *     killer_team != 0 -> denial bucket. The DB is the source of truth;
+ *     this script reads the same `data/odf.min.json` as the pipeline.
+ *   - KNOWN_DEPLOYABLE_ODFS - hand-curated ground-deployed utilities
+ *     (mines, decoys). Always routed to the deployable_destructions
+ *     block; never a kill.
  *
  * IMPORTANT: do not blind-promote ODFs based on team-zero %% alone.
  * fball2c.odf shows 79% team-zero (looks powerup-shaped) but is a
- * deployable mine. Apply DOMAIN KNOWLEDGE when extending either set.
- * See docs/pickup-powerup-semantics.md for the full evidence chain.
+ * deployable mine -- not in the DB Powerup bucket, lives in
+ * KNOWN_DEPLOYABLE_ODFS by domain knowledge. Apply DOMAIN KNOWLEDGE
+ * when extending either set. See docs/pickup-powerup-semantics.md
+ * for the full evidence chain.
  *
  * Outputs (ephemeral, in gitignored _investigation/output/):
  *   _investigation/output/pickup_powerup_histogram.json   machine-readable
@@ -29,9 +34,11 @@
  *   npm install --no-save protobufjs@7   # one-off setup, not committed
  *   node scripts/audit_pickup_powerup.mjs
  *
- * Re-run when a new map/mod ships and new ODFs surface in matches; look
- * for entries with team-zero >= 80%, total >= 5, then triage with domain
- * knowledge before adding to KNOWN_POWERUP_ODFS or KNOWN_DEPLOYABLE_ODFS.
+ * Re-run when a new map/mod ships and new ODFs surface in matches.
+ * Promotion candidates (entries with team_zero >= 80% AND total >= 5
+ * but NOT in either constant) signal the DB is missing entries:
+ * extend `data/odf.min.json` upstream, or add to KNOWN_DEPLOYABLE_ODFS
+ * via domain knowledge if they're really mines/utilities.
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -47,16 +54,21 @@ const protobuf = require('protobufjs');
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '..');
 
-// Mirror the constants in scripts/process_stats.py so the audit can verify
-// the current set still covers everything it should and surface any new
-// ODFs the pipeline isn't yet routing.
-const KNOWN_POWERUP_ODFS = new Set([
-  'apserv_vsr.odf', 'apchainvsr.odf', 'apsnipvsr.odf', 'apeburst.odf',
-  'apslicer.odf', 'aplasevsr.odf', 'apshdwvsr.odf', 'aptaggvsr.odf',
-  'apphanvsr.odf', 'aplockvsr.odf', 'apdragb.odf', 'apblst.odf',
-  'apredfvsr.odf', 'apsonicvsr.odf', 'approxvsr.odf', 'apcphan.odf',
-  'epsnip_vsr.odf', 'fpsnipvsr.odf',
-]);
+// Build KNOWN_POWERUP_ODFS from the same DB the pipeline uses. Mirrors
+// _load_known_powerup_odfs() in scripts/process_stats.py: every key in the
+// Powerup bucket plus its `*vsr` and `*_vsr` synthesized variants
+// (covering VSR-mod ODFs that inherit from stock parents at runtime via
+// [GameObjectClass]\nbaseName but are absent from the flattened DB).
+const odfDbPath = resolve(PROJECT_ROOT, 'data/odf.min.json');
+const odfDb = JSON.parse(readFileSync(odfDbPath, 'utf8'));
+const KNOWN_POWERUP_ODFS = new Set();
+for (const k of Object.keys(odfDb.Powerup || {})) {
+  const odf = (k.toLowerCase().endsWith('.odf') ? k : `${k}.odf`).toLowerCase();
+  KNOWN_POWERUP_ODFS.add(odf);
+  const stem = odf.slice(0, -4);
+  KNOWN_POWERUP_ODFS.add(`${stem}vsr.odf`);
+  KNOWN_POWERUP_ODFS.add(`${stem}_vsr.odf`);
+}
 const KNOWN_DEPLOYABLE_ODFS = new Set(['fball2c.odf']);
 
 const TEAM_ZERO_PROMOTE_THRESHOLD = 0.80; // suggest review when >=80% + total>=5
@@ -212,20 +224,21 @@ lines.push(`  old-schema      : ${oldSchemaMatches}`);
 lines.push(`pickup_powerup    : ${totalPickups}`);
 lines.push(`unit_destroyed    : ${totalUD}`);
 lines.push('');
-lines.push('Pipeline constants (scripts/process_stats.py):');
-lines.push(`  KNOWN_POWERUP_ODFS    (${KNOWN_POWERUP_ODFS.size} entries)`);
-lines.push(`  KNOWN_DEPLOYABLE_ODFS (${KNOWN_DEPLOYABLE_ODFS.size} entries)`);
+lines.push('Pipeline classification sets:');
+lines.push(`  KNOWN_POWERUP_ODFS    (${KNOWN_POWERUP_ODFS.size} entries: DB Powerup bucket + VSR variants)`);
+lines.push(`  KNOWN_DEPLOYABLE_ODFS (${KNOWN_DEPLOYABLE_ODFS.size} entries: hand-curated)`);
 lines.push('');
 
 if (promotionCandidates.length > 0) {
-  lines.push(`!! PROMOTION CANDIDATES (${promotionCandidates.length}): team_zero >= 80%, total >= 5, NOT in any constant`);
-  lines.push('   APPLY DOMAIN KNOWLEDGE before adding -- see fball2c.odf precedent.');
+  lines.push(`!! PROMOTION CANDIDATES (${promotionCandidates.length}): team_zero >= 80%, total >= 5, NOT in either set`);
+  lines.push('   The DB is missing entries OR these are deployables (apply DOMAIN KNOWLEDGE).');
+  lines.push('   Action: extend data/odf.min.json upstream, or add to KNOWN_DEPLOYABLE_ODFS if mines/utilities.');
   for (const r of promotionCandidates) {
     lines.push(`   total=${String(r.total).padStart(5)}  team0=${fmtPct(r.teamZeroPct)}%  ${r.odf}`);
   }
   lines.push('');
 } else {
-  lines.push('No promotion candidates: pipeline constants cover all team-zero-skewed ODFs in the corpus.');
+  lines.push('No promotion candidates: DB Powerup bucket covers all team-zero-skewed ODFs in the corpus.');
   lines.push('');
 }
 

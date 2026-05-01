@@ -51,10 +51,10 @@ Unless noted otherwise, entries describe per-match-view behavior; the All Matche
 | `asset_damage.by_faction` | Passes through | Absolute |
 | `kills.feed`, `kills.leaderboard`, `kills.kill_rivalry_matrix` | Narrowed upstream | Absolute. Phase 3: pickup/denial/deployable events are routed away from `kills.*` by the 4-way classification in `process_stats.py` (see `docs/pickup-powerup-semantics.md`); only real-vehicle destructions reach these fields. |
 | `kills.by_vehicle` | Always full-match (never narrowed) | Match-global aggregate — not per-player attributed |
-| `pickups.feed` | Narrowed upstream on `picker` | Absolute. Empty for old-schema matches (`pickups.has_pickup_data == false`). |
+| `pickups.feed` | Narrowed upstream on `picker` | Absolute. Empty for old-schema matches (`pickups.has_pickup_data == false`). Phase 3.5: each entry carries a `powerup_name` field (disambiguated " Powerup" suffix); follows the same per-entry passthrough as the other fields, no special filter logic. |
 | `pickups.by_player` | Narrowed upstream on `name` | Absolute |
 | `pickups.by_odf`, `pickups.totals`, `pickups.has_pickup_data` | Always full-match (never narrowed) | Match-global aggregates / flag |
-| `powerup_destructions.feed` | Narrowed upstream on `killer` | Absolute. Populated for both old and new schema from `unit_destroyed` events whose `victim_odf` is a known powerup AND `killer_team != 0`. |
+| `powerup_destructions.feed` | Narrowed upstream on `killer` | Absolute. Populated for both old and new schema from `unit_destroyed` events whose `victim_odf` is a known powerup AND `killer_team != 0`. Phase 3.5: each entry carries a `powerup_name` field (same as `pickups.feed[].powerup_name`); follows the same per-entry passthrough. |
 | `powerup_destructions.by_player` | Narrowed upstream on `name` | Absolute |
 | `powerup_destructions.by_odf`, `powerup_destructions.totals` | Always full-match (never narrowed) | Match-global |
 | `deployable_destructions.by_player` | Narrowed upstream on `name` | Absolute |

@@ -99,13 +99,15 @@ flowchart TD
 | Powerup denial | suppressed | `powerup_destructions.{feed, by_player, by_odf, totals}` | Real player shot the powerup before pickup |
 | Deployable destruction | suppressed | `deployable_destructions.{by_player, by_odf, totals}` | No `feed` (too noisy); mines self-detonate, expire, or get shot |
 
-Two pipeline constants drive the classification:
-- `KNOWN_POWERUP_ODFS` (18 entries): collectible powerups (`ap*`/`ep*`/`fp*` faction conventions). Audit-derived + domain-curated.
-- `KNOWN_DEPLOYABLE_ODFS` (1 entry: `fball2c.odf`): ground-deployed utilities. Curated by domain knowledge despite the high (79%) team-zero rate that would otherwise misroute them as powerups.
+Two pipeline classification sets drive the routing:
+- **Powerups (DB-derived)**: built per-pipeline-run by `_load_known_powerup_odfs(odf_db)` from the `Powerup` bucket of `data/odf.min.json` (currently 159 entries) PLUS synthesized `*vsr.odf` and `*_vsr.odf` variants for every entry (covering VSR-mod ODFs that inherit from stock parents at runtime). Threaded into `process_match()` as a `known_powerup_odfs` parameter (symmetric with `resolve_weapon` / `resolve_unit`). The DB is the source of truth; if a powerup is missing, extend `data/odf.min.json` upstream.
+- `KNOWN_DEPLOYABLE_ODFS` (1 entry: `fball2c.odf`): ground-deployed utilities. Hand-curated by domain knowledge despite the high (79%) team-zero rate that would otherwise misroute them as powerups; absent from the DB Powerup bucket.
 
-`apserv_vsr.odf` stays in the legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` to suppress the residual 13% of real-combat service-pod destructions from the Vehicle Destruction Breakdown chart only (those events still flow into `powerup_destructions.feed`).
+`powerup_display_name(odf)` is a closure inside `process_match` that resolves powerup ODFs through `unit_name` -> stripped-vsr `unit_name` -> `wpn_name` -> stripped-vsr `wpn_name` -> title-cased stem fallback, suffixed with " Powerup" to disambiguate from the same-named weapon ordnance. Used by `pickups.feed[].powerup_name`, `pickups.by_odf[].name`, `powerup_destructions.feed[].powerup_name`, and `powerup_destructions.by_odf[].name`. The dominant case is `apserv_vsr.odf` (110,589 pickup events in the corpus): not in the Powerup bucket directly, but `_strip_vsr_suffix` resolves it via `apserv.odf` -> "Service Pod" -> "Service Pod Powerup".
 
-Audit script `scripts/audit_pickup_powerup.mjs` re-derives the constants on demand. **Domain knowledge is required** when extending either set — do NOT auto-promote based on team-zero % alone (the `fball2c` precedent). Full evidence chain + maintenance procedure: [docs/pickup-powerup-semantics.md](../../docs/pickup-powerup-semantics.md).
+`apserv_vsr.odf` stays in the legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` to suppress the residual ~13% of real-combat service-pod destructions from the Vehicle Destruction Breakdown chart only (those events still flow into `powerup_destructions.feed`).
+
+Audit script `scripts/audit_pickup_powerup.mjs` reads the same `data/odf.min.json` and verifies coverage; "promotion candidates" surface ODFs the DB is missing entries for. **Domain knowledge is required** when extending the deployable set — do NOT auto-promote based on team-zero % alone (the `fball2c` precedent). Full evidence chain + maintenance procedure: [docs/pickup-powerup-semantics.md](../../docs/pickup-powerup-semantics.md).
 
 ## ODF Weapon Name Resolution
 

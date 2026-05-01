@@ -8,7 +8,8 @@ Linked from:
 
 - [.cursor/rules/data-schema.mdc](../.cursor/rules/data-schema.mdc)
 - [DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md)
-- [scripts/process_stats.py](../scripts/process_stats.py) constants `KNOWN_POWERUP_ODFS` + `KNOWN_DEPLOYABLE_ODFS`
+- [scripts/process_stats.py](../scripts/process_stats.py) helper `_load_known_powerup_odfs(odf_db)` + constant `KNOWN_DEPLOYABLE_ODFS`
+- [scripts/audit_pickup_powerup.mjs](../scripts/audit_pickup_powerup.mjs) (verification tool)
 
 ## Background
 
@@ -79,50 +80,84 @@ Headline findings from the initial corpus (47 sessions, 24 new-schema +
 `fball2c.odf` (a deployable flame mine) shows **79% team-zero** in the
 audit. By the team-zero threshold alone it looks powerup-shaped, but it is
 **NOT** a powerup -- it's a ground-deployed utility that self-detonates,
-expires, or gets shot. It belongs in `KNOWN_DEPLOYABLE_ODFS`, not
-`KNOWN_POWERUP_ODFS`.
+expires, or gets shot. It belongs in `KNOWN_DEPLOYABLE_ODFS`, not the DB
+Powerup bucket. (Verified: `fball2c.odf` is absent from
+`data/odf.min.json -> Powerup` -- the DB and domain knowledge agree it's
+not a powerup.)
 
-Future maintainers extending these constants must apply domain knowledge
-about the BZCC entity in question:
+Future maintainers extending the deployable set or recommending DB updates
+must apply domain knowledge about the BZCC entity in question:
 
-- **Collectible item** (gives the picker a powerup / weapon): goes into
-  `KNOWN_POWERUP_ODFS`. Match the `ap*` / `ep*` / `fp*` naming convention.
+- **Collectible item** (gives the picker a powerup / weapon): should be in
+  `data/odf.min.json -> Powerup`. The pipeline picks it up automatically.
+  If a real powerup is missing from the DB, extend the DB upstream.
 - **Deployable utility** (mine, decoy, smoke pot): goes into
-  `KNOWN_DEPLOYABLE_ODFS`. Cross-reference [data/odf.min.json](../data/odf.min.json)
-  for `wpnName` containing "Mine", "Bait", "Decoy".
+  `KNOWN_DEPLOYABLE_ODFS` in [scripts/process_stats.py](../scripts/process_stats.py).
+  Cross-reference [data/odf.min.json](../data/odf.min.json) for `wpnName`
+  containing "Mine", "Bait", "Decoy".
 - **Real combat unit** (vehicle, structure, soldier): leave it out of both
   sets. The pipeline routes it through existing kill accumulators.
 
 Do **not** auto-promote based on the team-zero signal alone.
 
-## Current `KNOWN_POWERUP_ODFS` (18 entries)
+## Authoritative source: `data/odf.min.json -> Powerup`
 
-| ODF | Team-zero % | Total |
-|---|---:|---:|
-| `apserv_vsr.odf` | 87.0% | 2456 |
-| `apchainvsr.odf` | 88.9% | 171 |
-| `apshdwvsr.odf` | 83.7% | 49 |
-| `apsnipvsr.odf` | 89.6% | 48 |
-| `apeburst.odf` | 100.0% | 48 |
-| `apslicer.odf` | 85.3% | 34 |
-| `aplasevsr.odf` | 92.6% | 27 |
-| `epsnip_vsr.odf` | 83.3% | 18 |
-| `aptaggvsr.odf` | 84.6% | 13 |
-| `apdragb.odf` | 100.0% | 9 |
-| `apcphan.odf` | 87.5% | 8 |
-| `apblst.odf` | 100.0% | 7 |
-| `apredfvsr.odf` | 100.0% | 6 |
-| `apsonicvsr.odf` | 100.0% | 6 |
-| `approxvsr.odf` | 100.0% | 6 |
-| `apphanvsr.odf` | 80.0% | 5 |
-| `fpsnipvsr.odf` | 100.0% | 5 |
-| `aplockvsr.odf` | 100.0% | 5 |
+`KNOWN_POWERUP_ODFS` is built by `_load_known_powerup_odfs(odf_db)` in
+[scripts/process_stats.py](../scripts/process_stats.py) on every pipeline
+run from the same DB the dashboard uses. The current DB carries **159
+Powerup entries** (run `Get-Content data/odf.min.json | ConvertFrom-Json |
+ForEach-Object { $_.Powerup.PSObject.Properties.Name.Count }` to verify).
 
-## Current `KNOWN_DEPLOYABLE_ODFS` (1 entry)
+Every entry has a `GameObjectClass.unitName` field that yields the
+friendly display name (e.g. `apchain.odf` -> "Chain Gun",
+`apserv.odf` -> "Service Pod"). The `powerup_display_name(odf)` closure in
+`process_match` consumes these names and suffixes " Powerup" to
+disambiguate from the same-named weapon ordnance:
+
+- `apchainvsr.odf` (powerup pod) -> "Chain Gun Powerup"
+- `apchain.odf` (the weapon ordnance the pod grants) -> "Chain Gun"
+  (unchanged via `prettify_odf` for kill feeds)
+
+### Why the hand-curated 18-entry set was insufficient
+
+The audit-derived set used a `total >= 5, team_zero >= 80%` threshold and
+missed 5 ODFs the engine itself emitted `pickup_powerup` events for in the
+new-schema sessions:
+
+| ODF | Pickup events | DB unit_name |
+|---|---:|---|
+| `apshellgun.odf` | 5 | (in DB) |
+| `applasvsr.odf` | 3 | (in DB) |
+| `apdefl.odf` | 2 | "Deflection" |
+| `apmdmgvsr.odf` | 2 | "MDM Mortar" |
+| `apsplasmavsr.odf` | 2 | (in DB) |
+| `apquilvsr.odf` | 2 | (in DB) |
+| `apfafmvsr.odf` | 2 | "FAF Missile" |
+
+These are now correctly classified by the DB-derived approach without any
+manual constant edit.
+
+### `_strip_vsr_suffix` fallback
+
+VSR-mod ODFs typically inherit from stock parents at runtime via the
+`[GameObjectClass]\nbaseName` ODF directive, but the flattened DB doesn't
+capture inheritance. `_load_known_powerup_odfs` synthesizes both `*vsr.odf`
+and `*_vsr.odf` variants for every Powerup-bucket entry, expanding 159 ->
+~437 entries. `powerup_display_name` additionally falls back to
+`_strip_vsr_suffix(odf)` lookup when the variant isn't in the bucket
+directly.
+
+**Highest-volume case**: `apserv_vsr.odf` is absent from `Powerup` directly,
+but the strip-vsr fallback resolves it via stock `apserv.odf` ->
+"Service Pod" -> "Service Pod Powerup". This single ODF accounts for
+**110,589 `pickup_powerup` events** in the current corpus -- by far the
+dominant pickup ODF -- so the fallback is the highest-volume code path.
+
+## Current `KNOWN_DEPLOYABLE_ODFS` (1 entry, hand-curated)
 
 | ODF | Team-zero % | Total | Notes |
 |---|---:|---:|---|
-| `fball2c.odf` | 78.7% | 705 | Flame mine. Curated by domain knowledge despite high team-zero. |
+| `fball2c.odf` | 78.7% | 705 | Flame mine. Curated by domain knowledge; absent from DB Powerup bucket. |
 
 ## Reproducibility
 
@@ -146,14 +181,17 @@ Re-run the audit when:
 Procedure:
 
 1. Run the audit script. It surfaces "promotion candidates" -- ODFs with
-   team-zero >= 80% and total >= 5 that are NOT in either constant.
-2. For each candidate, look up the ODF in [data/odf.min.json](../data/odf.min.json)
-   to determine its category (collectible powerup vs deployable utility
-   vs real combat unit).
-3. Add to the appropriate frozenset in
-   [scripts/process_stats.py](../scripts/process_stats.py) and append a row
-   to the corresponding table above.
-4. Run `python scripts/process_stats.py` to reprocess.
+   team-zero >= 80% and total >= 5 that are NOT in either set (DB-derived
+   or hand-curated).
+2. For each candidate, apply domain knowledge:
+   - **Collectible powerup**: extend `data/odf.min.json -> Powerup`
+     upstream so the DB picks it up. The pipeline's
+     `_load_known_powerup_odfs` will pick up the change on next run.
+   - **Deployable utility (mine, decoy)**: add to `KNOWN_DEPLOYABLE_ODFS`
+     in [scripts/process_stats.py](../scripts/process_stats.py).
+   - **Real combat unit**: leave it alone -- the audit threshold is just
+     a heuristic; some weird edge cases are legitimately combat events.
+3. Run `python scripts/process_stats.py` to reprocess.
 
 ## Engine emission semantics (verified by audit)
 
