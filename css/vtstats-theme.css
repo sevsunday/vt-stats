@@ -2942,3 +2942,312 @@ td.vt-col-split {
     }
 }
 
+/* ============================================================================
+   DOCS SEARCH PALETTE
+   Cmd/Ctrl+K modal that fuzzy-searches the rendered DATA_DICTIONARY.md.
+   Markup in docs.html (#docs-search-modal); behavior in js/docs-search.js.
+   Matches the existing match-picker glass aesthetic.
+   ============================================================================ */
+
+/* Algolia-style centered trigger pill in the docs navbar. Absolutely
+ * positioned inside the sticky navbar so it stays at viewport-center
+ * regardless of brand / collapse-menu widths. Hidden on mobile (d-md-flex
+ * on the markup); the burger menu has its own icon-button trigger. */
+.vt-docs-nav {
+    position: sticky; /* matches existing .sticky-top; absolute children anchor here */
+}
+
+.vt-docs-search-pill {
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.7rem 0.4rem 0.85rem;
+    min-width: 320px;
+    max-width: 480px;
+    background: var(--kb-bg-subtle);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    color: var(--kb-text-muted);
+    font-size: 0.85rem;
+    line-height: 1.2;
+    cursor: pointer;
+    text-align: left;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.vt-docs-search-pill:hover,
+.vt-docs-search-pill:focus-visible {
+    background: var(--kb-bg-card);
+    border-color: var(--kb-primary);
+    color: var(--kb-text-primary);
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--kb-primary) 18%, transparent);
+}
+
+.vt-docs-search-pill-icon {
+    font-size: 1rem;
+    color: var(--kb-text-muted);
+    flex-shrink: 0;
+}
+
+.vt-docs-search-pill:hover .vt-docs-search-pill-icon,
+.vt-docs-search-pill:focus-visible .vt-docs-search-pill-icon {
+    color: var(--kb-primary);
+}
+
+.vt-docs-search-pill-label {
+    flex: 1 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vt-docs-search-pill-kbd {
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, 'SF Mono', Consolas, monospace;
+    font-size: 0.7rem;
+    padding: 0.15rem 0.4rem;
+    background: var(--kb-bg-card);
+    color: var(--kb-text-muted);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 4px;
+    line-height: 1;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+}
+
+@media (min-width: 768px) {
+    .vt-docs-search-pill {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1; /* above the right-aligned collapse menu when widths get tight */
+    }
+}
+
+@media (min-width: 768px) and (max-width: 991.98px) {
+    .vt-docs-search-pill {
+        min-width: 240px;
+    }
+}
+
+.vt-docs-search-modal .modal-dialog {
+    max-width: 720px;
+}
+
+.vt-docs-search-modal .modal-content {
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 12px;
+    box-shadow: var(--vt-shadow-elevation-3, 0 16px 48px rgba(0, 0, 0, 0.35));
+    overflow: hidden;
+}
+
+.vt-docs-search-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+    background: var(--kb-bg-card);
+}
+
+.vt-docs-search-icon {
+    color: var(--kb-text-muted);
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.vt-docs-search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    color: var(--kb-text-primary);
+    font-size: 1rem;
+    padding: 0;
+    line-height: 1.4;
+}
+
+.vt-docs-search-input:focus {
+    background: transparent;
+    border: none;
+    outline: none;
+    box-shadow: none;
+    color: var(--kb-text-primary);
+}
+
+.vt-docs-search-input::placeholder {
+    color: var(--kb-text-muted);
+    opacity: 0.7;
+}
+
+/* Cancel the default search input clear (X) Webkit/Edge button so the layout
+ * stays predictable; users have Esc + the modal close button. */
+.vt-docs-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.vt-docs-search-count {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.vt-docs-search-body {
+    padding: 0;
+    max-height: min(60vh, 520px);
+    overflow-y: auto;
+}
+
+.vt-docs-search-results {
+    list-style: none;
+    margin: 0;
+    padding: 0.25rem 0;
+}
+
+.vt-docs-search-result {
+    margin: 0;
+    padding: 0;
+    border-bottom: 1px solid transparent;
+}
+
+.vt-docs-search-result-link {
+    display: block;
+    padding: 0.65rem 1rem;
+    color: var(--kb-text-primary);
+    text-decoration: none;
+    transition: background 120ms ease;
+    border-left: 2px solid transparent;
+}
+
+.vt-docs-search-result.is-active .vt-docs-search-result-link,
+.vt-docs-search-result-link:hover {
+    background: var(--kb-bg-subtle);
+    border-left-color: var(--kb-primary);
+    text-decoration: none;
+    color: var(--kb-text-primary);
+}
+
+.vt-docs-search-result-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.15rem;
+}
+
+.vt-docs-search-result-section {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg, #fff);
+    border-radius: 4px;
+    line-height: 1.3;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+}
+
+.vt-docs-search-result-heading {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--kb-text-primary);
+}
+
+.vt-docs-search-result-breadcrumb {
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.15rem;
+    line-height: 1.4;
+}
+
+.vt-docs-search-result-breadcrumb i {
+    font-size: 0.6rem;
+    margin: 0 0.15rem;
+    opacity: 0.6;
+}
+
+.vt-docs-search-result-snippet {
+    font-size: 0.82rem;
+    color: var(--kb-text-secondary);
+    line-height: 1.45;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.vt-docs-search-result-snippet mark {
+    background: color-mix(in srgb, var(--kb-primary) 25%, transparent);
+    color: var(--kb-text-primary);
+    padding: 0 0.1rem;
+    border-radius: 2px;
+}
+
+.vt-docs-search-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--kb-text-muted);
+    font-size: 0.9rem;
+    list-style: none;
+}
+
+.vt-docs-search-footer {
+    padding: 0.5rem 1rem;
+    border-top: 1px solid var(--kb-border-subtle);
+    background: var(--kb-bg-subtle);
+    justify-content: flex-end;
+}
+
+.vt-docs-search-legend {
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.vt-docs-search-legend kbd {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.65rem;
+    padding: 0.1rem 0.35rem;
+    background: var(--kb-bg-card);
+    color: var(--kb-text-secondary);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 3px;
+    line-height: 1;
+    margin-right: 0.15rem;
+}
+
+.vt-docs-search-sep {
+    opacity: 0.5;
+    margin: 0 0.25rem;
+}
+
+@media (max-width: 575.98px) {
+    .vt-docs-search-modal .modal-dialog {
+        margin: 0;
+    }
+
+    .vt-docs-search-modal .modal-content {
+        min-height: 100vh;
+        border-radius: 0;
+    }
+
+    .vt-docs-search-body {
+        max-height: none;
+        flex: 1 1 auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-docs-search-result-link {
+        transition: none;
+    }
+}

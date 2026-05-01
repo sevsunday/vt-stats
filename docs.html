@@ -14,12 +14,29 @@
 </head>
 <body>
 
-  <!-- Navbar -->
-  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+  <!-- Navbar. Three-zone layout: brand on the left, an Algolia-style search
+       pill absolutely centered (desktop only), and the rest of the menu
+       (Docs / Raw data / Theme / Mode) on the right. The desktop search pill
+       sits outside the burger collapse so it stays visible at md+ widths;
+       on mobile it falls back to a compact icon-button inside the menu. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom vt-docs-nav">
     <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
+
+      <!-- Centered search trigger pill (desktop only). Absolutely positioned
+           inside the sticky navbar so it floats at the viewport center
+           regardless of left / right column widths, mirroring Bootstrap's
+           own docs nav. Click or Cmd/Ctrl+K opens #docs-search-modal. -->
+      <button type="button" class="vt-docs-search-pill d-none d-md-flex"
+              id="docs-search-trigger" data-vt-docs-search-trigger
+              title="Search the docs (Ctrl+K)" aria-label="Search the docs"
+              aria-keyshortcuts="Control+K Meta+K">
+        <i class="bi bi-search vt-docs-search-pill-icon" aria-hidden="true"></i>
+        <span class="vt-docs-search-pill-label">Search the docs</span>
+        <kbd class="vt-docs-search-pill-kbd">Ctrl K</kbd>
+      </button>
 
       <!-- Burger (mobile only) -->
       <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto order-md-3" type="button"
@@ -36,6 +53,14 @@
           <a href="docs.html" class="vt-nav-icon-btn active" aria-current="page">
             <i class="bi bi-book me-1"></i>Docs
           </a>
+
+          <!-- Mobile-only search trigger (desktop uses the centered pill above
+               which is hidden via d-md-flex / d-none). -->
+          <button type="button" class="vt-nav-icon-btn d-md-none"
+                  data-vt-docs-search-trigger
+                  title="Search the docs" aria-label="Search the docs">
+            <i class="bi bi-search me-1"></i>Search
+          </button>
 
           <a href="raw.html" class="vt-nav-icon-btn" title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)">
             <i class="bi bi-code-square"></i><span class="vt-nav-label ms-2">Raw data</span>
@@ -113,9 +138,48 @@
     <i class="bi bi-arrow-up"></i>
   </button>
 
+  <!-- Docs Search Modal. Trigger via #docs-search-trigger button, Cmd/Ctrl+K,
+       or `/` (when no input has focus). Index built once after marked.parse()
+       inside js/docs-search.js, cached in sessionStorage by content hash so
+       subsequent navigations are zero-cost. -->
+  <div class="modal fade vt-docs-search-modal" id="docs-search-modal"
+       tabindex="-1" aria-labelledby="docs-search-modal-label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+      <div class="modal-content">
+        <div class="modal-header vt-docs-search-header">
+          <i class="bi bi-search vt-docs-search-icon" aria-hidden="true"></i>
+          <input type="search" id="docs-search-input"
+                 class="form-control vt-docs-search-input"
+                 placeholder="Search the docs..."
+                 aria-label="Search the docs"
+                 aria-controls="docs-search-results"
+                 aria-autocomplete="list"
+                 autocomplete="off" spellcheck="false">
+          <span id="docs-search-modal-label" class="visually-hidden">Search documentation</span>
+          <span id="docs-search-count" class="vt-docs-search-count" aria-live="polite"></span>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body vt-docs-search-body">
+          <ul id="docs-search-results" class="vt-docs-search-results" role="listbox"
+              aria-label="Search results"></ul>
+        </div>
+        <div class="modal-footer vt-docs-search-footer">
+          <span class="vt-docs-search-legend">
+            <kbd>↑</kbd><kbd>↓</kbd> navigate
+            <span class="vt-docs-search-sep">·</span>
+            <kbd>↵</kbd> jump
+            <span class="vt-docs-search-sep">·</span>
+            <kbd>Esc</kbd> close
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="vendor/marked/marked.min.js"></script>
   <script src="js/theme.js"></script>
+  <script src="js/docs-search.js"></script>
   <script>
     // Registry of available docs pages. The default (dictionary) is the main
     // technical spec; the other entries are standalone references linked from
@@ -123,7 +187,6 @@
     // needs to be surfaced from docs.html. Slugs are case-insensitive.
     const DOC_REGISTRY = [
       { slug: 'dictionary', file: 'docs/DATA_DICTIONARY.md', label: 'Data Dictionary', icon: 'bi-journal-text' },
-      { slug: 'sentinel', file: 'docs/sentinel-damage.md', label: 'Sentinel Damage Filter', icon: 'bi-shield-exclamation' },
     ];
 
     (async function () {
@@ -274,6 +337,17 @@
         buildToc(tocDesktop);
         buildToc(tocMobile);
 
+        // Initialize the client-side search (modal palette + Cmd/Ctrl+K).
+        // Index is built once over the rendered DOM, cached in sessionStorage
+        // by content hash. See js/docs-search.js for the architecture.
+        if (window.VTDocsSearch && typeof window.VTDocsSearch.init === 'function') {
+          window.VTDocsSearch.init({
+            content: content,
+            slug: active.slug,
+            raw: md
+          });
+        }
+
         // Expand a TOC section by its heading id (used by scroll-spy)
         function expandSectionForId(targetId) {
           document.querySelectorAll('.docs-toc').forEach(toc => {
@@ -289,6 +363,10 @@
             }
           });
         }
+        // Expose for cross-module callers (notably js/docs-search.js, which
+        // calls this after a search-result jump so the parent TOC section
+        // expands and the IntersectionObserver-driven highlight catches up).
+        window.expandSectionForId = expandSectionForId;
 
         // Scroll-spy via IntersectionObserver
         const allTocLinks = document.querySelectorAll('.docs-toc-link');
