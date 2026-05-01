@@ -682,7 +682,8 @@ Crate / pod pickups from `PickupPowerup` events (new-schema only). Always emitte
 | Field | Type | Description |
 |---|---|---|
 | `has_pickup_data` | `bool` | `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions. |
-| `feed` | `array` | Chronological pickup events. Each: `{ tick, picker, picker_in_game_nick, picker_odf, powerup_odf, powerup_team }`. AI pickers labeled as `"Team N"`. |
+| `feed` | `array` | Chronological pickup events. Each: `{ tick, picker, picker_in_game_nick, picker_odf, powerup_odf, powerup_name, powerup_team }`. AI pickers labeled as `"Team N"`. |
+| `feed[].powerup_name` | `string` | Disambiguated display name (e.g. `"Chain Gun Powerup"`), suffixed with " Powerup" to distinguish the pod from the same-named weapon ordnance. Resolution order: DB Powerup `unitName` -> stripped-vsr Powerup `unitName` -> weapon name -> stripped-vsr weapon name -> title-cased stem. Empty string for empty `powerup_odf`. |
 | `by_player` | `array` | Per-player counts. Each: `{ name, count }`, sorted descending. |
 | `by_odf` | `array` | Per-powerup counts. Each: `{ odf, name, count }`, sorted descending. `name` via `prettify_odf`. |
 | `totals` | `object` | `{ total, team_1, team_2, ai }` — match-global counts; `ai` is pickups by non-player units. |
@@ -693,7 +694,8 @@ Denial stats — powerups destroyed in real combat (not picked up). Sourced from
 
 | Field | Type | Description |
 |---|---|---|
-| `feed` | `array` | Chronological denial events. Each: `{ tick, killer, killer_in_game_nick, killer_odf, powerup_odf, powerup_team }`. |
+| `feed` | `array` | Chronological denial events. Each: `{ tick, killer, killer_in_game_nick, killer_odf, powerup_odf, powerup_name, powerup_team }`. |
+| `feed[].powerup_name` | `string` | Same disambiguated display name as `pickups.feed[].powerup_name` (see above). |
 | `by_player` | `array` | Per-killer counts. Each: `{ name, count }`. |
 | `by_odf` | `array` | Per-powerup counts. Each: `{ odf, name, count }`. |
 | `totals` | `object` | `{ total, team_1, team_2 }`. |
