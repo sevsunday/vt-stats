@@ -38,8 +38,10 @@ For each new event type:
 1. Add a handler in the main event loop in `process_stats.py`
 2. Add accumulators at the top of `process_match()`
 3. Add output fields in the JSON builder
-4. Add aggregation in `build_all_matches_aggregate()` if cross-match data is needed
-5. Update the output JSON structure documentation in `DEVELOPER_GUIDE.md` Section 5
+4. If the field has a cross-match aggregate, update **both** sides:
+   - `_extract_contribution()` in `scripts/process_stats.py` — emit the per-match field into `match_contributions.json`.
+   - `VTAggregate.build()` in `js/all-matches-aggregator.js` — sum it into the corresponding `career_stats` / `global_*` field with **identical rounding** to the Python pipeline (mirror the `round(x, 1)` / `round(x, 3)` calls).
+5. Update the output JSON structure documentation in `DEVELOPER_GUIDE.md` Section 5 (cover both `<match_id>.json` and `match_contributions.json`).
 6. **For every new field added to the output JSON**, run the filter-contract checklist in `.cursor/rules/filter-contract.mdc` and record the classification in `DEVELOPER_GUIDE.md` Global Player Filter section + `docs/DATA_DICTIONARY.md`. This applies to new fields on `PlayerState` too, once they flow through to the processed JSON.
 
 ## Step 4: Update Frontend (if new data is output)
@@ -79,7 +81,7 @@ Key locations in `scripts/process_stats.py`:
 - **Kill tracking**: `elif event_type == "unit_destroyed"` handler
 - **Player accumulators**: `player_dealt`, `player_received`, `player_weapon_*`, `player_kills`, `player_deaths` dicts
 - **Output builder**: leaderboard, faction_totals, weapon_meta, kills section, etc.
-- **Aggregate builder**: `build_all_matches_aggregate()` function
+- **Per-match contribution slice**: `_extract_contribution()` — slim shape consumed by the client-side All Matches aggregator (`js/all-matches-aggregator.js`). The legacy `build_all_matches_aggregate()` Python function remains as reference code only; the pipeline no longer writes `all_matches.json`.
 
 Key locations in `js/app.js`:
 - **Match loading**: `loadMatch()` function

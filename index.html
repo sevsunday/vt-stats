@@ -681,6 +681,20 @@
   <!-- All Matches View -->
   <div id="all-matches-view" class="container-fluid px-3 px-md-4 py-4">
 
+    <!-- Filter-state banner. Visible only when picker filters are active.
+         Surfaces the filtered subset size + a Clear-filters shortcut so the
+         user always knows the aggregate's scope without re-opening the
+         picker modal. Wired in js/app.js loadAllMatches / applyPickerFilters. -->
+    <div class="vt-info-banner mb-4 d-none" id="all-matches-filter-banner" role="status">
+      <i class="bi bi-funnel"></i>
+      <div class="flex-grow-1" id="all-matches-filter-banner-text">
+        Filters are active.
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="all-matches-filter-banner-clear">
+        <i class="bi bi-x-lg me-1"></i>Clear filters
+      </button>
+    </div>
+
     <!-- Aggregate Meta (always visible above tabs) -->
     <div class="card mb-4">
       <div class="card-body">
@@ -1147,24 +1161,33 @@
                 <div class="vt-match-picker-chipset" data-facet="submitters" id="match-picker-facet-submitters" role="group" aria-label="Submitter"></div>
               </div>
 
-              <!-- Commanders (multi-select chips with own search + mode toggle) -->
-              <div class="vt-match-picker-filter-row vt-match-picker-filter-row--commanders">
-                <span class="vt-match-picker-filter-label">Commanders</span>
-                <div class="vt-match-picker-commanders">
-                  <div class="vt-match-picker-commanders-head">
-                    <div class="input-group input-group-sm vt-match-picker-commanders-search">
+              <!-- Players (multi-select chips spanning the full roster, with
+                   own search + Match-mode toggle (Any of these / All of these)
+                   + Role toggle (Any / Commander / Thug). The role is derived
+                   per-match: a name in `team_leaders` is the match's commander,
+                   anyone else in `players[]` is a thug. -->
+              <div class="vt-match-picker-filter-row vt-match-picker-filter-row--players">
+                <span class="vt-match-picker-filter-label">Players</span>
+                <div class="vt-match-picker-players">
+                  <div class="vt-match-picker-players-head">
+                    <div class="input-group input-group-sm vt-match-picker-players-search">
                       <span class="input-group-text"><i class="bi bi-search"></i></span>
-                      <input type="search" id="match-picker-commanders-search" class="form-control"
-                             placeholder="Filter commander list..." aria-label="Filter commander chips" autocomplete="off">
+                      <input type="search" id="match-picker-players-search" class="form-control"
+                             placeholder="Filter player list..." aria-label="Filter player chips" autocomplete="off">
                     </div>
-                    <div class="btn-group btn-group-sm vt-match-picker-commanders-mode" role="radiogroup" aria-label="Commander match mode">
-                      <button type="button" class="btn btn-outline-secondary active" data-versus-mode="any" aria-pressed="true">Any</button>
-                      <button type="button" class="btn btn-outline-secondary" data-versus-mode="both" aria-pressed="false">Both</button>
+                    <div class="btn-group btn-group-sm vt-match-picker-players-mode" role="radiogroup" aria-label="Player match mode">
+                      <button type="button" class="btn btn-outline-secondary active" data-match-mode="any" aria-pressed="true" title="Match if any selected player was in the match">Any of these</button>
+                      <button type="button" class="btn btn-outline-secondary" data-match-mode="all" aria-pressed="false" title="Match only if every selected player was in the match">All of these</button>
+                    </div>
+                    <div class="btn-group btn-group-sm vt-match-picker-players-role" role="radiogroup" aria-label="Player role">
+                      <button type="button" class="btn btn-outline-secondary active" data-role="any" aria-pressed="true" title="Selected players in any role (commander or thug)">Any role</button>
+                      <button type="button" class="btn btn-outline-secondary" data-role="commander" aria-pressed="false" title="Selected players must have commanded the match">Commander</button>
+                      <button type="button" class="btn btn-outline-secondary" data-role="thug" aria-pressed="false" title="Selected players must have been on the team but not commanding">Thug</button>
                     </div>
                   </div>
-                  <div class="vt-match-picker-chipset vt-match-picker-chipset--commanders"
-                       data-facet="commanders" id="match-picker-facet-commanders"
-                       role="group" aria-label="Commanders"></div>
+                  <div class="vt-match-picker-chipset vt-match-picker-chipset--players"
+                       data-facet="players-roster" id="match-picker-facet-players-roster"
+                       role="group" aria-label="Players"></div>
                 </div>
               </div>
             </div>
@@ -1215,6 +1238,11 @@
   <script src="js/positioning-charts.js"></script>
   <script src="js/timeline-player.js"></script>
   <script src="js/positioning-player.js"></script>
+  <!-- All Matches aggregator: pure summation over a contributions dict.
+       Documented exception to the "no aggregation in JS" rule so the All
+       Matches view honors picker filters without per-match round trips.
+       See js/all-matches-aggregator.js header. -->
+  <script src="js/all-matches-aggregator.js"></script>
   <!-- BZ2API: baked-in VSR_MAP_DATA catalog + iondriver map API client.
        Consumed by js/app.js's getMapMeta() for hero banner fields. Loaded
        before app.js so window.BZ2API is available during init. -->

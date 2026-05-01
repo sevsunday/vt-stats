@@ -60,7 +60,7 @@ The pipeline adds four derived fields to each `leaderboard[].personal` entry, de
 - `pvp_received` = column sum of `rivalry[*][s64]` — damage received from humans.
 - `pve_received` = `received − pvp_received` — damage received from AI units / world.
 
-Each is rounded independently to 1 decimal, so `pvp + pve` may differ from the combined `dealt`/`received` by up to ±0.1. The same split is mirrored at the faction level in `faction_totals[n].{pvp_dealt, pve_dealt, pvp_received, pve_received}` and at the career level in `all_matches.json → career_stats[].{total_pvp_dealt, total_pve_dealt, total_pvp_received, total_pve_received}`.
+Each is rounded independently to 1 decimal, so `pvp + pve` may differ from the combined `dealt`/`received` by up to ±0.1. The same split is mirrored at the faction level in `faction_totals[n].{pvp_dealt, pve_dealt, pvp_received, pve_received}` and at the career level in the All Matches aggregate's `career_stats[].{total_pvp_dealt, total_pve_dealt, total_pvp_received, total_pve_received}` (built client-side from `match_contributions.json` by `js/all-matches-aggregator.js`).
 
 ### Source-Level Filters
 
@@ -127,7 +127,7 @@ Pre-computed JSON in `data/processed/`. See `DEVELOPER_GUIDE.md` Section 5 for f
 
 - `matches.json` — manifest (includes `submitter`, `has_position_data`, `has_target_lock_data`, `has_pickup_data` fields per match)
 - `<match_id>.json` — per-match: `match` (with `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `schema_version`), `leaderboard` (with kills/deaths/hit_targets), `faction_totals`, `rivalry_matrix`, `top_rivalries`, `weapon_meta`, **`odf_map`**, `timeline`, `asset_damage`, `kills` (leaderboard/feed/by_vehicle/kill_rivalry_matrix), `pickups` (Phase 3: feed/by_player/by_odf/totals/has_pickup_data), `powerup_destructions` (Phase 3: feed/by_player/by_odf/totals — destruction stats), `deployable_destructions` (Phase 3: by_player/by_odf/totals — no feed), `snipes` (Phase 3: feed/by_player/totals), `positioning`
-- `all_matches.json` — aggregate: `meta` (with submitters list, `total_sentinel_damage_dropped`, `matches_with_target_lock_data`), `career_stats` (with `total_kills`, `total_deaths`, `total_pickups`), `global_weapon_meta`, `global_rivalries`
+- `match_contributions.json` — slim per-match contributions for the All Matches aggregator. Dict keyed by `<match_id>.json`; each entry holds the fields needed to rebuild career stats / global weapon meta / global rivalries: `id`, `map`, `date`, `duration_sec`, `submitter`, `player_count`, `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `sentinel_damage_count`, plus per-player `leaderboard` (flat damage / shot / kill / weapon-breakdown / positioning fields), `weapon_meta`, and `rivalry_matrix`. Built by `_extract_contribution()` in `scripts/process_stats.py`. Consumed by [`js/all-matches-aggregator.js`](../../js/all-matches-aggregator.js) which sums it over the picker-filtered subset of file ids and produces the same shape the legacy `all_matches.json` had (`{meta, career_stats, global_weapon_meta, global_rivalries}`). DEPRECATED → DELETED: `all_matches.json` is no longer written by the pipeline; the legacy `build_all_matches_aggregate()` Python function remains as reference code only.
 
 ### `odf_map` (per-match, match-global)
 

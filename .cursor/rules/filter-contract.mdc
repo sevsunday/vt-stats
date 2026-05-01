@@ -13,7 +13,11 @@ This rule codifies that contract and gives the checklist for adding new fields. 
 
 **The global filter applies only to the per-match view**, rendered from `data/processed/<match_id>.json`. `getFilteredData(data, filterState)` in `js/app.js` runs exactly once per per-match render pass.
 
-**The All Matches view** (`data/processed/all_matches.json`) consumes the aggregate directly — `career_stats[]` fields render without any `getFilteredData()` call. The Career Radar's A/B picker (`careerRadarState` in `js/app.js`) is a local, chart-scoped selector that picks which one or two `career_stats[]` entries to draw; it has no cross-chart effect and no interaction with `filterState`. The **Career Leaderboard** table (`#career-table`) mirrors the per-match Player Leaderboard columns on career totals; column sort uses `careerSortState` in `js/app.js` and likewise does not interact with `filterState`.
+**The All Matches view** is now driven client-side by [`js/all-matches-aggregator.js`](../../js/all-matches-aggregator.js), which folds the pipeline-emitted [`data/processed/match_contributions.json`](../../data/processed/match_contributions.json) into the same `{meta, career_stats, global_weapon_meta, global_rivalries}` shape the legacy `all_matches.json` had. The pipeline no longer writes `all_matches.json`; aggregation moved to the browser so the picker's facet filters (player count, duration band, players, role, etc.) can scope the aggregate without per-match round trips. This is the **only** documented exception to the "no aggregation in JS" rule.
+
+`career_stats[]` fields still render without any `getFilteredData()` call — the per-match `filterState` is unrelated to the picker. The Career Radar's A/B picker (`careerRadarState` in `js/app.js`) is a local, chart-scoped selector that picks which one or two `career_stats[]` entries to draw; it has no cross-chart effect and no interaction with `filterState`. The **Career Leaderboard** table (`#career-table`) mirrors the per-match Player Leaderboard columns on career totals; column sort uses `careerSortState` in `js/app.js` and likewise does not interact with `filterState`.
+
+**Picker filter scope (separate axis from `filterState`).** The match picker (`pickerState` in `js/app.js`) filters which manifest entries the All Matches aggregate covers. When the user is on the All Matches view and toggles a chip, `applyPickerFilters()` schedules a debounced re-aggregate via `loadAllMatches()` so the career table / radar / global meta reflect the new subset. This pipeline is independent of `filterState` (which is per-match player narrowing) — the two never combine, since the All Matches view doesn't run `getFilteredData()`.
 
 Every new field must answer the checklist below for **both** scopes.
 
@@ -29,7 +33,9 @@ For every new field emitted by `scripts/process_stats.py` into the processed JSO
    - Recomputed client-side from a finer-grained field (weapon_meta style).
 3. **Relativity** — absolute value, or match-relative (depends on match-scoped normalizers like p95)?
 4. **Cross-match aggregation** — if the field has a career aggregate, how is it combined? Direct average is valid only for absolute metrics. Match-relative metrics need per-match normalization before aggregation, or the career aggregate is an average-of-relatives (approximation) that must be labeled as such.
-5. **All Matches surface** — does the field (or a derived aggregate) appear in `career_stats[]`, the career table, or the Career Radar? If yes, note that it renders **without global filtering** — the Career Radar's A/B picker is the only selection UI, and it operates on the full aggregate.
+5. **All Matches surface** — does the field (or a derived aggregate) appear in `career_stats[]`, the career table, or the Career Radar? If yes:
+   - Note that it renders **without `filterState` global filtering** — the Career Radar's A/B picker is the only selection UI, and it operates on the aggregate.
+   - **It will be re-aggregated client-side** when the picker's facet filters change. Add a slim per-match contribution to `_extract_contribution()` in `scripts/process_stats.py` AND its summation logic to `VTAggregate.build()` in `js/all-matches-aggregator.js`. Both must round identically (mirror the Python `round(x, 1)` / `round(x, 3)` calls in JS) so unfiltered output is byte-identical.
 6. **Documentation surface** — which of these need the classification noted?
    - `DEVELOPER_GUIDE.md` Section 5 (JSON structure) + Global Player Filter section
    - `docs/DATA_DICTIONARY.md` (per-field entry)
@@ -77,7 +83,7 @@ Unless noted otherwise, entries describe per-match-view behavior; the All Matche
 | `positioning.map_bounds_source` | Match-global, passes through | `"terrain"` / `"observed"` / `null`; renderers use it to label axes as absolute vs match-relative. Unfiltered. |
 | `match.sentinel_damage`, `meta.total_sentinel_damage_dropped`, `meta.matches_with_sentinel_damage` | Match-global, always unfiltered | Engine-sentinel telemetry from the `amount > 1e6` filter. See `data-schema.mdc` "Sentinel Damage Filter" + `docs/sentinel-damage.md`. |
 | `data/map-registry.json[key].image_path` / `image_calibration` / `canonical_*` / `author` / `title` / `net_vars` | Match-global, external reference, always unfiltered | Top-down map image + metadata fetched at build time by `scripts/build_map_registry.py`. Consumed by `js/app.js` (hero thumbnail, match-picker thumbs), `js/positioning-charts.js` (heatmap background), `js/positioning-player.js` (trail background). Projection contract in `DEVELOPER_GUIDE.md` §10 "Map Assets & Overlays". |
-| `career_stats[]` (All Matches view generally) | Consumed directly from `all_matches.json`; never passes through `getFilteredData`. | Per-chart pickers (e.g. Career Radar A/B) are the only selection UI. |
+| `career_stats[]` (All Matches view generally) | Consumed directly from `VTAggregate.build()` output (which sums `match_contributions.json` over the picker-filtered subset of file ids); never passes through `getFilteredData`. | Per-chart pickers (e.g. Career Radar A/B) are the only selection UI. Picker facet filters scope the underlying aggregate via `loadAllMatches()` re-render, debounced through `scheduleAllMatchesReaggregate()`. |
 
 ## Guidance
 
@@ -112,4 +118,6 @@ The `mean_movement_score` (match-relative) vs `mean_target_lock_pct` (absolute) 
 - `docs/DATA_DICTIONARY.md` — per-field documentation surface.
 - `AGENTS.md` Key Conventions — filter-level conventions only.
 - `js/app.js` `getFilteredData()` — the single narrowing function for per-match view.
+- `js/app.js` `pickerState` / `loadAllMatches()` / `scheduleAllMatchesReaggregate()` — the picker-side filter scope for the All Matches aggregate.
+- `js/all-matches-aggregator.js` — pure summation over `match_contributions.json`. Mirrors `scripts/process_stats.py` `build_all_matches_aggregate()` (which is now reference code only — pipeline doesn't write `all_matches.json` anymore).
 - `js/charts-radar.js` `_playerToAxes` / `_factionToAxes` / `_careerToAxes` — worked examples of render-time narrowing and career-aggregate handling.

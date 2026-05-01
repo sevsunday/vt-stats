@@ -2108,8 +2108,116 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
     }
 
 
+def _extract_contribution(match_data):
+    """Return the slim per-match shape consumed by the client-side
+    aggregator (`js/all-matches-aggregator.js`).
+
+    This is *exactly* the slice of `match_data` the All Matches aggregate
+    needs in order to rebuild career_stats / global_weapon_meta /
+    global_rivalries / meta — no more. The output of this function for a
+    list of matches is what gets written to
+    `data/processed/match_contributions.json`. The browser fetches that
+    one file and folds in only the entries whose ids pass the active
+    picker filter, so cross-match aggregates honor every facet (player
+    count, duration band, players, role, etc.) without re-fetching
+    per-match JSONs.
+
+    Field names mirror the corresponding match_data paths but flatten to
+    the keys the aggregator wants (e.g. `personal.dealt` -> `dealt`) so
+    the JS aggregator stays simple.
+    """
+    m = match_data["match"]
+    positioning = match_data.get("positioning") or {}
+    pos_players = positioning.get("players") or {}
+
+    pickups_by_name = {
+        row["name"]: row["count"]
+        for row in (match_data.get("pickups", {}).get("by_player") or [])
+    }
+
+    leaderboard = []
+    for p in match_data.get("leaderboard") or []:
+        personal = p.get("personal", {}) or {}
+        assets = p.get("assets", {}) or {}
+        # Positioning fields are best-effort: absent on pre-positioning
+        # matches, present-but-no-target_lock on pre-target-lock-schema.
+        pm = (pos_players.get(p["name"]) or {}).get("metrics") or {}
+        leaderboard.append({
+            "player_id": p.get("player_id", ""),
+            "name": p.get("name", ""),
+            "dealt":          round(personal.get("dealt", 0), 1),
+            "received":       round(personal.get("received", 0), 1),
+            "pvp_dealt":      round(personal.get("pvp_dealt", 0), 1),
+            "pve_dealt":      round(personal.get("pve_dealt", 0), 1),
+            "pvp_received":   round(personal.get("pvp_received", 0), 1),
+            "pve_received":   round(personal.get("pve_received", 0), 1),
+            "asset_dealt":    round(assets.get("dealt", 0), 1),
+            "shots_fired":    personal.get("shots_fired", 0),
+            "shots_hit":      personal.get("shots_hit", 0),
+            "kills":          p.get("kills", 0),
+            "deaths":         p.get("deaths", 0),
+            "pickups":        pickups_by_name.get(p["name"], 0),
+            "weapon_breakdown": {
+                wname: {
+                    "dealt": round(wdata.get("dealt", 0), 1),
+                    "shots": wdata.get("shots", 0),
+                    "hits":  wdata.get("hits", 0),
+                }
+                for wname, wdata in (p.get("weapon_breakdown") or {}).items()
+            },
+            "activity_score":   pm.get("activity_score") if pm else None,
+            "movement_band":    pm.get("movement_band") if pm else None,
+            "path_length":      pm.get("path_length", 0.0) if pm else 0.0,
+            "target_lock_pct":  pm.get("target_lock_pct") if pm and "target_lock_pct" in pm else None,
+        })
+
+    weapon_meta = [
+        {
+            "weapon":       wm["weapon"],
+            "total_damage": round(wm.get("total_damage", 0), 1),
+            "total_shots":  wm.get("total_shots", 0),
+            "total_hits":   wm.get("total_hits", 0),
+        }
+        for wm in (match_data.get("weapon_meta") or [])
+    ]
+
+    # Round rivalry damages to keep the JSON tight; aggregation tolerates
+    # the half-cent floor since match-level rivalries are already rounded.
+    rivalry_matrix = {
+        shooter: {victim: round(dmg, 1) for victim, dmg in victims.items()}
+        for shooter, victims in (match_data.get("rivalry_matrix") or {}).items()
+    }
+
+    return {
+        "id":           m["id"],
+        "map":          m["map"],
+        "date":         m["date"],
+        "duration_sec": m["duration_sec"],
+        "submitter":    m["submitter"],
+        "player_count": m.get("player_count", 0),
+        "has_position_data":    m.get("has_position_data", False),
+        "has_target_lock_data": m.get("has_target_lock_data", False),
+        "has_pickup_data":      m.get("has_pickup_data", False),
+        "sentinel_damage_count": (m.get("sentinel_damage") or {}).get("count", 0),
+        "leaderboard":     leaderboard,
+        "weapon_meta":     weapon_meta,
+        "rivalry_matrix":  rivalry_matrix,
+    }
+
+
 def build_all_matches_aggregate(all_match_data):
-    """Build cross-match aggregate stats."""
+    """DEPRECATED: kept as the canonical Python reference for cross-match
+    aggregation, no longer wired into the pipeline.
+
+    The pipeline now writes `data/processed/match_contributions.json`
+    (one slim entry per match, see `_extract_contribution`) and the
+    browser folds those entries into the same shape this function
+    produced — see `js/all-matches-aggregator.js`. Keeping this code lets
+    you quickly diff Python vs JS aggregator output during development:
+    `python -c "import process_stats, json; ..."` against a
+    `VTAggregate.build(contribs, allFileIds)` snapshot. Once the JS
+    aggregator is proven, this function can be deleted.
+    """
     career = defaultdict(lambda: {
         "player_id": "",
         "name": "",
@@ -2506,12 +2614,35 @@ def main():
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     print(f"\nManifest: {manifest_path.name} ({len(manifest)} matches)")
 
-    if len(all_match_data) > 1:
-        aggregate = build_all_matches_aggregate(all_match_data)
-        agg_path = OUTPUT_DIR / "all_matches.json"
-        with open(agg_path, "w", encoding="utf-8") as f:
-            json.dump(aggregate, f, indent=2, ensure_ascii=False)
-        print(f"Aggregate: {agg_path.name} ({agg_path.stat().st_size:,} bytes)")
+    # Emit per-match contributions for client-side aggregation. The
+    # browser uses this single file (plus the active picker filter) to
+    # build the All Matches view; aggregation moved client-side so the
+    # filtered subset can be re-aggregated without per-match round trips.
+    # See js/all-matches-aggregator.js for the consumer. The legacy
+    # all_matches.json output was removed in this same pass — its job is
+    # now done by aggregator.build(contributions, allFileIds) on demand.
+    contributions = {}
+    for match_data in all_match_data:
+        contrib = _extract_contribution(match_data)
+        # Key by the manifest's `file` value so the JS side can index
+        # straight off `manifest[i].file`.
+        key = f"{contrib['id']}.json"
+        contributions[key] = contrib
+
+    contrib_path = OUTPUT_DIR / "match_contributions.json"
+    with open(contrib_path, "w", encoding="utf-8") as f:
+        json.dump(contributions, f, indent=2, ensure_ascii=False)
+    print(f"Contributions: {contrib_path.name} ({contrib_path.stat().st_size:,} bytes, {len(contributions)} matches)")
+
+    # Drop a stale all_matches.json from previous pipeline runs so it
+    # can't shadow the new contributions-based aggregate during dev.
+    legacy_agg = OUTPUT_DIR / "all_matches.json"
+    if legacy_agg.exists():
+        try:
+            legacy_agg.unlink()
+            print(f"  Removed legacy {legacy_agg.name} (replaced by contributions-driven aggregate)")
+        except OSError as e:
+            print(f"  WARN: failed to remove legacy {legacy_agg.name}: {e}")
 
     # Extract proto doc comments for the Raw Data Browser's schema tooltips.
     # Lives next to the ODF resolver output (data/) and is consumed by
