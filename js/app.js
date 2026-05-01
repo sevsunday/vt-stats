@@ -383,6 +383,21 @@
     instance.show();
   }
 
+  // URLSearchParams.toString() percent-encodes a long list of characters
+  // that are technically valid unencoded inside a query string (RFC 3986
+  // §3.4: `pchar = unreserved / sub-delims / ":" / "@"`). De-encoding a
+  // curated subset makes shared URLs much more readable without breaking
+  // round-tripping — URLSearchParams.get() parses raw and percent-encoded
+  // forms equivalently for these characters.
+  //
+  // The set is deliberately conservative: anything with separator or
+  // form-encoder semantics (& = + # ? %) stays encoded so values can't
+  // accidentally bleed into adjacent params.
+  const SAFE_QUERY_CHARS = /%(2C|27|28|29|3A|40|2F|21|24|2A)/g;
+  function paramsToString(params) {
+    return params.toString().replace(SAFE_QUERY_CHARS, decodeURIComponent);
+  }
+
   // Pure: computes the URL string representing current state, without writing
   // to history. Used by both the gated syncUrl() and the explicit Share action.
   function buildShareUrl() {
@@ -424,7 +439,7 @@
     const slug = getActiveTabSlug();
     if (slug && slug !== 'overview') params.set('tab', slug);
 
-    const qs = params.toString();
+    const qs = paramsToString(params);
     return window.location.pathname + (qs ? '?' + qs : '');
   }
 
@@ -462,7 +477,7 @@
     if (ps.role && ps.role !== 'any')             cur.set('role', ps.role);
     if (ps.sort && ps.sort !== 'date-desc')       cur.set('sort', ps.sort);
 
-    const qs = cur.toString();
+    const qs = paramsToString(cur);
     history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
   }
 
