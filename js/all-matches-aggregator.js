@@ -67,6 +67,12 @@
       movement_bands: [],
       movement_path_total: 0.0,
       target_lock_pcts: [],
+      // Per-match distinct-weapon counts. Averaged at the end into
+      // `mean_weapons_used` for the Career Radar's per-match mode (axis
+      // 6 — Weapon Diversity). Lifetime distinct-weapon count is still
+      // available as `Object.keys(weapon_breakdown).length` on the
+      // emitted row, so totals mode keeps its existing source.
+      weapons_used_per_match: [],
     };
   }
 
@@ -185,6 +191,7 @@
 
         const wb = p.weapon_breakdown || {};
         for (const wname in wb) bumpWeapon(c.weapon_totals, wname, wb[wname]);
+        c.weapons_used_per_match.push(Object.keys(wb).length);
 
         if (c.best_match == null || (p.dealt || 0) > c.best_match.dealt) {
           c.best_match = { id: m.id, map: m.map, dealt: p.dealt || 0 };
@@ -285,6 +292,16 @@
         };
       }
 
+      // Mean distinct weapons used per match. Direct average of an
+      // absolute per-match count — valid because each contribution's
+      // `len(weapon_breakdown)` is independent of match count. Powers
+      // axis 6 (Weapon Diversity) on the Career Radar's per-match mode;
+      // totals mode keeps using the lifetime distinct count.
+      const wpmN = c.weapons_used_per_match.length;
+      const meanWeaponsUsed = wpmN > 0
+        ? c.weapons_used_per_match.reduce((s, v) => s + v, 0) / wpmN
+        : 0;
+
       careerStats.push({
         player_id: pid,
         name:                c.name,
@@ -303,6 +320,7 @@
         fav_weapon:          favWeapon,
         best_match:          c.best_match,
         weapon_breakdown:    weaponBreakdown,
+        mean_weapons_used:   r1(meanWeaponsUsed),
         ...movementFields,
         ...targetLockFields,
       });

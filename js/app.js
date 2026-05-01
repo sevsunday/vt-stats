@@ -1595,8 +1595,17 @@
   // the Rivalries tab but resets on match switch.
   let rivalryRadarCustom = false;
   // Career Radar state (All Matches tab). Persists across All Matches re-entries
-  // within a session. Reset by loadAllMatches on fresh data loads.
-  let careerRadarState = { a: null, b: null, compare: false };
+  // within a session. Reset by loadAllMatches on fresh data loads — except
+  // for `mode`, which is a user preference (Totals vs Per-match scale on the
+  // career radar's volume-biased axes 1/3/6) persisted across sessions in
+  // localStorage under 'vt-career-radar-mode'.
+  let careerRadarState = { a: null, b: null, compare: false, mode: 'totals' };
+  try {
+    const storedRadarMode = localStorage.getItem('vt-career-radar-mode');
+    if (storedRadarMode === 'totals' || storedRadarMode === 'per-match') {
+      careerRadarState.mode = storedRadarMode;
+    }
+  } catch (e) { /* ignore */ }
 
   /** Maps career sort keys: totals column -> per-match avg column (for view remapping). */
   const CAREER_TOTAL_TO_AVG_SORT = {
@@ -2317,8 +2326,9 @@
         total_sentinel_damage_dropped: 0,
         matches_with_sentinel_damage: [],
       });
-      // Clear downstream renders by passing an empty career list.
-      careerRadarState = { a: null, b: null, compare: false };
+      // Clear downstream renders by passing an empty career list. Preserve
+      // the user's `mode` preference (Totals vs Per match) across resets.
+      careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
       renderCareerTable([]);
       renderCareerRadar({ career_stats: [] });
       window.__vtAllMatchesData = { meta: {}, career_stats: [], global_weapon_meta: [], global_rivalries: [] };
@@ -2354,7 +2364,9 @@
 
     // Reset Career Radar state to defaults for a fresh All Matches load.
     // Dropdown values will re-default from career_stats[0] in the renderer.
-    careerRadarState = { a: null, b: null, compare: false };
+    // Preserve the user's `mode` preference (Totals vs Per match) — it is
+    // a UI lens, not match-data state.
+    careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
     careerSortState = { key: 'total_dealt', asc: false };
     remapCareerSortKeyForColumnView(careerColumnView);
 
@@ -3863,6 +3875,30 @@
     ensureTooltips(document.getElementById('career-table'));
   }
 
+  // Sync the active class on the Totals|Per match segmented buttons in the
+  // Career Radar card header to match `careerRadarState.mode`. Called from
+  // renderCareerRadar so the buttons stay consistent through picker
+  // re-aggregates and All Matches re-entries.
+  function syncCareerRadarModeButtons() {
+    document.querySelectorAll('#section-career-radar [data-career-radar-mode]').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-career-radar-mode') === careerRadarState.mode);
+    });
+    // Refresh the card-header info-tooltip so its top-of-tooltip note
+    // describes the currently active scale.
+    const icon = document.querySelector('#section-career-radar [data-vt-radar-info="career"]');
+    if (icon && typeof buildRadarInfoTooltipHtml === 'function') {
+      const html = buildRadarInfoTooltipHtml('career', careerRadarState.mode);
+      icon.setAttribute('title', html);
+      icon.setAttribute('data-bs-original-title', html);
+      if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+        const inst = bootstrap.Tooltip.getInstance(icon);
+        if (inst && typeof inst.setContent === 'function') {
+          inst.setContent({ '.tooltip-inner': html });
+        }
+      }
+    }
+  }
+
   // Career Radar (All Matches tab). Supports single mode (with ghost median)
   // and compare mode (two players). State persists in careerRadarState across
   // All Matches re-entries; reset in loadAllMatches on each fetch.
@@ -3876,6 +3912,8 @@
     const selB = document.getElementById('career-radar-pick-b');
     const hint = document.getElementById('career-radar-hint');
 
+    syncCareerRadarModeButtons();
+
     if (!stats.length) {
       if (toggleBtn) toggleBtn.disabled = true;
       if (hint) {
@@ -3883,7 +3921,10 @@
         hint.classList.remove('d-none');
       }
       if (typeof renderPlayerRadar === 'function') {
-        renderPlayerRadar('career-radar-canvas', data, { mode: 'career' });
+        renderPlayerRadar('career-radar-canvas', data, {
+          mode: 'career',
+          careerScale: careerRadarState.mode,
+        });
       }
       return;
     }
@@ -3940,6 +3981,7 @@
         mode: 'career',
         focusNames,
         showMedian: !careerRadarState.compare,
+        careerScale: careerRadarState.mode,
       });
     }
   }
@@ -4050,6 +4092,21 @@
     const careerCompareBtn = e.target.closest('#career-radar-compare-toggle');
     if (careerCompareBtn && window.__vtAllMatchesData) {
       careerRadarState.compare = !careerRadarState.compare;
+      renderCareerRadar(window.__vtAllMatchesData);
+      return;
+    }
+
+    // Totals|Per match scale toggle on the Career Radar card. Only active
+    // when All Matches data is loaded; no-op when clicking the already-
+    // selected mode. Persists the choice in localStorage so it survives
+    // session reloads.
+    const careerModeBtn = e.target.closest('#section-career-radar [data-career-radar-mode]');
+    if (careerModeBtn && window.__vtAllMatchesData) {
+      const next = careerModeBtn.getAttribute('data-career-radar-mode');
+      if (next !== 'totals' && next !== 'per-match') return;
+      if (next === careerRadarState.mode) return;
+      careerRadarState.mode = next;
+      try { localStorage.setItem('vt-career-radar-mode', next); } catch (e2) { /* ignore */ }
       renderCareerRadar(window.__vtAllMatchesData);
       return;
     }
@@ -4166,6 +4223,7 @@
         mode: 'career',
         focusNames,
         showMedian: !careerRadarState.compare,
+        careerScale: careerRadarState.mode,
       });
     });
   }
