@@ -71,7 +71,7 @@ These are applied by the statsgate collector before data reaches us:
 
 ### Sentinel Damage Filter
 
-The pipeline drops `DamageDealt` / `DamageReceived` events whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value: `268,435,456.0` = `2^28`), not real combat. The guard is applied at the top of the `damage_dealt` branch and the timeline recompute loop in `scripts/process_stats.py` before any accumulator touches the amount. Both the DD and its paired DR are consumed together. Per-match telemetry lives on `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` (counts **pairs**, not individual events); aggregate rollup at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage`. All match-global / always-unfiltered. The Raw Browser Reconcile view mirrors this filter (same helper constant, inline pill surfaces the literal dropped total); the raw events table still displays sentinel values verbatim. Full evidence chain + decompile + struct layout: [docs/sentinel-damage.md](../../docs/sentinel-damage.md).
+The pipeline drops `DamageDealt` / `DamageReceived` events whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value: `268,435,456.0` = `2^28`), not real combat. The guard is applied at the top of the `damage_dealt` branch and the timeline recompute loop in `scripts/process_stats.py` before any accumulator touches the amount. Both the DD and its paired DR are consumed together. Per-match telemetry lives on `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` (counts **pairs**, not individual events); aggregate rollup at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage`. All match-global / always-unfiltered. The Raw Browser Reconcile view mirrors this filter (same helper constant, inline pill surfaces the literal dropped total); the raw events table still displays sentinel values verbatim. Full evidence chain + decompile + struct layout: [§7 Sentinel Damage Filter in docs/DATA_DICTIONARY.md](../../docs/DATA_DICTIONARY.md#7-sentinel-damage-filter).
 
 ### Faction Determination
 
@@ -107,7 +107,7 @@ Two pipeline classification sets drive the routing:
 
 `apserv_vsr.odf` stays in the legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` to suppress the residual ~13% of real-combat service-pod destructions from the Vehicle Destruction Breakdown chart only (those events still flow into `powerup_destructions.feed`).
 
-Audit script `scripts/audit_pickup_powerup.mjs` reads the same `data/odf.min.json` and verifies coverage; "promotion candidates" surface ODFs the DB is missing entries for. **Domain knowledge is required** when extending the deployable set — do NOT auto-promote based on team-zero % alone (the `fball2c` precedent). Full evidence chain + maintenance procedure: [docs/pickup-powerup-semantics.md](../../docs/pickup-powerup-semantics.md).
+Audit script `scripts/audit_pickup_powerup.mjs` reads the same `data/odf.min.json` and verifies coverage; "promotion candidates" surface ODFs the DB is missing entries for. **Domain knowledge is required** when extending the deployable set — do NOT auto-promote based on team-zero % alone (the `fball2c` precedent). Full evidence chain + maintenance procedure: [§8 UnitDestroyed Classification & Powerup Economy in docs/DATA_DICTIONARY.md](../../docs/DATA_DICTIONARY.md#8-unitdestroyed-classification-powerup-economy).
 
 ## ODF Weapon Name Resolution
 

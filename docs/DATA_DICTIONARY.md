@@ -13,17 +13,31 @@ data/sessions/<username>/*.binpb.gz   Raw session files (protobuf, gzip-compress
         │
         ▼
 scripts/process_stats.py              Python pipeline
-        │
-        ├── data/odf.min.json         Weapon name database (ODF lookup)
+        │  ├── data/odf.min.json                         Weapon / unit / powerup name DB
+        │  ├── scripts/extract_proto_docs.py             Proto-comment extraction (pre-step)
+        │  └── scripts/build_map_registry.py             Map metadata + image fetch (post-step)
+        │             │  ├── js/bz2api.js                Baked-in VSR_MAP_DATA catalog
+        │             │  └── iondriver gamelistassets    External map metadata + images
+        │             ▼
+        │       data/map-registry.json + data/maps/*     Per-map title / image / netVars
+        │       data/proto-docs.json                     {Message.field: comment} dict
         │
         ▼
-data/processed/*.json                 Pre-computed JSON for the browser
+data/processed/                       Pre-computed JSON consumed by the browser
+        ├── matches.json                    Match manifest (drives the picker)
+        ├── <match_id>.json                 Per-match aggregates + positioning + odf_map
+        └── match_contributions.json        Slim per-match contributions for the
+                                            client-side All Matches aggregator
         │
         ▼
-index.html + JS                       Dashboard renders charts & tables
+index.html + JS                       Dashboard renders charts, tables, replay, positioning
+js/all-matches-aggregator.js          Pure summation over match_contributions.json
+                                      scoped to the picker-filtered subset
+raw.html + js/raw-browser.js          Standalone Raw Data Browser: decodes binpb
+                                      client-side and renders three tiers per match
 ```
 
-No data processing happens in the browser — all aggregation, attribution logic, and derived statistics are pre-computed by the pipeline.
+Per-match aggregation (leaderboards, weapon meta, rivalry matrices, positioning, odf_map, sentinel telemetry) happens in the Python pipeline — never in browser JavaScript. The **one documented exception** is `js/all-matches-aggregator.js`, which performs pure summation over `match_contributions.json` to produce the All Matches view's aggregate; it exists so the picker's facet filters can scope the cross-match aggregate without re-fetching per-match JSONs or pre-computing every facet combination.
 
 ---
 
@@ -79,6 +93,7 @@ A wrapper that holds exactly one event type via a `oneof`:
 | 5 | `UpdateTick` | Per-tick snapshot of all player states |
 | 6 | `UnitDestroyed` | A unit was destroyed |
 | 7 | `UnitSniped` | A snipe event occurred |
+| 8 | `PickupPowerup` | A player picked up a crate / pod (Phase 3 — new-schema only) |
 
 ### BulletInit
 
@@ -152,7 +167,7 @@ How the pipeline assigns credit based on the `shooter`/`victim` values:
 
 ### UpdateTick
 
-Periodic state snapshots of all players. Currently captured by the collector but **not processed** by the pipeline (future: heatmaps, movement analysis).
+Periodic state snapshots of all players. The pipeline downsamples these to 1 Hz per player and feeds the entire `positioning` block (§5) — spawn detection, top-down heatmaps, movement bands, T-key target-lock ratios. See `positioning` in §5 for the full derivation.
 
 | Field | Type | Description |
 |---|---|---|
@@ -173,29 +188,50 @@ Periodic state snapshots of all players. Currently captured by the collector but
 
 ### UnitDestroyed
 
-Recorded when a unit is destroyed. The pipeline tracks kills/deaths from this event.
+Recorded when a unit is destroyed (player vehicle, AI unit, structure, deployable, or — in pre-Phase-3 sessions — a synthetic emission for crate/pod pickups).
 
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
 | `killer` | `uint64` | Steam64 of killer (0 if not a player) |
-| `killer_team` | `uint32` | Killer's team slot |
+| `killer_team` | `uint32` | Killer's team slot. **`0` is the engine's signal that the destruction had no real attacker** — used by the four-way classification (§8) to detect powerup pickups disguised as destructions. |
 | `killer_odf` | `string` | Killer's vehicle ODF |
 | `victim` | `uint64` | Steam64 of victim (0 if not a player) |
 | `victim_team` | `uint32` | Victim's team slot |
 | `victim_odf` | `string` | Destroyed unit's ODF |
 
-Note: `UnitDestroyed` events are not yet produced by the current collector version. The pipeline handler is ready for when they arrive.
+Note: every `UnitDestroyed` event passes through the pipeline's **four-way classification** (real vehicle / powerup pickup / powerup-or-crate destruction / deployable destruction) before any kill aggregator touches it. Only real-vehicle destructions reach the `kills.*` block — the other three categories are routed to `pickups`, `powerup_destructions`, and `deployable_destructions` respectively. See [§8 UnitDestroyed Classification & Powerup Economy](#8-unitdestroyed-classification-powerup-economy).
 
 ### UnitSniped
 
-Recorded when a snipe event occurs. The pipeline counts these per match.
+Recorded when a pilot snipe event occurs.
 
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
+| `shooter` | `uint64` | Steam64 of sniper (0 if not a player; protobuf default for pre-Phase-3 sessions) |
+| `shooter_team` | `uint32` | Sniper's team slot |
+| `shooter_odf` | `string` | Sniper's vehicle ODF |
+| `victim` | `uint64` | Steam64 of pilot victim (0 if not a player) |
+| `victim_team` | `uint32` | Victim's team slot |
+| `victim_odf` | `string` | Victim's vehicle ODF |
 
-Note: `UnitSniped` events are not yet produced by the current collector version.
+Phase 3 enriched `UnitSniped` with the shooter / victim / odf fields. Pre-Phase-3 sessions only carry `tick`; the other six fields are protobuf defaults (zeros / empty strings). The Combat tab's Snipe Feed renders rich entries on Phase-3 matches and a tick-only count on older ones.
+
+### PickupPowerup
+
+Recorded when a player picks up a crate / pod. **Phase 3 (April 2026)** — new-schema sessions only. Pre-Phase-3 sessions do not contain this event; the engine emits a synthetic `UnitDestroyed` for the same tick (with `killer_team == 0`) regardless of schema version.
+
+| Field | Type | Description |
+|---|---|---|
+| `tick` | `uint32` | Game tick |
+| `picker` | `uint64` | Steam64 of picker (0 if AI) |
+| `picker_team` | `uint32` | Picker's team slot |
+| `picker_odf` | `string` | Picker's vehicle ODF |
+| `powerup_team` | `uint32` | Team that owned the powerup spawn |
+| `powerup_odf` | `string` | The collectible ODF (e.g. `apsnipvsr.odf`) |
+
+The pipeline routes the synthetic `UnitDestroyed` companion (powerup-pickup branch in §8) to suppression and consumes the real `PickupPowerup` event into `pickups.feed` for the rich picker context. The match-global `match.has_pickup_data` flag is `true` iff at least one `PickupPowerup` event was observed.
 
 ### Player Identity
 
@@ -266,9 +302,11 @@ The pipeline iterates through the event stream once, processing each event type:
 |---|---|
 | `BulletInit` | Shot count per player×weapon, faction shot totals, global weapon shot totals, tick range |
 | `BulletHit` | Hit count per player×weapon, faction hit totals, global weapon hit totals, tick range |
-| `DamageDealt` + `DamageReceived` | Personal dealt/received, asset dealt/received, faction totals, rivalry matrix, weapon damage, ODF collection |
-| `UnitDestroyed` | Per-player kills/deaths, kill feed entries (killer/victim with vehicle ODFs) |
-| `UnitSniped` | Snipe count for the match |
+| `DamageDealt` + `DamageReceived` | Personal dealt/received, asset dealt/received, faction totals, rivalry matrix, weapon damage, ODF collection. **`amount > 1e6` events are dropped at the top of the branch by the sentinel filter — see [§7](#7-sentinel-damage-filter).** |
+| `UpdateTick` | Position / speed / health / ammo / odf / has_target snapshots downsampled to 1 Hz per player; feeds the entire `positioning` block (heatmaps, distance metrics, activity score, T-key target-lock ratio). |
+| `UnitDestroyed` | Routed through the four-way classification before any kill aggregator touches it — only real-vehicle destructions reach `kills.*`; powerup pickups, denial destructions, and deployable destructions go to their own blocks. See [§8](#8-unitdestroyed-classification-powerup-economy). |
+| `UnitSniped` | `snipes.feed` entry (Phase 3-enriched with shooter / victim / odf), `snipes.by_player` and `snipes.totals` rollups, plus the legacy `match.snipe_count` count. |
+| `PickupPowerup` | `pickups.feed` entry with picker context, `pickups.by_player`, `pickups.by_odf`, `pickups.totals`. New-schema only; the synthetic `UnitDestroyed` companion the engine emits at the same tick is suppressed by the four-way classification. |
 
 Damage events are consumed as adjacent pairs. The [attribution logic](#attribution-logic) from Section 2 determines where each damage value is credited.
 
@@ -280,29 +318,38 @@ After the main pass, the timeline is recomputed from scratch. This is necessary 
 - Each bucket accumulates total damage dealt during that window
 - Two parallel timelines are built: **by player** and **by faction**
 - Asset damage (shooter = 0) is included in the faction timeline but not the player timeline
+- The sentinel filter from [§7](#7-sentinel-damage-filter) is mirrored here so the timeline reflects exactly the same dropped-event set as the per-match aggregates.
 
 ### Step 7: Derived Outputs
 
 After event processing, the pipeline computes:
 
-- **Match metadata:** ID (from start_time), map, date, duration, tick range, tick rate, player count, config mod, submitter, snipe count, team rosters
-- **Leaderboard:** Sorted by personal damage dealt (descending). Each entry includes personal stats, kills/deaths, asset stats, and per-weapon breakdown.
-- **Faction totals:** Aggregate dealt/received/shots/hits/accuracy per team
+- **Match metadata:** ID (from start_time), map, date, duration, tick range, tick rate, player count, config mod, submitter, snipe count, team rosters, schema version, the three `has_*_data` availability flags, terrain bounds, base-to-base distance, sentinel-damage telemetry
+- **Leaderboard:** Sorted by personal damage dealt (descending). Each entry includes personal stats (with PvP/PvE split), kills/deaths, asset stats, weapon breakdown, hit-target distribution
+- **Faction totals:** Aggregate dealt/received (with PvP/PvE split), shots/hits/accuracy per team
 - **Rivalry matrix:** Player-on-player damage grid (shooter name → victim name → damage)
 - **Top rivalries:** Top 5 bidirectional pairs sorted by total mutual damage
 - **Weapon meta:** Per-weapon totals (damage, shots, hits, accuracy, user count)
+- **Pickups, Powerup destructions, Deployable destructions:** Per-match blocks from the four-way classification ([§8](#8-unitdestroyed-classification-powerup-economy))
+- **Snipes:** Per-match block (Phase 3-enriched feed + per-player + totals)
+- **Positioning:** Full `positioning` block from `UpdateTick` events (heatmaps, distance metrics, activity score, T-key target-lock ratio, trail segments) — see `positioning` in §5
+- **odf_map:** Per-match raw-ODF → display-name lookup populated from every `*_odf` field encountered in the event stream — see `odf_map` in §5
+- **Sentinel damage telemetry:** `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` — see [§7](#7-sentinel-damage-filter)
 - **Timeline:** Labels (M:SS format) with damage arrays per player and per faction
 - **Asset damage:** AI/structure damage breakdown by player and by faction
 - **Kills:** Kill leaderboard and kill feed (from UnitDestroyed events)
 
-### Step 8: All-Matches Aggregation
+### Step 8: Slim Per-Match Contributions
 
-When more than one match is processed, the pipeline builds cross-match aggregate stats:
+After per-match processing, `_extract_contribution()` in `scripts/process_stats.py` produces a slim per-match record with the fields needed to rebuild career stats / global weapon meta / global rivalries by summation. Every per-match record is collected into a single `data/processed/match_contributions.json` dict keyed by `<match_id>.json`.
 
-- **Career stats:** Per-player totals across all matches (dealt, received, accuracy, kills, deaths, favorite weapon, best match, weapon breakdown)
-- **Global weapon meta:** Weapon totals summed across all matches
-- **Global rivalries:** Top 10 cross-match bidirectional player pairs
-- **Meta:** Match count, total duration, maps played, date range, submitters list
+The actual cross-match aggregate is **not** written to disk — the browser builds it on demand via `VTAggregate.build(contributions, fileIds)` in [js/all-matches-aggregator.js](../js/all-matches-aggregator.js), summing over whatever subset of matches passes the active picker filter. This is the documented exception to the "no aggregation in JS" rule, made so picker-filtered career views can rescope the aggregate without per-match round trips.
+
+The aggregator emits the same `{meta, career_stats, global_weapon_meta, global_rivalries}` shape the legacy `all_matches.json` had (see §5 "match_contributions.json + In-Memory Aggregate" for full field tables), then prunes any `career_stats[]` row whose `matches_played < MIN_CAREER_MATCHES` (currently `5`) and cascade-filters `global_rivalries[]` to the kept names. Fields used by the aggregator from each contribution:
+
+- **Identity / metadata:** `id`, `map`, `date`, `duration_sec`, `submitter`, `player_count`, `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `sentinel_damage_count`
+- **Per-player rows (`leaderboard`):** `name`, `dealt`, `received`, `pvp_dealt`, `pve_dealt`, `pvp_received`, `pve_received`, `asset_dealt`, `shots_fired`, `shots_hit`, `kills`, `deaths`, `pickups`, `weapon_breakdown`, `activity_score`, `movement_band`, `path_length`, `target_lock_pct`
+- **Match-level rollups:** `weapon_meta[]`, `rivalry_matrix`
 
 ---
 
@@ -312,6 +359,8 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 
 ### Match Info Banner
 
+The hero banner above the tab strip is built by `renderBanner()` + `renderMapBannerFields()` in `js/app.js`. Map fields use a three-source merge: `match.terrain_bounds` (highest precedence) → `data/map-registry.json` → `BZ2API.VSR_MAP_DATA` (baked-in library fallback).
+
 | Displayed | JSON Path | Computed From |
 |---|---|---|
 | Map | `match.map` | `StatHeader.map` (direct) |
@@ -319,6 +368,13 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 | Duration | `match.duration_sec` | `(max_tick - min_tick) / tick_rate` across all events |
 | Players | `match.player_count` | `StatHeader.player_count` or `len(nick_map)` |
 | Submitted by | `match.submitter` | Parent folder name of the session file |
+| Map size | `match.terrain_bounds` ∪ `BZ2API.VSR_MAP_DATA[key].size × 2` | `terrain_bounds.max.x − min.x × terrain_bounds.max.z − min.z` (rendered as `N × Nu`) when present; canonical half-edge × 2 (rendered as `~Nu`) for pre-schema sessions; dashed otherwise |
+| Elevation | `match.terrain_bounds.max.y − min.y` | New-schema only; dashed for pre-schema sessions |
+| Base to base | `match.base_to_base_distance` | Empirical centroid-to-centroid horizontal distance. Tooltip compares to canonical `BZ2API.VSR_MAP_DATA[key].baseToBase` when available |
+| Author | `BZ2API.VSR_MAP_DATA[key].author` | Baked-in library |
+| Snipes | `match.snipe_count` | Hidden when zero |
+| Map thumbnail | `data/map-registry.json[key].image_path` → `data/maps/<map_file>.png` | 48×48 `<img>`. Hidden when the match's map isn't in the registry |
+| View raw | hyperlink → `raw.html?match=<id>` | Per-match Raw Data Browser cross-link |
 
 ### Faction Scoreboard
 
@@ -392,6 +448,27 @@ This table traces every dashboard-visible datapoint from its protobuf origin thr
 | Vehicle names | `kills.by_vehicle[].name` | Resolved via `prettify_odf` — weapon ODFs via the `Weapon.*` chain, otherwise via `GameObjectClass.unitName` across every top-level ODF DB category (`Vehicle`, `Building`, `Powerup`, `Pilot`, `Ordnance`). Same-name collisions (including `_vsr` siblings) disambiguate as `Name (raw_stem)`. Falls back to a title-cased stem only for ODFs the DB does not recognize at all. |
 | Destruction count | `kills.by_vehicle[].count` | Count of `UnitDestroyed` events per `victim_odf` |
 
+### Combat Tab — Snipe Feed
+
+Pilot-snipe entries with shooter / victim context (Phase 3). Auto-hides when `snipes.feed` is empty.
+
+| Displayed | JSON Path | Computed From |
+|---|---|---|
+| Snipe entries | `snipes.feed[]` | `UnitSniped` events: `{ tick, sniper, sniper_in_game_nick, sniper_odf, victim, victim_in_game_nick, victim_odf }` (Phase 3-enriched). Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` — the feed still draws but tooltip detail is reduced. |
+| Per-sniper counts | `snipes.by_player[]` | `{ name, count }` |
+| Totals | `snipes.totals` | `{ total, team_1, team_2 }` |
+
+### Combat Tab — Powerup Destruction Breakdown
+
+Powerup pods / crates a real player destroyed before someone could pick them up — effectively denying the enemy economy. Auto-hides when `powerup_destructions.totals.total` is zero.
+
+| Displayed | JSON Path | Computed From |
+|---|---|---|
+| Per-powerup destruction counts | `powerup_destructions.by_odf[]` | `{ odf, name, count }`; `name` from the same `powerup_display_name(odf)` chain that powers `pickups.by_odf[].name`. Sourced from `UnitDestroyed` events whose `victim_odf` is in the DB-derived powerup set AND `killer_team != 0`. |
+| Per-killer breakdown | `powerup_destructions.by_player[]` | `{ name, count }` |
+| Detail feed | `powerup_destructions.feed[]` | `{ tick, killer, killer_in_game_nick, killer_odf, powerup_odf, powerup_name, powerup_team }` |
+| Totals | `powerup_destructions.totals` | `{ total, team_1, team_2 }` |
+
 ### Player Performance Radar (spiderweb)
 
 Eight-axis normalized shape chart, rendered in four modes across Overview (single), Rivalries (compare), Combat (team), and All Matches (career). All axes normalize to the range 0–100 so shapes are directly comparable within a single polygon and across overlaid polygons. Values closer to the outer ring are always "better" — the Survivability axis combines damage-trade ratio (dealt ÷ received) and K/D (kills ÷ deaths) into a single skill-like composite, so low raw damage taken alone no longer inflates the score.
@@ -426,7 +503,7 @@ Implementation lives in `js/charts-radar.js`: `_safeRatio`, `_percentile`, `_fin
 | single | Overview player profile card | Unfiltered `currentData` so the ghost median reflects the whole match roster | N/A — follows the selected player |
 | compare | Rivalries tab (`#section-rivalry-radar`) | Client-filtered `data` | Click a top-rivalry card to drill in (default = `top_rivalries[0]`); **Custom...** reveals two dropdowns for arbitrary pairs. On filter change the selection reconciles against the filtered roster with fallback to the first visible `top_rivalries[]` entry |
 | team | Combat tab (`#section-faction-radar`) | Client-filtered `data` | Aggregated from `faction_totals` + per-faction leaderboard subsets. Mobility = mean `activity_score` across faction members with positioning data; T-Key Usage = mean `target_lock_pct` across the same subset |
-| career | All Matches tab (`#section-career-radar`) | `all_matches.json → career_stats[]` | Single mode with ghost median by default; the **Compare** toggle reveals a second dropdown. A separate **Totals \| Per match** segmented toggle on the card header switches the scale of axes 1 (Damage Dealt), 3 (Kills), and 6 (Weapon Diversity) between lifetime totals and per-match averages — the other 5 axes are already match-agnostic and identical between scales. Per-match scale uses `total_dealt / matches_played`, `total_kills / matches_played`, and `mean_weapons_used` respectively, with all three peer maxes recomputed accordingly. State lives in `careerRadarState.mode` in `js/app.js` and persists in `localStorage` under `vt-career-radar-mode` (default `'totals'`); preserved across `loadAllMatches()` re-runs since it is a UI lens, not match-data state. Composes orthogonally with Compare. Mobility uses `mean_movement_score` (match-relative average — approximation); T-Key Usage uses `mean_target_lock_pct` (absolute — valid direct average). The All Matches view does **not** apply the global filter — the A/B picker here is the only selection UI |
+| career | All Matches tab (`#section-career-radar`) | In-memory aggregate's `career_stats[]` (built client-side by `VTAggregate.build()` from `match_contributions.json`) | Single mode with ghost median by default; the **Compare** toggle reveals a second dropdown. A separate **Totals \| Per match** segmented toggle on the card header switches the scale of axes 1 (Damage Dealt), 3 (Kills), and 6 (Weapon Diversity) between lifetime totals and per-match averages — the other 5 axes are already match-agnostic and identical between scales. Per-match scale uses `total_dealt / matches_played`, `total_kills / matches_played`, and `mean_weapons_used` respectively, with all three peer maxes recomputed accordingly. State lives in `careerRadarState.mode` in `js/app.js` and persists in `localStorage` under `vt-career-radar-mode` (default `'totals'`); preserved across `loadAllMatches()` re-runs since it is a UI lens, not match-data state. Composes orthogonally with Compare. Mobility uses `mean_movement_score` (match-relative average — approximation); T-Key Usage uses `mean_target_lock_pct` (absolute — valid direct average). The All Matches view does **not** apply the global filter — the A/B picker here is the only selection UI |
 
 **Empty states:**
 
@@ -513,6 +590,59 @@ Top 5 pairs sorted by total mutual damage.
 | Global weapon chart | `global_weapon_meta[]` | Weapon totals summed across all matches |
 | Cross-match rivalries | `global_rivalries[]` | Top 10 bidirectional pairs across all matches |
 
+### Positioning Tab
+
+The Positioning tab is gated by `match.has_position_data`. When `false`, every card is hidden and `#section-positioning-empty` is shown. When `true`, the tab renders these surfaces (all data lives under the per-match `positioning` block — see §5):
+
+| Displayed | JSON Path | Computed From |
+|---|---|---|
+| Movemint Leaderboard | `positioning.players[name].metrics.{activity_score, movement_band, mean_dist, max_dist, path_length, time_in_base_pct}` | Per-player rows, sortable. Hover reveals Area Covered (`convex_hull_area`), First Leave (`time_to_first_leave_sec`), Returns (`return_to_base_count`), P95 (`p95_dist`). Click a row to focus that player in the distance timeline. |
+| Distance from Spawn — Team bands mode | `positioning.players[*].trail.t / x / z` plus team membership | Per-tick horizontal distance from each player's spawn, aggregated to per-team **median + p25-p75 IQR band**. Solid line = median, shaded band = IQR. Blue = Team 1, purple = Team 2. |
+| Distance from Spawn — All players mode | Same as above | Every player drawn at low opacity; hover or click a Movemint Leaderboard row to highlight. |
+| Distance from Spawn — Focused mode | Same as above | One player drawn full-opacity over faded team bands. Click a leaderboard row to pick. |
+| Distance from Spawn — Smooth (5s) toggle | Same as above | Centered 5-second rolling median applied before band computation, suppresses tick-to-tick noise. |
+| Trail teleport gaps | `positioning.players[name].trail.segments` | Index ranges split at teleport detections; each segment renders as a separate polyline so the trail visibly breaks instead of flying across the map. |
+| All Players Heatmap (combined) | Sum of `positioning.players[*].heatmap_grid_xz` | 2D canvas. Spawn markers drawn at each `team_base[n].centroid`. Faction-tint overlay drawn iff `base_separation / map_diagonal > 0.3`. Compass rose, scale label. |
+| Per-Player Movemint Heatmaps grid | `positioning.players[name].heatmap_grid_xz` | Small-multiples grid. **Shared viewport** (all cards use the same world-space extent fitted to everyone's p95 positions) and **shared p95 intensity scale** (one cell's brightness means the same thing across cards). Compact legend strip explains the visual language. |
+| Time by Distance Band ring histogram | `positioning.players[name].trail` + `base_separation` | Stacked horizontal bar per player: Inner Base / Outer Base / Front Line / Deep Push, where band thresholds derive from `base_separation`. |
+| Animated Positioning Timeline | `positioning.players[name].trail.{t, x, y, z, segments}` | Transport controls (play / pause / step / scrub / 0.5x-20x speeds, default 4x). Sub-second interpolation on sparse `trail.t[]`. Pulsing current-position dots colored by faction. Live ticker with per-player "in base / N u out" chips. Respects `prefers-reduced-motion`. |
+
+Filter integration: `renderPositioningTab` narrows `positioning.players` to the filtered leaderboard for the Movemint Leaderboard + small-multiples highlighting, but always passes the full `positioning` block so the combined heatmap backdrop, team centroids, and opposing-team spawn markers still render for spatial context.
+
+### Match Picker Modal
+
+The match picker (`#match-picker-modal` in `index.html`) is the user-facing entry point for switching matches and scoping the All Matches view. State lives in `pickerState` in `js/app.js` and persists in `sessionStorage` under `vt.picker.filters.v2` (one-shot v1 migration on first read).
+
+| Facet | UI control | Source |
+|---|---|---|
+| Free-text search | Search input | Matches against per-match search blob built by `buildEntrySearchBlob()` — covers `name`, `map`, `submitter`, `players[]` (full roster), and `team_leaders` (commander names). |
+| Sort | Dropdown | Newest / Oldest / Longest / Shortest / Most players / Fewest players / Map A-Z |
+| Duration | Single-select chips | Any · `<10m` · `10–20m` · `20m+` (radio) |
+| Player count | Multi-select chips | Distinct counts in the manifest |
+| Submitter | Multi-select chips | Distinct values from `manifest[i].submitter` |
+| Players (full roster) | Multi-select chips with own search | Drawn from union of every match's `manifest[i].players[]`. Two orthogonal toggles modify the predicate: |
+| Match-mode | Segmented toggle | `Any of these` (default — match if any selected player was in the match) · `All of these` (match only if every selected player was) |
+| Role | Segmented toggle | `Any role` (default) · `Commander` (selected players must be in the match's `team_leaders`) · `Thug` (selected players must be in `players[]` but NOT in `team_leaders`) |
+
+Picker filters AND-combine across facets and with the free-text search. The pinned "All Matches" card at the top is exempt from every filter and sort.
+
+Effect on the All Matches view: when the user is on the All Matches view and toggles a chip, `applyPickerFilters()` schedules a debounced `loadAllMatches()` re-aggregate via `scheduleAllMatchesReaggregate()`, so the career table / radar / global weapon meta / global rivalries reflect only the filtered subset. The `#all-matches-filter-banner` above the aggregate surfaces "Aggregate of K of N matches matching the active filters" + a Clear-filters shortcut.
+
+### URL Parameters & Live Sync
+
+Any combination of match, filter, and tab is shareable via query parameters. URL writes are gated by the **Live Sync** topnav toggle (`bi-broadcast`) — when off (default), `syncUrl()` is a no-op. The **Share** button (`bi-link-45deg`) bypasses the gate and copies a URL representing the current state regardless of toggle state. Both preferences persist independently (`vt-url-sync` + `vt-filter-persist`).
+
+| Param | Values | Notes |
+|---|---|---|
+| `match` | match ID (e.g. `2026-04-16T01-27-48`) or `all` | Omitted → load first match in manifest |
+| `filter` | `all` \| `team` \| `player` | Omitted or `all` means no filter |
+| `team` | `1` \| `2` | Only valid when `filter=team` |
+| `players` | comma-separated names or Steam64 IDs | Only valid when `filter=player`. Tokens matching `/^\d{16,}$/` resolve against `leaderboard[].steam64`; otherwise case-insensitive against `leaderboard[].name`. Unresolved tokens are dropped silently |
+| `tab` | per-match: `overview`, `combat`, `rivalries`, `weapons`, `assets`, `positioning`, `replay`. all-matches: `overview`, `weapons-rivalries` | Omitted when on the default Overview tab |
+| `t` | raw tick (uint32) | One-shot Replay seek target. Produced by the Raw Data Browser's events-table row click. Forces `tab=replay` when no explicit `tab` is provided. Consumed once by `VTReplay.jumpToTick` on initial load and cleared. |
+
+Full edge-case table (insecure-context Share fallback, mid-session Live Sync flip, match-not-found recovery, etc.) lives in [DEVELOPER_GUIDE.md §6](../DEVELOPER_GUIDE.md).
+
 ---
 
 ## 5. Output JSON Reference
@@ -533,6 +663,11 @@ An array of match summaries used to populate the match selector dropdown.
 | `duration_sec` | `number` | Match duration in seconds |
 | `player_count` | `number` | Number of named players |
 | `submitter` | `string` | Username of who submitted the session file |
+| `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). |
+| `players` | `string[]` | Sorted unique display names from the match's `leaderboard[]` (same nicknames the dashboard shows). Used by the picker's free-text search blob (`buildEntrySearchBlob` in `js/app.js`). |
+| `has_position_data` | `boolean` | Mirrors per-match `match.has_position_data`. `true` iff the session contained `UpdateTick` events. Drives picker thumbnail decoration and Positioning-tab UI gating. |
+| `has_target_lock_data` | `boolean` | Mirrors per-match `match.has_target_lock_data`. `true` iff any `PlayerState.has_target=true` sample was observed. |
+| `has_pickup_data` | `boolean` | Phase 3. Mirrors per-match `match.has_pickup_data`. `true` iff the match contains at least one `PickupPowerup` event. |
 
 ### Per-Match JSON
 
@@ -554,6 +689,13 @@ Each match file has these top-level keys:
 | `config_mod` | `string` | Server configuration mod |
 | `snipe_count` | `number` | Number of UnitSniped events |
 | `teams` | `object` | `"1"` and `"2"` → arrays of roster entries |
+| `schema_version` | `number` | Per-match output schema version (Phase 3 = `1`). Absence indicates legacy data written before this PR. Bumped only when an output-shape-breaking change ships. |
+| `has_position_data` | `boolean` | `true` iff the session contained `UpdateTick` events. Mirrored from `positioning.has_position_data`. Drives Positioning-tab UI gating. |
+| `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed. Mirrored from `positioning.has_target_lock_data`. Distinguishes "no T-key data" (pre-schema or never pressed) from "0% lock" in Career Radar tooltips. |
+| `has_pickup_data` | `boolean` | Phase 3. `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. |
+| `terrain_bounds` | `object \| null` | Full 3D `{min:{x,y,z}, max:{x,y,z}}` from `StatHeader.terrain_*` (+X East, +Y Up, +Z North). Mirrored from `positioning.terrain_bounds`. `null` for pre-schema sessions. Match-global, always-unfiltered. |
+| `base_to_base_distance` | `number \| null` | Raw horizontal distance (units) between Team 1 and Team 2 spawn centroids — no floor applied. `null` when either team has zero players. Mirrored from `positioning.base_to_base_distance`. Distinct from `positioning.base_separation` which is a floored internal scaling value. Match-global, always-unfiltered. |
+| `sentinel_damage` | `object` | Per-match telemetry for engine sentinels dropped by the `> 1e6` filter: `{ count, total_amount, first_tick, last_tick }`. `count` is DD+DR pair count (one pair = 1); `total_amount` is the sum of DD-side amounts. `first_tick` / `last_tick` are `null` on clean matches. Always present (zeros when clean). Match-global, always-unfiltered. See [§7](#7-sentinel-damage-filter). |
 
 Each roster entry: `{ slot, player_id, name, steam64 }`
 
@@ -630,6 +772,27 @@ Top 5 bidirectional player pairs, sorted by total mutual damage.
 | `b_to_a` | `number` | Damage dealt from B to A |
 | `total` | `number` | `a_to_b + b_to_a` |
 
+#### `odf_map`
+
+Top-level per-match object mapping raw ODF strings to their best human-readable name. The pipeline's source of truth for ODF resolution; the Raw Data Browser and other downstream consumers read this rather than re-running the resolver chain.
+
+| Property | Notes |
+|---|---|
+| Keys | Raw ODF strings exactly as they appear in the binpb wire format, including the `.odf` suffix. |
+| Values | Resolved display name via `prettify_odf` — (1) weapons via `build_weapon_name_resolver` (the `Weapon.*` ordName / objectClass / leaderName / explosion chain), (2) any other game object via `build_unit_name_resolver` (`GameObjectClass.unitName` across `Vehicle`, `Building`, `Powerup`, `Pilot`, `Ordnance`), (3) title-cased form of the raw stem as a last-resort fallback for ODFs the DB does not recognize. |
+| Disambiguation | Same-name collisions inside a match (e.g. multiple "Pulse" weapons or stock + `_vsr` "Scavenger") resolve as `Name (raw_stem)` via the shared `disambiguate_names` helper. |
+| Population | Every `*_odf` field encountered in the match: `BulletInit.ordnance_odf`, `BulletHit.{ordnance_odf, victim_odf, shooter_odf}`, `DamageDealt.ordnance_odf`, `DamageReceived.ordnance_odf`, `UnitDestroyed.{killer_odf, victim_odf}`, and `PlayerState.odf`. Typically 10-50 entries per match. |
+| Consumers | Primarily [js/raw-browser.js](../js/raw-browser.js) for inline ODF resolution in the Decoded tier. `kills.by_vehicle[].name` is routed through the same `prettify_odf` chain so it always agrees with `odf_map`. |
+| Filter contract | **Match-global, always-unfiltered.** See `.cursor/rules/filter-contract.mdc`. |
+
+```json
+{
+  "chaingun_c.odf": "Chain Gun",
+  "ivscav_vsr.odf": "Scavenger (ivscav_vsr)",
+  "apsnipvsr.odf": "ISDF Pulse Rifle Powerup"
+}
+```
+
 #### `weapon_meta[]`
 
 Per-weapon statistics for the match, sorted by total damage (descending).
@@ -666,7 +829,7 @@ AI and structure damage attribution.
 
 #### `kills`
 
-Kill/death data from UnitDestroyed events. After Phase 3, only **real-vehicle** destructions reach this block — powerup pickups, powerup/crate destructions, and deployable destructions are routed away by the four-way classification (see `.cursor/rules/data-schema.mdc` "UnitDestroyed Four-Way Classification" + `docs/pickup-powerup-semantics.md`).
+Kill/death data from UnitDestroyed events. After Phase 3, only **real-vehicle** destructions reach this block — powerup pickups, powerup/crate destructions, and deployable destructions are routed away by the four-way classification (see `.cursor/rules/data-schema.mdc` "UnitDestroyed Four-Way Classification" + [§8 UnitDestroyed Classification & Powerup Economy](#8-unitdestroyed-classification-powerup-economy)).
 
 | Field | Type | Description |
 |---|---|---|
@@ -871,7 +1034,7 @@ BZCC lets a pilot hold the **T-key** to lock the crosshair onto the nearest enem
 - **Match-global flag**: `positioning.has_target_lock_data` (also mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed in the match. It gates the T-Key Usage UI so a pre-schema match (where the field did not exist) renders "no data" instead of an indistinguishable 0% bar.
 - **Edge case — field present but no player ever held T**: collapses to `has_target_lock_data=false`, same as pre-schema. This is an unavoidable limitation of protobuf's implicit presence: the wire format cannot distinguish "never set" from "explicit false". In practice both cases are correctly labeled "no data" because neither carries a meaningful T-key signal.
 - **Contrast with `activity_score`**: unlike `activity_score` (match-relative, p95-normalized across the roster), `target_lock_pct` is **absolute** — a 0.25 ratio means the player held T for a quarter of their kept samples regardless of how anyone else played. This is why `career_stats[].mean_target_lock_pct` is a **straight direct average** across matches (valid), whereas `mean_movement_score` is an average-of-relatives (approximation, noted in the career Mobility tooltip).
-- **Career aggregation**: `career_stats[].mean_target_lock_pct` and `career_stats[].matches_with_target_lock_data`; also surfaced as `meta.matches_with_target_lock_data` in `all_matches.json`. Only matches where `has_target_lock_data=true` contribute to the average — that prevents pre-schema zero-fill from diluting real values.
+- **Career aggregation**: `career_stats[].mean_target_lock_pct` and `career_stats[].matches_with_target_lock_data`; also surfaced as `meta.matches_with_target_lock_data` on the in-memory aggregate (built client-side by `VTAggregate.build()` from `match_contributions.json`). Only matches where `has_target_lock_data=true` contribute to the average — that prevents pre-schema zero-fill from diluting real values.
 - **UI surface**: the 8th "T-Key Usage" axis on the Player Performance Radar in all four modes (single / compare / team / career). The career Radar reads `mean_target_lock_pct` directly; the per-match Radar reads per-player `target_lock_pct`. Both tooltips fall back to "T-Key: no data" when the availability flag is false.
 
 ##### Worked example
@@ -913,21 +1076,71 @@ Reading: VTrider spent ~74% of the match outside their base, reached ~97% of the
 
 Contrast with F9bomber on the same match: `time_in_base_pct = 0.469`, `max_dist = 1006.1`, `path_length_per_sec = 18.62` → `term_a = 0.266`, `term_b = 0.287`, `term_c = 0.163` → score `72` → **Mobile**. Same map, same normalizers — the lower share of time outside base alone drops them a full band.
 
-### all_matches.json (Cross-Match Aggregate)
+### `match_contributions.json` + In-Memory Aggregate
 
-Only generated when more than one match is processed.
+The pipeline emits `data/processed/match_contributions.json` — a single dict keyed by `<match_id>.json` whose values are slim per-match contributions produced by `_extract_contribution()` in `scripts/process_stats.py`. The browser fetches this file once per session, caches it on `window.__vtContributions`, and rebuilds the cross-match aggregate on demand via `VTAggregate.build(contributions, fileIds)` in [js/all-matches-aggregator.js](../js/all-matches-aggregator.js) over whatever `fileIds` subset the active picker filter resolves to.
+
+The legacy `all_matches.json` artifact is no longer written; `scripts/process_stats.py`'s `build_all_matches_aggregate()` Python function is kept as reference code only. The `{meta, career_stats, global_weapon_meta, global_rivalries}` shape below describes the **in-memory** aggregate produced by `VTAggregate.build()`, not an on-disk JSON.
+
+#### Contribution shape (per match in `match_contributions.json`)
+
+```json
+{
+  "2026-04-16T01-27-48.json": {
+    "id": "2026-04-16T01-27-48",
+    "map": "havenvsr.bzn",
+    "date": "2026-04-16T01:27:48.447651+00:00",
+    "duration_sec": 847.8,
+    "submitter": "VTrider",
+    "player_count": 10,
+    "has_position_data": true,
+    "has_target_lock_data": false,
+    "has_pickup_data": false,
+    "sentinel_damage_count": 0,
+    "leaderboard": [
+      {
+        "player_id": "VTrider", "name": "VTrider",
+        "dealt": 75489.3, "received": 33462.1,
+        "pvp_dealt": 35058.7, "pve_dealt": 40430.6,
+        "pvp_received": 31936.1, "pve_received": 1526.0,
+        "asset_dealt": 0.0,
+        "shots_fired": 3700, "shots_hit": 3116,
+        "kills": 0, "deaths": 0, "pickups": 17,
+        "weapon_breakdown": { "Minigun": { "dealt": 20576.0, "shots": 958, "hits": 651 } },
+        "activity_score": 84, "movement_band": "Aggressive",
+        "path_length": 17154.2,
+        "target_lock_pct": null
+      }
+    ],
+    "weapon_meta": [
+      { "weapon": "Minigun", "total_damage": 20576.0, "total_shots": 958, "total_hits": 651 }
+    ],
+    "rivalry_matrix": { "VTrider": { "Domakus": 18900.1 } }
+  }
+}
+```
+
+#### Aggregate shape (built in-memory by `VTAggregate.build()`)
+
+After summation, the aggregator drops any `career_stats[]` row whose `matches_played < MIN_CAREER_MATCHES` (currently `5`) and cascade-filters `global_rivalries[]` to the kept names. `global_weapon_meta` and `meta.*` totals are unaffected — the threshold is exclusively about cross-match player identity. Per-match views (`<match_id>.json` → Player Leaderboard, kill feed, per-match rivalries) are unaffected.
+
+The threshold is **scope-aware**: it reads `matches_played` *in the current scope*, so a player with 30 career matches who appears in only 3 of the picker-filtered subset is hidden in that view (semantics: "show me players with meaningful presence in this view").
 
 #### `meta`
 
 | Field | Type | Description |
 |---|---|---|
-| `match_count` | `number` | Total matches processed |
+| `match_count` | `number` | Total matches in the current aggregate scope |
 | `total_duration_sec` | `number` | Sum of all match durations |
 | `maps_played` | `string[]` | Sorted list of unique map names |
 | `date_range` | `[string, string]` | Earliest and latest match dates |
 | `submitters` | `string[]` | Sorted list of unique submitter usernames |
 | `matches_with_positioning` | `number` | Count of matches whose top-level `match.has_position_data` is `true` |
 | `matches_with_target_lock_data` | `number` | Count of matches whose top-level `match.has_target_lock_data` is `true` (i.e. at least one player held T at least once during the match) |
+| `total_sentinel_damage_dropped` | `number` | Sum of per-match `sentinel_damage_count` across the aggregate scope (DD+DR pair count). See [§7](#7-sentinel-damage-filter) |
+| `matches_with_sentinel_damage` | `string[]` | List of match IDs whose `sentinel_damage_count > 0` |
+| `min_career_matches` | `number` | Live threshold value (currently `5`). UI labels read this instead of hardcoding "5+" |
+| `players_dropped_by_min_matches` | `number` | Count of `career_stats[]` rows pruned for the current scope (zero when nobody was below threshold) |
 
 #### `career_stats[]`
 
@@ -989,7 +1202,8 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Bucket Spotlight (Replay)** | Biggest contributor in the current playback bucket | `timeline.by_player[name][currentIndex]` | `argmax` of per-player damage at `currentIndex` |
 | **Config Mod** | Server configuration identifier | `StatHeader.active_config_mod` | Direct from header |
 | **Date** | When the match started | `StatHeader.start_time` | Protobuf Timestamp → ISO datetime |
-| **Deaths** | Times a player's unit was destroyed | `UnitDestroyed` where `victim` = player Steam64 | Count per player |
+| **Deaths** | Times a player's unit was destroyed | `UnitDestroyed` where `victim` = player Steam64 | Count per player. Phase 3: powerup pickups, powerup/crate destructions, and deployable destructions are routed away from `kills.*` by the four-way classification (see [§8](#8-unitdestroyed-classification-powerup-economy)) — only real-vehicle destructions count. |
+| **Deployable Destruction** | Mine / deployable-utility destruction (self-detonate, expire, or shot down) | `UnitDestroyed` where `victim_odf` is in `KNOWN_DEPLOYABLE_ODFS` (currently just `fball2c.odf` flame mine) | Routed to `deployable_destructions.{by_player, by_odf, totals}` (no `feed` — too noisy). Suppressed from `kills.*`. See [§8](#8-unitdestroyed-classification-powerup-economy) |
 | **Duration** | How long the match lasted | All events with `tick` | `(max_tick - min_tick) / tick_rate` |
 | **Faction Accuracy** | Team-wide hit rate | `BulletInit`, `BulletHit` grouped by faction | `faction_hits / faction_shots` |
 | **Hit Distribution** | Per-player breakdown of which targets were hit most, with damage context | `BulletHit` (hits) + `DamageDealt` rivalry (damage) | `{ hits: count, damage: total }` per shooter → victim pair. Dmg/Hit = `damage / hits` |
@@ -1001,19 +1215,25 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Map** | The BZCC map played | `StatHeader.map` | Direct from header |
 | **Matches Played** | Number of matches a player appeared in | Match presence | Count of matches containing this `player_id` |
 | **Momentum (Replay)** | Which faction is dominating the current phase of playback | `timeline.by_faction` rolling 3-bucket sums | Faction ahead by >10% drives the arrow direction; otherwise "Even" or "Quiet" |
+| **Movement Profile / Activity Score** | 0-100 per-player number summarizing how active a player was on the map (0 = stayed at base, 100 = covered most of the map) | `UpdateTick.players[].position` (downsampled to 1 Hz) | `round(100 × (0.5 × (1 − time_in_base_pct) + 0.3 × normalized_max_dist + 0.2 × normalized_path_per_sec))`. Both normalizers are match-relative p95 (computed across all players in the match), so the score self-calibrates per match. Bands: 0-20 Defensive, 21-40 Territorial, 41-60 Balanced, 61-80 Mobile, 81-100 Aggressive. Career aggregate `career_stats[].mean_movement_score` is an average-of-relatives — labeled as an approximation. See `positioning` block in §5 |
 | **Net Damage** | Difference between damage dealt and received | `DamageDealt`, `DamageReceived` | `personal_dealt - personal_received` |
+| **Picker Filter** | Cross-match filter modifying the All Matches aggregate's scope (separate axis from the per-match Player Filter). Facets: duration band, player count, submitter, full-roster Players (with Match-mode and Role toggles) | `pickerState` in `js/app.js`, persisted in `sessionStorage` under `vt.picker.filters.v2` | When the user is on the All Matches view and toggles a chip, `applyPickerFilters()` debounce-reruns `loadAllMatches()` so the career table / radar / global meta reflect only the filtered subset. The 5-match career-roster minimum is applied **after** picker scoping, so `meta.players_dropped_by_min_matches` reflects pruning *within the current scope*. See "Match Picker Modal" subsection in §4 |
+| **Pickup** | Crate / pod pickup event (Phase 3 — new-schema sessions only) | `PickupPowerup` events: `{ tick, picker, picker_team, picker_odf, powerup_team, powerup_odf }` | Routed to `pickups.{feed, by_player, by_odf, totals}`. The synthetic `UnitDestroyed` companion the engine still emits at the same tick is suppressed by the four-way classification (see [§8](#8-unitdestroyed-classification-powerup-economy)). `match.has_pickup_data` is `true` iff at least one `PickupPowerup` event was observed |
 | **Player Count** | Number of named players in a match | `StatHeader.player_count` | Direct from header (fallback: `len(nick_map)`) |
 | **Playhead (Replay)** | Continuous playback position expressed in buckets | `timeline.labels`, `timeline.bucket_seconds` | `progressBuckets` is a float 0.0 (empty: "0:00") → `totalBuckets` (full match), driven by `requestAnimationFrame` so the chart line, scrub thumb, time readout, and faction tug-of-war move continuously. Numeric panels (running leaderboard, bucket spotlight, momentum chip) snap per whole bucket so values stay readable. `prefers-reduced-motion` users get a fallback that steps per whole bucket via `setInterval` |
+| **Powerup Destruction** | Powerup pod / crate a real player destroyed before someone could pick it up — denying the enemy economy | `UnitDestroyed` where `victim_odf` is in the DB-derived powerup set AND `killer_team != 0` | Routed to `powerup_destructions.{feed, by_player, by_odf, totals}`. Suppressed from `kills.*`. The Combat tab's Powerup Destruction Breakdown chart auto-hides when totals are zero. See [§8](#8-unitdestroyed-classification-powerup-economy) |
 | **Ratio** | Damage dealt relative to damage received | `DamageDealt`, `DamageReceived` | `dealt / received`. Infinite (∞) when received = 0 and dealt > 0. |
 | **Replay Speed** | How fast the Replay tab plays relative to real match time | `timeline.bucket_seconds` | `intervalMs = (bucket_seconds × 1000) / speed`; options 0.5x (slow-mo), 1x, 2x (default), 5x, 10x, 20x |
 | **Rivalry** | Bidirectional damage between two specific players | `DamageDealt` + `DamageReceived` pairs where both `shooter > 0` and `victim > 0` | Sum of mutual damage in both directions |
 | **Shots Fired** | Number of projectiles a player launched | `BulletInit` | Count per player |
 | **Shots Hit** | Number of projectiles that connected | `BulletHit` | Count per player |
-| **Sentinel Event** | Engine-emitted damage event dropped by the pipeline's sentinel filter. Observed value exactly `268,435,456.0` (= 2^28 = `0x4d800000` as IEEE-754 float bits) from BZCC's `DAMAGE_TYPE_UNKNOWN` force-kill pathway via `misnexport2 + 0x1c`. Not real combat damage. | `DamageDealt` / `DamageReceived` where `amount > 1e6` | Skipped at ingest (pipeline and timeline recompute) before any accumulator touches the value. Both DD and paired DR are consumed together. Full evidence chain, struct layout, and decompile in [sentinel-damage.md](sentinel-damage.md) |
+| **Sentinel Event** | Engine-emitted damage event dropped by the pipeline's sentinel filter. Observed value exactly `268,435,456.0` (= 2^28 = `0x4d800000` as IEEE-754 float bits) from BZCC's `DAMAGE_TYPE_UNKNOWN` force-kill pathway via `misnexport2 + 0x1c`. Not real combat damage. | `DamageDealt` / `DamageReceived` where `amount > 1e6` | Skipped at ingest (pipeline and timeline recompute) before any accumulator touches the value. Both DD and paired DR are consumed together. Full evidence chain, struct layout, and decompile in [§7 Sentinel Damage Filter](#7-sentinel-damage-filter) |
 | **Sentinel Damage (match)** | Per-match telemetry for sentinel events dropped | `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` | `count` is number of DD+DR pairs (not individual events). `total_amount` is the sum of DD-side amounts. `first_tick`/`last_tick` are `null` on clean matches. Present on every match (zeros when clean). Match-global, always-unfiltered |
-| **Sentinel Damage (meta)** | Corpus-wide sentinel rollup | `all_matches.json → meta.total_sentinel_damage_dropped` (pair count sum) + `meta.matches_with_sentinel_damage` (list of affected match IDs) | Enables regression detection if a future session reintroduces sentinels after upstream fix |
+| **Sentinel Damage (meta)** | Corpus-wide sentinel rollup | In-memory aggregate `meta.total_sentinel_damage_dropped` (pair count sum) + `meta.matches_with_sentinel_damage` (list of affected match IDs); built client-side by `VTAggregate.build()` from `match_contributions.json` | Enables regression detection if a future session reintroduces sentinels after upstream fix |
 | **Snipe Count** | Number of snipe events in a match | `UnitSniped` | Count per match |
+| **Snipe Feed (Phase 3)** | Per-snipe entries with sniper / victim context | `UnitSniped` events with `shooter`, `shooter_team`, `shooter_odf`, `victim`, `victim_team`, `victim_odf` (Phase 3-enriched fields) | Routed to `snipes.{feed, by_player, totals}`. Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` (protobuf defaults). Combat-tab card auto-hides when feed is empty |
 | **Submitter** | Who submitted the session data | Filesystem | Parent folder name of the `.binpb.gz` file |
+| **T-Key Usage / Target Lock** | Per-player ratio of kept positioning samples where the player was holding T (target-lock key, gives small tracking / aim-assist advantage). **Absolute 0-1 ratio** — directly comparable across matches | `UpdateTick.players[].has_target` (downsampled to 1 Hz) | `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. Match-global flag `positioning.has_target_lock_data` (mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed; distinguishes "no data" (pre-schema or never-pressed) from "0% lock" in radar tooltips. Career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average. Powers the 8th "T-Key Usage" axis of the Player Performance Radar |
 | **Terrain Bounds** | Full 3D world-space extents of the map | `StatHeader.terrain_min_*` / `terrain_max_*` (fields 12-17) | `{min:{x,y,z}, max:{x,y,z}}`, axis convention +X East / +Y Up / +Z North. `null` for pre-schema sessions (all-zero fallback). Surfaced on `positioning.terrain_bounds` and mirrored to `match.terrain_bounds`. Drives `positioning.map_bounds` when present (`map_bounds_source = "terrain"`); observed player extents fallback otherwise |
 | **Timeline** | Damage over time in 10-second windows | `DamageDealt` | Damage per bucket = `(tick - min_tick) / (bucket_seconds * tick_rate)` |
 | **Tug-of-War (Replay)** | Cumulative faction damage as a two-segment bar during playback | `timeline.by_faction["1" / "2"]` | Segment width = `cumulative_faction_total / combined_total × 100%` |
@@ -1022,3 +1242,502 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Total Received (Career)** | Lifetime personal damage received across all matches | `leaderboard[].personal.received` | Sum across all matches |
 | **Weapon Breakdown** | Per-weapon stats for a player | `DamageDealt`, `BulletInit`, `BulletHit` per player per ODF | `{ dealt, received, shots, hits, accuracy }` per weapon |
 | **Weapons Used** | Count of distinct weapons a player dealt damage with | `DamageDealt` per player | Count of unique ODFs with `dealt > 0` |
+
+---
+
+## 7. Sentinel Damage Filter
+
+Reference for the `amount > 1e6` sentinel damage filter applied in
+`scripts/process_stats.py` and mirrored in `js/raw-browser.js` Reconcile.
+The canonical observed value is `268,435,456` (= `2^28` =
+`0x4d800000` as IEEE-754 float bits), emitted by the BZCC engine's
+internal force-kill pathway. These events are not real combat damage
+and are dropped before aggregation.
+
+### TL;DR
+
+Any `DamageDealt` / `DamageReceived` event with `amount > 1e6` is skipped
+at ingest. Skipping happens in pairs (DD + paired DR together) so both
+sides of the engine's event-pair convention are consumed.
+
+Counters + diagnostics flow through:
+
+- `match.sentinel_damage = { count, total_amount, first_tick, last_tick }`
+- `meta.total_sentinel_damage_dropped` (aggregate pair count)
+- `meta.matches_with_sentinel_damage` (list of affected match IDs)
+- Per-match pipeline log lines, deduped by `(tick, team, amount)`
+- Raw Browser Reconcile view: inline badge + reconcile summers mirror the filter
+
+Threshold `1e6` matches the upstream collector's `record_damage()`
+`unusual_damage.txt` diagnostic threshold. Real BZCC combat per-event
+amounts top out in the low tens of thousands, so the guard is ~100x
+above any legitimate event.
+
+### Evidence chain
+
+#### 1. The raw events have a perfectly clean signature
+
+Across 13 matches / 1,960,518 events at time of investigation, exactly 10
+events (5 paired `DamageDealt` + `DamageReceived`) carried
+`amount == 268435456`. All 10 share the identical wire profile:
+
+```
+damageDealt    | no_shooter | no_victim | no_ordnance | team=9    -> 5
+damageReceived | no_shooter | no_victim | no_ordnance | team=9    -> 5
+```
+
+Wire format (verbatim, protobufjs `defaults: false` so absent fields are
+genuinely absent on the wire):
+
+```json
+{ "damageDealt":   { "tick": 70099, "team": 9, "amount": 268435456 } }
+{ "damageReceived":{ "tick": 70099, "team": 9, "amount": 268435456 } }
+```
+
+No `shooter`. No `victim`. No `ordnanceOdf`. These are not a projectile
+hit and not an ODF-driven explosion.
+
+#### 2. Only one match in the corpus was affected
+
+12 of 13 matches had zero sentinel events. Only `2026-04-22T01-58-26`
+(Vegan) contained the 5-pair cluster. This rules out "normal death
+cascade" — if the sentinel fired on every unit death it would be seen
+hundreds of times per match.
+
+#### 3. The events cluster into two short bursts tied to a single player's deaths
+
+All 5 sentinels occurred within a 63-tick window (~3.15 s @ 20 Hz):
+
+| Tick | Context |
+|---|---|
+| 70099 | During enemy Arc Blast hit on Danya + Danya's vehicle death-explosion (`xcarxpl_e.odf`) |
+| 70100 | Same tick as `UnitDestroyed{ victim=Danya, victimOdf=evscoutm_vsr.odf, killerTeam=6, killerOdf=fbspir_vsr.odf }` |
+| 70105 | 5 ticks later, no other event at this tick |
+| 70160 | 15 ticks after `UnitDestroyed{ victim=Danya, victimOdf=esuser_m.odf (pilot), killerTeam=7 }` at tick 70145 |
+| 70162 | 2 ticks after 70160 |
+
+The cluster brackets Danya's vehicle death and her subsequent pilot
+death. Between 70099 and 70162 there are no other `UnitDestroyed`
+events, and nearby deaths for other players do not trigger sentinels —
+so "a death happened" is necessary but not sufficient.
+
+#### 4. `team=9` is the owning slot of the force-killed object
+
+All 10 sentinels have `team=9`. The decompile (below) reads the target
+handle from `piVar1[0xb8]` of the object being force-killed, supporting
+"owner of the object being force-killed" over any alternate "fallback
+to local player's slot". Either way, downstream the effect is the same:
+one slot's `assets.dealt` / `assets.received` column is inflated by
+`N × 2^28`.
+
+#### 5. Dev decompile + struct layout confirm an engine-level magic constant
+
+The struct layout and the decompiled call site line up exactly.
+
+**DAMAGE struct** (engine source, annotated with what the decompiled
+path writes at each offset):
+
+| Offset | Type | Field | Written by the decompiled path |
+|---|---|---|---|
+| 0  | int   | `owner` | target handle (`piVar1[0xb8]`) |
+| 4  | int   | `source` | copy of target handle |
+| 8  | float | `base` | 0 |
+| 12 | float | `armor` | 0 |
+| 16 | float | `shield` | 0 |
+| 20 | float | `value` | **`0x4d800000` = 2^28** |
+| 24 | byte + 2 bools (bitpacked) | `type` + `friendly_fire` + `self_damage` | type = `DAMAGE_TYPE_UNKNOWN` (0); both flags cleared |
+
+**`DAMAGE_TYPE` enum** (engine source):
+
+```cpp
+enum DAMAGE_TYPE : byte {
+    DAMAGE_TYPE_UNKNOWN,    // 0  <-- what our sentinel events carry
+    DAMAGE_TYPE_ORDNANCE,   // 1
+    DAMAGE_TYPE_EXPLOSION,  // 2
+    DAMAGE_TYPE_COLLISION,  // 3
+    DAMAGE_TYPE_WATER,      // 4
+    DAMAGE_TYPE_UNDERWATER, // 5
+    DAMAGE_TYPE_SCRIPT,     // 6
+    DAMAGE_TYPE_LAST
+};
+```
+
+The engine explicitly categorises the force-kill path as
+`DAMAGE_TYPE_UNKNOWN` — **not** the same code path as script-invoked
+`SelfDamage` (which uses `DAMAGE_TYPE_ORDNANCE` + the `self_damage`
+flag). This matches the wire-format observation: no ordnance_odf on
+sentinel events.
+
+**Decompiled call site**:
+
+```c
+piVar1[0xba] |= 0x600;       // flag bits on target object
+piVar1[0x3f] |= 5;
+piVar1[0x20] = 0; piVar1[0x22] = 0;
+piVar1[0x30] = 0; piVar1[0x32] = 0;
+piVar1[0xd4] = 0; piVar1[0xd6] = 0;
+FUN_006cec40();
+
+local_20 = 0; local_1c = 0; local_18 = 0;
+local_28 = piVar1[0xb8];     // target handle
+local_f  = 0;
+local_14 = 0x4d800000;       // <-- 2^28 as IEEE-754 float bits
+local_10 = 1;
+local_24 = local_28;
+
+// Call mission DLL's damage callback at misnexport2 + 0x1c
+if ((DAT_008a30e0 != 0) && (*(code **)(DAT_008a30e0 + 0x1c) != 0)) {
+    (**(code **)(DAT_008a30e0 + 0x1c))(DAT_0087c750, local_28, 0, &local_28);
+}
+
+local_10 = 1;
+(**(code **)(*piVar1 + 0xb0))(&local_28);  // vtable method on target (Kill?)
+```
+
+Bit-pattern check: IEEE-754 `0x4d800000` has sign 0, exponent `0x9B - 127 = 28`,
+mantissa 0 → `1.0 × 2^28 = 268,435,456.0f` exactly. Confirmed.
+
+The compiler emits a single dword-wide MOV to zero the three 1-byte
+flag slots at offset 24 (hence `local_10 = 1` looking like a whole-dword
+write). The engine is explicitly constructing a `DAMAGE_TYPE_UNKNOWN`
+event with `value = 2^28`, pushing it through the mission DLL's damage
+callback at `misnexport2 + 0x1c`, then calling the target's vtable
+method at `+0xb0` (almost certainly its `Kill`/`Destroy` handler).
+Statsgate hooks that very callback, so the sentinel arrives verbatim in
+the binpb wire stream.
+
+#### 5b. Player observation lines up
+
+Danya (slot 3, the victim of the deaths bracketing the sentinels):
+"interesting how these freak events revolve around me dying lol" /
+"this only happened in that one game lol ... even the code gets hazey
+in the late game". Consistent with the tick-cluster analysis above —
+the 5 sentinels bracket successive vehicle+pilot deaths in a specific
+late-game state.
+
+#### 6. Pipeline inflation, explained
+
+`scripts/process_stats.py` previously summed `dd.amount` into
+`asset_dealt[dd.team]` whenever `shooter == 0`, and `dr.amount` into
+`asset_received[dr.team]` whenever `victim == 0`. With 5 DD + 5 DR at
+`2^28` each and `team == 9`:
+
+- `asset_dealt[9]  += 5 × 268,435,456 = 1,342,177,280`
+- `asset_received[9] += 5 × 268,435,456 = 1,342,177,280`
+
+Which matches the ~63k delta seen on the Vegan match's processed JSON
+(`asset_dealt = 1,342,614,569`, `asset_received = 1,342,783,249`): the
+residual ~437k and ~606k is ordinary asset damage that survives the
+filter. The spike in `timeline.by_faction["2"]` at bucket 350 (~58:20)
+similarly accumulates `5 × 2^28 = 1,342,177,280`, matching the observed
+`1,342,184,712.2` (the residual 7,432 is one bucket's worth of real
+combat).
+
+### Implementation
+
+#### Python pipeline
+
+[scripts/process_stats.py](../scripts/process_stats.py):
+
+```python
+SENTINEL_DAMAGE_THRESHOLD = 1e6
+
+def _is_sentinel_damage(amount):
+    return amount is not None and amount > SENTINEL_DAMAGE_THRESHOLD
+```
+
+At the top of the `damage_dealt` event branch (before the existing
+`skip_shooter` check), peek at the paired DR. If either side is
+sentinel, advance past both events, update
+`match.sentinel_damage.{count,total_amount,first_tick,last_tick}`, log
+a deduped line, and `continue`. The timeline-recompute loop applies the
+same check.
+
+#### Raw Browser Reconcile
+
+[js/raw-browser.js](../js/raw-browser.js) mirrors with
+`isSentinelDamage(amount)` applied in `computePersonalDealt`,
+`computePersonalReceived`, `computePersonalPvpDealt`. The Reconcile
+view shows an inline badge with the literal dropped total when any
+sentinel events are present in the current match. The raw events table
+(virtualized) still displays the sentinel values verbatim — the raw
+tier's job is to show what's on the wire.
+
+### Upstream (VTrider's collector)
+
+VTrider indicated he intends to filter `DAMAGE_TYPE_UNKNOWN` events in
+the collector itself. That would make our pipeline-side filter a no-op
+guardrail on new sessions while keeping it relevant for the
+already-archived sentinel-bearing `.binpb.gz` files on disk.
+
+### Future schema enhancement (proposed upstream)
+
+Propagating `DAMAGE_TYPE` on the wire would let us filter
+`DAMAGE_TYPE_UNKNOWN` defensively without needing an amount-based
+heuristic, and would enable future breakdowns by damage source type
+(script vs ordnance vs collision vs water etc.). Rough shape:
+
+```proto
+enum DamageType {
+  DAMAGE_TYPE_UNKNOWN    = 0;
+  DAMAGE_TYPE_ORDNANCE   = 1;
+  DAMAGE_TYPE_EXPLOSION  = 2;
+  DAMAGE_TYPE_COLLISION  = 3;
+  DAMAGE_TYPE_WATER      = 4;
+  DAMAGE_TYPE_UNDERWATER = 5;
+  DAMAGE_TYPE_SCRIPT     = 6;
+}
+
+message DamageDealt {
+  uint32 tick = 1;
+  uint64 shooter = 2;
+  int32  team = 3;
+  string ordnance_odf = 4;
+  float  amount = 5;
+  DamageType damage_type = 6;  // new, default 0
+}
+```
+
+Backwards-compatible (default 0 = `UNKNOWN`). Not needed for the current
+filter; recorded here so it can be picked up the next time the upstream
+proto is touched.
+
+### Re-running the audit
+
+The promoted `scripts/audit_sentinel_events.mjs` scans all
+`data/sessions/**/*.binpb.gz` and prints + writes a histogram to
+`_investigation/output/sentinel_histogram.{json,txt}`. Requires
+`npm install --no-save protobufjs@7` once; the `_investigation/` folder
+is gitignored so repeated runs don't pollute the tree.
+
+```bash
+node scripts/audit_sentinel_events.mjs
+```
+
+Primary metric: `total_sentinel_pairs`. Must match the All Matches
+aggregate's `meta.total_sentinel_damage_dropped` (built client-side by
+[js/all-matches-aggregator.js](../js/all-matches-aggregator.js) from
+`data/processed/match_contributions.json`) after each pipeline rerun.
+
+`scripts/dump_events_window.mjs` dumps arbitrary tick windows for any
+match — useful for investigating future anomalies beyond just sentinels.
+
+---
+
+## 8. UnitDestroyed Classification & Powerup Economy
+
+Reference for the four-way classification of `unit_destroyed` events that
+the pipeline applies to disentangle real combat kills from powerup pickups,
+powerup/crate destructions, and deployable detonations.
+
+Linked from:
+
+- [.cursor/rules/data-schema.mdc](../.cursor/rules/data-schema.mdc)
+- [DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md)
+- [scripts/process_stats.py](../scripts/process_stats.py) helper `_load_known_powerup_odfs(odf_db)` + constant `KNOWN_DEPLOYABLE_ODFS`
+- [scripts/audit_pickup_powerup.mjs](../scripts/audit_pickup_powerup.mjs) (verification tool)
+
+### Background
+
+The `statsgate.proto` schema added a `PickupPowerup` event in April 2026 that
+records crate / pod pickups with picker + powerup context. Before that
+addition, the BZCC engine emitted a synthetic `UnitDestroyed` event when a
+player picked up a crate, with `killer_team == 0` (no real "killer") and
+`victim_odf` set to the powerup's ODF string. The new `PickupPowerup` event
+*supplements* but does not *replace* this synthetic destruction: in
+new-schema sessions, the engine still emits the fake `UnitDestroyed` for the
+same tick.
+
+This section captures the empirical evidence and the resulting classification
+rule the pipeline applies uniformly to old AND new sessions.
+
+### The four buckets
+
+Every `unit_destroyed` event is classified in the
+[scripts/process_stats.py](../scripts/process_stats.py) event loop into one
+of four categories. The classification happens at the very top of the
+`unit_destroyed` branch, before any kill / vehicle-destruction accumulator
+touches the event:
+
+```mermaid
+flowchart TD
+  Start[unit_destroyed event] --> InDep{victim_odf in<br/>KNOWN_DEPLOYABLE_ODFS?}
+  InDep -- yes --> Dep[deployable_destructions block<br/>SKIP all kill aggregations]
+  InDep -- no --> InPow{victim_odf in<br/>KNOWN_POWERUP_ODFS?}
+  InPow -- no --> Vehicle[Real vehicle<br/>FLOW THROUGH to existing<br/>kills accumulators]
+  InPow -- yes --> KT{killer_team == 0?}
+  KT -- yes --> Pickup[Powerup pickup<br/>SKIP. New-schema gets<br/>rich pickup_powerup data]
+  KT -- no --> Destruction[powerup_destructions block<br/>SKIP all kill aggregations]
+```
+
+Categorical effect on per-match output:
+
+| Bucket | `kills.*` | New JSON block | Notes |
+|---|---|---|---|
+| Real vehicle | full passthrough | none | Existing accumulators untouched |
+| Powerup pickup | suppressed | `pickups.feed[]` (new-schema only, populated from real `pickup_powerup` events) | Synthetic `unit_destroyed` companion is silently dropped |
+| Powerup/crate destruction | suppressed | `powerup_destructions.{feed,by_player,by_odf,totals}` | Real player shot the powerup before someone picked it up, effectively denying the enemy economy |
+| Deployable destruction | suppressed | `deployable_destructions.{by_player,by_odf,totals}` | No `feed` (too noisy) |
+
+### Evidence
+
+Audit script [scripts/audit_pickup_powerup.mjs](../scripts/audit_pickup_powerup.mjs)
+walks every `data/sessions/**/*.binpb.gz` and histograms `unit_destroyed`
+events by `(victim_odf, killer_team == 0)`.
+
+Headline findings from the initial corpus (47 sessions, 24 new-schema +
+23 old-schema):
+
+- `killer_team == 0` is a near-perfect pickup discriminator. 18 distinct
+  ODFs show >=80% team-zero (mostly 87-100%), all matching the BZCC
+  powerup naming convention (`ap*` American, `ep*` Erstwhile, `fp*` Furie).
+- Real combat ODFs (`*scout*`, `*tank*`, `*scav*`, structures) all sit at
+  0-5% team-zero (noise floor).
+- The engine continues to double-emit in new-schema matches:
+  `apserv_vsr.odf` shows 89% team-zero in NEW-schema matches (vs 87% in
+  OLD-schema). The classification flow's powerup-pickup branch
+  transparently handles this; no separate dedup needed.
+- Real-combat powerup destructions (~10-15% of powerup
+  `unit_destroyed` events) have a non-zero killer_team. These are the
+  data behind the `powerup_destructions` block.
+
+#### IMPORTANT: domain knowledge required
+
+`fball2c.odf` (a deployable flame mine) shows **79% team-zero** in the
+audit. By the team-zero threshold alone it looks powerup-shaped, but it is
+**NOT** a powerup -- it's a ground-deployed utility that self-detonates,
+expires, or gets shot. It belongs in `KNOWN_DEPLOYABLE_ODFS`, not the DB
+Powerup bucket. (Verified: `fball2c.odf` is absent from
+`data/odf.min.json -> Powerup` -- the DB and domain knowledge agree it's
+not a powerup.)
+
+Future maintainers extending the deployable set or recommending DB updates
+must apply domain knowledge about the BZCC entity in question:
+
+- **Collectible item** (gives the picker a powerup / weapon): should be in
+  `data/odf.min.json -> Powerup`. The pipeline picks it up automatically.
+  If a real powerup is missing from the DB, extend the DB upstream.
+- **Deployable utility** (mine, decoy, smoke pot): goes into
+  `KNOWN_DEPLOYABLE_ODFS` in [scripts/process_stats.py](../scripts/process_stats.py).
+  Cross-reference [data/odf.min.json](../data/odf.min.json) for `wpnName`
+  containing "Mine", "Bait", "Decoy".
+- **Real combat unit** (vehicle, structure, soldier): leave it out of both
+  sets. The pipeline routes it through existing kill accumulators.
+
+Do **not** auto-promote based on the team-zero signal alone.
+
+### Authoritative source: `data/odf.min.json -> Powerup`
+
+`KNOWN_POWERUP_ODFS` is built by `_load_known_powerup_odfs(odf_db)` in
+[scripts/process_stats.py](../scripts/process_stats.py) on every pipeline
+run from the same DB the dashboard uses. The current DB carries **159
+Powerup entries** (run `Get-Content data/odf.min.json | ConvertFrom-Json |
+ForEach-Object { $_.Powerup.PSObject.Properties.Name.Count }` to verify).
+
+Every entry has a `GameObjectClass.unitName` field that yields the
+friendly display name (e.g. `apchain.odf` -> "Chain Gun",
+`apserv.odf` -> "Service Pod"). The `powerup_display_name(odf)` closure in
+`process_match` consumes these names and suffixes " Powerup" to
+disambiguate from the same-named weapon ordnance:
+
+- `apchainvsr.odf` (powerup pod) -> "Chain Gun Powerup"
+- `apchain.odf` (the weapon ordnance the pod grants) -> "Chain Gun"
+  (unchanged via `prettify_odf` for kill feeds)
+
+#### Why the hand-curated 18-entry set was insufficient
+
+The audit-derived set used a `total >= 5, team_zero >= 80%` threshold and
+missed 5 ODFs the engine itself emitted `pickup_powerup` events for in the
+new-schema sessions:
+
+| ODF | Pickup events | DB unit_name |
+|---|---:|---|
+| `apshellgun.odf` | 5 | (in DB) |
+| `applasvsr.odf` | 3 | (in DB) |
+| `apdefl.odf` | 2 | "Deflection" |
+| `apmdmgvsr.odf` | 2 | "MDM Mortar" |
+| `apsplasmavsr.odf` | 2 | (in DB) |
+| `apquilvsr.odf` | 2 | (in DB) |
+| `apfafmvsr.odf` | 2 | "FAF Missile" |
+
+These are now correctly classified by the DB-derived approach without any
+manual constant edit.
+
+#### `_strip_vsr_suffix` fallback
+
+VSR-mod ODFs typically inherit from stock parents at runtime via the
+`[GameObjectClass]\nbaseName` ODF directive, but the flattened DB doesn't
+capture inheritance. `_load_known_powerup_odfs` synthesizes both `*vsr.odf`
+and `*_vsr.odf` variants for every Powerup-bucket entry, expanding 159 ->
+~437 entries. `powerup_display_name` additionally falls back to
+`_strip_vsr_suffix(odf)` lookup when the variant isn't in the bucket
+directly.
+
+**Highest-volume case**: `apserv_vsr.odf` is absent from `Powerup` directly,
+but the strip-vsr fallback resolves it via stock `apserv.odf` ->
+"Service Pod" -> "Service Pod Powerup". This single ODF accounts for
+**110,589 `pickup_powerup` events** in the current corpus -- by far the
+dominant pickup ODF -- so the fallback is the highest-volume code path.
+
+### Current `KNOWN_DEPLOYABLE_ODFS` (1 entry, hand-curated)
+
+| ODF | Team-zero % | Total | Notes |
+|---|---:|---:|---|
+| `fball2c.odf` | 78.7% | 705 | Flame mine. Curated by domain knowledge; absent from DB Powerup bucket. |
+
+### Reproducibility
+
+```sh
+npm install --no-save protobufjs@7   # one-off, gitignored
+node scripts/audit_pickup_powerup.mjs
+```
+
+Outputs:
+- `_investigation/output/pickup_powerup_histogram.json` (machine-readable)
+- `_investigation/output/pickup_powerup_histogram.txt` (human-readable)
+
+### Maintenance trigger
+
+Re-run the audit when:
+
+- A new map / mod ships and the dashboard surfaces unfamiliar ODFs in
+  `kills.by_vehicle` or in player K/D rankings that "shouldn't be there".
+- The reprocessing diff shows large unexplained `kills.by_vehicle` totals.
+
+Procedure:
+
+1. Run the audit script. It surfaces "promotion candidates" -- ODFs with
+   team-zero >= 80% and total >= 5 that are NOT in either set (DB-derived
+   or hand-curated).
+2. For each candidate, apply domain knowledge:
+   - **Collectible powerup**: extend `data/odf.min.json -> Powerup`
+     upstream so the DB picks it up. The pipeline's
+     `_load_known_powerup_odfs` will pick up the change on next run.
+   - **Deployable utility (mine, decoy)**: add to `KNOWN_DEPLOYABLE_ODFS`
+     in [scripts/process_stats.py](../scripts/process_stats.py).
+   - **Real combat unit**: leave it alone -- the audit threshold is just
+     a heuristic; some weird edge cases are legitimately combat events.
+3. Run `python scripts/process_stats.py` to reprocess.
+
+### Engine emission semantics (verified by audit)
+
+For powerups in NEW-schema sessions:
+
+```
+tick T: PickupPowerup { picker, powerup_odf, ... }      <-- new event, real data
+tick T: UnitDestroyed { victim_odf=powerup_odf, killer_team=0, killer=0 }  <-- synthetic companion
+```
+
+The pipeline classifies the synthetic `UnitDestroyed` into the powerup-pickup
+branch (suppressed) and consumes the real `PickupPowerup` event for
+`pickups.feed`. No deduplication state machine is required.
+
+For powerups in OLD-schema sessions:
+
+```
+tick T: UnitDestroyed { victim_odf=powerup_odf, killer_team=0, killer=0 }  <-- only signal
+```
+
+The classification rule applies identically. `pickups.feed` is empty
+(`pickups.has_pickup_data == false`) but `powerup_destructions` still
+populates from the ~10-15% of powerup destructions that had a real killer.

@@ -57,7 +57,7 @@ POSITIONING_POLAR_RADIAL_BINS = 8
 # Threshold matches the upstream collector's unusual_damage.txt diagnostic
 # threshold (real BZCC combat per-event amounts top out in low tens of
 # thousands; SENTINEL threshold is ~100x above any legitimate event).
-# See docs/sentinel-damage.md for full evidence chain.
+# See docs/DATA_DICTIONARY.md §7 "Sentinel Damage Filter" for full evidence chain.
 SENTINEL_DAMAGE_THRESHOLD = 1e6
 
 # ODFs to drop from `kills.by_vehicle` only. Non-combatant objects that the
@@ -96,7 +96,7 @@ VEHICLE_DESTRUCTION_IGNORE_ODFS = frozenset({
 # `main()` and threaded through `process_match()` as a parameter (symmetric
 # with `resolve_weapon` / `resolve_unit`).
 #
-# See docs/pickup-powerup-semantics.md for evidence + maintenance procedure.
+# See docs/DATA_DICTIONARY.md §8 "UnitDestroyed Classification & Powerup Economy" for evidence + maintenance procedure.
 
 # Deployable utilities: ground-deployed objects (mines, decoys, traps) that
 # detonate, expire, or get shot but are NEVER kills in any meaningful sense.
@@ -104,7 +104,7 @@ VEHICLE_DESTRUCTION_IGNORE_ODFS = frozenset({
 # Distinguished from powerups by domain knowledge, not by team-zero %.
 # fball2c.odf shows 79% team-zero but is a deployable mine (not in the DB
 # Powerup bucket), so it lives here rather than sharing the powerup path.
-# See docs/pickup-powerup-semantics.md for the curation rationale.
+# See docs/DATA_DICTIONARY.md §8 "UnitDestroyed Classification & Powerup Economy" for the curation rationale.
 KNOWN_DEPLOYABLE_ODFS = frozenset({
     "fball2c.odf",  # flame mine
 })
@@ -1227,7 +1227,7 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
     # Sentinel damage telemetry. Counts PAIRS (DD+DR together = 1 pair);
     # total_amount sums the DD-side amount only (DR amount is always equal,
     # so double-counting would misrepresent the "impact sum"). See the
-    # _is_sentinel_damage helper and docs/sentinel-damage.md.
+    # _is_sentinel_damage helper and docs/DATA_DICTIONARY.md §7 "Sentinel Damage Filter".
     sentinel_damage = {
         "count": 0,
         "total_amount": 0.0,
@@ -1404,7 +1404,8 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             victim_lower = (ud.victim_odf or "").lower()
 
             # Four-way classification of unit_destroyed events. See
-            # docs/pickup-powerup-semantics.md for evidence + rationale.
+            # docs/DATA_DICTIONARY.md §8 "UnitDestroyed Classification & Powerup Economy"
+            # for evidence + rationale.
             #
             # CATEGORY 1: Deployable utility (mine, decoy). Never a kill.
             # Track for the deployable_destructions stats block, then skip
@@ -2497,7 +2498,7 @@ def build_all_matches_aggregate(all_match_data):
     sorted_dates = sorted(dates)
 
     # Sentinel damage aggregate rollup (pair count across all matches).
-    # See SENTINEL_DAMAGE_THRESHOLD / _is_sentinel_damage + docs/sentinel-damage.md.
+    # See SENTINEL_DAMAGE_THRESHOLD / _is_sentinel_damage + docs/DATA_DICTIONARY.md §7.
     total_sentinel_damage_dropped = sum(
         (md.get("match") or {}).get("sentinel_damage", {}).get("count", 0)
         for md in all_match_data

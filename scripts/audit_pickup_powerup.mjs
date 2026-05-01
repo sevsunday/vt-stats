@@ -23,8 +23,9 @@
  * fball2c.odf shows 79% team-zero (looks powerup-shaped) but is a
  * deployable mine -- not in the DB Powerup bucket, lives in
  * KNOWN_DEPLOYABLE_ODFS by domain knowledge. Apply DOMAIN KNOWLEDGE
- * when extending either set. See docs/pickup-powerup-semantics.md
- * for the full evidence chain.
+ * when extending either set. See docs/DATA_DICTIONARY.md §8
+ * "UnitDestroyed Classification & Powerup Economy" for the full
+ * evidence chain.
  *
  * Outputs (ephemeral, in gitignored _investigation/output/):
  *   _investigation/output/pickup_powerup_histogram.json   machine-readable

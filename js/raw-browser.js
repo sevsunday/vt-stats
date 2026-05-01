@@ -59,7 +59,8 @@
   // scripts/process_stats.py. Engine's DAMAGE_TYPE_UNKNOWN force-kill
   // pathway emits DamageDealt/DamageReceived with amount = 2^28
   // (268,435,456.0); any amount above 1e6 is treated as sentinel. See
-  // docs/sentinel-damage.md for full evidence chain. The Reconcile view
+  // docs/DATA_DICTIONARY.md §7 "Sentinel Damage Filter" for full
+  // evidence chain. The Reconcile view
   // filters these out so its sums agree with the pipeline's processed
   // tier; the raw events table still displays them verbatim.
   const SENTINEL_DAMAGE_THRESHOLD = 1e6;

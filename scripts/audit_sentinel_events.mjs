@@ -9,7 +9,7 @@
  *
  * Today the only observed value is exactly 268435456.0 (= 2^28, from the
  * BZCC engine's DAMAGE_TYPE_UNKNOWN force-kill pathway — see
- * `docs/sentinel-damage.md`). Using a threshold rather than the exact value
+ * `docs/DATA_DICTIONARY.md` §7 "Sentinel Damage Filter"). Using a threshold rather than the exact value
  * catches future sentinel variants the engine might emit.
  *
  * Primary metric is `total_sentinel_pairs` (one DD+DR pair = 1 pair), matching
@@ -25,8 +25,10 @@
  *   npm install --no-save protobufjs@7   # one-off setup, not committed
  *   node scripts/audit_sentinel_events.mjs
  *
- * Re-run after any pipeline change to confirm pair counts still match
- * `data/processed/all_matches.json -> meta.total_sentinel_damage_dropped`.
+ * Re-run after any pipeline change to confirm pair counts still match the
+ * All Matches aggregate's `meta.total_sentinel_damage_dropped` (built
+ * client-side by `js/all-matches-aggregator.js` from
+ * `data/processed/match_contributions.json`).
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
