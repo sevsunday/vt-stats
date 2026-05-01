@@ -49,13 +49,14 @@ Theme switching via `window.KBTheme.setTheme(id)` and `window.KBTheme.setMode('l
 ### JS Load Order
 
 ```html
-<script src="js/theme.js"></script>              <!-- Theme system (must be first) -->
-<script src="js/vtstats-fx.js"></script>         <!-- Effects engine (registers Chart.js plugin) -->
-<script src="js/charts.js"></script>             <!-- Chart renderers -->
-<script src="js/positioning-charts.js"></script> <!-- Positioning tab renderers (heatmaps, movement leaderboard) -->
-<script src="js/timeline-player.js"></script>    <!-- Replay tab engine (exposes window.VTReplay) -->
-<script src="js/positioning-player.js"></script> <!-- Positioning animated trail player (exposes window.VTPositionPlayer) -->
-<script src="js/app.js"></script>                <!-- Main application -->
+<script src="js/theme.js"></script>                  <!-- Theme system (must be first) -->
+<script src="js/vtstats-fx.js"></script>             <!-- Effects engine (registers Chart.js plugin) -->
+<script src="js/charts.js"></script>                 <!-- Chart renderers -->
+<script src="js/positioning-charts.js"></script>     <!-- Positioning tab renderers (heatmaps, movement leaderboard) -->
+<script src="js/timeline-player.js"></script>        <!-- Replay tab engine (exposes window.VTReplay) -->
+<script src="js/positioning-player.js"></script>     <!-- Positioning animated trail player (exposes window.VTPositionPlayer) -->
+<script src="js/all-matches-aggregator.js"></script> <!-- Client-side aggregator for All Matches view (exposes window.VTAggregate) -->
+<script src="js/app.js"></script>                    <!-- Main application -->
 ```
 
 ## Typography — Geist

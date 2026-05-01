@@ -45,11 +45,19 @@
   const $resultCount        = document.getElementById('match-picker-result-count');
   const $clearBtn           = document.getElementById('match-picker-clear');
   const $facetDuration      = $filtersBody && $filtersBody.querySelector('[data-facet="duration"]');
-  const $facetPlayers       = document.getElementById('match-picker-facet-players');
+  // `$facetPlayerCounts` is the multi-select chipset for `manifest[].player_count`.
+  // (Was named `$facetPlayers` in v1; renamed for symmetry with the v2
+  // state shape — `pickerState.playerCounts` — and to free up the
+  // "Players" name for the new full-roster chipset below.)
+  const $facetPlayerCounts  = document.getElementById('match-picker-facet-players');
   const $facetSubmitters    = document.getElementById('match-picker-facet-submitters');
-  const $facetCommanders    = document.getElementById('match-picker-facet-commanders');
-  const $commanderSearch    = document.getElementById('match-picker-commanders-search');
-  const $commanderModeBtns  = $filtersBody && $filtersBody.querySelectorAll('[data-versus-mode]');
+  // New full-roster Players chipset + its search input + Match-mode and
+  // Role toggle button groups. Replaces the old Commanders block; see
+  // index.html .vt-match-picker-filter-row--players.
+  const $facetPlayers       = document.getElementById('match-picker-facet-players-roster');
+  const $playersSearch      = document.getElementById('match-picker-players-search');
+  const $playersModeBtns    = $filtersBody && $filtersBody.querySelectorAll('[data-match-mode]');
+  const $playersRoleBtns    = $filtersBody && $filtersBody.querySelectorAll('[data-role]');
   // Bootstrap Modal instance (lazy-initialized on first trigger click). We
   // hold a reference so card-click handlers can programmatically dismiss.
   let pickerModalInstance = null;
@@ -59,17 +67,32 @@
   // text for the trigger). null before boot completes.
   let currentTarget = null;
 
-  // Phase 2: picker filter + sort state. All AND-combine with each other
-  // and with the free-text search. Persisted in sessionStorage under the
-  // vt.picker.filters.v1 key; cleared on tab close.
-  const PICKER_STATE_KEY = 'vt.picker.filters.v1';
+  // Picker filter + sort state. All AND-combine with each other and with
+  // the free-text search. Persisted in sessionStorage under the
+  // vt.picker.filters.v2 key (v1 is migrated on read; see
+  // loadPickerStateFromStorage); cleared on tab close.
+  //
+  // v2 collapses the old `commanders` + `versusMode` pair into a richer
+  // `players` + `matchMode` + `role` triple. The chip list now spans the
+  // full roster (every name in any match's `players[]`) and a global Role
+  // toggle constrains *how* the selected names need to appear:
+  //   role='any'        -> anywhere in the match (commander or thug)
+  //   role='commander'  -> selected names must be in `team_leaders`
+  //   role='thug'       -> selected names must be in roster but NOT command
+  // matchMode is the presence axis ('any' = some present, 'all' = every).
+  const PICKER_STATE_KEY = 'vt.picker.filters.v2';
+  const PICKER_STATE_KEY_V1 = 'vt.picker.filters.v1';
+  // `playerCounts` is the multi-select facet for `manifest[].player_count`
+  // (was named `players` in v1; the new `players` field is the roster
+  // chipset, so this got a more specific name to avoid the collision).
   const DEFAULT_PICKER_STATE = () => ({
     query: '',
     duration: 'any',                // 'any' | 'short' (<10m) | 'medium' (10-20m) | 'long' (>=20m)
-    players: [],                    // array of player_count numbers; empty = any
+    playerCounts: [],               // array of player_count numbers; empty = any
     submitters: [],                 // array of submitter strings; empty = any
-    commanders: [],                 // array of nickname strings; empty = any
-    versusMode: 'any',              // 'any' | 'both'
+    players: [],                    // array of nickname strings (full roster); empty = any
+    matchMode: 'any',               // 'any' | 'all' — presence test against `players`
+    role: 'any',                    // 'any' | 'commander' | 'thug'
     sort: 'date-desc',
   });
   let pickerState = DEFAULT_PICKER_STATE();
@@ -605,6 +628,10 @@
   }
 
   function buildMatchPickerAllCardHtml() {
+    // The card's meta + submeta lines are kept generic at build-time and
+    // updated dynamically by updateAllMatchesCardCopy() once the picker
+    // filters apply. That avoids a second buildMatchPicker() pass when
+    // filters change.
     const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
     return `
       <button type="button" class="vt-match-picker-card vt-match-picker-card--all" data-target="__all__" role="listitem">
@@ -614,13 +641,83 @@
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
             <span class="vt-match-picker-card-name">All Matches</span>
-            <span class="vt-match-picker-card-meta">${manifest.length} matches &middot; ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}</span>
+            <span class="vt-match-picker-card-meta" data-all-card-meta>${manifest.length} matches &middot; ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}</span>
           </div>
           <div class="vt-match-picker-card-submeta">
-            <span class="vt-muted">Career overview across every recorded match.</span>
+            <span class="vt-muted" data-all-card-submeta>Career overview across every recorded match.</span>
           </div>
         </div>
       </button>`;
+  }
+
+  // Debounced re-aggregator for the All Matches view. Coalesces rapid
+  // chip toggles / search keystrokes into a single loadAllMatches() call.
+  // Only fires when the user is actively on the aggregate view; otherwise
+  // the filter state is recorded silently and applied on next selection.
+  let _allRerenderTimer = null;
+  function scheduleAllMatchesReaggregate() {
+    if (currentTarget !== '__all__') return;
+    if (_allRerenderTimer) clearTimeout(_allRerenderTimer);
+    _allRerenderTimer = setTimeout(() => {
+      _allRerenderTimer = null;
+      // Skip the view-transition wrapper for in-place filter updates so
+      // the user gets immediate feedback. URL sync still runs inside
+      // loadAllMatches so the share link reflects the new filter scope.
+      loadAllMatches();
+    }, 120);
+  }
+
+  // Sync the filter-state banner above #all-matches-view. Visible only
+  // when picker filters are active; surfaces the filtered subset size
+  // and a Clear-filters shortcut. Idempotent — safe to call from
+  // loadAllMatches and from applyPickerFilters whenever currentTarget
+  // is '__all__'.
+  function updateAllMatchesFilterBanner(filteredCount) {
+    const banner = document.getElementById('all-matches-filter-banner');
+    if (!banner) return;
+    const txt = document.getElementById('all-matches-filter-banner-text');
+    const filtersOn = hasAnyFilterEngaged(pickerState);
+    if (!filtersOn) {
+      banner.classList.add('d-none');
+      return;
+    }
+    banner.classList.remove('d-none');
+    if (txt) {
+      const k = filteredCount;
+      const N = manifest.length;
+      txt.innerHTML = k === 0
+        ? `<strong>No matches</strong> match the current filters.`
+        : `Aggregate of <strong>${k}</strong> of ${N} match${N === 1 ? '' : 'es'} matching the active filters.`;
+    }
+  }
+
+  // Keep the All Matches card's copy in sync with the active filter state.
+  // When filters are engaged, the card reads as "Aggregate of K of N matches
+  // matching filters"; when not, it falls back to the generic career-overview
+  // line. Called from applyPickerFilters() with the filtered count already
+  // computed (avoids a second predicate pass).
+  function updateAllMatchesCardCopy(filteredCount) {
+    if (!$pickerGrid) return;
+    const allCard = $pickerGrid.querySelector('.vt-match-picker-card--all');
+    if (!allCard) return;
+    const metaEl = allCard.querySelector('[data-all-card-meta]');
+    const subEl = allCard.querySelector('[data-all-card-submeta]');
+    if (!metaEl || !subEl) return;
+
+    const total = manifest.length;
+    const filtersOn = hasAnyFilterEngaged(pickerState);
+
+    if (filtersOn) {
+      const k = filteredCount;
+      metaEl.textContent = `${k} of ${total} match${total === 1 ? '' : 'es'}`;
+      subEl.textContent = k === 0
+        ? 'No matches match the current filters.'
+        : `Aggregate of ${k} match${k === 1 ? '' : 'es'} matching filters.`;
+    } else {
+      const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
+      metaEl.textContent = `${total} matches \u00B7 ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}`;
+      subEl.textContent = 'Career overview across every recorded match.';
+    }
   }
 
   function buildMatchPicker() {
@@ -695,9 +792,17 @@
 
     let name, sub;
     if (resolved === '__all__') {
-      const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
       name = 'All Matches';
-      sub = `${manifest.length} matches \u00B7 ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}`;
+      // The trigger subtitle mirrors the All-Matches card subtitle: when
+      // filters are engaged, surface the filtered/total count so the user
+      // sees the aggregate scope right in the hero.
+      if (hasAnyFilterEngaged(pickerState)) {
+        const k = countFilteredManifest();
+        sub = `Aggregate of ${k} of ${manifest.length} matches matching filters`;
+      } else {
+        const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
+        sub = `${manifest.length} matches \u00B7 ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}`;
+      }
     } else if (resolved && typeof resolved === 'object') {
       name = resolved.name || resolved.id;
       const rawMap = resolved.map && resolved.map !== resolved.name ? `${resolved.map} \u00B7 ` : '';
@@ -736,6 +841,13 @@
   };
 
   // Derive unique facet option lists from the manifest once.
+  //
+  // `roster` is the union of every `manifest[].players[]` (which always
+  // includes both commanders + thugs). The Players facet uses this list
+  // and derives role membership *per-match* by checking if the name is in
+  // that match's `team_leaders` (commander) or only in `players[]` (thug).
+  // We no longer derive a separate commanders list — the role toggle makes
+  // it redundant, and we want the chip list to surface non-commanders too.
   function deriveFacets() {
     const playerCounts = Array.from(new Set(
       manifest.map(m => m.player_count).filter(n => Number.isFinite(n) && n > 0)
@@ -745,23 +857,21 @@
       manifest.map(m => m.submitter).filter(Boolean)
     )).sort((a, b) => a.localeCompare(b));
 
-    const commanders = Array.from(new Set(
-      manifest.flatMap(m => {
-        const tl = m.team_leaders || {};
-        return [tl['1'] && tl['1'].name, tl['2'] && tl['2'].name];
-      }).filter(Boolean)
-    )).sort((a, b) => a.localeCompare(b));
+    const roster = Array.from(new Set(
+      manifest.flatMap(m => Array.isArray(m.players) ? m.players : [])
+        .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
-    return { playerCounts, submitters, commanders };
+    return { playerCounts, submitters, roster };
   }
 
   const pickerFacets = deriveFacets();
 
   function buildMatchPickerFilters() {
-    if (!$facetPlayers || !$facetSubmitters || !$facetCommanders) return;
+    if (!$facetPlayerCounts || !$facetSubmitters || !$facetPlayers) return;
 
-    // Player-count chips.
-    $facetPlayers.innerHTML = pickerFacets.playerCounts.map(pc =>
+    // Player-count chips (sizes of matches: 4, 6, 8, 10).
+    $facetPlayerCounts.innerHTML = pickerFacets.playerCounts.map(pc =>
       `<button type="button" class="vt-match-picker-chip" data-value="${pc}" role="checkbox" aria-checked="false">${pc}</button>`
     ).join('');
 
@@ -770,14 +880,17 @@
       `<button type="button" class="vt-match-picker-chip" data-value="${esc(s)}" role="checkbox" aria-checked="false">${esc(s)}</button>`
     ).join('');
 
-    // Commander chips (with per-chip searchable visibility via commander-search input).
-    $facetCommanders.innerHTML = pickerFacets.commanders.map(name =>
+    // Players chips (full roster — both commanders and thugs across all
+    // matches). Per-chip visibility is filtered by the players-search input;
+    // role membership is determined per-match by the predicate, not the
+    // chip itself.
+    $facetPlayers.innerHTML = pickerFacets.roster.map(name =>
       `<button type="button" class="vt-match-picker-chip" data-value="${esc(name)}" data-name-lc="${esc(name.toLowerCase())}" role="checkbox" aria-checked="false">${esc(name)}</button>`
     ).join('');
 
     // Empty-state handling when a facet has no options (e.g. fresh repo).
-    if (!pickerFacets.commanders.length) {
-      $facetCommanders.innerHTML = `<span class="vt-muted small">No commanders captured yet.</span>`;
+    if (!pickerFacets.roster.length) {
+      $facetPlayers.innerHTML = `<span class="vt-muted small">No players captured yet.</span>`;
     }
   }
 
@@ -797,28 +910,48 @@
       if (d < bucket.min || d >= bucket.max) return false;
     }
 
-    // Players (multi-select: match any selected count).
-    if (state.players.length && !state.players.includes(entry.player_count)) return false;
+    // Player count (multi-select: match any selected count).
+    if (state.playerCounts.length && !state.playerCounts.includes(entry.player_count)) return false;
 
     // Submitter (multi-select: match any selected).
     if (state.submitters.length && !state.submitters.includes(entry.submitter)) return false;
 
-    // Commanders (any / both mode).
-    if (state.commanders.length) {
+    // Players (multi-select chips, with two orthogonal toggles):
+    //   - matchMode: 'any' | 'all'  -> at least one vs. every selected name
+    //   - role:      'any' | 'commander' | 'thug' -> constrains *how* the
+    //     name has to appear in the match. A name is the match's commander
+    //     iff it shows up in `team_leaders.{1,2}.name`; otherwise (still in
+    //     `players[]`) it's a thug.
+    if (state.players.length) {
       const tl = entry.team_leaders || {};
-      const entryCommanders = [tl['1'] && tl['1'].name, tl['2'] && tl['2'].name].filter(Boolean);
-      if (state.versusMode === 'both') {
-        // Every selected name must appear as one of this match's commanders.
-        const ok = state.commanders.every(name => entryCommanders.includes(name));
-        if (!ok) return false;
-      } else {
-        // Any: at least one selected name must appear.
-        const ok = state.commanders.some(name => entryCommanders.includes(name));
-        if (!ok) return false;
-      }
+      const cmdrSet = new Set(
+        [tl['1'] && tl['1'].name, tl['2'] && tl['2'].name].filter(Boolean)
+      );
+      const rosterSet = new Set(Array.isArray(entry.players) ? entry.players : []);
+      const isPresent = (name) => {
+        if (!rosterSet.has(name)) return false;
+        if (state.role === 'commander') return cmdrSet.has(name);
+        if (state.role === 'thug')      return !cmdrSet.has(name);
+        return true;
+      };
+      const test = state.matchMode === 'all' ? 'every' : 'some';
+      if (!state.players[test](isPresent)) return false;
     }
 
     return true;
+  }
+
+  // Count manifest entries that pass the current pickerState. Used by the
+  // All Matches card and trigger to surface the filtered subset size.
+  // Cached per-call (the pickerState object itself isn't immutable, so we
+  // recompute on every call — manifest is small enough that this is a sub-
+  // millisecond loop).
+  function countFilteredManifest() {
+    let n = 0;
+    for (const m of manifest) {
+      if (entryMatchesState(m, pickerState)) n++;
+    }
+    return n;
   }
 
   function buildEntrySearchBlob(entry) {
@@ -847,12 +980,15 @@
   }
 
   // Count how many facets are engaged — for the badge / empty-state copy.
+  // Note: matchMode and role are counted as part of the players facet (not
+  // standalone) since they're meaningless without at least one selected
+  // player; engaging them alone shouldn't bump the badge.
   function activeFilterCount(state) {
     let n = 0;
     if (state.duration && state.duration !== 'any') n++;
-    if (state.players.length) n++;
+    if (state.playerCounts.length) n++;
     if (state.submitters.length) n++;
-    if (state.commanders.length) n++;
+    if (state.players.length) n++;
     if (state.sort && state.sort !== 'date-desc') n++;
     return n;
   }
@@ -896,6 +1032,18 @@
     });
     if (allCard) allCard.classList.remove('d-none');
 
+    // Update the All Matches card copy to reflect the filtered count.
+    // When the user is currently viewing the aggregate (currentTarget ===
+    // '__all__'), also re-sync the hero trigger subtitles + the live
+    // banner above the view, and schedule a debounced re-aggregate so
+    // the career table / radar / global meta reflect the new subset.
+    updateAllMatchesCardCopy(visibleRegular);
+    if (currentTarget === '__all__') {
+      updateMatchPickerTriggers('__all__');
+      updateAllMatchesFilterBanner(visibleRegular);
+      scheduleAllMatchesReaggregate();
+    }
+
     // Result counter.
     if ($resultCount) {
       $resultCount.textContent = `${visibleRegular} of ${manifest.length} match${manifest.length === 1 ? '' : 'es'}`;
@@ -936,22 +1084,55 @@
   // --- Persistence ---
 
   function loadPickerStateFromStorage() {
+    const d = DEFAULT_PICKER_STATE();
+
+    // Read v2 first (current).
+    let saved = null;
     try {
       const raw = sessionStorage.getItem(PICKER_STATE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (!saved || typeof saved !== 'object') return;
-      const d = DEFAULT_PICKER_STATE();
-      pickerState = {
-        query:      typeof saved.query === 'string' ? saved.query : d.query,
-        duration:   ['any', 'short', 'medium', 'long'].includes(saved.duration) ? saved.duration : d.duration,
-        players:    Array.isArray(saved.players) ? saved.players.filter(n => Number.isFinite(n)) : d.players,
-        submitters: Array.isArray(saved.submitters) ? saved.submitters.filter(s => typeof s === 'string') : d.submitters,
-        commanders: Array.isArray(saved.commanders) ? saved.commanders.filter(s => typeof s === 'string') : d.commanders,
-        versusMode: saved.versusMode === 'both' ? 'both' : 'any',
-        sort:       typeof saved.sort === 'string' ? saved.sort : d.sort,
-      };
+      if (raw) saved = JSON.parse(raw);
     } catch (_) { /* corrupt JSON — ignore */ }
+
+    // No v2 entry? Look for v1 and migrate it. v1 had a different shape:
+    //   { players: number[], commanders: string[], versusMode: 'any'|'both' }
+    // -> mapped to:
+    //   { playerCounts: number[], players: string[], matchMode: 'any'|'all',
+    //     role: 'any' (default) }
+    // Drop the v1 entry once consumed so a refreshed tab doesn't re-import.
+    if (!saved || typeof saved !== 'object') {
+      try {
+        const rawV1 = sessionStorage.getItem(PICKER_STATE_KEY_V1);
+        if (rawV1) {
+          const v1 = JSON.parse(rawV1);
+          if (v1 && typeof v1 === 'object') {
+            saved = {
+              query:        typeof v1.query === 'string' ? v1.query : d.query,
+              duration:     v1.duration,
+              playerCounts: Array.isArray(v1.players) ? v1.players : d.playerCounts,
+              submitters:   Array.isArray(v1.submitters) ? v1.submitters : d.submitters,
+              players:      Array.isArray(v1.commanders) ? v1.commanders : d.players,
+              matchMode:    v1.versusMode === 'both' ? 'all' : 'any',
+              role:         d.role,
+              sort:         typeof v1.sort === 'string' ? v1.sort : d.sort,
+            };
+          }
+          sessionStorage.removeItem(PICKER_STATE_KEY_V1);
+        }
+      } catch (_) { /* corrupt v1 JSON — ignore */ }
+    }
+
+    if (!saved || typeof saved !== 'object') return;
+
+    pickerState = {
+      query:        typeof saved.query === 'string' ? saved.query : d.query,
+      duration:     ['any', 'short', 'medium', 'long'].includes(saved.duration) ? saved.duration : d.duration,
+      playerCounts: Array.isArray(saved.playerCounts) ? saved.playerCounts.filter(n => Number.isFinite(n)) : d.playerCounts,
+      submitters:   Array.isArray(saved.submitters) ? saved.submitters.filter(s => typeof s === 'string') : d.submitters,
+      players:      Array.isArray(saved.players) ? saved.players.filter(s => typeof s === 'string') : d.players,
+      matchMode:    saved.matchMode === 'all' ? 'all' : 'any',
+      role:         ['any', 'commander', 'thug'].includes(saved.role) ? saved.role : d.role,
+      sort:         typeof saved.sort === 'string' ? saved.sort : d.sort,
+    };
   }
 
   function savePickerStateToStorage() {
@@ -961,7 +1142,8 @@
   }
 
   // Push pickerState into the UI controls (chip active classes, sort select,
-  // commander mode toggle, search input). Called on boot + after Clear-all.
+  // match-mode toggle, role toggle, search input). Called on boot + after
+  // Clear-all.
   function applyPickerStateToUI() {
     if ($pickerSearch) $pickerSearch.value = pickerState.query || '';
     if ($sortSelect) $sortSelect.value = pickerState.sort;
@@ -973,9 +1155,9 @@
         c.setAttribute('aria-checked', active ? 'true' : 'false');
       });
     }
-    if ($facetPlayers) {
-      $facetPlayers.querySelectorAll('.vt-match-picker-chip').forEach(c => {
-        const active = pickerState.players.includes(Number(c.dataset.value));
+    if ($facetPlayerCounts) {
+      $facetPlayerCounts.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = pickerState.playerCounts.includes(Number(c.dataset.value));
         c.classList.toggle('is-active', active);
         c.setAttribute('aria-checked', active ? 'true' : 'false');
       });
@@ -987,16 +1169,23 @@
         c.setAttribute('aria-checked', active ? 'true' : 'false');
       });
     }
-    if ($facetCommanders) {
-      $facetCommanders.querySelectorAll('.vt-match-picker-chip').forEach(c => {
-        const active = pickerState.commanders.includes(c.dataset.value);
+    if ($facetPlayers) {
+      $facetPlayers.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = pickerState.players.includes(c.dataset.value);
         c.classList.toggle('is-active', active);
         c.setAttribute('aria-checked', active ? 'true' : 'false');
       });
     }
-    if ($commanderModeBtns) {
-      $commanderModeBtns.forEach(btn => {
-        const active = btn.dataset.versusMode === pickerState.versusMode;
+    if ($playersModeBtns) {
+      $playersModeBtns.forEach(btn => {
+        const active = btn.dataset.matchMode === pickerState.matchMode;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
+    if ($playersRoleBtns) {
+      $playersRoleBtns.forEach(btn => {
+        const active = btn.dataset.role === pickerState.role;
         btn.classList.toggle('active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
@@ -1008,10 +1197,10 @@
     // Preserve current free-text search query? No — Clear-all means clear everything.
     applyPickerStateToUI();
     applyPickerFilters();
-    // Reset commander visibility search too.
-    if ($commanderSearch) {
-      $commanderSearch.value = '';
-      filterCommanderChipVisibility('');
+    // Reset players visibility search too.
+    if ($playersSearch) {
+      $playersSearch.value = '';
+      filterPlayersChipVisibility('');
     }
   }
 
@@ -1041,7 +1230,7 @@
     });
   }
 
-  // Players, Submitters, Commanders are multi-select (group) — click toggles.
+  // PlayerCounts, Submitters, Players are multi-select (group) — click toggles.
   function wireMultiChipset(container, stateKey, coerce) {
     if (!container) return;
     container.addEventListener('click', (e) => {
@@ -1057,16 +1246,16 @@
       applyPickerFilters();
     });
   }
-  wireMultiChipset($facetPlayers, 'players', v => Number(v));
+  wireMultiChipset($facetPlayerCounts, 'playerCounts', v => Number(v));
   wireMultiChipset($facetSubmitters, 'submitters', null);
-  wireMultiChipset($facetCommanders, 'commanders', null);
+  wireMultiChipset($facetPlayers, 'players', null);
 
-  // --- Wiring: commander search (visibility-only — does NOT filter matches) ---
+  // --- Wiring: players search (visibility-only — does NOT filter matches) ---
 
-  function filterCommanderChipVisibility(query) {
-    if (!$facetCommanders) return;
+  function filterPlayersChipVisibility(query) {
+    if (!$facetPlayers) return;
     const q = (query || '').trim().toLowerCase();
-    $facetCommanders.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+    $facetPlayers.querySelectorAll('.vt-match-picker-chip').forEach(c => {
       const name = c.dataset.nameLc || '';
       const active = c.classList.contains('is-active');
       // Always show active chips so users can un-toggle them without scrolling.
@@ -1074,18 +1263,31 @@
     });
   }
 
-  if ($commanderSearch) {
-    $commanderSearch.addEventListener('input', () => {
-      filterCommanderChipVisibility($commanderSearch.value);
+  if ($playersSearch) {
+    $playersSearch.addEventListener('input', () => {
+      filterPlayersChipVisibility($playersSearch.value);
     });
   }
 
-  // --- Wiring: versus-mode toggle (Any / Both) ---
+  // --- Wiring: Match-mode toggle (Any of these / All of these) ---
 
-  if ($commanderModeBtns) {
-    $commanderModeBtns.forEach(btn => {
+  if ($playersModeBtns) {
+    $playersModeBtns.forEach(btn => {
       btn.addEventListener('click', () => {
-        pickerState.versusMode = btn.dataset.versusMode === 'both' ? 'both' : 'any';
+        pickerState.matchMode = btn.dataset.matchMode === 'all' ? 'all' : 'any';
+        applyPickerStateToUI();
+        applyPickerFilters();
+      });
+    });
+  }
+
+  // --- Wiring: Role toggle (Any role / Commander / Thug) ---
+
+  if ($playersRoleBtns) {
+    $playersRoleBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = btn.dataset.role;
+        pickerState.role = (r === 'commander' || r === 'thug') ? r : 'any';
         applyPickerStateToUI();
         applyPickerFilters();
       });
@@ -1105,6 +1307,10 @@
 
   if ($clearBtn) $clearBtn.addEventListener('click', clearAllFilters);
   if ($pickerEmptyClear) $pickerEmptyClear.addEventListener('click', clearAllFilters);
+  // Banner-side Clear filters button (visible inside the All Matches view
+  // when filters are active). Same effect as the picker-modal Clear-all.
+  const $allBannerClear = document.getElementById('all-matches-filter-banner-clear');
+  if ($allBannerClear) $allBannerClear.addEventListener('click', clearAllFilters);
 
   // --- Wiring: mobile Filters disclosure ---
 
@@ -1898,19 +2104,80 @@
     destroyAllCharts();
     resetTabState();
 
-    let data;
-    try {
-      const res = await fetch('data/processed/all_matches.json');
-      if (!res.ok) throw new Error(res.status);
-      data = await res.json();
-    } catch {
-      $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load aggregate data.</p>';
+    // Fetch contributions once per session, cache on window so subsequent
+    // filter changes re-aggregate without a network round trip.
+    let contributions = window.__vtContributions;
+    if (!contributions) {
+      try {
+        const res = await fetch('data/processed/match_contributions.json');
+        if (!res.ok) throw new Error(res.status);
+        contributions = await res.json();
+        window.__vtContributions = contributions;
+      } catch {
+        $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load aggregate data.</p>';
+        return;
+      }
+    }
+
+    if (!window.VTAggregate || typeof window.VTAggregate.build !== 'function') {
+      $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Aggregator unavailable.</p>';
       return;
     }
+
+    // Resolve the filtered subset of match files. When filters are active,
+    // narrow to manifest entries that pass the picker predicate; otherwise
+    // include every contribution key (full career view).
+    const filtersOn = hasAnyFilterEngaged(pickerState);
+    const fileIds = filtersOn
+      ? manifest.filter(m => entryMatchesState(m, pickerState)).map(m => m.file)
+      : Object.keys(contributions);
+
+    // Empty filtered set short-circuits to a friendly empty state.
+    if (filtersOn && fileIds.length === 0) {
+      if (window.VTFx) VTFx.hidePreloader();
+      $loading.classList.add('d-none');
+      $allView.style.display = 'block';
+      updateAllMatchesFilterBanner(0);
+      // Render an explicit empty view so the previous match's data isn't
+      // left lingering in already-rendered tabs.
+      renderAggMeta({
+        match_count: 0,
+        total_duration_sec: 0,
+        maps_played: [],
+        date_range: [],
+        submitters: [],
+        matches_with_positioning: 0,
+        matches_with_target_lock_data: 0,
+        total_sentinel_damage_dropped: 0,
+        matches_with_sentinel_damage: [],
+      });
+      // Clear downstream renders by passing an empty career list.
+      careerRadarState = { a: null, b: null, compare: false };
+      renderCareerTable([]);
+      renderCareerRadar({ career_stats: [] });
+      window.__vtAllMatchesData = { meta: {}, career_stats: [], global_weapon_meta: [], global_rivalries: [] };
+      tabRendered['#all-tab-overview'] = true;
+      registerTabRenderer('#all-tab-weapons', () => {
+        renderGlobalWeaponMeta('global-weapon-chart', []);
+        renderGlobalRivalries([]);
+      });
+      const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
+      if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
+        const allOverviewBtn = document.getElementById('all-tab-overview-btn');
+        if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
+      }
+      syncUrl();
+      return;
+    }
+
+    const data = window.VTAggregate.build(contributions, fileIds);
 
     if (window.VTFx) VTFx.hidePreloader();
     $loading.classList.add('d-none');
     $allView.style.display = 'block';
+
+    // Surface filter-aware banner + filtered subset size.
+    updateAllMatchesFilterBanner(fileIds.length);
 
     // Reset Career Radar state to defaults for a fresh All Matches load.
     // Dropdown values will re-default from career_stats[0] in the renderer.

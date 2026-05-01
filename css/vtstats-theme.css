@@ -2776,13 +2776,16 @@ td.vt-col-split {
     background: color-mix(in oklab, var(--kb-primary) 85%, white);
 }
 
-/* --- Commanders section (chip list with own search + mode toggle) --- */
+/* --- Players section (chip list with own search + Match-mode toggle +
+   Role toggle). Replaced the old Commanders section: the chip list now
+   spans the full roster (every name that ever appeared in any match)
+   and role membership is derived per-match from `team_leaders`. */
 
-.vt-match-picker-filter-row--commanders {
+.vt-match-picker-filter-row--players {
     align-items: flex-start;
 }
 
-.vt-match-picker-commanders {
+.vt-match-picker-players {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
@@ -2790,33 +2793,30 @@ td.vt-col-split {
     min-width: 0;
 }
 
-.vt-match-picker-commanders-head {
+.vt-match-picker-players-head {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
 }
 
-.vt-match-picker-commanders-search {
+.vt-match-picker-players-search {
     flex: 1 1 200px;
     max-width: 280px;
 }
 
-.vt-match-picker-commanders-mode {
+.vt-match-picker-players-mode,
+.vt-match-picker-players-role {
     flex: 0 0 auto;
 }
 
-.vt-match-picker-chipset--commanders {
+.vt-match-picker-chipset--players {
     max-height: 132px;
     overflow-y: auto;
     padding: 0.35rem;
     border: 1px dashed var(--kb-border-subtle);
     border-radius: 0.4rem;
     background: color-mix(in oklab, var(--kb-bg-subtle) 50%, transparent);
-}
-
-/* Keep scrollbar visible but themed on modern browsers. */
-.vt-match-picker-chipset--commanders {
     scrollbar-width: thin;
     scrollbar-color: var(--kb-border-subtle) transparent;
 }
