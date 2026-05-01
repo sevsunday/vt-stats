@@ -89,14 +89,14 @@ flowchart TD
   InPow -- no --> Vehicle[Real vehicle<br/>FLOW THROUGH to existing<br/>kills accumulators]
   InPow -- yes --> KT{killer_team == 0?}
   KT -- yes --> Pickup[Powerup pickup<br/>SKIP. New-schema gets<br/>rich pickup_powerup data]
-  KT -- no --> Denial[powerup_destructions block<br/>SKIP all kill aggregations]
+  KT -- no --> Destruction[powerup_destructions block<br/>SKIP all kill aggregations]
 ```
 
 | Bucket | `kills.*` impact | New JSON block | Notes |
 |---|---|---|---|
 | Real vehicle | full passthrough | none | Existing `player_kills`, `kill_feed`, `vehicle_destruction_count`, `kill_rivalry` accumulators |
 | Powerup pickup | suppressed | `pickups.feed` (new-schema only, populated from real `PickupPowerup` events) | Synthetic `unit_destroyed` companion silently dropped; engine continues to double-emit even in new-schema sessions |
-| Powerup denial | suppressed | `powerup_destructions.{feed, by_player, by_odf, totals}` | Real player shot the powerup before pickup |
+| Powerup/crate destruction | suppressed | `powerup_destructions.{feed, by_player, by_odf, totals}` | Real player shot the powerup before pickup, effectively denying the enemy economy |
 | Deployable destruction | suppressed | `deployable_destructions.{by_player, by_odf, totals}` | No `feed` (too noisy); mines self-detonate, expire, or get shot |
 
 Two pipeline classification sets drive the routing:
@@ -126,7 +126,7 @@ Disambiguate collisions by appending raw ODF in parentheses.
 Pre-computed JSON in `data/processed/`. See `DEVELOPER_GUIDE.md` Section 5 for full JSON structure with examples.
 
 - `matches.json` — manifest (includes `submitter`, `has_position_data`, `has_target_lock_data`, `has_pickup_data` fields per match)
-- `<match_id>.json` — per-match: `match` (with `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `schema_version`), `leaderboard` (with kills/deaths/hit_targets), `faction_totals`, `rivalry_matrix`, `top_rivalries`, `weapon_meta`, **`odf_map`**, `timeline`, `asset_damage`, `kills` (leaderboard/feed/by_vehicle/kill_rivalry_matrix), `pickups` (Phase 3: feed/by_player/by_odf/totals/has_pickup_data), `powerup_destructions` (Phase 3: feed/by_player/by_odf/totals — denial stats), `deployable_destructions` (Phase 3: by_player/by_odf/totals — no feed), `snipes` (Phase 3: feed/by_player/totals), `positioning`
+- `<match_id>.json` — per-match: `match` (with `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `schema_version`), `leaderboard` (with kills/deaths/hit_targets), `faction_totals`, `rivalry_matrix`, `top_rivalries`, `weapon_meta`, **`odf_map`**, `timeline`, `asset_damage`, `kills` (leaderboard/feed/by_vehicle/kill_rivalry_matrix), `pickups` (Phase 3: feed/by_player/by_odf/totals/has_pickup_data), `powerup_destructions` (Phase 3: feed/by_player/by_odf/totals — destruction stats), `deployable_destructions` (Phase 3: by_player/by_odf/totals — no feed), `snipes` (Phase 3: feed/by_player/totals), `positioning`
 - `all_matches.json` — aggregate: `meta` (with submitters list, `total_sentinel_damage_dropped`, `matches_with_target_lock_data`), `career_stats` (with `total_kills`, `total_deaths`, `total_pickups`), `global_weapon_meta`, `global_rivalries`
 
 ### `odf_map` (per-match, match-global)

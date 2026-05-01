@@ -2,7 +2,7 @@
 
 Reference doc for the four-way classification of `unit_destroyed` events that
 the pipeline applies to disentangle real combat kills from powerup pickups,
-powerup denials, and deployable detonations.
+powerup/crate destructions, and deployable detonations.
 
 Linked from:
 
@@ -41,7 +41,7 @@ flowchart TD
   InPow -- no --> Vehicle[Real vehicle<br/>FLOW THROUGH to existing<br/>kills accumulators]
   InPow -- yes --> KT{killer_team == 0?}
   KT -- yes --> Pickup[Powerup pickup<br/>SKIP. New-schema gets<br/>rich pickup_powerup data]
-  KT -- no --> Denial[powerup_destructions block<br/>SKIP all kill aggregations]
+  KT -- no --> Destruction[powerup_destructions block<br/>SKIP all kill aggregations]
 ```
 
 Categorical effect on per-match output:
@@ -50,7 +50,7 @@ Categorical effect on per-match output:
 |---|---|---|---|
 | Real vehicle | full passthrough | none | Existing accumulators untouched |
 | Powerup pickup | suppressed | `pickups.feed[]` (new-schema only, populated from real `pickup_powerup` events) | Synthetic `unit_destroyed` companion is silently dropped |
-| Powerup denial | suppressed | `powerup_destructions.{feed,by_player,by_odf,totals}` | Real player shot the powerup before someone picked it up |
+| Powerup/crate destruction | suppressed | `powerup_destructions.{feed,by_player,by_odf,totals}` | Real player shot the powerup before someone picked it up, effectively denying the enemy economy |
 | Deployable destruction | suppressed | `deployable_destructions.{by_player,by_odf,totals}` | No `feed` (too noisy) |
 
 ## Evidence
@@ -73,7 +73,7 @@ Headline findings from the initial corpus (47 sessions, 24 new-schema +
   transparently handles this; no separate dedup needed.
 - Real-combat powerup destructions (~10-15% of powerup
   `unit_destroyed` events) have a non-zero killer_team. These are the
-  data behind the `powerup_destructions` (denial) block.
+  data behind the `powerup_destructions` block.
 
 ### IMPORTANT: domain knowledge required
 
