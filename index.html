@@ -738,33 +738,6 @@
 
       <!-- All Tab: Overview -->
       <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
-        <div class="card mb-4" id="section-career-radar">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0">Career Radar</h5>
-              <i class="bi bi-info-circle vt-col-info"
-                 data-vt-radar-info="career"
-                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                 title="Loading&hellip;"></i>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="career-radar-compare-toggle" type="button">Compare</button>
-              <button class="btn btn-sm" data-expand="section-career-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="vt-radar-custom-picker mb-3" id="career-radar-picker">
-              <div class="d-flex flex-wrap gap-2 align-items-center">
-                <span class="small" style="color:var(--kb-text-muted);">Player:</span>
-                <select class="form-select form-select-sm vt-radar-picker-select" id="career-radar-pick-a" aria-label="First player"></select>
-                <span class="small d-none vt-career-radar-vs" style="color:var(--kb-text-muted);">vs</span>
-                <select class="form-select form-select-sm vt-radar-picker-select d-none" id="career-radar-pick-b" aria-label="Second player"></select>
-              </div>
-            </div>
-            <div class="chart-container"><canvas id="career-radar-canvas"></canvas></div>
-            <p class="small mt-2 mb-0 d-none vt-radar-hint" id="career-radar-hint">Need at least two players in career stats to compare.</p>
-          </div>
-        </div>
         <div class="card mb-4" id="section-career">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0">Career Leaderboard</h5>
@@ -929,6 +902,33 @@
               </thead>
               <tbody></tbody>
             </table>
+          </div>
+        </div>
+        <div class="card mb-4" id="section-career-radar">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0">Career Radar</h5>
+              <i class="bi bi-info-circle vt-col-info"
+                 data-vt-radar-info="career"
+                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                 title="Loading&hellip;"></i>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary vt-radar-custom-toggle" id="career-radar-compare-toggle" type="button">Compare</button>
+              <button class="btn btn-sm" data-expand="section-career-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="vt-radar-custom-picker mb-3" id="career-radar-picker">
+              <div class="d-flex flex-wrap gap-2 align-items-center">
+                <span class="small" style="color:var(--kb-text-muted);">Player:</span>
+                <select class="form-select form-select-sm vt-radar-picker-select" id="career-radar-pick-a" aria-label="First player"></select>
+                <span class="small d-none vt-career-radar-vs" style="color:var(--kb-text-muted);">vs</span>
+                <select class="form-select form-select-sm vt-radar-picker-select d-none" id="career-radar-pick-b" aria-label="Second player"></select>
+              </div>
+            </div>
+            <div class="chart-container"><canvas id="career-radar-canvas"></canvas></div>
+            <p class="small mt-2 mb-0 d-none vt-radar-hint" id="career-radar-hint">Need at least two players in career stats to compare.</p>
           </div>
         </div>
       </div>
