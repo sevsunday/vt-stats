@@ -854,6 +854,8 @@ The pipeline writes `data/processed/match_contributions.json`, a dict keyed by `
 
 **Why the browser does this.** Statistical aggregation is the pipeline's job everywhere else in the project; this is the documented exception, made so the picker's facet filters (player count, duration band, players, role, etc.) can scope the aggregate without re-fetching per-match JSONs or pre-computing every facet combination. The slim contributions slice keeps the heavy work — building each per-match leaderboard / weapon_meta / rivalry_matrix — pipeline-side; only summation moves client-side. The legacy `data/processed/all_matches.json` is no longer written, and `scripts/process_stats.py`'s `build_all_matches_aggregate()` Python function is kept as reference code only.
 
+**5-match minimum.** After summation, the aggregator drops any `career_stats[]` row whose `matches_played < MIN_CAREER_MATCHES` (currently `5`) and cascade-filters `global_rivalries[]` to the kept names. `global_weapon_meta` and `meta.*` totals are unaffected — the threshold is exclusively about cross-match player identity. Per-match views are unaffected. The picker filters narrow the scope first; the threshold applies after, so a player with 30 career matches who only appears in 3 of the filtered subset is hidden in that view (semantics: "show me players with meaningful presence in this view"). The threshold is surfaced via `meta.min_career_matches` (live value, single source of truth for UI labels) and `meta.players_dropped_by_min_matches` (count of pruned rows in the current scope). When the count is non-zero, `js/app.js` `renderAggMeta()` adds a "Career Roster: 5+ matches, N hidden" tile and `updateAllMatchesFilterBanner()` appends a parenthetical hidden-count when picker filters are active.
+
 #### `meta`
 
 ```json
@@ -866,7 +868,9 @@ The pipeline writes `data/processed/match_contributions.json`, a dict keyed by `
   "matches_with_positioning": 4,
   "matches_with_target_lock_data": 2,
   "total_sentinel_damage_dropped": 5,
-  "matches_with_sentinel_damage": ["2026-04-22T01-58-26"]
+  "matches_with_sentinel_damage": ["2026-04-22T01-58-26"],
+  "min_career_matches": 5,
+  "players_dropped_by_min_matches": 3
 }
 ```
 
