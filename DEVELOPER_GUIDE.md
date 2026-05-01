@@ -191,24 +191,57 @@ Per-tick state snapshot for all players. Pipeline currently skips these events.
 **PlayerState fields:** `player` (uint64 Steam64), `position` (Vec3), `speed` (float), `health` (float — actual HP, not ratio), `ammo` (float — actual ammo, not ratio), `odf` (string — current vehicle ODF), `has_target` (bool — player is holding T / target-lock key at this tick)
 
 #### `UnitDestroyed` (field 6)
-A unit (player vehicle, AI unit, or structure) was destroyed. Pipeline tracks kills/deaths from this event.
+A unit (player vehicle, AI unit, or structure) was destroyed. Pipeline applies a **four-way classification** (Phase 3) before any kill aggregator touches the event — see "UnitDestroyed Classification" below.
 
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
 | `killer` | `uint64` | Steam64 of killer (0 if not a player) |
-| `killer_team` | `uint32` | Killer's team slot |
+| `killer_team` | `uint32` | Killer's team slot. **`0` is the engine's signal that the destruction had no real attacker** — used by the classification flow to detect powerup pickups disguised as destructions. |
 | `killer_odf` | `string` | Killer's vehicle ODF |
 | `victim` | `uint64` | Steam64 of victim (0 if not a player) |
 | `victim_team` | `uint32` | Victim's team slot |
 | `victim_odf` | `string` | Destroyed unit's ODF |
 
 #### `UnitSniped` (field 7)
-A snipe event occurred. Pipeline counts these per match.
+A pilot snipe event. Phase 3 enriched the event with shooter / victim context (pre-Phase-3 sessions only carry `tick`).
 
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
+| `shooter` | `uint64` | Steam64 of sniper (0 if not a player; protobuf default for pre-Phase-3 sessions) |
+| `shooter_team` | `uint32` | Sniper's team slot |
+| `shooter_odf` | `string` | Sniper's vehicle ODF |
+| `victim` | `uint64` | Steam64 of pilot victim (0 if not a player) |
+| `victim_team` | `uint32` | Victim's team slot |
+| `victim_odf` | `string` | Victim's vehicle ODF |
+
+#### `PickupPowerup` (field 8) — Phase 3
+A player picked up a crate or pod. Pre-Phase-3 sessions do not contain this event; the engine emits a synthetic `UnitDestroyed` for the same tick (with `killer_team == 0`) regardless of schema version. The pipeline routes the synthetic destruction to the powerup-pickup branch (suppressed) and consumes this event for the rich `pickups.feed` data.
+
+| Field | Type | Description |
+|---|---|---|
+| `tick` | `uint32` | Game tick |
+| `picker` | `uint64` | Steam64 of picker (0 if AI) |
+| `picker_team` | `uint32` | Picker's team slot |
+| `picker_odf` | `string` | Picker's vehicle ODF |
+| `powerup_team` | `uint32` | Team that owned the powerup spawn |
+| `powerup_odf` | `string` | The collectible ODF (e.g. `apsnipvsr.odf`) |
+
+### UnitDestroyed Classification (Phase 3)
+
+Every `UnitDestroyed` event is routed into one of four buckets at the top of the pipeline's `unit_destroyed` branch. The classification runs **before** any existing accumulator (`player_kills`, `kill_feed`, `vehicle_destruction_count`, `kill_rivalry`) touches the event:
+
+| Bucket | Trigger | Effect |
+|---|---|---|
+| Real vehicle | victim_odf NOT in either constant | Existing kill accumulators |
+| Powerup pickup | victim_odf in `KNOWN_POWERUP_ODFS` AND `killer_team == 0` | Suppressed. New-schema gets full picker context from the real `PickupPowerup` event. |
+| Powerup denial | victim_odf in `KNOWN_POWERUP_ODFS` AND `killer_team != 0` | Routed to `powerup_destructions` block (player shot the crate before pickup) |
+| Deployable destruction | victim_odf in `KNOWN_DEPLOYABLE_ODFS` (regardless of killer_team) | Routed to `deployable_destructions` block (mines self-detonate, expire, or get shot) |
+
+`KNOWN_POWERUP_ODFS` (18 entries, audit-derived + domain-curated) and `KNOWN_DEPLOYABLE_ODFS` (1 entry: `fball2c.odf`) live as frozensets in [scripts/process_stats.py](scripts/process_stats.py). Audit script: [scripts/audit_pickup_powerup.mjs](scripts/audit_pickup_powerup.mjs). Full evidence chain + maintenance procedure: [docs/pickup-powerup-semantics.md](docs/pickup-powerup-semantics.md).
+
+The legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` filter (currently just `apserv_vsr.odf`) coexists with the new classification — even after the team-zero filter, the residual ~13% of real-combat service-pod destructions still flow into `powerup_destructions.feed` and would dominate the Vehicle Destruction Breakdown chart without the chart-level filter.
 
 ### Faction Resolution
 
@@ -309,7 +342,9 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
     "submitter": "VTrider",
     "team_leaders": { "1": { "name": "…", "s64": "…" }, "2": { "name": "…", "s64": "…" } },
     "players": ["blue", "VTrider", "…"],
-    "has_position_data": true
+    "has_position_data": true,
+    "has_target_lock_data": false,
+    "has_pickup_data": true
   }
 ]
 ```
@@ -347,6 +382,8 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
   },
   "has_position_data": true,
   "has_target_lock_data": false,
+  "has_pickup_data": true,
+  "schema_version": 1,
   "terrain_bounds": {
     "min": {"x": -1024.0, "y": 0.0, "z": -1024.0},
     "max": {"x": 1024.0, "y": 320.25, "z": 1024.0}
@@ -360,6 +397,10 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
   }
 }
 ```
+
+`has_pickup_data` (Phase 3) is `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. Mirrored on `match`, `meta`, and the manifest entry.
+
+`schema_version` (Phase 3) is the per-match output schema version. `1` after Phase 3; absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
 
 Match-level spatial context fields:
 
@@ -561,7 +602,64 @@ The `positioning` JSON block drives a dedicated tab that visualizes where player
 }
 ```
 
-Note: `UnitDestroyed` events are not yet produced by the collector, so `kills.leaderboard`, `kills.feed`, `kills.by_vehicle`, and `kills.kill_rivalry_matrix` will be empty in current data. The structure is ready for when the collector starts emitting these events.
+Note: `kills.feed` excludes powerup pickups, powerup denials, and deployable destructions — those are routed by the **UnitDestroyed Classification** (Section 2) into the dedicated `pickups`, `powerup_destructions`, and `deployable_destructions` blocks below. `kills.by_vehicle` additionally excludes `apserv_vsr.odf` via the legacy chart-only `VEHICLE_DESTRUCTION_IGNORE_ODFS` filter.
+
+#### `pickups` (Phase 3)
+
+Crate / pod pickups, sourced from `PickupPowerup` events (new-schema only). Always emitted; empty for old-schema sessions (`has_pickup_data: false`).
+
+```json
+{
+  "has_pickup_data": true,
+  "feed": [
+    { "tick": 1234, "picker": "VTrider", "picker_in_game_nick": null, "picker_odf": "ivtank_vsr.odf", "powerup_odf": "apsnipvsr.odf", "powerup_team": 6 }
+  ],
+  "by_player": [{ "name": "VTrider", "count": 17 }],
+  "by_odf": [{ "odf": "apsnipvsr.odf", "name": "Sniper Powerup", "count": 8 }],
+  "totals": { "total": 42, "team_1": 18, "team_2": 23, "ai": 1 }
+}
+```
+
+#### `powerup_destructions` (Phase 3)
+
+Powerups destroyed in combat — denial stats. Sourced from `UnitDestroyed` events whose `victim_odf` is in `KNOWN_POWERUP_ODFS` AND `killer_team != 0`. Populated for both old and new schema (the team-zero filter discriminates regardless of source).
+
+```json
+{
+  "feed": [
+    { "tick": 5000, "killer": "VTrider", "killer_in_game_nick": null, "killer_odf": "ivscoutm_vsr.odf", "powerup_odf": "apserv_vsr.odf", "powerup_team": 6 }
+  ],
+  "by_player": [{ "name": "VTrider", "count": 9 }],
+  "by_odf": [{ "odf": "apserv_vsr.odf", "name": "Service Pod", "count": 5 }],
+  "totals": { "total": 12, "team_1": 7, "team_2": 5 }
+}
+```
+
+#### `deployable_destructions` (Phase 3)
+
+Mines / deployable utility destructions. No `feed` (too noisy); just per-player + per-ODF counts.
+
+```json
+{
+  "by_player": [{ "name": "Domakus", "count": 14 }],
+  "by_odf": [{ "odf": "fball2c.odf", "name": "Flame Mine", "count": 21 }],
+  "totals": { "total": 21 }
+}
+```
+
+#### `snipes` (Phase 3)
+
+Pilot snipe events. Phase 3 enriched `UnitSniped` to carry sniper / victim context; pre-Phase-3 sessions show `sniper_odf == ""` and `victim_odf == ""` (protobuf defaults), but the events still appear in `feed`.
+
+```json
+{
+  "feed": [
+    { "tick": 6789, "sniper": "VTrider", "sniper_in_game_nick": null, "sniper_odf": "isuser_m.odf", "victim": "Domakus", "victim_in_game_nick": null, "victim_odf": "fsuser_m.odf" }
+  ],
+  "by_player": [{ "name": "VTrider", "count": 3 }],
+  "totals": { "total": 5, "team_1": 3, "team_2": 2 }
+}
+```
 
 #### `positioning`
 

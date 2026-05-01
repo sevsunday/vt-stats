@@ -84,13 +84,14 @@
     'eventStream.*.updateTick.players.*.position': 'Vec3',
     'eventStream.*.unitDestroyed': 'UnitDestroyed',
     'eventStream.*.unitSniped': 'UnitSniped',
+    'eventStream.*.pickupPowerup': 'PickupPowerup',
   };
 
   // StatEvent oneof arms in declaration order (matches scripts/statsgate.proto).
   // Used by the events-mode filter chips and the stats banner.
   const EVENT_ARMS = [
     'bulletInit', 'bulletHit', 'damageDealt', 'damageReceived',
-    'updateTick', 'unitDestroyed', 'unitSniped',
+    'updateTick', 'unitDestroyed', 'unitSniped', 'pickupPowerup',
   ];
   const EVENT_ARM_LABELS = {
     bulletInit: 'BulletInit',
@@ -100,6 +101,7 @@
     updateTick: 'UpdateTick',
     unitDestroyed: 'UnitDestroyed',
     unitSniped: 'UnitSniped',
+    pickupPowerup: 'PickupPowerup',
   };
 
   // --- DOM handles (populated after DOMContentLoaded) ---
@@ -627,25 +629,12 @@
 
   function renderStatsBanner() {
     const events = (state.decoded && state.decoded.eventStream) || [];
-    const counts = {
-      bulletInit: 0, bulletHit: 0, damageDealt: 0, damageReceived: 0,
-      updateTick: 0, unitDestroyed: 0, unitSniped: 0,
-    };
+    const counts = Object.fromEntries(EVENT_ARMS.map(a => [a, 0]));
     for (const evt of events) {
       const arm = evt && evt.eventType;
       if (arm && counts[arm] != null) counts[arm]++;
     }
     const total = events.length;
-
-    const nameMap = {
-      bulletInit: 'BulletInit',
-      bulletHit: 'BulletHit',
-      damageDealt: 'DamageDealt',
-      damageReceived: 'DamageReceived',
-      updateTick: 'UpdateTick',
-      unitDestroyed: 'UnitDestroyed',
-      unitSniped: 'UnitSniped',
-    };
 
     const chips = [];
     chips.push(`
@@ -653,11 +642,10 @@
         <span class="vt-raw-stat-chip-label">Total</span>
         <span class="vt-raw-stat-chip-value">${fmtInt(total)}</span>
       </span>`);
-    for (const key of ['bulletInit', 'bulletHit', 'damageDealt', 'damageReceived',
-                       'updateTick', 'unitDestroyed', 'unitSniped']) {
+    for (const key of EVENT_ARMS) {
       chips.push(`
         <span class="vt-raw-stat-chip">
-          <span class="vt-raw-stat-chip-label">${nameMap[key]}</span>
+          <span class="vt-raw-stat-chip-label">${EVENT_ARM_LABELS[key]}</span>
           <span class="vt-raw-stat-chip-value">${fmtInt(counts[key])}</span>
         </span>`);
     }
@@ -2073,12 +2061,18 @@
         if (payload.shooter != null) shooter = String(payload.shooter);
         if (payload.victim != null) victim = String(payload.victim);
         if (payload.killer != null) shooter = String(payload.killer);
+        // PickupPowerup: map picker/picker_odf to shooter slot (the
+        // player who took the action); powerup_odf goes in ordnance.
+        if (payload.picker != null) shooter = String(payload.picker);
         if (payload.ordnanceOdf) ordnance = payload.ordnanceOdf;
         if (payload.victimOdf && !ordnance) ordnance = payload.victimOdf;
+        if (payload.powerupOdf && !ordnance) ordnance = payload.powerupOdf;
         if (payload.killerOdf && !shooter) shooter = payload.killerOdf;
+        if (payload.pickerOdf && !shooter) shooter = payload.pickerOdf;
         if (payload.amount != null) amount = payload.amount;
         if (payload.team != null) team = payload.team;
         if (payload.killerTeam != null && team == null) team = payload.killerTeam;
+        if (payload.pickerTeam != null && team == null) team = payload.pickerTeam;
       }
       rows[i] = { i, arm, tick, shooter, victim, ordnance, amount, team };
       if (arm && totalByType[arm] != null) totalByType[arm]++;
