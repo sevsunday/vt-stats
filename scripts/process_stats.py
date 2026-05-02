@@ -309,6 +309,588 @@ def _build_snipes_block(
         },
     }
 
+
+# --- Match Highlights ---------------------------------------------------------
+# Per-match award catalog. Always emitted in this order; cards whose data
+# gates fail are simply omitted (the UI grid reflows around the missing tiles).
+# See `.cursor/plans/match-highlights-section_*.plan.md` for the design rationale.
+HIGHLIGHTS_RENDER_ORDER = [
+    "the_bully",
+    "the_grim_reaper",
+    "bullet_sponge",
+    "the_hustler",
+    "sharpshooter",
+    "gunner",
+    "puppeteer",
+    "frenemies",
+    "roadrunner",
+    "crate_pod_goblin",
+    "chris_kyle",
+    "the_locksmith",
+]
+
+HIGHLIGHTS_LABELS = {
+    "the_bully":        ("The Bully",        "bi-emoji-angry"),
+    "the_grim_reaper":  ("The Grim Reaper",  "bi-person-x-fill"),
+    "bullet_sponge":    ("Bullet Sponge",    "bi-shield-fill"),
+    "the_hustler":      ("The Hustler",      "bi-graph-up-arrow"),
+    "sharpshooter":     ("Sharpshooter",     "bi-bullseye"),
+    "gunner":           ("Gunner",           "bi-lightning-charge"),
+    "puppeteer":        ("Puppeteer",        "bi-diagram-3"),
+    "frenemies":        ("Frenemies",        "bi-people-fill"),
+    "roadrunner":       ("Roadrunner",       "bi-rocket-takeoff"),
+    "crate_pod_goblin": ("Crate/Pod Goblin", "bi-box-seam"),
+    "chris_kyle":       ("Chris Kyle",       "bi-crosshair"),
+    "the_locksmith":    ("The Locksmith",    "bi-lock-fill"),
+}
+
+
+def _delta_pct(winner_v, runner_v):
+    """Fraction by which winner exceeds runner-up. None when no comparison
+    is possible (no runner-up, or runner-up is zero/negative)."""
+    if runner_v is None:
+        return None
+    try:
+        rv = float(runner_v)
+    except (TypeError, ValueError):
+        return None
+    if rv <= 0:
+        return None
+    return round((float(winner_v) - rv) / rv, 3)
+
+
+def _narrative_bucket(delta_pct):
+    """Discrete narrative bucket keyed off delta_pct. Drives copy-template
+    selection in the renderer. Solo standouts (no runner-up) read as 'clear'."""
+    if delta_pct is None:
+        return "clear"
+    if delta_pct >= 0.50:
+        return "dominant"
+    if delta_pct >= 0.15:
+        return "clear"
+    return "close"
+
+
+def _round_value(v, ndigits):
+    if ndigits is None:
+        return v
+    if ndigits == 0:
+        return int(round(v))
+    return round(v, ndigits)
+
+
+def _player_card(category, leaderboard, *, value_fn, value_format,
+                 round_value=1, floor=None, tiebreak=None):
+    """Pick top + runner-up from leaderboard rows by `value_fn`.
+
+    floor: callable(row, value) -> bool; row kept only when True.
+    tiebreak: callable(row) -> sort key (lower is better) used after the
+        primary value sort. Falls back to lowercase name.
+    """
+    eligible = []
+    for p in leaderboard:
+        v = value_fn(p)
+        if v is None:
+            continue
+        if floor is not None and not floor(p, v):
+            continue
+        eligible.append((v, p))
+    if not eligible:
+        return None
+    if tiebreak:
+        eligible.sort(key=lambda x: (-x[0], tiebreak(x[1])))
+    else:
+        eligible.sort(key=lambda x: (-x[0], (x[1].get("name") or "").lower()))
+    winner_v, winner = eligible[0]
+    runner = None
+    if len(eligible) > 1:
+        runner_v, runner_row = eligible[1]
+        runner = {
+            "name": runner_row.get("name"),
+            "value": _round_value(runner_v, round_value),
+        }
+    label, icon = HIGHLIGHTS_LABELS[category]
+    delta = _delta_pct(winner_v, runner["value"] if runner else None)
+    return {
+        "category": category,
+        "label": label,
+        "icon": icon,
+        "winner": {
+            "type": "player",
+            "name": winner.get("name"),
+            "steam64": winner.get("steam64"),
+        },
+        "value": _round_value(winner_v, round_value),
+        "value_format": value_format,
+        "runner_up": runner,
+        "delta_pct": delta,
+        "narrative": _narrative_bucket(delta),
+    }
+
+
+def _top_kv(d, key=lambda v: v):
+    """Return (name, value) for the entry maximizing key(value) in dict `d`,
+    or (None, None) when `d` is empty/None. Tiebreak alphabetic on name."""
+    if not d:
+        return (None, None)
+    best_name = None
+    best_v = None
+    best_k = None
+    for n, v in d.items():
+        k = key(v)
+        if k is None:
+            continue
+        if best_k is None or k > best_k or (k == best_k and (n or "").lower() < (best_name or "").lower()):
+            best_k = k
+            best_v = v
+            best_name = n
+    return (best_name, best_v)
+
+
+def compute_highlights(match_data):
+    """Build the per-match Highlights block (12-card always-on catalog).
+
+    Each card emits when its data gates pass; missing data means the card is
+    omitted (the UI grid reflows around the gap). All values are sourced from
+    already-built per-match blocks (no event re-walking). Match-global +
+    always-unfiltered: the dashboard reads this without applying filterState.
+
+    Schema v2 (this revision): every card carries a `value_breakdown` payload
+    so the renderer can show contextual sub-lines instead of bare scalars.
+    The Bully ranks by `personal.pvp_dealt` (was `personal.dealt`) so a
+    future Domination card can claim the directional argmax-rivalry story.
+    Bullet Sponge keeps ranking on total `personal.received` (humans + AI /
+    turrets / scavs / mines / world) — the Bully/Sponge asymmetry is
+    intentional: bullying is something you do *to humans*, sponging is what
+    you do *to incoming damage from anything*. Hustler's value_format moved
+    from "ratio" to "kd" so the renderer knows to surface raw kills/deaths.
+    """
+    leaderboard = match_data.get("leaderboard") or []
+    name_to_s64 = {p["name"]: p.get("steam64") for p in leaderboard if p.get("name")}
+    leaderboard_by_name = {p["name"]: p for p in leaderboard if p.get("name")}
+
+    cards = []
+
+    def emit(card):
+        if card is not None:
+            cards.append(card)
+
+    # ---- The Bully: max personal.pvp_dealt; breakdown = top victim from hit_targets.
+    bully = _player_card(
+        "the_bully", leaderboard,
+        value_fn=lambda p: (p.get("personal") or {}).get("pvp_dealt", 0),
+        tiebreak=lambda p: (
+            -(p.get("personal") or {}).get("dealt", 0),
+            -p.get("kills", 0),
+            (p.get("name") or "").lower(),
+        ),
+        value_format="damage",
+        round_value=1,
+    )
+    if bully is not None:
+        winner_p = leaderboard_by_name.get(bully["winner"]["name"]) or {}
+        hit_targets = winner_p.get("hit_targets") or {}
+        v_name, v_data = _top_kv(hit_targets, key=lambda v: (v or {}).get("damage", 0))
+        bully["value_breakdown"] = {
+            "top_victim": v_name,
+            "top_victim_damage": round((v_data or {}).get("damage", 0), 1) if v_data else 0,
+        }
+        emit(bully)
+
+    # ---- Grim Reaper: max kills; breakdown = top victim from kill_rivalry_matrix.
+    grim = _player_card(
+        "the_grim_reaper", leaderboard,
+        value_fn=lambda p: p.get("kills", 0),
+        floor=lambda p, v: v > 0,
+        tiebreak=lambda p: (
+            -(p.get("kd_ratio") or 0),
+            -(p.get("personal") or {}).get("dealt", 0),
+            (p.get("name") or "").lower(),
+        ),
+        value_format="count",
+        round_value=0,
+    )
+    if grim is not None:
+        kill_rivalry = (match_data.get("kills") or {}).get("kill_rivalry_matrix") or {}
+        per_victim = kill_rivalry.get(grim["winner"]["name"]) or {}
+        v_name, v_count = _top_kv(per_victim, key=lambda v: v if isinstance(v, (int, float)) else 0)
+        grim["value_breakdown"] = {
+            "top_victim": v_name,
+            "top_victim_count": int(v_count) if v_count else 0,
+        }
+        emit(grim)
+
+    # ---- Bullet Sponge: max personal.received (total, including PvE — turrets,
+    # scavs, mines, world). Asymmetric to The Bully on purpose: sponge soaks
+    # everything; bullying is a humans-only verb. Tiebreak prefers higher
+    # PvP-side received so a true tie resolves toward the player who took more
+    # of their damage from real opponents. Breakdown still names the worst
+    # human tormentor (rivalry_matrix is human-only by construction); the
+    # delta between value and breakdown surfaces PvE implicitly.
+    sponge = _player_card(
+        "bullet_sponge", leaderboard,
+        value_fn=lambda p: (p.get("personal") or {}).get("received", 0),
+        tiebreak=lambda p: (
+            -(p.get("personal") or {}).get("pvp_received", 0),
+            (p.get("name") or "").lower(),
+        ),
+        value_format="damage",
+        round_value=1,
+    )
+    if sponge is not None:
+        # Column-scan rivalry_matrix for the winner victim's worst tormentor.
+        rivalry = match_data.get("rivalry_matrix") or {}
+        victim = sponge["winner"]["name"]
+        best_name = None
+        best_dmg = 0.0
+        for shooter, victims in rivalry.items():
+            if shooter == victim:
+                continue
+            dmg = (victims or {}).get(victim, 0)
+            if dmg > best_dmg or (
+                dmg == best_dmg and best_name is not None
+                and (shooter or "").lower() < (best_name or "").lower()
+            ):
+                best_dmg = dmg
+                best_name = shooter
+        sponge["value_breakdown"] = {
+            "top_tormentor": best_name,
+            "top_tormentor_damage": round(best_dmg, 1) if best_name else 0,
+        }
+        emit(sponge)
+
+    # ---- The Hustler — best K/D trade. leaderboard.kd_ratio is None when
+    # deaths == 0 (even with kills > 0), so map that to the player's kill
+    # count as a synthetic dominant-K/D value: a 5-kill 0-death player still
+    # beats a 3:1 K/D player. Renderer detects deaths == 0 in the breakdown
+    # and renders "(perfect)" instead of a numeric ratio.
+    def _hustler_kd(p):
+        kr = p.get("kd_ratio")
+        if kr is not None:
+            return kr
+        kills = p.get("kills", 0)
+        deaths = p.get("deaths", 0)
+        if deaths == 0 and kills > 0:
+            return float(kills)
+        return None
+    hustler = _player_card(
+        "the_hustler", leaderboard,
+        value_fn=_hustler_kd,
+        floor=lambda p, v: p.get("kills", 0) >= 3,
+        tiebreak=lambda p: (
+            -p.get("kills", 0),
+            (p.get("name") or "").lower(),
+        ),
+        value_format="kd",
+        round_value=2,
+    )
+    if hustler is not None:
+        winner_p = leaderboard_by_name.get(hustler["winner"]["name"]) or {}
+        hustler["value_breakdown"] = {
+            "kills": int(winner_p.get("kills", 0)),
+            "deaths": int(winner_p.get("deaths", 0)),
+        }
+        emit(hustler)
+
+    # ---- Sharpshooter: max accuracy; breakdown = shots_hit / shots_fired.
+    sharp = _player_card(
+        "sharpshooter", leaderboard,
+        value_fn=lambda p: (p.get("personal") or {}).get("accuracy", 0),
+        floor=lambda p, v: (p.get("personal") or {}).get("shots_fired", 0) >= 100,
+        tiebreak=lambda p: (
+            -(p.get("personal") or {}).get("shots_hit", 0),
+            (p.get("name") or "").lower(),
+        ),
+        value_format="accuracy",
+        round_value=3,
+    )
+    if sharp is not None:
+        winner_p = (leaderboard_by_name.get(sharp["winner"]["name"]) or {}).get("personal") or {}
+        sharp["value_breakdown"] = {
+            "shots_hit": int(winner_p.get("shots_hit", 0)),
+            "shots_fired": int(winner_p.get("shots_fired", 0)),
+        }
+        emit(sharp)
+
+    # ---- Gunner: max shots_fired; breakdown = accuracy.
+    gunner = _player_card(
+        "gunner", leaderboard,
+        value_fn=lambda p: (p.get("personal") or {}).get("shots_fired", 0),
+        tiebreak=lambda p: (
+            -(p.get("personal") or {}).get("accuracy", 0),
+            (p.get("name") or "").lower(),
+        ),
+        value_format="count",
+        round_value=0,
+    )
+    if gunner is not None:
+        winner_p = (leaderboard_by_name.get(gunner["winner"]["name"]) or {}).get("personal") or {}
+        gunner["value_breakdown"] = {
+            "accuracy": round(winner_p.get("accuracy", 0), 3),
+        }
+        emit(gunner)
+
+    # ---- Puppeteer: max assets.dealt; breakdown = personal_dealt for contrast.
+    puppeteer = _player_card(
+        "puppeteer", leaderboard,
+        value_fn=lambda p: (p.get("assets") or {}).get("dealt", 0),
+        floor=lambda p, v: v > 0,
+        tiebreak=lambda p: (
+            -(p.get("personal") or {}).get("dealt", 0),
+            (p.get("name") or "").lower(),
+        ),
+        value_format="damage",
+        round_value=1,
+    )
+    if puppeteer is not None:
+        winner_p = (leaderboard_by_name.get(puppeteer["winner"]["name"]) or {}).get("personal") or {}
+        puppeteer["value_breakdown"] = {
+            "personal_dealt": round(winner_p.get("dealt", 0), 1),
+        }
+        emit(puppeteer)
+
+    # ---- Frenemies (pair). breakdown = directional split a_to_b / b_to_a.
+    rivalries = match_data.get("top_rivalries") or []
+    if rivalries and rivalries[0].get("total", 0) > 0:
+        winner = rivalries[0]
+        runner = None
+        if len(rivalries) > 1 and rivalries[1].get("total", 0) > 0:
+            r = rivalries[1]
+            runner = {
+                "name": f"{r['a']} vs {r['b']}",
+                "value": round(r["total"], 1),
+            }
+        delta = _delta_pct(winner["total"], runner["value"] if runner else None)
+        label, icon = HIGHLIGHTS_LABELS["frenemies"]
+        cards.append({
+            "category": "frenemies",
+            "label": label,
+            "icon": icon,
+            "winner": {"type": "pair", "a": winner["a"], "b": winner["b"]},
+            "value": round(winner["total"], 1),
+            "value_format": "damage",
+            "value_breakdown": {
+                "a_to_b": round(winner.get("a_to_b", 0), 1),
+                "b_to_a": round(winner.get("b_to_a", 0), 1),
+            },
+            "runner_up": runner,
+            "delta_pct": delta,
+            "narrative": _narrative_bucket(delta),
+        })
+
+    # ---- Roadrunner: max activity_score; breakdown = movement_band + path_length.
+    pos = match_data.get("positioning") or {}
+    has_pos = (match_data.get("match") or {}).get("has_position_data", False)
+    pos_players = pos.get("players") or {}
+    if has_pos and pos_players:
+        rows = []
+        for pname, pdata in pos_players.items():
+            metrics = pdata.get("metrics") or {}
+            score = metrics.get("activity_score")
+            if score is None:
+                continue
+            rows.append({
+                "name": pname,
+                "steam64": name_to_s64.get(pname),
+                "score": score,
+                "movement_band": metrics.get("movement_band"),
+                "path_length": metrics.get("path_length", 0),
+            })
+        if rows:
+            rows.sort(key=lambda r: (-r["score"], -r["path_length"], r["name"].lower()))
+            winner = rows[0]
+            runner = None
+            if len(rows) > 1:
+                runner = {"name": rows[1]["name"], "value": int(rows[1]["score"])}
+            delta = _delta_pct(winner["score"], runner["value"] if runner else None)
+            label, icon = HIGHLIGHTS_LABELS["roadrunner"]
+            cards.append({
+                "category": "roadrunner",
+                "label": label,
+                "icon": icon,
+                "winner": {
+                    "type": "player",
+                    "name": winner["name"],
+                    "steam64": winner["steam64"],
+                },
+                "value": int(winner["score"]),
+                "value_format": "score",
+                "value_breakdown": {
+                    "movement_band": winner.get("movement_band"),
+                    "path_length": int(round(winner["path_length"])),
+                },
+                "runner_up": runner,
+                "delta_pct": delta,
+                "narrative": _narrative_bucket(delta),
+            })
+
+    # ---- Crate/Pod Goblin: combined pickups + powerup destructions per player.
+    pickups_by_player = (match_data.get("pickups") or {}).get("by_player") or []
+    destr_by_player = (match_data.get("powerup_destructions") or {}).get("by_player") or []
+    combined = {}
+    for row in pickups_by_player:
+        n = row.get("name")
+        if not n:
+            continue
+        combined.setdefault(n, {"pickups": 0, "destructions": 0})
+        combined[n]["pickups"] += int(row.get("count", 0))
+    for row in destr_by_player:
+        n = row.get("name")
+        if not n:
+            continue
+        combined.setdefault(n, {"pickups": 0, "destructions": 0})
+        combined[n]["destructions"] += int(row.get("count", 0))
+    rows = [
+        {
+            "name": n,
+            "steam64": name_to_s64.get(n),
+            "total": v["pickups"] + v["destructions"],
+            "pickups": v["pickups"],
+            "destructions": v["destructions"],
+        }
+        for n, v in combined.items()
+        if v["pickups"] + v["destructions"] > 0
+    ]
+    if rows:
+        rows.sort(key=lambda r: (-r["total"], -r["pickups"], r["name"].lower()))
+        winner = rows[0]
+        runner = None
+        if len(rows) > 1:
+            runner = {"name": rows[1]["name"], "value": rows[1]["total"]}
+        delta = _delta_pct(winner["total"], runner["value"] if runner else None)
+        label, icon = HIGHLIGHTS_LABELS["crate_pod_goblin"]
+        cards.append({
+            "category": "crate_pod_goblin",
+            "label": label,
+            "icon": icon,
+            "winner": {
+                "type": "player",
+                "name": winner["name"],
+                "steam64": winner["steam64"],
+            },
+            "value": winner["total"],
+            "value_format": "count",
+            "value_breakdown": {
+                "pickups": winner["pickups"],
+                "destructions": winner["destructions"],
+            },
+            "runner_up": runner,
+            "delta_pct": delta,
+            "narrative": _narrative_bucket(delta),
+        })
+
+    # ---- Chris Kyle: max pilot snipes; breakdown = top victim from snipes.feed[].
+    snipes = match_data.get("snipes") or {}
+    snipe_total = (snipes.get("totals") or {}).get("total", 0)
+    snipe_by_player = snipes.get("by_player") or []
+    snipe_feed = snipes.get("feed") or []
+    if snipe_total > 0 and snipe_by_player:
+        kills_lookup = {p.get("name"): p.get("kills", 0) for p in leaderboard}
+        rows = [
+            {
+                "name": r["name"],
+                "count": r["count"],
+                "kills": kills_lookup.get(r["name"], 0),
+            }
+            for r in snipe_by_player if r.get("count", 0) > 0
+        ]
+        if rows:
+            rows.sort(key=lambda r: (-r["count"], -r["kills"], r["name"].lower()))
+            winner = rows[0]
+            runner = None
+            if len(rows) > 1:
+                runner = {"name": rows[1]["name"], "value": rows[1]["count"]}
+            delta = _delta_pct(winner["count"], runner["value"] if runner else None)
+            # Per-winner victim counter from the snipe feed. Tiebreak: alphabetic.
+            victim_counts = Counter(
+                e.get("victim") for e in snipe_feed
+                if e.get("sniper") == winner["name"] and e.get("victim")
+            )
+            top_victim, top_victim_count = (None, 0)
+            if victim_counts:
+                victims_sorted = sorted(
+                    victim_counts.items(),
+                    key=lambda kv: (-kv[1], (kv[0] or "").lower()),
+                )
+                top_victim, top_victim_count = victims_sorted[0][0], int(victims_sorted[0][1])
+            label, icon = HIGHLIGHTS_LABELS["chris_kyle"]
+            cards.append({
+                "category": "chris_kyle",
+                "label": label,
+                "icon": icon,
+                "winner": {
+                    "type": "player",
+                    "name": winner["name"],
+                    "steam64": name_to_s64.get(winner["name"]),
+                },
+                "value": winner["count"],
+                "value_format": "count",
+                "value_breakdown": {
+                    "top_victim": top_victim,
+                    "top_victim_count": top_victim_count,
+                },
+                "runner_up": runner,
+                "delta_pct": delta,
+                "narrative": _narrative_bucket(delta),
+            })
+
+    # ---- The Locksmith: max target_lock_pct, gated on has_target_lock_data.
+    has_lock = (match_data.get("match") or {}).get("has_target_lock_data", False)
+    if has_lock and pos_players:
+        rows = []
+        for pname, pdata in pos_players.items():
+            metrics = pdata.get("metrics") or {}
+            tlp = metrics.get("target_lock_pct")
+            if tlp is None or tlp < 0.10:
+                continue
+            rows.append({
+                "name": pname,
+                "steam64": name_to_s64.get(pname),
+                "tlp": tlp,
+                "sample_count": pdata.get("sample_count", 0),
+            })
+        if rows:
+            rows.sort(key=lambda r: (-r["tlp"], -r["sample_count"], r["name"].lower()))
+            winner = rows[0]
+            runner = None
+            if len(rows) > 1:
+                runner = {
+                    "name": rows[1]["name"],
+                    "value": round(rows[1]["tlp"], 3),
+                }
+            delta = _delta_pct(winner["tlp"], runner["value"] if runner else None)
+            label, icon = HIGHLIGHTS_LABELS["the_locksmith"]
+            cards.append({
+                "category": "the_locksmith",
+                "label": label,
+                "icon": icon,
+                "winner": {
+                    "type": "player",
+                    "name": winner["name"],
+                    "steam64": winner["steam64"],
+                },
+                "value": round(winner["tlp"], 3),
+                "value_format": "percent",
+                "value_breakdown": {
+                    "seconds_locked": int(round(winner["tlp"] * winner["sample_count"])),
+                    "total_seconds": int(winner["sample_count"]),
+                },
+                "runner_up": runner,
+                "delta_pct": delta,
+                "narrative": _narrative_bucket(delta),
+            })
+
+    # Stable canonical render order. (The append order above already matches,
+    # but sort defensively so a future refactor cannot reorder cards.)
+    order = {cat: i for i, cat in enumerate(HIGHLIGHTS_RENDER_ORDER)}
+    cards.sort(key=lambda c: order.get(c["category"], 999))
+
+    return {
+        "schema_version": 2,
+        "cards": cards,
+    }
+
+
 # Movement band thresholds on activity_score (0-100): Defensive ... Aggressive
 # 0 = camper (stayed at base), 100 = roamer (covered map).
 POSITIONING_BANDS = [
@@ -2019,7 +2601,7 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             f"ticks={sentinel_damage['first_tick']}..{sentinel_damage['last_tick']}"
         )
 
-    return {
+    match_data = {
         "match": {
             "id": match_id,
             "source_file": source_file,
@@ -2042,9 +2624,10 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             # the dashboard can badge legacy matches without loading the
             # full per-match JSON.
             "has_pickup_data": match_has_pickup_data,
-            # Per-match schema version. Introduced in Phase 3; absence
-            # means legacy data (anything written before this PR).
-            "schema_version": 1,
+            # Per-match schema version. v1 = pre-highlights; v2 added the
+            # top-level `highlights` block. Absence means legacy data
+            # (anything written before Phase 3).
+            "schema_version": 2,
             "terrain_bounds": terrain_bounds,
             "base_to_base_distance": positioning_block.get("base_to_base_distance"),
             "sentinel_damage": {
@@ -2107,6 +2690,13 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
         ),
         "positioning": positioning_block,
     }
+
+    # Match Highlights — fixed-slate award catalog (12 cards, always-on).
+    # Each card emits when its data gates pass, otherwise it's omitted.
+    # Match-global + always-unfiltered (read directly from currentData by the UI).
+    match_data["highlights"] = compute_highlights(match_data)
+
+    return match_data
 
 
 def _extract_contribution(match_data):

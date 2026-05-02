@@ -3251,3 +3251,201 @@ td.vt-col-split {
         transition: none;
     }
 }
+
+/* ============================================================================
+   Match Highlights — fixed-slate award catalog (12 cards, always-on).
+   Tile is the unit; the section card uses the standard glass surface from
+   `.card`. Layout uses Bootstrap row-cols utilities; tile styling lives here.
+   xl breakpoint (>=1200px): 6 tiles wide, flavor copy collapses to a tooltip
+   to keep tiles compact. md/lg/sm/xs: flavor copy renders inline below the
+   value.
+   ============================================================================ */
+
+.vt-highlights-card .card-header h5 {
+    color: var(--kb-text-primary);
+}
+
+.vt-highlight-tile {
+    position: relative;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.85rem 0.9rem;
+    border-radius: 0.6rem;
+    background: color-mix(in oklab, var(--kb-bg-card) 92%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+    box-shadow: var(--vt-shadow-elevation-1, 0 1px 2px rgba(0, 0, 0, 0.18));
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                box-shadow var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-highlight-tile:hover {
+    border-color: color-mix(in oklab, var(--kb-text-primary) 16%, transparent);
+    transform: translateY(-1px);
+}
+
+.vt-highlight-tile--dominant {
+    border-color: color-mix(in oklab, var(--kb-primary) 45%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--kb-primary) 22%, transparent),
+                var(--vt-shadow-elevation-1, 0 1px 2px rgba(0, 0, 0, 0.18));
+}
+
+.vt-highlight-tile--dominant:hover {
+    border-color: color-mix(in oklab, var(--kb-primary) 65%, transparent);
+}
+
+.vt-highlight-tile-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--kb-text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.vt-highlight-tile-icon {
+    font-size: 0.95rem;
+    color: var(--kb-primary);
+}
+
+.vt-highlight-tile--dominant .vt-highlight-tile-icon {
+    color: var(--kb-primary);
+    filter: drop-shadow(0 0 4px color-mix(in oklab, var(--kb-primary) 45%, transparent));
+}
+
+.vt-highlight-tile-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-highlight-tile-winner {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* Keep pair winners ("A vs B") on one row when possible; clamp at two. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.vt-highlight-tile-vs {
+    color: var(--kb-text-muted);
+    font-weight: 500;
+    margin: 0 0.3rem;
+}
+
+.vt-highlight-tile-value {
+    font-family: var(--vt-font-mono, "Geist Mono", ui-monospace, monospace);
+    font-size: 1.45rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+}
+
+.vt-highlight-tile--dominant .vt-highlight-tile-value {
+    color: var(--kb-primary);
+}
+
+/* Unit suffix on the headline value. Smaller, regular weight, system font
+   (Geist Sans renders short word units cleaner than mono); muted color so
+   the big number remains the visual anchor. Slight vertical lift makes the
+   unit read as a label rather than competing with the value baseline. */
+.vt-highlight-tile-value-unit {
+    font-family: var(--vt-font-system, "Geist", system-ui, sans-serif);
+    font-size: 0.55em;
+    font-weight: 500;
+    color: var(--kb-text-muted);
+    letter-spacing: 0;
+    margin-left: 0.2em;
+    vertical-align: 0.2em;
+}
+
+/* Schema-v2 breakdown line: pre-computed context that gives the headline value
+   meaning ("4.00" -> "12K / 3D (4.00)"). Sits between the big value and the
+   runner-up line; visible at every breakpoint (unlike `vt-highlight-tile-copy`
+   which xl hides). Names are inline-bold; numerics use the mono stack so digits
+   align across cards. */
+.vt-highlight-tile-breakdown {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: var(--kb-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.vt-highlight-tile-copy {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: var(--kb-text-secondary);
+    /* Wraps gracefully on small/medium tiles; xl hides this and uses a tooltip. */
+}
+
+.vt-highlight-tile-runner {
+    font-size: 0.74rem;
+    color: var(--kb-text-muted);
+    margin-top: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-highlight-tile-runner-val {
+    color: var(--kb-text-secondary);
+    font-family: var(--vt-font-mono, "Geist Mono", ui-monospace, monospace);
+    margin-left: 0.25rem;
+}
+
+.vt-highlight-tile-runner--solo {
+    font-style: italic;
+}
+
+/* Compact xl layout: 6 tiles wide, drop the flavor copy and lean on the
+   tooltip (rendered via the `title` attr by renderHighlights). */
+@media (min-width: 1200px) {
+    .vt-highlight-tile {
+        padding: 0.75rem 0.8rem;
+        gap: 0.3rem;
+    }
+
+    .vt-highlight-tile-copy {
+        display: none;
+    }
+
+    /* Keep the breakdown visible on xl, but force a single-line ellipsis to
+       protect tile width. The tooltip (carrying the flavor copy) provides
+       any overflow narrative. */
+    .vt-highlight-tile-breakdown {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 0.74rem;
+    }
+
+    .vt-highlight-tile-value {
+        font-size: 1.3rem;
+    }
+
+    .vt-highlight-tile-winner {
+        font-size: 0.9rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-highlight-tile {
+        transition: none;
+    }
+
+    .vt-highlight-tile:hover {
+        transform: none;
+    }
+}

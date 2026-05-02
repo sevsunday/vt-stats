@@ -409,7 +409,7 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
 
 `has_pickup_data` (Phase 3) is `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. Mirrored on `match`, `meta`, and the manifest entry.
 
-`schema_version` (Phase 3) is the per-match output schema version. `1` after Phase 3; absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
+`schema_version` (Phase 3) is the per-match output schema version. `1` = Phase 3 baseline; `2` adds the top-level `highlights` block (see "Match Highlights" below). Absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
 
 Match-level spatial context fields:
 
@@ -813,6 +813,77 @@ Supporting details:
   - `mean_target_lock_pct` — direct average of per-match `target_lock_pct` (absolute ratio), across matches with `has_target_lock_data=true`. `null` when the player has no such matches.
   - `matches_with_target_lock_data` — denominator for `mean_target_lock_pct`. Always `<= matches_with_positioning`.
 - Full derivation: [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) "Positioning Block" section.
+
+### Match Highlights (per-match, schema_version 2)
+
+Per-match award catalog rendered above the Faction Scoreboard. A fixed slate of 12 always-on cards — The Bully, Grim Reaper, Bullet Sponge, The Hustler, Sharpshooter, Gunner, Puppeteer, Frenemies, Roadrunner, Crate/Pod Goblin, Chris Kyle, The Locksmith. Each card emits unconditionally as long as its data gate passes; cards whose underlying data is unavailable (positioning / pickups / T-key gates, missing snipes, etc.) are simply omitted, and the grid reflows around the gap.
+
+Built by `compute_highlights()` in [scripts/process_stats.py](scripts/process_stats.py) from already-built per-match blocks (`leaderboard`, `top_rivalries`, `pickups`, `powerup_destructions`, `snipes`, `positioning`). No event re-walking. The block is **match-global and always-unfiltered** — the dashboard reads `currentData.highlights`, never the filtered `data` view, and the renderer is pure formatting.
+
+**Bully/Sponge asymmetry (intentional).** The Bully ranks by `personal.pvp_dealt` (humans-only — "bullying" is a thing you do *to people*; reserved as the PvP-flavor card so a future Domination card can take the directional argmax-rivalry slot). Bullet Sponge ranks by `personal.received` (total — humans + AI / turrets / scavs / mines / world; "sponging" is what you do to *any* incoming damage). Don't reflexively "fix" this to be symmetric — it's load-bearing for the cards' stories.
+
+There are **two independent schema versions** in play:
+
+- **Per-match `meta.schema_version`** — `2` once the pipeline added the `highlights` block. Pre-v2 matches have no block; the UI hides the section.
+- **Inner `highlights.schema_version`** — `1` was the initial bare-scalar shape; `2` adds a per-card `value_breakdown` payload (always present), pivots `the_bully.value` to `personal.pvp_dealt`, and pivots `bullet_sponge.value` to `personal.pvp_received`. Bumped independently when card definitions / payload shape change in a renderer-breaking way.
+
+Top-level shape (schema v2):
+
+```json
+"highlights": {
+  "schema_version": 2,
+  "cards": [
+    {
+      "category": "the_bully",
+      "label": "The Bully",
+      "icon": "bi-emoji-angry",
+      "winner": { "type": "player", "name": "VTrider", "steam64": "7656119..." },
+      "value": 60200.4,
+      "value_format": "damage",
+      "value_breakdown": { "top_victim": "Viv", "top_victim_damage": 38420.5 },
+      "runner_up": { "name": "Domakus", "value": 49120.0 },
+      "delta_pct": 0.226,
+      "narrative": "clear"
+    },
+    {
+      "category": "the_hustler",
+      "label": "The Hustler",
+      "icon": "bi-graph-up-arrow",
+      "winner": { "type": "player", "name": "VTrider", "steam64": "7656119..." },
+      "value": 4.0,
+      "value_format": "kd",
+      "value_breakdown": { "kills": 12, "deaths": 3 },
+      "runner_up": { "name": "Domakus", "value": 2.5 },
+      "delta_pct": 0.6,
+      "narrative": "dominant"
+    },
+    {
+      "category": "frenemies",
+      "label": "Frenemies",
+      "icon": "bi-people-fill",
+      "winner": { "type": "pair", "a": "VTrider", "b": "Domakus" },
+      "value": 38420.5,
+      "value_format": "damage",
+      "value_breakdown": { "a_to_b": 21100.0, "b_to_a": 17320.5 },
+      "runner_up": { "name": "GenosseGeneral vs Sporkinator", "value": 19200.0 },
+      "delta_pct": 1.001,
+      "narrative": "dominant"
+    }
+  ]
+}
+```
+
+`narrative` is a discrete bucket keyed off `delta_pct` — `"dominant"` if `delta_pct >= 0.50` (winner ≥ 1.5× runner-up), `"clear"` if `delta_pct >= 0.15`, `"close"` otherwise; `null` `delta_pct` (solo standout) reads as `"clear"`. The renderer picks one of three deterministic copy variants per `(category, narrative)` via a small FNV-1a hash over `match.id + category`. It then walks the bucket forward from the seeded index until it finds a variant whose `{token}` placeholders all have non-empty values in the interpolation context — so a `{top_victim}`-flavored line is skipped on a legacy match without kill data, while still producing byte-identical output for matches where the data is present.
+
+`value_format` drives `formatHighlightValue()` in `js/app.js` — `"damage"`/`"count"`/`"score"`/`"distance"` are locale-formatted integers, `"ratio"` and `"kd"` use two decimals, `"percent"`/`"accuracy"` render as `(value * 100).toFixed(1) + '%'`. The `"kd"` format is functionally identical to `"ratio"` at the value-formatting layer; the distinct enum value tells `formatHighlightBreakdown()` to render `{kills}K / {deaths}D` (with `(perfect)` when `deaths == 0`).
+
+`value_breakdown` is always present in v2 and carries category-specific contextual data (top victim/tormentor for narrative cards; raw kills/deaths/shots/etc. for context cards; directional rivalry split for Frenemies; band + path coverage for Roadrunner; absolute seconds for Locksmith). The renderer surfaces it as a sub-line below the headline value via `formatHighlightBreakdown()`. Per-key shape for each category lives in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) §5 `highlights`.
+
+Renderer + section UI live in [js/app.js](js/app.js) (`renderHighlights()`, `formatHighlightBreakdown()`, `HIGHLIGHT_COPY` template dict, `HIGHLIGHT_UNITS` per-category unit-suffix map) and [css/vtstats-theme.css](css/vtstats-theme.css) (`.vt-highlights-card` + `.vt-highlight-tile` blocks, including the `.vt-highlight-tile-breakdown` rule and the `.vt-highlight-tile-value-unit` sub-span). Section markup is in [index.html](index.html) at `#section-highlights`, immediately above `#section-faction` inside `#tab-overview`. The card grid uses Bootstrap `row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3` so 12 cards lay out 6×2 on xl, 4×3 on lg, 3×4 on md, 2×6 on sm, 1×12 on xs. xl tiles drop the inline flavor copy (Bootstrap tooltip carries it) but keep the breakdown line visible — clamped to a single line with ellipsis at xl, wrapping below.
+
+Headline values render with a category-specific unit suffix from `HIGHLIGHT_UNITS` in `js/app.js` (`"dmg"`, `"kills"`, `"shots"`, `"K/D"`, `"mvnt"`, `"snipes"`). The unit is a small muted sub-span beside the big mono number; cards whose `value_format` already self-labels (`sharpshooter` / `the_locksmith` show `"%"`) and `crate_pod_goblin` (breakdown line supplies the context) render bare. Adding a new card requires a one-line edit to `HIGHLIGHT_UNITS` — units are renderer-side only, not part of the JSON payload, so no pipeline rerun is needed when iterating on labels.
+
+Pre-`meta.schema_version=2` matches have no `highlights` key — the renderer hides the section in that case (no crash, no placeholder tiles). Full per-card formula table, gates, tiebreakers, and `value_breakdown` keys live in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) §5 `highlights` and the matching glossary entries in §6.
 
 ### All Matches Aggregate (in-memory, built from `match_contributions.json`)
 
