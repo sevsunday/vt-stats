@@ -2059,6 +2059,12 @@
     // Banner always from unfiltered data
     renderBanner(currentData.match);
 
+    // Match Highlights — match-global, always-unfiltered (read directly
+    // from currentData, not the filtered `data` view). Pre-computed in
+    // scripts/process_stats.py; this renderer is pure formatting.
+    renderHighlights(currentData.highlights, currentData.match);
+    ensureTooltips(document.getElementById('section-highlights'));
+
     // Overview: profile card vs faction scoreboard
     const $profile = document.getElementById('section-player-profile');
     const $faction = document.getElementById('section-faction');
@@ -2639,6 +2645,460 @@
   // Map name + date no longer live here — they've moved into the rich match
   // picker trigger button (updateMatchPickerTriggers) which sits at the start
   // of the hero flex row.
+  // ===========================================================================
+  // Match Highlights — fixed-slate award catalog (12 cards, always-on).
+  // Data comes from match_data.highlights (built by scripts/process_stats.py
+  // compute_highlights). Cards whose data gates failed are simply absent.
+  // Match-global + always-unfiltered: filterState is intentionally ignored.
+  // ===========================================================================
+
+  // Three short variants per (category, narrative) bucket. Selected
+  // deterministically (seeded by match id + category) so the same match
+  // always shows the same line.
+  const HIGHLIGHT_COPY = {
+    the_bully: {
+      dominant: [
+        '{name} ran the table on {top_victim} — {top_victim_damage} of {value} PvP.',
+        '{name} bullied the lobby into next week — most on {top_victim}.',
+        '{name} dropped {value} PvP dmg and nobody was close.',
+      ],
+      clear: [
+        '{name} led the field on PvP damage at {value}.',
+        '{name} took the damage crown — most on {top_victim}.',
+        '{name} out-damaged the pack at {value}.',
+      ],
+      close: [
+        '{name} edged the field on PvP damage.',
+        '{name} squeaked out the damage lead.',
+        '{name} barely held the damage crown.',
+      ],
+    },
+    the_grim_reaper: {
+      dominant: [
+        '{name} reaped {value} kills — {top_victim_count} of them on {top_victim}.',
+        '{name} farmed the lobby for {value} kills.',
+        '{name} put a tag on every name in the kill feed.',
+      ],
+      clear: [
+        '{name} led the kill feed with {value}.',
+        '{name} topped the kill chart at {value}.',
+        '{name} closed out {value} kills.',
+      ],
+      close: [
+        '{name} edged the kill race with {value}.',
+        '{name} barely held the kill lead.',
+        '{name} squeaked the kill crown.',
+      ],
+    },
+    bullet_sponge: {
+      dominant: [
+        '{name} ate {value} PvP damage — most of it from {top_tormentor}.',
+        '{name} soaked {value} from humans and kept rolling.',
+        '{name} was a magnet for incoming fire — {top_tormentor} kept finding them.',
+      ],
+      clear: [
+        '{name} took the most PvP damage — {value}.',
+        '{name} caught {value} on the chin.',
+        '{name} absorbed {value} from humans.',
+      ],
+      close: [
+        '{name} just barely took the most punishment.',
+        '{name} edged the field on PvP damage taken.',
+        '{name} narrowly led in damage absorbed.',
+      ],
+    },
+    the_hustler: {
+      dominant: [
+        '{name} traded {kills} kills for {deaths} deaths — efficiency clinic.',
+        '{name} posted a {value} K/D and made it look easy.',
+        '{name} ran {kills}K / {deaths}D — nobody else came close.',
+      ],
+      clear: [
+        '{name} led K/D at {value} ({kills}/{deaths}).',
+        '{name} closed out the best trade ratio at {value}.',
+        '{name} topped K/D at {value}.',
+      ],
+      close: [
+        '{name} edged the K/D lead at {value}.',
+        '{name} squeaked the best trade ratio.',
+        '{name} barely held the top K/D.',
+      ],
+    },
+    sharpshooter: {
+      dominant: [
+        '{name} hit {shots_hit} of {shots_fired} shots — a laser.',
+        '{name} sniped at {value} accuracy.',
+        '{name} aimed like the rest were spraying.',
+      ],
+      clear: [
+        '{name} led accuracy at {value} ({shots_hit}/{shots_fired}).',
+        '{name} put rounds on target at {value}.',
+        '{name} topped the accuracy table.',
+      ],
+      close: [
+        '{name} edged the accuracy lead.',
+        '{name} barely won the accuracy crown.',
+        '{name} squeaked top accuracy.',
+      ],
+    },
+    gunner: {
+      dominant: [
+        '{name} sent {value} rounds downrange — and kept going.',
+        '{name} held the trigger for {value} shots.',
+        '{name} could not stop firing — {value} shots.',
+      ],
+      clear: [
+        '{name} fired the most rounds — {value}.',
+        '{name} put {value} rounds in the air.',
+        '{name} led shots fired at {value}.',
+      ],
+      close: [
+        '{name} edged the trigger-pull race.',
+        '{name} barely fired more than the next.',
+        '{name} squeaked the shots-fired lead.',
+      ],
+    },
+    puppeteer: {
+      dominant: [
+        '{name}\u2019s scavs and turrets did {value} damage on their own.',
+        '{name} let the AI cook — {value} asset damage.',
+        '{name} commanded a small army for {value} damage.',
+      ],
+      clear: [
+        '{name} got {value} damage from owned assets.',
+        '{name} pulled strings for {value} asset damage.',
+        '{name} had the busiest turrets and scavs.',
+      ],
+      close: [
+        '{name} edged the asset-damage race.',
+        '{name} barely led on owned-AI damage.',
+        '{name} squeaked the puppeteer crown.',
+      ],
+    },
+    frenemies: {
+      dominant: [
+        '{a} and {b} would not stop trading shots — {value} dmg between them.',
+        '{a} and {b} ran their own private war.',
+        '{a} vs {b} accounted for the loudest pocket of the lobby.',
+      ],
+      clear: [
+        '{a} and {b} traded {value} damage.',
+        '{a} and {b} kept finding each other for {value} damage.',
+        '{a} vs {b} was the headline matchup.',
+      ],
+      close: [
+        '{a} and {b} kept brushing past each other for {value} damage.',
+        '{a} vs {b} stayed neck-and-neck.',
+        '{a} and {b} matched blow for blow.',
+      ],
+    },
+    roadrunner: {
+      dominant: [
+        '{name} covered the map — activity score {value}.',
+        '{name} would not stand still. Score: {value}.',
+        '{name} roamed everywhere — {value}/100 activity.',
+      ],
+      clear: [
+        '{name} led the map in activity at {value}/100.',
+        '{name} clocked the most ground covered.',
+        '{name} stayed on the move all match.',
+      ],
+      close: [
+        '{name} edged the activity board.',
+        '{name} barely led on map coverage.',
+        '{name} squeaked the most-active crown.',
+      ],
+    },
+    crate_pod_goblin: {
+      dominant: [
+        '{name} scooped {pickups} crates and trashed {destructions} more.',
+        '{name} ran the powerup economy — {pickups} pickups, {destructions} denials.',
+        '{name} would not let a crate live — {pickups}/{destructions}.',
+      ],
+      clear: [
+        '{name} grabbed {pickups} crates and shot {destructions} more.',
+        '{name} owned the powerup map: {pickups} pickups + {destructions} kills.',
+        '{name} ran the crate route ({pickups}+{destructions}).',
+      ],
+      close: [
+        '{name} edged the crate hustle ({pickups}+{destructions}).',
+        '{name} barely led the powerup tally.',
+        '{name} squeaked the crate crown.',
+      ],
+    },
+    chris_kyle: {
+      dominant: [
+        '{name} put a scope on everyone — {value} pilot snipes ({top_victim_count} on {top_victim}).',
+        '{name} sniped {value} pilots out of their seats.',
+        '{name} hunted cockpits all match — {value} snipes.',
+      ],
+      clear: [
+        '{name} led pilot snipes at {value}.',
+        '{name} popped {value} pilots clean.',
+        '{name} took {value} cockpit kills.',
+      ],
+      close: [
+        '{name} edged the snipe race at {value}.',
+        '{name} squeaked the snipe crown.',
+        '{name} barely led pilot snipes.',
+      ],
+    },
+    the_locksmith: {
+      dominant: [
+        '{name} held T like a vice — ~{seconds_locked}s of {total_seconds}s.',
+        '{name} stayed locked on for {value} of the match.',
+        '{name} barely let go of T — {value} target lock.',
+      ],
+      clear: [
+        '{name} held target lock {value} of the time.',
+        '{name} led T-key usage at {value}.',
+        '{name} kept the reticle on enemies for {value}.',
+      ],
+      close: [
+        '{name} edged the T-key board at {value}.',
+        '{name} squeaked the locksmith title.',
+        '{name} barely led on target lock.',
+      ],
+    },
+  };
+
+  // Soft FNV-1a-ish hash — small, deterministic, no need for crypto.
+  // Used to pick a copy variant per (matchId, category) so the same match
+  // always shows the same line, but two matches don't echo each other.
+  function _hlHash(str) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h >>> 0;
+  }
+
+  function formatHighlightValue(value, format) {
+    if (value == null) return '—';
+    switch (format) {
+      case 'damage':   return Math.round(value).toLocaleString();
+      case 'distance': return Math.round(value).toLocaleString();
+      case 'count':    return Math.round(value).toLocaleString();
+      case 'score':    return Math.round(value).toLocaleString();
+      case 'ratio':    return Number(value).toFixed(2);
+      case 'kd':       return Number(value).toFixed(2);
+      case 'percent':
+      case 'accuracy': return (Number(value) * 100).toFixed(1) + '%';
+      default:         return String(value);
+    }
+  }
+
+  // Per-category unit suffix appended to the headline value (and runner-up).
+  // Empty string for cards whose value_format already self-labels (`accuracy`
+  // / `percent` produce e.g. "27.4%") or whose breakdown line already supplies
+  // the context (Crate/Pod Goblin shows "X grabbed · Y denied"). Pure
+  // presentation; not part of the JSON payload. Adding a new card requires
+  // adding an entry here.
+  const HIGHLIGHT_UNITS = {
+    the_bully:        'dmg',
+    the_grim_reaper:  'kills',
+    bullet_sponge:    'dmg',
+    the_hustler:      'K/D',
+    sharpshooter:     '',
+    gunner:           'shots',
+    puppeteer:        'dmg',
+    frenemies:        'dmg',
+    roadrunner:       'mvnt',
+    crate_pod_goblin: '',
+    chris_kyle:       'snipes',
+    the_locksmith:    '',
+  };
+
+  // Schema v2 breakdown line: pre-computed per-category context that gives the
+  // headline number meaning ("4.00" -> "12K / 3D (4.00)", "27.4%" -> "482 / 1,758").
+  // Expects card.value_breakdown to carry the keys produced by compute_highlights()
+  // in scripts/process_stats.py. Returns '' when no breakdown data is available
+  // so the line is skipped cleanly.
+  function formatHighlightBreakdown(card) {
+    const b = card.value_breakdown || {};
+    switch (card.category) {
+      case 'the_bully':
+        return b.top_victim
+          ? `most on ${esc(b.top_victim)}: ${fmt(b.top_victim_damage)} dmg`
+          : '';
+      case 'the_grim_reaper':
+        return b.top_victim
+          ? `${b.top_victim_count} kills on ${esc(b.top_victim)}`
+          : '';
+      case 'bullet_sponge':
+        return b.top_tormentor
+          ? `most from ${esc(b.top_tormentor)}: ${fmt(b.top_tormentor_damage)} dmg`
+          : '';
+      case 'the_hustler': {
+        if (b.kills == null && b.deaths == null) return '';
+        const ratio = (b.deaths === 0 && b.kills > 0) ? 'perfect' : Number(card.value).toFixed(2);
+        return `${b.kills}K / ${b.deaths}D (${ratio})`;
+      }
+      case 'sharpshooter':
+        if (b.shots_hit == null || b.shots_fired == null) return '';
+        return `${fmt(b.shots_hit)} / ${fmt(b.shots_fired)} shots`;
+      case 'gunner':
+        if (b.accuracy == null) return '';
+        return `@ ${(Number(b.accuracy) * 100).toFixed(1)}% accuracy`;
+      case 'puppeteer':
+        if (b.personal_dealt == null) return '';
+        return `vs ${fmt(b.personal_dealt)} personal dmg`;
+      case 'frenemies':
+        if (b.a_to_b == null || b.b_to_a == null) return '';
+        return `${esc(card.winner.a)} ${fmt(b.a_to_b)} \u2194 ${esc(card.winner.b)} ${fmt(b.b_to_a)}`;
+      case 'roadrunner': {
+        const parts = [];
+        if (b.movement_band) parts.push(esc(b.movement_band));
+        if (b.path_length != null) parts.push(`${fmt(b.path_length)}u path`);
+        return parts.join(' \u00b7 ');
+      }
+      case 'crate_pod_goblin':
+        if (b.pickups == null && b.destructions == null) return '';
+        return `${fmt(b.pickups || 0)} grabbed \u00b7 ${fmt(b.destructions || 0)} denied`;
+      case 'chris_kyle':
+        return b.top_victim
+          ? `${b.top_victim_count} snipes on ${esc(b.top_victim)}`
+          : '';
+      case 'the_locksmith':
+        if (b.seconds_locked == null || b.total_seconds == null) return '';
+        return `~${fmt(b.seconds_locked)}s of ${fmt(b.total_seconds)}s`;
+      default:
+        return '';
+    }
+  }
+
+  function _hlFormatDeltaPct(delta) {
+    if (delta == null) return '';
+    return Math.round(delta * 100) + '%';
+  }
+
+  function _hlInterp(template, ctx) {
+    return template.replace(/\{(\w+)\}/g, (_, key) => {
+      const v = ctx[key];
+      return v == null ? '' : String(v);
+    });
+  }
+
+  // True when every {token} in `template` resolves to a non-empty value in ctx.
+  // Used by _hlPickCopy below to skip templates that would interpolate empties
+  // (e.g. a `{top_victim}`-flavored line on a legacy match with no kill data).
+  function _hlTemplateSatisfied(template, ctx) {
+    const matches = template.match(/\{(\w+)\}/g) || [];
+    for (const m of matches) {
+      const key = m.slice(1, -1);
+      const v = ctx[key];
+      if (v === '' || v == null) return false;
+    }
+    return true;
+  }
+
+  function _hlPickCopy(category, narrative, matchId, ctx) {
+    const bucket = (HIGHLIGHT_COPY[category] || {})[narrative]
+      || (HIGHLIGHT_COPY[category] || {})['clear']
+      || [];
+    if (!bucket.length) return '';
+    const seed = _hlHash(`${matchId || ''}|${category}`);
+    // Prefer the deterministic pick when its tokens are all satisfied; otherwise
+    // walk the bucket from the seeded index forward and use the first viable
+    // variant. As a last resort, return the original deterministic pick (will
+    // render with empty interp slots) so we never emit nothing.
+    const start = seed % bucket.length;
+    for (let i = 0; i < bucket.length; i++) {
+      const candidate = bucket[(start + i) % bucket.length];
+      if (_hlTemplateSatisfied(candidate, ctx)) return candidate;
+    }
+    return bucket[start];
+  }
+
+  function renderHighlights(highlights, matchInfo) {
+    const card = document.getElementById('section-highlights');
+    const grid = document.getElementById('highlights-grid');
+    if (!card || !grid) return;
+
+    const cards = (highlights && Array.isArray(highlights.cards)) ? highlights.cards : [];
+    if (!cards.length) {
+      card.classList.add('d-none');
+      grid.innerHTML = '';
+      return;
+    }
+    card.classList.remove('d-none');
+
+    const matchId = (matchInfo && matchInfo.id) || '';
+
+    grid.innerHTML = cards.map(c => {
+      const isPair = c.winner && c.winner.type === 'pair';
+      const winnerName = isPair
+        ? `${esc(c.winner.a)} <span class="vt-highlight-tile-vs">vs</span> ${esc(c.winner.b)}`
+        : esc(c.winner && c.winner.name || '—');
+      const valueStr = formatHighlightValue(c.value, c.value_format);
+      const breakdown = c.value_breakdown || {};
+      // Interpolation context: every documented token from the v2 spec, with
+      // sensible fallbacks ('' for missing fields). Numeric fields go through
+      // fmt() so locale-grouped digits render the same in copy and breakdown.
+      const ctx = {
+        name: (c.winner && c.winner.name) || '',
+        a: (c.winner && c.winner.a) || '',
+        b: (c.winner && c.winner.b) || '',
+        value: valueStr,
+        delta_pct: _hlFormatDeltaPct(c.delta_pct),
+        top_victim: breakdown.top_victim || '',
+        top_victim_damage: breakdown.top_victim_damage != null ? fmt(breakdown.top_victim_damage) : '',
+        top_victim_count: breakdown.top_victim_count != null ? breakdown.top_victim_count : '',
+        top_tormentor: breakdown.top_tormentor || '',
+        top_tormentor_damage: breakdown.top_tormentor_damage != null ? fmt(breakdown.top_tormentor_damage) : '',
+        kills: breakdown.kills != null ? breakdown.kills : '',
+        deaths: breakdown.deaths != null ? breakdown.deaths : '',
+        shots_hit: breakdown.shots_hit != null ? fmt(breakdown.shots_hit) : '',
+        shots_fired: breakdown.shots_fired != null ? fmt(breakdown.shots_fired) : '',
+        accuracy: breakdown.accuracy != null ? (Number(breakdown.accuracy) * 100).toFixed(1) + '%' : '',
+        personal_dealt: breakdown.personal_dealt != null ? fmt(breakdown.personal_dealt) : '',
+        a_to_b: breakdown.a_to_b != null ? fmt(breakdown.a_to_b) : '',
+        b_to_a: breakdown.b_to_a != null ? fmt(breakdown.b_to_a) : '',
+        movement_band: breakdown.movement_band || '',
+        path_length: breakdown.path_length != null ? fmt(breakdown.path_length) : '',
+        seconds_locked: breakdown.seconds_locked != null ? breakdown.seconds_locked : '',
+        total_seconds: breakdown.total_seconds != null ? breakdown.total_seconds : '',
+        pickups: breakdown.pickups != null ? breakdown.pickups : '',
+        destructions: breakdown.destructions != null ? breakdown.destructions : '',
+      };
+      const flavor = _hlInterp(_hlPickCopy(c.category, c.narrative, matchId, ctx), ctx);
+      const breakdownLine = formatHighlightBreakdown(c);
+      // Per-category unit suffix (presentation only). Empty string falls back
+      // to bare value display for cards whose value_format already self-labels.
+      const unit = HIGHLIGHT_UNITS[c.category] || '';
+      const unitHtml = unit ? ` <span class="vt-highlight-tile-value-unit">${esc(unit)}</span>` : '';
+      const runner = c.runner_up;
+      let runnerLine = '';
+      if (runner && runner.name) {
+        const runnerNum = formatHighlightValue(runner.value, c.value_format);
+        const runnerStr = unit ? `${runnerNum} ${unit}` : runnerNum;
+        runnerLine = `<div class="vt-highlight-tile-runner">vs ${esc(runner.name)} <span class="vt-highlight-tile-runner-val">${esc(runnerStr)}</span></div>`;
+      } else {
+        runnerLine = '<div class="vt-highlight-tile-runner vt-highlight-tile-runner--solo">solo standout</div>';
+      }
+      const dominantClass = c.narrative === 'dominant' ? ' vt-highlight-tile--dominant' : '';
+      const tipAttr = flavor
+        ? ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(flavor)}"`
+        : '';
+      return `
+        <div class="col" data-vt-stagger-child>
+          <div class="vt-highlight-tile${dominantClass}"${tipAttr} data-highlight-category="${esc(c.category)}">
+            <div class="vt-highlight-tile-head">
+              <i class="bi ${esc(c.icon || 'bi-trophy-fill')} vt-highlight-tile-icon"></i>
+              <span class="vt-highlight-tile-label">${esc(c.label)}</span>
+            </div>
+            <div class="vt-highlight-tile-winner">${winnerName}</div>
+            <div class="vt-highlight-tile-value">${valueStr}${unitHtml}</div>
+            ${breakdownLine ? `<div class="vt-highlight-tile-breakdown">${breakdownLine}</div>` : ''}
+            ${flavor ? `<div class="vt-highlight-tile-copy">${esc(flavor)}</div>` : ''}
+            ${runnerLine}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
   function renderBanner(info) {
     const m = Math.floor(info.duration_sec / 60);
     const s = Math.floor(info.duration_sec % 60);

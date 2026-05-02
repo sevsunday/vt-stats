@@ -4,22 +4,22 @@ overview: Add a per-match "Highlights" card to the Overview tab that surfaces a 
 todos:
   - id: pipeline-compute
     content: Add compute_highlights() in scripts/process_stats.py with helpers and the 12-card always-on catalog. Each card emits when its data gates pass, otherwise it's omitted. Wire into process_match() and bump meta.schema_version to 2.
-    status: pending
+    status: completed
   - id: ui-card
     content: "Add #section-highlights card to index.html above #section-faction; implement renderHighlights() in js/app.js with per-category formatters, narrative-driven copy templates, pair handling (Frenemies), and VTFx stagger hook."
-    status: pending
+    status: completed
   - id: styles
     content: Extend css/vtstats-theme.css with .vt-highlights-card and .vt-highlight-tile styles using --kb-* tokens; add .vt-highlight-tile--dominant accent for high delta_pct cards.
-    status: pending
+    status: completed
   - id: filter-contract
     content: Add highlights row to .cursor/rules/filter-contract.mdc reference table marking it always-unfiltered and match-global.
-    status: pending
+    status: completed
   - id: docs
     content: Update docs/DATA_DICTIONARY.md (§5 + §6), DEVELOPER_GUIDE.md, .cursor/rules/data-schema.mdc, .cursor/rules/project-overview.mdc, and AGENTS.md with the highlights block, schema-version bump, and award catalog.
-    status: pending
+    status: completed
   - id: regenerate
     content: Run scripts/process_stats.py to regenerate all per-match JSONs with the new highlights block; spot-check 3-4 representative matches (high-action VSR, snipe-heavy, pickup-heavy, low-roster) and verify card selection looks sane.
-    status: pending
+    status: completed
 isProject: false
 ---
 

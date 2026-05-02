@@ -689,7 +689,7 @@ Each match file has these top-level keys:
 | `config_mod` | `string` | Server configuration mod |
 | `snipe_count` | `number` | Number of UnitSniped events |
 | `teams` | `object` | `"1"` and `"2"` → arrays of roster entries |
-| `schema_version` | `number` | Per-match output schema version (Phase 3 = `1`). Absence indicates legacy data written before this PR. Bumped only when an output-shape-breaking change ships. |
+| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. Absence indicates legacy data written before this PR. Bumped only when an output-shape-breaking change ships. |
 | `has_position_data` | `boolean` | `true` iff the session contained `UpdateTick` events. Mirrored from `positioning.has_position_data`. Drives Positioning-tab UI gating. |
 | `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed. Mirrored from `positioning.has_target_lock_data`. Distinguishes "no T-key data" (pre-schema or never pressed) from "0% lock" in Career Radar tooltips. |
 | `has_pickup_data` | `boolean` | Phase 3. `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. |
@@ -1076,6 +1076,74 @@ Reading: VTrider spent ~74% of the match outside their base, reached ~97% of the
 
 Contrast with F9bomber on the same match: `time_in_base_pct = 0.469`, `max_dist = 1006.1`, `path_length_per_sec = 18.62` → `term_a = 0.266`, `term_b = 0.287`, `term_c = 0.163` → score `72` → **Mobile**. Same map, same normalizers — the lower share of time outside base alone drops them a full band.
 
+#### `highlights` (Phase 3, schema_version 2)
+
+Per-match award catalog. A fixed slate of **12 always-on cards** ("The Bully", "Grim Reaper", "Bullet Sponge", "The Hustler", "Sharpshooter", "Gunner", "Puppeteer", "Frenemies", "Roadrunner", "Crate/Pod Goblin", "Chris Kyle", "The Locksmith"). Each card is emitted unconditionally as long as its data gate passes; cards whose underlying data is unavailable (positioning / pickups / T-key gates, missing snipes, etc.) are simply omitted. Pre-computed in `scripts/process_stats.py` `compute_highlights()` from already-built per-match blocks (`leaderboard`, `top_rivalries`, `pickups`, `powerup_destructions`, `snipes`, `positioning`). **Match-global, always-unfiltered** — the dashboard reads `currentData.highlights` and never narrows under `filterState`.
+
+Top-level shape:
+
+| Field | Type | Description |
+|---|---|---|
+| `schema_version` | `number` | Inner highlights schema version (independent of per-match `meta.schema_version`). `1` was the initial bare-scalar shape; **`2`** adds a per-card `value_breakdown` payload (always present) and pivots `the_bully.value` to `personal.pvp_dealt`. `bullet_sponge.value` continues to rank on total `personal.received` (humans + PvE) — the Bully/Sponge asymmetry is intentional. Bumped when card definitions, payload shape, or narrative bucketing change in a way that breaks the renderer. |
+| `cards` | `array` | Cards in the canonical render order (see catalog below). May be shorter than 12 — failed gates simply drop entries. Empty arrays are valid; the UI hides the section. |
+
+Each entry in `cards[]`:
+
+| Field | Type | Description |
+|---|---|---|
+| `category` | `string` | Stable id (snake_case). One of `the_bully`, `the_grim_reaper`, `bullet_sponge`, `the_hustler`, `sharpshooter`, `gunner`, `puppeteer`, `frenemies`, `roadrunner`, `crate_pod_goblin`, `chris_kyle`, `the_locksmith`. |
+| `label` | `string` | Display label (e.g. `"The Bully"`). Always matches the catalog row below. |
+| `icon` | `string` | Bootstrap-icons class (`bi-emoji-angry`, `bi-trophy-fill`, etc.). |
+| `winner` | `object` | `{ type: "player", name, steam64 }` for normal cards; `{ type: "pair", a, b }` for `frenemies`. `steam64` is the leaderboard Steam64 string when available, `null` otherwise. |
+| `value` | `number` | Card-specific metric (rounded by the pipeline). Format depends on `value_format`. |
+| `value_format` | `string` | Renderer hint: `"damage"`, `"count"`, `"score"`, `"ratio"`, `"kd"`, `"percent"`, `"accuracy"`, `"distance"`. Drives [`formatHighlightValue()`](../js/app.js) — locale-formatted integer for `damage`/`count`/`score`/`distance`; two decimals for `ratio` and `kd`; `(value * 100).toFixed(1) + '%'` for `percent`/`accuracy`. `kd` is functionally identical to `ratio` at the value-formatting layer; the separate enum value tells the renderer to render the breakdown line as `{kills}K / {deaths}D` (with `(perfect)` instead of a number when `deaths == 0`). |
+| `value_breakdown` | `object` | **Schema v2: present on every card.** Card-specific contextual payload that gives the headline `value` meaning. The renderer surfaces these as a sub-line below the value (and a few keys also feed copy-template tokens). Per-category keys documented below. |
+| `runner_up` | `object \| null` | `{ name, value }` — runner-up's display name and metric (already rounded to match the winner's format). For pair cards (`frenemies`) the `name` is `"A vs B"`, no Steam64. `null` when no runner-up was eligible (rare; only one player passed the gate). |
+| `delta_pct` | `number \| null` | `(winner_value − runner_up_value) / runner_up_value`, rounded to 3 decimals. `null` when there is no runner-up or the runner-up value is non-positive. |
+| `narrative` | `string` | Discrete bucket keyed off `delta_pct`: `"dominant"` (`delta_pct >= 0.50`), `"clear"` (`delta_pct >= 0.15`), `"close"` otherwise. `null` `delta_pct` (solo standout) reads as `"clear"`. The renderer picks one of three deterministic copy variants per (category, narrative) bucket — same match always shows the same line. The renderer skips templates whose `{token}` placeholders would interpolate to empty (e.g. a `{top_victim}`-flavored line on a legacy match with no kill data) and walks the bucket to the next viable variant. |
+
+##### Catalog (canonical render order, gates, tiebreakers)
+
+| # | Category / Label | Icon | Source / formula | Floor / gate | Tiebreak |
+|---|---|---|---|---|---|
+| 1 | `the_bully` — The Bully | `bi-emoji-angry` | `max leaderboard[].personal.pvp_dealt` (player-on-player only — PvE excluded) | — | higher `personal.dealt` total, then `kills` |
+| 2 | `the_grim_reaper` — The Grim Reaper | `bi-person-x-fill` | `max leaderboard[].kills` | `kills > 0` | higher `kd_ratio`, then higher `dealt` |
+| 3 | `bullet_sponge` — Bullet Sponge | `bi-shield-fill` | `max leaderboard[].personal.received` (total damage absorbed — humans **and** AI / turrets / scavs / mines / world). Asymmetric to The Bully on purpose: sponge soaks everything, bullying is humans-only. | — | higher `pvp_received` (so a true tie resolves toward whoever took more of their damage from real opponents) |
+| 4 | `the_hustler` — The Hustler | `bi-graph-up-arrow` | `max kd_ratio` (kills/deaths trade) | `kills >= 3` | higher `kills`. 0-death runs map to `kills` as a synthetic-high ratio for sort purposes; renderer surfaces "(perfect)" instead of a numeric K/D in that case. |
+| 5 | `sharpshooter` — Sharpshooter | `bi-bullseye` | `max leaderboard[].personal.accuracy` | `shots_fired >= 100` | higher `shots_hit` |
+| 6 | `gunner` — Gunner | `bi-lightning-charge` | `max leaderboard[].personal.shots_fired` | — | higher `accuracy` |
+| 7 | `puppeteer` — Puppeteer | `bi-diagram-3` | `max leaderboard[].assets.dealt` (turrets / scavs / deployables owned by player) | `assets.dealt > 0` | higher `personal.dealt` |
+| 8 | `frenemies` — Frenemies *(pair card)* | `bi-people-fill` | `top_rivalries[0]` — both names; value is `total` mutual damage | `top_rivalries.length > 0 && total > 0` | — |
+| 9 | `roadrunner` — Roadrunner | `bi-rocket-takeoff` | `max positioning.players[].metrics.activity_score` | `match.has_position_data && players[*].metrics.activity_score != null` | higher `path_length` |
+| 10 | `crate_pod_goblin` — Crate/Pod Goblin | `bi-box-seam` | `max(pickups.by_player[name].count + powerup_destructions.by_player[name].count)` | combined total `> 0` | higher pickups count |
+| 11 | `chris_kyle` — Chris Kyle | `bi-crosshair` | `max snipes.by_player[].count` | `snipes.totals.total > 0` | higher `kills` |
+| 12 | `the_locksmith` — The Locksmith | `bi-lock-fill` | `max positioning.players[].metrics.target_lock_pct` | `match.has_target_lock_data && target_lock_pct >= 0.10` | longer presence (`sample_count`) |
+
+##### `value_breakdown` keys per category (schema v2)
+
+| Category | Keys | Source / meaning |
+|---|---|---|
+| `the_bully` | `top_victim` (string \| null), `top_victim_damage` (number) | Argmax over `leaderboard[winner].hit_targets[*].damage`. `null` victim when the winner has no recorded `hit_targets` (legacy / damage-less match). |
+| `the_grim_reaper` | `top_victim` (string \| null), `top_victim_count` (int) | Argmax over `kills.kill_rivalry_matrix[winner][*]`. |
+| `bullet_sponge` | `top_tormentor` (string \| null), `top_tormentor_damage` (number) | Column scan: argmax shooter over `rivalry_matrix[*][winner]`. |
+| `the_hustler` | `kills` (int), `deaths` (int) | Pulled from the leaderboard row. Renderer shows `(perfect)` instead of a numeric ratio when `deaths == 0`. |
+| `sharpshooter` | `shots_hit` (int), `shots_fired` (int) | Pulled from `leaderboard[winner].personal`. |
+| `gunner` | `accuracy` (number, 0-1, 3 dp) | Pulled from `leaderboard[winner].personal.accuracy`. |
+| `puppeteer` | `personal_dealt` (number) | Pulled from `leaderboard[winner].personal.dealt` for contrast against `assets.dealt`. |
+| `frenemies` | `a_to_b` (number), `b_to_a` (number) | Directional split from `top_rivalries[0]`. |
+| `roadrunner` | `movement_band` (string), `path_length` (int) | Pulled from `positioning.players[winner].metrics`. `path_length` rounded to whole units. |
+| `crate_pod_goblin` | `pickups` (int), `destructions` (int) | The two halves of the combined total. |
+| `chris_kyle` | `top_victim` (string \| null), `top_victim_count` (int) | Counter over `snipes.feed[]` filtered to `sniper == winner.name`. May be a `Team N` placeholder if the snipe targeted an unmapped victim. |
+| `the_locksmith` | `seconds_locked` (int), `total_seconds` (int) | `target_lock_pct * sample_count` and `sample_count` directly. |
+
+##### Renderer contract
+
+- The dashboard reads `currentData.highlights` (unfiltered) — **never** the narrowed `data` view from `getFilteredData()`. Same passthrough contract as `kills.by_vehicle` and the `*.totals` blocks.
+- Pre-`schema_version=2` matches have no `highlights` key. The renderer hides the section in that case (no crash, no placeholder tiles).
+- The card grid uses Bootstrap `row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3`. With 12 cards this lays out 6×2 on xl, 4×3 on lg, 3×4 on md, 2×6 on sm, single-column on xs.
+- Copy templates live in [`js/app.js`](../js/app.js) `HIGHLIGHT_COPY[category][narrative] = string[]` and pick a deterministic variant via a small FNV-1a hash over `match.id + category` so re-renders are byte-identical and two matches don't echo each other.
+- **Headline unit suffixes (presentation only).** The renderer appends a category-specific unit label to each headline value (and the runner-up value) from a renderer-side `HIGHLIGHT_UNITS` map in `js/app.js`. Current map: `the_bully` / `bullet_sponge` / `puppeteer` / `frenemies` -> `"dmg"`, `the_grim_reaper` -> `"kills"`, `the_hustler` -> `"K/D"`, `gunner` -> `"shots"`, `roadrunner` -> `"mvnt"` (project shorthand for "Movemint" / activity index), `chris_kyle` -> `"snipes"`. Cards whose `value_format` is `accuracy` / `percent` (`sharpshooter`, `the_locksmith`) and `crate_pod_goblin` (whose breakdown line already supplies "X grabbed · Y denied" context) render bare. The unit is rendered as a small muted sub-span beside the big mono number — it is presentation only and not part of the JSON payload.
+
 ### `match_contributions.json` + In-Memory Aggregate
 
 The pipeline emits `data/processed/match_contributions.json` — a single dict keyed by `<match_id>.json` whose values are slim per-match contributions produced by `_extract_contribution()` in `scripts/process_stats.py`. The browser fetches this file once per session, caches it on `window.__vtContributions`, and rebuilds the cross-match aggregate on demand via `VTAggregate.build(contributions, fileIds)` in [js/all-matches-aggregator.js](../js/all-matches-aggregator.js) over whatever `fileIds` subset the active picker filter resolves to.
@@ -1213,6 +1281,21 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Kill Rivalry** | How many times one player killed another | `UnitDestroyed` where both `killer > 0` and `victim > 0` | Count grouped by killer → victim pair |
 | **Kills** | Times a player destroyed a unit | `UnitDestroyed` where `killer` = player Steam64 | Count per player |
 | **Map** | The BZCC map played | `StatHeader.map` | Direct from header |
+| **Match Highlights** | Per-match award catalog rendered above the Faction Scoreboard. A fixed 12-card slate (The Bully, Grim Reaper, Bullet Sponge, Hustler, Sharpshooter, Gunner, Puppeteer, Frenemies, Roadrunner, Crate/Pod Goblin, Chris Kyle, Locksmith). Cards self-omit when their data gates fail (positioning / pickups / T-key gates, no snipes, etc.) — the renderer reflows around the gap | Per-match `highlights.cards[]` produced by `compute_highlights()` in `scripts/process_stats.py` | Sourced from already-built per-match blocks (`leaderboard`, `top_rivalries`, `pickups`, `powerup_destructions`, `snipes`, `positioning`). Match-global, always-unfiltered (read directly from `currentData.highlights`, not the filtered view). New top-level field added at `meta.schema_version = 2`; pre-v2 matches have no block and the section is hidden. See §5 `highlights` and the canonical card catalog there |
+| **The Bully (Highlight)** | Player who dealt the most player-on-player damage in the match (PvE excluded) | `leaderboard[].personal.pvp_dealt` | `argmax`. Tiebreak: higher `personal.dealt` total, then `kills`. No floor. **Schema-v2 change:** previously ranked on `personal.dealt`; pivoted to `pvp_dealt` so a future "Domination" card can claim the directional argmax-rivalry story. **Asymmetric to Bullet Sponge on purpose** — Bully is humans-only ("bullying" is a thing you do to people); Sponge is total-incl-PvE. `value_breakdown` carries `top_victim` / `top_victim_damage` from `hit_targets` |
+| **Grim Reaper (Highlight)** | Player with the most kills in the match | `leaderboard[].kills` | `argmax`, floor `kills > 0`. Tiebreak: higher `kd_ratio`, then higher `dealt` |
+| **Bullet Sponge (Highlight)** | Player who absorbed the most damage in the match (humans **and** AI / turrets / scavs / mines / world) | `leaderboard[].personal.received` | `argmax`. Tiebreak: higher `pvp_received` (so a true tie resolves toward whoever took more of their damage from real opponents). **Asymmetric to The Bully on purpose** — Sponge counts everything that hits you; Bully is humans-only. `value_breakdown` carries `top_tormentor` / `top_tormentor_damage` from a `rivalry_matrix` column scan (still PvP-side — names the worst single human shooter, while the delta between value and breakdown surfaces the PvE share implicitly) |
+| **The Hustler (Highlight)** | Best K/D trade ratio with a meaningful sample size | `leaderboard[].kd_ratio` | `argmax`, floor `kills >= 3`. Tiebreak: higher `kills`. 0-death runs use `kills` as a synthetic-high sort key; renderer surfaces "(perfect)" in the breakdown line. `value_format = "kd"`, `value_breakdown = {kills, deaths}` |
+| **Sharpshooter (Highlight)** | Highest shot-to-hit accuracy with a meaningful sample size | `leaderboard[].personal.accuracy` | `argmax`, floor `shots_fired >= 100`. Tiebreak: higher `shots_hit`. `value_breakdown = {shots_hit, shots_fired}` so the breakdown line shows the denominator |
+| **Gunner (Highlight)** | Most rounds put downrange | `leaderboard[].personal.shots_fired` | `argmax`. Tiebreak: higher `accuracy`. `value_breakdown = {accuracy}` so the breakdown line shows hit-rate context |
+| **Puppeteer (Highlight)** | Most damage credited to player-owned AI / structures (turrets, scavs, deployables) | `leaderboard[].assets.dealt` | `argmax`, floor `assets.dealt > 0`. Tiebreak: higher `personal.dealt`. `value_breakdown = {personal_dealt}` for contrast |
+| **Frenemies (Highlight)** | Pair card — the rivalry pair that traded the most mutual damage | `top_rivalries[0]` (`a`, `b`, `total`) | Floor: `top_rivalries.length > 0 && total > 0`. Pair-typed winner (`type: "pair"`); no Steam64 emitted. `value_breakdown = {a_to_b, b_to_a}` so the breakdown line surfaces the directional split |
+| **Roadrunner (Highlight)** | Most active player on the map (Movement Profile) | `positioning.players[].metrics.activity_score` | `argmax`. Gate: `match.has_position_data && score != null`. Tiebreak: higher `path_length`. `value_breakdown = {movement_band, path_length}` so the abstract 0-100 score is paired with its qualitative band + raw path coverage |
+| **Crate/Pod Goblin (Highlight)** | Most powerup activity (pickups + denials) | `pickups.by_player[name].count + powerup_destructions.by_player[name].count` | `argmax` of the combined sum. Gate: combined `> 0` (one half can be zero). Tiebreak: higher pickups count. `value_breakdown = {pickups, destructions}` (promoted to a visible breakdown line in v2 — was xl-tooltip-only in v1) |
+| **Chris Kyle (Highlight)** | Most pilot snipes in the match | `snipes.by_player[].count` | `argmax`. Gate: `snipes.totals.total > 0`. Tiebreak: higher `kills`. `value_breakdown = {top_victim, top_victim_count}` from a counter over `snipes.feed[]` filtered to the winning sniper |
+| **The Locksmith (Highlight)** | Highest T-key (target-lock) usage ratio | `positioning.players[].metrics.target_lock_pct` | `argmax`. Gate: `match.has_target_lock_data && target_lock_pct >= 0.10`. Tiebreak: longer presence (`sample_count`). `value_breakdown = {seconds_locked, total_seconds}` so the percentage is anchored to absolute time |
+| **Highlight Narrative Bucket** | Discrete copy-template bucket per card, keyed off `delta_pct` (winner-vs-runner-up margin) | `highlights.cards[].narrative` | `"dominant"` if `delta_pct >= 0.50` (winner ≥ 1.5× runner-up), `"clear"` if `delta_pct >= 0.15`, `"close"` otherwise. `null` `delta_pct` (solo standout) reads as `"clear"`. Renderer picks one of three deterministic copy variants per `(category, narrative)` via FNV-1a hash over `match.id + category` so re-renders are byte-identical. The renderer skips templates whose `{token}` placeholders would interpolate to empty (e.g. a `{top_victim}`-flavored line on a legacy match with no kill data) and walks the bucket to the next viable variant |
+| **Highlight Breakdown** | Per-card contextual sub-line (schema v2) that gives the headline `value` interpretable units / paired comparisons | `highlights.cards[].value_breakdown` | Per-category dispatch in `formatHighlightBreakdown()` (`js/app.js`). Examples: Hustler "12K / 3D (4.00)", Sharpshooter "482 / 1,758 shots", Bully "most on Viv: 38,420 dmg", Sponge "most from VTrider: 7,500 dmg", Reaper "3 kills on F9bomber", Chris Kyle "4 snipes on Team 2", Puppeteer "vs 364,502 personal dmg", Roadrunner "Aggressive · 24,500u path", Locksmith "~373s of 1,126s". Each breakdown line includes the relevant unit word inline so it self-labels even on a dense xl tile. The breakdown line stays visible at every breakpoint (xl included), unlike the flavor copy which xl hides behind a tooltip |
 | **Matches Played** | Number of matches a player appeared in | Match presence | Count of matches containing this `player_id` |
 | **Momentum (Replay)** | Which faction is dominating the current phase of playback | `timeline.by_faction` rolling 3-bucket sums | Faction ahead by >10% drives the arrow direction; otherwise "Even" or "Quiet" |
 | **Movement Profile / Activity Score** | 0-100 per-player number summarizing how active a player was on the map (0 = stayed at base, 100 = covered most of the map) | `UpdateTick.players[].position` (downsampled to 1 Hz) | `round(100 × (0.5 × (1 − time_in_base_pct) + 0.3 × normalized_max_dist + 0.2 × normalized_path_per_sec))`. Both normalizers are match-relative p95 (computed across all players in the match), so the score self-calibrates per match. Bands: 0-20 Defensive, 21-40 Territorial, 41-60 Balanced, 61-80 Mobile, 81-100 Aggressive. Career aggregate `career_stats[].mean_movement_score` is an average-of-relatives — labeled as an approximation. See `positioning` block in §5 |
