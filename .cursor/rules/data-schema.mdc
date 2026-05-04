@@ -21,7 +21,7 @@ Event types in `StatEvent.event_type` oneof:
 | 4 | `DamageReceived` | tick, victim (uint64 Steam64), team (int32 slot), ordnance_odf, amount |
 | 5 | `UpdateTick` | tick, repeated PlayerState (Steam64, position, speed, health, ammo, odf, has_target) |
 | 6 | `UnitDestroyed` | tick, killer/victim Steam64, killer/victim team slot, killer/victim odf |
-| 7 | `UnitSniped` | tick, shooter/victim Steam64, shooter/victim team slot, shooter/victim odf (Phase 3 added the shooter/victim/odf fields; pre-Phase-3 sessions only carry `tick`) |
+| 7 | `UnitSniped` | tick, shooter/victim Steam64, shooter/victim team slot, shooter/victim odf (Phase 3 added the shooter/victim/odf fields; pre-Phase-3 sessions only carry `tick`). **Collector-bug erratum (Phase 3 through ~2026-05-04):** `shooter` Steam64 was overwritten with the victim's Steam64 and `victim` Steam64 was always `0` (typo at `statsgate/statsgate/src/stat_client.cpp:273`). The pipeline ignores both wire Steam64 fields and slot-derives identity from `shooter_team` / `victim_team` via `header.teamnum_to_s64`; this works under both buggy and fixed collectors. See [`docs/DATA_DICTIONARY.md`](mdc:docs/DATA_DICTIONARY.md#unitsniped) and [`_sniper_investigation/DIAGNOSIS.txt`](mdc:_sniper_investigation/DIAGNOSIS.txt). |
 | 8 | `PickupPowerup` | tick, picker (uint64 Steam64), picker_team, picker_odf, powerup_team, powerup_odf (Phase 3 added) |
 
 ## Player Identity

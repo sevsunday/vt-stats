@@ -212,12 +212,14 @@ A pilot snipe event. Phase 3 enriched the event with shooter / victim context (p
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
-| `shooter` | `uint64` | Steam64 of sniper (0 if not a player; protobuf default for pre-Phase-3 sessions) |
-| `shooter_team` | `uint32` | Sniper's team slot |
+| `shooter` | `uint64` | Steam64 of sniper (collector-bug poisoned through ~2026-05-04 — see erratum) |
+| `shooter_team` | `uint32` | Sniper's team slot — **authoritative for sniper identity** |
 | `shooter_odf` | `string` | Sniper's vehicle ODF |
-| `victim` | `uint64` | Steam64 of pilot victim (0 if not a player) |
-| `victim_team` | `uint32` | Victim's team slot |
+| `victim` | `uint64` | Steam64 of pilot victim (collector-bug always-zero through ~2026-05-04 — see erratum) |
+| `victim_team` | `uint32` | Victim's team slot — **authoritative for victim identity** |
 | `victim_odf` | `string` | Victim's vehicle ODF |
+
+**Collector-bug erratum (Phase 3 through ~2026-05-04).** A copy-paste typo at `statsgate/statsgate/src/stat_client.cpp:273` (`set_shooter()` called twice in `record_snipe()` where the second call should have been `set_victim()`) caused the wire-level `shooter` Steam64 to be overwritten with the victim's Steam64 in nearly every event, while `victim` Steam64 was never written and stayed at protobuf default `0`. The four slot / ODF fields were always correct. The pipeline mitigates by slot-deriving identity in `process_stats.py` at the `unit_sniped` branch; the wire `shooter` / `victim` Steam64 fields are ignored. Forward-compatible with the upstream fix without code changes. Full evidence in [`_sniper_investigation/DIAGNOSIS.txt`](_sniper_investigation/DIAGNOSIS.txt) and the matching DATA_DICTIONARY entry.
 
 #### `PickupPowerup` (field 8) — Phase 3
 A player picked up a crate or pod. Pre-Phase-3 sessions do not contain this event; the engine emits a synthetic `UnitDestroyed` for the same tick (with `killer_team == 0`) regardless of schema version. The pipeline routes the synthetic destruction to the powerup-pickup branch (suppressed) and consumes this event for the rich `pickups.feed` data.
@@ -677,6 +679,8 @@ Mines / deployable utility destructions. No `feed` (too noisy); just per-player 
 #### `snipes` (Phase 3)
 
 Pilot snipe events. Phase 3 enriched `UnitSniped` to carry sniper / victim context; pre-Phase-3 sessions show `sniper_odf == ""` and `victim_odf == ""` (protobuf defaults), but the events still appear in `feed`.
+
+**Identity is slot-derived.** Both `feed[].sniper` / `feed[].victim` and the `by_player[].name` rollup come from `header.teamnum_to_s64[shooter_team]` / `[victim_team]` -> `s64_to_nick`, **not** from the wire-level `UnitSniped.shooter` / `UnitSniped.victim` Steam64 fields. Those fields were collector-bug poisoned through ~2026-05-04 and are ignored by the pipeline. See the [`UnitSniped` erratum](#unitsniped-field-7) for details.
 
 ```json
 {

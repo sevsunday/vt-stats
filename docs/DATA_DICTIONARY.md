@@ -209,14 +209,21 @@ Recorded when a pilot snipe event occurs.
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
-| `shooter` | `uint64` | Steam64 of sniper (0 if not a player; protobuf default for pre-Phase-3 sessions) |
-| `shooter_team` | `uint32` | Sniper's team slot |
-| `shooter_odf` | `string` | Sniper's vehicle ODF |
-| `victim` | `uint64` | Steam64 of pilot victim (0 if not a player) |
-| `victim_team` | `uint32` | Victim's team slot |
-| `victim_odf` | `string` | Victim's vehicle ODF |
+| `shooter` | `uint64` | Steam64 of sniper (collector-bug poisoned through ~2026-05-04 — see erratum) |
+| `shooter_team` | `uint32` | Sniper's team slot — **authoritative for sniper identity** |
+| `shooter_odf` | `string` | Sniper's vehicle ODF (typically a pilot ODF: `isuser*.odf`, `ispilo*.odf`, `fsuser*.odf`) |
+| `victim` | `uint64` | Steam64 of pilot victim (collector-bug always-zero through ~2026-05-04 — see erratum) |
+| `victim_team` | `uint32` | Victim's team slot — **authoritative for victim identity** |
+| `victim_odf` | `string` | Victim's vehicle ODF (the unit they were piloting when sniped) |
 
-Phase 3 enriched `UnitSniped` with the shooter / victim / odf fields. Pre-Phase-3 sessions only carry `tick`; the other six fields are protobuf defaults (zeros / empty strings). The Combat tab's Snipe Feed renders rich entries on Phase-3 matches and a tick-only count on older ones.
+Phase 3 enriched `UnitSniped` with the shooter / victim / odf fields. Pre-Phase-3 sessions only carry `tick`; the other six fields are protobuf defaults (zeros / empty strings).
+
+**Collector-bug erratum (Phase 3 through ~2026-05-04).** A copy-paste typo at `statsgate/statsgate/src/stat_client.cpp:273` caused `set_shooter()` to be called twice in `record_snipe()`, so:
+- `shooter` (uint64) was overwritten with the **victim's** Steam64 in nearly every event (or stayed as the genuine shooter Steam64 when the victim handle wasn't a tracked player — both outcomes unreliable for attribution)
+- `victim` (uint64) was never written and stayed at protobuf default `0`
+- The four slot / ODF fields (`shooter_team`, `shooter_odf`, `victim_team`, `victim_odf`) were always correct
+
+The pipeline mitigates this by **slot-deriving identity** in [`process_stats.py`](../scripts/process_stats.py) at the `unit_sniped` event branch: sniper Steam64 = `header.teamnum_to_s64[shooter_team]`, victim Steam64 = `header.teamnum_to_s64[victim_team]`. The `shooter` and `victim` Steam64 fields are ignored. This is forward-compatible with the upstream fix — when fixed-collector sessions arrive, the slot-derivation produces identical output without code changes. A one-line sanity warning fires during reprocess if a fixed-session `shooter` Steam64 maps to a slot that's neither `shooter_team` nor `victim_team`. Full evidence chain in [`_sniper_investigation/DIAGNOSIS.txt`](../_sniper_investigation/DIAGNOSIS.txt).
 
 ### PickupPowerup
 
@@ -305,7 +312,7 @@ The pipeline iterates through the event stream once, processing each event type:
 | `DamageDealt` + `DamageReceived` | Personal dealt/received, asset dealt/received, faction totals, rivalry matrix, weapon damage, ODF collection. **`amount > 1e6` events are dropped at the top of the branch by the sentinel filter — see [§7](#7-sentinel-damage-filter).** |
 | `UpdateTick` | Position / speed / health / ammo / odf / has_target snapshots downsampled to 1 Hz per player; feeds the entire `positioning` block (heatmaps, distance metrics, activity score, T-key target-lock ratio). |
 | `UnitDestroyed` | Routed through the four-way classification before any kill aggregator touches it — only real-vehicle destructions reach `kills.*`; powerup pickups, denial destructions, and deployable destructions go to their own blocks. See [§8](#8-unitdestroyed-classification-powerup-economy). |
-| `UnitSniped` | `snipes.feed` entry (Phase 3-enriched with shooter / victim / odf), `snipes.by_player` and `snipes.totals` rollups, plus the legacy `match.snipe_count` count. |
+| `UnitSniped` | `snipes.feed` entry, `snipes.by_player` and `snipes.totals` rollups, plus the legacy `match.snipe_count` count. **Identity is slot-derived** — sniper / victim Steam64 come from `header.teamnum_to_s64[shooter_team]` / `[victim_team]`, not from the `shooter` / `victim` Steam64 wire fields, which were collector-bug poisoned through ~2026-05-04. See [§ UnitSniped](#unitsniped) for the full erratum. |
 | `PickupPowerup` | `pickups.feed` entry with picker context, `pickups.by_player`, `pickups.by_odf`, `pickups.totals`. New-schema only; the synthetic `UnitDestroyed` companion the engine emits at the same tick is suppressed by the four-way classification. |
 
 Damage events are consumed as adjacent pairs. The [attribution logic](#attribution-logic) from Section 2 determines where each damage value is credited.
@@ -454,7 +461,7 @@ Pilot-snipe entries with shooter / victim context (Phase 3). Auto-hides when `sn
 
 | Displayed | JSON Path | Computed From |
 |---|---|---|
-| Snipe entries | `snipes.feed[]` | `UnitSniped` events: `{ tick, sniper, sniper_in_game_nick, sniper_odf, victim, victim_in_game_nick, victim_odf }` (Phase 3-enriched). Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` — the feed still draws but tooltip detail is reduced. |
+| Snipe entries | `snipes.feed[]` | `UnitSniped` events: `{ tick, sniper, sniper_in_game_nick, sniper_odf, victim, victim_in_game_nick, victim_odf }`. Names are slot-derived from `shooter_team` / `victim_team` so the wire-level `shooter` / `victim` Steam64 collector bug is mitigated (see [`§ UnitSniped`](#unitsniped)). Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` — the feed still draws but tooltip detail is reduced. |
 | Per-sniper counts | `snipes.by_player[]` | `{ name, count }` |
 | Totals | `snipes.totals` | `{ total, team_1, team_2 }` |
 
@@ -883,6 +890,8 @@ Pilot snipes from `UnitSniped` events. Phase 3 enriched the proto event with sho
 | `by_player` | `array` | Per-sniper counts. Each: `{ name, count }`. |
 | `totals` | `object` | `{ total, team_1, team_2 }`. |
 
+**Identity provenance.** Both `feed[].sniper` and `feed[].victim` (and the `by_player[].name` rollup) are **slot-derived nicknames** — the pipeline resolves them from `header.teamnum_to_s64[shooter_team]` and `header.teamnum_to_s64[victim_team]`, then nick-resolves through `s64_to_nick` / `known_players`. The wire-level `UnitSniped.shooter` and `UnitSniped.victim` Steam64 fields are **ignored** because the statsgate collector through ~2026-05-04 had a copy-paste bug at `stat_client.cpp:273` that poisoned `shooter` (overwrote it with the victim's Steam64) and never wrote `victim` (left it at protobuf default `0`). See [`§ UnitSniped`](#unitsniped) for the full erratum and [`_sniper_investigation/DIAGNOSIS.txt`](../_sniper_investigation/DIAGNOSIS.txt) for the evidence chain. The slot-derivation strategy is forward-compatible: when fixed-collector sessions arrive, no code changes are needed because the slot fields are correct under both collectors. `feed[].victim_in_game_nick` is now reliably non-null for victims whose in-game alias differs from their canonical name (it was always `null` pre-fix because `victim` Steam64 was always `0`). When a slot has no `s64_to_nick` mapping (e.g. AI shooter, slot recycled mid-match), the renderer falls back to the literal string `"Team {N}"` for that side of the entry.
+
 #### `positioning`
 
 Player movement analytics derived from `UpdateTick` events. Captured positions are downsampled to **1 Hz** in the processed JSON regardless of source `tick_rate`. When a session has no `UpdateTick` events, the block is still emitted with `has_position_data: false` and empty `players`.
@@ -1133,7 +1142,7 @@ Each entry in `cards[]`:
 | `frenemies` | `a_to_b` (number), `b_to_a` (number) | Directional split from `top_rivalries[0]`. |
 | `roadrunner` | `movement_band` (string), `path_length` (int) | Pulled from `positioning.players[winner].metrics`. `path_length` rounded to whole units. |
 | `crate_pod_goblin` | `pickups` (int), `destructions` (int) | The two halves of the combined total. |
-| `chris_kyle` | `top_victim` (string \| null), `top_victim_count` (int) | Counter over `snipes.feed[]` filtered to `sniper == winner.name`. May be a `Team N` placeholder if the snipe targeted an unmapped victim. |
+| `chris_kyle` | `top_victim` (string \| null), `top_victim_count` (int) | Counter over `snipes.feed[]` filtered to `sniper == winner.name`. Names are slot-derived (see [`snipes` block](#snipes-phase-3) for the identity provenance) so the value is a real nickname for any slot present in `header.teamnum_to_s64`. Falls back to `Team {N}` only when the victim's slot has no Steam64 mapping (slot recycled mid-match, AI victim, etc.). |
 | `the_locksmith` | `seconds_locked` (int), `total_seconds` (int) | `target_lock_pct * sample_count` and `sample_count` directly. |
 
 ##### Renderer contract
@@ -1314,7 +1323,7 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Sentinel Damage (match)** | Per-match telemetry for sentinel events dropped | `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` | `count` is number of DD+DR pairs (not individual events). `total_amount` is the sum of DD-side amounts. `first_tick`/`last_tick` are `null` on clean matches. Present on every match (zeros when clean). Match-global, always-unfiltered |
 | **Sentinel Damage (meta)** | Corpus-wide sentinel rollup | In-memory aggregate `meta.total_sentinel_damage_dropped` (pair count sum) + `meta.matches_with_sentinel_damage` (list of affected match IDs); built client-side by `VTAggregate.build()` from `match_contributions.json` | Enables regression detection if a future session reintroduces sentinels after upstream fix |
 | **Snipe Count** | Number of snipe events in a match | `UnitSniped` | Count per match |
-| **Snipe Feed (Phase 3)** | Per-snipe entries with sniper / victim context | `UnitSniped` events with `shooter`, `shooter_team`, `shooter_odf`, `victim`, `victim_team`, `victim_odf` (Phase 3-enriched fields) | Routed to `snipes.{feed, by_player, totals}`. Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` (protobuf defaults). Combat-tab card auto-hides when feed is empty |
+| **Snipe Feed (Phase 3)** | Per-snipe entries with sniper / victim context | `UnitSniped` events with `shooter_team`, `shooter_odf`, `victim_team`, `victim_odf` (Phase 3-enriched fields). The wire-level `shooter` / `victim` Steam64 fields were collector-bug poisoned through ~2026-05-04 — pipeline ignores them and slot-derives identity from `header.teamnum_to_s64[shooter_team]` / `[victim_team]`; see [`§ UnitSniped`](#unitsniped) for the erratum | Routed to `snipes.{feed, by_player, totals}`. Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` (protobuf defaults). Combat-tab card auto-hides when feed is empty |
 | **Submitter** | Who submitted the session data | Filesystem | Parent folder name of the `.binpb.gz` file |
 | **T-Key Usage / Target Lock** | Per-player ratio of kept positioning samples where the player had a target lock active (the T-key activates a tap-to-toggle target mode against the nearest enemy; gives a small tracking / aim-assist advantage). **Absolute 0-1 ratio** — directly comparable across matches | `UpdateTick.players[].has_target` (downsampled to 1 Hz) | `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. Match-global flag `positioning.has_target_lock_data` (mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed; distinguishes "no data" (pre-schema or never-pressed) from "0% lock" in radar tooltips. Career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average. Powers the 8th "T-Key Usage" axis of the Player Performance Radar |
 | **Terrain Bounds** | Full 3D world-space extents of the map | `StatHeader.terrain_min_*` / `terrain_max_*` (fields 12-17) | `{min:{x,y,z}, max:{x,y,z}}`, axis convention +X East / +Y Up / +Z North. `null` for pre-schema sessions (all-zero fallback). Surfaced on `positioning.terrain_bounds` and mirrored to `match.terrain_bounds`. Drives `positioning.map_bounds` when present (`map_bounds_source = "terrain"`); observed player extents fallback otherwise |

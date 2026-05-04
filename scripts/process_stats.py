@@ -2082,27 +2082,48 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
             if us.tick < min_tick:
                 min_tick = us.tick
             snipe_count += 1
-            # New-schema fields: shooter / shooter_team / shooter_odf /
-            # victim / victim_team / victim_odf. Pre-schema sessions only
-            # carry `tick`; the protobuf defaults make those branches
-            # safely no-op (no shooter Steam64, empty odf strings).
             if us.shooter_odf:
                 all_unit_odfs.add(us.shooter_odf)
             if us.victim_odf:
                 all_unit_odfs.add(us.victim_odf)
-            sniper_name = nick_for_s64(us.shooter) if us.shooter > 0 else f"Team {us.shooter_team}"
-            victim_name = nick_for_s64(us.victim) if us.victim > 0 else f"Team {us.victim_team}"
+            # Slot-derive identity. The statsgate collector through
+            # ~2026-05-04 had a copy-paste bug at stat_client.cpp:273
+            # where `set_shooter()` was called twice -- so `us.shooter`
+            # got overwritten with the victim's Steam64 and `us.victim`
+            # was never written at all (always 0). Slot fields
+            # (us.shooter_team / us.victim_team) are correct under both
+            # the buggy and fixed collectors, so we derive identity from
+            # them exclusively. Forward-compatible: when fixed-collector
+            # sessions arrive, the resolver still produces correct
+            # output without changes. See _sniper_investigation/DIAGNOSIS.txt.
+            sniper_s64 = slot_to_s64.get(us.shooter_team, 0)
+            victim_s64 = slot_to_s64.get(us.victim_team, 0)
+            sniper_name = nick_for_s64(sniper_s64) if sniper_s64 else f"Team {us.shooter_team}"
+            victim_name = nick_for_s64(victim_s64) if victim_s64 else f"Team {us.victim_team}"
+            # Forward-compat sanity: in fixed-collector sessions, us.shooter
+            # should equal sniper_s64. In buggy-collector sessions it equals
+            # victim_s64 (the bug pattern). If it equals neither slot owner,
+            # the upstream wire format has changed in an unexpected way --
+            # surface it during reprocess so we can investigate.
+            if us.shooter > 0:
+                poisoned_slot = s64_to_slot.get(us.shooter)
+                if poisoned_slot and poisoned_slot not in (us.shooter_team, us.victim_team):
+                    print(
+                        f"WARN: snipe at tick {us.tick} in {source_file}: shooter S64 "
+                        f"{us.shooter} maps to slot {poisoned_slot}, expected "
+                        f"{us.shooter_team} (sniper) or {us.victim_team} (victim)"
+                    )
             snipe_feed.append({
                 "tick": us.tick,
                 "sniper": sniper_name,
-                "sniper_in_game_nick": in_game_nick_for(us.shooter, sniper_name) if us.shooter > 0 else None,
+                "sniper_in_game_nick": in_game_nick_for(sniper_s64, sniper_name) if sniper_s64 else None,
                 "sniper_odf": us.shooter_odf or "",
                 "victim": victim_name,
-                "victim_in_game_nick": in_game_nick_for(us.victim, victim_name) if us.victim > 0 else None,
+                "victim_in_game_nick": in_game_nick_for(victim_s64, victim_name) if victim_s64 else None,
                 "victim_odf": us.victim_odf or "",
             })
-            if us.shooter > 0:
-                snipe_count_by_player[us.shooter] += 1
+            if sniper_s64:
+                snipe_count_by_player[sniper_s64] += 1
             i += 1
 
         elif event_type == "pickup_powerup":
