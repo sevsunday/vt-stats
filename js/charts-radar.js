@@ -117,7 +117,7 @@ function buildRadarInfoTooltipHtml(mode, careerScale) {
       '<strong>Mobility</strong> &mdash; ', mobilityLine, '<br><br>',
       '<strong>Weapon Diversity</strong> &mdash; ', weaponsLine, '<br><br>',
       "<strong>PvP Share</strong> &mdash; PvP (Player-versus-Player) share. The fraction of this player's damage output that hit other human players, as opposed to PvE (Player-versus-Environment - AI units, turrets, and world props). 0 means they only farmed AI; 1 means they only fought other humans.<br><br>",
-      '<strong>T-Key Usage</strong> &mdash; T-Key (Target-lock key) usage. Fraction of the match this player spent holding the target-lock key (bound to T by default), which locks the camera and aiming solution onto the nearest enemy. Shows "no data" for older matches recorded before this measurement existed.',
+      '<strong>T-Key Usage</strong> &mdash; Fraction of the match this player had a target lock active. The T-key is <strong>tap-to-toggle</strong> &mdash; pressing T activates target mode against the nearest enemy and the lock persists until the target dies or the player presses T again to drop it. The metric reflects whether target mode is on, not where the player is aiming. Shows "no data" for older matches recorded before this measurement existed.',
     '</div>',
   ].join('');
 }

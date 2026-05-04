@@ -2845,19 +2845,19 @@
     },
     the_locksmith: {
       dominant: [
-        '{name} held T like a vice — ~{seconds_locked}s of {total_seconds}s.',
-        '{name} stayed locked on for {value} of the match.',
-        '{name} barely let go of T — {value} target lock.',
+        '{name} dominated T-key usage — target lock active ~{seconds_locked}s of {total_seconds}s.',
+        '{name} ran target mode for {value} of the match.',
+        '{name} owned the target-lock board at {value}.',
       ],
       clear: [
-        '{name} held target lock {value} of the time.',
+        '{name} had a target locked {value} of the time.',
         '{name} led T-key usage at {value}.',
-        '{name} kept the reticle on enemies for {value}.',
+        '{name} ran target mode for {value} of the match.',
       ],
       close: [
-        '{name} edged the T-key board at {value}.',
+        '{name} edged the target-lock board at {value}.',
         '{name} squeaked the locksmith title.',
-        '{name} barely led on target lock.',
+        '{name} barely led on T-key usage.',
       ],
     },
   };

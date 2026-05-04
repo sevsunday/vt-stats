@@ -191,7 +191,7 @@ Per-tick state snapshot for all players. Pipeline currently skips these events.
 | `tick` | `uint32` | Game tick |
 | `players` | `repeated PlayerState` | State of each player |
 
-**PlayerState fields:** `player` (uint64 Steam64), `position` (Vec3), `speed` (float), `health` (float — actual HP, not ratio), `ammo` (float — actual ammo, not ratio), `odf` (string — current vehicle ODF), `has_target` (bool — player is holding T / target-lock key at this tick)
+**PlayerState fields:** `player` (uint64 Steam64), `position` (Vec3), `speed` (float), `health` (float — actual HP, not ratio), `ammo` (float — actual ammo, not ratio), `odf` (string — current vehicle ODF), `has_target` (bool — player has a target lock active at this tick; T-key activates target mode, tap-to-toggle)
 
 #### `UnitDestroyed` (field 6)
 A unit (player vehicle, AI unit, or structure) was destroyed. Pipeline applies a **four-way classification** (Phase 3) before any kill aggregator touches the event — see "UnitDestroyed Classification" below.
@@ -730,7 +730,7 @@ Top-level fields worth calling out:
 - `base_separation` — floored internal scaling value `max(computed_centroid_dist, 500, observed_max_range × 0.3)`. Drives `R_base` and `time_in_base_pct` heuristics. Not a user-facing measurement.
 - `base_to_base_distance` — raw horizontal distance between Team 1 and Team 2 spawn centroids, **no floor applied**. `null` when either team has zero players. This is the "how far apart are the bases" measurement; use this, not `base_separation`, for display.
 
-`has_target_lock_data` is a match-global availability flag: `true` iff any `PlayerState.has_target=true` sample was observed in the match. It's `false` for pre-schema matches (the proto field didn't exist yet) and also for new-schema matches where no player ever held T. Combined with per-player `metrics.target_lock_pct`, it distinguishes "no data" (pre-schema) from "0% lock" (field present, never pressed).
+`has_target_lock_data` is a match-global availability flag: `true` iff any `PlayerState.has_target=true` sample was observed in the match. It's `false` for pre-schema matches (the proto field didn't exist yet) and also for new-schema matches where no player ever activated target mode. Combined with per-player `metrics.target_lock_pct`, it distinguishes "no data" (pre-schema) from "0% lock" (field present, never pressed).
 
 Per-player block:
 
@@ -1065,7 +1065,7 @@ The filter is implemented entirely client-side in `app.js`. `getFilteredData(dat
 **Positioning block (including `activity_score` and `target_lock_pct`).** The `positioning` block passes through `getFilteredData` unchanged; `positioning.players` is narrowed at render-time by `renderPositioningTab`. This lets spatial renderers (combined heatmap, spawn markers) keep their full-match context while per-player charts still scope to the focused player.
 
 - `positioning.players[].metrics.activity_score` is **match-relative** (p95-normalized across the full match roster). Its career aggregate `career_stats[].mean_movement_score` is an average-of-relatives — labeled as an approximation, not a true cross-match metric.
-- `positioning.players[].metrics.target_lock_pct` is **absolute** (0-1 ratio — fraction of 1 Hz positioning samples where the player was holding T). Cross-match comparable. Its career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average and renders on the Career Radar's 8th "T-Key Usage" axis. The match-global `positioning.has_target_lock_data` / `match.has_target_lock_data` / `career_stats[].matches_with_target_lock_data` flags distinguish "no data" (pre-schema match, or no player ever used T) from "0% lock" in tooltips.
+- `positioning.players[].metrics.target_lock_pct` is **absolute** (0-1 ratio — fraction of 1 Hz positioning samples where the player had a target lock active). Cross-match comparable. Its career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average and renders on the Career Radar's 8th "T-Key Usage" axis. The match-global `positioning.has_target_lock_data` / `match.has_target_lock_data` / `career_stats[].matches_with_target_lock_data` flags distinguish "no data" (pre-schema match, or no player ever activated target mode) from "0% lock" in tooltips.
 
 The filtered data is stored in `currentFilteredData` — all renderers and the timeline toggle reference this instead of `currentData`. `renderMatchData(data)` is the shared render function called by both `loadMatch()` and `applyFilter()`.
 
