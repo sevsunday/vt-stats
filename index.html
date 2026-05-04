@@ -77,6 +77,13 @@
             <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
           </button>
 
+          <!-- Record Your Own Stats (re-opens the first-visit instructional modal) -->
+          <button class="vt-nav-icon-btn" id="record-stats-btn" type="button"
+                  data-bs-toggle="modal" data-bs-target="#record-stats-modal"
+                  title="How to record your own stats" aria-label="How to record your own stats">
+            <i class="bi bi-record-circle"></i><span class="vt-nav-label ms-2">Record stats</span>
+          </button>
+
           <!-- About / Source Repos -->
           <button class="vt-nav-icon-btn" id="about-btn" type="button"
                   data-bs-toggle="modal" data-bs-target="#about-modal"
@@ -1030,6 +1037,61 @@
         </div>
         <div class="modal-footer border-top">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- How To Record Your Stats Modal -->
+  <div class="modal fade" id="record-stats-modal" tabindex="-1"
+       aria-labelledby="record-stats-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="record-stats-modal-title">
+            <i class="bi bi-record-circle me-2"></i>Record your own stats
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3" style="color: var(--kb-text-muted); font-size: 0.9rem;">
+            Want your matches to show up here? Run the statsgate collector alongside Battlezone
+            and share the resulting <code>.binpb</code> files.
+          </p>
+          <ol class="mb-0" style="padding-left: 1.25rem;">
+            <li class="mb-2">
+              Download the
+              <a href="https://nightly.link/vtrider/statsgate/workflows/build/main/nightly-binaries.zip"
+                 target="_blank" rel="noopener noreferrer">
+                statsgate binaries<i class="bi bi-box-arrow-up-right ms-1 small"></i>
+              </a>.
+            </li>
+            <li class="mb-2">Unzip the contents anywhere you like.</li>
+            <li class="mb-2">Start Battlezone.</li>
+            <li class="mb-2">
+              Double-click <code>statsgatelauncher.exe</code>. This injects
+              <code>statsgate.dll</code> into your running BZCC instance.
+              No further action is necessary at this point.
+            </li>
+            <li class="mb-0">
+              Each match is automatically saved as a separate <code>.binpb</code> file in one of:
+              <ul class="mt-1 mb-0" style="padding-left: 1.1rem;">
+                <li><code>Documents\My Games\Battlezone Combat Commander\statsgate</code></li>
+                <li><code>Steams\steamapps\common\BZ2R\statsgate</code></li>
+              </ul>
+            </li>
+          </ol>
+          <p class="small mt-3 mb-0" style="color: var(--kb-text-muted);">
+            <i class="bi bi-info-circle me-1"></i>The statsgate DLL self-terminates once BZCC
+            closes &mdash; you'll need to re-run the launcher if you restart the game.
+          </p>
+        </div>
+        <div class="modal-footer border-top justify-content-between">
+          <div class="form-check m-0">
+            <input class="form-check-input" type="checkbox" id="record-stats-dont-show">
+            <label class="form-check-label small" for="record-stats-dont-show">Don't show me again</label>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Got it</button>
         </div>
       </div>
     </div>
