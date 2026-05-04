@@ -244,6 +244,23 @@
     }
   }
 
+  // --- Record-Your-Own-Stats Modal Dismissal ---
+  // Instructional first-visit (and every-visit-until-dismissed) popup that
+  // walks users through running the statsgate collector. Persistence is
+  // gated on the explicit "Don't show me again" checkbox; closing via X /
+  // Escape / backdrop / Got-it without checking leaves the flag untouched
+  // so the modal re-appears next visit.
+  const RECORD_STATS_DISMISSED_KEY = 'vt-record-stats-dismissed';
+
+  function readRecordStatsDismissed() {
+    try { return localStorage.getItem(RECORD_STATS_DISMISSED_KEY) === '1'; }
+    catch { return false; }
+  }
+  function writeRecordStatsDismissed() {
+    try { localStorage.setItem(RECORD_STATS_DISMISSED_KEY, '1'); }
+    catch { /* private mode / storage blocked — silently ignore */ }
+  }
+
   // Resolves a landing choice into an actual view load. Always keeps the
   // picker triggers in sync via updateMatchPickerTriggers(), matching the
   // existing URL-driven boot branches. Unknown modes and missing
@@ -4815,36 +4832,62 @@
     || initialUrlState.team
     || (initialUrlState.players && initialUrlState.players.length);
 
-  if (initialUrlState.match === 'all') {
-    updateMatchPickerTriggers('__all__');
-    loadAllMatches(initialUrlState);
-  } else if (initialUrlState.match) {
-    const entry = manifest.find(m => m.id === initialUrlState.match);
-    if (entry) {
-      updateMatchPickerTriggers(entry);
-      loadMatch(entry.file, initialUrlState);
-    } else {
-      showMatchNotFound(initialUrlState.match);
+  function runInitialBoot() {
+    if (initialUrlState.match === 'all') {
+      updateMatchPickerTriggers('__all__');
+      loadAllMatches(initialUrlState);
+    } else if (initialUrlState.match) {
+      const entry = manifest.find(m => m.id === initialUrlState.match);
+      if (entry) {
+        updateMatchPickerTriggers(entry);
+        loadMatch(entry.file, initialUrlState);
+      } else {
+        showMatchNotFound(initialUrlState.match);
+      }
+    } else if (manifest.length > 0 && hasOtherUrlIntent) {
+      // Partial shared link (e.g. ?tab=positioning). Preserve prior behavior:
+      // load first match and apply the URL state so filter/tab hydrate.
+      updateMatchPickerTriggers(manifest[0]);
+      loadMatch(manifest[0].file, initialUrlState);
+    } else if (manifest.length > 0) {
+      // No URL intent at all — consult landing pref.
+      const pref = readLandingPref();
+      if (!pref || pref.mode === 'ask') {
+        showLandingModal({
+          current: null,
+          onConfirm: ({ mode, matchId, persist }) => {
+            if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
+            applyLandingChoice({ mode, matchId });
+          },
+          onCancel: () => applyLandingChoice({ mode: 'recent' }),
+        });
+      } else {
+        applyLandingChoice(pref);
+      }
     }
-  } else if (manifest.length > 0 && hasOtherUrlIntent) {
-    // Partial shared link (e.g. ?tab=positioning). Preserve prior behavior:
-    // load first match and apply the URL state so filter/tab hydrate.
-    updateMatchPickerTriggers(manifest[0]);
-    loadMatch(manifest[0].file, initialUrlState);
-  } else if (manifest.length > 0) {
-    // No URL intent at all — consult landing pref.
-    const pref = readLandingPref();
-    if (!pref || pref.mode === 'ask') {
-      showLandingModal({
-        current: null,
-        onConfirm: ({ mode, matchId, persist }) => {
-          if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
-          applyLandingChoice({ mode, matchId });
-        },
-        onCancel: () => applyLandingChoice({ mode: 'recent' }),
-      });
-    } else {
-      applyLandingChoice(pref);
-    }
+  }
+
+  // Gate the boot sequence behind the "How to record your stats" modal
+  // until the user explicitly checks "Don't show me again". The dismissal
+  // flag is independent of any URL intent, so shared links still resolve
+  // correctly — the modal just defers the resolution until it closes.
+  // The {once:true} listener only fires for this initial open; the
+  // navbar `#record-stats-btn` re-opens via Bootstrap's data-bs-toggle
+  // and never re-triggers this gating logic.
+  const $recordStatsModal = document.getElementById('record-stats-modal');
+  const $recordStatsCheckbox = document.getElementById('record-stats-dont-show');
+  if (!readRecordStatsDismissed() && $recordStatsModal && window.bootstrap) {
+    const recordInst = bootstrap.Modal.getOrCreateInstance($recordStatsModal);
+    $recordStatsModal.addEventListener('hidden.bs.modal', () => {
+      if ($recordStatsCheckbox && $recordStatsCheckbox.checked) writeRecordStatsDismissed();
+      runInitialBoot();
+    }, { once: true });
+    // Hide the preloader behind the modal so the welcome screen reads
+    // cleanly (mirrors the trick showLandingModal() uses). Loaders
+    // re-show #loading themselves when they actually run.
+    $loading.classList.add('d-none');
+    recordInst.show();
+  } else {
+    runInitialBoot();
   }
 })();
