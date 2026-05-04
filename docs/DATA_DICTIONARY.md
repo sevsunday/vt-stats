@@ -184,7 +184,7 @@ Periodic state snapshots of all players. The pipeline downsamples these to 1 Hz 
 | `health` | `float` | Current health (actual HP, not ratio) |
 | `ammo` | `float` | Current ammo (actual value, not ratio) |
 | `odf` | `string` | Current vehicle ODF |
-| `has_target` | `bool` | `true` when the player is holding T / target-lock key at this tick (minor aim/tracking advantage). Defaults to `false` for pre-schema collector versions. |
+| `has_target` | `bool` | `true` when the player has a target lock active at this tick (T-key activates target mode; tap-to-toggle — minor aim/tracking advantage). Defaults to `false` for pre-schema collector versions. |
 
 ### UnitDestroyed
 
@@ -900,7 +900,7 @@ Player movement analytics derived from `UpdateTick` events. Captured positions a
 | Field | Type | Description |
 |---|---|---|
 | `has_position_data` | `boolean` | `true` when the session contained `UpdateTick` events |
-| `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed in the match. `false` for pre-schema matches AND for new-schema matches where no player ever held T. Distinguishes "no data" from "0% lock" in the UI (see T-Key Usage subsection below) |
+| `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed in the match. `false` for pre-schema matches AND for new-schema matches where no player ever activated target mode. Distinguishes "no data" from "0% lock" in the UI (see T-Key Usage subsection below) |
 | `sample_rate_hz` | `number` | Always 1 (downsample target) |
 | `match_sample_count` | `number` | Total seconds covered by any player (drives animation duration) |
 | `map_bounds` | `object` | `{ min: {x, z}, max: {x, z} }`. 2D reference frame used for `heatmap_grid_xz` binning and all canvas projections. Sourced from `terrain_bounds` when the header provides it, otherwise from observed player extents. `null` when `has_position_data: false` |
@@ -1027,13 +1027,13 @@ If one team has zero populated spawns, `team_base[n] = null` and the computed se
 
 ##### T-Key Usage (Target Lock)
 
-BZCC lets a pilot hold the **T-key** to lock the crosshair onto the nearest enemy, giving a small tracking / aim-assist advantage. The collector captures this as a per-tick boolean in `PlayerState.has_target`; the pipeline distills it into a per-player ratio.
+BZCC's **T-key** activates target mode against the nearest enemy, giving a small tracking / aim-assist advantage. It is **tap-to-toggle** — one press acquires the target lock, and the lock persists until the target dies or the player presses T again to drop it. The collector captures whether a lock is currently active as a per-tick boolean in `PlayerState.has_target`; the pipeline distills it into a per-player time-fraction.
 
 - **Signal**: raw `has_target` booleans in `UpdateTick.players[]`, downsampled to 1 Hz parallel to positioning samples.
-- **Per-player metric**: `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. 0 means "never held T"; 1 means "held T every kept sample"; in practice expect 0.05–0.40 for active pilots, near 0 for FPS-style ground players or pre-schema matches.
+- **Per-player metric**: `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. 0 means "never had a target lock active"; 1 means "had a target lock active for every kept sample"; in practice expect 0.05–0.40 for active pilots, near 0 for FPS-style ground players or pre-schema matches.
 - **Match-global flag**: `positioning.has_target_lock_data` (also mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed in the match. It gates the T-Key Usage UI so a pre-schema match (where the field did not exist) renders "no data" instead of an indistinguishable 0% bar.
-- **Edge case — field present but no player ever held T**: collapses to `has_target_lock_data=false`, same as pre-schema. This is an unavoidable limitation of protobuf's implicit presence: the wire format cannot distinguish "never set" from "explicit false". In practice both cases are correctly labeled "no data" because neither carries a meaningful T-key signal.
-- **Contrast with `activity_score`**: unlike `activity_score` (match-relative, p95-normalized across the roster), `target_lock_pct` is **absolute** — a 0.25 ratio means the player held T for a quarter of their kept samples regardless of how anyone else played. This is why `career_stats[].mean_target_lock_pct` is a **straight direct average** across matches (valid), whereas `mean_movement_score` is an average-of-relatives (approximation, noted in the career Mobility tooltip).
+- **Edge case — field present but no player ever activated target mode**: collapses to `has_target_lock_data=false`, same as pre-schema. This is an unavoidable limitation of protobuf's implicit presence: the wire format cannot distinguish "never set" from "explicit false". In practice both cases are correctly labeled "no data" because neither carries a meaningful T-key signal.
+- **Contrast with `activity_score`**: unlike `activity_score` (match-relative, p95-normalized across the roster), `target_lock_pct` is **absolute** — a 0.25 ratio means the player had a target lock active for a quarter of their kept samples regardless of how anyone else played. This is why `career_stats[].mean_target_lock_pct` is a **straight direct average** across matches (valid), whereas `mean_movement_score` is an average-of-relatives (approximation, noted in the career Mobility tooltip).
 - **Career aggregation**: `career_stats[].mean_target_lock_pct` and `career_stats[].matches_with_target_lock_data`; also surfaced as `meta.matches_with_target_lock_data` on the in-memory aggregate (built client-side by `VTAggregate.build()` from `match_contributions.json`). Only matches where `has_target_lock_data=true` contribute to the average — that prevents pre-schema zero-fill from diluting real values.
 - **UI surface**: the 8th "T-Key Usage" axis on the Player Performance Radar in all four modes (single / compare / team / career). The career Radar reads `mean_target_lock_pct` directly; the per-match Radar reads per-player `target_lock_pct`. Both tooltips fall back to "T-Key: no data" when the availability flag is false.
 
@@ -1204,7 +1204,7 @@ The threshold is **scope-aware**: it reads `matches_played` *in the current scop
 | `date_range` | `[string, string]` | Earliest and latest match dates |
 | `submitters` | `string[]` | Sorted list of unique submitter usernames |
 | `matches_with_positioning` | `number` | Count of matches whose top-level `match.has_position_data` is `true` |
-| `matches_with_target_lock_data` | `number` | Count of matches whose top-level `match.has_target_lock_data` is `true` (i.e. at least one player held T at least once during the match) |
+| `matches_with_target_lock_data` | `number` | Count of matches whose top-level `match.has_target_lock_data` is `true` (i.e. at least one player activated target mode at least once during the match) |
 | `total_sentinel_damage_dropped` | `number` | Sum of per-match `sentinel_damage_count` across the aggregate scope (DD+DR pair count). See [§7](#7-sentinel-damage-filter) |
 | `matches_with_sentinel_damage` | `string[]` | List of match IDs whose `sentinel_damage_count > 0` |
 | `min_career_matches` | `number` | Live threshold value (currently `5`). UI labels read this instead of hardcoding "5+" |
@@ -1316,7 +1316,7 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Snipe Count** | Number of snipe events in a match | `UnitSniped` | Count per match |
 | **Snipe Feed (Phase 3)** | Per-snipe entries with sniper / victim context | `UnitSniped` events with `shooter`, `shooter_team`, `shooter_odf`, `victim`, `victim_team`, `victim_odf` (Phase 3-enriched fields) | Routed to `snipes.{feed, by_player, totals}`. Pre-Phase-3 sessions render with empty `sniper_odf` / `victim_odf` (protobuf defaults). Combat-tab card auto-hides when feed is empty |
 | **Submitter** | Who submitted the session data | Filesystem | Parent folder name of the `.binpb.gz` file |
-| **T-Key Usage / Target Lock** | Per-player ratio of kept positioning samples where the player was holding T (target-lock key, gives small tracking / aim-assist advantage). **Absolute 0-1 ratio** — directly comparable across matches | `UpdateTick.players[].has_target` (downsampled to 1 Hz) | `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. Match-global flag `positioning.has_target_lock_data` (mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed; distinguishes "no data" (pre-schema or never-pressed) from "0% lock" in radar tooltips. Career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average. Powers the 8th "T-Key Usage" axis of the Player Performance Radar |
+| **T-Key Usage / Target Lock** | Per-player ratio of kept positioning samples where the player had a target lock active (the T-key activates a tap-to-toggle target mode against the nearest enemy; gives a small tracking / aim-assist advantage). **Absolute 0-1 ratio** — directly comparable across matches | `UpdateTick.players[].has_target` (downsampled to 1 Hz) | `metrics.target_lock_pct = sum(has_target) / sample_count`, rounded to 3 decimals. Match-global flag `positioning.has_target_lock_data` (mirrored on `match.has_target_lock_data` and manifest entries) is `true` iff any `has_target=true` sample was observed; distinguishes "no data" (pre-schema or never-pressed) from "0% lock" in radar tooltips. Career aggregate `career_stats[].mean_target_lock_pct` is a valid direct average. Powers the 8th "T-Key Usage" axis of the Player Performance Radar |
 | **Terrain Bounds** | Full 3D world-space extents of the map | `StatHeader.terrain_min_*` / `terrain_max_*` (fields 12-17) | `{min:{x,y,z}, max:{x,y,z}}`, axis convention +X East / +Y Up / +Z North. `null` for pre-schema sessions (all-zero fallback). Surfaced on `positioning.terrain_bounds` and mirrored to `match.terrain_bounds`. Drives `positioning.map_bounds` when present (`map_bounds_source = "terrain"`); observed player extents fallback otherwise |
 | **Timeline** | Damage over time in 10-second windows | `DamageDealt` | Damage per bucket = `(tick - min_tick) / (bucket_seconds * tick_rate)` |
 | **Tug-of-War (Replay)** | Cumulative faction damage as a two-segment bar during playback | `timeline.by_faction["1" / "2"]` | Segment width = `cumulative_faction_total / combined_total × 100%` |

@@ -1543,9 +1543,12 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         band = _band_for_score(activity_score)
 
         # Target lock (T-key) usage: fraction of kept 1 Hz samples where the
-        # player was holding T. Absolute 0-1 ratio, cross-match comparable.
-        # Sums to zero for pre-schema matches (has_target field defaults to
-        # False), matching has_target_lock_data=False for the same match.
+        # player had a target lock active (`has_target=true`). The T-key is
+        # tap-to-toggle in BZCC — one press activates target mode against the
+        # nearest enemy, lock persists until target dies or player presses T
+        # again. Absolute 0-1 ratio, cross-match comparable. Sums to zero for
+        # pre-schema matches (has_target field defaults to False), matching
+        # has_target_lock_data=False for the same match.
         target_samples = tr.get("target") or []
         target_lock_pct = round(
             sum(1 for v in target_samples if v) / sample_count, 3
@@ -1834,9 +1837,9 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
     tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
     # Target-lock availability for this match. Any observed has_target=True sample
     # flips this to True. Stays False for pre-schema matches (field defaults to
-    # False) and new-schema matches where no player ever held T. The flag is
-    # propagated to positioning.has_target_lock_data, match.has_target_lock_data,
-    # and on to career_stats[].matches_with_target_lock_data.
+    # False) and new-schema matches where no player ever activated target mode.
+    # The flag is propagated to positioning.has_target_lock_data,
+    # match.has_target_lock_data, and on to career_stats[].matches_with_target_lock_data.
     match_has_target_lock_data = False
 
     i = 0
