@@ -21,10 +21,23 @@
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
+      <!-- Record stats CTA (desktop only). Sits immediately left of the
+           Docs link as a high-emphasis primary-tinted action that re-opens
+           the first-visit instructional modal. Carries `ms-md-auto` so it
+           anchors the right-aligned group (Record + Docs); Docs no longer
+           needs the auto-margin since Record is its left neighbor. -->
+      <button class="vt-nav-icon-btn vt-nav-icon-btn--primary d-none d-md-inline-flex ms-md-auto order-md-1"
+              id="record-stats-btn-desktop" type="button"
+              data-bs-toggle="modal" data-bs-target="#record-stats-modal"
+              title="How to record your own stats" aria-label="How to record your own stats">
+        <i class="bi bi-record-circle me-1"></i>Record
+      </button>
+
       <!-- Docs link (desktop only). The match selector lives in the hero
-           cards now (rich picker, see #match-picker-modal), so this is the
-           only thing flex-auto-pushing the collapse menu right on desktop. -->
-      <a href="docs.html" class="vt-nav-icon-btn d-none d-md-inline-flex ms-md-auto order-md-1">
+           cards now (rich picker, see #match-picker-modal). The right-side
+           group is anchored by the Record button immediately above; Docs
+           sits flush to its right. -->
+      <a href="docs.html" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1">
         <i class="bi bi-book me-1"></i>Docs
       </a>
 
@@ -41,6 +54,16 @@
            content width and packs next to the burger/docs on the right. -->
       <div class="collapse navbar-collapse flex-md-grow-0 order-md-2" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <!-- Record stats CTA (mobile burger only). Mirrors the desktop
+               variant above; sits immediately above/left of the Docs link
+               so the high-emphasis CTA is the first item in the menu. -->
+          <button class="vt-nav-icon-btn vt-nav-icon-btn--primary d-md-none"
+                  id="record-stats-btn-mobile" type="button"
+                  data-bs-toggle="modal" data-bs-target="#record-stats-modal"
+                  title="How to record your own stats" aria-label="How to record your own stats">
+            <i class="bi bi-record-circle me-1"></i>Record
+          </button>
+
           <!-- Docs link (mobile burger only). Duplicate of the desktop
                version above; responsive visibility hides whichever isn't
                appropriate for the current breakpoint. -->
@@ -75,13 +98,6 @@
             <i class="bi bi-sun-fill"></i>
             <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
             <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
-          </button>
-
-          <!-- Record Your Own Stats (re-opens the first-visit instructional modal) -->
-          <button class="vt-nav-icon-btn" id="record-stats-btn" type="button"
-                  data-bs-toggle="modal" data-bs-target="#record-stats-modal"
-                  title="How to record your own stats" aria-label="How to record your own stats">
-            <i class="bi bi-record-circle"></i><span class="vt-nav-label ms-2">Record stats</span>
           </button>
 
           <!-- About / Source Repos -->
@@ -1076,12 +1092,16 @@
             <li class="mb-0">
               Each match is automatically saved as a separate <code>.binpb</code> file in one of:
               <ul class="mt-1 mb-0" style="padding-left: 1.1rem;">
-                <li><code>Documents\My Games\Battlezone Combat Commander\statsgate</code></li>
-                <li><code>Steams\steamapps\common\BZ2R\statsgate</code></li>
+                <li><code>Documents\My Games\Battlezone Combat Commander\statsgate</code> <span style="color: var(--kb-text-muted);">(default)</span></li>
+                <li><code>Steam\steamapps\common\BZ2R\statsgate</code> <span style="color: var(--kb-text-muted);">(if using novista launch option)</span></li>
               </ul>
             </li>
           </ol>
-          <p class="small mt-3 mb-0" style="color: var(--kb-text-muted);">
+          <div class="alert alert-primary small mt-3 mb-4 py-2 px-3" role="note">
+            <i class="bi bi-terminal me-1"></i>Enter <code>stats</code> in the BZCC console
+            to get a list of useful commands while the DLL is active.
+          </div>
+          <p class="small mt-2 mb-0" style="color: var(--kb-text-muted);">
             <i class="bi bi-info-circle me-1"></i>The statsgate DLL self-terminates once BZCC
             closes &mdash; you'll need to re-run the launcher if you restart the game.
           </p>
