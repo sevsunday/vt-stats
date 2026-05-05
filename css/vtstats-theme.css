@@ -2348,17 +2348,96 @@ td.vt-col-split {
    above the grid.
    ===================================================================== */
 
-/* Map thumbnail in the match-info hero. 48x48 top-down image from
+/* Map thumbnail in the match-info hero. 70x70 top-down image from
  * data/map-registry.json. Hidden (d-none) on matches whose map isn't
- * in the registry. Renders to the left of the match-picker trigger. */
+ * in the registry. Renders to the left of the match-picker trigger.
+ * Wrapped in a `.vt-map-thumb-btn` button that opens #map-info-modal
+ * with the full-resolution image + registry metadata. */
 .vt-map-thumb {
-    width: 48px;
-    height: 48px;
+    width: 70px;
+    height: 70px;
     border-radius: 8px;
     border: 1px solid var(--kb-border-subtle);
     background: var(--kb-bg-subtle);
     object-fit: cover;
     flex-shrink: 0;
+    display: block;
+    transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-map-thumb-btn {
+    cursor: pointer;
+    line-height: 0;
+    border-radius: 8px;
+}
+
+.vt-map-thumb-btn:hover .vt-map-thumb,
+.vt-map-thumb-btn:focus-visible .vt-map-thumb {
+    border-color: var(--kb-primary);
+    transform: translateY(-1px);
+}
+
+/* Map Info Modal: full-resolution map image + registry / terrain meta.
+ * Triggered by the .vt-map-thumb-btn in the match-info banner. */
+.vt-map-info-image {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: contain;
+    border-radius: 8px;
+    border: 1px solid var(--kb-border-subtle);
+    background: var(--kb-bg-subtle);
+    display: block;
+}
+
+.vt-map-info-meta {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.45rem 1rem;
+    font-size: 0.9rem;
+}
+
+.vt-map-info-meta dt {
+    color: var(--kb-text-muted);
+    font-weight: 500;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.vt-map-info-meta dd {
+    color: var(--kb-text-primary);
+    margin: 0;
+    word-break: break-word;
+}
+
+.vt-map-info-meta .vt-map-info-meta-description {
+    grid-column: 1 / -1;
+    color: var(--kb-text-secondary);
+    font-style: italic;
+    line-height: 1.5;
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid var(--kb-border-subtle);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 40%, transparent);
+    border-radius: 0 6px 6px 0;
+}
+
+.vt-map-info-meta .vt-map-info-meta-section {
+    grid-column: 1 / -1;
+    color: var(--kb-text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 0.5rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--kb-border-subtle);
+}
+
+.vt-map-info-meta .vt-map-info-meta-section:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
 }
 
 /* --- Trigger button (lives in each hero) --- */

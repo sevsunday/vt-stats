@@ -835,7 +835,7 @@ Supporting details:
 
 ### Match Highlights (per-match, schema_version 2)
 
-Per-match award catalog rendered above the Faction Scoreboard. A fixed slate of 12 always-on cards — The Bully, Grim Reaper, Bullet Sponge, The Hustler, Sharpshooter, Gunner, Puppeteer, Frenemies, Roadrunner, Crate/Pod Goblin, Chris Kyle, The Locksmith. Each card emits unconditionally as long as its data gate passes; cards whose underlying data is unavailable (positioning / pickups / T-key gates, missing snipes, etc.) are simply omitted, and the grid reflows around the gap.
+Per-match award catalog rendered above the Faction Scoreboard. A fixed slate of 12 always-on cards — The Bully, Grim Reaper, Bullet Sponge, The Hustler, Sharpshooter, Gunner, Puppeteer, Frenemies, Roadrunner, Pod Goblin, Chris Kyle, The Locksmith. Each card emits unconditionally as long as its data gate passes; cards whose underlying data is unavailable (positioning / pickups / T-key gates, missing snipes, etc.) are simply omitted, and the grid reflows around the gap.
 
 Built by `compute_highlights()` in [scripts/process_stats.py](scripts/process_stats.py) from already-built per-match blocks (`leaderboard`, `top_rivalries`, `pickups`, `powerup_destructions`, `snipes`, `positioning`). No event re-walking. The block is **match-global and always-unfiltered** — the dashboard reads `currentData.highlights`, never the filtered `data` view, and the renderer is pure formatting.
 
