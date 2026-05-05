@@ -73,6 +73,21 @@ data/sessions/<username>/*.binpb.gz → [process_stats.py] → data/processed/*.
 
 The map registry is built at the end of every pipeline run. It's idempotent: per-map assets cached in `data/maps/<mapFile>.{png,json}` are reused on subsequent runs with zero network traffic; only new maps trigger a fetch.
 
+### Pipeline Invocation
+
+`python scripts/process_stats.py` is the single entrypoint. It runs in **sync-default + incremental** mode: pulls the sibling `statsgate/` git clone (`--ff-only`), additively mirrors any new `.binpb.gz` files into `data/sessions/`, then processes only matches whose source is new or has changed size since the last run. Flags:
+
+| Flag | Effect |
+|---|---|
+| (none) | Sync upstream + process incrementally. Default for the "VTrider uploaded new data" workflow. |
+| `--no-sync` | Skip git pull + mirror; process only what's already in `data/sessions/`. Use offline. |
+| `--sync-only` | Sync then exit; don't process. |
+| `--force` | Ignore the per-match cache; reprocess every match. Composes with sync flags. |
+
+`--no-sync` and `--sync-only` are mutually exclusive. Missing `statsgate/` is a soft-skip (supports the manual-drop-only workflow without `--no-sync`); failed `git pull` is a hard-fail with a `--no-sync` hint. Sync is strictly additive — never deletes from `data/sessions/`, never overwrites existing files (size-mismatch warns), so local-only submitter folders are preserved.
+
+The cache key is `(match.submitter, match.source_file, match.source_size_bytes)` plus a top-level `PIPELINE_VERSION` constant (currently `1`). **Bump `PIPELINE_VERSION` whenever `process_match()` or any helper it transitively calls (positioning, highlights, weapon meta, rivalry matrices, `_extract_contribution`, etc.) changes output semantics.** Stale cache entries are reprocessed automatically. The version is orthogonal to `match.schema_version`: that one is a frontend contract (read by `js/app.js` to gate rendering); `pipeline_version` is an internal cache invalidator. If you ever forget to bump and notice stale data in the dashboard, run with `--force` once to rebuild from scratch.
+
 ---
 
 ## 2. Data Schema — Protobuf

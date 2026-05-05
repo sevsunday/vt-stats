@@ -7,11 +7,15 @@ aggregates match statistics, and outputs pre-computed JSON files to
 data/processed/ for browser consumption.
 """
 
+import argparse
 import gzip
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +28,23 @@ SESSIONS_DIR = PROJECT_ROOT / "data" / "sessions"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 ODF_PATH = PROJECT_ROOT / "data" / "odf.min.json"
 STEAMID_TO_NAME_PATH = PROJECT_ROOT / "data" / "steamid_to_name.txt"
+
+# Sibling git clone of the upstream statsgate repo. Sync mode (default) does
+# `git pull --ff-only` here and additively mirrors any new .binpb.gz files
+# into SESSIONS_DIR before processing. Soft-skips if missing so the
+# manual-drop-only workflow doesn't require --no-sync.
+STATSGATE_DIR = PROJECT_ROOT / "statsgate"
+STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
+
+# Cache invalidator for incremental processing. Bump this whenever
+# process_match() output semantics change (new fields, value tweaks, or any
+# helper it transitively calls -- positioning, highlights, weapon meta,
+# rivalry matrices, _extract_contribution, etc.). Cached per-match JSONs
+# whose match.pipeline_version != this constant are reprocessed from the
+# raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
+# one is a frontend contract (the JS reads it to decide rendering);
+# pipeline_version is an internal cache invalidator only.
+PIPELINE_VERSION = 1
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -1066,6 +1087,69 @@ def discover_sessions():
     return sources
 
 
+def sync_upstream():
+    """Pull upstream statsgate clone + mirror new .binpb.gz into data/sessions/.
+
+    Soft-skips (warn + return) if statsgate/ isn't cloned -- supports the
+    "I only ever drop files in manually" workflow without needing
+    --no-sync. Hard-fails on git pull errors (auth, conflicts, network) so
+    the user notices real problems; --no-sync is the documented escape
+    hatch.
+
+    The mirror copy is strictly additive: never deletes from data/sessions/
+    (protects local-only submitter folders) and never overwrites existing
+    files (size mismatches warn but don't clobber). git pull uses
+    --ff-only so a divergent local statsgate clone fails loudly instead
+    of auto-merging.
+    """
+    if not STATSGATE_DIR.exists():
+        print(f"  Note: {STATSGATE_DIR.name}/ not present; skipping sync.")
+        print(f"  (Clone it with: git clone https://github.com/vtrider/statsgate.git {STATSGATE_DIR.name})")
+        return
+
+    print(f"Pulling upstream in {STATSGATE_DIR}...")
+    try:
+        subprocess.run(
+            ["git", "-C", str(STATSGATE_DIR), "pull", "--ff-only"],
+            check=True,
+        )
+    except FileNotFoundError:
+        print("\nERROR: 'git' not found on PATH; cannot sync.")
+        print("  Install git or run with --no-sync to process local sessions only.")
+        sys.exit(2)
+    except subprocess.CalledProcessError as e:
+        print(f"\nERROR: git pull failed (exit {e.returncode}).")
+        print("  Use --no-sync to skip and process local sessions only.")
+        sys.exit(2)
+
+    if not STATSGATE_SESSIONS_DIR.exists():
+        print(f"  Note: {STATSGATE_SESSIONS_DIR.relative_to(PROJECT_ROOT)} not present; nothing to mirror.")
+        return
+
+    copied: list[str] = []
+    skipped_size_mismatch: list[Path] = []
+    for user_dir in sorted(STATSGATE_SESSIONS_DIR.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        for src in sorted(user_dir.iterdir()):
+            if src.suffix != ".gz" or not src.stem.endswith(".binpb"):
+                continue
+            dest = SESSIONS_DIR / user_dir.name / src.name
+            if dest.exists():
+                if dest.stat().st_size != src.stat().st_size:
+                    skipped_size_mismatch.append(dest)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            copied.append(f"{user_dir.name}/{src.name}")
+
+    print(f"Synced {len(copied)} new file(s)")
+    for c in copied:
+        print(f"  [copy] {c}")
+    for s in skipped_size_mismatch:
+        print(f"  WARN: size mismatch, NOT overwritten: {s.relative_to(SESSIONS_DIR)}")
+
+
 def load_session(path):
     """Load and parse a .binpb.gz session file."""
     with gzip.open(path, "rb") as f:
@@ -1073,6 +1157,43 @@ def load_session(path):
     session = statsgate_pb2.ClientStatSession()
     session.ParseFromString(data)
     return session
+
+
+def load_cache_index():
+    """Walk data/processed/*.json once, build the incremental cache index.
+
+    Returns a dict keyed by `(submitter, source_file)` mapping to the
+    fully-loaded cached match_data. Only includes entries whose
+    `match.pipeline_version` matches the current PIPELINE_VERSION
+    constant -- stale entries are skipped so they get reprocessed.
+
+    The cross-match aggregate files (matches.json,
+    match_contributions.json, all_matches.json) are skipped explicitly
+    since they don't represent a single match. Per-match JSONs that
+    fail to load (corrupt, mid-write, missing required fields) are
+    silently dropped from the index so they get reprocessed; this is
+    the self-healing path for partial pipeline runs.
+    """
+    index: dict[tuple[str, str], dict] = {}
+    if not OUTPUT_DIR.exists():
+        return index
+    skip = {"matches.json", "match_contributions.json", "all_matches.json"}
+    for json_path in OUTPUT_DIR.glob("*.json"):
+        if json_path.name in skip:
+            continue
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        m = cached.get("match", {})
+        if m.get("pipeline_version") != PIPELINE_VERSION:
+            continue
+        sub = m.get("submitter")
+        src = m.get("source_file")
+        if sub and src and m.get("source_size_bytes") is not None:
+            index[(sub, src)] = cached
+    return index
 
 
 def slot_to_faction(slot):
@@ -1679,8 +1800,14 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
-def process_match(session, source_file, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, known_players=None):
-    """Process a single match session into pre-computed stats."""
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, known_players=None):
+    """Process a single match session into pre-computed stats.
+
+    `source_size_bytes` is the byte size of the source .binpb.gz at
+    discovery time. It's stamped into the output JSON's
+    `match.source_size_bytes` field so subsequent runs can use it as the
+    incremental cache key (see load_cache_index() and the `--force` flag).
+    """
     header = session.header
     events = session.event_stream
 
@@ -2629,6 +2756,20 @@ def process_match(session, source_file, submitter, resolve_weapon, resolve_unit,
         "match": {
             "id": match_id,
             "source_file": source_file,
+            # Byte size of the source .binpb.gz at the time we processed it.
+            # Used (with `submitter` + `source_file`) as the incremental
+            # cache key in load_cache_index(). The collector writes each
+            # session file once and never modifies it, so size is a stable
+            # fingerprint -- we deliberately don't use mtime because
+            # shutil.copy2 in sync_upstream() can change mtime without
+            # changing content. See PIPELINE_VERSION docstring up top.
+            "source_size_bytes": source_size_bytes,
+            # Internal cache invalidator -- bumped manually when
+            # process_match() output semantics change. Cached JSONs whose
+            # value differs from the current PIPELINE_VERSION constant are
+            # reprocessed from raw on the next run. Orthogonal to
+            # `schema_version` below (which is a frontend contract).
+            "pipeline_version": PIPELINE_VERSION,
             "submitter": submitter,
             "map": header.map,
             "date": date_str,
@@ -3141,9 +3282,55 @@ def build_all_matches_aggregate(all_match_data):
     }
 
 
+def _parse_args():
+    """CLI surface. Sync is default-on; opt out via --no-sync. See module docs."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "VT Stats pipeline. Default behavior: sync upstream statsgate "
+            "+ process only changed matches. Re-run after VTrider uploads "
+            "with no flags."
+        ),
+    )
+    sync_group = parser.add_mutually_exclusive_group()
+    sync_group.add_argument(
+        "--no-sync",
+        action="store_true",
+        help="Skip git pull + mirror; process only what's already in data/sessions/",
+    )
+    sync_group.add_argument(
+        "--sync-only",
+        action="store_true",
+        help="Sync upstream then exit; don't process any matches",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore the per-match cache and reprocess every match (composes with sync flags)",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = _parse_args()
+    t0 = time.perf_counter()
+
     print("VT Stats Processing Pipeline")
     print("=" * 40)
+
+    # --sync-only --force is allowed by argparse but --force is a no-op
+    # since processing is skipped. Surface this so the user notices.
+    if args.sync_only and args.force:
+        print("Note: --force has no effect with --sync-only (processing is skipped).")
+
+    # Sync upstream (default-on; --no-sync opts out). sync_upstream()
+    # soft-skips if statsgate/ is missing so the manual-drop-only
+    # workflow doesn't require --no-sync. It hard-fails on git errors so
+    # real problems are visible.
+    if not args.no_sync:
+        sync_upstream()
+        if args.sync_only:
+            print(f"\nDone in {time.perf_counter() - t0:.1f}s (sync-only).")
+            return
 
     # Load ODF database
     odf_db = {}
@@ -3171,26 +3358,47 @@ def main():
 
     print(f"Found {len(sources)} session file(s)")
 
-    # Process each match
+    # Build the incremental cache index. Skipped wholesale under --force
+    # so every match gets reprocessed from raw. The cache hits when both
+    # source_size_bytes (immutable per session file) and pipeline_version
+    # (PIPELINE_VERSION constant) match the cached JSON.
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    cache = {} if args.force else load_cache_index()
+    print(f"Cache index: {len(cache)} prior match(es) eligible for reuse"
+          + (" (--force: cache disabled)" if args.force else ""))
+
     all_match_data = []
     submitter_by_id: dict[str, str] = {}
+    n_cache_hit = 0
+    n_processed = 0
 
     for session_path, submitter in sources:
-        print(f"\nProcessing {submitter}/{session_path.name}...")
+        cache_key = (submitter, session_path.name)
+        current_size = session_path.stat().st_size
+        cached = cache.get(cache_key)
+        if cached and cached["match"].get("source_size_bytes") == current_size:
+            print(f"  [cache] {submitter}/{session_path.name}")
+            match_data = cached
+            n_cache_hit += 1
+        else:
+            print(f"\nProcessing {submitter}/{session_path.name}...")
+            session = load_session(session_path)
+            print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
+            match_data = process_match(
+                session, session_path.name, current_size, submitter,
+                resolve_weapon, resolve_unit, known_powerup_odfs, known_players,
+            )
+            match_id = match_data["match"]["id"]
+            out_path = OUTPUT_DIR / f"{match_id}.json"
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(match_data, f, indent=2, ensure_ascii=False)
+            print(f"  Output: {out_path.name} ({out_path.stat().st_size:,} bytes)")
+            n_processed += 1
 
-        session = load_session(session_path)
-        print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
-
-        match_data = process_match(session, session_path.name, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, known_players)
         all_match_data.append(match_data)
         submitter_by_id[match_data["match"]["id"]] = submitter
 
-        match_id = match_data["match"]["id"]
-        out_path = OUTPUT_DIR / f"{match_id}.json"
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(match_data, f, indent=2, ensure_ascii=False)
-        print(f"  Output: {out_path.name} ({out_path.stat().st_size:,} bytes)")
+    print(f"\nMatches: {n_cache_hit} cached, {n_processed} reprocessed")
 
     # Build/refresh the map registry BEFORE the manifest so we can resolve
     # each match's display name from the iondriver `title` field (with
@@ -3289,7 +3497,8 @@ def main():
     except Exception as e:
         print(f"WARN: failed to extract proto docs ({e}); skipping.")
 
-    print("\nDone!")
+    print(f"\nDone in {time.perf_counter() - t0:.1f}s "
+          f"({n_cache_hit} cached, {n_processed} reprocessed)")
 
 
 if __name__ == "__main__":
