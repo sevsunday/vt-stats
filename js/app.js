@@ -4872,8 +4872,9 @@
   // flag is independent of any URL intent, so shared links still resolve
   // correctly — the modal just defers the resolution until it closes.
   // The {once:true} listener only fires for this initial open; the
-  // navbar `#record-stats-btn` re-opens via Bootstrap's data-bs-toggle
-  // and never re-triggers this gating logic.
+  // navbar `#record-stats-btn-desktop` / `#record-stats-btn-mobile`
+  // buttons re-open via Bootstrap's data-bs-toggle and never re-trigger
+  // this gating logic.
   const $recordStatsModal = document.getElementById('record-stats-modal');
   const $recordStatsCheckbox = document.getElementById('record-stats-dont-show');
   if (!readRecordStatsDismissed() && $recordStatsModal && window.bootstrap) {

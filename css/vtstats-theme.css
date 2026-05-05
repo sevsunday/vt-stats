@@ -640,6 +640,29 @@ body::before {
     display: none !important;
 }
 
+/* Primary-tinted variant of .vt-nav-icon-btn — used for high-emphasis
+   actions in the topnav (e.g. #record-stats-btn-desktop / -mobile).
+   Mirrors the visual weight of .btn-primary while keeping the topnav's
+   sizing and typography. Specificity matches the base .vt-nav-icon-btn
+   hover/focus rules above; defined later in source so it wins. */
+.vt-nav-icon-btn--primary {
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+    box-shadow: 0 2px 10px var(--kb-primary-muted);
+}
+
+.vt-nav-icon-btn--primary:hover,
+.vt-nav-icon-btn--primary:focus-visible {
+    background: var(--kb-primary-hover);
+    color: var(--kb-primary-fg);
+    box-shadow: 0 4px 14px var(--kb-primary-muted);
+}
+
+.vt-nav-icon-btn--primary:active {
+    filter: brightness(0.95);
+    box-shadow: 0 1px 6px var(--kb-primary-muted);
+}
+
 /* ============================================================================
    TOPNAV URL-SYNC BUTTONS
    Share (one-shot copy) + Live Sync (toggle). Both render as standalone
