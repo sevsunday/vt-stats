@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 1
+PIPELINE_VERSION = 2
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -1969,6 +1969,31 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # match.has_target_lock_data, and on to career_stats[].matches_with_target_lock_data.
     match_has_target_lock_data = False
 
+    # Per-(picker, powerup_odf, powerup_team) tick-cooldown deduplication
+    # of pickup_powerup events. The engine fires a pickup_powerup event
+    # every time a vehicle's collision volume overlaps a powerup's
+    # pickup zone, regardless of whether the powerup's effect is actually
+    # applied. For continuous-effect structures like apserv (Service Pod),
+    # this means the engine emits dozens-to-hundreds of PP events per
+    # pad visit (one per engine re-check of the volume), each of which
+    # may be a real consume or a "rejected" no-op (player already at full
+    # HP / ammo / shield). Without an in-event "consumed" boolean or a
+    # per-instance entity ID, we collapse PP events sharing
+    # (picker, powerup_odf, powerup_team) within PICKUP_DEDUP_GAP_TICKS
+    # of each other into one logical pickup -- effectively counting
+    # each "pad visit" or "crate touch" as one pickup, not 60.
+    #
+    # An earlier attempt tried to pair each PP with a same-tick synthetic
+    # UnitDestroyed (killer_team=0) following the doc's claim that the
+    # engine "double-emits" in new-schema sessions. Empirically, the
+    # synthetic UD is no longer emitted at all by the post-2026-05-01
+    # collector (zero such events in current new-schema corpus matches),
+    # so that pairing approach drops 100% of PP events as "rejected".
+    # See docs/DATA_DICTIONARY.md S8 erratum for the corrected three-era
+    # collector behavior model.
+    PICKUP_DEDUP_GAP_TICKS = 60  # 3 seconds at 20 Hz tick rate
+    pickup_last_kept_tick = {}  # (picker, powerup_odf_lower, powerup_team) -> last kept tick
+
     i = 0
     n = len(events)
     while i < n:
@@ -2259,11 +2284,32 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 max_tick = pp.tick
             if pp.tick < min_tick:
                 min_tick = pp.tick
+            # match_has_pickup_data stays loose: True on the first PP event
+            # regardless of accept/reject, because existing UI gates treat
+            # this as "match recorded by a new-schema collector," not "match
+            # has interesting pickup data." Tightening to "any accepted PP"
+            # would risk showing legit matches as "no pickup data" if every
+            # touch happened to be rejected.
             match_has_pickup_data = True
+            # ODF registration also stays loose -- rejected events reference
+            # real ODFs that the Raw Data Browser still needs to resolve.
             if pp.powerup_odf:
                 all_unit_odfs.add(pp.powerup_odf)
             if pp.picker_odf:
                 all_unit_odfs.add(pp.picker_odf)
+            # Accept-vs-reject gate. The engine emits PP events on volume
+            # contact even when the powerup's effect is rejected (player
+            # already maxed). Without per-instance disambiguation in the
+            # proto, dedup events that share (picker, powerup_odf,
+            # powerup_team) within PICKUP_DEDUP_GAP_TICKS of the previous
+            # kept event -- treating the cluster as one logical pickup.
+            # See pickup_last_kept_tick init above for full rationale.
+            _dedup_key = (pp.picker, (pp.powerup_odf or "").lower(), pp.powerup_team)
+            _prev_tick = pickup_last_kept_tick.get(_dedup_key)
+            if _prev_tick is not None and pp.tick - _prev_tick <= PICKUP_DEDUP_GAP_TICKS:
+                i += 1
+                continue
+            pickup_last_kept_tick[_dedup_key] = pp.tick
             pickup_events.append({
                 "tick": pp.tick,
                 "picker_s64": pp.picker,

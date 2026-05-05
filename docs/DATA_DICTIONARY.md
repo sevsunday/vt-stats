@@ -1833,3 +1833,92 @@ tick T: UnitDestroyed { victim_odf=powerup_odf, killer_team=0, killer=0 }  <-- o
 The classification rule applies identically. `pickups.feed` is empty
 (`pickups.has_pickup_data == false`) but `powerup_destructions` still
 populates from the ~10-15% of powerup destructions that had a real killer.
+
+### Collector-bug erratum: rejected-pickup over-count (Phase 3 through ~2026-05-05)
+
+**Supersedes the "no deduplication state machine is required" claim above
+and the "engine continues to double-emit in new-schema matches" claim in
+[Evidence](#evidence).** Until `PIPELINE_VERSION = 2` (May 2026), the
+pipeline assumed that every `PickupPowerup` event represented an actual
+consumption — i.e. that the new event was 1:1 with real pickups. That
+assumption is **wrong**. The upstream collector
+(`statsgate/src/stat_client.cpp`) hooks the engine's pickup-volume
+callback, which fires on **contact** with the pod, not on **consumption**.
+A vehicle at full HP / ammo / shield rolling through a Service Pod's
+volume generates a `PickupPowerup` event each time the engine re-checks
+the volume — but no consumption occurs and the pod stays alive on the map.
+
+Empirical impact on the corpus: in match `2026-05-05T02-23-38`, a single
+player accumulated **8,304 "pickups"** of `apserv_vsr.odf` (Service Pod) —
+98.2% of the entire match's pickup count came from this one ODF, against
+only 16 real Service Pod destructions in the same match. Players sitting
+on a repair pad were inflating both the per-match `pickups.by_player`
+column and the cross-match Crate/Pod Goblin highlight by orders of
+magnitude.
+
+#### Three-era collector behavior model
+
+A corpus-wide scan reveals the upstream collector evolved through three
+distinct emission behaviors (verified against every `data/sessions/**/*.binpb.gz`):
+
+| Era | Date range | `pickup_powerup` events | Synthetic `unit_destroyed` (`killer_team=0`, powerup `victim_odf`) |
+|---|---|---|---|
+| **1. Pre-Phase-3** | Through ~2026-04-26 | 0 (event didn't exist) | Many (the only pickup signal) |
+| **2. Transitional** | ~2026-04-26 through ~2026-04-30 | Many (with rejection-spam) | Many (1 per real consume) |
+| **3. Post-2026-05-01** | ~2026-05-01 onward | Many (with rejection-spam) | **Zero** |
+
+The original docs (and the original fix attempt) keyed off the era-2
+double-emit pattern, which by the time the bug was discovered had been
+deprecated for ~5 days of new sessions. The "89% team-zero in new-schema
+matches" figure quoted earlier was a corpus-wide average dominated by
+era-1 + era-2 matches; era-3 matches contribute zero to that ratio.
+
+#### Fix (pipeline-side, applied in `PIPELINE_VERSION = 2`)
+
+Per-`(picker, powerup_odf, powerup_team)` tick-cooldown deduplication.
+The `pickup_powerup` branch in `process_match()` collapses PP events
+sharing that key within `PICKUP_DEDUP_GAP_TICKS = 60` (3 seconds at 20
+Hz) of the previous kept event into one logical pickup. Effect: each
+"pad visit" or "crate touch" registers as a single pickup regardless
+of how many engine re-checks fire during contact. Works uniformly
+across all three collector eras (era 1 has no PP events to dedup,
+eras 2 and 3 both produce identical accept/reject-collapsed outputs).
+
+The 60-tick cooldown was chosen to be conservative against the dominant
+problem (Service Pod sit-on-pad spam where consecutive events are 0–10
+ticks apart) while preserving distinct visits separated by a vehicle
+leaving and re-entering the pickup zone (typically separated by 100+
+ticks of repositioning). Empirical session counts at this cutoff for
+the screenshot match's apserv events: Lithium 8,301 → 23 visits;
+Certified Bad Guy 1,436 → 15; VTrider 812 → 20; Domakus 774 → 30.
+
+The Category 2 branch in the four-way classification is unchanged: era-1
+and era-2 synthetic UDs are still suppressed from kill aggregation. The
+synthetic-UD signal is no longer used as a pairing input.
+
+#### Forward compatibility
+
+When/if the upstream collector is fixed to relocate `PickupPowerup`
+emission from the volume-entry hook to the consume hook (so PP only
+fires on real pickups), the cooldown gate becomes a near-no-op for
+single-consume crates and would still correctly merge any per-tick
+emission for continuous-effect structures. Safe to leave in place
+permanently as defense-in-depth. No proto / schema / frontend changes
+are required for either the pipeline-side fix or a future collector fix.
+
+#### `match_has_pickup_data` flag
+
+Stays loose by design: it flips `True` on the first `PickupPowerup`
+event seen, regardless of whether that event passed the dedup gate. The
+flag's contract is "match was recorded by a new-schema collector" (used
+by UI gates for the "no pickup data" badge), not "match has interesting
+pickup data." Tightening to "any *kept* pickup" would risk legit matches
+where every touch happened to land within the cooldown window of a
+prior event showing as "no pickup data."
+
+#### Affected corpus
+
+Every era-2 and era-3 match. The pipeline-side gate corrects the corpus
+on next reprocess (`--force` or the `PIPELINE_VERSION` bump alone).
+Era-1 (pre-Phase-3) sessions are unaffected because they have no
+`PickupPowerup` events to dedup.
