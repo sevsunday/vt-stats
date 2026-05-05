@@ -2367,6 +2367,7 @@ td.vt-col-split {
 }
 
 .vt-map-thumb-btn {
+    position: relative;
     cursor: pointer;
     line-height: 0;
     border-radius: 8px;
@@ -2376,6 +2377,36 @@ td.vt-col-split {
 .vt-map-thumb-btn:focus-visible .vt-map-thumb {
     border-color: var(--kb-primary);
     transform: translateY(-1px);
+}
+
+/* Lightbox-style affordance: a small zoom-in badge in the bottom-right
+ * corner of the thumbnail signals the image opens the Map Info Modal.
+ * Pointer-events disabled so the wrapping button still owns the click. */
+.vt-map-thumb-overlay {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background: color-mix(in oklab, var(--kb-bg-surface) 75%, transparent);
+    color: var(--kb-primary);
+    font-size: 0.85rem;
+    line-height: 1;
+    pointer-events: none;
+    backdrop-filter: blur(2px);
+    border: 1px solid var(--kb-border-subtle);
+    transition: transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
+                background var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+.vt-map-thumb-btn:hover .vt-map-thumb-overlay,
+.vt-map-thumb-btn:focus-visible .vt-map-thumb-overlay {
+    transform: scale(1.1);
+    background: color-mix(in oklab, var(--kb-primary) 25%, var(--kb-bg-surface));
 }
 
 /* Map Info Modal: full-resolution map image + registry / terrain meta.
@@ -2411,15 +2442,27 @@ td.vt-col-split {
     word-break: break-word;
 }
 
-.vt-map-info-meta .vt-map-info-meta-description {
-    grid-column: 1 / -1;
+/* Author / community blurb shown beneath the map image in the left
+ * column. Multi-line strings (registry `description` is a raw newline-
+ * delimited dump from iondriver's API) read better here than crammed
+ * into the right-column metadata grid. */
+.vt-map-info-description {
+    margin-top: 0.75rem;
     color: var(--kb-text-secondary);
     font-style: italic;
+    font-size: 0.875rem;
     line-height: 1.5;
-    padding: 0.5rem 0.75rem;
+    padding: 0.6rem 0.85rem;
     border-left: 2px solid var(--kb-border-subtle);
     background: color-mix(in oklab, var(--kb-bg-subtle) 40%, transparent);
     border-radius: 0 6px 6px 0;
+    word-break: break-word;
+}
+
+.vt-map-info-meta-empty {
+    color: var(--kb-text-muted);
+    font-style: italic;
+    font-size: 0.9rem;
 }
 
 .vt-map-info-meta .vt-map-info-meta-section {

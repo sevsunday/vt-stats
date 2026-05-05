@@ -3259,88 +3259,23 @@
     if (thumbBtn) {
       if (meta.imagePath) {
         thumbBtn.classList.remove('d-none');
+        // Imperative init: the button already carries data-bs-toggle="modal"
+        // (Bootstrap doesn't allow two `data-bs-toggle` values on one
+        // element), so wire the tooltip programmatically. getOrCreateInstance
+        // is idempotent across renderBanner re-runs on match switches.
+        if (window.bootstrap && window.bootstrap.Tooltip) {
+          window.bootstrap.Tooltip.getOrCreateInstance(thumbBtn);
+        }
       } else {
         thumbBtn.classList.add('d-none');
       }
     }
 
     // Modal contents stay in sync on every banner render so opening the
-    // modal after a match switch always reflects the current map.
+    // modal after a match switch always reflects the current map. Map size,
+    // elevation, base-to-base and author all live inside the modal now (the
+    // hero used to surface them as separate stat blocks).
     renderMapInfoModal(info, meta, registryEntry);
-
-    // Map size: prefer terrain (actual collected extents) over library canonical.
-    const sizeEl = document.getElementById('info-map-size');
-    if (sizeEl) {
-      if (meta.terrainSize) {
-        sizeEl.textContent = `${Math.round(meta.terrainSize.x)} \u00D7 ${Math.round(meta.terrainSize.z)}m`;
-        sizeEl.title = 'Terrain bounds from StatHeader (actual collected data).';
-      } else if (meta.canonicalSize) {
-        sizeEl.textContent = `~${Math.round(meta.canonicalSize)}m`;
-        sizeEl.title = 'Canonical size from VSR_MAP_DATA (pre-schema session — no terrain bounds on wire).';
-      } else {
-        sizeEl.textContent = '—';
-        sizeEl.title = '';
-      }
-    }
-
-    // Elevation range: only meaningful when terrain data is present. Otherwise
-    // render "—" (keep the row visible to preserve hero flex layout).
-    const elevEl = document.getElementById('info-map-elevation');
-    if (elevEl) {
-      if (meta.elevation) {
-        elevEl.textContent = `${Math.round(meta.elevation.min)} \u2192 ${Math.round(meta.elevation.max)}m`;
-        elevEl.title = 'Terrain Y range (min \u2192 max) from StatHeader.';
-      } else {
-        elevEl.textContent = '—';
-        elevEl.title = 'No terrain bounds on wire for this session.';
-      }
-    }
-
-    // Base-to-base: show empirical (always available post-terrain fix) with
-    // tooltip containing canonical reference. Bootstrap tooltip lifecycle:
-    // dispose existing instance before re-init to avoid leaks across
-    // renderBanner re-calls on match switches.
-    const b2bEl = document.getElementById('info-base-to-base');
-    if (b2bEl) {
-      if (meta.empiricalB2B != null) {
-        b2bEl.textContent = `${Math.round(meta.empiricalB2B)}m`;
-        let tipHtml;
-        if (meta.canonicalB2B != null) {
-          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}m ` +
-            `(spawn centroid distance this match)<br>` +
-            `<strong>Canonical:</strong> ${Math.round(meta.canonicalB2B)}m ` +
-            `<small>(map-design reference)</small>`;
-        } else {
-          tipHtml = `<strong>Empirical:</strong> ${Math.round(meta.empiricalB2B)}m ` +
-            `(spawn centroid distance this match)`;
-        }
-        b2bEl.setAttribute('data-bs-original-title', tipHtml);
-        b2bEl.setAttribute('title', tipHtml);
-        // Dispose-before-init guards against leaked Bootstrap Tooltip
-        // instances on match switches (first-ever banner-level tooltip;
-        // establishes the pattern for future hero tooltips).
-        if (window.bootstrap && window.bootstrap.Tooltip) {
-          const prev = window.bootstrap.Tooltip.getInstance(b2bEl);
-          if (prev) prev.dispose();
-          new window.bootstrap.Tooltip(b2bEl, { html: true });
-        }
-      } else {
-        b2bEl.textContent = '—';
-        b2bEl.removeAttribute('data-bs-original-title');
-        b2bEl.setAttribute('title', '');
-        if (window.bootstrap && window.bootstrap.Tooltip) {
-          const prev = window.bootstrap.Tooltip.getInstance(b2bEl);
-          if (prev) prev.dispose();
-        }
-      }
-    }
-
-    // Map author from VSR_MAP_DATA (via registry).
-    const authorEl = document.getElementById('info-map-author');
-    if (authorEl) {
-      authorEl.textContent = meta.author || '—';
-      authorEl.title = meta.author ? `Map by ${meta.author}` : '';
-    }
   }
 
   // Format a registry `description` for display: strip the BOM that some
@@ -3361,6 +3296,7 @@
     const titleEl = document.getElementById('map-info-modal-title-text');
     const imageEl = document.getElementById('map-info-modal-image');
     const imageCol = document.getElementById('map-info-modal-image-col');
+    const descriptionEl = document.getElementById('map-info-modal-description');
     const metaEl = document.getElementById('map-info-modal-meta');
     if (!titleEl || !imageEl || !metaEl) return;
 
@@ -3376,6 +3312,22 @@
       if (imageCol) imageCol.classList.add('d-none');
     }
 
+    const reg = registry || {};
+
+    // Description renders into the LEFT column under the image (longer
+    // multi-line author blurbs read better there and free the right column
+    // up for compact metadata rows).
+    const description = formatMapDescription(reg.description);
+    if (descriptionEl) {
+      if (description) {
+        descriptionEl.innerHTML = description;
+        descriptionEl.classList.remove('d-none');
+      } else {
+        descriptionEl.innerHTML = '';
+        descriptionEl.classList.add('d-none');
+      }
+    }
+
     const rows = [];
     const addRow = (label, html) => {
       if (html == null || html === '') return;
@@ -3384,12 +3336,6 @@
     const addSection = (label) => {
       rows.push(`<div class="vt-map-info-meta-section">${esc(label)}</div>`);
     };
-
-    const reg = registry || {};
-    const description = formatMapDescription(reg.description);
-    if (description) {
-      rows.push(`<div class="vt-map-info-meta-description">${description}</div>`);
-    }
 
     addSection('Map');
     addRow('Author', meta.author ? esc(meta.author) : '');
@@ -3435,7 +3381,7 @@
     }
 
     metaEl.innerHTML = rows.join('') ||
-      `<div class="vt-map-info-meta-description">No additional metadata available for this map.</div>`;
+      `<div class="vt-map-info-meta-empty">No additional metadata available for this map.</div>`;
   }
 
   // --- Player Profile (Single-Player Mode) ---

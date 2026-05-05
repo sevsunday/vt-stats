@@ -142,8 +142,11 @@
           <button id="info-map-thumb-btn" type="button"
                   class="vt-map-thumb-btn d-none p-0 border-0 bg-transparent"
                   data-bs-toggle="modal" data-bs-target="#map-info-modal"
-                  aria-label="View map details">
+                  title="View map details" aria-label="View map details">
             <img id="info-map-thumb" class="vt-map-thumb" alt="" decoding="async" loading="lazy">
+            <span class="vt-map-thumb-overlay" aria-hidden="true">
+              <i class="bi bi-zoom-in"></i>
+            </span>
           </button>
           <!-- Rich match picker trigger. Looks like a dropdown, opens the
                #match-picker-modal. Both this trigger and its twin inside
@@ -165,17 +168,10 @@
           <div><span class="stat-label">Duration</span><br><strong id="info-duration">—</strong></div>
           <div><span class="stat-label">Players</span><br><strong id="info-players">—</strong></div>
           <div><span class="stat-label">Submitted by</span><br><strong id="info-submitter">—</strong></div>
-          <!-- Map dimension fields. All match-global / always-unfiltered.
-               Sourced from match.terrain_bounds (primary) + data/map-registry.json
-               (fetched) + BZ2API.VSR_MAP_DATA (baked-in library fallback).
-               See .cursor/rules/filter-contract.mdc and docs/DATA_DICTIONARY.md. -->
-          <div><span class="stat-label">Map size</span><br><strong id="info-map-size">—</strong></div>
-          <div><span class="stat-label">Elevation</span><br><strong id="info-map-elevation">—</strong></div>
-          <div id="info-b2b-wrap">
-            <span class="stat-label">Base to base</span><br>
-            <strong id="info-base-to-base" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true">—</strong>
-          </div>
-          <div><span class="stat-label">Author</span><br><strong id="info-map-author">—</strong></div>
+          <!-- Map dimension fields (size / elevation / base-to-base / author)
+               + description / mod / team names live in the Map Info Modal,
+               opened by clicking the thumbnail above. See renderMapInfoModal()
+               in js/app.js. -->
           <div id="info-snipes-wrap" class="d-none"><span class="stat-label">Snipes</span><br><strong id="info-snipes">0</strong></div>
           <a id="info-raw-link" class="vt-nav-icon-btn" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
             <i class="bi bi-code-square me-1"></i><span>View raw</span>
@@ -1331,6 +1327,9 @@
           <div class="row g-3">
             <div class="col-md-6 vt-map-info-image-col" id="map-info-modal-image-col">
               <img id="map-info-modal-image" class="vt-map-info-image" alt="" decoding="async" loading="lazy">
+              <!-- Author/community blurb from data/map-registry.json[<key>].description.
+                   Hidden when the registry has no description for this map. -->
+              <div class="vt-map-info-description d-none" id="map-info-modal-description"></div>
             </div>
             <div class="col-md-6">
               <dl class="vt-map-info-meta" id="map-info-modal-meta">

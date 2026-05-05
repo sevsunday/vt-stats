@@ -434,17 +434,18 @@ Match-level spatial context fields:
 - `base_to_base_distance` — raw horizontal distance (units, horizontal-plane only) between Team 1 and Team 2 spawn centroids. `null` when either team has zero players. Distinct from `positioning.base_separation`, which is a floored internal scaling value used by the `R_base` / `time_in_base_pct` heuristics. Mirrored from `positioning.base_to_base_distance`. Match-global, always-unfiltered.
 - `sentinel_damage` — telemetry for engine sentinel events dropped by the `> 1e6` pipeline filter. `count` is the number of DD+DR pairs dropped (not individual events); `total_amount` is the sum of DD-side amounts (same as DR-side; double-counting is avoided for clarity). `first_tick` / `last_tick` are `null` on clean matches, set on affected matches. Always present (zeros on clean matches). Match-global, always-unfiltered. See [§7 in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#7-sentinel-damage-filter).
 
-##### Hero banner surface
+##### Hero banner + Map Info Modal surface
 
-`js/app.js` `renderBanner()` consumes the match-level spatial fields plus `data/map-registry.json` (fetched once at app init, cached in `mapRegistry`) plus `BZ2API.VSR_MAP_DATA` (baked-in fallback). Merge precedence — highest first:
+`js/app.js` `renderBanner()` populates the hero with Duration, Players, Submitted by, Snipes (conditional), and the 70x70 map thumbnail (`#info-map-thumb-btn` with a `bi-zoom-in` corner overlay). All map-dimension fields live inside the **Map Info Modal** (`#map-info-modal`) — opened by clicking the thumbnail — built by `renderMapInfoModal()` from `getMapMeta()` plus the raw `mapRegistry[key]` entry. The modal re-renders on every banner update so it stays in sync across match switches. Merge precedence — highest first:
 
-- **Map size** — `match.terrain_bounds` (edge = max − min on x / z, rendered as `N × Nu`) when present; `BZ2API.VSR_MAP_DATA[key].size × 2` as pre-schema fallback (rendered as `~Nu`).
-- **Elevation** — `match.terrain_bounds.max.y - min.y` when present; dashed out otherwise.
-- **Base-to-base** — `match.base_to_base_distance` (empirical, always populated). Tooltip compares to `VSR_MAP_DATA[key].baseToBase` (canonical) when available.
-- **Author** — `VSR_MAP_DATA[key].author`.
-- **Thumbnail** — `mapRegistry[key].image_path` → `data/maps/<map_file>.png`. Hidden when absent.
+- **Map size** — `match.terrain_bounds` (edge = max − min on x / z, rendered as `N × Nm`) when present; `BZ2API.VSR_MAP_DATA[key].size × 2` as pre-schema fallback (rendered as `~Nm`).
+- **Elevation** — `match.terrain_bounds.max.y - min.y` when present; row omitted otherwise.
+- **Base-to-base** — `match.base_to_base_distance` (empirical, always populated) shown in the "This match" section; `mapRegistry[key].canonical_b2b` ∪ `VSR_MAP_DATA[key].baseToBase` shown in the upper "Map" section.
+- **Author** — `mapRegistry[key].author` ∪ `VSR_MAP_DATA[key].author`.
+- **Description / Mod / Team names** — `mapRegistry[key].description` (BOM-stripped, line-broken), `mod_resolved` (linked to Steam Workshop when numeric), `net_vars.svar1` / `svar2`.
+- **Thumbnail** — `mapRegistry[key].image_path` → `data/maps/<map_file>.png`. Hidden when absent (the modal trigger is also hidden).
 
-Per the filter contract these are all match-global / always-unfiltered; no filter narrowing or recomputation paths involved. See `getMapMeta()` in `js/app.js` for the unified merge and `renderMapBannerFields()` for the banner DOM wiring.
+Per the filter contract these are all match-global / always-unfiltered; no filter narrowing or recomputation paths involved. See `getMapMeta()` in `js/app.js` for the unified merge, `renderMapBannerFields()` for the hero DOM wiring, and `renderMapInfoModal()` for the modal-population helper.
 
 #### `leaderboard[]` entry
 
