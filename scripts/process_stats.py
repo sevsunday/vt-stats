@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 2
+PIPELINE_VERSION = 3
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -360,7 +360,7 @@ HIGHLIGHTS_LABELS = {
     "puppeteer":        ("Puppeteer",        "bi-diagram-3"),
     "frenemies":        ("Frenemies",        "bi-people-fill"),
     "roadrunner":       ("Roadrunner",       "bi-rocket-takeoff"),
-    "crate_pod_goblin": ("Crate/Pod Goblin", "bi-box-seam"),
+    "crate_pod_goblin": ("Pod Goblin",       "bi-box-seam"),
     "chris_kyle":       ("Chris Kyle",       "bi-crosshair"),
     "the_locksmith":    ("The Locksmith",    "bi-lock-fill"),
 }
@@ -745,7 +745,7 @@ def compute_highlights(match_data):
                 "narrative": _narrative_bucket(delta),
             })
 
-    # ---- Crate/Pod Goblin: combined pickups + powerup destructions per player.
+    # ---- Pod Goblin: combined pickups + powerup destructions per player.
     pickups_by_player = (match_data.get("pickups") or {}).get("by_player") or []
     destr_by_player = (match_data.get("powerup_destructions") or {}).get("by_player") or []
     combined = {}

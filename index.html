@@ -137,8 +137,14 @@
         <div class="d-flex flex-wrap gap-4 align-items-center flex-grow-1">
           <!-- Map thumbnail (top-down, from data/map-registry.json). Hidden
                when the match's map isn't in the registry. Populated by
-               renderBanner() in js/app.js. -->
-          <img id="info-map-thumb" class="vt-map-thumb d-none" alt="" decoding="async" loading="lazy">
+               renderBanner() in js/app.js. Click opens #map-info-modal with
+               the full-resolution image + registry metadata. -->
+          <button id="info-map-thumb-btn" type="button"
+                  class="vt-map-thumb-btn d-none p-0 border-0 bg-transparent"
+                  data-bs-toggle="modal" data-bs-target="#map-info-modal"
+                  aria-label="View map details">
+            <img id="info-map-thumb" class="vt-map-thumb" alt="" decoding="async" loading="lazy">
+          </button>
           <!-- Rich match picker trigger. Looks like a dropdown, opens the
                #match-picker-modal. Both this trigger and its twin inside
                #all-matches-view are kept in sync by js/app.js. -->
@@ -1300,6 +1306,41 @@
               <i class="bi bi-x-lg me-1"></i>Clear filters
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map Info Modal: opened by clicking #info-map-thumb-btn in the
+       match-info banner. Shows the full-resolution top-down map image
+       plus all map-level metadata available (registry description, author,
+       canonical size / b2b, mod ID, team names) and the this-match terrain
+       fields (terrain size, elevation, empirical b2b). Populated by
+       renderMapBannerFields() in js/app.js. -->
+  <div class="modal fade vt-map-info-modal" id="map-info-modal" tabindex="-1"
+       aria-labelledby="map-info-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="map-info-modal-title">
+            <i class="bi bi-map me-2"></i><span id="map-info-modal-title-text">&mdash;</span>
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6 vt-map-info-image-col" id="map-info-modal-image-col">
+              <img id="map-info-modal-image" class="vt-map-info-image" alt="" decoding="async" loading="lazy">
+            </div>
+            <div class="col-md-6">
+              <dl class="vt-map-info-meta" id="map-info-modal-meta">
+                <!-- Populated by renderMapInfoModal() in js/app.js -->
+              </dl>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>

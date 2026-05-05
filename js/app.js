@@ -2916,7 +2916,7 @@
   // Per-category unit suffix appended to the headline value (and runner-up).
   // Empty string for cards whose value_format already self-labels (`accuracy`
   // / `percent` produce e.g. "27.4%") or whose breakdown line already supplies
-  // the context (Crate/Pod Goblin shows "X grabbed · Y denied"). Pure
+  // the context (Pod Goblin shows "X grabbed · Y denied"). Pure
   // presentation; not part of the JSON payload. Adding a new card requires
   // adding an entry here.
   const HIGHLIGHT_UNITS = {
@@ -3237,22 +3237,36 @@
   // layout stays stable across pre-schema vs terrain-schema matches.
   function renderMapBannerFields(info) {
     const meta = getMapMeta(info);
+    const registryEntry = (mapRegistry && mapRegistry[meta.key]) || null;
 
-    // Thumbnail: show/hide based on image availability.
+    // Thumbnail: show/hide the wrapping button (which carries the modal
+    // trigger), set the inner img's source/alt independently. The button is
+    // hidden via d-none when no image is available so the picker trigger
+    // butts up against the duration field cleanly.
+    const thumbBtn = document.getElementById('info-map-thumb-btn');
     const thumb = document.getElementById('info-map-thumb');
     if (thumb) {
       if (meta.imagePath) {
         thumb.src = 'data/' + meta.imagePath;
         thumb.alt = meta.title || info.name || meta.key;
         thumb.title = meta.title || '';
-        thumb.classList.remove('d-none');
       } else {
         thumb.removeAttribute('src');
         thumb.alt = '';
         thumb.title = '';
-        thumb.classList.add('d-none');
       }
     }
+    if (thumbBtn) {
+      if (meta.imagePath) {
+        thumbBtn.classList.remove('d-none');
+      } else {
+        thumbBtn.classList.add('d-none');
+      }
+    }
+
+    // Modal contents stay in sync on every banner render so opening the
+    // modal after a match switch always reflects the current map.
+    renderMapInfoModal(info, meta, registryEntry);
 
     // Map size: prefer terrain (actual collected extents) over library canonical.
     const sizeEl = document.getElementById('info-map-size');
@@ -3327,6 +3341,101 @@
       authorEl.textContent = meta.author || '—';
       authorEl.title = meta.author ? `Map by ${meta.author}` : '';
     }
+  }
+
+  // Format a registry `description` for display: strip the BOM that some
+  // entries carry and convert CRLF/LF line breaks into <br>. Source string
+  // is run through esc() first to neutralize any HTML.
+  function formatMapDescription(raw) {
+    if (!raw) return '';
+    const cleaned = String(raw).replace(/^\uFEFF/, '');
+    return esc(cleaned).replace(/\r?\n/g, '<br>');
+  }
+
+  // Populate the Map Info Modal (#map-info-modal) from getMapMeta() + the
+  // raw registry entry. Re-runs every renderMapBannerFields() so opening
+  // the modal after a match switch always reflects the current map. Rows
+  // are emitted only when their underlying value is present so the list
+  // stays compact for sparse / pre-schema entries.
+  function renderMapInfoModal(info, meta, registry) {
+    const titleEl = document.getElementById('map-info-modal-title-text');
+    const imageEl = document.getElementById('map-info-modal-image');
+    const imageCol = document.getElementById('map-info-modal-image-col');
+    const metaEl = document.getElementById('map-info-modal-meta');
+    if (!titleEl || !imageEl || !metaEl) return;
+
+    const title = meta.title || (info && info.name) || meta.key || '—';
+    titleEl.textContent = title;
+    imageEl.alt = title;
+
+    if (meta.imagePath) {
+      imageEl.src = 'data/' + meta.imagePath;
+      if (imageCol) imageCol.classList.remove('d-none');
+    } else {
+      imageEl.removeAttribute('src');
+      if (imageCol) imageCol.classList.add('d-none');
+    }
+
+    const rows = [];
+    const addRow = (label, html) => {
+      if (html == null || html === '') return;
+      rows.push(`<dt>${esc(label)}</dt><dd>${html}</dd>`);
+    };
+    const addSection = (label) => {
+      rows.push(`<div class="vt-map-info-meta-section">${esc(label)}</div>`);
+    };
+
+    const reg = registry || {};
+    const description = formatMapDescription(reg.description);
+    if (description) {
+      rows.push(`<div class="vt-map-info-meta-description">${description}</div>`);
+    }
+
+    addSection('Map');
+    addRow('Author', meta.author ? esc(meta.author) : '');
+    if (meta.canonicalSize != null) {
+      addRow('Canonical size', `~${Math.round(meta.canonicalSize)}m`);
+    }
+    if (meta.canonicalB2B != null) {
+      addRow('Canonical base-to-base', `${Math.round(meta.canonicalB2B)}m`);
+    }
+    if (reg.map_file) {
+      addRow('Map file', `<code>${esc(reg.map_file)}.bzn</code>`);
+    }
+    if (reg.mod_resolved) {
+      const modId = String(reg.mod_resolved);
+      if (/^\d+$/.test(modId)) {
+        const url = `https://steamcommunity.com/sharedfiles/filedetails/?id=${modId}`;
+        addRow('Mod', `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(modId)} <i class="bi bi-box-arrow-up-right small"></i></a>`);
+      } else {
+        addRow('Mod', esc(modId));
+      }
+    }
+    const netVars = reg.net_vars || {};
+    if (netVars.svar1) addRow('Team 1 name', esc(netVars.svar1));
+    if (netVars.svar2) addRow('Team 2 name', esc(netVars.svar2));
+
+    const hasMatchSection = meta.terrainSize || meta.elevation || meta.empiricalB2B != null;
+    if (hasMatchSection) {
+      addSection('This match');
+      if (meta.terrainSize) {
+        addRow('Terrain size', `${Math.round(meta.terrainSize.x)} \u00D7 ${Math.round(meta.terrainSize.z)}m`);
+      }
+      if (meta.elevation) {
+        addRow('Elevation', `${Math.round(meta.elevation.min)} \u2192 ${Math.round(meta.elevation.max)}m`);
+      }
+      if (meta.empiricalB2B != null) {
+        addRow('Empirical base-to-base', `${Math.round(meta.empiricalB2B)}m`);
+      }
+    }
+
+    if (reg.attribution && reg.attribution.source) {
+      addSection('Attribution');
+      addRow('Source', esc(reg.attribution.source));
+    }
+
+    metaEl.innerHTML = rows.join('') ||
+      `<div class="vt-map-info-meta-description">No additional metadata available for this map.</div>`;
   }
 
   // --- Player Profile (Single-Player Mode) ---
