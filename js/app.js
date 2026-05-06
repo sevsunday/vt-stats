@@ -3568,14 +3568,40 @@
       ? `${(teams['2'] || []).length} selected`
       : (leaderName(teams['2'], 6) || 'TBD');
 
+    // Faction badge: derived from match.team_factions (match-global,
+    // never narrowed by the player filter -- faction is fixed per
+    // match). Pre-v3 matches and inconclusive teams get no badge.
+    const teamFactions = (currentData && currentData.match && currentData.match.team_factions) || {};
+    const factionBadge = (key) => {
+      const fac = teamFactions[key];
+      if (!fac || !fac.code || !fac.name) return '';
+      return `<span class="vt-faction-badge" data-faction-code="${esc(fac.code)}">${esc(fac.name)}</span>`;
+    };
+    const t1FacBadge = factionBadge('1');
+    const t2FacBadge = factionBadge('2');
+
+    // Winner highlight: also match-global passthrough. Adds a gold accent
+    // class to the winning team's panel for clean / contested outcomes.
+    // Unclear outcomes get no highlight (the kill-feed badge already
+    // surfaces the ambiguity).
+    const matchWinner = (currentData && currentData.match && currentData.match.winner) || null;
+    const winnerTeam = (matchWinner && (matchWinner.decided_by === 'clean_win' || matchWinner.decided_by === 'contested'))
+      ? matchWinner.team
+      : null;
+    const t1Winner = winnerTeam === 1 ? ' vt-faction-panel--winner' : '';
+    const t2Winner = winnerTeam === 2 ? ' vt-faction-panel--winner' : '';
+    const winnerTrophy = `<i class="bi bi-trophy-fill vt-faction-winner-icon" title="Match winner"></i>`;
+    const t1WinnerTrophy = winnerTeam === 1 ? winnerTrophy : '';
+    const t2WinnerTrophy = winnerTeam === 2 ? winnerTrophy : '';
+
     const t1Muted = !bothActive && !active.has('1');
     const t2Muted = !bothActive && !active.has('2');
     const mutedNote = '<span class="vt-faction-muted-badge" title="Not included in current filter"><i class="bi bi-eye-slash me-1"></i>Filtered out</span>';
 
     container.innerHTML = `
       <div class="col-md-6">
-        <div class="vt-faction-panel ${t1Muted ? 'vt-faction-panel--muted' : ''}" style="border-left-color:var(--kb-primary);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Header}</span>${t1Muted ? mutedNote : ''}</h6>
+        <div class="vt-faction-panel ${t1Muted ? 'vt-faction-panel--muted' : ''}${t1Winner}" style="border-left-color:var(--kb-primary);">
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Header}</span>${t1FacBadge}${t1WinnerTrophy}${t1Muted ? mutedNote : ''}</h6>
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
@@ -3586,8 +3612,8 @@
         </div>
       </div>
       <div class="col-md-6">
-        <div class="vt-faction-panel ${t2Muted ? 'vt-faction-panel--muted' : ''}" style="border-left-color:var(--kb-accent);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Header}</span>${t2Muted ? mutedNote : ''}</h6>
+        <div class="vt-faction-panel ${t2Muted ? 'vt-faction-panel--muted' : ''}${t2Winner}" style="border-left-color:var(--kb-accent);">
+          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Header}</span>${t2FacBadge}${t2WinnerTrophy}${t2Muted ? mutedNote : ''}</h6>
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
@@ -3897,15 +3923,122 @@
   }
 
   // --- Kill Feed ---
+  // Updates the #kill-feed-winner-badge slot from a `match.winner` block.
+  // Sets the `data-decided-by` attribute (drives CSS color), the inner
+  // HTML (label + icon), and Bootstrap tooltip metadata for contested /
+  // unclear outcomes. Empty for pre-v3 matches; the slot's :empty CSS
+  // collapses it cleanly. Caller is responsible for invoking
+  // `ensureTooltips()` afterwards so any new tooltip wires up.
+  function applyWinnerBadge(badgeEl, winner, factions) {
+    if (!badgeEl) return;
+    badgeEl.removeAttribute('data-decided-by');
+    badgeEl.removeAttribute('data-bs-toggle');
+    badgeEl.removeAttribute('data-bs-placement');
+    badgeEl.removeAttribute('title');
+    // Tear down any existing Bootstrap tooltip so the next match doesn't
+    // inherit a stale tooltip instance referencing the prior badge state.
+    if (window.bootstrap && window.bootstrap.Tooltip) {
+      const existing = bootstrap.Tooltip.getInstance(badgeEl);
+      if (existing) existing.dispose();
+    }
+    if (!winner || !winner.decided_by) {
+      badgeEl.innerHTML = '';
+      return;
+    }
+    const decidedBy = winner.decided_by;
+    const factionLabelFor = (team) => {
+      const fac = factions && factions[String(team)];
+      return (fac && fac.name) ? fac.name : `Team ${team}`;
+    };
+    if (decidedBy === 'clean_win' && winner.team) {
+      const label = factionLabelFor(winner.team);
+      badgeEl.setAttribute('data-decided-by', 'clean');
+      badgeEl.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${esc(label)} wins`;
+      return;
+    }
+    if (decidedBy === 'contested' && winner.team) {
+      const label = factionLabelFor(winner.team);
+      const ev = winner.evidence || {};
+      const recCount = ev.rec_dest_count || {};
+      const facCount = ev.fac_dest_count || {};
+      const tooltip = [
+        'Both bases fell — outcome decided by who fell first.',
+        `Team 1: ${recCount['1'] || 0} rec / ${facCount['1'] || 0} fac destructions.`,
+        `Team 2: ${recCount['2'] || 0} rec / ${facCount['2'] || 0} fac destructions.`,
+      ].join(' ');
+      badgeEl.setAttribute('data-decided-by', 'contested');
+      badgeEl.setAttribute('data-bs-toggle', 'tooltip');
+      badgeEl.setAttribute('data-bs-placement', 'bottom');
+      badgeEl.setAttribute('title', tooltip);
+      badgeEl.innerHTML = `<i class="bi bi-trophy me-1"></i>${esc(label)} wins (contested)`;
+      return;
+    }
+    // unclear (or any other unhandled state)
+    const tooltip = 'Match outcome could not be determined from the kill feed. The game may have ended via host quit, timeout, or commander self-demolition of recycler/factory. Future stat collection will close these gaps.';
+    badgeEl.setAttribute('data-decided-by', 'unclear');
+    badgeEl.setAttribute('data-bs-toggle', 'tooltip');
+    badgeEl.setAttribute('data-bs-placement', 'bottom');
+    badgeEl.setAttribute('title', tooltip);
+    badgeEl.innerHTML = `<i class="bi bi-question-circle me-1"></i>Outcome unclear`;
+  }
+
   function renderKillFeed(kills, tickRate, minTick) {
     const container = document.getElementById('kill-feed-content');
+    // Winner badge in the card header. Reads passthrough fields from
+    // currentData.match.{winner, team_factions} -- match-global, never
+    // narrowed by the player filter.
+    const headerBadge = document.getElementById('kill-feed-winner-badge');
+    if (headerBadge) {
+      const winnerForBadge = currentData && currentData.match && currentData.match.winner;
+      const factionsForBadge = currentData && currentData.match && currentData.match.team_factions;
+      applyWinnerBadge(headerBadge, winnerForBadge, factionsForBadge);
+      // Initialize Bootstrap tooltips on the contested / unclear variants.
+      ensureTooltips(document.getElementById('section-kill-feed'));
+    }
     if (!kills || !kills.feed || kills.feed.length === 0) {
       container.innerHTML = '<p style="color:var(--kb-text-muted)">No kill events recorded.</p>';
       return;
     }
-    const stripOdf = (s) => s ? s.replace(/\.odf$/i, '').replace(/_/g, ' ') : '?';
+    // Resolve raw ODF strings to friendly names via the match-global
+    // odf_map (built by scripts/process_stats.py via prettify_odf ->
+    // unit_name_map -> GameObjectClass.unitName). When the ODF is empty
+    // or unresolved, return null so the renderer can omit the chip
+    // entirely instead of showing a meaningless "(?)".
+    const odfMap = (currentData && currentData.odf_map) || {};
+    const odfName = (s) => {
+      if (!s) return null;
+      if (odfMap[s]) return odfMap[s];
+      // Last-resort fallback for ODFs the pipeline didn't resolve
+      // (very rare -- only fires when an ODF appears in kill_feed but
+      // not in odf_map, which shouldn't happen post-Commit-1).
+      return s.replace(/\.odf$/i, '').replace(/_/g, ' ');
+    };
+    // Optional in-feed milestone marker at the winner's decided_at_tick.
+    // Filter-safe: read from currentData.match.winner.decided_at_tick
+    // (passthrough) rather than scanning the (possibly-narrowed) feed for
+    // recycler/factory destructions. Only emitted for decisive outcomes;
+    // "unclear" matches get no marker (the header badge tells the story).
+    const winner = currentData && currentData.match && currentData.match.winner;
+    const factions = currentData && currentData.match && currentData.match.team_factions;
+    const milestoneTick = (winner && (winner.decided_by === 'clean_win' || winner.decided_by === 'contested') && typeof winner.decided_at_tick === 'number')
+      ? winner.decided_at_tick
+      : null;
+    const milestoneFor = (winner && winner.team)
+      ? `${(factions && factions[String(winner.loser)] && factions[String(winner.loser)].name) || `Team ${winner.loser}`}'s base falls — ${(factions && factions[String(winner.team)] && factions[String(winner.team)].name) || `Team ${winner.team}`} wins`
+      : '';
+    const renderMilestone = () => `<div class="vt-killfeed-milestone d-flex align-items-center gap-2 py-2"><i class="bi bi-flag-fill"></i><span>${esc(milestoneFor)}</span></div>`;
+
     let html = '<div style="max-height:320px;overflow-y:auto;">';
+    let milestoneRendered = false;
     kills.feed.forEach(entry => {
+      // Insert milestone divider before the first feed entry whose tick
+      // exceeds the decided_at_tick. (The kill_feed is already
+      // chronological from the pipeline.) If every entry is earlier than
+      // the marker tick, the divider is appended at the end below.
+      if (milestoneTick !== null && !milestoneRendered && entry.tick > milestoneTick) {
+        html += renderMilestone();
+        milestoneRendered = true;
+      }
       const sec = tickRate > 0 ? (entry.tick - minTick) / tickRate : 0;
       const m = Math.floor(sec / 60);
       const s = Math.floor(sec % 60);
@@ -3916,15 +4049,27 @@
       const victimNick = entry.victim_in_game_nick
         ? `<span class="vt-nick-inline">@${esc(entry.victim_in_game_nick)}</span>`
         : '';
+      const killerOdfResolved = odfName(entry.killer_odf);
+      const victimOdfResolved = odfName(entry.victim_odf);
+      const killerOdf = killerOdfResolved
+        ? `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(killerOdfResolved)})</span>`
+        : '';
+      const victimOdf = victimOdfResolved
+        ? `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(victimOdfResolved)})</span>`
+        : '';
       html += `<div class="d-flex align-items-center gap-2 py-1" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
       html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
-      html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>${killerNick}`;
-      html += `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.killer_odf))})</span>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>${killerNick}${killerOdf}`;
       html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
-      html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>${victimNick}`;
-      html += `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.victim_odf))})</span>`;
+      html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>${victimNick}${victimOdf}`;
       html += `</div>`;
     });
+    if (milestoneTick !== null && !milestoneRendered) {
+      // All visible feed entries occurred before the marker tick (or the
+      // loser's destruction events are filtered out of view). Append the
+      // divider at the end so the user still sees the milestone in context.
+      html += renderMilestone();
+    }
     html += '</div>';
     container.innerHTML = html;
   }

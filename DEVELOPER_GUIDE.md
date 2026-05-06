@@ -406,10 +406,18 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
       { "slot": 6, "player_id": "DesUxS?sU", "name": "DesUxS?sU", "steam64": "76561198025561228" }
     ]
   },
+  "team_leaders": {
+    "1": { "name": "International ISDFism", "s64": "76561198284800778" },
+    "2": { "name": "DesUxS?sU", "s64": "76561198025561228" }
+  },
+  "team_factions": {
+    "1": { "code": "i", "name": "ISDF" },
+    "2": { "code": "e", "name": "Hadean" }
+  },
   "has_position_data": true,
   "has_target_lock_data": false,
   "has_pickup_data": true,
-  "schema_version": 1,
+  "schema_version": 3,
   "terrain_bounds": {
     "min": {"x": -1024.0, "y": 0.0, "z": -1024.0},
     "max": {"x": 1024.0, "y": 320.25, "z": 1024.0}
@@ -426,7 +434,11 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
 
 `has_pickup_data` (Phase 3) is `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. Mirrored on `match`, `meta`, and the manifest entry.
 
-`schema_version` (Phase 3) is the per-match output schema version. `1` = Phase 3 baseline; `2` adds the top-level `highlights` block (see "Match Highlights" below). Absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
+`schema_version` (Phase 3) is the per-match output schema version. `1` = Phase 3 baseline; `2` adds the top-level `highlights` block (see "Match Highlights" below); `3` adds `match.team_factions` and `match.winner` (per-team faction labels + match outcome inference — see [§9 Team Faction Detection in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#9-team-faction-detection)). Absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
+
+`team_leaders` is `{ "1": { name, s64 }, "2": { name, s64 } }` capturing the slot-1 / slot-6 commander identities. Drives the picker's Commander/Thug Role facet and the faction scoreboard's `<h6>` headers. Match-global, always-unfiltered.
+
+`team_factions` (schema v3+) is `{ "1": { code, name } | null, "2": { code, name } | null }` — derived faction per team. `code` is `"i"` (ISDF) / `"e"` (Hadean) / `"f"` (Scion); `name` is the human label. `null` when the team produced no faction signal (sandbox / pure-AI / corrupt match). Computed by `detect_team_factions()` in `scripts/process_stats.py`, combining Algorithm A (starting ship: first non-empty `PlayerState.odf` per slot) with Algorithm B (event-stream votes from every team-attributed vehicle/structure/pilot ODF). Match-global, always-unfiltered. Faction is fixed per match — the global player filter never reshapes it. Renderer: `renderFactionScoreboard()` injects `.vt-faction-badge[data-faction-code]` next to each team-leader name.
 
 Match-level spatial context fields:
 
@@ -1081,6 +1093,10 @@ The match info banner contains a filter bar that lets users switch between three
 The filter is implemented entirely client-side in `app.js`. `getFilteredData(data, filter)` derives a filtered data object from the loaded JSON. The filtered object replaces `leaderboard`, `rivalry_matrix`, `top_rivalries`, `kills` (feed/kill_rivalry_matrix/leaderboard), `timeline.by_player`, `asset_damage`, and `faction_totals`.
 
 `weapon_meta` is recomputed client-side by aggregating `leaderboard[].weapon_breakdown` across the filtered player set (summing dealt/shots/hits, recalculating accuracy). The pre-aggregated `weapon_meta` array is only used for the unfiltered "All Players" view. `kills.by_vehicle` always passes through unchanged (match-global aggregate, not per-player attributed).
+
+**Match-global identity / outcome blocks** — `match.team_leaders`, `match.team_factions` (schema v3+), and `match.winner` (schema v3+) all pass through unchanged. These describe properties of the match itself (who commanded, what faction each team picked, who won) that are fixed at match end and never reshape under a player narrowing. Renderers read them directly from `currentData.match.*`, never from the filtered `data.match.*`. The kill-feed-derived winner inference is computed once on the **unfiltered** `kills.feed` so a player filter that hides the loser's recycler/factory destruction events cannot corrupt the result. Pre-v3 matches have no `team_factions` / `winner` block; the UI hides the badge gracefully.
+
+`kill_feed[].killer_team` and `kill_feed[].victim_team` (schema v3+) are raw uint slot ints (1-10 or 0) carried alongside the rest of `kills.feed` — narrowed upstream as a single block, no separate filter logic.
 
 **Positioning block (including `activity_score` and `target_lock_pct`).** The `positioning` block passes through `getFilteredData` unchanged; `positioning.players` is narrowed at render-time by `renderPositioningTab`. This lets spatial renderers (combined heatmap, spawn markers) keep their full-match context while per-player charts still scope to the focused player.
 
