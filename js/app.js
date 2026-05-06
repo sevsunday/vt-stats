@@ -3624,6 +3624,22 @@
         </div>
       </div>
     `;
+
+    // Outcome pill in the Faction Scoreboard card header. We deliberately
+    // only surface the "unclear" variant here -- clean_win / contested
+    // outcomes are already conveyed by the winning team's panel trophy
+    // icon above (and the dedicated kill-feed badge on the Combat tab).
+    // Showing all three would be redundant. The unclear pill carries the
+    // Bootstrap tooltip explaining why the outcome couldn't be inferred,
+    // mirroring the kill-feed unclear badge.
+    const factionOutcomeBadge = document.getElementById('faction-outcome-badge');
+    if (factionOutcomeBadge) {
+      const winnerForOutcome = (matchWinner && matchWinner.decided_by === 'unclear')
+        ? matchWinner
+        : null;
+      applyWinnerBadge(factionOutcomeBadge, winnerForOutcome, teamFactions);
+      ensureTooltips(document.getElementById('section-faction'));
+    }
   }
 
   // --- Leaderboard ---
