@@ -33,9 +33,12 @@ vt-stats/
 │   ├── odf.min.json            # Weapon name resolution database (ODF)
 │   ├── proto-docs.json         # Field-comment index (built by extract_proto_docs.py)
 │   ├── map-registry.json       # Map metadata registry (built by build_map_registry.py)
+│   ├── vsrmaplist.json         # Vendored upstream BZCC-Website map index
+│   │                           # (refresh via scripts/refresh_vsrmaplist.py)
 │   ├── maps/                   # Per-map assets (image + metadata JSON)
 │   │   ├── havenvsr.png        # Top-down map image (from iondriver)
-│   │   ├── havenvsr.json       # Per-map metadata (title, author, canonical_size, netVars, ...)
+│   │   ├── havenvsr.json       # Per-map metadata (title, author, canonical_size,
+│   │   │                       #   pools, loose, tags, formatted_size, netVars, ...)
 │   │   └── ...
 │   ├── sessions/               # Raw session data (organized by submitter)
 │   │   └── VTrider/
@@ -54,6 +57,7 @@ vt-stats/
 │   ├── process_stats.py        # Data processing pipeline
 │   ├── extract_proto_docs.py   # Proto field-comment extractor (invoked by process_stats)
 │   ├── build_map_registry.py   # Map metadata/image fetcher (invoked by process_stats)
+│   ├── refresh_vsrmaplist.py   # One-shot helper: re-fetch data/vsrmaplist.json from upstream
 │   └── requirements.txt        # Python dependencies (protobuf>=4.25.0)
 └── .cursor/rules/              # AI assistant rules
 ```
@@ -67,8 +71,12 @@ data/sessions/<username>/*.binpb.gz → [process_stats.py] → data/processed/*.
                                                                      ↓
                    [build_map_registry.py] → data/map-registry.json + data/maps/*
                             ↑
-                   js/bz2api.js (VSR_MAP_DATA catalog)
-                   iondriver.com/bzcc/getdata.php (title, image, netVars)
+                   data/vsrmaplist.json (PRIMARY: vendored BZCC-Website index;
+                                         Pools, Loose, Tags, formatted_size,
+                                         Author, Description, Image URL)
+                   iondriver.com/bzcc/getdata.php (per-map enrichment: netVars
+                                                   + title/description fallback)
+                   js/bz2api.js (LEGACY FALLBACK: VSR_MAP_DATA baked-in catalog)
 ```
 
 The map registry is built at the end of every pipeline run. It's idempotent: per-map assets cached in `data/maps/<mapFile>.{png,json}` are reused on subsequent runs with zero network traffic; only new maps trigger a fetch.
@@ -450,12 +458,14 @@ Match-level spatial context fields:
 
 `js/app.js` `renderBanner()` populates the hero with Duration, Players, Submitted by, Snipes (conditional), and the 70x70 map thumbnail (`#info-map-thumb-btn` with a `bi-zoom-in` corner overlay). All map-dimension fields live inside the **Map Info Modal** (`#map-info-modal`) — opened by clicking the thumbnail — built by `renderMapInfoModal()` from `getMapMeta()` plus the raw `mapRegistry[key]` entry. The modal re-renders on every banner update so it stays in sync across match switches. Merge precedence — highest first:
 
-- **Map size** — `match.terrain_bounds` (edge = max − min on x / z, rendered as `N × Nm`) when present; `BZ2API.VSR_MAP_DATA[key].size × 2` as pre-schema fallback (rendered as `~Nm`).
+- **Canonical size** — `mapRegistry[key].formatted_size` (vsrmaplist's `Size.formattedSize` string, e.g. `"1024x1024"`) when present; `~${Math.round(canonical_size)}m` as fallback for legacy entries with no vsrmaplist coverage.
+- **Map size (this match)** — `match.terrain_bounds` (edge = max − min on x / z, rendered as `N × Nm`) when present; row omitted otherwise.
 - **Elevation** — `match.terrain_bounds.max.y - min.y` when present; row omitted otherwise.
 - **Base-to-base** — `match.base_to_base_distance` (empirical, always populated) shown in the "This match" section; `mapRegistry[key].canonical_b2b` ∪ `VSR_MAP_DATA[key].baseToBase` shown in the upper "Map" section.
-- **Author** — `mapRegistry[key].author` ∪ `VSR_MAP_DATA[key].author`.
-- **Description / Mod / Team names** — `mapRegistry[key].description` (BOM-stripped, line-broken), `mod_resolved` (linked to Steam Workshop when numeric), `net_vars.svar1` / `svar2`.
-- **Thumbnail** — `mapRegistry[key].image_path` → `data/maps/<map_file>.png`. Hidden when absent (the modal trigger is also hidden).
+- **Author** — `mapRegistry[key].author` (vsrmaplist `Author` primary) ∪ `VSR_MAP_DATA[key].author` (legacy fallback).
+- **Pools / Loose scrap / Tags** — `mapRegistry[key].pools` (vsrmaplist `Pools`, integer), `mapRegistry[key].loose` (vsrmaplist `Loose`, integer; `< 0` rendered as `Unlimited`), `mapRegistry[key].tags` (vsrmaplist `Tags` comma-string split + trimmed; rendered as `.vt-map-info-tag` chips). Rows omitted when the underlying field is absent (e.g. for maps falling through to the iondriver-only path).
+- **Description / Mod / Team names** — `mapRegistry[key].description` (BOM-stripped, line-broken; iondriver primary, vsrmaplist `Description` fallback), `mod_resolved` (linked to Steam Workshop when numeric), `net_vars.svar1` / `svar2`.
+- **Thumbnail** — `mapRegistry[key].image_path` → `data/maps/<map_file>.png` (downloaded from iondriver primary, vsrmaplist `Image` URL fallback — both content-addressed `assets/<sha>.png` URLs on the same iondriver host). Hidden when absent (the modal trigger is also hidden).
 
 Per the filter contract these are all match-global / always-unfiltered; no filter narrowing or recomputation paths involved. See `getMapMeta()` in `js/app.js` for the unified merge, `renderMapBannerFields()` for the hero DOM wiring, and `renderMapInfoModal()` for the modal-population helper.
 
@@ -1317,7 +1327,8 @@ No iondriver re-fetches are required during tuning; calibration is purely a loca
 
 | Surface | Renderer | Image use |
 |-|-|-|
-| Hero thumbnail | `js/app.js` `renderMapBannerFields()` | 48×48 `<img>` directly from `registry.image_path` |
+| Hero thumbnail | `js/app.js` `renderMapBannerFields()` | 70×70 `<img>` (wrapped in `#info-map-thumb-btn` with a `bi-zoom-in` corner overlay; click opens the Map Info Modal) directly from `registry.image_path` |
+| Map Info Modal image | `js/app.js` `renderMapInfoModal()` | Full-size `<img id="map-info-modal-image">` from the same `registry.image_path`; description (BOM-stripped, `<br>`-rendered) sits below the image in the left column of the modal body |
 | Match picker card | `js/app.js` `buildMatchPickerCardHtml()` | 96×96 `<img>` per card; placeholder icon when map not in registry |
 | Combined heatmap | `js/positioning-charts.js` `renderCombinedHeatmap()` | `_drawMapImageLayer()` at `globalAlpha: 0.45` between the solid backdrop and heatmap cells |
 | Per-player heatmap grid | `js/positioning-charts.js` `renderPlayerHeatmap()` | Same pattern; image re-used via `VTMapRegistry.getMapImage()` cache |
