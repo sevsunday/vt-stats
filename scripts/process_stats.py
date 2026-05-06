@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 3
+PIPELINE_VERSION = 5
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -129,6 +129,61 @@ VEHICLE_DESTRUCTION_IGNORE_ODFS = frozenset({
 KNOWN_DEPLOYABLE_ODFS = frozenset({
     "fball2c.odf",  # flame mine
 })
+
+# Recycler / factory ODFs, used by:
+#   - kill_feed cleanup (relabeling + Self/World fallback)
+#   - compute_match_winner() to identify game-ending destruction events
+# BZCC naming convention: lowercase first letter encodes faction
+#   - i*: ISDF
+#   - e*: Hadean
+#   - f*: Scion
+# Both base + upgrade variants are listed for factories: the engine emits
+# a distinct UnitDestroyed for each variant when destroyed (e.g. Kiln vs
+# Forge for Scion, Xenomator vs Mega Xenomator for Hadean). Match keys
+# lowercased for direct comparison against `(odf or "").lower()`.
+RECYCLER_ODFS = frozenset({
+    "ibrecy_vsr.odf",   # ISDF Recycler
+    "ebrecym_vsr.odf",  # Hadean Procreator
+    "fbrecy_vsr.odf",   # Scion Matriarch
+})
+FACTORY_ODFS = frozenset({
+    "ibfact_vsr.odf",   # ISDF Factory
+    "ebfact_vsr.odf",   # Hadean Xenomator (base)
+    "ebfact2_vsr.odf",  # Hadean Mega Xenomator (upgrade)
+    "fbkiln_vsr.odf",   # Scion Kiln (base)
+    "fbforg_vsr.odf",   # Scion Forge (upgrade)
+})
+
+# First-letter -> faction. Reliable for vehicles, structures, and pilots --
+# every BZCC unit ODF in those categories carries a faction prefix as the
+# first character (no exceptions in the corpus). NOT reliable for weapon
+# ordnance (gauss_a, cphcg_c, etc.) or generic deployables (fball2c is a
+# flame mine, not a Scion asset). Vote sources in Algorithm B should only
+# look at vehicle/structure/pilot ODFs to avoid prefix-collision pollution.
+FACTION_BY_PREFIX = {"i": "ISDF", "e": "Hadean", "f": "Scion"}
+
+# Pilot ODFs (player on foot). When a kill_feed entry has killer_team == 0
+# AND killer == 0 AND the victim died in one of these ODFs, the death is
+# treated as self-inflicted ("Self") rather than environmental ("World").
+PILOT_ODFS = frozenset({
+    "isuser_m.odf",   # ISDF pilot
+    "esuser_m.odf",   # Hadean pilot
+    "fsuser_m.odf",   # Scion pilot
+})
+
+
+def faction_from_odf(odf):
+    """Map an ODF string to a faction code ('i' / 'e' / 'f') via its
+    first letter. Returns None for empty / unrecognized strings.
+
+    Used by detect_team_factions() to vote on each team's faction from
+    every team-attributed vehicle/structure/pilot ODF observed in the
+    event stream.
+    """
+    if not odf:
+        return None
+    code = odf[0].lower()
+    return code if code in FACTION_BY_PREFIX else None
 
 
 def _strip_vsr_suffix(odf):
@@ -1205,6 +1260,193 @@ def slot_to_faction(slot):
     return 0
 
 
+def compute_match_winner(kill_feed):
+    """Infer the match outcome from recycler/factory destructions in
+    `kill_feed`.
+
+    Toggle model (per team): each recycler / factory destruction toggles
+    its "dead" state. Odd destructions = currently dead at match end;
+    even = currently alive (rebuilt at least once after the last kill,
+    or never destroyed). Pre-loss rebuilds are properly modeled because
+    the kill_feed only logs the destruction, not the construction --
+    the toggle still ends in the right state.
+
+    Outcomes (decided_by):
+      "clean_win"   -- exactly one team is fully_dead AND the other has
+                       zero rec/fac destructions. Highest confidence.
+      "contested"   -- both teams fully_dead. Loser = team that fell first
+                       (max(last_rec_tick, last_fac_tick)).
+      "unclear"     -- everything else. Includes:
+                       - zero teams fully_dead (premature quit, timeout,
+                         commander self-demo of own rec/fac that didn't
+                         register in the kill feed)
+                       - one team fully_dead but the other has non-zero
+                         destructions (rebuild ambiguity: e.g. lost fac,
+                         rebuilt, lost rec -- toggle says rec dead but
+                         we can't distinguish from the kill feed alone)
+
+    Returns a dict suitable for emission as `match.winner`:
+        {
+          "team": int | None,        # winning team (1 or 2; None for unclear)
+          "loser": int | None,       # losing team (3 - team; None for unclear)
+          "decided_at_tick": int | None,
+          "decided_by": "clean_win" | "contested" | "unclear",
+          "evidence": {
+            "rec_dest_count": {"1": int, "2": int},
+            "fac_dest_count": {"1": int, "2": int},
+            "loser_rec_destroyed_tick": int | None,
+            "loser_fac_destroyed_tick": int | None,
+            "loser_rec_odf": str | None,
+            "loser_fac_odf": str | None,
+          }
+        }
+
+    Always emitted (even when `decided_by == "unclear"`) so the renderer
+    can reliably read the block instead of probing for absence.
+    """
+    rec_dest_count = {1: 0, 2: 0}
+    fac_dest_count = {1: 0, 2: 0}
+    last_rec_tick = {1: None, 2: None}
+    last_fac_tick = {1: None, 2: None}
+    loser_rec_odf = {1: None, 2: None}
+    loser_fac_odf = {1: None, 2: None}
+
+    for evt in sorted(kill_feed, key=lambda e: e.get("tick") or 0):
+        odf = (evt.get("victim_odf") or "").lower()
+        team = slot_to_faction(evt.get("victim_team", 0))
+        if team not in (1, 2):
+            continue
+        if odf in RECYCLER_ODFS:
+            rec_dest_count[team] += 1
+            last_rec_tick[team] = evt["tick"]
+            loser_rec_odf[team] = odf
+        elif odf in FACTORY_ODFS:
+            fac_dest_count[team] += 1
+            last_fac_tick[team] = evt["tick"]
+            loser_fac_odf[team] = odf
+
+    rec_dead = {t: (rec_dest_count[t] % 2 == 1) for t in (1, 2)}
+    fac_dead = {t: (fac_dest_count[t] % 2 == 1) for t in (1, 2)}
+    fully_dead = {t: rec_dead[t] and fac_dead[t] for t in (1, 2)}
+    other_untouched = {
+        t: (rec_dest_count[3 - t] == 0 and fac_dest_count[3 - t] == 0)
+        for t in (1, 2)
+    }
+
+    def _evidence(loser=None):
+        return {
+            "rec_dest_count": {"1": rec_dest_count[1], "2": rec_dest_count[2]},
+            "fac_dest_count": {"1": fac_dest_count[1], "2": fac_dest_count[2]},
+            "loser_rec_destroyed_tick": last_rec_tick.get(loser) if loser else None,
+            "loser_fac_destroyed_tick": last_fac_tick.get(loser) if loser else None,
+            "loser_rec_odf": loser_rec_odf.get(loser) if loser else None,
+            "loser_fac_odf": loser_fac_odf.get(loser) if loser else None,
+        }
+
+    # clean_win: exactly one team fully dead AND the other team had no
+    # destructions at all. Highest-confidence path -- there's nothing
+    # to interpret about rebuilds or commander demos.
+    clean_losers = [
+        t for t in (1, 2)
+        if fully_dead[t] and other_untouched[t]
+    ]
+    if len(clean_losers) == 1:
+        loser = clean_losers[0]
+        decided_at = max(last_rec_tick[loser], last_fac_tick[loser])
+        return {
+            "team": 3 - loser,
+            "loser": loser,
+            "decided_at_tick": decided_at,
+            "decided_by": "clean_win",
+            "evidence": _evidence(loser=loser),
+        }
+
+    # contested: both teams fully dead. Loser = whichever fell first
+    # (their last rec/fac destruction is earlier).
+    if fully_dead[1] and fully_dead[2]:
+        fall_tick = {
+            t: max(last_rec_tick[t], last_fac_tick[t])
+            for t in (1, 2)
+        }
+        loser = 1 if fall_tick[1] < fall_tick[2] else 2
+        return {
+            "team": 3 - loser,
+            "loser": loser,
+            "decided_at_tick": fall_tick[loser],
+            "decided_by": "contested",
+            "evidence": _evidence(loser=loser),
+        }
+
+    # unclear: everything else. Could be premature quit, timeout, or a
+    # commander self-demolition that didn't register in the kill feed.
+    # Rebuild ambiguity (one team fully dead but the other has non-zero
+    # destructions) also lands here. Emit the evidence block so the UI
+    # can surface raw counts in a tooltip.
+    return {
+        "team": None,
+        "loser": None,
+        "decided_at_tick": None,
+        "decided_by": "unclear",
+        "evidence": _evidence(loser=None),
+    }
+
+
+def detect_team_factions(slot_first_odf, slot_faction_votes):
+    """Derive each team's faction from per-slot ODF signals.
+
+    Combines two complementary algorithms:
+
+      Algorithm A (starting ship): the first non-empty ODF observed for
+        each slot in UpdateTick events. The literal "what was this player
+        piloting at the start of the match" signal -- closest analogue we
+        have to a starting-roster check absent an explicit match-start
+        event in the proto. Weighted as one extra vote on top of B.
+
+      Algorithm B (event-stream votes): first-letter votes accumulated
+        across every team-attributed vehicle/structure/pilot ODF the
+        slot's owner emitted (their own vehicle in BulletHit, their own
+        asset in UnitDestroyed, their own avatar in UpdateTick, etc.).
+        Resilient to brief hijacks / pilot-swaps -- a single anomalous
+        event can't outvote dozens of normal ones.
+
+    Per slot, the mode of (votes + 1 weight on starting-ship) is the
+    slot's faction. Per team (1: slots 1-5, 2: slots 6-10), the mode
+    across all slots that produced any signal is the team's faction.
+    Empty result for either team is emitted as None (no signal).
+
+    Returns dict keyed by team number (1, 2) mapping to either:
+        {"code": "i" | "e" | "f", "name": "ISDF" | "Hadean" | "Scion"}
+        or None when no slot in that team produced any faction signal
+        (sandbox / corrupt match / pure-AI team with no events).
+    """
+    team_votes = defaultdict(Counter)  # team -> Counter[faction_code]
+
+    all_slots = set(slot_first_odf.keys()) | set(slot_faction_votes.keys())
+    for slot in all_slots:
+        team = slot_to_faction(slot)
+        if team not in (1, 2):
+            continue
+        # Combined vote pool: per-event votes + starting-ship weighted as 1.
+        slot_votes = Counter(slot_faction_votes.get(slot, {}))
+        first_code = faction_from_odf(slot_first_odf.get(slot))
+        if first_code:
+            slot_votes[first_code] += 1
+        if not slot_votes:
+            continue
+        slot_faction = slot_votes.most_common(1)[0][0]
+        team_votes[team][slot_faction] += 1
+
+    result = {}
+    for team in (1, 2):
+        votes = team_votes.get(team)
+        if not votes:
+            result[team] = None
+            continue
+        code = votes.most_common(1)[0][0]
+        result[team] = {"code": code, "name": FACTION_BY_PREFIX[code]}
+    return result
+
+
 # --- Positioning helpers ---
 
 
@@ -1957,6 +2199,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # every raw ODF string to a human-readable name.
     all_unit_odfs = set()
 
+    # Faction detection accumulators (consumed by detect_team_factions() after
+    # the event loop). slot_first_odf captures the literal "starting ship" --
+    # first non-empty ODF observed for each slot in UpdateTick events
+    # (Algorithm A). slot_faction_votes accumulates first-letter votes from
+    # every team-attributed vehicle/structure/pilot ODF emitted for the slot
+    # across the event stream (Algorithm B). Combined per-slot vote determines
+    # each slot's faction; per-team mode determines team faction.
+    slot_first_odf = {}  # slot -> first non-empty PlayerState.odf
+    slot_faction_votes = defaultdict(Counter)  # slot -> Counter[faction_code]
+
     # Positioning: per-player raw sample buffer (downsampled to ~1 Hz in the loop below).
     # Keyed by Steam64 -> list of (t_sec, x, y, z, has_target) tuples in tick order.
     position_samples = defaultdict(list)
@@ -2038,6 +2290,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 all_unit_odfs.add(bh.victim_odf)
             if bh.shooter_odf:
                 all_unit_odfs.add(bh.shooter_odf)
+            # Faction-detection votes (Algorithm B): the shooter and victim
+            # ODFs are vehicle/structure/pilot ODFs whose first letter
+            # encodes the owner's faction. Skip ordnance_odf -- weapon
+            # prefixes don't follow the i/e/f convention.
+            if shooter > 0 and bh.shooter_odf:
+                _sl = s64_to_slot.get(shooter)
+                _fc = faction_from_odf(bh.shooter_odf)
+                if _sl and _fc:
+                    slot_faction_votes[_sl][_fc] += 1
+            if bh.victim > 0 and bh.victim_odf:
+                _sl = s64_to_slot.get(bh.victim)
+                _fc = faction_from_odf(bh.victim_odf)
+                if _sl and _fc:
+                    slot_faction_votes[_sl][_fc] += 1
             if bh.tick > max_tick:
                 max_tick = bh.tick
             if bh.tick < min_tick:
@@ -2198,6 +2464,21 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # CATEGORY 4: Real vehicle/structure/soldier. Existing
             # accumulators (player_kills, player_deaths, kill_rivalry,
             # vehicle_destruction_count, kill_feed) handle these.
+            #
+            # First, drop pure-noise rows: events where every attribution
+            # field is zero/empty. These are typically unattributed phantom
+            # destructions (script-spawned debris, post-base-shockwave
+            # detonations of asteroids, ephemeral entities the engine
+            # never wired up) and convey no game information. They render
+            # in the kill feed as `Team 0 (?) -> Team 0 (?)` rows that
+            # users see as garbage. See plan: killfeed cleanup §1.
+            if (
+                ud.killer == 0 and ud.killer_team == 0 and not ud.killer_odf
+                and ud.victim == 0 and ud.victim_team == 0 and not ud.victim_odf
+            ):
+                i += 1
+                continue
+
             if ud.killer > 0:
                 player_kills[ud.killer] += 1
             if ud.victim > 0:
@@ -2210,11 +2491,58 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             if ud.killer_odf:
                 all_unit_odfs.add(ud.killer_odf)
 
-            killer_name = nick_for_s64(ud.killer) if ud.killer > 0 else f"Team {ud.killer_team}"
-            victim_name = nick_for_s64(ud.victim) if ud.victim > 0 else f"Team {ud.victim_team}"
+            # Faction-detection votes (Algorithm B): killer_odf and
+            # victim_odf are vehicle/structure/pilot ODFs whose first
+            # letter encodes the owner's faction. Vote against the
+            # owning slot via the proto's killer_team / victim_team
+            # (uint32 slots, 1-10 when populated).
+            if ud.killer_odf and 1 <= ud.killer_team <= 10:
+                _fc = faction_from_odf(ud.killer_odf)
+                if _fc:
+                    slot_faction_votes[ud.killer_team][_fc] += 1
+            if ud.victim_odf and 1 <= ud.victim_team <= 10:
+                _fc = faction_from_odf(ud.victim_odf)
+                if _fc:
+                    slot_faction_votes[ud.victim_team][_fc] += 1
+
+            # Display-label fallback when killer/victim is not a Steam64.
+            # Slot in 1-5 -> Team 1 (faction-aligned), 6-10 -> Team 2.
+            # Slot 0 means no team attribution at all -- render as
+            # "Self" when the victim died on foot in a pilot ODF
+            # (typical for pilot suicide / fall / drown / off-map),
+            # otherwise "World" (env damage / unattributed).
+            victim_lower_odf_disp = (ud.victim_odf or "").lower()
+            victim_is_pilot = victim_lower_odf_disp in PILOT_ODFS
+
+            if ud.killer > 0:
+                killer_name = nick_for_s64(ud.killer)
+            else:
+                killer_faction = slot_to_faction(ud.killer_team)
+                if killer_faction in (1, 2):
+                    killer_name = f"Team {killer_faction}"
+                elif victim_is_pilot:
+                    killer_name = "Self"
+                else:
+                    killer_name = "World"
+
+            if ud.victim > 0:
+                victim_name = nick_for_s64(ud.victim)
+            else:
+                victim_faction = slot_to_faction(ud.victim_team)
+                if victim_faction in (1, 2):
+                    victim_name = f"Team {victim_faction}"
+                else:
+                    victim_name = "World"
+
             kill_feed.append({
                 "tick": ud.tick,
                 "killer": killer_name,
+                # killer_team / victim_team carry the raw slot (1-10) so
+                # downstream logic (compute_match_winner, faction badges)
+                # can attribute kill-feed events to a specific team
+                # without re-deriving identity from the display string.
+                # 0 = no team attribution.
+                "killer_team": int(ud.killer_team),
                 # In-game nicks parallel to leaderboard[].in_game_nick.
                 # null when killer/victim is not a Steam64 (a "Team N"
                 # placeholder), or when the in-game nick matches the
@@ -2222,6 +2550,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "killer_in_game_nick": in_game_nick_for(ud.killer, killer_name) if ud.killer > 0 else None,
                 "killer_odf": ud.killer_odf,
                 "victim": victim_name,
+                "victim_team": int(ud.victim_team),
                 "victim_in_game_nick": in_game_nick_for(ud.victim, victim_name) if ud.victim > 0 else None,
                 "victim_odf": ud.victim_odf,
             })
@@ -2238,6 +2567,19 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 all_unit_odfs.add(us.shooter_odf)
             if us.victim_odf:
                 all_unit_odfs.add(us.victim_odf)
+            # Faction-detection votes (Algorithm B): shooter_odf and
+            # victim_odf are vehicle/pilot ODFs; vote against the
+            # owning slot via shooter_team / victim_team. Slot fields
+            # are reliable under both buggy and fixed collectors (see
+            # the slot-derive note below).
+            if us.shooter_odf and 1 <= us.shooter_team <= 10:
+                _fc = faction_from_odf(us.shooter_odf)
+                if _fc:
+                    slot_faction_votes[us.shooter_team][_fc] += 1
+            if us.victim_odf and 1 <= us.victim_team <= 10:
+                _fc = faction_from_odf(us.victim_odf)
+                if _fc:
+                    slot_faction_votes[us.victim_team][_fc] += 1
             # Slot-derive identity. The statsgate collector through
             # ~2026-05-04 had a copy-paste bug at stat_client.cpp:273
             # where `set_shooter()` was called twice -- so `us.shooter`
@@ -2297,6 +2639,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 all_unit_odfs.add(pp.powerup_odf)
             if pp.picker_odf:
                 all_unit_odfs.add(pp.picker_odf)
+            # Faction-detection votes (Algorithm B): picker_odf is the
+            # picker's vehicle/pilot ODF. Vote against picker_team. We
+            # skip powerup_odf -- powerup ODFs (ap*/ep*/fp*) follow a
+            # related but distinct prefix convention that overlaps
+            # cleanly with i/e/f only by coincidence; not worth the
+            # extra correctness review for marginal extra signal.
+            if pp.picker_odf and 1 <= pp.picker_team <= 10:
+                _fc = faction_from_odf(pp.picker_odf)
+                if _fc:
+                    slot_faction_votes[pp.picker_team][_fc] += 1
             # Accept-vs-reject gate. The engine emits PP events on volume
             # contact even when the powerup's effect is rejected (player
             # already maxed). Without per-instance disambiguation in the
@@ -2339,6 +2691,23 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     continue
                 if ps.odf:
                     all_unit_odfs.add(ps.odf)
+                # Faction detection. Algorithm A (starting ship): cache
+                # the first non-empty ODF seen for this slot; this is the
+                # closest analogue we have to a match-start roster check.
+                # Algorithm B (event-stream votes): every UpdateTick the
+                # slot continues to broadcast a vehicle/pilot ODF whose
+                # first letter encodes its faction -- accumulate votes.
+                # Note: AI-only slots have no Steam64, so they're
+                # filtered by the s64 guard above; their votes flow
+                # instead from UnitDestroyed/BulletHit events which
+                # carry the slot directly via *_team fields.
+                _slot = s64_to_slot.get(s64)
+                if _slot and ps.odf:
+                    if _slot not in slot_first_odf:
+                        slot_first_odf[_slot] = ps.odf
+                    _fc = faction_from_odf(ps.odf)
+                    if _fc:
+                        slot_faction_votes[_slot][_fc] += 1
                 has_target = bool(ps.has_target)
                 if has_target:
                     match_has_target_lock_data = True
@@ -2798,6 +3167,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             f"ticks={sentinel_damage['first_tick']}..{sentinel_damage['last_tick']}"
         )
 
+    # Derive each team's faction from the per-slot ODF signals collected
+    # during the event loop. Combined "starting ship" + "event-stream votes"
+    # model -- see detect_team_factions() docstring. Match-global, always
+    # unfiltered; emitted as None for teams with no signal (sandbox / pure
+    # AI). Output dict keys are JSON-serialized as strings.
+    _team_factions = detect_team_factions(slot_first_odf, slot_faction_votes)
+    team_factions = {
+        "1": _team_factions.get(1),
+        "2": _team_factions.get(2),
+    }
+
+    # Infer the match outcome from the (already-cleaned) kill_feed via the
+    # toggle model on recycler/factory destructions. Always emitted; the
+    # renderer reads this directly from currentData.match.winner and never
+    # from the (filterable) kills.feed -- a player filter could otherwise
+    # hide loser destruction events and corrupt the in-feed milestone.
+    match_winner = compute_match_winner(kill_feed)
+
     match_data = {
         "match": {
             "id": match_id,
@@ -2827,6 +3214,18 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "snipe_count": snipe_count,
             "teams": teams,
             "team_leaders": team_leaders,
+            # Per-team faction labels derived from per-slot ODF signals.
+            # Sibling to team_leaders. Always full-match (never narrowed).
+            # Each value is either {"code": "i" | "e" | "f", "name": ...}
+            # or null for inconclusive teams. See detect_team_factions().
+            "team_factions": team_factions,
+            # Inferred match outcome from the kill_feed toggle model on
+            # recycler/factory destructions. decided_by is one of
+            # "clean_win" / "contested" / "unclear"; team and loser are
+            # null for unclear. Always emitted. Match-global, always
+            # full-match (the renderer reads this block, never the
+            # filtered kills.feed). See compute_match_winner().
+            "winner": match_winner,
             "has_position_data": positioning_block["has_position_data"],
             "has_target_lock_data": positioning_block.get("has_target_lock_data", False),
             # True when the match contains at least one pickup_powerup
@@ -2836,9 +3235,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # full per-match JSON.
             "has_pickup_data": match_has_pickup_data,
             # Per-match schema version. v1 = pre-highlights; v2 added the
-            # top-level `highlights` block. Absence means legacy data
+            # top-level `highlights` block; v3 adds `match.team_factions`
+            # and `match.winner` (this commit). Absence means legacy data
             # (anything written before Phase 3).
-            "schema_version": 2,
+            "schema_version": 3,
             "terrain_bounds": terrain_bounds,
             "base_to_base_distance": positioning_block.get("base_to_base_distance"),
             "sentinel_damage": {

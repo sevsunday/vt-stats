@@ -711,7 +711,9 @@ Each match file has these top-level keys:
 | `config_mod` | `string` | Server configuration mod |
 | `snipe_count` | `number` | Number of UnitSniped events |
 | `teams` | `object` | `"1"` and `"2"` → arrays of roster entries |
-| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. Absence indicates legacy data written before this PR. Bumped only when an output-shape-breaking change ships. |
+| `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). Match-global, always-unfiltered. |
+| `team_factions` | `object` | `{ "1": { code, name } \| null, "2": { code, name } \| null }` — derived faction per team. `code` is one of `"i"` (ISDF) / `"e"` (Hadean) / `"f"` (Scion); `name` is the human label. `null` for teams with no signal (sandbox / pure-AI / corrupt match). Schema v3+. See [Team Faction Detection](#team-faction-detection) for the algorithm. Match-global, always-unfiltered. |
+| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. `3` adds `match.team_factions` + `match.winner` (this commit). Absence indicates legacy data written before this PR. Bumped only when an output-shape-breaking change ships. |
 | `has_position_data` | `boolean` | `true` iff the session contained `UpdateTick` events. Mirrored from `positioning.has_position_data`. Drives Positioning-tab UI gating. |
 | `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed. Mirrored from `positioning.has_target_lock_data`. Distinguishes "no T-key data" (pre-schema or never pressed) from "0% lock" in Career Radar tooltips. |
 | `has_pickup_data` | `boolean` | Phase 3. `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. |
@@ -856,7 +858,7 @@ Kill/death data from UnitDestroyed events. After Phase 3, only **real-vehicle** 
 | Field | Type | Description |
 |---|---|---|
 | `leaderboard` | `array` | Sorted by kills descending. Each: `{ player_id, name, kills, deaths, kd_ratio }` |
-| `feed` | `array` | Chronological kill events. Each: `{ tick, killer, killer_in_game_nick, killer_odf, victim, victim_in_game_nick, victim_odf }` |
+| `feed` | `array` | Chronological kill events. Each: `{ tick, killer, killer_team, killer_in_game_nick, killer_odf, victim, victim_team, victim_in_game_nick, victim_odf }`. `killer_team` / `victim_team` are raw uint slots (1-10, or 0 for unattributed) carried through from the proto so winner-inference can attribute kills to a faction without re-deriving identity from the display string. The `killer` / `victim` display strings fall back to `"Team 1"` / `"Team 2"` (faction-aligned) when no Steam64 is present, `"Self"` when the victim died on foot in a pilot ODF and the killer is fully unattributed, and `"World"` otherwise. Pure-noise rows (every attribution field zero/empty) are dropped during pipeline aggregation. |
 | `by_vehicle` | `array` | Vehicle types destroyed, sorted by count descending. Each: `{ odf, name, count }`. `name` is resolved via the same `prettify_odf` chain that powers `odf_map`. Capped to top 15 after filtering ignored ODFs (see `VEHICLE_DESTRUCTION_IGNORE_ODFS` in `scripts/process_stats.py`). |
 | `kill_rivalry_matrix` | `object` | Nested `{ "KillerName": { "VictimName": killCount } }`. Only player-on-player kills. |
 
@@ -1937,3 +1939,233 @@ Every era-2 and era-3 match. The pipeline-side gate corrects the corpus
 on next reprocess (`--force` or the `PIPELINE_VERSION` bump alone).
 Era-1 (pre-Phase-3) sessions are unaffected because they have no
 `PickupPowerup` events to dedup.
+
+## 9. Team Faction Detection
+
+BZCC matches are played by three asymmetric factions: **ISDF**, **Hadean**,
+and **Scion**. The proto schema (`scripts/statsgate.proto`) does not carry
+an explicit faction label per team — it carries only `teamnum` slots
+(1-10), which encode team membership (slots 1-5 = Team 1, 6-10 = Team 2)
+but not which side each team picked at lobby. Yet each unit ODF in the
+match data already encodes its owning faction in its first letter:
+
+- `i*` (e.g. `ivtank.odf`, `ibrecy_vsr.odf`, `isuser_m.odf`) → ISDF
+- `e*` (e.g. `evtank.odf`, `ebrecym_vsr.odf`, `esuser_m.odf`) → Hadean
+- `f*` (e.g. `fvscav_vsr.odf`, `fbrecy_vsr.odf`, `fsuser_m.odf`) → Scion
+
+The pipeline's `detect_team_factions()` helper combines two complementary
+algorithms to derive each team's faction reliably enough to surface in
+the UI, even on adversarial inputs (brief vehicle hijacks, pilot-only
+events, AI-only slots).
+
+### Output: `match.team_factions`
+
+```json
+"match": {
+  "team_leaders": { "1": {...}, "2": {...} },
+  "team_factions": {
+    "1": { "code": "i", "name": "ISDF" },
+    "2": { "code": "e", "name": "Hadean" }
+  }
+}
+```
+
+Per-team value is `null` when no slot in that team produced any faction
+signal — sandbox / pure-AI / corrupt match. Faction is fixed per match,
+so this field is **match-global, always-unfiltered** (the global player
+filter in `js/app.js` does not narrow it).
+
+### Algorithm A: Starting Ship
+
+For each slot, capture the **first non-empty `PlayerState.odf`** observed
+in `UpdateTick` events. This is the closest analogue we have to a
+match-start roster check absent an explicit "MatchStarted" event in the
+proto. Stored in `slot_first_odf` during the event loop, weighted as one
+extra vote on top of Algorithm B's tally.
+
+Limitations:
+- AI-only slots have no Steam64, so they never appear in `UpdateTick`
+  (the pipeline filters them out via `s64 not in s64_to_nick`). Their
+  faction signal flows from Algorithm B instead.
+- A player who hijacked an enemy vehicle on tick 0 would mis-vote on
+  Algorithm A, but Algorithm B's continuous-time vote will dominate.
+
+### Algorithm B: Event-Stream Votes
+
+Accumulate first-letter votes for each slot from every team-attributed
+**vehicle / structure / pilot ODF** observed in the event stream. Sources:
+
+| Event | Slot source | ODF source | Notes |
+|---|---|---|---|
+| `BulletHit` | `s64_to_slot[shooter]` | `shooter_odf` | Their own vehicle |
+| `BulletHit` | `s64_to_slot[victim]` | `victim_odf` | Their own vehicle |
+| `UnitDestroyed` (Cat 4) | `killer_team` | `killer_odf` | Their own vehicle (the killing unit) |
+| `UnitDestroyed` (Cat 4) | `victim_team` | `victim_odf` | Their own vehicle/structure |
+| `UpdateTick` `players[]` | `s64_to_slot[player]` | `odf` | Continuous-time vehicle/pilot signal |
+| `PickupPowerup` | `picker_team` | `picker_odf` | Their own vehicle/pilot |
+| `UnitSniped` | `shooter_team` | `shooter_odf` | Sniper's vehicle (slot fields reliable under both buggy and fixed collectors — see UnitSniped notes in §2) |
+| `UnitSniped` | `victim_team` | `victim_odf` | Victim's vehicle/pilot |
+
+**Excluded vote sources:** weapon ordnance ODFs (`BulletInit`,
+`BulletHit.ordnance_odf`, `DamageDealt.ordnance_odf`) and powerup ODFs
+(`PickupPowerup.powerup_odf`). Weapon ordnance prefixes do not follow the
+i/e/f convention reliably (`gauss_a.odf`, `cphcg_c.odf`, `pulsei.odf` —
+faction encoding lives in the suffix, not the first letter). Powerup
+prefixes use a distinct `ap*` / `ep*` / `fp*` convention that overlaps
+the unit prefixes only by coincidence.
+
+Votes are stored in `slot_faction_votes[slot]: Counter[faction_code]`
+where each vote is a single-character code (`'i'` / `'e'` / `'f'`).
+
+### Combining + Winning
+
+For each slot:
+
+1. Take the slot's `slot_faction_votes` Counter.
+2. Add `+1` to the bucket matching `faction_from_odf(slot_first_odf[slot])`
+   (Algorithm A weight).
+3. The slot's faction is the mode of this combined Counter.
+
+For each team (1: slots 1-5; 2: slots 6-10):
+
+1. Tally the slot-factions of every slot in the team that produced any signal.
+2. The team's faction is the mode of that tally.
+3. If no slot in the team produced any signal, the team's faction is `null`.
+
+### Edge cases
+
+- **Symmetric matchups** (ISDF vs ISDF, Scion vs Scion): both teams'
+  `code` matches; the badges show the same color for both teams. This is
+  a real game configuration, not a detection error.
+- **AI-only teams**: votes come exclusively from Algorithm B sources
+  carrying slot fields (`UnitDestroyed`, `BulletHit`, `PickupPowerup`,
+  `UnitSniped`), since `UpdateTick` skips AI slots. Detection still
+  succeeds when the team produced any team-attributed event.
+- **Corrupt / sandbox matches**: zero signal means `null` for that team;
+  the UI hides the badge.
+- **Brief hijacks**: a player who pilots a few enemy vehicles for a
+  short window contributes a small number of opposite-faction votes,
+  outweighed by their own match-long vehicle/pilot stream.
+
+### Source files
+
+- `scripts/process_stats.py`: `RECYCLER_ODFS` / `FACTORY_ODFS` /
+  `FACTION_BY_PREFIX` / `PILOT_ODFS` constants, `faction_from_odf()` and
+  `detect_team_factions()` helpers, per-event branch instrumentation.
+- `js/app.js`: `renderFactionScoreboard()` injects the badge from
+  `currentData.match.team_factions`; `renderKillFeed()` resolves ODFs
+  via `currentData.odf_map`.
+- `css/vtstats-theme.css`: `.vt-faction-badge[data-faction-code]` color
+  variants (`i` → `--kb-primary`, `e` → `--kb-warning`, `f` → `--kb-accent`).
+
+## 10. Match Winner Inference
+
+The proto schema has no explicit "MatchEnded" event with an end-reason
+enum, so the pipeline infers each match's winner from the cleaned
+`kill_feed[]` using a conservative toggle model on recycler/factory
+destruction events. The result is emitted as `match.winner` and is
+**match-global, always-unfiltered** — the renderer reads the block
+directly from `currentData.match.winner` and never from the (possibly
+narrowed) `data.kills.feed`, so a player filter that hides the loser's
+recycler/factory destruction events cannot corrupt the result.
+
+### Output: `match.winner`
+
+```json
+"match": {
+  "winner": {
+    "team": 2,
+    "loser": 1,
+    "decided_at_tick": 47823,
+    "decided_by": "clean_win",
+    "evidence": {
+      "rec_dest_count": {"1": 1, "2": 0},
+      "fac_dest_count": {"1": 1, "2": 0},
+      "loser_rec_destroyed_tick": 47100,
+      "loser_fac_destroyed_tick": 47823,
+      "loser_rec_odf": "ibrecy_vsr.odf",
+      "loser_fac_odf": "ibfact_vsr.odf"
+    }
+  }
+}
+```
+
+Schema v3+. Always emitted. `team` and `loser` are `null` for `unclear`
+outcomes; the rest of the block (including `evidence`) is always present
+so renderers can read it without absence-checking each field.
+
+### Toggle model
+
+Per team, count `kill_feed` entries whose `victim_odf` is a recycler /
+factory ODF and whose `victim_team` resolves (via `slot_to_faction()`)
+to that team:
+
+- `rec_dest_count[team]` and `fac_dest_count[team]` — total destruction
+  events seen.
+- A team's recycler is **dead at match end** iff `rec_dest_count` is
+  odd. Same for factory. Both odd → team is **fully dead**.
+- Even count means the team rebuilt at least once after the last
+  destruction (or was never destroyed). The toggle correctly models
+  "destroyed → rebuilt → destroyed → rebuilt → end of match alive."
+
+### Classification (`decided_by`)
+
+| State | `decided_by` | Notes |
+|---|---|---|
+| Exactly one team fully dead AND the other has zero rec/fac destructions | `clean_win` | Highest-confidence path — nothing to interpret about rebuilds or commander demos. |
+| Both teams fully dead | `contested` | Loser = whichever fell first (max of last_rec_tick and last_fac_tick is earlier). |
+| Anything else | `unclear` | Includes rebuild ambiguity (one team fully dead but the other has non-zero destructions), zero-destruction matches (premature quit / timeout), and commander self-demolitions that didn't register in the kill feed. |
+
+### Why "Unclear" exists
+
+There are several real-world game-end states the kill feed alone cannot
+disambiguate:
+
+1. **Rebuild ambiguity** — a player can lose a factory, rebuild it, then
+   lose the recycler. The toggle model says "rec_dead, fac_alive after
+   rebuild" → not fully dead → `unclear` if the other team also took
+   any rec/fac damage. We deliberately do **not** speculate about which
+   destruction was "the final one."
+2. **Commander self-demolition** — any commander can hit `Demo` on their
+   own recycler or factory. These self-demos may emit a `UnitDestroyed`
+   event with `killer_team == victim_team`, but the in-game effect is
+   immediate self-destruction, not a real combat loss. We treat them as
+   ordinary destructions for the toggle (which is mostly correct), but
+   when a self-demo was the *only* rec/fac destruction in a match, the
+   result drops into `unclear`.
+3. **Premature quit / host quit** — the recording session can end before
+   either team's bases fell.
+4. **Timeout** — the match ended via clock without a base loss.
+
+The renderer surfaces `unclear` via a question-mark badge with a tooltip:
+"Match outcome could not be determined from the kill feed. The game may
+have ended via host quit, timeout, or commander self-demolition of
+recycler/factory. Future stat collection will close these gaps."
+
+### Renderer integration
+
+- **Kill Feed card header** (`renderKillFeed()` in `js/app.js`): inserts
+  `<span class="vt-winner-badge" data-decided-by="...">` with three
+  visual variants. `clean` and `contested` show a trophy + faction-name
+  label; `unclear` shows a question-circle icon + "Outcome unclear"
+  with a tooltip. Tooltips are wired via `ensureTooltips()` — Bootstrap
+  `data-bs-toggle="tooltip"` on the badge.
+- **Faction Scoreboard** (`renderFactionScoreboard()` in `js/app.js`):
+  the winning team's `.vt-faction-panel` gets the
+  `.vt-faction-panel--winner` class (gold accent) and the team header
+  prefixes a `<i class="bi bi-trophy-fill">` icon. Unclear matches get
+  no panel highlight.
+- **In-feed milestone marker**: a divider row inserted into the kill
+  feed list at the `decided_at_tick` for `clean_win` / `contested`
+  outcomes. Reads the tick from `currentData.match.winner.decided_at_tick`
+  (passthrough), NOT from the filtered `kills.feed`. When a player filter
+  is active and the loser's destruction events are absent from view, the
+  divider falls through to the end of the list rather than disappearing.
+
+### Future work
+
+The proposed upstream `statsgate.proto` enhancement (a real
+`MatchEnded` event with `end_reason` enum: `rec_fac_loss` /
+`commander_quit` / `commander_demo` / `timeout` etc.) would
+deterministically resolve every "unclear" case. Until then, the toggle
+model is the best the pipeline can do without speculation.
