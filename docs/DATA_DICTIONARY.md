@@ -16,10 +16,19 @@ scripts/process_stats.py              Python pipeline
         │  ├── data/odf.min.json                         Weapon / unit / powerup name DB
         │  ├── scripts/extract_proto_docs.py             Proto-comment extraction (pre-step)
         │  └── scripts/build_map_registry.py             Map metadata + image fetch (post-step)
-        │             │  ├── js/bz2api.js                Baked-in VSR_MAP_DATA catalog
-        │             │  └── iondriver gamelistassets    External map metadata + images
+        │             │  ├── data/vsrmaplist.json        PRIMARY — vendored BZCC-Website
+        │             │  │                               index (Pools / Loose / Tags /
+        │             │  │                               formatted_size / Author / Image
+        │             │  │                               URL); refresh via
+        │             │  │                               scripts/refresh_vsrmaplist.py
+        │             │  ├── iondriver gamelistassets    Per-map enrichment — netVars
+        │             │  │                               (svar1/svar2 etc.) + richer
+        │             │  │                               title/description fallback
+        │             │  └── js/bz2api.js                LEGACY FALLBACK — baked-in
+        │             │                                  VSR_MAP_DATA catalog
         │             ▼
-        │       data/map-registry.json + data/maps/*     Per-map title / image / netVars
+        │       data/map-registry.json + data/maps/*     Per-map title / image / netVars +
+        │                                                pools / loose / tags / formatted_size
         │       data/proto-docs.json                     {Message.field: comment} dict
         │
         ▼
@@ -381,22 +390,25 @@ The hero banner above the tab strip is built by `renderBanner()` + `renderMapBan
 
 ### Map Info Modal
 
-Opened by clicking the hero banner thumbnail (`#info-map-thumb-btn`). Built by `renderMapInfoModal()` in `js/app.js` from the same three-source merge as the hero (`getMapMeta()` plus the raw `mapRegistry[key]` entry): `match.terrain_bounds` (highest precedence) → `data/map-registry.json` → `BZ2API.VSR_MAP_DATA` (baked-in library fallback). Re-runs every banner render so opening the modal after a match switch always reflects the current map. Rows self-omit when their underlying value is missing.
+Opened by clicking the hero banner thumbnail (`#info-map-thumb-btn`). Built by `renderMapInfoModal()` in `js/app.js` from the same three-source merge as the hero (`getMapMeta()` plus the raw `mapRegistry[key]` entry): `match.terrain_bounds` (highest precedence) → `data/map-registry.json` (primary; sourced from vendored `data/vsrmaplist.json` + iondriver `getdata.php` enrichment) → `BZ2API.VSR_MAP_DATA` (baked-in library fallback). Re-runs every banner render so opening the modal after a match switch always reflects the current map. Rows self-omit when their underlying value is missing.
 
 | Displayed | JSON Path | Computed From |
 |---|---|---|
-| Title | `data/map-registry.json[key].title` ∪ `match.name` | Registry title wins; falls back to manifest name then bare map key |
-| Description | `data/map-registry.json[key].description` | BOM-stripped, CRLF/LF rendered as `<br>`, run through `esc()` first |
-| Author | `data/map-registry.json[key].author` ∪ `BZ2API.VSR_MAP_DATA[key].author` | Registry first, library fallback |
-| Canonical size | `data/map-registry.json[key].canonical_size` ∪ `BZ2API.VSR_MAP_DATA[key].size × 2` | Rendered as `~Nm` (map-design reference, full-edge) |
-| Canonical base-to-base | `data/map-registry.json[key].canonical_b2b` ∪ `BZ2API.VSR_MAP_DATA[key].baseToBase` | Rendered as `Nm` (map-design reference) |
+| Title | `data/map-registry.json[key].title` ∪ `match.name` | Registry title wins (iondriver primary, vsrmaplist `Name` fallback); falls back to manifest name then bare map key |
+| Description | `data/map-registry.json[key].description` | BOM-stripped, CRLF/LF rendered as `<br>`, run through `esc()` first. Rendered into the LEFT column under the image (not the metadata grid). Iondriver `data.description` primary, vsrmaplist `Description` fallback |
+| Author | `data/map-registry.json[key].author` ∪ `BZ2API.VSR_MAP_DATA[key].author` | vsrmaplist `Author` primary, library fallback |
+| Canonical size | `data/map-registry.json[key].formatted_size` ∪ `data/map-registry.json[key].canonical_size` ∪ `BZ2API.VSR_MAP_DATA[key].size × 2` | Renders `formatted_size` as-is (e.g. `"1024x1024"`) when present; falls back to `~Nm` from `canonical_size`. `formatted_size` comes from vsrmaplist's `Size.formattedSize` |
+| Canonical base-to-base | `data/map-registry.json[key].canonical_b2b` ∪ `BZ2API.VSR_MAP_DATA[key].baseToBase` | Rendered as `Nm` (map-design reference). vsrmaplist `Size.baseToBase` primary, library fallback |
+| Pools | `data/map-registry.json[key].pools` | Integer scrap-pool count (vsrmaplist `Pools`); row omitted if absent |
+| Loose scrap | `data/map-registry.json[key].loose` | Integer loose-scrap budget (vsrmaplist `Loose`); rendered as `Unlimited` when value `< 0` (upstream sentinel); row omitted if absent |
+| Tags | `data/map-registry.json[key].tags` | String array (vsrmaplist `Tags` comma-string split + trimmed; observed values `"popular"`, `"played"`); rendered as `.vt-map-info-tag` chip(s); row omitted when array empty |
 | Map file | `data/map-registry.json[key].map_file` | `<key>.bzn` in `<code>` |
 | Mod | `data/map-registry.json[key].mod_resolved` | Linked to `https://steamcommunity.com/sharedfiles/filedetails/?id=<id>` when numeric |
-| Team 1 / Team 2 name | `data/map-registry.json[key].net_vars.svar1` / `svar2` | iondriver-side team name strings |
+| Team 1 / Team 2 name | `data/map-registry.json[key].net_vars.svar1` / `svar2` | iondriver-side team name strings (only source — vsrmaplist has no equivalent) |
 | Terrain size | `match.terrain_bounds` | `(max.x − min.x) × (max.z − min.z)` rendered as `N × Nm`. Section: "This match" |
 | Elevation | `match.terrain_bounds.max.y − min.y` | `min → max m`. Section: "This match" |
 | Empirical base-to-base | `match.base_to_base_distance` | Spawn-centroid distance this match. Section: "This match" |
-| Source | `data/map-registry.json[key].attribution.source` | Section: "Attribution" |
+| Source | `data/map-registry.json[key].attribution.source` | Section: "Attribution". Concatenation of contributing upstreams (e.g. `"iondriver.com / gamelistassets + battlezonescrapfield.github.io (vsrmaplist)"`) |
 
 ### Faction Scoreboard
 
@@ -1287,9 +1299,13 @@ Alphabetical reference of every statistic displayed in the dashboard.
 | **Asset Damage Received** | Damage taken by a player's AI units or structures | `DamageReceived` where `victim = 0` | Sum of `amount` grouped by owning slot (`team` field) |
 | **Base-to-Base Distance** | Raw horizontal distance between Team 1 and Team 2 spawn centroids (no floor applied) | `UpdateTick.players[].position` (first 3 kept samples per player) | Median of first-3 samples per player → per-team centroid of (x, z) → `sqrt(dx² + dz²)`. `null` if either team empty. See `positioning.base_to_base_distance` and the mirrored `match.base_to_base_distance`. Hero banner shows empirical as primary with a tooltip comparing to the canonical value |
 | **Base-to-Base Distance (Canonical)** | Map-design reference base-to-base distance | `BZ2API.VSR_MAP_DATA[<mapKey>].baseToBase` | Baked-in library value from the VSR map catalog (sevsunday/bz2vsr). Differs from empirical by a few units: canonical reflects the designed recycler-to-recycler distance while empirical is the median of first-3 kept spawn samples (players may have drifted slightly). Both shipped side-by-side in the hero base-to-base tooltip |
-| **Canonical Map Size** | Map edge length in world units, from the map-design reference | `BZ2API.VSR_MAP_DATA[<mapKey>].size * 2` (library stores half-edge; full-edge = size × 2) | Used as fallback in the Map Info Modal's "Canonical size" row when `match.terrain_bounds` is absent (pre-schema sessions). Also present as `canonical_size` on `data/maps/<mapFile>.json` and `data/map-registry.json` |
-| **Map Image** | Top-down map image (PNG/JPG) fetched from iondriver's gamelistassets API | `https://gamelistassets.iondriver.com/bzcc/getdata.php?map=X&mod=Y` → `data.image` → `data/maps/<mapFile>.<ext>` | Downloaded at pipeline time by `scripts/build_map_registry.py`; content-addressed filenames on the source side guarantee cache stability. Surfaces: hero 48×48 thumbnail, match-picker 96×96 card thumbnails, heatmap background (`js/positioning-charts.js`), replay trail background (`js/positioning-player.js`) |
-| **Map Registry** | Consolidated metadata dict for every distinct map in the corpus | `data/map-registry.json` | `{ <mapFile>: { title, description, image_path, image_calibration, net_vars, author, canonical_size, canonical_b2b, mod_resolved, fetched_at } }`. Keyed by lowercase `<mapFile>` (stripped `.bzn` extension). Consumed by `js/app.js` for hero banner + `js/positioning-charts.js` + `js/positioning-player.js` for overlays. External reference data; match-global; always-unfiltered |
+| **Canonical Map Size** | Map edge length in world units, from the map-design reference | Preferred: `data/map-registry.json[<mapKey>].formatted_size` (vsrmaplist's `Size.formattedSize` string, e.g. `"1024x1024"`). Fallback: `data/map-registry.json[<mapKey>].canonical_size` (numeric edge length) ∪ `BZ2API.VSR_MAP_DATA[<mapKey>].size * 2` (library stores half-edge; full-edge = size × 2) | Map Info Modal's "Canonical size" row renders `formatted_size` directly when present, else falls back to `~Nm` from `canonical_size`. Note: cached entries built before the vsrmaplist vendor may have `canonical_size` from the legacy bz2api `* 2` doubling that disagrees with `formatted_size`'s parsed value; the renderer's `formatted_size`-first preference makes the discrepancy invisible in the UI. Also present as `canonical_size` / `formatted_size` on `data/maps/<mapFile>.json` |
+| **Formatted Map Size** | Display-ready string form of the canonical map size (e.g. `"1024x1024"`) | `data/map-registry.json[<mapKey>].formatted_size` ← `data/vsrmaplist.json[].Size.formattedSize` | Vsrmaplist-only field. Preferred display source for the Map Info Modal's "Canonical size" row. Absent on maps that fall through to the iondriver-only or `VSR_MAP_DATA`-only path; row falls back to `~Nm` from `canonical_size` in that case. Match-global, always-unfiltered |
+| **Map Image** | Top-down map image (PNG/JPG) downloaded by the pipeline | Primary URL: iondriver `getdata.php` `data.image`. Fallback URL: `data/vsrmaplist.json[].Image` (same SHA-content-addressed `assets/<sha>.png` URL on the iondriver host). Local copy: `data/maps/<mapFile>.<ext>` | Downloaded at pipeline time by `scripts/build_map_registry.py`; content-addressed filenames on the source side guarantee cache stability. Surfaces: hero 70×70 thumbnail (clickable, opens Map Info Modal), Map Info Modal full-size image, match-picker 96×96 card thumbnails, heatmap background (`js/positioning-charts.js`), replay trail background (`js/positioning-player.js`) |
+| **Map Pools** | Number of designed scrap-pool spawn locations on the map | `data/map-registry.json[<mapKey>].pools` ← `data/vsrmaplist.json[].Pools` | Integer (typical range 3–9; observed mode = 7). Vsrmaplist-only field. Surfaced as the "Pools" row in the Map Info Modal; row omitted when absent. Match-global, always-unfiltered |
+| **Map Loose Scrap** | Designed loose-scrap budget (units of scrap scattered across the map outside of pools) | `data/map-registry.json[<mapKey>].loose` ← `data/vsrmaplist.json[].Loose` | Integer. Upstream sentinel `< 0` ("unlimited" loose scrap) is preserved in the JSON and rendered as `Unlimited` in the modal. Vsrmaplist-only field. Surfaced as the "Loose scrap" row in the Map Info Modal; row omitted when absent. Match-global, always-unfiltered |
+| **Map Tags** | Curator-assigned tags from the upstream BZCC-Website index | `data/map-registry.json[<mapKey>].tags` ← `data/vsrmaplist.json[].Tags` (comma-separated string, split + trimmed + empty-filtered into a string array) | Observed values: `"popular"`, `"played"`. Vsrmaplist-only field. Rendered as `.vt-map-info-tag` chips in the Map Info Modal's "Tags" row; row omitted when array is empty (16 of 34 maps in the current corpus carry at least one tag). Match-global, always-unfiltered |
+| **Map Registry** | Consolidated metadata dict for every distinct map in the corpus | `data/map-registry.json` | `{ <mapFile>: { title, description, image_path, image_hash_origin, image_calibration, net_vars, author, canonical_size, canonical_b2b, formatted_size, pools, loose, tags, mod_resolved, attribution: { source, map_author }, fetched_at } }`. Keyed by lowercase `<mapFile>` (stripped `.bzn` extension). Built by `scripts/build_map_registry.py` from `data/vsrmaplist.json` (primary), iondriver `getdata.php` (per-map enrichment for `net_vars` + title/description fallback), and `BZ2API.VSR_MAP_DATA` (legacy fallback). Consumed by `js/app.js` for the hero banner + Map Info Modal + `js/positioning-charts.js` + `js/positioning-player.js` for overlays. External reference data; match-global; always-unfiltered |
 | **Image Calibration** | Optional per-map override telling the frontend what world-space rectangle the map image covers | `data/maps/<mapFile>.json` → `image_calibration.image_bounds_world = { min:{x,z}, max:{x,z} }` | When `null` (default), frontend projection falls back to `match.terrain_bounds` (2D xz). When populated, `image_bounds_world` becomes the authoritative image-to-world mapping for heatmap + trail overlays, hero thumbnail projection, and the match-picker thumb. Preserved across `scripts/build_map_registry.py` reruns (additive on cache-hit). Tuning workflow in `DEVELOPER_GUIDE.md` §10 |
 | **Overlay Projection** | The pixel-to-world contract shared by map image and every data point drawn on top of it | `imageBounds` (from calibration or terrain_bounds) | `px = (worldX − min.x) / (max.x − min.x) × canvasW` ; `py = (max.z − worldZ) / (max.z − min.z) × canvasH`. Axis convention: +X East, +Z North, image top = north. Guarantees images + heatmap cells + trails stay co-aligned regardless of calibration. See `_drawMapImageLayer()` in `js/positioning-charts.js` |
 | **Best Match** | The match where a player dealt the most personal damage | `leaderboard[].personal.dealt` | Max dealt across matches (career view only) |

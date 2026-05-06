@@ -60,6 +60,10 @@ MATCHES_MANIFEST = PROJECT_ROOT / "data" / "processed" / "matches.json"
 MAPS_DIR = PROJECT_ROOT / "data" / "maps"
 REGISTRY_PATH = PROJECT_ROOT / "data" / "map-registry.json"
 BZ2API_JS_PATH = PROJECT_ROOT / "js" / "bz2api.js"
+# Vendored upstream BZCC-Website map index. Primary source for author,
+# canonical size, base-to-base, pools, loose scrap, tags, and image URL.
+# Refresh manually via `scripts/refresh_vsrmaplist.py` when a new map ships.
+VSRMAPLIST_PATH = PROJECT_ROOT / "data" / "vsrmaplist.json"
 
 IONDRIVER_BASE = "https://gamelistassets.iondriver.com/bzcc"
 USER_AGENT = (
@@ -78,11 +82,16 @@ STOCK_MOD_ID = "0"
 def load_vsr_map_data() -> dict:
     """Extract VSR_MAP_DATA from js/bz2api.js.
 
+    Legacy fallback only — `load_vsrmaplist()` is the primary source for
+    author / canonical_size / canonical_b2b. Kept because `bz2api.js` is
+    still used at runtime by the dashboard (see `getMapMeta()` in
+    `js/app.js`) and because it's a zero-network on-disk fallback if
+    `data/vsrmaplist.json` is missing.
+
     The library embeds a single-line JSON object assigned to
     `VSR_MAP_DATA`; we regex-locate it and parse with json.loads. If
     parsing fails (library structure drifted), returns an empty dict —
-    registry still builds but the `author`/`canonical_*` fields are
-    omitted.
+    registry still builds but the legacy-fallback fields are omitted.
     """
     if not BZ2API_JS_PATH.exists():
         print(f"WARNING: {BZ2API_JS_PATH.name} not found; canonical fields unavailable")
@@ -97,6 +106,68 @@ def load_vsr_map_data() -> dict:
     except json.JSONDecodeError as e:
         print(f"WARNING: VSR_MAP_DATA parse failed: {e}")
         return {}
+
+
+def load_vsrmaplist() -> dict[str, dict]:
+    """Read the vendored upstream `data/vsrmaplist.json` index and return
+    a `{file_lower: entry}` dict for O(1) lookup keyed by the same map
+    file stem `map_key()` produces (e.g. `"havenvsr"`).
+
+    Soft-fails with an empty dict + warning when the file is missing or
+    malformed; the registry still builds but loses pools / loose / tags /
+    formatted_size / Author / Description and falls back to the legacy
+    `VSR_MAP_DATA` + iondriver-only path.
+
+    Source: https://battlezonescrapfield.github.io/BZCC-Website/data/maps/vsrmaplist.json
+    Refresh: run `scripts/refresh_vsrmaplist.py` when a new map ships.
+    """
+    if not VSRMAPLIST_PATH.exists():
+        print(
+            f"WARNING: {VSRMAPLIST_PATH.name} not found; "
+            "pools/loose/tags/formatted_size unavailable. "
+            "Run `python scripts/refresh_vsrmaplist.py` to vendor it."
+        )
+        return {}
+    try:
+        raw = json.loads(VSRMAPLIST_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"WARNING: vsrmaplist parse failed: {e}")
+        return {}
+    if not isinstance(raw, list):
+        print("WARNING: vsrmaplist root is not an array")
+        return {}
+    out: dict[str, dict] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = (entry.get("File") or "").lower()
+        if key:
+            out[key] = entry
+    return out
+
+
+def _normalize_vsrmaplist_tags(raw: str | None) -> list[str]:
+    """vsrmaplist `Tags` is a comma-separated string (observed values:
+    `"popular"`, `"played"`, or `""`). Split, strip, drop empties.
+    """
+    if not raw:
+        return []
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
+def _vsrmaplist_image_relpath(image_url: str | None) -> str | None:
+    """vsrmaplist's `Image` field is a full URL hosted on iondriver
+    (`https://gamelistassets.iondriver.com/bzcc/assets/<sha>.png`).
+    Strip the base prefix so it can feed `download_image()` (which
+    re-prepends `IONDRIVER_BASE`). Returns None if the URL is missing
+    or doesn't live under iondriver.
+    """
+    if not image_url:
+        return None
+    prefix = IONDRIVER_BASE.rstrip("/") + "/"
+    if image_url.startswith(prefix):
+        return image_url[len(prefix):]
+    return None
 
 
 def map_key(map_field: str) -> str:
@@ -186,14 +257,26 @@ def build_per_map(
     map_file: str,
     primary_mod_id: str | None,
     vsr_entry: dict | None,
+    vsrmaplist_entry: dict | None = None,
 ) -> dict | None:
     """Fetch metadata + image for a single map. Returns the per-map JSON
-    dict on success, or None on total failure (all mod IDs 404'd or
-    network down). Side-effect: writes `data/maps/<map_file>.{png|jpg}`
-    and `data/maps/<map_file>.json`.
+    dict on success, or None on total failure (all mod IDs 404'd, no
+    vsrmaplist entry, and no fallback image). Side-effect: writes
+    `data/maps/<map_file>.{png|jpg}` and `data/maps/<map_file>.json`.
+
+    Merge precedence (highest first):
+      - title: iondriver `data.title` -> vsrmaplist `Name` -> stripped filename
+      - description: iondriver `data.description` -> vsrmaplist `Description`
+      - author: vsrmaplist `Author` -> `VSR_MAP_DATA[key].author` (legacy)
+      - canonical_size: vsrmaplist `Size.size` (full edge) -> `VSR_MAP_DATA[key].size * 2` (legacy half-edge doubled)
+      - canonical_b2b: vsrmaplist `Size.baseToBase` -> `VSR_MAP_DATA[key].baseToBase` (legacy)
+      - image_path: iondriver `data.image` -> vsrmaplist `Image` (same SHA URL on iondriver host)
+      - net_vars: iondriver only (no vsrmaplist source)
+      - pools / loose / tags / formatted_size: vsrmaplist only
 
     Idempotent: if the per-map JSON already exists AND its `image_path`
-    target is on disk, return the cached dict without hitting the network.
+    target is on disk, return the cached dict without hitting the network
+    (after backfilling any newly-added fields).
     """
     per_map_json = MAPS_DIR / f"{map_file}.json"
 
@@ -211,6 +294,41 @@ def build_per_map(
                 if "image_calibration" not in cached:
                     cached["image_calibration"] = None
                     dirty = True
+                # vsrmaplist-sourced fields. Backfill from the in-memory
+                # vsrmaplist entry without any network call. Skipped when
+                # vsrmaplist coverage is missing for this map (fields stay
+                # absent and the renderer falls back gracefully).
+                if vsrmaplist_entry:
+                    size_block = vsrmaplist_entry.get("Size") or {}
+                    backfill_pairs = [
+                        ("pools", vsrmaplist_entry.get("Pools")),
+                        ("loose", vsrmaplist_entry.get("Loose")),
+                        ("tags", _normalize_vsrmaplist_tags(vsrmaplist_entry.get("Tags"))),
+                        ("formatted_size", size_block.get("formattedSize") or None),
+                    ]
+                    for key, value in backfill_pairs:
+                        if key not in cached:
+                            cached[key] = value
+                            dirty = True
+                    # Author/canonical_* may have been resolved from the
+                    # legacy bz2api path before vsrmaplist was vendored;
+                    # promote vsrmaplist's value when the cached value is
+                    # missing (don't clobber an existing non-null value).
+                    if not cached.get("author") and vsrmaplist_entry.get("Author"):
+                        cached["author"] = vsrmaplist_entry.get("Author")
+                        dirty = True
+                    if cached.get("canonical_size") is None and size_block.get("size"):
+                        cached["canonical_size"] = int(size_block["size"])
+                        dirty = True
+                    if cached.get("canonical_b2b") is None and size_block.get("baseToBase"):
+                        cached["canonical_b2b"] = int(size_block["baseToBase"])
+                        dirty = True
+                    # Description: vsrmaplist as fill-in only (don't
+                    # overwrite an iondriver-sourced description that
+                    # might be richer).
+                    if not cached.get("description") and vsrmaplist_entry.get("Description"):
+                        cached["description"] = vsrmaplist_entry.get("Description")
+                        dirty = True
                 if dirty:
                     per_map_json.write_text(
                         json.dumps(cached, indent=2, sort_keys=True) + "\n",
@@ -231,12 +349,20 @@ def build_per_map(
         mod_chain.append(STOCK_MOD_ID)
 
     resp, used_mod = fetch_map_metadata(map_file, mod_chain)
-    if resp is None:
+    # vsrmaplist now lets us tolerate iondriver being fully unreachable for
+    # this map: we still build the entry from vendored data + image URL.
+    if resp is None and not vsrmaplist_entry:
         print(f"  {map_file}: metadata unavailable (tried mods {mod_chain})")
         return None
+    if resp is None:
+        print(f"  {map_file}: iondriver unavailable, building from vsrmaplist only")
 
-    # Download image.
-    image_rel_remote = resp.get("image")
+    # Download image. Prefer iondriver's URL (returned by getdata.php);
+    # fall back to vsrmaplist's `Image` field (same SHA-content-addressed
+    # URL on the same iondriver host) when iondriver gave us nothing.
+    image_rel_remote = (resp.get("image") if resp else None)
+    if not image_rel_remote and vsrmaplist_entry:
+        image_rel_remote = _vsrmaplist_image_relpath(vsrmaplist_entry.get("Image"))
     image_path_rel: str | None = None
     image_hash = None
     if image_rel_remote:
@@ -251,15 +377,46 @@ def build_per_map(
             print(f"  {map_file}: image download failed: {e}")
             # Keep metadata without image.
 
-    author = None
-    canonical_size = None
-    canonical_b2b = None
+    # Title / description / author / canonical_* merge per the precedence
+    # documented in the docstring.
+    title: str | None = None
+    description: str | None = None
+    if resp:
+        title = resp.get("title") or None
+        description = resp.get("description") or None
+    if not title and vsrmaplist_entry:
+        title = vsrmaplist_entry.get("Name") or None
+    if not description and vsrmaplist_entry:
+        description = vsrmaplist_entry.get("Description") or None
+
+    author: str | None = None
+    canonical_size: int | None = None
+    canonical_b2b: int | None = None
+    formatted_size: str | None = None
+    pools: int | None = None
+    loose: int | None = None
+    tags: list[str] = []
+    if vsrmaplist_entry:
+        author = vsrmaplist_entry.get("Author") or None
+        size_block = vsrmaplist_entry.get("Size") or {}
+        if size_block.get("size") is not None:
+            # vsrmaplist stores full edge length directly (matches
+            # `formattedSize: "NxN"`); no doubling required.
+            canonical_size = int(size_block["size"])
+        if size_block.get("baseToBase") is not None:
+            canonical_b2b = int(size_block["baseToBase"])
+        formatted_size = size_block.get("formattedSize") or None
+        pools = vsrmaplist_entry.get("Pools")
+        loose = vsrmaplist_entry.get("Loose")
+        tags = _normalize_vsrmaplist_tags(vsrmaplist_entry.get("Tags"))
     if vsr_entry:
-        author = vsr_entry.get("author")
-        if vsr_entry.get("size"):
-            # Library stores half-edge; terrain edge = 2 * size.
+        # Legacy `js/bz2api.js` VSR_MAP_DATA fallback. Library stores
+        # half-edge; terrain edge = 2 * size. Only fills holes.
+        if not author and vsr_entry.get("author"):
+            author = vsr_entry.get("author")
+        if canonical_size is None and vsr_entry.get("size"):
             canonical_size = int(vsr_entry["size"]) * 2
-        if vsr_entry.get("baseToBase"):
+        if canonical_b2b is None and vsr_entry.get("baseToBase"):
             canonical_b2b = vsr_entry["baseToBase"]
 
     # Preserve any hand-tuned image_calibration across registry rebuilds.
@@ -274,16 +431,35 @@ def build_per_map(
         except (json.JSONDecodeError, OSError):
             preserved_calibration = None
 
+    # Attribution source string reflects which upstream actually
+    # contributed metadata for this entry (vsrmaplist == BZCC-Website
+    # vendored index, iondriver == live getdata.php).
+    sources: list[str] = []
+    if resp:
+        sources.append("iondriver.com / gamelistassets")
+    if vsrmaplist_entry:
+        sources.append("battlezonescrapfield.github.io (vsrmaplist)")
+    if not sources and vsr_entry:
+        sources.append("js/bz2api.js (VSR_MAP_DATA legacy)")
+    attribution_source = " + ".join(sources) if sources else None
+
     per_map = {
         "map_file": map_file,
-        "title": resp.get("title") or None,
-        "description": resp.get("description") or None,
+        "title": title,
+        "description": description,
         "image_path": image_path_rel,
         "image_hash_origin": image_hash,
-        "net_vars": resp.get("netVars") or None,
+        "net_vars": (resp.get("netVars") if resp else None) or None,
         "author": author,
         "canonical_size": canonical_size,
         "canonical_b2b": canonical_b2b,
+        # vsrmaplist-only fields (added per plan vendor-vsrmaplist-registry).
+        # Stay null/empty for maps that fall through to the
+        # iondriver-only or VSR_MAP_DATA-only fallback.
+        "pools": pools,
+        "loose": loose,
+        "tags": tags,
+        "formatted_size": formatted_size,
         # Optional local override for how the image maps onto world space.
         # When null, frontend projections fall back to `match.terrain_bounds`
         # (2D xz). When populated, frontend uses `image_bounds_world` as the
@@ -295,7 +471,7 @@ def build_per_map(
         # calibration workflow. Preserved across registry rebuilds.
         "image_calibration": preserved_calibration,
         "attribution": {
-            "source": "iondriver.com / gamelistassets",
+            "source": attribution_source,
             "map_author": author,
         },
         "mod_resolved": used_mod,
@@ -347,10 +523,15 @@ def build_registry(
     `data/processed/matches.json` via `discover_map_files()`.
     """
     vsr_data = load_vsr_map_data()
+    vsrmaplist = load_vsrmaplist()
     entries = (
         map_mod_entries if map_mod_entries is not None else discover_map_files()
     )
-    print(f"Map registry: {len(entries)} distinct map(s)")
+    coverage = sum(1 for k, _ in entries if k in vsrmaplist)
+    print(
+        f"Map registry: {len(entries)} distinct map(s); "
+        f"vsrmaplist coverage {coverage}/{len(entries)}"
+    )
 
     registry: dict[str, dict] = {}
     skipped = 0
@@ -359,9 +540,15 @@ def build_registry(
 
     for map_file, primary_mod in entries:
         vsr_entry = vsr_data.get(map_file)
+        vsrmaplist_entry = vsrmaplist.get(map_file)
         before_exists = (MAPS_DIR / f"{map_file}.json").exists()
         try:
-            per_map = build_per_map(map_file, primary_mod, vsr_entry)
+            per_map = build_per_map(
+                map_file,
+                primary_mod,
+                vsr_entry,
+                vsrmaplist_entry=vsrmaplist_entry,
+            )
         except Exception as e:
             print(f"  {map_file}: unexpected error: {e}")
             per_map = None

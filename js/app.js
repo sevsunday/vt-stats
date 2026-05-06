@@ -3339,11 +3339,31 @@
 
     addSection('Map');
     addRow('Author', meta.author ? esc(meta.author) : '');
-    if (meta.canonicalSize != null) {
+    // Prefer the upstream-formatted "1024x1024" string from vsrmaplist
+    // (`reg.formatted_size`); fall back to the computed `~Nm` from the
+    // canonical edge length for legacy entries with no vsrmaplist coverage.
+    if (reg.formatted_size) {
+      addRow('Canonical size', esc(reg.formatted_size));
+    } else if (meta.canonicalSize != null) {
       addRow('Canonical size', `~${Math.round(meta.canonicalSize)}m`);
     }
     if (meta.canonicalB2B != null) {
       addRow('Canonical base-to-base', `${Math.round(meta.canonicalB2B)}m`);
+    }
+    // vsrmaplist-sourced map-economy fields. Loose < 0 is the upstream
+    // sentinel for "unlimited" (observed on a handful of maps).
+    if (reg.pools != null) {
+      addRow('Pools', esc(String(reg.pools)));
+    }
+    if (reg.loose != null) {
+      const looseStr = reg.loose < 0 ? 'Unlimited' : String(reg.loose);
+      addRow('Loose scrap', esc(looseStr));
+    }
+    if (Array.isArray(reg.tags) && reg.tags.length) {
+      const chips = reg.tags
+        .map((t) => `<span class="vt-map-info-tag">${esc(t)}</span>`)
+        .join(' ');
+      addRow('Tags', chips);
     }
     if (reg.map_file) {
       addRow('Map file', `<code>${esc(reg.map_file)}.bzn</code>`);
