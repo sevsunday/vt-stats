@@ -220,6 +220,13 @@
     return m != null ? `${n}/${m}` : `${n}`;
   }
 
+  function formatElapsed(session) {
+    const t = session && session.timeElapsedMinutes;
+    if (t === '>255') return '>255 min elapsed';
+    if (Number.isFinite(t)) return `${t} min elapsed`;
+    return null;
+  }
+
   function escapeHtml(s) {
     if (s == null) return '';
     return String(s)
@@ -432,6 +439,7 @@
       || session.mapFile
       || 'Unknown map';
     const count = formatPlayerCount(session);
+    const elapsed = formatElapsed(session);
     const isVsr = session.gameBalance === 'VSR';
     const stateBadge = (session.state || '').toUpperCase();
     const stateClass = stateBadge === 'INGAME'
@@ -520,6 +528,10 @@
           <div class="vt-active-game-modal-count">
             <i class="bi bi-people-fill me-1"></i>${escapeHtml(count)}
           </div>
+          ${elapsed ? `
+          <div class="vt-active-game-modal-elapsed">
+            <i class="bi bi-clock-fill me-1"></i>${escapeHtml(elapsed)}
+          </div>` : ''}
         </div>
       </div>
 
