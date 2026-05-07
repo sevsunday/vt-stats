@@ -313,12 +313,14 @@ class ODFBrowser {
 
     initializeSidebar() {
         const searchHTML = `
-            <div class="mb-2 d-flex gap-2 position-relative">
-                <input type="text" class="form-control" id="odfSearch"
-                       placeholder="Type here to filter..." aria-label="Search ODFs">
-                <span class="search-shortcut" id="searchShortcut">
-                    <kbd class="text-secondary">Ctrl</kbd><kbd class="text-secondary">K</kbd>
-                </span>
+            <div class="mb-2 d-flex gap-2">
+                <div class="position-relative flex-grow-1">
+                    <input type="text" class="form-control" id="odfSearch"
+                           placeholder="Type here to filter..." aria-label="Search ODFs">
+                    <span class="search-shortcut" id="searchShortcut">
+                        <kbd class="text-secondary">Ctrl</kbd><kbd class="text-secondary">K</kbd>
+                    </span>
+                </div>
                 <button class="btn btn-outline-secondary" id="clearSearch" type="button">
                     Clear
                 </button>
