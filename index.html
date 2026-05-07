@@ -21,6 +21,34 @@
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
+      <!-- Active Game Indicator. Polls the live BZ2 lobby via window.BZ2API
+           every 30s (paused while tab hidden) and surfaces a pulsing LIVE
+           pill whenever a session hosted by an allowlisted Steam64 ID is
+           live. Click pill -> #active-game-modal (single match) or
+           dropdown -> modal (multiple matches). Always shows GameWatch
+           link. Self-bootstrapping; see js/active-game-indicator.js. -->
+      <div id="vt-active-game" class="vt-active-game dropdown" data-state="loading" aria-live="polite">
+        <button type="button"
+                class="vt-active-game-pill"
+                id="vt-active-game-pill"
+                hidden
+                disabled>
+        </button>
+        <ul class="dropdown-menu vt-active-game-dropdown" id="vt-active-game-dropdown"
+            aria-labelledby="vt-active-game-pill"></ul>
+        <a id="vt-active-game-join" class="vt-active-game-join" hidden href="#"
+           rel="noopener noreferrer"
+           title="Join via Steam" aria-label="Join via Steam">
+          <i class="bi bi-play-fill me-1"></i><span class="vt-active-game-join-label">Join</span>
+        </a>
+        <a class="vt-active-game-gamewatch"
+           href="https://battlezonescrapfield.github.io/BZCC-Website/"
+           target="_blank" rel="noopener noreferrer"
+           title="Open BZCC GameWatch" aria-label="Open BZCC GameWatch">
+          <i class="bi bi-broadcast-pin"></i><span class="vt-active-game-gamewatch-label ms-1">GameWatch</span>
+        </a>
+      </div>
+
       <!-- Record stats CTA (desktop only). Sits immediately left of the
            Docs link as a high-emphasis primary-tinted action that re-opens
            the first-visit instructional modal. Carries `ms-md-auto` so it
@@ -1066,6 +1094,33 @@
     </div>
   </div>
 
+  <!-- Active Game Modal. Skeleton populated by js/active-game-indicator.js
+       on Bootstrap's `shown.bs.modal` event so the closed modal stays
+       cheap. Body is a session card mirroring the bz2api.js demo: header
+       badges (state, mode, VSR), map thumbnail + map line, players table
+       with HOST/CMDR badges + Steam profile + VTstats deep-link chips,
+       session stats grid, and mods row. Footer carries Join via Steam
+       (or Locked chip), GameWatch, Close. -->
+  <div class="modal fade" id="active-game-modal" tabindex="-1"
+       aria-labelledby="active-game-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title vt-active-game-modal-title" id="active-game-modal-title">
+            <i class="bi bi-broadcast me-2"></i>Active Game
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="active-game-modal-body">
+          <div class="text-muted small">Loading session details...</div>
+        </div>
+        <div class="modal-footer border-top" id="active-game-modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- How To Record Your Stats Modal -->
   <div class="modal fade" id="record-stats-modal" tabindex="-1"
        aria-labelledby="record-stats-modal-title" aria-hidden="true">
@@ -1391,6 +1446,13 @@
        Consumed by js/app.js's getMapMeta() for hero banner fields. Loaded
        before app.js so window.BZ2API is available during init. -->
   <script src="js/bz2api.js"></script>
+  <!-- Active Game Indicator: self-contained topnav widget that polls the
+       BZ2 lobby via window.BZ2API and surfaces a pulsing LIVE pill +
+       click-through modal whenever a session hosted by an allowlisted
+       Steam64 (data/known-hosts.json) is live. Loaded after bz2api.js
+       so window.BZ2API is available, before app.js to keep the topnav
+       responsive even if app.js stalls on per-match data. -->
+  <script src="js/active-game-indicator.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
