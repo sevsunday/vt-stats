@@ -1,0 +1,527 @@
+/* ==========================================================================
+ * ODF Browser styles
+ *
+ * Loaded only by odf/index.html. Three sections:
+ *   4a. Structural rules ported from odf-browser-seed/demo-only-style.css
+ *       (only the rules whose selectors are actually present in the live
+ *       ODF browser DOM; everything else is dropped). All hardcoded colors
+ *       remapped to --kb-* tokens.
+ *   4b. .vt-odf-* scoped classes the seed needed but our project doesn't
+ *       theme by default (popovers, alert variants, diff highlights, etc.).
+ *   4c. New layout: 3-up CSS column rule for property cards (Bug 5 fix),
+ *       sidebar nav-underline scoped Bootstrap-CSS-var override, context
+ *       menu rules (Bug 6 — moved out of the seed's JS-injected <style>).
+ *
+ * The kill-feed cross-link rules .vt-odf-link / .vt-odf-link-fallback
+ * intentionally live in css/vtstats-theme.css instead of here so they
+ * apply on the dashboard, which doesn't load this file.
+ * ========================================================================== */
+
+
+/* ==========================================================================
+ * 4a. Structural rules ported from demo-only-style.css
+ * ========================================================================== */
+
+/* Numeric / general code block styling inside the detail view. */
+#odfContentContent code {
+    color: var(--kb-info);
+    background: none;
+    padding: 0;
+}
+
+/* ODF list item interaction states. */
+.odf-item.active {
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent) !important;
+    border-color: var(--kb-border-subtle) !important;
+    border-left: 6px solid var(--kb-primary) !important;
+}
+
+.odf-item.active .text-secondary {
+    color: color-mix(in oklab, var(--kb-text-primary) 80%, transparent) !important;
+}
+
+.odf-item.active .odf-name {
+    font-weight: bold;
+}
+
+.odf-item:hover:not(.active) {
+    background-color: var(--kb-bg-subtle) !important;
+}
+
+.odf-item:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Main ODF content container -- absolute height so the nested flex chain
+ * has something to fill. The 90px is the seed's measured nav offset; refine
+ * after first visual check if our nav height differs. */
+#odfContentContent {
+    padding: 0;
+    height: calc(100vh - 90px);
+    overflow: hidden;
+    padding-right: 4px;
+}
+
+#odfContentContent > .card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+#odfContentContent > .card > .card-header {
+    flex-shrink: 0;
+    padding: 0.5rem 1rem;
+}
+
+#odfContentContent > .card > .card-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding: 1rem 0.75rem 1rem 1rem;
+}
+
+#odfContentContent > .card > .card-body > .nav-pills {
+    flex-shrink: 0;
+    margin-bottom: 1rem;
+}
+
+#odfContentContent > .card > .card-body > .tab-content {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 4px;
+    padding-left: 4px;
+}
+
+#odfContentContent > .card > .card-body:not(:has(.tab-content)) {
+    overflow-y: auto;
+}
+
+/* Compare-mode column padding (single-ODF mode uses .vt-odf-property-cards
+ * and bypasses .col-6 entirely). */
+#odfContentContent .col-6 {
+    padding: 0 0.5rem;
+}
+
+#odfContentContent .col-6:first-child {
+    padding-left: 1rem;
+}
+
+#odfContentContent .col-6:last-child {
+    padding-right: 1rem;
+}
+
+#odfContentContent .row {
+    margin: 0;
+}
+
+#odfContentContent .card {
+    border-radius: 0.375rem;
+    border: 1px solid var(--kb-border-subtle);
+}
+
+/* Last-row table cell styling so the inner table flows into the rounded
+ * card corners cleanly. */
+#odfContentContent .card .table tr:last-child td {
+    border-bottom: none;
+}
+
+#odfContentContent .card .table tr:last-child td:first-child {
+    border-bottom-left-radius: calc(0.375rem - 1px);
+}
+
+#odfContentContent .card .table tr:last-child td:last-child {
+    border-bottom-right-radius: calc(0.375rem - 1px);
+}
+
+/* Webkit scrollbars for both content + sidebar scrollable areas. */
+#odfContentContent > .card > .card-body > .tab-content::-webkit-scrollbar,
+#odfContentContent > .card > .card-body:not(:has(.tab-content))::-webkit-scrollbar,
+#odfSidebarContent .tab-content::-webkit-scrollbar {
+    width: 8px;
+    cursor: pointer;
+}
+
+#odfContentContent > .card > .card-body > .tab-content::-webkit-scrollbar-track,
+#odfContentContent > .card > .card-body:not(:has(.tab-content))::-webkit-scrollbar-track,
+#odfSidebarContent .tab-content::-webkit-scrollbar-track {
+    background: color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+    border-radius: 4px;
+}
+
+#odfContentContent > .card > .card-body > .tab-content::-webkit-scrollbar-thumb,
+#odfContentContent > .card > .card-body:not(:has(.tab-content))::-webkit-scrollbar-thumb,
+#odfSidebarContent .tab-content::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--kb-primary) 80%, transparent);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#odfContentContent > .card > .card-body > .tab-content::-webkit-scrollbar-thumb:hover,
+#odfContentContent > .card > .card-body:not(:has(.tab-content))::-webkit-scrollbar-thumb:hover,
+#odfSidebarContent .tab-content::-webkit-scrollbar-thumb:hover {
+    background: var(--kb-primary);
+}
+
+/* Firefox scrollbar fallback (added by us; the seed only had webkit rules). */
+#odfContentContent > .card > .card-body > .tab-content,
+#odfContentContent > .card > .card-body:not(:has(.tab-content)),
+#odfSidebarContent .tab-content {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--kb-primary) 80%, transparent) color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+
+/* Sidebar shell. */
+#odfSidebarContent {
+    padding-right: 0.5rem;
+    height: calc(100vh - 80px);
+}
+
+#odfSidebarContent .tab-content {
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+/* Keyboard shortcuts modal table — slightly more breathing room. */
+#shortcutsModal .table tr td {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+/* Search shortcut hint anchored over the search input. */
+.search-shortcut {
+    position: absolute;
+    right: 155px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    gap: 0.25rem;
+    pointer-events: none;
+    color: var(--kb-text-secondary);
+}
+
+.search-shortcut kbd {
+    font-family: system-ui;
+    background: none;
+    border: 1px solid var(--kb-border-subtle);
+    box-shadow: none;
+    padding: 0.1rem 0.3rem;
+    font-size: 0.75rem;
+    min-width: 20px;
+    height: 20px;
+    border-radius: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#odfSearch:focus + .search-shortcut {
+    display: none;
+}
+
+/* Property search input + clear button styling. */
+#odfPropertySearch {
+    border-right: 0;
+}
+
+#clearPropertySearch {
+    border-left: 0;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    border-color: var(--kb-border-subtle);
+}
+
+#clearPropertySearch:hover {
+    background: var(--kb-bg-subtle) !important;
+    border-color: var(--kb-border-subtle);
+}
+
+#clearPropertySearch:focus,
+#clearPropertySearch:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: var(--kb-border-subtle) !important;
+}
+
+#clearPropertySearch svg {
+    opacity: 0.75;
+}
+
+#clearPropertySearch:hover svg {
+    opacity: 1.0;
+}
+
+.input-group:has(#odfPropertySearch) {
+    border-radius: var(--bs-border-radius-sm);
+}
+
+.input-group:has(#odfPropertySearch):focus-within #clearPropertySearch {
+    border-color: var(--kb-primary);
+}
+
+
+/* ==========================================================================
+ * 4b. Scoped .vt-odf-* classes
+ * ========================================================================== */
+
+/* Popover scope -- mirrors the raw-browser pattern so popovers render
+ * against our --kb-* surface tokens instead of Bootstrap's white default.
+ * customClass='vt-odf-popover' is set per-instance in js/odf-browser.js. */
+.vt-odf-popover.popover {
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    max-width: 360px;
+    font-size: 0.85rem;
+    box-shadow: 0 6px 20px color-mix(in oklab, black 25%, transparent);
+}
+
+.vt-odf-popover .popover-header {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    color: var(--kb-text-primary);
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.vt-odf-popover .popover-body {
+    color: var(--kb-text-primary);
+}
+
+.vt-odf-popover .popover-body code {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+    padding: 0.05rem 0.3rem;
+    border-radius: 0.2rem;
+    color: var(--kb-text-primary);
+}
+
+/* Popover-arrow per-placement border-color overrides (mirrors the
+ * raw-browser approach so the arrow borders blend with the themed bg). */
+.vt-odf-popover.bs-popover-top .popover-arrow::after,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="top"] .popover-arrow::after {
+    border-top-color: var(--kb-bg-card);
+}
+
+.vt-odf-popover.bs-popover-bottom .popover-arrow::after,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="bottom"] .popover-arrow::after {
+    border-bottom-color: var(--kb-bg-card);
+}
+
+.vt-odf-popover.bs-popover-start .popover-arrow::after,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="left"] .popover-arrow::after {
+    border-left-color: var(--kb-bg-card);
+}
+
+.vt-odf-popover.bs-popover-end .popover-arrow::after,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="right"] .popover-arrow::after {
+    border-right-color: var(--kb-bg-card);
+}
+
+.vt-odf-popover.bs-popover-top .popover-arrow::before,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="top"] .popover-arrow::before {
+    border-top-color: var(--kb-border-subtle);
+}
+
+.vt-odf-popover.bs-popover-bottom .popover-arrow::before,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="bottom"] .popover-arrow::before {
+    border-bottom-color: var(--kb-border-subtle);
+}
+
+.vt-odf-popover.bs-popover-start .popover-arrow::before,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="left"] .popover-arrow::before {
+    border-left-color: var(--kb-border-subtle);
+}
+
+.vt-odf-popover.bs-popover-end .popover-arrow::before,
+.vt-odf-popover.bs-popover-auto[data-popper-placement^="right"] .popover-arrow::before {
+    border-right-color: var(--kb-border-subtle);
+}
+
+/* Card-header / search-input subhdr surface (replaces Bootstrap's
+ * unthemed bg-secondary-subtle). */
+.vt-odf-subhdr {
+    background: var(--kb-bg-subtle) !important;
+}
+
+/* Compare-mode diff highlighting. The pre-mixed --kb-{warning,info}-bg
+ * tokens already have built-in transparency. */
+.vt-odf-diff-different {
+    color: var(--kb-warning);
+    background: var(--kb-warning-bg);
+}
+
+.vt-odf-diff-unique {
+    color: var(--kb-info);
+    background: var(--kb-info-bg);
+}
+
+/* Inheritance chain text in the detail-view header (replaces text-info). */
+.vt-odf-inherits {
+    color: var(--kb-info);
+}
+
+/* In-detail cross-references between ODFs (replaces link-info + the
+ * Bootstrap link-underline-opacity utilities). */
+.vt-odf-prop-link {
+    color: var(--kb-info);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--kb-info) 25%, transparent);
+    text-underline-offset: 2px;
+}
+
+.vt-odf-prop-link:hover {
+    color: var(--kb-info-hover);
+    text-decoration-color: var(--kb-info);
+}
+
+/* Numeric / audio value styling (replaces hardcoded inline rgba colors
+ * the seed had on <code> elements in formatValue). The #odfContentContent
+ * scope above sets `color: var(--kb-info)` on <code>; these classes
+ * override that for the specific subtypes. */
+#odfContentContent code.vt-odf-num,
+#odfContentContent code.vt-odf-audio-name {
+    background: none;
+    padding: 0;
+}
+
+#odfContentContent code.vt-odf-num {
+    color: var(--kb-warning);
+}
+
+#odfContentContent code.vt-odf-audio-name {
+    color: var(--kb-warning);
+}
+
+/* Audio "sound file not found" error inline next to a play button
+ * (replaces text-danger). */
+.vt-odf-text-danger {
+    color: var(--kb-danger);
+}
+
+/* Compare column header filename (replaces text-light, which would
+ * disappear on a --kb-bg-subtle backdrop in light mode). */
+.vt-odf-text-strong {
+    color: var(--kb-text-primary);
+    font-weight: 600;
+}
+
+/* Sidebar tab count badges. */
+.vt-odf-badge,
+.vt-odf-badge-active {
+    border-radius: 0;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.7rem;
+}
+
+.vt-odf-badge {
+    background: var(--kb-bg-muted);
+    color: var(--kb-text-primary);
+}
+
+.vt-odf-badge-active {
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+}
+
+/* Themed alerts (replace alert-{primary,info,danger,secondary}). The
+ * `.alert` class itself supplies padding/margin/border-radius from
+ * Bootstrap; these classes only paint color/bg/border. */
+.vt-odf-alert-primary {
+    color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-primary) 30%, transparent);
+}
+
+.vt-odf-alert-info {
+    color: var(--kb-info);
+    background: color-mix(in oklab, var(--kb-info) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-info) 30%, transparent);
+}
+
+.vt-odf-alert-danger {
+    color: var(--kb-danger);
+    background: color-mix(in oklab, var(--kb-danger) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-danger) 30%, transparent);
+}
+
+.vt-odf-alert-secondary {
+    color: var(--kb-text-secondary);
+    background: var(--kb-bg-subtle);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+/* Transient flash applied by flashButton() (e.g. on Esc-to-clear). */
+.vt-odf-flash {
+    background: var(--kb-primary) !important;
+    color: var(--kb-primary-fg) !important;
+}
+
+
+/* ==========================================================================
+ * 4c. Layout / scoping rules
+ * ========================================================================== */
+
+/* CSS column distribution for property cards (Bug 5 fix). The seed used
+ * a JS height-estimator that landed cards into 3 manual .col-4 divs;
+ * letting CSS columns balance them removes the heuristic and works for
+ * arbitrary card heights. */
+.vt-odf-property-cards {
+    column-count: 3;
+    column-gap: 1rem;
+    column-fill: balance;
+}
+
+.vt-odf-property-cards > .card {
+    break-inside: avoid;
+    margin-bottom: 1rem;
+    width: 100%; /* prevents columns from collapsing in Firefox */
+}
+
+@media (max-width: 1199.98px) {
+    .vt-odf-property-cards {
+        column-count: 2;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .vt-odf-property-cards {
+        column-count: 1;
+    }
+}
+
+/* Sidebar #categoryTabs uses Bootstrap's nav-underline; that variant isn't
+ * themed project-wide, so override its --bs-* CSS vars locally to align
+ * with our --kb-* palette. */
+#categoryTabs.nav-underline {
+    --bs-nav-underline-link-active-color: var(--kb-primary);
+    --bs-nav-underline-border-color: var(--kb-primary);
+}
+
+#categoryTabs.nav-underline .nav-link {
+    color: var(--kb-text-secondary);
+}
+
+#categoryTabs.nav-underline .nav-link:hover {
+    color: var(--kb-text-primary);
+}
+
+#categoryTabs.nav-underline .nav-link.active {
+    color: var(--kb-primary);
+}
+
+/* Right-click context menu (Bug 6 — moved out of the seed's
+ * document.createElement('style') injection in the constructor). */
+#odfContextMenu {
+    position: fixed;
+    z-index: 1000;
+    display: none;
+}
+
+#odfContextMenu .dropdown-item:hover {
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+}
+
+#odfContextMenu .dropdown-item:hover svg {
+    fill: var(--kb-primary-fg);
+}
