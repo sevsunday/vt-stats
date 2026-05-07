@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VT Stats — ODF Browser</title>
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/odf-browser.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <!-- Always-visible primary controls (mobile burger only) -->
+      <div class="d-flex align-items-center gap-2 ms-auto ms-md-0 order-md-2 vt-nav-primary">
+        <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none" type="button"
+                data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+                aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+          <i class="bi bi-list"></i>
+        </button>
+      </div>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn">
+            <i class="bi bi-speedometer2"></i><span class="vt-nav-label ms-2">Dashboard</span>
+          </a>
+          <a href="../docs.html" class="vt-nav-icon-btn">
+            <i class="bi bi-book"></i><span class="vt-nav-label ms-2">Docs</span>
+          </a>
+          <a href="../raw.html" class="vt-nav-icon-btn">
+            <i class="bi bi-code-square"></i><span class="vt-nav-label ms-2">Raw data</span>
+          </a>
+          <button class="vt-nav-icon-btn" type="button" data-bs-toggle="modal" data-bs-target="#shortcutsModal"
+                  title="Keyboard shortcuts" aria-label="Keyboard shortcuts">
+            <i class="bi bi-keyboard"></i><span class="vt-nav-label ms-2">Shortcuts</span>
+          </button>
+
+          <!-- Theme Dropdown -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i><span class="vt-nav-label ms-2">Theme</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+
+          <!-- Mode Toggle -->
+          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+            <i class="bi bi-sun-fill"></i>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
+            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid flex-grow-1">
+    <div class="row g-3 p-2 pb-0 mb-0">
+      <aside id="odfSidebar" class="col-12 col-lg-3">
+        <div id="odfSidebarContent"></div>
+      </aside>
+      <section id="odfContent" class="col-12 col-lg-9">
+        <div id="odfContentContent"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Keyboard shortcuts modal (the compareModal + odfContextMenu are
+       injected at runtime by js/odf-browser.js to preserve seed parity). -->
+  <div class="modal fade" id="shortcutsModal" tabindex="-1" aria-labelledby="shortcutsModalLabel">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="shortcutsModalLabel">Keyboard Shortcuts</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <table class="table table-sm">
+            <tbody>
+              <tr>
+                <td><kbd>&uarr;</kbd> / <kbd>&darr;</kbd></td>
+                <td>Navigate through ODF list</td>
+              </tr>
+              <tr>
+                <td><kbd>&larr;</kbd> / <kbd>&rarr;</kbd></td>
+                <td>Cycle through category tabs</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>K</kbd></td>
+                <td>Focus search input</td>
+              </tr>
+              <tr>
+                <td><kbd>Esc</kbd></td>
+                <td>Clear search and focus input</td>
+              </tr>
+              <tr>
+                <td><kbd>Esc</kbd> <kbd>Esc</kbd></td>
+                <td>Reset view and clear search</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/odf-browser.js"></script>
+</body>
+</html>
