@@ -2934,6 +2934,13 @@
     the_locksmith:    '',
   };
 
+  // Presentation-only overrides for the tile heading. The pipeline emits a
+  // canonical `card.label` ("Gunner", etc.); this map lets us rebrand a card
+  // in the UI without rewriting historical processed JSON.
+  const HIGHLIGHT_LABEL_OVERRIDES = {
+    gunner: 'Trigger Happy',
+  };
+
   // Schema v2 breakdown line: pre-computed per-category context that gives the
   // headline number meaning ("4.00" -> "12K / 3D (4.00)", "27.4%" -> "482 / 1,758").
   // Expects card.value_breakdown to carry the keys produced by compute_highlights()
@@ -3110,7 +3117,7 @@
           <div class="vt-highlight-tile${dominantClass}"${tipAttr} data-highlight-category="${esc(c.category)}">
             <div class="vt-highlight-tile-head">
               <i class="bi ${esc(c.icon || 'bi-trophy-fill')} vt-highlight-tile-icon"></i>
-              <span class="vt-highlight-tile-label">${esc(c.label)}</span>
+              <span class="vt-highlight-tile-label">${esc(HIGHLIGHT_LABEL_OVERRIDES[c.category] || c.label)}</span>
             </div>
             <div class="vt-highlight-tile-winner">${winnerName}</div>
             <div class="vt-highlight-tile-value">${valueStr}${unitHtml}</div>
