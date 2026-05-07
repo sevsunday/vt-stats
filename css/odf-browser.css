@@ -208,19 +208,24 @@
     color: var(--kb-text-secondary);
 }
 
+/* Button-pill styling that matches .kb-search-hint kbd in css/layout.css
+ * (the dashboard's keyboard-shortcut hint pattern) -- subtle fill +
+ * visible border so the keys read as "buttons" rather than naked text. */
 .search-shortcut kbd {
-    font-family: system-ui;
-    background: none;
-    border: 1px solid var(--kb-border-subtle);
-    box-shadow: none;
-    padding: 0.1rem 0.3rem;
-    font-size: 0.75rem;
-    min-width: 20px;
-    height: 20px;
-    border-radius: 0.25rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-width: 1.25rem;
+    padding: 0.0625rem 0.3rem;
+    font-family: inherit;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--kb-text-muted);
+    background: var(--kb-bg-muted);
+    border: 1px solid var(--kb-border-default);
+    border-radius: 3px;
+    line-height: 1.4;
+    box-shadow: none;
 }
 
 #odfSearch:focus + .search-shortcut {
