@@ -1495,3 +1495,64 @@ Exposed by `js/timeline-player.js` (added alongside `init` / `destroy` / `render
 Granularity: `progressBuckets` is floating-point, but companion panels (leaderboard, spotlight, momentum) snap per whole `TIMELINE_BUCKET_SECONDS = 10`-second bucket — so the visible jump lands on the bucket that contains the event. Sub-bucket seek is intentionally out of scope; events inside a bucket are distinguishable in the Raw Data Browser but not in the Replay view.
 
 Returns `true` if the seek was accepted, `false` if there's no active replay state or `match.tick_range` / `match.tick_rate` are missing. Callers should not assume success if the Replay tab hasn't been rendered yet — `app.js` gates this by only calling `jumpToTick` inside the registered `#tab-replay` renderer, and by forcing `tab=replay` when `?t=<tick>` is provided without an explicit `tab`.
+
+---
+
+## 12. ODF Browser (`odf/index.html`)
+
+The ODF Browser is the project's fourth standalone page, sibling to `index.html` / `docs.html` / `raw.html`. It's a read-only reference for browsing the BZ2 Object Definition File (ODF) database — the same `data/odf.min.json` the dashboard uses for weapon-name resolution, but presented as an interactive browser rather than a lookup table.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `odf/index.html` | Page shell. Sidebar + content layout, topnav (Dashboard / Docs / Raw data / Shortcuts / theme / mode), shortcuts modal. All asset paths use `../`. |
+| `js/odf-browser.js` | Single-class `ODFBrowser` implementation. Reads `../data/odf.min.json`, plays `../data/audio/<file>.wav`. Exposes `window.browser` for inline `onclick` handlers. ~1,920 lines. |
+| `css/odf-browser.css` | Structural rules (height calc, scrollbars, list-item interaction states) + `.vt-odf-*` scoped classes (popover, alert variants, diff highlights, sub-header surface, etc.) + the 3-up CSS column layout for property cards. |
+| `data/audio/*.wav` | 633 vendored audio clips referenced by `.wav`-valued ODF properties. Loaded on demand at runtime; nothing else in the project consumes them. |
+
+### Features
+
+- **Sidebar**: Bootstrap `nav-underline` category tabs (Vehicle / Weapon / Pilot / Building / Ordnance / Powerup) + fuzzy search input + scrollable `list-group` of named/unnamed ODFs (named items first, alpha-sorted by display name).
+- **Detail view**: 3-column layout of one card per ODF class block, distributed via CSS `column-count: 3` (drops to 2 below 1200px, 1 below 768px). Per-property fuzzy filter inside the detail view header. Group tabs (`All` + per-class) appear when an ODF declares multiple class blocks.
+- **Compare mode**: side-by-side two-column diff (`.col-6` / `.col-6`) with hover-synced rows (`tr[data-property]` mouseenter mirrors the matching row in the other column). Diff highlighting uses `.vt-odf-diff-different` (warning amber) and `.vt-odf-diff-unique` (info cyan).
+- **Audio preview**: any property whose value ends in `.wav` gets an inline play button that streams from `../data/audio/`. Only one audio plays at a time; "Sound file not found" surfaces inline via `.vt-odf-text-danger`.
+- **Popovers**: `subAttackClass` and `engageRange` (Vehicle category) carry context-aware popovers. All popovers initialised with `customClass: 'vt-odf-popover'` so they render against project theme tokens (mirrors the `js/raw-browser.js` line 2756 pattern).
+- **Right-click context menu**: any ODF list item right-click opens a custom menu with "Open in new tab".
+- **Keyboard shortcuts**: `↑/↓` cycle ODF list, `←/→` cycle category tabs, `Ctrl+K` focus search, `Esc` clear search, `Esc Esc` (within 750ms) reset view. Shortcuts modal accessible from the topnav button.
+
+### URL routing
+
+| Param | Effect |
+|---|---|
+| `?odf=<name>` | Deep-link a single ODF by basename (no `.odf` extension). Case-insensitive. |
+| `?compare=<a>,<b>` | Deep-link a comparison of ODFs `<a>` and `<b>`. Case-insensitive on both sides. |
+
+`window.history.pushState` updates the URL on every selection / comparison; the `popstate` handler delegates back through `handleODFState` / `handleCompareState`. Bad ODF names render the themed `.vt-odf-alert-danger` "Could not find ODF" inline alert.
+
+### Performance
+
+`odfIndex` Map (`Map<filename, { category, data }>`) is built once after `loadData()` resolves. `findODFCategory()`, `selectODFByName()`, `handleCompareState()`, and the constructor's compare-URL handler all consult this index for O(1) lookups instead of iterating the per-category dicts.
+
+### Theming
+
+Every Bootstrap utility class and inline-style color the seed used has been swapped for a scoped `.vt-odf-*` class so the page picks up the project's `--kb-*` palette instead of stock Bootstrap colors. The full mapping is documented in the port plan (`port_odf_browser_5997731a.plan.md` section 3e). The `nav-underline` sidebar gets a scoped `--bs-nav-underline-*` override since `.nav-underline` isn't themed project-wide.
+
+### Cross-page integration
+
+- **Topnav nav-link**: every other page (`index.html`, `docs.html`, `raw.html`) carries an `<a href="odf/index.html"><i class="bi bi-boxes"></i>ODF</a>` icon-button in its topnav (desktop + mobile burger variants).
+- **Kill-feed cross-link**: each killer/victim ODF chip in `js/app.js` `renderKillFeed()` is wrapped in `<a class="vt-odf-link" href="odf/index.html?odf=<basename>" target="_blank" rel="noopener">`. Basename is the raw `entry.killer_odf` lowercased + `.odf`-stripped + `encodeURIComponent`'d. The `.vt-odf-link` / `.vt-odf-link-fallback` styles live in `css/vtstats-theme.css` (NOT `css/odf-browser.css`) so they apply on the dashboard, which doesn't load the ODF browser stylesheet.
+
+### Deferred from v1
+
+The seed shipped with a VSR Build Tree feature (`generateBuildTree()` and friends) that visualised faction tech progression. It's intentionally stripped from the v1 port to keep scope tight; when re-added later:
+
+1. The 7 stripped methods (`initializeBuildTree`, `showBuildTree`, `generateBuildTree`, `extractODFProperties`, `findChildODFs`, `getCategoryColor`, `formatTreeProperties`) need to be re-introduced.
+2. **Bug 7 from `odf-browser-seed/ODFBrowser_TechSpec.md` §9** — the hardcoded faction roots `ibrecy_vsr` / `ebrecym_vsr` / `fbrecy_vsr` — must be made configurable so the feature works for non-VSR mods.
+3. The 3 faction logo PNGs (`img/ISDF-Logo.png`, `img/Hadean-Logo.png`, `img/Scion-Logo2.png`) need to be vendored.
+
+### Known limitations carried over from the seed
+
+- `initializeCompareModal` rebinds event listeners on every `displayODFData()` call. Each rebind is benign because the underlying DOM elements are also recreated, but it would be cleaner to attach listeners once. Out of scope for v1.
+- Inline `onclick` handlers on dynamically-emitted HTML depend on the global `window.browser` reference. Refactoring these to `addEventListener` was deemed out of scope; the global is preserved.
+- No ARIA focus traps in the compare modal, no `aria-live` on search results, no explicit `role` on ODF list buttons beyond Bootstrap's defaults. Out of scope for v1.
