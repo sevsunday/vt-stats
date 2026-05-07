@@ -4094,12 +4094,18 @@
         : '';
       const killerOdfResolved = odfName(entry.killer_odf);
       const victimOdfResolved = odfName(entry.victim_odf);
-      const killerOdf = killerOdfResolved
-        ? `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(killerOdfResolved)})</span>`
-        : '';
-      const victimOdf = victimOdfResolved
-        ? `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(victimOdfResolved)})</span>`
-        : '';
+      // Cross-link the chip to the new ODF browser when we have the raw
+      // basename to encode. Falls back to a styled span (visually identical
+      // to the pre-cross-link chip) when killer_odf/victim_odf is empty
+      // but the resolver still returned a name from somewhere.
+      const killerOdfBase = entry.killer_odf ? entry.killer_odf.replace(/\.odf$/i, '').toLowerCase() : '';
+      const victimOdfBase = entry.victim_odf ? entry.victim_odf.replace(/\.odf$/i, '').toLowerCase() : '';
+      const killerOdf = (killerOdfResolved && killerOdfBase)
+        ? `<a href="odf/index.html?odf=${encodeURIComponent(killerOdfBase)}" target="_blank" rel="noopener" class="vt-odf-link" title="View ${esc(killerOdfResolved)} in ODF Browser">(${esc(killerOdfResolved)})</a>`
+        : (killerOdfResolved ? `<span class="vt-odf-link-fallback">(${esc(killerOdfResolved)})</span>` : '');
+      const victimOdf = (victimOdfResolved && victimOdfBase)
+        ? `<a href="odf/index.html?odf=${encodeURIComponent(victimOdfBase)}" target="_blank" rel="noopener" class="vt-odf-link" title="View ${esc(victimOdfResolved)} in ODF Browser">(${esc(victimOdfResolved)})</a>`
+        : (victimOdfResolved ? `<span class="vt-odf-link-fallback">(${esc(victimOdfResolved)})</span>` : '');
       html += `<div class="d-flex align-items-center gap-2 py-1" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
       html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
       html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>${killerNick}${killerOdf}`;

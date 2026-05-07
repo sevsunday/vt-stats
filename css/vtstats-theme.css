@@ -1392,6 +1392,32 @@ body::before {
     margin-left: 0.35em;
 }
 
+/* Kill-feed weapon ODF chip — clickable into the ODF Browser
+   (odf/index.html?odf=<basename>). Defined here (not in
+   css/odf-browser.css) so the dashboard, which doesn't load the ODF
+   browser stylesheet, picks it up. The .vt-odf-link-fallback variant
+   covers the rare edge case where the resolver returned a name from
+   somewhere but the raw entry.killer_odf / entry.victim_odf is empty
+   so we can't build a meaningful URL. */
+.vt-odf-link {
+    color: var(--kb-text-muted);
+    font-size: 0.75rem;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.vt-odf-link:hover {
+    color: var(--kb-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.vt-odf-link-fallback {
+    color: var(--kb-text-muted);
+    font-size: 0.75rem;
+}
+
 /* Used by Phase 3 cards (Snipe Feed, Powerup/Crate Destruction Breakdown) to fully
    hide a card+grid-column when its data is empty, so the surrounding row
    layout collapses cleanly. */
