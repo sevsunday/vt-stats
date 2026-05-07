@@ -191,10 +191,15 @@
     padding-bottom: 0.75rem;
 }
 
-/* Search shortcut hint anchored over the search input. */
+/* Search shortcut hint anchored over the search input. The parent
+ * .position-relative wrapper is the input ITSELF (not the row), so
+ * `right: 0.5rem` always sits flush inside the input's right edge,
+ * independent of Clear/Reset button widths. (The seed used a fragile
+ * `right: 155px` magic number relative to the whole row, which broke
+ * the moment our themed button widths drifted from stock Bootstrap.) */
 .search-shortcut {
     position: absolute;
-    right: 155px;
+    right: 0.5rem;
     top: 50%;
     transform: translateY(-50%);
     display: flex;
