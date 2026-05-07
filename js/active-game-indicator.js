@@ -222,8 +222,10 @@
 
   function formatElapsed(session) {
     const t = session && session.timeElapsedMinutes;
-    if (t === '>255') return '>255 min elapsed';
-    if (Number.isFinite(t)) return `${t} min elapsed`;
+    const state = (session && session.state) || null;
+    const suffix = state ? ` in <code>${escapeHtml(state)}</code> state` : '';
+    if (t === '>255') return `>255 min elapsed${suffix}`;
+    if (Number.isFinite(t)) return `${t} min elapsed${suffix}`;
     return null;
   }
 
@@ -530,7 +532,7 @@
           </div>
           ${elapsed ? `
           <div class="vt-active-game-modal-elapsed">
-            <i class="bi bi-clock-fill me-1"></i>${escapeHtml(elapsed)}
+            <i class="bi bi-clock-fill me-1"></i>${elapsed}
           </div>` : ''}
         </div>
       </div>
