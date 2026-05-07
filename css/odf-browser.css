@@ -54,11 +54,12 @@
 }
 
 /* Main ODF content container -- absolute height so the nested flex chain
- * has something to fill. The 90px is the seed's measured nav offset; refine
- * after first visual check if our nav height differs. */
+ * has something to fill. The 106px subtrahend = ~90px nav offset + 16px
+ * (1rem) of pt-3 we added on the row in odf/index.html so the cards
+ * breathe below the navbar; bumped from the seed's original 90px. */
 #odfContentContent {
     padding: 0;
-    height: calc(100vh - 90px);
+    height: calc(100vh - 106px);
     overflow: hidden;
     padding-right: 4px;
 }
@@ -173,10 +174,13 @@
     scrollbar-color: color-mix(in oklab, var(--kb-primary) 80%, transparent) color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
 }
 
-/* Sidebar shell. */
+/* Sidebar shell. The 96px subtrahend = ~80px nav offset + 16px (1rem) of
+ * pt-3 we added on the row in odf/index.html; bumped from 80px. The 10px
+ * delta vs #odfContentContent (106px) preserves the original offset for
+ * the content card's nested header padding. */
 #odfSidebarContent {
     padding-right: 0.5rem;
-    height: calc(100vh - 80px);
+    height: calc(100vh - 96px);
 }
 
 #odfSidebarContent .tab-content {
@@ -371,17 +375,39 @@
 }
 
 /* In-detail cross-references between ODFs (replaces link-info + the
- * Bootstrap link-underline-opacity utilities). */
+ * Bootstrap link-underline-opacity utilities). The trailing ::after icon
+ * is a bootstrap-icons box-arrow-up-right glyph (\f1c5), rendered via
+ * the already-loaded vendor/bootstrap-icons font so no JS template touch
+ * is needed. text-decoration: none on the ::after prevents the parent
+ * <a>'s underline from painting through the icon. */
 .vt-odf-prop-link {
     color: var(--kb-info);
     text-decoration: underline;
-    text-decoration-color: color-mix(in oklab, var(--kb-info) 25%, transparent);
+    text-decoration-color: color-mix(in oklab, var(--kb-info) 60%, transparent);
     text-underline-offset: 2px;
+    text-decoration-thickness: 1px;
+}
+
+.vt-odf-prop-link::after {
+    content: "\f1c5";
+    font-family: bootstrap-icons !important;
+    font-weight: 400 !important;
+    font-style: normal;
+    font-size: 0.75em;
+    margin-left: 0.25rem;
+    vertical-align: -0.05em;
+    opacity: 0.6;
+    text-decoration: none;
+    display: inline-block;
 }
 
 .vt-odf-prop-link:hover {
     color: var(--kb-info-hover);
     text-decoration-color: var(--kb-info);
+}
+
+.vt-odf-prop-link:hover::after {
+    opacity: 1;
 }
 
 /* Numeric / audio value styling (replaces hardcoded inline rgba colors
@@ -399,7 +425,7 @@
 }
 
 #odfContentContent code.vt-odf-audio-name {
-    color: var(--kb-warning);
+    color: var(--kb-danger);
 }
 
 /* Audio "sound file not found" error inline next to a play button

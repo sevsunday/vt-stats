@@ -625,6 +625,15 @@ a:hover {
 .table {
     --bs-table-bg: transparent;
     --bs-table-color: var(--kb-text-primary);
+    /* Bootstrap's .table-striped overrides cell color via a separate
+     * --bs-table-color-type cascade that pulls from --bs-table-striped-color
+     * (defaults to --bs-emphasis-color = #000). Without explicit overrides
+     * on the striped/active variants, odd rows in any .table-striped render
+     * bare-text cells as pure black regardless of theme -- invisible on
+     * dark mode. Overriding both keeps the striped row backgrounds while
+     * keeping the text color theme-aware. */
+    --bs-table-striped-color: var(--kb-text-primary);
+    --bs-table-active-color: var(--kb-text-primary);
     --bs-table-border-color: var(--kb-border-subtle);
 }
 
