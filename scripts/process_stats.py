@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 5
+PIPELINE_VERSION = 6
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3920,6 +3920,19 @@ def main():
     with open(contrib_path, "w", encoding="utf-8") as f:
         json.dump(contributions, f, indent=2, ensure_ascii=False)
     print(f"Contributions: {contrib_path.name} ({contrib_path.stat().st_size:,} bytes, {len(contributions)} matches)")
+
+    # Drop a stale seen-players.json from previous pipeline runs (the
+    # PIPELINE_VERSION 5 -> 6 bump shipped a `seen-players.json` emit
+    # that fed the now-removed [VTstats] chip in the active-game modal).
+    # Reverting the emit but keeping the version bump avoids a third
+    # forced reprocess.
+    legacy_seen = OUTPUT_DIR / "seen-players.json"
+    if legacy_seen.exists():
+        try:
+            legacy_seen.unlink()
+            print(f"  Removed legacy {legacy_seen.name} (no longer emitted)")
+        except OSError as e:
+            print(f"  WARN: failed to remove legacy {legacy_seen.name}: {e}")
 
     # Drop a stale all_matches.json from previous pipeline runs so it
     # can't shadow the new contributions-based aggregate during dev.
