@@ -22,9 +22,14 @@
  * 4a. Structural rules ported from demo-only-style.css
  * ========================================================================== */
 
-/* Numeric / general code block styling inside the detail view. */
+/* General <code> styling inside the detail view -- defaults to themed
+ * body text so property-name cells (rendered as bare <code>${key}</code>
+ * in formatClassProperties()) read as plain text. The cyan info color
+ * is reserved for actual ODF cross-links (.vt-odf-prop-link) and the
+ * inherits chain (.vt-odf-inherits). Numeric and audio code variants
+ * still override this with their own explicit colors below. */
 #odfContentContent code {
-    color: var(--kb-info);
+    color: var(--kb-text-primary);
     background: none;
     padding: 0;
 }
@@ -421,11 +426,11 @@
 }
 
 #odfContentContent code.vt-odf-num {
-    color: var(--kb-warning);
+    color: var(--kb-danger);
 }
 
 #odfContentContent code.vt-odf-audio-name {
-    color: var(--kb-danger);
+    color: var(--kb-warning);
 }
 
 /* Audio "sound file not found" error inline next to a play button
