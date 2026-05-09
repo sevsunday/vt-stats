@@ -845,12 +845,12 @@
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">
               <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR Leaderboard</h5>
-              <i class="bi bi-info-circle vt-col-info"
-                 data-bs-toggle="popover" data-bs-placement="bottom"
-                 data-bs-custom-class="vt-katex-tooltip"
-                 id="vtsr-info-tooltip"
-                 tabindex="0" role="button"
-                 aria-label="VTSR methodology"></i>
+              <button type="button" class="btn btn-sm btn-outline-secondary vt-vtsr-info-btn"
+                      id="vtsr-methodology-btn"
+                      data-bs-toggle="modal" data-bs-target="#vtsr-methodology-modal"
+                      aria-label="Open VTSR methodology">
+                <i class="bi bi-info-circle me-1"></i>Methodology
+              </button>
             </div>
             <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
@@ -1308,6 +1308,33 @@
           </div>
         </div>
         <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VTSR Methodology Modal. Body is populated lazily by renderVtsrLeaderboard()
+       in js/app.js (cached after first paint). Carries the .vt-katex-tooltip
+       class so the existing KaTeX equation-spacing rules in css/vtstats-theme.css
+       apply inside the modal body without having to duplicate them. -->
+  <div class="modal fade vt-katex-tooltip" id="vtsr-methodology-modal" tabindex="-1"
+       aria-labelledby="vtsr-methodology-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vtsr-methodology-modal-title">
+            <i class="bi bi-stars me-2"></i>VTSR Methodology
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="vtsr-methodology-modal-body">
+          <!-- Populated on first VTSR render. -->
+        </div>
+        <div class="modal-footer border-top">
+          <a href="docs.html#vtsr-methodology" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
+            Read the full methodology<i class="bi bi-box-arrow-up-right ms-2"></i>
+          </a>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
