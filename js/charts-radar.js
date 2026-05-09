@@ -59,9 +59,23 @@ function buildRadarInfoTooltipHtml(mode, careerScale) {
     ? "Each polygon represents one player's career; the further an edge sits from the center, the better they perform on that axis."
     : "Each polygon represents a player or team; the further an edge sits from the center, the stronger they performed on that axis.";
 
+  // Pre-rendered KaTeX HTML for the Survivability formula. Inline so the
+  // tooltip can splice it into the existing prose without a layout shift.
+  // Uses katex.renderToString when available (matches Phase 5 pattern in
+  // js/app.js); falls back to a literal `<code>` snippet when KaTeX hasn't
+  // loaded yet so the prose still makes sense.
+  const _katex = (window.katex && typeof window.katex.renderToString === 'function') ? window.katex : null;
+  function _radarTex(latex, displayMode) {
+    if (!_katex) return '<code>' + latex.replace(/[<>&]/g, '') + '</code>';
+    try { return _katex.renderToString(latex, { displayMode, throwOnError: false }); }
+    catch { return '<code>' + latex.replace(/[<>&]/g, '') + '</code>'; }
+  }
+  const survivabilityEq = _radarTex('S = 0.6 \\cdot \\mathrm{ratio}_{p95} + 0.4 \\cdot \\mathrm{KD}_{p95}', false);
+  const bayesianEq      = _radarTex('\\widetilde{KD}_i = (K_i + 10\\bar{KD}) / (D_i + 10)', false);
+
   const survivabilityLine = isCareer
-    ? "Career-wide measure of how efficiently this player survives fights, blending damage-trade ratio (lifetime damage dealt divided by lifetime damage absorbed) and K/D (Kill-to-Death ratio - lifetime kills divided by lifetime deaths). Shrunk toward the league average so a player with very few matches does not get an extreme score from a single blowout."
-    : "How efficiently this player survives fights. Blends two things: the damage-trade ratio (damage dealt divided by damage absorbed) and the K/D (Kill-to-Death ratio - kills divided by deaths). Higher on the chart = gave more damage than taken and stayed alive longer.";
+    ? "Career-wide measure of how efficiently this player survives fights, blending damage-trade ratio (lifetime damage dealt divided by lifetime damage absorbed) and K/D (Kill-to-Death ratio - lifetime kills divided by lifetime deaths) — " + survivabilityEq + " — shrunk toward the league average via Bayesian K/D " + bayesianEq + " so a player with very few matches does not get an extreme score from a single blowout."
+    : "How efficiently this player survives fights. Blends two things: the damage-trade ratio (damage dealt divided by damage absorbed) and the K/D (Kill-to-Death ratio - kills divided by deaths): " + survivabilityEq + ". Higher on the chart = gave more damage than taken and stayed alive longer.";
 
   const mobilityLine = isCareer
     ? "Average map-coverage score across all of this player's matches that had position tracking. Matches without tracking are excluded from the average."
