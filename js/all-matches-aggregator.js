@@ -178,6 +178,78 @@
     return a < b ? a + '\u0000' + b : b + '\u0000' + a;
   }
 
+  // Canonical labels + Bootstrap icons for each Career Highlight card.
+  // Same shape as `HIGHLIGHTS_LABELS` in scripts/process_stats.py — emit
+  // here on the JS side because Career Highlights are built client-side.
+  const CAREER_HIGHLIGHT_LABELS = {
+    // Flavor A — career-rolled siblings of the per-match catalog.
+    career_the_bully:        ['The Career Bully',        'bi-emoji-angry'],
+    career_the_grim_reaper:  ['The Reaper',              'bi-person-x-fill'],
+    career_bullet_sponge:    ['Career Bullet Sponge',    'bi-shield-fill'],
+    career_the_hustler:      ['The Hustler',             'bi-graph-up-arrow'],
+    career_sharpshooter:     ['The Sharpshooter',        'bi-bullseye'],
+    career_trigger_happy:    ['Trigger Happy',           'bi-lightning-charge'],
+    career_puppeteer:        ['The Puppeteer',           'bi-diagram-3'],
+    career_frenemies:        ['Career Frenemies',        'bi-people-fill'],
+    career_roadrunner:       ['The Roadrunner',          'bi-rocket-takeoff'],
+    career_pod_goblin:       ['The Pod Goblin',          'bi-box-seam'],
+    career_chris_kyle:       ['Chris Kyle',              'bi-crosshair'],
+    career_the_locksmith:    ['The Locksmith',           'bi-lock-fill'],
+    // Flavor B — cross-match-only originals (no per-match sibling).
+    the_champion:            ['The Champion',            'bi-stars'],
+    the_veteran:             ['The Veteran',             'bi-clock-history'],
+    the_workhorse:           ['The Workhorse',           'bi-hammer'],
+    the_carry:               ['The Carry',               'bi-trophy-fill'],
+    the_anchor:              ['The Anchor',              'bi-anchor'],
+    isdf_loyalist:           ['ISDF Loyalist',           'bi-shield-shaded'],
+    hadean_loyalist:         ['Hadean Loyalist',         'bi-shield-shaded'],
+    scion_loyalist:          ['Scion Loyalist',          'bi-shield-shaded'],
+    the_diplomat:            ['The Diplomat',            'bi-people'],
+    map_master:              ['Map Master',              'bi-map-fill'],
+    streak_king:             ['Streak King',             'bi-fire'],
+    the_polymath:            ['The Polymath',            'bi-tools'],
+  };
+
+  function deltaPct(winnerV, runnerV) {
+    if (runnerV == null) return null;
+    const rv = Number(runnerV);
+    if (!isFinite(rv) || rv <= 0) return null;
+    return Math.round(((Number(winnerV) - rv) / rv) * 1000) / 1000;
+  }
+
+  function narrativeBucket(deltaP) {
+    if (deltaP == null) return 'clear';
+    if (deltaP >= 0.40) return 'dominant';
+    if (deltaP >= 0.10) return 'clear';
+    return 'close';
+  }
+
+  // Common factory: take (sortedRows, value extractor, value_format,
+  // optional value_breakdown extractor) and shape one Career Highlight
+  // card. `sortedRows` must already be in best-first order.
+  function makeCard(category, sortedRows, opts = {}) {
+    if (!sortedRows.length) return null;
+    const winner = sortedRows[0];
+    const runnerRow = sortedRows[1] || null;
+    const winnerVal = opts.value(winner);
+    const runnerVal = runnerRow ? opts.value(runnerRow) : null;
+    const dp = deltaPct(winnerVal, runnerVal);
+    const [label, icon] = CAREER_HIGHLIGHT_LABELS[category] || [category, 'bi-trophy-fill'];
+    const card = {
+      category,
+      label,
+      icon,
+      winner: opts.winner ? opts.winner(winner) : { type: 'player', name: winner.name, steam64: winner.steam64 },
+      value: winnerVal,
+      value_format: opts.format || 'count',
+      value_breakdown: opts.breakdown ? opts.breakdown(winner) : {},
+      runner_up: runnerRow ? { name: runnerRow.name, value: runnerVal } : null,
+      delta_pct: dp,
+      narrative: narrativeBucket(dp),
+    };
+    return card;
+  }
+
   /**
    * Build the All Matches aggregate from a contributions map and a list
    * of match-file ids to include. Pure: no DOM or fetch side effects.
@@ -186,9 +258,15 @@
    * @param {Array<string>} fileIds - subset of contribution keys (the
    *   filtered match-file ids); pass Object.keys(contributions) for the
    *   full unfiltered aggregate.
-   * @returns {Object} { meta, career_stats, global_weapon_meta, global_rivalries }
+   * @param {Object} [elo] - optional parsed elo_current.json. When
+   *   provided, powers the Career Highlights "The Champion" card and
+   *   joins onto careerStats by steam64. Pass null/omit when ELO data
+   *   is unavailable (fresh checkout, file 404).
+   * @returns {Object} { meta, career_stats, global_weapon_meta,
+   *   global_rivalries, commander_stats, faction_stats, meta_charts,
+   *   career_highlights }
    */
-  function build(contributions, fileIds) {
+  function build(contributions, fileIds, elo) {
     const career = new Map();        // player_id -> career bucket
     const globalWeapon = new Map();  // weapon name -> { dealt, shots, hits }
     const globalRivalry = new Map(); // shooter -> Map<victim, dmg>
@@ -535,6 +613,8 @@
         total_pve_received:  r1(c.total_pve_received),
         total_asset_dealt:   r1(c.total_asset_dealt),
         overall_accuracy:    r3(acc),
+        total_shots_fired:   c.total_shots_fired,
+        total_shots_hit:     c.total_shots_hit,
         total_kills:         c.total_kills,
         total_deaths:        c.total_deaths,
         total_pickups:       c.total_pickups,
@@ -707,6 +787,22 @@
       .map(([wk, count]) => ({ week_iso: wk, count }))
       .sort((a, b) => a.week_iso.localeCompare(b.week_iso));
 
+    // ---- Phase 6: career_highlights (24 cards, self-omitting) ----
+    // Built inline so we still have access to the per-player career
+    // bucket Map (maps_played, win_streak_log, teammates_seen Set) which
+    // isn't fully exposed on the emitted careerStatsKept rows. ELO is
+    // optional; the_champion silently drops when missing.
+    const careerHighlights = buildCareerHighlightsInline({
+      careerStatsKept,
+      careerBuckets: career,        // pid -> bucket
+      keptNames,
+      commanderRowsKept,
+      factionStats: { by_team_slot: factionByTeamSlot, win_counts: factionWinCounts },
+      globalRivalries,
+      elo,
+      mapsArr,
+    });
+
     return {
       meta: {
         match_count:                   fileIds.length,
@@ -740,7 +836,344 @@
         submitters:        submitterRows,
         matches_over_time: matchesOverTime,
       },
+      career_highlights: careerHighlights,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Career Highlights builder. Pure: takes the already-built aggregate
+  // pieces and returns a `{ schema_version, cards: [...] }` block. The
+  // cards array is in canonical render order (Flavor A first, Flavor B
+  // second). Each card self-omits when its data gate fails.
+  // -------------------------------------------------------------------------
+  function buildCareerHighlightsInline(args) {
+    const { careerStatsKept, careerBuckets, keptNames, commanderRowsKept,
+            factionStats, globalRivalries, elo } = args;
+    const cards = [];
+    if (!careerStatsKept.length) {
+      return { schema_version: 1, cards };
+    }
+
+    // Helper: lookup the kept career row for a player id (steam64 fallback name).
+    const careerByName = new Map();
+    for (const c of careerStatsKept) careerByName.set(c.name, c);
+    const bucketByName = new Map();
+    for (const [, b] of careerBuckets) {
+      if (b.name) bucketByName.set(b.name, b);
+    }
+
+    // League K/D for Bayesian shrinkage on the_hustler.
+    let totalK = 0, totalD = 0;
+    for (const c of careerStatsKept) {
+      totalK += c.total_kills || 0;
+      totalD += c.total_deaths || 0;
+    }
+    const leagueKd = totalD > 0 ? totalK / totalD : (totalK > 0 ? totalK : 1);
+
+    // Top victim across the corpus for a given shooter (used by career_the_bully).
+    function topRivalryVictimFor(name) {
+      let bestVictim = null, bestDmg = 0;
+      for (const r of (globalRivalries || [])) {
+        if (r.a === name && r.b_to_a >= 0) {
+          if (r.a_to_b > bestDmg) { bestDmg = r.a_to_b; bestVictim = r.b; }
+        } else if (r.b === name) {
+          if (r.b_to_a > bestDmg) { bestDmg = r.b_to_a; bestVictim = r.a; }
+        }
+      }
+      return bestVictim ? { top_victim: bestVictim, top_victim_damage: bestDmg } : {};
+    }
+
+    // ---------- Flavor A: career-rolled (12) ----------
+    cards.push(makeCard('career_the_bully',
+      [...careerStatsKept].sort((a, b) => (b.total_pvp_dealt || 0) - (a.total_pvp_dealt || 0)),
+      { value: c => c.total_pvp_dealt || 0, format: 'damage',
+        breakdown: c => topRivalryVictimFor(c.name) }));
+
+    cards.push(makeCard('career_the_grim_reaper',
+      [...careerStatsKept].sort((a, b) => (b.total_kills || 0) - (a.total_kills || 0)),
+      { value: c => c.total_kills || 0, format: 'count' }));
+
+    cards.push(makeCard('career_bullet_sponge',
+      [...careerStatsKept].sort((a, b) => (b.total_received || 0) - (a.total_received || 0)),
+      { value: c => c.total_received || 0, format: 'damage' }));
+
+    // The Hustler — Bayesian-shrunk K/D with floor on raw kills.
+    const hustlerCandidates = careerStatsKept
+      .filter(c => (c.total_kills || 0) >= 25)
+      .map(c => {
+        const k = c.total_kills || 0, d = c.total_deaths || 0;
+        const skd = (k + 10 * leagueKd) / (d + 10);
+        return { row: c, skd, kills: k, deaths: d };
+      })
+      .sort((a, b) => b.skd - a.skd);
+    if (hustlerCandidates.length) {
+      cards.push(makeCard('career_the_hustler',
+        hustlerCandidates,
+        {
+          value: x => Math.round(x.skd * 100) / 100,
+          format: 'kd',
+          winner: x => ({ type: 'player', name: x.row.name, steam64: x.row.steam64 }),
+          breakdown: x => ({ kills: x.kills, deaths: x.deaths }),
+        }));
+    }
+
+    // Sharpshooter — accuracy with floor on shots fired.
+    const sharpshooterCandidates = careerStatsKept
+      .filter(c => (c.total_shots_fired || 0) >= 1000)
+      .map(c => ({
+        row: c,
+        accuracy: c.overall_accuracy || 0,
+        shots_hit: c.total_shots_hit || 0,
+        shots_fired: c.total_shots_fired || 0,
+      }))
+      .sort((a, b) => b.accuracy - a.accuracy);
+    if (sharpshooterCandidates.length) {
+      cards.push(makeCard('career_sharpshooter',
+        sharpshooterCandidates,
+        {
+          value: x => x.accuracy,
+          format: 'accuracy',
+          winner: x => ({ type: 'player', name: x.row.name, steam64: x.row.steam64 }),
+          breakdown: x => ({ shots_hit: x.shots_hit, shots_fired: x.shots_fired, accuracy: x.accuracy }),
+        }));
+    }
+
+    cards.push(makeCard('career_trigger_happy',
+      [...careerStatsKept].sort((a, b) => (b.total_shots_fired || 0) - (a.total_shots_fired || 0)),
+      { value: c => c.total_shots_fired || 0, format: 'count' }));
+
+    cards.push(makeCard('career_puppeteer',
+      [...careerStatsKept].sort((a, b) => (b.total_asset_dealt || 0) - (a.total_asset_dealt || 0)),
+      { value: c => c.total_asset_dealt || 0, format: 'damage' }));
+
+    // Frenemies — top global rivalry pair. globalRivalries is already
+    // top-10 sorted by total dmg; first entry is the pair-shape headline.
+    if (globalRivalries && globalRivalries.length) {
+      const top = globalRivalries[0];
+      const runner = globalRivalries[1] || null;
+      cards.push({
+        category: 'career_frenemies',
+        label: CAREER_HIGHLIGHT_LABELS.career_frenemies[0],
+        icon:  CAREER_HIGHLIGHT_LABELS.career_frenemies[1],
+        winner: { type: 'pair', a: top.a, b: top.b },
+        value: top.total,
+        value_format: 'damage',
+        value_breakdown: { a_to_b: top.a_to_b, b_to_a: top.b_to_a },
+        runner_up: runner ? { name: `${runner.a} & ${runner.b}`, value: runner.total } : null,
+        delta_pct: deltaPct(top.total, runner ? runner.total : null),
+        narrative: narrativeBucket(deltaPct(top.total, runner ? runner.total : null)),
+      });
+    }
+
+    // Roadrunner — best mean_movement_score with floor on positioning matches.
+    const roadrunnerCandidates = careerStatsKept
+      .filter(c => (c.matches_with_positioning || 0) >= 5 && c.mean_movement_score != null)
+      .sort((a, b) => (b.mean_movement_score || 0) - (a.mean_movement_score || 0));
+    if (roadrunnerCandidates.length) {
+      cards.push(makeCard('career_roadrunner',
+        roadrunnerCandidates,
+        {
+          value: c => c.mean_movement_score,
+          format: 'score',
+          breakdown: c => ({ movement_band: c.movement_band_dominant, path_length: c.total_path_length }),
+        }));
+    }
+
+    cards.push(makeCard('career_pod_goblin',
+      [...careerStatsKept].sort((a, b) =>
+        ((b.total_pickups || 0) + (b.total_destructions || 0)) -
+        ((a.total_pickups || 0) + (a.total_destructions || 0))),
+      {
+        value: c => (c.total_pickups || 0) + (c.total_destructions || 0),
+        format: 'count',
+        breakdown: c => ({ pickups: c.total_pickups || 0, destructions: c.total_destructions || 0 }),
+      }));
+
+    // Chris Kyle — most snipes (floor 1).
+    const snipeCandidates = careerStatsKept
+      .filter(c => (c.total_snipes || 0) >= 1)
+      .sort((a, b) => (b.total_snipes || 0) - (a.total_snipes || 0));
+    if (snipeCandidates.length) {
+      cards.push(makeCard('career_chris_kyle',
+        snipeCandidates,
+        { value: c => c.total_snipes || 0, format: 'count' }));
+    }
+
+    // Locksmith — best mean target lock with floor on target-lock matches.
+    const lockCandidates = careerStatsKept
+      .filter(c => (c.matches_with_target_lock_data || 0) >= 5 && c.mean_target_lock_pct != null)
+      .sort((a, b) => (b.mean_target_lock_pct || 0) - (a.mean_target_lock_pct || 0));
+    if (lockCandidates.length) {
+      cards.push(makeCard('career_the_locksmith',
+        lockCandidates,
+        { value: c => c.mean_target_lock_pct, format: 'percent' }));
+    }
+
+    // ---------- Flavor B: cross-match-only (12) ----------
+
+    // The Champion — highest VTSR (requires elo).
+    if (elo && Array.isArray(elo.ratings) && elo.ratings.length) {
+      const eligibleVtsr = elo.ratings
+        .filter(r => keptNames.has(r.name))
+        .sort((a, b) => (b.vtsr || 0) - (a.vtsr || 0));
+      if (eligibleVtsr.length) {
+        cards.push(makeCard('the_champion',
+          eligibleVtsr,
+          {
+            value: r => r.vtsr,
+            format: 'score',
+            winner: r => ({ type: 'player', name: r.name, steam64: r.steam64 }),
+            breakdown: r => ({ matches_played: r.matches_played, peak_vtsr: r.peak_vtsr }),
+          }));
+      }
+    }
+
+    cards.push(makeCard('the_veteran',
+      [...careerStatsKept].sort((a, b) => (b.matches_played || 0) - (a.matches_played || 0)),
+      { value: c => c.matches_played || 0, format: 'count' }));
+
+    // The Workhorse — most matches as commander (floor 3).
+    const workhorseCandidates = (commanderRowsKept || [])
+      .filter(r => (r.matches_as_commander || 0) >= 3)
+      .sort((a, b) => (b.matches_as_commander || 0) - (a.matches_as_commander || 0));
+    if (workhorseCandidates.length) {
+      cards.push(makeCard('the_workhorse',
+        workhorseCandidates,
+        { value: r => r.matches_as_commander, format: 'count' }));
+    }
+
+    // The Carry — best commander win % (floor: determined_as_commander >= 5).
+    const carryCandidates = (commanderRowsKept || [])
+      .filter(r => (r.determined_as_commander || 0) >= 5 && r.win_pct_as_commander != null)
+      .sort((a, b) => (b.win_pct_as_commander || 0) - (a.win_pct_as_commander || 0));
+    if (carryCandidates.length) {
+      cards.push(makeCard('the_carry',
+        carryCandidates,
+        {
+          value: r => r.win_pct_as_commander,
+          format: 'percent',
+          breakdown: r => ({ kills: r.wins_as_commander, deaths: r.losses_as_commander }),
+        }));
+    }
+
+    // The Anchor — best thug win % (floor: determined_as_thug >= 5).
+    const anchorCandidates = (commanderRowsKept || [])
+      .filter(r => (r.determined_as_thug || 0) >= 5 && r.win_pct_as_thug != null)
+      .sort((a, b) => (b.win_pct_as_thug || 0) - (a.win_pct_as_thug || 0));
+    if (anchorCandidates.length) {
+      cards.push(makeCard('the_anchor',
+        anchorCandidates,
+        { value: r => r.win_pct_as_thug, format: 'percent' }));
+    }
+
+    // Faction loyalists. Faction codes are 'i'/'e'/'f' in commander_stats,
+    // but career_stats[].faction_match_count uses the same letter codes.
+    const FACTION_CARDS = [
+      ['isdf_loyalist',   'i'],
+      ['hadean_loyalist', 'e'],
+      ['scion_loyalist',  'f'],
+    ];
+    for (const [cat, code] of FACTION_CARDS) {
+      const candidates = careerStatsKept
+        .map(c => ({ row: c, count: ((c.faction_match_count || {})[code] || 0) }))
+        .filter(x => x.count >= 5)
+        .sort((a, b) => b.count - a.count);
+      if (candidates.length) {
+        cards.push(makeCard(cat,
+          candidates,
+          {
+            value: x => x.count,
+            format: 'count',
+            winner: x => ({ type: 'player', name: x.row.name, steam64: x.row.steam64 }),
+          }));
+      }
+    }
+
+    // The Diplomat — most distinct teammates seen.
+    const diplomatCandidates = careerStatsKept
+      .map(c => ({ row: c, count: c.teammates_seen_count || 0 }))
+      .filter(x => x.count >= 1)
+      .sort((a, b) => b.count - a.count);
+    if (diplomatCandidates.length) {
+      cards.push(makeCard('the_diplomat',
+        diplomatCandidates,
+        {
+          value: x => x.count,
+          format: 'count',
+          winner: x => ({ type: 'player', name: x.row.name, steam64: x.row.steam64 }),
+        }));
+    }
+
+    // Map Master — best player win % on a single map (floor: >=3 determined wins
+    // on that map AND >=3 total matches on it).
+    const mapMasterCandidates = [];
+    for (const c of careerStatsKept) {
+      const bucket = bucketByName.get(c.name);
+      if (!bucket) continue;
+      for (const [mapName, mp] of bucket.maps_played) {
+        const determined = (mp.wins || 0) + (mp.losses || 0);
+        if (determined >= 3 && (mp.count || 0) >= 3) {
+          mapMasterCandidates.push({
+            row: c, map: mapName,
+            wins: mp.wins, losses: mp.losses,
+            win_pct: mp.wins / determined,
+            count: mp.count,
+          });
+        }
+      }
+    }
+    mapMasterCandidates.sort((a, b) => b.win_pct - a.win_pct);
+    if (mapMasterCandidates.length) {
+      cards.push(makeCard('map_master',
+        mapMasterCandidates,
+        {
+          value: x => x.win_pct,
+          format: 'percent',
+          winner: x => ({ type: 'player', name: x.row.name, steam64: x.row.steam64 }),
+          breakdown: x => ({ map_name: x.map, kills: x.wins, deaths: x.losses }),
+        }));
+    }
+
+    // Streak King — longest active win streak (floor 3).
+    const streakCandidates = [];
+    for (const c of careerStatsKept) {
+      const bucket = bucketByName.get(c.name);
+      if (!bucket) continue;
+      // Walk the streak log backward; count consecutive trailing wins.
+      let streak = 0;
+      for (let i = bucket.win_streak_log.length - 1; i >= 0; i--) {
+        if (bucket.win_streak_log[i].won) streak++;
+        else break;
+      }
+      if (streak >= 3) streakCandidates.push({ row: c, streak });
+    }
+    streakCandidates.sort((a, b) => b.streak - a.streak);
+    if (streakCandidates.length) {
+      cards.push(makeCard('streak_king',
+        streakCandidates,
+        {
+          value: x => x.streak,
+          format: 'count',
+          winner: x => ({ type: 'player', name: x.row.name, steam64: x.row.steam64 }),
+        }));
+    }
+
+    // The Polymath — most distinct weapons across the career.
+    const polymathRows = careerStatsKept
+      .map(c => ({ row: c, count: Object.keys(c.weapon_breakdown || {}).length }))
+      .filter(x => x.count > 0)
+      .sort((a, b) => b.count - a.count);
+    if (polymathRows.length) {
+      cards.push(makeCard('the_polymath',
+        polymathRows,
+        {
+          value: x => x.count,
+          format: 'count',
+          winner: x => ({ type: 'player', name: x.row.name, steam64: x.row.steam64 }),
+        }));
+    }
+
+    return { schema_version: 1, cards: cards.filter(Boolean) };
   }
 
   window.VTAggregate = { build };
