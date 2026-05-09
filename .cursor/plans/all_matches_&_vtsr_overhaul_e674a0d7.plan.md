@@ -4,7 +4,7 @@ overview: An 11-phase build (10 core + optional Phase 11) that flips All Matches
 todos:
   - id: phase1_landing
     content: "Phase 1 - Default landing flip: reorder modal radios in index.html (All matches first, checked), update showLandingModal() default branch in js/app.js, swap the auto-fill hint pattern to the All matches option, leave LANDING_PREF_VERSION untouched. Commit feat(landing): make All Matches the default landing view."
-    status: pending
+    status: in_progress
   - id: phase2_contribution_shape
     content: "Phase 2 - Contribution shape extension: add team_leaders, team_factions, winner, snipes_by_player, powerup_destructions_by_player to _extract_contribution() and per-leaderboard slot/team/is_commander; bump PIPELINE_VERSION 6->7; widen newCareerBucket() in js/all-matches-aggregator.js to track new fields without emitting yet; add team_factions and winner_decided_by to manifest entries. Commit feat(pipeline): extend match_contributions shape (PIPELINE_VERSION 6 -> 7)."
     status: pending
@@ -37,7 +37,6 @@ todos:
     status: pending
 isProject: false
 ---
-
 
 # All Matches & VTSR Overhaul
 
