@@ -110,6 +110,7 @@
     overview:          'all-tab-overview-btn',
     'weapons-rivalries': 'all-tab-weapons-btn',
     commanders:        'all-tab-commanders-btn',
+    meta:              'all-tab-meta-btn',
   };
 
   function btnIdToSlug(btnId) {
@@ -2513,6 +2514,32 @@
       renderCommanderLeaderboard(cs.rows);
       renderCommanderH2H(cs.head_to_head);
       renderCommanderFactionPicks('commander-faction-picks-canvas', cs.rows);
+    });
+
+    registerTabRenderer('#all-tab-meta', () => {
+      const mc = data.meta_charts || {
+        maps: [], duration_bands: {}, player_counts: {}, submitters: [], matches_over_time: [],
+      };
+      const fs = data.faction_stats || { by_team_slot: {}, win_counts: {} };
+      const mapNameResolver = (mapFile) => {
+        const key = (mapFile || '').replace(/\.bzn$/i, '').toLowerCase();
+        const reg = (mapRegistry && mapRegistry[key]) || null;
+        if (reg && reg.title) {
+          // Strip iteratively-stripped XYZ: prefixes the same way the
+          // pipeline's resolve_match_name does for the manifest.
+          let t = String(reg.title);
+          while (/^[A-Za-z0-9]+:\s/.test(t)) t = t.replace(/^[A-Za-z0-9]+:\s*/, '');
+          return t;
+        }
+        return (mapFile || '').replace(/\.bzn$/i, '');
+      };
+      renderMetaMapsChart('meta-maps-canvas',                   mc.maps, mapNameResolver);
+      renderMetaFactionTeamSlot('meta-faction-team1-canvas',    fs.by_team_slot, 1);
+      renderMetaFactionTeamSlot('meta-faction-team2-canvas',    fs.by_team_slot, 2);
+      renderMetaFactionWinrate('meta-faction-winrate-canvas',   fs.win_counts);
+      renderMetaDurationHistogram('meta-duration-canvas',       mc.duration_bands);
+      renderMetaPlayerCount('meta-playercount-canvas',          mc.player_counts);
+      renderMetaOverTime('meta-overtime-canvas',                mc.matches_over_time);
     });
 
     registerAllMatchesCharts(data);

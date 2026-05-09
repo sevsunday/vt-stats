@@ -822,6 +822,9 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="all-tab-commanders-btn" data-bs-toggle="pill" data-bs-target="#all-tab-commanders" type="button" role="tab" aria-controls="all-tab-commanders" aria-selected="false">Commanders</button>
         </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="all-tab-meta-btn" data-bs-toggle="pill" data-bs-target="#all-tab-meta" type="button" role="tab" aria-controls="all-tab-meta" aria-selected="false">Meta</button>
+        </li>
       </ul>
     </div>
 
@@ -1153,7 +1156,7 @@
           </div>
         </div>
 
-        <div class="row g-4 mb-4">
+        <div class="row g-4 mb-4" id="all-tab-commanders-secondary">
           <div class="col-lg-6">
             <div class="card h-100" id="section-commander-h2h">
               <div class="card-header d-flex align-items-center justify-content-between">
@@ -1170,6 +1173,75 @@
                 <button class="btn btn-sm" data-expand="section-commander-faction-picks" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
               <div class="card-body"><div class="chart-container"><canvas id="commander-faction-picks-canvas"></canvas></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- All Tab: Meta — corpus-distribution charts -->
+      <div class="tab-pane fade" id="all-tab-meta" role="tabpanel" aria-labelledby="all-tab-meta-btn">
+        <div class="row g-4 mb-4">
+          <div class="col-lg-12">
+            <div class="card h-100" id="section-meta-maps">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-map-fill me-2"></i>Top Maps (with win attribution)</h5>
+                <button class="btn btn-sm" data-expand="section-meta-maps" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container" style="min-height: 420px;"><canvas id="meta-maps-canvas"></canvas></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-meta-faction-team-slot">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-shield-shaded me-2"></i>Faction Picks by Team Slot</h5>
+                <button class="btn btn-sm" data-expand="section-meta-faction-team-slot" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-6"><div class="chart-container" style="height:260px;"><canvas id="meta-faction-team1-canvas"></canvas></div><div class="text-center small mt-2" style="color:var(--kb-text-muted);">Team 1</div></div>
+                  <div class="col-6"><div class="chart-container" style="height:260px;"><canvas id="meta-faction-team2-canvas"></canvas></div><div class="text-center small mt-2" style="color:var(--kb-text-muted);">Team 2</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-meta-faction-winrate">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Faction Win Rate</h5>
+                <button class="btn btn-sm" data-expand="section-meta-faction-winrate" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container" style="height:300px;"><canvas id="meta-faction-winrate-canvas"></canvas></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-4 mb-4">
+          <div class="col-lg-4">
+            <div class="card h-100" id="section-meta-duration-histogram">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Match Duration</h5>
+                <button class="btn btn-sm" data-expand="section-meta-duration-histogram" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-duration-canvas"></canvas></div></div>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="card h-100" id="section-meta-player-counts">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Player Count</h5>
+                <button class="btn btn-sm" data-expand="section-meta-player-counts" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-playercount-canvas"></canvas></div></div>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="card h-100" id="section-meta-over-time">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Matches Over Time</h5>
+                <button class="btn btn-sm" data-expand="section-meta-over-time" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container" style="height:240px;"><canvas id="meta-overtime-canvas"></canvas></div></div>
             </div>
           </div>
         </div>
