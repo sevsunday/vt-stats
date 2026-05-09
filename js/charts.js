@@ -635,3 +635,228 @@ function renderCommanderFactionPicks(canvasId, rows) {
   activeCharts.push(chart);
   return chart;
 }
+
+// --- Meta tab charts (Phase 8) ---
+
+// Top 15 maps as a horizontal stacked bar. Segments: T1 wins / T2 wins /
+// contested / unclear. Reads `meta_charts.maps[]` from the aggregator.
+function renderMetaMapsChart(canvasId, mapsArr, mapNameResolver) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const top = (mapsArr || []).slice(0, 15);
+  const labels = top.map(m => (mapNameResolver ? mapNameResolver(m.map) : m.map) || m.map);
+  const isdfColor   = getCSSVar('--kb-faction-i') || getCSSVar('--kb-primary')  || '#4d7cff';
+  const scionColor  = getCSSVar('--kb-faction-f') || getCSSVar('--kb-accent')   || '#3fbf72';
+  const muted       = getCSSVar('--kb-text-muted') || '#888';
+  const successCol  = getCSSVar('--kb-success')    || '#22c55e';
+  const datasets = [
+    { label: 'Team 1 wins', data: top.map(m => m.wins_t1   || 0), backgroundColor: isdfColor + 'cc',  borderColor: isdfColor,  borderWidth: 1 },
+    { label: 'Team 2 wins', data: top.map(m => m.wins_t2   || 0), backgroundColor: scionColor + 'cc', borderColor: scionColor, borderWidth: 1 },
+    { label: 'Contested',   data: top.map(m => m.contested || 0), backgroundColor: successCol + 'aa', borderColor: successCol, borderWidth: 1 },
+    { label: 'Unclear',     data: top.map(m => m.unclear   || 0), backgroundColor: muted + '88',      borderColor: muted,      borderWidth: 1 },
+  ];
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { ...glassTooltipConfig },
+      },
+      scales: {
+        x: { stacked: true, beginAtZero: true, title: { display: true, text: 'Matches' } },
+        y: { stacked: true, ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
+// Per-team faction donut. ``slot`` is 1 or 2.
+function renderMetaFactionTeamSlot(canvasId, factionByTeamSlot, slot) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const data = (factionByTeamSlot || {})[slot] || { i: 0, e: 0, f: 0 };
+  const isdfColor   = getCSSVar('--kb-faction-i') || getCSSVar('--kb-primary');
+  const hadeanColor = getCSSVar('--kb-faction-e') || getCSSVar('--kb-warning');
+  const scionColor  = getCSSVar('--kb-faction-f') || getCSSVar('--kb-accent');
+  const chart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['ISDF', 'Hadean', 'Scion'],
+      datasets: [{
+        data: [data.i || 0, data.e || 0, data.f || 0],
+        backgroundColor: [isdfColor + 'cc', hadeanColor + 'cc', scionColor + 'cc'],
+        borderColor:     [isdfColor, hadeanColor, scionColor],
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { ...glassTooltipConfig, callbacks: { label: (item) => `${item.label}: ${item.raw}` } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
+// Faction win-rate vertical bar. Y-axis = win % (0-1); tooltip shows raw
+// wins / determined.
+function renderMetaFactionWinrate(canvasId, winCounts) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const wc = winCounts || { i: { wins: 0, determined: 0 }, e: { wins: 0, determined: 0 }, f: { wins: 0, determined: 0 } };
+  const labels = ['ISDF', 'Hadean', 'Scion'];
+  const codes  = ['i', 'e', 'f'];
+  const data   = codes.map(c => {
+    const x = wc[c] || { wins: 0, determined: 0 };
+    return { wins: x.wins || 0, determined: x.determined || 0 };
+  });
+  const winPct = data.map(d => d.determined > 0 ? d.wins / d.determined : 0);
+  const colors = [
+    getCSSVar('--kb-faction-i') || getCSSVar('--kb-primary'),
+    getCSSVar('--kb-faction-e') || getCSSVar('--kb-warning'),
+    getCSSVar('--kb-faction-f') || getCSSVar('--kb-accent'),
+  ];
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: winPct,
+        backgroundColor: colors.map(c => c + 'cc'),
+        borderColor: colors,
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            label: (item) => {
+              const d = data[item.dataIndex];
+              return `${(item.raw * 100).toFixed(1)}%  (${d.wins} / ${d.determined})`;
+            },
+          },
+        },
+      },
+      scales: {
+        y: { beginAtZero: true, max: 1, ticks: { callback: (v) => (v * 100).toFixed(0) + '%' } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
+function renderMetaDurationHistogram(canvasId, bands) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const b = bands || { under5: 0, '5to10': 0, '10to15': 0, '15plus': 0 };
+  const labels = ['<5m', '5–10m', '10–15m', '15m+'];
+  const values = [b.under5 || 0, b['5to10'] || 0, b['10to15'] || 0, b['15plus'] || 0];
+  const primary = getCSSVar('--kb-primary') || '#4d7cff';
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: primary + 'cc', borderColor: primary, borderWidth: 1 }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...glassTooltipConfig } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
+function renderMetaPlayerCount(canvasId, playerCounts) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const entries = Object.entries(playerCounts || {})
+    .map(([k, v]) => [Number(k), v])
+    .filter(([k]) => Number.isFinite(k) && k > 0)
+    .sort((a, b) => a[0] - b[0]);
+  const labels = entries.map(([k]) => String(k));
+  const values = entries.map(([, v]) => v);
+  const accent = getCSSVar('--kb-accent') || '#3fbf72';
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: accent + 'cc', borderColor: accent, borderWidth: 1 }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...glassTooltipConfig } },
+      scales: {
+        x: { title: { display: true, text: 'Players in match' } },
+        y: { beginAtZero: true, ticks: { precision: 0 } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
+function renderMetaOverTime(canvasId, weeks) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+  const labels = (weeks || []).map(w => w.week_iso);
+  const values = (weeks || []).map(w => w.count);
+  const primary = getCSSVar('--kb-primary') || '#4d7cff';
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: primary + '33',
+        borderColor: primary,
+        borderWidth: 2,
+        tension: 0.25,
+        fill: true,
+        pointRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { ...glassTooltipConfig } },
+      scales: {
+        x: { ticks: { font: { size: 10 } } },
+        y: { beginAtZero: true, ticks: { precision: 0 } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
