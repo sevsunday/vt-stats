@@ -557,3 +557,81 @@ function renderPowerupDestructionsChart(canvasId, byOdf) {
   activeCharts.push(chart);
   return chart;
 }
+
+// --- Commander Faction Picks (Phase 7) ---
+//
+// Horizontal stacked bar chart, one row per kept commander, segments
+// colored by --kb-faction-i / -e / -f (ISDF / Hadean / Scion). Reads
+// `commander_stats.rows[].faction_distribution`. Rows with no commander
+// matches are filtered out.
+function renderCommanderFactionPicks(canvasId, rows) {
+  applyThemeDefaults();
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext('2d');
+
+  const visible = (rows || []).filter(r => (r.matches_as_commander || 0) > 0);
+  if (visible.length === 0) {
+    // Render an empty placeholder so the card body still has structure.
+    const c = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: [], datasets: [] },
+      options: { responsive: true, maintainAspectRatio: false },
+    });
+    activeCharts.push(c);
+    return c;
+  }
+
+  const labels = visible.map(r => r.name);
+  const isdfColor   = getCSSVar('--kb-faction-i') || getCSSVar('--kb-primary')  || '#4d7cff';
+  const hadeanColor = getCSSVar('--kb-faction-e') || getCSSVar('--kb-warning')  || '#ff9933';
+  const scionColor  = getCSSVar('--kb-faction-f') || getCSSVar('--kb-accent')   || '#3fbf72';
+  const datasets = [
+    {
+      label: 'ISDF',
+      data: visible.map(r => (r.faction_distribution || {}).i || 0),
+      backgroundColor: isdfColor + 'cc',
+      borderColor: isdfColor,
+      borderWidth: 1,
+    },
+    {
+      label: 'Hadean',
+      data: visible.map(r => (r.faction_distribution || {}).e || 0),
+      backgroundColor: hadeanColor + 'cc',
+      borderColor: hadeanColor,
+      borderWidth: 1,
+    },
+    {
+      label: 'Scion',
+      data: visible.map(r => (r.faction_distribution || {}).f || 0),
+      backgroundColor: scionColor + 'cc',
+      borderColor: scionColor,
+      borderWidth: 1,
+    },
+  ];
+
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            label: (item) => `${item.dataset.label}: ${item.raw} match${item.raw === 1 ? '' : 'es'}`,
+          },
+        },
+      },
+      scales: {
+        x: { stacked: true, beginAtZero: true, title: { display: true, text: 'Matches as commander' } },
+        y: { stacked: true, ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}

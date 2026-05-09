@@ -1882,16 +1882,25 @@ body::before {
     background: color-mix(in oklab, currentColor 12%, transparent);
 }
 
+/* Faction palette aliases — used by both the Commanders tab faction-picks
+   chart and the Meta tab donut/bar charts. Defined here so all faction
+   visualisations stay in lock-step with the badge colors above. */
+:root {
+    --kb-faction-i: var(--kb-primary);   /* ISDF — cyan/blue (project primary) */
+    --kb-faction-e: var(--kb-warning);   /* Hadean — warm amber/red */
+    --kb-faction-f: var(--kb-accent);    /* Scion — accent (typically green) */
+}
+
 .vt-faction-badge[data-faction-code="i"] {
-    color: var(--kb-primary);
+    color: var(--kb-faction-i);
 }
 
 .vt-faction-badge[data-faction-code="e"] {
-    color: var(--kb-warning);
+    color: var(--kb-faction-e);
 }
 
 .vt-faction-badge[data-faction-code="f"] {
-    color: var(--kb-accent);
+    color: var(--kb-faction-f);
 }
 
 /* Winner badge — sits next to "Kill Feed" in the Combat-tab card header.

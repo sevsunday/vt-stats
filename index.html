@@ -819,6 +819,9 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="all-tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#all-tab-weapons" type="button" role="tab" aria-controls="all-tab-weapons" aria-selected="false">Weapons &amp; Rivalries</button>
         </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="all-tab-commanders-btn" data-bs-toggle="pill" data-bs-target="#all-tab-commanders" type="button" role="tab" aria-controls="all-tab-commanders" aria-selected="false">Commanders</button>
+        </li>
       </ul>
     </div>
 
@@ -1109,6 +1112,64 @@
                 <button class="btn btn-sm" data-expand="section-global-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
               <div class="card-body" id="global-rivalries-container"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- All Tab: Commanders -->
+      <div class="tab-pane fade" id="all-tab-commanders" role="tabpanel" aria-labelledby="all-tab-commanders-btn">
+
+        <div class="card mb-4" id="section-commander-leaderboard">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Commander Leaderboard</h5>
+              <i class="bi bi-info-circle vt-col-info"
+                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                 title="<strong>Commander vs Thug split</strong><br>Slot 1 (Team 1) and slot 6 (Team 2) are team commanders; everyone else is a thug. Win % columns require at least 5 determined-winner matches in that role; under that floor, the cell shows &mdash;."></i>
+            </div>
+            <button class="btn btn-sm" data-expand="section-commander-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body table-responsive">
+            <table id="commander-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th data-sort="name">Player</th>
+                  <th data-sort="matches_as_commander" class="text-end">Cmdr</th>
+                  <th data-sort="matches_as_thug" class="text-end">Thug</th>
+                  <th data-sort="wins_losses_cmdr" class="text-end">W&ndash;L (cmdr)</th>
+                  <th data-sort="win_pct_as_commander" class="text-end sort-active">Win % (cmdr)</th>
+                  <th data-sort="win_pct_as_thug" class="text-end">Win % (thug)</th>
+                  <th data-sort="avg_dealt_as_commander" class="text-end">Avg Dlt (cmdr)</th>
+                  <th data-sort="avg_dealt_as_thug" class="text-end">Avg Dlt (thug)</th>
+                  <th data-sort="avg_kills_as_commander" class="text-end">Avg K (cmdr)</th>
+                  <th data-sort="avg_kills_as_thug" class="text-end">Avg K (thug)</th>
+                  <th class="text-center">Favored</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-commander-h2h">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i>Commander Head-to-Head</h5>
+                <button class="btn btn-sm" data-expand="section-commander-h2h" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body" id="commander-h2h-container"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-commander-faction-picks">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0"><i class="bi bi-shield-shaded me-2"></i>Faction Picks per Commander</h5>
+                <button class="btn btn-sm" data-expand="section-commander-faction-picks" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+              </div>
+              <div class="card-body"><div class="chart-container"><canvas id="commander-faction-picks-canvas"></canvas></div></div>
             </div>
           </div>
         </div>

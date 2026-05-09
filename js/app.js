@@ -109,6 +109,7 @@
   const ALL_TAB_SLUGS = {
     overview:          'all-tab-overview-btn',
     'weapons-rivalries': 'all-tab-weapons-btn',
+    commanders:        'all-tab-commanders-btn',
   };
 
   function btnIdToSlug(btnId) {
@@ -2505,6 +2506,13 @@
     registerTabRenderer('#all-tab-weapons', () => {
       renderGlobalWeaponMeta('global-weapon-chart', data.global_weapon_meta);
       renderGlobalRivalries(data.global_rivalries);
+    });
+
+    registerTabRenderer('#all-tab-commanders', () => {
+      const cs = data.commander_stats || { rows: [], head_to_head: [] };
+      renderCommanderLeaderboard(cs.rows);
+      renderCommanderH2H(cs.head_to_head);
+      renderCommanderFactionPicks('commander-faction-picks-canvas', cs.rows);
     });
 
     registerAllMatchesCharts(data);
@@ -5319,6 +5327,119 @@
         careerScale: careerRadarState.mode,
       });
     }
+  }
+
+  // ---- Commanders tab renderers ----
+
+  // Sortable commander leaderboard. Win % cells degrade to em-dash with
+  // an explanatory tooltip when the player has fewer than 5 determined-
+  // winner matches in the relevant role (mirrors the floor on
+  // `commander_stats.rows[].win_pct_*`).
+  let commanderSortState = { key: 'win_pct_as_commander', asc: false };
+
+  function commanderSort(key, asc) {
+    return (a, b) => {
+      let va; let vb;
+      switch (key) {
+        case 'name':                  va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
+        case 'wins_losses_cmdr':      va = a.wins_as_commander - a.losses_as_commander;
+                                       vb = b.wins_as_commander - b.losses_as_commander; break;
+        case 'matches_as_commander':  va = a.matches_as_commander || 0; vb = b.matches_as_commander || 0; break;
+        case 'matches_as_thug':       va = a.matches_as_thug      || 0; vb = b.matches_as_thug      || 0; break;
+        case 'win_pct_as_commander':  va = a.win_pct_as_commander != null ? a.win_pct_as_commander : -1;
+                                       vb = b.win_pct_as_commander != null ? b.win_pct_as_commander : -1; break;
+        case 'win_pct_as_thug':       va = a.win_pct_as_thug      != null ? a.win_pct_as_thug      : -1;
+                                       vb = b.win_pct_as_thug      != null ? b.win_pct_as_thug      : -1; break;
+        case 'avg_dealt_as_commander': va = a.avg_dealt_as_commander || 0; vb = b.avg_dealt_as_commander || 0; break;
+        case 'avg_dealt_as_thug':      va = a.avg_dealt_as_thug      || 0; vb = b.avg_dealt_as_thug      || 0; break;
+        case 'avg_kills_as_commander': va = a.avg_kills_as_commander || 0; vb = b.avg_kills_as_commander || 0; break;
+        case 'avg_kills_as_thug':      va = a.avg_kills_as_thug      || 0; vb = b.avg_kills_as_thug      || 0; break;
+        default:                       va = a.matches_as_commander || 0; vb = b.matches_as_commander || 0;
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+    };
+  }
+
+  function _factionBadge(code) {
+    if (!code) return '<span style="color:var(--kb-text-muted);">—</span>';
+    const labelMap = { i: 'ISDF', e: 'Hadean', f: 'Scion' };
+    return `<span class="vt-faction-badge" data-faction-code="${esc(code)}">${labelMap[code] || code}</span>`;
+  }
+
+  function _winPctCell(pct, determined) {
+    if (pct == null) {
+      const tip = `Awaiting more data — ${determined || 0} of 5 determined-winner matches needed`;
+      return `<span style="color:var(--kb-text-muted);" title="${esc(tip)}">&mdash;</span>`;
+    }
+    return `${(pct * 100).toFixed(1)}%`;
+  }
+
+  function renderCommanderLeaderboard(rows) {
+    const tbody = document.querySelector('#commander-table tbody');
+    if (!tbody) return;
+    if (!rows || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">No commander data in the current scope.</td></tr>';
+      return;
+    }
+    const sorted = [...rows].sort(commanderSort(commanderSortState.key, commanderSortState.asc));
+    tbody.innerHTML = sorted.map((r, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td class="fw-semibold">${esc(r.name)}</td>
+        <td class="text-end">${r.matches_as_commander || 0}</td>
+        <td class="text-end">${r.matches_as_thug || 0}</td>
+        <td class="text-end">${r.wins_as_commander || 0}&ndash;${r.losses_as_commander || 0} <span style="color:var(--kb-text-muted);">(${r.determined_as_commander || 0})</span></td>
+        <td class="text-end">${_winPctCell(r.win_pct_as_commander, r.determined_as_commander)}</td>
+        <td class="text-end">${_winPctCell(r.win_pct_as_thug, r.determined_as_thug)}</td>
+        <td class="text-end">${r.avg_dealt_as_commander != null ? fmt(r.avg_dealt_as_commander) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
+        <td class="text-end">${r.avg_dealt_as_thug != null ? fmt(r.avg_dealt_as_thug) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
+        <td class="text-end">${r.avg_kills_as_commander != null ? r.avg_kills_as_commander.toFixed(2) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
+        <td class="text-end">${r.avg_kills_as_thug != null ? r.avg_kills_as_thug.toFixed(2) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
+        <td class="text-center">${_factionBadge(r.favored_faction)}</td>
+      </tr>
+    `).join('');
+
+    document.querySelectorAll('#commander-table th[data-sort]').forEach(th => {
+      th.classList.toggle('sort-active', th.dataset.sort === commanderSortState.key);
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        if (commanderSortState.key === th.dataset.sort) commanderSortState.asc = !commanderSortState.asc;
+        else { commanderSortState.key = th.dataset.sort; commanderSortState.asc = false; }
+        renderCommanderLeaderboard(rows);
+      };
+    });
+    ensureTooltips(document.getElementById('commander-table'));
+  }
+
+  function renderCommanderH2H(pairs) {
+    const container = document.getElementById('commander-h2h-container');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!pairs || !pairs.length) {
+      container.innerHTML = '<p class="text-center" style="color:var(--kb-text-muted);">No commander pairings recorded in the current scope.</p>';
+      return;
+    }
+    pairs.slice(0, 10).forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'd-flex justify-content-between align-items-center p-2 mb-2 rounded';
+      row.style.background = 'color-mix(in oklab, var(--kb-text-muted) 8%, transparent)';
+      const determined = (p.a_wins || 0) + (p.b_wins || 0);
+      const subline = determined > 0
+        ? `${p.a_wins || 0}&ndash;${p.b_wins || 0} (${determined} decided${p.contested ? `, ${p.contested} contested` : ''})`
+        : `${p.matches} matches · no decided outcomes yet`;
+      row.innerHTML = `
+        <div>
+          <div class="fw-bold">${esc(p.a)} <span style="color:var(--kb-text-muted)">vs</span> ${esc(p.b)}</div>
+          <div class="small" style="color:var(--kb-text-secondary)">${subline}</div>
+        </div>
+        <div class="text-end" style="color:var(--kb-text-muted); font-size:0.85rem;">
+          ${p.matches} match${p.matches === 1 ? '' : 'es'}
+        </div>
+      `;
+      container.appendChild(row);
+    });
   }
 
   function renderGlobalRivalries(rivalries) {
