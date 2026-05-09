@@ -1628,6 +1628,46 @@
     });
   }
 
+  // --- VTSR Tier Ladder (render-layer policy, NOT pipeline data) ---
+  // Numeric Tier 1–5 only (no flavor names). Tier 5 spans 1000–1349
+  // (350 pts wide); Tiers 2–4 stay 150 pts wide; Tier 1 is open above
+  // 1800. Threshold tuning lives here so elo_current.json's schema
+  // stays stable. ELO_PROVISIONAL_THRESHOLD (10 rated matches) gates
+  // the "?" Provisional chip — separate from MIN_CAREER_MATCHES (5)
+  // which gates whether the row is visible at all.
+  const ELO_PROVISIONAL_THRESHOLD = 10;
+  const VTSR_TIERS = [
+    { id: 1, label: 'Tier 1', short: 'I',   min: 1800, max: Infinity, token: '--vt-tier-1' },
+    { id: 2, label: 'Tier 2', short: 'II',  min: 1650, max: 1800,     token: '--vt-tier-2' },
+    { id: 3, label: 'Tier 3', short: 'III', min: 1500, max: 1650,     token: '--vt-tier-3' },
+    { id: 4, label: 'Tier 4', short: 'IV',  min: 1350, max: 1500,     token: '--vt-tier-4' },
+    { id: 5, label: 'Tier 5', short: 'V',   min: 1000, max: 1350,     token: '--vt-tier-5' },
+  ];
+  function resolveTier(vtsr, matchesPlayed) {
+    if (matchesPlayed < ELO_PROVISIONAL_THRESHOLD) {
+      return { id: 0, label: 'Provisional', short: '?', token: null };
+    }
+    return VTSR_TIERS.find(t => vtsr >= t.min && vtsr < t.max)
+      || VTSR_TIERS[VTSR_TIERS.length - 1];
+  }
+  function tierProgress(vtsr, tier) {
+    if (tier.id === 1) return { toNext: null, fromCurrent: vtsr - tier.min, pct: 1.0 };
+    if (tier.id === 0) return { toNext: null, fromCurrent: null, pct: 0 };
+    const span = tier.max - tier.min;
+    const into = vtsr - tier.min;
+    return { toNext: tier.max - vtsr, fromCurrent: into, pct: into / span };
+  }
+  // Single-source-of-truth badge HTML used by both the dedicated VTSR
+  // table and the Career Leaderboard's new Tier column. Keeps badge
+  // markup byte-identical between the two views.
+  function tierBadgeHtml(tier, opts = {}) {
+    const titleAttr = opts.title ? ` title="${esc(opts.title)}" data-bs-toggle="tooltip" data-bs-placement="top"` : '';
+    if (tier.id === 0) {
+      return `<span class="vt-vtsr-provisional"${titleAttr}>${tier.short}</span>`;
+    }
+    return `<span class="vt-tier-badge vt-tier-${tier.id}"${titleAttr}>${tier.short}</span>`;
+  }
+
   // --- Filter State ---
   let currentData = null;
   let currentFilteredData = null;
@@ -1635,6 +1675,8 @@
   let timelineMode = 'player';
   let sortState = { key: 'dealt', asc: false };
   let careerSortState = { key: 'total_dealt', asc: false };
+  // Dedicated VTSR table sort. Defaults to vtsr desc (highest rating at top).
+  let vtsrSortState = { key: 'vtsr', asc: false };
   // Currently selected pair for the compare-mode radar on the Rivalries tab.
   // Reset on match switch; reconciled against the filtered leaderboard on
   // filter change, falling back to the first visible top_rivalries entry.
@@ -2348,6 +2390,20 @@
       }
     }
 
+    // Fetch elo_current.json once per session. Graceful 404: a fresh
+    // checkout (or pipeline-never-run state) means the file isn't there
+    // yet — hide the dedicated VTSR card and fall through to em-dash
+    // placeholders on the Career Leaderboard's Tier+VTSR columns.
+    if (window.__vtElo === undefined) {
+      try {
+        const eloRes = await fetch('data/processed/elo_current.json');
+        if (!eloRes.ok) throw new Error(eloRes.status);
+        window.__vtElo = await eloRes.json();
+      } catch {
+        window.__vtElo = null;
+      }
+    }
+
     if (!window.VTAggregate || typeof window.VTAggregate.build !== 'function') {
       $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Aggregator unavailable.</p>';
       return;
@@ -2383,6 +2439,7 @@
       // Clear downstream renders by passing an empty career list. Preserve
       // the user's `mode` preference (Totals vs Per match) across resets.
       careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
+      renderVtsrLeaderboard(window.__vtElo, []);
       renderCareerTable([]);
       renderCareerRadar({ career_stats: [] });
       window.__vtAllMatchesData = { meta: {}, career_stats: [], global_weapon_meta: [], global_rivalries: [] };
@@ -2425,6 +2482,7 @@
     remapCareerSortKeyForColumnView(careerColumnView);
 
     renderAggMeta(data.meta);
+    renderVtsrLeaderboard(window.__vtElo, data.career_stats);
     initCareerColumnViewControls();
     renderCareerTable(data.career_stats);
     renderCareerRadar(data);
@@ -4380,6 +4438,254 @@
     return '0.00';
   }
 
+  // Pre-rendered KaTeX HTML for the VTSR info tooltip. Built lazily on
+  // first render so katex.min.js (deferred) is guaranteed loaded.
+  // Cached as a module-local string after first build.
+  let vtsrTooltipHtmlCache = null;
+  function buildVtsrTooltipHtml() {
+    if (vtsrTooltipHtmlCache) return vtsrTooltipHtmlCache;
+    const k = (window.katex && typeof window.katex.renderToString === 'function')
+      ? window.katex
+      : null;
+    function tex(latex, displayMode) {
+      if (!k) return `<code>${esc(latex)}</code>`;
+      try { return k.renderToString(latex, { displayMode, throwOnError: false }); }
+      catch { return `<code>${esc(latex)}</code>`; }
+    }
+    const blendEq = tex('\\mathrm{VTSR}_i = \\alpha \\cdot R^{W}_i + (1 - \\alpha) \\cdot R^{C}_i', true);
+    const updateEq = tex('\\Delta R^C_i = K_i \\cdot S \\cdot (P_i - P_{\\text{med}})', true);
+    const lossEq = tex('\\Delta R^C_i \\cdot L \\cdot \\phi(R)\\quad \\text{when } \\Delta R^C_i < 0', true);
+    const phiEq = tex('\\phi(R) = \\mathrm{clamp}(0,\\,1,\\,(R - F)/W)', true);
+    const weightsRows = [
+      ['Net damage share', '0.25'],
+      ['Kill rate',        '0.20'],
+      ['Accuracy',         '0.15'],
+      ['PvP share',        '0.20'],
+      ['Mobility',         '0.10'],
+      ['Snipe bonus',      '0.05'],
+      ['Asset multiplier', '0.05'],
+    ].map(([n, w]) => `<tr><td>${n}</td><td class="text-end">${w}</td></tr>`).join('');
+    const tierRows = [
+      ['Tier 1', '&ge; 1800'],
+      ['Tier 2', '1650 – 1799'],
+      ['Tier 3', '1500 – 1649'],
+      ['Tier 4', '1350 – 1499'],
+      ['Tier 5', '1000 – 1349'],
+    ].map(([n, r]) => `<tr><td>${n}</td><td class="text-end">${r}</td></tr>`).join('');
+    vtsrTooltipHtmlCache = `<div class="vt-katex-tooltip-body">
+      <strong>VTSR (VT Stats Rating)</strong> blends Wins ELO and Combat ELO:
+      ${blendEq}
+      <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Combat ELO only); Wins ELO stubbed at the 1500 anchor until the in-game winner-attestation UI lands.</div>
+      <strong>Per-match update</strong> (gain case):
+      ${updateEq}
+      <strong>Loss case</strong> (asymmetric, with soft-floor taper):
+      ${lossEq}
+      ${phiEq}
+      with L = 0.85, F = 1000 (floor), W = 150 (taper window).
+      <table class="vt-katex-weights">
+        <thead><tr><th>Combat axis</th><th class="text-end">Weight</th></tr></thead>
+        <tbody>${weightsRows}</tbody>
+      </table>
+      <table class="vt-katex-tiers">
+        <thead><tr><th>Tier</th><th class="text-end">VTSR range</th></tr></thead>
+        <tbody>${tierRows}</tbody>
+      </table>
+      <div class="vt-katex-caveat">Anchor 1500 · 7 lobby z-scored axes · K-factor decays 52 → ~18 by match 50. Ratings are corpus-wide; the picker filter narrows the displayed roster only.</div>
+      <a href="docs.html#vtsr-methodology" target="_blank" rel="noopener">Read the full methodology &rarr;</a>
+    </div>`;
+    return vtsrTooltipHtmlCache;
+  }
+
+  // Inline 10-point sparkline canvas for the Trend column. Plain Canvas
+  // 2D so we don't pay Chart.js construction cost per row.
+  function renderSparkline(canvas, deltas) {
+    if (!canvas || !canvas.getContext) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth || 64;
+    const cssH = canvas.clientHeight || 18;
+    canvas.width = cssW * dpr;
+    canvas.height = cssH * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssW, cssH);
+    if (!deltas || deltas.length === 0) return;
+    const maxAbs = Math.max(1, ...deltas.map(d => Math.abs(d)));
+    const midY = cssH / 2;
+    const stepX = deltas.length > 1 ? cssW / (deltas.length - 1) : cssW;
+    // Center reference line.
+    const muted = getComputedStyle(document.documentElement).getPropertyValue('--kb-text-muted').trim() || '#666';
+    ctx.strokeStyle = muted;
+    ctx.globalAlpha = 0.25;
+    ctx.beginPath();
+    ctx.moveTo(0, midY);
+    ctx.lineTo(cssW, midY);
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+    // Series line, color-shifted by sign of last delta.
+    const success = getComputedStyle(document.documentElement).getPropertyValue('--kb-success').trim() || '#3fb950';
+    const danger  = getComputedStyle(document.documentElement).getPropertyValue('--kb-danger').trim()  || '#f85149';
+    ctx.strokeStyle = (deltas[deltas.length - 1] >= 0) ? success : danger;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    deltas.forEach((d, i) => {
+      const x = i * stepX;
+      const y = midY - (d / maxAbs) * (midY - 1);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  function vtsrSort(key, asc) {
+    return (a, b) => {
+      let va; let vb;
+      switch (key) {
+        case 'name':           va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
+        case 'last_delta':     va = a.last_delta || 0;            vb = b.last_delta || 0;            break;
+        case 'peak_vtsr':      va = a.peak_vtsr || 0;             vb = b.peak_vtsr || 0;             break;
+        case 'matches_played': va = a.matches_played || 0;        vb = b.matches_played || 0;        break;
+        case 'vtsr':
+        default:               va = a.vtsr || 0;                  vb = b.vtsr || 0;                  break;
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      const na = (a.name || '').toLowerCase(), nb = (b.name || '').toLowerCase();
+      if (na < nb) return -1;
+      if (na > nb) return 1;
+      return 0;
+    };
+  }
+
+  // Renders the dedicated VTSR Leaderboard card. `elo` is the parsed
+  // elo_current.json payload (or null when the file is missing — in which
+  // case the card hides itself entirely). `careerStats` is the post-filter
+  // career_stats list emitted by the aggregator; we filter the displayed
+  // roster to players who appear there so the dedicated VTSR card never
+  // shows a player the Career Leaderboard hides.
+  function renderVtsrLeaderboard(elo, careerStats) {
+    const $card = document.getElementById('section-vtsr');
+    if (!$card) return;
+
+    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
+      $card.classList.add('d-none');
+      return;
+    }
+
+    // Cascade the career_stats filter set so the picker filter narrows
+    // the dedicated VTSR table the same way it narrows the Career table.
+    // (VTSR ratings themselves are corpus-wide — only the displayed roster
+    // changes based on filter scope.)
+    const careerNames    = new Set((careerStats || []).map(c => (c.name || '').toLowerCase()));
+    const careerSteam64s = new Set((careerStats || []).map(c => c.steam64).filter(Boolean));
+    const visible = elo.ratings.filter(r => {
+      if (r.steam64 && careerSteam64s.has(r.steam64)) return true;
+      if (r.name && careerNames.has(r.name.toLowerCase())) return true;
+      return false;
+    });
+    if (visible.length === 0) {
+      $card.classList.add('d-none');
+      return;
+    }
+    $card.classList.remove('d-none');
+
+    const sorted = visible.slice().sort(vtsrSort(vtsrSortState.key, vtsrSortState.asc));
+    const tbody = $card.querySelector('#vtsr-table tbody');
+    tbody.innerHTML = sorted.map((r, i) => {
+      const tier = resolveTier(r.vtsr, r.matches_played);
+      let tierTip;
+      if (tier.id === 0) {
+        tierTip = `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`;
+      } else if (tier.id === 1) {
+        tierTip = `${tier.label} · ${tier.min}+ VTSR · top of the ladder`;
+      } else if (tier.id === 5) {
+        const fromFloor = Math.max(0, Math.round(r.vtsr - 1000));
+        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR · ${fromFloor} pts above floor`;
+      } else {
+        const prog = tierProgress(r.vtsr, tier);
+        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
+      }
+      const badge = tierBadgeHtml(tier, { title: tierTip });
+      const lastDelta = r.last_delta || 0;
+      const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : '';
+      const lastSign  = lastDelta > 0 ? '+' : '';
+      const sparklineId = `vtsr-spark-${(r.steam64 || r.name || i)}`.replace(/[^A-Za-z0-9_-]/g, '_');
+      return `<tr data-vtsr-name="${esc(r.name)}">
+        <td>${i + 1}</td>
+        <td class="text-center">${badge}</td>
+        <td class="fw-semibold">${esc(r.name)}</td>
+        <td class="text-end vt-vtsr-rating">${Math.round(r.vtsr)}</td>
+        <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
+        <td class="text-end">${Math.round(r.peak_vtsr || r.vtsr)}</td>
+        <td class="text-end">${r.matches_played}</td>
+        <td class="text-end"><canvas class="vt-vtsr-sparkline" id="${sparklineId}"></canvas></td>
+      </tr>`;
+    }).join('');
+
+    // Render the per-row sparklines after the rows are in the DOM so the
+    // canvases have layout (clientWidth/Height).
+    requestAnimationFrame(() => {
+      sorted.forEach((r, i) => {
+        const id = `vtsr-spark-${(r.steam64 || r.name || i)}`.replace(/[^A-Za-z0-9_-]/g, '_');
+        renderSparkline(document.getElementById(id), r.win_history || []);
+      });
+    });
+
+    // Wire sortable header cells.
+    document.querySelectorAll('#vtsr-table th[data-sort]').forEach(th => {
+      th.classList.toggle('sort-active', th.dataset.sort === vtsrSortState.key);
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        if (vtsrSortState.key === th.dataset.sort) vtsrSortState.asc = !vtsrSortState.asc;
+        else { vtsrSortState.key = th.dataset.sort; vtsrSortState.asc = false; }
+        renderVtsrLeaderboard(elo, careerStats);
+      };
+    });
+
+    // Click-to-scroll: jump from the dedicated VTSR card to the Career
+    // Leaderboard row for the same player.
+    tbody.querySelectorAll('tr[data-vtsr-name]').forEach(tr => {
+      tr.onclick = () => {
+        const target = document.getElementById('section-career');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    });
+
+    // Inject the KaTeX-rendered methodology tooltip on the info icon.
+    const $info = document.getElementById('vtsr-info-tooltip');
+    if ($info) {
+      const html = buildVtsrTooltipHtml();
+      $info.setAttribute('title', html);
+      $info.setAttribute('data-bs-original-title', html);
+      if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+        let inst = bootstrap.Tooltip.getInstance($info);
+        if (inst && typeof inst.setContent === 'function') {
+          inst.setContent({ '.tooltip-inner': html });
+        } else if (!inst) {
+          new bootstrap.Tooltip($info, { html: true, customClass: 'vt-katex-tooltip' });
+        }
+      }
+    }
+
+    ensureTooltips($card);
+  }
+
+  // Look up a career row's VTSR record from the cached ELO payload.
+  // Joins by steam64 (primary) with name fallback for legacy contributions
+  // missing steam64. Returns null when ELO data isn't loaded yet (404 path).
+  function careerEloFor(row) {
+    const elo = window.__vtElo;
+    if (!elo || !Array.isArray(elo.ratings)) return null;
+    const ratings = elo.ratings;
+    if (row.steam64) {
+      const r = ratings.find(rr => rr.steam64 === row.steam64);
+      if (r) return r;
+    }
+    if (row.name) {
+      const r = ratings.find(rr => (rr.name || '').toLowerCase() === row.name.toLowerCase());
+      if (r) return r;
+    }
+    return null;
+  }
+
   function careerLeaderboardSort(key, asc) {
     return (a, b) => {
       let va; let vb;
@@ -4392,6 +4698,39 @@
           va = a.matches_played || 0;
           vb = b.matches_played || 0;
           break;
+        case 'vtsr': {
+          // Sort missing ELO rows below all rated rows.
+          const ea = careerEloFor(a);
+          const eb = careerEloFor(b);
+          va = ea ? ea.vtsr : -Infinity;
+          vb = eb ? eb.vtsr : -Infinity;
+          break;
+        }
+        case 'tier': {
+          // Tier desc => Tier 1 first; Provisional rows sink to the bottom.
+          // Encode tier id as a numeric weight (Tier 1 highest), ties
+          // break on VTSR (handled by the secondary VTSR-ordering branch
+          // below — we encode tier-then-vtsr as a single composite).
+          const ea = careerEloFor(a);
+          const eb = careerEloFor(b);
+          // Provisional / missing ELO uses a negative tier weight so it
+          // always sinks below all rated rows on either sort direction.
+          const ta = ea ? resolveTier(ea.vtsr, ea.matches_played) : { id: 0 };
+          const tb = eb ? resolveTier(eb.vtsr, eb.matches_played) : { id: 0 };
+          // Tier id 0 = Provisional; map to 99 so it sinks to the bottom
+          // when sorting "best tier first" (asc=false on UI = desc here).
+          const sortableA = ta.id === 0 ? 99 : ta.id;
+          const sortableB = tb.id === 0 ? 99 : tb.id;
+          if (sortableA !== sortableB) {
+            // Inverted: lower tier id = "better" tier in our ladder.
+            va = -sortableA; vb = -sortableB;
+          } else {
+            // Within a tier, secondary sort by VTSR.
+            va = ea ? ea.vtsr : -Infinity;
+            vb = eb ? eb.vtsr : -Infinity;
+          }
+          break;
+        }
         case 'total_pvp_dealt':
           va = a.total_pvp_dealt || 0;
           vb = b.total_pvp_dealt || 0;
@@ -4587,9 +4926,24 @@
             <div class="vt-movement-bar"><div class="vt-movement-bar-fill" style="width:${pct}%;background:${color};"></div></div>
           </div>`;
       }
+      // Tier + VTSR cells. Joined per row from window.__vtElo (cached in
+      // loadAllMatches). Falls through to em-dash when ELO is missing.
+      const eloRow = careerEloFor(c);
+      let tierCell = '<span style="color:var(--kb-text-muted);">&mdash;</span>';
+      let vtsrCell = '<span style="color:var(--kb-text-muted);">&mdash;</span>';
+      if (eloRow) {
+        const tier = resolveTier(eloRow.vtsr, eloRow.matches_played);
+        const tip = eloRow.matches_played < ELO_PROVISIONAL_THRESHOLD
+          ? `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - eloRow.matches_played} more rated matches`
+          : `${tier.label} · ${tier.min}${tier.max === Infinity ? '+' : `–${tier.max - 1}`} VTSR`;
+        tierCell = tierBadgeHtml(tier, { title: tip });
+        vtsrCell = `<span class="vt-vtsr-rating" title="VTSR (anchor 1500, floor 1000) · ${eloRow.matches_played} rated matches">${Math.round(eloRow.vtsr)}</span>`;
+      }
       return `<tr>
         <td class="vt-career-col-shared">${i + 1}</td>
         <td class="vt-career-col-shared fw-semibold">${esc(c.name)}</td>
+        <td class="text-center vt-career-col-shared">${tierCell}</td>
+        <td class="text-end vt-career-col-shared">${vtsrCell}</td>
         <td class="text-center vt-career-col-shared"><span style="color:var(--kb-text-muted);" title="Not applicable across matches">—</span></td>
         <td class="text-end vt-career-col-shared">${c.matches_played}</td>
         <td class="text-end vt-col-split vt-career-col-total">${fmt(c.total_pvp_dealt || 0)}</td>

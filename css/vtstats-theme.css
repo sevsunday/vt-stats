@@ -4422,3 +4422,145 @@ td.vt-col-split {
         transform: none;
     }
 }
+
+/* ============================================================================
+   VTSR LEADERBOARD + 5-TIER LADDER
+   Render-layer presentation for the All Matches → Overview tab.
+   Tier color tokens lean on the existing --kb-* palette where possible
+   (Tier 3 picks up project blue so the anchor band matches the brand).
+   ============================================================================ */
+
+:root {
+    --vt-tier-1: #f5c518;                     /* Tier 1 — gold */
+    --vt-tier-2: #84d6e6;                     /* Tier 2 — silver-cyan */
+    --vt-tier-3: var(--kb-primary);           /* Tier 3 — anchor band, brand */
+    --vt-tier-4: #f0a93b;                     /* Tier 4 — warm amber */
+    --vt-tier-5: var(--kb-text-muted);        /* Tier 5 — muted slate (wide band) */
+}
+
+.vt-tier-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.1rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.4rem;
+    font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 600;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    color: var(--kb-bg-primary);
+    background: var(--kb-text-muted);  /* default for unknown tier */
+    cursor: default;
+    user-select: none;
+}
+
+.vt-tier-badge.vt-tier-1 { background: var(--vt-tier-1); color: #1a1306; }
+.vt-tier-badge.vt-tier-2 { background: var(--vt-tier-2); color: #061520; }
+.vt-tier-badge.vt-tier-3 { background: var(--vt-tier-3); color: var(--kb-bg-primary); }
+.vt-tier-badge.vt-tier-4 { background: var(--vt-tier-4); color: #1a1006; }
+.vt-tier-badge.vt-tier-5 {
+    background: color-mix(in oklab, var(--vt-tier-5) 60%, transparent);
+    color: var(--kb-text-primary);
+}
+
+.vt-vtsr-provisional {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.1rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.4rem;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    color: var(--kb-text-muted);
+    background: color-mix(in oklab, var(--kb-text-muted) 22%, transparent);
+    border: 1px dashed color-mix(in oklab, var(--kb-text-muted) 38%, transparent);
+    cursor: default;
+    user-select: none;
+}
+
+.vt-vtsr-sparkline {
+    display: inline-block;
+    width: 64px;
+    height: 18px;
+    vertical-align: middle;
+}
+
+.vt-vtsr-delta-positive { color: var(--kb-success); }
+.vt-vtsr-delta-negative { color: var(--kb-danger); }
+
+.vt-vtsr-rating {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--kb-text-primary);
+    letter-spacing: -0.01em;
+}
+
+#vtsr-table tbody tr {
+    cursor: pointer;
+}
+
+/* ============================================================================
+   KATEX TOOLTIP
+   Override Bootstrap tooltip width + KaTeX glyph color so equations pick
+   up the theme foreground in both light and dark modes.
+   ============================================================================ */
+
+.vt-katex-tooltip {
+    --bs-tooltip-max-width: 540px;
+}
+
+.vt-katex-tooltip .tooltip-inner {
+    text-align: left;
+    padding: 0.85rem 1rem;
+    font-size: 0.85rem;
+    background: var(--kb-bg-secondary);
+    color: var(--kb-text-primary);
+    border: 1px solid color-mix(in oklab, var(--kb-text-muted) 25%, transparent);
+}
+
+.vt-katex-tooltip .tooltip-arrow::before { display: none; }
+
+.vt-katex-tooltip .vt-katex-tooltip-body { line-height: 1.45; }
+
+.vt-katex-tooltip .katex-display {
+    margin: 0.55em 0;
+    font-size: 0.95em;
+}
+
+.vt-katex-tooltip .katex { font-size: 1.0em; }
+
+.vt-katex-tooltip table {
+    width: 100%;
+    margin: 0.55rem 0;
+    font-size: 0.78rem;
+}
+
+.vt-katex-tooltip table th,
+.vt-katex-tooltip table td {
+    padding: 0.18rem 0.4rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 18%, transparent);
+}
+
+.vt-katex-tooltip table th {
+    color: var(--kb-text-muted);
+    font-weight: 600;
+    text-align: left;
+}
+
+.vt-katex-tooltip .vt-katex-caveat {
+    color: var(--kb-text-muted);
+    font-size: 0.78rem;
+    margin: 0.45em 0;
+}
+
+.vt-katex-tooltip a { color: var(--kb-primary); }
+
+/* KaTeX ships hard-coded color: #000 on .katex; force it to follow the
+   theme so equations stay legible in dark mode. */
+.katex { color: inherit; }
+
