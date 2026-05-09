@@ -4750,7 +4750,6 @@
         <tbody>${tierRows}</tbody>
       </table>
       <div class="vt-katex-caveat">Anchor 1500 · 7 lobby z-scored axes · K-factor decays 52 → ~18 by match 50. Ratings are corpus-wide; the picker filter narrows the displayed roster only.</div>
-      <a href="docs.html#vtsr-methodology" target="_blank" rel="noopener">Read the full methodology &rarr;</a>
     </div>`;
     return vtsrTooltipHtmlCache;
   }
@@ -4908,32 +4907,14 @@
       };
     });
 
-    // Inject the KaTeX-rendered methodology popover on the info icon.
-    // Popover (not Tooltip) because the body contains a "Read the full
-    // methodology" link that needs to be clickable — Bootstrap Tooltips
-    // are not interactive and close on mouseleave.
-    const $info = document.getElementById('vtsr-info-tooltip');
-    if ($info && typeof bootstrap !== 'undefined' && bootstrap.Popover) {
-      const headerHtml = '<div class="d-flex justify-content-between align-items-center gap-2">'
-        + '<span>VTSR Methodology</span>'
-        + '<button type="button" class="btn-close" aria-label="Close" data-vt-vtsr-close></button>'
-        + '</div>';
-      const bodyHtml = buildVtsrTooltipHtml();
-      let inst = bootstrap.Popover.getInstance($info);
-      if (inst && typeof inst.setContent === 'function') {
-        inst.setContent({ '.popover-header': headerHtml, '.popover-body': bodyHtml });
-      } else if (!inst) {
-        new bootstrap.Popover($info, {
-          html: true,
-          sanitize: false,
-          title: headerHtml,
-          content: bodyHtml,
-          placement: 'bottom',
-          trigger: 'click',
-          customClass: 'vt-katex-tooltip',
-          container: 'body',
-        });
-      }
+    // Populate the VTSR methodology modal body on first VTSR render.
+    // Markup lives in index.html alongside the other modals; the docs link
+    // is rendered as a footer button there, so we only inject the KaTeX
+    // body content here. Cached after first paint via the data attribute.
+    const $modalBody = document.getElementById('vtsr-methodology-modal-body');
+    if ($modalBody && !$modalBody.dataset.vtPopulated) {
+      $modalBody.innerHTML = buildVtsrTooltipHtml();
+      $modalBody.dataset.vtPopulated = '1';
     }
 
     ensureTooltips($card);
@@ -5554,25 +5535,6 @@
       modalChart = null;
     }
     modalBody.innerHTML = '';
-  });
-
-  // VTSR methodology popover: close on outside click or close-button click.
-  // Bootstrap popovers with `trigger: 'click'` toggle on trigger click but
-  // don't auto-dismiss when the user clicks elsewhere; this delegated
-  // handler fills that gap and also wires the (×) button rendered in the
-  // popover header HTML.
-  document.addEventListener('click', (e) => {
-    const trigger = document.getElementById('vtsr-info-tooltip');
-    if (!trigger || !window.bootstrap || !bootstrap.Popover) return;
-    const inst = bootstrap.Popover.getInstance(trigger);
-    if (!inst) return;
-    if (e.target.closest('[data-vt-vtsr-close]')) {
-      inst.hide();
-      return;
-    }
-    if (trigger.contains(e.target)) return;
-    if (e.target.closest('.popover.show')) return;
-    inst.hide();
   });
 
   document.addEventListener('click', (e) => {

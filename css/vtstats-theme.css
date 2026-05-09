@@ -4524,8 +4524,7 @@ td.vt-col-split {
     max-width: 600px;
 }
 
-.vt-katex-tooltip .tooltip-inner,
-.vt-katex-tooltip .popover-body {
+.vt-katex-tooltip .tooltip-inner {
     text-align: left;
     padding: 0.85rem 1rem;
     font-size: 0.85rem;
@@ -4580,32 +4579,18 @@ td.vt-col-split {
 
 .vt-katex-tooltip a { color: var(--kb-primary); }
 
-/* Popover variant — applied when the VTSR methodology icon uses
-   data-bs-toggle="popover" instead of "tooltip". The body link inside
-   needs to be reachable, so we use Popover (interactive) and add a
-   close button in the header. */
-.vt-katex-tooltip.popover {
-    max-width: 600px;
-    background: var(--kb-bg-secondary);
-    border: 1px solid color-mix(in oklab, var(--kb-text-muted) 25%, transparent);
+/* Modal variant — the VTSR methodology icon opens #vtsr-methodology-modal
+   (which carries the .vt-katex-tooltip class), so the equation-spacing
+   rules above apply inside the modal body too. The block below tunes the
+   couple of things that need to differ from the tooltip context: the
+   modal body has more room than a tooltip, so we restore a normal font
+   size and let the modal's own background/border show through. */
+.vt-katex-tooltip.modal .modal-body {
+    font-size: 0.95rem;
+    line-height: 1.55;
 }
 
-.vt-katex-tooltip .popover-header {
-    background: color-mix(in oklab, var(--kb-text-muted) 8%, var(--kb-bg-secondary));
-    color: var(--kb-text-primary);
-    font-weight: 600;
-    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 18%, transparent);
-}
-
-.vt-katex-tooltip .popover-arrow::after { border-bottom-color: var(--kb-bg-secondary); }
-.vt-katex-tooltip .popover-arrow::before { border-bottom-color: color-mix(in oklab, var(--kb-text-muted) 25%, transparent); }
-
-.vt-katex-tooltip .btn-close {
-    filter: invert(1) grayscale(0.5);
-    opacity: 0.7;
-}
-
-.vt-katex-tooltip .btn-close:hover { opacity: 1; }
+.vt-katex-tooltip.modal .vt-katex-tooltip-body { line-height: 1.55; }
 
 /* KaTeX ships hard-coded color: #000 on .katex; force it to follow the
    theme so equations stay legible in dark mode. */
