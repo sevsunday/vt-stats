@@ -11,6 +11,12 @@
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/vtstats-theme.css">
+  <!-- KaTeX (vendored, v0.16.11). Used to pre-render the VTSR formula
+       tooltip via katex.renderToString(); auto-render contrib is loaded
+       only on docs.html. Fonts live in vendor/katex/fonts/ (woff2 only;
+       modern browsers fall back through the @font-face source list). -->
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <script defer src="vendor/katex/katex.min.js"></script>
 </head>
 <body>
 
@@ -821,6 +827,42 @@
 
       <!-- All Tab: Overview -->
       <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
+
+        <!-- VTSR Leaderboard. Compact ladder view, sparkline-led, sorted
+             by VTSR by default. Reads data/processed/elo_current.json
+             (pipeline-emitted, full-corpus). Hides itself entirely when
+             that file is missing (fresh checkout, pipeline never run).
+             See scripts/elo.py for the algorithm. -->
+        <div class="card mb-4 d-none" id="section-vtsr">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR Leaderboard</h5>
+              <i class="bi bi-info-circle vt-col-info"
+                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                 data-bs-custom-class="vt-katex-tooltip"
+                 id="vtsr-info-tooltip" title="Loading&hellip;"></i>
+            </div>
+            <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          </div>
+          <div class="card-body table-responsive">
+            <table id="vtsr-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th class="text-center">Tier</th>
+                  <th data-sort="name">Player</th>
+                  <th data-sort="vtsr" class="text-end sort-active">VTSR</th>
+                  <th data-sort="last_delta" class="text-end">Last</th>
+                  <th data-sort="peak_vtsr" class="text-end">Peak</th>
+                  <th data-sort="matches_played" class="text-end">Matches</th>
+                  <th class="text-end">Trend</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="card mb-4" id="section-career">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0">Career Leaderboard</h5>
@@ -839,6 +881,18 @@
                 <tr>
                   <th class="vt-career-col-shared">#</th>
                   <th class="vt-career-col-shared" data-sort="name">Player</th>
+                  <th class="text-center vt-career-col-shared" data-sort="tier">
+                    Tier
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>Tier</strong><br>VTSR-driven 5-tier classification: Tier 1 (>=1800), Tier 2 (1650-1799), Tier 3 (1500-1649, anchor), Tier 4 (1350-1499), Tier 5 (1000-1349, wide band). Provisional badge for players with fewer than 10 rated matches."></i>
+                  </th>
+                  <th data-sort="vtsr" class="text-end vt-career-col-shared">
+                    VTSR
+                    <i class="bi bi-info-circle vt-col-info ms-1"
+                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                       title="<strong>VTSR</strong> (VT Stats Rating)<br>Pipeline-side combat ELO, anchored at 1500, soft floor at 1000. Full methodology in the VTSR Leaderboard card above."></i>
+                  </th>
                   <th class="text-center vt-career-col-shared">
                     Team
                     <i class="bi bi-info-circle vt-col-info ms-1"
