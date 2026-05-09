@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 6
+PIPELINE_VERSION = 7
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3344,9 +3344,17 @@ def _extract_contribution(match_data):
         # Positioning fields are best-effort: absent on pre-positioning
         # matches, present-but-no-target_lock on pre-target-lock-schema.
         pm = (pos_players.get(p["name"]) or {}).get("metrics") or {}
+        slot = p.get("slot")
         leaderboard.append({
             "player_id": p.get("player_id", ""),
             "name": p.get("name", ""),
+            "steam64":        p.get("steam64"),
+            # Slot 1 = Team 1 commander, slot 6 = Team 2 commander.
+            # Carried onto contributions so the JS aggregator can split
+            # commander vs thug stats without re-deriving from the leaderboard.
+            "slot":           slot,
+            "team":           p.get("faction"),
+            "is_commander":   slot in (1, 6),
             "dealt":          round(personal.get("dealt", 0), 1),
             "received":       round(personal.get("received", 0), 1),
             "pvp_dealt":      round(personal.get("pvp_dealt", 0), 1),
@@ -3390,6 +3398,34 @@ def _extract_contribution(match_data):
         for shooter, victims in (match_data.get("rivalry_matrix") or {}).items()
     }
 
+    # Per-player snipes. The match `snipes.by_player` block is already a
+    # list of {name, count, ...} aggregates — flatten to a name -> count
+    # dict so the JS aggregator can roll them up into career totals
+    # without a per-match round trip.
+    snipes_by_player = {}
+    for row in (match_data.get("snipes") or {}).get("by_player") or []:
+        name = row.get("name")
+        if not name:
+            continue
+        c = int(row.get("count", 0) or 0)
+        if c > 0:
+            snipes_by_player[name] = c
+
+    # Same shape for powerup destructions (used by Pod Goblin career card).
+    powerup_destructions_by_player = {}
+    for row in (match_data.get("powerup_destructions") or {}).get("by_player") or []:
+        name = row.get("name")
+        if not name:
+            continue
+        c = int(row.get("count", 0) or 0)
+        if c > 0:
+            powerup_destructions_by_player[name] = c
+
+    # Match-level commander/faction/winner tuple. All three are
+    # match-global, always-unfiltered passthrough fields per the project
+    # rule (read directly by aggregator and renderers; never narrowed by
+    # the per-match player filter).
+    winner = m.get("winner") or {}
     return {
         "id":           m["id"],
         "map":          m["map"],
@@ -3401,9 +3437,17 @@ def _extract_contribution(match_data):
         "has_target_lock_data": m.get("has_target_lock_data", False),
         "has_pickup_data":      m.get("has_pickup_data", False),
         "sentinel_damage_count": (m.get("sentinel_damage") or {}).get("count", 0),
+        "team_leaders":  m.get("team_leaders") or {},
+        "team_factions": m.get("team_factions") or {},
+        "winner": {
+            "team":       winner.get("team"),
+            "decided_by": winner.get("decided_by", "unclear"),
+        },
         "leaderboard":     leaderboard,
         "weapon_meta":     weapon_meta,
         "rivalry_matrix":  rivalry_matrix,
+        "snipes_by_player":               snipes_by_player,
+        "powerup_destructions_by_player": powerup_destructions_by_player,
     }
 
 
@@ -3888,6 +3932,14 @@ def main():
             "player_count": match_data["match"]["player_count"],
             "submitter": submitter_by_id.get(match_id, ""),
             "team_leaders": match_data["match"].get("team_leaders", {}),
+            # Per-team faction codes ({"1": {"code": "i", ...}, "2": {...}})
+            # and the inferred match outcome's "decided_by" tier
+            # ("clean_win" | "contested" | "unclear"). Both are exposed on
+            # the manifest so future picker facets (faction filter, won/
+            # contested/unclear filter) can read straight off matches.json
+            # without hydrating per-match JSON.
+            "team_factions": match_data["match"].get("team_factions", {}),
+            "winner_decided_by": (match_data["match"].get("winner") or {}).get("decided_by", "unclear"),
             "players": manifest_players,
             "has_position_data": match_data["match"].get("has_position_data", False),
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),

@@ -48,6 +48,7 @@
     return {
       player_id: '',
       name: '',
+      steam64: null,
       matches_played: 0,
       total_dealt: 0,
       total_received: 0,
@@ -73,6 +74,39 @@
       // available as `Object.keys(weapon_breakdown).length` on the
       // emitted row, so totals mode keeps its existing source.
       weapons_used_per_match: [],
+
+      // ---- Phase 2 contribution-shape extensions (consumed by Phase 3+) ----
+      // Per-player career rolls of Pod Goblin / Chris Kyle inputs (so the
+      // Career Highlights cards can read straight off career_stats[]
+      // without re-walking contributions).
+      total_snipes: 0,
+      total_destructions: 0,
+      // Commander vs thug split. `is_commander` lives on each leaderboard
+      // entry now; we increment the matching counter per match.
+      matches_as_commander: 0,
+      matches_as_thug: 0,
+      // Faction match counts keyed by the team-faction code map from the
+      // pipeline ('i' / 'e' / 'f' for ISDF / Hadean / Scion). Numeric
+      // 1/2/3 keys are intentionally avoided in favor of the pipeline's
+      // canonical letter codes so downstream code reads directly off
+      // contribution `team_factions` payloads.
+      faction_match_count: { i: 0, e: 0, f: 0 },
+      // Distinct teammates seen across the whole career — drives the
+      // Diplomat highlight (size of set at emit time).
+      teammates_seen: new Set(),
+      // map_file -> { count, wins, losses, contested } — feeds Map
+      // Master + map win-rate stats. Wins/losses only update on
+      // determined-winner matches; contested matches bump `contested`.
+      maps_played: new Map(),
+      // Chronological log of determined-winner matches the player was
+      // in (used for Streak King). Each entry: { match_id, won, decided_by }.
+      win_streak_log: [],
+      // How many of this player's matches had a decided winner — denominator
+      // for win % and the floor on commander/thug win-rate cards.
+      matches_with_determined_winner: 0,
+      // Win/loss split, both overall and by role.
+      wins:   { as_commander: 0, as_thug: 0, total: 0 },
+      losses: { as_commander: 0, as_thug: 0, total: 0 },
     };
   }
 
