@@ -211,6 +211,8 @@
   // Stored as JSON in localStorage under LANDING_PREF_KEY. Schema:
   //   { version: 1, mode: 'ask' | 'recent' | 'all' | 'specific', matchId?: string }
   // Shared links (any URL intent) always bypass this entirely.
+  // Default landing view changed from 'recent' to 'all' on 2026-05-08;
+  // existing saved prefs preserved deliberately (LANDING_PREF_VERSION not bumped).
   const LANDING_PREF_KEY = 'vt-landing-pref';
   const LANDING_PREF_VERSION = 1;
   const LANDING_MODES = new Set(['ask', 'recent', 'all', 'specific']);
@@ -294,11 +296,35 @@
     }
   }
 
+  // Populates the auto-filled hint under the "All matches" option with the
+  // current corpus snapshot ("Career overview · 47 matches · 14 players ·
+  // last seen May 4, 2026"). Falls back to the static placeholder when the
+  // manifest is empty. The "Most recent" hint is intentionally static and
+  // lives in the HTML markup.
+  function populateLandingHints(manifest) {
+    const $allHint = document.getElementById('landing-mode-all-hint');
+    if (!$allHint) return;
+    if (!manifest || manifest.length === 0) {
+      $allHint.textContent = 'Career overview across every recorded match.';
+      return;
+    }
+    const distinctPlayers = new Set();
+    for (const m of manifest) {
+      if (Array.isArray(m.players)) m.players.forEach(p => distinctPlayers.add(p));
+    }
+    const mostRecent = manifest[0];
+    const shortDate = new Date(mostRecent.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const matchWord = manifest.length === 1 ? 'match' : 'matches';
+    const playerWord = distinctPlayers.size === 1 ? 'player' : 'players';
+    $allHint.textContent = `Career overview · ${manifest.length} ${matchWord} · ${distinctPlayers.size} ${playerWord} · last seen ${shortDate}`;
+  }
+
   // Builds and shows the landing preferences modal. Called on first-visit
   // boot (when no URL intent and no stored pref) and from the Preferences
   // gear button in the nav. The two entry points differ only in their
-  // onCancel handling: first-visit falls back to loading the most recent
-  // match; gear re-open is a no-op so dismissing doesn't disturb the view.
+  // onCancel handling: first-visit falls back to the default landing view
+  // (All matches); gear re-open is a no-op so dismissing doesn't disturb
+  // the view.
   function showLandingModal({ current, onConfirm, onCancel }) {
     const $modal = document.getElementById('landing-modal');
     if (!$modal || !window.bootstrap) return;
@@ -308,18 +334,13 @@
     const $specificRadio = document.getElementById('landing-mode-specific');
     const $specificWrap  = document.getElementById('landing-specific-wrap');
     const $specificSel   = document.getElementById('landing-specific-select');
-    const $recentHint    = document.getElementById('landing-mode-recent-hint');
     const $persistYes    = document.getElementById('landing-persist-yes');
     const $persistNo     = document.getElementById('landing-persist-no');
     const $confirmBtn    = document.getElementById('landing-modal-confirm');
 
-    // Fill the "Most recent" label with the actual map + date so the
-    // default option is concrete rather than abstract.
-    if (manifest.length > 0 && $recentHint) {
-      const m = manifest[0];
-      const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-      $recentHint.textContent = `${m.name} — ${shortDate}`;
-    }
+    // Auto-fill the "All matches" hint with the corpus snapshot. The
+    // "Most recent" hint is static and lives in the HTML.
+    populateLandingHints(manifest);
 
     // Populate the specific-match select from manifest (mirrors the
     // navbar dropdown's label format).
@@ -335,8 +356,10 @@
     }
 
     // Pre-select based on `current` (gear re-open) or defaults (first visit).
-    if (current && current.mode === 'all') {
-      $allRadio.checked = true;
+    // First-visit default is now "All matches" (changed from "Most recent"
+    // on 2026-05-08) — pre-existing saved prefs preserved deliberately.
+    if (current && current.mode === 'recent') {
+      $recentRadio.checked = true;
     } else if (current && current.mode === 'specific') {
       $specificRadio.checked = true;
       if (current.matchId && $specificSel) {
@@ -344,7 +367,8 @@
         if (exists) $specificSel.value = current.matchId;
       }
     } else {
-      $recentRadio.checked = true;
+      // No saved pref or current.mode === 'all' / 'ask' → default to All matches.
+      $allRadio.checked = true;
     }
     // If we have a saved pref (even 'ask'), "Remember" is implicitly the
     // current stance; treat missing pref as Remember-pre-selected per the
@@ -5115,7 +5139,9 @@
             if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
             applyLandingChoice({ mode, matchId });
           },
-          onCancel: () => applyLandingChoice({ mode: 'recent' }),
+          // Cancel falls back to the new default (All matches), matching
+          // what the modal showed pre-selected.
+          onCancel: () => applyLandingChoice({ mode: 'all' }),
         });
       } else {
         applyLandingChoice(pref);
