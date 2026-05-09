@@ -2152,7 +2152,7 @@
     // Match Highlights — match-global, always-unfiltered (read directly
     // from currentData, not the filtered `data` view). Pre-computed in
     // scripts/process_stats.py; this renderer is pure formatting.
-    renderHighlights(currentData.highlights, currentData.match);
+    renderHighlights(currentData.highlights, currentData.match, 'match');
     ensureTooltips(document.getElementById('section-highlights'));
 
     // Overview: profile card vs faction scoreboard
@@ -2440,6 +2440,7 @@
       // the user's `mode` preference (Totals vs Per match) across resets.
       careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
       renderVtsrLeaderboard(window.__vtElo, []);
+      renderHighlights({ schema_version: 1, cards: [] }, { id: 'all-matches' }, 'career');
       renderCareerTable([]);
       renderCareerRadar({ career_stats: [] });
       window.__vtAllMatchesData = { meta: {}, career_stats: [], global_weapon_meta: [], global_rivalries: [] };
@@ -2457,7 +2458,7 @@
       return;
     }
 
-    const data = window.VTAggregate.build(contributions, fileIds);
+    const data = window.VTAggregate.build(contributions, fileIds, window.__vtElo);
 
     if (window.VTFx) VTFx.hidePreloader();
     $loading.classList.add('d-none');
@@ -2483,6 +2484,7 @@
 
     renderAggMeta(data.meta);
     renderVtsrLeaderboard(window.__vtElo, data.career_stats);
+    renderHighlights(data.career_highlights, { id: 'all-matches' }, 'career');
     initCareerColumnViewControls();
     renderCareerTable(data.career_stats);
     renderCareerRadar(data);
@@ -3023,6 +3025,177 @@
     gunner: 'Trigger Happy',
   };
 
+  // ---- Career Highlights (built client-side by the aggregator) ----
+  // Three flavor lines per (category, narrative) bucket. Selected
+  // deterministically by hash(matchId='all-matches' + category) so the
+  // same All Matches view always shows the same line; the Per-match
+  // and Career grids render their own copy tables independently.
+  const CAREER_HIGHLIGHT_COPY = {
+    career_the_bully: {
+      dominant: [
+        '{name} has spent {value} dmg on humans across the corpus — most on {top_victim}.',
+        '{name} bullied the league for {value} PvP dmg.',
+        '{name} farms PvP like a job — {value} lifetime.',
+      ],
+      clear: [
+        '{name} leads career PvP damage at {value}.',
+        '{name} tops the lifetime PvP charts with {value}.',
+        '{name} owns the long-haul PvP crown.',
+      ],
+      close: [
+        '{name} narrowly leads career PvP damage.',
+        '{name} edges the lifetime PvP race.',
+        '{name} squeaks the all-time PvP crown.',
+      ],
+    },
+    career_the_grim_reaper: {
+      dominant: ['{name} has reaped {value} kills league-wide.', '{name} owns the all-time kill column.', '{name} has tagged the corpus {value} times.'],
+      clear:    ['{name} leads career kills at {value}.',        '{name} tops the lifetime kill chart.',  '{name} closes out the most kills.'],
+      close:    ['{name} narrowly leads career kills.',          '{name} edges the lifetime kill race.',  '{name} squeaks the all-time kill crown.'],
+    },
+    career_bullet_sponge: {
+      dominant: ['{name} has absorbed {value} dmg lifetime — a magnet.', '{name} soaks more incoming than anyone — {value} all-time.', '{name} won\u2019t stop catching rounds — {value} lifetime.'],
+      clear:    ['{name} leads career damage taken at {value}.',         '{name} has eaten the most lifetime damage.',                 '{name} tops the all-time absorbed-dmg column.'],
+      close:    ['{name} edges career absorbed damage.',                 '{name} narrowly leads lifetime damage taken.',               '{name} squeaks the long-haul sponge crown.'],
+    },
+    career_the_hustler: {
+      dominant: ['{name}\u2019s career K/D of {value} ({kills}/{deaths}) is a clinic.', '{name} runs a {value} lifetime trade ratio.', '{name} owns the K/D column at {value}.'],
+      clear:    ['{name} leads career K/D at {value} ({kills}/{deaths}).',              '{name} tops the lifetime trade ratio at {value}.', '{name} holds the best long-run K/D.'],
+      close:    ['{name} edges career K/D at {value}.',                                 '{name} narrowly leads the lifetime trade ratio.',  '{name} squeaks the all-time K/D crown.'],
+    },
+    career_sharpshooter: {
+      dominant: ['{name} hits {value} of shots fired ({shots_hit}/{shots_fired}). Laser.', '{name} is a sniper — {value} career accuracy.', '{name}\u2019s {value} accuracy across {shots_fired} shots is wild.'],
+      clear:    ['{name} leads career accuracy at {value}.',                               '{name} tops the lifetime accuracy column.',     '{name} owns the long-run sharpshooter crown.'],
+      close:    ['{name} edges career accuracy at {value}.',                               '{name} narrowly leads lifetime accuracy.',      '{name} squeaks the all-time accuracy crown.'],
+    },
+    career_trigger_happy: {
+      dominant: ['{name} has fired {value} rounds league-wide. Get this person an ammo subscription.', '{name} held the trigger for {value} shots across the corpus.', '{name}\u2019s {value} lifetime shots is hard to fathom.'],
+      clear:    ['{name} fired the most rounds — {value} lifetime.',                                  '{name} leads lifetime shots at {value}.',                       '{name} tops the all-time trigger column.'],
+      close:    ['{name} edges lifetime shots at {value}.',                                           '{name} narrowly leads career shots fired.',                     '{name} squeaks the all-time trigger crown.'],
+    },
+    career_puppeteer: {
+      dominant: ['{name}\u2019s scavs and turrets have done {value} dmg lifetime.', '{name} commands a small army — {value} asset dmg.',  '{name} owns the lifetime puppeteer column at {value}.'],
+      clear:    ['{name} leads career asset dmg at {value}.',                       '{name} pulled the most strings overall.',            '{name} tops the all-time puppeteer chart.'],
+      close:    ['{name} edges career asset dmg at {value}.',                       '{name} narrowly leads lifetime asset dmg.',          '{name} squeaks the long-run puppeteer crown.'],
+    },
+    career_frenemies: {
+      dominant: ['{a} and {b} have traded {value} dmg over the years.', '{a} and {b} are each other\u2019s favorite enemy.', '{a} vs {b} is the corpus\u2019s headline matchup.'],
+      clear:    ['{a} and {b} traded {value} dmg.',                     '{a} and {b} have the corpus\u2019s top rivalry.',   '{a} vs {b} leads career rivalries.'],
+      close:    ['{a} and {b} narrowly lead career rivalries.',         '{a} vs {b} squeaks the all-time pair crown.',       '{a} and {b} edge the lifetime pair race.'],
+    },
+    career_roadrunner: {
+      dominant: ['{name} averages {value}/100 activity across {matches_with_positioning}+ matches.', '{name} won\u2019t sit still — {value} mean.', '{name} covers more map than anyone — {value} avg.'],
+      clear:    ['{name} leads career mobility at {value}/100.',                                    '{name} tops average activity across the corpus.', '{name} owns the long-run mobility crown.'],
+      close:    ['{name} edges career mobility at {value}.',                                        '{name} narrowly leads lifetime activity.',        '{name} squeaks the all-time mobility crown.'],
+    },
+    career_pod_goblin: {
+      dominant: ['{name} has scooped {pickups} crates and trashed {destructions} more.', '{name} runs the corpus pickup economy.',         '{name} owns the lifetime crate column at {value}.'],
+      clear:    ['{name} grabbed {pickups} + denied {destructions} crates lifetime.',     '{name} leads career powerup activity at {value}.', '{name} tops the all-time crate chart.'],
+      close:    ['{name} edges career crate activity at {value}.',                        '{name} narrowly leads lifetime pickups + denials.', '{name} squeaks the long-run pod-goblin crown.'],
+    },
+    career_chris_kyle: {
+      dominant: ['{name} has sniped {value} pilots out of their cockpits.', '{name} hunts cockpits for sport — {value} lifetime.', '{name} owns the snipe column at {value}.'],
+      clear:    ['{name} leads career snipes at {value}.',                  '{name} tops lifetime pilot snipes at {value}.',         '{name} holds the all-time snipe crown.'],
+      close:    ['{name} edges career snipes at {value}.',                  '{name} narrowly leads lifetime snipes.',                '{name} squeaks the all-time snipe crown.'],
+    },
+    career_the_locksmith: {
+      dominant: ['{name} averages {value} target lock — basically welded to the T key.', '{name} runs target mode for {value} of every match.', '{name} dominates lifetime T-key usage.'],
+      clear:    ['{name} averages {value} target lock across rated matches.',            '{name} leads career T-key usage at {value}.',          '{name} tops the all-time locksmith column.'],
+      close:    ['{name} edges career T-key usage at {value}.',                          '{name} narrowly leads lifetime target lock.',          '{name} squeaks the long-run locksmith crown.'],
+    },
+    the_champion: {
+      dominant: ['{name} sits at {value} VTSR with {matches_played} rated matches.', '{name} owns the league. {value} VTSR.',          '{name} is the corpus champion at {value}.'],
+      clear:    ['{name} tops the VTSR ladder at {value}.',                          '{name} holds the highest VTSR — {value}.',        '{name} leads the league rating column.'],
+      close:    ['{name} edges the VTSR ladder at {value}.',                         '{name} narrowly leads the league rating.',        '{name} squeaks the top of the VTSR ladder.'],
+    },
+    the_veteran: {
+      dominant: ['{name} has been to {value} matches and counting.', '{name} is the all-time leader in showing up.',       '{name} has the most miles on the odometer.'],
+      clear:    ['{name} has played the most matches — {value}.',    '{name} leads career match count at {value}.',         '{name} owns the all-time appearance column.'],
+      close:    ['{name} narrowly leads matches played at {value}.', '{name} edges the lifetime attendance race.',          '{name} squeaks the most-matches-played crown.'],
+    },
+    the_workhorse: {
+      dominant: ['{name} has commanded {value} matches league-wide.', '{name} is the corpus\u2019s favorite commander.',     '{name} owns the lifetime command column at {value}.'],
+      clear:    ['{name} leads matches as commander at {value}.',     '{name} tops career command appearances.',             '{name} holds the all-time workhorse crown.'],
+      close:    ['{name} edges career commander matches at {value}.', '{name} narrowly leads lifetime command count.',       '{name} squeaks the workhorse crown.'],
+    },
+    the_carry: {
+      dominant: ['{name} wins {value} of commanded matches — pure carry energy.', '{name} carries every game they command.',          '{name} owns the commander win-rate column at {value}.'],
+      clear:    ['{name} leads commander win % at {value}.',                      '{name} tops career commander wins at {value}.',     '{name} holds the all-time carry crown.'],
+      close:    ['{name} edges commander win % at {value}.',                      '{name} narrowly leads commander wins.',             '{name} squeaks the carry crown.'],
+    },
+    the_anchor: {
+      dominant: ['{name} wins {value} of matches as a thug — the anchor that never breaks.', '{name} is a wall on the back line.',     '{name} owns the thug win-rate column at {value}.'],
+      clear:    ['{name} leads thug win % at {value}.',                                       '{name} tops career thug wins at {value}.', '{name} holds the all-time anchor crown.'],
+      close:    ['{name} edges thug win % at {value}.',                                       '{name} narrowly leads thug wins.',         '{name} squeaks the anchor crown.'],
+    },
+    isdf_loyalist: {
+      dominant: ['{name} has played ISDF in {value} matches — true believer.', '{name} bleeds ISDF cyan.',                       '{name} is the league\u2019s ISDF poster child.'],
+      clear:    ['{name} leads ISDF appearances at {value}.',                  '{name} has the most ISDF matches — {value}.',     '{name} tops the all-time ISDF column.'],
+      close:    ['{name} edges ISDF appearances at {value}.',                  '{name} narrowly leads ISDF matches.',             '{name} squeaks the ISDF loyalist crown.'],
+    },
+    hadean_loyalist: {
+      dominant: ['{name} has played Hadean in {value} matches — true believer.', '{name} bleeds Hadean red.',                     '{name} is the league\u2019s Hadean poster child.'],
+      clear:    ['{name} leads Hadean appearances at {value}.',                   '{name} has the most Hadean matches — {value}.', '{name} tops the all-time Hadean column.'],
+      close:    ['{name} edges Hadean appearances at {value}.',                   '{name} narrowly leads Hadean matches.',         '{name} squeaks the Hadean loyalist crown.'],
+    },
+    scion_loyalist: {
+      dominant: ['{name} has played Scion in {value} matches — true believer.',  '{name} bleeds Scion green.',                    '{name} is the league\u2019s Scion poster child.'],
+      clear:    ['{name} leads Scion appearances at {value}.',                    '{name} has the most Scion matches — {value}.',  '{name} tops the all-time Scion column.'],
+      close:    ['{name} edges Scion appearances at {value}.',                    '{name} narrowly leads Scion matches.',          '{name} squeaks the Scion loyalist crown.'],
+    },
+    the_diplomat: {
+      dominant: ['{name} has shared a team with {value} different players. Friend to all.', '{name} is everyone\u2019s teammate — {value} distinct.', '{name} owns the diplomacy column at {value}.'],
+      clear:    ['{name} leads distinct teammates at {value}.',                              '{name} has played alongside the most people.',           '{name} holds the corpus diplomat crown.'],
+      close:    ['{name} edges distinct teammates at {value}.',                              '{name} narrowly leads career teammate variety.',         '{name} squeaks the diplomat crown.'],
+    },
+    map_master: {
+      dominant: ['{name} wins {value} of matches on {map_name} ({kills}-{deaths}). Owns it.', '{name} owns {map_name} — {value} W%.',    '{name} is the king of {map_name} at {value}.'],
+      clear:    ['{name} leads {map_name} with {value} W% ({kills}-{deaths}).',              '{name} tops the win % on {map_name}.',     '{name} holds the {map_name} crown.'],
+      close:    ['{name} edges {map_name} W% at {value}.',                                   '{name} narrowly leads {map_name}.',        '{name} squeaks the {map_name} crown.'],
+    },
+    streak_king: {
+      dominant: ['{name} is on a {value}-match win streak. Untouchable right now.', '{name} hasn\u2019t lost in {value} matches.',  '{name} is on a tear — {value} wins running.'],
+      clear:    ['{name} leads active streaks at {value} wins.',                    '{name} has the longest current win streak.',   '{name} holds the streak crown at {value}.'],
+      close:    ['{name} edges active streaks at {value} wins.',                    '{name} narrowly leads current streaks.',       '{name} squeaks the streak crown.'],
+    },
+    the_polymath: {
+      dominant: ['{name} has fired {value} different weapons across the corpus. Renaissance pilot.', '{name} has touched every weapon in the game.', '{name} owns the all-time variety column at {value}.'],
+      clear:    ['{name} leads career weapon variety at {value}.',                                   '{name} tops the lifetime polymath column.',     '{name} holds the all-time variety crown.'],
+      close:    ['{name} edges career weapon variety at {value}.',                                   '{name} narrowly leads lifetime weapon count.',  '{name} squeaks the polymath crown.'],
+    },
+  };
+
+  const CAREER_HIGHLIGHT_UNITS = {
+    career_the_bully:        'dmg',
+    career_the_grim_reaper:  'kills',
+    career_bullet_sponge:    'dmg',
+    career_the_hustler:      'K/D',
+    career_sharpshooter:     '',
+    career_trigger_happy:    'shots',
+    career_puppeteer:        'dmg',
+    career_frenemies:        'dmg',
+    career_roadrunner:       'mvnt',
+    career_pod_goblin:       '',
+    career_chris_kyle:       'snipes',
+    career_the_locksmith:    '',
+    the_champion:            'VTSR',
+    the_veteran:             'matches',
+    the_workhorse:           'commands',
+    the_carry:               '',
+    the_anchor:              '',
+    isdf_loyalist:           'matches',
+    hadean_loyalist:         'matches',
+    scion_loyalist:          'matches',
+    the_diplomat:            'teammates',
+    map_master:              '',
+    streak_king:             'wins',
+    the_polymath:            'wpns',
+  };
+
+  // No career-mode label overrides — labels come straight from the
+  // aggregator's CAREER_HIGHLIGHT_LABELS table.
+  const CAREER_HIGHLIGHT_LABEL_OVERRIDES = {};
+
   // Schema v2 breakdown line: pre-computed per-category context that gives the
   // headline number meaning ("4.00" -> "12K / 3D (4.00)", "27.4%" -> "482 / 1,758").
   // Expects card.value_breakdown to carry the keys produced by compute_highlights()
@@ -3076,6 +3249,39 @@
       case 'the_locksmith':
         if (b.seconds_locked == null || b.total_seconds == null) return '';
         return `~${fmt(b.seconds_locked)}s of ${fmt(b.total_seconds)}s`;
+      // ---- Career Highlights ----
+      case 'career_the_bully':
+        return b.top_victim
+          ? `most on ${esc(b.top_victim)}: ${fmt(b.top_victim_damage)} dmg`
+          : '';
+      case 'career_the_hustler': {
+        if (b.kills == null && b.deaths == null) return '';
+        return `${fmt(b.kills)}K / ${fmt(b.deaths)}D career`;
+      }
+      case 'career_sharpshooter':
+        if (b.shots_hit == null || b.shots_fired == null) return '';
+        return `${fmt(b.shots_hit)} / ${fmt(b.shots_fired)} shots career`;
+      case 'career_frenemies':
+        if (b.a_to_b == null || b.b_to_a == null) return '';
+        return `${esc(card.winner.a)} ${fmt(b.a_to_b)} \u2194 ${esc(card.winner.b)} ${fmt(b.b_to_a)}`;
+      case 'career_roadrunner': {
+        const parts = [];
+        if (b.movement_band) parts.push(esc(b.movement_band));
+        if (b.path_length != null) parts.push(`${fmt(b.path_length)}u path`);
+        return parts.join(' \u00b7 ');
+      }
+      case 'career_pod_goblin':
+        if (b.pickups == null && b.destructions == null) return '';
+        return `${fmt(b.pickups || 0)} grabbed \u00b7 ${fmt(b.destructions || 0)} denied`;
+      case 'the_champion':
+        if (b.matches_played == null) return '';
+        return `${b.matches_played} rated · peak ${b.peak_vtsr != null ? Math.round(b.peak_vtsr) : '—'}`;
+      case 'the_carry':
+        if (b.kills == null && b.deaths == null) return '';
+        return `${b.kills}W / ${b.deaths}L commanding`;
+      case 'map_master':
+        if (!b.map_name) return '';
+        return `${esc(b.map_name)} (${b.kills}-${b.deaths})`;
       default:
         return '';
     }
@@ -3106,9 +3312,10 @@
     return true;
   }
 
-  function _hlPickCopy(category, narrative, matchId, ctx) {
-    const bucket = (HIGHLIGHT_COPY[category] || {})[narrative]
-      || (HIGHLIGHT_COPY[category] || {})['clear']
+  function _hlPickCopy(category, narrative, matchId, ctx, copyTable) {
+    const table = copyTable || HIGHLIGHT_COPY;
+    const bucket = (table[category] || {})[narrative]
+      || (table[category] || {})['clear']
       || [];
     if (!bucket.length) return '';
     const seed = _hlHash(`${matchId || ''}|${category}`);
@@ -3124,9 +3331,21 @@
     return bucket[start];
   }
 
-  function renderHighlights(highlights, matchInfo) {
-    const card = document.getElementById('section-highlights');
-    const grid = document.getElementById('highlights-grid');
+  // Render a Match Highlights or Career Highlights grid. `mode` selects
+  // the lookup tables AND the DOM containers:
+  //   'match'  → #section-highlights         + #highlights-grid
+  //   'career' → #section-career-highlights + #career-highlights-grid
+  // matchInfo carries the seeding key used to pick deterministic copy
+  // variants (per-match: match.id; career: a stable string like 'all-matches').
+  function renderHighlights(highlights, matchInfo, mode) {
+    const isCareer = mode === 'career';
+    const cardId = isCareer ? 'section-career-highlights' : 'section-highlights';
+    const gridId = isCareer ? 'career-highlights-grid'    : 'highlights-grid';
+    const copyTable     = isCareer ? CAREER_HIGHLIGHT_COPY            : HIGHLIGHT_COPY;
+    const unitsTable    = isCareer ? CAREER_HIGHLIGHT_UNITS           : HIGHLIGHT_UNITS;
+    const overridesTable = isCareer ? CAREER_HIGHLIGHT_LABEL_OVERRIDES : HIGHLIGHT_LABEL_OVERRIDES;
+    const card = document.getElementById(cardId);
+    const grid = document.getElementById(gridId);
     if (!card || !grid) return;
 
     const cards = (highlights && Array.isArray(highlights.cards)) ? highlights.cards : [];
@@ -3174,12 +3393,17 @@
         total_seconds: breakdown.total_seconds != null ? breakdown.total_seconds : '',
         pickups: breakdown.pickups != null ? breakdown.pickups : '',
         destructions: breakdown.destructions != null ? breakdown.destructions : '',
+        // Career-mode tokens (no-op for per-match cards).
+        matches_played: breakdown.matches_played != null ? breakdown.matches_played : '',
+        peak_vtsr:      breakdown.peak_vtsr != null ? Math.round(breakdown.peak_vtsr) : '',
+        map_name:       breakdown.map_name || '',
+        matches_with_positioning: breakdown.matches_with_positioning != null ? breakdown.matches_with_positioning : '',
       };
-      const flavor = _hlInterp(_hlPickCopy(c.category, c.narrative, matchId, ctx), ctx);
+      const flavor = _hlInterp(_hlPickCopy(c.category, c.narrative, matchId, ctx, copyTable), ctx);
       const breakdownLine = formatHighlightBreakdown(c);
       // Per-category unit suffix (presentation only). Empty string falls back
       // to bare value display for cards whose value_format already self-labels.
-      const unit = HIGHLIGHT_UNITS[c.category] || '';
+      const unit = unitsTable[c.category] || '';
       const unitHtml = unit ? ` <span class="vt-highlight-tile-value-unit">${esc(unit)}</span>` : '';
       const runner = c.runner_up;
       let runnerLine = '';
@@ -3199,7 +3423,7 @@
           <div class="vt-highlight-tile${dominantClass}"${tipAttr} data-highlight-category="${esc(c.category)}">
             <div class="vt-highlight-tile-head">
               <i class="bi ${esc(c.icon || 'bi-trophy-fill')} vt-highlight-tile-icon"></i>
-              <span class="vt-highlight-tile-label">${esc(HIGHLIGHT_LABEL_OVERRIDES[c.category] || c.label)}</span>
+              <span class="vt-highlight-tile-label">${esc(overridesTable[c.category] || c.label)}</span>
             </div>
             <div class="vt-highlight-tile-winner">${winnerName}</div>
             <div class="vt-highlight-tile-value">${valueStr}${unitHtml}</div>
