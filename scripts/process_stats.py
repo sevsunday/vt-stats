@@ -1232,7 +1232,8 @@ def load_cache_index():
     index: dict[tuple[str, str], dict] = {}
     if not OUTPUT_DIR.exists():
         return index
-    skip = {"matches.json", "match_contributions.json", "all_matches.json"}
+    skip = {"matches.json", "match_contributions.json", "all_matches.json",
+            "elo_current.json", "elo_history.json"}
     for json_path in OUTPUT_DIR.glob("*.json"):
         if json_path.name in skip:
             continue
@@ -3972,6 +3973,31 @@ def main():
     with open(contrib_path, "w", encoding="utf-8") as f:
         json.dump(contributions, f, indent=2, ensure_ascii=False)
     print(f"Contributions: {contrib_path.name} ({contrib_path.stat().st_size:,} bytes, {len(contributions)} matches)")
+
+    # ----- VTSR (combat ELO + alpha-stub Wins ELO blend) -----
+    # Pipeline-side, full-corpus, time-ordered. Feeds the All Matches
+    # VTSR Leaderboard. Per the project rule, this is corpus-wide and
+    # NEVER picker-filter aware — the dashboard reads elo_current.json
+    # once per session and passes ratings through the JS aggregator
+    # unchanged. See scripts/elo.py for the algorithm.
+    try:
+        import elo as elo_module
+        elo_current, elo_history = elo_module.compute_elo(all_match_data)
+        elo_current_path = OUTPUT_DIR / "elo_current.json"
+        with open(elo_current_path, "w", encoding="utf-8") as f:
+            json.dump(elo_current, f, indent=2, ensure_ascii=False)
+        elo_history_path = OUTPUT_DIR / "elo_history.json"
+        with open(elo_history_path, "w", encoding="utf-8") as f:
+            json.dump(elo_history, f, indent=2, ensure_ascii=False)
+        rated = elo_current.get("match_count", 0)
+        excl_lpc = elo_current.get("matches_excluded_low_player_count", 0)
+        excl_dur = elo_current.get("matches_excluded_short_duration", 0)
+        n_ratings = len(elo_current.get("ratings", []))
+        print(f"VTSR: {elo_current_path.name} ({n_ratings} players · "
+              f"{rated} rated matches · {excl_lpc} excluded low-player-count · "
+              f"{excl_dur} excluded short-duration)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR ({e}); skipping.")
 
     # Drop a stale seen-players.json from previous pipeline runs (the
     # PIPELINE_VERSION 5 -> 6 bump shipped a `seen-players.json` emit
