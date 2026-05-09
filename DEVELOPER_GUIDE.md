@@ -1556,3 +1556,173 @@ The seed shipped with a VSR Build Tree feature (`generateBuildTree()` and friend
 - `initializeCompareModal` rebinds event listeners on every `displayODFData()` call. Each rebind is benign because the underlying DOM elements are also recreated, but it would be cleaner to attach listeners once. Out of scope for v1.
 - Inline `onclick` handlers on dynamically-emitted HTML depend on the global `window.browser` reference. Refactoring these to `addEventListener` was deemed out of scope; the global is preserved.
 - No ARIA focus traps in the compare modal, no `aria-live` on search results, no explicit `role` on ODF list buttons beyond Bootstrap's defaults. Out of scope for v1.
+
+## 13. VTSR Methodology {#vtsr-methodology}
+
+**VTSR** (VT Stats Rating) is the project's player rating. It's pipeline-emitted, full-corpus, and time-ordered — the dashboard reads `data/processed/elo_current.json` once per session and passes ratings through the All Matches aggregator unchanged. The picker filter narrows the displayed roster only; ratings are corpus-wide.
+
+### 13.1 Final equation
+
+The published rating is a linear blend of two components — a **Wins ELO** ($R^W_i$) and a **Combat ELO** ($R^C_i$):
+
+$$
+\boxed{\;\mathrm{VTSR}_i \;=\; \alpha \cdot R^W_i \;+\; (1 - \alpha) \cdot R^C_i\;}
+$$
+
+v1 ships with $\alpha = 0$. Wins ELO is stubbed at the league anchor 1500 for every player so the blend math runs through unchanged — the day the in-game winner-attestation UI lands in `statsgate`, $\alpha$ bumps to ~0.55 (CS2 Premier-flavored split) and the dashboard text doesn't change.
+
+Linearity is the only blend that preserves the anchor: with $R^W = R^C = 1500$ and any $\alpha$, $\mathrm{VTSR} = 1500$. Geometric and harmonic blends break at zero or have no closed-form interpretation in points.
+
+### 13.2 Combat ELO derivation
+
+Combat ELO updates per match by
+
+$$
+\Delta R^C_{i,\text{raw}} \;=\; K_i \cdot S \cdot (P_i - P_{\text{med}})
+$$
+
+where:
+
+| Symbol | Meaning | Value |
+|---|---|---|
+| $K_i$ | Per-player K-factor (decays with experience) | $\in [12, 52]$ |
+| $S$ | Per-match update scale (`ELO_RATING_SCALE`) | $2.5$ |
+| $P_i$ | Player $i$'s performance index in this match | $\in [-1, +1]$ |
+| $P_{\text{med}}$ | Lobby median performance | $\in [-1, +1]$ |
+
+$S = 2.5$ replaces a buggy $400$ in earlier drafts (which lifted a chess expected-score divisor into the update rule); $400$ would have produced $1000+$ pt swings per match. $S = 2.5$ calibrates so a typical above-median composite gap of $\sim 0.4$ produces a swing of $\sim K$ points — i.e. K is the natural unit of swing.
+
+### 13.3 K-factor decay
+
+$$
+K_i \;=\; K_{\text{base}} \cdot \left(1 - \frac{n_i}{n_i + n_{\text{prior}}}\right) + K_{\text{floor}}
+$$
+
+with $K_{\text{base}} = 40$, $K_{\text{floor}} = 12$, $n_{\text{prior}} = 10$. New players have $K = 52$; after 10 matches K halves toward 32; by 50 matches K $\approx 18.7$.
+
+| Career stage | $K_i$ | Typical $\lvert\Delta R\rvert$ gain | Typical $\lvert\Delta R\rvert$ loss ($R \geq 1150$) |
+|---|---|---|---|
+| 0 matches  | 52   | ~52 | ~44 |
+| 5 matches  | 38.7 | ~39 | ~33 |
+| 20 matches | 25.3 | ~25 | ~22 |
+| 50+ matches | ~18.7 | ~19 | ~16 |
+
+Anchor and curve mirror FIDE / USCF (provisional K=40) and lichess steady-state (K~12–16). A rookie at $\sim 0.4$ above median climbs about 250 points in their first 5 matches; a settled vet swings $\sim 20$ pts/match.
+
+### 13.4 Performance index
+
+Seven combat axes (locked, $\sum w = 1.00$):
+
+| Axis | Weight | Per-match metric (before z-score) |
+|---|---|---|
+| `net_damage_share`  | 0.25 | $(\text{dealt} - \text{received}) / \max(1, \sum_{\text{lobby}} \text{dealt})$ |
+| `kill_rate`         | 0.20 | $\text{kills} / \text{minutes\_played}$ |
+| `accuracy`          | 0.15 | $\text{shots\_hit} / \max(1, \text{shots\_fired})$ |
+| `pvp_share`         | 0.20 | $\text{pvp\_dmg} / \max(1, \text{total\_dmg})$ |
+| `mobility`          | 0.10 | $\text{activity\_score} / 100$ (omit axis if no positioning) |
+| `snipe_bonus`       | 0.05 | $\min(\text{snipes} / 5, 1)$ — capped before z-score |
+| `asset_multiplier`  | 0.05 | $\text{asset\_dmg} / \max(1, \text{dealt})$ |
+
+`pickup_economy` is intentionally **not** an ELO axis (low signal, map-dependent) — pickup + destruction totals stay on `match_contributions.json` so the Career Highlights' Pod Goblin card still has data. The former pickup weight folded into `pvp_share` to lean harder into anti-PvE-farming.
+
+Each axis is computed per-player-per-match, **z-scored within the lobby** (population stdev, ddof=0), clipped to $[-2, +2]$, divided by 2 to land in $[-1, +1]$. The composite is
+
+$$
+P_i \;=\; \sum_{a \in \mathcal{A}_{\text{available}}} \frac{w_a}{\sum_{a' \in \mathcal{A}_{\text{available}}} w_{a'}} \cdot \frac{\mathrm{clip}_{[-2,+2]}(z_a(x_{i,a}))}{2}
+$$
+
+When an axis is missing for the entire lobby (e.g. pre-positioning matches lack `mobility`), its weight redistributes pro-rata to the surviving axes so $\sum w = 1$ always.
+
+**Z-score edge cases**: when every player ties on an axis ($\sigma = 0$), the z-score is undefined; we set every player's contribution on that axis to 0. Same when $\sigma < 10^{-9}$ (numerical noise).
+
+### 13.5 Hope mechanics — loss aversion + soft floor
+
+The raw update is asymmetric: when $\Delta R^C_{i,\text{raw}} < 0$, multiply by a loss-aversion factor $L = 0.85$ AND a soft-floor taper $\varphi(R)$:
+
+$$
+\varphi(R) \;=\; \mathrm{clamp}\!\left(0,\;1,\;\frac{R - F}{W}\right)
+$$
+
+with floor $F = 1000$ and taper window $W = 150$. Final per-match update:
+
+$$
+\boxed{\;\Delta R^C_i \;=\; \begin{cases}
+\Delta R^C_{i,\text{raw}} & \text{if } \Delta R^C_{i,\text{raw}} \geq 0 \\
+\Delta R^C_{i,\text{raw}} \cdot L \cdot \varphi(R^C_i) & \text{otherwise}
+\end{cases}\;}
+$$
+
+So a player at $R = 1000$ losing $-30$ raw drops $0$. At $R = 1075$ they drop $-30 \cdot 0.85 \cdot 0.5 = -12.75$. At $R \geq 1150$ they drop the full asymmetric $-30 \cdot 0.85 = -25.5$. Gains are unaffected.
+
+**Loss aversion**: anchored in Kahneman & Tversky 1979 prospect theory; operational precedent in Marvel Rivals SR (~0.83), Overwatch role queue (~0.85), League of Legends demotion shielding (~0.7). Acceptable cost: ~5–8 pts/player/year of league-wide drift at our cadence. Median $P_{\text{med}}$ drifts up alongside it, so $(P_i - P_{\text{med}})$ stays centered.
+
+**Soft floor**: anchored in FIDE rapid/blitz floors, Glicko-2 RD floors, chess.com / lichess provisional floors. The $1000$ floor is two expected steady-state stdevs below the $1500$ anchor — about one player at our scale. The $150$-pt taper covers the bottom of the wide Tier 5 band so the floor approach is gradual rather than abrupt.
+
+A defensive `R ← max(F, R)` clamp catches float-edge drift below $F$. The taper math drives losses asymptotically to zero at the floor; the clamp is belt-and-suspenders.
+
+### 13.6 Worked example
+
+Synthetic match: VTrider has $n = 32$ matches played, $R^C = 1820$, posts $P = 0.42$ in a lobby with $P_{\text{med}} = 0.05$.
+
+$$
+K_i = 40 \cdot \left(1 - \frac{32}{32 + 10}\right) + 12 = 40 \cdot \frac{10}{42} + 12 \approx 21.5
+$$
+$$
+\Delta R^C_{i,\text{raw}} = 21.5 \cdot 2.5 \cdot (0.42 - 0.05) = 21.5 \cdot 2.5 \cdot 0.37 \approx +19.9
+$$
+
+Gain case: $\Delta R^C_i = +19.9$. New rating $1839.9$.
+
+Same player a few matches later, posts $P = -0.30$ in a peer lobby with $P_{\text{med}} = +0.05$:
+
+$$
+\Delta R^C_{i,\text{raw}} = 21.5 \cdot 2.5 \cdot (-0.35) = -18.8
+$$
+
+Above $1150$, so $\varphi = 1$:
+
+$$
+\Delta R^C_i = -18.8 \cdot 0.85 \cdot 1 = -16.0
+$$
+
+Now suppose a different player at $R = 1075$ also posts $-0.35$ below median with $K = 22$:
+
+$$
+\Delta R^C_{i,\text{raw}} = 22 \cdot 2.5 \cdot (-0.35) = -19.25
+$$
+$$
+\varphi(1075) = \mathrm{clamp}(0, 1, (1075 - 1000) / 150) = 0.5
+$$
+$$
+\Delta R^C_i = -19.25 \cdot 0.85 \cdot 0.5 = -8.18
+$$
+
+Half the loss they'd take above $1150$. New rating $\approx 1066.8$ — still safely above floor.
+
+### 13.7 Tier ladder
+
+Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to give the sub-1350 "training band" room without adding a sixth tier. Tier 1 is open above 1800 so we never need to retro-add tiers.
+
+| Tier | Roman | VTSR range | Width | What it takes |
+|---|---|---|---|---|
+| 1 | I  | $\geq 1800$  | open  | Top of the ladder. Requires sustained $\sim +0.4$ above lobby median across many matches. |
+| 2 | II | 1650 – 1799 | 150   | Consistently above-median performance; clear strength on at least 2–3 axes. |
+| 3 | III | 1500 – 1649 | 150   | League anchor. Every fresh player exits Provisional at the bottom of this band. |
+| 4 | IV | 1350 – 1499 | 150   | Below median, still rated. Loss aversion buffers the slide. |
+| 5 | V  | **1000 – 1349** | **350** | Wide training band. Floor at 1000; losses taper to zero as you approach it. |
+| 0 | ?  | Provisional | —    | $5 \leq \texttt{matches\_played} < 10$. Shown but flagged "rating still settling". |
+
+### 13.8 Match exclusion + provisional rules
+
+- **Excluded** matches (`player_count < 6` OR `duration_sec < 300`) do not increment `matches_played` and contribute no deltas to ratings. They appear in `elo_history.json` with `match_excluded: true` and an empty `deltas` array so the exclusion counters reconcile.
+- **Provisional** badge: rated rows with `matches_played < 10` (`ELO_PROVISIONAL_THRESHOLD`) display a `?` chip. Provisional players ARE rated and ARE shown on the leaderboard (provided they're past `MIN_CAREER_MATCHES = 5`); the chip just signals "rating is still moving fast — interpret with caution".
+- **Leaderboard visibility floor** (`MIN_CAREER_MATCHES = 5`): players with fewer than 5 rated matches in the current scope are hidden from `career_stats[]` and from both leaderboard tables entirely.
+- **Ratings are corpus-wide; the picker filter narrows display only.** A picker filter that narrows to one submitter or one duration band changes which rows appear in the VTSR leaderboard but does NOT recompute ratings against the filtered subset — that would change the meaning of every player's rating depending on which filter they happened to be looking at.
+
+### 13.9 File-format reference
+
+- `data/processed/elo_current.json` — current-state per-player ratings. Schema documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md).
+- `data/processed/elo_history.json` — per-match rating deltas, chronological. One entry per processed match (excluded matches have empty `deltas`).
+
+Source-of-truth implementation: [scripts/elo.py](scripts/elo.py). Constants are exported at module top so they're trivially auditable.
+
