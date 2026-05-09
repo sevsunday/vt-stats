@@ -1,6 +1,6 @@
 ---
 name: All Matches & VTSR Overhaul
-overview: A 10-phase build that flips All Matches to the default landing view, ships a pipeline-side combat ELO ("VTSR") with an alpha-ready Wins-ELO blend slot, adds career-rolled highlights and 12 new cross-match awards, surfaces commander stats, and lands a Meta tab of corpus-level distributions. Each phase is independently shippable in a single reviewable commit.
+overview: An 11-phase build (10 core + optional Phase 11) that flips All Matches to the default landing view, ships pipeline-side VTSR (seven-axis combat ELO, floor 1000 / taper 150), KaTeX methodology UI, career highlights, Commanders/Meta tabs. Pickup stats stay on contributions for highlights only—not in ELO. Each phase is one reviewable commit.
 todos:
   - id: phase1_landing
     content: "Phase 1 - Default landing flip: reorder modal radios in index.html (All matches first, checked), update showLandingModal() default branch in js/app.js, swap the auto-fill hint pattern to the All matches option, leave LANDING_PREF_VERSION untouched. Commit feat(landing): make All Matches the default landing view."
@@ -12,10 +12,10 @@ todos:
     content: "Phase 3 - Aggregator blocks: extend js/all-matches-aggregator.js build() to emit commander_stats {rows, head_to_head, most_commanded_against}, faction_stats {by_team_slot, win_counts}, meta_charts {maps, duration_bands, player_counts, submitters, matches_over_time}. Cascade keptNames through commander_stats. No UI yet. Commit feat(aggregator): emit commander_stats, faction_stats, meta_charts blocks."
     status: pending
   - id: phase4_pipeline_elo
-    content: "Phase 4 - Pipeline-side ELO: create scripts/elo.py with locked constants (anchor 1500, K_base 40, K_floor 12, prior 10, threshold 10, min_player_count 6, min_duration 300, RATING_SCALE 2.5, K_LOSS_AVERSION 0.85, RATING_FLOOR 1200, FLOOR_TAPER_WINDOW 100) and locked combat weights (0.25/0.20/0.15/0.10/0.10/0.10/0.05/0.05). Implement per-axis lobby z-score clip composite, weight redistribution, asymmetric K-decay update with loss aversion + sigmoid floor taper. Stub Wins ELO at 1500 (alpha=0.0). Wire into main() to emit data/processed/elo_current.json (with all hope-mechanic constants surfaced) and data/processed/elo_history.json. Update load_cache_index() skip set. Commit feat(elo): pipeline-side VTSR with combat ELO core, hope mechanics, and alpha-stubbed wins ELO blend."
+    content: "Phase 4 - Pipeline-side ELO: create scripts/elo.py with locked constants (anchor 1500, K_base 40, K_floor 12, prior 10, threshold 10, min_player_count 6, min_duration 300, RATING_SCALE 2.5, K_LOSS_AVERSION 0.85, RATING_FLOOR 1000, FLOOR_TAPER_WINDOW 150) and locked combat weights seven axes sum 1.0: net_damage_share 0.25, kill_rate 0.20, accuracy 0.15, pvp_share 0.20, mobility 0.10, snipe_bonus 0.05, asset_multiplier 0.05 (pickup_economy intentionally omitted from rating; still on contributions for Pod Goblin highlights). Implement per-axis lobby z-score clip composite, weight redistribution, asymmetric K-decay update with loss aversion + linear floor taper. Stub Wins ELO at 1500 (alpha=0.0). Wire into main() to emit data/processed/elo_current.json (with all hope-mechanic constants surfaced) and data/processed/elo_history.json. Update load_cache_index() skip set. Commit feat(elo): pipeline-side VTSR with combat ELO core, hope mechanics, and alpha-stubbed wins ELO blend."
     status: pending
   - id: phase5_vtsr_ui
-    content: "Phase 5 - VTSR Leaderboard UI with 5-tier ladder: insert #section-vtsr card above #section-career in index.html (sortable table with rank/Tier/name/VTSR/Last/Peak/Matches/Trend); add VTSR_TIERS table + resolveTier() + tierProgress() in js/app.js; fetch elo_current.json once per session in loadAllMatches(); renderVtsrLeaderboard() with tier badge column, sparkline trend, provisional chips, and points-to-next-tier tooltip; info-tooltip rendering the boxed VTSR equation + weight table + loss-aversion/floor explanation + tier mini-table + methodology link; --vt-tier-1..5 color tokens and .vt-tier-badge / .vt-vtsr-* styles in css/vtstats-theme.css. Commit feat(all-matches): VTSR leaderboard card with 5-tier ladder, sparkline trend, and inline formula tooltip."
+    content: "Phase 5 - VTSR UI + KaTeX: vendor KaTeX to vendor/katex/; index.html KaTeX CSS+JS; #section-vtsr card; tierBadgeHtml(); renderVtsrLeaderboard(); Tier 5 band 1000–1349; Provisional <10 matches; KaTeX pre-render for info tooltip (seven axes, F=1000/W=150); career table Tier+VTSR columns; .vt-katex-tooltip CSS. Commit feat(all-matches): VTSR leaderboard + KaTeX + career Tier/VTSR columns."
     status: pending
   - id: phase6_career_highlights
     content: "Phase 6 - Career Highlights grid: refactor renderHighlights() in js/app.js with mode='match'|'career' param; add CAREER_HIGHLIGHT_COPY/LABELS/UNITS sibling tables (3 buckets x 3 lines per category); add buildCareerHighlights() to js/all-matches-aggregator.js producing 12 Flavor A career-rolled cards (with floors and Bayesian K/D shrinkage on Hustler) plus 12 Flavor B cross-match-only cards (Champion, Veteran, Workhorse, Carry, Anchor, ISDF/Hadean/Scion Loyalist, Diplomat, Map Master, Streak King, Polymath); insert #section-career-highlights between VTSR card and Career Leaderboard. Commit feat(all-matches): career highlights grid with 24 cards."
@@ -27,10 +27,13 @@ todos:
     content: "Phase 8 - Meta tab: add #all-tab-meta-btn pill and pane; six charts (maps stacked bar by win attribution, faction by team slot dual donut, faction win rate bar, duration histogram, player count bar, matches over time line); single registerTabRenderer call drives all six. Commit feat(all-matches): Meta tab."
     status: pending
   - id: phase9_docs
-    content: "Phase 9 - Public methodology docs: add VTSR Methodology section to docs/DEVELOPER_GUIDE.md with boxed VTSR equation, asymmetric update equation including loss aversion + floor sigmoid, full Combat ELO derivation, weight table, K-decay worked example (gain case AND near-floor loss case), exclusion rules, alpha=0 caveat, hope-mechanics subsection with citations (Kahneman/Tversky, Marvel Rivals, Overwatch, FIDE, Glicko-2, chess.com), tier ladder subsection with the 5-tier table and per-tier narrative, file-format reference; add elo_current.json (with hope-mechanic constants) and elo_history.json schemas plus the new aggregator keys to docs/DATA_DICTIONARY.md; new in-page #vtsr-methodology section in docs.html linkable from the leaderboard tooltip. Commit docs: VTSR methodology, equation, weight table, hope mechanics, and tier ladder."
+    content: "Phase 9 - Docs: DEVELOPER_GUIDE methodology (seven axes, F=1000/W=150, cadence drift disclosure); DATA_DICTIONARY elo schemas + aggregator keys; docs.html #vtsr-methodology with KaTeX + auto-render.min.js + renderMathInElement boot. Commit docs: VTSR methodology + KaTeX on docs."
     status: pending
   - id: phase10_rules
-    content: "Phase 10 - Rules and agent docs: update .cursor/rules/project-overview.mdc with new file locations and Commanders/Meta tabs; .cursor/rules/data-schema.mdc with contribution and ELO schemas; .cursor/rules/filter-contract.mdc with VTSR-is-corpus-wide section; AGENTS.md key conventions for VTSR pipeline ownership and alpha-stub design. Commit docs: register VTSR/ELO and new tabs in project rules and agent docs."
+    content: "Phase 10 - Rules and agent docs: update .cursor/rules/project-overview.mdc with new file locations, Commanders/Meta tabs, vendor/katex/; .cursor/rules/data-schema.mdc with contribution and ELO schemas; .cursor/rules/filter-contract.mdc with VTSR-is-corpus-wide section; AGENTS.md key conventions for VTSR pipeline ownership and alpha-stub design. Commit docs: register VTSR/ELO, KaTeX, and new tabs in project rules and agent docs."
+    status: pending
+  - id: phase11_radar_retrofit
+    content: "Phase 11 (optional): KaTeX-rendered formulas in js/charts-radar.js buildRadarInfoTooltipHtml(); reuse .vt-katex-tooltip. Commit feat(career-radar): KaTeX in radar info tooltip."
     status: pending
 isProject: false
 ---
@@ -43,8 +46,8 @@ isProject: false
 **Goals (locked)**
 - Make All Matches the default landing view, preserving any existing user landing pref.
 - Pipeline-side **VTSR** (VT Stats Rating) anchored at 1500, blending Wins ELO and Combat ELO with the blend formula publicly displayed everywhere; v1 ships `α = 0.0` (Combat-only) with the equation written so a future commit just bumps `α`.
-- **Humane rating dynamics**: asymmetric K-factor (losses cost 85% of gains, prospect-theory grounded) + soft rating floor at 1200 with sigmoid taper (FIDE/Glicko-anchored). Lower-tier players have a concrete floor, not an abyss.
-- **5-tier ladder** rendered alongside VTSR: Living Legend (1800+) / Ace Pilot (1650-1799) / Veteran (1500-1649) / Cadet (1350-1499) / Recruit (1200-1349), with absolute thresholds so improvement is rewarded directly. Provisional badge for `matches_played < 5`.
+- **Humane rating dynamics**: asymmetric K-factor (losses cost 85% of gains, prospect-theory grounded) + soft rating floor at **1000** with **150**-point linear taper toward that floor (chess-style rating insurance). Lower-tier players keep meaningful downward mobility without an abyss.
+- **5-tier ladder** rendered alongside VTSR using numeric labels only (**Tier 1** … **Tier 5**): Tier 1 ≥1800, Tier 2 1650–1799, Tier 3 1500–1649 (anchor band), Tier 4 1350–1499, **Tier 5 1000–1349** (wider bottom band). **Provisional** badge for `matches_played < 10` on rated rows (players with `< MIN_CAREER_MATCHES` stays hidden from tables entirely).
 - A unified **Career Highlights** grid on `#all-tab-overview` with 24 cards: 12 career-rolled siblings of the per-match catalog + 12 net-new cross-match-only awards (The Champion, The Veteran, The Workhorse, The Carry, The Anchor, ISDF/Hadean/Scion Loyalist, The Diplomat, Map Master, Streak King, The Polymath).
 - New **Commanders** tab: leaderboard, head-to-head matrix, faction-picks-per-commander chart. Degrades gracefully on `winner.decided_by === 'unclear'` matches.
 - New **Meta** tab: 6 corpus-distribution charts (maps, faction by team slot, faction win rate, map win rate, duration histogram, player-count distribution).
@@ -62,9 +65,10 @@ isProject: false
 
 - **VTSR is full-corpus, time-ordered, pipeline-emitted.** The aggregator reads `data/processed/elo_current.json` once per session and passes ratings through. Filter narrows display only.
 - **VTSR equation displayed publicly:** $\,\mathrm{VTSR}_i = \alpha \cdot R^W_i + (1 - \alpha) \cdot R^C_i\,$, with $\alpha = 0.0$ in v1. The Wins ELO stub keeps every rating at the 1500 anchor so the blend math is lossless.
-- **Combat ELO** is per-match, lobby-internal z-score composite of 8 axes with provisional K-decay. League anchor 1500. Match-size gate `player_count ≥ 6`. Duration gate `duration_sec ≥ 300`. Per-match update uses `RATING_SCALE = 2.5` (replaces a buggy `· 400` from earlier drafts). Asymmetric K via `K_LOSS_AVERSION = 0.85` and soft-floor sigmoid taper to `RATING_FLOOR = 1200` (window 100).
-- **Tier presentation lives in JS render layer**, not in `elo_current.json` — keeps the JSON schema stable when tier widths are tuned. Single source of truth: `VTSR_TIERS` table in [js/app.js](js/app.js).
-- **`MIN_CAREER_MATCHES = 5`** continues to gate `career_stats[]`. The same threshold gates the VTSR leaderboard display roster (provisional players are still rated; just hidden from the public board).
+- **Combat ELO** is per-match, lobby-internal z-score composite of **seven** combat axes (pickup economy excluded from rating; anti-farming emphasis shifts to **PvP share**). Provisional K-decay. League anchor 1500. Match-size gate `player_count ≥ 6`. Duration gate `duration_sec ≥ 300`. Per-match update uses `RATING_SCALE = 2.5`. Asymmetric K via `K_LOSS_AVERSION = 0.85` and soft-floor linear taper to `RATING_FLOOR = 1000` (`FLOOR_TAPER_WINDOW = 150`; full loss strength resumes at rating ≥ **1150**).
+- **Tier presentation lives in JS render layer**, not in `elo_current.json`. `VTSR_TIERS` in [js/app.js](js/app.js): Tiers 2–4 are 150 pts wide; **Tier 5 spans 1000–1349** (350 pts); Tier 1 open-ended ≥1800.
+- **`MIN_CAREER_MATCHES = 5`** continues to gate `career_stats[]` and both leaderboard tables. Players remain **rated** from match 1 (for ELO history); they only **appear** once they hit 5 rated matches. **Provisional** chips show for rows with `5 ≤ matches_played < 10`.
+- **Corpus cadence expectation**: ~**500–750 league matches recorded per year** (~600 midpoint). Active roster (~25) implies **~190 rated matches/player/year** after gates — K-decay settles quickly; top ratings can reach ~2000+ within a year without inflating `RATING_SCALE`. Mild league-wide inflation from loss aversion is ~**5–8 pts/player/year** at this volume (disclose in methodology).
 - **`PIPELINE_VERSION` bumps `6 → 7`** in this overhaul (Phase 2 contribution shape change forces a one-time full reprocess).
 - **`LANDING_PREF_VERSION` does NOT bump.** Existing users keep their saved choice. Only first-visit default flips.
 - **No new tabs on the per-match dashboard.** Everything new lives under `#all-matches-view`.
@@ -254,25 +258,28 @@ ELO_RATING_SCALE = 2.5
 # Behavioral-economics anchor (Kahneman & Tversky 1979 prospect theory);
 # operational precedent in Marvel Rivals SR, Overwatch role queue, and
 # League of Legends demotion shielding. Mild positive league-wide drift
-# (~1-3 pts/player/year at our cadence) is acceptable inflation.
+# (~5-8 pts/player/year at ~600 league matches/year recorded) is acceptable;
+# disclose in methodology. No need to raise RATING_SCALE for "chess.com spread"
+# at this cadence — the ladder stretches naturally.
 ELO_K_LOSS_AVERSION = 0.85
 
-# Soft rating floor with sigmoid taper. Effective loss multiplier is
+# Soft rating floor with linear taper. Effective loss multiplier is
 # clamp(0, 1, (R_current - FLOOR) / TAPER_WINDOW) -- losses go to zero
-# as a player approaches FLOOR. Anchor for FIDE/Glicko-2/chess.com
-# floor-based "rating insurance" mechanics. Players never drop below
-# FLOOR; the bottom of the public ladder is concretely reachable.
-ELO_RATING_FLOOR = 1200.0
-ELO_FLOOR_TAPER_WINDOW = 100.0  # full losses restored at FLOOR + 100 (1300)
+# as a player approaches FLOOR. WIDER taper (150 vs 100) because Tier 5
+# now spans 1000-1349; keeps floor approach gradual across the band.
+ELO_RATING_FLOOR = 1000.0
+ELO_FLOOR_TAPER_WINDOW = 150.0  # full asymmetric losses restored at FLOOR + 150 (1150)
 
-# Combat composite weights (locked, sum = 1.00)
+# Combat composite weights (locked, sum = 1.00). Seven axes — pickup_economy
+# deliberately omitted from rating (low signal / map-dependent); pickups &
+# destructions remain on contributions for Career Highlights (Pod Goblin).
+# Former pickup weight folded into pvp_share (anti-farming emphasis).
 COMBAT_WEIGHTS = {
     "net_damage_share":  0.25,
     "kill_rate":         0.20,
     "accuracy":          0.15,
-    "pvp_share":         0.10,
+    "pvp_share":         0.20,
     "mobility":          0.10,
-    "pickup_economy":    0.10,
     "snipe_bonus":       0.05,
     "asset_multiplier":  0.05,
 }
@@ -280,7 +287,7 @@ COMBAT_WEIGHTS = {
 ALPHA = 0.0  # v1: Wins ELO stubbed at anchor; bump to 0.55 when winner data backfilled
 ```
 
-**Per-axis transform**: each axis is computed per-player-per-match, then z-scored *within the lobby* (mean / stdev computed over the players in this match only), then clipped to `[-2, +2]`, then divided by 2 to land in `[-1, +1]`. When a match lacks an axis (no positioning data, no snipes), the axis weight is redistributed pro-rata to remaining axes — keeps `Σ w = 1` always.
+**Per-axis transform**: each axis is computed per-player-per-match, then z-scored *within the lobby* (mean / stdev computed over the players in this match only), then clipped to `[-2, +2]`, then divided by 2 to land in `[-1, +1]`. When a match lacks an axis (no positioning data, no snipes), the axis weight is redistributed pro-rata to remaining axes — keeps `Σ w = 1` always. **`pickup_economy` is not an ELO axis** (see `COMBAT_WEIGHTS`).
 
 **Performance index**:
 $$
@@ -297,7 +304,7 @@ $$
 
 with $n_i$ = matches played by player $i$ before this match, $n_\text{prior} = 10$, $S = 2.5$ (`ELO_RATING_SCALE`).
 
-**Loss-aversion + soft-floor taper** applied to the raw update only when negative. Let $L = 0.85$ (`ELO_K_LOSS_AVERSION`), $F = 1200$ (`ELO_RATING_FLOOR`), $W = 100$ (`ELO_FLOOR_TAPER_WINDOW`). Define the floor multiplier:
+**Loss-aversion + soft-floor taper** applied to the raw update only when negative. Let $L = 0.85$ (`ELO_K_LOSS_AVERSION`), $F = 1000$ (`ELO_RATING_FLOOR`), $W = 150$ (`ELO_FLOOR_TAPER_WINDOW`). Define the floor multiplier:
 $$
 \phi(R) \;=\; \mathrm{clamp}\!\left(0,\;1,\;\tfrac{R - F}{W}\right)
 $$
@@ -310,7 +317,9 @@ $$
 \end{cases}\;}
 $$
 
-So a player at $R = 1200$ with a -30 raw delta loses 0; at $R = 1250$ they lose $-30 \cdot 0.85 \cdot 0.5 = -12.75$; at $R = 1300+$ they lose the full asymmetric $-30 \cdot 0.85 = -25.5$. Gains are unaffected.
+So a player at $R = 1000$ with a -30 raw delta loses 0; at $R = 1075$ they lose $-30 \cdot 0.85 \cdot 0.5 = -12.75$ (half taper); at $R \geq 1150$ they lose the full asymmetric $-30 \cdot 0.85 = -25.5$. Gains are unaffected.
+
+**Tier geometry note**: Tier 5 spans **350** rating points (1000–1349) while Tiers 2–4 remain **150** pts wide — intentional beginner-band stretch (chess.com-like “training zone”) without adding a sixth tier.
 
 **Wins ELO** (v1 stub): every player stays at the anchor 1500. `R^W_i = 1500.0` always. The blend math runs through unchanged.
 
@@ -318,14 +327,44 @@ So a player at $R = 1200$ with a -30 raw delta loses 0; at $R = 1250$ they lose 
 
 **Practical movement** (with $S = 2.5$, $L = 0.85$, soft floor):
 
-| Career stage | $K_i$ | Typical $\|P_i - P_\text{med}\|$ | Typical $\|\Delta R\|$ gain | Typical $\|\Delta R\|$ loss (above 1300) |
+| Career stage | $K_i$ | Typical $\|P_i - P_\text{med}\|$ | Typical $\|\Delta R\|$ gain | Typical $\|\Delta R\|$ loss ($R \geq 1150$, full taper) |
 |---|---|---|---|---|
 | 0 matches | 52 | 0.40 | ~52 | ~44 |
 | 5 matches | 38.7 | 0.40 | ~39 | ~33 |
 | 20 matches | 25.3 | 0.40 | ~25 | ~22 |
 | 50+ matches | ~18.7 | 0.40 | ~19 | ~16 |
 
-Top players who consistently post +0.30 above lobby median converge to ~1850-1950 (Tier I). Bottom-quartile players bottom out at the 1200 floor (Tier V).
+Top players who consistently post +0.30 above lobby median converge toward **~1900–2100+** within high-volume years at expected corpus cadence. Bottom-quartile players asymptote toward the **1000** floor (Tier 5).
+
+### Algorithm hardening (locked numerical contracts)
+
+Explicit edge-case rules for `compute_elo()` — deterministic, byte-reproducible output.
+
+**Determinism**
+- Sort `all_match_data` by `(match_date, match_id)` before the rating loop. Composite key tiebreaks same-second imports.
+- Use **population stdev** (`numpy.std(ddof=0)`).
+- `float64` internally; round displayed `vtsr` to one decimal in JSON.
+
+**Per-axis preprocessing (before z-score)** — only the **seven** `COMBAT_WEIGHTS` axes (no `pickup_economy` in ELO):
+- `net_damage_share` = `(damage_dealt - damage_received) / max(1, sum_lobby_damage_dealt)`
+- `kill_rate` = `kills / minutes_played`
+- `accuracy` = `direct_hits / max(1, shots_fired)`
+- `pvp_share` = `pvp_damage / max(1, total_damage_dealt)`
+- `mobility` = `activity_score / 100` (omit axis if no positioning)
+- `snipe_bonus` = `min(snipes / 5, 1)` before z-score
+- `asset_multiplier` = `asset_damage / max(1, damage_dealt)`
+
+**Z-score edge cases** — σ = 0 or `< 1e-9` ⇒ all players get z = 0 on that axis.
+
+**Weight redistribution** — missing lobby-wide axis ⇒ renormalize remaining weights. If **all seven** axes unavailable (pathological), `P_i = 0`, log warning, no rating change.
+
+**Match exclusion** — excluded matches do not increment `matches_played`; `elo_history` row may still exist with `match_excluded: true` and empty `deltas`.
+
+**Floor enforcement** — after update, `R^C_i ← max(ELO_RATING_FLOOR, R^C_i)` with `F = 1000` (belt-and-suspenders vs float edge).
+
+**Bayesian K/D** (Career Hustler / shared helper): \(\widetilde{KD}_i = (K_i + 10\bar{KD}) / (D_i + 10)\).
+
+**Identity** — primary key `steam64`; `name` fallback for legacy rows.
 
 ### Output files
 
@@ -339,8 +378,8 @@ Wire `compute_elo(all_match_data)` into `main()` of [scripts/process_stats.py](s
   "anchor": 1500.0,
   "rating_scale": 2.5,
   "k_loss_aversion": 0.85,
-  "rating_floor": 1200.0,
-  "floor_taper_window": 100.0,
+  "rating_floor": 1000.0,
+  "floor_taper_window": 150.0,
   "computed_at": "<ISO8601>",
   "match_count": 50,
   "matches_excluded_low_player_count": 3,
@@ -380,118 +419,95 @@ Mirror the cache-invalidating cleanup pattern at lines 3937-3945 — if a stale 
 
 Commit: `feat(elo): pipeline-side VTSR with combat ELO core and alpha-stubbed wins ELO blend`.
 
-## Phase 5 — VTSR Leaderboard UI (with 5-tier ladder)
+## Phase 5 — VTSR Leaderboard UI (5-tier ladder + KaTeX)
 
-Files: [index.html](index.html), [js/app.js](js/app.js), [css/vtstats-theme.css](css/vtstats-theme.css).
+Files: [index.html](index.html), [js/app.js](js/app.js), [css/vtstats-theme.css](css/vtstats-theme.css), new [vendor/katex/](vendor/katex/) directory.
+
+### 5.0 Vendor KaTeX (first consumer)
+
+**KaTeX** (v0.16.x) vendored under `vendor/katex/` — synchronous `katex.renderToString()` for Bootstrap HTML tooltips; **MathJax rejected** (larger, async FOUC risk).
+
+```
+vendor/katex/
+  katex.min.css
+  katex.min.js
+  contrib/auto-render.min.js   # Phase 9 docs.html only
+  fonts/
+  LICENSE
+```
+
+In [index.html](index.html) `<head>`:
+
+```html
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<script defer src="vendor/katex/katex.min.js"></script>
+```
+
+Do **not** load auto-render on the dashboard — tooltip math is pre-rendered in JS.
 
 ### 5.1 Tier ladder (locked)
 
-The leaderboard surfaces a 5-tier classification driven by absolute VTSR (not percentile, so improvement actually moves players up). Tier III starts at the league anchor 1500 — every fresh player exits Provisional at the bottom edge of "Veteran".
+Numeric **Tier 1–Tier 5** only. Tier 5 is **350 pts wide** (1000–1349); Tiers 2–4 stay **150** pts.
 
-| Tier | Roman | Name | VTSR Range | CSS token |
+| Tier | Roman | Range | Width | CSS |
 |---|---|---|---|---|
-| 1 | I | **Living Legend** | ≥ 1800 | `--vt-tier-1` (gold) |
-| 2 | II | **Ace Pilot** | 1650 – 1799 | `--vt-tier-2` (electric cyan/silver) |
-| 3 | III | **Veteran** | 1500 – 1649 | `--vt-tier-3` (project blue, anchor) |
-| 4 | IV | **Cadet** | 1350 – 1499 | `--vt-tier-4` (warm amber) |
-| 5 | V | **Recruit** | 1200 – 1349 | `--vt-tier-5` (muted slate) |
-| 0 | — | **Provisional** | any (matches_played < 5) | neutral muted |
-
-Tier widths are 150 VTSR ≈ one expected steady-state stdev. T1 is open-ended above 1800 to leave headroom for future legends without re-tiering.
-
-Pure JS render-layer module added near the top of [js/app.js](js/app.js) (kept render-layer because tier thresholds are presentation policy, not pipeline data — keeps `elo_current.json` schema stable when tuning):
+| 1 | I | ≥ 1800 | open | `--vt-tier-1` |
+| 2 | II | 1650–1799 | 150 | `--vt-tier-2` |
+| 3 | III | 1500–1649 | 150 | `--vt-tier-3` |
+| 4 | IV | 1350–1499 | 150 | `--vt-tier-4` |
+| 5 | V | **1000–1349** | **350** | `--vt-tier-5` |
+| 0 | ? | Provisional | — | muted |
 
 ```js
 const VTSR_TIERS = [
-  { id: 1, name: 'Living Legend', short: 'I',   min: 1800, max: Infinity, token: '--vt-tier-1' },
-  { id: 2, name: 'Ace Pilot',     short: 'II',  min: 1650, max: 1800,     token: '--vt-tier-2' },
-  { id: 3, name: 'Veteran',       short: 'III', min: 1500, max: 1650,     token: '--vt-tier-3' },
-  { id: 4, name: 'Cadet',         short: 'IV',  min: 1350, max: 1500,     token: '--vt-tier-4' },
-  { id: 5, name: 'Recruit',       short: 'V',   min: 1200, max: 1350,     token: '--vt-tier-5' },
+  { id: 1, label: 'Tier 1', short: 'I',   min: 1800, max: Infinity, token: '--vt-tier-1' },
+  { id: 2, label: 'Tier 2', short: 'II',  min: 1650, max: 1800,     token: '--vt-tier-2' },
+  { id: 3, label: 'Tier 3', short: 'III', min: 1500, max: 1650,     token: '--vt-tier-3' },
+  { id: 4, label: 'Tier 4', short: 'IV',  min: 1350, max: 1500,     token: '--vt-tier-4' },
+  { id: 5, label: 'Tier 5', short: 'V',   min: 1000, max: 1350,     token: '--vt-tier-5' },
 ];
 function resolveTier(vtsr, matchesPlayed) {
-  if (matchesPlayed < 5) return { id: 0, name: 'Provisional', short: '—', token: null };
+  if (matchesPlayed < 10) return { id: 0, label: 'Provisional', short: '?', token: null };
   return VTSR_TIERS.find(t => vtsr >= t.min && vtsr < t.max)
     || VTSR_TIERS[VTSR_TIERS.length - 1];
 }
-function tierProgress(vtsr, tier) {
-  if (tier.id === 1) return { toNext: null, fromCurrent: vtsr - tier.min };  // open-ended top
-  if (tier.id === 0) return { toNext: null, fromCurrent: null };
-  const span = tier.max - tier.min;
-  const into = vtsr - tier.min;
-  return { toNext: tier.max - vtsr, fromCurrent: into, pct: into / span };
-}
+function tierProgress(vtsr, tier) { /* unchanged — Infinity tier.id===1 branch */ }
 ```
 
 ### 5.2 Card markup
 
-In [index.html](index.html), insert a new card immediately above `#section-career` (line 824):
+Insert `#section-vtsr` immediately above `#section-career` ([index.html](index.html) ~824): sortable table columns `#`, Tier, Player, VTSR, Last, Peak, Matches, Trend — same skeleton as prior plan.
 
-```html
-<div class="card mb-4" id="section-vtsr">
-  <div class="card-header d-flex align-items-center justify-content-between">
-    <div class="d-flex align-items-center gap-2">
-      <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR Leaderboard</h5>
-      <i class="bi bi-info-circle vt-col-info"
-         data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-         id="vtsr-info-tooltip" title="Loading..."></i>
-    </div>
-    <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-  </div>
-  <div class="card-body table-responsive">
-    <table id="vtsr-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th class="text-center">Tier</th>
-          <th data-sort="name">Player</th>
-          <th data-sort="vtsr" class="text-end sort-active">VTSR</th>
-          <th data-sort="last_delta" class="text-end">Last</th>
-          <th data-sort="peak_vtsr" class="text-end">Peak</th>
-          <th data-sort="matches_played" class="text-end">Matches</th>
-          <th class="text-end">Trend</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-</div>
-```
+### 5.3 Provisional vs visibility
 
-### 5.3 Wiring
+| Constant | Value | Effect |
+|---|---|---|
+| `MIN_CAREER_MATCHES` | 5 | Hidden from career/VTSR tables until reached |
+| `ELO_PROVISIONAL_THRESHOLD` | 10 | `?` Provisional chip for matches_played 5–9 |
 
-In [js/app.js](js/app.js):
+### 5.4 Wiring ([js/app.js](js/app.js))
 
-- Load `data/processed/elo_current.json` once per session in `loadAllMatches()` (around line 2314 alongside the contributions fetch). Cache on `window.__vtElo`.
-- New `renderVtsrLeaderboard(elo, careerStats)` rendered alongside `renderCareerTable(data.career_stats)` at line 2405. Joins ELO ratings to career rows by `steam64` (fallback `name`) and emits a sortable table. Each row's Tier cell renders a `<span class="vt-tier-badge vt-tier-${tier.id}">` carrying the Roman numeral; a Bootstrap tooltip on the chip shows `"Tier ${tier.id}: ${tier.name} · ${tier.min}-${tier.max} VTSR · ${toNext} pts to ${nextTierName}"` (or `"${fromFloor} pts above floor"` for Tier V). Provisional rows get a `vt-vtsr-provisional` chip with a `"Play ${5 - matches_played} more matches to enter the ladder"` tooltip. The Trend column renders an inline 10-point sparkline canvas from `win_history`. Clicking a row scrolls the Career Leaderboard to that player.
-- The info-tooltip renders the boxed VTSR equation HTML with the weight table, the loss-aversion + soft-floor explanation, the tier ladder mini-table, and the v1 α=0 caveat. Cache the HTML in a module-level constant. Reuses the same tooltip pattern as the career-radar info icon at lines 4621-4632. Includes a "Read the full methodology" link to `docs.html#vtsr-methodology`.
-- New sort key `tier`: tier ascending/descending sorts by `tier.id` first, then VTSR within tier as tiebreaker.
+- Fetch `elo_current.json` in `loadAllMatches()`, cache `window.__vtElo`. **404**: hide `#section-vtsr`; career Tier/VTSR columns show `—` (see 5.7).
+- `renderVtsrLeaderboard()` + **`tierBadgeHtml(tier)`** shared helper for badge HTML.
+- Tier tooltip: `${tier.label}`, bounds; Tier 5 mentions **1000** floor band.
+- Sort **tier** descending ⇒ Tier 1 first; tiebreak VTSR desc.
+- Sparkline: last 10 `win_history` deltas.
 
-### 5.4 CSS
+### 5.5 KaTeX methodology tooltip
 
-In [css/vtstats-theme.css](css/vtstats-theme.css), add:
+Pre-render at init: blend equation, update equation, **seven-axis** weight table, loss aversion + **F=1000 / W=150**, Tier mini-table, α=0 caveat, link `docs.html#vtsr-methodology`. `data-bs-html="true"`, `data-bs-custom-class="vt-katex-tooltip"`.
 
-```css
-:root {
-  --vt-tier-1: <gold>;       /* Living Legend  -- pick from existing palette */
-  --vt-tier-2: <silver-cyan>;/* Ace Pilot */
-  --vt-tier-3: <kb-primary>; /* Veteran -- match anchor color */
-  --vt-tier-4: <warm-amber>; /* Cadet */
-  --vt-tier-5: <muted-slate>;/* Recruit */
-}
-.vt-tier-badge { /* Roman numeral chip with token-driven background */ }
-.vt-tier-1 { background: var(--vt-tier-1); }
-/* ... */
-.vt-tier-5 { background: var(--vt-tier-5); }
-.vt-vtsr-provisional   { /* neutral muted chip */ }
-.vt-vtsr-sparkline     { /* inline 10-point trend canvas */ }
-.vt-vtsr-delta-positive { color: var(--kb-success); }
-.vt-vtsr-delta-negative { color: var(--kb-danger); }
-```
+CSS: `.vt-katex-tooltip`, `:root .katex { color: inherit; }` (theme-aware).
 
-Color tokens borrow from the existing `--kb-*` palette where possible (T3 should use the project blue so the anchor tier matches the brand). Final hex values picked during phase 5 implementation.
+### 5.6 Tier + VTSR leaderboard CSS
 
-Commit: `feat(all-matches): VTSR leaderboard card with 5-tier ladder, sparkline trend, and inline formula tooltip`.
+`--vt-tier-1` … `--vt-tier-5`, `.vt-tier-badge`, `.vt-vtsr-provisional`, `.vt-vtsr-sparkline`, delta colors — same as compact plan.
+
+### 5.7 Career Leaderboard columns
+
+On `#career-table`: add **Tier** + **VTSR** columns (leftmost stats after Rank/Name). Reuse **`tierBadgeHtml()`**. Sort handlers for `tier` and `vtsr`. Join ELO by steam64.
+
+Commit: `feat(all-matches): VTSR leaderboard with KaTeX tooltip, 5-tier ladder (Tier 5 wide), career-table Tier+VTSR columns (vendors KaTeX)`.
 
 ## Phase 6 — Career Highlights grid
 
@@ -623,14 +639,14 @@ Explicit content:
 - The boxed final equation: $\mathrm{VTSR}_i = \alpha \cdot R^W_i + (1 - \alpha) \cdot R^C_i$, with the v1 α=0 note and the "future α=0.55 once winner-attestation is backfilled" forward-statement.
 - The full Combat ELO derivation: per-axis z-score-clip composite, K-decay curve with worked example, exclusion rules, anchor.
 - The weight table copied verbatim from [scripts/elo.py](scripts/elo.py) `COMBAT_WEIGHTS`.
-- The boxed asymmetric update equation including loss aversion ($L = 0.85$) and soft-floor sigmoid ($\phi(R)$).
+- The boxed asymmetric update equation including loss aversion ($L = 0.85$) and soft-floor linear taper $\phi(R)$ with $F=1000$, $W=150$.
 - A worked example: walk one synthetic match (e.g. "VTrider posts P=0.42, lobby median=0.05, K=22") through both a gain case and a near-floor loss case.
 - **Hope mechanics** subsection — explain why losses are softened and the floor exists, with citations:
   - Loss aversion (Kahneman & Tversky 1979 *Prospect Theory*; operational precedent in Marvel Rivals SR, Overwatch role queue, League of Legends demotion shielding).
   - Rating floors (FIDE rapid/blitz floor mechanics, Glicko-2 RD floors, chess.com / Lichess provisional floors).
-  - Honest disclosure that loss aversion produces ~1-3 points/year of league-wide drift; tier thresholds may be re-anchored once N grows past 50 active players.
-- **Tier ladder** subsection — the full 5-tier table from Phase 5.1 with name, range, and a narrative paragraph per tier. Explicitly state these are absolute thresholds (a player can sit in T2 alone if everyone else is T3+); tiers describe skill, not relative position.
-- The provisional badge rule, the floor (`MIN_CAREER_MATCHES = 5`), and the "ratings are corpus-wide; the picker filter narrows display only" caveat in bold.
+  - Honest disclosure that loss aversion produces roughly **5–8 points/player/year** of league-wide drift at ~600 league matches/year recorded (~500–750 band); tier thresholds may be re-anchored if the roster grows past ~50 active players.
+- **Tier ladder** subsection — the table from Phase 5.1 (**Tier 1–5**, no flavor names), note Tier 5 width (350). Narrative per tier focuses on skill band, not nicknames.
+- The provisional badge rule (`matches_played < 10` on rated matches), **leaderboard visibility** floor (`MIN_CAREER_MATCHES = 5`), and the "ratings are corpus-wide; the picker filter narrows display only" caveat in bold.
 - File-format reference: `data/processed/elo_current.json` and `data/processed/elo_history.json`.
 
 ### [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md): new entries
@@ -640,11 +656,30 @@ Explicit content:
 - New aggregator output keys: `commander_stats`, `faction_stats`, `meta_charts`, `career_highlights`.
 - Updated contribution shape entries (the new fields from Phase 2).
 
-### [docs.html](docs.html): new in-page navigable section
+### [docs.html](docs.html): `#vtsr-methodology` + KaTeX auto-render
 
-Mirror the existing one-page-doc pattern. Anchor `#vtsr-methodology` linkable from the leaderboard tooltip ("Read the full methodology"). Renders a TOC + the same equation + weight table HTML-rendered (the source-of-truth markdown stays in `DEVELOPER_GUIDE.md`).
+Load KaTeX CSS + `katex.min.js` + `contrib/auto-render.min.js` in `<head>`. Boot script:
 
-Commit: `docs: VTSR methodology, equation, weight table, and exclusion rules`.
+```js
+document.addEventListener('DOMContentLoaded', () => {
+  if (typeof renderMathInElement === 'function') {
+    renderMathInElement(document.body, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\[', right: '\\]', display: true },
+        { left: '\\(', right: '\\)', display: false },
+      ],
+      throwOnError: false,
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+    });
+  }
+});
+```
+
+Anchor `#vtsr-methodology` linked from the dashboard tooltip. Markdown in `DEVELOPER_GUIDE.md` can use `$...$` / `$$...$$` for parity with GitHub rendering.
+
+Commit: `docs: VTSR methodology with KaTeX on docs.html`.
 
 ## Phase 10 — Rules + agent docs
 
@@ -652,12 +687,20 @@ Files: [AGENTS.md](AGENTS.md), [.cursor/rules/project-overview.mdc](.cursor/rule
 
 Concrete updates:
 
-- **`project-overview.mdc`**: append VTSR / ELO file locations to "Key File Locations" (`scripts/elo.py`, `data/processed/elo_current.json`, `data/processed/elo_history.json`). Add the Commanders + Meta tabs to the architecture summary. Update the Match Highlights paragraph to note the Career Highlights sibling.
+- **`project-overview.mdc`**: append `scripts/elo.py`, `data/processed/elo_current.json`, `elo_history.json`, **`vendor/katex/`**; Commanders + Meta tabs; Career Highlights sibling note.
 - **`data-schema.mdc`**: register the contribution shape additions and the ELO output schemas.
 - **`filter-contract.mdc`**: add a new section "VTSR Filter Behavior — Always Full-Corpus" explicitly stating the picker filter narrows the displayed VTSR roster but never recomputes ratings. Cite the All-Matches banner copy that surfaces this to the user.
 - **`AGENTS.md`**: update the "Key Conventions" bullets to cover (a) VTSR is corpus-wide and pipeline-emitted, (b) the JS aggregator passes ELO through unchanged, (c) the α-stub design and how to bump it.
 
-Commit: `docs: register VTSR/ELO and Commanders/Meta tabs in project rules and agent docs`.
+Commit: `docs: register VTSR/ELO, KaTeX vendor, Commanders/Meta in rules and AGENTS.md`.
+
+## Phase 11 — Career Radar tooltip retrofit (optional)
+
+Files: [js/charts-radar.js](js/charts-radar.js), [css/vtstats-theme.css](css/vtstats-theme.css).
+
+After Phase 5, optionally replace prose-only math in `buildRadarInfoTooltipHtml()` with `katex.renderToString()` snippets (Survivability blend, Bayesian shrinkage). Reuse `.vt-katex-tooltip`. Non-blocking.
+
+Commit: `feat(career-radar): KaTeX in Combat Radar info tooltip`.
 
 ## Verification checklist (no commit)
 
@@ -669,9 +712,9 @@ After each phase, the user runs through a smoke checklist:
 
 **Phase 3**: Console: `window.VTAggregate.build(window.__vtContributions, Object.keys(window.__vtContributions))` returns object with the three new top-level keys populated.
 
-**Phase 4**: `data/processed/elo_current.json` exists with `match_count`, `weights`, `rating_scale: 2.5`, `k_loss_aversion: 0.85`, `rating_floor: 1200.0`, and a non-empty `ratings[]`. All `wins_elo` values equal 1500.0. All `vtsr === combat_elo` (because α=0). No rating sits below 1200. Re-running the pipeline is deterministic. Spot-check: pick the bottom-rated player; their `last_delta` on a losing match should be visibly smaller than their gains on a winning match of similar magnitude.
+**Phase 4**: `data/processed/elo_current.json` exists with `match_count`, `weights`, `rating_scale: 2.5`, `k_loss_aversion: 0.85`, `rating_floor: 1000.0`, `floor_taper_window: 150.0`, and a non-empty `ratings[]`. All `wins_elo` values equal 1500.0. All `vtsr === combat_elo` (because α=0). No rating sits below 1000 (defensive clamp). Re-running the pipeline is deterministic. Spot-check near-floor loss taper at $R \approx 1075$ vs full asymmetric loss at $R \geq 1150$.
 
-**Phase 5**: VTSR Leaderboard card renders above the Career Leaderboard. Tier badge column renders Roman-numeral chips colored by `--vt-tier-*` token. Hover on a tier chip shows points-to-next-tier. Sort works on every column including the new Tier column. Sparkline column renders. Info tooltip shows the boxed equation, the loss-aversion + floor explanation, the tier mini-table, and a "Read the full methodology" link to `docs.html#vtsr-methodology`. Provisional `—` chip appears on rows with `matches_played < 5`. Sanity: Tier III should contain the bulk of the active roster; Tier I likely empty or 1 player; Tier V likely 1-2 players.
+**Phase 5**: VTSR card + KaTeX tooltip (no raw LaTeX leakage). Career table shows Tier+VTSR columns with matching badges. Provisional `?` for 5–9 matches. **404 `elo_current.json`**: VTSR card hidden; career columns `—`. Tier sort: Tier 1 first when descending.
 
 **Phase 6**: Career Highlights card renders 12-24 cards depending on data availability. Cards self-omit when floor isn't met. Copy lines vary across categories.
 
@@ -723,4 +766,4 @@ flowchart LR
   P9 --> P10
 ```
 
-P1 ships standalone. P2 is foundation. P3 and P4 can ship in parallel after P2. P5/P6/P7/P8 are UI fan-out, each shippable independently once their prereqs land. P9/P10 close the loop.
+P1 ships standalone. P2 is foundation. P3 ∥ P4 after P2. P5–P8 fan-out. P9/P10 close the loop. **P11** optional polish anytime after P5. Monitor `elo_history.json` size (~1 MB/year at expected cadence).
