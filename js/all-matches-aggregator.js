@@ -85,6 +85,12 @@
       // entry now; we increment the matching counter per match.
       matches_as_commander: 0,
       matches_as_thug: 0,
+      // Role-split totals for the Commanders tab averages
+      // (avg_dealt / avg_kills as commander vs thug).
+      cmdr_total_dealt: 0,
+      cmdr_total_kills: 0,
+      thug_total_dealt: 0,
+      thug_total_kills: 0,
       // Faction match counts keyed by the team-faction code map from the
       // pipeline ('i' / 'e' / 'f' for ISDF / Hadean / Scion). Numeric
       // 1/2/3 keys are intentionally avoided in favor of the pipeline's
@@ -140,6 +146,38 @@
     return out;
   }
 
+  // Pure-JS ISO 8601 week id. Mirrors strftime("%G-W%V"): the year here is
+  // the ISO week-numbering year (not the calendar year), so a Jan 1 that
+  // belongs to the prior year's last week renders as e.g. "2025-W53".
+  function isoWeek(dateStr) {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    // Shift to nearest Thursday so the week-number calculation lines up
+    // with ISO 8601 (week starts Monday, year-numbering follows Thursday).
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return d.getUTCFullYear() + '-W' + String(weekNo).padStart(2, '0');
+  }
+
+  // Bucket a duration in seconds into one of four canonical bands. Mirrors
+  // the duration histogram on the Meta tab; also mirrors the picker
+  // facet's existing bands so the labels stay consistent.
+  function durationBand(durationSec) {
+    const m = (durationSec || 0) / 60;
+    if (m < 5)  return 'under5';
+    if (m < 10) return '5to10';
+    if (m < 15) return '10to15';
+    return '15plus';
+  }
+
+  // Stable, deterministic key for a commander head-to-head pair (sorted
+  // alphabetically so {a, b} and {b, a} bucket together).
+  function pairKey(a, b) {
+    return a < b ? a + '\u0000' + b : b + '\u0000' + a;
+  }
+
   /**
    * Build the All Matches aggregate from a contributions map and a list
    * of match-file ids to include. Pure: no DOM or fetch side effects.
@@ -165,6 +203,25 @@
     let totalSentinelDamageDropped = 0;
     const matchesWithSentinel = [];
 
+    // ---- Phase 3 accumulators ----
+    // Commander head-to-head pairings. Key = sorted-name pair joined by
+    // a NUL separator; value = { a, b, matches, a_wins, b_wins, contested }.
+    // We only update when both teams have a known commander in the match.
+    const commanderPairs = new Map();
+    // faction_stats: per-team-slot faction picks + per-faction win/loss
+    // bookkeeping, keyed by canonical lowercase faction code ('i'/'e'/'f').
+    const factionByTeamSlot = { 1: { i: 0, e: 0, f: 0 }, 2: { i: 0, e: 0, f: 0 } };
+    const factionWinCounts  = { i: { wins: 0, losses: 0, determined: 0 },
+                                e: { wins: 0, losses: 0, determined: 0 },
+                                f: { wins: 0, losses: 0, determined: 0 } };
+    // meta_charts: per-map roll, duration histogram, player count histogram,
+    // submitter histogram, matches-over-time (ISO week buckets).
+    const mapRows = new Map(); // map_file -> { count, wins_t1, wins_t2, contested, unclear, total_duration_sec }
+    const durationBands = { under5: 0, '5to10': 0, '10to15': 0, '15plus': 0 };
+    const playerCounts  = Object.create(null);
+    const submitterCounts = new Map(); // submitter -> count
+    const overTimeWeeks  = new Map();  // 'YYYY-Www' -> count
+
     // Iterate in the order ids were passed; the final career_stats /
     // weapon_meta sorts are deterministic regardless of iteration order
     // but we still preserve the caller's order for any best-match ties.
@@ -185,6 +242,79 @@
       totalSentinelDamageDropped += sCount;
       if (sCount > 0 && m.id) matchesWithSentinel.push(m.id);
 
+      // ---- Phase 3: match-level rollups for meta + faction blocks ----
+      const winner = m.winner || {};
+      const decidedBy = winner.decided_by || 'unclear';
+      const winningTeam = decidedBy === 'unclear' ? null : winner.team;
+      const teamFactions = m.team_factions || {};
+      // Lowercase letter codes; null for unknown so downstream contains() checks
+      // safely degrade (don't bump 'i'/'e'/'f' counters for unknown factions).
+      const t1Faction = ((teamFactions['1'] || {}).code || '').toLowerCase() || null;
+      const t2Faction = ((teamFactions['2'] || {}).code || '').toLowerCase() || null;
+      if (t1Faction && factionByTeamSlot[1][t1Faction] != null) factionByTeamSlot[1][t1Faction] += 1;
+      if (t2Faction && factionByTeamSlot[2][t2Faction] != null) factionByTeamSlot[2][t2Faction] += 1;
+      if (winningTeam === 1 || winningTeam === 2) {
+        const winFaction = winningTeam === 1 ? t1Faction : t2Faction;
+        const losFaction = winningTeam === 1 ? t2Faction : t1Faction;
+        if (winFaction && factionWinCounts[winFaction]) {
+          factionWinCounts[winFaction].wins      += 1;
+          factionWinCounts[winFaction].determined += 1;
+        }
+        if (losFaction && factionWinCounts[losFaction]) {
+          factionWinCounts[losFaction].losses     += 1;
+          factionWinCounts[losFaction].determined += 1;
+        }
+      }
+
+      // Per-map roll (used by Meta tab + Map Master highlight).
+      let mr = mapRows.get(m.map);
+      if (!mr) { mr = { count: 0, wins_t1: 0, wins_t2: 0, contested: 0, unclear: 0, total_duration_sec: 0 }; mapRows.set(m.map, mr); }
+      mr.count += 1;
+      mr.total_duration_sec += m.duration_sec || 0;
+      if (decidedBy === 'unclear')      mr.unclear  += 1;
+      else if (decidedBy === 'contested') mr.contested += 1;
+      else if (winningTeam === 1)       mr.wins_t1  += 1;
+      else if (winningTeam === 2)       mr.wins_t2  += 1;
+
+      // Duration / player-count / submitter / over-time histograms.
+      durationBands[durationBand(m.duration_sec)] += 1;
+      const pc = String(m.player_count || 0);
+      playerCounts[pc] = (playerCounts[pc] || 0) + 1;
+      if (m.submitter) submitterCounts.set(m.submitter, (submitterCounts.get(m.submitter) || 0) + 1);
+      const wk = isoWeek(m.date);
+      if (wk) overTimeWeeks.set(wk, (overTimeWeeks.get(wk) || 0) + 1);
+
+      // Commander head-to-head: pair team-1 commander (slot 1) with team-2
+      // commander (slot 6) when both are present in this match's leaderboard.
+      const lb = m.leaderboard || [];
+      const cmdr1 = lb.find(p => p && p.slot === 1);
+      const cmdr2 = lb.find(p => p && p.slot === 6);
+      if (cmdr1 && cmdr2 && cmdr1.name && cmdr2.name && cmdr1.name !== cmdr2.name) {
+        const sortedAB = cmdr1.name < cmdr2.name ? [cmdr1.name, cmdr2.name] : [cmdr2.name, cmdr1.name];
+        const key = pairKey(cmdr1.name, cmdr2.name);
+        let pair = commanderPairs.get(key);
+        if (!pair) {
+          pair = { a: sortedAB[0], b: sortedAB[1], matches: 0, a_wins: 0, b_wins: 0, contested: 0 };
+          commanderPairs.set(key, pair);
+        }
+        pair.matches += 1;
+        if (decidedBy === 'contested') pair.contested += 1;
+        if (winningTeam === 1) {
+          if (cmdr1.name === pair.a) pair.a_wins += 1; else pair.b_wins += 1;
+        } else if (winningTeam === 2) {
+          if (cmdr2.name === pair.a) pair.a_wins += 1; else pair.b_wins += 1;
+        }
+      }
+
+      // Build a quick per-team name index so the player loop can populate
+      // teammates_seen without an inner re-walk per player.
+      const teammatesByTeam = { 1: [], 2: [] };
+      for (const lp of lb) {
+        if (!lp || !lp.name) continue;
+        const t = lp.team;
+        if (t === 1 || t === 2) teammatesByTeam[t].push(lp.name);
+      }
+
       for (const p of (m.leaderboard || [])) {
         const pid = p.player_id || '';
         let c = career.get(pid);
@@ -194,6 +324,9 @@
           career.set(pid, c);
         }
         c.name = p.name || c.name;
+        // Steam64 is best-effort: pre-Phase-2 contributions don't carry it.
+        // Once seen, lock it in so renames don't lose the identity.
+        if (p.steam64 && !c.steam64) c.steam64 = p.steam64;
         c.matches_played += 1;
         c.total_dealt          += p.dealt          || 0;
         c.total_received       += p.received       || 0;
@@ -207,6 +340,59 @@
         c.total_kills          += p.kills          || 0;
         c.total_deaths         += p.deaths         || 0;
         c.total_pickups        += p.pickups        || 0;
+
+        // ---- Phase 3: commander/faction/win/streak/teammate roll-up ----
+        // Snipes & destructions per match — fed by the Phase 2 contribution-shape additions.
+        c.total_snipes       += (m.snipes_by_player              || {})[p.name] || 0;
+        c.total_destructions += (m.powerup_destructions_by_player || {})[p.name] || 0;
+
+        // Role split. `is_commander` was added to leaderboard entries in Phase 2.
+        if (p.is_commander) {
+          c.matches_as_commander += 1;
+          c.cmdr_total_dealt += p.dealt || 0;
+          c.cmdr_total_kills += p.kills || 0;
+        } else {
+          c.matches_as_thug += 1;
+          c.thug_total_dealt += p.dealt || 0;
+          c.thug_total_kills += p.kills || 0;
+        }
+
+        // Faction this player played as this match. Read from team_factions
+        // by their team slot (not from any per-player field — the player
+        // doesn't choose faction, the team does).
+        const myTeam = p.team;
+        const myFaction = myTeam === 1 ? t1Faction : myTeam === 2 ? t2Faction : null;
+        if (myFaction && c.faction_match_count[myFaction] != null) {
+          c.faction_match_count[myFaction] += 1;
+        }
+
+        // Teammates: every other player on the same team this match.
+        if (myTeam === 1 || myTeam === 2) {
+          for (const tn of teammatesByTeam[myTeam]) {
+            if (tn && tn !== p.name) c.teammates_seen.add(tn);
+          }
+        }
+
+        // Per-map history for Map Master.
+        let mp = c.maps_played.get(m.map);
+        if (!mp) { mp = { count: 0, wins: 0, losses: 0, contested: 0 }; c.maps_played.set(m.map, mp); }
+        mp.count += 1;
+        // Win/loss bookkeeping (per match, applies whether commander or thug).
+        if (decidedBy !== 'unclear' && (winningTeam === 1 || winningTeam === 2)) {
+          c.matches_with_determined_winner += 1;
+          const won = winningTeam === myTeam;
+          if (won) {
+            mp.wins += 1;
+            c.wins.total += 1;
+            if (p.is_commander) c.wins.as_commander += 1; else c.wins.as_thug += 1;
+          } else {
+            mp.losses += 1;
+            c.losses.total += 1;
+            if (p.is_commander) c.losses.as_commander += 1; else c.losses.as_thug += 1;
+          }
+          if (decidedBy === 'contested') mp.contested += 1;
+          c.win_streak_log.push({ match_id: m.id, decided_by: decidedBy, won });
+        }
 
         // Career positioning aggregation: include only when this match
         // had positioning data AND this player has an entry. The Python
@@ -339,6 +525,7 @@
       careerStats.push({
         player_id: pid,
         name:                c.name,
+        steam64:             c.steam64,
         matches_played:      c.matches_played,
         total_dealt:         r1(c.total_dealt),
         total_received:      r1(c.total_received),
@@ -351,6 +538,14 @@
         total_kills:         c.total_kills,
         total_deaths:        c.total_deaths,
         total_pickups:       c.total_pickups,
+        // Phase 2/3: surfaced on career_stats so the Career Highlights
+        // cards (Phase 6) can read straight off this row.
+        total_snipes:        c.total_snipes,
+        total_destructions:  c.total_destructions,
+        matches_as_commander: c.matches_as_commander,
+        matches_as_thug:      c.matches_as_thug,
+        faction_match_count:  Object.assign({}, c.faction_match_count),
+        teammates_seen_count: c.teammates_seen.size,
         fav_weapon:          favWeapon,
         best_match:          c.best_match,
         weapon_breakdown:    weaponBreakdown,
@@ -420,6 +615,98 @@
 
     const sortedDates = dates.slice().sort();
 
+    // ---- Phase 3: commander_stats ----
+    // Reuse the career bucket map so we can pull steam64/totals without a
+    // second pass. Cascade keptNames so the commander leaderboard hides
+    // the same players the career table hides.
+    const commanderRowsAll = [];
+    for (const [pid, c] of career) {
+      // Skip pure spectators / trivial appearances (kept aligned with career table).
+      if (c.matches_played <= 0) continue;
+      const determinedAsCommander = c.wins.as_commander + c.losses.as_commander;
+      const determinedAsThug      = c.wins.as_thug      + c.losses.as_thug;
+      // 5-determined-match floor for win % display (mirrors the floor on
+      // commander win-rate cards). Sentinel `null` means "not enough data".
+      const winPctCmdr = determinedAsCommander >= 5
+        ? r3(c.wins.as_commander / determinedAsCommander) : null;
+      const winPctThug = determinedAsThug >= 5
+        ? r3(c.wins.as_thug / determinedAsThug) : null;
+      const avgDealtCmdr = c.matches_as_commander > 0 ? r1(c.cmdr_total_dealt / c.matches_as_commander) : null;
+      const avgKillsCmdr = c.matches_as_commander > 0 ? r2(c.cmdr_total_kills / c.matches_as_commander) : null;
+      const avgDealtThug = c.matches_as_thug      > 0 ? r1(c.thug_total_dealt / c.matches_as_thug)      : null;
+      const avgKillsThug = c.matches_as_thug      > 0 ? r2(c.thug_total_kills / c.matches_as_thug)      : null;
+      const fdist = c.faction_match_count;
+      let favoredFaction = null, favoredCount = 0;
+      for (const code of ['i', 'e', 'f']) {
+        if (fdist[code] > favoredCount) { favoredCount = fdist[code]; favoredFaction = code; }
+      }
+      commanderRowsAll.push({
+        name:    c.name,
+        steam64: c.steam64,
+        matches_as_commander: c.matches_as_commander,
+        matches_as_thug:      c.matches_as_thug,
+        wins_as_commander:    c.wins.as_commander,
+        losses_as_commander:  c.losses.as_commander,
+        contested_as_commander: 0,  // TODO: contested-as-commander breakdown not tracked separately yet; reserved key
+        determined_as_commander: determinedAsCommander,
+        determined_as_thug:      determinedAsThug,
+        win_pct_as_commander: winPctCmdr,
+        win_pct_as_thug:      winPctThug,
+        avg_dealt_as_commander: avgDealtCmdr,
+        avg_dealt_as_thug:      avgDealtThug,
+        avg_kills_as_commander: avgKillsCmdr,
+        avg_kills_as_thug:      avgKillsThug,
+        faction_distribution: { i: fdist.i, e: fdist.e, f: fdist.f },
+        favored_faction: favoredFaction,
+      });
+    }
+    // Cascade keptNames (5-match minimum) so commander rows mirror the
+    // career table's visibility. Spectator-only / sub-floor players drop.
+    const commanderRowsKept = commanderRowsAll
+      .filter(r => keptNames.has(r.name))
+      .sort((a, b) => {
+        if (b.matches_as_commander !== a.matches_as_commander) return b.matches_as_commander - a.matches_as_commander;
+        return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
+      });
+
+    // Commander head-to-head pairs (kept-only). Also produce
+    // `most_commanded_against` as the unbounded sorted list — Phase 7 caps
+    // its UI at top 10 itself.
+    const allPairs = Array.from(commanderPairs.values())
+      .filter(p => keptNames.has(p.a) && keptNames.has(p.b))
+      .sort((x, y) => {
+        if (y.matches !== x.matches) return y.matches - x.matches;
+        const xa = String(x.a).toLowerCase(), ya = String(y.a).toLowerCase();
+        if (xa !== ya) return xa.localeCompare(ya);
+        return String(x.b).toLowerCase().localeCompare(String(y.b).toLowerCase());
+      });
+    const headToHead = allPairs.slice(0, 10);
+
+    // ---- Phase 3: meta_charts ----
+    const mapsArr = Array.from(mapRows.entries()).map(([mapName, mr]) => ({
+      map: mapName,
+      count: mr.count,
+      wins_t1: mr.wins_t1,
+      wins_t2: mr.wins_t2,
+      contested: mr.contested,
+      unclear: mr.unclear,
+      avg_duration_sec: mr.count > 0 ? r1(mr.total_duration_sec / mr.count) : 0,
+    })).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return (a.map || '').toLowerCase().localeCompare((b.map || '').toLowerCase());
+    });
+
+    const submitterRows = Array.from(submitterCounts.entries()).map(([submitter, count]) => ({
+      submitter, count,
+    })).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return (a.submitter || '').toLowerCase().localeCompare((b.submitter || '').toLowerCase());
+    });
+
+    const matchesOverTime = Array.from(overTimeWeeks.entries())
+      .map(([wk, count]) => ({ week_iso: wk, count }))
+      .sort((a, b) => a.week_iso.localeCompare(b.week_iso));
+
     return {
       meta: {
         match_count:                   fileIds.length,
@@ -437,6 +724,22 @@
       career_stats:       careerStatsKept,
       global_weapon_meta: gwm,
       global_rivalries:   globalRivalries,
+      commander_stats: {
+        rows: commanderRowsKept,
+        head_to_head: headToHead,
+        most_commanded_against: allPairs,
+      },
+      faction_stats: {
+        by_team_slot: factionByTeamSlot,
+        win_counts:   factionWinCounts,
+      },
+      meta_charts: {
+        maps:              mapsArr,
+        duration_bands:    durationBands,
+        player_counts:     playerCounts,
+        submitters:        submitterRows,
+        matches_over_time: matchesOverTime,
+      },
     };
   }
 
