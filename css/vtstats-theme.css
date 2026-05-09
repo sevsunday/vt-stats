@@ -4520,13 +4520,16 @@ td.vt-col-split {
    ============================================================================ */
 
 .vt-katex-tooltip {
-    --bs-tooltip-max-width: 540px;
+    --bs-tooltip-max-width: 600px;
+    max-width: 600px;
 }
 
-.vt-katex-tooltip .tooltip-inner {
+.vt-katex-tooltip .tooltip-inner,
+.vt-katex-tooltip .popover-body {
     text-align: left;
     padding: 0.85rem 1rem;
     font-size: 0.85rem;
+    line-height: 1.55;
     background: var(--kb-bg-secondary);
     color: var(--kb-text-primary);
     border: 1px solid color-mix(in oklab, var(--kb-text-muted) 25%, transparent);
@@ -4534,14 +4537,22 @@ td.vt-col-split {
 
 .vt-katex-tooltip .tooltip-arrow::before { display: none; }
 
-.vt-katex-tooltip .vt-katex-tooltip-body { line-height: 1.45; }
+.vt-katex-tooltip .vt-katex-tooltip-body { line-height: 1.55; }
 
 .vt-katex-tooltip .katex-display {
-    margin: 0.55em 0;
-    font-size: 0.95em;
+    margin: 0.95em 0 0.8em;
+    line-height: 1.4;
 }
 
-.vt-katex-tooltip .katex { font-size: 1.0em; }
+.vt-katex-tooltip .katex {
+    font-size: 1.0em;
+    line-height: 1.4 !important;
+}
+
+.vt-katex-tooltip .vt-katex-tooltip-body strong {
+    display: inline-block;
+    margin-top: 0.45em;
+}
 
 .vt-katex-tooltip table {
     width: 100%;
