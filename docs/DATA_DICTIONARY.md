@@ -2185,3 +2185,193 @@ The proposed upstream `statsgate.proto` enhancement (a real
 `commander_quit` / `commander_demo` / `timeout` etc.) would
 deterministically resolve every "unclear" case. Until then, the toggle
 model is the best the pipeline can do without speculation.
+
+## 11. VTSR Outputs (`elo_current.json` + `elo_history.json`)
+
+Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `process_stats.py` run. Full algorithm and constants are in [§13 of DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md#vtsr-methodology).
+
+### `data/processed/elo_current.json`
+
+Current per-player ratings keyed for the All Matches view's VTSR Leaderboard. Top-level shape:
+
+```json
+{
+  "schema_version": 1,
+  "alpha": 0.0,
+  "anchor": 1500.0,
+  "rating_scale": 2.5,
+  "k_loss_aversion": 0.85,
+  "rating_floor": 1000.0,
+  "floor_taper_window": 150.0,
+  "k_base": 40.0,
+  "k_floor": 12.0,
+  "provisional_prior": 10.0,
+  "provisional_threshold": 10,
+  "min_player_count": 6,
+  "min_duration_sec": 300,
+  "computed_at": "2026-05-09T04:23:11Z",
+  "match_count": 57,
+  "matches_excluded_low_player_count": 4,
+  "matches_excluded_short_duration": 4,
+  "matches_excluded_no_winner": 0,
+  "weights": { "net_damage_share": 0.25, "kill_rate": 0.20, "accuracy": 0.15,
+               "pvp_share": 0.20, "mobility": 0.10, "snipe_bonus": 0.05,
+               "asset_multiplier": 0.05 },
+  "ratings": [{
+    "name": "VTrider",
+    "steam64": "76561197974548434",
+    "vtsr": 2708.9,
+    "combat_elo": 2708.9,
+    "wins_elo": 1500.0,
+    "matches_played": 49,
+    "matches_provisional": false,
+    "last_match_id": "2026-05-04T03-06-22",
+    "last_delta": 12.10,
+    "peak_vtsr": 2708.9,
+    "peak_at": "2026-05-04T03-06-22",
+    "win_history": [12.4, 8.1, -3.2, 5.7, ...]
+  }, ...]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `schema_version` | int | Output shape version. Bump when the JS reader needs to change. |
+| `alpha` | float | Wins ELO blend weight. v1: 0.0 (Combat-only). |
+| `anchor` | float | League anchor where every new player starts. 1500.0. |
+| `rating_scale` | float | Per-match update scale `S` in $\Delta R = K \cdot S \cdot (P - P_{\text{med}})$. 2.5. |
+| `k_loss_aversion` | float | Asymmetric loss multiplier. 0.85. |
+| `rating_floor` | float | Soft floor below which losses go to zero. 1000.0. |
+| `floor_taper_window` | float | Width of the linear taper above the floor. 150.0 → full losses resume at 1150. |
+| `k_base`, `k_floor`, `provisional_prior` | float | K-decay curve parameters (40 / 12 / 10). |
+| `provisional_threshold` | int | matches_played below which the row gets a "Provisional" badge (10). |
+| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 300). |
+| `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
+| `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
+| `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |
+| `weights` | object | Snapshot of `COMBAT_WEIGHTS` for transparency. |
+| `ratings[]` | array | Per-player rows. Sorted by `vtsr` desc, name asc as tiebreak. |
+| `ratings[].name` | string | Display name. Most-recent-seen across the corpus for renames. |
+| `ratings[].steam64` | string \| null | Stable identity. Null for legacy rows missing steam64. |
+| `ratings[].vtsr` | float | The published rating. Equal to `combat_elo` when α=0. Rounded to 1 decimal. |
+| `ratings[].combat_elo` | float | Pure Combat-ELO component. |
+| `ratings[].wins_elo` | float | Wins-ELO component. v1: stubbed at the anchor for everyone (1500.0). |
+| `ratings[].matches_played` | int | Number of rated matches contributing to this rating. Excluded matches don't count. |
+| `ratings[].matches_provisional` | bool | True when `matches_played < provisional_threshold`. |
+| `ratings[].last_match_id` | string | Match id of the player's most recent rated match. |
+| `ratings[].last_delta` | float | The Δ applied at `last_match_id` (negative = loss). |
+| `ratings[].peak_vtsr` | float | Highest VTSR this player has ever held. |
+| `ratings[].peak_at` | string | Match id where `peak_vtsr` was set. |
+| `ratings[].win_history` | array<float> | Last 10 deltas (oldest-first), used by the trend sparkline. |
+
+### `data/processed/elo_history.json`
+
+Per-match rating deltas, chronological. Powers the (deferred) per-match rating-over-time chart and the determinism / audit checks.
+
+```json
+{
+  "schema_version": 1,
+  "history": [{
+    "match_id": "2026-04-16T01-27-48",
+    "match_date": "2026-04-16T01:27:48Z",
+    "match_excluded": false,
+    "deltas": [
+      { "name": "VTrider", "steam64": "...", "before": 1500.0, "after": 1517.2, "delta": 17.2, "performance": 0.42 },
+      ...
+    ]
+  }, ...]
+}
+```
+
+Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`.
+
+## 12. Aggregator output keys (Phase 3 + 6)
+
+`window.VTAggregate.build(contributions, fileIds, elo)` in [js/all-matches-aggregator.js](../js/all-matches-aggregator.js) produces these top-level keys (in addition to the pre-existing `meta` / `career_stats` / `global_weapon_meta` / `global_rivalries`).
+
+### `commander_stats`
+
+```json
+{
+  "rows": [{
+    "name": "VTrider", "steam64": "...",
+    "matches_as_commander": 17, "matches_as_thug": 25,
+    "wins_as_commander": 0, "losses_as_commander": 4,
+    "contested_as_commander": 0,
+    "determined_as_commander": 4, "determined_as_thug": 8,
+    "win_pct_as_commander": null, "win_pct_as_thug": 0.625,
+    "avg_dealt_as_commander": 35491.0, "avg_dealt_as_thug": 51938.9,
+    "avg_kills_as_commander": 3.88, "avg_kills_as_thug": 5.04,
+    "faction_distribution": { "i": 15, "e": 3, "f": 24 },
+    "favored_faction": "f"
+  }, ...],
+  "head_to_head": [{ "a": "VTrider", "b": "Domakus", "matches": 12,
+                     "a_wins": 7, "b_wins": 4, "contested": 1 }, ...],
+  "most_commanded_against": [/* same shape as head_to_head, full list, no top-10 cap */]
+}
+```
+
+`win_pct_*` cells are `null` when `determined_*` is below 5 (UI displays `—` with an explanatory tooltip). `head_to_head` is capped at the top 10 pairs by `matches`. `most_commanded_against` is the full sorted list.
+
+### `faction_stats`
+
+```json
+{
+  "by_team_slot": { "1": { "i": 32, "e": 16, "f": 16 }, "2": { "i": 33, "e": 6, "f": 25 } },
+  "win_counts":   { "i": { "wins": 10, "losses": 10, "determined": 20 },
+                    "e": { "wins": 2,  "losses": 1,  "determined": 3 },
+                    "f": { "wins": 5,  "losses": 6,  "determined": 11 } }
+}
+```
+
+Faction codes are lowercase (`i`/`e`/`f` = ISDF/Hadean/Scion), matching the pipeline's canonical letter codes on `match.team_factions`.
+
+### `meta_charts`
+
+```json
+{
+  "maps":           [{ "map": "stredslopevsr.bzn", "count": 5, "wins_t1": 0, "wins_t2": 3,
+                       "contested": 0, "unclear": 2, "avg_duration_sec": 894.5 }, ...],
+  "duration_bands": { "under5": 6, "5to10": 9, "10to15": 17, "15plus": 32 },
+  "player_counts":  { "10": 45, "8": 8, "6": 3, ... },
+  "submitters":     [{ "submitter": "VTrider", "count": 64 }, ...],
+  "matches_over_time": [{ "week_iso": "2026-W16", "count": 8 }, ...]
+}
+```
+
+`maps[].count = wins_t1 + wins_t2 + contested + unclear` always. ISO week ids follow `strftime("%G-W%V")` (the year is the ISO week-numbering year, not the calendar year).
+
+### `career_highlights`
+
+```json
+{
+  "schema_version": 1,
+  "cards": [{ /* same shape as match Highlights cards in §5 */ }]
+}
+```
+
+Up to 24 cards (12 career-rolled siblings of the per-match catalog with `career_*` category prefixes, plus 12 cross-match-only originals: `the_champion`, `the_veteran`, `the_workhorse`, `the_carry`, `the_anchor`, `isdf_loyalist`, `hadean_loyalist`, `scion_loyalist`, `the_diplomat`, `map_master`, `streak_king`, `the_polymath`). Cards self-omit when their data gates fail (Bayesian K/D needs `total_kills >= 25`; Sharpshooter needs `total_shots_fired >= 1000`; faction loyalists need 5 matches on that faction; Map Master needs 3 determined wins AND 3 total matches on a single map; etc.).
+
+## 13. Contribution Shape Extensions (Phase 2)
+
+The `match_contributions.json` slim per-match shape (see [scripts/process_stats.py](../scripts/process_stats.py) `_extract_contribution()`) gained five additive fields when `PIPELINE_VERSION` bumped from 6 to 7:
+
+| Field | Type | Source | Consumer |
+|---|---|---|---|
+| `team_leaders` | object | `match.team_leaders` (passthrough) | Aggregator commander pairing |
+| `team_factions` | object | `match.team_factions` (passthrough) | Faction stats + per-player faction roll |
+| `winner.team` | int \| null | `match.winner.team` | Win/loss attribution |
+| `winner.decided_by` | string | `match.winner.decided_by` ("clean_win" / "contested" / "unclear") | Match-exclusion + tie-break logic |
+| `snipes_by_player` | `{ name: count }` | `match.snipes.by_player` flattened | Career Chris Kyle highlight |
+| `powerup_destructions_by_player` | `{ name: count }` | `match.powerup_destructions.by_player` flattened | Career Pod Goblin highlight |
+
+Per-leaderboard entries gained:
+
+| Field | Type | Source | Consumer |
+|---|---|---|---|
+| `steam64` | string | leaderboard `steam64` | ELO identity, VTSR table joins |
+| `slot` | int (1-10) | leaderboard `slot` | Commander/thug split |
+| `team` | int (1\|2) | leaderboard `faction` (team number, not faction code) | Team-attributed rolls |
+| `is_commander` | bool | `slot in {1, 6}` | Role split |
+
+Manifest entries (`data/processed/matches.json`) also gained `team_factions` + `winner_decided_by` for future picker facets.

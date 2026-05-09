@@ -11,6 +11,13 @@
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/vtstats-theme.css">
+  <!-- KaTeX (vendored, v0.16.11). The auto-render contrib scans the
+       rendered markdown for $...$ / $$...$$ delimiters and replaces them
+       with KaTeX HTML. Same source string as GitHub's native math
+       rendering, so DEVELOPER_GUIDE.md round-trips between the two. -->
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <script defer src="vendor/katex/katex.min.js"></script>
+  <script defer src="vendor/katex/contrib/auto-render.min.js"></script>
 </head>
 <body>
 
@@ -192,7 +199,8 @@
     // rules and the developer guide. Add a row here when a new standalone doc
     // needs to be surfaced from docs.html. Slugs are case-insensitive.
     const DOC_REGISTRY = [
-      { slug: 'dictionary', file: 'docs/DATA_DICTIONARY.md', label: 'Data Dictionary', icon: 'bi-journal-text' },
+      { slug: 'dictionary',  file: 'docs/DATA_DICTIONARY.md', label: 'Data Dictionary',  icon: 'bi-journal-text' },
+      { slug: 'developer',   file: 'DEVELOPER_GUIDE.md',      label: 'Developer Guide',  icon: 'bi-code-slash'   },
     ];
 
     (async function () {
@@ -225,6 +233,29 @@
         const md = await res.text();
 
         content.innerHTML = marked.parse(md);
+
+        // Post-render: KaTeX auto-render scans the rendered HTML for
+        // $...$ / $$...$$ / \(...\) / \[...\] delimiters and swaps in
+        // pre-rendered math. Skips inside <code>/<pre> so prose snippets
+        // showing literal `$x$` don't accidentally render. GitHub's
+        // native LaTeX renderer uses the same delimiters, so the source
+        // markdown round-trips between the two without forking.
+        if (typeof renderMathInElement === 'function') {
+          try {
+            renderMathInElement(content, {
+              delimiters: [
+                { left: '$$', right: '$$', display: true  },
+                { left: '$',  right: '$',  display: false },
+                { left: '\\[', right: '\\]', display: true  },
+                { left: '\\(', right: '\\)', display: false },
+              ],
+              throwOnError: false,
+              ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+            });
+          } catch (e) {
+            console.warn('KaTeX auto-render failed:', e);
+          }
+        }
 
         // Post-render: style tables
         content.querySelectorAll('table').forEach(t => {
