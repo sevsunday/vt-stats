@@ -34,7 +34,7 @@ todos:
     status: completed
   - id: commit
     content: "Single commit: refactor(vtsr): switch combat ELO to opponent-strength-weighted expected score (v2)."
-    status: in_progress
+    status: completed
 isProject: false
 ---
 

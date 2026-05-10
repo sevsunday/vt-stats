@@ -4706,6 +4706,15 @@
   // proper layout). Each section is a `<section
   // class="vt-vtsr-doc-section">` with an h6 title; matching CSS
   // lives in css/vtstats-theme.css.
+  //
+  // v2.1: bumped the rating-logistic scale from S_R = 400 to 800.
+  // Curve table values (curveRows below) remain numerically valid
+  // because the ±200 / ±400 gap rows happen to land at the chess-
+  // canonical ±0.52 / ±0.82 under S_R = 400 and at the same ±0.28
+  // / ±0.52 under S_R = 800 — by coincidence the displayed values
+  // were correctly labelled ONLY at S_R = 800 (latent v2.0 bug
+  // resolved by the v2.1 bump). Worked-example numbers (Lamper m9)
+  // recomputed; expected-section caveat rewritten.
   let vtsrTooltipHtmlCache = null;
   function buildVtsrTooltipHtml() {
     if (vtsrTooltipHtmlCache) return vtsrTooltipHtmlCache;
@@ -4739,7 +4748,12 @@
     ].map(([sym, desc]) => `<div><code>${esc(sym)}</code> <span>${esc(desc)}</span></div>`).join('');
 
     // ---- Expected-score curve intuition table ----
-    // (Computed from the canonical formula with S_R = 400.)
+    // Pre-computed from the formula E_i = 2 / (1 + 10^((Rbar - R) / S_R)) - 1
+    // with S_R = 800 (the v2.1 calibrated value). Recompute these
+    // values if S_R changes — at S_R = 400 the same gaps would produce
+    // ±0.52 / ±0.82 / ±0.92, not ±0.28 / ±0.52 / ±0.80. The 5 rows
+    // below mirror the typical lobby-stratification range we see in
+    // our corpus (±400 pts is roughly Tier 1 vs Tier 4).
     const curveRows = [
       ['&minus;400', '&minus;0.52'],
       ['&minus;200', '&minus;0.28'],
@@ -4778,10 +4792,13 @@
 
     // ---- Worked example: Lamper m9 ----
     // Real numbers from data/processed/elo_history.json (match
-    // 2026-05-04T03-45-41, Lamper's 9th rated match).
+    // 2026-05-04T03-45-41, Lamper's 9th rated match). Recomputed for
+    // v2.1 (S_R = 800): E_i drops from +0.117 to ~+0.06, and the
+    // resulting dR rises from +33 to ~+38 — still a meaningful
+    // compression vs v1's +49, but breathing room for the spread.
     const exKEq  = tex('K_i \\;=\\; 40 \\cdot \\left(1 - \\frac{8}{8 + 10}\\right) + 12 \\;=\\; 34.22', true);
-    const exEEq  = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(1510 - 1551) / 400}} - 1 \\;=\\; +0.117', true);
-    const exDREq = tex('\\Delta R^{C}_i \\;=\\; 34.22 \\cdot 2.5 \\cdot (0.50 - 0.117) \\;\\approx\\; +32.7', true);
+    const exEEq  = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(1510 - 1551) / 800}} - 1 \\;\\approx\\; +0.059', true);
+    const exDREq = tex('\\Delta R^{C}_i \\;=\\; 34.22 \\cdot 2.5 \\cdot (0.50 - 0.059) \\;\\approx\\; +37.7', true);
 
     vtsrTooltipHtmlCache = `<div class="vt-katex-tooltip-body">
 
@@ -4807,7 +4824,7 @@
           <thead><tr><th>Rating gap (R &minus; R\u0304)</th><th class="text-end">Expected E_i</th></tr></thead>
           <tbody>${curveRows}</tbody>
         </table>
-        <div class="vt-katex-caveat">S_R = 400 is the chess-canonical denominator: a 400-pt rating advantage maps to E &asymp; +0.52 (about half-way to the per-axis-clipped maximum).</div>
+        <div class="vt-katex-caveat">S<sub>R</sub> = 800 (calibrated for our small-population corpus). Chess uses 400, but our continuous P_i scoring carries more signal per match than chess's binary win/loss, and our ~25-player league means even small rating gaps already pin E_i near its limit; widening the curve to 800 lets top players plateau ~300 pts above the median lobby instead of ~140.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -4857,11 +4874,11 @@
         ${exKEq}
         ${exEEq}
         ${exDREq}
-        <div class="vt-katex-caveat">Under v1 (lobby-median baseline) this same match produced +49. The v2 reduction reflects that out-rating most of the lobby was part of why the performance looked so dominant.</div>
+        <div class="vt-katex-caveat">Under v1 (lobby-median baseline) this same match produced +49. v2.0 (S<sub>R</sub> = 400) compressed it to +33; v2.1 (S<sub>R</sub> = 800) lands at ~+38 &mdash; still a meaningful reduction from v1, but breathing room restored for the leaderboard spread.</div>
       </section>
 
       <div class="vt-katex-caveat mt-3">
-        <strong>VTSR v2 &middot; changed Phase 12.</strong> Per-match comparison switched from lobby-median performance (P_med) to opponent-strength-weighted expected performance (E_i, median of opponent ratings, chess-ELO style). Existing peak_vtsr values from v1 are no longer comparable. Wins ELO blend (&alpha;) still 0.0; full algorithm in DEVELOPER_GUIDE \u00a713.
+        <strong>VTSR v2.1 &middot; tuned post-Phase 12.</strong> v2.0 switched the per-match comparison from lobby-median performance (P_med) to opponent-strength-weighted expected performance (E_i, median of opponent ratings). v2.1 widens the rating-logistic scale from S<sub>R</sub> = 400 to 800 to restore a Tier 1&ndash;4 leaderboard-friendly spread for our small-population corpus. Existing peak_vtsr values from v1 / v2.0 are no longer comparable. Wins ELO blend (&alpha;) still 0.0; full algorithm in DEVELOPER_GUIDE \u00a713.
       </div>
     </div>`;
     return vtsrTooltipHtmlCache;
