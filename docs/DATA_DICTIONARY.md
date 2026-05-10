@@ -2200,7 +2200,7 @@ Current per-player ratings keyed for the All Matches view's VTSR Leaderboard. To
   "alpha": 0.0,
   "anchor": 1500.0,
   "rating_scale": 2.5,
-  "expected_score_logistic_scale": 400.0,
+  "expected_score_logistic_scale": 800.0,
   "k_loss_aversion": 0.85,
   "rating_floor": 1000.0,
   "floor_taper_window": 150.0,
@@ -2241,7 +2241,7 @@ Current per-player ratings keyed for the All Matches view's VTSR Leaderboard. To
 | `alpha` | float | Wins ELO blend weight. v1: 0.0 (Combat-only). |
 | `anchor` | float | League anchor where every new player starts. 1500.0. |
 | `rating_scale` | float | Per-match outcome scale $S_O$ in $\Delta R = K \cdot S_O \cdot (P_i - E_i)$. 2.5. |
-| `expected_score_logistic_scale` | float | Rating-logistic scale $S_R$ in $E_i = 2/(1 + 10^{(\bar{R}_i - R_i)/S_R}) - 1$. 400.0 (chess-canonical). v2 only. |
+| `expected_score_logistic_scale` | float | Rating-logistic scale $S_R$ in $E_i = 2/(1 + 10^{(\bar{R}_i - R_i)/S_R}) - 1$. v2.0 shipped at 400.0 (chess-canonical) but over-compressed our small-population corpus; v2.1 widened to **800.0** (calibrated for our continuous $P_i$ scoring + ~25-player league). v2 only. |
 | `k_loss_aversion` | float | Asymmetric loss multiplier. 0.85. |
 | `rating_floor` | float | Soft floor below which losses go to zero. 1000.0. |
 | `floor_taper_window` | float | Width of the linear taper above the floor. 150.0 → full losses resume at 1150. |

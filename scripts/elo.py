@@ -30,8 +30,12 @@ for every player; the blend math runs through unchanged so a future
 
 Replaces the v1 lobby-median performance baseline ``P_med`` with a
 chess-ELO style opponent-strength-weighted expected performance
-``E_i``. ``S_R = 400`` is the rating-logistic scale (chess-canonical;
-a 400-pt rating gap → expected-performance gap of ~0.5). ``S_O = 2.5``
+``E_i``. ``S_R = 800`` is the rating-logistic scale (calibrated for
+our small-population corpus — chess uses 400, but our continuous P_i
+scoring carries more signal per match than chess's binary win/loss,
+and our ~25-player league means even small rating gaps already pin
+``E_i`` near its limit; 800 lets top players plateau ~300 pts above
+the median lobby instead of ~140 — see v2.1 in §13.7). ``S_O = 2.5``
 is the outcome scale, unchanged from v1 because the practical
 ``(P_i - E_i)`` magnitudes land in the same range as v1's
 ``(P_i - P_med)``. We use the **median** of opponents (not mean) so a
@@ -82,19 +86,26 @@ ELO_MIN_DURATION_SEC = 300       # 5-minute minimum.
 # update is bounded by how far ``P_i`` can sit above/below ``E_i``,
 # which is itself bounded in [-1, +1]. ``S_O = 2.5`` is unchanged
 # from v1 — the per-match scale didn't need rebumping once the
-# logistic scale (``S_R``) was set to the chess standard ``400``.
+# logistic scale (``S_R``) was set to the calibrated 800.
 ELO_RATING_SCALE = 2.5
 
 # Rating-logistic scale for the expected-performance curve.
-# ``S_R = 400`` matches the canonical chess ELO denominator: a
-# 400-pt rating advantage maps to E ≈ +0.52 (i.e. you're expected
-# to score about half-way to the per-axis-clipped maximum). Lower
-# values would amplify rating differences (faster regression to the
-# mean, harsher penalty for top players in soft lobbies); higher
-# values dampen them. We tested ``S_R = 200`` and ``S_R = 300`` and
-# found 200 too aggressive for our ``P_i`` scale (which practically
-# tops out around ~0.7, not 1.0 like chess win/loss scores).
-ELO_LOGISTIC_SCALE = 400.0
+# Calibrated for a small (~25-player) league with continuous P_i
+# scoring. Chess uses 400 because chess scores are binary; our
+# 7-axis composite carries more signal per match but is noisier and
+# bounded by ~±0.7 in practice, which made our v2.0 ship at S_R=400
+# (chess-canonical) over-compress the spread to ~200 pts (Tiers 3
+# and 4 only on the leaderboard). ``S_R = 800`` flattens the curve
+# so top players need ~300 pts above the median lobby to plateau
+# (instead of ~140), restoring a Tier 1–4 leaderboard-friendly
+# spread. With S_R = 800: a 200-pt rating advantage maps to
+# E ≈ +0.28; a 400-pt advantage to E ≈ +0.52; a 800-pt advantage
+# to E ≈ +0.80. Lower values amplify rating differences (faster
+# regression to the mean, harsher penalty for top players in soft
+# lobbies); higher values dampen them. Iterating this constant
+# does NOT require an ``ELO_SCHEMA_VERSION`` bump (shape unchanged),
+# only a ``PIPELINE_VERSION`` bump to force re-rating.
+ELO_LOGISTIC_SCALE = 800.0
 
 # Loss-aversion asymmetry: when raw dR < 0, multiply by this factor.
 # Anchored in Kahneman & Tversky 1979 prospect theory; operational
