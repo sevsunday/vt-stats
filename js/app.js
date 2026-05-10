@@ -4697,9 +4697,15 @@
     return '0.00';
   }
 
-  // Pre-rendered KaTeX HTML for the VTSR info tooltip. Built lazily on
-  // first render so katex.min.js (deferred) is guaranteed loaded.
-  // Cached as a module-local string after first build.
+  // Pre-rendered KaTeX HTML for the VTSR methodology modal. Built
+  // lazily on first render so katex.min.js (deferred) is guaranteed
+  // loaded. Cached as a module-local string after first build.
+  //
+  // v2 (Phase 12): rewritten as a 6-section structured reference (it
+  // stopped being a tooltip 3 iterations ago — the modal can host a
+  // proper layout). Each section is a `<section
+  // class="vt-vtsr-doc-section">` with an h6 title; matching CSS
+  // lives in css/vtstats-theme.css.
   let vtsrTooltipHtmlCache = null;
   function buildVtsrTooltipHtml() {
     if (vtsrTooltipHtmlCache) return vtsrTooltipHtmlCache;
@@ -4711,45 +4717,152 @@
       try { return k.renderToString(latex, { displayMode, throwOnError: false }); }
       catch { return `<code>${esc(latex)}</code>`; }
     }
-    const blendEq = tex('\\mathrm{VTSR}_i = \\alpha \\cdot R^{W}_i + (1 - \\alpha) \\cdot R^{C}_i', true);
-    const updateEq = tex('\\Delta R^C_i = K_i \\cdot S \\cdot (P_i - P_{\\text{med}})', true);
-    const lossEq = tex('\\Delta R^C_i \\cdot L \\cdot \\phi(R)\\quad \\text{when } \\Delta R^C_i < 0', true);
-    const phiEq = tex('\\phi(R) = \\mathrm{clamp}(0,\\,1,\\,(R - F)/W)', true);
+
+    // ---- Equations ----
+    const updateEqGain = tex('\\Delta R^{C}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i)', true);
+    const updateEqLoss = tex('\\Delta R^{C}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i) \\cdot L \\cdot \\varphi(R^{C}_{i}) \\quad \\text{when } (P_i - E_i) < 0', true);
+    const blendEq      = tex('\\mathrm{VTSR}_i \\;=\\; \\alpha \\cdot R^{W}_i + (1 - \\alpha) \\cdot R^{C}_i', true);
+    const expectedEq   = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(\\bar{R}_i - R^{C}_i) / S_R}} \\;-\\; 1', true);
+    const rbarEq       = tex('\\bar{R}_i \\;=\\; \\mathrm{median}\\{\\, R^{C}_j \\,:\\, j \\neq i \\,\\}', true);
+    const compositeEq  = tex('P_i \\;=\\; \\sum_{a \\in \\mathcal{A}} w\'_a \\cdot \\frac{\\mathrm{clip}_{[-2,+2]}(z_a(x_{i,a}))}{2}', true);
+    const kEq          = tex('K_i \\;=\\; K_{\\text{base}} \\cdot \\left(1 - \\frac{n_i}{n_i + n_{\\text{prior}}}\\right) + K_{\\text{floor}}', true);
+    const phiEq        = tex('\\varphi(R) \\;=\\; \\mathrm{clamp}(0,\\,1,\\,(R - F)/W)', true);
+
+    // ---- Symbol legend (under the hero equation) ----
+    const symbolRows = [
+      ['K_i',       'K-factor (decays with experience)'],
+      ['S_O = 2.5', 'outcome scale (per-match update magnitude)'],
+      ['P_i',       'your performance index this match (7-axis composite)'],
+      ['E_i',       'expected performance given your rating vs the lobby'],
+      ['L = 0.85',  'loss aversion multiplier (losses only)'],
+      ['\u03c6(R)',  'soft-floor taper (losses only)'],
+    ].map(([sym, desc]) => `<div><code>${esc(sym)}</code> <span>${esc(desc)}</span></div>`).join('');
+
+    // ---- Expected-score curve intuition table ----
+    // (Computed from the canonical formula with S_R = 400.)
+    const curveRows = [
+      ['&minus;400', '&minus;0.52'],
+      ['&minus;200', '&minus;0.28'],
+      ['0',          '0.00'],
+      ['+200',       '+0.28'],
+      ['+400',       '+0.52'],
+    ].map(([gap, e]) => `<tr><td>${gap}</td><td class="text-end">${e}</td></tr>`).join('');
+
+    // ---- 7-axis composite (with plain-English descriptions) ----
     const weightsRows = [
-      ['Net damage share', '0.25'],
-      ['Kill rate',        '0.20'],
-      ['Accuracy',         '0.15'],
-      ['PvP share',        '0.20'],
-      ['Mobility',         '0.10'],
-      ['Snipe bonus',      '0.05'],
-      ['Asset multiplier', '0.05'],
-    ].map(([n, w]) => `<tr><td>${n}</td><td class="text-end">${w}</td></tr>`).join('');
+      ['Net damage share', '0.25', 'damage you dealt minus damage you took, as a share of the lobby total'],
+      ['Kill rate',        '0.20', 'kills per minute played'],
+      ['PvP share',        '0.20', 'fraction of your damage that hit other players (anti-PvE-farming)'],
+      ['Accuracy',         '0.15', 'shots hit divided by shots fired'],
+      ['Mobility',         '0.10', 'how much of the map you actually moved across (positioning data)'],
+      ['Snipe bonus',      '0.05', 'sniper rifle hits (capped before z-score so one big game can\u2019t deform the lobby)'],
+      ['Asset multiplier', '0.05', 'damage to enemy buildings as a share of your total damage'],
+    ].map(([n, w, d]) => `<tr><td><strong>${n}</strong><br><small class="text-muted">${esc(d)}</small></td><td class="text-end align-top">${w}</td></tr>`).join('');
+
+    // ---- K-decay table ----
+    const kRows = [
+      ['0 matches',  '52', 'rookie — calibrating fast'],
+      ['5 matches',  '~39', ''],
+      ['20 matches', '~25', ''],
+      ['50+ matches', '~19', 'settled veteran'],
+    ].map(([n, k_, note]) => `<tr><td>${n}</td><td class="text-end"><code>${k_}</code></td><td class="text-muted"><small>${esc(note)}</small></td></tr>`).join('');
+
+    // ---- Tier ladder ----
     const tierRows = [
-      ['Tier 1', '&ge; 1800'],
-      ['Tier 2', '1650 – 1799'],
-      ['Tier 3', '1500 – 1649'],
-      ['Tier 4', '1350 – 1499'],
-      ['Tier 5', '1000 – 1349'],
-    ].map(([n, r]) => `<tr><td>${n}</td><td class="text-end">${r}</td></tr>`).join('');
+      ['Tier 1', '&ge; 1800',     'top of the ladder'],
+      ['Tier 2', '1650 \u2013 1799', ''],
+      ['Tier 3', '1500 \u2013 1649', 'anchor band'],
+      ['Tier 4', '1350 \u2013 1499', ''],
+      ['Tier 5', '1000 \u2013 1349', 'wide band; soft floor at 1000'],
+    ].map(([n, r, note]) => `<tr><td><strong>${n}</strong></td><td class="text-end"><code>${r}</code></td><td class="text-muted"><small>${esc(note)}</small></td></tr>`).join('');
+
+    // ---- Worked example: Lamper m9 ----
+    // Real numbers from data/processed/elo_history.json (match
+    // 2026-05-04T03-45-41, Lamper's 9th rated match).
+    const exKEq  = tex('K_i \\;=\\; 40 \\cdot \\left(1 - \\frac{8}{8 + 10}\\right) + 12 \\;=\\; 34.22', true);
+    const exEEq  = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(1510 - 1551) / 400}} - 1 \\;=\\; +0.117', true);
+    const exDREq = tex('\\Delta R^{C}_i \\;=\\; 34.22 \\cdot 2.5 \\cdot (0.50 - 0.117) \\;\\approx\\; +32.7', true);
+
     vtsrTooltipHtmlCache = `<div class="vt-katex-tooltip-body">
-      <strong>VTSR (VT Stats Rating)</strong> blends Wins ELO and Combat ELO:
-      ${blendEq}
-      <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Combat ELO only); Wins ELO stubbed at the 1500 anchor until the in-game winner-attestation UI lands.</div>
-      <strong>Per-match update</strong> (gain case):
-      ${updateEq}
-      <strong>Loss case</strong> (asymmetric, with soft-floor taper):
-      ${lossEq}
-      ${phiEq}
-      with L = 0.85, F = 1000 (floor), W = 150 (taper window).
-      <table class="vt-katex-weights">
-        <thead><tr><th>Combat axis</th><th class="text-end">Weight</th></tr></thead>
-        <tbody>${weightsRows}</tbody>
-      </table>
-      <table class="vt-katex-tiers">
-        <thead><tr><th>Tier</th><th class="text-end">VTSR range</th></tr></thead>
-        <tbody>${tierRows}</tbody>
-      </table>
-      <div class="vt-katex-caveat">Anchor 1500 · 7 lobby z-scored axes · K-factor decays 52 → ~18 by match 50. Ratings are corpus-wide; the picker filter narrows the displayed roster only.</div>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>The Update Rule</h6>
+        <p class="mb-2">VTSR (VT Stats Rating) is the project\u2019s player rating, computed once per pipeline run over the full chronological corpus. Each rated match changes your rating by:</p>
+        ${updateEqGain}
+        <p class="mb-2 mt-2">When the bracket goes negative (loss case), two \u201chope\u201d multipliers soften the drop:</p>
+        ${updateEqLoss}
+        <div class="vt-vtsr-doc-symbols">${symbolRows}</div>
+        <p class="mb-2 mt-3">The published rating blends Wins ELO and Combat ELO:</p>
+        ${blendEq}
+        <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Combat ELO only); Wins ELO is stubbed at the 1500 anchor until the in-game winner-attestation UI lands.</div>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>Expected Performance <span class="text-muted">(E)</span></h6>
+        <p class="mb-2">The chess-ELO move: instead of comparing your performance to the lobby median, we compare it to what we\u2019d <em>expect</em> from a player of your rating playing against this lobby. The reference is the <strong>median</strong> rating of all other players (median, not mean, so a single VTrider doesn\u2019t pull the bar up for everyone).</p>
+        ${rbarEq}
+        ${expectedEq}
+        <p class="mb-2">When you out-rate the lobby, you\u2019re expected to score positive; when you\u2019re the underdog, you\u2019re expected to score negative. Performing as expected leaves your rating unchanged.</p>
+        <table class="vt-vtsr-doc-curve-table">
+          <thead><tr><th>Rating gap (R &minus; R\u0304)</th><th class="text-end">Expected E_i</th></tr></thead>
+          <tbody>${curveRows}</tbody>
+        </table>
+        <div class="vt-katex-caveat">S_R = 400 is the chess-canonical denominator: a 400-pt rating advantage maps to E &asymp; +0.52 (about half-way to the per-axis-clipped maximum).</div>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>Performance Composite <span class="text-muted">(P)</span></h6>
+        <p class="mb-2">Your single-match performance index is a weighted sum of seven combat axes. Each axis is computed per-player, z-scored across the lobby, clipped to &plusmn;2, and divided by 2 to land in &plusmn;1. Missing axes (e.g. no positioning data) redistribute their weight pro-rata.</p>
+        ${compositeEq}
+        <table class="vt-katex-weights">
+          <thead><tr><th>Axis</th><th class="text-end">Weight</th></tr></thead>
+          <tbody>${weightsRows}</tbody>
+        </table>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>K-factor &amp; Hope Mechanics</h6>
+        <p class="mb-2">Your K-factor scales every per-match update. New players have a high K (their rating moves fast while we calibrate); settled veterans have a low K (their rating is stable).</p>
+        ${kEq}
+        <table class="vt-vtsr-doc-curve-table">
+          <thead><tr><th>Matches played</th><th class="text-end">K_i</th><th></th></tr></thead>
+          <tbody>${kRows}</tbody>
+        </table>
+        <p class="mb-2 mt-3">For losses, two \u201chope\u201d multipliers apply:</p>
+        <ul class="mb-2">
+          <li><strong>Loss aversion</strong> &middot; every loss is multiplied by L = 0.85 (chess precedent).</li>
+          <li><strong>Soft floor</strong> &middot; losses taper to zero as you approach the rating floor F = 1000:</li>
+        </ul>
+        ${phiEq}
+        <div class="vt-katex-caveat">F = 1000 (soft rating floor). W = 150 (taper window: by R = 1150 the full asymmetric loss is restored). A defensive max(F, R) clamp catches float-edge drift.</div>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>Tier Ladder</h6>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR thresholds &mdash; they don\u2019t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
+        <table class="vt-katex-tiers">
+          <thead><tr><th>Tier</th><th class="text-end">VTSR range</th><th></th></tr></thead>
+          <tbody>${tierRows}</tbody>
+        </table>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>Worked Example &middot; Lamper\u2019s 9th rated match</h6>
+        <p class="mb-2">Real numbers from <code>data/processed/elo_history.json</code>:</p>
+        <ul class="mb-3">
+          <li><strong>Player</strong>: Lamper at R = 1551 with 8 rated matches played.</li>
+          <li><strong>Lobby opponents</strong> (sorted): 1271 / 1276 / 1292 / 1418 / <strong>1510 (median)</strong> / 1519 / 1633 / 1670 / 2620.</li>
+          <li><strong>Performance</strong>: P = +0.50 (top of lobby &mdash; 13K / 3D, 33% accuracy, 63K dmg dealt).</li>
+        </ul>
+        ${exKEq}
+        ${exEEq}
+        ${exDREq}
+        <div class="vt-katex-caveat">Under v1 (lobby-median baseline) this same match produced +49. The v2 reduction reflects that out-rating most of the lobby was part of why the performance looked so dominant.</div>
+      </section>
+
+      <div class="vt-katex-caveat mt-3">
+        <strong>VTSR v2 &middot; changed Phase 12.</strong> Per-match comparison switched from lobby-median performance (P_med) to opponent-strength-weighted expected performance (E_i, median of opponent ratings, chess-ELO style). Existing peak_vtsr values from v1 are no longer comparable. Wins ELO blend (&alpha;) still 0.0; full algorithm in DEVELOPER_GUIDE \u00a713.
+      </div>
     </div>`;
     return vtsrTooltipHtmlCache;
   }

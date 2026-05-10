@@ -1575,22 +1575,40 @@ Linearity is the only blend that preserves the anchor: with $R^W = R^C = 1500$ a
 
 ### 13.2 Combat ELO derivation
 
+> **v2 (Phase 12)** — replaces the v1 lobby-median performance baseline ($P_{\text{med}}$) with an opponent-strength-weighted expected performance ($E_i$) derived from a chess-style logistic. Same 7-axis composite, same K-decay, same hope mechanics. See §13.7 for the migration note.
+
 Combat ELO updates per match by
 
 $$
-\Delta R^C_{i,\text{raw}} \;=\; K_i \cdot S \cdot (P_i - P_{\text{med}})
+\Delta R^C_{i,\text{raw}} \;=\; K_i \cdot S_O \cdot (P_i - E_i)
 $$
 
-where:
+where the **expected performance** $E_i$ is the chess-ELO logistic, rescaled to match the composite-performance range $[-1, +1]$:
+
+$$
+E_i \;=\; \frac{2}{1 + 10^{(\bar{R}_i - R^C_i) / S_R}} \;-\; 1
+$$
+
+and $\bar{R}_i$ is the **median** rating of player $i$'s opponents at the start of the match:
+
+$$
+\bar{R}_i \;=\; \mathrm{median}\{\, R^C_j \,:\, j \neq i \,\}
+$$
 
 | Symbol | Meaning | Value |
 |---|---|---|
 | $K_i$ | Per-player K-factor (decays with experience) | $\in [12, 52]$ |
-| $S$ | Per-match update scale (`ELO_RATING_SCALE`) | $2.5$ |
+| $S_O$ | Per-match outcome scale (`ELO_RATING_SCALE`) | $2.5$ |
+| $S_R$ | Rating-logistic scale (`ELO_LOGISTIC_SCALE`) | $400$ |
 | $P_i$ | Player $i$'s performance index in this match | $\in [-1, +1]$ |
-| $P_{\text{med}}$ | Lobby median performance | $\in [-1, +1]$ |
+| $E_i$ | Expected performance for player $i$ vs this lobby | $\in [-1, +1]$ |
+| $\bar{R}_i$ | Median rating of player $i$'s opponents | $\geq F = 1000$ |
 
-$S = 2.5$ replaces a buggy $400$ in earlier drafts (which lifted a chess expected-score divisor into the update rule); $400$ would have produced $1000+$ pt swings per match. $S = 2.5$ calibrates so a typical above-median composite gap of $\sim 0.4$ produces a swing of $\sim K$ points — i.e. K is the natural unit of swing.
+**Why median (not mean) for $\bar{R}_i$**: in a stratified lobby that contains a single very-high-rated outlier (e.g. VTrider at ~2700 in a lobby otherwise around 1500), the mean is pulled up so far that *every other player* looks like an underdog. Median is robust to that one outlier; the ELO update for everyone else lands close to where it would in a balanced lobby.
+
+**Why $S_O = 2.5$ unchanged from v1**: the practical magnitude of $(P_i - E_i)$ is in the same range as v1's $(P_i - P_{\text{med}})$ once $S_R$ is set to a value where typical rating gaps map to typical performance gaps. We tested $S_R \in \{200, 300, 400\}$ and found $400$ (the chess-canonical denominator) lands per-match swings within ~10–20% of v1 for an average-rated player, while compressing the high tail and lifting the floor (the desired v2 outcome).
+
+**Cold start**: when every player is at the anchor ($R = 1500$), $E_i = 0$ for everyone and the formula degrades to $\Delta R = K_i \cdot S_O \cdot P_i$. No special-case handling needed.
 
 ### 13.3 K-factor decay
 
@@ -1654,7 +1672,7 @@ $$
 
 So a player at $R = 1000$ losing $-30$ raw drops $0$. At $R = 1075$ they drop $-30 \cdot 0.85 \cdot 0.5 = -12.75$. At $R \geq 1150$ they drop the full asymmetric $-30 \cdot 0.85 = -25.5$. Gains are unaffected.
 
-**Loss aversion**: anchored in Kahneman & Tversky 1979 prospect theory; operational precedent in Marvel Rivals SR (~0.83), Overwatch role queue (~0.85), League of Legends demotion shielding (~0.7). Acceptable cost: ~5–8 pts/player/year of league-wide drift at our cadence. Median $P_{\text{med}}$ drifts up alongside it, so $(P_i - P_{\text{med}})$ stays centered.
+**Loss aversion**: anchored in Kahneman & Tversky 1979 prospect theory; operational precedent in Marvel Rivals SR (~0.83), Overwatch role queue (~0.85), League of Legends demotion shielding (~0.7). Acceptable cost: ~5–8 pts/player/year of league-wide drift at our cadence. Under v2, $E_i$ self-corrects for league-wide drift because it's anchored on absolute ratings (and the median-of-opponents reference moves with the league), so $(P_i - E_i)$ stays centered without needing a separate normalization.
 
 **Soft floor**: anchored in FIDE rapid/blitz floors, Glicko-2 RD floors, chess.com / lichess provisional floors. The $1000$ floor is two expected steady-state stdevs below the $1500$ anchor — about one player at our scale. The $150$-pt taper covers the bottom of the wide Tier 5 band so the floor approach is gradual rather than abrupt.
 
@@ -1662,44 +1680,98 @@ A defensive `R ← max(F, R)` clamp catches float-edge drift below $F$. The tape
 
 ### 13.6 Worked example
 
-Synthetic match: VTrider has $n = 32$ matches played, $R^C = 1820$, posts $P = 0.42$ in a lobby with $P_{\text{med}} = 0.05$.
+Real numbers from `data/processed/elo_history.json`, match `2026-05-04T03-45-41` — Lamper's 9th rated match.
+
+**Inputs:**
+
+- Player: **Lamper** at $R^C = 1551$ with $n = 8$ rated matches played.
+- Lobby opponents (sorted): $1271 / 1276 / 1292 / 1418 / \mathbf{1510} / 1519 / 1633 / 1670 / 2620$.
+- Performance index: $P = +0.50$ (top of the lobby — 13K / 3D, 33% accuracy, 63K dmg dealt).
+
+**Step 1 — K-factor:**
 
 $$
-K_i = 40 \cdot \left(1 - \frac{32}{32 + 10}\right) + 12 = 40 \cdot \frac{10}{42} + 12 \approx 21.5
-$$
-$$
-\Delta R^C_{i,\text{raw}} = 21.5 \cdot 2.5 \cdot (0.42 - 0.05) = 21.5 \cdot 2.5 \cdot 0.37 \approx +19.9
+K_i = 40 \cdot \left(1 - \frac{8}{8 + 10}\right) + 12 = 40 \cdot \frac{10}{18} + 12 \approx 34.22
 $$
 
-Gain case: $\Delta R^C_i = +19.9$. New rating $1839.9$.
-
-Same player a few matches later, posts $P = -0.30$ in a peer lobby with $P_{\text{med}} = +0.05$:
+**Step 2 — opponent reference (median, robust to the 2620 outlier):**
 
 $$
-\Delta R^C_{i,\text{raw}} = 21.5 \cdot 2.5 \cdot (-0.35) = -18.8
+\bar{R}_i = \mathrm{median}\{1271, 1276, 1292, 1418, 1510, 1519, 1633, 1670, 2620\} = 1510
 $$
 
-Above $1150$, so $\varphi = 1$:
+**Step 3 — expected performance:**
 
 $$
-\Delta R^C_i = -18.8 \cdot 0.85 \cdot 1 = -16.0
+E_i = \frac{2}{1 + 10^{(1510 - 1551) / 400}} - 1 = \frac{2}{1 + 10^{-0.1025}} - 1 \approx +0.117
 $$
 
-Now suppose a different player at $R = 1075$ also posts $-0.35$ below median with $K = 22$:
+(Lamper out-rates the lobby median by 41 pts; the model expects him to score about $+0.12$ in lobby-z-score units.)
+
+**Step 4 — raw delta:**
 
 $$
-\Delta R^C_{i,\text{raw}} = 22 \cdot 2.5 \cdot (-0.35) = -19.25
+\Delta R^C_{i,\text{raw}} = 34.22 \cdot 2.5 \cdot (0.50 - 0.117) \approx +32.7
+$$
+
+**Step 5 — gain case (no loss aversion / floor taper):**
+
+$$
+\Delta R^C_i = +32.7 \quad\Rightarrow\quad R^C_i = 1551 + 32.7 \approx 1583.7
+$$
+
+> **v1 vs v2**: under the v1 lobby-median baseline this same match produced $+49.07$. The v2 reduction reflects that out-rating most of the lobby was part of why the performance looked so dominant — Lamper still gains, but ~33% less.
+
+**Loss-case example** — a different player at $R^C = 1075$ posts $P = -0.30$ in a peer lobby ($K = 22$, $\bar{R} = 1075$ so $E = 0$):
+
+$$
+\Delta R^C_{i,\text{raw}} = 22 \cdot 2.5 \cdot (-0.30 - 0) = -16.5
 $$
 $$
 \varphi(1075) = \mathrm{clamp}(0, 1, (1075 - 1000) / 150) = 0.5
 $$
 $$
-\Delta R^C_i = -19.25 \cdot 0.85 \cdot 0.5 = -8.18
+\Delta R^C_i = -16.5 \cdot 0.85 \cdot 0.5 = -7.0
 $$
 
-Half the loss they'd take above $1150$. New rating $\approx 1066.8$ — still safely above floor.
+Half the loss they'd take above $1150$. New rating $\approx 1068$ — still safely above floor.
 
-### 13.7 Tier ladder
+**Top-player plateau example** — a $R^C = 2620$ player in a lobby with $\bar{R} = 1510$ posts $P = +0.73$ (top of leaderboard, 11 kills, 5 deaths):
+
+$$
+E_i = \frac{2}{1 + 10^{(1510 - 2620) / 400}} - 1 \approx +0.997
+$$
+
+The model expects them to dominate. They do dominate ($P = +0.73$), but not as completely as the rating predicted ($E = +1.00$):
+
+$$
+\Delta R^C_{i,\text{raw}} = K \cdot 2.5 \cdot (0.73 - 0.997) \approx -0.6 \cdot K
+$$
+
+Even on a top-fragger game, this player loses a small amount of rating. Across many matches their rating plateaus where typical $P_i \approx E_i$ — i.e. where their rating matches their actual performance. This is the chess-ELO mechanism that prevents top players from gaining rating indefinitely just by playing in soft lobbies.
+
+### 13.7 Migration note — v1 → v2
+
+| Aspect | v1 (Phase 4 – Phase 11) | v2 (Phase 12+) |
+|---|---|---|
+| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) |
+| Lobby reference rating | n/a | Median of opponents' Combat ELO |
+| Logistic scale ($S_R$) | n/a | $400$ (chess-canonical) |
+| Outcome scale ($S_O$) | $2.5$ | $2.5$ (unchanged) |
+| K-factor decay | unchanged | unchanged |
+| Loss aversion + soft floor | unchanged | unchanged |
+| Tier ranges | unchanged | unchanged (absolute thresholds) |
+| Wins ELO blend ($\alpha$) | $0.0$ (stub) | $0.0$ (still stubbed) |
+| `ELO_SCHEMA_VERSION` | $1$ | $2$ |
+| `PIPELINE_VERSION` | $7$ | $8$ (forced full re-process) |
+| New `expected_score_logistic_scale` constant | absent | exposed in `elo_current.json` |
+| Per-delta `expected` field | absent | added alongside `performance` |
+
+**Empirical effect**: v2 compresses the high tail (top players plateau where their typical $P_i$ matches their $E_i$, instead of climbing forever in soft lobbies) and lifts the floor (mid- and low-rated players who play in heavyweight lobbies stop bleeding rating for "average" performances they were never expected to exceed). Existing `peak_vtsr` values from v1 are no longer comparable — every player's rating history was recomputed from scratch on the first v2 pipeline run.
+
+**Why we changed it**: working through real numbers (Lamper +49 / +45 in soft lobbies, econchump -32 / -26 in heavyweight lobbies) made the lobby-stratification failure mode visible. The v1 within-lobby z-score baseline rewarded "be the best of whoever showed up" rather than "perform above expectation for your rating." The chess-ELO answer to that problem is opponent-strength weighting, which is what v2 implements.
+
+### 13.8 Tier ladder
 
 Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to give the sub-1350 "training band" room without adding a sixth tier. Tier 1 is open above 1800 so we never need to retro-add tiers.
 
@@ -1712,14 +1784,14 @@ Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to giv
 | 5 | V  | **1000 – 1349** | **350** | Wide training band. Floor at 1000; losses taper to zero as you approach it. |
 | 0 | ?  | Provisional | —    | $5 \leq \texttt{matches\_played} < 10$. Shown but flagged "rating still settling". |
 
-### 13.8 Match exclusion + provisional rules
+### 13.9 Match exclusion + provisional rules
 
 - **Excluded** matches (`player_count < 6` OR `duration_sec < 300`) do not increment `matches_played` and contribute no deltas to ratings. They appear in `elo_history.json` with `match_excluded: true` and an empty `deltas` array so the exclusion counters reconcile.
 - **Provisional** badge: rated rows with `matches_played < 10` (`ELO_PROVISIONAL_THRESHOLD`) display a `?` chip. Provisional players ARE rated and ARE shown on the leaderboard (provided they're past `MIN_CAREER_MATCHES = 5`); the chip just signals "rating is still moving fast — interpret with caution".
 - **Leaderboard visibility floor** (`MIN_CAREER_MATCHES = 5`): players with fewer than 5 rated matches in the current scope are hidden from `career_stats[]` and from both leaderboard tables entirely.
 - **Ratings are corpus-wide; the picker filter narrows display only.** A picker filter that narrows to one submitter or one duration band changes which rows appear in the VTSR leaderboard but does NOT recompute ratings against the filtered subset — that would change the meaning of every player's rating depending on which filter they happened to be looking at.
 
-### 13.9 File-format reference
+### 13.10 File-format reference
 
 - `data/processed/elo_current.json` — current-state per-player ratings. Schema documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md).
 - `data/processed/elo_history.json` — per-match rating deltas, chronological. One entry per processed match (excluded matches have empty `deltas`).

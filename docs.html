@@ -280,7 +280,22 @@
 
         const usedIds = new Set();
         content.querySelectorAll('h1, h2, h3, h4').forEach(heading => {
-          let id = slugify(heading.textContent);
+          // Honor kramdown-style explicit anchor extension on headings:
+          // `## 13. VTSR Methodology {#vtsr-methodology}` → ID
+          // `vtsr-methodology`, displayed text `13. VTSR Methodology`.
+          // Vanilla marked doesn't strip the {#...} suffix, so without
+          // this step the heading text would slugify to something like
+          // `13-vtsr-methodology-vtsr-methodology` and any deep link to
+          // the explicit anchor (e.g. the VTSR modal's footer link in
+          // js/app.js) would silently no-op.
+          let id;
+          const explicitMatch = heading.textContent.match(/\s*\{#([\w-]+)\}\s*$/);
+          if (explicitMatch) {
+            id = explicitMatch[1];
+            heading.textContent = heading.textContent.replace(/\s*\{#[\w-]+\}\s*$/, '');
+          } else {
+            id = slugify(heading.textContent);
+          }
           if (usedIds.has(id)) {
             let n = 2;
             while (usedIds.has(id + '-' + n)) n++;

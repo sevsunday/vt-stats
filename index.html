@@ -843,16 +843,16 @@
              See scripts/elo.py for the algorithm. -->
         <div class="card mb-4 d-none" id="section-vtsr">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR Leaderboard</h5>
-              <button type="button" class="btn btn-sm btn-outline-secondary vt-vtsr-info-btn"
+            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR Leaderboard</h5>
+            <div class="d-flex align-items-center gap-1">
+              <button type="button" class="btn btn-sm vt-vtsr-info-btn"
                       id="vtsr-methodology-btn"
                       data-bs-toggle="modal" data-bs-target="#vtsr-methodology-modal"
-                      aria-label="Open VTSR methodology">
-                <i class="bi bi-info-circle me-1"></i>Methodology
+                      aria-label="How VTSR is calculated">
+                <i class="bi bi-info-circle me-1"></i>How It's Calculated
               </button>
+              <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
             </div>
-            <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body table-responsive">
             <table id="vtsr-table" class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
@@ -1315,24 +1315,33 @@
   </div>
 
   <!-- VTSR Methodology Modal. Body is populated lazily by renderVtsrLeaderboard()
-       in js/app.js (cached after first paint). Carries the .vt-katex-tooltip
-       class so the existing KaTeX equation-spacing rules in css/vtstats-theme.css
-       apply inside the modal body without having to duplicate them. -->
-  <div class="modal fade vt-katex-tooltip" id="vtsr-methodology-modal" tabindex="-1"
+       in js/app.js (cached after first paint). The body carries the
+       .vt-katex-tooltip class so the existing KaTeX equation-spacing rules
+       in css/vtstats-theme.css apply inside the modal body without having
+       to duplicate them. We deliberately do NOT put .vt-katex-tooltip on the
+       modal root because that selector caps width at 600px (for tooltips),
+       which would constrain the modal overlay and break centering.
+       v2 (Phase 12): bumped to modal-xl to host a richer 6-section reference
+       layout (golden equation / expected curve / composite / K & hope /
+       tiers / worked example). -->
+  <div class="modal fade" id="vtsr-methodology-modal" tabindex="-1"
        aria-labelledby="vtsr-methodology-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="vtsr-methodology-modal-title">
-            <i class="bi bi-stars me-2"></i>VTSR Methodology
-          </h5>
+          <div>
+            <h5 class="modal-title mb-0" id="vtsr-methodology-modal-title">
+              <i class="bi bi-stars me-2"></i>VTSR Methodology
+            </h5>
+            <small class="text-muted">v2 &middot; opponent-strength-weighted</small>
+          </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="modal-body" id="vtsr-methodology-modal-body">
+        <div class="modal-body vt-katex-tooltip" id="vtsr-methodology-modal-body">
           <!-- Populated on first VTSR render. -->
         </div>
         <div class="modal-footer border-top">
-          <a href="docs.html#vtsr-methodology" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
+          <a href="docs.html?doc=developer#vtsr-methodology" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
             Read the full methodology<i class="bi bi-box-arrow-up-right ms-2"></i>
           </a>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
