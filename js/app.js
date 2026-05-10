@@ -4716,13 +4716,20 @@
   // resolved by the v2.1 bump). Worked-example numbers (Lamper m9)
   // recomputed; expected-section caveat rewritten.
   let vtsrTooltipHtmlCache = null;
+  // Returns the rendered modal HTML, or ``null`` when ``katex.min.js``
+  // (deferred in index.html) hasn't finished loading yet. Returning
+  // null instead of a ``<code>``-fallback string is critical: an
+  // earlier version cached the fallback and locked the modal into
+  // showing raw LaTeX forever, even after KaTeX eventually loaded.
+  // The caller (the modal's ``show.bs.modal`` handler) re-attempts on
+  // each open until KaTeX is ready, then locks in the cached result.
   function buildVtsrTooltipHtml() {
     if (vtsrTooltipHtmlCache) return vtsrTooltipHtmlCache;
     const k = (window.katex && typeof window.katex.renderToString === 'function')
       ? window.katex
       : null;
+    if (!k) return null;
     function tex(latex, displayMode) {
-      if (!k) return `<code>${esc(latex)}</code>`;
       try { return k.renderToString(latex, { displayMode, throwOnError: false }); }
       catch { return `<code>${esc(latex)}</code>`; }
     }
@@ -5037,14 +5044,27 @@
       };
     });
 
-    // Populate the VTSR methodology modal body on first VTSR render.
-    // Markup lives in index.html alongside the other modals; the docs link
-    // is rendered as a footer button there, so we only inject the KaTeX
-    // body content here. Cached after first paint via the data attribute.
+    // Wire the VTSR methodology modal to lazy-populate its body the
+    // first time it opens. We deliberately do NOT populate on first
+    // VTSR render here — that races KaTeX's deferred load and would
+    // cache a fallback ``<code>`` rendering of every equation. By
+    // the time the user clicks "How It's Calculated", katex.min.js
+    // has long since loaded; rendering at modal-open time guarantees
+    // ``buildVtsrTooltipHtml()`` returns a real KaTeX-rendered body.
+    // The listener attaches once (idempotent via the data flag) so
+    // re-renders of the leaderboard don't pile up duplicate handlers.
+    const $modal = document.getElementById('vtsr-methodology-modal');
     const $modalBody = document.getElementById('vtsr-methodology-modal-body');
-    if ($modalBody && !$modalBody.dataset.vtPopulated) {
-      $modalBody.innerHTML = buildVtsrTooltipHtml();
-      $modalBody.dataset.vtPopulated = '1';
+    if ($modal && $modalBody && !$modal.dataset.vtListener) {
+      $modal.dataset.vtListener = '1';
+      $modal.addEventListener('show.bs.modal', () => {
+        if ($modalBody.dataset.vtPopulated) return;
+        const html = buildVtsrTooltipHtml();
+        if (html) {
+          $modalBody.innerHTML = html;
+          $modalBody.dataset.vtPopulated = '1';
+        }
+      });
     }
 
     ensureTooltips($card);
