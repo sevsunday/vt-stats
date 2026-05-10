@@ -2196,10 +2196,11 @@ Current per-player ratings keyed for the All Matches view's VTSR Leaderboard. To
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "alpha": 0.0,
   "anchor": 1500.0,
   "rating_scale": 2.5,
+  "expected_score_logistic_scale": 400.0,
   "k_loss_aversion": 0.85,
   "rating_floor": 1000.0,
   "floor_taper_window": 150.0,
@@ -2236,10 +2237,11 @@ Current per-player ratings keyed for the All Matches view's VTSR Leaderboard. To
 
 | Field | Type | Description |
 |---|---|---|
-| `schema_version` | int | Output shape version. Bump when the JS reader needs to change. |
+| `schema_version` | int | Output shape version. Bump when the JS reader needs to change. **v2 (Phase 12)**: bumped 1 → 2 when the per-match comparison switched from $P_{\text{med}}$ to $E_i$ and `expected_score_logistic_scale` + per-delta `expected` joined the schema. |
 | `alpha` | float | Wins ELO blend weight. v1: 0.0 (Combat-only). |
 | `anchor` | float | League anchor where every new player starts. 1500.0. |
-| `rating_scale` | float | Per-match update scale `S` in $\Delta R = K \cdot S \cdot (P - P_{\text{med}})$. 2.5. |
+| `rating_scale` | float | Per-match outcome scale $S_O$ in $\Delta R = K \cdot S_O \cdot (P_i - E_i)$. 2.5. |
+| `expected_score_logistic_scale` | float | Rating-logistic scale $S_R$ in $E_i = 2/(1 + 10^{(\bar{R}_i - R_i)/S_R}) - 1$. 400.0 (chess-canonical). v2 only. |
 | `k_loss_aversion` | float | Asymmetric loss multiplier. 0.85. |
 | `rating_floor` | float | Soft floor below which losses go to zero. 1000.0. |
 | `floor_taper_window` | float | Width of the linear taper above the floor. 150.0 → full losses resume at 1150. |
@@ -2270,18 +2272,25 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "history": [{
     "match_id": "2026-04-16T01-27-48",
     "match_date": "2026-04-16T01:27:48Z",
     "match_excluded": false,
     "deltas": [
-      { "name": "VTrider", "steam64": "...", "before": 1500.0, "after": 1517.2, "delta": 17.2, "performance": 0.42 },
+      { "name": "VTrider", "steam64": "...", "before": 1500.0, "after": 1517.2,
+        "delta": 17.2, "performance": 0.42, "expected": 0.05 },
       ...
     ]
   }, ...]
 }
 ```
+
+| Field | Type | Description |
+|---|---|---|
+| `history[].deltas[].before` / `after` / `delta` | float | Pre-match rating, post-match rating, and the applied $\Delta R$ (negative = loss). |
+| `history[].deltas[].performance` | float | The 7-axis composite $P_i$ from `compute_performance_index()`. Range $[-1, +1]$. |
+| `history[].deltas[].expected` | float | **v2 only** — the opponent-strength-weighted expected performance $E_i$ (median-of-opponents reference, logistic with $S_R = 400$). Range $[-1, +1]$. Useful for audit / debug: a row with `performance ≈ expected` means the player rated about as expected for the lobby they were in. |
 
 Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`.
 

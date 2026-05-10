@@ -766,3 +766,31 @@ flowchart LR
 ```
 
 P1 ships standalone. P2 is foundation. P3 ∥ P4 after P2. P5–P8 fan-out. P9/P10 close the loop. **P11** optional polish anytime after P5. Monitor `elo_history.json` size (~1 MB/year at expected cadence).
+
+---
+
+## Phase 12 — VTSR v2 (Opponent-Strength-Weighted Combat ELO)
+
+Post-launch follow-up triggered by real-data evidence of lobby-stratification bias in v1 (Lamper +49 / +45 in soft lobbies, econchump -32 / -26 in heavyweight lobbies). Full plan: [`vtsr_v2_opponent_strength_bb79188d.plan.md`](vtsr_v2_opponent_strength_bb79188d.plan.md).
+
+**Algorithm change** in `scripts/elo.py`:
+- Per-match comparison switched from lobby-median performance ($P_{\text{med}}$) to opponent-strength-weighted expected performance ($E_i$, chess-ELO style logistic).
+- Lobby reference rating $\bar{R}_i$ is the **median** of opponents' Combat ELO at the start of the match (median, not mean — robust to single-outlier ratings like VTrider's).
+- New constant `ELO_LOGISTIC_SCALE = 400` (chess-canonical denominator). Outcome scale `ELO_RATING_SCALE = 2.5` unchanged from v1.
+- New `expected_performance(r_i, r_opponents_ref)` helper returns the logistic mapped to $[-1, +1]$.
+- Per-delta history rows gain an `expected` field alongside `performance` for audit / debug.
+- `elo_current.json` constants block gains `expected_score_logistic_scale`.
+
+**Schema bumps**:
+- `ELO_SCHEMA_VERSION` 1 → 2
+- `PIPELINE_VERSION` 7 → 8 (forces full re-process so every match's ELO history is recomputed)
+
+**Hope mechanics, K-decay, tier ranges, weights, and Wins ELO blend (`α = 0`) are unchanged.** All loss-aversion / floor-taper math now applies on top of the new $(P_i - E_i)$ raw delta.
+
+**Modal restructuring** (the "How It's Calculated" button):
+- Bumped from `modal-lg` to `modal-xl` (1140px).
+- Body rewritten as 6 titled sections: golden equation hero / expected performance curve / performance composite / K-factor & hope mechanics / tier ladder / worked example using Lamper's actual match-9 numbers.
+- Footer link fixed to `docs.html?doc=developer#vtsr-methodology` (was missing the `?doc=developer` query so it loaded the data dictionary).
+- Added kramdown `{#anchor}` support to `docs.html`'s heading post-processor so the explicit anchor on `## 13. VTSR Methodology {#vtsr-methodology}` actually resolves.
+
+**Empirical effect**: top tail compresses (top players plateau where typical $P_i$ matches their $E_i$ instead of climbing forever in soft lobbies); mid-band lifts (low-rated players in heavyweight lobbies stop bleeding rating for "average" performances they were never expected to exceed). Pre-v2 `peak_vtsr` values are no longer comparable across the v1 / v2 boundary.

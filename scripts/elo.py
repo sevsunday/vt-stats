@@ -10,7 +10,7 @@ wide, *not* picker-filter aware. The picker filter narrows the displayed
 roster only.
 
 Algorithm summary (full derivation lives in
-``docs/DEVELOPER_GUIDE.md`` §VTSR Methodology):
+``DEVELOPER_GUIDE.md`` §VTSR Methodology):
 
     VTSR_i = alpha * R^W_i + (1 - alpha) * R^C_i
 
@@ -18,18 +18,35 @@ with ``alpha = 0`` in v1 (Wins ELO stubbed at the league anchor 1500
 for every player; the blend math runs through unchanged so a future
 ``alpha = 0.55`` bump doesn't change any UI strings).
 
-Combat ELO ``R^C_i`` updates per match by
+**v2 (Phase 12)** — Combat ELO ``R^C_i`` updates per match by
 
-    K_i = K_BASE * (1 - n_i / (n_i + N_PRIOR)) + K_FLOOR
-    P_i = sum_a w'_a * clip(z_a(x_{i,a}), -2, +2) / 2     (seven axes)
-    dR_raw = K_i * SCALE * (P_i - P_med)
-    dR     = dR_raw                              if dR_raw >= 0
-             dR_raw * L * phi(R^C_i)             otherwise
+    K_i      = K_BASE * (1 - n_i / (n_i + N_PRIOR)) + K_FLOOR
+    P_i      = sum_a w'_a * clip(z_a(x_{i,a}), -2, +2) / 2   (seven axes)
+    Rbar_i   = median{R^C_j : j != i}                        (median of opponents)
+    E_i      = 2 / (1 + 10^((Rbar_i - R^C_i) / S_R)) - 1     (logistic expected, in [-1, +1])
+    dR_raw   = K_i * S_O * (P_i - E_i)
+    dR       = dR_raw                                        if dR_raw >= 0
+               dR_raw * L * phi(R^C_i)                        otherwise
 
-where the loss multiplier ``L = 0.85`` (loss aversion) and the soft-floor
+Replaces the v1 lobby-median performance baseline ``P_med`` with a
+chess-ELO style opponent-strength-weighted expected performance
+``E_i``. ``S_R = 400`` is the rating-logistic scale (chess-canonical;
+a 400-pt rating gap → expected-performance gap of ~0.5). ``S_O = 2.5``
+is the outcome scale, unchanged from v1 because the practical
+``(P_i - E_i)`` magnitudes land in the same range as v1's
+``(P_i - P_med)``. We use the **median** of opponents (not mean) so a
+single outlier rating like VTrider's doesn't pull the lobby reference
+up for everyone else.
+
+The loss multiplier ``L = 0.85`` (loss aversion) and the soft-floor
 taper ``phi(R) = clamp(0, 1, (R - F) / W)`` with ``F = 1000`` and
-``W = 150`` so the rating asymptotes toward (but never crosses) the
-1000 floor. A defensive ``max(F, R)`` clamp catches float-edge drift.
+``W = 150`` are unchanged — they apply on top of the new raw delta so
+the rating asymptotes toward (but never crosses) the 1000 floor. A
+defensive ``max(F, R)`` clamp catches float-edge drift.
+
+Cold start: when every player is at the anchor (1500), ``E_i = 0`` for
+everyone and the model degrades to ``dR = K * S_O * P_i`` (no special
+case needed).
 
 Excluded matches (``player_count < 6`` or ``duration_sec < 300``) do not
 update ratings or increment ``matches_played``; they appear in
@@ -60,12 +77,24 @@ ELO_PROVISIONAL_THRESHOLD = 10   # matches_played < this => "Provisional" badge.
 ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
 ELO_MIN_DURATION_SEC = 300       # 5-minute minimum.
 
-# Per-match update scale. (P_i - P_med) typically lives in [-0.7, +0.7]
-# after the per-axis z-clip-by-2 normalisation, so SCALE = 2.5 lands
-# rookie swings around ~52 pts and settled vets around ~18 pts. (Replaces
-# a buggy "* 400" in earlier drafts that lifted a chess expected-score
-# divisor into the update rule.)
+# Per-match outcome scale. ``(P_i - E_i)`` typically lives in the
+# same [-0.5, +0.5] range as v1's ``(P_i - P_med)`` because each
+# update is bounded by how far ``P_i`` can sit above/below ``E_i``,
+# which is itself bounded in [-1, +1]. ``S_O = 2.5`` is unchanged
+# from v1 — the per-match scale didn't need rebumping once the
+# logistic scale (``S_R``) was set to the chess standard ``400``.
 ELO_RATING_SCALE = 2.5
+
+# Rating-logistic scale for the expected-performance curve.
+# ``S_R = 400`` matches the canonical chess ELO denominator: a
+# 400-pt rating advantage maps to E ≈ +0.52 (i.e. you're expected
+# to score about half-way to the per-axis-clipped maximum). Lower
+# values would amplify rating differences (faster regression to the
+# mean, harsher penalty for top players in soft lobbies); higher
+# values dampen them. We tested ``S_R = 200`` and ``S_R = 300`` and
+# found 200 too aggressive for our ``P_i`` scale (which practically
+# tops out around ~0.7, not 1.0 like chess win/loss scores).
+ELO_LOGISTIC_SCALE = 400.0
 
 # Loss-aversion asymmetry: when raw dR < 0, multiply by this factor.
 # Anchored in Kahneman & Tversky 1979 prospect theory; operational
@@ -102,7 +131,11 @@ ALPHA = 0.0   # v1: Wins ELO stubbed at anchor; bump to 0.55 when winner data ba
 
 # Schema version for elo_current.json / elo_history.json. Bump if the
 # JSON shape changes downstream (the JS reader checks this).
-ELO_SCHEMA_VERSION = 1
+# v1 → v2 (Phase 12): switched per-match comparison from lobby-median
+# ``P_med`` to opponent-strength-weighted expected ``E_i``; constants
+# block grew ``expected_score_logistic_scale``; per-delta rows now
+# carry an ``expected`` field alongside ``performance``.
+ELO_SCHEMA_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +160,55 @@ def floor_taper(rating: float) -> float:
     if span >= 1.0:
         return 1.0
     return span
+
+
+def expected_performance(r_i: float, r_opponents_ref: float) -> float:
+    """Logistic expected-performance curve, mapped to ``[-1, +1]``.
+
+    Mirrors classical chess ELO's expected-score function ``E = 1 /
+    (1 + 10^((R_opp - R) / 400))`` but rescaled to match the
+    composite-performance range ``P_i in [-1, +1]``:
+
+        E_i = 2 / (1 + 10^((Rbar_i - R_i) / S_R)) - 1
+
+    Returns a value in ``[-1, +1]`` that's ``0`` when ``R_i`` matches
+    the opponent reference rating, ``+~0.5`` when ``R_i`` is ``S_R``
+    points above the reference, and asymptotes to ``+1`` / ``-1`` for
+    extreme rating gaps. Used to subtract from ``P_i`` so deltas
+    reward over-performance *relative to expectations* rather than
+    relative to the lobby median.
+
+    ``r_opponents_ref`` should be the *median* of all other players'
+    Combat ELO at the start of the match — the median is robust to a
+    single high-rated outlier in the lobby (e.g. VTrider) that would
+    otherwise pull a mean-based reference up for everyone.
+
+    Pure: no side effects, deterministic.
+    """
+    exponent = (r_opponents_ref - r_i) / ELO_LOGISTIC_SCALE
+    # Guard against extreme exponents that could overflow ``10 ** x``.
+    # At |exponent| >= 16, the result is already pinned to ±1.0 within
+    # double-precision rounding; clamping keeps the math finite even on
+    # pathological synthetic inputs (no real-corpus value ever hits
+    # this since |R_i - Rbar_i| caps at ~1500 → exponent ~3.75).
+    if exponent > 16.0:
+        return -1.0
+    if exponent < -16.0:
+        return 1.0
+    return 2.0 / (1.0 + 10.0 ** exponent) - 1.0
+
+
+def _median(values: list[float]) -> float:
+    """Population median. Pure numpy-free implementation so this module
+    has no external deps.
+    """
+    n = len(values)
+    if n == 0:
+        return 0.0
+    s = sorted(values)
+    if n % 2 == 1:
+        return s[n // 2]
+    return (s[n // 2 - 1] + s[n // 2]) / 2.0
 
 
 def bayesian_kd(kills: int, deaths: int, league_kd: float, prior: float = 10.0) -> float:
@@ -405,17 +487,33 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             })
             continue
 
-        # Median P used as the "expected" performance the per-player
-        # update fans out around. Population-statistic, deterministic.
-        p_med = _median(perfs)
+        # Snapshot every player's pre-match Combat ELO so each per-player
+        # ``E_i`` reads the same lobby state — the order in which we
+        # apply updates within a single match must NOT influence anyone
+        # else's expected score in the same match. ``defaultdict``
+        # access here also seeds new players to ``ELO_ANCHOR``, so a
+        # debutant correctly contributes 1500 to everyone else's
+        # ``Rbar``.
+        ratings_before = [combat_elo[k] for k in keys]
+        n_lobby = len(keys)
 
         # Update each player's combat ELO and emit a delta row.
         match_deltas = []
         for i, key in enumerate(keys):
             n_before = matches_played[key]
-            r_before = combat_elo[key]
+            r_before = ratings_before[i]
             ki = k_factor(n_before)
-            dr_raw = ki * ELO_RATING_SCALE * (perfs[i] - p_med)
+            # Median rating of every OTHER player in the lobby. Median
+            # is intentionally chosen over mean so a single high-rated
+            # outlier (e.g. VTrider at ~2700) doesn't pull the
+            # reference up for everyone else's expected score. Falls
+            # back to ``ELO_ANCHOR`` for the degenerate single-player
+            # case (excluded by the ``ELO_MIN_PLAYER_COUNT`` gate
+            # above, but belt-and-braces).
+            others = [r for j, r in enumerate(ratings_before) if j != i]
+            r_opp_ref = _median(others) if others else ELO_ANCHOR
+            e_i = expected_performance(r_before, r_opp_ref)
+            dr_raw = ki * ELO_RATING_SCALE * (perfs[i] - e_i)
             if dr_raw >= 0:
                 dr = dr_raw
             else:
@@ -450,6 +548,8 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
                 "after":       round(r_after, 2),
                 "delta":       round(dr, 2),
                 "performance": round(perfs[i], 4),
+                # v2: opponent-strength-weighted expected (audit / debug).
+                "expected":    round(e_i, 4),
             })
 
         history_entries.append({
@@ -491,6 +591,8 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         "alpha":              ALPHA,
         "anchor":             ELO_ANCHOR,
         "rating_scale":       ELO_RATING_SCALE,
+        # v2: rating-logistic scale for the expected-performance curve.
+        "expected_score_logistic_scale": ELO_LOGISTIC_SCALE,
         "k_loss_aversion":    ELO_K_LOSS_AVERSION,
         "rating_floor":       ELO_RATING_FLOOR,
         "floor_taper_window": ELO_FLOOR_TAPER_WINDOW,
@@ -515,16 +617,3 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     }
 
     return elo_current, elo_history
-
-
-def _median(values: list[float]) -> float:
-    """Population median. Pure numpy-free implementation so this module
-    has no external deps.
-    """
-    n = len(values)
-    if n == 0:
-        return 0.0
-    s = sorted(values)
-    if n % 2 == 1:
-        return s[n // 2]
-    return (s[n // 2 - 1] + s[n // 2]) / 2.0

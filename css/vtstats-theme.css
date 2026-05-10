@@ -4513,13 +4513,38 @@ td.vt-col-split {
     cursor: pointer;
 }
 
+/* "How It's Calculated" button next to the VTSR fullscreen icon. Borderless,
+   muted, with the same hover treatment as the surrounding card-header icon
+   buttons so the pair reads as a single control cluster. */
+.vt-vtsr-info-btn {
+    border: 0;
+    background: transparent;
+    color: var(--kb-text-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.25rem 0.55rem;
+}
+
+.vt-vtsr-info-btn:hover,
+.vt-vtsr-info-btn:focus-visible {
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+}
+
 /* ============================================================================
    KATEX TOOLTIP
    Override Bootstrap tooltip width + KaTeX glyph color so equations pick
    up the theme foreground in both light and dark modes.
+
+   The shared .vt-katex-tooltip class is reused on the modal body that
+   opens from the VTSR Leaderboard's "How It's Calculated" button so it
+   inherits the same equation-spacing rules below. The width cap is
+   scoped to tooltip context only — applying max-width: 600px to a modal
+   body would visually shrink the dialog content even though the dialog
+   itself is .modal-lg, so we exclude that context here.
    ============================================================================ */
 
-.vt-katex-tooltip {
+.vt-katex-tooltip:not(.modal-body) {
     --bs-tooltip-max-width: 600px;
     max-width: 600px;
 }
@@ -4579,18 +4604,75 @@ td.vt-col-split {
 
 .vt-katex-tooltip a { color: var(--kb-primary); }
 
-/* Modal variant — the VTSR methodology icon opens #vtsr-methodology-modal
-   (which carries the .vt-katex-tooltip class), so the equation-spacing
-   rules above apply inside the modal body too. The block below tunes the
-   couple of things that need to differ from the tooltip context: the
-   modal body has more room than a tooltip, so we restore a normal font
-   size and let the modal's own background/border show through. */
-.vt-katex-tooltip.modal .modal-body {
+/* Modal variant — the VTSR methodology button opens #vtsr-methodology-modal
+   whose body carries .vt-katex-tooltip so the equation-spacing rules above
+   apply inside the modal too. The modal body has much more room than a
+   tooltip, so restore a comfortable reading size for the prose. */
+.modal-body.vt-katex-tooltip {
     font-size: 0.95rem;
     line-height: 1.55;
 }
 
-.vt-katex-tooltip.modal .vt-katex-tooltip-body { line-height: 1.55; }
+.modal-body.vt-katex-tooltip .vt-katex-tooltip-body { line-height: 1.55; }
+
+/* VTSR Methodology modal — v2 (Phase 12) structured-reference layout.
+   The body is divided into six titled <section class="vt-vtsr-doc-section">
+   blocks (golden equation / expected curve / composite / K & hope / tiers /
+   worked example). Each section is separated by a subtle bottom border so
+   the reference reads like a doc page rather than a long blob. */
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-section {
+    padding: 1.1rem 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 18%, transparent);
+}
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-section:first-of-type { padding-top: 0; }
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-section:last-of-type {
+    padding-bottom: 0.5rem;
+    border-bottom: 0;
+}
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-section h6 {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 0.85rem 0;
+}
+
+/* Symbol legend grid — 2 columns under the hero equation. Each cell pairs
+   a <code> symbol with a brief description. */
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-symbols {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem 1.2rem;
+    margin: 0.75rem 0;
+    font-size: 0.86rem;
+}
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-symbols code {
+    color: var(--kb-primary);
+    margin-right: 0.4rem;
+}
+
+/* Compact 2/3-column tables used by the expected-curve, K-decay, and tier
+   sections. Slightly tighter than the legacy .vt-katex-tiers / .vt-katex-weights
+   tables so the dense data reads at a glance. */
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-curve-table {
+    width: auto;
+    min-width: 50%;
+    margin: 0.65rem 0;
+    font-size: 0.86rem;
+}
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-curve-table th,
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-curve-table td {
+    padding: 0.3rem 1rem 0.3rem 0;
+}
+.modal-body.vt-katex-tooltip .vt-vtsr-doc-curve-table th {
+    color: var(--kb-text-muted);
+    font-weight: 500;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 25%, transparent);
+}
 
 /* KaTeX ships hard-coded color: #000 on .katex; force it to follow the
    theme so equations stay legible in dark mode. */
