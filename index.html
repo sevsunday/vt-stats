@@ -11,8 +11,8 @@
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/vtstats-theme.css">
-  <!-- KaTeX (vendored, v0.16.11). Used to pre-render the VTSR formula
-       tooltip via katex.renderToString(); auto-render contrib is loaded
+  <!-- KaTeX (vendored, v0.16.11). Used to pre-render VTSR-T methodology
+       math in the modal via katex.renderToString(); auto-render contrib is loaded
        only on docs.html. Fonts live in vendor/katex/fonts/ (woff2 only;
        modern browsers fall back through the @font-face source list). -->
   <link rel="stylesheet" href="vendor/katex/katex.min.css">
@@ -836,19 +836,19 @@
       <!-- All Tab: Overview -->
       <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
 
-        <!-- VTSR Leaderboard. Compact ladder view, sparkline-led, sorted
-             by VTSR by default. Reads data/processed/elo_current.json
+        <!-- VTSR-T Leaderboard (VT Stats Rating — Thug). Sorted by rating
+             by default. Reads data/processed/elo_current.json
              (pipeline-emitted, full-corpus). Hides itself entirely when
              that file is missing (fresh checkout, pipeline never run).
              See scripts/elo.py for the algorithm. -->
         <div class="card mb-4 d-none" id="section-vtsr">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR Leaderboard</h5>
+            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
             <div class="d-flex align-items-center gap-1">
               <button type="button" class="btn btn-sm vt-vtsr-info-btn"
                       id="vtsr-methodology-btn"
                       data-bs-toggle="modal" data-bs-target="#vtsr-methodology-modal"
-                      aria-label="How VTSR is calculated">
+                      aria-label="How VTSR-T is calculated">
                 <i class="bi bi-info-circle me-1"></i>How It's Calculated
               </button>
               <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
@@ -861,7 +861,7 @@
                   <th>#</th>
                   <th class="text-center">Tier</th>
                   <th data-sort="name">Player</th>
-                  <th data-sort="vtsr" class="text-end sort-active">VTSR</th>
+                  <th data-sort="vtsr" class="text-end sort-active">VTSR-T</th>
                   <th data-sort="last_delta" class="text-end">Last</th>
                   <th data-sort="peak_vtsr" class="text-end">Peak</th>
                   <th data-sort="matches_played" class="text-end">Matches</th>
@@ -907,13 +907,13 @@
                     Tier
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Tier</strong><br>VTSR-driven 5-tier classification: Tier 1 (>=1800), Tier 2 (1650-1799), Tier 3 (1500-1649, anchor), Tier 4 (1350-1499), Tier 5 (1000-1349, wide band). Provisional badge for players with fewer than 10 rated matches."></i>
+                       title="<strong>Tier</strong><br>VTSR-T-driven 5-tier classification: Tier 1 (>=1800), Tier 2 (1650-1799), Tier 3 (1500-1649, anchor), Tier 4 (1350-1499), Tier 5 (1000-1349, wide band). Provisional badge for players with fewer than 10 rated matches."></i>
                   </th>
                   <th data-sort="vtsr" class="text-end vt-career-col-shared">
-                    VTSR
+                    VTSR-T
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>VTSR</strong> (VT Stats Rating)<br>Pipeline-side combat ELO, anchored at 1500, soft floor at 1000. Full methodology in the VTSR Leaderboard card above."></i>
+                       title="<strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug)<br>Fine-tuned combat ELO (eight-axis thug composite), anchored at 1500, soft floor at 1000. With Wins blend &alpha;=0 this equals the headline rating; full methodology in the VTSR-T Leaderboard card above."></i>
                   </th>
                   <th class="text-center vt-career-col-shared">
                     Team
@@ -1314,7 +1314,7 @@
     </div>
   </div>
 
-  <!-- VTSR Methodology Modal. Body is populated lazily by renderVtsrLeaderboard()
+  <!-- VTSR-T methodology modal. Body is populated lazily by renderVtsrLeaderboard()
        in js/app.js (cached after first paint). The body carries the
        .vt-katex-tooltip class so the existing KaTeX equation-spacing rules
        in css/vtstats-theme.css apply inside the modal body without having
@@ -1331,14 +1331,14 @@
         <div class="modal-header border-bottom">
           <div>
             <h5 class="modal-title mb-0" id="vtsr-methodology-modal-title">
-              <i class="bi bi-stars me-2"></i>VTSR Methodology
+              <i class="bi bi-stars me-2"></i>VTSR-T Methodology
             </h5>
-            <small class="text-muted">v2.1 &middot; opponent-strength-weighted (S<sub>R</sub> = 800)</small>
+            <small class="text-muted">v2.2 &middot; 8-axis thug composite (structure share + T-key, S<sub>R</sub> = 800)</small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body vt-katex-tooltip" id="vtsr-methodology-modal-body">
-          <!-- Populated on first VTSR render. -->
+          <!-- Populated on first modal open (KaTeX-ready). -->
         </div>
         <div class="modal-footer border-top">
           <a href="docs.html?doc=developer#vtsr-methodology" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
