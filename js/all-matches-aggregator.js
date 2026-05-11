@@ -394,14 +394,25 @@
       }
 
       for (const p of (m.leaderboard || [])) {
-        const pid = p.player_id || '';
-        let c = career.get(pid);
+        // Mirror scripts/elo.py _player_key(): Steam64 is the durable identity;
+        // player_id / name are legacy-row fallbacks for pre-Phase-2 contributions
+        // that pre-date the steam64 emit. Bucketing by Steam64 means an
+        // unregistered rename (someone playing matches under two aliases before
+        // they land in data/steamid_to_name.txt) self-merges into one career row
+        // without requiring a re-process.
+        const key = p.steam64 ? `s64:${p.steam64}` : (p.player_id || p.name || '');
+        if (!key) continue;
+        let c = career.get(key);
         if (!c) {
           c = newCareerBucket();
-          c.player_id = pid;
-          career.set(pid, c);
+          c.player_id = p.player_id || p.name || '';
+          career.set(key, c);
         }
+        // Refresh name and player_id on every match so the bucket reflects the
+        // most recently-seen canonical alias (chronological fileIds order means
+        // the last-seen value is the most recent alias).
         c.name = p.name || c.name;
+        if (p.player_id) c.player_id = p.player_id;
         // Steam64 is best-effort: pre-Phase-2 contributions don't carry it.
         // Once seen, lock it in so renames don't lose the identity.
         if (p.steam64 && !c.steam64) c.steam64 = p.steam64;
@@ -601,7 +612,7 @@
         : 0;
 
       careerStats.push({
-        player_id: pid,
+        player_id: c.player_id,
         name:                c.name,
         steam64:             c.steam64,
         matches_played:      c.matches_played,
