@@ -203,6 +203,65 @@
       { slug: 'developer',   file: 'DEVELOPER_GUIDE.md',      label: 'Developer Guide',  icon: 'bi-code-slash'   },
     ];
 
+    // Protect $...$ / $$...$$ math regions from marked's escape processing.
+    // marked has no concept of LaTeX math contexts, so it strips backslash-
+    // escapes (\_,  \*, \\) inside $...$, corrupting expressions like
+    // $\text{minutes\_played}$ into $\text{minutes_played}$ which KaTeX
+    // cannot parse inside \text{}.  This function masks math regions with
+    // opaque placeholder tokens before marked.parse() runs, then
+    // restoreMathRegions() replaces them in the resulting HTML so KaTeX
+    // auto-render sees the pristine LaTeX source.
+    //
+    // Algorithm:
+    //   1. Mask fenced-code blocks (``` / ~~~) and inline code (`) with
+    //      null-byte tokens so dollar signs inside code spans are never
+    //      treated as math delimiters.
+    //   2. Replace $$$...$$$ (block, multiline) then $...$ (inline, single-
+    //      line) with @@VTKATEXMATHn@@ tokens — pure ASCII alphanum so
+    //      marked treats them as plain text (no escaping, linking, etc.).
+    //   3. Restore code masks so marked sees real code fence / span syntax.
+    //
+    // Returns { protected: string, placeholders: string[] }.
+    function protectMathRegions(md) {
+      const placeholders = [];
+      let counter = 0;
+      const codeMasks = [];
+
+      // Mask fenced code blocks (``` or ~~~, optional language tag).
+      let s = md.replace(
+        /^(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*$/gm,
+        m => { const tok = `\x00C${codeMasks.length}\x00`; codeMasks.push(m); return tok; }
+      );
+      // Mask inline code spans (one or more backticks, no newline inside).
+      s = s.replace(
+        /`+[^`\n]*`+/g,
+        m => { const tok = `\x00C${codeMasks.length}\x00`; codeMasks.push(m); return tok; }
+      );
+
+      // Replace math — $$ before $ to avoid consuming block openers as two
+      // adjacent inline matches.
+      s = s
+        .replace(/\$\$([\s\S]*?)\$\$/g, m => {
+          placeholders.push(m); return `@@VTKATEXMATH${counter++}@@`;
+        })
+        .replace(/\$([^\n$]+?)\$/g, m => {
+          placeholders.push(m); return `@@VTKATEXMATH${counter++}@@`;
+        });
+
+      // Restore code masks before handing the string to marked.
+      s = s.replace(/\x00C(\d+)\x00/g, (_, i) => codeMasks[+i]);
+
+      return { protected: s, placeholders };
+    }
+
+    // Restore @@VTKATEXMATHn@@ tokens in marked's HTML output back to the
+    // original math source before KaTeX auto-render.  A function callback is
+    // used so any literal '$' inside a math expression doesn't trigger
+    // String.replace's special $& / $1 substitution syntax.
+    function restoreMathRegions(html, placeholders) {
+      return html.replace(/@@VTKATEXMATH(\d+)@@/g, (_, i) => placeholders[+i]);
+    }
+
     (async function () {
       const content = document.getElementById('docs-content');
       const loading = document.getElementById('docs-loading');
@@ -232,12 +291,18 @@
         if (!res.ok) throw new Error(res.statusText);
         const md = await res.text();
 
-        content.innerHTML = marked.parse(md);
+        // Protect math regions before marked.parse() so that backslash-
+        // escapes inside $...$ (e.g. \_ in \text{minutes\_played}) are
+        // not stripped by marked's generic escape processing.  After
+        // marked runs, restore the original LaTeX source verbatim so
+        // KaTeX auto-render sees pristine expressions.
+        const { protected: mdProtected, placeholders } = protectMathRegions(md);
+        content.innerHTML = restoreMathRegions(marked.parse(mdProtected), placeholders);
 
         // Post-render: KaTeX auto-render scans the rendered HTML for
-        // $...$ / $$...$$ / \(...\) / \[...\] delimiters and swaps in
-        // pre-rendered math. Skips inside <code>/<pre> so prose snippets
-        // showing literal `$x$` don't accidentally render. GitHub's
+        // $...$ / $$...$$ / \(...\) / \[...\] delimiters and renders
+        // them as proper math.  Skips <code>/<pre> so prose showing
+        // literal `$x$` is never accidentally rendered.  GitHub's
         // native LaTeX renderer uses the same delimiters, so the source
         // markdown round-trips between the two without forking.
         if (typeof renderMathInElement === 'function') {
