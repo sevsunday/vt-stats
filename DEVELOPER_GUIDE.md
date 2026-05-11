@@ -1557,13 +1557,15 @@ The seed shipped with a VSR Build Tree feature (`generateBuildTree()` and friend
 - Inline `onclick` handlers on dynamically-emitted HTML depend on the global `window.browser` reference. Refactoring these to `addEventListener` was deemed out of scope; the global is preserved.
 - No ARIA focus traps in the compare modal, no `aria-live` on search results, no explicit `role` on ODF list buttons beyond Bootstrap's defaults. Out of scope for v1.
 
-## 13. VTSR Methodology {#vtsr-methodology}
+## 13. VTSR-T Methodology {#vtsr-methodology}
 
-**VTSR** (VT Stats Rating) is the project's player rating. It's pipeline-emitted, full-corpus, and time-ordered — the dashboard reads `data/processed/elo_current.json` once per session and passes ratings through the All Matches aggregator unchanged. The picker filter narrows the displayed roster only; ratings are corpus-wide.
+**VTSR-T** (VT Stats Rating — *Thug*) is the combat-focused rating: an **eight-axis thug composite** (v2.2; previously seven axes) plus fine-tuned ELO-style updates (`scripts/elo.py`). The published headline **VTSR** is still the linear blend below — with $\alpha = 0$ (current ship), **VTSR equals VTSR-T** for every player; the JSON wire field stays `vtsr` for a stable contract.
+
+The rating system is pipeline-emitted, full-corpus, and time-ordered — the dashboard reads `data/processed/elo_current.json` once per session and passes ratings through the All Matches aggregator unchanged. The picker filter narrows the displayed roster only; ratings are corpus-wide.
 
 ### 13.1 Final equation
 
-The published rating is a linear blend of two components — a **Wins ELO** ($R^W_i$) and a **Combat ELO** ($R^C_i$):
+The published rating is a linear blend of two components — a **Wins ELO** ($R^W_i$) and **Combat ELO** ($R^C_i$, i.e. **VTSR-T**):
 
 $$
 \boxed{\;\mathrm{VTSR}_i \;=\; \alpha \cdot R^W_i \;+\; (1 - \alpha) \cdot R^C_i\;}
@@ -1575,9 +1577,11 @@ Linearity is the only blend that preserves the anchor: with $R^W = R^C = 1500$ a
 
 ### 13.2 Combat ELO derivation
 
-> **v2 (Phase 12)** — replaces the v1 lobby-median performance baseline ($P_{\text{med}}$) with an opponent-strength-weighted expected performance ($E_i$) derived from a chess-style logistic. Same 7-axis composite, same K-decay, same hope mechanics. See §13.7 for the migration note.
+> **v2 (Phase 12)** — replaces the v1 lobby-median performance baseline ($P_{\text{med}}$) with an opponent-strength-weighted expected performance ($E_i$) from a fine-tuned ELO-family logistic. Same 7-axis composite, same K-decay, same hope mechanics. See §13.7 for the migration note.
 >
-> **v2.1** — same algorithm shape; the rating-logistic scale was widened from $S_R = 400$ to $S_R = 800$ to restore a leaderboard-friendly spread (the v2.0 ship over-compressed every player into Tiers 3–4 only). Numbers in §13.6 are computed at $S_R = 800$; the symbol-table value below also reflects v2.1.
+> **v2.1** — same algorithm shape; the rating-logistic scale was widened from $S_R = 400$ to $S_R = 800$ to restore a leaderboard-friendly spread (the v2.0 ship over-compressed every player into Tiers 3–4 only). Numbers in §13.6 (Lamper m9) are computed under v2.2; the symbol-table value below reflects $S_R = 800$ which is unchanged in v2.2.
+>
+> **v2.2 (Phase 13)** — thug-axis rebalance. Drops `asset_multiplier` (damage by player-owned AI — that's a build/route signal, reserved for a future VTSR-C commander rating), adds `structure_share` (player-dealt damage to enemy buildings as a share of total dealt — the true PvE thug signal), and adds `target_lock_pct` (T-key situational-awareness proxy). Snipe shaved 0.05 → 0.04 with three other axes nudged to keep $\sum w = 1.00$. `ELO_SCHEMA_VERSION` bumped $2 \to 3$ because the `weights` block changes shape. Pre-v2.2 `peak_vtsr` values are no longer comparable.
 
 Combat ELO updates per match by
 
@@ -1585,7 +1589,7 @@ $$
 \Delta R^C_{i,\text{raw}} \;=\; K_i \cdot S_O \cdot (P_i - E_i)
 $$
 
-where the **expected performance** $E_i$ is the chess-ELO logistic, rescaled to match the composite-performance range $[-1, +1]$:
+where the **expected performance** $E_i$ is an opponent-strength-weighted logistic (fine-tuned ELO-style curve), rescaled to match the composite-performance range $[-1, +1]$:
 
 $$
 E_i \;=\; \frac{2}{1 + 10^{(\bar{R}_i - R^C_i) / S_R}} \;-\; 1
@@ -1608,9 +1612,9 @@ $$
 
 **Why median (not mean) for $\bar{R}_i$**: in a stratified lobby that contains a single very-high-rated outlier (e.g. VTrider at ~2700 in a lobby otherwise around 1500), the mean is pulled up so far that *every other player* looks like an underdog. Median is robust to that one outlier; the ELO update for everyone else lands close to where it would in a balanced lobby.
 
-**Why $S_O = 2.5$ unchanged from v1**: the practical magnitude of $(P_i - E_i)$ is in the same range as v1's $(P_i - P_{\text{med}})$ once $S_R$ is set to a value where typical rating gaps map to typical performance gaps. We tested $S_R \in \{200, 300, 400, 600, 800, 1200\}$ on the corpus. $400$ (chess-canonical) was our v2.0 ship value but over-compressed the spread to ~200 pts, collapsing the leaderboard into Tiers 3 and 4 only. $800$ (the v2.1 calibrated value) lands the spread at ~440 pts so all four populated tiers (1 through 4) appear. Chess uses 400 because chess scores are binary; our continuous $P_i$ scoring carries more signal per match but is noisier and bounded by ~$\pm 0.7$ in practice, which makes 400 too aggressive for a small population. Iterating $S_R$ does NOT require a schema bump — only `PIPELINE_VERSION` to force re-rating.
+**Why $S_O = 2.5$ unchanged from v1**: the practical magnitude of $(P_i - E_i)$ is in the same range as v1's $(P_i - P_{\text{med}})$ once $S_R$ is set to a value where typical rating gaps map to typical performance gaps. We tested $S_R \in \{200, 300, 400, 600, 800, 1200\}$ on the corpus. $400$ was our v2.0 ship value but over-compressed the spread to ~200 pts, collapsing the leaderboard into Tiers 3 and 4 only. $800$ (the v2.1 calibrated value) lands the spread at ~440 pts so all four populated tiers (1 through 4) appear. Classic binary-outcome ELO formulations often pair a ~400-pt logistic denominator with win/loss scores; our continuous $P_i$ composite behaves differently (noisier, bounded by ~$\pm 0.7$ in practice), which makes 400 too aggressive for a ~25-player corpus. Iterating $S_R$ does NOT require a schema bump — only `PIPELINE_VERSION` to force re-rating.
 
-**$S_R = 800$ intuition**: a 200-pt rating advantage maps to $E \approx +0.28$; a 400-pt advantage to $E \approx +0.52$; an 800-pt advantage to $E \approx +0.80$. Compare chess's $S_R = 400$: a 200-pt advantage there would already map to $E \approx +0.52$, which over-claims the certainty of the rating signal for our small population.
+**$S_R = 800$ intuition**: a 200-pt rating advantage maps to $E \approx +0.28$; a 400-pt advantage to $E \approx +0.52$; an 800-pt advantage to $E \approx +0.80$. Compare $S_R = 400$: a 200-pt advantage there already maps to $E \approx +0.52$, which over-claims the certainty of the rating signal for our small population.
 
 **Cold start**: when every player is at the anchor ($R = 1500$), $E_i = 0$ for everyone and the formula degrades to $\Delta R = K_i \cdot S_O \cdot P_i$. No special-case handling needed.
 
@@ -1629,21 +1633,30 @@ with $K_{\text{base}} = 40$, $K_{\text{floor}} = 12$, $n_{\text{prior}} = 10$. N
 | 20 matches | 25.3 | ~25 | ~22 |
 | 50+ matches | ~18.7 | ~19 | ~16 |
 
-Anchor and curve mirror FIDE / USCF (provisional K=40) and lichess steady-state (K~12–16). A rookie at $\sim 0.4$ above median climbs about 250 points in their first 5 matches; a settled vet swings $\sim 20$ pts/match.
+The rookie curve ($K \approx 52$ decaying toward $K \approx 12$–16 settled) mirrors conventional provisional ladder setups used across ranked multiplayer titles — without pinning implementation to any single external sanctioning body. A rookie at $\sim 0.4$ above median climbs about 250 points in their first 5 matches; a settled vet swings $\sim 20$ pts/match.
 
 ### 13.4 Performance index
 
-Seven combat axes (locked, $\sum w = 1.00$):
+Eight combat axes (v2.2 — locked, $\sum w = 1.00$):
 
 | Axis | Weight | Per-match metric (before z-score) |
 |---|---|---|
-| `net_damage_share`  | 0.25 | $(\text{dealt} - \text{received}) / \max(1, \sum_{\text{lobby}} \text{dealt})$ |
+| `net_damage_share`  | 0.21 | $(\text{dealt} - \text{received}) / \max(1, \sum_{\text{lobby}} \text{dealt})$ |
 | `kill_rate`         | 0.20 | $\text{kills} / \text{minutes\_played}$ |
+| `pvp_share`         | 0.18 | $\text{pvp\_dmg} / \max(1, \text{total\_dmg})$ |
 | `accuracy`          | 0.15 | $\text{shots\_hit} / \max(1, \text{shots\_fired})$ |
-| `pvp_share`         | 0.20 | $\text{pvp\_dmg} / \max(1, \text{total\_dmg})$ |
-| `mobility`          | 0.10 | $\text{activity\_score} / 100$ (omit axis if no positioning) |
-| `snipe_bonus`       | 0.05 | $\min(\text{snipes} / 5, 1)$ — capped before z-score |
-| `asset_multiplier`  | 0.05 | $\text{asset\_dmg} / \max(1, \text{dealt})$ |
+| `structure_share`   | 0.10 | $\text{structure\_dmg} / \max(1, \text{dealt})$ — damage to enemy buildings as share of total (omit axis if lobby has zero structure damage) |
+| `mobility`          | 0.08 | $\text{activity\_score} / 100$ (omit axis if no positioning) |
+| `snipe_bonus`       | 0.04 | $\min(\text{snipes} / 5, 1)$ — capped before z-score |
+| `target_lock_pct`   | 0.04 | $\text{target\_lock\_pct} \in [0, 1]$ (omit axis if `has_target_lock_data` is false) |
+
+Direct-dogfight axes (`net_damage_share + kill_rate + pvp_share + accuracy + snipe_bonus`) still total **0.78**, so the v2.2 axis swap sharpens what counts as thug work without blunting the core fighting signal.
+
+**`structure_share`** is a v2.2 addition. The pipeline derives it via a `BulletHit` → `DamageDealt` join (`DamageDealt` carries no `victim_odf` in the proto; only `BulletHit` does). For each player's BulletHits, we stash `victim_odf` into a per-`(tick, shooter, ordnance)` FIFO; the paired DamageDealt popleft's the queue and credits the player when (a) the victim ODF is in the `Building` bucket of `data/odf.min.json` and (b) the victim's faction-code (i/e/f from the ODF prefix) differs from the shooter's team faction. Mirror matches (both teams same faction) fall back to crediting all damage because the faction filter can't distinguish own vs enemy buildings. See `_load_building_odfs()` and `player_structure_dealt_by_vfc` in `scripts/process_stats.py`.
+
+**`target_lock_pct`** is a v2.2 addition. Reads `positioning.players[name].metrics.target_lock_pct` (already a 0–1 ratio, cross-match comparable). Gated on the match-global `has_target_lock_data` flag — pre-schema sessions and matches where nobody activated target mode return `None` for the entire lobby (the weight redistributes). Low weight (0.04) is deliberate: a discipline reward, not a dominator signal.
+
+**`asset_multiplier`** was removed in v2.2 and reserved for a future **VTSR-C** (Commander) rating. Damage by player-owned AI tracks build/route quality (commander signal) rather than dogfight skill (thug signal). The underlying `assets.dealt` field still flows into `match_contributions.json` so career highlights like Puppeteer continue to work — only the ELO axis was retired.
 
 `pickup_economy` is intentionally **not** an ELO axis (low signal, map-dependent) — pickup + destruction totals stay on `match_contributions.json` so the Career Highlights' Pod Goblin card still has data. The former pickup weight folded into `pvp_share` to lean harder into anti-PvE-farming.
 
@@ -1678,19 +1691,19 @@ So a player at $R = 1000$ losing $-30$ raw drops $0$. At $R = 1075$ they drop $-
 
 **Loss aversion**: anchored in Kahneman & Tversky 1979 prospect theory; operational precedent in Marvel Rivals SR (~0.83), Overwatch role queue (~0.85), League of Legends demotion shielding (~0.7). Acceptable cost: ~5–8 pts/player/year of league-wide drift at our cadence. Under v2, $E_i$ self-corrects for league-wide drift because it's anchored on absolute ratings (and the median-of-opponents reference moves with the league), so $(P_i - E_i)$ stays centered without needing a separate normalization.
 
-**Soft floor**: anchored in FIDE rapid/blitz floors, Glicko-2 RD floors, chess.com / lichess provisional floors. The $1000$ floor is two expected steady-state stdevs below the $1500$ anchor — about one player at our scale. The $150$-pt taper covers the bottom of the wide Tier 5 band so the floor approach is gradual rather than abrupt.
+**Soft floor**: anchored in common ranked-floor conventions across ladder-based multiplayer titles (explicit numeric floors + gradual taper vs abrupt cliffs). The $1000$ floor is two expected steady-state stdevs below the $1500$ anchor — about one player at our scale. The $150$-pt taper covers the bottom of the wide Tier 5 band so the floor approach is gradual rather than abrupt.
 
 A defensive `R ← max(F, R)` clamp catches float-edge drift below $F$. The taper math drives losses asymptotically to zero at the floor; the clamp is belt-and-suspenders.
 
 ### 13.6 Worked example
 
-Real numbers from `data/processed/elo_history.json`, match `2026-05-04T03-45-41` — Lamper's 9th rated match.
+Real numbers from `data/processed/elo_history.json`, match `2026-05-04T03-45-41` — Lamper's 9th rated match. Re-rated under VTSR-T v2.2.
 
 **Inputs:**
 
-- Player: **Lamper** at $R^C = 1551$ with $n = 8$ rated matches played.
-- Lobby opponents (sorted): $1271 / 1276 / 1292 / 1418 / \mathbf{1510} / 1519 / 1633 / 1670 / 2620$.
-- Performance index: $P = +0.50$ (top of the lobby — 13K / 3D, 33% accuracy, 63K dmg dealt).
+- Player: **Lamper** at $R^C = 1500.82$ with $n = 8$ rated matches played.
+- Lobby opponents (sorted by `before`): $1333 / 1373 / 1385 / 1450 / \mathbf{1456} / 1483 / 1499 / 1543 / 1767$. The bolded value is the median of the *other 9 players* (Lamper himself excluded). Exact median: $1455.77$.
+- Performance index: $P = +0.5435$ (top of the lobby on net damage, PvP share, and accuracy).
 
 **Step 1 — K-factor:**
 
@@ -1698,33 +1711,33 @@ $$
 K_i = 40 \cdot \left(1 - \frac{8}{8 + 10}\right) + 12 = 40 \cdot \frac{10}{18} + 12 \approx 34.22
 $$
 
-**Step 2 — opponent reference (median, robust to the 2620 outlier):**
+**Step 2 — opponent reference (median of the other 9 ratings):**
 
 $$
-\bar{R}_i = \mathrm{median}\{1271, 1276, 1292, 1418, 1510, 1519, 1633, 1670, 2620\} = 1510
+\bar{R}_i = \mathrm{median}\{1333.32,\, 1372.60,\, 1385.28,\, 1449.74,\, \mathbf{1455.77},\, 1482.74,\, 1499.38,\, 1543.11,\, 1767.39\} = 1455.77
 $$
 
-**Step 3 — expected performance** ($S_R = 800$, the v2.1 calibrated value):
+**Step 3 — expected performance** ($S_R = 800$):
 
 $$
-E_i = \frac{2}{1 + 10^{(1510 - 1551) / 800}} - 1 = \frac{2}{1 + 10^{-0.05125}} - 1 \approx +0.059
+E_i = \frac{2}{1 + 10^{(1455.77 - 1500.82) / 800}} - 1 = \frac{2}{1 + 10^{-0.05631}} - 1 \approx +0.0647
 $$
 
-(Lamper out-rates the lobby median by 41 pts; with the v2.1 widened logistic, the model expects him to score about $+0.06$ in lobby-z-score units — a softer claim than the $+0.117$ that v2.0's $S_R = 400$ produced for the same gap.)
+(Lamper out-rates the lobby median by ~45 pts; with $S_R = 800$ the model expects him to score about $+0.065$ in lobby-z-score units — a soft claim, appropriate for a small rating gap in a small-population corpus.)
 
 **Step 4 — raw delta:**
 
 $$
-\Delta R^C_{i,\text{raw}} = 34.22 \cdot 2.5 \cdot (0.50 - 0.059) \approx +37.7
+\Delta R^C_{i,\text{raw}} = 34.22 \cdot 2.5 \cdot (0.5435 - 0.0647) \approx +40.96
 $$
 
 **Step 5 — gain case (no loss aversion / floor taper):**
 
 $$
-\Delta R^C_i = +37.7 \quad\Rightarrow\quad R^C_i = 1551 + 37.7 \approx 1588.7
+\Delta R^C_i = +40.96 \quad\Rightarrow\quad R^C_i = 1500.82 + 40.96 = 1541.78
 $$
 
-> **v1 → v2.0 → v2.1 progression for this match**: v1 (lobby-median baseline) produced $+49.07$. v2.0 ($S_R = 400$) compressed it to $+32.7$. v2.1 ($S_R = 800$) lands at $+37.7$ — still a meaningful reduction from v1, but breathing room restored for the leaderboard spread.
+> **Algorithm progression for this match**: v1 (lobby-median baseline) produced $\approx +49$. v2.0 ($S_R = 400$, opponent-strength-weighted) compressed it to $\approx +33$. v2.1 ($S_R = 800$) produced $\approx +38$. v2.2 (8-axis composite with `structure_share` + `target_lock_pct` replacing `asset_multiplier`) lands at $+40.96$ here — Lamper's lobby had no structure damage and no T-key data, so those axes self-omit and the weights redistribute to the remaining six, slightly amplifying his net-damage / PvP / accuracy lead. The full corpus was re-rated chronologically under v2.2, so $\bar{R}_i$ (and Lamper's own pre-match rating) differ from the v2.1 worked example.
 
 **Loss-case example** — a different player at $R^C = 1075$ posts $P = -0.30$ in a peer lobby ($K = 22$, $\bar{R} = 1075$ so $E = 0$):
 
@@ -1752,38 +1765,44 @@ $$
 \Delta R^C_{i,\text{raw}} = K \cdot 2.5 \cdot (0.73 - 0.921) \approx -0.48 \cdot K
 $$
 
-Even on a top-fragger game, this player loses a small amount of rating. (Under v2.0's $S_R = 400$, $E$ pinned at $+0.997$ and the same match produced a slightly larger $-0.67 \cdot K$ drop.) Across many matches their rating plateaus where typical $P_i \approx E_i$ — i.e. where their rating matches their actual performance. This is the chess-ELO mechanism that prevents top players from gaining rating indefinitely just by playing in soft lobbies; v2.1 lets the plateau sit ~300 pts above the median lobby instead of ~140, restoring a leaderboard-friendly spread.
+Even on a top-fragger game, this player loses a small amount of rating. (Under v2.0's $S_R = 400$, $E$ pinned at $+0.997$ and the same match produced a slightly larger $-0.67 \cdot K$ drop.) Across many matches their rating plateaus where typical $P_i \approx E_i$ — i.e. where their rating matches their actual performance. This fine-tuned ELO-style opponent expectation prevents top players from gaining rating indefinitely just by farming soft lobbies; v2.1 lets the plateau sit ~300 pts above the median lobby instead of ~140, restoring a leaderboard-friendly spread.
 
-### 13.7 Migration note — v1 → v2 → v2.1
+### 13.7 Migration note — v1 → v2 → v2.1 → v2.2
 
-| Aspect | v1 (Phase 4 – Phase 11) | v2.0 (Phase 12 ship) | v2.1 (post-Phase-12 tuning) |
-|---|---|---|---|
-| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged |
-| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged |
-| Logistic scale ($S_R$) | n/a | $400$ (chess-canonical) | $\mathbf{800}$ (small-population calibrated) |
-| Outcome scale ($S_O$) | $2.5$ | $2.5$ (unchanged) | $2.5$ (unchanged) |
-| K-factor decay | unchanged | unchanged | unchanged |
-| Loss aversion + soft floor | unchanged | unchanged | unchanged |
-| Tier ranges | unchanged | unchanged (absolute thresholds) | unchanged |
-| Wins ELO blend ($\alpha$) | $0.0$ (stub) | $0.0$ (still stubbed) | $0.0$ (still stubbed) |
-| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ (no shape change) |
-| `PIPELINE_VERSION` | $7$ | $8$ (forced full re-process) | $\mathbf{9}$ (forced full re-rating) |
-| `expected_score_logistic_scale` constant | absent | exposed (= 400) | exposed (= 800) |
-| Per-delta `expected` field | absent | added alongside `performance` | unchanged |
+| Aspect | v1 (Phase 4 – Phase 11) | v2.0 (Phase 12 ship) | v2.1 (post-Phase-12 tuning) | v2.2 (Phase 13 thug-axis rebalance) |
+|---|---|---|---|---|
+| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged | unchanged |
+| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged | unchanged |
+| Logistic scale ($S_R$) | n/a | $400$ (v2.0 default) | $\mathbf{800}$ (small-population calibrated) | $800$ (unchanged) |
+| Outcome scale ($S_O$) | $2.5$ | $2.5$ (unchanged) | $2.5$ (unchanged) | $2.5$ (unchanged) |
+| Composite axes | 7 | 7 | 7 | **8** (drop `asset_multiplier`; add `structure_share` + `target_lock_pct`) |
+| K-factor decay | unchanged | unchanged | unchanged | unchanged |
+| Loss aversion + soft floor | unchanged | unchanged | unchanged | unchanged |
+| Tier ranges | unchanged | unchanged (absolute thresholds) | unchanged | unchanged |
+| Wins ELO blend ($\alpha$) | $0.0$ (stub) | $0.0$ (still stubbed) | $0.0$ (still stubbed) | $0.0$ (still stubbed) |
+| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ (no shape change) | $\mathbf{3}$ (weights keys changed shape) |
+| `PIPELINE_VERSION` | $7$ | $8$ (forced full re-process) | $9$ (forced full re-rating) | $\mathbf{10}$ (forced full re-process: new `personal.structure_dealt` field) |
+| `expected_score_logistic_scale` constant | absent | exposed (= 400) | exposed (= 800) | exposed (= 800) |
+| Per-delta `expected` field | absent | added alongside `performance` | unchanged | unchanged |
+| Per-player `personal.structure_dealt` | absent | absent | absent | **added** (BulletHit→DamageDealt join) |
 
 **Empirical effect (v2)**: compresses the high tail (top players plateau where their typical $P_i$ matches their $E_i$, instead of climbing forever in soft lobbies) and lifts the floor (mid- and low-rated players who play in heavyweight lobbies stop bleeding rating for "average" performances they were never expected to exceed). Existing `peak_vtsr` values from v1 are no longer comparable — every player's rating history was recomputed from scratch on the first v2 pipeline run.
 
 **Empirical effect (v2.1)**: the v2.0 ship over-compressed the spread for our small-population corpus — every established player landed within a 200-pt band (Tiers 3 and 4 only on the leaderboard). v2.1 doubles $S_R$ (400 → 800), flattening the expected-performance curve so top players plateau ~300 pts above the median lobby instead of ~140. Predicted spread widens from ~200 pts to ~440 pts, populating Tiers 1 through 4. `peak_vtsr` values from v2.0 are also no longer comparable to v2.1 — same reason.
 
-**Why we changed it (v1 → v2)**: working through real numbers (Lamper +49 / +45 in soft lobbies, econchump -32 / -26 in heavyweight lobbies) made the lobby-stratification failure mode visible. The v1 within-lobby z-score baseline rewarded "be the best of whoever showed up" rather than "perform above expectation for your rating." The chess-ELO answer to that problem is opponent-strength weighting, which is what v2 implements.
+**Empirical effect (v2.2)**: the axis swap sharpens what counts as thug work. `asset_multiplier` (damage by player-owned AI — a build/route signal) leaves the thug rating; `structure_share` (player-dealt damage to enemy buildings) and `target_lock_pct` (T-key situational awareness) enter. Direct-dogfight axes still total 0.78 of the composite, so the core fighting signal is preserved. Players who consistently bust enemy economy and play with target lock active gain a small but real boost; players who relied on AI-asset damage lose that subsidy. **All `peak_vtsr` values from v2.1 are no longer comparable to v2.2** — the composite shape changed, so historical peaks were recomputed from scratch on the v2.2 re-rate.
 
-**Why we tuned it (v2.0 → v2.1)**: shipping at the chess-canonical $S_R = 400$ assumed our continuous $P_i$ scoring would behave like chess's binary win/loss outcomes. It doesn't — our composite is bounded at $\sim \pm 0.7$ in practice (not $\pm 1$), and our ~25-player league means even small rating gaps already pin $E_i$ near its limit. The result was a tiny 200-pt spread on the leaderboard with VTrider sitting at 1644 — mathematically defensible (he'd plateaued where his typical performance matched expectations) but visually unhelpful (only Tiers 3 and 4 populated). $S_R = 800$ is honest about the small-population uncertainty without giving up the v2 mechanism. Iterating $S_R$ does NOT require a schema bump because the JSON shape is identical (just a constant value flips); only `PIPELINE_VERSION` bumps to force the cached re-rating.
+**Why we changed it (v1 → v2)**: working through real numbers (Lamper +49 / +45 in soft lobbies, econchump -32 / -26 in heavyweight lobbies) made the lobby-stratification failure mode visible. The v1 within-lobby z-score baseline rewarded "be the best of whoever showed up" rather than "perform above expectation for your rating." Strength-of-schedule via opponent-strength weighting is the standard ELO-family answer — that's what v2 implements.
+
+**Why we tuned it (v2.0 → v2.1)**: shipping at $S_R = 400$ assumed our continuous $P_i$ scoring would tolerate the same logistic steepness as classic binary win/loss formulations. It doesn't — our composite is bounded at $\sim \pm 0.7$ in practice (not $\pm 1$), and our ~25-player league means even small rating gaps already pin $E_i$ near its limit. The result was a tiny 200-pt spread on the leaderboard with VTrider sitting at 1644 — mathematically defensible (he'd plateaued where his typical performance matched expectations) but visually unhelpful (only Tiers 3 and 4 populated). $S_R = 800$ is honest about the small-population uncertainty without giving up the v2 mechanism. Iterating $S_R$ does NOT require a schema bump because the JSON shape is identical (just a constant value flips); only `PIPELINE_VERSION` bumps to force the cached re-rating.
+
+**Why we rebalanced (v2.1 → v2.2)**: VTSR-T is "individual dogfighter skill." `asset_multiplier` was always borderline — damage dealt by AI units a player owns measures how well their commander built/routed for them, not how well they dogfight. Pulling it out of VTSR-T and reserving it for a future VTSR-C (Commander) rating cleans up the signal. The freed weight went to two thug-relevant axes: `structure_share` (does the player threaten the enemy's economy?) and `target_lock_pct` (do they play with awareness of nearby threats?). `snipe_bonus` was trimmed one point alongside three other small adjustments to keep $\sum w = 1.00$. The `assets.dealt` field still flows into `match_contributions.json` so career highlights like Puppeteer keep working — only the ELO axis was retired.
 
 ### 13.8 Tier ladder
 
 Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to give the sub-1350 "training band" room without adding a sixth tier. Tier 1 is open above 1800 so we never need to retro-add tiers.
 
-| Tier | Roman | VTSR range | Width | What it takes |
+| Tier | Roman | VTSR-T range | Width | What it takes |
 |---|---|---|---|---|
 | 1 | I  | $\geq 1800$  | open  | Top of the ladder. Requires sustained $\sim +0.4$ above lobby median across many matches. |
 | 2 | II | 1650 – 1799 | 150   | Consistently above-median performance; clear strength on at least 2–3 axes. |
@@ -1797,7 +1816,7 @@ Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to giv
 - **Excluded** matches (`player_count < 6` OR `duration_sec < 300`) do not increment `matches_played` and contribute no deltas to ratings. They appear in `elo_history.json` with `match_excluded: true` and an empty `deltas` array so the exclusion counters reconcile.
 - **Provisional** badge: rated rows with `matches_played < 10` (`ELO_PROVISIONAL_THRESHOLD`) display a `?` chip. Provisional players ARE rated and ARE shown on the leaderboard (provided they're past `MIN_CAREER_MATCHES = 5`); the chip just signals "rating is still moving fast — interpret with caution".
 - **Leaderboard visibility floor** (`MIN_CAREER_MATCHES = 5`): players with fewer than 5 rated matches in the current scope are hidden from `career_stats[]` and from both leaderboard tables entirely.
-- **Ratings are corpus-wide; the picker filter narrows display only.** A picker filter that narrows to one submitter or one duration band changes which rows appear in the VTSR leaderboard but does NOT recompute ratings against the filtered subset — that would change the meaning of every player's rating depending on which filter they happened to be looking at.
+- **Ratings are corpus-wide; the picker filter narrows display only.** A picker filter that narrows to one submitter or one duration band changes which rows appear in the VTSR-T leaderboard but does NOT recompute ratings against the filtered subset — that would change the meaning of every player's rating depending on which filter they happened to be looking at.
 
 ### 13.10 File-format reference
 

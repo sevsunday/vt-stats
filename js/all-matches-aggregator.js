@@ -1011,7 +1011,7 @@
 
     // ---------- Flavor B: cross-match-only (12) ----------
 
-    // The Champion — highest VTSR (requires elo).
+    // The Champion — highest VTSR-T (`vtsr` field; requires elo).
     if (elo && Array.isArray(elo.ratings) && elo.ratings.length) {
       const eligibleVtsr = elo.ratings
         .filter(r => keptNames.has(r.name))
