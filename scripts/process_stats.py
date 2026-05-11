@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 9
+PIPELINE_VERSION = 10
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -220,6 +220,32 @@ def _load_known_powerup_odfs(odf_db):
     expanded = set(base)
     for odf in base:
         stem = odf[:-4]  # strip .odf
+        expanded.add(f"{stem}vsr.odf")
+        expanded.add(f"{stem}_vsr.odf")
+    return frozenset(expanded)
+
+
+def _load_building_odfs(odf_db):
+    """Authoritative building ODF set, sourced from data/odf.min.json's
+    Building bucket plus VSR-mod variants. Used by the BulletHit ->
+    DamageDealt join in `process_match()` to credit `player_structure_dealt`
+    when a player's bullet impacts an enemy building (recycler, factory,
+    extractor, power gen, etc.). Feeds the VTSR-T `structure_share` axis.
+
+    Mirrors `_load_known_powerup_odfs()`: builds the base set from the DB
+    bucket, then synthesizes `vsr` / `_vsr` suffix variants for each entry
+    so VSR-mod ODFs that inherit from stock parents at runtime are still
+    recognized. Returns an empty frozenset when odf_db lacks a Building
+    bucket (degrades gracefully -- structure_share axis just sees zero
+    damage for every lobby and self-omits via weight redistribution).
+    """
+    base = set()
+    for k in (odf_db.get("Building") or {}).keys():
+        odfl = (k if k.lower().endswith(".odf") else f"{k}.odf").lower()
+        base.add(odfl)
+    expanded = set(base)
+    for odf in base:
+        stem = odf[:-4]
         expanded.add(f"{stem}vsr.odf")
         expanded.add(f"{stem}_vsr.odf")
     return frozenset(expanded)
@@ -2043,7 +2069,7 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, known_players=None):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -2115,6 +2141,25 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # Asset (AI/structure) accumulators per owning slot
     asset_dealt = defaultdict(float)
     asset_received = defaultdict(float)
+
+    # Player-dealt damage to enemy buildings. Feeds VTSR-T `structure_share`
+    # axis. Built via a BulletHit -> DamageDealt join because DamageDealt
+    # carries no victim_odf in the proto: BulletHit logs (tick, shooter,
+    # ordnance, victim_odf) immediately before the matching DamageDealt
+    # logs (tick, shooter, ordnance, amount). We push victim_odf into a
+    # per-key FIFO queue at BulletHit time and popleft when the paired
+    # DamageDealt arrives.
+    # Queue policy: orphan BulletHits (shield absorb -> no DamageDealt) stay
+    # in the queue; orphan DamageDealts (crush, mine, environmental) get an
+    # empty-queue popleft no-op. Friendly-fire on own structures is rejected
+    # POST-loop using `team_factions` (line ~3245) because pre-collector-
+    # schema sessions emit empty `bh.shooter_odf`, breaking in-loop checks.
+    # During the loop we accumulate `player_structure_dealt_by_vfc[s64][vfc]
+    # += amount` (vfc = victim faction code 'i'/'e'/'f'); the post-loop
+    # reconciliation collapses to `player_structure_dealt[s64]` summing only
+    # the (s64, vfc) tuples where vfc != shooter's team-faction code.
+    bh_pending = defaultdict(deque)  # (tick, shooter, ordnance_lower) -> deque[victim_odf]
+    player_structure_dealt_by_vfc = defaultdict(lambda: defaultdict(float))  # s64 -> {vfc: amount}
 
     # Rivalry matrix (player-on-player only, keyed on Steam64)
     rivalry = defaultdict(lambda: defaultdict(float))
@@ -2291,6 +2336,18 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 all_unit_odfs.add(bh.victim_odf)
             if bh.shooter_odf:
                 all_unit_odfs.add(bh.shooter_odf)
+            # Stash victim_odf so the paired DamageDealt can attribute
+            # building damage for the VTSR-T `structure_share` axis. Only
+            # human shooters with a known victim_odf are interesting;
+            # AI-owned damage already lands in `asset_dealt` and isn't a
+            # thug signal. We push regardless of whether the victim is a
+            # building -- the DamageDealt-side check classifies it. The
+            # friendly-fire filter is deferred to post-loop reconciliation
+            # because pre-collector-schema sessions leave `bh.shooter_odf`
+            # empty; team_factions (computed after the loop) gives a
+            # reliable shooter-faction code in those cases.
+            if shooter > 0 and bh.victim_odf:
+                bh_pending[(bh.tick, shooter, odf.lower())].append(bh.victim_odf.lower())
             # Faction-detection votes (Algorithm B): the shooter and victim
             # ODFs are vehicle/structure/pilot ODFs whose first letter
             # encodes the owner's faction. Skip ordnance_odf -- weapon
@@ -2375,6 +2432,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if odf:
                         weapon_total_damage[odf] += dd.amount
                         weapon_users[odf].add(shooter)
+
+                    # Structure-damage attribution for VTSR-T `structure_share`.
+                    # Pop the matching BulletHit-side victim_odf and bucket the
+                    # damage by victim faction code (i/e/f). The friendly-fire
+                    # filter happens post-loop using team_factions (some old
+                    # sessions emit empty `bh.shooter_odf`, so an in-loop check
+                    # would conservatively drop ALL structure damage on those
+                    # matches). Empty-queue popleft is a no-op for orphan
+                    # DamageDealts (crush, mine, environmental) -- those are
+                    # conservatively uncounted. Same honesty contract as
+                    # `pve_dealt`.
+                    queue = bh_pending.get((dd.tick, shooter, (odf or "").lower())) if odf else None
+                    if queue:
+                        v_odf = queue.popleft()
+                        if v_odf in building_odfs:
+                            v_fc = faction_from_odf(v_odf)
+                            if v_fc:
+                                player_structure_dealt_by_vfc[shooter][v_fc] += dd.amount
                 else:
                     asset_dealt[dd.team] += dd.amount
 
@@ -2880,6 +2955,40 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             })
         teams[str(faction_num)] = roster
 
+    # Compute team_factions early (re-emitted at the canonical location
+    # below) so the structure-share reconciliation has a shooter-faction
+    # code available even when pre-collector-schema sessions left
+    # `bh.shooter_odf` empty. `_team_factions_pre` maps team (1/2) -> dict
+    # {"code": "i"|"e"|"f", "name": "ISDF"|"Hadean"|"Scion"} or None.
+    _team_factions_pre = detect_team_factions(slot_first_odf, slot_faction_votes)
+
+    # Reconcile `player_structure_dealt_by_vfc` into the final
+    # `player_structure_dealt[s64] -> float`. For each shooter, look up
+    # their slot -> team -> team_faction code; sum the per-vfc damage where
+    # vfc differs from the shooter's team faction (rejects friendly fire on
+    # own structures). Two fallbacks credit all damage instead of dropping:
+    #   (a) shooter's team faction is unknown (no signal at all in the
+    #       match -- e.g. sandbox or corrupt session), and
+    #   (b) the match is a mirror (both teams same faction code) -- the
+    #       faction-code filter cannot distinguish own buildings from enemy
+    #       buildings, so it would silently drop ALL structure damage. The
+    #       alternative is a rare false positive (self-demo on own recy),
+    #       and self-demos rarely land in BulletHit anyway (most are
+    #       commander-issued without a projectile impact).
+    t1 = (_team_factions_pre.get(1) or {}).get("code")
+    t2 = (_team_factions_pre.get(2) or {}).get("code")
+    mirror_match = bool(t1 and t2 and t1 == t2)
+    player_structure_dealt = defaultdict(float)
+    for s64, by_vfc in player_structure_dealt_by_vfc.items():
+        slot = s64_to_slot.get(s64)
+        team_num = slot_to_faction(slot) if slot else 0
+        team_fc_entry = _team_factions_pre.get(team_num) if team_num in (1, 2) else None
+        team_fc = team_fc_entry["code"] if team_fc_entry else None
+        skip_filter = (team_fc is None) or mirror_match
+        for vfc, amount in by_vfc.items():
+            if skip_filter or vfc != team_fc:
+                player_structure_dealt[s64] += amount
+
     # Build leaderboard
     leaderboard = []
     for slot in sorted(all_slots):
@@ -2955,6 +3064,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "pve_dealt": round(pve_d, 1),
                 "pvp_received": round(pvp_r, 1),
                 "pve_received": round(pve_r, 1),
+                "structure_dealt": round(player_structure_dealt.get(s64, 0), 1) if s64 else 0.0,
                 "net": round(net, 1),
                 "ratio": round(ratio, 2) if ratio != float("inf") else None,
                 "shots_fired": total_fired,
@@ -3173,7 +3283,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # model -- see detect_team_factions() docstring. Match-global, always
     # unfiltered; emitted as None for teams with no signal (sandbox / pure
     # AI). Output dict keys are JSON-serialized as strings.
-    _team_factions = detect_team_factions(slot_first_odf, slot_faction_votes)
+    # NOTE: this is recomputed from `_team_factions_pre` which was already
+    # computed above (before the leaderboard build) so the structure-share
+    # reconciliation could use it. Reusing avoids duplicate work.
+    _team_factions = _team_factions_pre
     team_factions = {
         "1": _team_factions.get(1),
         "2": _team_factions.get(2),
@@ -3363,6 +3476,7 @@ def _extract_contribution(match_data):
             "pvp_received":   round(personal.get("pvp_received", 0), 1),
             "pve_received":   round(personal.get("pve_received", 0), 1),
             "asset_dealt":    round(assets.get("dealt", 0), 1),
+            "structure_dealt": round(personal.get("structure_dealt", 0), 1),
             "shots_fired":    personal.get("shots_fired", 0),
             "shots_hit":      personal.get("shots_hit", 0),
             "kills":          p.get("kills", 0),
@@ -3837,6 +3951,8 @@ def main():
     resolve_unit = build_unit_name_resolver(odf_db)
     known_powerup_odfs = _load_known_powerup_odfs(odf_db)
     print(f"  Powerup classification set: {len(known_powerup_odfs)} ODFs (DB Powerup bucket + VSR variants)")
+    building_odfs = _load_building_odfs(odf_db)
+    print(f"  Building classification set: {len(building_odfs)} ODFs (DB Building bucket + VSR variants)")
 
     # Load canonical player names
     known_players = load_known_players()
@@ -3877,7 +3993,8 @@ def main():
             print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
             match_data = process_match(
                 session, session_path.name, current_size, submitter,
-                resolve_weapon, resolve_unit, known_powerup_odfs, known_players,
+                resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs,
+                known_players,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"
@@ -3974,9 +4091,9 @@ def main():
         json.dump(contributions, f, indent=2, ensure_ascii=False)
     print(f"Contributions: {contrib_path.name} ({contrib_path.stat().st_size:,} bytes, {len(contributions)} matches)")
 
-    # ----- VTSR (combat ELO + alpha-stub Wins ELO blend) -----
+    # ----- VTSR-T (combat ELO + alpha-stub Wins ELO blend) -----
     # Pipeline-side, full-corpus, time-ordered. Feeds the All Matches
-    # VTSR Leaderboard. Per the project rule, this is corpus-wide and
+    # VTSR-T Leaderboard. Per the project rule, this is corpus-wide and
     # NEVER picker-filter aware — the dashboard reads elo_current.json
     # once per session and passes ratings through the JS aggregator
     # unchanged. See scripts/elo.py for the algorithm.
@@ -3993,11 +4110,11 @@ def main():
         excl_lpc = elo_current.get("matches_excluded_low_player_count", 0)
         excl_dur = elo_current.get("matches_excluded_short_duration", 0)
         n_ratings = len(elo_current.get("ratings", []))
-        print(f"VTSR: {elo_current_path.name} ({n_ratings} players · "
+        print(f"VTSR-T: {elo_current_path.name} ({n_ratings} players · "
               f"{rated} rated matches · {excl_lpc} excluded low-player-count · "
               f"{excl_dur} excluded short-duration)")
     except Exception as e:
-        print(f"WARN: failed to compute VTSR ({e}); skipping.")
+        print(f"WARN: failed to compute VTSR-T ({e}); skipping.")
 
     # Drop a stale seen-players.json from previous pipeline runs (the
     # PIPELINE_VERSION 5 -> 6 bump shipped a `seen-players.json` emit
