@@ -49,10 +49,10 @@ todos:
     status: completed
   - id: commit_docs
     content: "Commit 4: `docs(vtsr-t): v2.2 methodology refresh (eight-axis composite, structure_share + target_lock_pct, peak_vtsr migration caveat)`. Stage DEVELOPER_GUIDE.md + docs/DATA_DICTIONARY.md + AGENTS.md + .cursor/rules/data-schema.mdc + .cursor/rules/project-overview.mdc + .cursor/plans/all_matches_&_vtsr_overhaul_e674a0d7.plan.md."
-    status: in_progress
+    status: completed
   - id: verify
     content: Final smoke pass (no commit). (1) `git log --oneline -4` shows the four v2.2 commits in order. (2) Modal opens with Performance Composite first, all KaTeX equations render, 8-axis table is correct. (3) elo_current.json schema_version == 3, weights has 8 keys. (4) A known base-busting match shows non-zero personal.structure_dealt for the recycler shooter, and that player's `performance` in elo_history.json is higher than their v2.1 value. (5) Re-running the pipeline produces a byte-identical elo_current.json (ignoring `computed_at`).
-    status: pending
+    status: completed
 isProject: false
 ---
 
