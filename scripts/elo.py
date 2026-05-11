@@ -1,16 +1,30 @@
-"""VT Stats Rating (VTSR) — pipeline-side combat ELO.
+"""VT Stats Rating — Thug (VTSR-T): pipeline-side combat ELO.
+
+**VTSR-T** is the combat-focused rating (eight-axis thug composite +
+fine-tuned ELO-style updates). The published blend
+``VTSR = α·R^W + (1−α)·R^C`` collapses to VTSR-T when ``α = 0`` (current
+ship); JSON still exposes the combined field as ``vtsr`` for one stable
+wire name.
+
+v2.2 axis rebalance (this module): drops ``asset_multiplier`` (reserved
+for a future VTSR-C commander rating because damage-by-owned-AI is a
+build/route quality signal, not a dogfight signal), adds
+``structure_share`` (player-dealt damage to enemy buildings as a share
+of total dealt — the true PvE signal we want to reward in a thug rating),
+and adds ``target_lock_pct`` (T-key situational awareness, low weight).
+``snipe_bonus`` shaved by 1pt to keep the sum at 1.00.
 
 Computed once per pipeline run over the full chronological corpus, and
 emitted to ``data/processed/elo_current.json`` (one row per player) plus
 ``data/processed/elo_history.json`` (per-match deltas for trend / debug).
 
 The dashboard reads ``elo_current.json`` once per session and passes
-ratings through the All Matches aggregator unchanged — VTSR is corpus-
+ratings through the All Matches aggregator unchanged — ratings are corpus-
 wide, *not* picker-filter aware. The picker filter narrows the displayed
 roster only.
 
 Algorithm summary (full derivation lives in
-``DEVELOPER_GUIDE.md`` §VTSR Methodology):
+``DEVELOPER_GUIDE.md`` §13 — VTSR-T methodology):
 
     VTSR_i = alpha * R^W_i + (1 - alpha) * R^C_i
 
@@ -21,7 +35,7 @@ for every player; the blend math runs through unchanged so a future
 **v2 (Phase 12)** — Combat ELO ``R^C_i`` updates per match by
 
     K_i      = K_BASE * (1 - n_i / (n_i + N_PRIOR)) + K_FLOOR
-    P_i      = sum_a w'_a * clip(z_a(x_{i,a}), -2, +2) / 2   (seven axes)
+    P_i      = sum_a w'_a * clip(z_a(x_{i,a}), -2, +2) / 2   (eight axes in v2.2)
     Rbar_i   = median{R^C_j : j != i}                        (median of opponents)
     E_i      = 2 / (1 + 10^((Rbar_i - R^C_i) / S_R)) - 1     (logistic expected, in [-1, +1])
     dR_raw   = K_i * S_O * (P_i - E_i)
@@ -29,13 +43,12 @@ for every player; the blend math runs through unchanged so a future
                dR_raw * L * phi(R^C_i)                        otherwise
 
 Replaces the v1 lobby-median performance baseline ``P_med`` with a
-chess-ELO style opponent-strength-weighted expected performance
-``E_i``. ``S_R = 800`` is the rating-logistic scale (calibrated for
-our small-population corpus — chess uses 400, but our continuous P_i
-scoring carries more signal per match than chess's binary win/loss,
-and our ~25-player league means even small rating gaps already pin
-``E_i`` near its limit; 800 lets top players plateau ~300 pts above
-the median lobby instead of ~140 — see v2.1 in §13.7). ``S_O = 2.5``
+fine-tuned, opponent-strength-weighted expected performance ``E_i``
+(ELO-family logistic). ``S_R = 800`` is the rating-logistic scale
+(calibrated for our small-population corpus with **continuous** ``P_i``
+scoring — a tighter denominator such as 400 over-compressed the spread;
+800 lets top players plateau ~300 pts above the median lobby instead
+of ~140 — see v2.1 in §13.7). ``S_O = 2.5``
 is the outcome scale, unchanged from v1 because the practical
 ``(P_i - E_i)`` magnitudes land in the same range as v1's
 ``(P_i - P_med)``. We use the **median** of opponents (not mean) so a
@@ -75,7 +88,7 @@ from typing import Any
 
 ELO_ANCHOR = 1500.0              # League-wide anchor; every new player starts here.
 ELO_K_BASE = 40.0                # Base K-factor (rookie has K = BASE + FLOOR ≈ 52).
-ELO_K_FLOOR = 12.0               # Settled-veteran floor on K (matches FIDE rapid).
+ELO_K_FLOOR = 12.0               # Settled-veteran floor on K (typical provisional settle band).
 ELO_PROVISIONAL_PRIOR = 10.0     # K decays toward FLOOR over the first ~10 matches.
 ELO_PROVISIONAL_THRESHOLD = 10   # matches_played < this => "Provisional" badge.
 ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
@@ -91,11 +104,11 @@ ELO_RATING_SCALE = 2.5
 
 # Rating-logistic scale for the expected-performance curve.
 # Calibrated for a small (~25-player) league with continuous P_i
-# scoring. Chess uses 400 because chess scores are binary; our
-# 7-axis composite carries more signal per match but is noisier and
-# bounded by ~±0.7 in practice, which made our v2.0 ship at S_R=400
-# (chess-canonical) over-compress the spread to ~200 pts (Tiers 3
-# and 4 only on the leaderboard). ``S_R = 800`` flattens the curve
+# scoring. A denominator near 400 fits classic *binary-outcome* ELO
+# expected scores; our 8-axis composite carries more signal per match
+# but is noisier and bounded by ~±0.7 in practice, which made our v2.0
+# ship at S_R=400 over-compress the spread to ~200 pts (Tiers 3 and 4
+# only on the leaderboard). ``S_R = 800`` flattens the curve
 # so top players need ~300 pts above the median lobby to plateau
 # (instead of ~140), restoring a Tier 1–4 leaderboard-friendly
 # spread. With S_R = 800: a 200-pt rating advantage maps to
@@ -111,8 +124,8 @@ ELO_LOGISTIC_SCALE = 800.0
 # Anchored in Kahneman & Tversky 1979 prospect theory; operational
 # precedent in Marvel Rivals SR, Overwatch role queue, League of Legends
 # demotion shielding. Mild ~5-8 pts/player/year drift at ~600 league
-# matches/year recorded — disclosed in methodology, no need to raise
-# RATING_SCALE for "chess.com spread".
+# matches/year recorded — disclosed in methodology; no need to inflate
+# RATING_SCALE to chase a wider cosmetic spread.
 ELO_K_LOSS_AVERSION = 0.85
 
 # Soft rating floor with linear taper. Effective loss multiplier is
@@ -123,19 +136,35 @@ ELO_K_LOSS_AVERSION = 0.85
 ELO_RATING_FLOOR = 1000.0
 ELO_FLOOR_TAPER_WINDOW = 150.0   # full asymmetric losses restored at FLOOR + 150 (1150).
 
-# Combat composite weights (locked, sum = 1.00). SEVEN axes —
-# ``pickup_economy`` deliberately omitted from rating (low signal /
-# map-dependent); pickups & destructions remain on contributions for
-# Career Highlights (Pod Goblin). The former pickup weight folded into
-# pvp_share to lean harder on the anti-PvE-farming signal.
+# Combat composite weights (locked, sum = 1.00). EIGHT axes (v2.2) —
+# thug-first composite. ``pickup_economy`` deliberately omitted from
+# rating (low signal / map-dependent); pickups & destructions remain
+# on contributions for Career Highlights (Pod Goblin). The former
+# pickup weight folded into pvp_share to lean harder on the
+# anti-PvE-farming signal. ``asset_multiplier`` (damage-by-owned-AI)
+# was REMOVED in v2.2 because it tracks build/route quality rather
+# than dogfight skill — reserved for a future VTSR-C commander rating.
+# Two new axes added in v2.2:
+#   * ``structure_share`` — player-dealt damage to enemy buildings as a
+#     share of total dealt. Rewards direct base/economy pressure that
+#     a good thug applies in addition to dogfights.
+#   * ``target_lock_pct`` — share of the match the player held an
+#     active T-key target lock (situational-awareness proxy).
+#     Intentionally low weight (0.04) — a discipline reward, not a
+#     dominator signal.
+# Snipe shaved by 1pt to keep the sum at 1.00 while making room.
+# Direct-dogfight axes (net + kill + pvp + accuracy + snipe) still
+# total 0.78, so the rebalance sharpens what counts as thug work
+# without blunting the core fighting signal.
 COMBAT_WEIGHTS = {
-    "net_damage_share":  0.25,
+    "net_damage_share":  0.21,
     "kill_rate":         0.20,
     "accuracy":          0.15,
-    "pvp_share":         0.20,
-    "mobility":          0.10,
-    "snipe_bonus":       0.05,
-    "asset_multiplier":  0.05,
+    "pvp_share":         0.18,
+    "structure_share":   0.10,
+    "mobility":          0.08,
+    "snipe_bonus":       0.04,
+    "target_lock_pct":   0.04,
 }
 
 ALPHA = 0.0   # v1: Wins ELO stubbed at anchor; bump to 0.55 when winner data backfilled.
@@ -146,7 +175,10 @@ ALPHA = 0.0   # v1: Wins ELO stubbed at anchor; bump to 0.55 when winner data ba
 # ``P_med`` to opponent-strength-weighted expected ``E_i``; constants
 # block grew ``expected_score_logistic_scale``; per-delta rows now
 # carry an ``expected`` field alongside ``performance``.
-ELO_SCHEMA_VERSION = 2
+# v2 → v3 (Phase 13 / v2.2 axis rebalance): the ``weights`` block now
+# has 8 keys (asset_multiplier removed; structure_share + target_lock_pct
+# added). Pre-v3 ``peak_vtsr`` values are no longer comparable.
+ELO_SCHEMA_VERSION = 3
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +208,9 @@ def floor_taper(rating: float) -> float:
 def expected_performance(r_i: float, r_opponents_ref: float) -> float:
     """Logistic expected-performance curve, mapped to ``[-1, +1]``.
 
-    Mirrors classical chess ELO's expected-score function ``E = 1 /
-    (1 + 10^((R_opp - R) / 400))`` but rescaled to match the
-    composite-performance range ``P_i in [-1, +1]``:
+    Same logistic *family* as standard two-player ELO expected score
+    (often written with a 400-pt denominator for binary outcomes) but
+    rescaled to match the composite-performance range ``P_i in [-1, +1]``:
 
         E_i = 2 / (1 + 10^((Rbar_i - R_i) / S_R)) - 1
 
@@ -335,15 +367,61 @@ def _snipe_bonus_lobby(lobby: list[dict], snipes_by_player: dict) -> list[float]
     return out if any_present else None
 
 
-def _asset_multiplier_lobby(lobby: list[dict]) -> list[float] | None:
+def _structure_share_lobby(lobby: list[dict]) -> list[float] | None:
+    """Player-dealt damage to enemy buildings / total dealt (v2.2 axis).
+
+    Reads ``personal.structure_dealt`` (emitted by the pipeline's
+    BulletHit → DamageDealt join over the Building bucket of
+    ``data/odf.min.json``; friendly-fire on own structures is filtered
+    pipeline-side via the team_factions reconciliation). Returns ``None``
+    when no player in the lobby has any structure damage — axis-missing
+    triggers the weight-redistribution rule in ``compute_performance_index``.
+
+    Most VSR matches are pure dogfights; this signal will be ``None`` for
+    those lobbies and the 0.10 weight gets pro-rata distributed across
+    the other seven available axes. Lobbies with real base pressure will
+    reward the players who delivered it.
+    """
     any_present = False
     out = []
     for p in lobby:
-        ad = (p.get("assets", {}) or {}).get("dealt", 0) or 0
-        dealt = (p.get("personal", {}) or {}).get("dealt", 0) or 0
-        if ad > 0:
+        pd = p.get("personal", {}) or {}
+        sd = pd.get("structure_dealt", 0) or 0
+        dealt = pd.get("dealt", 0) or 0
+        if sd > 0:
             any_present = True
-        out.append(ad / max(1.0, dealt))
+        out.append(sd / max(1.0, dealt))
+    return out if any_present else None
+
+
+def _target_lock_pct_lobby(
+    lobby: list[dict], pos_players: dict, has_target_lock: bool
+) -> list[float] | None:
+    """Share of the match each player held an active T-key target lock.
+
+    Reads ``positioning.players[name].metrics.target_lock_pct`` (already
+    a 0-1 ratio, cross-match comparable per the data-schema rules).
+    Gated on the match-global ``has_target_lock_data`` flag — pre-schema
+    sessions and matches where nobody activated target mode return
+    ``None`` for the entire lobby (axis-missing → weight redistribution).
+
+    Per project rule: "T-key Usage is absolute (cross-match comparable)
+    and averaged directly in career_stats[].mean_target_lock_pct" — same
+    contract holds for the ELO axis. Low weight (0.04) intentionally: a
+    discipline reward, not a dominator signal.
+    """
+    if not has_target_lock:
+        return None
+    any_present = False
+    out = []
+    for p in lobby:
+        metrics = ((pos_players.get(p.get("name")) or {}).get("metrics") or {})
+        score = metrics.get("target_lock_pct")
+        if score is None:
+            out.append(0.0)
+        else:
+            any_present = True
+            out.append(max(0.0, min(1.0, float(score))))
     return out if any_present else None
 
 
@@ -371,6 +449,9 @@ def compute_performance_index(match_data: dict) -> tuple[list[float], list[str]]
         row.get("name"): int(row.get("count", 0) or 0)
         for row in ((match_data.get("snipes") or {}).get("by_player") or [])
     }
+    has_target_lock = bool(
+        (match_data.get("match") or {}).get("has_target_lock_data")
+    )
 
     # Build per-axis raw values lists (one float per player) keyed by axis
     # name. None entries mean the axis is missing for the whole lobby —
@@ -380,9 +461,10 @@ def compute_performance_index(match_data: dict) -> tuple[list[float], list[str]]
         "kill_rate":         _kill_rate_lobby(lobby, minutes),
         "accuracy":          _accuracy_lobby(lobby),
         "pvp_share":         _pvp_share_lobby(lobby),
+        "structure_share":   _structure_share_lobby(lobby),
         "mobility":          _mobility_lobby(lobby, pos_players),
         "snipe_bonus":       _snipe_bonus_lobby(lobby, snipes_by_player),
-        "asset_multiplier":  _asset_multiplier_lobby(lobby),
+        "target_lock_pct":   _target_lock_pct_lobby(lobby, pos_players, has_target_lock),
     }
 
     available = [a for a, v in raw.items() if v is not None]
