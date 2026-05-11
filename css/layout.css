@@ -118,7 +118,10 @@
     grid-area: main;
     padding: 2rem 2rem;
     max-width: 100%;
-    overflow-x: hidden;
+    /* `overflow: clip` clips overflowing content visually (same as `hidden`)
+       but does NOT create a scroll container, so position: sticky inside
+       descendants (e.g. .vt-sticky-thead) can anchor to the body's scroll. */
+    overflow: clip;
     min-width: 0;
 }
 

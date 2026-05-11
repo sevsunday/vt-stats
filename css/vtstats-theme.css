@@ -3086,6 +3086,36 @@ td.vt-col-split {
     display: none;
 }
 
+/* Sticky table headers — keep column labels visible while scrolling the page.
+   Anchored to the .kb-header height (64px). Uses --kb-bg-popover to match
+   the existing `.table > thead` background in css/main.css (otherwise the
+   thead would shift color on themes where -popover and -card diverge). */
+.vt-sticky-thead thead th {
+    position: sticky;
+    top: 64px;
+    z-index: 5;
+    background: var(--kb-bg-popover);
+    box-shadow: inset 0 -1px 0 var(--kb-border-subtle);
+}
+
+/* The card-body wrapper uses .table-responsive (overflow-x: auto), which the
+   CSS spec promotes into a y-axis scroll container too — that swallows the
+   sticky behaviour. At >=992px (where these tables fit horizontally) drop
+   the wrapper's overflow constraint so page-level scroll drives sticky.
+   Below 992px keep the default behaviour: horizontal table scroll, no sticky. */
+@media (min-width: 992px) {
+    .vt-sticky-thead-card.table-responsive {
+        overflow: visible;
+    }
+}
+
+/* Inside the Fullscreen modal the cloned table sits in its own scroll
+   container (.modal-body), and the page header isn't above it — re-anchor
+   sticky to the top of that scroll container. */
+#fullscreen-modal .vt-sticky-thead thead th {
+    top: 0;
+}
+
 /* Movement band pill (replaces the muted band-label text) */
 .vt-movement-band-pill {
     padding: 0.1em 0.5em;

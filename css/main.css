@@ -375,7 +375,10 @@ a:hover {
     box-shadow: var(--kb-shadow-sm);
     transition: all var(--kb-transition-normal);
     color: var(--kb-text-primary);
-    overflow: hidden;
+    /* `clip` instead of `hidden` so the card visually clips child overflow
+       (e.g. against rounded corners) without becoming a scroll container,
+       which would block position: sticky on descendants like .vt-sticky-thead. */
+    overflow: clip;
 }
 
 .card:hover {
