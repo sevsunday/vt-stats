@@ -795,4 +795,167 @@ Post-launch follow-up triggered by real-data evidence of lobby-stratification bi
 
 **Empirical effect**: top tail compresses (top players plateau where typical $P_i$ matches their $E_i$ instead of climbing forever in soft lobbies); mid-band lifts (low-rated players in heavyweight lobbies stop bleeding rating for "average" performances they were never expected to exceed). Pre-v2 `peak_vtsr` values are no longer comparable across the v1 / v2 boundary.
 
-**v2.1 (post-Phase-12 tuning)** — bumped `ELO_LOGISTIC_SCALE` from 400 → **800** after the v2.0 ship over-compressed the spread for our small-population corpus (every established player landed within a 200-pt band, collapsing the leaderboard into Tiers 3 and 4 only). The chess-canonical S_R = 400 assumed binary win/loss outcomes; our continuous P_i scoring (bounded ~±0.7 in practice) needs a wider denominator to leave room for clear tier separation. v2.1 lets top players plateau ~300 pts above the median lobby instead of ~140; predicted spread widens from ~200 → ~440 pts, populating Tiers 1–4. `PIPELINE_VERSION` bumped 8 → 9 (forced re-rate); `ELO_SCHEMA_VERSION` stays at 2 (no shape change — only the value of `expected_score_logistic_scale` flipped). Full v2.0 → v2.1 derivation in [`vtsr_v2.1_widen_logistic_7aa72188.plan.md`](vtsr_v2.1_widen_logistic_7aa72188.plan.md). Iterating S_R further is the standard knob for spread tuning; no schema bump required.
+**v2.1 (post-Phase-12 tuning)** — bumped `ELO_LOGISTIC_SCALE` from 400 → **800** after the v2.0 ship over-compressed the spread for our small-population corpus (every established player landed within a 200-pt band, collapsing the leaderboard into Tiers 3 and 4 only). The v2.0 default S_R = 400 assumed binary win/loss outcomes; our continuous P_i scoring (bounded ~±0.7 in practice) needs a wider denominator to leave room for clear tier separation. v2.1 lets top players plateau ~300 pts above the median lobby instead of ~140; predicted spread widens from ~200 → ~440 pts, populating Tiers 1–4. `PIPELINE_VERSION` bumped 8 → 9 (forced re-rate); `ELO_SCHEMA_VERSION` stays at 2 (no shape change — only the value of `expected_score_logistic_scale` flipped). Full v2.0 → v2.1 derivation in [`vtsr_v2.1_widen_logistic_7aa72188.plan.md`](vtsr_v2.1_widen_logistic_7aa72188.plan.md). Iterating S_R further is the standard knob for spread tuning; no schema bump required.
+
+---
+
+## Phase 13 — VTSR-T v2.2 (Eight-Axis Thug Composite)
+
+Post-v2.1 axis rebalance scoped explicitly to **VTSR-T** (the VT Stats Rating - Thug, i.e. combat-only personal performance). Removes commander-flavored AI damage from the composite, adds a true PvE signal and a low-weight aiming-discipline signal, and re-shapes the methodology modal so the composite is the lead concept.
+
+### Trigger
+
+User feedback observed that top-rated players plateaued at Tier 2 because the v2.1 composite over-rewarded raw PvP damage and lacked credit for high-impact economy plays (recycler runs, factory drops). At the same time, `asset_multiplier` is conceptually a commander axis (damage by *owned AI units* — a function of how well you build/route, not how well you dogfight) and belongs in a future **VTSR-C** (Commander) rating, not VTSR-T.
+
+### Algorithm change (locked)
+
+**Drop** `asset_multiplier` from `COMBAT_WEIGHTS`. Pipeline still emits `assets.dealt` per-player and `total_asset_dealt` on contributions — the Puppeteer / `career_puppeteer` highlight cards continue to function. Only the **rating axis** is removed; the field stays.
+
+**Add two new axes** to `COMBAT_WEIGHTS`:
+
+| Axis | Weight | Definition |
+|---|---|---|
+| `structure_share` | 0.10 | Player-dealt damage to enemy **building** ODFs / `max(1, total_damage_dealt)`. Friendly-fire on own structures is excluded via `faction_from_odf(victim_odf) != shooter_faction`. |
+| `target_lock_pct` | 0.04 | Ratio of ticks the player held an enemy target lock (`positioning.players[name].metrics.target_lock_pct`). Gated on `match.has_target_lock_data`; returns `None` for the entire lobby otherwise (axis weight redistributes pro-rata). |
+
+**Rebalance the remaining six** so the eight-axis table sums to **1.00**:
+
+```python
+COMBAT_WEIGHTS = {
+    "net_damage_share":  0.21,  # was 0.25
+    "kill_rate":         0.20,  # unchanged
+    "accuracy":          0.15,  # unchanged
+    "pvp_share":         0.18,  # was 0.20
+    "structure_share":   0.10,  # NEW (PvE signal)
+    "mobility":          0.08,  # was 0.10
+    "snipe_bonus":       0.04,  # was 0.05
+    "target_lock_pct":   0.04,  # NEW (aiming discipline)
+}
+```
+
+Snipe shaved by 1 pt to make room without overweighting the new axes. PvP still dominates at 0.18 + 0.21 net = 0.39 effective dogfight share.
+
+**S_R, S_O, K-decay, loss aversion, soft floor, tier ranges, Wins ELO blend — all unchanged.** Only the per-axis composite changes shape.
+
+### Pipeline change: structure damage attribution
+
+`DamageDealt` in the proto carries `shooter` + `ordnance_odf` but **not** `victim_odf`. Structure damage attribution requires a **BulletHit → DamageDealt join** in [scripts/process_stats.py](scripts/process_stats.py) `process_match()`:
+
+```python
+# At process_match() init (near line 2115):
+bh_pending = defaultdict(deque)  # (tick, shooter, ordnance_lower) -> deque[victim_odf]
+player_structure_dealt = defaultdict(float)  # s64 -> float
+
+# In the bullet_hit handler (after line 2293, only when shooter is human and victim_odf set):
+if bh.shooter > 0 and bh.victim_odf:
+    key = (bh.tick, bh.shooter, (bh.ordnance_odf or "").lower())
+    bh_pending[key].append(bh.victim_odf.lower())
+
+# In the damage_dealt handler, INSIDE the existing `if shooter > 0:` branch at line 2370,
+# AFTER the sentinel `continue` at line 2347 (so sentinel events never pollute the
+# accumulator):
+key = (dd.tick, dd.shooter, (dd.ordnance_odf or "").lower())
+queue = bh_pending.get(key)
+victim_odf = queue.popleft() if queue else None  # popleft on empty queue = no-op
+if victim_odf and victim_odf in BUILDING_ODFS:
+    victim_faction_code = faction_from_odf(victim_odf)
+    if victim_faction_code and victim_faction_code != shooter_faction_code:
+        player_structure_dealt[dd.shooter] += dd.amount
+```
+
+`BUILDING_ODFS` is a module-level `frozenset` built once from `data/odf.min.json` filtered to `category == "Building"`, normalized to `lowercased + .odf` suffix.
+
+### Edge cases (acknowledged + handled)
+
+1. **Sentinel-filter placement** — the structure-attribution `popleft` lives **after** the sentinel short-circuit at `scripts/process_stats.py:2328-2347` (the `i += 2 if has_paired_dr else 1; continue` block) and **inside** the existing `if shooter > 0:` branch at `:2370`. Force-kill sentinels (`amount > 1e6`) never reach the accumulator.
+2. **BulletHit without paired DamageDealt** (shield absorb, miss-after-hit registration) — leaves a tail in `bh_pending`. Acceptable: queue is bounded by match length (~30k events worst case), no GC needed.
+3. **DamageDealt without prior BulletHit** (crush damage, mine, environmental, fall) — `popleft` on empty queue is a no-op. The guard `queue.popleft() if queue else None` prevents `IndexError`.
+4. **Same tick + same shooter + same ordnance hitting two different victims** — FIFO order matches because the collector emits BulletHit immediately before its DamageDealt for each hit; both events share `(tick, shooter, ordnance)`. Safe under the existing event-stream contract.
+5. **Friendly fire on own structures** — `faction_from_odf(victim_odf) != shooter_faction_code` rejects same-faction recyclers/factories. Confirmed working pattern from existing faction-detection votes at `scripts/process_stats.py:2298-2307`.
+6. **Pre-positioning matches missing `target_lock_pct`** — `_target_lock_pct_lobby()` reads `match.has_target_lock_data` (mirrored at three levels per project-overview.mdc) and returns `None` for every player when False. The existing `compute_performance_index` None-handling redistributes the 0.04 weight pro-rata across the other seven axes for that match.
+
+### Per-match emit
+
+Add to the per-player leaderboard `personal` block at `scripts/process_stats.py:2951-2965`:
+
+```python
+"structure_dealt": round(player_structure_dealt.get(s64, 0), 1),
+```
+
+Add to `_extract_contribution()` leaderboard rows at `scripts/process_stats.py:3359-3382`, right after `asset_dealt`:
+
+```python
+"structure_dealt": round(personal.get("structure_dealt", 0), 1),
+```
+
+### Version bumps
+
+- `PIPELINE_VERSION` **9 → 10** (new per-match field forces full reprocess so the `structure_dealt` accumulator runs against every match).
+- `ELO_SCHEMA_VERSION` **2 → 3** (`weights` block changes shape — drops `asset_multiplier`, adds `structure_share` + `target_lock_pct`).
+- **Pre-v2.2 `peak_vtsr` values are no longer comparable.** Same caveat as v1 → v2 transition; weight redistribution invalidates peaks. Note this in the migration table.
+
+### Modal reorder (the "How It's Calculated" button)
+
+Reorder sections in `buildVtsrTooltipHtml()` in [js/app.js](js/app.js) so the composite leads:
+
+1. **Performance Composite (P)** — was section 3; promote to first. 8-axis weights table + per-axis copy for `structure_share` and `target_lock_pct`.
+2. The Update Rule — was section 1.
+3. Expected Performance (E) — was section 2.
+4. K-factor & Hope Mechanics — unchanged.
+5. Tier Ladder — unchanged.
+6. Worked Example — Lamper match 9 numbers **recomputed against post-v2.2 `elo_history.json`** (see Build Order below).
+
+Subtitle in [index.html](index.html) ~line 1336 bumps from `v2.1 - opponent-strength-weighted (S_R = 800)` to `v2.2 - 8-axis thug composite (structure share + T-key, S_R = 800)`.
+
+Append a v2.2 caveat block to the modal noting (a) `asset_multiplier` was removed and now reserved for VTSR-C, (b) `structure_share` rewards direct player damage to enemy buildings only, (c) `target_lock_pct` is intentionally low-weight to reward aiming discipline without dominating the composite.
+
+### Build order (critical — worked-example dependency)
+
+```mermaid
+flowchart LR
+  A[Code: constants + axes + pipeline + modal layout with v2.1 numbers as placeholder]
+  B[Run pipeline force]
+  C[Read post-v2.2 Lamper m9 from elo_history.json]
+  D[Update modal + dev-guide worked example with real v2.2 numbers]
+  E[Verify + commit]
+  A --> B --> C --> D --> E
+```
+
+The worked example in the modal and `DEVELOPER_GUIDE.md` §13.6 depends on the regenerated `elo_history.json`. Implement everything with v2.1 numbers as placeholders, run the pipeline, then fill in the real v2.2 Lamper m9 P_i / dR / E_i lines before committing.
+
+### Documentation touch list
+
+- **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** §13.4: swap 7-axis table for 8-axis table; update intro from "Seven combat axes" to "Eight combat axes."
+- **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** §13.6: refresh Lamper m9 worked example under new weights (post-re-rate).
+- **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** §13.7: append v2.1 → v2.2 row to migration table + one-paragraph rationale, including the `peak_vtsr` incomparability caveat.
+- **[docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md)** §5 line 367 (per-player rows enumeration): add `structure_dealt` to the comma list right after `asset_dealt`.
+- **[docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md)** §11.1: update `elo_current.json` JSON example's `weights` block to show 8 keys; bump `schema_version` reference 2 → 3; add a one-paragraph note explaining `personal.structure_dealt` joins to `BulletHit.victim_odf` via `(tick, shooter, ordnance.lower())`.
+- **[AGENTS.md](AGENTS.md)** + **[.cursor/rules/data-schema.mdc](.cursor/rules/data-schema.mdc)** + **[.cursor/rules/project-overview.mdc](.cursor/rules/project-overview.mdc)**: replace "seven-axis composite" phrasing with "eight-axis composite (structure_share + target_lock_pct added in v2.2; asset_multiplier removed — reserved for future VTSR-C)." Touch only the existing VTSR-T bullets; leave the corpus-wide / picker-filter-unaware contract verbatim.
+
+### Intentionally out of scope
+
+- **JS aggregator (`js/all-matches-aggregator.js`)** — no changes. VTSR-T is corpus-wide, the aggregator passes `elo_current.json` through unchanged. Adding `total_structure_dealt` for a future career-damage highlight is a follow-up only.
+- **Raw-browser Reconcile** (`js/raw-browser.js`) — `structure_dealt` is not added to the Reconcile fixed list. Reconcile already covers the same underlying `BulletHit` + `DamageDealt` events through other fields.
+- **Schema-migration playbook** (`.cursor/rules/schema-migration.mdc`) — not triggered; no proto changes.
+- **Radar chart axes** (`js/charts-radar.js`) — coincidentally also 8 axes but unrelated to ELO composite. No change.
+- **`VTSR-C` (Commander rating)** — `asset_multiplier` is reserved for this future rating but not built now.
+
+### Verification (no commit)
+
+1. **Field appears**: After re-run, spot-check a per-match `data/processed/<id>.json` for `leaderboard[].personal.structure_dealt`. Verify a known base-busting game shows non-zero values for the players who hit recycler/factory.
+2. **Determinism**: Re-run the pipeline twice; diff `elo_current.json` ignoring `computed_at` — must be byte-identical.
+3. **Behavior**: Spot-check a player who dealt recycler damage has higher `performance` under v2.2 than they did under v2.1 (same match, same lobby).
+4. **Modal**: Open "How It's Calculated" — Performance Composite (P) is first, all KaTeX equations render (no `<code>` fallback), 8-axis table is correct with structure_share = 0.10 and target_lock_pct = 0.04.
+5. **Tier movement**: Top players (VTrider / Domakus) move toward Tier 2 or land at Tier 1 with the PvE boost, confirming the rebalance achieves the stated goal.
+
+### Commit cadence (four incremental commits)
+
+Detailed cadence + per-commit file list lives in the dedicated v2.2 plan at [`vtsr-t_v2.2_rebalance_86ee3c26.plan.md`](.cursor/plans/vtsr-t_v2.2_rebalance_86ee3c26.plan.md). Summary:
+
+1. `feat(pipeline): emit personal.structure_dealt via BulletHit-DamageDealt join (PIPELINE_VERSION 9 -> 10)` — data layer ships first; ELO output unchanged.
+2. `feat(elo): VTSR-T v2.2 eight-axis thug composite (drop asset_multiplier, add structure_share + target_lock_pct, ELO_SCHEMA_VERSION 2 -> 3)` — algorithm change; next pipeline run re-rates corpus.
+3. **Gate (no commit)**: run pipeline `--force`, capture Lamper m9 numbers from regenerated `elo_history.json`, confirm determinism, record top-tier peak_vtsr deltas.
+4. `feat(ui): VTSR-T methodology modal v2.2 (Performance Composite leads, 8-axis table, real v2.2 worked example)` — UI catches up with the algorithm.
+5. `docs(vtsr-t): v2.2 methodology refresh (eight-axis composite, structure_share + target_lock_pct, peak_vtsr migration caveat)` — DEVELOPER_GUIDE + DATA_DICTIONARY + AGENTS.md + rules + this plan's note.
+
+Each commit is independently revertible. Intermediate states are safe (Commit 1 alone yields "old algorithm reading new data field" — yields the same v2.1 ratings).
