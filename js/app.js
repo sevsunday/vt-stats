@@ -1630,7 +1630,7 @@
     });
   }
 
-  // --- VTSR Tier Ladder (render-layer policy, NOT pipeline data) ---
+  // --- VTSR-T tier ladder (render-layer policy, NOT pipeline data) ---
   // Numeric Tier 1–5 only (no flavor names). Tier 5 spans 1000–1349
   // (350 pts wide); Tiers 2–4 stay 150 pts wide; Tier 1 is open above
   // 1800. Threshold tuning lives here so elo_current.json's schema
@@ -1659,7 +1659,7 @@
     const into = vtsr - tier.min;
     return { toNext: tier.max - vtsr, fromCurrent: into, pct: into / span };
   }
-  // Single-source-of-truth badge HTML used by both the dedicated VTSR
+  // Single-source-of-truth badge HTML used by both the dedicated VTSR-T
   // table and the Career Leaderboard's new Tier column. Keeps badge
   // markup byte-identical between the two views.
   function tierBadgeHtml(tier, opts = {}) {
@@ -1677,7 +1677,7 @@
   let timelineMode = 'player';
   let sortState = { key: 'dealt', asc: false };
   let careerSortState = { key: 'total_dealt', asc: false };
-  // Dedicated VTSR table sort. Defaults to vtsr desc (highest rating at top).
+  // Dedicated VTSR-T table sort. Defaults to vtsr desc (highest rating at top).
   let vtsrSortState = { key: 'vtsr', asc: false };
   // Currently selected pair for the compare-mode radar on the Rivalries tab.
   // Reset on match switch; reconciled against the filtered leaderboard on
@@ -2394,8 +2394,8 @@
 
     // Fetch elo_current.json once per session. Graceful 404: a fresh
     // checkout (or pipeline-never-run state) means the file isn't there
-    // yet — hide the dedicated VTSR card and fall through to em-dash
-    // placeholders on the Career Leaderboard's Tier+VTSR columns.
+    // yet — hide the dedicated VTSR-T card and fall through to em-dash
+    // placeholders on the Career Leaderboard's Tier+VTSR-T columns.
     if (window.__vtElo === undefined) {
       try {
         const eloRes = await fetch('data/processed/elo_current.json');
@@ -3139,9 +3139,9 @@
       close:    ['{name} edges career T-key usage at {value}.',                          '{name} narrowly leads lifetime target lock.',          '{name} squeaks the long-run locksmith crown.'],
     },
     the_champion: {
-      dominant: ['{name} sits at {value} VTSR with {matches_played} rated matches.', '{name} owns the league. {value} VTSR.',          '{name} is the corpus champion at {value}.'],
-      clear:    ['{name} tops the VTSR ladder at {value}.',                          '{name} holds the highest VTSR — {value}.',        '{name} leads the league rating column.'],
-      close:    ['{name} edges the VTSR ladder at {value}.',                         '{name} narrowly leads the league rating.',        '{name} squeaks the top of the VTSR ladder.'],
+      dominant: ['{name} sits at {value} VTSR-T with {matches_played} rated matches.', '{name} owns the league. {value} VTSR-T.',          '{name} is the corpus champion at {value}.'],
+      clear:    ['{name} tops the VTSR-T ladder at {value}.',                          '{name} holds the highest VTSR-T — {value}.',        '{name} leads the league rating column.'],
+      close:    ['{name} edges the VTSR-T ladder at {value}.',                         '{name} narrowly leads the league rating.',        '{name} squeaks the top of the VTSR-T ladder.'],
     },
     the_veteran: {
       dominant: ['{name} has been to {value} matches and counting.', '{name} is the all-time leader in showing up.',       '{name} has the most miles on the odometer.'],
@@ -3213,7 +3213,7 @@
     career_pod_goblin:       '',
     career_chris_kyle:       'snipes',
     career_the_locksmith:    '',
-    the_champion:            'VTSR',
+    the_champion:            'VTSR-T',
     the_veteran:             'matches',
     the_workhorse:           'commands',
     the_carry:               '',
@@ -4697,8 +4697,8 @@
     return '0.00';
   }
 
-  // Pre-rendered KaTeX HTML for the VTSR methodology modal. Built
-  // lazily on first render so katex.min.js (deferred) is guaranteed
+  // Pre-rendered KaTeX HTML for the VTSR-T methodology modal. Built
+  // lazily on first modal open so katex.min.js (deferred) is guaranteed
   // loaded. Cached as a module-local string after first build.
   //
   // v2 (Phase 12): rewritten as a 6-section structured reference (it
@@ -4708,13 +4708,9 @@
   // lives in css/vtstats-theme.css.
   //
   // v2.1: bumped the rating-logistic scale from S_R = 400 to 800.
-  // Curve table values (curveRows below) remain numerically valid
-  // because the ±200 / ±400 gap rows happen to land at the chess-
-  // canonical ±0.52 / ±0.82 under S_R = 400 and at the same ±0.28
-  // / ±0.52 under S_R = 800 — by coincidence the displayed values
-  // were correctly labelled ONLY at S_R = 800 (latent v2.0 bug
-  // resolved by the v2.1 bump). Worked-example numbers (Lamper m9)
-  // recomputed; expected-section caveat rewritten.
+  // Curve table values (curveRows below) are pre-computed for S_R = 800.
+  // At S_R = 400 the same ±200 / ±400 gaps would read ±0.52 / ±0.82,
+  // not ±0.28 / ±0.52 — relabel if S_R changes again.
   let vtsrTooltipHtmlCache = null;
   // Returns the rendered modal HTML, or ``null`` when ``katex.min.js``
   // (deferred in index.html) hasn't finished loading yet. Returning
@@ -4748,7 +4744,7 @@
     const symbolRows = [
       ['K_i',       'K-factor (decays with experience)'],
       ['S_O = 2.5', 'outcome scale (per-match update magnitude)'],
-      ['P_i',       'your performance index this match (7-axis composite)'],
+      ['P_i',       'your performance index this match (8-axis composite)'],
       ['E_i',       'expected performance given your rating vs the lobby'],
       ['L = 0.85',  'loss aversion multiplier (losses only)'],
       ['\u03c6(R)',  'soft-floor taper (losses only)'],
@@ -4769,15 +4765,21 @@
       ['+400',       '+0.52'],
     ].map(([gap, e]) => `<tr><td>${gap}</td><td class="text-end">${e}</td></tr>`).join('');
 
-    // ---- 7-axis composite (with plain-English descriptions) ----
+    // ---- 8-axis thug composite (v2.2). Sum = 1.00. ----
+    // Listed in weight order so the heaviest signals lead the table.
+    // ``structure_share`` replaced the v2.1 ``asset_multiplier`` axis
+    // (which moved to the future VTSR-C commander rating because damage
+    // by player-owned AI tracks build/route quality rather than dogfight
+    // skill). ``target_lock_pct`` is a discipline reward at low weight.
     const weightsRows = [
-      ['Net damage share', '0.25', 'damage you dealt minus damage you took, as a share of the lobby total'],
+      ['Net damage share', '0.21', 'damage you dealt minus damage you took, as a share of the lobby total'],
       ['Kill rate',        '0.20', 'kills per minute played'],
-      ['PvP share',        '0.20', 'fraction of your damage that hit other players (anti-PvE-farming)'],
+      ['PvP share',        '0.18', 'fraction of your damage that hit other players (anti-PvE-farming)'],
       ['Accuracy',         '0.15', 'shots hit divided by shots fired'],
-      ['Mobility',         '0.10', 'how much of the map you actually moved across (positioning data)'],
-      ['Snipe bonus',      '0.05', 'sniper rifle hits (capped before z-score so one big game can\u2019t deform the lobby)'],
-      ['Asset multiplier', '0.05', 'damage to enemy buildings as a share of your total damage'],
+      ['Structure share',  '0.10', 'damage you landed on enemy buildings / economy (recyclers, factories, extractors, turrets) as a share of your total damage'],
+      ['Mobility',         '0.08', 'how much of the map you actually moved across (positioning data)'],
+      ['Snipe bonus',      '0.04', 'sniper rifle hits (capped before z-score so one big game can\u2019t deform the lobby)'],
+      ['T-key usage',      '0.04', 'share of the match you held an active T-key target lock (situational-awareness proxy)'],
     ].map(([n, w, d]) => `<tr><td><strong>${n}</strong><br><small class="text-muted">${esc(d)}</small></td><td class="text-end align-top">${w}</td></tr>`).join('');
 
     // ---- K-decay table ----
@@ -4797,33 +4799,47 @@
       ['Tier 5', '1000 \u2013 1349', 'wide band; soft floor at 1000'],
     ].map(([n, r, note]) => `<tr><td><strong>${n}</strong></td><td class="text-end"><code>${r}</code></td><td class="text-muted"><small>${esc(note)}</small></td></tr>`).join('');
 
-    // ---- Worked example: Lamper m9 ----
-    // Real numbers from data/processed/elo_history.json (match
-    // 2026-05-04T03-45-41, Lamper's 9th rated match). Recomputed for
-    // v2.1 (S_R = 800): E_i drops from +0.117 to ~+0.06, and the
-    // resulting dR rises from +33 to ~+38 — still a meaningful
-    // compression vs v1's +49, but breathing room for the spread.
+    // ---- Worked example: Lamper m9 (v2.2 post-rerate) ----
+    // Real numbers captured from data/processed/elo_history.json after
+    // re-rating the corpus under VTSR-T v2.2 (match 2026-05-04T03-45-41,
+    // Lamper's 9th rated match). Lobby (sorted by `before`):
+    //   1333.32 / 1372.60 / 1385.28 / 1449.74 / **1455.77 (median for
+    //   Lamper)** / 1482.74 / 1499.38 / 1543.11 / 1767.39 -- the
+    //   median-of-OTHER-players is what Lamper compares against, so it
+    //   rules out his own 1500.82.
+    // P = +0.5435 (top of lobby), E_i = +0.0647, dR = +40.96.
     const exKEq  = tex('K_i \\;=\\; 40 \\cdot \\left(1 - \\frac{8}{8 + 10}\\right) + 12 \\;=\\; 34.22', true);
-    const exEEq  = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(1510 - 1551) / 800}} - 1 \\;\\approx\\; +0.059', true);
-    const exDREq = tex('\\Delta R^{C}_i \\;=\\; 34.22 \\cdot 2.5 \\cdot (0.50 - 0.059) \\;\\approx\\; +37.7', true);
+    const exEEq  = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(1455.77 - 1500.82) / 800}} - 1 \\;\\approx\\; +0.0647', true);
+    const exDREq = tex('\\Delta R^{C}_i \\;=\\; 34.22 \\cdot 2.5 \\cdot (0.5435 - 0.0647) \\;\\approx\\; +40.96', true);
 
     vtsrTooltipHtmlCache = `<div class="vt-katex-tooltip-body">
 
       <section class="vt-vtsr-doc-section">
+        <h6>Performance Composite <span class="text-muted">(P)</span></h6>
+        <p class="mb-2"><strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug) is our combat-focused rating, and the per-match Performance Composite is the heart of it. Your single-match performance index is a weighted sum of eight thug-relevant axes. Each axis is computed per-player, z-scored across the lobby, clipped to &plusmn;2, and divided by 2 to land in &plusmn;1. Missing axes (e.g. no structure damage in this lobby, no positioning data) redistribute their weight pro-rata across the remaining axes.</p>
+        ${compositeEq}
+        <table class="vt-katex-weights">
+          <thead><tr><th>Axis</th><th class="text-end">Weight</th></tr></thead>
+          <tbody>${weightsRows}</tbody>
+        </table>
+        <div class="vt-katex-caveat">Direct-dogfight axes (net damage + kill rate + PvP share + accuracy + snipe) still total 0.78, so the v2.2 axis swap sharpens what counts as thug work without blunting the core fighting signal. Structure share rewards real base/economy pressure; T-key usage is a small discipline reward.</div>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
         <h6>The Update Rule</h6>
-        <p class="mb-2">VTSR (VT Stats Rating) is the project\u2019s player rating, computed once per pipeline run over the full chronological corpus. Each rated match changes your rating by:</p>
+        <p class="mb-2">Each rated match changes your combat rating by the difference between your performance composite <code>P_i</code> and your expected performance <code>E_i</code>, scaled by an experience-dependent K-factor:</p>
         ${updateEqGain}
         <p class="mb-2 mt-2">When the bracket goes negative (loss case), two \u201chope\u201d multipliers soften the drop:</p>
         ${updateEqLoss}
         <div class="vt-vtsr-doc-symbols">${symbolRows}</div>
         <p class="mb-2 mt-3">The published rating blends Wins ELO and Combat ELO:</p>
         ${blendEq}
-        <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Combat ELO only); Wins ELO is stubbed at the 1500 anchor until the in-game winner-attestation UI lands.</div>
+        <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Combat ELO only); Wins ELO is stubbed at the 1500 anchor until the in-game winner-attestation UI lands. The headline <strong>VTSR</strong> field therefore equals VTSR-T today.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
         <h6>Expected Performance <span class="text-muted">(E)</span></h6>
-        <p class="mb-2">The chess-ELO move: instead of comparing your performance to the lobby median, we compare it to what we\u2019d <em>expect</em> from a player of your rating playing against this lobby. The reference is the <strong>median</strong> rating of all other players (median, not mean, so a single VTrider doesn\u2019t pull the bar up for everyone).</p>
+        <p class="mb-2">Instead of comparing your performance to the lobby median alone, we compare it to what we\u2019d <em>expect</em> from a player of your rating in this lobby (fine-tuned ELO-style strength-of-schedule). The reference is the <strong>median</strong> rating of all other players (median, not mean, so a single VTrider doesn\u2019t pull the bar up for everyone).</p>
         ${rbarEq}
         ${expectedEq}
         <p class="mb-2">When you out-rate the lobby, you\u2019re expected to score positive; when you\u2019re the underdog, you\u2019re expected to score negative. Performing as expected leaves your rating unchanged.</p>
@@ -4831,17 +4847,7 @@
           <thead><tr><th>Rating gap (R &minus; R\u0304)</th><th class="text-end">Expected E_i</th></tr></thead>
           <tbody>${curveRows}</tbody>
         </table>
-        <div class="vt-katex-caveat">S<sub>R</sub> = 800 (calibrated for our small-population corpus). Chess uses 400, but our continuous P_i scoring carries more signal per match than chess's binary win/loss, and our ~25-player league means even small rating gaps already pin E_i near its limit; widening the curve to 800 lets top players plateau ~300 pts above the median lobby instead of ~140.</div>
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>Performance Composite <span class="text-muted">(P)</span></h6>
-        <p class="mb-2">Your single-match performance index is a weighted sum of seven combat axes. Each axis is computed per-player, z-scored across the lobby, clipped to &plusmn;2, and divided by 2 to land in &plusmn;1. Missing axes (e.g. no positioning data) redistribute their weight pro-rata.</p>
-        ${compositeEq}
-        <table class="vt-katex-weights">
-          <thead><tr><th>Axis</th><th class="text-end">Weight</th></tr></thead>
-          <tbody>${weightsRows}</tbody>
-        </table>
+        <div class="vt-katex-caveat">S<sub>R</sub> = 800 (calibrated for our small-population corpus). Classic binary-outcome ELO often uses a ~400-pt logistic denominator; our continuous P_i composite behaves differently, and our ~25-player league means tight denominators pin E_i too aggressively; widening to 800 lets top players plateau ~300 pts above the median lobby instead of ~140.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -4854,7 +4860,7 @@
         </table>
         <p class="mb-2 mt-3">For losses, two \u201chope\u201d multipliers apply:</p>
         <ul class="mb-2">
-          <li><strong>Loss aversion</strong> &middot; every loss is multiplied by L = 0.85 (chess precedent).</li>
+          <li><strong>Loss aversion</strong> &middot; every loss is multiplied by L = 0.85 (common in modern ranked ladders).</li>
           <li><strong>Soft floor</strong> &middot; losses taper to zero as you approach the rating floor F = 1000:</li>
         </ul>
         ${phiEq}
@@ -4863,29 +4869,29 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier Ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR thresholds &mdash; they don\u2019t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don\u2019t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
         <table class="vt-katex-tiers">
-          <thead><tr><th>Tier</th><th class="text-end">VTSR range</th><th></th></tr></thead>
+          <thead><tr><th>Tier</th><th class="text-end">VTSR-T range</th><th></th></tr></thead>
           <tbody>${tierRows}</tbody>
         </table>
       </section>
 
       <section class="vt-vtsr-doc-section">
         <h6>Worked Example &middot; Lamper\u2019s 9th rated match</h6>
-        <p class="mb-2">Real numbers from <code>data/processed/elo_history.json</code>:</p>
+        <p class="mb-2">Real numbers from <code>data/processed/elo_history.json</code> (match <code>2026-05-04T03-45-41</code>, re-rated under VTSR-T v2.2):</p>
         <ul class="mb-3">
-          <li><strong>Player</strong>: Lamper at R = 1551 with 8 rated matches played.</li>
-          <li><strong>Lobby opponents</strong> (sorted): 1271 / 1276 / 1292 / 1418 / <strong>1510 (median)</strong> / 1519 / 1633 / 1670 / 2620.</li>
-          <li><strong>Performance</strong>: P = +0.50 (top of lobby &mdash; 13K / 3D, 33% accuracy, 63K dmg dealt).</li>
+          <li><strong>Player</strong>: Lamper at R = 1500.82 with 8 rated matches played.</li>
+          <li><strong>Lobby opponents</strong> (sorted by current rating): 1333 / 1373 / 1385 / 1450 / <strong>1456 (median for Lamper)</strong> / 1483 / 1499 / 1543 / 1767. Median of the other 9 players = 1455.77.</li>
+          <li><strong>Performance</strong>: P_i = +0.5435 (top of lobby on net damage, PvP share, and accuracy).</li>
         </ul>
         ${exKEq}
         ${exEEq}
         ${exDREq}
-        <div class="vt-katex-caveat">Under v1 (lobby-median baseline) this same match produced +49. v2.0 (S<sub>R</sub> = 400) compressed it to +33; v2.1 (S<sub>R</sub> = 800) lands at ~+38 &mdash; still a meaningful reduction from v1, but breathing room restored for the leaderboard spread.</div>
+        <p class="mb-2 mt-2">Result: Lamper\u2019s combat rating ticks 1500.82 &rarr; 1541.78. Even with the expected-performance discount of about +0.065, his P_i of +0.5435 was far enough above the bar to earn a +41 update at K = 34.</p>
       </section>
 
       <div class="vt-katex-caveat mt-3">
-        <strong>VTSR v2.1 &middot; tuned post-Phase 12.</strong> v2.0 switched the per-match comparison from lobby-median performance (P_med) to opponent-strength-weighted expected performance (E_i, median of opponent ratings). v2.1 widens the rating-logistic scale from S<sub>R</sub> = 400 to 800 to restore a Tier 1&ndash;4 leaderboard-friendly spread for our small-population corpus. Existing peak_vtsr values from v1 / v2.0 are no longer comparable. Wins ELO blend (&alpha;) still 0.0; full algorithm in DEVELOPER_GUIDE \u00a713.
+        <strong>VTSR-T v2.2 &middot; thug-axis rebalance.</strong> v2.2 reshapes the Performance Composite around dogfight skill: drops <code>asset_multiplier</code> (damage by your owned AI &mdash; that&rsquo;s a build/route signal, reserved for the future VTSR-C commander rating), adds <code>structure_share</code> (player-dealt damage to enemy buildings as a share of total dealt), and adds <code>target_lock_pct</code> (T-key situational-awareness proxy). Snipe shaved 0.05 &rarr; 0.04 and three other axes nudged to keep the sum at 1.00. v2.0 had already moved the per-match comparison from lobby-median to opponent-strength-weighted expected performance (E_i, median of opponent ratings); v2.1 set S<sub>R</sub> = 800 to widen the rating spread for our small-population corpus. <strong>Pre-v2.2 peak_vtsr values are no longer comparable</strong> &mdash; the P_i definition changed. Wins ELO blend (&alpha;) still 0.0; full algorithm in DEVELOPER_GUIDE \u00a713.
       </div>
     </div>`;
     return vtsrTooltipHtmlCache;
@@ -4950,11 +4956,11 @@
     };
   }
 
-  // Renders the dedicated VTSR Leaderboard card. `elo` is the parsed
+  // Renders the dedicated VTSR-T Leaderboard card. `elo` is the parsed
   // elo_current.json payload (or null when the file is missing — in which
   // case the card hides itself entirely). `careerStats` is the post-filter
   // career_stats list emitted by the aggregator; we filter the displayed
-  // roster to players who appear there so the dedicated VTSR card never
+    // roster to players who appear there so the dedicated VTSR-T card never
   // shows a player the Career Leaderboard hides.
   function renderVtsrLeaderboard(elo, careerStats) {
     const $card = document.getElementById('section-vtsr');
@@ -4966,8 +4972,8 @@
     }
 
     // Cascade the career_stats filter set so the picker filter narrows
-    // the dedicated VTSR table the same way it narrows the Career table.
-    // (VTSR ratings themselves are corpus-wide — only the displayed roster
+    // the dedicated VTSR-T table the same way it narrows the Career table.
+    // (Ratings themselves are corpus-wide — only the displayed roster
     // changes based on filter scope.)
     const careerNames    = new Set((careerStats || []).map(c => (c.name || '').toLowerCase()));
     const careerSteam64s = new Set((careerStats || []).map(c => c.steam64).filter(Boolean));
@@ -4990,13 +4996,13 @@
       if (tier.id === 0) {
         tierTip = `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`;
       } else if (tier.id === 1) {
-        tierTip = `${tier.label} · ${tier.min}+ VTSR · top of the ladder`;
+        tierTip = `${tier.label} · ${tier.min}+ VTSR-T · top of the ladder`;
       } else if (tier.id === 5) {
         const fromFloor = Math.max(0, Math.round(r.vtsr - 1000));
-        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR · ${fromFloor} pts above floor`;
+        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${fromFloor} pts above floor`;
       } else {
         const prog = tierProgress(r.vtsr, tier);
-        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
+        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
       }
       const badge = tierBadgeHtml(tier, { title: tierTip });
       const lastDelta = r.last_delta || 0;
@@ -5035,7 +5041,7 @@
       };
     });
 
-    // Click-to-scroll: jump from the dedicated VTSR card to the Career
+    // Click-to-scroll: jump from the dedicated VTSR-T card to the Career
     // Leaderboard row for the same player.
     tbody.querySelectorAll('tr[data-vtsr-name]').forEach(tr => {
       tr.onclick = () => {
@@ -5044,9 +5050,9 @@
       };
     });
 
-    // Wire the VTSR methodology modal to lazy-populate its body the
+    // Wire the VTSR-T methodology modal to lazy-populate its body the
     // first time it opens. We deliberately do NOT populate on first
-    // VTSR render here — that races KaTeX's deferred load and would
+    // VTSR-T render here — that races KaTeX's deferred load and would
     // cache a fallback ``<code>`` rendering of every equation. By
     // the time the user clicks "How It's Calculated", katex.min.js
     // has long since loaded; rendering at modal-open time guarantees
@@ -5070,7 +5076,7 @@
     ensureTooltips($card);
   }
 
-  // Look up a career row's VTSR record from the cached ELO payload.
+  // Look up a career row's VTSR-T record from the cached ELO payload.
   // Joins by steam64 (primary) with name fallback for legacy contributions
   // missing steam64. Returns null when ELO data isn't loaded yet (404 path).
   function careerEloFor(row) {
@@ -5111,7 +5117,7 @@
         case 'tier': {
           // Tier desc => Tier 1 first; Provisional rows sink to the bottom.
           // Encode tier id as a numeric weight (Tier 1 highest), ties
-          // break on VTSR (handled by the secondary VTSR-ordering branch
+          // break on VTSR-T sort key `vtsr` (handled by the secondary ordering branch
           // below — we encode tier-then-vtsr as a single composite).
           const ea = careerEloFor(a);
           const eb = careerEloFor(b);
@@ -5127,7 +5133,7 @@
             // Inverted: lower tier id = "better" tier in our ladder.
             va = -sortableA; vb = -sortableB;
           } else {
-            // Within a tier, secondary sort by VTSR.
+            // Within a tier, secondary sort by VTSR-T (`vtsr` field).
             va = ea ? ea.vtsr : -Infinity;
             vb = eb ? eb.vtsr : -Infinity;
           }
@@ -5328,7 +5334,7 @@
             <div class="vt-movement-bar"><div class="vt-movement-bar-fill" style="width:${pct}%;background:${color};"></div></div>
           </div>`;
       }
-      // Tier + VTSR cells. Joined per row from window.__vtElo (cached in
+      // Tier + VTSR-T cells. Joined per row from window.__vtElo (cached in
       // loadAllMatches). Falls through to em-dash when ELO is missing.
       const eloRow = careerEloFor(c);
       let tierCell = '<span style="color:var(--kb-text-muted);">&mdash;</span>';
@@ -5337,9 +5343,9 @@
         const tier = resolveTier(eloRow.vtsr, eloRow.matches_played);
         const tip = eloRow.matches_played < ELO_PROVISIONAL_THRESHOLD
           ? `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - eloRow.matches_played} more rated matches`
-          : `${tier.label} · ${tier.min}${tier.max === Infinity ? '+' : `–${tier.max - 1}`} VTSR`;
+          : `${tier.label} · ${tier.min}${tier.max === Infinity ? '+' : `–${tier.max - 1}`} VTSR-T`;
         tierCell = tierBadgeHtml(tier, { title: tip });
-        vtsrCell = `<span class="vt-vtsr-rating" title="VTSR (anchor 1500, floor 1000) · ${eloRow.matches_played} rated matches">${Math.round(eloRow.vtsr)}</span>`;
+        vtsrCell = `<span class="vt-vtsr-rating" title="VTSR-T (anchor 1500, floor 1000) · ${eloRow.matches_played} rated matches">${Math.round(eloRow.vtsr)}</span>`;
       }
       return `<tr>
         <td class="vt-career-col-shared">${i + 1}</td>
