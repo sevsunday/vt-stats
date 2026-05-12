@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 10
+PIPELINE_VERSION = 11
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -230,7 +230,9 @@ def _load_building_odfs(odf_db):
     Building bucket plus VSR-mod variants. Used by the BulletHit ->
     DamageDealt join in `process_match()` to credit `player_structure_dealt`
     when a player's bullet impacts an enemy building (recycler, factory,
-    extractor, power gen, etc.). Feeds the VTSR-T `structure_share` axis.
+    extractor, power gen, etc.). Feeds the VTSR-T `pve_share` axis (and
+    via the BulletHit join, also feeds the `personal.structure_dealt`
+    field that downstream readers consume).
 
     Mirrors `_load_known_powerup_odfs()`: builds the base set from the DB
     bucket, then synthesizes `vsr` / `_vsr` suffix variants for each entry
@@ -249,6 +251,62 @@ def _load_building_odfs(odf_db):
         expanded.add(f"{stem}vsr.odf")
         expanded.add(f"{stem}_vsr.odf")
     return frozenset(expanded)
+
+
+def _load_class_labels(odf_db):
+    """Resolve every Vehicle/Pilot ODF to its root class label.
+
+    Returns `{odf_lower (with .odf suffix) -> classLabel}` covering the
+    Vehicle and Pilot buckets of `data/odf.min.json`. The class label is
+    the last entry of the ODF's `inheritanceChain` (the engine resolves
+    parent ODFs at runtime, and the DB pre-flattens the chain). Falls
+    back to `GameObjectClass.classLabel` when the chain is empty.
+
+    The Vehicle bucket has 20 distinct roots in the current ODF DB
+    (`apc`, `artillery`, `assaulttank`, `boid`, `bomber`, `constructionrig`,
+    `fv_walker`, `iv_walker`, `morphtank`, `person`, `recyclervehicle`,
+    `sav`, `scavenger`, `service`, `spraymine`, `torpedo`, `tug`, `turret`,
+    `turrettank`, `wingman`); the Pilot bucket is uniformly `person`. We
+    rename `person` -> `pilot` in the output so the loadout display reads
+    as "tank / wingman / pilot" rather than "tank / wingman / person".
+
+    Synthesizes VSR-mod variants the same way `_load_building_odfs()` does
+    (each base ODF gets a `vsr.odf` and `_vsr.odf` sibling pointing at the
+    same root class) so VSR sessions resolve cleanly even when the ODF DB
+    is a pre-VSR snapshot. Direct `_vsr` ODFs in the DB win over the
+    synthesized variants because dict insertion order preserves the real
+    entry first.
+
+    Consumed by `process_match()` to bucket `update_tick.players[].odf`
+    samples into per-player class-time accumulators that feed the
+    Loadout Profile and per-class combat breakdown (v2.3+).
+    """
+    out = {}
+    for bucket_name in ("Vehicle", "Pilot"):
+        for k, entry in (odf_db.get(bucket_name) or {}).items():
+            chain = entry.get("inheritanceChain") or []
+            cls = chain[-1] if chain else (
+                (entry.get("GameObjectClass") or {}).get("classLabel") or ""
+            )
+            cls = (cls or "").strip().lower()
+            if not cls:
+                continue
+            # Pilot/person is on-foot infantry; rename for clarity.
+            if cls == "person":
+                cls = "pilot"
+            odfl = (k if k.lower().endswith(".odf") else f"{k}.odf").lower()
+            out[odfl] = cls
+    # Synthesize VSR-mod siblings for any Vehicle/Pilot ODF the DB
+    # carries, so VSR sessions resolve when the DB hasn't been refreshed
+    # for the latest mod release. Direct entries already in `out` win.
+    extra = {}
+    for odfl, cls in out.items():
+        stem = odfl[:-4]  # strip .odf
+        for variant in (f"{stem}vsr.odf", f"{stem}_vsr.odf"):
+            if variant not in out:
+                extra[variant] = cls
+    out.update(extra)
+    return out
 
 
 def _is_sentinel_damage(amount):
@@ -2069,7 +2127,7 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, class_label_map=None, known_players=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -2129,6 +2187,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             return None
         return raw
 
+    # Class-label resolver. None = ODF DB unavailable; everything buckets
+    # to "unknown". Lowercased ODF (with .odf suffix) -> root class label.
+    class_label_map = class_label_map or {}
+
     # Per-player accumulators (keyed on Steam64)
     player_dealt = defaultdict(float)
     player_received = defaultdict(float)
@@ -2136,6 +2198,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     player_weapon_received = defaultdict(lambda: defaultdict(float))
     player_shots_fired = defaultdict(lambda: defaultdict(int))
     player_shots_hit = defaultdict(lambda: defaultdict(int))
+    # PvP-only hit counter (subset of player_shots_hit). Increments only
+    # when a BulletHit's victim is a Steam64 player. Drives v2.3 thug
+    # composite axes (thug_accuracy weapon-normalized formula needs the
+    # PvP/PvE split per weapon) and the per-match leaderboard's new
+    # weapon_breakdown[w].pvp_hits field.
+    player_pvp_shots_hit = defaultdict(lambda: defaultdict(int))
     player_weapons_used = defaultdict(set)
 
     # Asset (AI/structure) accumulators per owning slot
@@ -2260,6 +2328,58 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     position_samples = defaultdict(list)
     position_last_kept_tick = {}  # s64 -> last tick we kept a sample for (for 1 Hz downsample)
     tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
+
+    # ----- Loadout / per-class combat accumulators (v2.3) -----
+    # Per-tick class-time. UpdateTick is the only signal that says "what
+    # ship is each player currently in"; we sample at the full tick rate
+    # so a ship-switch is reflected within ~1 tick. These accumulators
+    # are NOT downsampled like the position samples -- the goal is
+    # ship-time, not movement.
+    #   player_class_ticks[s64][class] -> int    (# of UpdateTick samples)
+    #   player_class_odf_ticks[s64][class][odf_lower] -> int
+    #     used post-loop to derive most-used ODF per class (the Loadout
+    #     Profile card surfaces e.g. "wingman: 58% -- most-used: ivtank.odf").
+    # Class is class_label_map.get(odf_lower) or "unknown".
+    player_class_ticks = defaultdict(lambda: defaultdict(int))
+    player_class_odf_ticks = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+
+    # Running "what ship is each Steam64 currently in" map. Updated every
+    # UpdateTick; queried on every BulletInit / BulletHit / DamageDealt /
+    # UnitDestroyed event with a player shooter (or victim, for deaths)
+    # so we can attribute the event to the player's *active* ship class.
+    # Empty string = no UpdateTick yet for this player; events that fire
+    # before the first tick bucket to "unknown" in per_class_combat.
+    s64_to_current_odf = {}
+
+    # Per-(s64, class) combat aggregates. One row per player per class
+    # they used in the match. Sums kills / deaths / dealt damage /
+    # shots / hits / pvp_kills / pvp_hits, all tick-joined to the active
+    # ship at event time. Time is converted to seconds at the end via
+    # `ticks / tick_rate`.
+    #   per_class_combat[s64][class] = {
+    #       'kills', 'deaths', 'pvp_kills', 'pvp_deaths',
+    #       'dealt', 'shots', 'hits', 'pvp_hits',
+    #   }
+    per_class_combat = defaultdict(lambda: defaultdict(lambda: {
+        "kills": 0,
+        "deaths": 0,
+        "pvp_kills": 0,
+        "pvp_deaths": 0,
+        "dealt": 0.0,
+        "shots": 0,
+        "hits": 0,
+        "pvp_hits": 0,
+    }))
+
+    def _classify(s64):
+        """Resolve the active ship class for `s64` at the current event.
+        "unknown" before the first UpdateTick for that player; any ODF the
+        DB doesn't recognize also lands in "unknown" (rare in practice
+        because `class_label_map` includes synthesized VSR variants)."""
+        cur = s64_to_current_odf.get(s64) or ""
+        if not cur:
+            return "unknown"
+        return class_label_map.get(cur.lower()) or "unknown"
     # Target-lock availability for this match. Any observed has_target=True sample
     # flips this to True. Stays False for pre-schema matches (field defaults to
     # False) and new-schema matches where no player ever activated target mode.
@@ -2311,6 +2431,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if faction:
                         faction_shots[faction] += 1
                 weapon_total_shots[odf] += 1
+                # Per-class combat: tick-join the shot to the shooter's
+                # active ship class (v2.3).
+                per_class_combat[shooter][_classify(shooter)]["shots"] += 1
             if bi.tick > max_tick:
                 max_tick = bi.tick
             if bi.tick < min_tick:
@@ -2321,15 +2444,26 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             bh = evt.bullet_hit
             shooter = bh.shooter
             odf = bh.ordnance_odf or ""
+            is_pvp_hit = shooter > 0 and bh.victim > 0
             if shooter > 0 and odf:
                 all_ordnance.add(odf)
                 player_shots_hit[shooter][odf] += 1
+                if is_pvp_hit:
+                    # PvP-only weapon-level hit counter (subset of
+                    # player_shots_hit). Drives v2.3 thug_accuracy.
+                    player_pvp_shots_hit[shooter][odf] += 1
                 slot = s64_to_slot.get(shooter)
                 if slot:
                     faction = slot_to_faction(slot)
                     if faction:
                         faction_hits[faction] += 1
                 weapon_total_hits[odf] += 1
+            # Per-class combat: tick-join hits/pvp_hits to active ship.
+            if shooter > 0:
+                cls = _classify(shooter)
+                per_class_combat[shooter][cls]["hits"] += 1
+                if is_pvp_hit:
+                    per_class_combat[shooter][cls]["pvp_hits"] += 1
             if shooter > 0 and bh.victim > 0:
                 player_hits_by_victim[shooter][bh.victim] += 1
             if bh.victim_odf:
@@ -2432,6 +2566,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if odf:
                         weapon_total_damage[odf] += dd.amount
                         weapon_users[odf].add(shooter)
+                    # Per-class combat: tick-join dealt damage to active
+                    # ship class (v2.3). Sums regardless of whether the
+                    # victim is PvP or PvE -- the per-class table totals
+                    # all dealt damage; the PvP/PvE split is captured via
+                    # pvp_kills / pvp_hits on the same row.
+                    per_class_combat[shooter][_classify(shooter)]["dealt"] += dd.amount
 
                     # Structure-damage attribution for VTSR-T `structure_share`.
                     # Pop the matching BulletHit-side victim_odf and bucket the
@@ -2555,11 +2695,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 i += 1
                 continue
 
-            if ud.killer > 0:
+            killer_is_player = ud.killer > 0
+            victim_is_player = ud.victim > 0
+            is_pvp_kill = killer_is_player and victim_is_player
+            if killer_is_player:
                 player_kills[ud.killer] += 1
-            if ud.victim > 0:
+                # Per-class combat: attribute kill to killer's active ship.
+                kc_cls = _classify(ud.killer)
+                per_class_combat[ud.killer][kc_cls]["kills"] += 1
+                if is_pvp_kill:
+                    per_class_combat[ud.killer][kc_cls]["pvp_kills"] += 1
+            if victim_is_player:
                 player_deaths[ud.victim] += 1
-            if ud.killer > 0 and ud.victim > 0:
+                # Death attributed to victim's active ship at time of death.
+                vc_cls = _classify(ud.victim)
+                per_class_combat[ud.victim][vc_cls]["deaths"] += 1
+                if is_pvp_kill:
+                    per_class_combat[ud.victim][vc_cls]["pvp_deaths"] += 1
+            if is_pvp_kill:
                 kill_rivalry[ud.killer][ud.victim] += 1
             if ud.victim_odf:
                 vehicle_destruction_count[ud.victim_odf] += 1
@@ -2767,6 +2920,21 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     continue
                 if ps.odf:
                     all_unit_odfs.add(ps.odf)
+                    # v2.3: keep s64_to_current_odf updated every tick so
+                    # any subsequent BulletInit / BulletHit / DamageDealt
+                    # / UnitDestroyed event in the same or following
+                    # ticks attributes correctly to the player's ACTIVE
+                    # ship at event time (not their starting ship).
+                    s64_to_current_odf[s64] = ps.odf
+                    # v2.3: per-tick class-time accumulator. Class is
+                    # the inheritanceChain root from data/odf.min.json
+                    # (e.g. ivtank.odf -> "wingman", apcdron.odf ->
+                    # "apc"). Unknown ODFs (DB miss + no synthesized VSR
+                    # variant) bucket to "unknown".
+                    odfl = ps.odf.lower()
+                    cls = class_label_map.get(odfl) or "unknown"
+                    player_class_ticks[s64][cls] += 1
+                    player_class_odf_ticks[s64][cls][odfl] += 1
                 # Faction detection. Algorithm A (starting ship): cache
                 # the first non-empty ODF seen for this slot; this is the
                 # closest analogue we have to a match-start roster check.
@@ -3010,6 +3178,21 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         total_fired = sum(player_shots_fired[s64].values()) if s64 else 0
         total_hit = sum(player_shots_hit[s64].values()) if s64 else 0
         accuracy = total_hit / total_fired if total_fired > 0 else 0
+        # PvP-only hit count + accuracy (subset of total_hit). Drives the
+        # v2.3 thug_accuracy axis (weapon-normalized) at the
+        # player+weapon level via weapon_breakdown[w].pvp_hits below.
+        total_pvp_hit = sum(player_pvp_shots_hit[s64].values()) if s64 else 0
+        pvp_accuracy = total_pvp_hit / total_fired if total_fired > 0 else 0
+
+        # PvP/PvE kill+death split. PvP = events with both killer and
+        # victim being Steam64 players (already captured in kill_rivalry).
+        # PvE = remainder = kills/deaths against AI units + world.
+        pvp_kills = sum(kill_rivalry[s64].values()) if s64 else 0
+        pvp_deaths = sum(victims.get(s64, 0) for victims in kill_rivalry.values()) if s64 else 0
+        kills = player_kills.get(s64, 0) if s64 else 0
+        deaths = player_deaths.get(s64, 0) if s64 else 0
+        pve_kills = max(0, kills - pvp_kills)
+        pve_deaths = max(0, deaths - pvp_deaths)
 
         fav_weapon = "—"
         fav_max = 0
@@ -3030,17 +3213,114 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             w_recv = player_weapon_received[s64].get(odf, 0)
             w_shots = player_shots_fired[s64].get(odf, 0)
             w_hits = player_shots_hit[s64].get(odf, 0)
+            w_pvp_hits = player_pvp_shots_hit[s64].get(odf, 0) if s64 else 0
             w_acc = w_hits / w_shots if w_shots > 0 else 0
             weapon_breakdown[wpn_name(odf)] = {
                 "dealt": round(w_dealt, 1),
                 "received": round(w_recv, 1),
                 "shots": w_shots,
                 "hits": w_hits,
+                "pvp_hits": w_pvp_hits,
                 "accuracy": round(w_acc, 3),
             }
 
-        kills = player_kills.get(s64, 0) if s64 else 0
-        deaths = player_deaths.get(s64, 0) if s64 else 0
+        # ---- v2.3 Loadout Profile + per-class combat block. ----
+        # Derived from per_class_combat (tick-joined to active ship at
+        # each event) and player_class_ticks (what fraction of ticks
+        # this player was in each class). UI is display-only; no axis
+        # math reads these blocks.
+        loadout_block = None
+        per_class_combat_rows = []
+        if s64:
+            class_ticks = dict(player_class_ticks.get(s64, {}))
+            total_class_ticks = sum(class_ticks.values())
+            if total_class_ticks > 0:
+                # Most-used ODF per class (e.g. for "wingman" the
+                # player's primary ride was "ivtank.odf").
+                most_used_odf = {}
+                for cls, odf_ticks in player_class_odf_ticks.get(s64, {}).items():
+                    if odf_ticks:
+                        most_used_odf[cls] = max(odf_ticks.items(), key=lambda kv: kv[1])[0]
+
+                # Class shares (sum to ~1.0). Round late so tiny shares
+                # like 0.5% still surface in the bar instead of dropping
+                # to 0.
+                class_shares = {
+                    cls: ticks / total_class_ticks
+                    for cls, ticks in class_ticks.items()
+                }
+                class_seconds = {
+                    cls: round(ticks / tick_rate, 1)
+                    for cls, ticks in class_ticks.items()
+                }
+                # Primary / secondary by share. Sorted desc; ties
+                # broken alphabetically for deterministic output.
+                ordered = sorted(
+                    class_shares.items(),
+                    key=lambda kv: (-kv[1], kv[0]),
+                )
+                primary_class, primary_share = ordered[0]
+                secondary_class, secondary_share = (
+                    ordered[1] if len(ordered) > 1 else (None, None)
+                )
+                loadout_block = {
+                    "classes": {c: round(s, 4) for c, s in class_shares.items()},
+                    "class_seconds": class_seconds,
+                    "primary_class": primary_class,
+                    "primary_share": round(primary_share, 4),
+                    "secondary_class": secondary_class,
+                    "secondary_share": (
+                        round(secondary_share, 4) if secondary_share is not None else None
+                    ),
+                    "class_diversity": len([c for c, s in class_ticks.items() if s > 0]),
+                    "most_used_odf": most_used_odf,
+                    "active_seconds": round(total_class_ticks / tick_rate, 1),
+                }
+
+                # Per-class combat rows (display-only; not consumed by
+                # ELO axes). One row per class with time_seconds > 0,
+                # sorted by time desc, ties broken alphabetically.
+                per_class_raw = per_class_combat.get(s64, {})
+                for cls, ticks in class_ticks.items():
+                    if ticks <= 0:
+                        continue
+                    cd = per_class_raw.get(cls, {})
+                    pc_kills = int(cd.get("kills", 0))
+                    pc_deaths = int(cd.get("deaths", 0))
+                    pc_pvp_kills = int(cd.get("pvp_kills", 0))
+                    pc_pvp_deaths = int(cd.get("pvp_deaths", 0))
+                    pc_dealt = float(cd.get("dealt", 0.0))
+                    pc_shots = int(cd.get("shots", 0))
+                    pc_hits = int(cd.get("hits", 0))
+                    pc_pvp_hits = int(cd.get("pvp_hits", 0))
+                    pc_time = ticks / tick_rate
+                    pc_acc = pc_hits / pc_shots if pc_shots > 0 else 0.0
+                    pc_pvp_acc = pc_pvp_hits / pc_shots if pc_shots > 0 else 0.0
+                    pc_dpm = pc_dealt / (pc_time / 60.0) if pc_time > 0 else 0.0
+                    pc_kd = pc_pvp_kills / pc_pvp_deaths if pc_pvp_deaths > 0 else (
+                        None if pc_pvp_kills == 0 else None
+                    )
+                    per_class_combat_rows.append({
+                        "class": cls,
+                        "time_seconds": round(pc_time, 1),
+                        "kills": pc_kills,
+                        "deaths": pc_deaths,
+                        "pvp_kills": pc_pvp_kills,
+                        "pvp_deaths": pc_pvp_deaths,
+                        "pve_kills": max(0, pc_kills - pc_pvp_kills),
+                        "pve_deaths": max(0, pc_deaths - pc_pvp_deaths),
+                        "dealt": round(pc_dealt, 1),
+                        "shots": pc_shots,
+                        "hits": pc_hits,
+                        "pvp_hits": pc_pvp_hits,
+                        "accuracy": round(pc_acc, 3),
+                        "pvp_accuracy": round(pc_pvp_acc, 3),
+                        "dpm": round(pc_dpm, 1),
+                        "kd": round(pc_kd, 2) if pc_kd is not None else None,
+                    })
+                per_class_combat_rows.sort(
+                    key=lambda r: (-r["time_seconds"], r["class"])
+                )
 
         leaderboard.append({
             "player_id": name,
@@ -3069,7 +3349,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "ratio": round(ratio, 2) if ratio != float("inf") else None,
                 "shots_fired": total_fired,
                 "shots_hit": total_hit,
+                # v2.3: PvP-only hit count + accuracy. Subset of
+                # shots_hit / accuracy. Used by the dashboard's
+                # weapon-breakdown table (PvP Acc column) and the
+                # thug_accuracy ELO axis at the per-weapon level.
+                "pvp_shots_hit": total_pvp_hit,
+                "pvp_accuracy": round(pvp_accuracy, 3),
                 "accuracy": round(accuracy, 3),
+                # v2.3: PvP/PvE kill + death split. Drives the dashboard's
+                # compact `TOTAL (PvP/PvE)` chips on Kills/Deaths cells
+                # and the thug_kill_rate ELO axis (alpha-blended).
+                "pvp_kills":  pvp_kills,
+                "pve_kills":  pve_kills,
+                "pvp_deaths": pvp_deaths,
+                "pve_deaths": pve_deaths,
                 "fav_weapon": fav_weapon,
                 "weapons_used": len(player_weapons_used.get(s64, set())) if s64 else 0,
             },
@@ -3078,6 +3371,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "received": round(asset_received.get(slot, 0), 1),
             },
             "weapon_breakdown": weapon_breakdown,
+            # v2.3: Loadout Profile + per-class combat (display-only,
+            # no editorial role labels). loadout is None when the
+            # player has zero ticks (degenerate / spectator slot);
+            # per_class_combat is empty list in the same case. UI
+            # hides the cards in both cases.
+            "loadout": loadout_block,
+            "per_class_combat": per_class_combat_rows,
             "hit_targets": {
                 nick_for_s64(victim_s64): {
                     "hits": count,
@@ -3349,10 +3649,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # full per-match JSON.
             "has_pickup_data": match_has_pickup_data,
             # Per-match schema version. v1 = pre-highlights; v2 added the
-            # top-level `highlights` block; v3 adds `match.team_factions`
-            # and `match.winner` (this commit). Absence means legacy data
-            # (anything written before Phase 3).
-            "schema_version": 3,
+            # top-level `highlights` block; v3 added `match.team_factions`
+            # and `match.winner`; v4 (this version) adds the v2.3 leaderboard
+            # fields: `personal.pvp_kills` / `pve_kills` / `pvp_deaths` /
+            # `pve_deaths` / `pvp_shots_hit` / `pvp_accuracy`,
+            # `weapon_breakdown[w].pvp_hits`, plus per-player `loadout`
+            # block (class shares, primary/secondary, most-used ODFs) and
+            # `per_class_combat` list (per-ship-class combat stats joined
+            # to active ship at event time). Absence means legacy data
+            # (anything written before the v2.3 phase).
+            "schema_version": 4,
             "terrain_bounds": terrain_bounds,
             "base_to_base_distance": positioning_block.get("base_to_base_distance"),
             "sentinel_damage": {
@@ -3459,6 +3765,40 @@ def _extract_contribution(match_data):
         # matches, present-but-no-target_lock on pre-target-lock-schema.
         pm = (pos_players.get(p["name"]) or {}).get("metrics") or {}
         slot = p.get("slot")
+        # v2.3: Loadout block trimmed to exactly what the aggregator
+        # needs to rebuild career_loadout (sum of class_seconds across
+        # matches; primary/secondary rederived from the totals to avoid
+        # double-rounding). most_used_odf is carried per-class so the
+        # aggregator can pick the most-used per (player, class) by
+        # re-weighting via class_seconds.
+        loadout = p.get("loadout") or None
+        if loadout:
+            loadout_slim = {
+                "classes":         dict(loadout.get("classes") or {}),
+                "class_seconds":   dict(loadout.get("class_seconds") or {}),
+                "most_used_odf":   dict(loadout.get("most_used_odf") or {}),
+                "active_seconds":  loadout.get("active_seconds", 0.0),
+            }
+        else:
+            loadout_slim = None
+        # v2.3: per_class_combat slim rows. The aggregator sums each
+        # field per (player, class) across matches; display fields
+        # (accuracy, dpm, kd) are recomputed client-side.
+        per_class_combat_slim = [
+            {
+                "class":         row.get("class") or "unknown",
+                "time_seconds":  row.get("time_seconds", 0.0),
+                "kills":         row.get("kills", 0),
+                "deaths":        row.get("deaths", 0),
+                "pvp_kills":     row.get("pvp_kills", 0),
+                "pvp_deaths":    row.get("pvp_deaths", 0),
+                "dealt":         row.get("dealt", 0.0),
+                "shots":         row.get("shots", 0),
+                "hits":          row.get("hits", 0),
+                "pvp_hits":      row.get("pvp_hits", 0),
+            }
+            for row in (p.get("per_class_combat") or [])
+        ]
         leaderboard.append({
             "player_id": p.get("player_id", ""),
             "name": p.get("name", ""),
@@ -3479,17 +3819,37 @@ def _extract_contribution(match_data):
             "structure_dealt": round(personal.get("structure_dealt", 0), 1),
             "shots_fired":    personal.get("shots_fired", 0),
             "shots_hit":      personal.get("shots_hit", 0),
+            # v2.3: PvP-only hit count (subset of shots_hit). Drives the
+            # career thug_accuracy axis at the per-weapon level (via
+            # weapon_breakdown[w].pvp_hits) and the per-match thug
+            # composite calculation.
+            "pvp_shots_hit":  personal.get("pvp_shots_hit", 0),
             "kills":          p.get("kills", 0),
             "deaths":         p.get("deaths", 0),
+            # v2.3: PvP/PvE kill+death split. Drives the dashboard's
+            # compact `TOTAL (PvP/PvE)` chips on Career Leaderboard
+            # rows and the career thug_kill_rate axis.
+            "pvp_kills":      personal.get("pvp_kills", 0),
+            "pve_kills":      personal.get("pve_kills", 0),
+            "pvp_deaths":     personal.get("pvp_deaths", 0),
+            "pve_deaths":     personal.get("pve_deaths", 0),
             "pickups":        pickups_by_name.get(p["name"], 0),
             "weapon_breakdown": {
                 wname: {
                     "dealt": round(wdata.get("dealt", 0), 1),
                     "shots": wdata.get("shots", 0),
                     "hits":  wdata.get("hits", 0),
+                    # v2.3: per-weapon PvP-hit count for the career
+                    # weapon-breakdown table's PvP Hits / PvP Acc cols.
+                    "pvp_hits": wdata.get("pvp_hits", 0),
                 }
                 for wname, wdata in (p.get("weapon_breakdown") or {}).items()
             },
+            # v2.3: Loadout + per-class combat for the All Matches
+            # career rollup. Aggregator sums class_seconds and the
+            # per-class combat fields; rederives display fields.
+            "loadout":          loadout_slim,
+            "per_class_combat": per_class_combat_slim,
             "activity_score":   pm.get("activity_score") if pm else None,
             "movement_band":    pm.get("movement_band") if pm else None,
             "path_length":      pm.get("path_length", 0.0) if pm else 0.0,
@@ -3953,6 +4313,8 @@ def main():
     print(f"  Powerup classification set: {len(known_powerup_odfs)} ODFs (DB Powerup bucket + VSR variants)")
     building_odfs = _load_building_odfs(odf_db)
     print(f"  Building classification set: {len(building_odfs)} ODFs (DB Building bucket + VSR variants)")
+    class_label_map = _load_class_labels(odf_db)
+    print(f"  Class-label map: {len(class_label_map)} ODFs (Vehicle + Pilot buckets, root inheritance class)")
 
     # Load canonical player names
     known_players = load_known_players()
@@ -3994,7 +4356,7 @@ def main():
             match_data = process_match(
                 session, session_path.name, current_size, submitter,
                 resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs,
-                known_players,
+                class_label_map, known_players,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"

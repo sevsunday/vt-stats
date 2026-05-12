@@ -1659,6 +1659,29 @@
     const into = vtsr - tier.min;
     return { toNext: tier.max - vtsr, fromCurrent: into, pct: into / span };
   }
+  // v2.3: compact `TOTAL (PvP/PvE)` chip cell renderer. Drives the
+  // Player Leaderboard + Career Leaderboard Kills/Deaths columns.
+  // ``kind`` is 'kills' or 'deaths'; the tooltip narrates accordingly.
+  // ``extraCls`` is an optional space-separated class list appended to
+  // the <td> (e.g. ``vt-career-col-total`` so the column-view CSS can
+  // hide it under the Per-match column-mode). Returns a complete
+  // <td>...</td> string. When pvp/pve aren't present (pre-v4 schema),
+  // falls back to plain integer rendering (same extraCls applied).
+  function killsDeathsChipCell(total, pvp, pve, kind, extraCls) {
+    const tot = total || 0;
+    const cls = ('text-end ' + (extraCls || '')).trim();
+    const hasSplit = (pvp != null && pve != null);
+    if (!hasSplit) {
+      return `<td class="${cls}">${tot}</td>`;
+    }
+    const pvpN = pvp || 0;
+    const pveN = pve || 0;
+    const tip = kind === 'deaths'
+      ? `PvP: ${pvpN} from players · PvE: ${pveN} from AI / world`
+      : `PvP: ${pvpN} on players · PvE: ${pveN} on AI / structures (thug_kill_rate weights PvP at 1.0 and PvE at α=0.5)`;
+    return `<td class="${cls}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">${tot} <span class="vt-kd-split text-muted small">(${pvpN}/${pveN})</span></td>`;
+  }
+
   // Single-source-of-truth badge HTML used by both the dedicated VTSR-T
   // table and the Career Leaderboard's new Tier column. Keeps badge
   // markup byte-identical between the two views.
@@ -3796,6 +3819,22 @@
         </div>`;
     }
 
+    // v2.3: PvP/PvE kill+death chip + tooltip on the Kills/Deaths
+    // stat cards, mirroring the Player Leaderboard cell rendering.
+    const killChipBody = (pvp, pve) =>
+      (pvp != null && pve != null)
+        ? ` <span class="vt-kd-split">(${pvp}/${pve})</span>`
+        : '';
+    const killsChip = killChipBody(ps.pvp_kills, ps.pve_kills);
+    const deathsChip = killChipBody(ps.pvp_deaths, ps.pve_deaths);
+
+    // v2.3: Loadout Profile + Per-Class Combat sections. Built only
+    // when the leaderboard row carries v2.3 data (pre-v4 matches just
+    // skip these blocks gracefully).
+    const loadoutHtml = renderLoadoutCard(player.loadout);
+    const perClassHtml = renderPerClassCombatTable(player.per_class_combat);
+    const weaponBreakdownHtml = renderPlayerWeaponBreakdownTable(player.weapon_breakdown);
+
     container.innerHTML = `
       <div class="vt-profile-panel" style="border-left-color:${borderColor};">
         <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
@@ -3808,8 +3847,8 @@
           <div class="stat-card"><div class="stat-value">${fmt(ps.received)}</div><div class="stat-label">Received</div></div>
           <div class="stat-card"><div class="stat-value">${ratioStr}</div><div class="stat-label">Ratio</div></div>
           <div class="stat-card"><div class="stat-value">${(ps.accuracy * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
-          <div class="stat-card"><div class="stat-value">${player.kills || 0}</div><div class="stat-label">Kills</div></div>
-          <div class="stat-card"><div class="stat-value">${player.deaths || 0}</div><div class="stat-label">Deaths</div></div>
+          <div class="stat-card"><div class="stat-value">${player.kills || 0}${killsChip}</div><div class="stat-label">Kills <span class="text-muted">(PvP/PvE)</span></div></div>
+          <div class="stat-card"><div class="stat-value">${player.deaths || 0}${deathsChip}</div><div class="stat-label">Deaths <span class="text-muted">(PvP/PvE)</span></div></div>
           <div class="stat-card"><div class="stat-value">${kdStr}</div><div class="stat-label">K/D</div></div>
           <div class="vt-profile-chart-wrap"><canvas id="profile-doughnut"></canvas></div>
           <div class="vt-profile-radar-wrap">
@@ -3824,6 +3863,9 @@
           <span class="badge bg-secondary">${esc(ps.fav_weapon)}</span>
           <span class="small" style="color:var(--kb-text-muted);">${ps.weapons_used} weapons used</span>
         </div>
+        ${loadoutHtml}
+        ${perClassHtml}
+        ${weaponBreakdownHtml}
         ${topRivalHtml}
         ${hitTargetsHtml}
       </div>`;
@@ -3857,6 +3899,195 @@
       });
     }
     applyRadarInfoTooltips(container);
+    // v2.3: rebind tooltips on freshly-injected Loadout / Per-Class /
+    // Weapon-Breakdown nodes (Bootstrap 5 doesn't auto-init).
+    ensureTooltips(container);
+  }
+
+  // ----- v2.3 Loadout Profile + Per-Class Combat renderers -----
+  // Display-only blocks consumed by both per-match (renderPlayerProfile)
+  // and career (renderCareerPlayer) views. No editorial role labels —
+  // class names come straight from the inheritanceChain root in
+  // data/odf.min.json (e.g. ``wingman``, ``morphtank``, ``walker``).
+
+  // Format a duration in seconds as ``Mm Ss`` (or just ``Ss`` under 60s).
+  function fmtDurationCompact(sec) {
+    const s = Math.max(0, Math.round(sec || 0));
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    if (r === 0) return m + 'm';
+    return m + 'm ' + r + 's';
+  }
+
+  // Pretty-print an ODF basename for display (strips ``.odf`` and
+  // tries the existing odf_map / unit name resolver, falling back to a
+  // title-cased stem). Used inside Loadout Profile's "most-used ODF
+  // per class" callout.
+  function prettyOdfName(odfRaw) {
+    if (!odfRaw) return '';
+    const odfMap = currentData && currentData.odf_map;
+    if (odfMap && odfMap[odfRaw]) return odfMap[odfRaw];
+    const lower = odfRaw.toLowerCase();
+    if (odfMap) {
+      for (const k in odfMap) {
+        if (k.toLowerCase() === lower) return odfMap[k];
+      }
+    }
+    const stem = odfRaw.replace(/\.odf$/i, '');
+    return stem.charAt(0).toUpperCase() + stem.slice(1);
+  }
+
+  // Stacked horizontal bar + per-class list. Returns '' when ``loadout``
+  // is missing (legacy / pre-v4 / spectator-only player), so callers
+  // can splice the result into a template-literal unconditionally.
+  function renderLoadoutCard(loadout) {
+    if (!loadout) return '';
+    const classes = loadout.classes || {};
+    const classSeconds = loadout.class_seconds || {};
+    const mostUsed = loadout.most_used_odf || {};
+    const classKeys = Object.keys(classes).sort((a, b) => (classes[b] || 0) - (classes[a] || 0));
+    if (!classKeys.length) return '';
+
+    // Stacked bar segments, color-cycled through the chart palette
+    // tokens (--vt-chart-1..8) which are also used by the timeline,
+    // weapon-meta charts, etc. Caps at 8 distinct colors and reuses
+    // the last color for any 9th+ class (rare).
+    const segments = classKeys.map((cls, i) => {
+      const share = classes[cls] || 0;
+      const widthPct = (share * 100).toFixed(2);
+      const colorIdx = Math.min(i + 1, 8);
+      const tip = `${cls}: ${(share * 100).toFixed(1)}% · ${fmtDurationCompact(classSeconds[cls] || 0)}`;
+      return `<div class="vt-loadout-bar-seg" data-bs-toggle="tooltip" title="${esc(tip)}" style="width:${widthPct}%;background:var(--vt-chart-${colorIdx});" data-cls="${esc(cls)}"></div>`;
+    }).join('');
+
+    const items = classKeys.map((cls, i) => {
+      const share = classes[cls] || 0;
+      const colorIdx = Math.min(i + 1, 8);
+      const odfRaw = mostUsed[cls];
+      const odfDisp = odfRaw ? prettyOdfName(odfRaw) : '';
+      const odfPart = odfDisp
+        ? ` <span class="vt-loadout-most-used">most-used: ${esc(odfDisp)}</span>`
+        : '';
+      return `<li>
+        <span class="vt-loadout-swatch" style="background:var(--vt-chart-${colorIdx});"></span>
+        <span class="vt-loadout-class">${esc(cls)}</span>
+        <span class="vt-loadout-share">${(share * 100).toFixed(1)}%</span>
+        ${odfPart}
+      </li>`;
+    }).join('');
+
+    const footer = `active: ${fmtDurationCompact(loadout.active_seconds || 0)} · ${loadout.class_diversity || classKeys.length} distinct ${ (loadout.class_diversity || classKeys.length) === 1 ? 'class' : 'classes' }`;
+
+    return `
+      <div class="vt-loadout-card mt-3">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="small fw-semibold" style="color:var(--kb-text-muted);">Loadout Profile</div>
+          <div class="small" style="color:var(--kb-text-muted);">${esc(footer)}</div>
+        </div>
+        <div class="vt-loadout-bar">${segments}</div>
+        <ul class="vt-loadout-classlist">${items}</ul>
+      </div>`;
+  }
+
+  // Per-class combat table (one row per ship class with time>0).
+  // Returns '' when no rows. Data shape mirrors the contribution slim
+  // rows: kills/deaths/pvp_kills/pvp_deaths/dealt/shots/hits/pvp_hits/
+  // accuracy/pvp_accuracy/dpm.
+  function renderPerClassCombatTable(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return '';
+    const body = rows.map(r => {
+      const accStr    = r.accuracy != null ? (r.accuracy * 100).toFixed(1) + '%' : '—';
+      const pvpAccStr = r.pvp_accuracy != null ? (r.pvp_accuracy * 100).toFixed(1) + '%' : '—';
+      const dpmStr    = r.dpm != null ? fmt(r.dpm) : '—';
+      return `<tr>
+        <td>${esc(r.class)}</td>
+        <td class="text-end">${fmtDurationCompact(r.time_seconds)}</td>
+        <td class="text-end">${r.pvp_kills || 0}</td>
+        <td class="text-end text-muted">${r.pve_kills || 0}</td>
+        <td class="text-end">${r.deaths || 0}</td>
+        <td class="text-end">${fmt(r.dealt || 0)}</td>
+        <td class="text-end">${accStr}</td>
+        <td class="text-end">${pvpAccStr}</td>
+        <td class="text-end">${dpmStr}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <div class="vt-pcc-card mt-3">
+        <div class="small fw-semibold mb-2" style="color:var(--kb-text-muted);">Per-Class Combat</div>
+        <div class="table-responsive">
+          <table class="table table-sm vt-pcc-table mb-0">
+            <thead>
+              <tr>
+                <th>Class</th>
+                <th class="text-end">Time</th>
+                <th class="text-end" data-bs-toggle="tooltip" title="PvP kills (against other human players)">PvP K</th>
+                <th class="text-end" data-bs-toggle="tooltip" title="PvE kills (against AI / structures)">PvE K</th>
+                <th class="text-end">Deaths</th>
+                <th class="text-end">Dmg dealt</th>
+                <th class="text-end">Acc</th>
+                <th class="text-end" data-bs-toggle="tooltip" title="PvP-only accuracy: pvp_hits / shots">PvP Acc</th>
+                <th class="text-end" data-bs-toggle="tooltip" title="Damage per minute, per class">DPM</th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  // Per-player weapon breakdown table with v2.3 PvP Hits + PvP Acc cols.
+  // Returns '' when weapon_breakdown is empty / absent. Sort by dealt desc.
+  function renderPlayerWeaponBreakdownTable(weaponBreakdown) {
+    if (!weaponBreakdown) return '';
+    const entries = Object.entries(weaponBreakdown).filter(
+      ([, w]) => (w.dealt || 0) > 0 || (w.shots || 0) > 0
+    );
+    if (!entries.length) return '';
+    entries.sort(([wa, a], [wb, b]) => {
+      const da = b.dealt || 0, db = a.dealt || 0;
+      if (da !== db) return da - db;
+      return wa.toLowerCase().localeCompare(wb.toLowerCase());
+    });
+    const body = entries.map(([wname, w]) => {
+      const shots = w.shots || 0;
+      const hits = w.hits || 0;
+      const pvpHits = w.pvp_hits || 0;
+      const acc = shots > 0 ? (hits / shots * 100).toFixed(1) + '%' : '—';
+      // PvP Acc = pvp_hits / shots (matches the thug_accuracy axis math
+      // at the per-weapon level, NOT pvp_hits / hits which would always
+      // be ≤100% and conflate weapon-mix with on-target rate).
+      const pvpAcc = shots > 0 ? (pvpHits / shots * 100).toFixed(1) + '%' : '—';
+      return `<tr>
+        <td>${esc(wname)}</td>
+        <td class="text-end">${fmt(w.dealt || 0)}</td>
+        <td class="text-end">${shots}</td>
+        <td class="text-end">${hits}</td>
+        <td class="text-end" data-bs-toggle="tooltip" title="Hits that landed on a human player (subset of Hits).">${pvpHits}</td>
+        <td class="text-end">${acc}</td>
+        <td class="text-end" data-bs-toggle="tooltip" title="pvp_hits ÷ shots — the per-weapon ratio used by the thug_accuracy ELO axis.">${pvpAcc}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <div class="vt-wb-card mt-3">
+        <div class="small fw-semibold mb-2" style="color:var(--kb-text-muted);">Weapon Breakdown</div>
+        <div class="table-responsive">
+          <table class="table table-sm vt-wb-table mb-0">
+            <thead>
+              <tr>
+                <th>Weapon</th>
+                <th class="text-end">Dmg</th>
+                <th class="text-end">Shots</th>
+                <th class="text-end">Hits</th>
+                <th class="text-end" data-bs-toggle="tooltip" title="Hits that landed on a human player.">PvP Hits</th>
+                <th class="text-end">Acc</th>
+                <th class="text-end" data-bs-toggle="tooltip" title="pvp_hits ÷ shots — feeds the thug_accuracy ELO axis.">PvP Acc</th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      </div>`;
   }
 
   // --- Faction Scoreboard ---
@@ -4027,6 +4258,13 @@
       const nickSub = r.in_game_nick
         ? `<small class="vt-nick-sub">@${esc(r.in_game_nick)}</small>`
         : '';
+      // v2.3: compact `TOTAL (PvP/PvE)` chip rendering on Kills/Deaths.
+      // Sort behavior unchanged (sort key still `kills` / `deaths`,
+      // i.e. totals). Tooltip surfaces the explicit split + the
+      // alpha-blend weighting note. Falls back to plain integer when
+      // pvp/pve fields are absent (pre-v4 schema).
+      const kCell = killsDeathsChipCell(r.kills || 0, ps.pvp_kills, ps.pve_kills, 'kills');
+      const dCell = killsDeathsChipCell(r.deaths || 0, ps.pvp_deaths, ps.pve_deaths, 'deaths');
       return `<tr>
         <td>${i + 1}</td>
         <td class="fw-semibold">${esc(r.name)}${nickSub}</td>
@@ -4040,14 +4278,15 @@
         <td class="text-end" style="${netClass}">${ps.net > 0 ? '+' : ''}${fmt(ps.net)}</td>
         <td class="text-end">${ratioStr}</td>
         <td class="text-end">${(ps.accuracy * 100).toFixed(1)}%</td>
-        <td class="text-end">${r.kills || 0}</td>
-        <td class="text-end">${r.deaths || 0}</td>
+        ${kCell}
+        ${dCell}
         <td class="text-end">${fmt(r.assets.dealt)}</td>
         <td>${moveCell}</td>
         <td><span class="badge bg-secondary">${esc(ps.fav_weapon)}</span></td>
         <td class="text-end">${ps.weapons_used}</td>
       </tr>`;
     }).join('');
+    ensureTooltips(tbody);
 
     document.querySelectorAll('#leaderboard th[data-sort]').forEach(th => {
       th.classList.toggle('sort-active', th.dataset.sort === sortState.key);
@@ -4730,24 +4969,35 @@
       catch { return `<code>${esc(latex)}</code>`; }
     }
 
-    // ---- Equations ----
-    const updateEqGain = tex('\\Delta R^{C}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i)', true);
-    const updateEqLoss = tex('\\Delta R^{C}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i) \\cdot L \\cdot \\varphi(R^{C}_{i}) \\quad \\text{when } (P_i - E_i) < 0', true);
-    const blendEq      = tex('\\mathrm{VTSR}_i \\;=\\; \\alpha \\cdot R^{W}_i + (1 - \\alpha) \\cdot R^{C}_i', true);
-    const expectedEq   = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(\\bar{R}_i - R^{C}_i) / S_R}} \\;-\\; 1', true);
-    const rbarEq       = tex('\\bar{R}_i \\;=\\; \\mathrm{median}\\{\\, R^{C}_j \\,:\\, j \\neq i \\,\\}', true);
+    // ---- Equations (v2.3: R^C -> R^T to match the Combat ELO ->
+    //                 Thug ELO architectural rename). ----
+    const updateEqGain = tex('\\Delta R^{T}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i)', true);
+    const updateEqLoss = tex('\\Delta R^{T}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i) \\cdot L \\cdot \\varphi(R^{T}_{i}) \\quad \\text{when } (P_i - E_i) < 0', true);
+    const blendEq      = tex('\\mathrm{VTSR\\text{-}T}_i \\;=\\; \\alpha \\cdot R^{W}_i + (1 - \\alpha) \\cdot R^{T}_i', true);
+    const expectedEq   = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(\\bar{R}_i - R^{T}_i) / S_R}} \\;-\\; 1', true);
+    const rbarEq       = tex('\\bar{R}_i \\;=\\; \\mathrm{median}\\{\\, R^{T}_j \\,:\\, j \\neq i \\,\\}', true);
     const compositeEq  = tex('P_i \\;=\\; \\sum_{a \\in \\mathcal{A}} w\'_a \\cdot \\frac{\\mathrm{clip}_{[-2,+2]}(z_a(x_{i,a}))}{2}', true);
     const kEq          = tex('K_i \\;=\\; K_{\\text{base}} \\cdot \\left(1 - \\frac{n_i}{n_i + n_{\\text{prior}}}\\right) + K_{\\text{floor}}', true);
     const phiEq        = tex('\\varphi(R) \\;=\\; \\mathrm{clamp}(0,\\,1,\\,(R - F)/W)', true);
+    // v2.3 alpha-blend formulas surfaced in the new "What is α?"
+    // section. Showing PvP+PvE inputs separately in the kill_rate
+    // formula makes the alpha weighting visually obvious.
+    const thugKillRateEq = tex('\\text{thug\\_kill\\_rate} \\;=\\; \\frac{\\text{pvp\\_kills} + \\alpha_{\\mathrm{PvE}} \\cdot \\text{pve\\_kills}}{\\text{minutes}}', true);
+    const thugAccEq      = tex('\\text{pwa}_p \\;=\\; \\frac{\\sum_w \\frac{\\text{thug\\_hits}_{p,w} \\,/\\, \\text{shots}_{p,w}}{\\text{thug\\_hits}_{w} \\,/\\, \\text{shots}_{w}} \\cdot \\frac{\\text{shots}_{p,w}}{\\text{shots}_{p}}}{\\sum_w \\frac{\\text{shots}_{p,w}}{\\text{shots}_p}}', true);
+    const thugAccHitsEq  = tex('\\text{thug\\_hits} \\;=\\; \\text{pvp\\_hits} + \\alpha_{\\mathrm{PvE}} \\cdot \\text{pve\\_hits}', true);
+    const thugEffEq      = tex('\\text{thug\\_efficiency} \\;=\\; \\frac{\\text{pvp\\_dealt} + \\alpha_{\\mathrm{PvE}} \\cdot \\text{pve\\_to\\_AI}}{\\max(1,\\, \\text{total\\_dealt} - \\text{structure\\_dealt})}', true);
+    const pveShareEq     = tex('\\text{pve\\_share} \\;=\\; \\frac{\\text{pve\\_dealt}}{\\max(1,\\, \\text{total\\_dealt})}', true);
 
     // ---- Symbol legend (under the hero equation) ----
     const symbolRows = [
-      ['K_i',       'K-factor (decays with experience)'],
-      ['S_O = 2.5', 'outcome scale (per-match update magnitude)'],
-      ['P_i',       'your performance index this match (8-axis composite)'],
-      ['E_i',       'expected performance given your rating vs the lobby'],
-      ['L = 0.85',  'loss aversion multiplier (losses only)'],
-      ['\u03c6(R)',  'soft-floor taper (losses only)'],
+      ['K_i',                 'K-factor (decays with experience)'],
+      ['S_O = 2.5',           'outcome scale (per-match update magnitude)'],
+      ['P_i',                 'your performance index this match (8-axis thug composite)'],
+      ['E_i',                 'expected performance given your rating vs the lobby'],
+      ['L = 0.85',            'loss aversion multiplier (losses only)'],
+      ['\u03c6(R)',           'soft-floor taper (losses only)'],
+      ['R^T',                 'Thug ELO (combat-skill component of VTSR-T)'],
+      ['\u03b1_PvE = 0.5',    'PvE-credit fraction in the three thug axes'],
     ].map(([sym, desc]) => `<div><code>${esc(sym)}</code> <span>${esc(desc)}</span></div>`).join('');
 
     // ---- Expected-score curve intuition table ----
@@ -4765,22 +5015,25 @@
       ['+400',       '+0.52'],
     ].map(([gap, e]) => `<tr><td>${gap}</td><td class="text-end">${e}</td></tr>`).join('');
 
-    // ---- 8-axis thug composite (v2.2). Sum = 1.00. ----
+    // ---- 8-axis thug composite (v2.3). Sum = 1.00. ----
     // Listed in weight order so the heaviest signals lead the table.
-    // ``structure_share`` replaced the v2.1 ``asset_multiplier`` axis
-    // (which moved to the future VTSR-C commander rating because damage
-    // by player-owned AI tracks build/route quality rather than dogfight
-    // skill). ``target_lock_pct`` is a discipline reward at low weight.
+    // v2.3 changes from v2.2:
+    //   * kill_rate -> thug_kill_rate (alpha-blended PvP + α·PvE)
+    //   * accuracy -> thug_accuracy (weapon-normalized + alpha-blended)
+    //   * pvp_share -> thug_efficiency (alpha-blended, denom excl. structure)
+    //   * structure_share -> pve_share (broadened to all enemy non-human dmg)
+    //   * net_damage 0.21 -> 0.20, snipe 0.04 -> 0.05, eff 0.18 -> 0.16,
+    //     pve_share 0.10 -> 0.12.
     const weightsRows = [
-      ['Net damage share', '0.21', 'damage you dealt minus damage you took, as a share of the lobby total'],
-      ['Kill rate',        '0.20', 'kills per minute played'],
-      ['PvP share',        '0.18', 'fraction of your damage that hit other players (anti-PvE-farming)'],
-      ['Accuracy',         '0.15', 'shots hit divided by shots fired'],
-      ['Structure share',  '0.10', 'damage you landed on enemy buildings / economy (recyclers, factories, extractors, turrets) as a share of your total damage'],
+      ['Net damage share', '0.20', 'damage you dealt minus damage you took, as a share of the lobby total'],
+      ['Thug kill rate',   '0.20', 'kills per minute, with PvE kills credited at &alpha; = 0.5 weight (no penalty for role players who farm AI)'],
+      ['Thug efficiency',  '0.16', 'fraction of your <em>non-structure</em> damage that hit players, with PvE-to-AI credited at &alpha; = 0.5'],
+      ['Thug accuracy',    '0.15', 'weapon-normalized hit rate vs the lobby&rsquo;s per-weapon baseline (sniper mains stop getting punished for the rifle&rsquo;s natural lower hit rate)'],
+      ['PvE share',        '0.12', 'damage you landed on enemy non-human assets (structures, scavs, AI tanks) as a share of your total damage'],
       ['Mobility',         '0.08', 'how much of the map you actually moved across (positioning data)'],
-      ['Snipe bonus',      '0.04', 'sniper rifle hits (capped before z-score so one big game can\u2019t deform the lobby)'],
+      ['Snipe bonus',      '0.05', 'sniper rifle hits (capped before z-score so one big game can\u2019t deform the lobby)'],
       ['T-key usage',      '0.04', 'share of the match you held an active T-key target lock (situational-awareness proxy)'],
-    ].map(([n, w, d]) => `<tr><td><strong>${n}</strong><br><small class="text-muted">${esc(d)}</small></td><td class="text-end align-top">${w}</td></tr>`).join('');
+    ].map(([n, w, d]) => `<tr><td><strong>${n}</strong><br><small class="text-muted">${d}</small></td><td class="text-end align-top">${w}</td></tr>`).join('');
 
     // ---- K-decay table ----
     const kRows = [
@@ -4816,25 +5069,38 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Performance Composite <span class="text-muted">(P)</span></h6>
-        <p class="mb-2"><strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug) is our combat-focused rating, and the per-match Performance Composite is the heart of it. Your single-match performance index is a weighted sum of eight thug-relevant axes. Each axis is computed per-player, z-scored across the lobby, clipped to &plusmn;2, and divided by 2 to land in &plusmn;1. Missing axes (e.g. no structure damage in this lobby, no positioning data) redistribute their weight pro-rata across the remaining axes.</p>
+        <p class="mb-2"><strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug) measures thug effectiveness, and the per-match Performance Composite is the heart of it. Your single-match performance index is a weighted sum of eight thug-relevant axes. Each axis is computed per-player, z-scored across the lobby, clipped to &plusmn;2, and divided by 2 to land in &plusmn;1. Missing axes (e.g. no positioning data, nobody in the lobby dealt PvE damage) redistribute their weight pro-rata across the remaining axes.</p>
         ${compositeEq}
         <table class="vt-katex-weights">
           <thead><tr><th>Axis</th><th class="text-end">Weight</th></tr></thead>
           <tbody>${weightsRows}</tbody>
         </table>
-        <div class="vt-katex-caveat">Direct-dogfight axes (net damage + kill rate + PvP share + accuracy + snipe) still total 0.78, so the v2.2 axis swap sharpens what counts as thug work without blunting the core fighting signal. Structure share rewards real base/economy pressure; T-key usage is a small discipline reward.</div>
+        <div class="vt-katex-caveat">Direct-dogfight axes (thug_kill_rate + thug_accuracy + thug_efficiency) total 0.51; the asset-disruption axis (pve_share) is 0.12; volume + utility axes (net_damage + mobility + snipe + T-key) total 0.37. The v2.3 rebalance recognizes role-player effectiveness alongside pure dogfight skill.</div>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>What is &alpha;<sub>PvE</sub>?</h6>
+        <p class="mb-2">A "thug" can be effective in more ways than one. v2.3 introduces a single tunable constant <code>&alpha;<sub>PvE</sub> = 0.5</code> that credits PvE work (damage to AI ships, structures, scavs) at half the weight of equivalent PvP work in the three "thug" axes. Lobby z-scoring still naturally rewards exceptional PvE &mdash; a player who does dramatically more economy work than peers z-scores high on <code>pve_share</code> and <code>thug_efficiency</code> simultaneously, no extra mechanism needed. <code>&alpha;<sub>PvE</sub></code> is exposed in <code>elo_current.json</code> as <code>alpha_pve</code> for transparency and may be tuned post-ship without a schema bump.</p>
+        ${thugKillRateEq}
+        <p class="mb-2 mt-3"><strong>Weapon-normalized accuracy.</strong> Instead of a flat shots_hit/shots_fired ratio (which punishes sniper mains), <code>thug_accuracy</code> compares your per-weapon hit rate against the lobby&rsquo;s per-weapon baseline, weighted by your shot-share. The numerator counts &ldquo;thug hits&rdquo; (PvP at full weight, PvE at &alpha;):</p>
+        ${thugAccHitsEq}
+        ${thugAccEq}
+        <p class="mb-2 mt-3"><strong>Thug efficiency</strong> &mdash; of your non-structure damage, how effectively did you dogfight? Structure damage flows entirely to <code>pve_share</code>; mobile-AI damage gets partial credit here AND full credit on <code>pve_share</code>:</p>
+        ${thugEffEq}
+        <p class="mb-2 mt-3"><strong>PvE share</strong> &mdash; replaces the narrower v2.2 <code>structure_share</code>. Covers all enemy non-human damage (structures + AI tanks + scavs + extractors), so base-busters AND scrap-killers both get credit:</p>
+        ${pveShareEq}
       </section>
 
       <section class="vt-vtsr-doc-section">
         <h6>The Update Rule</h6>
-        <p class="mb-2">Each rated match changes your combat rating by the difference between your performance composite <code>P_i</code> and your expected performance <code>E_i</code>, scaled by an experience-dependent K-factor:</p>
+        <p class="mb-2">Each rated match changes your Thug ELO by the difference between your performance composite <code>P_i</code> and your expected performance <code>E_i</code>, scaled by an experience-dependent K-factor:</p>
         ${updateEqGain}
         <p class="mb-2 mt-2">When the bracket goes negative (loss case), two \u201chope\u201d multipliers soften the drop:</p>
         ${updateEqLoss}
         <div class="vt-vtsr-doc-symbols">${symbolRows}</div>
-        <p class="mb-2 mt-3">The published rating blends Wins ELO and Combat ELO:</p>
+        <p class="mb-2 mt-3">The published rating blends Wins ELO and Thug ELO:</p>
         ${blendEq}
-        <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Combat ELO only); Wins ELO is stubbed at the 1500 anchor until the in-game winner-attestation UI lands. The headline <strong>VTSR</strong> field therefore equals VTSR-T today.</div>
+        <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Thug ELO only); Wins ELO is stubbed at the 1500 anchor until the in-game winner-attestation UI lands. The headline <strong>VTSR-T</strong> field therefore equals Thug ELO today. A future VTSR-C (commander) rating will follow the same blend shape with its own commander-axis composite.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -4877,21 +5143,30 @@
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>Worked Example &middot; Lamper\u2019s 9th rated match</h6>
-        <p class="mb-2">Real numbers from <code>data/processed/elo_history.json</code> (match <code>2026-05-04T03-45-41</code>, re-rated under VTSR-T v2.2):</p>
+        <h6>Worked Example &middot; The role-player vs the fragger</h6>
+        <p class="mb-2">Imagine a 10-player lobby where two players stand out:</p>
         <ul class="mb-3">
-          <li><strong>Player</strong>: Lamper at R = 1500.82 with 8 rated matches played.</li>
-          <li><strong>Lobby opponents</strong> (sorted by current rating): 1333 / 1373 / 1385 / 1450 / <strong>1456 (median for Lamper)</strong> / 1483 / 1499 / 1543 / 1767. Median of the other 9 players = 1455.77.</li>
-          <li><strong>Performance</strong>: P_i = +0.5435 (top of lobby on net damage, PvP share, and accuracy).</li>
+          <li><strong>Player 1 (fragger)</strong>: 5k PvP damage, 5 PvP kills, 0 PvE damage. Classic dogfight role.</li>
+          <li><strong>Player 2 (economy cripple)</strong>: 0 PvP damage, 13k PvE damage (4k structure + 9k mobile-AI), ~20 AI kills. Sneak-attacked enemy base, killed scavs, &ldquo;essentially won the game&rdquo;.</li>
         </ul>
+        <p class="mb-2">Under v2.3 with &alpha;<sub>PvE</sub> = 0.5, lobby z-scoring lights up like this:</p>
+        <ul class="mb-3">
+          <li><code>net_damage_share</code> rewards Player 2 (26% of lobby damage) over Player 1 (10%): roughly <strong>+1.5&sigma; vs 0.0&sigma;</strong></li>
+          <li><code>thug_kill_rate</code> is roughly even (5 PvP &times; 1.0 &asymp; 20 AI &times; 0.5)</li>
+          <li><code>thug_accuracy</code> slightly favors Player 1 (more PvP-focused)</li>
+          <li><code>thug_efficiency</code> favors Player 1 (denominator excludes structure, but their pvp_dealt is higher)</li>
+          <li><code>pve_share</code> rewards Player 2 dramatically: <strong>+2.0&sigma; vs &minus;1.0&sigma;</strong> (Player 2 is the lobby&rsquo;s standout)</li>
+        </ul>
+        <p class="mb-2">Net composite: Player 2 narrowly outperforms Player 1, matching the community-expected outcome. Lobby z-scoring is the &ldquo;exceeded expectations&rdquo; mechanism &mdash; when one player does dramatically more PvE work, it shows up across multiple axes simultaneously.</p>
+        <p class="mb-2 mt-3"><strong>Math walkthrough (carry-over from v2.2 example)</strong>: when Lamper scored P<sub>i</sub> = +0.54 at R = 1500.82 in a lobby with median opponent rating 1455.77 and 8 prior matches:</p>
         ${exKEq}
         ${exEEq}
         ${exDREq}
-        <p class="mb-2 mt-2">Result: Lamper\u2019s combat rating ticks 1500.82 &rarr; 1541.78. Even with the expected-performance discount of about +0.065, his P_i of +0.5435 was far enough above the bar to earn a +41 update at K = 34.</p>
+        <p class="mb-2 mt-2">Result: Lamper&rsquo;s Thug ELO ticks 1500.82 &rarr; 1541.78 in that match. The same K-factor / E<sub>i</sub> / blend math applies in v2.3; only the axis math changed.</p>
       </section>
 
       <div class="vt-katex-caveat mt-3">
-        <strong>VTSR-T v2.2 &middot; thug-axis rebalance.</strong> v2.2 reshapes the Performance Composite around dogfight skill: drops <code>asset_multiplier</code> (damage by your owned AI &mdash; that&rsquo;s a build/route signal, reserved for the future VTSR-C commander rating), adds <code>structure_share</code> (player-dealt damage to enemy buildings as a share of total dealt), and adds <code>target_lock_pct</code> (T-key situational-awareness proxy). Snipe shaved 0.05 &rarr; 0.04 and three other axes nudged to keep the sum at 1.00. v2.0 had already moved the per-match comparison from lobby-median to opponent-strength-weighted expected performance (E_i, median of opponent ratings); v2.1 set S<sub>R</sub> = 800 to widen the rating spread for our small-population corpus. <strong>Pre-v2.2 peak_vtsr values are no longer comparable</strong> &mdash; the P_i definition changed. Wins ELO blend (&alpha;) still 0.0; full algorithm in DEVELOPER_GUIDE \u00a713.
+        <strong>VTSR-T v2.3 &middot; alpha-blended thug composite.</strong> v2.3 introduces three changes to the Performance Composite: (1) the three "thug" axes (<code>thug_kill_rate</code>, <code>thug_accuracy</code>, <code>thug_efficiency</code>) credit PvE work at &alpha;<sub>PvE</sub> = 0.5 instead of zero, so role players doing economy/utility work aren&rsquo;t penalized for the role choice; (2) <code>thug_accuracy</code> is weapon-normalized against the lobby&rsquo;s per-weapon baseline, removing weapon-mix bias; (3) <code>structure_share</code> broadens to <code>pve_share</code>, covering all enemy non-human damage (structures + mobile AI). Architectural rename: the rating&rsquo;s combat-skill component is now called <strong>Thug ELO</strong> (was Combat ELO) to reflect that it measures thug effectiveness specifically &mdash; sets up future VTSR-C (commander) as a sibling rating. <strong>Pre-v2.3 peak_vtsr values are no longer comparable</strong> &mdash; the P_i definition changed. Wins ELO blend (&alpha;) still 0.0; <code>&alpha;<sub>PvE</sub></code> is tunable post-ship via <code>elo_current.json</code>; full algorithm in DEVELOPER_GUIDE &sect;13.
       </div>
     </div>`;
     return vtsrTooltipHtmlCache;
@@ -4944,6 +5219,26 @@
         case 'last_delta':     va = a.last_delta || 0;            vb = b.last_delta || 0;            break;
         case 'peak_vtsr':      va = a.peak_vtsr || 0;             vb = b.peak_vtsr || 0;             break;
         case 'matches_played': va = a.matches_played || 0;        vb = b.matches_played || 0;        break;
+        case 'primary_class': {
+          // v2.3: Primary class lives on the joined careerStats row,
+          // not on `a` / `b` directly. Pull it from the active career
+          // bucket; missing class sorts last regardless of asc/desc
+          // so "—" rows always cluster at the bottom of the column.
+          const ca = (vtsrCareerByName(a) || {}).career_loadout;
+          const cb = (vtsrCareerByName(b) || {}).career_loadout;
+          va = (ca && ca.primary_class) ? String(ca.primary_class).toLowerCase() : '\uffff';
+          vb = (cb && cb.primary_class) ? String(cb.primary_class).toLowerCase() : '\uffff';
+          break;
+        }
+        case 'pvp_kd': {
+          // v2.3: PvP K/D = total_pvp_kills / max(1, total_pvp_deaths).
+          // Same null-last sentinel for cells with no PvP data.
+          const ca = vtsrCareerByName(a);
+          const cb = vtsrCareerByName(b);
+          va = ca ? (ca.total_pvp_kills || 0) / Math.max(1, ca.total_pvp_deaths || 0) : -1;
+          vb = cb ? (cb.total_pvp_kills || 0) / Math.max(1, cb.total_pvp_deaths || 0) : -1;
+          break;
+        }
         case 'vtsr':
         default:               va = a.vtsr || 0;                  vb = b.vtsr || 0;                  break;
       }
@@ -4954,6 +5249,144 @@
       if (na > nb) return 1;
       return 0;
     };
+  }
+
+  // Lookup helper used by vtsrSort + the row renderer to join an ELO
+  // ratings row to its career_stats[] counterpart by steam64 (with name
+  // fallback). Reads from the module-local `_vtsrCareerStats` set by
+  // renderVtsrLeaderboard so the joins don't have to be passed through
+  // the sort comparator.
+  let _vtsrCareerStats = null;
+  function vtsrCareerByName(eloRow) {
+    if (!_vtsrCareerStats) return null;
+    if (eloRow.steam64) {
+      const r = _vtsrCareerStats.find(c => c.steam64 === eloRow.steam64);
+      if (r) return r;
+    }
+    if (eloRow.name) {
+      const lower = eloRow.name.toLowerCase();
+      return _vtsrCareerStats.find(c => (c.name || '').toLowerCase() === lower) || null;
+    }
+    return null;
+  }
+
+  // v2.3: lazy-load data/processed/elo_history.json once per session.
+  // Cached on window.__vtEloHistory; null means "fetched and 404'd"
+  // (the `axis_contributions` popover renders an "axis breakdown
+  // unavailable" fallback in that case). Idempotent: subsequent
+  // calls are no-ops once the in-flight or completed promise lands.
+  let _eloHistoryLoadStarted = false;
+  function ensureEloHistoryLoaded() {
+    if (_eloHistoryLoadStarted) return;
+    if (window.__vtEloHistory != null || window.__vtEloHistory === null && window.__vtEloHistoryLoaded) {
+      return;
+    }
+    _eloHistoryLoadStarted = true;
+    fetch('data/processed/elo_history.json')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        window.__vtEloHistory = j;
+        window.__vtEloHistoryLoaded = true;
+      })
+      .catch(() => {
+        window.__vtEloHistory = null;
+        window.__vtEloHistoryLoaded = true;
+      });
+  }
+
+  // v2.3: build the HTML body for the Last-delta cell popover. Reads
+  // the player's most recent non-excluded delta from
+  // ``window.__vtEloHistory`` and renders the per-axis contributions
+  // (z-score after clip / 2; weighted contribution = z * weight).
+  // Audit invariant: Σ (z * weight') ≈ performance for available axes.
+  function buildLastDeltaPopoverHtml(eloRow) {
+    if (!eloRow) {
+      return '<div class="text-muted small">No rating record for this player.</div>';
+    }
+    const hist = window.__vtEloHistory;
+    if (hist == null) {
+      // Still loading or 404'd. Show a compact fallback derived from the
+      // axis_means (career-average) on the elo_current row.
+      const am = eloRow.axis_means || {};
+      const keys = Object.keys(am).sort((a, b) => Math.abs(am[b]) - Math.abs(am[a]));
+      if (!keys.length) {
+        return '<div class="text-muted small">No per-axis breakdown available.</div>';
+      }
+      const rowsHtml = keys.map(k => {
+        const z = am[k];
+        const cls = z > 0 ? 'is-positive' : z < 0 ? 'is-negative' : '';
+        const sign = z >= 0 ? '+' : '';
+        return `<div class="vt-axis-contrib-row ${cls}">
+          <span class="vt-axis-name">${esc(k)}</span>
+          <span class="vt-axis-z">${sign}${z.toFixed(2)}\u03c3 (career avg)</span>
+          <span class="vt-axis-weighted"></span>
+        </div>`;
+      }).join('');
+      return `<div class="vt-vtsr-popover-headline">Career-average axis means</div>
+              <div class="vt-vtsr-popover-eq">elo_history.json not yet loaded; showing axis_means.</div>
+              ${rowsHtml}`;
+    }
+    const targetSteam64 = eloRow.steam64 || '';
+    const targetName = eloRow.name || '';
+    // Walk history in reverse to find the player's most recent
+    // non-excluded delta.
+    const history = (hist.history || []);
+    let lastDelta = null;
+    let lastEntry = null;
+    for (let i = history.length - 1; i >= 0 && !lastDelta; i--) {
+      const h = history[i];
+      if (h.match_excluded) continue;
+      const found = (h.deltas || []).find(d =>
+        (targetSteam64 && d.steam64 === targetSteam64) || d.name === targetName
+      );
+      if (found) { lastDelta = found; lastEntry = h; }
+    }
+    if (!lastDelta) {
+      return '<div class="text-muted small">No rated match history for this player yet.</div>';
+    }
+    const ac = lastDelta.axis_contributions || {};
+    const matchId = lastEntry.match_id || '';
+    const dr = (lastDelta.delta != null ? lastDelta.delta : 0).toFixed(2);
+    const drSign = lastDelta.delta > 0 ? '+' : '';
+    const perfStr = (lastDelta.performance != null ? lastDelta.performance : 0).toFixed(4);
+    const perfSign = lastDelta.performance > 0 ? '+' : '';
+    const expStr = (lastDelta.expected != null ? lastDelta.expected : 0).toFixed(4);
+    const expSign = lastDelta.expected > 0 ? '+' : '';
+
+    // Use the canonical THUG_WEIGHTS shipped from elo_current.json so
+    // we don't hardcode them here. Pro-rata redistribute over only the
+    // axes actually present (matches Python compute_performance_index
+    // weight redistribution rule).
+    const weightsAll = (window.__vtElo && window.__vtElo.weights) || {};
+    const availableAxes = Object.keys(ac);
+    const totalWeight = availableAxes.reduce((s, a) => s + (weightsAll[a] || 0), 0);
+    const weightOf = (a) => totalWeight > 0 ? (weightsAll[a] || 0) / totalWeight : 0;
+
+    // Sort by absolute weighted contribution desc — the most-impactful
+    // axes lead the popover.
+    const sorted = availableAxes.slice().sort((a, b) =>
+      Math.abs(ac[b] * weightOf(b)) - Math.abs(ac[a] * weightOf(a))
+    );
+    const rowsHtml = sorted.map(a => {
+      const z = ac[a] || 0;
+      const w = weightOf(a);
+      const wc = z * w;
+      const cls = z > 0 ? 'is-positive' : z < 0 ? 'is-negative' : '';
+      const zSign = z >= 0 ? '+' : '';
+      const wcSign = wc >= 0 ? '+' : '';
+      return `<div class="vt-axis-contrib-row ${cls}">
+        <span class="vt-axis-name">${esc(a)}</span>
+        <span class="vt-axis-z">${zSign}${z.toFixed(2)}</span>
+        <span class="vt-axis-weighted">w=${w.toFixed(2)} \u2192 ${wcSign}${wc.toFixed(3)}</span>
+      </div>`;
+    }).join('');
+
+    const headerLine = matchId
+      ? `Last match: <strong>${esc(matchId)}</strong>`
+      : 'Last rated match';
+    return `<div class="vt-vtsr-popover-headline">${headerLine}</div>
+            <div class="vt-vtsr-popover-eq">P=${perfSign}${perfStr} &middot; E=${expSign}${expStr} &middot; \u0394R=${drSign}${dr}</div>
+            ${rowsHtml}`;
   }
 
   // Renders the dedicated VTSR-T Leaderboard card. `elo` is the parsed
@@ -4988,6 +5421,17 @@
     }
     $card.classList.remove('d-none');
 
+    // v2.3: cache the careerStats reference for vtsrSort + the row
+    // renderer to join Primary Class / PvP K/D from career_stats[]
+    // by steam64-then-name without passing it through every helper.
+    _vtsrCareerStats = careerStats || [];
+
+    // v2.3: lazy-load elo_history.json once per session into
+    // window.__vtEloHistory so the per-axis breakdown popover on the
+    // Last-delta cell can render the player's most-recent rated match
+    // without a per-row fetch. No-op when already cached or 404.
+    ensureEloHistoryLoaded();
+
     const sorted = visible.slice().sort(vtsrSort(vtsrSortState.key, vtsrSortState.asc));
     const tbody = $card.querySelector('#vtsr-table tbody');
     tbody.innerHTML = sorted.map((r, i) => {
@@ -5009,13 +5453,82 @@
       const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : '';
       const lastSign  = lastDelta > 0 ? '+' : '';
       const sparklineId = `vtsr-spark-${(r.steam64 || r.name || i)}`.replace(/[^A-Za-z0-9_-]/g, '_');
-      return `<tr data-vtsr-name="${esc(r.name)}">
+
+      // ----- v2.3 Primary Class cell -----
+      const careerRow = vtsrCareerByName(r);
+      const cl = (careerRow && careerRow.career_loadout) || null;
+      let primaryCell = '<td class="text-center"><span style="color:var(--kb-text-muted);">&mdash;</span></td>';
+      if (cl && cl.primary_class) {
+        const primaryShare = cl.primary_share != null ? (cl.primary_share * 100).toFixed(1) + '%' : '';
+        const secondaryName = cl.secondary_class || '';
+        const secondaryShare = cl.secondary_share != null ? (cl.secondary_share * 100).toFixed(1) + '%' : '';
+        const diversity = cl.class_diversity || 0;
+        const tipParts = [
+          `${cl.primary_class} ${primaryShare}`,
+        ];
+        if (secondaryName && secondaryShare) tipParts.push(`${secondaryName} ${secondaryShare}`);
+        tipParts.push(`${diversity} distinct ${diversity === 1 ? 'class' : 'classes'}`);
+        const tip = tipParts.join(' \u00b7 ');
+        primaryCell = `<td class="text-center" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}"><span class="vt-vtsr-primary-class">${esc(cl.primary_class)}</span></td>`;
+      }
+
+      // ----- v2.3 PvP K/D cell (career-level PvP K/D · PvE K/D) -----
+      let pvpKdCell = '<td class="text-end"><span style="color:var(--kb-text-muted);">&mdash;</span></td>';
+      if (careerRow) {
+        const pvpK = careerRow.total_pvp_kills || 0;
+        const pvpD = careerRow.total_pvp_deaths || 0;
+        const pveK = careerRow.total_pve_kills || 0;
+        const pveD = careerRow.total_pve_deaths || 0;
+        if (pvpK + pvpD + pveK + pveD > 0) {
+          const fmtKd = (k, d) => {
+            if (d === 0 && k === 0) return '\u2014';
+            if (d === 0) return '\u221e';
+            return (k / d).toFixed(2);
+          };
+          const pvpKd = fmtKd(pvpK, pvpD);
+          const pveKd = fmtKd(pveK, pveD);
+          const tip = `Career: ${pvpK} PvP kills / ${pvpD} PvP deaths = ${pvpKd} PvP K/D · ${pveK} PvE kills / ${pveD} PvE deaths = ${pveKd} PvE K/D`;
+          pvpKdCell = `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}"><span class="vt-vtsr-pvp-kd">${pvpKd}</span> <span class="text-muted">/</span> <span class="vt-vtsr-pve-kd text-muted">${pveKd}</span></td>`;
+        }
+      }
+
+      // ----- v2.3 VTSR-T value tooltip: top axes from axis_means -----
+      let vtsrCellTitle = `VTSR-T (anchor 1500, floor 1000) · ${r.matches_played} rated matches`;
+      const am = r.axis_means || {};
+      const amKeys = Object.keys(am);
+      if (amKeys.length) {
+        // Sort by absolute z-mean desc; "Strong" = top 2 positive,
+        // "Weak" = single most-negative when negative.
+        const sorted = amKeys.slice().sort((a, b) => Math.abs(am[b]) - Math.abs(am[a]));
+        const positives = amKeys.filter(k => am[k] > 0).sort((a, b) => am[b] - am[a]).slice(0, 2);
+        const mostNegativeKey = amKeys.reduce((acc, k) => (am[k] < (am[acc] || 0) ? k : acc), amKeys[0]);
+        const mostNegative = am[mostNegativeKey];
+        const fmtZ = z => (z >= 0 ? '+' : '') + z.toFixed(2) + '\u03c3';
+        const lines = [];
+        if (positives.length > 0) {
+          lines.push('Strong: ' + positives.map(k => `${k} ${fmtZ(am[k])}`).join(', '));
+        }
+        if (mostNegative != null && mostNegative < 0) {
+          lines.push('Weak: ' + `${mostNegativeKey} ${fmtZ(mostNegative)}`);
+        }
+        if (lines.length) vtsrCellTitle = lines.join('\n');
+      }
+
+      // ----- v2.3 Peak tooltip -----
+      const peakAt = r.peak_at || '';
+      const peakTip = peakAt
+        ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} reached at ${peakAt}`
+        : `Peak rating: ${Math.round(r.peak_vtsr || r.vtsr)}`;
+
+      return `<tr data-vtsr-name="${esc(r.name)}" data-vtsr-steam64="${esc(r.steam64 || '')}">
         <td>${i + 1}</td>
         <td class="text-center">${badge}</td>
         <td class="fw-semibold">${esc(r.name)}</td>
-        <td class="text-end vt-vtsr-rating">${Math.round(r.vtsr)}</td>
-        <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
-        <td class="text-end">${Math.round(r.peak_vtsr || r.vtsr)}</td>
+        ${primaryCell}
+        <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrCellTitle)}">${Math.round(r.vtsr)}</td>
+        ${pvpKdCell}
+        <td class="text-end ${lastClass} vt-vtsr-last-cell" tabindex="0" data-vtsr-popover="last">${lastSign}${lastDelta.toFixed(1)}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
         <td class="text-end">${r.matches_played}</td>
         <td class="text-end"><canvas class="vt-vtsr-sparkline" id="${sparklineId}"></canvas></td>
       </tr>`;
@@ -5029,6 +5542,33 @@
         renderSparkline(document.getElementById(id), r.win_history || []);
       });
     });
+
+    // v2.3: Bootstrap popover on the Last-delta cell. Shows the
+    // axis-by-axis breakdown of the player's most recent rated match
+    // (sourced from elo_history.json `axis_contributions`). Built
+    // lazily on first hover/click; popover content rebuilds on each
+    // open in case elo_history loaded after the table rendered.
+    if (window.bootstrap && window.bootstrap.Popover) {
+      tbody.querySelectorAll('[data-vtsr-popover="last"]').forEach(cell => {
+        // Use existing instance if any (idempotent re-render).
+        const existing = bootstrap.Popover.getInstance(cell);
+        if (existing) existing.dispose();
+        bootstrap.Popover.getOrCreateInstance(cell, {
+          trigger: 'click focus',
+          placement: 'left',
+          customClass: 'vt-vtsr-popover',
+          html: true,
+          title: 'Last rated match breakdown',
+          content: () => {
+            const tr = cell.closest('tr[data-vtsr-name]');
+            const name = tr ? tr.getAttribute('data-vtsr-name') : '';
+            const steam64 = tr ? tr.getAttribute('data-vtsr-steam64') : '';
+            const eloRow = elo.ratings.find(rr => (steam64 && rr.steam64 === steam64) || rr.name === name);
+            return buildLastDeltaPopoverHtml(eloRow);
+          },
+        });
+      });
+    }
 
     // Wire sortable header cells.
     document.querySelectorAll('#vtsr-table th[data-sort]').forEach(th => {
@@ -5310,6 +5850,25 @@
       const wpns = careerWeaponsUsedCount(c);
       const avgK = careerPerMatchAvg(c.total_kills || 0, m);
       const avgD = careerPerMatchAvg(c.total_deaths || 0, m);
+      // v2.3: per-career PvP/PvE kill+death chip + tooltip on the
+      // Career Leaderboard's Kills / Deaths total cells. Sort behavior
+      // unchanged (still sorts on the totals). Extra class
+      // ``vt-career-col-total`` lets the column-view toggle hide
+      // the cell under the Per-match column mode.
+      const careerKillsTotalCell = killsDeathsChipCell(
+        c.total_kills || 0,
+        c.total_pvp_kills,
+        c.total_pve_kills,
+        'kills',
+        'vt-career-col-total',
+      );
+      const careerDeathsTotalCell = killsDeathsChipCell(
+        c.total_deaths || 0,
+        c.total_pvp_deaths,
+        c.total_pve_deaths,
+        'deaths',
+        'vt-career-col-total',
+      );
 
       let moveCell = '<span style="color:var(--kb-text-muted);">—</span>';
       if (c.matches_with_positioning > 0 && c.mean_movement_score != null) {
@@ -5370,9 +5929,9 @@
         <td class="text-end vt-col-split vt-career-col-avg" style="${netAvgClass}">${netAvg > 0 ? '+' : ''}${fmt(netAvg)}</td>
         <td class="text-end vt-career-col-shared">${ratioStr}</td>
         <td class="text-end vt-career-col-shared">${accPct.toFixed(1)}%</td>
-        <td class="text-end vt-career-col-total">${c.total_kills || 0}</td>
+        ${careerKillsTotalCell}
         <td class="text-end vt-col-split vt-career-col-avg">${avgK.toFixed(1)}</td>
-        <td class="text-end vt-career-col-total">${c.total_deaths || 0}</td>
+        ${careerDeathsTotalCell}
         <td class="text-end vt-col-split vt-career-col-avg">${avgD.toFixed(1)}</td>
         <td class="text-end vt-career-col-total">${fmt(c.total_asset_dealt)}</td>
         <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_asset_dealt || 0, m))}</td>

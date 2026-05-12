@@ -59,10 +59,30 @@
       total_asset_dealt: 0,
       total_shots_fired: 0,
       total_shots_hit: 0,
+      // v2.3: PvP-only hit counter (subset of total_shots_hit). Drives
+      // career-level pvp_accuracy display.
+      total_pvp_shots_hit: 0,
       total_kills: 0,
       total_deaths: 0,
+      // v2.3: PvP/PvE kill+death split. Drives the Career Leaderboard's
+      // compact `TOTAL (PvP/PvE)` chips on Kills/Deaths cells and the
+      // VTSR-T leaderboard's PvP K/D column.
+      total_pvp_kills: 0,
+      total_pve_kills: 0,
+      total_pvp_deaths: 0,
+      total_pve_deaths: 0,
       total_pickups: 0,
-      weapon_totals: Object.create(null), // wname -> {dealt, shots, hits}
+      weapon_totals: Object.create(null), // wname -> {dealt, shots, hits, pvp_hits}
+      // v2.3: career loadout accumulator. class_seconds[cls] sums
+      // class-time across matches; class_odf_seconds[cls][odf] tracks
+      // per-class ODF time for "most-used per class" derivation.
+      class_seconds: Object.create(null),       // cls -> seconds
+      class_odf_seconds: Object.create(null),   // cls -> { odf -> seconds }
+      active_seconds_total: 0,
+      // v2.3: career per-class combat accumulator. Sums each combat
+      // field per (player, class). Display fields (accuracy, dpm, kd)
+      // derived at emit time.
+      per_class_combat: Object.create(null),    // cls -> { time_seconds, kills, deaths, pvp_kills, pvp_deaths, dealt, shots, hits, pvp_hits, matches }
       best_match: null,
       movement_scores: [],
       movement_bands: [],
@@ -119,12 +139,16 @@
   function bumpWeapon(weaponTotals, wname, wdata) {
     let acc = weaponTotals[wname];
     if (!acc) {
-      acc = { dealt: 0, shots: 0, hits: 0 };
+      acc = { dealt: 0, shots: 0, hits: 0, pvp_hits: 0 };
       weaponTotals[wname] = acc;
     }
-    acc.dealt += wdata.dealt || 0;
-    acc.shots += wdata.shots || 0;
-    acc.hits  += wdata.hits  || 0;
+    acc.dealt    += wdata.dealt    || 0;
+    acc.shots    += wdata.shots    || 0;
+    acc.hits     += wdata.hits     || 0;
+    // v2.3: per-weapon PvP-only hit tally for the Career Leaderboard
+    // weapon-breakdown table's PvP Acc column. Pre-v2.3 contributions
+    // omit pvp_hits; default to 0 (legacy fallback).
+    acc.pvp_hits += wdata.pvp_hits || 0;
   }
 
   // Most-common element by Counter semantics: ties broken by first
@@ -426,9 +450,65 @@
         c.total_asset_dealt    += p.asset_dealt    || 0;
         c.total_shots_fired    += p.shots_fired    || 0;
         c.total_shots_hit      += p.shots_hit      || 0;
+        // v2.3 fields (legacy contributions default to 0 here).
+        c.total_pvp_shots_hit  += p.pvp_shots_hit  || 0;
+        c.total_pvp_kills      += p.pvp_kills      || 0;
+        c.total_pve_kills      += p.pve_kills      || 0;
+        c.total_pvp_deaths     += p.pvp_deaths     || 0;
+        c.total_pve_deaths     += p.pve_deaths     || 0;
         c.total_kills          += p.kills          || 0;
         c.total_deaths         += p.deaths         || 0;
         c.total_pickups        += p.pickups        || 0;
+
+        // v2.3: career loadout aggregation. Sum class_seconds and
+        // class_odf_seconds across matches; primary/secondary
+        // rederived from sums at emit time. most_used_odf per class
+        // is the ODF with the most total seconds, weighted by each
+        // match's total class time (since each match's contribution
+        // carries one canonical most-used ODF per class, we approximate
+        // the weighting by adding `class_seconds[cls]` to that ODF).
+        const ld = p.loadout;
+        if (ld) {
+          const classSec = ld.class_seconds || {};
+          const mostUsed = ld.most_used_odf || {};
+          for (const cls in classSec) {
+            const sec = classSec[cls] || 0;
+            c.class_seconds[cls] = (c.class_seconds[cls] || 0) + sec;
+            const odf = mostUsed[cls];
+            if (odf) {
+              if (!c.class_odf_seconds[cls]) c.class_odf_seconds[cls] = Object.create(null);
+              c.class_odf_seconds[cls][odf] = (c.class_odf_seconds[cls][odf] || 0) + sec;
+            }
+          }
+          c.active_seconds_total += ld.active_seconds || 0;
+        }
+        // v2.3: career per-class combat aggregation. Each row is a
+        // (player, class) tuple — sum kills / deaths / dealt / shots /
+        // hits / pvp variants across matches; track matches_played
+        // per class so the UI can show "X matches as <class>".
+        for (const row of (p.per_class_combat || [])) {
+          const cls = row.class || 'unknown';
+          let pcc = c.per_class_combat[cls];
+          if (!pcc) {
+            pcc = {
+              time_seconds: 0, kills: 0, deaths: 0,
+              pvp_kills: 0, pvp_deaths: 0,
+              dealt: 0, shots: 0, hits: 0, pvp_hits: 0,
+              matches: 0,
+            };
+            c.per_class_combat[cls] = pcc;
+          }
+          pcc.time_seconds += row.time_seconds || 0;
+          pcc.kills        += row.kills        || 0;
+          pcc.deaths       += row.deaths       || 0;
+          pcc.pvp_kills    += row.pvp_kills    || 0;
+          pcc.pvp_deaths   += row.pvp_deaths   || 0;
+          pcc.dealt        += row.dealt        || 0;
+          pcc.shots        += row.shots        || 0;
+          pcc.hits         += row.hits         || 0;
+          pcc.pvp_hits     += row.pvp_hits     || 0;
+          if ((row.time_seconds || 0) > 0) pcc.matches += 1;
+        }
 
         // ---- Phase 3: commander/faction/win/streak/teammate roll-up ----
         // Snipes & destructions per match — fed by the Phase 2 contribution-shape additions.
@@ -547,13 +627,105 @@
       for (const wn of sortedNames) {
         const wd = c.weapon_totals[wn];
         const wAcc = wd.shots > 0 ? wd.hits / wd.shots : 0;
+        // v2.3: per-weapon PvP accuracy = pvp_hits / shots (NOT
+        // pvp_hits / hits — pwa axis math weights per-weapon shots).
+        const wPvpAcc = wd.shots > 0 ? wd.pvp_hits / wd.shots : 0;
         weaponBreakdown[wn] = {
-          dealt:    r1(wd.dealt),
-          shots:    wd.shots,
-          hits:     wd.hits,
-          accuracy: r3(wAcc),
+          dealt:        r1(wd.dealt),
+          shots:        wd.shots,
+          hits:         wd.hits,
+          pvp_hits:     wd.pvp_hits,
+          accuracy:     r3(wAcc),
+          pvp_accuracy: r3(wPvpAcc),
         };
       }
+
+      // v2.3: career_loadout block. Rederive primary/secondary from
+      // summed class_seconds (avoids double-rounding from per-match
+      // primary_class strings). Most-used ODF per class is the ODF
+      // with the highest career sum-of-class-seconds for that class.
+      let careerLoadout = null;
+      const classSecondsMap = c.class_seconds;
+      const classKeys = Object.keys(classSecondsMap);
+      const totalActiveSec = classKeys.reduce((s, k) => s + classSecondsMap[k], 0);
+      if (totalActiveSec > 0) {
+        const classes = {};
+        const classSeconds = {};
+        for (const cls of classKeys) {
+          classes[cls] = r3(classSecondsMap[cls] / totalActiveSec);
+          classSeconds[cls] = r1(classSecondsMap[cls]);
+        }
+        // Primary/secondary by share desc, ties broken alphabetically.
+        const ordered = classKeys.slice().sort((a, b) => {
+          const da = classSecondsMap[a], db = classSecondsMap[b];
+          if (db !== da) return db - da;
+          return a.localeCompare(b);
+        });
+        const primaryClass  = ordered[0];
+        const primaryShare  = r3(classSecondsMap[primaryClass] / totalActiveSec);
+        const secondaryClass  = ordered.length > 1 ? ordered[1] : null;
+        const secondaryShare  = secondaryClass != null
+          ? r3(classSecondsMap[secondaryClass] / totalActiveSec)
+          : null;
+        // Per-class most-used ODF (over career, weighted by class time).
+        const mostUsedOdf = {};
+        for (const cls of classKeys) {
+          const odfMap = c.class_odf_seconds[cls];
+          if (!odfMap) continue;
+          let bestOdf = null, bestSec = -1;
+          for (const odf in odfMap) {
+            if (odfMap[odf] > bestSec) { bestSec = odfMap[odf]; bestOdf = odf; }
+          }
+          if (bestOdf) mostUsedOdf[cls] = bestOdf;
+        }
+        careerLoadout = {
+          classes,
+          class_seconds:   classSeconds,
+          primary_class:   primaryClass,
+          primary_share:   primaryShare,
+          secondary_class: secondaryClass,
+          secondary_share: secondaryShare,
+          class_diversity: classKeys.filter(k => classSecondsMap[k] > 0).length,
+          most_used_odf:   mostUsedOdf,
+          active_seconds:  r1(totalActiveSec),
+        };
+      }
+
+      // v2.3: career_per_class_combat block. One row per class with
+      // time_seconds > 0; sorted by time desc, ties alpha. Display
+      // fields recomputed from sums.
+      const careerPerClassCombat = [];
+      for (const cls in c.per_class_combat) {
+        const pcc = c.per_class_combat[cls];
+        if (pcc.time_seconds <= 0) continue;
+        const acc    = pcc.shots > 0 ? pcc.hits / pcc.shots : 0;
+        const pvpAcc = pcc.shots > 0 ? pcc.pvp_hits / pcc.shots : 0;
+        const dpm    = pcc.time_seconds > 0 ? pcc.dealt / (pcc.time_seconds / 60) : 0;
+        const kd     = pcc.pvp_deaths > 0 ? pcc.pvp_kills / pcc.pvp_deaths : null;
+        careerPerClassCombat.push({
+          class:        cls,
+          time_seconds: r1(pcc.time_seconds),
+          matches:      pcc.matches,
+          kills:        pcc.kills,
+          deaths:       pcc.deaths,
+          pvp_kills:    pcc.pvp_kills,
+          pvp_deaths:   pcc.pvp_deaths,
+          pve_kills:    Math.max(0, pcc.kills - pcc.pvp_kills),
+          pve_deaths:   Math.max(0, pcc.deaths - pcc.pvp_deaths),
+          dealt:        r1(pcc.dealt),
+          shots:        pcc.shots,
+          hits:         pcc.hits,
+          pvp_hits:     pcc.pvp_hits,
+          accuracy:     r3(acc),
+          pvp_accuracy: r3(pvpAcc),
+          dpm:          r1(dpm),
+          kd:           kd != null ? r2(kd) : null,
+        });
+      }
+      careerPerClassCombat.sort((a, b) => {
+        if (b.time_seconds !== a.time_seconds) return b.time_seconds - a.time_seconds;
+        return a.class.localeCompare(b.class);
+      });
 
       // Career movement aggregation (mirror of the Python pipeline path).
       let movementFields;
@@ -611,6 +783,10 @@
         ? c.weapons_used_per_match.reduce((s, v) => s + v, 0) / wpmN
         : 0;
 
+      // v2.3: career-level PvP accuracy (subset of overall_accuracy).
+      const pvpAcc = c.total_shots_fired > 0
+        ? c.total_pvp_shots_hit / c.total_shots_fired : 0;
+
       careerStats.push({
         player_id: c.player_id,
         name:                c.name,
@@ -626,9 +802,25 @@
         overall_accuracy:    r3(acc),
         total_shots_fired:   c.total_shots_fired,
         total_shots_hit:     c.total_shots_hit,
+        // v2.3: PvP-only career accuracy. Drives the Career Leaderboard's
+        // PvP Acc display where surfaced.
+        total_pvp_shots_hit: c.total_pvp_shots_hit,
+        pvp_accuracy:        r3(pvpAcc),
         total_kills:         c.total_kills,
         total_deaths:        c.total_deaths,
+        // v2.3: PvP/PvE kill+death career totals. Drive the Career
+        // Leaderboard's compact `TOTAL (PvP/PvE)` chips and the
+        // VTSR-T leaderboard's PvP K/D column.
+        total_pvp_kills:     c.total_pvp_kills,
+        total_pve_kills:     c.total_pve_kills,
+        total_pvp_deaths:    c.total_pvp_deaths,
+        total_pve_deaths:    c.total_pve_deaths,
         total_pickups:       c.total_pickups,
+        // v2.3: career loadout + per-class combat (display-only, no
+        // axis math reads these blocks). Null/empty when no v2.3+
+        // contributions present.
+        career_loadout:      careerLoadout,
+        career_per_class_combat: careerPerClassCombat,
         // Phase 2/3: surfaced on career_stats so the Career Highlights
         // cards (Phase 6) can read straight off this row.
         total_snipes:        c.total_snipes,

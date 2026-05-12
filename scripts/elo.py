@@ -1,18 +1,40 @@
-"""VT Stats Rating — Thug (VTSR-T): pipeline-side combat ELO.
+"""VT Stats Rating — Thug (VTSR-T): pipeline-side Thug ELO.
 
-**VTSR-T** is the combat-focused rating (eight-axis thug composite +
+**VTSR-T** is the thug-focused rating (eight-axis thug composite +
 fine-tuned ELO-style updates). The published blend
-``VTSR = α·R^W + (1−α)·R^C`` collapses to VTSR-T when ``α = 0`` (current
-ship); JSON still exposes the combined field as ``vtsr`` for one stable
-wire name.
+``VTSR-T = α·R^W + (1−α)·R^T`` collapses to VTSR-T when ``α = 0``
+(current ship); JSON still exposes the combined field as ``vtsr`` for
+one stable wire name. ``R^T`` is the **Thug ELO** subscript — the
+combat-skill component that pairs with Wins ELO ``R^W`` in the blend.
+A future VTSR-C (commander) rating will follow the same blend shape
+with its own commander-axis composite.
 
-v2.2 axis rebalance (this module): drops ``asset_multiplier`` (reserved
-for a future VTSR-C commander rating because damage-by-owned-AI is a
-build/route quality signal, not a dogfight signal), adds
-``structure_share`` (player-dealt damage to enemy buildings as a share
-of total dealt — the true PvE signal we want to reward in a thug rating),
-and adds ``target_lock_pct`` (T-key situational awareness, low weight).
-``snipe_bonus`` shaved by 1pt to keep the sum at 1.00.
+v2.3 axis rebalance (this module):
+  * Renames ``Combat ELO`` -> ``Thug ELO`` and ``COMBAT_WEIGHTS`` ->
+    ``THUG_WEIGHTS``. The rating measures thug effectiveness, not
+    generic combat skill; the rename clarifies that VTSR-T sits
+    alongside future VTSR-C as a sibling thug-vs-commander pair.
+    ``combat_elo`` JSON field on ``elo_current.ratings[]`` becomes
+    ``thug_elo`` (rides the existing ``ELO_SCHEMA_VERSION`` bump).
+  * **Alpha-blended thug axes (α = 0.5).** The three "thug" axes
+    (``thug_kill_rate``, ``thug_accuracy``, ``thug_efficiency``) credit
+    PvE work at fractional weight rather than zero, so a role player
+    doing economy/utility work isn't penalized for the role choice.
+    Lobby z-scoring still amplifies exceptional performance regardless
+    of source — no separate "PvE excellence" axis needed.
+  * **Weapon-normalized accuracy.** Replaces flat shots_hit/shots_fired
+    with per-weapon ratio against the lobby's per-weapon baseline,
+    weighted by player's shot-share. Numerator includes ``α × pve_hits``
+    so role players landing hits on AI/economy targets get credit.
+  * **Broader ``pve_share`` axis** replaces ``structure_share``. Covers
+    all enemy non-human damage (structures + mobile AI like Scavengers,
+    Producers, Extractors). Sources from ``personal.pve_dealt``.
+  * **Per-axis attribution**: ``compute_performance_index`` now also
+    returns per-axis z-scores per player. Threaded into each
+    ``elo_history.deltas[]`` entry as ``axis_contributions`` and
+    aggregated into per-player ``axis_means`` on
+    ``elo_current.ratings[]``. Powers the VTSR-T leaderboard's
+    "why does this player have this rating?" tooltip + popover.
 
 Computed once per pipeline run over the full chronological corpus, and
 emitted to ``data/processed/elo_current.json`` (one row per player) plus
@@ -26,40 +48,36 @@ roster only.
 Algorithm summary (full derivation lives in
 ``DEVELOPER_GUIDE.md`` §13 — VTSR-T methodology):
 
-    VTSR_i = alpha * R^W_i + (1 - alpha) * R^C_i
+    VTSR-T_i = alpha * R^W_i + (1 - alpha) * R^T_i
 
 with ``alpha = 0`` in v1 (Wins ELO stubbed at the league anchor 1500
 for every player; the blend math runs through unchanged so a future
 ``alpha = 0.55`` bump doesn't change any UI strings).
 
-**v2 (Phase 12)** — Combat ELO ``R^C_i`` updates per match by
+**Thug ELO update rule** (R^T_i updates per match by):
 
     K_i      = K_BASE * (1 - n_i / (n_i + N_PRIOR)) + K_FLOOR
-    P_i      = sum_a w'_a * clip(z_a(x_{i,a}), -2, +2) / 2   (eight axes in v2.2)
-    Rbar_i   = median{R^C_j : j != i}                        (median of opponents)
-    E_i      = 2 / (1 + 10^((Rbar_i - R^C_i) / S_R)) - 1     (logistic expected, in [-1, +1])
+    P_i      = sum_a w'_a * clip(z_a(x_{i,a}), -2, +2) / 2   (eight axes in v2.3)
+    Rbar_i   = median{R^T_j : j != i}                        (median of opponents)
+    E_i      = 2 / (1 + 10^((Rbar_i - R^T_i) / S_R)) - 1     (logistic expected, in [-1, +1])
     dR_raw   = K_i * S_O * (P_i - E_i)
     dR       = dR_raw                                        if dR_raw >= 0
-               dR_raw * L * phi(R^C_i)                        otherwise
+               dR_raw * L * phi(R^T_i)                        otherwise
 
-Replaces the v1 lobby-median performance baseline ``P_med`` with a
-fine-tuned, opponent-strength-weighted expected performance ``E_i``
+Compares against opponent-strength-weighted expected performance ``E_i``
 (ELO-family logistic). ``S_R = 800`` is the rating-logistic scale
 (calibrated for our small-population corpus with **continuous** ``P_i``
 scoring — a tighter denominator such as 400 over-compressed the spread;
 800 lets top players plateau ~300 pts above the median lobby instead
-of ~140 — see v2.1 in §13.7). ``S_O = 2.5``
-is the outcome scale, unchanged from v1 because the practical
-``(P_i - E_i)`` magnitudes land in the same range as v1's
-``(P_i - P_med)``. We use the **median** of opponents (not mean) so a
-single outlier rating like VTrider's doesn't pull the lobby reference
-up for everyone else.
+of ~140). ``S_O = 2.5`` is the outcome scale. We use the **median** of
+opponents (not mean) so a single outlier rating like VTrider's doesn't
+pull the lobby reference up for everyone else.
 
 The loss multiplier ``L = 0.85`` (loss aversion) and the soft-floor
 taper ``phi(R) = clamp(0, 1, (R - F) / W)`` with ``F = 1000`` and
-``W = 150`` are unchanged — they apply on top of the new raw delta so
-the rating asymptotes toward (but never crosses) the 1000 floor. A
-defensive ``max(F, R)`` clamp catches float-edge drift.
+``W = 150`` apply on top of the raw delta so the rating asymptotes
+toward (but never crosses) the 1000 floor. A defensive ``max(F, R)``
+clamp catches float-edge drift.
 
 Cold start: when every player is at the anchor (1500), ``E_i = 0`` for
 everyone and the model degrades to ``dR = K * S_O * P_i`` (no special
@@ -136,35 +154,50 @@ ELO_K_LOSS_AVERSION = 0.85
 ELO_RATING_FLOOR = 1000.0
 ELO_FLOOR_TAPER_WINDOW = 150.0   # full asymmetric losses restored at FLOOR + 150 (1150).
 
-# Combat composite weights (locked, sum = 1.00). EIGHT axes (v2.2) —
-# thug-first composite. ``pickup_economy`` deliberately omitted from
-# rating (low signal / map-dependent); pickups & destructions remain
-# on contributions for Career Highlights (Pod Goblin). The former
-# pickup weight folded into pvp_share to lean harder on the
-# anti-PvE-farming signal. ``asset_multiplier`` (damage-by-owned-AI)
-# was REMOVED in v2.2 because it tracks build/route quality rather
-# than dogfight skill — reserved for a future VTSR-C commander rating.
-# Two new axes added in v2.2:
-#   * ``structure_share`` — player-dealt damage to enemy buildings as a
-#     share of total dealt. Rewards direct base/economy pressure that
-#     a good thug applies in addition to dogfights.
-#   * ``target_lock_pct`` — share of the match the player held an
-#     active T-key target lock (situational-awareness proxy).
-#     Intentionally low weight (0.04) — a discipline reward, not a
-#     dominator signal.
-# Snipe shaved by 1pt to keep the sum at 1.00 while making room.
-# Direct-dogfight axes (net + kill + pvp + accuracy + snipe) still
-# total 0.78, so the rebalance sharpens what counts as thug work
-# without blunting the core fighting signal.
-COMBAT_WEIGHTS = {
-    "net_damage_share":  0.21,
-    "kill_rate":         0.20,
-    "accuracy":          0.15,
-    "pvp_share":         0.18,
-    "structure_share":   0.10,
-    "mobility":          0.08,
-    "snipe_bonus":       0.04,
-    "target_lock_pct":   0.04,
+# Fractional weight for PvE work in the three thug axes. A "thug" can
+# be effective in more ways than one — α=0.5 means PvE damage / kills /
+# hits count at half the weight of equivalent PvP work in the thug
+# axes, while remaining standalone-rewardable via lobby z-scoring when
+# a player's PvE output is exceptional. ``pve_share`` already credits
+# PvE work at full weight (separate axis); this constant tunes how
+# much PvE shows up in the dogfight-flavored axes (thug_kill_rate,
+# thug_accuracy, thug_efficiency).
+#
+# Tunable post-ship without an ``ELO_SCHEMA_VERSION`` bump (shape
+# unchanged). ``compute_elo`` is corpus-wide (recomputed every pipeline
+# run, not cached per-match), so re-rating after an ALPHA_PVE tune
+# requires only a ``PIPELINE_VERSION`` bump in ``process_stats.py``.
+# Surface in elo_current.json so consumers can audit the value.
+ALPHA_PVE = 0.5
+
+# Thug composite weights (locked, sum = 1.00). EIGHT axes (v2.3) —
+# rebalanced to recognize role-player effectiveness alongside pure
+# dogfight skill. v2.3 changes vs v2.2:
+#   * Renamed three axes for clarity ("thug" prefix on the three
+#     alpha-blended axes; the others stay descriptive without prefix):
+#         kill_rate       -> thug_kill_rate    (alpha-blended)
+#         accuracy        -> thug_accuracy     (weapon-normalized + alpha-blended)
+#         pvp_share       -> thug_efficiency   (alpha-blended; denom excl. structure)
+#         structure_share -> pve_share         (broadened to all enemy non-human dmg)
+#   * Tweaked weights: net_damage 0.21 -> 0.20, snipe_bonus 0.04 -> 0.05,
+#     thug_efficiency 0.18 -> 0.16, pve_share 0.10 -> 0.12. Direct-
+#     dogfight axes (thug_kill_rate + thug_accuracy + thug_efficiency)
+#     total 0.51; pve_share 0.12; volume + utility (net + mobility +
+#     snipe + target_lock) 0.37. Sum locked at 1.00.
+#
+# Naming note: the dict variable is ``THUG_WEIGHTS`` (the weights for
+# the Thug ELO axis composite). The wire field on
+# ``elo_current.json`` stays as ``weights`` (no rename of the JSON key
+# itself; only the keys *inside* the dict changed names).
+THUG_WEIGHTS = {
+    "net_damage_share":  0.20,   # damage you dealt minus what you took, vs lobby total
+    "thug_kill_rate":    0.20,   # (pvp_kills + ALPHA_PVE * pve_kills) / minutes
+    "thug_accuracy":     0.15,   # weapon-normalized hit-rate ratio vs lobby; alpha-blended
+    "thug_efficiency":   0.16,   # (pvp_dealt + α * pve_to_AI) / max(1, total - structure)
+    "pve_share":         0.12,   # pve_dealt / total_dealt (asset disruption)
+    "mobility":          0.08,   # activity_score from positioning data
+    "snipe_bonus":       0.05,   # capped sniper-rifle hits
+    "target_lock_pct":   0.04,   # T-key situational-awareness proxy
 }
 
 ALPHA = 0.0   # v1: Wins ELO stubbed at anchor; bump to 0.55 when winner data backfilled.
@@ -178,7 +211,20 @@ ALPHA = 0.0   # v1: Wins ELO stubbed at anchor; bump to 0.55 when winner data ba
 # v2 → v3 (Phase 13 / v2.2 axis rebalance): the ``weights`` block now
 # has 8 keys (asset_multiplier removed; structure_share + target_lock_pct
 # added). Pre-v3 ``peak_vtsr`` values are no longer comparable.
-ELO_SCHEMA_VERSION = 3
+# v3 → v4 (v2.3): axis renames (``kill_rate``→``thug_kill_rate``,
+# ``accuracy``→``thug_accuracy``, ``pvp_share``→``thug_efficiency``,
+# ``structure_share``→``pve_share``); ``thug_accuracy`` is now
+# weapon-normalized; ``ALPHA_PVE`` constant introduced (alpha-blended
+# PvE in the three thug axes); ``thug_efficiency`` denominator now
+# excludes structure damage; ``pve_share`` broadened from buildings-only
+# to all enemy non-human damage. JSON field rename
+# ``ratings[].combat_elo`` → ``ratings[].thug_elo`` reflects the
+# Combat ELO -> Thug ELO architectural rename. Per-delta rows now
+# carry an ``axis_contributions`` block; per-rating rows carry an
+# ``axis_means`` block. ``alpha_pve`` constant surfaced in the top-
+# level constants block. Pre-v4 ``peak_vtsr`` values are no longer
+# comparable (P_i definition changed).
+ELO_SCHEMA_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +268,7 @@ def expected_performance(r_i: float, r_opponents_ref: float) -> float:
     relative to the lobby median.
 
     ``r_opponents_ref`` should be the *median* of all other players'
-    Combat ELO at the start of the match — the median is robust to a
+    Thug ELO at the start of the match — the median is robust to a
     single high-rated outlier in the lobby (e.g. VTrider) that would
     otherwise pull a mean-based reference up for everyone.
 
@@ -310,28 +356,142 @@ def _net_damage_share_lobby(lobby: list[dict]) -> list[float]:
     return out
 
 
-def _kill_rate_lobby(lobby: list[dict], minutes_played: float) -> list[float]:
+def _thug_kill_rate_lobby(lobby: list[dict], minutes_played: float) -> list[float]:
+    """Alpha-blended kill rate: (pvp_kills + α·pve_kills) / minutes.
+
+    v2.3 axis. PvE kills (against AI ships, AI structures) count at
+    fractional weight ``ALPHA_PVE`` so role players doing economy/utility
+    work get credit for AI kills without farming-rewarding alpha=1.0.
+    Falls back to ``kills`` when ``pvp_kills``/``pve_kills`` are absent
+    (legacy match data); this preserves pre-v2.3 behavior on stale
+    leaderboards rather than dropping them to zero.
+    """
     minutes = max(1e-3, minutes_played)
-    return [(p.get("kills", 0) or 0) / minutes for p in lobby]
-
-
-def _accuracy_lobby(lobby: list[dict]) -> list[float]:
     out = []
     for p in lobby:
         pd = p.get("personal", {}) or {}
-        sf = pd.get("shots_fired", 0) or 0
-        sh = pd.get("shots_hit", 0) or 0
-        out.append(sh / max(1, sf))
+        if "pvp_kills" in pd or "pve_kills" in pd:
+            pvp_k = pd.get("pvp_kills", 0) or 0
+            pve_k = pd.get("pve_kills", 0) or 0
+            blended = pvp_k + ALPHA_PVE * pve_k
+        else:
+            # Legacy fallback: treat all kills as PvP-equivalent (matches
+            # v2.2 behavior for pre-v4 match data).
+            blended = p.get("kills", 0) or 0
+        out.append(blended / minutes)
     return out
 
 
-def _pvp_share_lobby(lobby: list[dict]) -> list[float]:
+def _thug_accuracy_lobby(lobby: list[dict]) -> list[float]:
+    """Weapon-normalized accuracy with alpha-blended PvE hits (v2.3).
+
+    For each player p and each weapon w that p fired, compute the
+    ratio of p's combat-weighted hits per shot vs the lobby's
+    combat-weighted hits per shot for the same weapon. Combat-weighted
+    hits = ``pvp_hits + ALPHA_PVE * pve_hits`` (where ``pve_hits =
+    hits - pvp_hits``). Player score is the shot-share-weighted mean
+    of those ratios over the player's used weapons:
+
+        pwa_p = (Σ_w (p_combat_acc_w / lobby_combat_acc_w) * weight_w) / Σ_w weight_w
+        weight_w = p_shots_w / p_total_shots
+
+    Returns a positive number per player; lobby z-score in
+    ``compute_performance_index()`` handles centering. Unlike the v2.2
+    flat ratio, this is weapon-mix bias robust — sniper mains aren't
+    penalized for the rifle's natural lower hit rate, and shotgun
+    spammers don't benefit from the spray pattern.
+
+    Edge cases:
+      * Player who fired zero shots → 0.0 (lowest score).
+      * Weapon with no lobby signal (nobody else fired it, or lobby has
+        zero hits with it) → dropped from the player's pwa via
+        ``continue``; ``used_weight`` shrinks accordingly. A player who
+        ONLY fires unique-to-them weapons gets ``used_weight == 0`` and
+        is assigned 0.0.
+      * Pre-v2.3 leaderboard rows lacking ``weapon_breakdown[w].pvp_hits``
+        treat all hits as PvP-equivalent (legacy fallback).
+    """
+    from collections import defaultdict as _dd
+    lobby_shots_w: dict[str, int] = _dd(int)
+    lobby_thug_hits_w: dict[str, float] = _dd(float)
+
+    for p in lobby:
+        for w, wd in (p.get("weapon_breakdown") or {}).items():
+            shots = wd.get("shots", 0) or 0
+            hits = wd.get("hits", 0) or 0
+            # Legacy fallback: pre-v2.3 weapon_breakdown has no pvp_hits.
+            if "pvp_hits" in wd:
+                pvp_h = wd.get("pvp_hits", 0) or 0
+                pve_h = max(0, hits - pvp_h)
+                thug_h = pvp_h + ALPHA_PVE * pve_h
+            else:
+                thug_h = hits  # legacy: count all hits at full weight
+            lobby_shots_w[w] += shots
+            lobby_thug_hits_w[w] += thug_h
+
+    out = []
+    for p in lobby:
+        wb = p.get("weapon_breakdown") or {}
+        total_player_shots = sum((wd.get("shots", 0) or 0) for wd in wb.values())
+        if total_player_shots <= 0:
+            out.append(0.0)
+            continue
+        score_num = 0.0
+        used_weight = 0.0
+        for w, wd in wb.items():
+            p_shots = wd.get("shots", 0) or 0
+            if p_shots <= 0:
+                continue
+            if "pvp_hits" in wd:
+                p_pvp_h = wd.get("pvp_hits", 0) or 0
+                p_pve_h = max(0, (wd.get("hits", 0) or 0) - p_pvp_h)
+                p_thug_h = p_pvp_h + ALPHA_PVE * p_pve_h
+            else:
+                p_thug_h = wd.get("hits", 0) or 0
+            l_shots = lobby_shots_w.get(w, 0)
+            l_thug_h = lobby_thug_hits_w.get(w, 0)
+            if l_shots <= 0 or l_thug_h <= 0:
+                continue  # no lobby signal for this weapon → drop
+            player_acc = p_thug_h / p_shots
+            lobby_acc = l_thug_h / l_shots
+            ratio = player_acc / lobby_acc  # >=0; 1.0 = matches lobby baseline
+            weight = p_shots / total_player_shots
+            score_num += ratio * weight
+            used_weight += weight
+        if used_weight <= 0:
+            out.append(0.0)
+        else:
+            # Renormalize over the weapons that had lobby signal.
+            out.append(score_num / used_weight)
+    return out
+
+
+def _thug_efficiency_lobby(lobby: list[dict]) -> list[float]:
+    """Alpha-blended dogfight efficiency with structure damage excluded
+    from the denominator (v2.3, replaces v2.2 ``pvp_share``).
+
+        thug_efficiency_p = (pvp_dealt + α * pve_to_AI) / max(1, total - structure)
+
+    Where ``pve_to_AI ≈ pve_dealt - structure_dealt`` (mobile AI damage,
+    excluding world props which are negligible after the sentinel
+    filter). Rationale: measures "of your non-structure damage, how
+    effectively did you dogfight (with PvE damage credited at α
+    weight)?". Structure damage flows entirely to ``pve_share``;
+    mobile-AI damage gets partial credit here AND full credit on
+    ``pve_share``. The denominator excludes structure so a structure-
+    buster's economy work is rewarded via ``pve_share`` rather than
+    diluting their efficiency score here.
+    """
     out = []
     for p in lobby:
         pd = p.get("personal", {}) or {}
-        pvp = pd.get("pvp_dealt", 0) or 0
+        pvp_d = pd.get("pvp_dealt", 0) or 0
         total = pd.get("dealt", 0) or 0
-        out.append(pvp / max(1.0, total))
+        struct = pd.get("structure_dealt", 0) or 0
+        pve_to_ai = max(0.0, (pd.get("pve_dealt", 0) or 0) - struct)
+        numer = pvp_d + ALPHA_PVE * pve_to_ai
+        denom = max(1.0, total - struct)
+        out.append(numer / denom)
     return out
 
 
@@ -367,30 +527,36 @@ def _snipe_bonus_lobby(lobby: list[dict], snipes_by_player: dict) -> list[float]
     return out if any_present else None
 
 
-def _structure_share_lobby(lobby: list[dict]) -> list[float] | None:
-    """Player-dealt damage to enemy buildings / total dealt (v2.2 axis).
+def _pve_share_lobby(lobby: list[dict]) -> list[float] | None:
+    """Player-dealt damage to enemy non-human assets / total dealt
+    (v2.3 axis, replaces v2.2's narrower ``structure_share``).
 
-    Reads ``personal.structure_dealt`` (emitted by the pipeline's
-    BulletHit → DamageDealt join over the Building bucket of
-    ``data/odf.min.json``; friendly-fire on own structures is filtered
-    pipeline-side via the team_factions reconciliation). Returns ``None``
-    when no player in the lobby has any structure damage — axis-missing
-    triggers the weight-redistribution rule in ``compute_performance_index``.
+    Captures ALL "asset disruption" work — structures AND mobile AI
+    units (Scavengers, Producers, Extractors, AI tanks, etc.). Sources
+    from ``personal.pve_dealt``, which is already
+    ``total_dealt - pvp_dealt`` and excludes player-owned-AI damage by
+    construction (only events with ``shooter > 0`` enter
+    ``personal.dealt``). Structures are NOT double-counted; this is one
+    share over a clean denominator.
 
-    Most VSR matches are pure dogfights; this signal will be ``None`` for
-    those lobbies and the 0.10 weight gets pro-rata distributed across
-    the other seven available axes. Lobbies with real base pressure will
-    reward the players who delivered it.
+    Returns ``None`` when no player in the lobby dealt any PvE damage —
+    axis-missing triggers the weight-redistribution rule in
+    ``compute_performance_index``. This is the same axis-missing handling
+    used for ``mobility`` and ``target_lock_pct``.
+
+    Rewards both base-busters and scrap-killers symmetrically: a
+    structure-focused thug and a mobile-AI-focused thug both score on
+    the same axis.
     """
     any_present = False
     out = []
     for p in lobby:
         pd = p.get("personal", {}) or {}
-        sd = pd.get("structure_dealt", 0) or 0
-        dealt = pd.get("dealt", 0) or 0
-        if sd > 0:
+        pve_d = pd.get("pve_dealt", 0) or 0
+        total = pd.get("dealt", 0) or 0
+        if pve_d > 0:
             any_present = True
-        out.append(sd / max(1.0, dealt))
+        out.append(pve_d / max(1.0, total))
     return out if any_present else None
 
 
@@ -429,17 +595,35 @@ def _target_lock_pct_lobby(
 # Performance index per lobby
 # ---------------------------------------------------------------------------
 
-def compute_performance_index(match_data: dict) -> tuple[list[float], list[str]]:
+def compute_performance_index(
+    match_data: dict,
+) -> tuple[list[float], list[str], list[dict[str, float]]]:
     """Compute the per-player performance index ``P_i`` for a single
     match.
 
-    Returns (per_player_P, player_keys) where ``player_keys[i]`` is the
-    steam64 (or fallback name) for ``per_player_P[i]``. Pure: no
-    side-effects on ``match_data``.
+    Returns ``(per_player_P, player_keys, per_player_axis_z)`` where:
+      * ``per_player_P[i]`` is the player's composite score in [-1, +1]
+      * ``player_keys[i]`` is the steam64 (or fallback name)
+      * ``per_player_axis_z[i]`` is a dict ``{axis_name: clipped_z}``
+        carrying each axis's contribution AFTER clip-and-divide-by-2 so
+        each value lives in [-1, +1]. Axes that were unavailable for the
+        entire lobby (and thus had their weight redistributed) are
+        OMITTED from the dict — consumers should treat absence as
+        "axis unavailable in this match" and rely on the redistributed
+        weight already baked into ``per_player_P``.
+
+    The ``per_player_axis_z`` block powers the VTSR-T leaderboard's
+    per-axis breakdown popover (``elo_history.json`` ``axis_contributions``
+    field) and the career-average tooltip (``elo_current.json``
+    ``axis_means`` field). Audit invariant: for available axes,
+    ``Σ_axis (axis_z[axis] * weight'_axis) ≈ per_player_P[i]`` where
+    ``weight'`` is the redistributed weight (sum to 1.00).
+
+    Pure: no side-effects on ``match_data``.
     """
     lobby = match_data.get("leaderboard") or []
     if not lobby:
-        return [], []
+        return [], [], []
 
     duration_sec = (match_data.get("match") or {}).get("duration_sec", 0) or 0
     minutes = duration_sec / 60.0
@@ -457,21 +641,25 @@ def compute_performance_index(match_data: dict) -> tuple[list[float], list[str]]
     # name. None entries mean the axis is missing for the whole lobby —
     # that axis's weight gets redistributed.
     raw: dict[str, list[float] | None] = {
-        "net_damage_share":  _net_damage_share_lobby(lobby),
-        "kill_rate":         _kill_rate_lobby(lobby, minutes),
-        "accuracy":          _accuracy_lobby(lobby),
-        "pvp_share":         _pvp_share_lobby(lobby),
-        "structure_share":   _structure_share_lobby(lobby),
-        "mobility":          _mobility_lobby(lobby, pos_players),
-        "snipe_bonus":       _snipe_bonus_lobby(lobby, snipes_by_player),
-        "target_lock_pct":   _target_lock_pct_lobby(lobby, pos_players, has_target_lock),
+        "net_damage_share": _net_damage_share_lobby(lobby),
+        "thug_kill_rate":   _thug_kill_rate_lobby(lobby, minutes),
+        "thug_accuracy":    _thug_accuracy_lobby(lobby),
+        "thug_efficiency":  _thug_efficiency_lobby(lobby),
+        "pve_share":        _pve_share_lobby(lobby),
+        "mobility":         _mobility_lobby(lobby, pos_players),
+        "snipe_bonus":      _snipe_bonus_lobby(lobby, snipes_by_player),
+        "target_lock_pct":  _target_lock_pct_lobby(lobby, pos_players, has_target_lock),
     }
 
     available = [a for a, v in raw.items() if v is not None]
     if not available:
         # Pathological — should be excluded by the duration gate, but
         # belt-and-suspenders: every player gets P = 0, no rating change.
-        return [0.0] * len(lobby), [_player_key(p) for p in lobby]
+        return (
+            [0.0] * len(lobby),
+            [_player_key(p) for p in lobby],
+            [{} for _ in lobby],
+        )
 
     # Per-axis z-score, clip to [-2, +2], divide by 2 to land in [-1, +1].
     z_by_axis: dict[str, list[float]] = {}
@@ -480,15 +668,22 @@ def compute_performance_index(match_data: dict) -> tuple[list[float], list[str]]
         z_by_axis[axis] = [_clip(zi, -2.0, 2.0) / 2.0 for zi in z]
 
     # Pro-rata weight redistribution so available weights still sum to 1.
-    total_available_weight = sum(COMBAT_WEIGHTS[a] for a in available)
-    weights = {a: COMBAT_WEIGHTS[a] / total_available_weight for a in available}
+    total_available_weight = sum(THUG_WEIGHTS[a] for a in available)
+    weights = {a: THUG_WEIGHTS[a] / total_available_weight for a in available}
 
-    perf = []
+    perf: list[float] = []
+    per_player_axis_z: list[dict[str, float]] = []
     for i in range(len(lobby)):
-        p = sum(weights[a] * z_by_axis[a][i] for a in available)
-        perf.append(p)
+        axis_z_dict: dict[str, float] = {}
+        p_sum = 0.0
+        for a in available:
+            zi = z_by_axis[a][i]
+            axis_z_dict[a] = zi
+            p_sum += weights[a] * zi
+        perf.append(p_sum)
+        per_player_axis_z.append(axis_z_dict)
 
-    return perf, [_player_key(p) for p in lobby]
+    return perf, [_player_key(p) for p in lobby], per_player_axis_z
 
 
 def _player_key(p: dict) -> str:
@@ -521,9 +716,13 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         ),
     )
 
-    # Per-player rating state. Combat ELO accumulates across matches;
+    # Per-player rating state. Thug ELO accumulates across matches;
     # display name and last-seen steam64 are tracked for the output row.
-    combat_elo: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
+    # Naming: ``thug_elo`` is the v2.3 rename of ``combat_elo`` —
+    # reflects that VTSR-T's combat-skill component is specifically
+    # thug-flavored (8-axis thug composite), and sets up future VTSR-C
+    # (commander) as a sibling rating.
+    thug_elo: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
     matches_played: dict[str, int] = defaultdict(int)
     display_name: dict[str, str] = {}
     steam64_for_key: dict[str, str | None] = {}
@@ -532,6 +731,17 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     peak_vtsr: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
     peak_at: dict[str, str] = {}
     win_history: dict[str, list[float]] = defaultdict(list)
+    # Per-player career-average axis z-scores (running mean across all
+    # rated matches the player participated in). Keyed
+    # ``axis_running_sum[key][axis] -> sum`` and
+    # ``axis_running_count[key][axis] -> n``; final mean = sum / n.
+    # Tracked separately per axis because some matches omit some axes
+    # (mobility / target_lock_pct / pve_share / snipe_bonus can self-omit
+    # via the axis-missing rule), so each axis's denominator may differ
+    # by player. Surfaces as ``axis_means`` on each elo_current.ratings[]
+    # row; powers the VTSR-T leaderboard's "top axes" tooltip.
+    axis_running_sum: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    axis_running_count: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     history_entries: list[dict] = []
 
@@ -569,7 +779,7 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             })
             continue
 
-        perfs, keys = compute_performance_index(md)
+        perfs, keys, axis_z_by_player = compute_performance_index(md)
         if not perfs:
             history_entries.append({
                 "match_id":         match_id,
@@ -580,17 +790,17 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             })
             continue
 
-        # Snapshot every player's pre-match Combat ELO so each per-player
+        # Snapshot every player's pre-match Thug ELO so each per-player
         # ``E_i`` reads the same lobby state — the order in which we
         # apply updates within a single match must NOT influence anyone
         # else's expected score in the same match. ``defaultdict``
         # access here also seeds new players to ``ELO_ANCHOR``, so a
         # debutant correctly contributes 1500 to everyone else's
         # ``Rbar``.
-        ratings_before = [combat_elo[k] for k in keys]
+        ratings_before = [thug_elo[k] for k in keys]
         n_lobby = len(keys)
 
-        # Update each player's combat ELO and emit a delta row.
+        # Update each player's Thug ELO and emit a delta row.
         match_deltas = []
         for i, key in enumerate(keys):
             n_before = matches_played[key]
@@ -617,7 +827,7 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             if r_after < ELO_RATING_FLOOR:
                 r_after = ELO_RATING_FLOOR
 
-            combat_elo[key] = r_after
+            thug_elo[key] = r_after
             matches_played[key] = n_before + 1
             last_match_id[key] = match_id
             last_delta[key] = dr
@@ -634,6 +844,19 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             if len(wh) > 10:
                 del wh[: len(wh) - 10]
 
+            # v2.3: per-axis attribution. Round to 4 dp for compact JSON.
+            # axis_z_by_player[i] omits axes that self-redistributed for
+            # this lobby (e.g. no positioning -> mobility absent). The
+            # consumer (VTSR-T leaderboard popover) renders absent axes
+            # as "axis unavailable in this match".
+            axis_contrib = {
+                a: round(z, 4) for a, z in (axis_z_by_player[i] or {}).items()
+            }
+            # Accumulate into per-player career running means.
+            for a, z in (axis_z_by_player[i] or {}).items():
+                axis_running_sum[key][a] += z
+                axis_running_count[key][a] += 1
+
             match_deltas.append({
                 "name":        display_name[key],
                 "steam64":     steam64_for_key.get(key),
@@ -643,6 +866,9 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
                 "performance": round(perfs[i], 4),
                 # v2: opponent-strength-weighted expected (audit / debug).
                 "expected":    round(e_i, 4),
+                # v2.3: per-axis z-scores (post-clip / 2). Powers the
+                # VTSR-T leaderboard's Last-delta breakdown popover.
+                "axis_contributions": axis_contrib,
             })
 
         history_entries.append({
@@ -654,17 +880,30 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
 
     # ----- Build elo_current.json shape -----
     ratings = []
-    for key in combat_elo:
-        c_elo = combat_elo[key]
+    for key in thug_elo:
+        t_elo = thug_elo[key]
         n     = matches_played[key]
-        # Final VTSR = blend(R^W, R^C). R^W stubbed at anchor in v1.
+        # Final VTSR-T = blend(R^W, R^T). R^W stubbed at anchor in v1.
         wins_elo = ELO_ANCHOR
-        vtsr = ALPHA * wins_elo + (1.0 - ALPHA) * c_elo
+        vtsr = ALPHA * wins_elo + (1.0 - ALPHA) * t_elo
+        # v2.3: per-player career-average axis z-scores. Each axis's
+        # mean is computed over the rated matches where THAT axis was
+        # available for the player's lobby (so a player who's been in
+        # mostly no-positioning matches has a smaller denominator on
+        # the mobility key). Rounded to 4 dp for compact JSON.
+        axis_means: dict[str, float] = {}
+        sums = axis_running_sum.get(key) or {}
+        counts = axis_running_count.get(key) or {}
+        for a in THUG_WEIGHTS:
+            n_a = counts.get(a, 0)
+            if n_a > 0:
+                axis_means[a] = round(sums.get(a, 0.0) / n_a, 4)
         ratings.append({
             "name":             display_name.get(key, ""),
             "steam64":          steam64_for_key.get(key),
             "vtsr":             round(vtsr, 1),
-            "combat_elo":       round(c_elo, 1),
+            # v2.3: was ``combat_elo`` (Combat ELO -> Thug ELO rename).
+            "thug_elo":         round(t_elo, 1),
             "wins_elo":         round(wins_elo, 1),
             "matches_played":   n,
             "matches_provisional": n < ELO_PROVISIONAL_THRESHOLD,
@@ -673,6 +912,10 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             "peak_vtsr":        round(peak_vtsr.get(key, ELO_ANCHOR), 1),
             "peak_at":          peak_at.get(key, ""),
             "win_history":      list(win_history.get(key, [])),
+            # v2.3: per-axis career-average z-scores. Powers the
+            # VTSR-T leaderboard's "Strong axes" tooltip on the
+            # rating cell.
+            "axis_means":       axis_means,
         })
 
     # Sort by VTSR desc, then name asc (deterministic).
@@ -681,9 +924,13 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     rated_match_count = sum(1 for h in history_entries if not h["match_excluded"])
     elo_current = {
         "schema_version":     ELO_SCHEMA_VERSION,
-        "alpha":              ALPHA,
-        "anchor":             ELO_ANCHOR,
-        "rating_scale":       ELO_RATING_SCALE,
+        "alpha":               ALPHA,
+        # v2.3: PvE-credit fraction in the three thug axes
+        # (thug_kill_rate, thug_accuracy, thug_efficiency). Surfaced for
+        # auditability and future tunability.
+        "alpha_pve":           ALPHA_PVE,
+        "anchor":              ELO_ANCHOR,
+        "rating_scale":        ELO_RATING_SCALE,
         # v2: rating-logistic scale for the expected-performance curve.
         "expected_score_logistic_scale": ELO_LOGISTIC_SCALE,
         "k_loss_aversion":    ELO_K_LOSS_AVERSION,
@@ -700,7 +947,7 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         "matches_excluded_low_player_count": excluded_low_player_count,
         "matches_excluded_short_duration":   excluded_short_duration,
         "matches_excluded_no_winner":        excluded_no_winner,
-        "weights":            dict(COMBAT_WEIGHTS),
+        "weights":            dict(THUG_WEIGHTS),
         "ratings":            ratings,
     }
 
