@@ -4,43 +4,43 @@ overview: "Ship VTSR-T v2.3: rebalance the composite so role players doing PvE/e
 todos:
   - id: pipeline_accumulators
     content: Add per-weapon PvP-hit accumulator, class-label resolver, per-tick class accumulator, and per-class combat accumulator (with running s64-to-current-odf tracker) in scripts/process_stats.py. Bump PIPELINE_VERSION 10 -> 11 and match.schema_version 3 -> 4.
-    status: pending
+    status: completed
   - id: pipeline_leaderboard_fields
     content: "Surface new fields on the per-player leaderboard row: personal.pvp_kills/pve_kills/pvp_deaths/pve_deaths/pvp_shots_hit/pvp_accuracy, weapon_breakdown[w].pvp_hits, loadout block (classes, class_seconds, primary/secondary, class_diversity, most_used_odf, active_seconds), and per_class_combat list."
-    status: pending
+    status: completed
   - id: elo_axis_rewrites
     content: "In scripts/elo.py: introduce ALPHA_PVE = 0.5 module constant; replace _kill_rate_lobby with _thug_kill_rate_lobby (pvp_kills + ALPHA_PVE * pve_kills) / minutes; replace _accuracy_lobby with _thug_accuracy_lobby implementing the weapon-normalized formula with alpha-blended numerator; replace _pvp_share_lobby with _thug_efficiency_lobby (pvp_dealt + ALPHA_PVE * pve_dealt_to_AI) / max(1, total_dealt - structure_dealt); replace _structure_share_lobby with _pve_share_lobby (structure_dealt + pve_dealt_to_AI) / total_dealt; rename COMBAT_WEIGHTS dict to THUG_WEIGHTS with v2.3 axes (sum=1.00); bump ELO_SCHEMA_VERSION 3 -> 4; surface ALPHA_PVE in elo_current.json."
-    status: pending
+    status: completed
   - id: combat_to_thug_rename
     content: "Combat ELO -> Thug ELO rename pass folded into the same elo.py commit: rename per-player accumulator combat_elo dict to thug_elo, local var c_elo to t_elo, JSON output field combat_elo to thug_elo on every elo_current.ratings[] row, math notation R^C to R^T in module docstring + comments, all 'Combat ELO' prose to 'Thug ELO'. Also update js/app.js methodology modal (lines 4835, 4837) and any r.combat_elo reads. Schema bump rides the existing ELO_SCHEMA_VERSION 3 -> 4."
-    status: pending
+    status: completed
   - id: elo_axis_attribution
     content: "Extend scripts/elo.py compute_performance_index() to also return per-axis z-scores (post-clip, pre-divide-by-2) per player. Threaded through compute_elo() into elo_history.json: each delta row gains axis_contributions: {axis_name: z_score, ...} so the dashboard can reconstruct the axis-by-axis breakdown of why a rating moved. Aggregate per-player career-axis means into elo_current.json: each rating row gains axis_means: {axis_name: career_avg_z, ...} for the VTSR-T table 'top axes' tooltip."
-    status: pending
+    status: completed
   - id: contributions_extension
     content: Extend _extract_contribution() in scripts/process_stats.py to surface pvp_kills/pve_kills/pvp_shots_hit, weapon_breakdown[w].pvp_hits, loadout block, and per_class_combat slim rows on match_contributions.json.
-    status: pending
+    status: completed
   - id: js_aggregator_extension
     content: "Extend VTAggregate.build() in js/all-matches-aggregator.js: sum pvp_kills/pve_kills/pvp_shots_hit and per-weapon pvp_hits into career_stats[]; sum class_seconds and per-class combat fields into career_loadout and career_per_class_combat blocks. Mirror Python rounding."
-    status: pending
+    status: completed
   - id: dashboard_per_match
     content: Render Loadout Profile card + Per-Class Combat table + new PvP Hits / PvP Acc weapon-breakdown columns on the per-match Player Leaderboard expand modal (js/app.js, index.html, css/vtstats-theme.css). Update the existing Player Leaderboard Kills/Deaths cells to render as compact 'TOTAL (PvP/PvE)' chips with hover tooltips; sort behavior unchanged (still sorts on total). Per-Class Combat table includes explicit PvP Kills + PvE Kills columns. No role_label rendered.
-    status: pending
+    status: completed
   - id: dashboard_career
     content: Render Career Loadout Profile + Career Per-Class Combat table on the All Matches per-player Career card. Update the Career Leaderboard Kills/Deaths cells to render as compact 'TOTAL (PvP/PvE)' chips with hover tooltips; sort behavior unchanged. Cards hidden when loadout block is absent (legacy compat during transient pre-rerate state).
-    status: pending
+    status: completed
   - id: dashboard_vtsr_table
     content: "Enrich the VTSR-T Leaderboard (#section-vtsr / #vtsr-table in js/app.js renderVtsrLeaderboard()): add 'Primary Class' column (sourced from career_stats[].career_loadout.primary_class), add compact 'PvP K/D' column showing 'X.X / Y.Y' (PvP-only K/D and PvE-only K/D side by side); add Bootstrap tooltip on the VTSR-T value cell showing the player's top 2 strongest axes (from elo.ratings[].axis_means); add Bootstrap popover on the Last-delta cell showing the axis-by-axis contribution breakdown for that player's most recent rated match (from elo_history.json axis_contributions); add tooltips on Peak (showing peak match name/date) and on the Trend sparkline (listing last 10 raw deltas with match ids)."
-    status: pending
+    status: completed
   - id: methodology_modal
     content: "Update KaTeX-rendered VTSR-T methodology modal strings in js/app.js: composite axes table (8 axes with new combat_* names + pve_share + weights), ALPHA_PVE constant explanation, weapon-normalized thug_accuracy formula derivation, v2.3 worked example walking through the role-player vs fragger comparison."
-    status: pending
+    status: completed
   - id: docs_pass
     content: "Update DEVELOPER_GUIDE.md (Section 13: axes table with combat_* + pve_share names, migration table v2.3 row noting ALPHA_PVE introduction, broadened scope of pve_share, new section 13.11 Loadout Profile spec), docs/DATA_DICTIONARY.md (Section 11 schema v4 with alpha_pve constant, new Section 13 Loadout schema), .cursor/rules/data-schema.mdc, .cursor/rules/filter-contract.mdc (6Q checklist for all new fields), AGENTS.md, and .cursor/rules/project-overview.mdc."
-    status: pending
+    status: completed
   - id: rerate_and_verify
     content: Run python scripts/process_stats.py to trigger full re-process via PIPELINE_VERSION bump. Verify elo_current.json schema_version=4, weights block shape, sample player rating shifts. Spot-check 3 representative matches (heavy tank, sniper-heavy, utility-heavy) for plausible loadout output. Verify aggregator-vs-pipeline parity on byte-identical fields under no-picker-filter.
-    status: pending
+    status: completed
 isProject: false
 ---
 

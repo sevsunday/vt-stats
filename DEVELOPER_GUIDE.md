@@ -1559,46 +1559,61 @@ The seed shipped with a VSR Build Tree feature (`generateBuildTree()` and friend
 
 ## 13. VTSR-T Methodology {#vtsr-methodology}
 
-**VTSR-T** (VT Stats Rating — *Thug*) is the combat-focused rating: an **eight-axis thug composite** (v2.2; previously seven axes) plus fine-tuned ELO-style updates (`scripts/elo.py`). The published headline **VTSR** is still the linear blend below — with $\alpha = 0$ (current ship), **VTSR equals VTSR-T** for every player; the JSON wire field stays `vtsr` for a stable contract.
+**VTSR-T** (VT Stats Rating — *Thug*) is the thug-focused rating: an **eight-axis thug composite** (v2.3) plus fine-tuned ELO-style updates (`scripts/elo.py`). The published headline **VTSR-T** is the linear blend below — with $\alpha = 0$ (current ship), **VTSR-T equals Thug ELO** for every player; the JSON wire field stays `vtsr` for a stable contract.
 
 The rating system is pipeline-emitted, full-corpus, and time-ordered — the dashboard reads `data/processed/elo_current.json` once per session and passes ratings through the All Matches aggregator unchanged. The picker filter narrows the displayed roster only; ratings are corpus-wide.
 
+> **v2.3 architectural rename**: the rating's combat-skill component, previously called *Combat ELO*, is now called **Thug ELO** ($R^T_i$). Sets up future VTSR-C (Commander) as a sibling rating with its own commander-axis composite. Math notation $R^C \to R^T$ throughout this section. JSON field rename `ratings[].combat_elo` → `ratings[].thug_elo` rides the existing `ELO_SCHEMA_VERSION` 3 → 4 bump.
+
 ### 13.1 Final equation
 
-The published rating is a linear blend of two components — a **Wins ELO** ($R^W_i$) and **Combat ELO** ($R^C_i$, i.e. **VTSR-T**):
+The published rating is a linear blend of two components — a **Wins ELO** ($R^W_i$) and **Thug ELO** ($R^T_i$, i.e. **VTSR-T**):
 
 $$
-\boxed{\;\mathrm{VTSR}_i \;=\; \alpha \cdot R^W_i \;+\; (1 - \alpha) \cdot R^C_i\;}
+\boxed{\;\mathrm{VTSR\text{-}T}_i \;=\; \alpha \cdot R^W_i \;+\; (1 - \alpha) \cdot R^T_i\;}
 $$
 
 v1 ships with $\alpha = 0$. Wins ELO is stubbed at the league anchor 1500 for every player so the blend math runs through unchanged — the day the in-game winner-attestation UI lands in `statsgate`, $\alpha$ bumps to ~0.55 (CS2 Premier-flavored split) and the dashboard text doesn't change.
 
-Linearity is the only blend that preserves the anchor: with $R^W = R^C = 1500$ and any $\alpha$, $\mathrm{VTSR} = 1500$. Geometric and harmonic blends break at zero or have no closed-form interpretation in points.
+Linearity is the only blend that preserves the anchor: with $R^W = R^T = 1500$ and any $\alpha$, $\mathrm{VTSR\text{-}T} = 1500$. Geometric and harmonic blends break at zero or have no closed-form interpretation in points.
 
-### 13.2 Combat ELO derivation
+### 13.2 Thug ELO derivation
 
 > **v2 (Phase 12)** — replaces the v1 lobby-median performance baseline ($P_{\text{med}}$) with an opponent-strength-weighted expected performance ($E_i$) from a fine-tuned ELO-family logistic. Same 7-axis composite, same K-decay, same hope mechanics. See §13.7 for the migration note.
 >
-> **v2.1** — same algorithm shape; the rating-logistic scale was widened from $S_R = 400$ to $S_R = 800$ to restore a leaderboard-friendly spread (the v2.0 ship over-compressed every player into Tiers 3–4 only). Numbers in §13.6 (Lamper m9) are computed under v2.2; the symbol-table value below reflects $S_R = 800$ which is unchanged in v2.2.
+> **v2.1** — same algorithm shape; the rating-logistic scale was widened from $S_R = 400$ to $S_R = 800$ to restore a leaderboard-friendly spread (the v2.0 ship over-compressed every player into Tiers 3–4 only).
 >
-> **v2.2 (Phase 13)** — thug-axis rebalance. Drops `asset_multiplier` (damage by player-owned AI — that's a build/route signal, reserved for a future VTSR-C commander rating), adds `structure_share` (player-dealt damage to enemy buildings as a share of total dealt — the true PvE thug signal), and adds `target_lock_pct` (T-key situational-awareness proxy). Snipe shaved 0.05 → 0.04 with three other axes nudged to keep $\sum w = 1.00$. `ELO_SCHEMA_VERSION` bumped $2 \to 3$ because the `weights` block changes shape. Pre-v2.2 `peak_vtsr` values are no longer comparable.
+> **v2.2 (Phase 13)** — thug-axis rebalance. Dropped `asset_multiplier` (damage by player-owned AI — that's a build/route signal, reserved for a future VTSR-C commander rating), added `structure_share` (player-dealt damage to enemy buildings) and `target_lock_pct` (T-key situational awareness). Pre-v2.2 `peak_vtsr` values were no longer comparable.
+>
+> **v2.3** — alpha-blended thug composite + Combat ELO → Thug ELO rename.
+>
+> Three changes to axis math:
+> 1. **Alpha-blended thug axes** ($\alpha_{\mathrm{PvE}} = 0.5$). The three "thug" axes (`thug_kill_rate`, `thug_accuracy`, `thug_efficiency`) credit PvE work at fractional weight rather than zero — a role player doing economy/utility work isn't penalized for the role choice. Locked module constant `ALPHA_PVE` in `scripts/elo.py`; surfaced as `alpha_pve` in `elo_current.json` for transparency. Tunable post-ship without a schema bump (only `PIPELINE_VERSION` to force re-rating).
+> 2. **Weapon-normalized accuracy**. `thug_accuracy` replaces the flat `shots_hit/shots_fired` ratio with a per-weapon ratio against the lobby's per-weapon baseline, weighted by player's shot-share. Numerator counts "thug hits" (`pvp_hits + α·pve_hits`). Robust to weapon-mix bias — sniper mains aren't punished for the rifle's natural lower hit rate.
+> 3. **Broader `pve_share` axis** replaces the narrower `structure_share`. Captures damage to all enemy non-human assets (structures + mobile AI like Scavengers, Producers, Extractors). Sources from `personal.pve_dealt`, which already excludes player-owned-AI damage by construction. Rewards both base-busters AND scrap-killers symmetrically.
+>
+> Architectural rename: **Combat ELO → Thug ELO** ($R^C \to R^T$) reflects that VTSR-T's combat-skill component is specifically thug-flavored. JSON field `ratings[].combat_elo` renamed to `ratings[].thug_elo`. Future VTSR-C (commander) follows the same blend shape with its own commander-axis composite.
+>
+> Per-axis attribution: `compute_performance_index` now returns per-axis z-scores per player, threaded into each `elo_history.deltas[]` as `axis_contributions` and aggregated into per-player `axis_means` on `elo_current.ratings[]`. Powers the VTSR-T leaderboard's per-axis breakdown popover and "Strong axes" tooltip.
+>
+> `ELO_SCHEMA_VERSION` bumped 3 → 4 (axis renames, JSON field rename, new attribution blocks). **Pre-v2.3 `peak_vtsr` values are no longer comparable** — the $P_i$ definition changed.
 
-Combat ELO updates per match by
+Thug ELO updates per match by
 
 $$
-\Delta R^C_{i,\text{raw}} \;=\; K_i \cdot S_O \cdot (P_i - E_i)
+\Delta R^T_{i,\text{raw}} \;=\; K_i \cdot S_O \cdot (P_i - E_i)
 $$
 
 where the **expected performance** $E_i$ is an opponent-strength-weighted logistic (fine-tuned ELO-style curve), rescaled to match the composite-performance range $[-1, +1]$:
 
 $$
-E_i \;=\; \frac{2}{1 + 10^{(\bar{R}_i - R^C_i) / S_R}} \;-\; 1
+E_i \;=\; \frac{2}{1 + 10^{(\bar{R}_i - R^T_i) / S_R}} \;-\; 1
 $$
 
 and $\bar{R}_i$ is the **median** rating of player $i$'s opponents at the start of the match:
 
 $$
-\bar{R}_i \;=\; \mathrm{median}\{\, R^C_j \,:\, j \neq i \,\}
+\bar{R}_i \;=\; \mathrm{median}\{\, R^T_j \,:\, j \neq i \,\}
 $$
 
 | Symbol | Meaning | Value |
@@ -1637,28 +1652,44 @@ The rookie curve ($K \approx 52$ decaying toward $K \approx 12$–16 settled) mi
 
 ### 13.4 Performance index
 
-Eight combat axes (v2.2 — locked, $\sum w = 1.00$):
+Eight thug axes (v2.3 — locked, $\sum w = 1.00$, exported as `THUG_WEIGHTS` in `scripts/elo.py`):
 
 | Axis | Weight | Per-match metric (before z-score) |
 |---|---|---|
-| `net_damage_share`  | 0.21 | $(\text{dealt} - \text{received}) / \max(1, \sum_{\text{lobby}} \text{dealt})$ |
-| `kill_rate`         | 0.20 | $\text{kills} / \text{minutes\_played}$ |
-| `pvp_share`         | 0.18 | $\text{pvp\_dmg} / \max(1, \text{total\_dmg})$ |
-| `accuracy`          | 0.15 | $\text{shots\_hit} / \max(1, \text{shots\_fired})$ |
-| `structure_share`   | 0.10 | $\text{structure\_dmg} / \max(1, \text{dealt})$ — damage to enemy buildings as share of total (omit axis if lobby has zero structure damage) |
-| `mobility`          | 0.08 | $\text{activity\_score} / 100$ (omit axis if no positioning) |
-| `snipe_bonus`       | 0.04 | $\min(\text{snipes} / 5, 1)$ — capped before z-score |
-| `target_lock_pct`   | 0.04 | $\text{target\_lock\_pct} \in [0, 1]$ (omit axis if `has_target_lock_data` is false) |
+| `net_damage_share` | 0.20 | $(\text{dealt} - \text{received}) / \max(1, \sum_{\text{lobby}} \text{dealt})$ |
+| `thug_kill_rate`   | 0.20 | $(\text{pvp\_kills} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_kills}) / \text{minutes\_played}$ |
+| `thug_efficiency`  | 0.16 | $(\text{pvp\_dealt} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_to\_AI}) / \max(1, \text{total\_dealt} - \text{structure\_dealt})$ |
+| `thug_accuracy`    | 0.15 | weapon-normalized hit-rate ratio vs lobby (see formula below) |
+| `pve_share`        | 0.12 | $\text{pve\_dealt} / \max(1, \text{total\_dealt})$ — damage to enemy non-human assets (structures + mobile AI) as share of total (omit axis if lobby has zero PvE damage) |
+| `mobility`         | 0.08 | $\text{activity\_score} / 100$ (omit axis if no positioning) |
+| `snipe_bonus`      | 0.05 | $\min(\text{snipes} / 5, 1)$ — capped before z-score |
+| `target_lock_pct`  | 0.04 | $\text{target\_lock\_pct} \in [0, 1]$ (omit axis if `has_target_lock_data` is false) |
 
-Direct-dogfight axes (`net_damage_share + kill_rate + pvp_share + accuracy + snipe_bonus`) still total **0.78**, so the v2.2 axis swap sharpens what counts as thug work without blunting the core fighting signal.
+Direct-dogfight axes (`thug_kill_rate + thug_accuracy + thug_efficiency`) total **0.51**; the asset-disruption axis (`pve_share`) is **0.12**; volume + utility axes (`net_damage_share + mobility + snipe_bonus + target_lock_pct`) total **0.37**. The v2.3 composite is explicitly more multi-modal than v2.2 — role players doing economy work no longer get penalized.
 
-**`structure_share`** is a v2.2 addition. The pipeline derives it via a `BulletHit` → `DamageDealt` join (`DamageDealt` carries no `victim_odf` in the proto; only `BulletHit` does). For each player's BulletHits, we stash `victim_odf` into a per-`(tick, shooter, ordnance)` FIFO; the paired DamageDealt popleft's the queue and credits the player when (a) the victim ODF is in the `Building` bucket of `data/odf.min.json` and (b) the victim's faction-code (i/e/f from the ODF prefix) differs from the shooter's team faction. Mirror matches (both teams same faction) fall back to crediting all damage because the faction filter can't distinguish own vs enemy buildings. See `_load_building_odfs()` and `player_structure_dealt_by_vfc` in `scripts/process_stats.py`.
+**`ALPHA_PVE = 0.5`** (locked module constant in `scripts/elo.py`, surfaced as `alpha_pve` in `elo_current.json`). PvE work in the three "thug" axes counts at half the weight of equivalent PvP work — a nonzero floor so role players doing PvE work get credit, with PvP retaining the higher signal. Lobby z-scoring still naturally rewards exceptional PvE — a player who does dramatically more PvE damage than peers z-scores high on `pve_share` and `thug_efficiency` simultaneously without needing a separate "PvE excellence" axis. Tunable post-ship without a schema bump.
 
-**`target_lock_pct`** is a v2.2 addition. Reads `positioning.players[name].metrics.target_lock_pct` (already a 0–1 ratio, cross-match comparable). Gated on the match-global `has_target_lock_data` flag — pre-schema sessions and matches where nobody activated target mode return `None` for the entire lobby (the weight redistributes). Low weight (0.04) is deliberate: a discipline reward, not a dominator signal.
+**`thug_accuracy`** (weapon-normalized): for each player $p$ and each weapon $w$ that $p$ fired,
+
+$$
+\text{thug\_hits}_{p,w} = \text{pvp\_hits}_{p,w} + \alpha_{\mathrm{PvE}} \cdot (\text{hits}_{p,w} - \text{pvp\_hits}_{p,w})
+$$
+
+$$
+\text{pwa}_p = \frac{\sum_w \dfrac{\text{thug\_hits}_{p,w} / \text{shots}_{p,w}}{\text{thug\_hits}_w / \text{shots}_w} \cdot \dfrac{\text{shots}_{p,w}}{\text{shots}_p}}{\sum_w \dfrac{\text{shots}_{p,w}}{\text{shots}_p}}
+$$
+
+(weapons with no lobby signal are dropped; `used_weight` renormalizes). Output is a positive number per player; lobby z-score handles centering. Robust to weapon-mix bias — sniper mains aren't punished for the rifle's natural lower hit rate.
+
+**`thug_efficiency`** (was `pvp_share` in v2.2): the alpha-blended numerator credits PvE-to-AI damage at $\alpha$ weight; the denominator excludes structure damage so a structure-buster's economy work flows entirely to `pve_share` rather than diluting their efficiency score. Where `pve_to_AI ≈ pve_dealt - structure_dealt` (mobile AI damage, excluding world props which are negligible after the sentinel filter).
+
+**`pve_share`** (was `structure_share` in v2.2): broadened from buildings-only to all enemy non-human damage — covers structures + mobile AI like Scavengers, Producers, Extractors. Sources from `personal.pve_dealt`, which is already `total_dealt - pvp_dealt` and excludes player-owned-AI damage by construction. Returns `None` when no player in the lobby dealt PvE damage (axis-missing → weight redistribution).
+
+**`target_lock_pct`** (carried over from v2.2): reads `positioning.players[name].metrics.target_lock_pct`. Gated on the match-global `has_target_lock_data` flag — pre-schema sessions return `None` (weight redistributes). Low weight (0.04) is deliberate: a discipline reward, not a dominator signal.
 
 **`asset_multiplier`** was removed in v2.2 and reserved for a future **VTSR-C** (Commander) rating. Damage by player-owned AI tracks build/route quality (commander signal) rather than dogfight skill (thug signal). The underlying `assets.dealt` field still flows into `match_contributions.json` so career highlights like Puppeteer continue to work — only the ELO axis was retired.
 
-`pickup_economy` is intentionally **not** an ELO axis (low signal, map-dependent) — pickup + destruction totals stay on `match_contributions.json` so the Career Highlights' Pod Goblin card still has data. The former pickup weight folded into `pvp_share` to lean harder into anti-PvE-farming.
+`pickup_economy` is intentionally **not** an ELO axis (low signal, map-dependent) — pickup + destruction totals stay on `match_contributions.json` so the Career Highlights' Pod Goblin card still has data.
 
 Each axis is computed per-player-per-match, **z-scored within the lobby** (population stdev, ddof=0), clipped to $[-2, +2]$, divided by 2 to land in $[-1, +1]$. The composite is
 
@@ -1672,7 +1703,7 @@ When an axis is missing for the entire lobby (e.g. pre-positioning matches lack 
 
 ### 13.5 Hope mechanics — loss aversion + soft floor
 
-The raw update is asymmetric: when $\Delta R^C_{i,\text{raw}} < 0$, multiply by a loss-aversion factor $L = 0.85$ AND a soft-floor taper $\varphi(R)$:
+The raw update is asymmetric: when $\Delta R^T_{i,\text{raw}} < 0$, multiply by a loss-aversion factor $L = 0.85$ AND a soft-floor taper $\varphi(R)$:
 
 $$
 \varphi(R) \;=\; \mathrm{clamp}\!\left(0,\;1,\;\frac{R - F}{W}\right)
@@ -1681,9 +1712,9 @@ $$
 with floor $F = 1000$ and taper window $W = 150$. Final per-match update:
 
 $$
-\boxed{\;\Delta R^C_i \;=\; \begin{cases}
-\Delta R^C_{i,\text{raw}} & \text{if } \Delta R^C_{i,\text{raw}} \geq 0 \\
-\Delta R^C_{i,\text{raw}} \cdot L \cdot \varphi(R^C_i) & \text{otherwise}
+\boxed{\;\Delta R^T_i \;=\; \begin{cases}
+\Delta R^T_{i,\text{raw}} & \text{if } \Delta R^T_{i,\text{raw}} \geq 0 \\
+\Delta R^T_{i,\text{raw}} \cdot L \cdot \varphi(R^T_i) & \text{otherwise}
 \end{cases}\;}
 $$
 
@@ -1701,7 +1732,7 @@ Real numbers from `data/processed/elo_history.json`, match `2026-05-04T03-45-41`
 
 **Inputs:**
 
-- Player: **Lamper** at $R^C = 1500.82$ with $n = 8$ rated matches played.
+- Player: **Lamper** at $R^T = 1500.82$ with $n = 8$ rated matches played.
 - Lobby opponents (sorted by `before`): $1333 / 1373 / 1385 / 1450 / \mathbf{1456} / 1483 / 1499 / 1543 / 1767$. The bolded value is the median of the *other 9 players* (Lamper himself excluded). Exact median: $1455.77$.
 - Performance index: $P = +0.5435$ (top of the lobby on net damage, PvP share, and accuracy).
 
@@ -1728,32 +1759,32 @@ $$
 **Step 4 — raw delta:**
 
 $$
-\Delta R^C_{i,\text{raw}} = 34.22 \cdot 2.5 \cdot (0.5435 - 0.0647) \approx +40.96
+\Delta R^T_{i,\text{raw}} = 34.22 \cdot 2.5 \cdot (0.5435 - 0.0647) \approx +40.96
 $$
 
 **Step 5 — gain case (no loss aversion / floor taper):**
 
 $$
-\Delta R^C_i = +40.96 \quad\Rightarrow\quad R^C_i = 1500.82 + 40.96 = 1541.78
+\Delta R^T_i = +40.96 \quad\Rightarrow\quad R^T_i = 1500.82 + 40.96 = 1541.78
 $$
 
 > **Algorithm progression for this match**: v1 (lobby-median baseline) produced $\approx +49$. v2.0 ($S_R = 400$, opponent-strength-weighted) compressed it to $\approx +33$. v2.1 ($S_R = 800$) produced $\approx +38$. v2.2 (8-axis composite with `structure_share` + `target_lock_pct` replacing `asset_multiplier`) lands at $+40.96$ here — Lamper's lobby had no structure damage and no T-key data, so those axes self-omit and the weights redistribute to the remaining six, slightly amplifying his net-damage / PvP / accuracy lead. The full corpus was re-rated chronologically under v2.2, so $\bar{R}_i$ (and Lamper's own pre-match rating) differ from the v2.1 worked example.
 
-**Loss-case example** — a different player at $R^C = 1075$ posts $P = -0.30$ in a peer lobby ($K = 22$, $\bar{R} = 1075$ so $E = 0$):
+**Loss-case example** — a different player at $R^T = 1075$ posts $P = -0.30$ in a peer lobby ($K = 22$, $\bar{R} = 1075$ so $E = 0$):
 
 $$
-\Delta R^C_{i,\text{raw}} = 22 \cdot 2.5 \cdot (-0.30 - 0) = -16.5
+\Delta R^T_{i,\text{raw}} = 22 \cdot 2.5 \cdot (-0.30 - 0) = -16.5
 $$
 $$
 \varphi(1075) = \mathrm{clamp}(0, 1, (1075 - 1000) / 150) = 0.5
 $$
 $$
-\Delta R^C_i = -16.5 \cdot 0.85 \cdot 0.5 = -7.0
+\Delta R^T_i = -16.5 \cdot 0.85 \cdot 0.5 = -7.0
 $$
 
 Half the loss they'd take above $1150$. New rating $\approx 1068$ — still safely above floor.
 
-**Top-player plateau example** — a $R^C = 2620$ player (v1-era VTrider rating) in a lobby with $\bar{R} = 1510$ posts $P = +0.73$ (top of leaderboard, 11 kills, 5 deaths). With the v2.1 widened logistic ($S_R = 800$):
+**Top-player plateau example** — a $R^T = 2620$ player (v1-era VTrider rating) in a lobby with $\bar{R} = 1510$ posts $P = +0.73$ (top of leaderboard, 11 kills, 5 deaths). With the v2.1 widened logistic ($S_R = 800$):
 
 $$
 E_i = \frac{2}{1 + 10^{(1510 - 2620) / 800}} - 1 \approx +0.921
@@ -1762,29 +1793,32 @@ $$
 The model expects them to dominate. They do dominate ($P = +0.73$), but not as completely as the rating predicted ($E \approx +0.92$):
 
 $$
-\Delta R^C_{i,\text{raw}} = K \cdot 2.5 \cdot (0.73 - 0.921) \approx -0.48 \cdot K
+\Delta R^T_{i,\text{raw}} = K \cdot 2.5 \cdot (0.73 - 0.921) \approx -0.48 \cdot K
 $$
 
 Even on a top-fragger game, this player loses a small amount of rating. (Under v2.0's $S_R = 400$, $E$ pinned at $+0.997$ and the same match produced a slightly larger $-0.67 \cdot K$ drop.) Across many matches their rating plateaus where typical $P_i \approx E_i$ — i.e. where their rating matches their actual performance. This fine-tuned ELO-style opponent expectation prevents top players from gaining rating indefinitely just by farming soft lobbies; v2.1 lets the plateau sit ~300 pts above the median lobby instead of ~140, restoring a leaderboard-friendly spread.
 
-### 13.7 Migration note — v1 → v2 → v2.1 → v2.2
+### 13.7 Migration note — v1 → v2 → v2.1 → v2.2 → v2.3
 
-| Aspect | v1 (Phase 4 – Phase 11) | v2.0 (Phase 12 ship) | v2.1 (post-Phase-12 tuning) | v2.2 (Phase 13 thug-axis rebalance) |
-|---|---|---|---|---|
-| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged | unchanged |
-| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged | unchanged |
-| Logistic scale ($S_R$) | n/a | $400$ (v2.0 default) | $\mathbf{800}$ (small-population calibrated) | $800$ (unchanged) |
-| Outcome scale ($S_O$) | $2.5$ | $2.5$ (unchanged) | $2.5$ (unchanged) | $2.5$ (unchanged) |
-| Composite axes | 7 | 7 | 7 | **8** (drop `asset_multiplier`; add `structure_share` + `target_lock_pct`) |
-| K-factor decay | unchanged | unchanged | unchanged | unchanged |
-| Loss aversion + soft floor | unchanged | unchanged | unchanged | unchanged |
-| Tier ranges | unchanged | unchanged (absolute thresholds) | unchanged | unchanged |
-| Wins ELO blend ($\alpha$) | $0.0$ (stub) | $0.0$ (still stubbed) | $0.0$ (still stubbed) | $0.0$ (still stubbed) |
-| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ (no shape change) | $\mathbf{3}$ (weights keys changed shape) |
-| `PIPELINE_VERSION` | $7$ | $8$ (forced full re-process) | $9$ (forced full re-rating) | $\mathbf{10}$ (forced full re-process: new `personal.structure_dealt` field) |
-| `expected_score_logistic_scale` constant | absent | exposed (= 400) | exposed (= 800) | exposed (= 800) |
-| Per-delta `expected` field | absent | added alongside `performance` | unchanged | unchanged |
-| Per-player `personal.structure_dealt` | absent | absent | absent | **added** (BulletHit→DamageDealt join) |
+| Aspect | v1 | v2.0 | v2.1 | v2.2 | v2.3 (alpha-blended thug composite + Combat ELO → Thug ELO rename) |
+|---|---|---|---|---|---|
+| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged | unchanged | unchanged |
+| Rating component name | Combat ELO ($R^C$) | unchanged | unchanged | unchanged | **Thug ELO** ($R^T$) |
+| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged | unchanged | Median of opponents' Thug ELO |
+| Logistic scale ($S_R$) | n/a | $400$ | $\mathbf{800}$ | $800$ | $800$ (unchanged) |
+| Outcome scale ($S_O$) | $2.5$ | $2.5$ | $2.5$ | $2.5$ | $2.5$ (unchanged) |
+| Composite axes | 7 | 7 | 7 | 8 | **8** (rename `kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`; broaden `pve_share` to all enemy non-human dmg) |
+| Alpha-blended PvE in thug axes | n/a | n/a | n/a | n/a | **$\alpha_{\mathrm{PvE}} = 0.5$** (locked default; tunable post-ship) |
+| Weapon-normalized accuracy | flat ratio | flat ratio | flat ratio | flat ratio | **per-weapon ratio vs lobby baseline, shot-share weighted** |
+| K-factor decay | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Loss aversion + soft floor | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Tier ranges | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Wins ELO blend ($\alpha$) | $0.0$ | $0.0$ | $0.0$ | $0.0$ | $0.0$ (still stubbed) |
+| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ | $3$ | $\mathbf{4}$ (axis renames; `combat_elo`→`thug_elo` JSON field; new `axis_contributions` per delta + `axis_means` per rating; `alpha_pve` constant in top-level constants block) |
+| `PIPELINE_VERSION` | $7$ | $8$ | $9$ | $10$ | $\mathbf{11}$ (forced full re-process: new pipeline fields incl. per-weapon `pvp_hits`, `loadout`, `per_class_combat`) |
+| `match.schema_version` | $1$ → $2$ → $3$ | $3$ | $3$ | $3$ | $\mathbf{4}$ (per-match leaderboard rows gain `personal.pvp_kills`/`pve_kills`/etc., `weapon_breakdown[w].pvp_hits`, `loadout`, `per_class_combat`) |
+| Per-delta `axis_contributions` field | absent | absent | absent | absent | **added** (per-axis z-score after clip / 2) |
+| Per-rating `axis_means` field | absent | absent | absent | absent | **added** (career-average axis z-scores per player) |
 
 **Empirical effect (v2)**: compresses the high tail (top players plateau where their typical $P_i$ matches their $E_i$, instead of climbing forever in soft lobbies) and lifts the floor (mid- and low-rated players who play in heavyweight lobbies stop bleeding rating for "average" performances they were never expected to exceed). Existing `peak_vtsr` values from v1 are no longer comparable — every player's rating history was recomputed from scratch on the first v2 pipeline run.
 
@@ -1797,6 +1831,17 @@ Even on a top-fragger game, this player loses a small amount of rating. (Under v
 **Why we tuned it (v2.0 → v2.1)**: shipping at $S_R = 400$ assumed our continuous $P_i$ scoring would tolerate the same logistic steepness as classic binary win/loss formulations. It doesn't — our composite is bounded at $\sim \pm 0.7$ in practice (not $\pm 1$), and our ~25-player league means even small rating gaps already pin $E_i$ near its limit. The result was a tiny 200-pt spread on the leaderboard with VTrider sitting at 1644 — mathematically defensible (he'd plateaued where his typical performance matched expectations) but visually unhelpful (only Tiers 3 and 4 populated). $S_R = 800$ is honest about the small-population uncertainty without giving up the v2 mechanism. Iterating $S_R$ does NOT require a schema bump because the JSON shape is identical (just a constant value flips); only `PIPELINE_VERSION` bumps to force the cached re-rating.
 
 **Why we rebalanced (v2.1 → v2.2)**: VTSR-T is "individual dogfighter skill." `asset_multiplier` was always borderline — damage dealt by AI units a player owns measures how well their commander built/routed for them, not how well they dogfight. Pulling it out of VTSR-T and reserving it for a future VTSR-C (Commander) rating cleans up the signal. The freed weight went to two thug-relevant axes: `structure_share` (does the player threaten the enemy's economy?) and `target_lock_pct` (do they play with awareness of nearby threats?). `snipe_bonus` was trimmed one point alongside three other small adjustments to keep $\sum w = 1.00$. The `assets.dealt` field still flows into `match_contributions.json` so career highlights like Puppeteer keep working — only the ELO axis was retired.
+
+**Empirical effect (v2.3)**: VTSR-T is a *thug* rating, and a thug can be effective in more ways than one. Community feedback flagged that role players in defensive/utility ships were systematically downweighted because the v2.2 composite assumed everyone has equal opportunity to do PvP. Three v2.3 changes recognize role-player effectiveness:
+1. **Alpha-blended thug axes** ($\alpha_{\mathrm{PvE}} = 0.5$) — the three "thug" axes (`thug_kill_rate`, `thug_accuracy`, `thug_efficiency`) credit PvE work at fractional weight rather than zero. A pure economy-cripple now gets credit for AI kills + PvE damage they land on enemy structures.
+2. **Weapon-normalized accuracy** — `thug_accuracy` compares each weapon's hit rate against the lobby's per-weapon baseline. Sniper mains stop bleeding accuracy z-score for the rifle's natural lower hit rate.
+3. **Broader `pve_share`** — covers all enemy non-human damage (structures + mobile AI like Scavengers, Producers, Extractors), not just buildings. Base-busters AND scrap-killers both get credit symmetrically.
+
+Worked example: in a 10-player lobby, a fragger doing 5k PvP / 5 PvP kills now compares evenly with an economy-cripple doing 0 PvP / 13k PvE / ~20 AI kills — the latter scores +1.5σ on `net_damage_share` and +2.0σ on `pve_share`, which combined with comparable `thug_kill_rate` performance lets them narrowly out-rate the fragger. Lobby z-scoring is the "exceeded expectations" mechanism: when one player does dramatically more PvE work than peers, it shows up across multiple axes simultaneously.
+
+Architectural rename: **Combat ELO → Thug ELO** ($R^C \to R^T$) and **`COMBAT_WEIGHTS` → `THUG_WEIGHTS`** internally, plus JSON field rename `ratings[].combat_elo` → `ratings[].thug_elo`. Reflects that VTSR-T's combat-skill component is specifically thug-flavored. Sets up future VTSR-C as a sibling rating with its own commander-axis composite. **All `peak_vtsr` values from v2.2 are no longer comparable to v2.3** — the $P_i$ definition changed; historical peaks were recomputed from scratch on the v2.3 re-rate.
+
+**Why we rebalanced (v2.2 → v2.3)**: A thug rating that ignores PvE work systematically penalizes role players. The minimal alpha-blend approach (`α = 0.5`) preserves PvP as the primary signal while crediting PvE work at half-weight — guards against pure AI-farming (a player doing 100% PvE with no PvP still scores lower than an equally-skilled fragger) while letting role players be measured fairly. `pve_share` (12% of composite weight) gives any "asset disruption" role its own dedicated lane. Tunability: `ALPHA_PVE` is exposed in `elo_current.json` so the constant can be re-iterated from community feedback without a schema bump (only `PIPELINE_VERSION` to force re-rating). Per-axis attribution emit (`axis_contributions` + `axis_means`) makes the composite auditable from the dashboard's VTSR-T leaderboard popover, so the community can see exactly which axes drove each player's rating.
 
 ### 13.8 Tier ladder
 
@@ -1820,8 +1865,63 @@ Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to giv
 
 ### 13.10 File-format reference
 
-- `data/processed/elo_current.json` — current-state per-player ratings. Schema documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md).
-- `data/processed/elo_history.json` — per-match rating deltas, chronological. One entry per processed match (excluded matches have empty `deltas`).
+- `data/processed/elo_current.json` — current-state per-player ratings. Schema documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md). v2.3 fields: `alpha_pve` constant in the top-level constants block; per-rating `thug_elo` (was `combat_elo`) and `axis_means: {axis_name: career_avg_z, ...}`.
+- `data/processed/elo_history.json` — per-match rating deltas, chronological. One entry per processed match (excluded matches have empty `deltas`). v2.3 fields: per-delta `axis_contributions: {axis_name: clipped_z, ...}` carrying each axis's per-match contribution after clip-and-divide-by-2.
 
 Source-of-truth implementation: [scripts/elo.py](scripts/elo.py). Constants are exported at module top so they're trivially auditable.
+
+### 13.11 Loadout Profile + per-class combat (v2.3)
+
+Display-only data shipped on every leaderboard row alongside the existing combat fields. Powers the per-match Player Profile's Loadout Profile card + Per-Class Combat table. Sourced entirely from `update_tick.players[].odf` ticks + `data/odf.min.json` `inheritanceChain` field — zero editorial role labels.
+
+**Class taxonomy** (root inheritance class from `data/odf.min.json`):
+
+The pipeline's `_load_class_labels()` helper walks every `Vehicle` and `Pilot` ODF, takes the last entry of `inheritanceChain` as the canonical class, and synthesizes VSR-mod siblings (`<base>vsr.odf` / `<base>_vsr.odf`) for every base ODF. Resulting class labels (20 distinct in the current ODF DB):
+
+```
+wingman, morphtank, assaulttank, recyclervehicle, pilot, constructionrig,
+turrettank, turret, service, tug, scavenger, iv_walker, fv_walker, torpedo,
+bomber, artillery, boid, apc, sav, spraymine
+```
+
+`person` ODFs are renamed to `pilot` for display clarity. Unknown ODFs (DB miss + no synthesized variant) bucket to `unknown` and surface explicitly in the Per-Class Combat table — no silent merging into another class.
+
+**Per-player `loadout` block** (sibling to `weapon_breakdown` on each leaderboard row):
+
+```json
+{
+  "classes":         { "wingman": 0.582, "morphtank": 0.418 },
+  "class_seconds":   { "wingman": 348.5, "morphtank": 250.2 },
+  "primary_class":   "wingman",
+  "primary_share":   0.582,
+  "secondary_class": "morphtank",
+  "secondary_share": 0.418,
+  "class_diversity": 2,
+  "most_used_odf":   { "wingman": "ivtank.odf", "morphtank": "fvsent.odf" },
+  "active_seconds":  598.7
+}
+```
+
+**Per-player `per_class_combat` block** (list, one row per class with `time_seconds > 0`, sorted by time desc):
+
+```json
+[
+  {
+    "class": "wingman",
+    "time_seconds": 348.5,
+    "kills": 8, "deaths": 4,
+    "pvp_kills": 7, "pvp_deaths": 3,
+    "pve_kills": 1, "pve_deaths": 1,
+    "dealt": 4830.0,
+    "shots": 612, "hits": 287, "pvp_hits": 245,
+    "accuracy": 0.469, "pvp_accuracy": 0.400,
+    "dpm": 832.0,
+    "kd": 2.33
+  }
+]
+```
+
+All numeric fields are tick-joined to the player's active ship at event time via the running `s64_to_current_odf` map. Edge case: events that fire before the player's first `update_tick` (typically the first 1–2 events) bucket to class `unknown`. At 20 Hz this is negligible noise; the `unknown` row renders explicitly so any user audit can see the magnitude.
+
+**Career rollup** (in `js/all-matches-aggregator.js`): `career_loadout` and `career_per_class_combat` blocks on each `career_stats[]` row, summed across the picker-filtered match subset. Primary/secondary class is rederived from summed `class_seconds` to avoid double-rounding from per-match strings.
 

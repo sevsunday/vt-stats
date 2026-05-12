@@ -4708,3 +4708,199 @@ td.vt-col-split {
    theme so equations stay legible in dark mode. */
 .katex { color: inherit; }
 
+/* ===== VTSR-T v2.3 — Loadout Profile + Per-Class Combat + chips ===== */
+
+/* Compact PvP/PvE chip rendered next to the kills/deaths total in the
+   Player Leaderboard + Career Leaderboard tables. The total stays as
+   the primary number; the chip is a small, muted parenthetical so the
+   row reads as TOTAL (PvP/PvE). Tooltip surfaces the full split. */
+.vt-kd-split {
+    color: var(--kb-text-muted);
+    font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
+    margin-left: 0.15em;
+}
+
+/* Loadout Profile card. Stacked horizontal bar + per-class list,
+   shown inside renderPlayerProfile and the All Matches Career card.
+   Uses the same chart-palette tokens as the Combat Timeline so a
+   "wingman" segment renders the same color across the whole UI. */
+.vt-loadout-card {
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: var(--kb-radius-md, 6px);
+    padding: 0.75rem 0.9rem;
+    background: color-mix(in srgb, var(--kb-bg-card) 60%, transparent);
+}
+.vt-loadout-bar {
+    display: flex;
+    height: 14px;
+    width: 100%;
+    border-radius: 999px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--kb-text-muted) 10%, transparent);
+    margin-bottom: 0.6rem;
+}
+.vt-loadout-bar-seg {
+    height: 100%;
+    transition: opacity 120ms ease;
+    cursor: default;
+}
+.vt-loadout-bar-seg:hover {
+    opacity: 0.85;
+}
+.vt-loadout-classlist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.25rem 1rem;
+    font-size: 0.85rem;
+}
+.vt-loadout-classlist li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--kb-text-secondary);
+}
+.vt-loadout-swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+.vt-loadout-class {
+    color: var(--kb-text-primary);
+    font-weight: 500;
+}
+.vt-loadout-share {
+    color: var(--kb-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.vt-loadout-most-used {
+    color: var(--kb-text-muted);
+    font-size: 0.92em;
+    margin-left: auto;
+}
+
+/* Per-Class Combat table. Shown immediately below the Loadout bar.
+   Compact rows — one per ship class with time>0. PvE K column is
+   muted (not zeroed) to keep PvP K visually primary. */
+.vt-pcc-card {
+    margin-top: 0.75rem;
+}
+.vt-pcc-table th {
+    color: var(--kb-text-muted);
+    font-weight: 500;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 25%, transparent);
+    padding: 0.35rem 0.5rem;
+}
+.vt-pcc-table td {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.86rem;
+    color: var(--kb-text-secondary);
+    border-top: 1px solid color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+}
+.vt-pcc-table tbody tr:first-child td {
+    border-top: 0;
+}
+
+/* Player weapon-breakdown table (with v2.3 PvP Hits + PvP Acc cols).
+   Same compact aesthetic as the per-class combat table. */
+.vt-wb-card {
+    margin-top: 0.75rem;
+}
+.vt-wb-table th {
+    color: var(--kb-text-muted);
+    font-weight: 500;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 25%, transparent);
+    padding: 0.35rem 0.5rem;
+}
+.vt-wb-table td {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.86rem;
+    color: var(--kb-text-secondary);
+    border-top: 1px solid color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+}
+.vt-wb-table tbody tr:first-child td {
+    border-top: 0;
+}
+
+/* VTSR-T leaderboard popover for the per-axis breakdown of the
+   last-rated-match delta. Clicked-from a Last-delta cell. */
+.popover.vt-vtsr-popover {
+    --bs-popover-max-width: 380px;
+    background: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    color: var(--kb-text-primary);
+}
+.popover.vt-vtsr-popover .popover-header {
+    background: transparent;
+    color: var(--kb-text-primary);
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+.popover.vt-vtsr-popover .popover-body {
+    color: var(--kb-text-secondary);
+    font-size: 0.85rem;
+}
+.popover.vt-vtsr-popover .vt-vtsr-popover-headline {
+    color: var(--kb-text-primary);
+    font-weight: 500;
+    margin-bottom: 0.3rem;
+}
+.popover.vt-vtsr-popover .vt-vtsr-popover-eq {
+    margin-bottom: 0.5rem;
+    color: var(--kb-text-muted);
+    font-size: 0.78rem;
+    font-family: var(--bs-font-monospace);
+}
+.popover.vt-vtsr-popover .vt-axis-contrib-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 0.6rem;
+    font-variant-numeric: tabular-nums;
+    padding: 0.18rem 0;
+}
+.popover.vt-vtsr-popover .vt-axis-contrib-row .vt-axis-name {
+    color: var(--kb-text-primary);
+    font-size: 0.82rem;
+}
+.popover.vt-vtsr-popover .vt-axis-contrib-row .vt-axis-z {
+    color: var(--kb-text-secondary);
+    font-size: 0.82rem;
+}
+.popover.vt-vtsr-popover .vt-axis-contrib-row .vt-axis-weighted {
+    color: var(--kb-text-muted);
+    font-size: 0.78rem;
+}
+.popover.vt-vtsr-popover .vt-axis-contrib-row.is-positive .vt-axis-z,
+.popover.vt-vtsr-popover .vt-axis-contrib-row.is-positive .vt-axis-weighted {
+    color: var(--kb-success);
+}
+.popover.vt-vtsr-popover .vt-axis-contrib-row.is-negative .vt-axis-z,
+.popover.vt-vtsr-popover .vt-axis-contrib-row.is-negative .vt-axis-weighted {
+    color: var(--kb-danger);
+}
+
+/* Primary class chip on the VTSR-T leaderboard. Small badge sized
+   to align with the existing Tier badge column. */
+.vt-vtsr-primary-class {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    background: color-mix(in srgb, var(--kb-text-muted) 15%, transparent);
+    color: var(--kb-text-secondary);
+    border: 1px solid var(--kb-border-subtle);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+}
+
