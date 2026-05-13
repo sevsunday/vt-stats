@@ -24,7 +24,8 @@ VT Stats — static-site dashboard for Battlezone: Combat Commander match statis
 
 - `DEVELOPER_GUIDE.md` — full technical specification: protobuf schema with field tables, damage event semantics, ODF weapon resolution, pre-computed JSON structure with examples, styling standards, chart architecture, tab navigation architecture
 - `README.md` — project overview, quick start, features list
-- `scripts/statsgate.proto` — **definitive reference** for the raw data schema
+- `scripts/statsgate.proto` — **definitive reference** for the current (v2) raw data schema
+- `scripts/statsgate_v1.proto` — frozen verbatim snapshot of the legacy schema. Used only by the dual-descriptor fallback path in `scripts/process_stats.py::load_session` and `js/raw-browser.js::fetchAndDecodeBinpb` so pre-Nomad sessions still decode byte-identically. Do not edit; regenerate the v1 pb2 + protobufjs JSON only if backporting a fix
 - `statsgate/` — upstream collector source code for schema reference
 - `css/vtstats-theme.css` — premium glassmorphic theme layer: glass surfaces, Geist typography, depth shadows, animations, migrated inline styles, `--vt-*` effect variables
 - `js/vtstats-fx.js` — effects engine: animated counters, staggered entrances, tab-entrance hooks, Chart.js shadow plugin, preloader lifecycle, View Transition API
@@ -50,7 +51,8 @@ VT Stats — static-site dashboard for Battlezone: Combat Commander match statis
 
 ## Key Conventions
 
-- `scripts/statsgate.proto` is the single source of truth for raw data schema. All docs, rules, and pipeline code must match it. When it changes, everything downstream updates.
+- `scripts/statsgate.proto` is the single source of truth for the **current (v2)** raw data schema. All docs, rules, and pipeline code must match it. When it changes, regenerate `scripts/statsgate_pb2.py` and `vendor/protobufjs/statsgate.proto.json`; everything downstream updates.
+- **Dual-descriptor decode (v1/v2 corpus split).** The pipeline transparently supports both the legacy schema (`scripts/statsgate_v1.proto`, separate `DamageDealt`+`DamageReceived` events) and the current schema (unified `DamageDealt` + `Race` enum + `shutdown_requested` + `BulletHit.distance_to_target`). `load_session()` returns `(session, schema)` where `schema` is `"v1"` or `"v2"`; the consumer loop normalizes both paths to a single `DamageEvent` shape so downstream aggregators are schema-agnostic. The detected schema is stamped on `match.proto_schema_version` (debugging telemetry only — UI never branches on it). The same try-v2/fallback-v1 dance happens in the Raw Data Browser. Maintain byte-for-byte parity for v1 corpus on any schema-related change — the only allowed diffs are version bumps and new optional fields.
 - All data processing happens in the Python pipeline (`scripts/process_stats.py`), never in browser JavaScript — with one **documented exception**: `js/all-matches-aggregator.js` performs pure summation over `data/processed/match_contributions.json` to produce the All Matches view's aggregate. This exists so the picker's facet filters (player count, duration band, players, role, etc.) can scope the aggregate without per-match round trips. Per-match aggregation (leaderboards, weapon meta, rivalry matrices) still happens in the pipeline; only the cross-match summation moved client-side.
 - All dependencies are vendored locally in `vendor/` — no CDN usage.
 - All colors come from CSS custom properties (`--kb-*`) — zero hardcoded colors in HTML or JS. Visual effects use `--vt-*` variables.

@@ -7,22 +7,61 @@ globs: "**/*.{py,js,json}"
 
 ## Canonical Reference
 
-`scripts/statsgate.proto` is the **definitive reference** for the raw data schema. All documentation, rules, and pipeline code must match it. See `DEVELOPER_GUIDE.md` Section 2 for full field tables and JSON structure examples.
+`scripts/statsgate.proto` is the **definitive reference** for the raw data schema (v2 — current). `scripts/statsgate_v1.proto` is a frozen verbatim snapshot of the legacy schema, retained for the dual-descriptor decode path so pre-Nomad sessions still process byte-identically. All documentation, rules, and pipeline code must match the v2 schema. See `DEVELOPER_GUIDE.md` Section 2 for full field tables and JSON structure examples.
 
-## Protobuf Events
+## Schema Version Strategy (v1 / v2 Dual Descriptors)
+
+The pipeline supports two on-the-wire proto formats simultaneously:
+
+- **v1 (legacy)**: separate `DamageDealt` + `DamageReceived` events emitted as adjacent pairs. `StatHeader` has no race or shutdown fields. `BulletHit` has no `distance_to_target` field. Used for sessions captured before the Nomad collector upgrade.
+- **v2 (current)**: single unified `DamageDealt` event carrying both sides. `StatHeader` adds `shutdown_requested`, `team1_race`, `team2_race`. `BulletHit` adds `distance_to_target`. `StatEvent.event_type` reserves oneof field `4` (the slot the removed `DamageReceived` used to occupy).
+
+Detection at decode time:
+- **Python** (`scripts/process_stats.py::load_session`): parse with the v2 descriptor first; if `header.team1_race != 0` OR `header.team2_race != 0` the file is v2; otherwise scan the event stream for any `WhichOneof('event_type') is None` (v1's `damage_received` lands here under v2's `reserved 4`). A v1 detection re-parses with the v1 descriptor so DamageDealt fields land in the correct semantic slots.
+- **JS** (`js/raw-browser.js::fetchAndDecodeBinpb`): protobufjs is strict about wire-type collisions, so a try-v2 / catch-and-fall-back-to-v1 dance is sufficient.
+
+The detected schema is stamped onto every match output as `match.proto_schema_version` (`"v1"` | `"v2"`). UI never branches on it -- it's debugging telemetry. The pipeline normalizes both schemas to a single internal `DamageEvent` shape so downstream aggregators (leaderboard, weapon meta, rivalry, kills, positioning, highlights, etc.) are schema-agnostic.
+
+Bumping `scripts/statsgate.proto` going forward: regenerate **both** descriptor pairs (`statsgate_pb2.py` + `vendor/protobufjs/statsgate.proto.json`). The v1 pair is frozen unless we need to backport a bugfix. See `.cursor/rules/schema-migration.mdc` for the full playbook.
+
+## Protobuf Events (v2 current schema)
 
 Event types in `StatEvent.event_type` oneof:
 
 | Field # | Type | Key Fields |
 |---|---|---|
 | 1 | `BulletInit` | tick, shooter (uint64 Steam64), ordnance_odf |
-| 2 | `BulletHit` | tick, shooter (uint64 Steam64), ordnance_odf, victim (uint64 Steam64), victim_odf, shooter_odf |
-| 3 | `DamageDealt` | tick, shooter (uint64 Steam64), team (int32 slot), ordnance_odf, amount |
-| 4 | `DamageReceived` | tick, victim (uint64 Steam64), team (int32 slot), ordnance_odf, amount |
+| 2 | `BulletHit` | tick, shooter (uint64 Steam64), ordnance_odf, victim (uint64 Steam64), victim_odf, shooter_odf, **distance_to_target (v2-only float)** |
+| 3 | `DamageDealt` (v2 unified) | tick, shooter (uint64 Steam64), shooter_team (int32 slot), shooter_odf, victim (uint64 Steam64), victim_team (int32 slot), victim_odf, ordnance_odf, amount |
+| 4 | _reserved_ | v2 reserves this slot (was `DamageReceived` in v1) |
 | 5 | `UpdateTick` | tick, repeated PlayerState (Steam64, position, speed, health, ammo, odf, has_target) |
 | 6 | `UnitDestroyed` | tick, killer/victim Steam64, killer/victim team slot, killer/victim odf |
 | 7 | `UnitSniped` | tick, shooter/victim Steam64, shooter/victim team slot, shooter/victim odf (Phase 3 added the shooter/victim/odf fields; pre-Phase-3 sessions only carry `tick`). **Collector-bug erratum (Phase 3 through ~2026-05-04):** `shooter` Steam64 was overwritten with the victim's Steam64 and `victim` Steam64 was always `0` (typo at `statsgate/statsgate/src/stat_client.cpp:273`). The pipeline ignores both wire Steam64 fields and slot-derives identity from `shooter_team` / `victim_team` via `header.teamnum_to_s64`; this works under both buggy and fixed collectors. See [`docs/DATA_DICTIONARY.md`](mdc:docs/DATA_DICTIONARY.md#unitsniped) and [`_sniper_investigation/DIAGNOSIS.txt`](mdc:_sniper_investigation/DIAGNOSIS.txt). |
 | 8 | `PickupPowerup` | tick, picker (uint64 Steam64), picker_team, picker_odf, powerup_team, powerup_odf (Phase 3 added) |
+
+### v1 legacy schema (still decoded by `statsgate_v1.proto`)
+
+The v1 descriptor still resolves the pre-change layout for pre-Nomad sessions:
+
+| Field # | Type | Key Fields |
+|---|---|---|
+| 3 | `DamageDealt` (v1) | tick, shooter (uint64 Steam64), team (int32 slot — shooter's team), ordnance_odf, amount |
+| 4 | `DamageReceived` (v1) | tick, victim (uint64 Steam64), team (int32 slot — victim's team), ordnance_odf, amount (always equal to the paired DD's amount) |
+
+All other v1 messages are identical to v2 with the v2-only fields absent. The v1 `StatHeader` has no `shutdown_requested` / `team1_race` / `team2_race`; the v1 `BulletHit` has no `distance_to_target`. These appear as `false` / `0` / `0.0` after a v1 decode (protobuf default).
+
+## Race Enum (v2 only)
+
+`StatHeader.team1_race` and `team2_race` carry a `Race` enum value:
+
+| Value | Enum | Faction code | Faction name |
+|---|---|---|---|
+| 0 | `RACE_UNSPECIFIED` | (none) | (algo inference falls back) |
+| 1 | `RACE_ISDF` | `"i"` | ISDF |
+| 2 | `RACE_SCION` | `"f"` | Scion |
+| 3 | `RACE_HADEAN` | `"e"` | Hadean |
+
+Mapping is `RACE_TO_FACTION_CODE` in `scripts/process_stats.py`. When either header race is non-zero, it overrides the existing per-slot ODF-vote inference (`detect_team_factions()`) for that team. Mismatches between header and algo log to stdout but never block. v1 sessions always report `RACE_UNSPECIFIED` on both teams since the field doesn't exist in the legacy proto; the inference path remains unchanged.
 
 ## Player Identity
 
@@ -33,13 +72,22 @@ Players are identified by `uint64` Steam64 IDs. The header provides three lookup
 
 ## Critical: Damage Semantics
 
-### The `team` Field
+### The `team` / `shooter_team` / `victim_team` Fields
 
-The `team` field is **ALWAYS the owning player's slot number (1-10)**. It is NOT a faction ID. Faction is determined by slot convention: 1-5 = Team 1, 6-10 = Team 2.
+The team field is **ALWAYS the owning player's slot number (1-10)**. It is NOT a faction ID. Faction is determined by slot convention: 1-5 = Team 1, 6-10 = Team 2.
 
-### Adjacent Pair Rule
+- v1 `DamageDealt.team` = shooter's team slot. v1 `DamageReceived.team` = victim's team slot.
+- v2 `DamageDealt` carries both `shooter_team` and `victim_team` on the same event.
 
-`DamageDealt` and `DamageReceived` events are **ALWAYS adjacent pairs**. Both have identical `amount` values (`dmg.value` in the engine). Consume both together.
+The pipeline's normalized `DamageEvent` exposes both as `de_shooter_team` and `de_victim_team` regardless of schema.
+
+### Adjacent Pair Rule (v1 only)
+
+In v1, `DamageDealt` and `DamageReceived` events are **ALWAYS adjacent pairs** on the wire. Both have identical `amount` values (`dmg.value` in the engine). The v1 path of the `_normalize_damage_events()` adapter in `scripts/process_stats.py` consumes both together (advances stream index by 2) and produces a single normalized `DamageEvent`.
+
+In v2, there is no pair -- the unified `DamageDealt` already carries both shooter-side and victim-side data. The adapter advances by 1 per event and the same `DamageEvent` shape is produced.
+
+Downstream aggregators read the normalized event uniformly; no consumer should branch on schema.
 
 ### Attribution Logic
 
@@ -99,7 +147,13 @@ These are applied by the statsgate collector before data reaches us:
 
 ### Sentinel Damage Filter
 
-The pipeline drops `DamageDealt` / `DamageReceived` events whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value: `268,435,456.0` = `2^28`), not real combat. The guard is applied at the top of the `damage_dealt` branch and the timeline recompute loop in `scripts/process_stats.py` before any accumulator touches the amount. Both the DD and its paired DR are consumed together. Per-match telemetry lives on `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` (counts **pairs**, not individual events); aggregate rollup at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage`. All match-global / always-unfiltered. The Raw Browser Reconcile view mirrors this filter (same helper constant, inline pill surfaces the literal dropped total); the raw events table still displays sentinel values verbatim. Full evidence chain + decompile + struct layout: [§7 Sentinel Damage Filter in docs/DATA_DICTIONARY.md](../../docs/DATA_DICTIONARY.md#7-sentinel-damage-filter).
+The pipeline drops damage events whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value: `268,435,456.0` = `2^28`), not real combat. The guard is applied at the top of the unified damage-event consumer in `scripts/process_stats.py` (and the timeline recompute loop) before any accumulator touches the amount.
+
+`match.sentinel_damage = { count, total_amount, first_tick, last_tick }` counts **logical damage records**, which is schema-agnostic:
+- **v1**: one DamageDealt+DamageReceived pair = 1 record.
+- **v2**: one unified DamageDealt event = 1 record.
+
+The on-the-wire representation differs but the in-game damage event count is identical. Aggregate rollup at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage` uses the same logical-record semantic. All match-global / always-unfiltered. The Raw Browser Reconcile view mirrors this filter (same helper constant, inline pill surfaces the literal dropped total); the raw events table still displays sentinel values verbatim. Full evidence chain + decompile + struct layout: [§7 Sentinel Damage Filter in docs/DATA_DICTIONARY.md](../../docs/DATA_DICTIONARY.md#7-sentinel-damage-filter).
 
 ### Faction Determination
 
@@ -107,7 +161,10 @@ Faction is determined purely by slot convention: slots 1-5 = Team 1, slots 6-10 
 
 ### Team Faction Detection (ISDF / Hadean / Scion)
 
-Slot membership tells you which team a player is on, but not which **faction** that team picked at lobby. The pipeline derives faction labels (ISDF / Hadean / Scion) from per-slot ODF signals via two complementary algorithms — **Algorithm A** (starting ship: first non-empty `PlayerState.odf` per slot) and **Algorithm B** (event-stream votes: first-letter votes from every team-attributed vehicle/structure/pilot ODF the slot's owner emitted across `BulletHit`, `UnitDestroyed`, `UpdateTick`, `PickupPowerup`, `UnitSniped`). The combined per-slot vote determines each slot's faction; the per-team mode determines the team's faction.
+Slot membership tells you which team a player is on, but not which **faction** that team picked at lobby. Two sources, in order of authority:
+
+1. **Header race override (v2 only)**: when `StatHeader.team1_race` and/or `team2_race` are non-zero, they map to the project's faction code via `RACE_TO_FACTION_CODE` and authoritatively determine that team's faction. This is the source-of-truth signal the engine itself emits. Mismatches against the algorithmic inference log to stdout (`faction header/algo mismatch teamN`) but never block.
+2. **Algorithmic inference (v1 + v2 fallback)**: derived from per-slot ODF signals via two complementary algorithms — **Algorithm A** (starting ship: first non-empty `PlayerState.odf` per slot) and **Algorithm B** (event-stream votes: first-letter votes from every team-attributed vehicle/structure/pilot ODF the slot's owner emitted across `BulletHit`, `UnitDestroyed`, `UpdateTick`, `PickupPowerup`, `UnitSniped`). The combined per-slot vote determines each slot's faction; the per-team mode determines the team's faction. Used whenever the header race is `RACE_UNSPECIFIED` (always on v1, and on rare v2 sessions where the collector didn't populate it).
 
 Constants in `scripts/process_stats.py`:
 - `RECYCLER_ODFS` / `FACTORY_ODFS` — recycler + factory ODFs grouped by faction (used by faction detection's documentation + `compute_match_winner()`).
@@ -171,7 +228,7 @@ Disambiguate collisions by appending raw ODF in parentheses.
 Pre-computed JSON in `data/processed/`. See `DEVELOPER_GUIDE.md` Section 5 for full JSON structure with examples.
 
 - `matches.json` — manifest (includes `submitter`, `has_position_data`, `has_target_lock_data`, `has_pickup_data` fields per match)
-- `<match_id>.json` — per-match: `match` (with `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `team_leaders`, **`team_factions`**, `schema_version`), `leaderboard` (with kills/deaths/hit_targets), `faction_totals`, `rivalry_matrix`, `top_rivalries`, `weapon_meta`, **`odf_map`**, `timeline`, `asset_damage`, `kills` (leaderboard/feed/by_vehicle/kill_rivalry_matrix; `feed[]` carries `killer_team` + `victim_team` raw slot ints), `pickups` (Phase 3: feed/by_player/by_odf/totals/has_pickup_data), `powerup_destructions` (Phase 3: feed/by_player/by_odf/totals — destruction stats), `deployable_destructions` (Phase 3: by_player/by_odf/totals — no feed), `snipes` (Phase 3: feed/by_player/totals), `positioning`, **`highlights`** (schema_version 2: fixed-slate 12-card award catalog — match-global + always-unfiltered; cards self-omit when their data gates fail). `match.schema_version` is `1` for Phase 3 baseline, `2` once `highlights` shipped, `3` once `team_factions` + `winner` ship; absence means legacy data.
+- `<match_id>.json` — per-match: `match` (with `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `team_leaders`, **`team_factions`**, `schema_version`, **`proto_schema_version`**, **`shutdown_requested`**, **`bullet_hit_distance`**), `leaderboard` (with kills/deaths/hit_targets), `faction_totals`, `rivalry_matrix`, `top_rivalries`, `weapon_meta`, **`odf_map`**, `timeline`, `asset_damage`, `kills` (leaderboard/feed/by_vehicle/kill_rivalry_matrix; `feed[]` carries `killer_team` + `victim_team` raw slot ints), `pickups` (Phase 3: feed/by_player/by_odf/totals/has_pickup_data), `powerup_destructions` (Phase 3: feed/by_player/by_odf/totals — destruction stats), `deployable_destructions` (Phase 3: by_player/by_odf/totals — no feed), `snipes` (Phase 3: feed/by_player/totals), `positioning`, **`highlights`** (schema_version 2: fixed-slate 12-card award catalog — match-global + always-unfiltered; cards self-omit when their data gates fail). `match.schema_version` is `1` for Phase 3 baseline, `2` once `highlights` shipped, `3` once `team_factions` + `winner` shipped, `4` once v2.3 leaderboard fields shipped, `5` once the proto v2 capture fields (`proto_schema_version` / `shutdown_requested` / `bullet_hit_distance`) shipped; absence means legacy data.
 - `match_contributions.json` — slim per-match contributions for the All Matches aggregator. Dict keyed by `<match_id>.json`; each entry holds the fields needed to rebuild career stats / global weapon meta / global rivalries: `id`, `map`, `date`, `duration_sec`, `submitter`, `player_count`, `has_position_data`, `has_target_lock_data`, `has_pickup_data`, `sentinel_damage_count`, **`team_leaders`**, **`team_factions`**, **`winner`** (`{team, decided_by}`), **`snipes_by_player`**, **`powerup_destructions_by_player`**, plus per-player `leaderboard` (flat damage / shot / kill / weapon-breakdown / positioning fields, **`steam64`**, **`slot`**, **`team`**, **`is_commander`**), `weapon_meta`, and `rivalry_matrix`. Built by `_extract_contribution()` in `scripts/process_stats.py`. Consumed by [`js/all-matches-aggregator.js`](../../js/all-matches-aggregator.js) which sums it over the picker-filtered subset of file ids and produces the legacy shape (`{meta, career_stats, global_weapon_meta, global_rivalries}`) plus three new top-level blocks: **`commander_stats`** (rows + head-to-head + most-commanded-against), **`faction_stats`** (per-team-slot picks + per-faction win counts), **`meta_charts`** (maps / duration bands / player counts / submitters / matches over time), and **`career_highlights`** (24-card highlight grid built by `buildCareerHighlightsInline()`). DEPRECATED → DELETED: `all_matches.json` is no longer written by the pipeline; the legacy `build_all_matches_aggregate()` Python function remains as reference code only. **PIPELINE_VERSION** bumped from 6 to 7 in this overhaul (the contribution shape change forced one full reprocess).
 - `elo_current.json` — per-player ratings emitted by `scripts/elo.py`. Schema (v4): `{schema_version, alpha, alpha_pve, anchor, rating_scale, expected_score_logistic_scale, k_loss_aversion, rating_floor, floor_taper_window, k_base, k_floor, provisional_prior, provisional_threshold, min_player_count, min_duration_sec, computed_at, match_count, matches_excluded_low_player_count, matches_excluded_short_duration, matches_excluded_no_winner, weights, ratings[]}`. The `weights` block carries **8 keys** as of v2.3 (`net_damage_share`, `thug_kill_rate`, `thug_efficiency`, `thug_accuracy`, `pve_share`, `mobility`, `snipe_bonus`, `target_lock_pct`). Per-row `ratings[i]` carries `{name, steam64, vtsr, thug_elo, wins_elo, matches_played, matches_provisional, last_match_id, last_delta, peak_vtsr, peak_at, win_history, axis_means}`. Full algorithm: see `DEVELOPER_GUIDE.md` §13. **Corpus-wide / picker-filter-unaware** per `filter-contract.mdc`. **v2.3 (current)**: alpha-blended thug composite + Combat ELO → Thug ELO rename. Three changes: (1) `thug_kill_rate`/`thug_accuracy`/`thug_efficiency` credit PvE work at fractional weight `ALPHA_PVE = 0.5` (locked default, surfaced as `alpha_pve` in elo_current.json — tunable post-ship without a schema bump). (2) `thug_accuracy` is weapon-normalized against the lobby's per-weapon baseline (replaces flat shots_hit/shots_fired). (3) `pve_share` replaces v2.2's narrower `structure_share` — covers all enemy non-human damage (structures + mobile AI; sources from `personal.pve_dealt`). JSON field rename `combat_elo` → `thug_elo` reflects the architectural Combat ELO → Thug ELO rename (sets up future VTSR-C commander rating). New per-rating `axis_means` block: career-average per-axis z-scores. Powers the VTSR-T leaderboard's "Strong axes" tooltip on the rating cell. `ELO_SCHEMA_VERSION` bumped 3 → 4; `PIPELINE_VERSION` bumped 10 → 11. **Pre-v2.3 `peak_vtsr` values are no longer comparable.**
 - `elo_history.json` — per-match ELO deltas (chronological) emitted alongside `elo_current.json`. `{schema_version, history[]}` with each `history[i] = {match_id, match_date, match_excluded, exclusion_reason?, deltas[]}`. Each `deltas[i]` carries `{name, steam64, before, after, delta, performance, expected, axis_contributions}`. The v2 `expected` field is the opponent-strength-weighted `E_i`. The **v2.3** `axis_contributions` field is the per-axis z-score after clip-and-divide-by-2 (range $[-1, +1]$ per axis), keyed by axis name; axes that were unavailable for this lobby (and thus had their weight redistributed) are OMITTED. Audit invariant: $\sum_a z_a \cdot w'_a \approx \text{performance}$. Powers the VTSR-T leaderboard's per-axis breakdown popover on the Last-delta cell.

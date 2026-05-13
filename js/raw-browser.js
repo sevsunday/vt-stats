@@ -51,6 +51,15 @@
   // See .cursor/plans/lazy-projected_rows_bulk_baaa7bef.plan.md.
   const BULK_THRESHOLD = 2000;
   const DESCRIPTOR_URL = 'vendor/protobufjs/statsgate.proto.json';
+  const DESCRIPTOR_URL_V1 = 'vendor/protobufjs/statsgate_v1.proto.json';
+  const ROOT_MESSAGE_V1 = 'statsgate_v1.ClientStatSession';
+
+  // Schema labels mirrored from scripts/process_stats.py (PROTO_SCHEMA_V1
+  // / PROTO_SCHEMA_V2). Stamped on `state.protoSchemaVersion` so the
+  // events table + Reconcile view can branch on which descriptor
+  // succeeded for the current match.
+  const PROTO_SCHEMA_V1 = 'v1';
+  const PROTO_SCHEMA_V2 = 'v2';
   const ROOT_MESSAGE = 'statsgate.ClientStatSession';
   const PROTO_DOCS_URL = 'data/proto-docs.json';
   const FIELD_DOCS_MANUAL_URL = 'data/field-docs-manual.json';
@@ -88,12 +97,29 @@
     'eventStream.*.pickupPowerup': 'PickupPowerup',
   };
 
-  // StatEvent oneof arms in declaration order (matches scripts/statsgate.proto).
-  // Used by the events-mode filter chips and the stats banner.
-  const EVENT_ARMS = [
+  // StatEvent oneof arms in declaration order. EVENT_ARMS_ALL is the
+  // superset across both schemas (declared in scripts/statsgate_v1.proto
+  // and scripts/statsgate.proto). Most call sites should read from
+  // `currentEventArms()` which filters this list against the active
+  // schema -- on v2 sessions, `damageReceived` is excluded because the
+  // unified `damageDealt` message carries both sides; on v1 sessions
+  // all eight arms appear.
+  const EVENT_ARMS_ALL = [
     'bulletInit', 'bulletHit', 'damageDealt', 'damageReceived',
     'updateTick', 'unitDestroyed', 'unitSniped', 'pickupPowerup',
   ];
+  // Per-schema chip set. v2 reserves `damage_received` (field 4) on
+  // StatEvent so the arm never appears in modern matches.
+  const EVENT_ARMS_BY_SCHEMA = {
+    v1: EVENT_ARMS_ALL,
+    v2: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
+  };
+  // Back-compat alias: many existing call sites read `EVENT_ARMS`
+  // directly. Re-exposed as a getter so reads always reflect the
+  // current detected schema without touching the call sites.
+  function currentEventArms() {
+    return EVENT_ARMS_BY_SCHEMA[state.protoSchemaVersion] || EVENT_ARMS_ALL;
+  }
   const EVENT_ARM_LABELS = {
     bulletInit: 'BulletInit',
     bulletHit: 'BulletHit',
@@ -142,6 +168,16 @@
     // proto root (loaded once)
     protoRoot: null,
     rootMessageType: null,
+    // v1 (legacy) descriptor cache. Lazy-populated by loadProtoRootV1()
+    // on the first match that needs the fallback. Most modern matches
+    // use v2 so the v1 root is only fetched + parsed when the v2 decode
+    // fails (typically once per page load, then cached).
+    protoRootV1: null,
+    rootMessageTypeV1: null,
+    // 'v1' | 'v2' -- detected per match by fetchAndDecodeBinpb() based
+    // on which descriptor's decode() succeeded. Drives EVENT_ARMS chip
+    // filtering and Reconcile view computations downstream.
+    protoSchemaVersion: PROTO_SCHEMA_V2,
     // resolvers (match-specific)
     s64ToNick: null,       // Map<string, string>
     odfMap: null,          // { raw_odf -> pretty }
@@ -302,8 +338,8 @@
     // Events-mode filters (only serialized when events mode is active).
     if (state.view === 'decoded' && state.mode === 'events' && state.events) {
       const f = state.events.filter;
-      if (f.types.size < EVENT_ARMS.length) {
-        p.set('types', EVENT_ARMS.filter(a => f.types.has(a)).join(','));
+      if (f.types.size < currentEventArms().length) {
+        p.set('types', currentEventArms().filter(a => f.types.has(a)).join(','));
       }
       if (f.lo !== state.events.tickMin || f.hi !== state.events.tickMax) {
         p.set('tick', `${f.lo}-${f.hi}`);
@@ -411,11 +447,24 @@
     return state.protoRoot;
   }
 
+  // Lazy-load the v1 (legacy) descriptor. Only invoked when a v2
+  // decode throws -- typically the very first pre-Nomad session of
+  // the browsing session, then cached for subsequent v1 matches.
+  async function loadProtoRootV1() {
+    if (state.protoRootV1) return state.protoRootV1;
+    const res = await fetch(DESCRIPTOR_URL_V1);
+    if (!res.ok) throw new Error(`Failed to load v1 proto descriptor (${res.status})`);
+    const desc = await res.json();
+    state.protoRootV1 = window.protobuf.Root.fromJSON(desc);
+    state.rootMessageTypeV1 = state.protoRootV1.lookupType(ROOT_MESSAGE_V1);
+    return state.protoRootV1;
+  }
+
   // --- Decode pipeline ---
 
   async function fetchAndDecodeBinpb(rawUrl) {
-    const root = await loadProtoRoot();
-    const type = state.rootMessageType;
+    await loadProtoRoot();
+    const typeV2 = state.rootMessageType;
 
     const res = await fetch(rawUrl);
     if (!res.ok) throw new Error(`Failed to fetch ${rawUrl} (HTTP ${res.status})`);
@@ -426,8 +475,27 @@
     const rawStream = new Blob([gzBytes]).stream().pipeThrough(ds);
     const rawBytes = new Uint8Array(await new Response(rawStream).arrayBuffer());
 
+    // Schema discrimination: try v2 first. protobufjs is strict about
+    // wire-type collisions, so a v1 file (whose DamageDealt field 5 is
+    // fixed32 `amount` where v2 expects varint `victim`) reliably throws
+    // during decode. On error, fall back to the v1 descriptor.
+    //
+    // Why protobufjs is strict here while the Python pipeline's
+    // `load_session()` uses a header-fingerprint discriminator instead:
+    // Python's protobuf parser silently stashes wire-type mismatches
+    // into unknown_fields without raising, so we can't use try/catch
+    // there. protobufjs raises, so we can.
     const t0 = performance.now();
-    const msg = type.decode(rawBytes);
+    let msg = null;
+    let schema = PROTO_SCHEMA_V2;
+    try {
+      msg = typeV2.decode(rawBytes);
+    } catch (e) {
+      await loadProtoRootV1();
+      msg = state.rootMessageTypeV1.decode(rawBytes);
+      schema = PROTO_SCHEMA_V1;
+    }
+    const decodeType = schema === PROTO_SCHEMA_V2 ? typeV2 : state.rootMessageTypeV1;
     // toObject flattens protobufjs runtime wrappers to plain JS. `longs:
     // String` preserves 64-bit values losslessly (Steam64 IDs, etc).
     // `defaults: false` omits zero-valued scalars (implicit presence in
@@ -436,7 +504,7 @@
     // `oneofs: true` adds a discriminator (`eventType`) to StatEvent so the
     // Phase 2 events view can dispatch on the active arm without sniffing
     // keys.
-    const obj = type.toObject(msg, {
+    const obj = decodeType.toObject(msg, {
       longs: String,
       defaults: false,
       oneofs: true,
@@ -445,11 +513,14 @@
     });
     const t1 = performance.now();
 
+    state.protoSchemaVersion = schema;
+
     return {
       gzBytes,
       rawBytes,
       decoded: obj,
       decodeMs: Math.round(t1 - t0),
+      schema,
     };
   }
 
@@ -630,7 +701,7 @@
 
   function renderStatsBanner() {
     const events = (state.decoded && state.decoded.eventStream) || [];
-    const counts = Object.fromEntries(EVENT_ARMS.map(a => [a, 0]));
+    const counts = Object.fromEntries(currentEventArms().map(a => [a, 0]));
     for (const evt of events) {
       const arm = evt && evt.eventType;
       if (arm && counts[arm] != null) counts[arm]++;
@@ -643,7 +714,7 @@
         <span class="vt-raw-stat-chip-label">Total</span>
         <span class="vt-raw-stat-chip-value">${fmtInt(total)}</span>
       </span>`);
-    for (const key of EVENT_ARMS) {
+    for (const key of currentEventArms()) {
       chips.push(`
         <span class="vt-raw-stat-chip">
           <span class="vt-raw-stat-chip-label">${EVENT_ARM_LABELS[key]}</span>
@@ -2048,7 +2119,7 @@
   function buildEventsModel(decoded) {
     const stream = (decoded && decoded.eventStream) || [];
     const rows = new Array(stream.length);
-    const totalByType = Object.fromEntries(EVENT_ARMS.map(a => [a, 0]));
+    const totalByType = Object.fromEntries(currentEventArms().map(a => [a, 0]));
     let tickMin = Infinity;
     let tickMax = -Infinity;
 
@@ -2074,6 +2145,11 @@
         if (payload.team != null) team = payload.team;
         if (payload.killerTeam != null && team == null) team = payload.killerTeam;
         if (payload.pickerTeam != null && team == null) team = payload.pickerTeam;
+        // v2 DamageDealt + UnitSniped + BulletHit use `shooterTeam`
+        // instead of the v1 `team` field. Without this fallthrough v2
+        // rows would have team=null, breaking the Reconcile view's
+        // `r.team > 0` skip-shooter gate.
+        if (payload.shooterTeam != null && team == null) team = payload.shooterTeam;
       }
       rows[i] = { i, arm, tick, shooter, victim, ordnance, amount, team };
       if (arm && totalByType[arm] != null) totalByType[arm]++;
@@ -2083,14 +2159,24 @@
       }
     }
 
-    // Pair-index for adjacent DamageDealt <-> DamageReceived. Per the
-    // data-schema.mdc "adjacent pair rule", they're always side-by-side
-    // and share the same amount; we just link them by stream position.
+    // Pair-index for adjacent DamageDealt <-> DamageReceived (v1 only).
+    // The legacy schema emits the two arms side-by-side and they share
+    // the same amount; the pair-index just links them by stream
+    // position so the events table can highlight partners on hover and
+    // the Reconcile view can join victim-side data back to the dealer.
+    //
+    // v2 unified DamageDealt carries both sides on the same event, so
+    // there are no DamageReceived rows to pair with -- pairIdx stays
+    // all -1 and the adjacent-pair hover hint silently disables itself.
+    // The Reconcile view branches on `state.protoSchemaVersion`
+    // separately to read victim fields off the DamageDealt row.
     const pairIdx = new Int32Array(stream.length).fill(-1);
-    for (let i = 0; i < stream.length - 1; i++) {
-      if (rows[i].arm === 'damageDealt' && rows[i + 1].arm === 'damageReceived') {
-        pairIdx[i] = i + 1;
-        pairIdx[i + 1] = i;
+    if (state.protoSchemaVersion === PROTO_SCHEMA_V1) {
+      for (let i = 0; i < stream.length - 1; i++) {
+        if (rows[i].arm === 'damageDealt' && rows[i + 1].arm === 'damageReceived') {
+          pairIdx[i] = i + 1;
+          pairIdx[i + 1] = i;
+        }
       }
     }
 
@@ -2102,7 +2188,7 @@
       totalByType,
       pairIdx,
       filter: {
-        types: new Set(EVENT_ARMS),
+        types: new Set(currentEventArms()),
         lo: tickMin,
         hi: tickMax,
         playerS64: '',
@@ -2116,8 +2202,8 @@
     const f = state.events.filter;
     if (url.types) {
       const wanted = new Set(url.types.split(',').filter(Boolean));
-      f.types = new Set(EVENT_ARMS.filter(a => wanted.has(a)));
-      if (f.types.size === 0) f.types = new Set(EVENT_ARMS);
+      f.types = new Set(currentEventArms().filter(a => wanted.has(a)));
+      if (f.types.size === 0) f.types = new Set(currentEventArms());
     }
     if (url.tick) {
       const [lo, hi] = url.tick.split('-').map(n => parseInt(n, 10));
@@ -2130,7 +2216,7 @@
 
   function renderEventsChips() {
     const f = state.events.filter;
-    const html = EVENT_ARMS.map(arm => {
+    const html = currentEventArms().map(arm => {
       const on = f.types.has(arm);
       return `
         <button type="button"
@@ -2364,7 +2450,7 @@
   function onEventsReset() {
     if (!state.events) return;
     const ev = state.events;
-    ev.filter.types = new Set(EVENT_ARMS);
+    ev.filter.types = new Set(currentEventArms());
     ev.filter.lo = ev.tickMin;
     ev.filter.hi = ev.tickMax;
     ev.filter.playerS64 = '';
@@ -2493,13 +2579,18 @@
 
   function computePersonalReceived(s64) {
     const entry = findLeaderboardEntry(s64);
-    // damage_received events were extracted as rows with `victim` populated
-    // from dr.victim. In Phase 2's buildEventsModel we folded dr into the
-    // damage_dealt row via pair lookup — but the raw DR row still exists as
-    // arm='damageReceived'. We read .victim / .team / .amount directly.
+    const isV2 = state.protoSchemaVersion === PROTO_SCHEMA_V2;
+    // v1: read the separate `damageReceived` rows -- they carry the
+    //     victim-side amount directly (dr.victim / dr.team / dr.amount).
+    // v2: the unified `damageDealt` row carries the victim on the same
+    //     event (r.victim). The amount is the same on both sides, so
+    //     we sum over damageDealt rows where r.victim == s64. We use
+    //     r.team (which the model now back-populates from shooterTeam
+    //     on v2) as the same skip-shooter gate the pipeline applies.
+    const targetArm = isV2 ? 'damageDealt' : 'damageReceived';
     let sum = 0;
     for (const r of state.events.rows) {
-      if (r.arm !== 'damageReceived') continue;
+      if (r.arm !== targetArm) continue;
       if (r.victim !== s64) continue;
       if (!(r.team > 0)) continue;
       if (!(r.amount > 0)) continue;
@@ -2510,13 +2601,16 @@
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.received`,
       processed: entry && entry.personal ? Number(entry.personal.received) : 0,
       computed: sum,
-      rule: 'Σ damageReceived.amount where victim == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6',
+      rule: isV2
+        ? 'Σ damageDealt.amount where victim == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 (v2 unified)'
+        : 'Σ damageReceived.amount where victim == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 (v1)',
       kind: 'float',
     };
   }
 
   function computePersonalPvpDealt(s64) {
     const entry = findLeaderboardEntry(s64);
+    const isV2 = state.protoSchemaVersion === PROTO_SCHEMA_V2;
     const rows = state.events.rows;
     const pairIdx = state.events.pairIdx;
     let sum = 0;
@@ -2527,28 +2621,41 @@
       if (!(r.team > 0)) continue;
       if (!(r.amount > 0)) continue;
       if (isSentinelDamage(r.amount)) continue;
-      const j = pairIdx[i];
-      if (j < 0) continue;
-      const dr = rows[j];
-      // Paired damageReceived's victim must be a player (dr.victim != 0).
-      // With defaults:false, unset victim is empty string; human victim is
-      // the Steam64 string.
-      if (!dr.victim) continue;
+      // PvP gate: victim must be a human player.
+      // v1: look up the paired damageReceived row's victim.
+      // v2: victim is on the same row.
+      if (isV2) {
+        if (!r.victim) continue;
+      } else {
+        const j = pairIdx[i];
+        if (j < 0) continue;
+        const dr = rows[j];
+        // With defaults:false, unset victim is empty string; human
+        // victim is the Steam64 string.
+        if (!dr.victim) continue;
+      }
       sum += r.amount;
     }
     return {
       label: `leaderboard[${entry ? entry.slot : '?'}].personal.pvp_dealt`,
       processed: entry && entry.personal ? Number(entry.personal.pvp_dealt) : 0,
       computed: sum,
-      rule: 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim > 0',
+      rule: isV2
+        ? 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ victim > 0 (v2 unified)'
+        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim > 0 (v1)',
       kind: 'float',
     };
   }
 
-  // Scan the current match's event stream for sentinel-amount events. Returns
-  // { pairs, totalAmount } where `pairs` counts DD+DR pairs (matches pipeline
-  // telemetry shape) and `totalAmount` is the literal sum of DD-side amounts.
-  // Used by the Reconcile view's top badge to surface the filter's effect.
+  // Scan the current match's event stream for sentinel-amount events.
+  // Returns { pairs, totalAmount } where `pairs` is the number of
+  // *logical* sentinel records (= DD+DR pair on v1, = DamageDealt event
+  // on v2 — they carry the same single in-game damage event). The
+  // pipeline's `match.sentinel_damage.count` uses the same logical-
+  // record semantic so the Reconcile badge can compare directly without
+  // a schema branch on the consumer side. `totalAmount` is the sum of
+  // DD-side amounts (DR amount in v1 is always identical and dropping
+  // the double-count keeps the impact-sum honest).
   function computeSentinelSummary() {
     if (!state.events || !state.events.rows) return { pairs: 0, totalAmount: 0 };
     let pairs = 0;

@@ -1381,17 +1381,20 @@ and are dropped before aggregation.
 
 ### TL;DR
 
-Any `DamageDealt` / `DamageReceived` event with `amount > 1e6` is skipped
-at ingest. Skipping happens in pairs (DD + paired DR together) so both
-sides of the engine's event-pair convention are consumed.
+Any damage event with `amount > 1e6` is skipped at ingest:
+- **v1**: the legacy two-event pair (`DamageDealt` + adjacent `DamageReceived`) is dropped as a single unit — one logical record.
+- **v2**: the unified `DamageDealt` (which carries both sides) is dropped — also one logical record.
+
+The on-the-wire shape differs but the in-game damage event count is identical, so the same `match.sentinel_damage.count` integer is comparable across schemas. Tooling that reports "sentinel pairs" is now reporting "sentinel logical records" — same number, schema-agnostic name.
 
 Counters + diagnostics flow through:
 
-- `match.sentinel_damage = { count, total_amount, first_tick, last_tick }`
-- `meta.total_sentinel_damage_dropped` (aggregate pair count)
+- `match.sentinel_damage = { count, total_amount, first_tick, last_tick }` — `count` is logical-records (v1: pairs, v2: events)
+- `meta.total_sentinel_damage_dropped` (aggregate logical-record count)
 - `meta.matches_with_sentinel_damage` (list of affected match IDs)
-- Per-match pipeline log lines, deduped by `(tick, team, amount)`
-- Raw Browser Reconcile view: inline badge + reconcile summers mirror the filter
+- Per-match pipeline log lines, deduped by `(tick, shooter_team, amount)`
+- Raw Browser Reconcile view: inline badge + reconcile summers mirror the filter (schema-agnostic)
+- `scripts/audit_sentinel_events.mjs` emits `total_sentinel_logical_records` as its primary metric; `total_sentinel_dd` / `total_sentinel_dr` retained as breakdown diagnostics (`sentinel_dr` is always 0 on v2)
 
 Threshold `1e6` matches the upstream collector's `record_damage()`
 `unusual_damage.txt` diagnostic threshold. Real BZCC combat per-event
@@ -1959,11 +1962,13 @@ Era-1 (pre-Phase-3) sessions are unaffected because they have no
 ## 9. Team Faction Detection
 
 BZCC matches are played by three asymmetric factions: **ISDF**, **Hadean**,
-and **Scion**. The proto schema (`scripts/statsgate.proto`) does not carry
-an explicit faction label per team — it carries only `teamnum` slots
-(1-10), which encode team membership (slots 1-5 = Team 1, 6-10 = Team 2)
-but not which side each team picked at lobby. Yet each unit ODF in the
-match data already encodes its owning faction in its first letter:
+and **Scion**. The current proto schema (v2) carries explicit `Race`
+enum values on the header (`StatHeader.team1_race`, `team2_race`), which
+authoritatively label each team's faction. v1 sessions and rare v2
+sessions that left the field as `RACE_UNSPECIFIED` fall back to the
+algorithmic inference below — preserved verbatim so the pipeline
+continues to label legacy sessions correctly. Each unit ODF in the match
+data still encodes its owning faction in its first letter:
 
 - `i*` (e.g. `ivtank.odf`, `ibrecy_vsr.odf`, `isuser_m.odf`) → ISDF
 - `e*` (e.g. `evtank.odf`, `ebrecym_vsr.odf`, `esuser_m.odf`) → Hadean
@@ -1973,6 +1978,27 @@ The pipeline's `detect_team_factions()` helper combines two complementary
 algorithms to derive each team's faction reliably enough to surface in
 the UI, even on adversarial inputs (brief vehicle hijacks, pilot-only
 events, AI-only slots).
+
+### Header override (v2 only)
+
+After `detect_team_factions()` returns its inference, `process_match()`
+overrides per team when the v2 header carries a definite `Race`:
+
+| `StatHeader.team{1,2}_race` enum | Faction code | Faction name |
+|---|---|---|
+| `RACE_UNSPECIFIED` (0) | inference unchanged | inference unchanged |
+| `RACE_ISDF` (1) | `"i"` | ISDF |
+| `RACE_SCION` (2) | `"f"` | Scion |
+| `RACE_HADEAN` (3) | `"e"` | Hadean |
+
+Mapping is `RACE_TO_FACTION_CODE` in `scripts/process_stats.py`. The
+override path always preserves the inference for non-overridden teams.
+When the inferred code disagrees with the header code, the pipeline
+logs a one-line `faction header/algo mismatch teamN: header=X algo=Y
+(using header)` diagnostic to stdout but never blocks. The header wins
+by design: the engine itself authored the value. v1 sessions have no
+race fields in the proto, so they always fall back to the algorithmic
+inference described below.
 
 ### Output: `match.team_factions`
 
@@ -2185,6 +2211,47 @@ The proposed upstream `statsgate.proto` enhancement (a real
 `commander_quit` / `commander_demo` / `timeout` etc.) would
 deterministically resolve every "unclear" case. Until then, the toggle
 model is the best the pipeline can do without speculation.
+
+## 10.1 Proto v2 Capture Fields (`match.schema_version` 5)
+
+The proto v2 schema migration added three top-level capture fields on
+every match (regardless of which proto version the source `.binpb.gz`
+was decoded against):
+
+```json
+"match": {
+  "schema_version": 5,
+  "proto_schema_version": "v2",          // or "v1" for legacy sessions
+  "shutdown_requested": false,            // v1 always false (field absent)
+  "bullet_hit_distance": {
+    "count": 4252,        // total BulletHit events seen
+    "with_distance": 4252,// subset where distance_to_target > 0
+    "mean": 67.74,        // null on v1 / no distance data
+    "max": 597.014        // null on v1 / no distance data
+  }
+}
+```
+
+Semantics:
+
+- **`proto_schema_version`** is debugging telemetry only. Detected at
+  `load_session()` time. UI never branches on it -- the pipeline already
+  normalized every downstream aggregator to a single shape so the
+  output is schema-agnostic. Surfaced in `scripts/verify_proto_decode.mjs`
+  / `scripts/audit_sentinel_events.mjs` summaries for cross-validation.
+- **`shutdown_requested`** is `true` when the match ended because the
+  stat session was cancelled mid-game via mission script or console
+  command. v1 sessions always report `false` (the field doesn't exist
+  in the legacy proto; the v2 collector populates it from the engine's
+  shutdown reason). No UI consumer yet -- capture-only. Future filter:
+  exclude shutdown-requested matches from career ratings.
+- **`bullet_hit_distance`** is a per-match summary of the v2 `BulletHit.distance_to_target`
+  field (world units between shooter and victim at impact). v1 sessions
+  emit `count=N, with_distance=0, mean=null, max=null` because the
+  field is absent from the legacy proto. Capture-only -- see
+  [distance_to_target.txt](../distance_to_target.txt) at the repo root
+  for concrete future uses (VTSR-T axes, weapon-meta engagement-range
+  stats, highlight card refinements).
 
 ## 11. VTSR / VTSR-T Outputs (`elo_current.json` + `elo_history.json`)
 
