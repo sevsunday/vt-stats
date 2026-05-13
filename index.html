@@ -858,18 +858,29 @@
             <table id="vtsr-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
               <thead>
                 <tr>
-                  <th>#</th>
+                  <th data-bs-toggle="tooltip" data-bs-placement="top"
+                      title="Rank within the visible filter (1 = highest VTSR-T in scope)."
+                  >#</th>
                   <th class="vt-vtsr-expand-col"
                       data-bs-toggle="tooltip" data-bs-placement="top"
-                      title="Click the chevron on any row to expand the per-axis breakdown, raw PvP/PvE counts, and ship loadout."
+                      title="Click the chevron on any row to expand the per-axis breakdown, raw PvP/PvE counts, and ship + weapon distributions."
                   ></th>
-                  <th class="text-center">Tier</th>
-                  <th data-sort="name">Player</th>
+                  <th class="text-center"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Tier</strong><br>Absolute thresholds: Tier 1 (&ge;1800), Tier 2 (1650-1799), Tier 3 (1500-1649), Tier 4 (1350-1499), Tier 5 (1000-1349). Players with fewer than 10 rated matches show <strong>Provisional</strong>."
+                  >Tier</th>
+                  <th data-sort="name"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Player</strong><br>Display name (most-recent canonical alias). Hover the cell to see Steam64 + in-game nick when they differ."
+                  >Player</th>
                   <th data-sort="primary_ship" class="text-center"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Primary Ship</strong><br>Most-played ship across the player's career, pretty-named via <code>data/odf.min.json</code> (e.g. Tank, Scout, Assault Tank, Pilot)."
+                      title="<strong>Primary Ship</strong><br>Most-played ship ODF across the player's career (raw lowercased ODF stem -- e.g. <code>ivscout_vsr</code>, <code>fvtank_vsr</code>). Hover the cell for share + secondary ship + active hours."
                   >Primary Ship</th>
-                  <th data-sort="vtsr" class="text-end sort-active">VTSR-T</th>
+                  <th data-sort="vtsr" class="text-end sort-active"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>VTSR-T</strong><br>Published rating. <code>VTSR-T = &alpha;&middot;Wins ELO + (1-&alpha;)&middot;Thug ELO</code>. With &alpha; = 0 (current ship), VTSR-T equals Thug ELO. Anchored at 1500, soft floor at 1000."
+                  >VTSR-T</th>
                   <th data-sort="pvp_kd" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>PvP K/D</strong><br>Career kills against human players &divide; deaths from human players. Click the row chevron for the raw PvP K + PvP D counts and the per-axis breakdown."
@@ -880,16 +891,28 @@
                   >PvE K/D</th>
                   <th data-sort="accuracy" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Accuracy</strong><br>Career hits &divide; shots fired. Includes both PvP + PvE hits."
+                      title="<strong>Accuracy</strong><br>Career hits &divide; shots fired. Includes both PvP + PvE hits. Hover the cell for raw hits / shots."
                   >Acc</th>
                   <th data-sort="pvp_accuracy" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>PvP Accuracy</strong><br>Career PvP hits &divide; shots fired. The per-weapon-normalized variant (used by the <code>thug_accuracy</code> ELO axis) lives in the row's expand panel."
                   >PvP Acc</th>
-                  <th data-sort="last_delta" class="text-end">Last</th>
-                  <th data-sort="peak_vtsr" class="text-end">Peak</th>
-                  <th data-sort="matches_played" class="text-end">Matches</th>
-                  <th class="text-end">Trend</th>
+                  <th data-sort="last_delta" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Last delta</strong><br>Most recent rated-match rating change (positive = gain, negative = loss). Click the row chevron for the per-axis breakdown of why the rating moved."
+                  >Last</th>
+                  <th data-sort="peak_vtsr" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Peak</strong><br>Highest published VTSR-T this player has ever held. Hover the cell to see when it was reached."
+                  >Peak</th>
+                  <th data-sort="matches_played" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 5 minutes."
+                  >Matches</th>
+                  <th class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Trend</strong><br>Last 10 raw deltas (oldest to most-recent), oriented around the zero line. Hover the sparkline cell to see the values."
+                  >Trend</th>
                 </tr>
               </thead>
               <tbody></tbody>
