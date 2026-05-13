@@ -1872,42 +1872,46 @@ Source-of-truth implementation: [scripts/elo.py](scripts/elo.py). Constants are 
 
 ### 13.11 Loadout Profile + per-class combat (v2.3)
 
-Display-only data shipped on every leaderboard row alongside the existing combat fields. Powers the per-match Player Profile's Loadout Profile card + Per-Class Combat table. Sourced entirely from `update_tick.players[].odf` ticks + `data/odf.min.json` `inheritanceChain` field — zero editorial role labels.
+Display-only data shipped on every leaderboard row alongside the existing combat fields. Powers the per-match Player Profile's Loadout Profile card + Per-Ship Combat table, plus the VTSR-T leaderboard's expandable detail panel. Sourced entirely from `update_tick.players[].odf` ticks + `data/odf.min.json` `unitName` resolution — **per-ship organization, no class taxonomy**.
 
-**Class taxonomy** (root inheritance class from `data/odf.min.json`):
-
-The pipeline's `_load_class_labels()` helper walks every `Vehicle` and `Pilot` ODF, takes the last entry of `inheritanceChain` as the canonical class, and synthesizes VSR-mod siblings (`<base>vsr.odf` / `<base>_vsr.odf`) for every base ODF. Resulting class labels (20 distinct in the current ODF DB):
+**Ship name resolution.** Each ODF observed in `update_tick.players[].odf` (e.g. `ivtank.odf`, `ivscout.odf`, `ispilo.odf`) is resolved to a pretty display name at pipeline emit time via `prettify_odf()` in `process_match()`. The chain is `unit_name(odf)` → stripped-VSR `unit_name(odf)` → `wpn_name(odf)` → title-cased stem fallback. The `unit_name` resolver consumes the `GameObjectClass.unitName` field from `data/odf.min.json`, the same field that resolves weapons elsewhere in the pipeline. Concrete examples:
 
 ```
-wingman, morphtank, assaulttank, recyclervehicle, pilot, constructionrig,
-turrettank, turret, service, tug, scavenger, iv_walker, fv_walker, torpedo,
-bomber, artillery, boid, apc, sav, spraymine
+ivtank.odf       -> Tank
+ivscout.odf      -> Scout
+ivatank.odf      -> Assault Tank
+ivmbike.odf      -> Mortar Bike
+ivwalk.odf       -> Walker
+fvsent.odf       -> Sentry
+ispilo.odf       -> Pilot
 ```
 
-`person` ODFs are renamed to `pilot` for display clarity. Unknown ODFs (DB miss + no synthesized variant) bucket to `unknown` and surface explicitly in the Per-Class Combat table — no silent merging into another class.
+ODFs the DB does not recognize (no `unitName` and not in any other resolver) fall through to a title-cased stem (e.g. `unknownship.odf` -> `Unknownship`). Events that fire before the player's first `update_tick` bucket to literal `"unknown"` so the `per_ship_combat` row renders explicitly rather than silently merging.
 
 **Per-player `loadout` block** (sibling to `weapon_breakdown` on each leaderboard row):
 
 ```json
 {
-  "classes":         { "wingman": 0.582, "morphtank": 0.418 },
-  "class_seconds":   { "wingman": 348.5, "morphtank": 250.2 },
-  "primary_class":   "wingman",
-  "primary_share":   0.582,
-  "secondary_class": "morphtank",
-  "secondary_share": 0.418,
-  "class_diversity": 2,
-  "most_used_odf":   { "wingman": "ivtank.odf", "morphtank": "fvsent.odf" },
-  "active_seconds":  598.7
+  "ships": {
+    "ivtank.odf":  { "name": "Tank",  "share": 0.582, "seconds": 348.5 },
+    "ivscout.odf": { "name": "Scout", "share": 0.418, "seconds": 250.2 }
+  },
+  "primary_ship":   { "odf": "ivtank.odf",  "name": "Tank",  "share": 0.582 },
+  "secondary_ship": { "odf": "ivscout.odf", "name": "Scout", "share": 0.418 },
+  "ship_diversity": 2,
+  "active_seconds": 598.7
 }
 ```
 
-**Per-player `per_class_combat` block** (list, one row per class with `time_seconds > 0`, sorted by time desc):
+`secondary_ship` is `null` when the player only flew one ship. `ship_diversity` counts distinct ships with > 0 ticks. `active_seconds` is the sum of all `ships[*].seconds` (i.e. total time the player was actually piloting a ship — may be less than match duration if the player joined late or quit early).
+
+**Per-player `per_ship_combat` block** (list, one row per ship with `time_seconds > 0`, sorted by time desc, ties broken alphabetically on ODF):
 
 ```json
 [
   {
-    "class": "wingman",
+    "ship": "ivtank.odf",
+    "ship_name": "Tank",
     "time_seconds": 348.5,
     "kills": 8, "deaths": 4,
     "pvp_kills": 7, "pvp_deaths": 3,
@@ -1921,7 +1925,7 @@ bomber, artillery, boid, apc, sav, spraymine
 ]
 ```
 
-All numeric fields are tick-joined to the player's active ship at event time via the running `s64_to_current_odf` map. Edge case: events that fire before the player's first `update_tick` (typically the first 1–2 events) bucket to class `unknown`. At 20 Hz this is negligible noise; the `unknown` row renders explicitly so any user audit can see the magnitude.
+All numeric fields are tick-joined to the player's active ship at event time via the running `s64_to_current_odf` map. Edge case: events that fire before the player's first `update_tick` (typically the first 1–2 events) bucket to ship `"unknown"`. At 20 Hz this is negligible noise; the `unknown` row renders explicitly so any user audit can see the magnitude.
 
-**Career rollup** (in `js/all-matches-aggregator.js`): `career_loadout` and `career_per_class_combat` blocks on each `career_stats[]` row, summed across the picker-filtered match subset. Primary/secondary class is rederived from summed `class_seconds` to avoid double-rounding from per-match strings.
+**Career rollup** (in `js/all-matches-aggregator.js`): `career_loadout` and `career_per_ship_combat` blocks on each `career_stats[]` row, summed across the picker-filtered match subset. Primary/secondary ship is rederived from summed `ship_seconds` (cached via `ship_seconds[odf]` in the per-player accumulator) to avoid double-rounding from per-match strings. Ship pretty names are cached on first encounter from the per-match `loadout.ships[odf].name` so the rollup emits names without re-resolving.
 

@@ -3,7 +3,7 @@
     "id": "2026-04-24T01-25-15",
     "source_file": "2026-04-24-01-25-15.binpb.gz",
     "source_size_bytes": 7827292,
-    "pipeline_version": 11,
+    "pipeline_version": 12,
     "submitter": "VTrider",
     "map": "vsrv8.bzn",
     "date": "2026-04-24T01:25:15.060939+00:00",
@@ -364,49 +364,112 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.7735,
-          "pilot": 0.1161,
-          "assaulttank": 0.1104
+        "ships": {
+          "evscout_vsr.odf": {
+            "name": "Xypos",
+            "share": 0.2323,
+            "seconds": 464.6
+          },
+          "esuser_m.odf": {
+            "name": "Pilot (esuser_m)",
+            "share": 0.1161,
+            "seconds": 232.2
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout",
+            "share": 0.0099,
+            "seconds": 19.8
+          },
+          "evscoutm_vsr.odf": {
+            "name": "Empty Xypos",
+            "share": 0.3503,
+            "seconds": 700.5
+          },
+          "evatanku_vsr.odf": {
+            "name": "Hedoux",
+            "share": 0.1104,
+            "seconds": 220.8
+          },
+          "evmislw_vsr.odf": {
+            "name": "Zeus WRM",
+            "share": 0.181,
+            "seconds": 361.9
+          }
         },
-        "class_seconds": {
-          "wingman": 1546.8,
-          "pilot": 232.2,
-          "assaulttank": 220.8
+        "primary_ship": {
+          "odf": "evscoutm_vsr.odf",
+          "name": "Empty Xypos",
+          "share": 0.3503
         },
-        "primary_class": "wingman",
-        "primary_share": 0.7735,
-        "secondary_class": "pilot",
-        "secondary_share": 0.1161,
-        "class_diversity": 3,
-        "most_used_odf": {
-          "wingman": "evscoutm_vsr.odf",
-          "pilot": "esuser_m.odf",
-          "assaulttank": "evatanku_vsr.odf"
+        "secondary_ship": {
+          "odf": "evscout_vsr.odf",
+          "name": "Xypos",
+          "share": 0.2323
         },
+        "ship_diversity": 6,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1546.8,
-          "kills": 19,
-          "deaths": 7,
-          "pvp_kills": 14,
-          "pvp_deaths": 6,
-          "pve_kills": 5,
-          "pve_deaths": 1,
-          "dealt": 153954.5,
-          "shots": 5159,
-          "hits": 1605,
-          "pvp_hits": 1605,
-          "accuracy": 0.311,
-          "pvp_accuracy": 0.311,
-          "dpm": 5972.1,
-          "kd": 2.33
+          "ship": "evscoutm_vsr.odf",
+          "ship_name": "Empty Xypos",
+          "time_seconds": 700.5,
+          "kills": 8,
+          "deaths": 4,
+          "pvp_kills": 5,
+          "pvp_deaths": 4,
+          "pve_kills": 3,
+          "pve_deaths": 0,
+          "dealt": 52040.1,
+          "shots": 2506,
+          "hits": 734,
+          "pvp_hits": 734,
+          "accuracy": 0.293,
+          "pvp_accuracy": 0.293,
+          "dpm": 4457.4,
+          "kd": 1.25
         },
         {
-          "class": "pilot",
+          "ship": "evscout_vsr.odf",
+          "ship_name": "Xypos",
+          "time_seconds": 464.6,
+          "kills": 5,
+          "deaths": 2,
+          "pvp_kills": 5,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 1,
+          "dealt": 24301.5,
+          "shots": 2090,
+          "hits": 681,
+          "pvp_hits": 681,
+          "accuracy": 0.326,
+          "pvp_accuracy": 0.326,
+          "dpm": 3138.7,
+          "kd": 5.0
+        },
+        {
+          "ship": "evmislw_vsr.odf",
+          "ship_name": "Zeus WRM",
+          "time_seconds": 361.9,
+          "kills": 5,
+          "deaths": 0,
+          "pvp_kills": 3,
+          "pvp_deaths": 0,
+          "pve_kills": 2,
+          "pve_deaths": 0,
+          "dealt": 73010.4,
+          "shots": 217,
+          "hits": 46,
+          "pvp_hits": 46,
+          "accuracy": 0.212,
+          "pvp_accuracy": 0.212,
+          "dpm": 12104.5,
+          "kd": null
+        },
+        {
+          "ship": "esuser_m.odf",
+          "ship_name": "Pilot (esuser_m)",
           "time_seconds": 232.2,
           "kills": 1,
           "deaths": 6,
@@ -424,7 +487,8 @@
           "kd": 1.0
         },
         {
-          "class": "assaulttank",
+          "ship": "evatanku_vsr.odf",
+          "ship_name": "Hedoux",
           "time_seconds": 220.8,
           "kills": 1,
           "deaths": 0,
@@ -440,6 +504,25 @@
           "pvp_accuracy": 0.148,
           "dpm": 3119.0,
           "kd": null
+        },
+        {
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout",
+          "time_seconds": 19.8,
+          "kills": 1,
+          "deaths": 1,
+          "pvp_kills": 1,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 4602.5,
+          "shots": 346,
+          "hits": 144,
+          "pvp_hits": 144,
+          "accuracy": 0.416,
+          "pvp_accuracy": 0.416,
+          "dpm": 13946.9,
+          "kd": 1.0
         }
       ],
       "hit_targets": {
@@ -592,49 +675,64 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.5422,
-          "pilot": 0.3169,
-          "assaulttank": 0.1409
+        "ships": {
+          "evscout_vsr.odf": {
+            "name": "Xypos",
+            "share": 0.0861,
+            "seconds": 172.2
+          },
+          "esuser_m.odf": {
+            "name": "Pilot (esuser_m)",
+            "share": 0.3169,
+            "seconds": 633.6
+          },
+          "evscoutm_vsr.odf": {
+            "name": "Empty Xypos",
+            "share": 0.4561,
+            "seconds": 912.1
+          },
+          "evatanku_vsr.odf": {
+            "name": "Hedoux",
+            "share": 0.1409,
+            "seconds": 281.9
+          }
         },
-        "class_seconds": {
-          "wingman": 1084.2,
-          "pilot": 633.6,
-          "assaulttank": 281.9
+        "primary_ship": {
+          "odf": "evscoutm_vsr.odf",
+          "name": "Empty Xypos",
+          "share": 0.4561
         },
-        "primary_class": "wingman",
-        "primary_share": 0.5422,
-        "secondary_class": "pilot",
-        "secondary_share": 0.3169,
-        "class_diversity": 3,
-        "most_used_odf": {
-          "wingman": "evscoutm_vsr.odf",
-          "pilot": "esuser_m.odf",
-          "assaulttank": "evatanku_vsr.odf"
+        "secondary_ship": {
+          "odf": "esuser_m.odf",
+          "name": "Pilot (esuser_m)",
+          "share": 0.3169
         },
+        "ship_diversity": 4,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1084.2,
-          "kills": 11,
-          "deaths": 8,
-          "pvp_kills": 3,
-          "pvp_deaths": 7,
+          "ship": "evscoutm_vsr.odf",
+          "ship_name": "Empty Xypos",
+          "time_seconds": 912.1,
+          "kills": 10,
+          "deaths": 7,
+          "pvp_kills": 2,
+          "pvp_deaths": 6,
           "pve_kills": 8,
           "pve_deaths": 1,
-          "dealt": 104012.5,
-          "shots": 5024,
-          "hits": 761,
-          "pvp_hits": 761,
-          "accuracy": 0.151,
-          "pvp_accuracy": 0.151,
-          "dpm": 5755.8,
-          "kd": 0.43
+          "dealt": 98510.5,
+          "shots": 4396,
+          "hits": 594,
+          "pvp_hits": 594,
+          "accuracy": 0.135,
+          "pvp_accuracy": 0.135,
+          "dpm": 6480.2,
+          "kd": 0.33
         },
         {
-          "class": "pilot",
+          "ship": "esuser_m.odf",
+          "ship_name": "Pilot (esuser_m)",
           "time_seconds": 633.6,
           "kills": 0,
           "deaths": 2,
@@ -652,7 +750,8 @@
           "kd": null
         },
         {
-          "class": "assaulttank",
+          "ship": "evatanku_vsr.odf",
+          "ship_name": "Hedoux",
           "time_seconds": 281.9,
           "kills": 6,
           "deaths": 0,
@@ -668,6 +767,25 @@
           "pvp_accuracy": 0.205,
           "dpm": 9000.0,
           "kd": null
+        },
+        {
+          "ship": "evscout_vsr.odf",
+          "ship_name": "Xypos",
+          "time_seconds": 172.2,
+          "kills": 1,
+          "deaths": 1,
+          "pvp_kills": 1,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 5502.0,
+          "shots": 628,
+          "hits": 167,
+          "pvp_hits": 167,
+          "accuracy": 0.266,
+          "pvp_accuracy": 0.266,
+          "dpm": 1917.6,
+          "kd": 1.0
         }
       ],
       "hit_targets": {
@@ -820,46 +938,78 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.8934,
-          "pilot": 0.1066
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout",
+            "share": 0.7484,
+            "seconds": 1496.5
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.1066,
+            "seconds": 213.2
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout",
+            "share": 0.145,
+            "seconds": 290.1
+          }
         },
-        "class_seconds": {
-          "wingman": 1786.6,
-          "pilot": 213.2
+        "primary_ship": {
+          "odf": "ivscout_vsr.odf",
+          "name": "Scout",
+          "share": 0.7484
         },
-        "primary_class": "wingman",
-        "primary_share": 0.8934,
-        "secondary_class": "pilot",
-        "secondary_share": 0.1066,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "ivscout_vsr.odf",
-          "pilot": "isuser_m.odf"
+        "secondary_ship": {
+          "odf": "ivscoutm_vsr.odf",
+          "name": "Empty Scout",
+          "share": 0.145
         },
+        "ship_diversity": 3,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1786.6,
-          "kills": 10,
-          "deaths": 3,
-          "pvp_kills": 8,
-          "pvp_deaths": 3,
-          "pve_kills": 2,
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout",
+          "time_seconds": 1496.5,
+          "kills": 8,
+          "deaths": 2,
+          "pvp_kills": 7,
+          "pvp_deaths": 2,
+          "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 124109.0,
-          "shots": 4131,
-          "hits": 1622,
-          "pvp_hits": 1622,
-          "accuracy": 0.393,
-          "pvp_accuracy": 0.393,
-          "dpm": 4168.0,
-          "kd": 2.67
+          "dealt": 107471.1,
+          "shots": 3077,
+          "hits": 1093,
+          "pvp_hits": 1093,
+          "accuracy": 0.355,
+          "pvp_accuracy": 0.355,
+          "dpm": 4308.8,
+          "kd": 3.5
         },
         {
-          "class": "pilot",
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout",
+          "time_seconds": 290.1,
+          "kills": 2,
+          "deaths": 1,
+          "pvp_kills": 1,
+          "pvp_deaths": 1,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 16637.9,
+          "shots": 1054,
+          "hits": 529,
+          "pvp_hits": 529,
+          "accuracy": 0.502,
+          "pvp_accuracy": 0.502,
+          "dpm": 3441.7,
+          "kd": 1.0
+        },
+        {
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 213.2,
           "kills": 0,
           "deaths": 2,
@@ -1035,46 +1185,69 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.8039,
-          "pilot": 0.1961
+        "ships": {
+          "evscout_vsr.odf": {
+            "name": "Xypos",
+            "share": 0.1013,
+            "seconds": 202.6
+          },
+          "esuser_m.odf": {
+            "name": "Pilot (esuser_m)",
+            "share": 0.1961,
+            "seconds": 392.1
+          },
+          "evscoutm_vsr.odf": {
+            "name": "Empty Xypos",
+            "share": 0.4835,
+            "seconds": 966.8
+          },
+          "evtankf_vsr.odf": {
+            "name": "Xares FS",
+            "share": 0.1872,
+            "seconds": 374.3
+          },
+          "evtanku_vsr.odf": {
+            "name": "Xares SGS",
+            "share": 0.032,
+            "seconds": 64.0
+          }
         },
-        "class_seconds": {
-          "wingman": 1607.7,
-          "pilot": 392.1
+        "primary_ship": {
+          "odf": "evscoutm_vsr.odf",
+          "name": "Empty Xypos",
+          "share": 0.4835
         },
-        "primary_class": "wingman",
-        "primary_share": 0.8039,
-        "secondary_class": "pilot",
-        "secondary_share": 0.1961,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "evscoutm_vsr.odf",
-          "pilot": "esuser_m.odf"
+        "secondary_ship": {
+          "odf": "esuser_m.odf",
+          "name": "Pilot (esuser_m)",
+          "share": 0.1961
         },
+        "ship_diversity": 5,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1607.7,
-          "kills": 14,
-          "deaths": 3,
-          "pvp_kills": 7,
-          "pvp_deaths": 2,
-          "pve_kills": 7,
+          "ship": "evscoutm_vsr.odf",
+          "ship_name": "Empty Xypos",
+          "time_seconds": 966.8,
+          "kills": 9,
+          "deaths": 2,
+          "pvp_kills": 4,
+          "pvp_deaths": 1,
+          "pve_kills": 5,
           "pve_deaths": 1,
-          "dealt": 105692.9,
-          "shots": 4499,
-          "hits": 874,
-          "pvp_hits": 874,
-          "accuracy": 0.194,
-          "pvp_accuracy": 0.194,
-          "dpm": 3944.6,
-          "kd": 3.5
+          "dealt": 73264.6,
+          "shots": 3664,
+          "hits": 658,
+          "pvp_hits": 658,
+          "accuracy": 0.18,
+          "pvp_accuracy": 0.18,
+          "dpm": 4546.8,
+          "kd": 4.0
         },
         {
-          "class": "pilot",
+          "ship": "esuser_m.odf",
+          "ship_name": "Pilot (esuser_m)",
           "time_seconds": 392.1,
           "kills": 0,
           "deaths": 0,
@@ -1089,6 +1262,63 @@
           "accuracy": 0.096,
           "pvp_accuracy": 0.096,
           "dpm": 161.3,
+          "kd": null
+        },
+        {
+          "ship": "evtankf_vsr.odf",
+          "ship_name": "Xares FS",
+          "time_seconds": 374.3,
+          "kills": 1,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 10833.7,
+          "shots": 37,
+          "hits": 0,
+          "pvp_hits": 0,
+          "accuracy": 0.0,
+          "pvp_accuracy": 0.0,
+          "dpm": 1736.6,
+          "kd": 0.0
+        },
+        {
+          "ship": "evscout_vsr.odf",
+          "ship_name": "Xypos",
+          "time_seconds": 202.6,
+          "kills": 1,
+          "deaths": 0,
+          "pvp_kills": 0,
+          "pvp_deaths": 0,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 7731.5,
+          "shots": 556,
+          "hits": 208,
+          "pvp_hits": 208,
+          "accuracy": 0.374,
+          "pvp_accuracy": 0.374,
+          "dpm": 2289.7,
+          "kd": null
+        },
+        {
+          "ship": "evtanku_vsr.odf",
+          "ship_name": "Xares SGS",
+          "time_seconds": 64.0,
+          "kills": 3,
+          "deaths": 0,
+          "pvp_kills": 3,
+          "pvp_deaths": 0,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 13863.1,
+          "shots": 242,
+          "hits": 8,
+          "pvp_hits": 8,
+          "accuracy": 0.033,
+          "pvp_accuracy": 0.033,
+          "dpm": 13006.9,
           "kd": null
         }
       ],
@@ -1290,46 +1520,83 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.7599,
-          "pilot": 0.2401
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout",
+            "share": 0.3266,
+            "seconds": 653.1
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.2401,
+            "seconds": 480.2
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout",
+            "share": 0.4288,
+            "seconds": 857.5
+          },
+          "evscoutm_vsr.odf": {
+            "name": "Empty Xypos",
+            "share": 0.0045,
+            "seconds": 8.9
+          }
         },
-        "class_seconds": {
-          "wingman": 1519.5,
-          "pilot": 480.2
+        "primary_ship": {
+          "odf": "ivscoutm_vsr.odf",
+          "name": "Empty Scout",
+          "share": 0.4288
         },
-        "primary_class": "wingman",
-        "primary_share": 0.7599,
-        "secondary_class": "pilot",
-        "secondary_share": 0.2401,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "ivscoutm_vsr.odf",
-          "pilot": "isuser_m.odf"
+        "secondary_ship": {
+          "odf": "ivscout_vsr.odf",
+          "name": "Scout",
+          "share": 0.3266
         },
+        "ship_diversity": 4,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1519.5,
-          "kills": 8,
-          "deaths": 7,
-          "pvp_kills": 8,
-          "pvp_deaths": 7,
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout",
+          "time_seconds": 857.5,
+          "kills": 6,
+          "deaths": 5,
+          "pvp_kills": 6,
+          "pvp_deaths": 5,
           "pve_kills": 0,
           "pve_deaths": 0,
-          "dealt": 98168.5,
-          "shots": 4370,
-          "hits": 1104,
-          "pvp_hits": 1104,
-          "accuracy": 0.253,
-          "pvp_accuracy": 0.253,
-          "dpm": 3876.2,
-          "kd": 1.14
+          "dealt": 63001.8,
+          "shots": 3890,
+          "hits": 886,
+          "pvp_hits": 886,
+          "accuracy": 0.228,
+          "pvp_accuracy": 0.228,
+          "dpm": 4408.3,
+          "kd": 1.2
         },
         {
-          "class": "pilot",
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout",
+          "time_seconds": 653.1,
+          "kills": 2,
+          "deaths": 1,
+          "pvp_kills": 2,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 33959.6,
+          "shots": 374,
+          "hits": 214,
+          "pvp_hits": 214,
+          "accuracy": 0.572,
+          "pvp_accuracy": 0.572,
+          "dpm": 3119.9,
+          "kd": 2.0
+        },
+        {
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 480.2,
           "kills": 0,
           "deaths": 2,
@@ -1344,6 +1611,25 @@
           "accuracy": 0.337,
           "pvp_accuracy": 0.337,
           "dpm": 359.3,
+          "kd": 0.0
+        },
+        {
+          "ship": "evscoutm_vsr.odf",
+          "ship_name": "Empty Xypos",
+          "time_seconds": 8.9,
+          "kills": 0,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 1207.0,
+          "shots": 106,
+          "hits": 4,
+          "pvp_hits": 4,
+          "accuracy": 0.038,
+          "pvp_accuracy": 0.038,
+          "dpm": 8091.6,
           "kd": 0.0
         }
       ],
@@ -1501,46 +1787,64 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.6179,
-          "pilot": 0.3821
+        "ships": {
+          "evscout_vsr.odf": {
+            "name": "Xypos",
+            "share": 0.0614,
+            "seconds": 122.8
+          },
+          "esuser_m.odf": {
+            "name": "Pilot (esuser_m)",
+            "share": 0.3821,
+            "seconds": 764.1
+          },
+          "evscoutm_vsr.odf": {
+            "name": "Empty Xypos",
+            "share": 0.4998,
+            "seconds": 999.4
+          },
+          "evmislw_vsr.odf": {
+            "name": "Zeus WRM",
+            "share": 0.0567,
+            "seconds": 113.4
+          }
         },
-        "class_seconds": {
-          "wingman": 1235.7,
-          "pilot": 764.1
+        "primary_ship": {
+          "odf": "evscoutm_vsr.odf",
+          "name": "Empty Xypos",
+          "share": 0.4998
         },
-        "primary_class": "wingman",
-        "primary_share": 0.6179,
-        "secondary_class": "pilot",
-        "secondary_share": 0.3821,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "evscoutm_vsr.odf",
-          "pilot": "esuser_m.odf"
+        "secondary_ship": {
+          "odf": "esuser_m.odf",
+          "name": "Pilot (esuser_m)",
+          "share": 0.3821
         },
+        "ship_diversity": 4,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1235.7,
+          "ship": "evscoutm_vsr.odf",
+          "ship_name": "Empty Xypos",
+          "time_seconds": 999.4,
           "kills": 4,
-          "deaths": 9,
+          "deaths": 8,
           "pvp_kills": 1,
-          "pvp_deaths": 9,
+          "pvp_deaths": 8,
           "pve_kills": 3,
           "pve_deaths": 0,
-          "dealt": 96959.1,
-          "shots": 5589,
-          "hits": 1073,
-          "pvp_hits": 1073,
-          "accuracy": 0.192,
-          "pvp_accuracy": 0.192,
-          "dpm": 4708.1,
-          "kd": 0.11
+          "dealt": 73003.0,
+          "shots": 5108,
+          "hits": 948,
+          "pvp_hits": 948,
+          "accuracy": 0.186,
+          "pvp_accuracy": 0.186,
+          "dpm": 4382.8,
+          "kd": 0.12
         },
         {
-          "class": "pilot",
+          "ship": "esuser_m.odf",
+          "ship_name": "Pilot (esuser_m)",
           "time_seconds": 764.1,
           "kills": 2,
           "deaths": 4,
@@ -1556,6 +1860,44 @@
           "pvp_accuracy": 0.177,
           "dpm": 184.2,
           "kd": 2.0
+        },
+        {
+          "ship": "evscout_vsr.odf",
+          "ship_name": "Xypos",
+          "time_seconds": 122.8,
+          "kills": 0,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 5054.2,
+          "shots": 446,
+          "hits": 117,
+          "pvp_hits": 117,
+          "accuracy": 0.262,
+          "pvp_accuracy": 0.262,
+          "dpm": 2468.5,
+          "kd": 0.0
+        },
+        {
+          "ship": "evmislw_vsr.odf",
+          "ship_name": "Zeus WRM",
+          "time_seconds": 113.4,
+          "kills": 0,
+          "deaths": 0,
+          "pvp_kills": 0,
+          "pvp_deaths": 0,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 18901.9,
+          "shots": 35,
+          "hits": 8,
+          "pvp_hits": 8,
+          "accuracy": 0.229,
+          "pvp_accuracy": 0.229,
+          "dpm": 10001.0,
+          "kd": null
         }
       ],
       "hit_targets": {
@@ -1680,46 +2022,78 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.7568,
-          "pilot": 0.2432
+        "ships": {
+          "evscout_vsr.odf": {
+            "name": "Xypos",
+            "share": 0.3532,
+            "seconds": 706.4
+          },
+          "esuser_m.odf": {
+            "name": "Pilot (esuser_m)",
+            "share": 0.2432,
+            "seconds": 486.3
+          },
+          "evscoutm_vsr.odf": {
+            "name": "Empty Xypos",
+            "share": 0.4036,
+            "seconds": 807.0
+          }
         },
-        "class_seconds": {
-          "wingman": 1513.5,
-          "pilot": 486.3
+        "primary_ship": {
+          "odf": "evscoutm_vsr.odf",
+          "name": "Empty Xypos",
+          "share": 0.4036
         },
-        "primary_class": "wingman",
-        "primary_share": 0.7568,
-        "secondary_class": "pilot",
-        "secondary_share": 0.2432,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "evscoutm_vsr.odf",
-          "pilot": "esuser_m.odf"
+        "secondary_ship": {
+          "odf": "evscout_vsr.odf",
+          "name": "Xypos",
+          "share": 0.3532
         },
+        "ship_diversity": 3,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1513.5,
-          "kills": 8,
+          "ship": "evscoutm_vsr.odf",
+          "ship_name": "Empty Xypos",
+          "time_seconds": 807.0,
+          "kills": 6,
           "deaths": 6,
-          "pvp_kills": 6,
+          "pvp_kills": 5,
           "pvp_deaths": 6,
-          "pve_kills": 2,
+          "pve_kills": 1,
           "pve_deaths": 0,
-          "dealt": 77210.1,
-          "shots": 4154,
-          "hits": 1751,
-          "pvp_hits": 1751,
-          "accuracy": 0.422,
-          "pvp_accuracy": 0.422,
-          "dpm": 3061.0,
-          "kd": 1.0
+          "dealt": 51580.9,
+          "shots": 1904,
+          "hits": 1091,
+          "pvp_hits": 1091,
+          "accuracy": 0.573,
+          "pvp_accuracy": 0.573,
+          "dpm": 3834.8,
+          "kd": 0.83
         },
         {
-          "class": "pilot",
+          "ship": "evscout_vsr.odf",
+          "ship_name": "Xypos",
+          "time_seconds": 706.4,
+          "kills": 2,
+          "deaths": 0,
+          "pvp_kills": 1,
+          "pvp_deaths": 0,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 25629.3,
+          "shots": 2250,
+          "hits": 660,
+          "pvp_hits": 660,
+          "accuracy": 0.293,
+          "pvp_accuracy": 0.293,
+          "dpm": 2176.9,
+          "kd": null
+        },
+        {
+          "ship": "esuser_m.odf",
+          "ship_name": "Pilot (esuser_m)",
           "time_seconds": 486.3,
           "kills": 1,
           "deaths": 5,
@@ -1867,46 +2241,59 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.7392,
-          "pilot": 0.2608
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout",
+            "share": 0.2129,
+            "seconds": 425.7
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.2608,
+            "seconds": 521.5
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout",
+            "share": 0.5264,
+            "seconds": 1052.6
+          }
         },
-        "class_seconds": {
-          "wingman": 1478.3,
-          "pilot": 521.5
+        "primary_ship": {
+          "odf": "ivscoutm_vsr.odf",
+          "name": "Empty Scout",
+          "share": 0.5264
         },
-        "primary_class": "wingman",
-        "primary_share": 0.7392,
-        "secondary_class": "pilot",
-        "secondary_share": 0.2608,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "ivscoutm_vsr.odf",
-          "pilot": "isuser_m.odf"
+        "secondary_ship": {
+          "odf": "isuser_m.odf",
+          "name": "Pilot (isuser_m)",
+          "share": 0.2608
         },
+        "ship_diversity": 3,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1478.3,
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout",
+          "time_seconds": 1052.6,
           "kills": 9,
-          "deaths": 7,
+          "deaths": 5,
           "pvp_kills": 6,
-          "pvp_deaths": 6,
+          "pvp_deaths": 4,
           "pve_kills": 3,
           "pve_deaths": 1,
-          "dealt": 72408.0,
-          "shots": 7210,
-          "hits": 1242,
-          "pvp_hits": 1242,
-          "accuracy": 0.172,
-          "pvp_accuracy": 0.172,
-          "dpm": 2938.8,
-          "kd": 1.0
+          "dealt": 61998.2,
+          "shots": 5938,
+          "hits": 1007,
+          "pvp_hits": 1007,
+          "accuracy": 0.17,
+          "pvp_accuracy": 0.17,
+          "dpm": 3534.0,
+          "kd": 1.5
         },
         {
-          "class": "pilot",
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 521.5,
           "kills": 0,
           "deaths": 1,
@@ -1921,6 +2308,25 @@
           "accuracy": 0.21,
           "pvp_accuracy": 0.21,
           "dpm": 143.0,
+          "kd": 0.0
+        },
+        {
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout",
+          "time_seconds": 425.7,
+          "kills": 0,
+          "deaths": 2,
+          "pvp_kills": 0,
+          "pvp_deaths": 2,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 10409.8,
+          "shots": 1272,
+          "hits": 235,
+          "pvp_hits": 235,
+          "accuracy": 0.185,
+          "pvp_accuracy": 0.185,
+          "dpm": 1467.2,
           "kd": 0.0
         }
       ],
@@ -2122,46 +2528,83 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.74,
-          "pilot": 0.26
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout",
+            "share": 0.2946,
+            "seconds": 589.1
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.26,
+            "seconds": 519.9
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout",
+            "share": 0.4182,
+            "seconds": 836.3
+          },
+          "ivtank_vsr.odf": {
+            "name": "Tank",
+            "share": 0.0272,
+            "seconds": 54.5
+          }
         },
-        "class_seconds": {
-          "wingman": 1479.9,
-          "pilot": 519.9
+        "primary_ship": {
+          "odf": "ivscoutm_vsr.odf",
+          "name": "Empty Scout",
+          "share": 0.4182
         },
-        "primary_class": "wingman",
-        "primary_share": 0.74,
-        "secondary_class": "pilot",
-        "secondary_share": 0.26,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "ivscoutm_vsr.odf",
-          "pilot": "isuser_m.odf"
+        "secondary_ship": {
+          "odf": "ivscout_vsr.odf",
+          "name": "Scout",
+          "share": 0.2946
         },
+        "ship_diversity": 4,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1479.9,
-          "kills": 11,
-          "deaths": 6,
-          "pvp_kills": 7,
-          "pvp_deaths": 6,
-          "pve_kills": 4,
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout",
+          "time_seconds": 836.3,
+          "kills": 7,
+          "deaths": 4,
+          "pvp_kills": 4,
+          "pvp_deaths": 4,
+          "pve_kills": 3,
           "pve_deaths": 0,
-          "dealt": 66782.9,
-          "shots": 4064,
-          "hits": 1331,
-          "pvp_hits": 1331,
-          "accuracy": 0.328,
-          "pvp_accuracy": 0.328,
-          "dpm": 2707.6,
-          "kd": 1.17
+          "dealt": 41056.9,
+          "shots": 2740,
+          "hits": 1014,
+          "pvp_hits": 1014,
+          "accuracy": 0.37,
+          "pvp_accuracy": 0.37,
+          "dpm": 2945.6,
+          "kd": 1.0
         },
         {
-          "class": "pilot",
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout",
+          "time_seconds": 589.1,
+          "kills": 4,
+          "deaths": 1,
+          "pvp_kills": 3,
+          "pvp_deaths": 1,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 18500.3,
+          "shots": 1058,
+          "hits": 118,
+          "pvp_hits": 118,
+          "accuracy": 0.112,
+          "pvp_accuracy": 0.112,
+          "dpm": 1884.1,
+          "kd": 3.0
+        },
+        {
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 519.9,
           "kills": 0,
           "deaths": 2,
@@ -2176,6 +2619,25 @@
           "accuracy": 0.354,
           "pvp_accuracy": 0.354,
           "dpm": 89.6,
+          "kd": 0.0
+        },
+        {
+          "ship": "ivtank_vsr.odf",
+          "ship_name": "Tank",
+          "time_seconds": 54.5,
+          "kills": 0,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 7225.7,
+          "shots": 266,
+          "hits": 199,
+          "pvp_hits": 199,
+          "accuracy": 0.748,
+          "pvp_accuracy": 0.748,
+          "dpm": 7962.2,
           "kd": 0.0
         }
       ],
@@ -2309,46 +2771,59 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.6964,
-          "pilot": 0.3036
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout",
+            "share": 0.0829,
+            "seconds": 165.7
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.3036,
+            "seconds": 607.1
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout",
+            "share": 0.6136,
+            "seconds": 1227.0
+          }
         },
-        "class_seconds": {
-          "wingman": 1392.7,
-          "pilot": 607.1
+        "primary_ship": {
+          "odf": "ivscoutm_vsr.odf",
+          "name": "Empty Scout",
+          "share": 0.6136
         },
-        "primary_class": "wingman",
-        "primary_share": 0.6964,
-        "secondary_class": "pilot",
-        "secondary_share": 0.3036,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "ivscoutm_vsr.odf",
-          "pilot": "isuser_m.odf"
+        "secondary_ship": {
+          "odf": "isuser_m.odf",
+          "name": "Pilot (isuser_m)",
+          "share": 0.3036
         },
+        "ship_diversity": 3,
         "active_seconds": 1999.8
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 1392.7,
-          "kills": 7,
-          "deaths": 6,
-          "pvp_kills": 4,
-          "pvp_deaths": 6,
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout",
+          "time_seconds": 1227.0,
+          "kills": 6,
+          "deaths": 5,
+          "pvp_kills": 3,
+          "pvp_deaths": 5,
           "pve_kills": 3,
           "pve_deaths": 0,
-          "dealt": 56813.8,
-          "shots": 4296,
-          "hits": 726,
-          "pvp_hits": 726,
-          "accuracy": 0.169,
-          "pvp_accuracy": 0.169,
-          "dpm": 2447.7,
-          "kd": 0.67
+          "dealt": 51785.0,
+          "shots": 3876,
+          "hits": 633,
+          "pvp_hits": 633,
+          "accuracy": 0.163,
+          "pvp_accuracy": 0.163,
+          "dpm": 2532.4,
+          "kd": 0.6
         },
         {
-          "class": "pilot",
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 607.1,
           "kills": 0,
           "deaths": 1,
@@ -2364,6 +2839,25 @@
           "pvp_accuracy": 0.3,
           "dpm": 533.3,
           "kd": 0.0
+        },
+        {
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout",
+          "time_seconds": 165.7,
+          "kills": 1,
+          "deaths": 1,
+          "pvp_kills": 1,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 5028.8,
+          "shots": 420,
+          "hits": 93,
+          "pvp_hits": 93,
+          "accuracy": 0.221,
+          "pvp_accuracy": 0.221,
+          "dpm": 1820.9,
+          "kd": 1.0
         }
       ],
       "hit_targets": {

@@ -3,7 +3,7 @@
     "id": "2026-04-28T02-15-19",
     "source_file": "2026-04-28-02-15-19.binpb.gz",
     "source_size_bytes": 636242,
-    "pipeline_version": 11,
+    "pipeline_version": 12,
     "submitter": "VTrider",
     "map": "stredslopevsr.bzn",
     "date": "2026-04-28T02:15:19.557817+00:00",
@@ -220,25 +220,26 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 1.0
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout",
+            "share": 1.0,
+            "seconds": 676.5
+          }
         },
-        "class_seconds": {
-          "wingman": 676.5
+        "primary_ship": {
+          "odf": "ivscout_vsr.odf",
+          "name": "Scout",
+          "share": 1.0
         },
-        "primary_class": "wingman",
-        "primary_share": 1.0,
-        "secondary_class": null,
-        "secondary_share": null,
-        "class_diversity": 1,
-        "most_used_odf": {
-          "wingman": "ivscout_vsr.odf"
-        },
+        "secondary_ship": null,
+        "ship_diversity": 1,
         "active_seconds": 676.5
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout",
           "time_seconds": 676.5,
           "kills": 7,
           "deaths": 0,
@@ -382,28 +383,35 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.8913,
-          "pilot": 0.1087
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout",
+            "share": 0.8913,
+            "seconds": 603.0
+          },
+          "isuser_m.odf": {
+            "name": "Pilot",
+            "share": 0.1087,
+            "seconds": 73.5
+          }
         },
-        "class_seconds": {
-          "wingman": 603.0,
-          "pilot": 73.5
+        "primary_ship": {
+          "odf": "ivscout_vsr.odf",
+          "name": "Scout",
+          "share": 0.8913
         },
-        "primary_class": "wingman",
-        "primary_share": 0.8913,
-        "secondary_class": "pilot",
-        "secondary_share": 0.1087,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "wingman": "ivscout_vsr.odf",
-          "pilot": "isuser_m.odf"
+        "secondary_ship": {
+          "odf": "isuser_m.odf",
+          "name": "Pilot",
+          "share": 0.1087
         },
+        "ship_diversity": 2,
         "active_seconds": 676.5
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout",
           "time_seconds": 603.0,
           "kills": 1,
           "deaths": 2,
@@ -421,7 +429,8 @@
           "kd": 0.0
         },
         {
-          "class": "pilot",
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot",
           "time_seconds": 73.5,
           "kills": 0,
           "deaths": 0,

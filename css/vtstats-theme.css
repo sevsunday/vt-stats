@@ -4770,7 +4770,7 @@ td.vt-col-split {
     border-radius: 2px;
     flex-shrink: 0;
 }
-.vt-loadout-class {
+.vt-loadout-ship {
     color: var(--kb-text-primary);
     font-weight: 500;
 }
@@ -4778,9 +4778,10 @@ td.vt-col-split {
     color: var(--kb-text-secondary);
     font-variant-numeric: tabular-nums;
 }
-.vt-loadout-most-used {
+.vt-loadout-time {
     color: var(--kb-text-muted);
     font-size: 0.92em;
+    font-variant-numeric: tabular-nums;
     margin-left: auto;
 }
 
@@ -4833,65 +4834,218 @@ td.vt-col-split {
     border-top: 0;
 }
 
-/* VTSR-T leaderboard popover for the per-axis breakdown of the
-   last-rated-match delta. Clicked-from a Last-delta cell. */
-.popover.vt-vtsr-popover {
-    --bs-popover-max-width: 380px;
-    background: var(--kb-bg-card);
-    border: 1px solid var(--kb-border-subtle);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    color: var(--kb-text-primary);
-}
-.popover.vt-vtsr-popover .popover-header {
+/* VTSR-T leaderboard expandable rows + detail panel (v2.3 polish).
+   Replaces the prior popover/tooltip pattern with always-discoverable
+   inline drill-down. Each visible row pairs with a sibling
+   `<tr class="collapse vt-vtsr-detail">` that hosts a 5-section panel
+   in a 2-column responsive grid. Sort + filter re-renders preserve
+   expand state via the module-local `expandedVtsrRows` Set. */
+.vt-vtsr-expand-col { width: 32px; padding-left: 0; padding-right: 0; }
+.vt-row-expand {
     background: transparent;
-    color: var(--kb-text-primary);
-    border-bottom: 1px solid var(--kb-border-subtle);
-}
-.popover.vt-vtsr-popover .popover-body {
-    color: var(--kb-text-secondary);
-    font-size: 0.85rem;
-}
-.popover.vt-vtsr-popover .vt-vtsr-popover-headline {
-    color: var(--kb-text-primary);
-    font-weight: 500;
-    margin-bottom: 0.3rem;
-}
-.popover.vt-vtsr-popover .vt-vtsr-popover-eq {
-    margin-bottom: 0.5rem;
+    border: 0;
+    padding: 0.15rem 0.35rem;
     color: var(--kb-text-muted);
-    font-size: 0.78rem;
-    font-family: var(--bs-font-monospace);
+    cursor: pointer;
+    transition: transform 150ms ease, color 120ms ease;
+    line-height: 1;
 }
-.popover.vt-vtsr-popover .vt-axis-contrib-row {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: 0.6rem;
-    font-variant-numeric: tabular-nums;
-    padding: 0.18rem 0;
-}
-.popover.vt-vtsr-popover .vt-axis-contrib-row .vt-axis-name {
+.vt-row-expand:hover { color: var(--kb-primary); }
+.vt-row-expand[aria-expanded="true"] {
+    transform: rotate(90deg);
     color: var(--kb-text-primary);
-    font-size: 0.82rem;
 }
-.popover.vt-vtsr-popover .vt-axis-contrib-row .vt-axis-z {
-    color: var(--kb-text-secondary);
-    font-size: 0.82rem;
-}
-.popover.vt-vtsr-popover .vt-axis-contrib-row .vt-axis-weighted {
-    color: var(--kb-text-muted);
-    font-size: 0.78rem;
-}
-.popover.vt-vtsr-popover .vt-axis-contrib-row.is-positive .vt-axis-z,
-.popover.vt-vtsr-popover .vt-axis-contrib-row.is-positive .vt-axis-weighted {
-    color: var(--kb-success);
-}
-.popover.vt-vtsr-popover .vt-axis-contrib-row.is-negative .vt-axis-z,
-.popover.vt-vtsr-popover .vt-axis-contrib-row.is-negative .vt-axis-weighted {
-    color: var(--kb-danger);
+.vt-row-expand:focus-visible {
+    outline: 2px solid var(--kb-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
 }
 
-/* Primary class chip on the VTSR-T leaderboard. Small badge sized
-   to align with the existing Tier badge column. */
+.vt-vtsr-detail > td {
+    padding: 0;
+    background: color-mix(in srgb, var(--kb-bg-card) 70%, transparent);
+    border-top: 1px solid var(--kb-border-subtle);
+}
+.vt-vtsr-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    padding: 1rem 1.25rem;
+}
+@media (max-width: 1199.98px) {
+    .vt-vtsr-detail-grid { grid-template-columns: 1fr; }
+}
+.vt-vtsr-detail-col {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.vt-vtsr-detail-section {
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: var(--kb-radius-md, 6px);
+    padding: 0.75rem 0.9rem;
+    background: var(--kb-bg-card);
+}
+.vt-vtsr-detail-section h6 {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.55rem;
+}
+.vt-vtsr-detail-section .vt-vtsr-detail-sub {
+    font-size: 0.7rem;
+    text-transform: none;
+    letter-spacing: normal;
+    margin-left: 0.3rem;
+}
+
+/* Section A: combat split stats grid */
+.vt-vtsr-detail-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem 1rem;
+}
+.vt-vtsr-detail-stats > div { display: flex; flex-direction: column; }
+.vt-vtsr-detail-stats .vt-stat-label {
+    color: var(--kb-text-muted);
+    font-size: 0.74rem;
+    line-height: 1;
+    margin-bottom: 0.15rem;
+}
+.vt-vtsr-detail-stats .vt-stat-value {
+    color: var(--kb-text-primary);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Sections B+C: 8-axis horizontal bar grid (per-axis z-score with
+   weighted contribution sub-text). Each row has an axis name | bar
+   centered on 0 (extends right for positive, left for negative) |
+   z value (color-coded) + optional w*z weighted contribution. */
+.vt-axis-bar-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+}
+.vt-axis-bar-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) minmax(120px, 2fr) minmax(140px, auto);
+    gap: 0.6rem;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+}
+.vt-axis-bar-name {
+    color: var(--kb-text-secondary);
+    font-size: 0.78rem;
+}
+.vt-axis-bar-track {
+    position: relative;
+    display: block;
+    height: 8px;
+    background: color-mix(in srgb, var(--kb-text-muted) 10%, transparent);
+    border-radius: 4px;
+}
+.vt-axis-bar-center {
+    position: absolute;
+    left: 50%;
+    top: -2px;
+    bottom: -2px;
+    width: 1px;
+    background: color-mix(in srgb, var(--kb-text-muted) 50%, transparent);
+}
+.vt-axis-bar-fill {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+}
+.vt-axis-bar-row.is-positive .vt-axis-bar-fill {
+    background: var(--kb-success);
+}
+.vt-axis-bar-row.is-negative .vt-axis-bar-fill {
+    background: var(--kb-danger);
+}
+.vt-axis-bar-z {
+    text-align: right;
+    color: var(--kb-text-secondary);
+    font-size: 0.78rem;
+}
+.vt-axis-bar-row.is-positive .vt-axis-bar-z { color: var(--kb-success); }
+.vt-axis-bar-row.is-negative .vt-axis-bar-z { color: var(--kb-danger); }
+.vt-axis-bar-weighted {
+    color: var(--kb-text-muted);
+    font-size: 0.7rem;
+    margin-left: 0.4rem;
+}
+
+.vt-vtsr-detail-formula {
+    color: var(--kb-text-secondary);
+    font-size: 0.78rem;
+    font-family: var(--bs-font-monospace);
+    margin-bottom: 0.6rem;
+}
+
+/* Section D: ship loadout mini-rows (top 5 by time). */
+.vt-vtsr-detail-loadout-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1.5fr) minmax(80px, 2fr) 60px 60px 70px;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.18rem 0;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+.vt-vtsr-detail-loadout-name {
+    color: var(--kb-text-primary);
+    font-weight: 500;
+}
+.vt-vtsr-detail-loadout-bar {
+    position: relative;
+    display: block;
+    height: 6px;
+    background: color-mix(in srgb, var(--kb-text-muted) 10%, transparent);
+    border-radius: 3px;
+}
+.vt-vtsr-detail-loadout-bar-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    background: var(--kb-primary);
+    border-radius: 3px;
+}
+.vt-vtsr-detail-loadout-share,
+.vt-vtsr-detail-loadout-time,
+.vt-vtsr-detail-loadout-kd {
+    color: var(--kb-text-secondary);
+    text-align: right;
+}
+.vt-vtsr-detail-loadout-more {
+    margin-top: 0.3rem;
+    font-size: 0.74rem;
+}
+
+/* Section E: peak rating callout. */
+.vt-vtsr-detail-peak {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-variant-numeric: tabular-nums;
+}
+.vt-vtsr-detail-peak-value {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+}
+.vt-vtsr-detail-peak-label {
+    font-size: 0.78rem;
+}
+
+/* Primary ship chip on the VTSR-T leaderboard. Small badge sized
+   to align with the existing Tier badge column. (Token name kept as
+   `vt-vtsr-primary-class` for backwards-CSS-token-stability; renders
+   ship names like "Tank", "Scout" in v2.3+.) */
 .vt-vtsr-primary-class {
     display: inline-block;
     padding: 0.15rem 0.55rem;

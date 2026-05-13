@@ -81,14 +81,14 @@ Each `leaderboard[].personal` row gains six new fields supplementing the existin
 
 Each weapon entry on `weapon_breakdown` also gains `pvp_hits` (subset of `hits`). Together these power the v2.3 thug ELO axes (`thug_kill_rate` blends pvp + α·pve; `thug_accuracy` is weapon-normalized using the per-weapon pvp_hits) and the dashboard's `TOTAL (PvP/PvE)` chip rendering.
 
-### Loadout Profile + Per-Class Combat (v2.3 addition)
+### Loadout Profile + Per-Ship Combat (v2.3 addition)
 
 Each `leaderboard[]` row gains two new sibling blocks:
 
-- `loadout`: `{classes, class_seconds, primary_class, primary_share, secondary_class, secondary_share, class_diversity, most_used_odf, active_seconds}`. Class-time distribution sourced from per-tick `update_tick.players[].odf` samples + `data/odf.min.json` `inheritanceChain` root resolution (via `_load_class_labels()` in `scripts/process_stats.py`). Pilot ODFs (root class `person`) renamed to `pilot` for display clarity; unrecognized ODFs bucket to `unknown`.
-- `per_class_combat`: list of `{class, time_seconds, kills, deaths, pvp_kills, pvp_deaths, pve_kills, pve_deaths, dealt, shots, hits, pvp_hits, accuracy, pvp_accuracy, dpm, kd}` rows, one per class with time>0, sorted by time desc. Tick-joined to active ship at event time via the running `s64_to_current_odf` map (cold-start: events before the player's first `update_tick` bucket to class `unknown`).
+- `loadout`: `{ships, primary_ship, secondary_ship, ship_diversity, active_seconds}`. Per-ship time distribution sourced from per-tick `update_tick.players[].odf` samples in `scripts/process_stats.py`. Each entry in `ships[odf_lower] = {name, share, seconds}` carries a pre-resolved pretty name (`Tank`, `Scout`, `Assault Tank`, `Pilot`, etc.) via the same `prettify_odf()` chain (`unit_name(odf)` → stripped-VSR → `wpn_name(odf)` → title-cased stem) that resolves weapons elsewhere. `primary_ship` / `secondary_ship` are records of `{odf, name, share}` (not bare strings) so consumers don't have to re-resolve. **No class taxonomy** — consumers see actual ships, not invented bucket labels.
+- `per_ship_combat`: list of `{ship, ship_name, time_seconds, kills, deaths, pvp_kills, pvp_deaths, pve_kills, pve_deaths, dealt, shots, hits, pvp_hits, accuracy, pvp_accuracy, dpm, kd}` rows, one per ship with time>0, sorted by time desc. Tick-joined to active ship at event time via the running `s64_to_current_odf` map (cold-start: events before the player's first `update_tick` bucket to ship `"unknown"`).
 
-Display-only — no axis math reads these blocks. Career-rolled by `js/all-matches-aggregator.js` into `career_loadout` + `career_per_class_combat` on each `career_stats[]` row.
+Display-only — no axis math reads these blocks. Career-rolled by `js/all-matches-aggregator.js` into `career_loadout` + `career_per_ship_combat` on each `career_stats[]` row (cached `ship_names[odf]` map populated on first encounter so the rollup emits names without re-resolving).
 
 ### Source-Level Filters
 
