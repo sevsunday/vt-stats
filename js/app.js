@@ -5313,27 +5313,112 @@
       });
   }
 
+  // v2.3 polish: per-axis metadata for the expand panel's hover
+  // tooltips. Each axis row in sections B + C surfaces a tooltip
+  // composed of label + formula + description, plus a per-row sigma
+  // interpretation that the axis-grid renderer appends. Keys mirror
+  // the axis-name keys in elo_current.json `weights` (and the same
+  // keys in `axis_means` / `axis_contributions`).
+  const VTSR_AXIS_META = {
+    net_damage_share: {
+      label: 'Net damage share',
+      formula: '(dealt - received) / sum_lobby(dealt)',
+      desc:    'Your damage output minus damage taken, as a share of total damage dealt in the lobby. Captures both offensive output and survivability.',
+    },
+    thug_kill_rate: {
+      label: 'Thug kill rate',
+      formula: '(pvp_kills + alpha_pve * pve_kills) / minutes_played',
+      desc:    'Kills per minute, with PvE kills credited at alpha_pve = 0.5 weight (no penalty for role players who farm AI).',
+    },
+    thug_accuracy: {
+      label: 'Thug accuracy',
+      formula: 'weapon-normalized hit-rate ratio vs lobby (pwa formula)',
+      desc:    'Per-weapon accuracy compared against the lobby baseline for each weapon, weighted by your shot share. PvE hits credited at alpha_pve = 0.5.',
+    },
+    thug_efficiency: {
+      label: 'Thug efficiency',
+      formula: '(pvp_dealt + alpha_pve * pve_to_AI) / max(1, total_dealt - structure_dealt)',
+      desc:    'Of your non-structure damage, how effectively did you fight? Structure damage flows entirely to pve_share; AI damage gets partial credit here.',
+    },
+    pve_share: {
+      label: 'PvE share',
+      formula: 'pve_dealt / max(1, total_dealt)',
+      desc:    'Your damage to enemy non-human assets (structures + AI tanks + scavs + extractors) as a share of your total damage. Rewards economy disruption.',
+    },
+    mobility: {
+      label: 'Mobility',
+      formula: 'activity_score / 100  (positioning data)',
+      desc:    'How much of the map you actually moved across. Driven by the same metric as the per-match Movement Profile column.',
+    },
+    snipe_bonus: {
+      label: 'Snipe bonus',
+      formula: 'min(snipes / 5, 1)  (capped before z-score)',
+      desc:    'Sniper rifle hits, capped at 5 before z-score so one big game cannot deform the lobby distribution.',
+    },
+    target_lock_pct: {
+      label: 'T-key usage',
+      formula: 'target_lock_pct  (already 0-1)',
+      desc:    'Share of the match you held an active T-key target lock. Situational-awareness proxy at low weight (4%).',
+    },
+  };
+
+  // Build the tooltip body string for one axis bar row. ``mode`` is
+  // 'career' (axis_means - long-run average) or 'last_match'
+  // (axis_contributions - per-match z). Phrasing differs slightly so
+  // the user understands whether the value is career-aggregate or
+  // single-match. Returns an HTML string suitable for a Bootstrap
+  // tooltip with ``data-bs-html="true"``.
+  function buildAxisTooltipHtml(axisName, z, mode) {
+    const meta = VTSR_AXIS_META[axisName] || {
+      label: axisName, formula: '', desc: '',
+    };
+    const zSign = z >= 0 ? '+' : '';
+    const zRounded = z.toFixed(2);
+    let interp;
+    const matchPhrase = mode === 'last_match' ? ' for that match' : '';
+    if (Math.abs(z) < 0.05) {
+      interp = `About average for the lobby${matchPhrase}.`;
+    } else if (z > 0) {
+      interp = `<span style="color:var(--kb-success);">Above lobby average${matchPhrase}.</span> Higher than peers.`;
+    } else {
+      interp = `<span style="color:var(--kb-danger);">Below lobby average${matchPhrase}.</span> Lower than peers.`;
+    }
+    const formulaLine = meta.formula
+      ? `<div style="margin-top:0.3rem;"><code style="font-size:0.75rem;">${esc(meta.formula)}</code></div>`
+      : '';
+    const descLine = meta.desc
+      ? `<div style="margin-top:0.3rem;">${esc(meta.desc)}</div>`
+      : '';
+    return `<div><strong>${esc(meta.label)}</strong> &middot; ${zSign}${zRounded}\u03c3</div>
+            ${formulaLine}
+            ${descLine}
+            <div style="margin-top:0.3rem;">${interp}</div>`;
+  }
+
   // v2.3 polish: render one VTSR-T leaderboard row's expanded detail
-  // panel. Five sections in a 2-col responsive grid, all sourced from
+  // panel. Six sections in a 2-col responsive grid, all sourced from
   // already-loaded data (`elo_current.json` for axis_means, lazy-loaded
   // `elo_history.json` for last-match axis_contributions, `careerStats[]`
-  // for combat split + ship loadout).
+  // for combat split + ship/weapon distribution).
   //
-  //   A. Combat split    - PvP/PvE raw counts + total dmg + active time
-  //   B. Career axes     - 8-axis bar grid from axis_means
-  //   C. Last-match axes - 8-axis bar grid + P/E/dR formula
-  //   D. Ship loadout    - top 5 ships by time (career)
-  //   E. Peak context    - peak rating + match id
+  //   A. Combat split        - PvP/PvE raw counts + total dmg + active time
+  //   B. Career axes         - 8-axis bar grid from axis_means
+  //   C. Last-match axes     - 8-axis bar grid + P/E/dR formula
+  //   D. Ship distribution   - top 5 ships by time (career)
+  //   E. Peak context        - peak rating + match id
+  //   F. Weapon distribution - top 5 weapons by damage (career)
   function buildVtsrDetailPanel(eloRow, careerRow) {
     const sectA = renderVtsrCombatSection(careerRow);
     const sectB = renderVtsrAxisGrid(eloRow.axis_means || {}, 'career', null);
     const sectC = renderVtsrLastMatchSection(eloRow);
     const sectD = renderVtsrShipLoadoutSection(careerRow);
     const sectE = renderVtsrPeakSection(eloRow);
+    const sectF = renderVtsrWeaponDistributionSection(careerRow);
     return `<div class="vt-vtsr-detail-grid">
       <div class="vt-vtsr-detail-col">
         ${sectA}
         ${sectD}
+        ${sectF}
         ${sectE}
       </div>
       <div class="vt-vtsr-detail-col">
@@ -5407,7 +5492,17 @@
         const wcSign = wc >= 0 ? '+' : '';
         weightedStr = ` <span class="vt-axis-bar-weighted">w=${w.toFixed(2)} \u2192 ${wcSign}${wc.toFixed(3)}</span>`;
       }
-      return `<div class="vt-axis-bar-row ${cls}">
+      // v2.3 polish: per-axis hover tooltip (formula + description +
+      // sigma interpretation). The detail row is hidden inside a
+      // Bootstrap collapse, so tooltips on its descendants don't
+      // initialize until the panel is shown -- ensureTooltips() runs
+      // after the tbody rebuild and re-binds on every render.
+      const tipHtml = buildAxisTooltipHtml(a, z, mode);
+      return `<div class="vt-axis-bar-row ${cls}"
+                   data-bs-toggle="tooltip" data-bs-html="true"
+                   data-bs-placement="top"
+                   data-bs-custom-class="vt-axis-tooltip"
+                   title="${esc(tipHtml)}">
         <span class="vt-axis-bar-name">${esc(a)}</span>
         <span class="vt-axis-bar-track">
           <span class="vt-axis-bar-center"></span>
@@ -5515,7 +5610,51 @@
       ? `<div class="vt-vtsr-detail-loadout-more text-muted small">+ ${list.length - 5} more ${list.length - 5 === 1 ? 'ship' : 'ships'}</div>`
       : '';
     return `<section class="vt-vtsr-detail-section">
-      <h6>Ship loadout <span class="vt-vtsr-detail-sub text-muted">(top ${Math.min(5, list.length)})</span></h6>
+      <h6>Ship distribution <span class="vt-vtsr-detail-sub text-muted">(top ${Math.min(5, list.length)} by time)</span></h6>
+      ${rows}
+      ${more}
+    </section>`;
+  }
+
+  // Section F: top 5 weapons by damage dealt (career-aggregated).
+  // Same visual aesthetic as the ship distribution section -- one row
+  // per weapon with name | bar | share% | total dmg | accuracy. Reads
+  // from career_stats[].weapon_breakdown which already carries
+  // {dealt, shots, hits, pvp_hits, accuracy, pvp_accuracy} per weapon.
+  function renderVtsrWeaponDistributionSection(careerRow) {
+    const wb = (careerRow && careerRow.weapon_breakdown) || {};
+    const list = Object.entries(wb)
+      .filter(([, w]) => (w && (w.dealt || 0) > 0))
+      .sort(([, a], [, b]) => (b.dealt || 0) - (a.dealt || 0));
+    if (!list.length) {
+      return `<section class="vt-vtsr-detail-section">
+        <h6>Weapon distribution</h6>
+        <div class="text-muted small">No weapon data available.</div>
+      </section>`;
+    }
+    const top = list.slice(0, 5);
+    const totalDealt = list.reduce((s, [, w]) => s + (w.dealt || 0), 0);
+    const rows = top.map(([wname, w]) => {
+      const share = totalDealt > 0 ? (w.dealt || 0) / totalDealt : 0;
+      const widthPct = (share * 100).toFixed(1);
+      const accStr = (w.shots || 0) > 0
+        ? ((w.accuracy || 0) * 100).toFixed(1) + '%'
+        : '\u2014';
+      return `<div class="vt-vtsr-detail-loadout-row">
+        <span class="vt-vtsr-detail-loadout-name">${esc(wname)}</span>
+        <span class="vt-vtsr-detail-loadout-bar">
+          <span class="vt-vtsr-detail-loadout-bar-fill" style="width:${widthPct}%;"></span>
+        </span>
+        <span class="vt-vtsr-detail-loadout-share">${(share * 100).toFixed(1)}%</span>
+        <span class="vt-vtsr-detail-loadout-time">${fmt(w.dealt || 0)}</span>
+        <span class="vt-vtsr-detail-loadout-kd">${accStr}</span>
+      </div>`;
+    }).join('');
+    const more = list.length > 5
+      ? `<div class="vt-vtsr-detail-loadout-more text-muted small">+ ${list.length - 5} more ${list.length - 5 === 1 ? 'weapon' : 'weapons'}</div>`
+      : '';
+    return `<section class="vt-vtsr-detail-section">
+      <h6>Weapon distribution <span class="vt-vtsr-detail-sub text-muted">(top ${Math.min(5, list.length)} by damage)</span></h6>
       ${rows}
       ${more}
     </section>`;
@@ -5610,10 +5749,42 @@
       const careerRow = vtsrCareerByName(r);
       const cl = (careerRow && careerRow.career_loadout) || null;
 
-      // ----- Primary Ship cell (pretty-named via pipeline) -----
+      // ----- Player cell tooltip: steam64 + in-game nick when they
+      //       differ from the canonical display name. Skip the
+      //       data-bs-toggle entirely when neither is informative
+      //       (avoid empty popovers).
+      let playerCellAttrs = '';
+      const playerTipParts = [];
+      if (r.steam64) playerTipParts.push(`Steam64: ${r.steam64}`);
+      // careerRow may carry an in_game_nick on legacy rows; check both
+      // sources without assuming presence.
+      const inGameNick = (careerRow && careerRow.in_game_nick) || null;
+      if (inGameNick && inGameNick.toLowerCase() !== (r.name || '').toLowerCase()) {
+        playerTipParts.push(`In-game nick: ${inGameNick}`);
+      }
+      if (playerTipParts.length) {
+        playerCellAttrs = ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(playerTipParts.join(' \u00b7 '))}"`;
+      }
+
+      // ----- Primary Ship cell (raw lowercased ODF stem) -----
       let primaryShipCell = '<td class="text-center"><span style="color:var(--kb-text-muted);">&mdash;</span></td>';
       if (cl && cl.primary_ship && cl.primary_ship.name) {
-        primaryShipCell = `<td class="text-center"><span class="vt-vtsr-primary-class">${esc(cl.primary_ship.name)}</span></td>`;
+        const psName = cl.primary_ship.name;
+        const psShare = cl.primary_ship.share != null ? (cl.primary_ship.share * 100).toFixed(1) + '%' : '';
+        const ss = cl.secondary_ship;
+        const ssPart = (ss && ss.name && ss.share != null)
+          ? ` \u00b7 secondary ${ss.name} (${(ss.share * 100).toFixed(1)}%)`
+          : '';
+        const diversity = cl.ship_diversity || 0;
+        const diversityPart = diversity > 0
+          ? ` \u00b7 ${diversity} distinct ${diversity === 1 ? 'ship' : 'ships'}`
+          : '';
+        const activeSec = cl.active_seconds || 0;
+        const activeStr = activeSec >= 3600
+          ? (activeSec / 3600).toFixed(1) + 'h active'
+          : Math.round(activeSec / 60) + 'm active';
+        const psTip = `${psName} \u00b7 ${psShare} of ${activeStr}${ssPart}${diversityPart}`;
+        primaryShipCell = `<td class="text-center" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(psTip)}"><span class="vt-vtsr-primary-class">${esc(psName)}</span></td>`;
       }
 
       // ----- PvP K/D + PvE K/D split cells -----
@@ -5632,17 +5803,44 @@
       const pveKdTip = (pveK + pveD > 0) ? `${pveK} PvE kills / ${pveD} PvE deaths` : 'No PvE combat';
 
       // ----- Acc + PvP Acc -----
+      const totalShots = careerRow ? (careerRow.total_shots_fired || 0) : 0;
+      const totalHits  = careerRow ? (careerRow.total_shots_hit || 0) : 0;
+      const totalPvpHits = careerRow ? (careerRow.total_pvp_shots_hit || 0) : 0;
       const accStr = careerRow
         ? ((careerRow.overall_accuracy || 0) * 100).toFixed(1) + '%'
         : '\u2014';
       const pvpAccStr = careerRow
         ? ((careerRow.pvp_accuracy || 0) * 100).toFixed(1) + '%'
         : '\u2014';
+      const accTip = totalShots > 0
+        ? `${totalHits.toLocaleString()} hits / ${totalShots.toLocaleString()} shots = ${((careerRow.overall_accuracy || 0) * 100).toFixed(2)}%`
+        : 'No shots fired this career';
+      const pvpAccTip = totalShots > 0
+        ? `${totalPvpHits.toLocaleString()} PvP hits / ${totalShots.toLocaleString()} shots = ${((careerRow.pvp_accuracy || 0) * 100).toFixed(2)}%`
+        : 'No shots fired this career';
 
+      // ----- VTSR-T cell tooltip (Thug ELO + Wins ELO + matches) -----
+      const vtsrTip = `${Math.round(r.vtsr)} VTSR-T \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
+
+      // ----- Last cell tooltip (delta + match id) -----
+      const lastTip = (r.last_match_id && lastDelta !== 0)
+        ? `${lastSign}${lastDelta.toFixed(2)} from match ${r.last_match_id}`
+        : (r.last_match_id ? `No rating change from match ${r.last_match_id}` : 'No rated matches yet');
+
+      // ----- Peak cell tooltip (already had one; add match-id) -----
       const peakAt = r.peak_at || '';
       const peakTip = peakAt
         ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} reached at ${peakAt}`
         : `Peak rating: ${Math.round(r.peak_vtsr || r.vtsr)}`;
+
+      // ----- Matches cell tooltip -----
+      const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <5 min duration`;
+
+      // ----- Trend cell tooltip (last N raw deltas listed) -----
+      const trendList = Array.isArray(r.win_history) ? r.win_history : [];
+      const trendTip = trendList.length
+        ? `Last ${trendList.length} ${trendList.length === 1 ? 'delta' : 'deltas'} (oldest \u2192 most-recent): ${trendList.map(d => (d > 0 ? '+' : '') + d.toFixed(1)).join(', ')}`
+        : 'No rated matches yet';
 
       const detailHtml = buildVtsrDetailPanel(r, careerRow);
 
@@ -5657,17 +5855,17 @@
           </button>
         </td>
         <td class="text-center">${badge}</td>
-        <td class="fw-semibold">${esc(r.name)}</td>
+        <td class="fw-semibold"${playerCellAttrs}>${esc(r.name)}</td>
         ${primaryShipCell}
-        <td class="text-end vt-vtsr-rating">${Math.round(r.vtsr)}</td>
+        <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
         <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pveKdTip)}">${pveKdStr}</td>
-        <td class="text-end">${accStr}</td>
-        <td class="text-end">${pvpAccStr}</td>
-        <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(accTip)}">${accStr}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpAccTip)}">${pvpAccStr}</td>
+        <td class="text-end ${lastClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(lastTip)}">${lastSign}${lastDelta.toFixed(1)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
-        <td class="text-end">${r.matches_played}</td>
-        <td class="text-end"><canvas class="vt-vtsr-sparkline" id="${sparklineId}"></canvas></td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(trendTip)}"><canvas class="vt-vtsr-sparkline" id="${sparklineId}"></canvas></td>
       </tr>
       <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
         <td colspan="14">${detailHtml}</td>

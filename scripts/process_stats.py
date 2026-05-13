@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 12
+PIPELINE_VERSION = 13
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3173,10 +3173,18 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             total_ship_ticks = sum(ship_ticks.values())
             if total_ship_ticks > 0:
                 # Per-ship metadata (name + share + seconds).
+                # v2.3 polish round 2: emit raw lowercased ODF stem
+                # (e.g. "ivscout_vsr") instead of pretty-name resolution.
+                # Multiple ODFs share the same `unitName` ("Scout") so the
+                # disambiguator was producing a confusing mix of clean
+                # names + stem-suffixed names ("Scout (fvscout_vsr)").
+                # Identifier-grade stems are unambiguous; can flip back
+                # to prettify_odf() later via another PIPELINE_VERSION
+                # bump once the pretty-name strategy is settled.
                 ships = {}
                 for odfl, ticks in ship_ticks.items():
                     ships[odfl] = {
-                        "name":    prettify_odf(odfl),
+                        "name":    odfl[:-4],
                         "share":   round(ticks / total_ship_ticks, 4),
                         "seconds": round(ticks / tick_rate, 1),
                     }
@@ -3231,7 +3239,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     )
                     per_ship_combat_rows.append({
                         "ship":         odfl,
-                        "ship_name":    prettify_odf(odfl),
+                        "ship_name":    odfl[:-4],
                         "time_seconds": round(pc_time, 1),
                         "kills":        pc_kills,
                         "deaths":       pc_deaths,
