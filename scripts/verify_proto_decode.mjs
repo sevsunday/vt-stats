@@ -1,15 +1,20 @@
 /**
  * Schema-migration verification tool for the Raw Data Browser decode path.
  *
- * Decodes a real .binpb.gz with protobufjs-light + the generated JSON
- * descriptor (`vendor/protobufjs/statsgate.proto.json`) and prints a summary
- * of header + per-oneof event counts. Compare against the Python pipeline's
+ * Decodes a real .binpb.gz with protobufjs-light and prints a summary of
+ * header + per-oneof event counts. Compare against the Python pipeline's
  * printed event count for the same file (`python scripts/process_stats.py`).
  *
- * Use this whenever `scripts/statsgate.proto` changes: after regenerating the
- * descriptor (see `.cursor/rules/schema-migration.mdc`), run this to confirm
- * the Node/browser decode path still agrees with the Python pipeline before
- * shipping the new schema.
+ * Dual-descriptor strategy: tries the v2 (current) descriptor first, then
+ * falls back to v1 (legacy) on a wire-type error. Mirrors the same
+ * detection scheme used at runtime in `js/raw-browser.js`. The output
+ * includes the detected `schema` field so it's obvious which path
+ * succeeded.
+ *
+ * Use this whenever `scripts/statsgate.proto` changes: after regenerating
+ * the descriptors (see `.cursor/rules/schema-migration.mdc`), run this on
+ * both a v1 file and a v2 file to confirm the Node/browser decode path
+ * still agrees with the Python pipeline before shipping the new schema.
  *
  * One-off setup (not persisted in repo):
  *   npm install --no-save protobufjs@7
@@ -32,20 +37,31 @@ const PROJECT_ROOT = resolve(__dirname, '..');
 
 const target = process.argv[2] || 'data/sessions/VTrider/2026-04-16-01-27-48.binpb.gz';
 const binpbPath = resolve(PROJECT_ROOT, target);
-const descriptorPath = resolve(PROJECT_ROOT, 'vendor/protobufjs/statsgate.proto.json');
+const descV2Path = resolve(PROJECT_ROOT, 'vendor/protobufjs/statsgate.proto.json');
+const descV1Path = resolve(PROJECT_ROOT, 'vendor/protobufjs/statsgate_v1.proto.json');
 
-const descriptor = JSON.parse(readFileSync(descriptorPath, 'utf8'));
-const root = protobuf.Root.fromJSON(descriptor);
-const ClientStatSession = root.lookupType('statsgate.ClientStatSession');
+const descV2 = JSON.parse(readFileSync(descV2Path, 'utf8'));
+const descV1 = JSON.parse(readFileSync(descV1Path, 'utf8'));
+const TypeV2 = protobuf.Root.fromJSON(descV2).lookupType('statsgate.ClientStatSession');
+const TypeV1 = protobuf.Root.fromJSON(descV1).lookupType('statsgate_v1.ClientStatSession');
 
 const gzBytes = readFileSync(binpbPath);
 const rawBytes = gunzipSync(gzBytes);
 
 const t0 = Date.now();
-const msg = ClientStatSession.decode(rawBytes);
+let schema = 'v2';
+let decodeType = TypeV2;
+let msg = null;
+try {
+  msg = TypeV2.decode(rawBytes);
+} catch (e) {
+  schema = 'v1';
+  decodeType = TypeV1;
+  msg = TypeV1.decode(rawBytes);
+}
 // Mirror the raw-browser.js conversion options so this test validates the
 // exact shape the browser produces.
-const obj = ClientStatSession.toObject(msg, {
+const obj = decodeType.toObject(msg, {
   longs: String,
   defaults: false,
   oneofs: true,
@@ -54,6 +70,9 @@ const obj = ClientStatSession.toObject(msg, {
 });
 const elapsed = Date.now() - t0;
 
+// Counts mirror the Python pipeline's snake_case event-type labels. The
+// `damage_received` slot is populated only on v1 (v2 reserves StatEvent
+// field 4 -- the unified DamageDealt carries both sides).
 const counts = {
   bullet_init: 0,
   bullet_hit: 0,
@@ -104,10 +123,15 @@ const headerSummary = {
   terrain_max_y: header.terrainMaxY,
   terrain_min_z: header.terrainMinZ,
   terrain_max_z: header.terrainMaxZ,
+  // v2-only header fields. v1 sessions emit defaults (unset / 0 / false).
+  shutdown_requested: !!header.shutdownRequested,
+  team1_race: header.team1Race || 'RACE_UNSPECIFIED',
+  team2_race: header.team2Race || 'RACE_UNSPECIFIED',
 };
 
 console.log(JSON.stringify({
   file: target,
+  schema,
   gz_bytes: gzBytes.length,
   raw_bytes: rawBytes.length,
   decode_ms: elapsed,

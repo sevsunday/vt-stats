@@ -19,6 +19,15 @@
             }
           }
         },
+        "Race": {
+          "edition": "2023",
+          "values": {
+            "RACE_UNSPECIFIED": 0,
+            "RACE_ISDF": 1,
+            "RACE_SCION": 2,
+            "RACE_HADEAN": 3
+          }
+        },
         "StatHeader": {
           "edition": "2023",
           "fields": {
@@ -92,6 +101,18 @@
             "terrainMaxZ": {
               "type": "float",
               "id": 17
+            },
+            "shutdownRequested": {
+              "type": "bool",
+              "id": 18
+            },
+            "team1Race": {
+              "type": "Race",
+              "id": 19
+            },
+            "team2Race": {
+              "type": "Race",
+              "id": 20
             }
           }
         },
@@ -138,6 +159,10 @@
             "shooterOdf": {
               "type": "string",
               "id": 6
+            },
+            "distanceToTarget": {
+              "type": "float",
+              "id": 7
             }
           }
         },
@@ -152,42 +177,33 @@
               "type": "uint64",
               "id": 2
             },
-            "team": {
+            "shooterTeam": {
               "type": "int32",
               "id": 3
             },
-            "ordnanceOdf": {
+            "shooterOdf": {
               "type": "string",
               "id": 4
-            },
-            "amount": {
-              "type": "float",
-              "id": 5
-            }
-          }
-        },
-        "DamageReceived": {
-          "edition": "2023",
-          "fields": {
-            "tick": {
-              "type": "uint32",
-              "id": 1
             },
             "victim": {
               "type": "uint64",
-              "id": 2
+              "id": 5
             },
-            "team": {
+            "victimTeam": {
               "type": "int32",
-              "id": 3
+              "id": 6
+            },
+            "victimOdf": {
+              "type": "string",
+              "id": 7
             },
             "ordnanceOdf": {
               "type": "string",
-              "id": 4
+              "id": 8
             },
             "amount": {
               "type": "float",
-              "id": 5
+              "id": 9
             }
           }
         },
@@ -341,7 +357,6 @@
                 "bulletInit",
                 "bulletHit",
                 "damageDealt",
-                "damageReceived",
                 "updateTick",
                 "unitDestroyed",
                 "unitSniped",
@@ -362,10 +377,6 @@
               "type": "DamageDealt",
               "id": 3
             },
-            "damageReceived": {
-              "type": "DamageReceived",
-              "id": 4
-            },
             "updateTick": {
               "type": "UpdateTick",
               "id": 5
@@ -382,7 +393,13 @@
               "type": "PickupPowerup",
               "id": 8
             }
-          }
+          },
+          "reserved": [
+            [
+              4,
+              4
+            ]
+          ]
         },
         "ClientStatSession": {
           "edition": "2023",

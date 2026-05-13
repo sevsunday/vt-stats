@@ -16,7 +16,8 @@ Static-site dashboard for Battlezone: Combat Commander match statistics. Four-pa
 
 ## Key File Locations
 
-- Proto schema (source of truth): `scripts/statsgate.proto`
+- Proto schema (source of truth, v2 — current): `scripts/statsgate.proto`
+- Legacy proto schema (v1, frozen snapshot): `scripts/statsgate_v1.proto` + `scripts/statsgate_v1_pb2.py` + `vendor/protobufjs/statsgate_v1.proto.json`. Used only by the dual-descriptor fallback path in `scripts/process_stats.py::load_session` and `js/raw-browser.js::fetchAndDecodeBinpb` so pre-Nomad sessions still decode byte-identically. The pipeline normalizes both schemas to a single internal `DamageEvent` shape; downstream aggregators are schema-agnostic. Detected schema is stamped on `match.proto_schema_version` (debugging telemetry only — UI never branches on it).
 - Pipeline: `scripts/process_stats.py`
 - Radar renderer: `js/charts-radar.js` (Player Performance Radar — 8-axis spiderweb with single / compare / team / career modes; Survivability is a p95-clipped composite of damage-trade ratio and K/D, career mode adds Bayesian shrinkage toward the league mean; reuses `activeCharts` and `glassTooltipConfig` from `js/charts.js`)
 - ODF weapon DB: `data/odf.min.json`

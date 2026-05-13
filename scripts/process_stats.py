@@ -20,7 +20,16 @@ from collections import Counter, defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-import statsgate_pb2
+import statsgate_pb2          # v2 (current schema)
+import statsgate_v1_pb2       # v1 (legacy schema, retained for pre-Nomad sessions)
+from google.protobuf.message import DecodeError
+
+# Internal schema labels stamped onto each match_data["match"]["proto_schema_version"].
+# Used by the damage-event adapter (`_normalize_damage_events`) and the
+# faction resolver to branch on layout-dependent fields. NOT a frontend
+# contract -- this is debugging telemetry only; UI never reads it.
+PROTO_SCHEMA_V1 = "v1"
+PROTO_SCHEMA_V2 = "v2"
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -44,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 13
+PIPELINE_VERSION = 14
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -161,6 +170,23 @@ FACTORY_ODFS = frozenset({
 # flame mine, not a Scion asset). Vote sources in Algorithm B should only
 # look at vehicle/structure/pilot ODFs to avoid prefix-collision pollution.
 FACTION_BY_PREFIX = {"i": "ISDF", "e": "Hadean", "f": "Scion"}
+
+# Maps v2's StatHeader.team1_race / team2_race enum values
+# (statsgate_pb2.Race) to the project's existing single-letter faction
+# code convention. Used by the header-override path in process_match()
+# to translate the collector's authoritative race signal into the same
+# {"code", "name"} shape `detect_team_factions()` already emits. Keep
+# in sync with FACTION_BY_PREFIX -- the codes must round-trip.
+#
+#   RACE_UNSPECIFIED = 0  (no override; algo inference remains)
+#   RACE_ISDF        = 1  -> "i"
+#   RACE_SCION       = 2  -> "f"  (Scion ODFs start with 'f')
+#   RACE_HADEAN      = 3  -> "e"  (Hadean ODFs start with 'e')
+RACE_TO_FACTION_CODE = {
+    statsgate_pb2.RACE_ISDF: "i",
+    statsgate_pb2.RACE_SCION: "f",
+    statsgate_pb2.RACE_HADEAN: "e",
+}
 
 # Pilot ODFs (player on foot). When a kill_feed entry has killer_team == 0
 # AND killer == 0 AND the victim died in one of these ODFs, the death is
@@ -1234,12 +1260,52 @@ def sync_upstream():
 
 
 def load_session(path):
-    """Load and parse a .binpb.gz session file."""
+    """Load and parse a .binpb.gz session file.
+
+    Returns `(session, schema)` where `schema` is `PROTO_SCHEMA_V1` or
+    `PROTO_SCHEMA_V2`. The pipeline supports both the legacy schema
+    (separate DamageDealt/DamageReceived events) and the current schema
+    (unified DamageDealt) by dispatching on the returned label downstream.
+
+    Discrimination strategy:
+      1. Parse with the v2 descriptor (always works structurally because
+         v1's removed `damage_received` payloads land in `reserved 4` and
+         the lenient Python protobuf parser silently keeps walking).
+      2. If `header.team1_race` / `team2_race` are set, it's a v2 file --
+         the v1 collector cannot populate these fields.
+      3. Otherwise, scan the event stream once for `WhichOneof('event_type')
+         is None`. v1 emits `damage_received` as oneof field 4, which the
+         v2 parser reports as an unidentifiable oneof arm. Even ONE such
+         event proves v1.
+      4. On a v1 detection, re-parse from scratch with the v1 descriptor
+         so DamageDealt fields land in the correct semantic slots and
+         DamageReceived events are first-class again.
+    """
     with gzip.open(path, "rb") as f:
         data = f.read()
-    session = statsgate_pb2.ClientStatSession()
-    session.ParseFromString(data)
-    return session
+
+    session_v2 = statsgate_pb2.ClientStatSession()
+    try:
+        session_v2.ParseFromString(data)
+    except DecodeError:
+        # Extremely defensive -- if even the v2 parse blows up, surface v1.
+        session_v1 = statsgate_v1_pb2.ClientStatSession()
+        session_v1.ParseFromString(data)
+        return session_v1, PROTO_SCHEMA_V1
+
+    hdr = session_v2.header
+    if hdr.team1_race != 0 or hdr.team2_race != 0:
+        return session_v2, PROTO_SCHEMA_V2
+
+    for evt in session_v2.event_stream:
+        if evt.WhichOneof("event_type") is None:
+            # v1's damage_received slot (oneof field 4) shows up as an
+            # unidentifiable arm under v2's `reserved 4`.
+            session_v1 = statsgate_v1_pb2.ClientStatSession()
+            session_v1.ParseFromString(data)
+            return session_v1, PROTO_SCHEMA_V1
+
+    return session_v2, PROTO_SCHEMA_V2
 
 
 def load_cache_index():
@@ -2071,13 +2137,21 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
     discovery time. It's stamped into the output JSON's
     `match.source_size_bytes` field so subsequent runs can use it as the
     incremental cache key (see load_cache_index() and the `--force` flag).
+
+    `schema` is `PROTO_SCHEMA_V1` or `PROTO_SCHEMA_V2`, returned by
+    `load_session`. It controls the damage-event normalization branch
+    (see `_normalize_damage_events`), the faction resolution (v2's
+    `team1_race`/`team2_race` header fields are authoritative when set,
+    algo inference is the fallback), and the per-ship combat ODF
+    attribution (v2 uses event-time `DamageDealt.shooter_odf` when
+    present; v1 unchanged via the existing `_ship_key()` UpdateTick map).
     """
     header = session.header
     events = session.event_stream
@@ -2232,10 +2306,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     snipe_feed = []
     snipe_count_by_player = Counter()  # s64 -> count
 
-    # Sentinel damage telemetry. Counts PAIRS (DD+DR together = 1 pair);
-    # total_amount sums the DD-side amount only (DR amount is always equal,
-    # so double-counting would misrepresent the "impact sum"). See the
-    # _is_sentinel_damage helper and docs/DATA_DICTIONARY.md §7 "Sentinel Damage Filter".
+    # Sentinel damage telemetry. Counts logical damage records that the
+    # sentinel filter dropped:
+    #   v1: each DamageDealt+DamageReceived pair = 1 record (count).
+    #   v2: each unified DamageDealt = 1 record (count).
+    # The on-the-wire layout differs but the logical-record count is
+    # identical (a v1 pair represents the same single in-game damage
+    # event as a v2 unified DamageDealt). total_amount sums one side
+    # only (DR amount is always equal to DD's, so summing both would
+    # misrepresent the "impact sum"). See _is_sentinel_damage() and
+    # docs/DATA_DICTIONARY.md §7 "Sentinel Damage Filter".
     sentinel_damage = {
         "count": 0,
         "total_amount": 0.0,
@@ -2244,6 +2324,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     }
     # Dedup key for log lines; one line per unique (tick, team, amount) tuple.
     sentinel_log_seen = set()
+
+    # BulletHit distance-to-target capture (v2 only). The v2 schema added
+    # `BulletHit.distance_to_target` (engagement range at impact, world
+    # units). v1 BulletHits have no such field; values default to 0.0
+    # and never reach the `>0` gate below, so v1 matches naturally emit
+    # an empty summary block.
+    #
+    # No UI consumer yet -- see `distance_to_target.txt` at the repo
+    # root for concrete future uses (VTSR-T axes, weapon-meta
+    # engagement-range stats, highlight card refinements).
+    bullet_hit_distance_total = 0.0
+    bullet_hit_distance_max = 0.0
+    bullet_hit_distance_count = 0  # BulletHits seen
+    bullet_hit_distance_with = 0   # BulletHits with distance_to_target > 0
 
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
@@ -2383,6 +2477,18 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             shooter = bh.shooter
             odf = bh.ordnance_odf or ""
             is_pvp_hit = shooter > 0 and bh.victim > 0
+            # BulletHit distance capture (v2-only field on the wire).
+            # `bh.distance_to_target` is 0.0 on v1 (field absent in the
+            # legacy proto -- protobuf returns default), so the `>0` gate
+            # naturally distinguishes "no data" from "real distance".
+            bullet_hit_distance_count += 1
+            if schema == PROTO_SCHEMA_V2:
+                _dt = bh.distance_to_target
+                if _dt > 0:
+                    bullet_hit_distance_with += 1
+                    bullet_hit_distance_total += _dt
+                    if _dt > bullet_hit_distance_max:
+                        bullet_hit_distance_max = _dt
             if shooter > 0 and odf:
                 all_ordnance.add(odf)
                 player_shots_hit[shooter][odf] += 1
@@ -2418,7 +2524,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # because pre-collector-schema sessions leave `bh.shooter_odf`
             # empty; team_factions (computed after the loop) gives a
             # reliable shooter-faction code in those cases.
-            if shooter > 0 and bh.victim_odf:
+            #
+            # v2 skip: the unified DamageDealt carries `victim_odf`
+            # directly, so the queue is unused on v2 sessions. Skipping
+            # the push saves a few thousand allocations per match.
+            if schema == PROTO_SCHEMA_V1 and shooter > 0 and bh.victim_odf:
                 bh_pending[(bh.tick, shooter, odf.lower())].append(bh.victim_odf.lower())
             # Faction-detection votes (Algorithm B): the shooter and victim
             # ODFs are vehicle/structure/pilot ODFs whose first letter
@@ -2441,115 +2551,177 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             i += 1
 
         elif event_type == "damage_dealt":
+            # Schema-aware normalization: extract a uniform set of
+            # locals so the body below stays schema-agnostic. Both
+            # paths converge on `de_*` (the unified DamageEvent shape).
+            #
+            # v1: legacy two-message form. Pair with the next
+            #     damage_received event when present (the engine emits
+            #     them adjacently); orphan DamageDealts (crush, mine,
+            #     environmental, etc.) carry no victim side. v1 has no
+            #     event-time shooter_odf or victim_odf on DamageDealt --
+            #     we leave those locals empty so the existing
+            #     bh_pending join path handles structure_dealt
+            #     attribution unchanged.
+            #
+            # v2: unified DamageDealt carries both sides plus the
+            #     event-time shooter_odf / victim_odf. We synthesize a
+            #     "paired DR" view from the unified event so the
+            #     receiving/rivalry/asset code below works unchanged.
             dd = evt.damage_dealt
-            dr = None
-            has_paired_dr = (
-                i + 1 < n
-                and events[i + 1].WhichOneof("event_type") == "damage_received"
-            )
-            if has_paired_dr:
-                dr = events[i + 1].damage_received
+            if schema == PROTO_SCHEMA_V2:
+                de_tick = dd.tick
+                de_shooter = dd.shooter
+                de_shooter_team = dd.shooter_team
+                de_shooter_odf_event = dd.shooter_odf  # event-time ODF (narrow v2 switch)
+                de_victim = dd.victim
+                de_victim_team = dd.victim_team
+                de_victim_odf_event = dd.victim_odf
+                de_ordnance = dd.ordnance_odf
+                de_amount = dd.amount
+                de_victim_amount = dd.amount  # unified: one amount represents both sides
+                # v2 always carries the victim side on the same event;
+                # has_paired_dr stays True so the existing victim-side
+                # code path stays alive, gated only by victim_team != 0.
+                has_paired_dr = True
+                i += 1
+            else:
+                de_tick = dd.tick
+                de_shooter = dd.shooter
+                de_shooter_team = dd.team  # v1's `team` is the shooter's team
+                de_shooter_odf_event = ""
+                de_ordnance = dd.ordnance_odf
+                de_amount = dd.amount
+                has_paired_dr = (
+                    i + 1 < n
+                    and events[i + 1].WhichOneof("event_type") == "damage_received"
+                )
+                if has_paired_dr:
+                    dr = events[i + 1].damage_received
+                    de_victim = dr.victim
+                    de_victim_team = dr.team
+                    de_victim_amount = dr.amount
+                    i += 2
+                else:
+                    de_victim = 0
+                    de_victim_team = 0
+                    de_victim_amount = 0.0
+                    i += 1
+                de_victim_odf_event = ""
 
             # Sentinel filter: DAMAGE_TYPE_UNKNOWN force-kill events have
-            # amount > 1e6. Skip the whole pair (DD + paired DR) before any
-            # accumulator touches the values. Either side being sentinel
-            # triggers the skip — in practice they carry identical amounts.
-            if _is_sentinel_damage(dd.amount) or (
-                dr is not None and _is_sentinel_damage(dr.amount)
+            # amount > 1e6. Skip before any accumulator touches the values.
+            # v1: either DD or DR amount triggers (in practice they're
+            #     identical); count is per-pair.
+            # v2: single unified event; count is per-event (same logical
+            #     record count as v1 pairs).
+            if _is_sentinel_damage(de_amount) or (
+                schema == PROTO_SCHEMA_V1 and has_paired_dr and _is_sentinel_damage(de_victim_amount)
             ):
                 sentinel_damage["count"] += 1
-                sentinel_damage["total_amount"] += float(dd.amount)
-                tick_val = int(dd.tick)
+                sentinel_damage["total_amount"] += float(de_amount)
+                tick_val = int(de_tick)
                 if sentinel_damage["first_tick"] is None or tick_val < sentinel_damage["first_tick"]:
                     sentinel_damage["first_tick"] = tick_val
                 if sentinel_damage["last_tick"] is None or tick_val > sentinel_damage["last_tick"]:
                     sentinel_damage["last_tick"] = tick_val
-                log_key = (tick_val, int(dd.team), float(dd.amount))
+                log_key = (tick_val, int(de_shooter_team), float(de_amount))
                 if log_key not in sentinel_log_seen:
                     sentinel_log_seen.add(log_key)
                     print(
-                        f"  sentinel damage: tick={tick_val} team={dd.team} "
-                        f"shooter={dd.shooter} victim={dr.victim if dr else 0} "
-                        f"amount={dd.amount} odf='{dd.ordnance_odf or ''}'"
+                        f"  sentinel damage: tick={tick_val} team={de_shooter_team} "
+                        f"shooter={de_shooter} victim={de_victim} "
+                        f"amount={de_amount} odf='{de_ordnance or ''}'"
                     )
-                i += 2 if has_paired_dr else 1
                 continue
 
-            if has_paired_dr:
-                i += 2
-            else:
-                i += 1
+            skip_shooter = (de_shooter_team == 0 or de_amount == 0.0)
 
-            skip_shooter = (dd.team == 0 or dd.amount == 0.0)
-
-            tick = dd.tick
+            tick = de_tick
             if tick > max_tick:
                 max_tick = tick
             if tick < min_tick:
                 min_tick = tick
 
-            odf = dd.ordnance_odf or ""
+            odf = de_ordnance or ""
             if odf:
                 all_ordnance.add(odf)
 
             if not skip_shooter:
-                shooter = dd.shooter
-                shooter_faction = slot_to_faction(dd.team)
+                shooter = de_shooter
+                shooter_faction = slot_to_faction(de_shooter_team)
 
                 if shooter > 0:
-                    player_dealt[shooter] += dd.amount
+                    player_dealt[shooter] += de_amount
                     if odf:
-                        player_weapon_dealt[shooter][odf] += dd.amount
+                        player_weapon_dealt[shooter][odf] += de_amount
                         player_weapons_used[shooter].add(odf)
                     if odf:
-                        weapon_total_damage[odf] += dd.amount
+                        weapon_total_damage[odf] += de_amount
                         weapon_users[odf].add(shooter)
                     # Per-ship combat: tick-join dealt damage to active
                     # ship (v2.3). Sums regardless of whether the
                     # victim is PvP or PvE -- the per-ship table totals
                     # all dealt damage; the PvP/PvE split is captured via
                     # pvp_kills / pvp_hits on the same row.
-                    per_ship_combat[shooter][_ship_key(shooter)]["dealt"] += dd.amount
+                    #
+                    # Narrow v2 event-time ODF switch: when the
+                    # unified DamageDealt carries `shooter_odf`, that's
+                    # the engine's ground-truth ship at the exact moment
+                    # of the damage event -- more accurate than the
+                    # UpdateTick-based `_ship_key()` map across
+                    # ship-switch moments. v1 has no event-time
+                    # shooter_odf, so `de_shooter_odf_event` is "" and
+                    # the existing fallback applies unchanged.
+                    _ship = (de_shooter_odf_event.lower() if de_shooter_odf_event else "") or _ship_key(shooter)
+                    per_ship_combat[shooter][_ship]["dealt"] += de_amount
 
                     # Structure-damage attribution for VTSR-T `structure_share`.
-                    # Pop the matching BulletHit-side victim_odf and bucket the
-                    # damage by victim faction code (i/e/f). The friendly-fire
-                    # filter happens post-loop using team_factions (some old
-                    # sessions emit empty `bh.shooter_odf`, so an in-loop check
-                    # would conservatively drop ALL structure damage on those
-                    # matches). Empty-queue popleft is a no-op for orphan
-                    # DamageDealts (crush, mine, environmental) -- those are
-                    # conservatively uncounted. Same honesty contract as
-                    # `pve_dealt`.
-                    queue = bh_pending.get((dd.tick, shooter, (odf or "").lower())) if odf else None
-                    if queue:
-                        v_odf = queue.popleft()
-                        if v_odf in building_odfs:
-                            v_fc = faction_from_odf(v_odf)
-                            if v_fc:
-                                player_structure_dealt_by_vfc[shooter][v_fc] += dd.amount
+                    # v2: victim_odf is on the event -- use it directly.
+                    # v1: pop the matching BulletHit-side victim_odf from
+                    #     bh_pending (the queue is populated only on v1;
+                    #     see the bullet_hit branch). The friendly-fire
+                    #     filter happens post-loop using team_factions
+                    #     (pre-collector-schema sessions emit empty
+                    #     `bh.shooter_odf`, so an in-loop check would
+                    #     conservatively drop ALL structure damage on
+                    #     those matches). Empty-queue popleft is a no-op
+                    #     for orphan DamageDealts (crush, mine,
+                    #     environmental) -- those are conservatively
+                    #     uncounted. Same honesty contract as `pve_dealt`.
+                    v_odf = ""
+                    if schema == PROTO_SCHEMA_V2:
+                        v_odf = de_victim_odf_event.lower() if de_victim_odf_event else ""
+                    else:
+                        queue = bh_pending.get((de_tick, shooter, (odf or "").lower())) if odf else None
+                        if queue:
+                            v_odf = queue.popleft()
+                    if v_odf and v_odf in building_odfs:
+                        v_fc = faction_from_odf(v_odf)
+                        if v_fc:
+                            player_structure_dealt_by_vfc[shooter][v_fc] += de_amount
                 else:
-                    asset_dealt[dd.team] += dd.amount
+                    asset_dealt[de_shooter_team] += de_amount
 
                 if shooter_faction:
-                    faction_dealt[shooter_faction] += dd.amount
+                    faction_dealt[shooter_faction] += de_amount
 
-            if dr and dr.team != 0 and dr.amount != 0.0:
-                victim = dr.victim
-                victim_faction = slot_to_faction(dr.team)
+            if has_paired_dr and de_victim_team != 0 and de_victim_amount != 0.0:
+                victim = de_victim
+                victim_faction = slot_to_faction(de_victim_team)
 
                 if victim > 0:
-                    player_received[victim] += dr.amount
+                    player_received[victim] += de_victim_amount
                     if odf:
-                        player_weapon_received[victim][odf] += dr.amount
+                        player_weapon_received[victim][odf] += de_victim_amount
                 else:
-                    asset_received[dr.team] += dr.amount
+                    asset_received[de_victim_team] += de_victim_amount
 
                 if victim_faction:
-                    faction_received[victim_faction] += dr.amount
+                    faction_received[victim_faction] += de_victim_amount
 
-                if not skip_shooter and dd.shooter > 0 and victim > 0:
-                    rivalry[dd.shooter][victim] += dd.amount
+                if not skip_shooter and de_shooter > 0 and victim > 0:
+                    rivalry[de_shooter][victim] += de_amount
 
         elif event_type == "unit_destroyed":
             ud = evt.unit_destroyed
@@ -2914,13 +3086,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             if et != "damage_dealt":
                 continue
             dd = evt.damage_dealt
+            # Schema-aware shooter-team extraction: v1's `team` was the
+            # shooter's team; v2 renamed to `shooter_team`. Same wire
+            # field id (3) and same semantic.
+            dd_shooter_team = dd.shooter_team if schema == PROTO_SCHEMA_V2 else dd.team
             if _is_sentinel_damage(dd.amount):
                 continue
-            if dd.team == 0 or dd.amount == 0.0:
+            if dd_shooter_team == 0 or dd.amount == 0.0:
                 continue
             shooter = dd.shooter
             bucket_idx = (dd.tick - min_tick) // bucket_size
-            shooter_faction = slot_to_faction(dd.team)
+            shooter_faction = slot_to_faction(dd_shooter_team)
 
             if shooter > 0:
                 timeline_player[shooter][bucket_idx] += dd.amount
@@ -3063,6 +3239,32 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # `bh.shooter_odf` empty. `_team_factions_pre` maps team (1/2) -> dict
     # {"code": "i"|"e"|"f", "name": "ISDF"|"Hadean"|"Scion"} or None.
     _team_factions_pre = detect_team_factions(slot_first_odf, slot_faction_votes)
+
+    # v2 collector ships authoritative `team1_race`/`team2_race` enum
+    # values on the StatHeader. When set (non-zero), they override the
+    # algorithmic inference -- the engine knows the canonical race; we
+    # only inferred from event-stream votes because we previously had
+    # nothing else. When unset (RACE_UNSPECIFIED == 0, the v1 collector
+    # default since the fields don't exist there) we keep the inference.
+    # Algorithm B votes are still computed regardless: they are still the
+    # *only* signal for v1 sessions and serve as a sanity log on v2
+    # sessions (mismatches log at INFO level; never block).
+    if schema == PROTO_SCHEMA_V2:
+        for team_num, race_value in ((1, header.team1_race), (2, header.team2_race)):
+            if race_value not in RACE_TO_FACTION_CODE:
+                continue
+            header_code = RACE_TO_FACTION_CODE[race_value]
+            algo_entry = _team_factions_pre.get(team_num)
+            algo_code = (algo_entry or {}).get("code")
+            if algo_code and algo_code != header_code:
+                print(
+                    f"  faction header/algo mismatch team{team_num}: "
+                    f"header={header_code} algo={algo_code} (using header)"
+                )
+            _team_factions_pre[team_num] = {
+                "code": header_code,
+                "name": FACTION_BY_PREFIX[header_code],
+            }
 
     # Reconcile `player_structure_dealt_by_vfc` into the final
     # `player_structure_dealt[s64] -> float`. For each shooter, look up
@@ -3590,15 +3792,49 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "has_pickup_data": match_has_pickup_data,
             # Per-match schema version. v1 = pre-highlights; v2 added the
             # top-level `highlights` block; v3 added `match.team_factions`
-            # and `match.winner`; v4 (this version) adds the v2.3 leaderboard
-            # fields: `personal.pvp_kills` / `pve_kills` / `pvp_deaths` /
+            # and `match.winner`; v4 added the v2.3 leaderboard fields
+            # (`personal.pvp_kills` / `pve_kills` / `pvp_deaths` /
             # `pve_deaths` / `pvp_shots_hit` / `pvp_accuracy`,
-            # `weapon_breakdown[w].pvp_hits`, plus per-player `loadout`
-            # block (class shares, primary/secondary, most-used ODFs) and
-            # `per_class_combat` list (per-ship-class combat stats joined
-            # to active ship at event time). Absence means legacy data
-            # (anything written before the v2.3 phase).
-            "schema_version": 4,
+            # `weapon_breakdown[w].pvp_hits`, per-player `loadout`,
+            # `per_class_combat`); v5 (this version) adds the proto v2
+            # capture fields: `match.proto_schema_version`,
+            # `match.shutdown_requested`, `match.bullet_hit_distance`.
+            # Absence of v5 fields = legacy data; v5 fields are
+            # null-safe / capture-only and do not change the rendering
+            # contract.
+            "schema_version": 5,
+            # Internal debugging telemetry: which proto version the
+            # source .binpb.gz was encoded against. "v1" = pre-Nomad
+            # (separate DamageDealt/DamageReceived); "v2" = current
+            # (unified DamageDealt). UI never reads this; aggregators
+            # never branch on it -- the pipeline already normalized the
+            # output to a single shape.
+            "proto_schema_version": schema,
+            # True when the match ended because the stat session was
+            # cancelled mid-game via mission script or console command.
+            # False when the game ended normally OR when this is a v1
+            # session (legacy collector cannot distinguish; defaults to
+            # the "normal end" interpretation). Capture-only -- no UI
+            # consumer yet; surfaced for future filtering (e.g. exclude
+            # mid-game-quit matches from career ratings).
+            "shutdown_requested": bool(getattr(header, "shutdown_requested", False)),
+            # BulletHit distance-to-target summary (v2-only). v1 matches
+            # emit count=N total but with_distance=0 and mean/max=null
+            # because the proto field doesn't exist. See
+            # `distance_to_target.txt` at the repo root for the planned
+            # future uses.
+            "bullet_hit_distance": {
+                "count": int(bullet_hit_distance_count),
+                "with_distance": int(bullet_hit_distance_with),
+                "mean": (
+                    round(bullet_hit_distance_total / bullet_hit_distance_with, 3)
+                    if bullet_hit_distance_with > 0 else None
+                ),
+                "max": (
+                    round(bullet_hit_distance_max, 3)
+                    if bullet_hit_distance_with > 0 else None
+                ),
+            },
             "terrain_bounds": terrain_bounds,
             "base_to_base_distance": positioning_block.get("base_to_base_distance"),
             "sentinel_damage": {
@@ -4296,12 +4532,13 @@ def main():
             n_cache_hit += 1
         else:
             print(f"\nProcessing {submitter}/{session_path.name}...")
-            session = load_session(session_path)
-            print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}")
+            session, schema = load_session(session_path)
+            print(f"  Parsed: {len(session.event_stream)} events, map={session.header.map}, schema={schema}")
             match_data = process_match(
                 session, session_path.name, current_size, submitter,
                 resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs,
                 known_players,
+                schema=schema,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"

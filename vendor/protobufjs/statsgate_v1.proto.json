@@ -1,0 +1,424 @@
+{
+  "nested": {
+    "statsgate_v1": {
+      "nested": {
+        "Vec3": {
+          "edition": "2023",
+          "fields": {
+            "x": {
+              "type": "float",
+              "id": 1
+            },
+            "y": {
+              "type": "float",
+              "id": 2
+            },
+            "z": {
+              "type": "float",
+              "id": 3
+            }
+          }
+        },
+        "StatHeader": {
+          "edition": "2023",
+          "fields": {
+            "map": {
+              "type": "string",
+              "id": 1
+            },
+            "startTime": {
+              "type": "google.protobuf.Timestamp",
+              "id": 2
+            },
+            "authorNickname": {
+              "type": "string",
+              "id": 3
+            },
+            "authorSteam64": {
+              "type": "uint64",
+              "id": 4
+            },
+            "tickRate": {
+              "type": "uint32",
+              "id": 5
+            },
+            "s64ToNick": {
+              "keyType": "uint64",
+              "type": "string",
+              "id": 6
+            },
+            "teamnumToS64": {
+              "keyType": "int32",
+              "type": "uint64",
+              "id": 7
+            },
+            "activeConfigMod": {
+              "type": "string",
+              "id": 8
+            },
+            "s64ToTeamnum": {
+              "keyType": "uint64",
+              "type": "int32",
+              "id": 9
+            },
+            "playerCount": {
+              "type": "uint32",
+              "id": 10
+            },
+            "lastTick": {
+              "type": "uint32",
+              "id": 11
+            },
+            "terrainMinX": {
+              "type": "float",
+              "id": 12
+            },
+            "terrainMaxX": {
+              "type": "float",
+              "id": 13
+            },
+            "terrainMinY": {
+              "type": "float",
+              "id": 14
+            },
+            "terrainMaxY": {
+              "type": "float",
+              "id": 15
+            },
+            "terrainMinZ": {
+              "type": "float",
+              "id": 16
+            },
+            "terrainMaxZ": {
+              "type": "float",
+              "id": 17
+            }
+          }
+        },
+        "BulletInit": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "shooter": {
+              "type": "uint64",
+              "id": 2
+            },
+            "ordnanceOdf": {
+              "type": "string",
+              "id": 3
+            }
+          }
+        },
+        "BulletHit": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "shooter": {
+              "type": "uint64",
+              "id": 2
+            },
+            "ordnanceOdf": {
+              "type": "string",
+              "id": 3
+            },
+            "victim": {
+              "type": "uint64",
+              "id": 4
+            },
+            "victimOdf": {
+              "type": "string",
+              "id": 5
+            },
+            "shooterOdf": {
+              "type": "string",
+              "id": 6
+            }
+          }
+        },
+        "DamageDealt": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "shooter": {
+              "type": "uint64",
+              "id": 2
+            },
+            "team": {
+              "type": "int32",
+              "id": 3
+            },
+            "ordnanceOdf": {
+              "type": "string",
+              "id": 4
+            },
+            "amount": {
+              "type": "float",
+              "id": 5
+            }
+          }
+        },
+        "DamageReceived": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "victim": {
+              "type": "uint64",
+              "id": 2
+            },
+            "team": {
+              "type": "int32",
+              "id": 3
+            },
+            "ordnanceOdf": {
+              "type": "string",
+              "id": 4
+            },
+            "amount": {
+              "type": "float",
+              "id": 5
+            }
+          }
+        },
+        "PlayerState": {
+          "edition": "2023",
+          "fields": {
+            "player": {
+              "type": "uint64",
+              "id": 1
+            },
+            "position": {
+              "type": "Vec3",
+              "id": 2
+            },
+            "speed": {
+              "type": "float",
+              "id": 3
+            },
+            "health": {
+              "type": "float",
+              "id": 4
+            },
+            "ammo": {
+              "type": "float",
+              "id": 5
+            },
+            "odf": {
+              "type": "string",
+              "id": 6
+            },
+            "hasTarget": {
+              "type": "bool",
+              "id": 7
+            }
+          }
+        },
+        "UpdateTick": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "players": {
+              "rule": "repeated",
+              "type": "PlayerState",
+              "id": 2
+            }
+          }
+        },
+        "UnitDestroyed": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "killer": {
+              "type": "uint64",
+              "id": 2
+            },
+            "killerTeam": {
+              "type": "uint32",
+              "id": 3
+            },
+            "killerOdf": {
+              "type": "string",
+              "id": 4
+            },
+            "victim": {
+              "type": "uint64",
+              "id": 5
+            },
+            "victimTeam": {
+              "type": "uint32",
+              "id": 6
+            },
+            "victimOdf": {
+              "type": "string",
+              "id": 7
+            }
+          }
+        },
+        "UnitSniped": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "shooter": {
+              "type": "uint64",
+              "id": 2
+            },
+            "shooterTeam": {
+              "type": "uint32",
+              "id": 3
+            },
+            "shooterOdf": {
+              "type": "string",
+              "id": 4
+            },
+            "victim": {
+              "type": "uint64",
+              "id": 5
+            },
+            "victimTeam": {
+              "type": "uint32",
+              "id": 6
+            },
+            "victimOdf": {
+              "type": "string",
+              "id": 7
+            }
+          }
+        },
+        "PickupPowerup": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "picker": {
+              "type": "uint64",
+              "id": 2
+            },
+            "pickerTeam": {
+              "type": "uint32",
+              "id": 3
+            },
+            "pickerOdf": {
+              "type": "string",
+              "id": 4
+            },
+            "powerupTeam": {
+              "type": "uint32",
+              "id": 5
+            },
+            "powerupOdf": {
+              "type": "string",
+              "id": 6
+            }
+          }
+        },
+        "StatEvent": {
+          "edition": "2023",
+          "oneofs": {
+            "eventType": {
+              "oneof": [
+                "bulletInit",
+                "bulletHit",
+                "damageDealt",
+                "damageReceived",
+                "updateTick",
+                "unitDestroyed",
+                "unitSniped",
+                "pickupPowerup"
+              ]
+            }
+          },
+          "fields": {
+            "bulletInit": {
+              "type": "BulletInit",
+              "id": 1
+            },
+            "bulletHit": {
+              "type": "BulletHit",
+              "id": 2
+            },
+            "damageDealt": {
+              "type": "DamageDealt",
+              "id": 3
+            },
+            "damageReceived": {
+              "type": "DamageReceived",
+              "id": 4
+            },
+            "updateTick": {
+              "type": "UpdateTick",
+              "id": 5
+            },
+            "unitDestroyed": {
+              "type": "UnitDestroyed",
+              "id": 6
+            },
+            "unitSniped": {
+              "type": "UnitSniped",
+              "id": 7
+            },
+            "pickupPowerup": {
+              "type": "PickupPowerup",
+              "id": 8
+            }
+          }
+        },
+        "ClientStatSession": {
+          "edition": "2023",
+          "fields": {
+            "header": {
+              "type": "StatHeader",
+              "id": 1
+            },
+            "eventStream": {
+              "rule": "repeated",
+              "type": "StatEvent",
+              "id": 2
+            }
+          }
+        }
+      }
+    },
+    "google": {
+      "nested": {
+        "protobuf": {
+          "nested": {
+            "Timestamp": {
+              "fields": {
+                "seconds": {
+                  "type": "int64",
+                  "id": 1
+                },
+                "nanos": {
+                  "type": "int32",
+                  "id": 2
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

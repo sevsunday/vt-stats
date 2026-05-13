@@ -100,7 +100,16 @@ The cache key is `(match.submitter, match.source_file, match.source_size_bytes)`
 
 ## 2. Data Schema — Protobuf
 
-The raw match data uses Protocol Buffers (protobuf). The canonical schema is at `scripts/statsgate.proto`.
+The raw match data uses Protocol Buffers (protobuf). Two schema versions are supported simultaneously:
+
+- **v2 (current)** — `scripts/statsgate.proto`. The definitive reference for new code. Unified `DamageDealt` (carries both sides on one event), new `Race` enum on `StatHeader`, `shutdown_requested` / `team1_race` / `team2_race` header fields, `BulletHit.distance_to_target`.
+- **v1 (legacy)** — `scripts/statsgate_v1.proto`. Frozen verbatim snapshot of the pre-Nomad schema. Used only by the dual-descriptor fallback path so pre-Nomad sessions still decode byte-identically.
+
+Decode-time discrimination:
+- **Python** (`scripts/process_stats.py::load_session`) parses with v2 first, then checks `header.team1_race != 0 || team2_race != 0` (v2-only signal) or scans for any `WhichOneof('event_type') is None` event (v1's `damage_received` lands here under v2's `reserved 4`). v1 detection re-parses with the v1 descriptor.
+- **JS** (`js/raw-browser.js::fetchAndDecodeBinpb`) tries v2 first; protobufjs throws on the wire-type collision, so a simple try/catch falls back to v1.
+
+Detected schema is stamped onto every output as `match.proto_schema_version` (`"v1"` | `"v2"`). The pipeline normalizes both schemas to a single internal `DamageEvent` shape so downstream aggregators are schema-agnostic. UI never branches on the schema label.
 
 ### Top-Level Message: `ClientStatSession`
 
@@ -130,8 +139,11 @@ The raw match data uses Protocol Buffers (protobuf). The canonical schema is at 
 | 15 | `terrain_max_y` | `float` | World-space maximum Y (highest elevation) |
 | 16 | `terrain_min_z` | `float` | World-space minimum Z (south edge) |
 | 17 | `terrain_max_z` | `float` | World-space maximum Z (north edge) |
+| 18 | `shutdown_requested` | `bool` | **v2-only.** `true` when the stat session was cancelled mid-game via mission script or console command; `false` for normal end. v1 sessions emit default `false`. |
+| 19 | `team1_race` | `Race` enum | **v2-only.** Team 1's faction (`RACE_UNSPECIFIED` / `RACE_ISDF` / `RACE_SCION` / `RACE_HADEAN`). Authoritative when set; v1 always reports `RACE_UNSPECIFIED`. |
+| 20 | `team2_race` | `Race` enum | **v2-only.** Team 2's faction. Same semantic as team1_race. |
 
-All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions, edition-2023 implicit field presence). The pipeline treats all-zero as "unset" and falls back to observed player extents for `map_bounds`.
+All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions, edition-2023 implicit field presence). The pipeline treats all-zero as "unset" and falls back to observed player extents for `map_bounds`. The v2-only fields (#18-20) emit defaults on v1 sessions because the field numbers don't exist in `statsgate_v1.proto` (protobuf returns the type default after a v1 decode).
 
 Team convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
 
@@ -157,29 +169,32 @@ A projectile connects with a target.
 | `victim` | `uint64` | Steam64 ID of the victim (0 if not a player) |
 | `victim_odf` | `string` | ODF of the hit entity |
 | `shooter_odf` | `string` | Shooter's vehicle ODF (not yet populated by collector) |
+| `distance_to_target` | `float` | **v2-only.** Line-of-fire distance from shooter to victim at impact (world units). v1 has no such field; values default to 0.0. Capture-only -- see `distance_to_target.txt` at the repo root for planned future uses. |
 
-#### `DamageDealt` (field 3) + `DamageReceived` (field 4)
-These **always occur as adjacent pairs** in the event stream. A `DamageDealt` event is always immediately followed by a corresponding `DamageReceived` event.
+#### `DamageDealt` (field 3) — v2 unified
 
-**DamageDealt:**
+**v2 (current).** A single event carries both shooter-side and victim-side data for a single in-game damage tick. Replaced the v1 `DamageDealt` + `DamageReceived` pair.
 
 | Field | Type | Description |
 |---|---|---|
 | `tick` | `uint32` | Game tick |
 | `shooter` | `uint64` | Steam64 ID of damage source player (0 = non-player entity) |
-| `team` | `int32` | Owning player's slot (1-10), 0 = world prop |
-| `ordnance_odf` | `string` | Weapon ODF (may be null → "Unknown") |
-| `amount` | `float` | Damage amount |
-
-**DamageReceived:**
-
-| Field | Type | Description |
-|---|---|---|
-| `tick` | `uint32` | Game tick |
+| `shooter_team` | `int32` | Shooter's slot (1-10), 0 = world prop |
+| `shooter_odf` | `string` | Shooter's vehicle ODF at event time (more accurate than the UpdateTick-derived `_ship_key()` map across ship-switch moments) |
 | `victim` | `uint64` | Steam64 ID of damage target player (0 = non-player entity) |
-| `team` | `int32` | Owning player's slot (1-10), 0 = world prop |
+| `victim_team` | `int32` | Victim's slot (1-10), 0 = world prop |
+| `victim_odf` | `string` | Victim's ODF at event time (used directly for structure-damage attribution -- replaces v1's bh_pending queue join) |
 | `ordnance_odf` | `string` | Weapon ODF (may be null → "Unknown") |
 | `amount` | `float` | Damage amount |
+
+**v1 (legacy).** Two separate events emitted as adjacent pairs. The pipeline's v1 path in `_normalize_damage_events()` pairs them and produces the same unified `DamageEvent` shape consumed by the rest of the pipeline.
+
+| v1 message | Field | Description |
+|---|---|---|
+| `DamageDealt` (v1) | `tick`, `shooter`, `team` (shooter team), `ordnance_odf`, `amount` | First half of the pair |
+| `DamageReceived` (v1) | `tick`, `victim`, `team` (victim team), `ordnance_odf`, `amount` (always equal to the paired DD) | Second half of the pair |
+
+v2 `StatEvent` reserves oneof field `4` so the v1 layout cannot be mistakenly re-introduced.
 
 ### Critical: Damage Event Semantics
 
@@ -204,7 +219,7 @@ The `team` field is **always the owning player's slot number (1-10)**, not a fac
 - `victim == 0` → asset received credit to `team` (the owning slot)
 - Both `shooter > 0` AND `victim > 0` (and shooter not skipped) → rivalry matrix entry
 
-**Sentinel damage filter.** The pipeline drops any `DamageDealt` / `DamageReceived` event whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value exactly `268,435,456.0` = `2^28`), not real combat. Skipping happens before any accumulator and is mirrored in the timeline recompute loop. Both DD and paired DR are consumed together. Per-match diagnostic at `match.sentinel_damage`; aggregate at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage`. Counts are **pair counts** (one DD+DR pair = 1). Full evidence chain, struct layout, and the `misnexport2 + 0x1c` decompile are in [§7 Sentinel Damage Filter in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#7-sentinel-damage-filter). The Raw Browser Reconcile view applies the same filter and surfaces the dropped total via an inline badge; the raw events table still shows sentinel values verbatim.
+**Sentinel damage filter.** The pipeline drops any damage event whose `amount > 1e6`. These are engine-emitted sentinels from the BZCC `DAMAGE_TYPE_UNKNOWN` force-kill pathway (observed value exactly `268,435,456.0` = `2^28`), not real combat. Skipping happens before any accumulator and is mirrored in the timeline recompute loop. Per-match diagnostic at `match.sentinel_damage`; aggregate at `meta.total_sentinel_damage_dropped` + `meta.matches_with_sentinel_damage`. **Counts are logical-record counts** — one v1 DD+DR pair = 1, one v2 unified DamageDealt = 1. The on-the-wire shape differs but the in-game damage event count is identical, so `match.sentinel_damage.count` is comparable across schemas. Full evidence chain, struct layout, and the `misnexport2 + 0x1c` decompile are in [§7 Sentinel Damage Filter in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#7-sentinel-damage-filter). The Raw Browser Reconcile view applies the same filter (schema-agnostic helper) and surfaces the dropped total via an inline badge; the raw events table still shows sentinel values verbatim.
 
 #### `UpdateTick` (field 5)
 Per-tick state snapshot for all players. Pipeline currently skips these events.
@@ -314,17 +329,26 @@ Every dashboard card has an expand button (`data-expand="section-id"`) that open
 ### When the Schema Changes
 
 1. Replace `scripts/statsgate.proto` with the new version
-2. Recompile: `python -m grpc_tools.protoc --proto_path=. --python_out=. statsgate.proto`
-3. Follow `.cursor/rules/schema-migration.mdc` checklist
-4. Update `process_stats.py` to handle new/changed event types
-5. Re-run the pipeline and verify output
-6. Update this document and `.cursor/rules/data-schema.mdc`
+2. Recompile **both** Python descriptors:
+   - `python -m grpc_tools.protoc --proto_path=scripts --python_out=scripts scripts/statsgate.proto`
+   - The legacy descriptor (`scripts/statsgate_v1.proto` + `scripts/statsgate_v1_pb2.py`) is normally frozen — only regenerate if you're backporting a bugfix to the v1 corpus
+3. Regenerate **both** protobufjs descriptors:
+   - `npx pbjs -t json scripts/statsgate.proto -o vendor/protobufjs/statsgate.proto.json`
+   - `npx pbjs -t json scripts/statsgate_v1.proto -o vendor/protobufjs/statsgate_v1.proto.json` (only when v1 changes)
+4. Follow `.cursor/rules/schema-migration.mdc` checklist
+5. Update `process_stats.py` to handle new/changed event types
+6. Update `js/raw-browser.js` to handle new event arms (chips, Reconcile, etc.)
+7. Re-run `scripts/verify_proto_decode.mjs` on one v1 file AND one v2 file to confirm dual-decode still agrees with the Python pipeline
+8. Re-run the pipeline and verify output (parity on v1 corpus, first-process on v2)
+9. Update this document and `.cursor/rules/data-schema.mdc`
+
+The dual-descriptor strategy means every v1 session must continue to decode and produce byte-identical processed JSON. Add a parity test to your migration plan: copy a representative v1 processed JSON to `_before.json`, reprocess after the schema change, and diff — the only differences must be the version bumps and any new optional fields you're intentionally adding.
 
 ### Future Schema Considerations
 
 Items flagged for the upstream collector / proto, not blocking for current dashboard work:
 
-- **`DamageType` enum on `DamageDealt` / `DamageReceived`.** The engine's internal `DAMAGE` struct already carries a `type` byte (`DAMAGE_TYPE_UNKNOWN` / `ORDNANCE` / `EXPLOSION` / `COLLISION` / `WATER` / `UNDERWATER` / `SCRIPT`). Propagating it on the wire would (a) let us defensively drop `DAMAGE_TYPE_UNKNOWN` events without relying on the current amount-based sentinel heuristic, and (b) unlock source-type breakdowns (e.g. "damage by cause"). Backwards-compatible if added with default 0. See [§7 Sentinel Damage Filter in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#7-sentinel-damage-filter) "Future schema enhancement" for a proposed proto shape.
+- **`DamageType` enum on `DamageDealt`.** The engine's internal `DAMAGE` struct already carries a `type` byte (`DAMAGE_TYPE_UNKNOWN` / `ORDNANCE` / `EXPLOSION` / `COLLISION` / `WATER` / `UNDERWATER` / `SCRIPT`). Propagating it on the wire would (a) let us defensively drop `DAMAGE_TYPE_UNKNOWN` events without relying on the current amount-based sentinel heuristic, and (b) unlock source-type breakdowns (e.g. "damage by cause"). Backwards-compatible if added with default 0. See [§7 Sentinel Damage Filter in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#7-sentinel-damage-filter) "Future schema enhancement" for a proposed proto shape.
 
 ---
 
@@ -425,7 +449,15 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
   "has_position_data": true,
   "has_target_lock_data": false,
   "has_pickup_data": true,
-  "schema_version": 3,
+  "schema_version": 5,
+  "proto_schema_version": "v2",
+  "shutdown_requested": false,
+  "bullet_hit_distance": {
+    "count": 4252,
+    "with_distance": 4252,
+    "mean": 67.74,
+    "max": 597.014
+  },
   "terrain_bounds": {
     "min": {"x": -1024.0, "y": 0.0, "z": -1024.0},
     "max": {"x": 1024.0, "y": 320.25, "z": 1024.0}
@@ -442,7 +474,12 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
 
 `has_pickup_data` (Phase 3) is `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. Mirrored on `match`, `meta`, and the manifest entry.
 
-`schema_version` (Phase 3) is the per-match output schema version. `1` = Phase 3 baseline; `2` adds the top-level `highlights` block (see "Match Highlights" below); `3` adds `match.team_factions` and `match.winner` (per-team faction labels + match outcome inference — see [§9 Team Faction Detection in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#9-team-faction-detection)). Absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
+`schema_version` (Phase 3) is the per-match output schema version. `1` = Phase 3 baseline; `2` adds the top-level `highlights` block (see "Match Highlights" below); `3` adds `match.team_factions` and `match.winner` (per-team faction labels + match outcome inference — see [§9 Team Faction Detection in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#9-team-faction-detection)); `4` adds the v2.3 PvP/PvE leaderboard fields and per-ship combat blocks; `5` adds the proto v2 capture fields (`proto_schema_version`, `shutdown_requested`, `bullet_hit_distance`). Absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
+
+The schema_version=5 fields are capture-only — UI never branches on them:
+- **`proto_schema_version`** — debugging telemetry, `"v1"` or `"v2"`, detected by `load_session()`. Stamped here so the Raw Browser / verify scripts can cross-reference which descriptor was used.
+- **`shutdown_requested`** — `true` when the match ended because the stat session was cancelled mid-game. v1 sessions always report `false` (the proto field doesn't exist).
+- **`bullet_hit_distance`** — per-match summary of v2's `BulletHit.distance_to_target` (in world units). `count` is total BulletHits seen; `with_distance` is the subset with `distance_to_target > 0`; `mean`/`max` are `null` on v1 sessions (no distance data on the wire). See `distance_to_target.txt` at the repo root for planned future uses.
 
 `team_leaders` is `{ "1": { name, s64 }, "2": { name, s64 } }` capturing the slot-1 / slot-6 commander identities. Drives the picker's Commander/Thug Role facet and the faction scoreboard's `<h6>` headers. Match-global, always-unfiltered.
 
@@ -1368,7 +1405,7 @@ Tier 2 does not exist as an on-disk artifact — it is materialized on demand in
 
 1. `fetch('data/sessions/<submitter>/<basename>.binpb.gz')` — the binpb is served statically, same as the processed JSON.
 2. Gunzip via the native `DecompressionStream('gzip')` API (no vendored lib).
-3. `protobuf.Root.fromJSON(...)` on `vendor/protobufjs/statsgate.proto.json` (pre-compiled descriptor) → `ClientStatSession.decode(bytes)`.
+3. **Dual-descriptor decode.** Try v2 first (`vendor/protobufjs/statsgate.proto.json` → `statsgate.ClientStatSession.decode(bytes)`); on a wire-type error from protobufjs (which is strict), fall back to v1 (`vendor/protobufjs/statsgate_v1.proto.json` → `statsgate_v1.ClientStatSession.decode(bytes)`). The detected schema is stamped on `state.protoSchemaVersion` (`"v1"` | `"v2"`).
 4. `ClientStatSession.toObject(msg, { longs: String, defaults: false, oneofs: true, bytes: String, enums: String })` → plain JS object suitable for the tree renderer.
    - `longs: String` preserves 64-bit values losslessly (Steam64 IDs).
    - `defaults: false` omits zero-valued scalars — matches the Edition 2023 implicit-presence wire format and the proto's `// undefined if not a player` comment semantics.
@@ -1430,7 +1467,11 @@ A virtualized alternate rendering of `event_stream`. Row for each event with col
 - **Player cell click** — clicking any Steam64 cell narrows to rows where that s64 is the shooter or victim. A dismissable badge above the table shows the active filter.
 - **Reset** — a single button that restores all filters to their initial state.
 
-**Pair highlight** — hovering a `DamageDealt` row outlines the adjacent `DamageReceived` row (and vice versa) per the [adjacent-pair rule](.cursor/rules/data-schema.mdc). A one-pass precompute (`pairIdx: Int32Array`) indexes the pairs at load time so hover is O(1).
+**Pair highlight** — hovering a `DamageDealt` row outlines the adjacent `DamageReceived` row (and vice versa) per the [adjacent-pair rule](.cursor/rules/data-schema.mdc). A one-pass precompute (`pairIdx: Int32Array`) indexes the pairs at load time so hover is O(1). The pair-index is only built on v1 sessions — on v2 the unified `DamageDealt` carries both sides on the same event, so `pairIdx` stays filled with `-1` and the adjacent-pair hover hint silently disables itself.
+
+**Schema-aware chips** — the events filter chips read from `currentEventArms()`, which returns the schema-filtered subset of `EVENT_ARMS_ALL`. On v2 sessions the `damageReceived` chip is omitted because the arm never appears in the stream.
+
+**Schema-aware Reconcile** — `computePersonalReceived(s64)` reads from `damageReceived` rows on v1 and from `damageDealt` rows (with `r.victim == s64`) on v2. `computePersonalPvpDealt(s64)` reads paired-DR victim on v1 and direct `r.victim` on v2. `computeSentinelSummary()` is schema-agnostic — one logical record per matching `damageDealt` row regardless of schema.
 
 **Cross-link to Replay** — clicking a row navigates to `index.html?match=<id>&tab=replay&t=<tick>`. The Replay tab honors `?t=<tick>` via `VTReplay.jumpToTick(tick)` — see below. The jump is consumed exactly once on initial page load and does not persist across subsequent renders (so the user can freely scrub after).
 

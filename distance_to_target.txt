@@ -1,0 +1,137 @@
+BulletHit.distance_to_target — brainstorming doc
+================================================
+
+Source field
+------------
+`BulletHit.distance_to_target` (float, world units) was added in the v2
+statsgate schema (alongside the unified DamageDealt + Race enum +
+shutdown_requested fields). It records the line-of-fire distance from
+shooter to victim at the instant the bullet/projectile struck.
+
+Today it is captured-only:
+- Pipeline aggregates a per-match summary at `match.bullet_hit_distance`:
+    { count, with_distance, mean, max }
+  on every match -- v1 sessions report `with_distance=0, mean=null,
+  max=null` because the field is absent from the legacy proto. v2
+  sessions populate all four.
+- No UI consumer reads the field. No VTSR-T axis depends on it. No
+  highlight card uses it.
+
+This file enumerates concrete future uses worth prototyping when the
+v2 corpus is big enough to do statistically-meaningful analysis. The
+availability gate for any consumer is the same shape as
+`has_target_lock_data`: pipeline emits a top-level boolean
+`has_bullet_hit_distance` or per-match `bullet_hit_distance.with_distance
+> 0` and consumers check before drawing.
+
+
+Section 1 — VTSR-T axis ideas
+-----------------------------
+
+The current Thug composite has 8 axes. Distance opens up at least two
+genuinely orthogonal signals:
+
+1.1  Distance-weighted accuracy (replacement for or sibling to
+     `thug_accuracy`). Weights each hit by `min(distance / 100, 3)` or
+     a similar bucketed curve. A 200m sniper shot counts more than a
+     5m point-blank. Neutralizes the "spray at touching range" pattern
+     that elevates the current accuracy axis. Implementation: in the
+     bullet_hit loop, accumulate `weighted_hits[s64][weapon] += w(dist)`
+     alongside the existing `player_pvp_shots_hit[s64][weapon] += 1`.
+
+1.2  Engagement-range diversity. Standard deviation of a player's
+     hit-distance histogram (with weapon class filtering, so spread
+     across weapon archetypes doesn't dilute the signal). Captures the
+     "swiss army knife" thug who plays at multiple ranges effectively
+     versus the specialist who only ever fights at one range. Cap at
+     N hits to avoid noise floor.
+
+Both depend on having a *weapon-normalized* baseline -- a Hornet hits
+at long range by nature; an MG hits at short range. The same v2.3
+`thug_accuracy` weapon-normalization step is the precedent: compute the
+lobby-wide per-weapon median distance, z-score each player's mean
+against it.
+
+
+Section 2 — Per-match stat ideas
+--------------------------------
+
+2.1  Per-weapon engagement range stats in `weapon_meta`. For each
+     weapon ODF, emit `mean_distance`, `p50_distance`, `p95_distance`.
+     Surfaces the actual playstyle deployment of each weapon (rocket
+     primarily at >150m, MG primarily at <30m) versus what the ODF
+     specs say.
+
+2.2  Per-player engagement-range histogram in `personal.*`. Buckets
+     [0..50m, 50..150m, 150..400m, >400m] with hit counts +
+     pvp_hits. Drives a small bar in the Player Leaderboard cell,
+     showing each player's range distribution.
+
+2.3  "Longest sniper hit" milestone in the kill_feed. When a kill
+     follows a BulletHit whose `distance_to_target > 400m`, append a
+     `long_range_kill: true` flag to the kill_feed entry. Renders as
+     a chip in the feed UI.
+
+
+Section 3 — Highlight card refinements
+--------------------------------------
+
+3.1  "Sharpshooter" (currently fires on weighted PvP accuracy >= 0.40
+     w/ shot count gates) gains a distance-floor variant: an
+     additional `the_sniper` highlight that requires
+     `mean_distance(pvp_hits) > 150m AND pvp_accuracy > 0.30`. Same
+     scoring model, different rendering ("nailed shots at range").
+
+3.2  "Chris Kyle" (currently snipes-based) can degrade to firing on
+     the sniped-victim distance OR a long-range BulletHit on a
+     pilot ODF. Today many matches don't have snipes; this opens a
+     fallback signal so the card is more often eligible.
+
+3.3  Per-weapon "best of weapon X" cards (e.g. "best Hornet pilot")
+     gain a tiebreaker: same hit-rate ⇒ longer mean distance wins.
+     Surfaces skill on long-range weapons where short-range opportunism
+     isn't the differentiator.
+
+
+Section 4 — Data-quality caveats
+---------------------------------
+
+- Distance is the LINEAR shooter→victim distance at impact. Curve-line
+  weapons (mortars, lobbers) get the straight-line distance, not the
+  flight-path arc.
+- Self-damage / friendly-fire BulletHits still emit distance values;
+  any analytics should filter on `is_pvp_hit AND shooter_team !=
+  victim_team`.
+- v1 sessions never set the field; all analytics need a per-match
+  availability gate. The simplest gate is the pipeline's
+  `match.bullet_hit_distance.with_distance > 0`; the dashboard's
+  cross-match aggregator can mirror this onto the aggregate
+  `meta.has_bullet_hit_distance: bool` so the All Matches view's
+  range visualisations gracefully omit when no v2 matches are in the
+  filter set.
+- For map-scale normalization, divide by the match's
+  `base_to_base_distance` (in `match.base_to_base_distance` from the
+  positioning block). A 200m shot on Octavia is "across the map"; a
+  200m shot on Bunker Trip is barely past base.
+
+
+Section 5 — Implementation order (suggested)
+--------------------------------------------
+
+When v2 corpus reaches ~50 matches:
+  1. Plumb `match.bullet_hit_distance` into the All Matches aggregator
+     as a passthrough; add `meta.has_bullet_hit_distance` boolean.
+  2. Add `personal.distance_buckets` to the per-match leaderboard
+     (Section 2.2). Cheap; renders well as a sparkline.
+  3. Add weapon-meta distance stats (Section 2.1). Drives the docs
+     page's weapon table.
+
+When v2 corpus reaches ~150 matches:
+  4. Prototype the VTSR-T distance-weighted accuracy axis as a
+     sandbox sibling to `thug_accuracy` (Section 1.1). Compare both
+     side-by-side in a hidden card before deciding to replace.
+  5. Add `the_sniper` highlight card (Section 3.1).
+
+When v2 corpus saturates:
+  6. Decide whether engagement-range diversity (1.2) earns its own
+     axis or feeds into thug_accuracy as a third weight term.
