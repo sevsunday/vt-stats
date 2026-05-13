@@ -2415,18 +2415,30 @@
       }
     }
 
-    // Fetch elo_current.json once per session. Graceful 404: a fresh
-    // checkout (or pipeline-never-run state) means the file isn't there
-    // yet — hide the dedicated VTSR-T card and fall through to em-dash
-    // placeholders on the Career Leaderboard's Tier+VTSR-T columns.
+    // Fetch elo_current.json + elo_history.json once per session in
+    // parallel. Both are needed before the VTSR-T leaderboard renders:
+    // elo_current powers the table rows + axis_means; elo_history
+    // powers the per-row expand panel's Last-Match Axis Breakdown
+    // section. Graceful 404 on either: a fresh checkout / pipeline-
+    // never-run state means the files aren't there yet -- hide the
+    // dedicated VTSR-T card and fall through to em-dash placeholders
+    // on the Career Leaderboard's Tier+VTSR-T columns; the expand
+    // panel renders an "axis breakdown unavailable" fallback for the
+    // missing-history case. Loading both up-front (rather than
+    // lazy-loading elo_history at first VTSR-T render) avoids a race
+    // where the panels render with the "elo_history not yet loaded"
+    // fallback because the fetch hadn't resolved yet.
     if (window.__vtElo === undefined) {
+      const [eloRes, histRes] = await Promise.all([
+        fetch('data/processed/elo_current.json').catch(() => null),
+        fetch('data/processed/elo_history.json').catch(() => null),
+      ]);
       try {
-        const eloRes = await fetch('data/processed/elo_current.json');
-        if (!eloRes.ok) throw new Error(eloRes.status);
-        window.__vtElo = await eloRes.json();
-      } catch {
-        window.__vtElo = null;
-      }
+        window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
+      } catch { window.__vtElo = null; }
+      try {
+        window.__vtEloHistory = (histRes && histRes.ok) ? await histRes.json() : null;
+      } catch { window.__vtEloHistory = null; }
     }
 
     if (!window.VTAggregate || typeof window.VTAggregate.build !== 'function') {
@@ -5290,29 +5302,6 @@
     return String(raw).replace(/[^A-Za-z0-9_-]/g, '_');
   }
 
-  // v2.3: lazy-load data/processed/elo_history.json once per session.
-  // Cached on window.__vtEloHistory; null means "fetched and 404'd"
-  // (the per-axis breakdown panel renders an "axis breakdown
-  // unavailable" fallback in that case). Idempotent.
-  let _eloHistoryLoadStarted = false;
-  function ensureEloHistoryLoaded() {
-    if (_eloHistoryLoadStarted) return;
-    if (window.__vtEloHistory != null || window.__vtEloHistory === null && window.__vtEloHistoryLoaded) {
-      return;
-    }
-    _eloHistoryLoadStarted = true;
-    fetch('data/processed/elo_history.json')
-      .then(r => r.ok ? r.json() : null)
-      .then(j => {
-        window.__vtEloHistory = j;
-        window.__vtEloHistoryLoaded = true;
-      })
-      .catch(() => {
-        window.__vtEloHistory = null;
-        window.__vtEloHistoryLoaded = true;
-      });
-  }
-
   // v2.3 polish: per-axis metadata for the expand panel's hover
   // tooltips. Each axis row in sections B + C surfaces a tooltip
   // composed of label + formula + description, plus a per-row sigma
@@ -5521,15 +5510,16 @@
   }
 
   // Section C: last-match axis breakdown with P / E / dR formula
-  // header. Pulls from window.__vtEloHistory (lazy-loaded once per
-  // session). Falls back to an "unavailable" message if the file is
-  // missing or the player has no rated matches yet.
+  // header. Pulls from window.__vtEloHistory (eagerly loaded in
+  // loadAllMatches() alongside elo_current.json). Falls back to an
+  // "unavailable" message only if the file is genuinely missing
+  // (404 / parse fail) or the player has no rated matches yet.
   function renderVtsrLastMatchSection(eloRow) {
     const hist = window.__vtEloHistory;
     if (hist == null) {
       return `<section class="vt-vtsr-detail-section">
         <h6>Last-match axis breakdown</h6>
-        <div class="text-muted small">elo_history.json not yet loaded\u2026</div>
+        <div class="text-muted small">Axis breakdown unavailable (elo_history.json missing).</div>
       </section>`;
     }
     const targetSteam64 = eloRow.steam64 || '';
@@ -5711,11 +5701,10 @@
     // by steam64-then-name without passing it through every helper.
     _vtsrCareerStats = careerStats || [];
 
-    // v2.3: lazy-load elo_history.json once per session into
-    // window.__vtEloHistory so the per-axis breakdown popover on the
-    // Last-delta cell can render the player's most-recent rated match
-    // without a per-row fetch. No-op when already cached or 404.
-    ensureEloHistoryLoaded();
+    // elo_history.json is eagerly fetched alongside elo_current.json in
+    // loadAllMatches() so window.__vtEloHistory is guaranteed populated
+    // (or sentinel `null`) by the time we get here. The per-axis
+    // Last-Match Axis Breakdown panel reads it directly.
 
     const sorted = visible.slice().sort(vtsrSort(vtsrSortState.key, vtsrSortState.asc));
     const tbody = $card.querySelector('#vtsr-table tbody');
