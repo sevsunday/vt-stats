@@ -10,6 +10,13 @@ message Vec3 {
   float z = 3;
 }
 
+enum Race {
+  RACE_UNSPECIFIED = 0;
+  RACE_ISDF = 1;
+  RACE_SCION = 2;
+  RACE_HADEAN = 3;
+}
+
 // Important notes:
 
 // Players are identified by their steam64 id.
@@ -29,13 +36,22 @@ message StatHeader {
   string active_config_mod = 8;
   map<uint64, int32> s64_to_teamnum = 9;
   uint32 player_count = 10;
+
   uint32 last_tick = 11;
+
   float terrain_min_x = 12;
   float terrain_max_x = 13;
   float terrain_min_y = 14;
   float terrain_max_y = 15;
   float terrain_min_z = 16;
   float terrain_max_z = 17;
+
+  // this is true if the stat session was cancelled via mission script
+  // or console command, otherwise false if the game ended normally
+  bool shutdown_requested = 18;
+
+  Race team1_race = 19;
+  Race team2_race = 20;
 }
 
 // As of now these events only track player shots
@@ -55,30 +71,27 @@ message BulletHit {
   uint64 victim = 4; // undefined if not a player
   string victim_odf = 5;
   string shooter_odf = 6;
+  float distance_to_target = 7;
 }
 
 // Note on damage messages: shooter/victim are the steam64 id of the player if applicable,
 // otherwise the field is undefined. Team is the team slot that the message is associated with
 // (may not be a player, could be an ai or structure). If a player owns AI or structures
 // they will have the same team slot as the player.
-//
-// Given a damage event in-game, a damage dealt and received event will be recorded that represent
-// two sides of the same event
 
 message DamageDealt {
   uint32 tick = 1;
-  uint64 shooter = 2; // undefined if not a player
-  int32 team = 3;
-  string ordnance_odf = 4; // undefined for environmental damage (water, other unknown sources)
-  float amount = 5;
-}
 
-message DamageReceived {
-  uint32 tick = 1;
-  uint64 victim = 2; // undefined if not a player
-  int32 team = 3;
-  string ordnance_odf = 4; // undefined for environmental damage (water, other unknown sources) 
-  float amount = 5;
+  uint64 shooter = 2; // undefined if not a player
+  int32 shooter_team = 3;
+  string shooter_odf = 4;
+
+  uint64 victim = 5; // undefined if not a player
+  int32 victim_team = 6;
+  string victim_odf = 7;
+
+  string ordnance_odf = 8; // undefined for environmental damage (water, other unknown sources)
+  float amount = 9;
 }
 
 message PlayerState {
@@ -88,7 +101,7 @@ message PlayerState {
   float health = 4; // Actual hp values not ratio
   float ammo = 5;   // Same as health
   string odf = 6;
-  bool has_target = 7; // true while a target lock is active via the T-key (tap-to-toggle: one press activates target mode against the nearest enemy, persists until target dies or player presses T again)
+  bool has_target = 7; // are they using the T key?
 }
 
 message UpdateTick {
@@ -135,11 +148,11 @@ message PickupPowerup {
 }
 
 message StatEvent {
+  reserved 4;
   oneof event_type {
     BulletInit bullet_init = 1;
     BulletHit bullet_hit = 2;
     DamageDealt damage_dealt = 3;
-    DamageReceived damage_received = 4;
     UpdateTick update_tick = 5;
     UnitDestroyed unit_destroyed = 6;
     UnitSniped unit_sniped = 7;
