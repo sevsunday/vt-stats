@@ -44,7 +44,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 11
+PIPELINE_VERSION = 12
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -251,62 +251,6 @@ def _load_building_odfs(odf_db):
         expanded.add(f"{stem}vsr.odf")
         expanded.add(f"{stem}_vsr.odf")
     return frozenset(expanded)
-
-
-def _load_class_labels(odf_db):
-    """Resolve every Vehicle/Pilot ODF to its root class label.
-
-    Returns `{odf_lower (with .odf suffix) -> classLabel}` covering the
-    Vehicle and Pilot buckets of `data/odf.min.json`. The class label is
-    the last entry of the ODF's `inheritanceChain` (the engine resolves
-    parent ODFs at runtime, and the DB pre-flattens the chain). Falls
-    back to `GameObjectClass.classLabel` when the chain is empty.
-
-    The Vehicle bucket has 20 distinct roots in the current ODF DB
-    (`apc`, `artillery`, `assaulttank`, `boid`, `bomber`, `constructionrig`,
-    `fv_walker`, `iv_walker`, `morphtank`, `person`, `recyclervehicle`,
-    `sav`, `scavenger`, `service`, `spraymine`, `torpedo`, `tug`, `turret`,
-    `turrettank`, `wingman`); the Pilot bucket is uniformly `person`. We
-    rename `person` -> `pilot` in the output so the loadout display reads
-    as "tank / wingman / pilot" rather than "tank / wingman / person".
-
-    Synthesizes VSR-mod variants the same way `_load_building_odfs()` does
-    (each base ODF gets a `vsr.odf` and `_vsr.odf` sibling pointing at the
-    same root class) so VSR sessions resolve cleanly even when the ODF DB
-    is a pre-VSR snapshot. Direct `_vsr` ODFs in the DB win over the
-    synthesized variants because dict insertion order preserves the real
-    entry first.
-
-    Consumed by `process_match()` to bucket `update_tick.players[].odf`
-    samples into per-player class-time accumulators that feed the
-    Loadout Profile and per-class combat breakdown (v2.3+).
-    """
-    out = {}
-    for bucket_name in ("Vehicle", "Pilot"):
-        for k, entry in (odf_db.get(bucket_name) or {}).items():
-            chain = entry.get("inheritanceChain") or []
-            cls = chain[-1] if chain else (
-                (entry.get("GameObjectClass") or {}).get("classLabel") or ""
-            )
-            cls = (cls or "").strip().lower()
-            if not cls:
-                continue
-            # Pilot/person is on-foot infantry; rename for clarity.
-            if cls == "person":
-                cls = "pilot"
-            odfl = (k if k.lower().endswith(".odf") else f"{k}.odf").lower()
-            out[odfl] = cls
-    # Synthesize VSR-mod siblings for any Vehicle/Pilot ODF the DB
-    # carries, so VSR sessions resolve when the DB hasn't been refreshed
-    # for the latest mod release. Direct entries already in `out` win.
-    extra = {}
-    for odfl, cls in out.items():
-        stem = odfl[:-4]  # strip .odf
-        for variant in (f"{stem}vsr.odf", f"{stem}_vsr.odf"):
-            if variant not in out:
-                extra[variant] = cls
-    out.update(extra)
-    return out
 
 
 def _is_sentinel_damage(amount):
@@ -2127,7 +2071,7 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, class_label_map=None, known_players=None):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -2186,10 +2130,6 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         if raw.strip().casefold() == resolved_name.strip().casefold():
             return None
         return raw
-
-    # Class-label resolver. None = ODF DB unavailable; everything buckets
-    # to "unknown". Lowercased ODF (with .odf suffix) -> root class label.
-    class_label_map = class_label_map or {}
 
     # Per-player accumulators (keyed on Steam64)
     player_dealt = defaultdict(float)
@@ -2329,38 +2269,35 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     position_last_kept_tick = {}  # s64 -> last tick we kept a sample for (for 1 Hz downsample)
     tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
 
-    # ----- Loadout / per-class combat accumulators (v2.3) -----
-    # Per-tick class-time. UpdateTick is the only signal that says "what
+    # ----- Loadout / per-ship combat accumulators (v2.3) -----
+    # Per-tick ship-time. UpdateTick is the only signal that says "what
     # ship is each player currently in"; we sample at the full tick rate
     # so a ship-switch is reflected within ~1 tick. These accumulators
     # are NOT downsampled like the position samples -- the goal is
     # ship-time, not movement.
-    #   player_class_ticks[s64][class] -> int    (# of UpdateTick samples)
-    #   player_class_odf_ticks[s64][class][odf_lower] -> int
-    #     used post-loop to derive most-used ODF per class (the Loadout
-    #     Profile card surfaces e.g. "wingman: 58% -- most-used: ivtank.odf").
-    # Class is class_label_map.get(odf_lower) or "unknown".
-    player_class_ticks = defaultdict(lambda: defaultdict(int))
-    player_class_odf_ticks = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    #   player_ship_ticks[s64][odf_lower] -> int    (# of UpdateTick samples per ship)
+    # Display names ("Tank", "Scout", "Assault Tank", "Pilot") get
+    # resolved at the leaderboard build via the existing prettify_odf()
+    # chain (unit_name -> stripped-vsr -> wpn_name -> title-cased stem).
+    # No invented class taxonomy ("wingman" / "morphtank" / "turret")
+    # appears in the output -- consumers see the actual ships.
+    player_ship_ticks = defaultdict(lambda: defaultdict(int))
 
     # Running "what ship is each Steam64 currently in" map. Updated every
     # UpdateTick; queried on every BulletInit / BulletHit / DamageDealt /
     # UnitDestroyed event with a player shooter (or victim, for deaths)
-    # so we can attribute the event to the player's *active* ship class.
-    # Empty string = no UpdateTick yet for this player; events that fire
-    # before the first tick bucket to "unknown" in per_class_combat.
+    # so we can attribute the event to the player's *active* ship at
+    # event time. Empty / missing = no UpdateTick yet for this player;
+    # events that fire before the first tick bucket to "unknown" in
+    # per_ship_combat.
     s64_to_current_odf = {}
 
-    # Per-(s64, class) combat aggregates. One row per player per class
+    # Per-(s64, odf_lower) combat aggregates. One row per player per ship
     # they used in the match. Sums kills / deaths / dealt damage /
     # shots / hits / pvp_kills / pvp_hits, all tick-joined to the active
     # ship at event time. Time is converted to seconds at the end via
     # `ticks / tick_rate`.
-    #   per_class_combat[s64][class] = {
-    #       'kills', 'deaths', 'pvp_kills', 'pvp_deaths',
-    #       'dealt', 'shots', 'hits', 'pvp_hits',
-    #   }
-    per_class_combat = defaultdict(lambda: defaultdict(lambda: {
+    per_ship_combat = defaultdict(lambda: defaultdict(lambda: {
         "kills": 0,
         "deaths": 0,
         "pvp_kills": 0,
@@ -2371,15 +2308,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         "pvp_hits": 0,
     }))
 
-    def _classify(s64):
-        """Resolve the active ship class for `s64` at the current event.
-        "unknown" before the first UpdateTick for that player; any ODF the
-        DB doesn't recognize also lands in "unknown" (rare in practice
-        because `class_label_map` includes synthesized VSR variants)."""
+    def _ship_key(s64):
+        """Resolve the active ship ODF (lowercased) for `s64` at the
+        current event. Returns "unknown" before the first UpdateTick
+        for that player. Empty / missing buckets to "unknown" so the
+        per_ship_combat row is rendered explicitly rather than silently
+        merged into another ship."""
         cur = s64_to_current_odf.get(s64) or ""
         if not cur:
             return "unknown"
-        return class_label_map.get(cur.lower()) or "unknown"
+        return cur.lower()
     # Target-lock availability for this match. Any observed has_target=True sample
     # flips this to True. Stays False for pre-schema matches (field defaults to
     # False) and new-schema matches where no player ever activated target mode.
@@ -2431,9 +2369,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if faction:
                         faction_shots[faction] += 1
                 weapon_total_shots[odf] += 1
-                # Per-class combat: tick-join the shot to the shooter's
-                # active ship class (v2.3).
-                per_class_combat[shooter][_classify(shooter)]["shots"] += 1
+                # Per-ship combat: tick-join the shot to the shooter's
+                # active ship ODF (v2.3).
+                per_ship_combat[shooter][_ship_key(shooter)]["shots"] += 1
             if bi.tick > max_tick:
                 max_tick = bi.tick
             if bi.tick < min_tick:
@@ -2458,12 +2396,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if faction:
                         faction_hits[faction] += 1
                 weapon_total_hits[odf] += 1
-            # Per-class combat: tick-join hits/pvp_hits to active ship.
+            # Per-ship combat: tick-join hits/pvp_hits to active ship.
             if shooter > 0:
-                cls = _classify(shooter)
-                per_class_combat[shooter][cls]["hits"] += 1
+                ship = _ship_key(shooter)
+                per_ship_combat[shooter][ship]["hits"] += 1
                 if is_pvp_hit:
-                    per_class_combat[shooter][cls]["pvp_hits"] += 1
+                    per_ship_combat[shooter][ship]["pvp_hits"] += 1
             if shooter > 0 and bh.victim > 0:
                 player_hits_by_victim[shooter][bh.victim] += 1
             if bh.victim_odf:
@@ -2566,12 +2504,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if odf:
                         weapon_total_damage[odf] += dd.amount
                         weapon_users[odf].add(shooter)
-                    # Per-class combat: tick-join dealt damage to active
-                    # ship class (v2.3). Sums regardless of whether the
-                    # victim is PvP or PvE -- the per-class table totals
+                    # Per-ship combat: tick-join dealt damage to active
+                    # ship (v2.3). Sums regardless of whether the
+                    # victim is PvP or PvE -- the per-ship table totals
                     # all dealt damage; the PvP/PvE split is captured via
                     # pvp_kills / pvp_hits on the same row.
-                    per_class_combat[shooter][_classify(shooter)]["dealt"] += dd.amount
+                    per_ship_combat[shooter][_ship_key(shooter)]["dealt"] += dd.amount
 
                     # Structure-damage attribution for VTSR-T `structure_share`.
                     # Pop the matching BulletHit-side victim_odf and bucket the
@@ -2700,18 +2638,18 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             is_pvp_kill = killer_is_player and victim_is_player
             if killer_is_player:
                 player_kills[ud.killer] += 1
-                # Per-class combat: attribute kill to killer's active ship.
-                kc_cls = _classify(ud.killer)
-                per_class_combat[ud.killer][kc_cls]["kills"] += 1
+                # Per-ship combat: attribute kill to killer's active ship.
+                kc_ship = _ship_key(ud.killer)
+                per_ship_combat[ud.killer][kc_ship]["kills"] += 1
                 if is_pvp_kill:
-                    per_class_combat[ud.killer][kc_cls]["pvp_kills"] += 1
+                    per_ship_combat[ud.killer][kc_ship]["pvp_kills"] += 1
             if victim_is_player:
                 player_deaths[ud.victim] += 1
                 # Death attributed to victim's active ship at time of death.
-                vc_cls = _classify(ud.victim)
-                per_class_combat[ud.victim][vc_cls]["deaths"] += 1
+                vc_ship = _ship_key(ud.victim)
+                per_ship_combat[ud.victim][vc_ship]["deaths"] += 1
                 if is_pvp_kill:
-                    per_class_combat[ud.victim][vc_cls]["pvp_deaths"] += 1
+                    per_ship_combat[ud.victim][vc_ship]["pvp_deaths"] += 1
             if is_pvp_kill:
                 kill_rivalry[ud.killer][ud.victim] += 1
             if ud.victim_odf:
@@ -2926,15 +2864,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     # ticks attributes correctly to the player's ACTIVE
                     # ship at event time (not their starting ship).
                     s64_to_current_odf[s64] = ps.odf
-                    # v2.3: per-tick class-time accumulator. Class is
-                    # the inheritanceChain root from data/odf.min.json
-                    # (e.g. ivtank.odf -> "wingman", apcdron.odf ->
-                    # "apc"). Unknown ODFs (DB miss + no synthesized VSR
-                    # variant) bucket to "unknown".
-                    odfl = ps.odf.lower()
-                    cls = class_label_map.get(odfl) or "unknown"
-                    player_class_ticks[s64][cls] += 1
-                    player_class_odf_ticks[s64][cls][odfl] += 1
+                    # v2.3: per-tick per-ship accumulator. Keyed by ODF
+                    # (lowercased) directly -- no class taxonomy. The
+                    # leaderboard build resolves each ODF to a pretty
+                    # name via prettify_odf() at emit time.
+                    player_ship_ticks[s64][ps.odf.lower()] += 1
                 # Faction detection. Algorithm A (starting ship): cache
                 # the first non-empty ODF seen for this slot; this is the
                 # closest analogue we have to a match-start roster check.
@@ -3224,67 +3158,62 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "accuracy": round(w_acc, 3),
             }
 
-        # ---- v2.3 Loadout Profile + per-class combat block. ----
-        # Derived from per_class_combat (tick-joined to active ship at
-        # each event) and player_class_ticks (what fraction of ticks
-        # this player was in each class). UI is display-only; no axis
-        # math reads these blocks.
+        # ---- v2.3 Loadout Profile + per-ship combat block. ----
+        # Derived from per_ship_combat (tick-joined to active ship at
+        # each event) and player_ship_ticks (what fraction of ticks
+        # this player was in each ship). UI is display-only; no axis
+        # math reads these blocks. Pretty names are resolved at emit
+        # time via prettify_odf() so consumers see actual ship names
+        # ("Tank", "Scout", "Assault Tank", "Pilot") rather than any
+        # invented class taxonomy.
         loadout_block = None
-        per_class_combat_rows = []
+        per_ship_combat_rows = []
         if s64:
-            class_ticks = dict(player_class_ticks.get(s64, {}))
-            total_class_ticks = sum(class_ticks.values())
-            if total_class_ticks > 0:
-                # Most-used ODF per class (e.g. for "wingman" the
-                # player's primary ride was "ivtank.odf").
-                most_used_odf = {}
-                for cls, odf_ticks in player_class_odf_ticks.get(s64, {}).items():
-                    if odf_ticks:
-                        most_used_odf[cls] = max(odf_ticks.items(), key=lambda kv: kv[1])[0]
-
-                # Class shares (sum to ~1.0). Round late so tiny shares
-                # like 0.5% still surface in the bar instead of dropping
-                # to 0.
-                class_shares = {
-                    cls: ticks / total_class_ticks
-                    for cls, ticks in class_ticks.items()
-                }
-                class_seconds = {
-                    cls: round(ticks / tick_rate, 1)
-                    for cls, ticks in class_ticks.items()
-                }
+            ship_ticks = dict(player_ship_ticks.get(s64, {}))
+            total_ship_ticks = sum(ship_ticks.values())
+            if total_ship_ticks > 0:
+                # Per-ship metadata (name + share + seconds).
+                ships = {}
+                for odfl, ticks in ship_ticks.items():
+                    ships[odfl] = {
+                        "name":    prettify_odf(odfl),
+                        "share":   round(ticks / total_ship_ticks, 4),
+                        "seconds": round(ticks / tick_rate, 1),
+                    }
                 # Primary / secondary by share. Sorted desc; ties
-                # broken alphabetically for deterministic output.
+                # broken alphabetically (on ODF) for deterministic output.
                 ordered = sorted(
-                    class_shares.items(),
-                    key=lambda kv: (-kv[1], kv[0]),
+                    ships.items(),
+                    key=lambda kv: (-kv[1]["share"], kv[0]),
                 )
-                primary_class, primary_share = ordered[0]
-                secondary_class, secondary_share = (
-                    ordered[1] if len(ordered) > 1 else (None, None)
-                )
+                primary_odf, primary_meta = ordered[0]
+                secondary = ordered[1] if len(ordered) > 1 else None
                 loadout_block = {
-                    "classes": {c: round(s, 4) for c, s in class_shares.items()},
-                    "class_seconds": class_seconds,
-                    "primary_class": primary_class,
-                    "primary_share": round(primary_share, 4),
-                    "secondary_class": secondary_class,
-                    "secondary_share": (
-                        round(secondary_share, 4) if secondary_share is not None else None
+                    "ships": ships,
+                    "primary_ship": {
+                        "odf":   primary_odf,
+                        "name":  primary_meta["name"],
+                        "share": primary_meta["share"],
+                    },
+                    "secondary_ship": (
+                        {
+                            "odf":   secondary[0],
+                            "name":  secondary[1]["name"],
+                            "share": secondary[1]["share"],
+                        } if secondary else None
                     ),
-                    "class_diversity": len([c for c, s in class_ticks.items() if s > 0]),
-                    "most_used_odf": most_used_odf,
-                    "active_seconds": round(total_class_ticks / tick_rate, 1),
+                    "ship_diversity": len([1 for t in ship_ticks.values() if t > 0]),
+                    "active_seconds": round(total_ship_ticks / tick_rate, 1),
                 }
 
-                # Per-class combat rows (display-only; not consumed by
-                # ELO axes). One row per class with time_seconds > 0,
-                # sorted by time desc, ties broken alphabetically.
-                per_class_raw = per_class_combat.get(s64, {})
-                for cls, ticks in class_ticks.items():
+                # Per-ship combat rows (display-only; not consumed by
+                # ELO axes). One row per ship with time_seconds > 0,
+                # sorted by time desc, ties broken alphabetically (on ODF).
+                per_ship_raw = per_ship_combat.get(s64, {})
+                for odfl, ticks in ship_ticks.items():
                     if ticks <= 0:
                         continue
-                    cd = per_class_raw.get(cls, {})
+                    cd = per_ship_raw.get(odfl, {})
                     pc_kills = int(cd.get("kills", 0))
                     pc_deaths = int(cd.get("deaths", 0))
                     pc_pvp_kills = int(cd.get("pvp_kills", 0))
@@ -3300,26 +3229,27 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     pc_kd = pc_pvp_kills / pc_pvp_deaths if pc_pvp_deaths > 0 else (
                         None if pc_pvp_kills == 0 else None
                     )
-                    per_class_combat_rows.append({
-                        "class": cls,
+                    per_ship_combat_rows.append({
+                        "ship":         odfl,
+                        "ship_name":    prettify_odf(odfl),
                         "time_seconds": round(pc_time, 1),
-                        "kills": pc_kills,
-                        "deaths": pc_deaths,
-                        "pvp_kills": pc_pvp_kills,
-                        "pvp_deaths": pc_pvp_deaths,
-                        "pve_kills": max(0, pc_kills - pc_pvp_kills),
-                        "pve_deaths": max(0, pc_deaths - pc_pvp_deaths),
-                        "dealt": round(pc_dealt, 1),
-                        "shots": pc_shots,
-                        "hits": pc_hits,
-                        "pvp_hits": pc_pvp_hits,
-                        "accuracy": round(pc_acc, 3),
+                        "kills":        pc_kills,
+                        "deaths":       pc_deaths,
+                        "pvp_kills":    pc_pvp_kills,
+                        "pvp_deaths":   pc_pvp_deaths,
+                        "pve_kills":    max(0, pc_kills - pc_pvp_kills),
+                        "pve_deaths":   max(0, pc_deaths - pc_pvp_deaths),
+                        "dealt":        round(pc_dealt, 1),
+                        "shots":        pc_shots,
+                        "hits":         pc_hits,
+                        "pvp_hits":     pc_pvp_hits,
+                        "accuracy":     round(pc_acc, 3),
                         "pvp_accuracy": round(pc_pvp_acc, 3),
-                        "dpm": round(pc_dpm, 1),
-                        "kd": round(pc_kd, 2) if pc_kd is not None else None,
+                        "dpm":          round(pc_dpm, 1),
+                        "kd":           round(pc_kd, 2) if pc_kd is not None else None,
                     })
-                per_class_combat_rows.sort(
-                    key=lambda r: (-r["time_seconds"], r["class"])
+                per_ship_combat_rows.sort(
+                    key=lambda r: (-r["time_seconds"], r["ship"])
                 )
 
         leaderboard.append({
@@ -3371,13 +3301,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "received": round(asset_received.get(slot, 0), 1),
             },
             "weapon_breakdown": weapon_breakdown,
-            # v2.3: Loadout Profile + per-class combat (display-only,
-            # no editorial role labels). loadout is None when the
-            # player has zero ticks (degenerate / spectator slot);
-            # per_class_combat is empty list in the same case. UI
-            # hides the cards in both cases.
+            # v2.3: Loadout Profile + per-ship combat (display-only,
+            # organized per individual ship ODF, no class taxonomy).
+            # `loadout` is None when the player has zero ticks
+            # (degenerate / spectator slot); `per_ship_combat` is an
+            # empty list in the same case. UI hides the cards in both
+            # cases. Pretty names ("Tank", "Scout", etc.) are pre-
+            # resolved at emit time via prettify_odf().
             "loadout": loadout_block,
-            "per_class_combat": per_class_combat_rows,
+            "per_ship_combat": per_ship_combat_rows,
             "hit_targets": {
                 nick_for_s64(victim_s64): {
                     "hits": count,
@@ -3766,38 +3698,45 @@ def _extract_contribution(match_data):
         pm = (pos_players.get(p["name"]) or {}).get("metrics") or {}
         slot = p.get("slot")
         # v2.3: Loadout block trimmed to exactly what the aggregator
-        # needs to rebuild career_loadout (sum of class_seconds across
-        # matches; primary/secondary rederived from the totals to avoid
-        # double-rounding). most_used_odf is carried per-class so the
-        # aggregator can pick the most-used per (player, class) by
-        # re-weighting via class_seconds.
+        # needs to rebuild career_loadout (sum of ship_seconds across
+        # matches; primary/secondary rederived from the totals to
+        # avoid double-rounding). Ship names ("Tank", "Scout", etc.)
+        # are pre-resolved in the per-match loadout block so the JS
+        # aggregator doesn't need its own resolver.
         loadout = p.get("loadout") or None
         if loadout:
             loadout_slim = {
-                "classes":         dict(loadout.get("classes") or {}),
-                "class_seconds":   dict(loadout.get("class_seconds") or {}),
-                "most_used_odf":   dict(loadout.get("most_used_odf") or {}),
-                "active_seconds":  loadout.get("active_seconds", 0.0),
+                "ships":          {
+                    odf: {"name": s.get("name") or "", "share": s.get("share") or 0.0,
+                          "seconds": s.get("seconds") or 0.0}
+                    for odf, s in (loadout.get("ships") or {}).items()
+                },
+                "primary_ship":   loadout.get("primary_ship"),
+                "secondary_ship": loadout.get("secondary_ship"),
+                "ship_diversity": loadout.get("ship_diversity", 0),
+                "active_seconds": loadout.get("active_seconds", 0.0),
             }
         else:
             loadout_slim = None
-        # v2.3: per_class_combat slim rows. The aggregator sums each
-        # field per (player, class) across matches; display fields
-        # (accuracy, dpm, kd) are recomputed client-side.
-        per_class_combat_slim = [
+        # v2.3: per_ship_combat slim rows. The aggregator sums each
+        # field per (player, ship) across matches; display fields
+        # (accuracy, dpm, kd) are recomputed client-side. ship_name
+        # is pre-resolved here so the aggregator doesn't re-resolve.
+        per_ship_combat_slim = [
             {
-                "class":         row.get("class") or "unknown",
-                "time_seconds":  row.get("time_seconds", 0.0),
-                "kills":         row.get("kills", 0),
-                "deaths":        row.get("deaths", 0),
-                "pvp_kills":     row.get("pvp_kills", 0),
-                "pvp_deaths":    row.get("pvp_deaths", 0),
-                "dealt":         row.get("dealt", 0.0),
-                "shots":         row.get("shots", 0),
-                "hits":          row.get("hits", 0),
-                "pvp_hits":      row.get("pvp_hits", 0),
+                "ship":         row.get("ship") or "unknown",
+                "ship_name":    row.get("ship_name") or "Unknown",
+                "time_seconds": row.get("time_seconds", 0.0),
+                "kills":        row.get("kills", 0),
+                "deaths":       row.get("deaths", 0),
+                "pvp_kills":    row.get("pvp_kills", 0),
+                "pvp_deaths":   row.get("pvp_deaths", 0),
+                "dealt":        row.get("dealt", 0.0),
+                "shots":        row.get("shots", 0),
+                "hits":         row.get("hits", 0),
+                "pvp_hits":     row.get("pvp_hits", 0),
             }
-            for row in (p.get("per_class_combat") or [])
+            for row in (p.get("per_ship_combat") or [])
         ]
         leaderboard.append({
             "player_id": p.get("player_id", ""),
@@ -3845,11 +3784,11 @@ def _extract_contribution(match_data):
                 }
                 for wname, wdata in (p.get("weapon_breakdown") or {}).items()
             },
-            # v2.3: Loadout + per-class combat for the All Matches
-            # career rollup. Aggregator sums class_seconds and the
-            # per-class combat fields; rederives display fields.
-            "loadout":          loadout_slim,
-            "per_class_combat": per_class_combat_slim,
+            # v2.3: Loadout + per-ship combat for the All Matches
+            # career rollup. Aggregator sums ship_seconds and the
+            # per-ship combat fields; rederives display fields.
+            "loadout":         loadout_slim,
+            "per_ship_combat": per_ship_combat_slim,
             "activity_score":   pm.get("activity_score") if pm else None,
             "movement_band":    pm.get("movement_band") if pm else None,
             "path_length":      pm.get("path_length", 0.0) if pm else 0.0,
@@ -4313,8 +4252,6 @@ def main():
     print(f"  Powerup classification set: {len(known_powerup_odfs)} ODFs (DB Powerup bucket + VSR variants)")
     building_odfs = _load_building_odfs(odf_db)
     print(f"  Building classification set: {len(building_odfs)} ODFs (DB Building bucket + VSR variants)")
-    class_label_map = _load_class_labels(odf_db)
-    print(f"  Class-label map: {len(class_label_map)} ODFs (Vehicle + Pilot buckets, root inheritance class)")
 
     # Load canonical player names
     known_players = load_known_players()
@@ -4356,7 +4293,7 @@ def main():
             match_data = process_match(
                 session, session_path.name, current_size, submitter,
                 resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs,
-                class_label_map, known_players,
+                known_players,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"

@@ -73,16 +73,17 @@
       total_pve_deaths: 0,
       total_pickups: 0,
       weapon_totals: Object.create(null), // wname -> {dealt, shots, hits, pvp_hits}
-      // v2.3: career loadout accumulator. class_seconds[cls] sums
-      // class-time across matches; class_odf_seconds[cls][odf] tracks
-      // per-class ODF time for "most-used per class" derivation.
-      class_seconds: Object.create(null),       // cls -> seconds
-      class_odf_seconds: Object.create(null),   // cls -> { odf -> seconds }
+      // v2.3: career loadout accumulator. ship_seconds[odf_lower]
+      // sums per-ship time across matches; ship_names caches the
+      // pre-resolved pretty name on first sight so the rollup emits
+      // ships without re-resolving. No class taxonomy.
+      ship_seconds: Object.create(null),       // odf_lower -> seconds
+      ship_names:   Object.create(null),       // odf_lower -> "Tank" / "Scout" / etc.
       active_seconds_total: 0,
-      // v2.3: career per-class combat accumulator. Sums each combat
-      // field per (player, class). Display fields (accuracy, dpm, kd)
-      // derived at emit time.
-      per_class_combat: Object.create(null),    // cls -> { time_seconds, kills, deaths, pvp_kills, pvp_deaths, dealt, shots, hits, pvp_hits, matches }
+      // v2.3: career per-ship combat accumulator. Sums each combat
+      // field per (player, ship). Display fields (accuracy, dpm, kd)
+      // derived at emit time. ship_name lives on each row.
+      per_ship_combat: Object.create(null),    // odf_lower -> { name, time_seconds, kills, deaths, pvp_kills, pvp_deaths, dealt, shots, hits, pvp_hits, matches }
       best_match: null,
       movement_scores: [],
       movement_bands: [],
@@ -460,44 +461,40 @@
         c.total_deaths         += p.deaths         || 0;
         c.total_pickups        += p.pickups        || 0;
 
-        // v2.3: career loadout aggregation. Sum class_seconds and
-        // class_odf_seconds across matches; primary/secondary
-        // rederived from sums at emit time. most_used_odf per class
-        // is the ODF with the most total seconds, weighted by each
-        // match's total class time (since each match's contribution
-        // carries one canonical most-used ODF per class, we approximate
-        // the weighting by adding `class_seconds[cls]` to that ODF).
+        // v2.3: career loadout aggregation. Sum per-ship seconds
+        // across matches; cache the pre-resolved ship name on first
+        // sight so the career rollup emits names without re-resolving.
+        // Primary/secondary ship is rederived from sums at emit time.
         const ld = p.loadout;
         if (ld) {
-          const classSec = ld.class_seconds || {};
-          const mostUsed = ld.most_used_odf || {};
-          for (const cls in classSec) {
-            const sec = classSec[cls] || 0;
-            c.class_seconds[cls] = (c.class_seconds[cls] || 0) + sec;
-            const odf = mostUsed[cls];
-            if (odf) {
-              if (!c.class_odf_seconds[cls]) c.class_odf_seconds[cls] = Object.create(null);
-              c.class_odf_seconds[cls][odf] = (c.class_odf_seconds[cls][odf] || 0) + sec;
-            }
+          const ships = ld.ships || {};
+          for (const odf in ships) {
+            const s = ships[odf] || {};
+            c.ship_seconds[odf] = (c.ship_seconds[odf] || 0) + (s.seconds || 0);
+            if (!c.ship_names[odf] && s.name) c.ship_names[odf] = s.name;
           }
           c.active_seconds_total += ld.active_seconds || 0;
         }
-        // v2.3: career per-class combat aggregation. Each row is a
-        // (player, class) tuple — sum kills / deaths / dealt / shots /
+        // v2.3: career per-ship combat aggregation. Each row is a
+        // (player, ship) tuple — sum kills / deaths / dealt / shots /
         // hits / pvp variants across matches; track matches_played
-        // per class so the UI can show "X matches as <class>".
-        for (const row of (p.per_class_combat || [])) {
-          const cls = row.class || 'unknown';
-          let pcc = c.per_class_combat[cls];
+        // per ship so the UI can show "X matches in <ship>".
+        for (const row of (p.per_ship_combat || [])) {
+          const odf = row.ship || 'unknown';
+          let pcc = c.per_ship_combat[odf];
           if (!pcc) {
             pcc = {
+              name: row.ship_name || 'Unknown',
               time_seconds: 0, kills: 0, deaths: 0,
               pvp_kills: 0, pvp_deaths: 0,
               dealt: 0, shots: 0, hits: 0, pvp_hits: 0,
               matches: 0,
             };
-            c.per_class_combat[cls] = pcc;
+            c.per_ship_combat[odf] = pcc;
           }
+          // Refresh name on every match so renames in odf.min.json
+          // pick up the most-recent canonical name.
+          if (row.ship_name) pcc.name = row.ship_name;
           pcc.time_seconds += row.time_seconds || 0;
           pcc.kills        += row.kills        || 0;
           pcc.deaths       += row.deaths       || 0;
@@ -640,70 +637,62 @@
         };
       }
 
-      // v2.3: career_loadout block. Rederive primary/secondary from
-      // summed class_seconds (avoids double-rounding from per-match
-      // primary_class strings). Most-used ODF per class is the ODF
-      // with the highest career sum-of-class-seconds for that class.
+      // v2.3: career_loadout block (per-ship; no class taxonomy).
+      // Rederive primary/secondary from summed ship_seconds so we
+      // avoid double-rounding from per-match primary_ship strings.
+      // Pretty names ("Tank", "Scout") come from the cached ship_names
+      // map populated during accumulation.
       let careerLoadout = null;
-      const classSecondsMap = c.class_seconds;
-      const classKeys = Object.keys(classSecondsMap);
-      const totalActiveSec = classKeys.reduce((s, k) => s + classSecondsMap[k], 0);
+      const shipSecondsMap = c.ship_seconds;
+      const shipKeys = Object.keys(shipSecondsMap);
+      const totalActiveSec = shipKeys.reduce((s, k) => s + shipSecondsMap[k], 0);
       if (totalActiveSec > 0) {
-        const classes = {};
-        const classSeconds = {};
-        for (const cls of classKeys) {
-          classes[cls] = r3(classSecondsMap[cls] / totalActiveSec);
-          classSeconds[cls] = r1(classSecondsMap[cls]);
+        const ships = {};
+        for (const odf of shipKeys) {
+          ships[odf] = {
+            name:    c.ship_names[odf] || odf.replace(/\.odf$/i, ''),
+            share:   r3(shipSecondsMap[odf] / totalActiveSec),
+            seconds: r1(shipSecondsMap[odf]),
+          };
         }
-        // Primary/secondary by share desc, ties broken alphabetically.
-        const ordered = classKeys.slice().sort((a, b) => {
-          const da = classSecondsMap[a], db = classSecondsMap[b];
+        // Primary/secondary by share desc; ties broken alphabetically (on ODF).
+        const ordered = shipKeys.slice().sort((a, b) => {
+          const da = shipSecondsMap[a], db = shipSecondsMap[b];
           if (db !== da) return db - da;
           return a.localeCompare(b);
         });
-        const primaryClass  = ordered[0];
-        const primaryShare  = r3(classSecondsMap[primaryClass] / totalActiveSec);
-        const secondaryClass  = ordered.length > 1 ? ordered[1] : null;
-        const secondaryShare  = secondaryClass != null
-          ? r3(classSecondsMap[secondaryClass] / totalActiveSec)
-          : null;
-        // Per-class most-used ODF (over career, weighted by class time).
-        const mostUsedOdf = {};
-        for (const cls of classKeys) {
-          const odfMap = c.class_odf_seconds[cls];
-          if (!odfMap) continue;
-          let bestOdf = null, bestSec = -1;
-          for (const odf in odfMap) {
-            if (odfMap[odf] > bestSec) { bestSec = odfMap[odf]; bestOdf = odf; }
-          }
-          if (bestOdf) mostUsedOdf[cls] = bestOdf;
-        }
+        const primaryOdf = ordered[0];
+        const secondaryOdf = ordered.length > 1 ? ordered[1] : null;
         careerLoadout = {
-          classes,
-          class_seconds:   classSeconds,
-          primary_class:   primaryClass,
-          primary_share:   primaryShare,
-          secondary_class: secondaryClass,
-          secondary_share: secondaryShare,
-          class_diversity: classKeys.filter(k => classSecondsMap[k] > 0).length,
-          most_used_odf:   mostUsedOdf,
-          active_seconds:  r1(totalActiveSec),
+          ships,
+          primary_ship: {
+            odf:   primaryOdf,
+            name:  ships[primaryOdf].name,
+            share: ships[primaryOdf].share,
+          },
+          secondary_ship: secondaryOdf
+            ? { odf: secondaryOdf, name: ships[secondaryOdf].name, share: ships[secondaryOdf].share }
+            : null,
+          ship_diversity: shipKeys.filter(k => shipSecondsMap[k] > 0).length,
+          active_seconds: r1(totalActiveSec),
         };
       }
 
-      // v2.3: career_per_class_combat block. One row per class with
-      // time_seconds > 0; sorted by time desc, ties alpha. Display
-      // fields recomputed from sums.
-      const careerPerClassCombat = [];
-      for (const cls in c.per_class_combat) {
-        const pcc = c.per_class_combat[cls];
+      // v2.3: career_per_ship_combat block (per-ship; no class
+      // taxonomy). One row per ship with time_seconds > 0; sorted by
+      // time desc, ties alpha (on ODF). Display fields recomputed
+      // from sums. ship_name carried through from the accumulator.
+      const careerPerShipCombat = [];
+      for (const odf in c.per_ship_combat) {
+        const pcc = c.per_ship_combat[odf];
         if (pcc.time_seconds <= 0) continue;
         const acc    = pcc.shots > 0 ? pcc.hits / pcc.shots : 0;
         const pvpAcc = pcc.shots > 0 ? pcc.pvp_hits / pcc.shots : 0;
         const dpm    = pcc.time_seconds > 0 ? pcc.dealt / (pcc.time_seconds / 60) : 0;
         const kd     = pcc.pvp_deaths > 0 ? pcc.pvp_kills / pcc.pvp_deaths : null;
-        careerPerClassCombat.push({
-          class:        cls,
+        careerPerShipCombat.push({
+          ship:         odf,
+          ship_name:    pcc.name || odf.replace(/\.odf$/i, ''),
           time_seconds: r1(pcc.time_seconds),
           matches:      pcc.matches,
           kills:        pcc.kills,
@@ -722,9 +711,9 @@
           kd:           kd != null ? r2(kd) : null,
         });
       }
-      careerPerClassCombat.sort((a, b) => {
+      careerPerShipCombat.sort((a, b) => {
         if (b.time_seconds !== a.time_seconds) return b.time_seconds - a.time_seconds;
-        return a.class.localeCompare(b.class);
+        return a.ship.localeCompare(b.ship);
       });
 
       // Career movement aggregation (mirror of the Python pipeline path).
@@ -816,11 +805,11 @@
         total_pvp_deaths:    c.total_pvp_deaths,
         total_pve_deaths:    c.total_pve_deaths,
         total_pickups:       c.total_pickups,
-        // v2.3: career loadout + per-class combat (display-only, no
+        // v2.3: career loadout + per-ship combat (display-only, no
         // axis math reads these blocks). Null/empty when no v2.3+
         // contributions present.
-        career_loadout:      careerLoadout,
-        career_per_class_combat: careerPerClassCombat,
+        career_loadout:         careerLoadout,
+        career_per_ship_combat: careerPerShipCombat,
         // Phase 2/3: surfaced on career_stats so the Career Highlights
         // cards (Phase 6) can read straight off this row.
         total_snipes:        c.total_snipes,

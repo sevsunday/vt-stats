@@ -3,7 +3,7 @@
     "id": "2026-04-30T03-07-41",
     "source_file": "2026-04-30-03-07-41.binpb.gz",
     "source_size_bytes": 11085031,
-    "pipeline_version": 11,
+    "pipeline_version": 12,
     "submitter": "VTrider",
     "map": "vsrMojave.bzn",
     "date": "2026-04-30T03:07:41.886758+00:00",
@@ -319,46 +319,107 @@
         }
       },
       "loadout": {
-        "classes": {
-          "morphtank": 0.8943,
-          "pilot": 0.1057
+        "ships": {
+          "fvscout_vsr.odf": {
+            "name": "Scout (fvscout_vsr)",
+            "share": 0.2508,
+            "seconds": 1050.2
+          },
+          "fsuser_m.odf": {
+            "name": "Pilot (fsuser_m)",
+            "share": 0.1057,
+            "seconds": 442.6
+          },
+          "fvscoutm_vsr.odf": {
+            "name": "Empty Scout (fvscoutm_vsr)",
+            "share": 0.019,
+            "seconds": 79.7
+          },
+          "fvsent_vsr.odf": {
+            "name": "Sentry",
+            "share": 0.2261,
+            "seconds": 946.7
+          },
+          "fvtank_vsr.odf": {
+            "name": "Warrior",
+            "share": 0.3984,
+            "seconds": 1668.0
+          }
         },
-        "class_seconds": {
-          "morphtank": 3744.5,
-          "pilot": 442.6
+        "primary_ship": {
+          "odf": "fvtank_vsr.odf",
+          "name": "Warrior",
+          "share": 0.3984
         },
-        "primary_class": "morphtank",
-        "primary_share": 0.8943,
-        "secondary_class": "pilot",
-        "secondary_share": 0.1057,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "morphtank": "fvtank_vsr.odf",
-          "pilot": "fsuser_m.odf"
+        "secondary_ship": {
+          "odf": "fvscout_vsr.odf",
+          "name": "Scout (fvscout_vsr)",
+          "share": 0.2508
         },
+        "ship_diversity": 5,
         "active_seconds": 4187.1
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "morphtank",
-          "time_seconds": 3744.5,
-          "kills": 21,
-          "deaths": 7,
-          "pvp_kills": 14,
-          "pvp_deaths": 6,
-          "pve_kills": 7,
-          "pve_deaths": 1,
-          "dealt": 452349.0,
-          "shots": 2736,
-          "hits": 836,
-          "pvp_hits": 836,
-          "accuracy": 0.306,
-          "pvp_accuracy": 0.306,
-          "dpm": 7248.2,
-          "kd": 2.33
+          "ship": "fvtank_vsr.odf",
+          "ship_name": "Warrior",
+          "time_seconds": 1668.0,
+          "kills": 9,
+          "deaths": 0,
+          "pvp_kills": 4,
+          "pvp_deaths": 0,
+          "pve_kills": 5,
+          "pve_deaths": 0,
+          "dealt": 153183.2,
+          "shots": 1811,
+          "hits": 681,
+          "pvp_hits": 681,
+          "accuracy": 0.376,
+          "pvp_accuracy": 0.376,
+          "dpm": 5510.2,
+          "kd": null
         },
         {
-          "class": "pilot",
+          "ship": "fvscout_vsr.odf",
+          "ship_name": "Scout (fvscout_vsr)",
+          "time_seconds": 1050.2,
+          "kills": 8,
+          "deaths": 4,
+          "pvp_kills": 7,
+          "pvp_deaths": 4,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 130060.0,
+          "shots": 566,
+          "hits": 112,
+          "pvp_hits": 112,
+          "accuracy": 0.198,
+          "pvp_accuracy": 0.198,
+          "dpm": 7430.9,
+          "kd": 1.75
+        },
+        {
+          "ship": "fvsent_vsr.odf",
+          "ship_name": "Sentry",
+          "time_seconds": 946.7,
+          "kills": 4,
+          "deaths": 2,
+          "pvp_kills": 3,
+          "pvp_deaths": 1,
+          "pve_kills": 1,
+          "pve_deaths": 1,
+          "dealt": 160730.2,
+          "shots": 122,
+          "hits": 43,
+          "pvp_hits": 43,
+          "accuracy": 0.352,
+          "pvp_accuracy": 0.352,
+          "dpm": 10186.8,
+          "kd": 3.0
+        },
+        {
+          "ship": "fsuser_m.odf",
+          "ship_name": "Pilot (fsuser_m)",
           "time_seconds": 442.6,
           "kills": 0,
           "deaths": 3,
@@ -374,6 +435,25 @@
           "pvp_accuracy": 0.0,
           "dpm": 20.8,
           "kd": null
+        },
+        {
+          "ship": "fvscoutm_vsr.odf",
+          "ship_name": "Empty Scout (fvscoutm_vsr)",
+          "time_seconds": 79.7,
+          "kills": 0,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 8375.5,
+          "shots": 237,
+          "hits": 0,
+          "pvp_hits": 0,
+          "accuracy": 0.0,
+          "pvp_accuracy": 0.0,
+          "dpm": 6309.3,
+          "kd": 0.0
         }
       ],
       "hit_targets": {
@@ -578,49 +658,79 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.599,
-          "pilot": 0.2324,
-          "assaulttank": 0.1687
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout (ivscout_vsr)",
+            "share": 0.2205,
+            "seconds": 923.3
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.2324,
+            "seconds": 972.9
+          },
+          "ivtank_vsr.odf": {
+            "name": "Tank",
+            "share": 0.2715,
+            "seconds": 1137.0
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout (ivscoutm_vsr)",
+            "share": 0.0989,
+            "seconds": 414.2
+          },
+          "ivrckt_vsr.odf": {
+            "name": "Rocket Tank",
+            "share": 0.0088,
+            "seconds": 37.0
+          },
+          "ivatank_vsr.odf": {
+            "name": "Assault Tank",
+            "share": 0.1598,
+            "seconds": 669.2
+          },
+          "ivmisl_vsr.odf": {
+            "name": "Missile Scout",
+            "share": 0.008,
+            "seconds": 33.5
+          }
         },
-        "class_seconds": {
-          "wingman": 2508.0,
-          "pilot": 972.9,
-          "assaulttank": 706.2
+        "primary_ship": {
+          "odf": "ivtank_vsr.odf",
+          "name": "Tank",
+          "share": 0.2715
         },
-        "primary_class": "wingman",
-        "primary_share": 0.599,
-        "secondary_class": "pilot",
-        "secondary_share": 0.2324,
-        "class_diversity": 3,
-        "most_used_odf": {
-          "wingman": "ivtank_vsr.odf",
-          "pilot": "isuser_m.odf",
-          "assaulttank": "ivatank_vsr.odf"
+        "secondary_ship": {
+          "odf": "isuser_m.odf",
+          "name": "Pilot (isuser_m)",
+          "share": 0.2324
         },
+        "ship_diversity": 7,
         "active_seconds": 4187.1
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 2508.0,
-          "kills": 13,
-          "deaths": 13,
-          "pvp_kills": 4,
-          "pvp_deaths": 8,
-          "pve_kills": 9,
-          "pve_deaths": 5,
-          "dealt": 147209.3,
-          "shots": 4930,
-          "hits": 537,
-          "pvp_hits": 537,
-          "accuracy": 0.109,
-          "pvp_accuracy": 0.109,
-          "dpm": 3521.8,
-          "kd": 0.5
+          "ship": "ivtank_vsr.odf",
+          "ship_name": "Tank",
+          "time_seconds": 1137.0,
+          "kills": 4,
+          "deaths": 3,
+          "pvp_kills": 0,
+          "pvp_deaths": 2,
+          "pve_kills": 4,
+          "pve_deaths": 1,
+          "dealt": 59468.4,
+          "shots": 1393,
+          "hits": 312,
+          "pvp_hits": 312,
+          "accuracy": 0.224,
+          "pvp_accuracy": 0.224,
+          "dpm": 3138.3,
+          "kd": 0.0
         },
         {
-          "class": "pilot",
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 972.9,
           "kills": 0,
           "deaths": 12,
@@ -638,22 +748,99 @@
           "kd": 0.0
         },
         {
-          "class": "assaulttank",
-          "time_seconds": 706.2,
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout (ivscout_vsr)",
+          "time_seconds": 923.3,
+          "kills": 6,
+          "deaths": 1,
+          "pvp_kills": 3,
+          "pvp_deaths": 1,
+          "pve_kills": 3,
+          "pve_deaths": 0,
+          "dealt": 49492.1,
+          "shots": 2233,
+          "hits": 100,
+          "pvp_hits": 100,
+          "accuracy": 0.045,
+          "pvp_accuracy": 0.045,
+          "dpm": 3216.2,
+          "kd": 3.0
+        },
+        {
+          "ship": "ivatank_vsr.odf",
+          "ship_name": "Assault Tank",
+          "time_seconds": 669.2,
           "kills": 8,
-          "deaths": 3,
+          "deaths": 2,
           "pvp_kills": 1,
-          "pvp_deaths": 3,
+          "pvp_deaths": 2,
           "pve_kills": 7,
           "pve_deaths": 0,
-          "dealt": 177615.2,
-          "shots": 235,
-          "hits": 36,
-          "pvp_hits": 36,
-          "accuracy": 0.153,
-          "pvp_accuracy": 0.153,
-          "dpm": 15089.4,
-          "kd": 0.33
+          "dealt": 175567.1,
+          "shots": 223,
+          "hits": 34,
+          "pvp_hits": 34,
+          "accuracy": 0.152,
+          "pvp_accuracy": 0.152,
+          "dpm": 15740.0,
+          "kd": 0.5
+        },
+        {
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout (ivscoutm_vsr)",
+          "time_seconds": 414.2,
+          "kills": 3,
+          "deaths": 8,
+          "pvp_kills": 1,
+          "pvp_deaths": 4,
+          "pve_kills": 2,
+          "pve_deaths": 4,
+          "dealt": 33752.6,
+          "shots": 1286,
+          "hits": 125,
+          "pvp_hits": 125,
+          "accuracy": 0.097,
+          "pvp_accuracy": 0.097,
+          "dpm": 4888.7,
+          "kd": 0.25
+        },
+        {
+          "ship": "ivrckt_vsr.odf",
+          "ship_name": "Rocket Tank",
+          "time_seconds": 37.0,
+          "kills": 0,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 2048.1,
+          "shots": 12,
+          "hits": 2,
+          "pvp_hits": 2,
+          "accuracy": 0.167,
+          "pvp_accuracy": 0.167,
+          "dpm": 3321.2,
+          "kd": 0.0
+        },
+        {
+          "ship": "ivmisl_vsr.odf",
+          "ship_name": "Missile Scout",
+          "time_seconds": 33.5,
+          "kills": 0,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 4496.2,
+          "shots": 18,
+          "hits": 0,
+          "pvp_hits": 0,
+          "accuracy": 0.0,
+          "pvp_accuracy": 0.0,
+          "dpm": 8052.9,
+          "kd": 0.0
         }
       ],
       "hit_targets": {
@@ -850,55 +1037,84 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.525,
-          "pilot": 0.1983,
-          "assaulttank": 0.0828,
-          "morphtank": 0.194,
-          "unknown": 0.0
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout (ivscout_vsr)",
+            "share": 0.2564,
+            "seconds": 1073.4
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.1983,
+            "seconds": 830.1
+          },
+          "ivmisl_vsr.odf": {
+            "name": "Missile Scout",
+            "share": 0.1474,
+            "seconds": 617.2
+          },
+          "ivatank_vsr.odf": {
+            "name": "Assault Tank",
+            "share": 0.0828,
+            "seconds": 346.6
+          },
+          "fvtank_vsr.odf": {
+            "name": "Warrior",
+            "share": 0.194,
+            "seconds": 812.2
+          },
+          "fvcamr_vsr.odf": {
+            "name": "Fvcamr Vsr",
+            "share": 0.0,
+            "seconds": 0.1
+          },
+          "ivtank_vsr.odf": {
+            "name": "Tank",
+            "share": 0.062,
+            "seconds": 259.7
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout (ivscoutm_vsr)",
+            "share": 0.0592,
+            "seconds": 247.8
+          }
         },
-        "class_seconds": {
-          "wingman": 2198.2,
-          "pilot": 830.1,
-          "assaulttank": 346.6,
-          "morphtank": 812.2,
-          "unknown": 0.1
+        "primary_ship": {
+          "odf": "ivscout_vsr.odf",
+          "name": "Scout (ivscout_vsr)",
+          "share": 0.2564
         },
-        "primary_class": "wingman",
-        "primary_share": 0.525,
-        "secondary_class": "pilot",
-        "secondary_share": 0.1983,
-        "class_diversity": 5,
-        "most_used_odf": {
-          "wingman": "ivscout_vsr.odf",
-          "pilot": "isuser_m.odf",
-          "assaulttank": "ivatank_vsr.odf",
-          "morphtank": "fvtank_vsr.odf",
-          "unknown": "fvcamr_vsr.odf"
+        "secondary_ship": {
+          "odf": "isuser_m.odf",
+          "name": "Pilot (isuser_m)",
+          "share": 0.1983
         },
+        "ship_diversity": 8,
         "active_seconds": 4187.1
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 2198.2,
-          "kills": 24,
-          "deaths": 11,
-          "pvp_kills": 5,
-          "pvp_deaths": 7,
-          "pve_kills": 19,
-          "pve_deaths": 4,
-          "dealt": 178381.2,
-          "shots": 3830,
-          "hits": 451,
-          "pvp_hits": 451,
-          "accuracy": 0.118,
-          "pvp_accuracy": 0.118,
-          "dpm": 4869.0,
-          "kd": 0.71
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout (ivscout_vsr)",
+          "time_seconds": 1073.4,
+          "kills": 5,
+          "deaths": 1,
+          "pvp_kills": 2,
+          "pvp_deaths": 1,
+          "pve_kills": 3,
+          "pve_deaths": 0,
+          "dealt": 48066.7,
+          "shots": 2130,
+          "hits": 265,
+          "pvp_hits": 265,
+          "accuracy": 0.124,
+          "pvp_accuracy": 0.124,
+          "dpm": 2686.8,
+          "kd": 2.0
         },
         {
-          "class": "pilot",
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 830.1,
           "kills": 0,
           "deaths": 6,
@@ -916,7 +1132,8 @@
           "kd": 0.0
         },
         {
-          "class": "morphtank",
+          "ship": "fvtank_vsr.odf",
+          "ship_name": "Warrior",
           "time_seconds": 812.2,
           "kills": 6,
           "deaths": 2,
@@ -934,7 +1151,27 @@
           "kd": null
         },
         {
-          "class": "assaulttank",
+          "ship": "ivmisl_vsr.odf",
+          "ship_name": "Missile Scout",
+          "time_seconds": 617.2,
+          "kills": 9,
+          "deaths": 3,
+          "pvp_kills": 3,
+          "pvp_deaths": 3,
+          "pve_kills": 6,
+          "pve_deaths": 0,
+          "dealt": 64192.3,
+          "shots": 205,
+          "hits": 32,
+          "pvp_hits": 32,
+          "accuracy": 0.156,
+          "pvp_accuracy": 0.156,
+          "dpm": 6240.3,
+          "kd": 1.0
+        },
+        {
+          "ship": "ivatank_vsr.odf",
+          "ship_name": "Assault Tank",
           "time_seconds": 346.6,
           "kills": 3,
           "deaths": 1,
@@ -952,7 +1189,46 @@
           "kd": 0.0
         },
         {
-          "class": "unknown",
+          "ship": "ivtank_vsr.odf",
+          "ship_name": "Tank",
+          "time_seconds": 259.7,
+          "kills": 3,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 0,
+          "pve_kills": 3,
+          "pve_deaths": 1,
+          "dealt": 33362.6,
+          "shots": 383,
+          "hits": 105,
+          "pvp_hits": 105,
+          "accuracy": 0.274,
+          "pvp_accuracy": 0.274,
+          "dpm": 7708.0,
+          "kd": null
+        },
+        {
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout (ivscoutm_vsr)",
+          "time_seconds": 247.8,
+          "kills": 7,
+          "deaths": 6,
+          "pvp_kills": 0,
+          "pvp_deaths": 3,
+          "pve_kills": 7,
+          "pve_deaths": 3,
+          "dealt": 32759.5,
+          "shots": 1112,
+          "hits": 49,
+          "pvp_hits": 49,
+          "accuracy": 0.044,
+          "pvp_accuracy": 0.044,
+          "dpm": 7930.5,
+          "kd": 0.0
+        },
+        {
+          "ship": "fvcamr_vsr.odf",
+          "ship_name": "Fvcamr Vsr",
           "time_seconds": 0.1,
           "kills": 0,
           "deaths": 0,
@@ -1212,67 +1488,93 @@
         }
       },
       "loadout": {
-        "classes": {
-          "wingman": 0.5557,
-          "pilot": 0.2005,
-          "morphtank": 0.2438
+        "ships": {
+          "ivscout_vsr.odf": {
+            "name": "Scout (ivscout_vsr)",
+            "share": 0.2088,
+            "seconds": 874.5
+          },
+          "isuser_m.odf": {
+            "name": "Pilot (isuser_m)",
+            "share": 0.2005,
+            "seconds": 839.5
+          },
+          "ivmisl_vsr.odf": {
+            "name": "Missile Scout",
+            "share": 0.2288,
+            "seconds": 958.2
+          },
+          "fvtank_vsr.odf": {
+            "name": "Warrior",
+            "share": 0.1631,
+            "seconds": 683.0
+          },
+          "ivscoutm_vsr.odf": {
+            "name": "Empty Scout (ivscoutm_vsr)",
+            "share": 0.118,
+            "seconds": 494.1
+          },
+          "fvarch_vsr.odf": {
+            "name": "Lancer",
+            "share": 0.0807,
+            "seconds": 337.8
+          }
         },
-        "class_seconds": {
-          "wingman": 2326.8,
-          "pilot": 839.5,
-          "morphtank": 1020.9
+        "primary_ship": {
+          "odf": "ivmisl_vsr.odf",
+          "name": "Missile Scout",
+          "share": 0.2288
         },
-        "primary_class": "wingman",
-        "primary_share": 0.5557,
-        "secondary_class": "morphtank",
-        "secondary_share": 0.2438,
-        "class_diversity": 3,
-        "most_used_odf": {
-          "wingman": "ivmisl_vsr.odf",
-          "pilot": "isuser_m.odf",
-          "morphtank": "fvtank_vsr.odf"
+        "secondary_ship": {
+          "odf": "ivscout_vsr.odf",
+          "name": "Scout (ivscout_vsr)",
+          "share": 0.2088
         },
+        "ship_diversity": 6,
         "active_seconds": 4187.1
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "wingman",
-          "time_seconds": 2326.8,
-          "kills": 10,
-          "deaths": 7,
-          "pvp_kills": 2,
-          "pvp_deaths": 6,
-          "pve_kills": 8,
-          "pve_deaths": 1,
-          "dealt": 162950.8,
-          "shots": 3861,
-          "hits": 336,
-          "pvp_hits": 336,
-          "accuracy": 0.087,
-          "pvp_accuracy": 0.087,
-          "dpm": 4201.9,
+          "ship": "ivmisl_vsr.odf",
+          "ship_name": "Missile Scout",
+          "time_seconds": 958.2,
+          "kills": 3,
+          "deaths": 3,
+          "pvp_kills": 1,
+          "pvp_deaths": 3,
+          "pve_kills": 2,
+          "pve_deaths": 0,
+          "dealt": 88413.3,
+          "shots": 244,
+          "hits": 56,
+          "pvp_hits": 56,
+          "accuracy": 0.23,
+          "pvp_accuracy": 0.23,
+          "dpm": 5536.2,
           "kd": 0.33
         },
         {
-          "class": "morphtank",
-          "time_seconds": 1020.9,
-          "kills": 6,
-          "deaths": 0,
-          "pvp_kills": 0,
-          "pvp_deaths": 0,
-          "pve_kills": 6,
+          "ship": "ivscout_vsr.odf",
+          "ship_name": "Scout (ivscout_vsr)",
+          "time_seconds": 874.5,
+          "kills": 5,
+          "deaths": 1,
+          "pvp_kills": 1,
+          "pvp_deaths": 1,
+          "pve_kills": 4,
           "pve_deaths": 0,
-          "dealt": 137763.9,
-          "shots": 971,
-          "hits": 324,
-          "pvp_hits": 324,
-          "accuracy": 0.334,
-          "pvp_accuracy": 0.334,
-          "dpm": 8097.0,
-          "kd": null
+          "dealt": 43425.8,
+          "shots": 2333,
+          "hits": 160,
+          "pvp_hits": 160,
+          "accuracy": 0.069,
+          "pvp_accuracy": 0.069,
+          "dpm": 2979.6,
+          "kd": 1.0
         },
         {
-          "class": "pilot",
+          "ship": "isuser_m.odf",
+          "ship_name": "Pilot (isuser_m)",
           "time_seconds": 839.5,
           "kills": 0,
           "deaths": 6,
@@ -1288,6 +1590,63 @@
           "pvp_accuracy": 0.417,
           "dpm": 286.5,
           "kd": 0.0
+        },
+        {
+          "ship": "fvtank_vsr.odf",
+          "ship_name": "Warrior",
+          "time_seconds": 683.0,
+          "kills": 2,
+          "deaths": 0,
+          "pvp_kills": 0,
+          "pvp_deaths": 0,
+          "pve_kills": 2,
+          "pve_deaths": 0,
+          "dealt": 57309.0,
+          "shots": 891,
+          "hits": 308,
+          "pvp_hits": 308,
+          "accuracy": 0.346,
+          "pvp_accuracy": 0.346,
+          "dpm": 5034.1,
+          "kd": null
+        },
+        {
+          "ship": "ivscoutm_vsr.odf",
+          "ship_name": "Empty Scout (ivscoutm_vsr)",
+          "time_seconds": 494.1,
+          "kills": 2,
+          "deaths": 3,
+          "pvp_kills": 0,
+          "pvp_deaths": 2,
+          "pve_kills": 2,
+          "pve_deaths": 1,
+          "dealt": 31111.7,
+          "shots": 1284,
+          "hits": 120,
+          "pvp_hits": 120,
+          "accuracy": 0.093,
+          "pvp_accuracy": 0.093,
+          "dpm": 3777.6,
+          "kd": 0.0
+        },
+        {
+          "ship": "fvarch_vsr.odf",
+          "ship_name": "Lancer",
+          "time_seconds": 337.8,
+          "kills": 4,
+          "deaths": 0,
+          "pvp_kills": 0,
+          "pvp_deaths": 0,
+          "pve_kills": 4,
+          "pve_deaths": 0,
+          "dealt": 80454.9,
+          "shots": 80,
+          "hits": 16,
+          "pvp_hits": 16,
+          "accuracy": 0.2,
+          "pvp_accuracy": 0.2,
+          "dpm": 14290.4,
+          "kd": null
         }
       ],
       "hit_targets": {
@@ -1480,49 +1839,79 @@
         }
       },
       "loadout": {
-        "classes": {
-          "morphtank": 0.8136,
-          "pilot": 0.1764,
-          "fv_walker": 0.01
+        "ships": {
+          "fvscout_vsr.odf": {
+            "name": "Scout (fvscout_vsr)",
+            "share": 0.1668,
+            "seconds": 698.6
+          },
+          "fsuser_m.odf": {
+            "name": "Pilot (fsuser_m)",
+            "share": 0.1764,
+            "seconds": 738.8
+          },
+          "fvsent_vsr.odf": {
+            "name": "Sentry",
+            "share": 0.011,
+            "seconds": 46.0
+          },
+          "fvtank_vsr.odf": {
+            "name": "Warrior",
+            "share": 0.4217,
+            "seconds": 1765.8
+          },
+          "fvarch_vsr.odf": {
+            "name": "Lancer",
+            "share": 0.1716,
+            "seconds": 718.7
+          },
+          "fvscoutm_vsr.odf": {
+            "name": "Empty Scout (fvscoutm_vsr)",
+            "share": 0.0424,
+            "seconds": 177.4
+          },
+          "fvwalk_vsr.odf": {
+            "name": "Mauler",
+            "share": 0.01,
+            "seconds": 41.7
+          }
         },
-        "class_seconds": {
-          "morphtank": 3406.7,
-          "pilot": 738.8,
-          "fv_walker": 41.7
+        "primary_ship": {
+          "odf": "fvtank_vsr.odf",
+          "name": "Warrior",
+          "share": 0.4217
         },
-        "primary_class": "morphtank",
-        "primary_share": 0.8136,
-        "secondary_class": "pilot",
-        "secondary_share": 0.1764,
-        "class_diversity": 3,
-        "most_used_odf": {
-          "morphtank": "fvtank_vsr.odf",
-          "pilot": "fsuser_m.odf",
-          "fv_walker": "fvwalk_vsr.odf"
+        "secondary_ship": {
+          "odf": "fsuser_m.odf",
+          "name": "Pilot (fsuser_m)",
+          "share": 0.1764
         },
+        "ship_diversity": 7,
         "active_seconds": 4187.1
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "morphtank",
-          "time_seconds": 3406.7,
-          "kills": 22,
-          "deaths": 5,
-          "pvp_kills": 9,
-          "pvp_deaths": 4,
-          "pve_kills": 13,
-          "pve_deaths": 1,
-          "dealt": 218437.3,
-          "shots": 1791,
-          "hits": 524,
-          "pvp_hits": 524,
-          "accuracy": 0.293,
-          "pvp_accuracy": 0.293,
-          "dpm": 3847.3,
-          "kd": 2.25
+          "ship": "fvtank_vsr.odf",
+          "ship_name": "Warrior",
+          "time_seconds": 1765.8,
+          "kills": 13,
+          "deaths": 2,
+          "pvp_kills": 4,
+          "pvp_deaths": 2,
+          "pve_kills": 9,
+          "pve_deaths": 0,
+          "dealt": 114915.8,
+          "shots": 1187,
+          "hits": 407,
+          "pvp_hits": 407,
+          "accuracy": 0.343,
+          "pvp_accuracy": 0.343,
+          "dpm": 3904.6,
+          "kd": 2.0
         },
         {
-          "class": "pilot",
+          "ship": "fsuser_m.odf",
+          "ship_name": "Pilot (fsuser_m)",
           "time_seconds": 738.8,
           "kills": 0,
           "deaths": 1,
@@ -1540,7 +1929,84 @@
           "kd": null
         },
         {
-          "class": "fv_walker",
+          "ship": "fvarch_vsr.odf",
+          "ship_name": "Lancer",
+          "time_seconds": 718.7,
+          "kills": 6,
+          "deaths": 0,
+          "pvp_kills": 3,
+          "pvp_deaths": 0,
+          "pve_kills": 3,
+          "pve_deaths": 0,
+          "dealt": 74275.7,
+          "shots": 212,
+          "hits": 76,
+          "pvp_hits": 76,
+          "accuracy": 0.358,
+          "pvp_accuracy": 0.358,
+          "dpm": 6200.8,
+          "kd": null
+        },
+        {
+          "ship": "fvscout_vsr.odf",
+          "ship_name": "Scout (fvscout_vsr)",
+          "time_seconds": 698.6,
+          "kills": 1,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 24643.2,
+          "shots": 362,
+          "hits": 18,
+          "pvp_hits": 18,
+          "accuracy": 0.05,
+          "pvp_accuracy": 0.05,
+          "dpm": 2116.5,
+          "kd": 0.0
+        },
+        {
+          "ship": "fvscoutm_vsr.odf",
+          "ship_name": "Empty Scout (fvscoutm_vsr)",
+          "time_seconds": 177.4,
+          "kills": 2,
+          "deaths": 1,
+          "pvp_kills": 2,
+          "pvp_deaths": 0,
+          "pve_kills": 0,
+          "pve_deaths": 1,
+          "dealt": 3924.8,
+          "shots": 30,
+          "hits": 23,
+          "pvp_hits": 23,
+          "accuracy": 0.767,
+          "pvp_accuracy": 0.767,
+          "dpm": 1327.1,
+          "kd": null
+        },
+        {
+          "ship": "fvsent_vsr.odf",
+          "ship_name": "Sentry",
+          "time_seconds": 46.0,
+          "kills": 0,
+          "deaths": 1,
+          "pvp_kills": 0,
+          "pvp_deaths": 1,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 677.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "accuracy": 0.0,
+          "pvp_accuracy": 0.0,
+          "dpm": 883.1,
+          "kd": 0.0
+        },
+        {
+          "ship": "fvwalk_vsr.odf",
+          "ship_name": "Mauler",
           "time_seconds": 41.7,
           "kills": 1,
           "deaths": 1,
@@ -1700,46 +2166,83 @@
         }
       },
       "loadout": {
-        "classes": {
-          "morphtank": 0.9151,
-          "pilot": 0.0849
+        "ships": {
+          "fvscout_vsr.odf": {
+            "name": "Scout (fvscout_vsr)",
+            "share": 0.1473,
+            "seconds": 616.8
+          },
+          "fsuser_m.odf": {
+            "name": "Pilot (fsuser_m)",
+            "share": 0.0849,
+            "seconds": 355.6
+          },
+          "fvsent_vsr.odf": {
+            "name": "Sentry",
+            "share": 0.0336,
+            "seconds": 140.8
+          },
+          "fvtank_vsr.odf": {
+            "name": "Warrior",
+            "share": 0.7341,
+            "seconds": 3073.9
+          }
         },
-        "class_seconds": {
-          "morphtank": 3831.6,
-          "pilot": 355.6
+        "primary_ship": {
+          "odf": "fvtank_vsr.odf",
+          "name": "Warrior",
+          "share": 0.7341
         },
-        "primary_class": "morphtank",
-        "primary_share": 0.9151,
-        "secondary_class": "pilot",
-        "secondary_share": 0.0849,
-        "class_diversity": 2,
-        "most_used_odf": {
-          "morphtank": "fvtank_vsr.odf",
-          "pilot": "fsuser_m.odf"
+        "secondary_ship": {
+          "odf": "fvscout_vsr.odf",
+          "name": "Scout (fvscout_vsr)",
+          "share": 0.1473
         },
+        "ship_diversity": 4,
         "active_seconds": 4187.1
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "morphtank",
-          "time_seconds": 3831.6,
-          "kills": 25,
-          "deaths": 1,
-          "pvp_kills": 13,
-          "pvp_deaths": 1,
-          "pve_kills": 12,
+          "ship": "fvtank_vsr.odf",
+          "ship_name": "Warrior",
+          "time_seconds": 3073.9,
+          "kills": 23,
+          "deaths": 0,
+          "pvp_kills": 12,
+          "pvp_deaths": 0,
+          "pve_kills": 11,
           "pve_deaths": 0,
-          "dealt": 197748.8,
-          "shots": 1880,
-          "hits": 464,
-          "pvp_hits": 464,
-          "accuracy": 0.247,
-          "pvp_accuracy": 0.247,
-          "dpm": 3096.6,
-          "kd": 13.0
+          "dealt": 171405.0,
+          "shots": 1374,
+          "hits": 407,
+          "pvp_hits": 407,
+          "accuracy": 0.296,
+          "pvp_accuracy": 0.296,
+          "dpm": 3345.7,
+          "kd": null
         },
         {
-          "class": "pilot",
+          "ship": "fvscout_vsr.odf",
+          "ship_name": "Scout (fvscout_vsr)",
+          "time_seconds": 616.8,
+          "kills": 2,
+          "deaths": 1,
+          "pvp_kills": 1,
+          "pvp_deaths": 1,
+          "pve_kills": 1,
+          "pve_deaths": 0,
+          "dealt": 22687.7,
+          "shots": 471,
+          "hits": 38,
+          "pvp_hits": 38,
+          "accuracy": 0.081,
+          "pvp_accuracy": 0.081,
+          "dpm": 2207.0,
+          "kd": 1.0
+        },
+        {
+          "ship": "fsuser_m.odf",
+          "ship_name": "Pilot (fsuser_m)",
           "time_seconds": 355.6,
           "kills": 0,
           "deaths": 1,
@@ -1754,6 +2257,25 @@
           "accuracy": 0.0,
           "pvp_accuracy": 0.0,
           "dpm": 394.8,
+          "kd": null
+        },
+        {
+          "ship": "fvsent_vsr.odf",
+          "ship_name": "Sentry",
+          "time_seconds": 140.8,
+          "kills": 0,
+          "deaths": 0,
+          "pvp_kills": 0,
+          "pvp_deaths": 0,
+          "pve_kills": 0,
+          "pve_deaths": 0,
+          "dealt": 3656.1,
+          "shots": 35,
+          "hits": 19,
+          "pvp_hits": 19,
+          "accuracy": 0.543,
+          "pvp_accuracy": 0.543,
+          "dpm": 1557.5,
           "kd": null
         }
       ],
@@ -1814,25 +2336,26 @@
       },
       "weapon_breakdown": {},
       "loadout": {
-        "classes": {
-          "unknown": 1.0
+        "ships": {
+          "fvcamr_vsr.odf": {
+            "name": "Fvcamr Vsr",
+            "share": 1.0,
+            "seconds": 2451.7
+          }
         },
-        "class_seconds": {
-          "unknown": 2451.7
+        "primary_ship": {
+          "odf": "fvcamr_vsr.odf",
+          "name": "Fvcamr Vsr",
+          "share": 1.0
         },
-        "primary_class": "unknown",
-        "primary_share": 1.0,
-        "secondary_class": null,
-        "secondary_share": null,
-        "class_diversity": 1,
-        "most_used_odf": {
-          "unknown": "fvcamr_vsr.odf"
-        },
+        "secondary_ship": null,
+        "ship_diversity": 1,
         "active_seconds": 2451.7
       },
-      "per_class_combat": [
+      "per_ship_combat": [
         {
-          "class": "unknown",
+          "ship": "fvcamr_vsr.odf",
+          "ship_name": "Fvcamr Vsr",
           "time_seconds": 2451.7,
           "kills": 0,
           "deaths": 0,
