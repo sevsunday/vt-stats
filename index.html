@@ -786,30 +786,34 @@
       </button>
     </div>
 
-    <!-- Aggregate Meta (always visible above tabs) -->
-    <div class="card mb-4">
+    <!-- Hero band: title + 4-up stat cards + chip strip. Stat cards
+         (#hero-stats) and chip row (#hero-chips) are populated by
+         renderHeroStats() / renderHeroChips() in js/app.js. The picker
+         trigger that used to live here was removed once the Recent
+         Matches strip's "View all" button (below) became the sole
+         entry point into #match-picker-modal from this view. -->
+    <div class="vt-all-hero card mb-4">
       <div class="card-body">
-        <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
-          <!-- Twin of the #match-picker-trigger in #match-info. Kept in sync
-               by js/app.js: both reflect the same currentTarget. -->
-          <button id="match-picker-trigger-all" class="vt-match-picker-trigger" type="button"
-                  data-bs-toggle="modal" data-bs-target="#match-picker-modal"
-                  aria-haspopup="dialog" aria-expanded="false"
-                  aria-label="Change match">
-            <span class="stat-label">Match</span>
-            <span class="vt-match-picker-trigger-primary">
-              <span class="vt-match-picker-trigger-name" id="trigger-name-all">—</span>
-              <span class="vt-match-picker-trigger-badge d-none" id="trigger-badge-all">0</span>
-              <i class="bi bi-chevron-down"></i>
-            </span>
-            <span class="vt-match-picker-trigger-secondary">
-              <span id="trigger-sub-all" class="vt-muted">—</span>
-            </span>
-          </button>
+        <div class="vt-all-hero-head">
           <h4 class="mb-0">All Matches Overview</h4>
         </div>
-        <div class="d-flex flex-wrap gap-4" id="agg-meta"></div>
+        <div class="vt-hero-stats" id="hero-stats"></div>
+        <div class="vt-hero-chips" id="hero-chips"></div>
       </div>
+    </div>
+
+    <!-- Recent matches strip. Reuses .vt-match-picker-card styling; cards are
+         emitted by renderRecentMatches(fileIds) in js/app.js, scoped to the
+         active picker filter (consistent with the hero stats above). -->
+    <div class="vt-recent-matches mb-4" id="recent-matches-section">
+      <div class="vt-recent-matches-header">
+        <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Recent Matches</h5>
+        <button type="button" class="btn btn-sm btn-link vt-recent-matches-viewall"
+                data-bs-toggle="modal" data-bs-target="#match-picker-modal">
+          View all <i class="bi bi-arrow-right ms-1"></i>
+        </button>
+      </div>
+      <div class="vt-recent-matches-strip" id="recent-matches-strip"></div>
     </div>
 
     <!-- All Matches Tab Navigation -->
@@ -909,10 +913,6 @@
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                       title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 5 minutes."
                   >Matches</th>
-                  <th class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Trend</strong><br>Last 10 raw deltas (oldest to most-recent), oriented around the zero line. Hover the sparkline cell to see the values."
-                  >Trend</th>
                 </tr>
               </thead>
               <tbody></tbody>

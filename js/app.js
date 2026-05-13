@@ -2473,6 +2473,7 @@
         total_sentinel_damage_dropped: 0,
         matches_with_sentinel_damage: [],
       });
+      renderRecentMatches([]);
       // Clear downstream renders by passing an empty career list. Preserve
       // the user's `mode` preference (Totals vs Per match) across resets.
       careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
@@ -2520,6 +2521,7 @@
     remapCareerSortKeyForColumnView(careerColumnView);
 
     renderAggMeta(data.meta);
+    renderRecentMatches(fileIds);
     renderVtsrLeaderboard(window.__vtElo, data.career_stats);
     renderHighlights(data.career_highlights, { id: 'all-matches' }, 'career');
     initCareerColumnViewControls();
@@ -2536,7 +2538,25 @@
 
     if (window.VTFx) {
       const allOverviewPane = document.getElementById('all-tab-overview');
-      requestAnimationFrame(() => VTFx.staggerEntrance(allOverviewPane));
+      const heroCard = document.querySelector('#all-matches-view > .vt-all-hero');
+      requestAnimationFrame(() => {
+        // Animate the hero card directly with a 0ms delay, then run the
+        // existing tab-pane stagger. Calling staggerEntrance on a parent
+        // that contains both the hero and the tab content would double-
+        // index the tab cards' delays, so we apply the entrance class
+        // manually to the single hero card. The recent-matches strip
+        // isn't a `.card`, so it just appears in-place.
+        if (heroCard) {
+          heroCard.style.setProperty('--vt-delay', '0ms');
+          heroCard.classList.add('vt-enter');
+          heroCard.addEventListener('animationend', function onEnd() {
+            heroCard.classList.remove('vt-enter');
+            heroCard.style.removeProperty('--vt-delay');
+            heroCard.removeEventListener('animationend', onEnd);
+          });
+        }
+        VTFx.staggerEntrance(allOverviewPane);
+      });
     }
 
     registerTabRenderer('#all-tab-weapons', () => {
@@ -4873,29 +4893,139 @@
   }
 
   // --- All Matches ---
-  function renderAggMeta(meta) {
-    const container = document.getElementById('agg-meta');
-    const dur = meta.total_duration_sec;
-    const m = Math.floor(dur / 60);
+  // Compact "Apr 16" / "May 12" formatter for the Date Range hero card.
+  // Falls back to the raw ISO when parsing fails so we never silently swallow
+  // an upstream format change.
+  function fmtShortDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  // Hero stat cards (4-up at desktop). Reads `meta` directly from the
+  // aggregate; tolerates partial payloads (used by both the happy path and
+  // the empty-filter-set branch in loadAllMatches).
+  function renderHeroStats(meta) {
+    const container = document.getElementById('hero-stats');
+    if (!container) return;
+    const matchCount = meta.match_count || 0;
+    const dur = meta.total_duration_sec || 0;
+    const totalMin = Math.floor(dur / 60);
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    const playTime = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+    const mapsCount = (meta.maps_played || []).length;
     const submitters = meta.submitters || [];
-    const posCount = meta.matches_with_positioning || 0;
-    const posBlock = posCount > 0
-      ? `<div><span class="stat-label">With Positioning</span><br><strong>${posCount} / ${meta.match_count}</strong></div>`
-      : '';
+    const dr = meta.date_range || [];
+
+    let dateValue = '—';
+    let dateSub = '';
+    if (dr.length === 2) {
+      const [start, end] = dr;
+      dateValue = `${fmtShortDate(start)} \u2014 ${fmtShortDate(end)}`;
+      const startMs = new Date(start).getTime();
+      const endMs   = new Date(end).getTime();
+      if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+        const days = Math.max(1, Math.round((endMs - startMs) / 86400000) + 1);
+        dateSub = `${days}-day span`;
+      }
+    }
+
+    const submitterValue = submitters.length;
+    const submitterSub = submitters.length === 0 ? '\u2014'
+      : submitters.length <= 2 ? submitters.join(', ')
+      : `${submitters.slice(0, 2).join(', ')} +${submitters.length - 2}`;
+
+    container.innerHTML = `
+      <div class="vt-hero-stat">
+        <i class="bi bi-collection-play vt-hero-stat-icon" aria-hidden="true"></i>
+        <span class="vt-hero-stat-label">Matches</span>
+        <span class="vt-hero-stat-value">${matchCount}</span>
+        <span class="vt-hero-stat-sub">across ${mapsCount} ${mapsCount === 1 ? 'map' : 'maps'}</span>
+      </div>
+      <div class="vt-hero-stat">
+        <i class="bi bi-clock-history vt-hero-stat-icon" aria-hidden="true"></i>
+        <span class="vt-hero-stat-label">Play Time</span>
+        <span class="vt-hero-stat-value">${matchCount > 0 ? playTime : '\u2014'}</span>
+        <span class="vt-hero-stat-sub">${matchCount > 0 ? `${totalMin} min total` : ''}</span>
+      </div>
+      <div class="vt-hero-stat">
+        <i class="bi bi-calendar-range vt-hero-stat-icon" aria-hidden="true"></i>
+        <span class="vt-hero-stat-label">Date Range</span>
+        <span class="vt-hero-stat-value" style="font-size:1.1rem">${dateValue}</span>
+        <span class="vt-hero-stat-sub">${dateSub}</span>
+      </div>
+      <div class="vt-hero-stat">
+        <i class="bi bi-person-circle vt-hero-stat-icon" aria-hidden="true"></i>
+        <span class="vt-hero-stat-label">Submitters</span>
+        <span class="vt-hero-stat-value">${submitterValue}</span>
+        <span class="vt-hero-stat-sub" title="${esc(submitters.join(', '))}">${esc(submitterSub)}</span>
+      </div>`;
+  }
+
+  // Conditional chip strip below the cards. Career-roster chip is always
+  // shown when MIN_CAREER_MATCHES > 0; partial-coverage chips (positioning,
+  // T-key) auto-hide at 100% coverage. CSS `:empty` collapses the row when
+  // no chips qualify (e.g. zero-match filter scope).
+  function renderHeroChips(meta) {
+    const container = document.getElementById('hero-chips');
+    if (!container) return;
+    const chips = [];
+    const matchCount = meta.match_count || 0;
     const minMatches = meta.min_career_matches || 0;
     const dropped = meta.players_dropped_by_min_matches || 0;
-    const minBlock = (minMatches > 0 && dropped > 0)
-      ? `<div><span class="stat-label">Career Roster</span><br><strong>${minMatches}+ matches</strong><br><span class="stat-label">${dropped} hidden</span></div>`
-      : '';
-    container.innerHTML = `
-      <div><span class="stat-label">Matches</span><br><strong>${meta.match_count}</strong></div>
-      <div><span class="stat-label">Total Play Time</span><br><strong>${m} min</strong></div>
-      <div><span class="stat-label">Maps</span><br><strong>${meta.maps_played.length}</strong></div>
-      <div><span class="stat-label">Submitters</span><br><strong>${submitters.length}</strong></div>
-      <div><span class="stat-label">Date Range</span><br><strong>${meta.date_range.join(' — ')}</strong></div>
-      ${posBlock}
-      ${minBlock}
-    `;
+    if (minMatches > 0) {
+      const droppedSuffix = dropped > 0 ? ` &middot; ${dropped} hidden` : '';
+      chips.push(`<span class="vt-hero-chip"><i class="bi bi-people" aria-hidden="true"></i>Career roster: <strong>${minMatches}+ matches</strong>${droppedSuffix}</span>`);
+    }
+    const posCount = meta.matches_with_positioning || 0;
+    if (matchCount > 0 && posCount > 0 && posCount < matchCount) {
+      chips.push(`<span class="vt-hero-chip"><i class="bi bi-geo-alt" aria-hidden="true"></i>Positioning: <strong>${posCount} / ${matchCount}</strong></span>`);
+    }
+    const tlCount = meta.matches_with_target_lock_data || 0;
+    if (matchCount > 0 && tlCount > 0 && tlCount < matchCount) {
+      chips.push(`<span class="vt-hero-chip"><i class="bi bi-bullseye" aria-hidden="true"></i>T-key data: <strong>${tlCount} / ${matchCount}</strong></span>`);
+    }
+    container.innerHTML = chips.join('');
+  }
+
+  // Public entry point used by loadAllMatches. Splits into the two render
+  // helpers above so callers can refresh stats without re-rendering chips
+  // (or vice-versa) in the future. The previous #agg-meta inline-text
+  // renderer was retired here in favour of #hero-stats / #hero-chips.
+  function renderAggMeta(meta) {
+    renderHeroStats(meta);
+    renderHeroChips(meta);
+  }
+
+  // Recent Matches strip. Reuses .vt-match-picker-card so a future styling
+  // change to picker cards picks up here for free. fileIds is the same
+  // filtered subset loadAllMatches() built; the strip therefore scopes
+  // consistently with the hero stats. Click delegates to selectMatch so
+  // URL state, view-transition, and trigger sync all flow through the
+  // existing path.
+  function renderRecentMatches(fileIds) {
+    const strip = document.getElementById('recent-matches-strip');
+    if (!strip) return;
+    const fileSet = new Set(fileIds || []);
+    // manifest is sorted newest-first earlier in this module (see the
+    // `manifest.sort` call after fetch); .filter preserves order.
+    const recent = manifest.filter(m => fileSet.has(m.file)).slice(0, 4);
+    if (recent.length === 0) {
+      strip.innerHTML = `<div class="vt-recent-matches-empty">
+        <i class="bi bi-inbox me-2" aria-hidden="true"></i>No matches in the current filter scope.
+      </div>`;
+      return;
+    }
+    strip.innerHTML = recent.map(buildMatchPickerCardHtml).join('');
+    strip.querySelectorAll('.vt-match-picker-card').forEach(el => {
+      el.addEventListener('click', () => {
+        const tgt = el.dataset.target;
+        const entry = manifest.find(m => m.file === tgt);
+        if (entry) selectMatch(entry);
+      });
+    });
   }
 
   function careerWeaponsUsedCount(c) {
@@ -5162,45 +5292,6 @@
       </div>
     </div>`;
     return vtsrTooltipHtmlCache;
-  }
-
-  // Inline 10-point sparkline canvas for the Trend column. Plain Canvas
-  // 2D so we don't pay Chart.js construction cost per row.
-  function renderSparkline(canvas, deltas) {
-    if (!canvas || !canvas.getContext) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.clientWidth || 64;
-    const cssH = canvas.clientHeight || 18;
-    canvas.width = cssW * dpr;
-    canvas.height = cssH * dpr;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, cssW, cssH);
-    if (!deltas || deltas.length === 0) return;
-    const maxAbs = Math.max(1, ...deltas.map(d => Math.abs(d)));
-    const midY = cssH / 2;
-    const stepX = deltas.length > 1 ? cssW / (deltas.length - 1) : cssW;
-    // Center reference line.
-    const muted = getComputedStyle(document.documentElement).getPropertyValue('--kb-text-muted').trim() || '#666';
-    ctx.strokeStyle = muted;
-    ctx.globalAlpha = 0.25;
-    ctx.beginPath();
-    ctx.moveTo(0, midY);
-    ctx.lineTo(cssW, midY);
-    ctx.stroke();
-    ctx.globalAlpha = 1.0;
-    // Series line, color-shifted by sign of last delta.
-    const success = getComputedStyle(document.documentElement).getPropertyValue('--kb-success').trim() || '#3fb950';
-    const danger  = getComputedStyle(document.documentElement).getPropertyValue('--kb-danger').trim()  || '#f85149';
-    ctx.strokeStyle = (deltas[deltas.length - 1] >= 0) ? success : danger;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    deltas.forEach((d, i) => {
-      const x = i * stepX;
-      const y = midY - (d / maxAbs) * (midY - 1);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
   }
 
   function vtsrSort(key, asc) {
@@ -5731,7 +5822,6 @@
       const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : '';
       const lastSign  = lastDelta > 0 ? '+' : '';
       const rowKey = vtsrRowKey(r);
-      const sparklineId = `vtsr-spark-${rowKey}`;
       const detailId    = `vtsr-detail-${rowKey}`;
       const expanded = expandedVtsrRows.has(rowKey);
 
@@ -5825,12 +5915,6 @@
       // ----- Matches cell tooltip -----
       const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <5 min duration`;
 
-      // ----- Trend cell tooltip (last N raw deltas listed) -----
-      const trendList = Array.isArray(r.win_history) ? r.win_history : [];
-      const trendTip = trendList.length
-        ? `Last ${trendList.length} ${trendList.length === 1 ? 'delta' : 'deltas'} (oldest \u2192 most-recent): ${trendList.map(d => (d > 0 ? '+' : '') + d.toFixed(1)).join(', ')}`
-        : 'No rated matches yet';
-
       const detailHtml = buildVtsrDetailPanel(r, careerRow);
 
       return `<tr data-vtsr-name="${esc(r.name)}" data-vtsr-steam64="${esc(r.steam64 || '')}" data-vtsr-key="${esc(rowKey)}">
@@ -5854,22 +5938,11 @@
         <td class="text-end ${lastClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(lastTip)}">${lastSign}${lastDelta.toFixed(1)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(trendTip)}"><canvas class="vt-vtsr-sparkline" id="${sparklineId}"></canvas></td>
       </tr>
       <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
-        <td colspan="14">${detailHtml}</td>
+        <td colspan="13">${detailHtml}</td>
       </tr>`;
     }).join('');
-
-    // Render the per-row sparklines after the rows are in the DOM so the
-    // canvases have layout (clientWidth/Height).
-    requestAnimationFrame(() => {
-      sorted.forEach((r) => {
-        const rowKey = vtsrRowKey(r);
-        const id = `vtsr-spark-${rowKey}`;
-        renderSparkline(document.getElementById(id), r.win_history || []);
-      });
-    });
 
     // v2.3 polish: track expand/collapse on the chevron button. Bootstrap's
     // Collapse component fires shown.bs.collapse / hidden.bs.collapse on

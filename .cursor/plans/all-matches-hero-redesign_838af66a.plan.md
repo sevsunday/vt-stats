@@ -4,25 +4,25 @@ overview: Replace the bland inline-text hero on the All Matches landing view wit
 todos:
   - id: markup
     content: "Replace #all-matches-view hero markup (index.html lines 790-813) with .vt-all-hero (title + relocated picker trigger + 4-up #hero-stats + #hero-chips) and a new .vt-recent-matches block above the tabs"
-    status: pending
+    status: completed
   - id: css
     content: Add .vt-all-hero-head, .vt-hero-stats, .vt-hero-stat, .vt-hero-chips, .vt-hero-chip, .vt-recent-matches-header, .vt-recent-matches-strip, .vt-recent-matches-empty rules in css/vtstats-theme.css with responsive breakpoints
-    status: pending
+    status: completed
   - id: render-split
     content: Replace renderAggMeta in js/app.js (line ~4876) with renderHeroStats + renderHeroChips + thin renderAggMeta wrapper, and add fmtShortDate helper
-    status: pending
+    status: completed
   - id: render-recent
     content: Add renderRecentMatches(fileIds) in js/app.js using manifest.slice + buildMatchPickerCardHtml + selectMatch click handler
-    status: pending
+    status: completed
   - id: wire-load
     content: Call renderRecentMatches(fileIds) in loadAllMatches happy path (after renderAggMeta) and in the empty-filter-set branch (renderRecentMatches([]))
-    status: pending
+    status: completed
   - id: stagger
     content: "Add VTFx.staggerEntrance on #all-matches-view alongside the existing #all-tab-overview call so the hero + recent strip animate in"
-    status: pending
+    status: completed
   - id: verify
     content: Open index.html, verify hero + recent strip at desktop / tablet / mobile widths, exercise filter scopes (full / narrowed / single / empty), confirm VTSR-T table row width unchanged
-    status: pending
+    status: completed
 isProject: false
 ---
 
