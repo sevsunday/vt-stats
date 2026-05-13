@@ -2305,11 +2305,18 @@
     rivalryRadarPair = { a: null, b: null };
     rivalryRadarCustom = false;
 
+    // Fire ELO load in parallel with the match-JSON fetch so the
+    // per-match VTSR-T Δ column has data ready by the time the
+    // leaderboard renders. ensureEloLoaded() is idempotent and swallows
+    // its own fetch errors, so Promise.all only rejects on the match-JSON
+    // fetch — preserving the existing error path.
     let data;
     try {
-      const res = await fetch('data/processed/' + file);
-      if (!res.ok) throw new Error(res.status);
-      data = await res.json();
+      const matchPromise = fetch('data/processed/' + file).then(r => {
+        if (!r.ok) throw new Error(r.status);
+        return r.json();
+      });
+      [data] = await Promise.all([matchPromise, ensureEloLoaded()]);
     } catch {
       $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load match data.</p>';
       return;
@@ -2390,6 +2397,28 @@
     }
   }
 
+  // Fetches elo_current.json + elo_history.json once per session and caches
+  // them on window.__vtElo / window.__vtEloHistory. Idempotent: subsequent
+  // calls short-circuit immediately. Called from both loadAllMatches (where
+  // the VTSR-T leaderboard needs both files) and loadMatch (where the new
+  // per-match VTSR-T Δ leaderboard column needs elo_history). Fired in
+  // parallel with the match-JSON fetch in loadMatch so it adds no latency
+  // on the hot path. Graceful 404: sentinel null hides the VTSR-T card and
+  // renders "—" in the leaderboard column.
+  async function ensureEloLoaded() {
+    if (window.__vtElo !== undefined) return;
+    const [eloRes, histRes] = await Promise.all([
+      fetch('data/processed/elo_current.json').catch(() => null),
+      fetch('data/processed/elo_history.json').catch(() => null),
+    ]);
+    try {
+      window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
+    } catch { window.__vtElo = null; }
+    try {
+      window.__vtEloHistory = (histRes && histRes.ok) ? await histRes.json() : null;
+    } catch { window.__vtEloHistory = null; }
+  }
+
   async function loadAllMatches(urlState) {
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
@@ -2415,31 +2444,15 @@
       }
     }
 
-    // Fetch elo_current.json + elo_history.json once per session in
-    // parallel. Both are needed before the VTSR-T leaderboard renders:
-    // elo_current powers the table rows + axis_means; elo_history
-    // powers the per-row expand panel's Last-Match Axis Breakdown
-    // section. Graceful 404 on either: a fresh checkout / pipeline-
-    // never-run state means the files aren't there yet -- hide the
-    // dedicated VTSR-T card and fall through to em-dash placeholders
-    // on the Career Leaderboard's Tier+VTSR-T columns; the expand
-    // panel renders an "axis breakdown unavailable" fallback for the
-    // missing-history case. Loading both up-front (rather than
-    // lazy-loading elo_history at first VTSR-T render) avoids a race
-    // where the panels render with the "elo_history not yet loaded"
-    // fallback because the fetch hadn't resolved yet.
-    if (window.__vtElo === undefined) {
-      const [eloRes, histRes] = await Promise.all([
-        fetch('data/processed/elo_current.json').catch(() => null),
-        fetch('data/processed/elo_history.json').catch(() => null),
-      ]);
-      try {
-        window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
-      } catch { window.__vtElo = null; }
-      try {
-        window.__vtEloHistory = (histRes && histRes.ok) ? await histRes.json() : null;
-      } catch { window.__vtEloHistory = null; }
-    }
+    // elo_current.json + elo_history.json are fetched once per session via
+    // the shared ensureEloLoaded() helper (defined above loadAllMatches).
+    // Both are needed before the VTSR-T leaderboard renders: elo_current
+    // powers the table rows + axis_means; elo_history powers the per-row
+    // expand panel's Last-Match Axis Breakdown section. Graceful 404 on
+    // either: hide the dedicated VTSR-T card and fall through to em-dash
+    // placeholders. Also consumed by the per-match leaderboard's new
+    // VTSR-T Δ column via getEloDeltaIndexForCurrentMatch().
+    await ensureEloLoaded();
 
     if (!window.VTAggregate || typeof window.VTAggregate.build !== 'function') {
       $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Aggregator unavailable.</p>';
@@ -4254,6 +4267,98 @@
   }
 
   // --- Leaderboard ---
+  // --- Per-match VTSR-T Δ helpers ---
+  // Builds a lookup index from window.__vtEloHistory for the currently-loaded
+  // match and caches it on currentData.__eloDeltaIndex so sort/filter re-
+  // renders don't re-scan the history array. The cache is automatically
+  // invalidated on every match switch because currentData is reassigned.
+  function getEloDeltaIndexForCurrentMatch() {
+    if (!currentData || !currentData.match) return null;
+    if (currentData.__eloDeltaIndex !== undefined) return currentData.__eloDeltaIndex;
+    // Defensive: pipeline always emits a non-empty match.id, but guard
+    // against a future schema change to avoid matching the first
+    // empty-id excluded row in elo_history.
+    if (!currentData.match.id) {
+      return (currentData.__eloDeltaIndex = { available: false });
+    }
+    const hist = window.__vtEloHistory;
+    if (!hist || !Array.isArray(hist.history)) {
+      return (currentData.__eloDeltaIndex = { available: false });
+    }
+    const entry = hist.history.find(h => h.match_id === currentData.match.id);
+    if (!entry) {
+      return (currentData.__eloDeltaIndex = { available: false, missing: true });
+    }
+    if (entry.match_excluded) {
+      return (currentData.__eloDeltaIndex = {
+        available: true, excluded: true,
+        exclusion_reason: entry.exclusion_reason || 'unknown',
+      });
+    }
+    const bySteam = new Map(), byName = new Map();
+    for (const d of (entry.deltas || [])) {
+      if (d.steam64) bySteam.set(String(d.steam64), d);
+      if (d.name) byName.set(d.name.toLowerCase(), d);
+    }
+    return (currentData.__eloDeltaIndex = {
+      available: true, excluded: false, bySteam, byName,
+    });
+  }
+
+  function lookupEloDelta(idx, row) {
+    if (!idx || !idx.available) return null;
+    if (idx.excluded) return { excluded: true, exclusion_reason: idx.exclusion_reason };
+    const sid = row.steam64 ? String(row.steam64) : null;
+    const d = (sid && idx.bySteam.get(sid))
+           || (row.name && idx.byName.get(row.name.toLowerCase()))
+           || null;
+    return d ? {
+      delta: d.delta,
+      before: d.before,
+      after: d.after,
+      performance: d.performance,
+      expected: d.expected,
+      axis_contributions: d.axis_contributions || {},
+    } : null;
+  }
+
+  function renderEloDeltaCell(d, idx) {
+    if (!idx || !idx.available) {
+      return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="VTSR-T data unavailable"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
+    }
+    if (idx.excluded) {
+      const reasonText = idx.exclusion_reason === 'low_player_count' ? 'fewer than 6 players'
+                       : idx.exclusion_reason === 'short_duration'   ? 'shorter than 5 minutes'
+                       : 'excluded from rating';
+      return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Match excluded from VTSR-T (${reasonText})"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
+    }
+    if (!d) {
+      return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Not rated in this match"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
+    }
+    const cls  = d.delta > 0 ? 'vt-vtsr-delta-positive' : d.delta < 0 ? 'vt-vtsr-delta-negative' : '';
+    const sign = d.delta > 0 ? '+' : '';
+    // Top 2 axis contributors (largest |z|). Labels resolved via VTSR_AXIS_META.
+    const axes = Object.entries(d.axis_contributions || {})
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+      .slice(0, 2)
+      .map(([a, z]) => {
+        const label = (VTSR_AXIS_META[a] && VTSR_AXIS_META[a].label) || a;
+        return `${label}: ${z >= 0 ? '+' : ''}${z.toFixed(2)}z`;
+      })
+      .join(' \u00b7 ');
+    const tipParts = [
+      `${sign}${d.delta.toFixed(2)} pts`,
+      `${Math.round(d.before)} \u2192 ${Math.round(d.after)}`,
+      `Perf ${d.performance.toFixed(2)} vs expected ${d.expected.toFixed(2)}`,
+    ];
+    if (axes) tipParts.push(`Top axes: ${axes}`);
+    return `<td class="text-end ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
+      title="${esc(tipParts.join(' \u00b7 '))}">${sign}${d.delta.toFixed(1)}</td>`;
+  }
+
   function renderLeaderboard(rows) {
     const tbody = document.querySelector('#leaderboard tbody');
     const sorted = [...rows].sort(leaderboardSort(sortState.key, sortState.asc));
@@ -4277,6 +4382,8 @@
       // pvp/pve fields are absent (pre-v4 schema).
       const kCell = killsDeathsChipCell(r.kills || 0, ps.pvp_kills, ps.pve_kills, 'kills');
       const dCell = killsDeathsChipCell(r.deaths || 0, ps.pvp_deaths, ps.pve_deaths, 'deaths');
+      const eloIdx  = getEloDeltaIndexForCurrentMatch();
+      const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
       return `<tr>
         <td>${i + 1}</td>
         <td class="fw-semibold">${esc(r.name)}${nickSub}</td>
@@ -4292,6 +4399,7 @@
         <td class="text-end">${(ps.accuracy * 100).toFixed(1)}%</td>
         ${kCell}
         ${dCell}
+        ${eloCell}
         <td class="text-end">${fmt(r.assets.dealt)}</td>
         <td>${moveCell}</td>
         <td><span class="badge bg-secondary">${esc(ps.fav_weapon)}</span></td>
@@ -4330,6 +4438,16 @@
         case 'accuracy': va = a.personal.accuracy; vb = b.personal.accuracy; break;
         case 'kills': va = a.kills || 0; vb = b.kills || 0; break;
         case 'deaths': va = a.deaths || 0; vb = b.deaths || 0; break;
+        case 'elo_delta': {
+          const idx = getEloDeltaIndexForCurrentMatch();
+          const da = lookupEloDelta(idx, a);
+          const db = lookupEloDelta(idx, b);
+          // Rows with no delta (excluded match, missing data) always sink
+          // to the bottom regardless of sort direction.
+          va = (da && da.delta != null) ? da.delta : (asc ? Infinity : -Infinity);
+          vb = (db && db.delta != null) ? db.delta : (asc ? Infinity : -Infinity);
+          break;
+        }
         case 'asset_dealt': va = a.assets.dealt; vb = b.assets.dealt; break;
         case 'activity_score': {
           const pos = currentData && currentData.positioning;
