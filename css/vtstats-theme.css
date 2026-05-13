@@ -3193,10 +3193,10 @@ td.vt-col-split {
 /* =====================================================================
    Rich Match Picker
    ---------------------------------------------------------------------
-   Faux-dropdown trigger in both hero cards (#match-info and
-   #all-matches-view's agg-meta card) opens #match-picker-modal, which
-   houses a searchable card grid. Phase 2 will add a filter toolbar
-   above the grid.
+   Faux-dropdown trigger in both hero contexts (#match-info on the
+   per-match dashboard and the .vt-all-hero card on the All Matches
+   view) opens #match-picker-modal, which houses a searchable card
+   grid. Phase 2 will add a filter toolbar above the grid.
    ===================================================================== */
 
 /* Map thumbnail in the match-info hero. 70x70 top-down image from
@@ -3962,6 +3962,168 @@ td.vt-col-split {
 }
 
 /* ============================================================================
+   ALL MATCHES HERO + RECENT MATCHES STRIP
+   Markup in index.html (#all-matches-view): .vt-all-hero card + 4-up
+   .vt-hero-stats grid + conditional .vt-hero-chips chip strip, plus a
+   .vt-recent-matches block that reuses .vt-match-picker-card for each
+   recent-match tile. Renderers in js/app.js: renderHeroStats(),
+   renderHeroChips(), renderRecentMatches().
+   ============================================================================ */
+
+.vt-all-hero-head {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+.vt-all-hero-head h4 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.vt-hero-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+@media (max-width: 991.98px) {
+    .vt-hero-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 575.98px) {
+    .vt-hero-stats {
+        grid-template-columns: 1fr;
+    }
+}
+
+.vt-hero-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.1rem;
+    background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.55rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.vt-hero-stat-icon {
+    position: absolute;
+    right: 0.75rem;
+    top: 0.75rem;
+    font-size: 1.25rem;
+    color: var(--kb-text-muted);
+    opacity: 0.5;
+}
+
+.vt-hero-stat-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--kb-text-muted);
+    font-weight: 500;
+}
+
+.vt-hero-stat-value {
+    font-family: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    color: var(--kb-text-primary);
+}
+
+.vt-hero-stat-sub {
+    font-size: 0.78rem;
+    color: var(--kb-text-muted);
+    /* Stop the optional sub-line from shoving the value down on hover or
+       wrapping mid-card; truncates with ellipsis on overflow. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vt-hero-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.vt-hero-chips:empty {
+    display: none;
+}
+
+.vt-hero-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    color: var(--kb-text-muted);
+}
+
+.vt-hero-chip strong {
+    color: var(--kb-text-primary);
+    font-weight: 600;
+}
+
+.vt-recent-matches-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    padding: 0 0.25rem;
+}
+
+.vt-recent-matches-viewall {
+    text-decoration: none;
+}
+
+.vt-recent-matches-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+@media (max-width: 991.98px) {
+    .vt-recent-matches-strip {
+        display: flex;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 0.25rem;
+        scrollbar-width: thin;
+        scrollbar-color: var(--kb-border-subtle) transparent;
+    }
+
+    .vt-recent-matches-strip > .vt-match-picker-card {
+        flex: 0 0 280px;
+        scroll-snap-align: start;
+    }
+}
+
+.vt-recent-matches-empty {
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--kb-text-muted);
+    background: color-mix(in oklab, var(--kb-bg-card) 50%, transparent);
+    border: 1px dashed var(--kb-border-subtle);
+    border-radius: 0.55rem;
+    grid-column: 1 / -1;
+}
+
+/* ============================================================================
    DOCS SEARCH PALETTE
    Cmd/Ctrl+K modal that fuzzy-searches the rendered DATA_DICTIONARY.md.
    Markup in docs.html (#docs-search-modal); behavior in js/docs-search.js.
@@ -4526,13 +4688,6 @@ td.vt-col-split {
     border: 1px dashed color-mix(in oklab, var(--kb-text-muted) 38%, transparent);
     cursor: default;
     user-select: none;
-}
-
-.vt-vtsr-sparkline {
-    display: inline-block;
-    width: 64px;
-    height: 18px;
-    vertical-align: middle;
 }
 
 .vt-vtsr-delta-positive { color: var(--kb-success); }
