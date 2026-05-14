@@ -21,7 +21,7 @@ todos:
     content: "js/app.js: extend the VTSR-T methodology modal caveat block (line 5409) with the v2.4 role-adjustment paragraph + updated peak_vtsr incomparable warning"
     status: pending
   - id: docs-developer-guide
-    content: "DEVELOPER_GUIDE.md §13: append v2.4 subsection covering shift math, shrinkage formula, symmetry rationale, snipe_bonus exclusion, path-dependence note"
+    content: "DEVELOPER_GUIDE.md §13: append v2.4 subsection covering shift math, shrinkage formula, asymmetric design rationale (4 audit-derived priors, 2 hand-tuned, 2 role-blind), path-dependence note"
     status: pending
   - id: docs-data-dictionary
     content: "docs/DATA_DICTIONARY.md §11: document the 3 new elo_current.json blocks, the 2 new per-row fields, the optional axis_contributions_meta on history, and the peak_vtsr migration warning"
@@ -33,7 +33,7 @@ todos:
     content: "AGENTS.md: update Key Conventions VTSR-T entry with the v2.4 one-paragraph summary"
     status: pending
   - id: validation-rerun
-    content: Run python scripts/process_stats.py --force end to end, then re-run _investigation/audit_commander_bias.py and confirm cmdr mean P_i ≈ 0, within-player gap ≈ 0, per-axis cmdr means ≈ 0 on the 7 shifted axes; spot-check dual-role players gained ~50-150 ELO
+    content: Run python scripts/process_stats.py --force end to end, then re-run _investigation/audit_commander_bias.py and confirm cmdr mean P_i ≈ 0, within-player gap ≈ 0, per-axis cmdr means ≈ 0 on the 4 fully-shifted axes (mobility, thug_kill_rate, net_damage_share, thug_efficiency); target_lock_pct keeps residual ~-0.37 by design; pve_share lifted to ~+0.16 by design (commander reward boost); thug_accuracy + snipe_bonus unchanged at current empirical means (role-blind by design); spot-check dual-role players gained ~50-150 ELO
     status: pending
   - id: validation-cache-roundtrip
     content: Run pipeline twice in a row (no flags) — second run should be a clean cache hit, confirming PIPELINE_VERSION bump invalidated correctly on the first run
@@ -62,24 +62,48 @@ flowchart LR
 ## Decisions locked from prior conversation
 
 - **Per-axis additive shift** (Option A) on commander rows only
-- **Symmetric** — every axis with an empirical prior gets shifted, including positive-prior ones (`pve_share`, `thug_accuracy`)
+- **Asymmetric by design** — 5 axes structurally adjusted (penalty relief on the role-incompatible ones), 1 axis actively boosted (`pve_share` rewards commander asset disruption above lobby), 2 axes role-blind (`thug_accuracy`, `snipe_bonus` — effect sizes at/below noise floor in the audit)
+- **Two priors deliberately overridden** away from the empirical audit values: `target_lock_pct` under-encoded at -0.10 (vs empirical -0.466) because T-key is universally available and commanders are common targets — they should be expected to use it nearly as much as thugs; `pve_share` flipped to -0.05 (vs empirical +0.111) because hitting enemy assets is the work commanders SHOULD do, so we actively reward it instead of dampening it
 - **Shrinkage strength = 30** (empirical prior carries weight of 30 observations vs. running mean)
-- **`snipe_bonus` deliberately excluded** from the shift mechanism (n=22 too noisy; treat as role-blind)
 - **Full schema bump** + corpus re-rate; `peak_vtsr` migration warning across docs and methodology modal
 - **Backward-compat axis_contributions** — keep flat shape, add parallel `axis_contributions_meta` only on commander rows for forensics (zero JS rendering changes needed)
 
-## Empirical seed values (from the audit)
+## Seed values (audit-derived where appropriate, hand-tuned where deliberate)
 
 ```python
 COMMANDER_AXIS_PRIOR = {
+    # Structural penalty relief (audit-derived from empirical means).
+    # Commanders are tied to base / building / not in dedicated combat ships,
+    # so we don't ding them as hard for the natural commander shortfall on
+    # these axes. Shift = -prior, so each commander row gets +0.488 added
+    # to its raw mobility z (etc.) before clipping.
     "mobility":         -0.488,
-    "target_lock_pct":  -0.595,
     "thug_kill_rate":   -0.164,
     "net_damage_share": -0.131,
     "thug_efficiency":  -0.106,
-    "pve_share":        +0.111,
-    "thug_accuracy":    +0.069,
-    # snipe_bonus deliberately omitted
+
+    # Deliberately under-encoded (audit said -0.466 / n=116, but we don't
+    # want to fully accommodate it). T-key is universally available and
+    # commanders are common targets -- they should be locking nearly as
+    # much as thugs. The shrinkage running-mean will gradually drift the
+    # baseline toward empirical reality over time; if you want to lock
+    # the prior, switch to per-axis shrinkage strength later.
+    "target_lock_pct":  -0.10,
+
+    # Deliberately INVERTED (audit said +0.111, but flipping the sign
+    # turns this from "reward reduction" into "reward boost"). Hitting
+    # enemy assets is the work commanders SHOULD do, so we actively
+    # reward it instead of dampening it. Magnitude is small (-0.05)
+    # because the lobby z already credits PvE work; we just want to
+    # nudge the typical-commander result a bit further into positive
+    # territory rather than zeroing it out.
+    "pve_share":        -0.05,
+
+    # thug_accuracy and snipe_bonus deliberately omitted (role-blind).
+    # thug_accuracy: empirical +0.069 is below the noise floor at the
+    # current corpus size (std 0.46, SE ~0.04). snipe_bonus: empirical
+    # +0.28 unreliable on n=22 commander rows. Treat both as role-blind
+    # until the data clearly warrants an adjustment.
 }
 COMMANDER_BASELINE_SHRINKAGE = 30.0
 ```
@@ -160,7 +184,7 @@ PIPELINE_VERSION = 15  # was 14 — VTSR-T v2.4 commander role adjustment
 
 **Update modal caveat block at line 5409** to add v2.4 entry:
 
-> **VTSR-T v2.4 · commander role adjustment.** Each commander match-row now shifts per-axis z-scores against a typical-commander baseline before clipping (audit-derived empirical priors blended with a running mean of all commander rows seen so far, shrinkage strength 30). Commanders posting typical-commander values land at z′ ≈ 0 on every adjusted axis, exactly like thugs posting typical-thug values. Commanders defying expectations — high mobility, high net damage — get correspondingly larger z′ values and earn rating credit naturally. `snipe_bonus` is deliberately role-blind. **Pre-v2.4 peak_vtsr values are no longer comparable** — corpus re-rated.
+> **VTSR-T v2.4 · commander role adjustment.** Each commander match-row now shifts per-axis z-scores against a typical-commander baseline before clipping (audit-derived priors blended with a running mean of all commander rows seen so far, shrinkage strength 30). Five axes get penalty relief on commander rows so the natural-commander shortfall (low mobility, fewer kills, lower net damage, etc.) doesn't drag rating; one axis (`pve_share`) gets a small reward boost because hitting enemy assets is the work commanders should be doing; two axes (`thug_accuracy`, `snipe_bonus`) are role-blind. Commanders defying thug-tier expectations — high mobility, high net damage — earn extra rating credit naturally because the bar they're being measured against drops. **Pre-v2.4 peak_vtsr values are no longer comparable** — corpus re-rated.
 
 (`axis_contributions` rendering at lines 4344, 5753, 5774 unchanged — flat values still flow through as today. `axis_contributions_meta` is purely audit/forensics for now; can be surfaced in a follow-up UI pass.)
 
@@ -168,12 +192,11 @@ PIPELINE_VERSION = 15  # was 14 — VTSR-T v2.4 commander role adjustment
 
 Extend the existing v2.3 section with a v2.4 subsection:
 
-- The role-adjustment math: `z'_a = z_a − μ̂_commander[a]` for commander rows, identity for thugs
+- The role-adjustment math: `z'_a = z_a − μ̂_commander[a]` for commander rows on shifted axes, identity for thugs and for omitted axes
 - The shrinkage formula: `μ̂[a] = (n·running_mean[a] + S·prior[a]) / (n + S)` with `S = 30`
-- Why symmetric (role-neutral vs. role-favoring)
-- The empirical priors as v1 seeds (audit-derived; tunable post-ship via constants, re-runs the corpus on change — same contract as `ALPHA_PVE`)
-- `snipe_bonus` exclusion rationale (n=22, noise floor)
-- Path-dependence note: rolling baseline accumulates chronologically; the seed prior dominates early matches and the running mean dominates later ones
+- The asymmetric design rationale: 4 audit-derived penalty-relief priors, 1 audit-derived prior deliberately under-encoded (`target_lock_pct` at -0.10 vs empirical -0.466 because T-key is universally available and commanders are common targets), 1 audit-derived prior deliberately INVERTED (`pve_share` at -0.05 vs empirical +0.111 because asset disruption is the work commanders should be doing), 2 axes role-blind (`thug_accuracy` at +0.069 below noise floor, `snipe_bonus` at n=22 unreliable)
+- The priors as v1 seeds (4 audit-derived, 2 hand-tuned, 2 omitted; tunable post-ship via constants, re-runs the corpus on change — same contract as `ALPHA_PVE`)
+- Path-dependence note: rolling baseline accumulates chronologically; the seed prior dominates early matches and the running mean dominates later ones — for hand-tuned priors this means the baseline will gradually drift toward empirical reality (which is intentional; lock individual priors with per-axis shrinkage strength later if needed)
 
 ### 5. [docs/DATA_DICTIONARY.md §11](docs/DATA_DICTIONARY.md) — schema additions
 
@@ -186,10 +209,9 @@ Extend the existing v2.3 section with a v2.4 subsection:
 ### 6. [.cursor/rules/project-overview.mdc](.cursor/rules/project-overview.mdc) — VTSR-T entry refresh
 
 Replace the `v2.3 (current)` paragraph with a `v2.4 (current)` block summarizing:
-- Role-adjustment mechanism (one sentence)
-- Symmetric shift across all 7 priored axes
-- `snipe_bonus` role-blind exclusion
-- Shrinkage strength 30
+- Role-adjustment mechanism (one sentence): per-axis additive shift on commander rows against a typical-commander baseline
+- Asymmetric design: 5 axes shifted (4 audit-derived penalty relief + 1 hand-tuned `target_lock_pct` under-encoded); 1 axis actively boosted (`pve_share` flipped to reward commander asset disruption); 2 axes role-blind (`thug_accuracy`, `snipe_bonus`)
+- Shrinkage strength 30 (running mean drifts toward empirical over time; hand-tuned priors will gradually fade unless locked later)
 - Schema bumps: `ELO_SCHEMA_VERSION 4→5`, `PIPELINE_VERSION 14→15`
 - `peak_vtsr` incomparable warning
 
@@ -218,10 +240,12 @@ Already exists; gitignored. Used in validation step (re-run after pipeline finis
 
 1. `python scripts/process_stats.py --force` — full corpus re-rate
 2. `python _investigation/audit_commander_bias.py` — confirm:
-   - Commander mean P_i ≈ 0 (was −0.093)
+   - Commander mean P_i ≈ 0 (was −0.093) — slight residual positive from `pve_share` boost is fine
    - Within-player gap ≈ 0 (was +0.117)
-   - Per-axis commander mean z ≈ 0 on the 7 shifted axes
-   - `snipe_bonus` commander mean unchanged (was +0.186)
+   - Per-axis commander mean z ≈ 0 on the 4 fully-shifted axes (`mobility`, `thug_kill_rate`, `net_damage_share`, `thug_efficiency`)
+   - `target_lock_pct` keeps a residual ~−0.37 mean by design (prior deliberately under-encoded at −0.10 vs empirical −0.466)
+   - `pve_share` lifted to ~+0.16 mean by design (raw +0.111 + boost +0.05) — commanders actively rewarded for asset disruption
+   - `thug_accuracy` and `snipe_bonus` commander means unchanged from current empirical (+0.07, +0.19) — role-blind by design
 3. Spot-check the 13 dual-role players' VTSR-T values against their pre-migration values — frequent commanders (Snake, Danya, Just!ce, Lithium) should rise; thug-pure (VTrider, F9bomber) should be flat
 4. Eyeball `commander_baseline_observed.shrunk_baseline_at_corpus_end` — should land between `COMMANDER_AXIS_PRIOR` (seed) and the audit's empirical means, weighted toward empirical
 5. Hard refresh dashboard, hover the new methodology modal text, verify it reads correctly and `peak_vtsr` warning is current
