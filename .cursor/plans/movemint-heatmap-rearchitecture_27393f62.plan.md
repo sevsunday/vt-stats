@@ -4,46 +4,46 @@ overview: "Fix the heatmap-vs-map-image misalignment that affects every match (r
 todos:
   - id: phase1-calibrate-tool
     content: "Phase 1 — Build the ?calibrate=1 dashboard mode: js/calibrate-tool.js (panel + sliders + numeric inputs + lock-aspect + reset + suggest-from-formatted_size + copy-JSON), css/vtstats-theme.css panel styles, index.html mount, js/app.js init hook, terrain-bounds + candidate outline overlays on the Combined Heatmap canvas."
-    status: pending
+    status: completed
   - id: phase1-calibrate-maps
     content: Phase 1 follow-up — Calibrate the 5-10 most-played maps using the new tool and paste the JSON blocks into data/maps/<key>.json. User-driven; tool enables zero pipeline changes.
-    status: pending
+    status: cancelled
   - id: phase2-color-ramp
     content: Phase 2A — Replace _drawHeatmapCells() monochrome+alpha with a 5-stop viridis-ish ramp on the shared p95-clipped intensity scale. Combined-heatmap keeps faction-tint lerp; small-multiples switch fully to the ramp.
-    status: pending
+    status: completed
   - id: phase2-spawn-labels
     content: Phase 2B — Add player-name pills under each spawn diamond in _drawSpawnMarkers(); greedy overlap-avoid pass.
-    status: pending
+    status: completed
   - id: phase2-team-base-labels
     content: Phase 2C — Draw translucent team-base rings at team_base[*].centroid using team_base[*].radius and label them with team_factions name (ISDF/Hadean/Scion) falling back to net_vars.svar1/svar2 then 'Team 1'/'Team 2'.
-    status: pending
+    status: completed
   - id: phase2-color-legend
     content: Phase 2D — On-canvas horizontal gradient legend (bottom-left) using the same ramp as 2A; trim the DOM _buildHeatmapLegend() to just the per-cell scale chip + compass note.
-    status: pending
+    status: completed
   - id: phase2-scale-bar
     content: Phase 2E — On-canvas scale bar adjacent to the compass rose with auto-rounded distance (50/100/200/500/1000m based on viewport).
-    status: pending
+    status: completed
   - id: phase2-player-badge
     content: Phase 2F — Top-left name + activity_score pill drawn on every small-multiples card canvas so the grid stays legible out of DOM context.
-    status: pending
+    status: completed
   - id: phase2-replay-tab-parity
     content: Phase 2 parity — Apply the same labels, ramp, legend, scale bar to js/positioning-player.js renderMap() so the Replay tab map matches the Positioning tab.
-    status: pending
+    status: completed
   - id: phase3-distance-modal
     content: "Phase 3A — Move renderDistanceTimeline() into a Bootstrap modal #distance-drilldown-modal opened on Movemint Leaderboard row click; modal carries the bands/all/focus toggle + smooth switch."
-    status: pending
+    status: completed
   - id: phase3-swimlane
     content: "Phase 3B (1/2) — Build the First-Leave Swimlane card: one lane per player, faction-colored, dot at the tick the player first crossed personal_base_radius, sorted ascending."
-    status: pending
+    status: completed
   - id: phase3-time-near-base
     content: "Phase 3B (2/2) — Build the Time-Near-Base Stacked Bar card: per-player in-base/out-of-base segments from time_in_base_pct, sorted ascending, click-through to the drilldown modal."
-    status: pending
+    status: completed
   - id: phase3-layout
     content: "Phase 3 layout — Replace #section-distance-timeline col-lg-7 block in index.html with the new #section-movement-quickread cluster (swimlane + stacked bar); keep Combined Heatmap at col-lg-5."
-    status: pending
+    status: completed
   - id: phase4-docs
     content: Phase 4 — Update DEVELOPER_GUIDE.md 'Map Assets and Overlays' with the calibration workflow, why iondriver images don't match terrain extents, and the do-not-auto-derive guidance.
-    status: pending
+    status: completed
 isProject: false
 ---
 
