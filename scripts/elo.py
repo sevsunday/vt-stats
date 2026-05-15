@@ -12,10 +12,19 @@ name.
 Per-match update:
 
     K_i    = K_BASE * (1 - n_i / (n_i + N_PRIOR)) + K_FLOOR
-    P_i    = sum_a w'_a * clip(z_a(x_{i,a}), -2, +2) / 2
+    P_i    = sum_a w'_a * z'_{i,a}
     Rbar_i = median{R^T_j : j != i}
     E_i    = 2 / (1 + 10^((Rbar_i - R^T_i) / S_R)) - 1
     dR     = K_i * S_O * (P_i - E_i),  scaled by L * phi(R^T_i) when negative
+
+v2.4 (current): per-match commander role adjustment. For each commander
+match-row, post-clip per-axis z-scores get shifted by the negation of a
+typical-commander baseline (then re-clipped to [-1, +1]). 4 audit-derived
+priors apply with shrinkage strength 30; 2 hand-tuned priors are locked
+(no shrinkage); 2 axes (thug_accuracy, snipe_bonus) are role-blind.
+Math: for commander row i and shifted axis a:
+    z'_{i,a} = clip(clip(z_{i,a}, -2, +2) / 2  -  baseline[a],  -1, +1)
+For thug rows or omitted axes, z'_{i,a} = clip(z_{i,a}, -2, +2) / 2.
 
 Matches with ``player_count < 6`` or ``duration_sec < 300`` don't update
 ratings; they emit a history row with ``match_excluded: true`` so
@@ -83,9 +92,58 @@ THUG_WEIGHTS = {
 
 ALPHA = 0.0   # Wins-ELO blend weight. Stubbed at 0 until winner data lands.
 
+# v2.4: per-match commander role adjustment. For each commander row and
+# each axis listed in COMMANDER_AXIS_PRIOR, the post-clip z-score is
+# shifted by ``-baseline[axis]`` then re-clipped to ``[-1, +1]``. Values
+# below are in **post-clip space** (i.e. after ``clip(z, -2, +2) / 2``)
+# so they share units with the audit's measurement space. Asymmetric by
+# design - see DEVELOPER_GUIDE.md §13 v2.4 for the full rationale.
+COMMANDER_AXIS_PRIOR = {
+    # ---- Audit-derived structural penalty relief (use shrinkage strength 30).
+    # Commanders are tied to base / building / not in dedicated combat ships,
+    # so we don't ding them as hard for the natural commander shortfall.
+    "mobility":         -0.488,
+    "thug_kill_rate":   -0.164,
+    "net_damage_share": -0.131,
+    "thug_efficiency":  -0.106,
+
+    # ---- Hand-tuned: T-key cushion (LOCKED, no shrinkage).
+    # Audit said -0.466 (n=116), but T-key is universally available and
+    # commanders are common targets - they should be locking nearly as
+    # much as thugs. We pin a small cushion that doesn't fully accommodate
+    # the empirical reality. Locked so this design intent doesn't drift
+    # toward empirical over time.
+    "target_lock_pct":  -0.10,
+
+    # ---- Hand-tuned: PvE reward boost (LOCKED, no shrinkage).
+    # Audit said +0.111 (commanders naturally do more PvE). We invert the
+    # sign so this becomes a +0.05 reward shift on commander rows: hitting
+    # enemy assets is the work commanders SHOULD do, so we actively reward
+    # it instead of dampening it. Locked so the boost intent doesn't fade
+    # (and worse, silently flip into a dampener) as the running mean drifts.
+    "pve_share":        -0.05,
+
+    # ---- Omitted (role-blind by design).
+    # thug_accuracy: empirical +0.069 below noise floor at current corpus
+    # size (std 0.46, SE ~0.04). snipe_bonus: empirical +0.28 unreliable
+    # on n=22 commander rows. Treat both as role-blind until the data
+    # clearly warrants an adjustment.
+}
+
+# Shrinkage strength (in pseudo-observations) for audit-derived axes.
+# Live data takes over the seed prior smoothly as the corpus grows.
+COMMANDER_BASELINE_SHRINKAGE = 30.0
+
+# Axes whose prior is hand-tuned and should NOT drift toward live empirical
+# data over time. These always use the seed value from COMMANDER_AXIS_PRIOR.
+# The running mean is still tracked (visibility only) so anyone reading
+# elo_current.json can see when reality has diverged enough from intent
+# to warrant a seed-value revisit.
+COMMANDER_BASELINE_LOCKED_AXES = {"target_lock_pct", "pve_share"}
+
 # Bump if elo_current.json / elo_history.json shape changes (the JS
 # reader checks this).
-ELO_SCHEMA_VERSION = 4
+ELO_SCHEMA_VERSION = 5
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +225,32 @@ def _clip(x: float, lo: float, hi: float) -> float:
     if x > hi:
         return hi
     return x
+
+
+def commander_shrunk_baseline(
+    axis: str, running_sum: float, running_count: int
+) -> float:
+    """Shrunk baseline for a commander-shifted axis (post-clip space).
+
+    LOCKED axes (``COMMANDER_BASELINE_LOCKED_AXES``) always return the
+    seed prior - their design intent is hand-tuned and should never drift
+    toward live empirical mean. Audit-derived axes blend the seed prior
+    with the running mean of observed pre-shift commander z-scores using
+    shrinkage strength ``COMMANDER_BASELINE_SHRINKAGE``:
+
+        baseline[a] = (n * running_mean[a] + s * prior[a]) / (n + s)
+
+    With ``n = 0`` (no commander rows seen yet) the baseline equals the
+    prior; as ``n`` grows the baseline tracks live empirical reality.
+    """
+    prior = COMMANDER_AXIS_PRIOR[axis]
+    if axis in COMMANDER_BASELINE_LOCKED_AXES:
+        return prior
+    if running_count <= 0:
+        return prior
+    running_mean = running_sum / running_count
+    s = COMMANDER_BASELINE_SHRINKAGE
+    return (running_count * running_mean + s * prior) / (running_count + s)
 
 
 # ---------------------------------------------------------------------------
@@ -383,16 +467,34 @@ def _target_lock_pct_lobby(
 
 def compute_performance_index(
     match_data: dict,
-) -> tuple[list[float], list[str], list[dict[str, float]]]:
+    commander_baseline_snapshot: dict[str, float] | None = None,
+) -> tuple[
+    list[float],
+    list[str],
+    list[dict[str, float]],
+    list[dict[str, dict[str, float]]],
+]:
     """Compute the per-player performance index ``P_i`` for a single match.
 
-    Returns ``(per_player_P, player_keys, per_player_axis_z)``:
+    Returns ``(per_player_P, player_keys, per_player_axis_z, per_player_axis_meta)``:
       * ``per_player_P[i]`` — composite score in [-1, +1]
       * ``player_keys[i]`` — steam64 (or fallback name)
-      * ``per_player_axis_z[i]`` — ``{axis_name: clipped_z}`` after
-        clip-and-divide-by-2 (each value in [-1, +1]). Axes unavailable
-        for the entire lobby are OMITTED; consumers treat absence as
-        "axis unavailable in this match".
+      * ``per_player_axis_z[i]`` — ``{axis_name: z_post_shift}`` after
+        clip-and-divide-by-2 AND v2.4 commander shift. Each value in
+        [-1, +1]. Axes unavailable for the entire lobby are OMITTED;
+        consumers treat absence as "axis unavailable in this match".
+        For thug rows the value is ``z_pre_shift`` unchanged; for
+        commander rows on shifted axes it's the post-shift, re-clipped z.
+      * ``per_player_axis_meta[i]`` — forensic per-axis breakdown for
+        commander rows on shifted axes only: ``{axis: {z_pre_shift,
+        shift, z_post_shift}}``. Empty dict for thug rows or for axes
+        omitted from ``COMMANDER_AXIS_PRIOR``.
+
+    v2.4 commander adjustment: when ``commander_baseline_snapshot`` is
+    provided, each commander row's post-clip z is shifted by ``-baseline``
+    on the relevant axes (then re-clipped to ``[-1, +1]``). The shift is
+    applied in **post-clip space** so the audit-measured prior magnitudes
+    match the in-algorithm impact 1:1.
 
     ``per_player_axis_z`` powers ``elo_history.json``'s
     ``axis_contributions`` and ``elo_current.json``'s ``axis_means``.
@@ -401,7 +503,7 @@ def compute_performance_index(
     """
     lobby = match_data.get("leaderboard") or []
     if not lobby:
-        return [], [], []
+        return [], [], [], []
 
     duration_sec = (match_data.get("match") or {}).get("duration_sec", 0) or 0
     minutes = duration_sec / 60.0
@@ -434,13 +536,38 @@ def compute_performance_index(
             [0.0] * len(lobby),
             [_player_key(p) for p in lobby],
             [{} for _ in lobby],
+            [{} for _ in lobby],
         )
 
     # Per-axis z-score, clip to [-2, +2], divide by 2 to land in [-1, +1].
+    # v2.4: for commander rows on shifted axes, additionally subtract the
+    # commander baseline (post-clip space) and re-clip to [-1, +1]. The
+    # forensic breakdown lands in axis_meta_by_player.
+    axis_meta_by_player: list[dict[str, dict[str, float]]] = [
+        {} for _ in lobby
+    ]
     z_by_axis: dict[str, list[float]] = {}
     for axis in available:
         z = _zscore_axis(raw[axis])
-        z_by_axis[axis] = [_clip(zi, -2.0, 2.0) / 2.0 for zi in z]
+        clipped = [_clip(zi, -2.0, 2.0) / 2.0 for zi in z]
+        if (
+            commander_baseline_snapshot is not None
+            and axis in commander_baseline_snapshot
+        ):
+            baseline = commander_baseline_snapshot[axis]
+            shift = -baseline
+            for i, p in enumerate(lobby):
+                if not p.get("is_commander"):
+                    continue
+                z_pre_shift = clipped[i]
+                z_post_shift = max(-1.0, min(1.0, z_pre_shift + shift))
+                clipped[i] = z_post_shift
+                axis_meta_by_player[i][axis] = {
+                    "z_pre_shift":  round(z_pre_shift, 4),
+                    "shift":        round(shift, 4),
+                    "z_post_shift": round(z_post_shift, 4),
+                }
+        z_by_axis[axis] = clipped
 
     # Pro-rata weight redistribution so available weights still sum to 1.
     total_available_weight = sum(THUG_WEIGHTS[a] for a in available)
@@ -458,7 +585,12 @@ def compute_performance_index(
         perf.append(p_sum)
         per_player_axis_z.append(axis_z_dict)
 
-    return perf, [_player_key(p) for p in lobby], per_player_axis_z
+    return (
+        perf,
+        [_player_key(p) for p in lobby],
+        per_player_axis_z,
+        axis_meta_by_player,
+    )
 
 
 def _player_key(p: dict) -> str:
@@ -503,6 +635,15 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     axis_running_sum: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     axis_running_count: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
+    # v2.4: rolling commander-baseline running mean (per axis), and per-player
+    # commander-match counter for matches_as_commander / matches_as_thug.
+    # Running buffers accumulate ONLY commander rows' pre-shift z-scores
+    # (post-clip space). Locked axes still accumulate for visibility but
+    # commander_shrunk_baseline ignores their running mean.
+    commander_axis_running_sum:   dict[str, float] = defaultdict(float)
+    commander_axis_running_count: dict[str, int]   = defaultdict(int)
+    commander_match_count:        dict[str, int]   = defaultdict(int)
+
     history_entries: list[dict] = []
 
     excluded_low_player_count = 0
@@ -537,7 +678,23 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             })
             continue
 
-        perfs, keys, axis_z_by_player = compute_performance_index(md)
+        # v2.4: snapshot the per-axis commander baseline BEFORE this match
+        # runs, so commanders in this match are evaluated against rolling
+        # state derived from prior matches only (no leakage).
+        commander_baseline_snapshot = {
+            a: commander_shrunk_baseline(
+                a,
+                commander_axis_running_sum[a],
+                commander_axis_running_count[a],
+            )
+            for a in COMMANDER_AXIS_PRIOR
+        }
+
+        perfs, keys, axis_z_by_player, axis_meta_by_player = (
+            compute_performance_index(
+                md, commander_baseline_snapshot=commander_baseline_snapshot
+            )
+        )
         if not perfs:
             history_entries.append({
                 "match_id":         match_id,
@@ -592,7 +749,10 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
                 del wh[: len(wh) - 10]
 
             # Per-axis attribution. Axes that self-redistributed for this
-            # lobby are omitted from the dict.
+            # lobby are omitted from the dict. v2.4: values are POST-shift
+            # for commander rows (so axis_contributions matches what fed
+            # into P_i); the optional axis_contributions_meta sibling block
+            # carries z_pre_shift / shift / z_post_shift for forensics.
             axis_contrib = {
                 a: round(z, 4) for a, z in (axis_z_by_player[i] or {}).items()
             }
@@ -600,7 +760,13 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
                 axis_running_sum[key][a] += z
                 axis_running_count[key][a] += 1
 
-            match_deltas.append({
+            # v2.4: per-row commander tracking. Bump matches_as_commander
+            # for this player when the row is flagged is_commander.
+            row_axis_meta = axis_meta_by_player[i] if axis_meta_by_player else {}
+            if lobby[i].get("is_commander"):
+                commander_match_count[key] += 1
+
+            delta_entry: dict[str, Any] = {
                 "name":        display_name[key],
                 "steam64":     steam64_for_key.get(key),
                 "before":      round(r_before, 2),
@@ -609,7 +775,25 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
                 "performance": round(perfs[i], 4),
                 "expected":    round(e_i, 4),
                 "axis_contributions": axis_contrib,
-            })
+            }
+            # Only commander rows carry the forensic meta block. Schema is
+            # {axis: {z_pre_shift, shift, z_post_shift}}; audit invariant
+            # axis_contributions[axis] == z_post_shift on each shifted axis.
+            if row_axis_meta:
+                delta_entry["axis_contributions_meta"] = dict(row_axis_meta)
+            match_deltas.append(delta_entry)
+
+        # v2.4: AFTER the per-row loop, accumulate this match's commander
+        # rows' pre-shift post-clip z-scores into the rolling baseline
+        # buffers. We pull pre-shift (not post-shift) so the running mean
+        # tracks the empirical commander distribution untouched by the
+        # adjustment. Locked axes still accumulate (visibility only).
+        for i, key in enumerate(keys):
+            if not lobby[i].get("is_commander"):
+                continue
+            for axis, meta in (axis_meta_by_player[i] or {}).items():
+                commander_axis_running_sum[axis]   += meta["z_pre_shift"]
+                commander_axis_running_count[axis] += 1
 
         history_entries.append({
             "match_id":       match_id,
@@ -635,6 +819,10 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             n_a = counts.get(a, 0)
             if n_a > 0:
                 axis_means[a] = round(sums.get(a, 0.0) / n_a, 4)
+        # v2.4: per-row commander vs thug match split. Sums to matches_played
+        # (matches_as_commander counts every rated row where the player held
+        # slot 1 / 6; everything else is a thug appearance).
+        n_cmdr = commander_match_count.get(key, 0)
         ratings.append({
             "name":             display_name.get(key, ""),
             "steam64":          steam64_for_key.get(key),
@@ -642,6 +830,8 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
             "thug_elo":         round(t_elo, 1),
             "wins_elo":         round(wins_elo, 1),
             "matches_played":   n,
+            "matches_as_commander": n_cmdr,
+            "matches_as_thug":  n - n_cmdr,
             "matches_provisional": n < ELO_PROVISIONAL_THRESHOLD,
             "last_match_id":    last_match_id.get(key, ""),
             "last_delta":       round(last_delta.get(key, 0.0), 2),
@@ -677,6 +867,37 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         "matches_excluded_short_duration":   excluded_short_duration,
         "matches_excluded_no_winner":        excluded_no_winner,
         "weights":            dict(THUG_WEIGHTS),
+        # v2.4: commander role-adjustment metadata. Audit-derived priors
+        # blend with the running mean as the corpus grows; locked priors
+        # always equal the seed value (running_mean tracked for visibility
+        # only — `locked: true` makes that obvious in the JSON).
+        "commander_axis_prior":           dict(COMMANDER_AXIS_PRIOR),
+        "commander_baseline_shrinkage":   COMMANDER_BASELINE_SHRINKAGE,
+        "commander_baseline_locked_axes": sorted(COMMANDER_BASELINE_LOCKED_AXES),
+        "commander_baseline_observed": {
+            a: {
+                "n":            commander_axis_running_count[a],
+                "running_mean": (
+                    round(
+                        commander_axis_running_sum[a]
+                        / commander_axis_running_count[a],
+                        4,
+                    )
+                    if commander_axis_running_count[a] > 0
+                    else 0.0
+                ),
+                "shrunk_baseline_at_corpus_end": round(
+                    commander_shrunk_baseline(
+                        a,
+                        commander_axis_running_sum[a],
+                        commander_axis_running_count[a],
+                    ),
+                    4,
+                ),
+                "locked": a in COMMANDER_BASELINE_LOCKED_AXES,
+            }
+            for a in COMMANDER_AXIS_PRIOR
+        },
         "ratings":            ratings,
     }
 

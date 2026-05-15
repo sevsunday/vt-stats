@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 14
+PIPELINE_VERSION = 15
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3472,6 +3472,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # the in-game nick match -- the UI suppresses the subtext.
             "in_game_nick": in_game_nick_for(s64, name) if s64 else None,
             "slot": slot,
+            # Slot 1 = Team 1 commander, slot 6 = Team 2 commander.
+            # Carried into the per-match JSON so scripts/elo.py
+            # compute_elo() can apply the v2.4 commander role adjustment.
+            "is_commander": slot in (1, 6),
             "steam64": str(s64) if s64 else None,
             "faction": faction,
             "kills": kills,

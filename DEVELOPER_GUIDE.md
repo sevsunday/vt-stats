@@ -1600,11 +1600,13 @@ The seed shipped with a VSR Build Tree feature (`generateBuildTree()` and friend
 
 ## 13. VTSR-T Methodology {#vtsr-methodology}
 
-**VTSR-T** (VT Stats Rating — *Thug*) is the thug-focused rating: an **eight-axis thug composite** (v2.3) plus fine-tuned ELO-style updates (`scripts/elo.py`). The published headline **VTSR-T** is the linear blend below — with $\alpha = 0$ (current ship), **VTSR-T equals Thug ELO** for every player; the JSON wire field stays `vtsr` for a stable contract.
+**VTSR-T** (VT Stats Rating — *Thug*) is the thug-focused rating: an **eight-axis thug composite** (v2.3) plus fine-tuned ELO-style updates (`scripts/elo.py`), with a per-match commander role adjustment (v2.4). The published headline **VTSR-T** is the linear blend below — with $\alpha = 0$ (current ship), **VTSR-T equals Thug ELO** for every player; the JSON wire field stays `vtsr` for a stable contract.
 
 The rating system is pipeline-emitted, full-corpus, and time-ordered — the dashboard reads `data/processed/elo_current.json` once per session and passes ratings through the All Matches aggregator unchanged. The picker filter narrows the displayed roster only; ratings are corpus-wide.
 
 > **v2.3 architectural rename**: the rating's combat-skill component, previously called *Combat ELO*, is now called **Thug ELO** ($R^T_i$). Sets up future VTSR-C (Commander) as a sibling rating with its own commander-axis composite. Math notation $R^C \to R^T$ throughout this section. JSON field rename `ratings[].combat_elo` → `ratings[].thug_elo` rides the existing `ELO_SCHEMA_VERSION` 3 → 4 bump.
+
+> **v2.4 — commander role adjustment.** A single unified VTSR-T leaderboard remains the contract, but per-match commander rows now get a per-axis additive shift in **post-clip space** so commanders aren't penalized for their role. 4 audit-derived priors ride a shrunk rolling baseline; 2 hand-tuned priors are **locked** at their seed values; 2 axes are role-blind. `ELO_SCHEMA_VERSION` 4 → 5 and `PIPELINE_VERSION` 14 → 15. **Pre-v2.4 `peak_vtsr` values are no longer comparable** — full corpus re-rated. Full subsection at §13.7.1.
 
 ### 13.1 Final equation
 
@@ -1839,27 +1841,32 @@ $$
 
 Even on a top-fragger game, this player loses a small amount of rating. (Under v2.0's $S_R = 400$, $E$ pinned at $+0.997$ and the same match produced a slightly larger $-0.67 \cdot K$ drop.) Across many matches their rating plateaus where typical $P_i \approx E_i$ — i.e. where their rating matches their actual performance. This fine-tuned ELO-style opponent expectation prevents top players from gaining rating indefinitely just by farming soft lobbies; v2.1 lets the plateau sit ~300 pts above the median lobby instead of ~140, restoring a leaderboard-friendly spread.
 
-### 13.7 Migration note — v1 → v2 → v2.1 → v2.2 → v2.3
+### 13.7 Migration note — v1 → v2 → v2.1 → v2.2 → v2.3 → v2.4
 
-| Aspect | v1 | v2.0 | v2.1 | v2.2 | v2.3 (alpha-blended thug composite + Combat ELO → Thug ELO rename) |
-|---|---|---|---|---|---|
-| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged | unchanged | unchanged |
-| Rating component name | Combat ELO ($R^C$) | unchanged | unchanged | unchanged | **Thug ELO** ($R^T$) |
-| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged | unchanged | Median of opponents' Thug ELO |
-| Logistic scale ($S_R$) | n/a | $400$ | $\mathbf{800}$ | $800$ | $800$ (unchanged) |
-| Outcome scale ($S_O$) | $2.5$ | $2.5$ | $2.5$ | $2.5$ | $2.5$ (unchanged) |
-| Composite axes | 7 | 7 | 7 | 8 | **8** (rename `kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`; broaden `pve_share` to all enemy non-human dmg) |
-| Alpha-blended PvE in thug axes | n/a | n/a | n/a | n/a | **$\alpha_{\mathrm{PvE}} = 0.5$** (locked default; tunable post-ship) |
-| Weapon-normalized accuracy | flat ratio | flat ratio | flat ratio | flat ratio | **per-weapon ratio vs lobby baseline, shot-share weighted** |
-| K-factor decay | unchanged | unchanged | unchanged | unchanged | unchanged |
-| Loss aversion + soft floor | unchanged | unchanged | unchanged | unchanged | unchanged |
-| Tier ranges | unchanged | unchanged | unchanged | unchanged | unchanged |
-| Wins ELO blend ($\alpha$) | $0.0$ | $0.0$ | $0.0$ | $0.0$ | $0.0$ (still stubbed) |
-| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ | $3$ | $\mathbf{4}$ (axis renames; `combat_elo`→`thug_elo` JSON field; new `axis_contributions` per delta + `axis_means` per rating; `alpha_pve` constant in top-level constants block) |
-| `PIPELINE_VERSION` | $7$ | $8$ | $9$ | $10$ | $\mathbf{11}$ (forced full re-process: new pipeline fields incl. per-weapon `pvp_hits`, `loadout`, `per_class_combat`) |
-| `match.schema_version` | $1$ → $2$ → $3$ | $3$ | $3$ | $3$ | $\mathbf{4}$ (per-match leaderboard rows gain `personal.pvp_kills`/`pve_kills`/etc., `weapon_breakdown[w].pvp_hits`, `loadout`, `per_class_combat`) |
-| Per-delta `axis_contributions` field | absent | absent | absent | absent | **added** (per-axis z-score after clip / 2) |
-| Per-rating `axis_means` field | absent | absent | absent | absent | **added** (career-average axis z-scores per player) |
+| Aspect | v1 | v2.0 | v2.1 | v2.2 | v2.3 (alpha-blended thug composite + Combat ELO → Thug ELO rename) | v2.4 (commander role adjustment) |
+|---|---|---|---|---|---|---|
+| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged | unchanged | unchanged | unchanged |
+| Rating component name | Combat ELO ($R^C$) | unchanged | unchanged | unchanged | **Thug ELO** ($R^T$) | unchanged |
+| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged | unchanged | Median of opponents' Thug ELO | unchanged |
+| Logistic scale ($S_R$) | n/a | $400$ | $\mathbf{800}$ | $800$ | $800$ (unchanged) | $800$ (unchanged) |
+| Outcome scale ($S_O$) | $2.5$ | $2.5$ | $2.5$ | $2.5$ | $2.5$ (unchanged) | $2.5$ (unchanged) |
+| Composite axes | 7 | 7 | 7 | 8 | **8** (rename `kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`; broaden `pve_share` to all enemy non-human dmg) | 8 (unchanged) |
+| Alpha-blended PvE in thug axes | n/a | n/a | n/a | n/a | **$\alpha_{\mathrm{PvE}} = 0.5$** (locked default; tunable post-ship) | unchanged |
+| Weapon-normalized accuracy | flat ratio | flat ratio | flat ratio | flat ratio | **per-weapon ratio vs lobby baseline, shot-share weighted** | unchanged |
+| Commander row per-axis shift | n/a | n/a | n/a | n/a | n/a | **post-clip-space additive shift on 6 of 8 axes; re-clipped to $[-1, +1]$** |
+| Commander baseline drift | n/a | n/a | n/a | n/a | n/a | **shrunk rolling mean (strength 30) for 4 audit-derived priors; LOCKED at seed for 2 hand-tuned priors** |
+| Per-rating `matches_as_commander` / `matches_as_thug` | absent | absent | absent | absent | absent | **added** |
+| Per-delta `axis_contributions_meta` field | absent | absent | absent | absent | absent | **added (commander rows only)** — `{axis: {z_pre_shift, shift, z_post_shift}}` |
+| Top-level `commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed` | absent | absent | absent | absent | absent | **added** |
+| K-factor decay | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Loss aversion + soft floor | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Tier ranges | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Wins ELO blend ($\alpha$) | $0.0$ | $0.0$ | $0.0$ | $0.0$ | $0.0$ (still stubbed) | $0.0$ (still stubbed) |
+| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ | $3$ | $4$ (axis renames; `combat_elo`→`thug_elo` JSON field; new `axis_contributions` per delta + `axis_means` per rating; `alpha_pve` constant in top-level constants block) | $\mathbf{5}$ (commander block on `elo_current.json`; `axis_contributions_meta` on commander deltas; `matches_as_commander` / `matches_as_thug` per rating) |
+| `PIPELINE_VERSION` | $7$ | $8$ | $9$ | $10$ | $11$ (forced full re-process: new pipeline fields incl. per-weapon `pvp_hits`, `loadout`, `per_class_combat`) | $\mathbf{15}$ (forced full re-rate to apply commander shift) |
+| `match.schema_version` | $1$ → $2$ → $3$ | $3$ | $3$ | $3$ | $4$ (per-match leaderboard rows gain `personal.pvp_kills`/`pve_kills`/etc., `weapon_breakdown[w].pvp_hits`, `loadout`, `per_class_combat`) | $4$ (no per-match shape change; the role adjustment is purely inside the rating math) |
+| Per-delta `axis_contributions` field | absent | absent | absent | absent | added (per-axis z-score after clip / 2) | unchanged shape; values for commander rows are now POST-shift |
+| Per-rating `axis_means` field | absent | absent | absent | absent | added (career-average axis z-scores per player) | unchanged shape; for commander-heavy players the career means now reflect post-shift z |
 
 **Empirical effect (v2)**: compresses the high tail (top players plateau where their typical $P_i$ matches their $E_i$, instead of climbing forever in soft lobbies) and lifts the floor (mid- and low-rated players who play in heavyweight lobbies stop bleeding rating for "average" performances they were never expected to exceed). Existing `peak_vtsr` values from v1 are no longer comparable — every player's rating history was recomputed from scratch on the first v2 pipeline run.
 
@@ -1884,6 +1891,87 @@ Architectural rename: **Combat ELO → Thug ELO** ($R^C \to R^T$) and **`COMBAT_
 
 **Why we rebalanced (v2.2 → v2.3)**: A thug rating that ignores PvE work systematically penalizes role players. The minimal alpha-blend approach (`α = 0.5`) preserves PvP as the primary signal while crediting PvE work at half-weight — guards against pure AI-farming (a player doing 100% PvE with no PvP still scores lower than an equally-skilled fragger) while letting role players be measured fairly. `pve_share` (12% of composite weight) gives any "asset disruption" role its own dedicated lane. Tunability: `ALPHA_PVE` is exposed in `elo_current.json` so the constant can be re-iterated from community feedback without a schema bump (only `PIPELINE_VERSION` to force re-rating). Per-axis attribution emit (`axis_contributions` + `axis_means`) makes the composite auditable from the dashboard's VTSR-T leaderboard popover, so the community can see exactly which axes drove each player's rating.
 
+### 13.7.1 v2.4 — commander role adjustment
+
+VTSR-T is "individual thug skill", but the rating is computed against per-lobby z-scoring with no awareness of in-match role. The audit ([_investigation/audit_commander_bias.py](_investigation/audit_commander_bias.py)) confirmed a systematic bias: commander match-rows score $-0.115$ lower on composite $P_i$ than thug rows (~8 ELO/match), with consistent within-player evidence (median gap $+0.103$ across 13 dual-role players who play both roles in our corpus). Without intervention, frequent commanders eat a structural rating penalty for the role they're being asked to play. v2.4 fixes this with a per-axis additive shift on commander match-rows; the leaderboard contract stays a single unified VTSR-T rating with commanders included as "thugs" on the days they fragged.
+
+**Math.** For commander row $i$ and shifted axis $a \in \mathrm{COMMANDER\_AXIS\_PRIOR}$:
+
+$$
+z'_{i,a} \;=\; \mathrm{clip}\!\left(\frac{\mathrm{clip}(z_{i,a},\, -2,\, +2)}{2} \;-\; \mathrm{baseline}[a],\; -1,\; +1\right)
+$$
+
+For thug rows (or any axis omitted from the prior), the un-shifted formula applies:
+
+$$
+z'_{i,a} \;=\; \frac{\mathrm{clip}(z_{i,a},\, -2,\, +2)}{2}
+$$
+
+The composite $P_i = \sum_a w'_a \cdot z'_{i,a}$ then feeds the unchanged ELO update. The shift is applied in **post-clip space** (after the $\div 2$ scaling) because that's the space the audit measured the priors in — applying them as raw-z shifts would be half-strength.
+
+**Shrinkage formula (rolling baseline).** For audit-derived axes, the baseline blends the seed prior with a running mean of past commander rows' pre-shift post-clip z-scores:
+
+$$
+\mathrm{baseline}[a] \;=\; \frac{n \cdot \overline{z}^{\,\mathrm{pre}}_a \;+\; s \cdot \mathrm{prior}[a]}{n + s}, \qquad s = 30
+$$
+
+With $n = 0$ (no commander rows yet observed) the baseline equals the prior; as $n$ grows, the baseline tracks live empirical reality. Helper: `commander_shrunk_baseline(axis, running_sum, running_count)` in `scripts/elo.py`. The snapshot is built **before** each match's `compute_performance_index()` call so the running mean uses prior matches only (no in-match leakage).
+
+For **locked** axes (`COMMANDER_BASELINE_LOCKED_AXES = {"target_lock_pct", "pve_share"}`):
+
+$$
+\mathrm{baseline}[a] \;=\; \mathrm{prior}[a] \quad\text{(exactly, no shrinkage)}
+$$
+
+The running mean is still tracked for locked axes (visibility only — surfaced via `commander_baseline_observed[a].running_mean`) so you can see when reality has diverged enough from intent to warrant a seed-value revisit.
+
+**Asymmetric design rationale (eight axes, three groups).**
+
+1. **4 audit-derived priors with shrinkage** — `mobility (-0.488)`, `thug_kill_rate (-0.164)`, `net_damage_share (-0.131)`, `thug_efficiency (-0.106)`. These are real structural shortfalls of the commander role (tied to base / building / not in dedicated combat ships). The seed values are the audit's empirical means; the rolling shrinkage lets live data take over the prior smoothly as the corpus grows.
+2. **2 hand-tuned priors LOCKED** — `target_lock_pct (-0.10)` and `pve_share (-0.05)`.
+   - `target_lock_pct`: audit said $-0.466$ (n=116), but T-key is universally available and commanders are often common targets. We pin a small cushion that deliberately under-encodes the empirical penalty — design intent is "commanders should be locking nearly as much as thugs". Locked so this intent doesn't drift toward the empirical $-0.466$ over time.
+   - `pve_share`: audit said $+0.111$ (commanders naturally do more PvE because of where they spend time). We **invert the sign** to a $-0.05$ baseline so the shift becomes $+0.05$ on commander rows — hitting enemy assets is the work commanders SHOULD be doing, so we actively reward it instead of dampening it. Locked so the boost intent doesn't fade — and worse, silently flip into a dampener — as the running mean drifts.
+3. **2 axes role-blind (omitted from the prior dict)** — `thug_accuracy` and `snipe_bonus`. `thug_accuracy`'s empirical commander mean is $+0.069$, below the noise floor at current corpus size (std $0.46$, SE ~0.04). `snipe_bonus`'s $+0.28$ is unreliable on $n = 22$ commander rows. Treat both as role-blind until the data clearly warrants an adjustment.
+
+**Worked example — typical-commander mobility.** Take a commander posting empirical-mean mobility (raw z = $-0.976$):
+
+| Step | Value |
+|---|---|
+| Lobby z-score $z_{i,\text{mobility}}$ | $-0.976$ |
+| After $\mathrm{clip}(z, -2, +2) / 2$ → `z_pre_shift` | $-0.488$ |
+| `commander_baseline_snapshot["mobility"]` (audit-derived, near-corpus-end) | $\approx -0.488$ |
+| `shift = -baseline` | $+0.488$ |
+| Post-shift = `z_pre_shift + shift` | $0.000$ |
+| Re-clip to $[-1, +1]$ → `z_post_shift` | $0.000$ |
+| Net impact on $P_i$ | $0 \cdot 0.08 = 0$ (was $-0.488 \cdot 0.08 = -0.039$) |
+
+Net: typical-commander mobility now contributes $0$ to $P_i$ instead of $-0.039$. A commander who actually moves around — say `z_pre_shift = +0.2` (above-typical for a commander) — earns a post-shift $+0.688$, capped at $+1.0$; that's the "fightin' commander" extra credit the design was after.
+
+**Path-dependence note.** Rolling baselines accumulate chronologically as `compute_elo()` walks matches in `(date, id)` order. For audit-derived priors, the baseline gradually moves from the seed value toward the live empirical commander mean as the corpus grows. Two consequences worth knowing:
+- Early matches in the corpus see a slightly different effective shift than late matches; this is benign because the seed values were calibrated to the late-corpus empirical means, not zero.
+- Running the pipeline with `--force` reproduces the same ratings byte-for-byte (the baseline computation is purely a function of prior matches' commander rows in chronological order). Locked priors don't drift.
+
+**Forensic emit.** Each commander delta in `elo_history.json` carries an optional `axis_contributions_meta` sibling block alongside the existing `axis_contributions`:
+
+```json
+"axis_contributions": {
+  "mobility": 0.0,
+  "thug_kill_rate": -0.05,
+  ...
+},
+"axis_contributions_meta": {
+  "mobility":       {"z_pre_shift": -0.488, "shift": 0.488,  "z_post_shift": 0.0},
+  "thug_kill_rate": {"z_pre_shift": -0.214, "shift": 0.164,  "z_post_shift": -0.05},
+  ...
+}
+```
+
+Audit invariant: for each shifted axis $a$ on a commander row, `axis_contributions[a] == axis_contributions_meta[a].z_post_shift` (because the post-shift value IS what feeds the rating math). The flat `axis_contributions` shape is unchanged on the wire, so existing JS rendering (per-axis bars, "Strong axes" tooltip) keeps working without changes.
+
+**Why we changed it (v2.3 → v2.4)**: VTSR-T was systematically punishing players for being chosen / volunteering as commander, against the explicit design goal of "thug rating, role-fair where the role lets you fight". The audit confirmed both magnitude (~8 ELO/match) and consistency (within-player evidence across 13 dual-role players). The role-baseline z-shift ("Option A" from the algorithm-selection conversation) is the lightest-touch fix that lands the commander mean back at $\approx 0$ without requiring a separate VTSR-C rating to be designed and shipped first. VTSR-C is reserved for future work and will incorporate VTSR-T as one of its inputs.
+
+**Empirical effect (v2.4)**: post-shift, the commander mean $P_i$ lands at $\approx 0$ (within $\pm 0.02$, with a small positive residual from the `pve_share` boost). The 4 audit-derived shifted axes' commander means converge to $\approx 0$. `target_lock_pct` keeps a residual ~$-0.366$ commander mean by design (post-clip empirical $-0.466$ + locked shift $+0.10$). `pve_share` lifts to ~$+0.161$ commander mean by design (post-clip empirical $+0.111$ + locked shift $+0.05$). `thug_accuracy` and `snipe_bonus` are unchanged at empirical means (role-blind by design). Frequent commanders gain ~50–150 ELO; thug-pure players are essentially flat. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — the $P_i$ definition changed for commander rows; historical peaks were recomputed from scratch on the v2.4 re-rate.
+
 ### 13.8 Tier ladder
 
 Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to give the sub-1350 "training band" room without adding a sixth tier. Tier 1 is open above 1800 so we never need to retro-add tiers.
@@ -1906,8 +1994,8 @@ Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to giv
 
 ### 13.10 File-format reference
 
-- `data/processed/elo_current.json` — current-state per-player ratings. Schema documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md). v2.3 fields: `alpha_pve` constant in the top-level constants block; per-rating `thug_elo` (was `combat_elo`) and `axis_means: {axis_name: career_avg_z, ...}`.
-- `data/processed/elo_history.json` — per-match rating deltas, chronological. One entry per processed match (excluded matches have empty `deltas`). v2.3 fields: per-delta `axis_contributions: {axis_name: clipped_z, ...}` carrying each axis's per-match contribution after clip-and-divide-by-2.
+- `data/processed/elo_current.json` — current-state per-player ratings. Schema documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md). v2.3 fields: `alpha_pve` constant in the top-level constants block; per-rating `thug_elo` (was `combat_elo`) and `axis_means: {axis_name: career_avg_z, ...}`. v2.4 fields: top-level `commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed`; per-rating `matches_as_commander` / `matches_as_thug`.
+- `data/processed/elo_history.json` — per-match rating deltas, chronological. One entry per processed match (excluded matches have empty `deltas`). v2.3 fields: per-delta `axis_contributions: {axis_name: clipped_z, ...}` carrying each axis's per-match contribution after clip-and-divide-by-2. v2.4 fields: optional per-delta `axis_contributions_meta: {axis_name: {z_pre_shift, shift, z_post_shift}}` on commander rows only — forensic breakdown of the per-axis shift.
 
 Source-of-truth implementation: [scripts/elo.py](scripts/elo.py). Constants are exported at module top so they're trivially auditable.
 

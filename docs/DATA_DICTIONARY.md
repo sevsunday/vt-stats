@@ -2258,6 +2258,8 @@ Semantics:
 Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `process_stats.py` run. **VTSR-T** (VT Stats Rating — Thug) is the thug-focused rating; the JSON field `vtsr` is the published headline number ($\mathrm{VTSR\text{-}T} = \alpha R^W + (1-\alpha) R^T$ — equal to **thug_elo** when $\alpha=0$). Full algorithm and constants are in [§13 of DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md#vtsr-methodology).
 
 > **v2.3 rename**: the rating's combat-skill component, previously called *Combat ELO* with JSON field `combat_elo`, is now called **Thug ELO** with JSON field `thug_elo`. Future VTSR-C (Commander) follows the same blend shape with its own commander-axis composite.
+>
+> **v2.4 — commander role adjustment**: per-match commander rows now get a per-axis additive shift in post-clip space so commanders aren't penalized for their role on the unified VTSR-T leaderboard. New top-level fields on `elo_current.json`: `commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed`. New per-rating fields: `matches_as_commander` / `matches_as_thug`. New optional sibling block on commander deltas in `elo_history.json`: `axis_contributions_meta`. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — corpus re-rated.
 
 ### `data/processed/elo_current.json`
 
@@ -2265,7 +2267,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "alpha": 0.0,
   "alpha_pve": 0.5,
   "anchor": 1500.0,
@@ -2288,6 +2290,20 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "weights": { "net_damage_share": 0.20, "thug_kill_rate": 0.20, "thug_efficiency": 0.16,
                "thug_accuracy": 0.15, "pve_share": 0.12, "mobility": 0.08,
                "snipe_bonus": 0.05, "target_lock_pct": 0.04 },
+  "commander_axis_prior": {
+    "mobility": -0.488, "thug_kill_rate": -0.164, "net_damage_share": -0.131,
+    "thug_efficiency": -0.106, "target_lock_pct": -0.10, "pve_share": -0.05
+  },
+  "commander_baseline_shrinkage": 30.0,
+  "commander_baseline_locked_axes": ["pve_share", "target_lock_pct"],
+  "commander_baseline_observed": {
+    "mobility":         { "n": 116, "running_mean": -0.488, "shrunk_baseline_at_corpus_end": -0.488, "locked": false },
+    "thug_kill_rate":   { "n": 116, "running_mean": -0.164, "shrunk_baseline_at_corpus_end": -0.164, "locked": false },
+    "net_damage_share": { "n": 116, "running_mean": -0.131, "shrunk_baseline_at_corpus_end": -0.131, "locked": false },
+    "thug_efficiency":  { "n": 116, "running_mean": -0.106, "shrunk_baseline_at_corpus_end": -0.106, "locked": false },
+    "target_lock_pct":  { "n": 116, "running_mean": -0.466, "shrunk_baseline_at_corpus_end": -0.10,  "locked": true  },
+    "pve_share":        { "n": 116, "running_mean":  0.111, "shrunk_baseline_at_corpus_end": -0.05,  "locked": true  }
+  },
   "ratings": [{
     "name": "VTrider",
     "steam64": "76561197974548434",
@@ -2295,6 +2311,8 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
     "thug_elo": 2708.9,
     "wins_elo": 1500.0,
     "matches_played": 49,
+    "matches_as_commander": 4,
+    "matches_as_thug": 45,
     "matches_provisional": false,
     "last_match_id": "2026-05-04T03-06-22",
     "last_delta": 12.10,
@@ -2308,7 +2326,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 
 | Field | Type | Description |
 |---|---|---|
-| `schema_version` | int | Output shape version. Bump when the JS reader needs to change. **v2 (Phase 12)**: bumped 1 → 2 when the per-match comparison switched from $P_{\text{med}}$ to $E_i$ and `expected_score_logistic_scale` + per-delta `expected` joined the schema. **v2.2 (Phase 13)**: bumped 2 → 3 when the composite changed shape — `asset_multiplier` dropped, `structure_share` + `target_lock_pct` added. **v2.3**: bumped 3 → 4 — axis renames (`kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`); JSON field rename `combat_elo`→`thug_elo`; new `alpha_pve` constant in top-level constants block; new `axis_means` object on every rating row; new `axis_contributions` object on every non-excluded delta in `elo_history.json`. |
+| `schema_version` | int | Output shape version. Bump when the JS reader needs to change. **v2 (Phase 12)**: bumped 1 → 2 when the per-match comparison switched from $P_{\text{med}}$ to $E_i$ and `expected_score_logistic_scale` + per-delta `expected` joined the schema. **v2.2 (Phase 13)**: bumped 2 → 3 when the composite changed shape — `asset_multiplier` dropped, `structure_share` + `target_lock_pct` added. **v2.3**: bumped 3 → 4 — axis renames (`kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`); JSON field rename `combat_elo`→`thug_elo`; new `alpha_pve` constant in top-level constants block; new `axis_means` object on every rating row; new `axis_contributions` object on every non-excluded delta in `elo_history.json`. **v2.4**: bumped 4 → 5 — new top-level commander block (`commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed`); new per-rating `matches_as_commander` / `matches_as_thug` fields; new optional per-delta `axis_contributions_meta` block on commander rows in `elo_history.json`. |
 | `alpha` | float | Wins ELO blend weight. v1: 0.0 (Thug-only). |
 | `alpha_pve` | float | **v2.3** — PvE-credit fraction in the three thug axes (`thug_kill_rate`, `thug_accuracy`, `thug_efficiency`). Locked default `0.5`. Tunable post-ship without a schema bump (only `PIPELINE_VERSION` to force re-rating). |
 | `anchor` | float | League anchor where every new player starts. 1500.0. |
@@ -2324,6 +2342,10 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
 | `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |
 | `weights` | object | Snapshot of `THUG_WEIGHTS` for transparency. **v2.3**: 8 keys (`net_damage_share`, `thug_kill_rate`, `thug_efficiency`, `thug_accuracy`, `pve_share`, `mobility`, `snipe_bonus`, `target_lock_pct`). The Python dict was renamed `COMBAT_WEIGHTS` → `THUG_WEIGHTS` in v2.3 to align with the Combat ELO → Thug ELO rename. The `pve_share` axis (was `structure_share` pre-v2.3) covers ALL enemy non-human damage — structures + mobile AI like Scavengers, Producers, Extractors. Sources from `personal.pve_dealt`. The three "thug" axes (`thug_kill_rate`, `thug_accuracy`, `thug_efficiency`) credit PvE work at fractional weight `alpha_pve` (default 0.5). |
+| `commander_axis_prior` | object | **v2.4** — snapshot of `COMMANDER_AXIS_PRIOR` for transparency. Up to 8 keys (1 per axis); axes omitted from this dict are role-blind (currently `thug_accuracy`, `snipe_bonus`). Values are in **post-clip space** (i.e. measured in the same units as `clip(z, -2, +2) / 2`). For commander rows on each listed axis, the per-match shift applied is `-baseline[axis]`, where `baseline` comes from `commander_shrunk_baseline()` (audit-derived axes blend with the running mean; locked axes equal the prior exactly). |
+| `commander_baseline_shrinkage` | float | **v2.4** — shrinkage strength (in pseudo-observations) used for audit-derived axes. Live data takes over the seed prior smoothly as the corpus grows. Default `30.0`. Locked axes ignore this constant. |
+| `commander_baseline_locked_axes` | array<string> | **v2.4** — sorted list of axis names whose baselines are locked at the seed prior (no shrinkage). Default `["pve_share", "target_lock_pct"]` — the two hand-tuned priors whose design intent should not silently drift toward live empirical means. |
+| `commander_baseline_observed` | object | **v2.4** — per-axis snapshot of the rolling baseline state at the end of the corpus walk. Keys match `commander_axis_prior`. Each value: `{ "n": int, "running_mean": float, "shrunk_baseline_at_corpus_end": float, "locked": bool }`. `n` is the number of commander rows that contributed to the running mean across the corpus. `running_mean` is the empirical mean of pre-shift post-clip z-scores observed for commander rows on this axis (visibility only when `locked: true`). `shrunk_baseline_at_corpus_end` is the value `commander_shrunk_baseline()` would return at corpus end — equals the prior exactly when `locked: true`; for unlocked axes it sits between `prior` and `running_mean`, weighted toward `running_mean` as `n` grows past `commander_baseline_shrinkage`. `locked: true` is a clear signal in the JSON that this axis's prior is hand-tuned and not drift-tracking. |
 | `ratings[]` | array | Per-player rows. Sorted by `vtsr` desc, name asc as tiebreak. |
 | `ratings[].name` | string | Display name. Most-recent-seen across the corpus for renames. |
 | `ratings[].steam64` | string \| null | Stable identity. Null for legacy rows missing steam64. |
@@ -2331,10 +2353,12 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].thug_elo` | float | **v2.3** — pure Thug-ELO component (was `combat_elo` pre-v2.3). |
 | `ratings[].wins_elo` | float | Wins-ELO component. v1: stubbed at the anchor for everyone (1500.0). |
 | `ratings[].matches_played` | int | Number of rated matches contributing to this rating. Excluded matches don't count. |
+| `ratings[].matches_as_commander` | int | **v2.4** — count of rated matches where the player held a commander slot (slot 1 / 6 — `is_commander: true` on the leaderboard row). |
+| `ratings[].matches_as_thug` | int | **v2.4** — `matches_played - matches_as_commander`. Sums to `matches_played` exactly. Both fields are 0 for players who only appear in excluded matches. |
 | `ratings[].matches_provisional` | bool | True when `matches_played < provisional_threshold`. |
 | `ratings[].last_match_id` | string | Match id of the player's most recent rated match. |
 | `ratings[].last_delta` | float | The Δ applied at `last_match_id` (negative = loss). |
-| `ratings[].peak_vtsr` | float | Highest headline rating (`vtsr`) this player has ever held. |
+| `ratings[].peak_vtsr` | float | Highest headline rating (`vtsr`) this player has ever held. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — the $P_i$ definition changed for commander rows; historical peaks were recomputed from scratch on the v2.4 re-rate. |
 | `ratings[].peak_at` | string | Match id where `peak_vtsr` was set. |
 | `ratings[].win_history` | array<float> | Last 10 deltas (oldest-first), used by the trend sparkline. |
 | `ratings[].axis_means` | object | **v2.3** — per-axis career-average z-scores, keyed by axis name. Each value is the mean of the player's per-match clipped-z (post `clip / 2`, so range $[-1, +1]$) across the rated matches where that axis was available for the lobby. Some keys may be absent if the player has never been in a lobby where that axis fired (e.g. matches with no positioning data → no `mobility` key). Powers the VTSR-T leaderboard's "Strong axes" tooltip on the rating cell. |
@@ -2345,7 +2369,7 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 
 ```json
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "history": [{
     "match_id": "2026-04-16T01-27-48",
     "match_date": "2026-04-16T01:27:48Z",
@@ -2356,7 +2380,21 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
         "axis_contributions": { "net_damage_share": 0.85, "thug_kill_rate": 0.40,
                                  "thug_accuracy": 0.10, "thug_efficiency": 0.30,
                                  "pve_share": -0.20, "mobility": 0.50,
-                                 "snipe_bonus": 0.0, "target_lock_pct": 0.15 } }
+                                 "snipe_bonus": 0.0, "target_lock_pct": 0.15 } },
+      { "name": "Snake", "steam64": "...", "before": 1500.0, "after": 1503.1,
+        "delta": 3.1, "performance": 0.05, "expected": -0.02,
+        "axis_contributions": { "net_damage_share": 0.0, "thug_kill_rate": -0.05,
+                                 "thug_accuracy": 0.10, "thug_efficiency": -0.05,
+                                 "pve_share": 0.16, "mobility": 0.0,
+                                 "snipe_bonus": 0.0, "target_lock_pct": -0.366 },
+        "axis_contributions_meta": {
+          "mobility":         { "z_pre_shift": -0.488, "shift": 0.488, "z_post_shift": 0.0 },
+          "thug_kill_rate":   { "z_pre_shift": -0.214, "shift": 0.164, "z_post_shift": -0.05 },
+          "net_damage_share": { "z_pre_shift": -0.131, "shift": 0.131, "z_post_shift": 0.0 },
+          "thug_efficiency":  { "z_pre_shift": -0.156, "shift": 0.106, "z_post_shift": -0.05 },
+          "target_lock_pct":  { "z_pre_shift": -0.466, "shift": 0.10,  "z_post_shift": -0.366 },
+          "pve_share":        { "z_pre_shift": 0.111,  "shift": 0.05,  "z_post_shift": 0.161 }
+        } }
     ]
   }]
 }
@@ -2365,9 +2403,10 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 | Field | Type | Description |
 |---|---|---|
 | `history[].deltas[].before` / `after` / `delta` | float | Pre-match rating, post-match rating, and the applied $\Delta R$ (negative = loss). |
-| `history[].deltas[].performance` | float | The 8-axis composite $P_i$ from `compute_performance_index()` (v2.3). Range $[-1, +1]$. |
+| `history[].deltas[].performance` | float | The 8-axis composite $P_i$ from `compute_performance_index()` (v2.3). Range $[-1, +1]$. **v2.4**: for commander rows, this is the post-shift composite. |
 | `history[].deltas[].expected` | float | **v2+** — the opponent-strength-weighted expected performance $E_i$ (median-of-opponents reference, logistic with $S_R = 800$ as of v2.1). Range $[-1, +1]$. |
-| `history[].deltas[].axis_contributions` | object | **v2.3** — per-axis z-score after clip-and-divide-by-2 (range $[-1, +1]$ per axis), keyed by axis name. Audit invariant: $\sum_a z_a \cdot w'_a \approx \text{performance}$ where $w'_a$ is the redistributed weight (axes absent from this dict had their weight redistributed to the available axes). When an axis was unavailable for the lobby (e.g. no positioning data → no `mobility` key, no PvE damage in the lobby → no `pve_share` key, etc.), the axis is OMITTED from the dict. Powers the VTSR-T leaderboard's per-axis breakdown popover on the Last-delta cell. |
+| `history[].deltas[].axis_contributions` | object | **v2.3** — per-axis z-score after clip-and-divide-by-2 (range $[-1, +1]$ per axis), keyed by axis name. Audit invariant: $\sum_a z_a \cdot w'_a \approx \text{performance}$ where $w'_a$ is the redistributed weight (axes absent from this dict had their weight redistributed to the available axes). When an axis was unavailable for the lobby (e.g. no positioning data → no `mobility` key, no PvE damage in the lobby → no `pve_share` key, etc.), the axis is OMITTED from the dict. Powers the VTSR-T leaderboard's per-axis breakdown popover on the Last-delta cell. **v2.4**: shape unchanged. For commander rows, each value is `z_post_shift` (i.e. what fed into `performance`); for thug rows the value is the un-shifted post-clip z. The flat shape lets existing JS rendering work without changes. |
+| `history[].deltas[].axis_contributions_meta` | object \| absent | **v2.4** — optional sibling block, present ONLY on commander rows (`is_commander: true` on the source leaderboard row) AND only for axes that were both available for the lobby AND listed in `commander_axis_prior`. Shape: `{axis_name: {z_pre_shift, shift, z_post_shift}}` where `z_pre_shift` is the value before the v2.4 commander shift (post-clip space, range $[-1, +1]$), `shift = -baseline[axis]` (where `baseline` is `commander_shrunk_baseline()` evaluated at the start of this match — frozen at the prior for locked axes), and `z_post_shift` is the final value after re-clipping to $[-1, +1]$. **Audit invariant**: for each shifted axis $a$ on a commander row, `axis_contributions[a] == axis_contributions_meta[a].z_post_shift` exactly (because the post-shift value IS what feeds the rating math). For thug rows, this block is OMITTED entirely. Forensics-only for now; not consumed by the dashboard renderer. |
 
 Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`.
 
