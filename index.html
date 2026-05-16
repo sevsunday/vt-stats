@@ -1174,6 +1174,28 @@
       <!-- All Tab: Commanders -->
       <div class="tab-pane fade" id="all-tab-commanders" role="tabpanel" aria-labelledby="all-tab-commanders-btn">
 
+        <div class="card mb-4" id="section-commander-cohort">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Commander Cohort <span class="vt-cohort-title-tag">VTSR-C preview</span></h5>
+              <i class="bi bi-info-circle vt-col-info"
+                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                 title="<strong>Commander-vs-commander axis comparison</strong><br>Each commander's thug-axis performance averaged over <em>only the matches they commanded</em>. Pre-shift z-scores &mdash; the v2.4 role-fairness cushion is reversed for this view so true commander-vs-commander gaps surface.<br><br>Defaults to players with at least 40% commander share. Provisional ratings are always excluded; a minimum of 5 commander matches is required so the per-axis means are stable enough to compare. Use <em>Show all commanders</em> to drop the 40% threshold while keeping the 5-match floor.<br><br><strong>VTSR-C<sub>prev</sub></strong> per column is &Sigma; w &times; z&#772; over the player's commander matches (performance space [-1, +1]; not rating-space). Foundation of a future VTSR-C rating &mdash; commander-specific signals (scrap, build tempo) aren't collected upstream yet, so this preview is thug-performance only.<br><br>Sourced from <code>elo_history.json</code> &mdash; <strong>corpus-wide</strong>, independent of the active picker filter."></i>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <div class="btn-group btn-group-sm" role="group" aria-label="Cohort view mode" id="commander-cohort-view-toggle">
+                <button type="button" class="btn btn-outline-secondary active" data-cohort-view="z" title="Per-axis z-score over commander matches only (clipped to [-1, +1], pre-shift). Green = above lobby average, red = below.">Z-scores</button>
+                <button type="button" class="btn btn-outline-secondary" data-cohort-view="contrib" title="Weighted contribution (w &times; z&#772;) over commander matches only. Final row sums to VTSR-C&#8341;&#8347;&#8337;&#8339; for the player.">Weighted</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="commander-cohort-show-all" data-show-all="false" title="Toggle between &ge;40% commander share and every non-provisional player with at least 5 commander matches">Show all commanders</button>
+              <button class="btn btn-sm" data-expand="section-commander-cohort" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="commander-cohort-container"></div>
+          </div>
+        </div>
+
         <div class="card mb-4" id="section-commander-leaderboard">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">
