@@ -527,7 +527,7 @@
   // --- Manifest + HEAD size fetches ---
 
   async function loadManifest() {
-    const res = await fetch('data/processed/matches.json');
+    const res = await fetch('data/processed/matches.json', { cache: 'no-store' });
     if (!res.ok) throw new Error(`Failed to load manifest (HTTP ${res.status})`);
     return res.json();
   }
