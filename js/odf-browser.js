@@ -291,7 +291,7 @@ class ODFBrowser {
 
     async loadData() {
         try {
-            const response = await fetch('../data/odf.min.json');
+            const response = await fetch('../data/odf.min.json', { cache: 'no-store' });
             this.data = await response.json();
 
             // O(1) lookup index built once (Bug 3 fix).

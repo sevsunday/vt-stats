@@ -670,7 +670,7 @@
 
   let manifest;
   try {
-    const res = await fetch('data/processed/matches.json');
+    const res = await fetch('data/processed/matches.json', { cache: 'no-store' });
     if (!res.ok) throw new Error(res.status);
     manifest = await res.json();
   } catch {
@@ -686,7 +686,7 @@
   // dashes out missing fields.
   let mapRegistry = {};
   try {
-    const regRes = await fetch('data/map-registry.json');
+    const regRes = await fetch('data/map-registry.json', { cache: 'no-store' });
     if (regRes.ok) mapRegistry = await regRes.json();
   } catch {
     // registry is optional — nothing to do
@@ -2408,8 +2408,8 @@
   async function ensureEloLoaded() {
     if (window.__vtElo !== undefined) return;
     const [eloRes, histRes] = await Promise.all([
-      fetch('data/processed/elo_current.json').catch(() => null),
-      fetch('data/processed/elo_history.json').catch(() => null),
+      fetch('data/processed/elo_current.json', { cache: 'no-store' }).catch(() => null),
+      fetch('data/processed/elo_history.json', { cache: 'no-store' }).catch(() => null),
     ]);
     try {
       window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
@@ -2434,7 +2434,7 @@
     let contributions = window.__vtContributions;
     if (!contributions) {
       try {
-        const res = await fetch('data/processed/match_contributions.json');
+        const res = await fetch('data/processed/match_contributions.json', { cache: 'no-store' });
         if (!res.ok) throw new Error(res.status);
         contributions = await res.json();
         window.__vtContributions = contributions;
