@@ -26,7 +26,7 @@ Math: for commander row i and shifted axis a:
     z'_{i,a} = clip(clip(z_{i,a}, -2, +2) / 2  -  baseline[a],  -1, +1)
 For thug rows or omitted axes, z'_{i,a} = clip(z_{i,a}, -2, +2) / 2.
 
-Matches with ``player_count < 6`` or ``duration_sec < 300`` don't update
+Matches with ``player_count < 6`` or ``duration_sec < 240`` don't update
 ratings; they emit a history row with ``match_excluded: true`` so
 exclusion counters reconcile.
 
@@ -52,7 +52,7 @@ ELO_K_FLOOR = 12.0               # Settled-veteran floor on K (typical provision
 ELO_PROVISIONAL_PRIOR = 10.0     # K decays toward FLOOR over the first ~10 matches.
 ELO_PROVISIONAL_THRESHOLD = 10   # matches_played < this => "Provisional" badge.
 ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
-ELO_MIN_DURATION_SEC = 300       # 5-minute minimum.
+ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
 
 # Per-match outcome scale; bounds dR via (P_i - E_i) which lives in roughly [-1, +1].
 ELO_RATING_SCALE = 2.5
@@ -656,7 +656,7 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         match_id = m.get("id", "")
         match_date = m.get("date", "")
 
-        # Player count < 6 OR duration < 300s → emit excluded history row, no rating change.
+        # Player count < 6 OR duration < 240s → emit excluded history row, no rating change.
         excluded = False
         if (m.get("player_count", 0) or 0) < ELO_MIN_PLAYER_COUNT:
             excluded_low_player_count += 1

@@ -4141,7 +4141,7 @@
     }
     if (idx.excluded) {
       const reasonText = idx.exclusion_reason === 'low_player_count' ? 'fewer than 6 players'
-                       : idx.exclusion_reason === 'short_duration'   ? 'shorter than 5 minutes'
+                       : idx.exclusion_reason === 'short_duration'   ? 'shorter than 4 minutes'
                        : 'excluded from rating';
       return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
         title="Match excluded from VTSR-T (${reasonText})"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;

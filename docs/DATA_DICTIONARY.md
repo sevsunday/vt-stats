@@ -2281,7 +2281,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "provisional_prior": 10.0,
   "provisional_threshold": 10,
   "min_player_count": 6,
-  "min_duration_sec": 300,
+  "min_duration_sec": 240,
   "computed_at": "2026-05-12T22:00:00Z",
   "match_count": 57,
   "matches_excluded_low_player_count": 4,
@@ -2337,7 +2337,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `floor_taper_window` | float | Width of the linear taper above the floor. 150.0 → full losses resume at 1150. |
 | `k_base`, `k_floor`, `provisional_prior` | float | K-decay curve parameters (40 / 12 / 10). |
 | `provisional_threshold` | int | matches_played below which the row gets a "Provisional" badge (10). |
-| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 300). |
+| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 240). |
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
 | `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |
