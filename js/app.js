@@ -581,7 +581,9 @@
     // updated dynamically by updateAllMatchesCardCopy() once the picker
     // filters apply. That avoids a second buildMatchPicker() pass when
     // filters change.
-    const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
+    // Meta is rendered as its own stacked block under the head row (not
+    // inside it) so a long "N matches" string can't squeeze the name down
+    // to "Al..." like it did when both lived in the same flex row.
     return `
       <button type="button" class="vt-match-picker-card vt-match-picker-card--all" data-target="__all__" role="listitem">
         <div class="vt-match-picker-card-thumb vt-match-picker-card-thumb--placeholder" aria-hidden="true">
@@ -590,8 +592,8 @@
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
             <span class="vt-match-picker-card-name">All Matches</span>
-            <span class="vt-match-picker-card-meta" data-all-card-meta>${manifest.length} matches &middot; ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}</span>
           </div>
+          <div class="vt-match-picker-card-meta" data-all-card-meta>${manifest.length} matches</div>
           <div class="vt-match-picker-card-submeta">
             <span class="vt-muted" data-all-card-submeta>Career overview across every recorded match.</span>
           </div>
@@ -673,8 +675,7 @@
         ? 'No matches match the current filters.'
         : `Aggregate of ${k} match${k === 1 ? '' : 'es'} matching filters.`;
     } else {
-      const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
-      metaEl.textContent = `${total} matches \u00B7 ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}`;
+      metaEl.textContent = `${total} match${total === 1 ? '' : 'es'}`;
       subEl.textContent = 'Career overview across every recorded match.';
     }
   }
