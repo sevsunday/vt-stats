@@ -143,13 +143,6 @@
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>
 
-          <!-- Mode Toggle (light/dark). Handler wired by js/theme.js. -->
-          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-            <i class="bi bi-sun-fill"></i>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
-          </button>
-
           <!-- About / Source Repos -->
           <button class="vt-nav-icon-btn" id="about-btn" type="button"
                   data-bs-toggle="modal" data-bs-target="#about-modal"
@@ -157,11 +150,6 @@
             <i class="bi bi-info-circle"></i>
           </button>
 
-          <!-- Landing Preferences (kept last so gear sits on the far right) -->
-          <button class="vt-nav-icon-btn" id="landing-prefs-btn" type="button"
-                  title="Landing preferences" aria-label="Landing preferences">
-            <i class="bi bi-gear"></i><span class="vt-nav-label ms-2">Preferences</span>
-          </button>
         </div>
       </div>
     </div>
@@ -223,9 +211,14 @@
                opened by clicking the thumbnail above. See renderMapInfoModal()
                in js/app.js. -->
           <div id="info-snipes-wrap" class="d-none"><span class="stat-label">Snipes</span><br><strong id="info-snipes">0</strong></div>
-          <a id="info-raw-link" class="vt-nav-icon-btn" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
-            <i class="bi bi-code-square me-1"></i><span>View raw</span>
-          </a>
+          <div class="d-flex flex-column gap-2">
+            <button id="info-back-to-all" class="vt-nav-icon-btn vt-nav-icon-btn--primary" type="button" title="Return to the All Matches aggregate view">
+              <i class="bi bi-grid-3x3-gap me-1"></i><span>All Matches</span>
+            </button>
+            <a id="info-raw-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
+              <i class="bi bi-code-square me-1"></i><span>View Raw Data</span>
+            </a>
+          </div>
         </div>
         <div id="filter-bar" class="vt-filter-bar vt-filter-bar--right">
           <div class="vt-filter-bar-label"><span class="stat-label">Filter</span></div>
@@ -1499,75 +1492,6 @@
             <label class="form-check-label small" for="record-stats-dont-show">Don't show on page load</label>
           </div>
           <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Got it</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Landing Preferences Modal -->
-  <div class="modal fade vt-landing-modal" id="landing-modal" tabindex="-1" aria-labelledby="landing-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="landing-modal-title">Welcome to VT Stats</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <p class="mb-3" style="color: var(--kb-text-muted); font-size: 0.9rem;">
-            What would you like to see first?
-          </p>
-
-          <fieldset class="mb-4">
-            <legend class="stat-label mb-2" style="font-size: 0.75rem;">Landing view</legend>
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="radio" name="landing-mode" id="landing-mode-all" value="all" checked>
-              <label class="form-check-label" for="landing-mode-all">
-                <strong>All matches</strong>
-                <div class="small" style="color: var(--kb-text-muted);" id="landing-mode-all-hint">Career overview across every recorded match.</div>
-              </label>
-            </div>
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="radio" name="landing-mode" id="landing-mode-recent" value="recent">
-              <label class="form-check-label" for="landing-mode-recent">
-                <strong>Most recent match</strong>
-                <div class="small" style="color: var(--kb-text-muted);" id="landing-mode-recent-hint">Jump straight to the most recently recorded match.</div>
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="landing-mode" id="landing-mode-specific" value="specific">
-              <label class="form-check-label" for="landing-mode-specific">
-                <strong>A specific match</strong>
-                <div class="small" style="color: var(--kb-text-muted);">Always land on the same match.</div>
-              </label>
-              <div class="mt-2 d-none" id="landing-specific-wrap">
-                <select id="landing-specific-select" class="form-select form-select-sm" style="max-width: 320px;" aria-label="Pick a specific match"></select>
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend class="stat-label mb-2" style="font-size: 0.75rem;">Remember my choice</legend>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="landing-persist" id="landing-persist-yes" value="yes" checked>
-              <label class="form-check-label" for="landing-persist-yes">
-                Remember my choice
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="landing-persist" id="landing-persist-no" value="no">
-              <label class="form-check-label" for="landing-persist-no">
-                Ask me every time
-              </label>
-            </div>
-          </fieldset>
-
-          <p class="small mt-3 mb-0" style="color: var(--kb-text-muted);">
-            <i class="bi bi-info-circle me-1"></i>You can change this anytime from the <strong>Preferences</strong> button in the menu.
-          </p>
-        </div>
-        <div class="modal-footer border-top">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" class="btn btn-primary btn-sm" id="landing-modal-confirm">Continue</button>
         </div>
       </div>
     </div>

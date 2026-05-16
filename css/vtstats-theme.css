@@ -663,6 +663,25 @@ body::before {
     box-shadow: 0 1px 6px var(--kb-primary-muted);
 }
 
+/* Secondary-background variant of .vt-nav-icon-btn — uses --kb-bg-muted as a
+   clear surface tint without competing with the primary CTA. Paired with the
+   primary variant for stacked button pairs (e.g. the match-info banner's
+   All Matches + View Raw Data column). */
+.vt-nav-icon-btn--secondary {
+    background: var(--kb-bg-muted);
+    color: var(--kb-text-primary);
+}
+
+.vt-nav-icon-btn--secondary:hover,
+.vt-nav-icon-btn--secondary:focus-visible {
+    background: var(--kb-bg-active);
+    color: var(--kb-text-primary);
+}
+
+.vt-nav-icon-btn--secondary:active {
+    filter: brightness(0.95);
+}
+
 /* ============================================================================
    TOPNAV URL-SYNC BUTTONS
    Share (one-shot copy) + Live Sync (toggle). Both render as standalone
@@ -2696,12 +2715,6 @@ h4:hover .docs-heading-anchor,
 
 .vt-nav-label {
     display: none;
-}
-
-/* Mode label pair: show only the one matching current root mode */
-[data-mode="dark"] .vt-nav-label--mode-light,
-[data-mode="light"] .vt-nav-label--mode-dark {
-    display: none !important;
 }
 
 /* ---------- Burger button ---------- */

@@ -208,45 +208,13 @@
   // the producer (event-stream table row click).
   let pendingReplayTick = null;
 
-  // --- Landing Preferences ---
-  // First-visit modal prompts the user to pick a default landing view.
-  // Stored as JSON in localStorage under LANDING_PREF_KEY. Schema:
-  //   { version: 1, mode: 'ask' | 'recent' | 'all' | 'specific', matchId?: string }
-  // Shared links (any URL intent) always bypass this entirely.
-  // Default landing view changed from 'recent' to 'all' on 2026-05-08;
-  // existing saved prefs preserved deliberately (LANDING_PREF_VERSION not bumped).
-  const LANDING_PREF_KEY = 'vt-landing-pref';
-  const LANDING_PREF_VERSION = 1;
-  const LANDING_MODES = new Set(['ask', 'recent', 'all', 'specific']);
-
-  function readLandingPref() {
-    try {
-      const raw = localStorage.getItem(LANDING_PREF_KEY);
-      if (!raw) return null;
-      const pref = JSON.parse(raw);
-      if (!pref || pref.version !== LANDING_PREF_VERSION) return null;
-      if (!LANDING_MODES.has(pref.mode)) return null;
-      return pref;
-    } catch {
-      return null;
-    }
-  }
-
-  function writeLandingPref(pref) {
-    try {
-      localStorage.setItem(LANDING_PREF_KEY, JSON.stringify(pref));
-    } catch {
-      // Private mode / storage blocked — silently ignore.
-    }
-  }
-
-  function clearLandingPref() {
-    try {
-      localStorage.removeItem(LANDING_PREF_KEY);
-    } catch {
-      // No-op.
-    }
-  }
+  // --- Legacy localStorage cleanup ---
+  // The landing-preferences modal (which once stored `vt-landing-pref`) was
+  // removed in favor of forcing every visit to default to the All Matches
+  // view. Silently nuke the orphaned key on every boot so returning users
+  // get the new behavior without any stale-pref bleed-through. removeItem
+  // on a missing key is a no-op so this is idempotent.
+  try { localStorage.removeItem('vt-landing-pref'); } catch { /* private mode / storage blocked — silently ignore */ }
 
   // --- Record-Your-Own-Stats Modal Dismissal ---
   // Instructional popup that walks users through running the statsgate
@@ -270,167 +238,6 @@
   function clearRecordStatsDismissed() {
     try { localStorage.removeItem(RECORD_STATS_DISMISSED_KEY); }
     catch { /* private mode / storage blocked — silently ignore */ }
-  }
-
-  // Resolves a landing choice into an actual view load. Always keeps the
-  // picker triggers in sync via updateMatchPickerTriggers(), matching the
-  // existing URL-driven boot branches. Unknown modes and missing
-  // specific-matchIds silently fall back to most recent.
-  function applyLandingChoice(choice) {
-    const mode = choice && choice.mode;
-    if (mode === 'all') {
-      updateMatchPickerTriggers('__all__');
-      loadAllMatches();
-      return;
-    }
-    if (mode === 'specific' && choice.matchId) {
-      const entry = manifest.find(m => m.id === choice.matchId);
-      if (entry) {
-        updateMatchPickerTriggers(entry);
-        loadMatch(entry.file);
-        return;
-      }
-      // Fall through to recent if the saved match is gone.
-    }
-    if (manifest.length > 0) {
-      updateMatchPickerTriggers(manifest[0]);
-      loadMatch(manifest[0].file);
-    }
-  }
-
-  // Populates the auto-filled hint under the "All matches" option with the
-  // current corpus snapshot ("Career overview · 47 matches · 14 players ·
-  // last seen May 4, 2026"). Falls back to the static placeholder when the
-  // manifest is empty. The "Most recent" hint is intentionally static and
-  // lives in the HTML markup.
-  function populateLandingHints(manifest) {
-    const $allHint = document.getElementById('landing-mode-all-hint');
-    if (!$allHint) return;
-    if (!manifest || manifest.length === 0) {
-      $allHint.textContent = 'Career overview across every recorded match.';
-      return;
-    }
-    const distinctPlayers = new Set();
-    for (const m of manifest) {
-      if (Array.isArray(m.players)) m.players.forEach(p => distinctPlayers.add(p));
-    }
-    const mostRecent = manifest[0];
-    const shortDate = new Date(mostRecent.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    const matchWord = manifest.length === 1 ? 'match' : 'matches';
-    const playerWord = distinctPlayers.size === 1 ? 'player' : 'players';
-    $allHint.textContent = `Career overview · ${manifest.length} ${matchWord} · ${distinctPlayers.size} ${playerWord} · last seen ${shortDate}`;
-  }
-
-  // Builds and shows the landing preferences modal. Called on first-visit
-  // boot (when no URL intent and no stored pref) and from the Preferences
-  // gear button in the nav. The two entry points differ only in their
-  // onCancel handling: first-visit falls back to the default landing view
-  // (All matches); gear re-open is a no-op so dismissing doesn't disturb
-  // the view.
-  function showLandingModal({ current, onConfirm, onCancel }) {
-    const $modal = document.getElementById('landing-modal');
-    if (!$modal || !window.bootstrap) return;
-
-    const $recentRadio   = document.getElementById('landing-mode-recent');
-    const $allRadio      = document.getElementById('landing-mode-all');
-    const $specificRadio = document.getElementById('landing-mode-specific');
-    const $specificWrap  = document.getElementById('landing-specific-wrap');
-    const $specificSel   = document.getElementById('landing-specific-select');
-    const $persistYes    = document.getElementById('landing-persist-yes');
-    const $persistNo     = document.getElementById('landing-persist-no');
-    const $confirmBtn    = document.getElementById('landing-modal-confirm');
-
-    // Auto-fill the "All matches" hint with the corpus snapshot. The
-    // "Most recent" hint is static and lives in the HTML.
-    populateLandingHints(manifest);
-
-    // Populate the specific-match select from manifest (mirrors the
-    // navbar dropdown's label format).
-    if ($specificSel) {
-      $specificSel.innerHTML = '';
-      manifest.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        opt.textContent = `${m.name} — ${shortDate}`;
-        $specificSel.appendChild(opt);
-      });
-    }
-
-    // Pre-select based on `current` (gear re-open) or defaults (first visit).
-    // First-visit default is now "All matches" (changed from "Most recent"
-    // on 2026-05-08) — pre-existing saved prefs preserved deliberately.
-    if (current && current.mode === 'recent') {
-      $recentRadio.checked = true;
-    } else if (current && current.mode === 'specific') {
-      $specificRadio.checked = true;
-      if (current.matchId && $specificSel) {
-        const exists = manifest.some(m => m.id === current.matchId);
-        if (exists) $specificSel.value = current.matchId;
-      }
-    } else {
-      // No saved pref or current.mode === 'all' / 'ask' → default to All matches.
-      $allRadio.checked = true;
-    }
-    // If we have a saved pref (even 'ask'), "Remember" is implicitly the
-    // current stance; treat missing pref as Remember-pre-selected per the
-    // plan's default.
-    if (current && current.mode === 'ask') $persistNo.checked = true;
-    else $persistYes.checked = true;
-
-    // Toggle specific-match select visibility with the radio.
-    function syncSpecificVisibility() {
-      if ($specificRadio.checked) $specificWrap.classList.remove('d-none');
-      else $specificWrap.classList.add('d-none');
-    }
-    function handleSpecificFocus() {
-      $specificRadio.checked = true;
-      syncSpecificVisibility();
-    }
-    syncSpecificVisibility();
-    const modeRadios = [$recentRadio, $allRadio, $specificRadio];
-    modeRadios.forEach(r => r.addEventListener('change', syncSpecificVisibility));
-    // Focusing the dropdown implies they want "specific".
-    if ($specificSel) $specificSel.addEventListener('focus', handleSpecificFocus);
-
-    let confirmed = false;
-
-    function getChoice() {
-      let mode = 'recent';
-      if ($allRadio.checked) mode = 'all';
-      else if ($specificRadio.checked) mode = 'specific';
-      const persist = $persistYes.checked;
-      const choice = { mode, persist };
-      if (mode === 'specific' && $specificSel) choice.matchId = $specificSel.value;
-      return choice;
-    }
-
-    const instance = bootstrap.Modal.getOrCreateInstance($modal);
-
-    function handleConfirm() {
-      confirmed = true;
-      const choice = getChoice();
-      instance.hide();
-      if (typeof onConfirm === 'function') onConfirm(choice);
-    }
-
-    function handleHidden() {
-      // Tear down every listener we added so re-opens don't accumulate.
-      $confirmBtn.removeEventListener('click', handleConfirm);
-      $modal.removeEventListener('hidden.bs.modal', handleHidden);
-      modeRadios.forEach(r => r.removeEventListener('change', syncSpecificVisibility));
-      if ($specificSel) $specificSel.removeEventListener('focus', handleSpecificFocus);
-      if (!confirmed && typeof onCancel === 'function') onCancel();
-    }
-
-    $confirmBtn.addEventListener('click', handleConfirm);
-    $modal.addEventListener('hidden.bs.modal', handleHidden);
-
-    // Hide the preloader spinner behind the modal so the welcome screen
-    // reads cleanly. Loaders re-show #loading themselves when they run.
-    $loading.classList.add('d-none');
-
-    instance.show();
   }
 
   // URLSearchParams.toString() percent-encodes a long list of characters
@@ -7018,31 +6825,19 @@
     });
   }
 
-  // --- Preferences Gear ---
-  // Re-opens the landing modal pre-filled with the current saved pref so
-  // users can change their mind later. onCancel is a no-op here so
-  // dismissing the modal doesn't disturb whatever they're currently viewing.
-  document.getElementById('landing-prefs-btn')?.addEventListener('click', () => {
-    showLandingModal({
-      current: readLandingPref(),
-      onConfirm: ({ mode, matchId, persist }) => {
-        if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
-        else clearLandingPref();
-        const doLoad = () => applyLandingChoice({ mode, matchId });
-        if (window.VTFx) VTFx.withViewTransition(doLoad);
-        else doLoad();
-      },
-      onCancel: () => { /* no-op: keep current view */ },
-    });
-  });
+  // --- Back-to-All-Matches Button ---
+  // Per-match banner shortcut for jumping back to the aggregate view.
+  // Lives inside #match-info which is hidden whenever the All Matches view
+  // is active, so the button is naturally per-match-only with no extra
+  // visibility wiring. selectMatch handles trigger sync + view-transition.
+  document.getElementById('info-back-to-all')?.addEventListener('click', () => selectMatch('__all__'));
 
   // --- Initial Boot ---
   // Branch to the appropriate loader based on the URL state we already
   // parsed earlier (during picker init — `const initialUrlState` is in
   // scope from the Phase 2 init block above). Shared URLs (any
-  // match/tab/filter/team/players intent) always win and fully bypass the
-  // landing preferences modal. Only when no URL intent exists do we
-  // consult the stored pref (or show the first-visit modal).
+  // match/tab/filter/team/players intent) always win. When no URL intent
+  // is present we always default to the All Matches aggregate view.
   const hasOtherUrlIntent = initialUrlState.tab
     || initialUrlState.filter
     || initialUrlState.team
@@ -7066,22 +6861,9 @@
       updateMatchPickerTriggers(manifest[0]);
       loadMatch(manifest[0].file, initialUrlState);
     } else if (manifest.length > 0) {
-      // No URL intent at all — consult landing pref.
-      const pref = readLandingPref();
-      if (!pref || pref.mode === 'ask') {
-        showLandingModal({
-          current: null,
-          onConfirm: ({ mode, matchId, persist }) => {
-            if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
-            applyLandingChoice({ mode, matchId });
-          },
-          // Cancel falls back to the new default (All matches), matching
-          // what the modal showed pre-selected.
-          onCancel: () => applyLandingChoice({ mode: 'all' }),
-        });
-      } else {
-        applyLandingChoice(pref);
-      }
+      // No URL intent at all — universal default is the All Matches view.
+      updateMatchPickerTriggers('__all__');
+      loadAllMatches();
     }
   }
 
@@ -7116,8 +6898,7 @@
     const recordInst = bootstrap.Modal.getOrCreateInstance($recordStatsModal);
     $recordStatsModal.addEventListener('hidden.bs.modal', runInitialBoot, { once: true });
     // Hide the preloader behind the modal so the welcome screen reads
-    // cleanly (mirrors the trick showLandingModal() uses). Loaders
-    // re-show #loading themselves when they actually run.
+    // cleanly. Loaders re-show #loading themselves when they actually run.
     $loading.classList.add('d-none');
     recordInst.show();
   } else {
