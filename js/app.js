@@ -2386,6 +2386,11 @@
 
     registerTabRenderer('#all-tab-commanders', () => {
       const cs = data.commander_stats || { rows: [], head_to_head: [] };
+      // Cohort card sits above the leaderboard; reads window.__vtElo
+      // directly (corpus-wide / picker-filter-unaware - same contract as
+      // the main-view VTSR-T leaderboard).
+      wireCommanderCohortControls();
+      renderCommanderCohort(window.__vtElo);
       renderCommanderLeaderboard(cs.rows);
       renderCommanderH2H(cs.head_to_head);
       renderCommanderFactionPicks('commander-faction-picks-canvas', cs.rows);
@@ -5923,6 +5928,394 @@
     }
 
     ensureTooltips($card);
+  }
+
+  // -----------------------------------------------------------------------
+  // Commander Cohort card (All Matches -> Commanders tab, top of pane).
+  //
+  // Side-by-side career-axis comparison across players with a commander
+  // share at or above the active threshold. Two views toggle in place:
+  //   'z'       : per-axis z-score from axis_means (one cell per axis x player)
+  //   'contrib' : weight x z, with a highlighted Sum (~ mean P_i) footer row
+  //
+  // Data source is window.__vtElo (corpus-wide) - the table intentionally
+  // ignores the picker filter, matching the contract used by the dedicated
+  // VTSR-T leaderboard. Reuses VTSR_AXIS_META for axis labels and shares
+  // the --kb-success / --kb-danger color tokens used elsewhere.
+  // -----------------------------------------------------------------------
+
+  // Module-local state. Persist across re-renders within a single session;
+  // reset to defaults each fresh tab-state cycle (see resetTabState).
+  let commanderCohortShowAll = false;   // false -> >=40% only; true -> all rated cmdrs
+  let commanderCohortView    = 'z';     // 'z' | 'contrib'
+
+  const COMMANDER_COHORT_MIN_SHARE   = 0.40;
+  const COMMANDER_COHORT_MIN_MATCHES = 5;     // min matches_as_commander floor
+                                              // (mirrors MIN_CAREER_MATCHES convention)
+
+  // Compute commander share for one rating row. Returns 0 when the
+  // player has zero rated matches (defensive — pure spectators / debutants
+  // shouldn't be in the ratings array anyway).
+  function _cohortShare(r) {
+    const c = r.matches_as_commander || 0;
+    const t = r.matches_as_thug || 0;
+    const denom = c + t;
+    return denom > 0 ? c / denom : 0;
+  }
+
+  // Filter + sort the rating set for the cohort table. Provisional rows
+  // are always excluded (tiny-sample noise dominates the axis_means);
+  // the >=8 commander-match floor further filters players whose role
+  // average isn't yet stable enough to compare side-by-side.
+  function _cohortVisible(elo) {
+    if (!elo || !Array.isArray(elo.ratings)) return [];
+    const minShare = commanderCohortShowAll ? 0 : COMMANDER_COHORT_MIN_SHARE;
+    const out = elo.ratings.filter(r => {
+      if (r.matches_provisional) return false;                       // skip provisional ratings
+      const cmdr = r.matches_as_commander || 0;
+      if (cmdr < COMMANDER_COHORT_MIN_MATCHES) return false;         // need stable commander sample
+      return _cohortShare(r) >= minShare;
+    });
+    // Primary: commander share desc. Secondary: VTSR-T desc.
+    out.sort((a, b) => {
+      const sa = _cohortShare(a);
+      const sb = _cohortShare(b);
+      if (sb !== sa) return sb - sa;
+      return (b.vtsr || 0) - (a.vtsr || 0);
+    });
+    return out;
+  }
+
+  // Color-class helper mirroring the VTSR axis-bar convention.
+  // Returns one of 'is-positive' / 'is-negative' / '' (neutral band).
+  function _cohortValueClass(v) {
+    if (v == null || !isFinite(v)) return '';
+    if (Math.abs(v) < 0.005) return '';
+    return v > 0 ? 'vt-cohort-pos' : 'vt-cohort-neg';
+  }
+
+  // Format a signed numeric cell value with explicit + / - prefix.
+  function _cohortFmt(v, digits) {
+    if (v == null || !isFinite(v)) return '<span class="text-muted">&mdash;</span>';
+    const sign = v >= 0 ? '+' : '';
+    return `${sign}${v.toFixed(digits)}`;
+  }
+
+  // Commander-only axis means. Walks window.__vtEloHistory deltas and
+  // averages each axis's z-score using ONLY rows where the player was a
+  // commander. Commander rows are self-labeling via axis_contributions_meta
+  // (emitted only when v2.4 applied a role-fairness shift). For the four
+  // shifted axes (mobility, thug_kill_rate, net_damage_share,
+  // thug_efficiency) plus the two locked shifted axes (target_lock_pct,
+  // pve_share), we pull z_pre_shift so the v2.4 commander cushion is
+  // reversed - that cushion exists to make VTSR-T fair across roles, but
+  // for commander-vs-commander comparison it artificially flattens gaps.
+  // For the two role-blind axes (thug_accuracy, snipe_bonus) pre == post,
+  // so axis_contributions[axis] is the raw value.
+  //
+  // Returns { [steam64|name]: { axisMeans: {axis: meanZ}, n: int } }
+  // where n is the count of commander matches contributing data for that
+  // player (max across axes - per-axis denominator can be smaller when
+  // an axis was unavailable in some match, mirroring elo.py).
+  function _commanderAxisMeans(eloHistory) {
+    const out = {};
+    if (!eloHistory || !Array.isArray(eloHistory.history)) return out;
+    for (const match of eloHistory.history) {
+      if (match.match_excluded) continue;
+      const deltas = match.deltas || [];
+      for (const d of deltas) {
+        const meta = d.axis_contributions_meta;
+        if (!meta) continue; // thug row in this match
+        const key = d.steam64 || d.name;
+        if (!key) continue;
+        const rec = out[key] || { sums: {}, counts: {}, n: 0 };
+        rec.n += 1;
+        const contribs = d.axis_contributions || {};
+        const seen = new Set([...Object.keys(meta), ...Object.keys(contribs)]);
+        for (const axis of seen) {
+          let z;
+          if (meta[axis] && typeof meta[axis].z_pre_shift === 'number') {
+            z = meta[axis].z_pre_shift;
+          } else if (axis in contribs) {
+            z = contribs[axis];
+          } else {
+            continue;
+          }
+          rec.sums[axis] = (rec.sums[axis] || 0) + z;
+          rec.counts[axis] = (rec.counts[axis] || 0) + 1;
+        }
+        out[key] = rec;
+      }
+    }
+    const result = {};
+    for (const key of Object.keys(out)) {
+      const rec = out[key];
+      const axisMeans = {};
+      for (const axis of Object.keys(rec.sums)) {
+        const c = rec.counts[axis] || 0;
+        if (c > 0) axisMeans[axis] = rec.sums[axis] / c;
+      }
+      result[key] = { axisMeans, n: rec.n };
+    }
+    return result;
+  }
+
+  // Weighted-contribution helper. For a single player, compute (weight x z)
+  // per axis using pro-rata weight redistribution over axes the player
+  // actually has (mirrors compute_performance_index() in scripts/elo.py).
+  // Returns { contribs: {axis: w*z}, sum: number }.
+  function _cohortWeightedContribs(axisMeans, weightsAll) {
+    const present = Object.keys(axisMeans || {})
+      .filter(a => axisMeans[a] != null && isFinite(axisMeans[a]));
+    if (!present.length) return { contribs: {}, sum: 0 };
+    const totalWeight = present.reduce((s, a) => s + (weightsAll[a] || 0), 0);
+    if (totalWeight <= 0) return { contribs: {}, sum: 0 };
+    const contribs = {};
+    let sum = 0;
+    for (const a of present) {
+      const w = (weightsAll[a] || 0) / totalWeight;
+      const c = w * axisMeans[a];
+      contribs[a] = c;
+      sum += c;
+    }
+    return { contribs, sum };
+  }
+
+  // Main renderer. `elo` is window.__vtElo (already loaded by
+  // ensureEloLoaded). When elo is missing / has no ratings, the card
+  // hides itself entirely.
+  function renderCommanderCohort(elo) {
+    const $card = document.getElementById('section-commander-cohort');
+    if (!$card) return;
+
+    const container = document.getElementById('commander-cohort-container');
+    if (!container) return;
+
+    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
+      $card.classList.add('d-none');
+      return;
+    }
+    $card.classList.remove('d-none');
+
+    // Reflect current toggle state in the header controls.
+    document.querySelectorAll('#commander-cohort-view-toggle [data-cohort-view]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.cohortView === commanderCohortView);
+    });
+    const $showAllBtn = document.getElementById('commander-cohort-show-all');
+    if ($showAllBtn) {
+      $showAllBtn.dataset.showAll = String(commanderCohortShowAll);
+      $showAllBtn.textContent = commanderCohortShowAll
+        ? 'Show \u226540% only'
+        : 'Show all commanders';
+      $showAllBtn.classList.toggle('active', commanderCohortShowAll);
+    }
+
+    // Pre-compute commander-only axis means once per render. Reads from
+    // window.__vtEloHistory (eagerly loaded by ensureEloLoaded). Each entry
+    // is { axisMeans, n } keyed by steam64 (name fallback for legacy rows).
+    const cmdrByKey = _commanderAxisMeans(window.__vtEloHistory);
+
+    // Defensive: drop visible rows that have zero commander deltas in
+    // history. matches_as_commander >= 5 in elo_current should already
+    // cover this since the v2.4 corpus re-rate, but a stale history file
+    // would otherwise show empty rows.
+    const visibleAll = _cohortVisible(elo);
+    const visible = visibleAll.filter(r => {
+      const key = r.steam64 || r.name;
+      const c = cmdrByKey[key];
+      return c && c.n > 0;
+    });
+    if (visible.length === 0) {
+      const note = commanderCohortShowAll
+        ? `No non-provisional players with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches yet.`
+        : `No non-provisional players with \u226540% commander share and \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches yet. Try <em>Show all commanders</em>.`;
+      container.innerHTML = `<p class="text-center my-3" style="color:var(--kb-text-muted);">${note}</p>`;
+      return;
+    }
+
+    // Cap displayed players when "Show all" is on to keep the grid
+    // readable; sort already put the highest-cmdr-share players first.
+    const MAX_VISIBLE = 12;
+    const trimmed = visible.slice(0, MAX_VISIBLE);
+    const moreCount = Math.max(0, visible.length - trimmed.length);
+
+    // Axis order locked to weight desc so the heaviest axes lead -
+    // matches what the user sees in the methodology section.
+    const weightsAll = (elo.weights || {});
+    const axisOrder = Object.keys(weightsAll).sort((a, b) =>
+      (weightsAll[b] || 0) - (weightsAll[a] || 0)
+    );
+    // Fallback if elo.weights is missing for some reason: use VTSR_AXIS_META key order.
+    const axes = axisOrder.length ? axisOrder : Object.keys(VTSR_AXIS_META);
+
+    // Pre-compute weighted contribs per player (used by both the header
+    // VTSR-C-prev cell and, when in 'contrib' view, the body cells +
+    // Sum row). Reads commander-only axis means, never career means.
+    const contribByPlayer = {};
+    for (const r of trimmed) {
+      const key = r.steam64 || r.name;
+      const cm = (cmdrByKey[key] && cmdrByKey[key].axisMeans) || {};
+      contribByPlayer[key] = _cohortWeightedContribs(cm, weightsAll);
+    }
+
+    // Header row: one cell per player. Columns are sized via CSS grid;
+    // the axis column lives in its own .vt-cohort-axis-cell column.
+    const headerCells = trimmed.map(r => {
+      const c = r.matches_as_commander || 0;
+      const t = r.matches_as_thug || 0;
+      const sharePct = (_cohortShare(r) * 100).toFixed(0);
+      const peak = Math.round(r.peak_vtsr || r.vtsr || 0);
+      const vtsr = Math.round(r.vtsr || 0);
+      const provBadge = r.matches_provisional
+        ? ' <span class="vt-cohort-prov" title="Provisional rating">Prov</span>'
+        : '';
+      const key = r.steam64 || r.name;
+      const cmdrN = (cmdrByKey[key] && cmdrByKey[key].n) || 0;
+      const composite = (contribByPlayer[key] || { sum: 0 }).sum;
+      const compositeCls = _cohortValueClass(composite);
+      const compositeTip = esc(
+        `VTSR-C (preview): \u03a3 w \u00d7 z\u0304 over the player's ${cmdrN} commander match${cmdrN === 1 ? '' : 'es'}. `
+        + `Performance space [-1, +1]; not rating-space (no anchor/floor). Thug-axis performance only \u2014 commander-specific signals (scrap, build tempo) not yet collected.`
+      );
+      return `<div class="vt-cohort-col-header">
+        <div class="vt-cohort-col-name">${esc(r.name)}${provBadge}</div>
+        <div class="vt-cohort-col-share">${sharePct}% <span class="vt-cohort-col-share-detail">(${c} C / ${t} T)</span></div>
+        <div class="vt-cohort-col-rating"><strong>${vtsr}</strong> <span class="vt-cohort-col-rating-label">VTSR-T</span></div>
+        <div class="vt-cohort-col-vtsrc ${compositeCls}"
+             data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="bottom"
+             title="${compositeTip}">
+          <strong>${_cohortFmt(composite, 2)}</strong>
+          <span class="vt-cohort-col-vtsrc-label">VTSR-C<sub>prev</sub></span>
+        </div>
+        <div class="vt-cohort-col-peak">${cmdrN} cmdr match${cmdrN === 1 ? '' : 'es'} \u00b7 Peak VTSR-T ${peak}</div>
+      </div>`;
+    }).join('');
+
+    // Body rows: one row per axis. Each cell shows either the z value
+    // (z view) or the weighted contribution (contrib view), drawing from
+    // the commander-matches-only means computed above.
+    const bodyRows = axes.map(axisKey => {
+      const meta = VTSR_AXIS_META[axisKey] || { label: axisKey, desc: '', formula: '' };
+      const weight = weightsAll[axisKey] || 0;
+      const axisLabel = commanderCohortView === 'contrib' && weight > 0
+        ? `${esc(meta.label)} <span class="vt-cohort-axis-weight">(w=${weight.toFixed(2)})</span>`
+        : esc(meta.label);
+
+      const tipDesc = meta.desc ? `<br><small>${esc(meta.desc)}</small>` : '';
+      const tipHtml = `<strong>${esc(meta.label)}</strong>${tipDesc}`;
+
+      const cells = trimmed.map(r => {
+        const key = r.steam64 || r.name;
+        const cm = (cmdrByKey[key] && cmdrByKey[key].axisMeans) || {};
+        let raw;
+        if (commanderCohortView === 'contrib') {
+          const cb = contribByPlayer[key] || { contribs: {} };
+          raw = cb.contribs[axisKey];
+        } else {
+          raw = cm[axisKey];
+        }
+        const cls = _cohortValueClass(raw);
+        const txt = commanderCohortView === 'contrib'
+          ? _cohortFmt(raw, 4)
+          : _cohortFmt(raw, 2);
+        return `<div class="vt-cohort-cell ${cls}">${txt}</div>`;
+      }).join('');
+
+      return `<div class="vt-cohort-row">
+        <div class="vt-cohort-axis-cell"
+             data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="right"
+             data-bs-custom-class="vt-axis-tooltip"
+             title="${esc(tipHtml)}">${axisLabel}</div>
+        ${cells}
+      </div>`;
+    }).join('');
+
+    // Footer sum row only in contrib view.
+    let footerRow = '';
+    if (commanderCohortView === 'contrib') {
+      const sumCells = trimmed.map(r => {
+        const key = r.steam64 || r.name;
+        const cb = contribByPlayer[key] || { sum: 0 };
+        const cls = _cohortValueClass(cb.sum);
+        return `<div class="vt-cohort-cell ${cls}"><strong>${_cohortFmt(cb.sum, 4)}</strong></div>`;
+      }).join('');
+      footerRow = `<div class="vt-cohort-row vt-cohort-sum-row">
+        <div class="vt-cohort-axis-cell"><strong>Sum (= VTSR-C<sub>prev</sub>)</strong></div>
+        ${sumCells}
+      </div>`;
+    }
+
+    // CSS grid template: first column is the axis label, rest is one
+    // column per player. We set it inline so the grid scales with the
+    // visible cohort size without needing a stylesheet entry per N.
+    const colCount = trimmed.length;
+    const gridTemplate = `minmax(160px, 1.6fr) repeat(${colCount}, minmax(108px, 1fr))`;
+
+    // Source-note is the only subtitle now - it's dynamic (reflects the
+    // active filter / count). The view-mode explainer (z vs weighted +
+    // color coding) lives in the toggle-button tooltips and the
+    // info-icon tooltip on the card title.
+    const sourceNote = commanderCohortShowAll
+      ? (moreCount
+          ? `All non-provisional commanders with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches (showing first ${trimmed.length} of ${visible.length}, sorted by commander share).`
+          : `All ${visible.length} non-provisional commander${visible.length === 1 ? '' : 's'} with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches.`)
+      : `Showing ${trimmed.length} commander${trimmed.length === 1 ? '' : 's'} with \u226540% commander share &middot; minimum ${COMMANDER_COHORT_MIN_MATCHES} commander matches &middot; provisional ratings excluded.`;
+
+    const callout = `
+      <div class="vt-cohort-callout small mb-2">
+        <i class="bi bi-flask vt-cohort-callout-icon"></i>
+        <span><strong>VTSR-C preview.</strong> Measures each commander's thug-axis performance over <em>only the matches they commanded</em>, with the v2.4 role-fairness cushion reversed so true commander-vs-commander gaps surface. A future VTSR-C rating will layer wins and commander-specific signals (economy, build tempo) on top &mdash; those aren't collected upstream yet, so this preview is thug-performance only.</span>
+      </div>
+    `;
+
+    container.innerHTML = `
+      ${callout}
+      <div class="vt-cohort-subtitle text-muted small mb-2">${sourceNote}</div>
+      <div class="vt-cohort-table-wrap">
+        <div class="vt-cohort-grid" style="grid-template-columns:${gridTemplate};">
+          <div class="vt-cohort-row vt-cohort-header-row">
+            <div class="vt-cohort-axis-cell"></div>
+            ${headerCells}
+          </div>
+          ${bodyRows}
+          ${footerRow}
+        </div>
+      </div>
+    `;
+
+    ensureTooltips(container);
+  }
+
+  // One-time wiring for the cohort card's two header controls. Idempotent
+  // via a dataset flag on the card element - safe to call from the tab
+  // renderer on every activation.
+  function wireCommanderCohortControls() {
+    const $card = document.getElementById('section-commander-cohort');
+    if (!$card || $card.dataset.cohortWired === '1') return;
+    $card.dataset.cohortWired = '1';
+
+    // View-mode toggle (z-scores vs weighted-contribution). Delegated so
+    // a future re-render that rebuilds the button group keeps working.
+    const $viewGroup = document.getElementById('commander-cohort-view-toggle');
+    if ($viewGroup) {
+      $viewGroup.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-cohort-view]');
+        if (!btn) return;
+        const next = btn.dataset.cohortView;
+        if (!next || next === commanderCohortView) return;
+        commanderCohortView = next;
+        renderCommanderCohort(window.__vtElo);
+      });
+    }
+
+    // "Show all rated commanders" toggle.
+    const $showAll = document.getElementById('commander-cohort-show-all');
+    if ($showAll) {
+      $showAll.addEventListener('click', () => {
+        commanderCohortShowAll = !commanderCohortShowAll;
+        renderCommanderCohort(window.__vtElo);
+      });
+    }
   }
 
   // Look up a career row's VTSR-T record from the cached ELO payload.

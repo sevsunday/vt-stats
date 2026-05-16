@@ -5233,3 +5233,182 @@ td.vt-col-split {
     letter-spacing: 0.02em;
 }
 
+/* Commander Cohort card (All Matches -> Commanders tab).
+   Side-by-side axis-comparison grid. First column is the axis label;
+   remaining columns are one per player. Both views (z / contrib) share
+   this grid layout - only cell contents differ. */
+.vt-cohort-subtitle {
+    line-height: 1.45;
+}
+.vt-cohort-table-wrap {
+    overflow-x: auto;     /* horizontal scroll for narrow viewports */
+    padding-bottom: 0.25rem;   /* clear scrollbar from sum-row border */
+}
+.vt-cohort-grid {
+    display: grid;
+    /* grid-template-columns is set inline by the renderer so it scales
+       with the visible player count. Rows are auto-sized. */
+    gap: 0;
+    min-width: 100%;
+    font-variant-numeric: tabular-nums;
+}
+.vt-cohort-row {
+    display: contents;    /* let parent grid lay out the cells */
+}
+.vt-cohort-axis-cell {
+    padding: 0.5rem 0.75rem 0.5rem 0;
+    color: var(--kb-text-secondary);
+    font-size: 0.82rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--kb-text-muted) 14%, transparent);
+    position: sticky;
+    left: 0;
+    background: var(--kb-bg);   /* mask scroll-under cells */
+    z-index: 1;
+}
+.vt-cohort-axis-weight {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    font-weight: 400;
+}
+.vt-cohort-cell {
+    padding: 0.5rem 0.6rem;
+    text-align: right;
+    font-size: 0.85rem;
+    color: var(--kb-text-secondary);
+    border-bottom: 1px solid color-mix(in srgb, var(--kb-text-muted) 14%, transparent);
+}
+.vt-cohort-cell.vt-cohort-pos { color: var(--kb-success); }
+.vt-cohort-cell.vt-cohort-neg { color: var(--kb-danger); }
+
+/* Header row: per-player summary stack (name, share, VTSR-T, peak). */
+.vt-cohort-header-row .vt-cohort-axis-cell {
+    border-bottom: 2px solid color-mix(in srgb, var(--kb-text-muted) 22%, transparent);
+}
+.vt-cohort-col-header {
+    padding: 0.4rem 0.6rem;
+    text-align: right;
+    border-bottom: 2px solid color-mix(in srgb, var(--kb-text-muted) 22%, transparent);
+    line-height: 1.25;
+}
+.vt-cohort-col-name {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    font-size: 0.92rem;
+    margin-bottom: 0.15rem;
+}
+.vt-cohort-col-share {
+    color: var(--kb-text-secondary);
+    font-size: 0.78rem;
+}
+.vt-cohort-col-share-detail {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+}
+.vt-cohort-col-rating {
+    color: var(--kb-text-primary);
+    font-size: 0.82rem;
+    margin-top: 0.15rem;
+}
+.vt-cohort-col-rating-label {
+    color: var(--kb-text-muted);
+    font-size: 0.7rem;
+    margin-left: 0.2rem;
+}
+.vt-cohort-col-peak {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+}
+.vt-cohort-prov {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    margin-left: 0.25rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--kb-text-muted) 18%, transparent);
+    color: var(--kb-text-secondary);
+    font-size: 0.65rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+}
+
+/* Headline VTSR-C-prev cell in each column header. Mirrors the sign-coded
+   look of body cells but slightly larger/bolder so it reads as a leaderboard
+   number. Neutral-band (near-zero composite) uses the primary text color. */
+.vt-cohort-col-vtsrc {
+    margin-top: 0.25rem;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.95rem;
+    line-height: 1.15;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--kb-text-muted) 6%, transparent);
+    color: var(--kb-text-primary);
+    cursor: help;
+}
+.vt-cohort-col-vtsrc.vt-cohort-pos { color: var(--kb-success); }
+.vt-cohort-col-vtsrc.vt-cohort-neg { color: var(--kb-danger); }
+.vt-cohort-col-vtsrc-label {
+    color: var(--kb-text-muted);
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    margin-left: 0.25rem;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+
+/* Title tag on the card header ("VTSR-C preview" sub-label). */
+.vt-cohort-title-tag {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--kb-accent) 14%, transparent);
+    color: var(--kb-accent);
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    vertical-align: middle;
+}
+
+/* Preview-status callout banner inside the card body. Compact, low-key,
+   uses muted-text and a tinted accent strip on the left so it reads as
+   informational rather than alarmist. */
+.vt-cohort-callout {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+    margin-bottom: 0.6rem;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--kb-accent) 8%, transparent);
+    border-left: 3px solid color-mix(in srgb, var(--kb-accent) 55%, transparent);
+    color: var(--kb-text-secondary);
+    line-height: 1.4;
+}
+.vt-cohort-callout-icon {
+    color: var(--kb-accent);
+    font-size: 1rem;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+.vt-cohort-callout strong {
+    color: var(--kb-text-primary);
+}
+
+/* Weighted-view sum row: highlighted band that totals each player's
+   weighted axis contributions into mean P_i. */
+.vt-cohort-sum-row .vt-cohort-axis-cell,
+.vt-cohort-sum-row .vt-cohort-cell {
+    background: color-mix(in srgb, var(--kb-text-muted) 8%, transparent);
+    border-top: 2px solid color-mix(in srgb, var(--kb-text-muted) 22%, transparent);
+    border-bottom: none;
+    font-weight: 600;
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+}
+.vt-cohort-sum-row .vt-cohort-axis-cell {
+    color: var(--kb-text-primary);
+}
+
