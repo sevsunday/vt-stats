@@ -24,19 +24,25 @@ todos:
     content: "Categorize into 12 buckets: SPECIAL_CATEGORY first, CONFIG_DROPLIST and abstract-base check second (drop), then iterate CATEGORIES by class signature with Vehicle/Weapon/Pilot/Building/Ordnance/Powerup/Explosion/Mine/Spawn/Misc/Config/Effect order. Config bucket catches *_config.odf vehicle-loadout files via EasyWeaponSlot1/MediumWeaponSlot1/HardWeaponSlot1/ExtremeWeaponSlot1 signatures. Effect catches the visual-only long tail."
     status: pending
   - id: diff_emit
-    content: Implement diff vs existing data/odf.min.json (added/removed/changed counts per-category, verbose name lists), write minified JSON with deterministic key order, print summary with file size
+    content: Implement diff vs existing data/odf.min.json (added/removed/changed counts per-category, verbose name lists), write minified JSON to scripts/odf/odf.min.json (NOT data/odf.min.json - prod is hand-copied), print summary with file size + manual hand-copy hint
     status: pending
   - id: js_crosslinks
     content: "Update js/odf-browser.js shouldLinkToODF(): add Ordnance/Mine/Spawn/Explosion/Misc/Config category entries with their composition-ref field patterns (xpl*, launchOrd, payloadName, objectClass, bombName, bomberType, weaponConfig, etc.) so the new fields render as clickable links instead of plain text"
     status: pending
-  - id: smoke_test
-    content: Run the script, verify counts match expectations (~3221 unique ODFs collected, ~3093 categorized into 12 buckets including 422 Explosion / 68 Mine / 93 Spawn / 41 Misc / ~37 Config / ~150 Effect, ~91 dropped as abstract/droplist/corrupt, file size 25-40 MB)
+  - id: run_build
+    content: Run `python scripts/odf/build_odf_db.py` (no flags) and capture full stdout. Confirm exit code 0 and that scripts/odf/odf.min.json exists. Record actual roots resolved, actual collected/categorized/dropped counts, actual diff vs data/odf.min.json, and any unresolved-ref warnings.
     status: pending
-  - id: regression_check
-    content: Spot-check the canonical recursive-chain examples - gpoptag.odf (Medusa Mortar) shows nested Ordnance.LaunchOrd.ExplGround.ExplosionClass blocks; apserv_vsr.odf appears with its inheritance chain; weapon-ordnance-explosion chains for ivtank's gatstab_c, ispilo's igsnipvsr_c, etc. all fully expanded
+  - id: self_check_counts
+    content: Programmatic post-build self-check (read scripts/odf/odf.min.json with json.load) - assert (a) exactly 12 top-level categories present (Vehicle/Weapon/Pilot/Building/Ordnance/Powerup/Explosion/Mine/Spawn/Misc/Config/Effect), (b) total ODF count between 3000-3300, (c) per-category counts within +/-10% of plan estimates, (d) no category is empty, (e) zero duplicate basenames across categories, (f) every entry has an inheritanceChain field
+    status: pending
+  - id: self_check_recursion
+    content: Programmatic recursive-chain spot checks - assert apserv_vsr.odf is in Powerup with inheritanceChain ["apserv","servicepod"]; gmortar.odf is in Weapon and has Ordnance.ExplGround.ExplosionClass with non-empty damageRadius; gpoptag.odf is in Weapon with the full Ordnance.LaunchOrd.ExplGround.ExplosionClass chain; cvatank_config.odf is in Config; ivtank.odf is in Vehicle with WeaponConfig.EasyWeaponSlot1 inlined. Print each assertion's pass/fail with the actual value seen.
+    status: pending
+  - id: self_check_parity
+    content: Programmatic parity diff against data/odf.min.json - for every overlap basename, assert the original class block names are still present (additions allowed, deletions are bugs). Confirm the 6 known orphans are removed. Confirm the 12 case-collision keys collapsed cleanly (no longer two entries differing only in case). Print a summary of any unexpected deletions for human review.
     status: pending
   - id: consumer_smoke
-    content: Open odf/index.html locally, verify all 12 sidebar tabs render, the new Explosion/Mine/Spawn/Misc/Config/Effect categories populate, the gmortar/gpoptag/etc xpl* fields are now blue cross-links instead of red plain text; verify scripts/process_stats.py still runs to completion against existing sessions (only reads top-level unitName/wpnName so file-size growth is functionally invisible to the pipeline)
+    content: After hand-copying scripts/odf/odf.min.json -> data/odf.min.json, open odf/index.html locally, verify all 12 sidebar tabs render, the new Explosion/Mine/Spawn/Misc/Config/Effect categories populate, the gmortar/gpoptag/etc xpl* fields are now blue cross-links instead of red plain text; verify scripts/process_stats.py still runs to completion against existing sessions (only reads top-level unitName/wpnName so file-size growth is functionally invisible to the pipeline)
     status: pending
 isProject: false
 ---
@@ -100,7 +106,12 @@ BZ2R_DIR_RELATIVE = Path("common") / "BZ2R"
 WORKSHOP_RELATIVE = Path("workshop") / "content" / "624970"  # BZCC appid
 VSR_MOD_ID = "1325933293"  # "Vet Strat Recycler Variant" config mod
 
-OUTPUT_PATH = PROJECT_ROOT / "data" / "odf.min.json"
+# Output goes into the SCRIPT folder, not directly into data/. Hand-copy to
+# data/odf.min.json after reviewing the diff summary. Build is safe-by-default
+# (never touches production data without an explicit cp step).
+SCRIPT_DIR = Path(__file__).resolve().parent              # scripts/odf/
+OUTPUT_PATH = SCRIPT_DIR / "odf.min.json"                  # write target
+PROD_PATH = PROJECT_ROOT / "data" / "odf.min.json"         # read-only diff source
 
 # Categorize order matters: first-match wins. Config and Effect must be LAST so all
 # the better-fitting buckets get first dibs.
@@ -393,7 +404,7 @@ Expected bucket counts (audited, pre-implementation):
 
 ## Stage 6 — Diff and emit
 
-Compare against existing [data/odf.min.json](data/odf.min.json). Print:
+Compare against existing production file at `PROD_PATH = data/odf.min.json` (read-only — never overwritten). Write the new build to `OUTPUT_PATH = scripts/odf/odf.min.json`. Print:
 
 ```
 ODF DB build summary
@@ -431,12 +442,18 @@ ODF DB build summary
     +~2100 added across all categories
     -6     removed (orphans not on disk: ebazooka_vsr_a, ...)
     ~1100  changed (case collisions normalized + noise-filter properties rehydrated on every Vehicle/Building/Pilot/DataPak entry)
-  Wrote: data/odf.min.json (~30 MB minified)
+  Wrote: scripts/odf/odf.min.json (~30 MB minified)
+
+  Next step (manual):
+    Review the diff above. If it looks good, copy the build into production:
+      copy scripts\odf\odf.min.json data\odf.min.json
+    Then verify the ODF browser still loads:
+      start odf\index.html
 ```
 
 Under `--verbose`, the "added/removed/changed" lines expand to full name lists per category, plus per-file parse-stage logs and the unresolved-ref name list.
 
-Write the file with `json.dump(data, f, separators=(",", ":"), sort_keys=False)` to mirror the current minified format. Keys ordered as inserted (categories in `CATEGORIES` declaration order; ODFs within each category sorted alphabetically for deterministic builds).
+Write the file with `json.dump(data, f, separators=(",", ":"), sort_keys=False)` to mirror the current minified format. Keys ordered as inserted (categories in `CATEGORIES` declaration order; ODFs within each category sorted alphabetically for deterministic builds). The production file at `data/odf.min.json` is **never touched** by this script — promotion is a deliberate manual `copy` step after reviewing the build summary.
 
 ## Stage 7 — Wire `js/odf-browser.js` cross-links
 
@@ -470,6 +487,55 @@ const categoryProperties = {
 ```
 
 Also: the `Object.keys(this.data)`-driven sidebar tabs already render the 5 new categories with zero changes. The detail-view dynamic class-block iteration (line 1625, `Object.entries(data)`) already renders any prefixed key (`Ordnance.LaunchOrd.ExplGround.ExplosionClass`) as a normal block. The only JS change needed is the link patterns.
+
+## Stage 8 — Run + self-check (no human in loop)
+
+After the script is implemented, the agent will run it once and validate the output programmatically — no waiting on human review. Three layers of checks, each implemented as a small inline Python block (or scoped helper inside `build_odf_db.py` callable via a hidden `--self-check` subcommand, agent's choice). Failure of any check stops the workflow and reports specifics.
+
+**Layer 1 — Build runs**
+- `python scripts/odf/build_odf_db.py` exits 0
+- `scripts/odf/odf.min.json` exists and is non-empty
+- File size between 15 MB and 60 MB (sanity envelope around the 25-40 MB estimate)
+- Stdout includes the expected "ODF DB build summary" header
+
+**Layer 2 — Structural correctness** (loads the JSON, asserts shape)
+- Exactly **12** top-level categories, names match `[Vehicle, Weapon, Pilot, Building, Ordnance, Powerup, Explosion, Mine, Spawn, Misc, Config, Effect]`
+- Total ODF count is between **3000 and 3300** (envelope around the 3,130 estimate)
+- No category is empty
+- Per-category counts each within ±15% of the table in Stage 5
+- No duplicate basenames across categories (each ODF appears exactly once)
+- Every entry has an `inheritanceChain` array (may be empty `[]`)
+- For each entry: every value is a string (no accidental int/float coercion), all keys are non-empty strings
+- Random sample of 50 entries: at least one class block per entry
+
+**Layer 3 — Recursive-chain spot checks** (the meat — confirms expansion actually worked)
+- `apserv_vsr.odf` is in **Powerup**, has `inheritanceChain` ending with `["apserv", "servicepod"]`
+- `gmortar.odf` is in **Weapon**, has `Ordnance.ExplGround.ExplosionClass` block with non-empty `damageRadius`/`damageValue`
+- `gpoptag.odf` is in **Weapon**, has the full chain `Ordnance.LaunchOrd.ExplGround.ExplosionClass` (Medusa Mortar — secondary ordnance with explosions on the launched popper)
+- `gflare.odf` is in **Powerup**, contains a `Powerup.DispenserObj.<MineClass-or-FlareMineClass>` block (dispenser-deployed mine)
+- `cvatank_config.odf` is in **Config**, has `EasyWeaponSlot1`/`MediumWeaponSlot1`/`HardWeaponSlot1`/`ExtremeWeaponSlot1` blocks
+- `ivtank.odf` is in **Vehicle**, has `WeaponConfig.EasyWeaponSlot1` (or similar prefixed) block from the inlined config
+- The 6 known orphans (`ebazooka_vsr_a/c.odf`, `egbzka_vsr_a/c.odf`, `eggren_vsr.odf`, `egrenade_vsr.odf`) are NOT present in any category
+- The 12 case-collision keys: pick one from a known-bad ODF, confirm only one casing variant remains
+- Pick 3 random Vehicle entries: confirm noise-filter properties (`lightHard1`, `geometryName`, `soundThrust`) are now present (rehydration check)
+
+**Layer 4 — Diff parity** (against `data/odf.min.json`)
+- For every overlap basename, every original class block name is still present in the new build (deletions = bug)
+- New build's overlap entries have **>=** the property count of the old (additions OK, deletions = bug)
+- All entries categorized in old data are still categorized in new data (or moved to a more-specific bucket)
+- Print top 10 entries with the largest property-count delta as `~changed` examples
+
+**Output of self-check**: a one-screen summary printed by the agent
+```
+Self-check results:
+  L1 Build runs              PASS  (28.4 MB, exit 0, 4.2s)
+  L2 Structural correctness  PASS  (12 cats, 3127 ODFs, all within +/-15%)
+  L3 Recursive chains        PASS  (8/8 spot checks)
+  L4 Diff parity             PASS  (1119 overlap, 0 deletions, 6 orphans removed)
+Ready for hand-copy: copy scripts\odf\odf.min.json data\odf.min.json
+```
+
+If any layer fails, the agent stops, reports the specific assertion that failed, dumps the actual offending data, and asks the user how to proceed. No silent fixes — failures are surfaced immediately.
 
 ## Acceptance checks (informal)
 
