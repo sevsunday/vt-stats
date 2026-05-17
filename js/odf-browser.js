@@ -331,7 +331,7 @@ class ODFBrowser {
         `;
 
         const tabsHTML = `
-            <ul class="nav nav-underline small nav-justified" id="categoryTabs" role="tablist">
+            <ul class="nav nav-pills gap-1 mb-2 flex-wrap" id="categoryTabs" role="tablist">
                 ${Object.keys(this.data).map((category, idx) => `
                     <li class="nav-item" role="presentation">
                         <button class="nav-link ${idx === 0 ? 'active' : ''}"
@@ -542,9 +542,9 @@ class ODFBrowser {
             const tab = document.getElementById(`sidebar-tab-${category}`);
             const isActiveCategory = tab.classList.contains('active');
 
-            tab.innerHTML = count > 0 ?
-                `${category} <div><span class="badge ${isActiveCategory ? 'vt-odf-badge-active' : 'vt-odf-badge'}">${count}</span></div>` :
-                category;
+            tab.innerHTML = count > 0
+                ? `${category} <span class="badge ms-1 ${isActiveCategory ? 'vt-odf-badge-active' : 'vt-odf-badge'}">${count}</span>`
+                : category;
         });
 
         if (!firstExactMatch) {

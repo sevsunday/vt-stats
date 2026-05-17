@@ -530,24 +530,38 @@
     }
 }
 
-/* Sidebar #categoryTabs uses Bootstrap's nav-underline; that variant isn't
- * themed project-wide, so override its --bs-* CSS vars locally to align
- * with our --kb-* palette. */
-#categoryTabs.nav-underline {
-    --bs-nav-underline-link-active-color: var(--kb-primary);
-    --bs-nav-underline-border-color: var(--kb-primary);
+/* Sidebar #categoryTabs renders as compact, theme-tokened nav-pills.
+ * Drops nav-justified equal-width so short labels (Mine, Misc) stop
+ * wasting space and long ones (Ordnance, Building) stop crowding, then
+ * wraps to as many rows as needed at the current sidebar width. */
+#categoryTabs.nav-pills {
+    --bs-nav-pills-link-active-bg: var(--kb-primary);
+    --bs-nav-pills-link-active-color: var(--kb-primary-fg);
+    --bs-nav-pills-border-radius: 999px;
 }
 
-#categoryTabs.nav-underline .nav-link {
+#categoryTabs.nav-pills .nav-link {
+    padding: 0.2rem 0.55rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
     color: var(--kb-text-secondary);
+    border: 1px solid var(--kb-border-subtle);
+    transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
-#categoryTabs.nav-underline .nav-link:hover {
+#categoryTabs.nav-pills .nav-link:hover {
     color: var(--kb-text-primary);
+    background: var(--kb-bg-muted);
 }
 
-#categoryTabs.nav-underline .nav-link.active {
-    color: var(--kb-primary);
+#categoryTabs.nav-pills .nav-link.active {
+    color: var(--kb-primary-fg);
+    border-color: var(--kb-primary);
+}
+
+#categoryTabs.nav-pills .nav-link.active:hover {
+    color: var(--kb-primary-fg);
+    background: var(--kb-primary);
 }
 
 /* Right-click context menu (Bug 6 — moved out of the seed's
