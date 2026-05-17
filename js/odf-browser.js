@@ -289,6 +289,21 @@ class ODFBrowser {
         `;
     }
 
+    renderNavTotal() {
+        const el = document.getElementById('navOdfTotal');
+        if (!el || !this.odfIndex) return;
+        const total = this.odfIndex.size;
+        const breakdown = Object.entries(this.data)
+            .map(([cat, items]) => `${cat}: ${Object.keys(items).length.toLocaleString()}`)
+            .join('<br>');
+        el.textContent = `${total.toLocaleString()} ODFs`;
+        el.setAttribute('title', breakdown);
+        el.removeAttribute('hidden');
+        if (window.bootstrap?.Tooltip) {
+            bootstrap.Tooltip.getOrCreateInstance(el, { customClass: 'vt-odf-popover' });
+        }
+    }
+
     async loadData() {
         try {
             const response = await fetch('../data/odf.min.json', { cache: 'no-store' });
@@ -302,6 +317,7 @@ class ODFBrowser {
                 }
             }
 
+            this.renderNavTotal();
             this.initializeSidebar();
             return true;
         } catch (error) {
