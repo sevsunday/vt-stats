@@ -1922,6 +1922,54 @@ body::before {
     color: var(--kb-faction-f);
 }
 
+/* Campod + Partial row badges (v2.5). Sit inside the Player Leaderboard
+   "Player" cell next to the player name when the row is excluded from
+   VTSR-T and career stats for one of two reasons:
+     - Campod : spent >25% of match wall-clock in a camera-pod ship.
+     - Partial: event-stream presence window covered <75% of match
+                duration (late joiner or mid-match disconnect).
+   Both flags are pipeline-emitted; the row stays visible in the
+   per-match leaderboard for transparency but is de-emphasized via the
+   .vt-row-* row classes below. Tooltips carry the actual share /
+   presence numbers. */
+.vt-campod-badge,
+.vt-partial-badge {
+    display: inline-block;
+    padding: 0.15em 0.55em;
+    margin-left: 0.4em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+    background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+    border: 1px solid var(--kb-border);
+    border-radius: 999px;
+    vertical-align: middle;
+    cursor: help;
+}
+
+/* Partial badge gets the warning accent so the two states are visually
+   distinguishable at a glance. */
+.vt-partial-badge {
+    color: var(--kb-warning);
+    border-color: color-mix(in oklab, var(--kb-warning) 50%, var(--kb-border));
+    background: color-mix(in oklab, var(--kb-warning) 12%, transparent);
+}
+
+/* De-emphasize excluded leaderboard rows so users immediately see the
+   real ratees. Hover restores most of the opacity for readability when
+   inspecting the row. */
+.vt-row-campod,
+.vt-row-partial {
+    opacity: 0.55;
+}
+
+.vt-row-campod:hover,
+.vt-row-partial:hover {
+    opacity: 0.9;
+}
+
 /* Winner badge — sits next to "Kill Feed" in the Combat-tab card header.
    Three visual states keyed by data-decided-by:
      - clean      : decisive win (recycler + factory of the loser are dead,

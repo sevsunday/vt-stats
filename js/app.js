@@ -3699,6 +3699,8 @@
           <span class="vt-profile-name">${esc(player.name)}</span>
           <span class="badge ${fBadge}">Team ${player.faction}</span>
           <span class="small" style="color:var(--kb-text-muted);">Slot ${player.slot}</span>
+          ${player.is_campod ? '<span class="vt-campod-badge" data-bs-toggle="tooltip" title="Spent &gt;25% of the match in a camera-pod — excluded from VTSR-T and career stats">Campod</span>' : ''}
+          ${player.is_low_activity ? '<span class="vt-partial-badge" data-bs-toggle="tooltip" title="Event-stream presence covered &lt;75% of match duration — excluded from VTSR-T and career stats">Partial</span>' : ''}
         </div>
         <div class="d-flex flex-wrap gap-4 mb-3">
           <div class="stat-card"><div class="stat-value">${fmt(ps.dealt)}</div><div class="stat-label">Dealt</div></div>
@@ -4188,6 +4190,29 @@
       const nickSub = r.in_game_nick
         ? `<small class="vt-nick-sub">@${esc(r.in_game_nick)}</small>`
         : '';
+      // v2.5: spectator-style exclusion badges. is_campod / is_low_activity
+      // are pipeline-set; supporting fields (campod_share,
+      // presence_window_sec) power the hover tooltips. Excluded rows
+      // also get a row-level class for 55% opacity de-emphasis (see
+      // css/vtstats-theme.css). Pure-presentation -- ELO + career
+      // aggregator already omitted these rows by the time we get here,
+      // we're just signaling WHY they don't move the needle.
+      const campodPct = ((r.campod_share || 0) * 100).toFixed(0);
+      const presenceSec = r.presence_window_sec || 0;
+      const presenceMin = Math.floor(presenceSec / 60);
+      const presenceRem = Math.round(presenceSec % 60);
+      const durationSec = (currentData && currentData.match && currentData.match.duration_sec) || 0;
+      const durationMin = Math.floor(durationSec / 60);
+      const durationRem = Math.round(durationSec % 60);
+      const campodBadge = r.is_campod
+        ? ` <span class="vt-campod-badge" data-bs-toggle="tooltip" title="Spent ${campodPct}% of match in a camera-pod — excluded from VTSR-T and career stats">Campod</span>`
+        : '';
+      const partialBadge = r.is_low_activity
+        ? ` <span class="vt-partial-badge" data-bs-toggle="tooltip" title="Only present for ${presenceMin}:${String(presenceRem).padStart(2,'0')} of ${durationMin}:${String(durationRem).padStart(2,'0')} — excluded from VTSR-T and career stats">Partial</span>`
+        : '';
+      const rowClass = r.is_campod
+        ? 'vt-row-campod'
+        : (r.is_low_activity ? 'vt-row-partial' : '');
       // v2.3: compact `TOTAL (PvP/PvE)` chip rendering on Kills/Deaths.
       // Sort behavior unchanged (sort key still `kills` / `deaths`,
       // i.e. totals). Tooltip surfaces the explicit split + the
@@ -4197,9 +4222,9 @@
       const dCell = killsDeathsChipCell(r.deaths || 0, ps.pvp_deaths, ps.pve_deaths, 'deaths');
       const eloIdx  = getEloDeltaIndexForCurrentMatch();
       const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
-      return `<tr>
+      return `<tr class="${rowClass}">
         <td>${i + 1}</td>
-        <td class="fw-semibold">${esc(r.name)}${nickSub}</td>
+        <td class="fw-semibold">${esc(r.name)}${nickSub}${campodBadge}${partialBadge}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
         <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>

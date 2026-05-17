@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 15
+PIPELINE_VERSION = 16
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -162,6 +162,33 @@ FACTORY_ODFS = frozenset({
     "fbkiln_vsr.odf",   # Scion Kiln (base)
     "fbforg_vsr.odf",   # Scion Forge (upgrade)
 })
+
+# Player-flyable camera-pod ODFs. Spectator-style vehicles -- BZ2 lets a
+# player jump into one to observe the battlefield without participating
+# (zero damage, zero kills, maxHealth=0 so they can't be killed). Rows
+# whose loadout share of these ships exceeds CAMPOD_MAX_SHARE (measured
+# against match.duration_sec wall-clock) are flagged with is_campod=True
+# so scripts/elo.py + the All Matches aggregator exclude them. If a
+# future BZCC mod adds another player-flyable camera-pod variant, extend
+# this set. The Weapon/gcamr.odf entry (grapple-cam) and Misc/apcamr.odf
+# entry (deployable artifact) in the ODF DB are intentionally NOT
+# included -- they have different class structures and are never flown
+# by players.
+CAMPOD_ODFS = frozenset({
+    "evcamr_vsr.odf",     # Scion campod
+    "fvcamr_vsr.odf",     # Hadean campod
+    "ivcamr_vsr.odf",     # ISDF campod
+    "camerapod_vsr.odf",  # generic campod
+})
+CAMPOD_MAX_SHARE = 0.25  # > 25% of match wall-clock in campod => is_campod=True
+
+# Late-joiner / early-disconnect gate. A player's event-stream presence
+# window (first_event_tick -> last_event_tick) must cover at least this
+# fraction of match.duration_sec to be eligible for VTSR-T. Catches both
+# late joins and mid-match DCs with one window check. Does NOT penalize
+# died-often players whose presence window is full but active_seconds is
+# short -- their dead time is correctly NOT a participation deficit.
+LOW_ACTIVITY_MIN_PRESENCE = 0.75
 
 # First-letter -> faction. Reliable for vehicles, structures, and pilots --
 # every BZCC unit ODF in those categories carries a faction prefix as the
@@ -2137,6 +2164,47 @@ def load_known_players(path=STEAMID_TO_NAME_PATH):
     return known
 
 
+def _is_campod_row(loadout, duration_sec):
+    """Return (is_campod, campod_share).
+
+    `is_campod` is True iff > CAMPOD_MAX_SHARE of match wall-clock was
+    spent in camera-pod ships. Denominator is `match.duration_sec`, not
+    the player's `active_seconds`, so a player who sat in a campod for
+    25%+ of the match is flagged regardless of how often they died /
+    respawned during the rest of the time.
+    """
+    if not loadout or duration_sec <= 0:
+        return False, 0.0
+    ships = loadout.get("ships") or {}
+    if not ships:
+        return False, 0.0
+    campod_sec = sum(
+        (s.get("seconds", 0.0) or 0.0)
+        for odf, s in ships.items()
+        if odf in CAMPOD_ODFS
+    )
+    share = campod_sec / duration_sec
+    return share > CAMPOD_MAX_SHARE, share
+
+
+def _is_low_activity_row(first_tick, last_tick, tick_rate, duration_sec):
+    """Return (is_low_activity, presence_sec).
+
+    `is_low_activity` is True iff the player's event-stream presence
+    window (first_event_tick -> last_event_tick) covers less than
+    LOW_ACTIVITY_MIN_PRESENCE of match.duration_sec. Catches both late
+    joiners (large first_tick) and early disconnects (small last_tick).
+
+    Returns (False, duration_sec) when first_tick is None (no events
+    seen for this player at all -- shouldn't happen for a real
+    leaderboard row, but be safe).
+    """
+    if first_tick is None or last_tick is None or duration_sec <= 0 or tick_rate <= 0:
+        return False, float(duration_sec or 0)
+    presence_sec = max(0.0, (last_tick - first_tick) / tick_rate)
+    return (presence_sec / duration_sec) < LOW_ACTIVITY_MIN_PRESENCE, presence_sec
+
+
 def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2):
     """Process a single match session into pre-computed stats.
 
@@ -2377,6 +2445,27 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # appears in the output -- consumers see the actual ships.
     player_ship_ticks = defaultdict(lambda: defaultdict(int))
 
+    # ----- Per-player event-stream presence window (v2.5) -----
+    # first / last tick where this Steam64 appeared in ANY event branch
+    # (UpdateTick, DamageDealt/Received, BulletHit, UnitDestroyed,
+    # PickupPowerup, UnitSniped, PlayerState). Feeds _is_low_activity_row()
+    # at leaderboard-build time so late joiners (large first_event_tick)
+    # and mid-match disconnects (small last_event_tick) get flagged as
+    # is_low_activity=True and excluded from VTSR-T by scripts/elo.py.
+    # NOT downsampled -- we want the literal first/last event tick.
+    player_first_tick = {}
+    player_last_tick = {}
+
+    def _touch(s64, tick):
+        if not s64:
+            return
+        ft = player_first_tick.get(s64)
+        if ft is None or tick < ft:
+            player_first_tick[s64] = tick
+        lt = player_last_tick.get(s64)
+        if lt is None or tick > lt:
+            player_last_tick[s64] = tick
+
     # Running "what ship is each Steam64 currently in" map. Updated every
     # UpdateTick; queried on every BulletInit / BulletHit / DamageDealt /
     # UnitDestroyed event with a player shooter (or victim, for deaths)
@@ -2477,6 +2566,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             shooter = bh.shooter
             odf = bh.ordnance_odf or ""
             is_pvp_hit = shooter > 0 and bh.victim > 0
+            # v2.5: presence-window tracking for is_low_activity gate.
+            _touch(shooter, bh.tick)
             # BulletHit distance capture (v2-only field on the wire).
             # `bh.distance_to_target` is 0.0 on v1 (field absent in the
             # legacy proto -- protobuf returns default), so the `>0` gate
@@ -2609,6 +2700,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     i += 1
                 de_victim_odf_event = ""
 
+            # v2.5: presence-window tracking for is_low_activity gate.
+            # Touched on BOTH sides (shooter + victim) per plan; _touch
+            # no-ops when the s64 is 0/empty so sentinel pairs (which
+            # carry shooter=0 / victim=0) don't pollute the window.
+            _touch(de_shooter, de_tick)
+            if has_paired_dr:
+                _touch(de_victim, de_tick)
+
             # Sentinel filter: DAMAGE_TYPE_UNKNOWN force-kill events have
             # amount > 1e6. Skip before any accumulator touches the values.
             # v1: either DD or DR amount triggers (in practice they're
@@ -2729,6 +2828,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 max_tick = ud.tick
             if ud.tick < min_tick:
                 min_tick = ud.tick
+
+            # v2.5: presence-window tracking for is_low_activity gate.
+            # _touch no-ops on 0/empty s64 so deployable/powerup/world
+            # destructions without a player killer or victim don't
+            # pollute anyone's window.
+            _touch(ud.killer, ud.tick)
+            _touch(ud.victim, ud.tick)
 
             victim_lower = (ud.victim_odf or "").lower()
 
@@ -2931,6 +3037,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # output without changes. See _sniper_investigation/DIAGNOSIS.txt.
             sniper_s64 = slot_to_s64.get(us.shooter_team, 0)
             victim_s64 = slot_to_s64.get(us.victim_team, 0)
+            # v2.5: presence-window tracking for is_low_activity gate.
+            _touch(sniper_s64, us.tick)
+            _touch(victim_s64, us.tick)
             sniper_name = nick_for_s64(sniper_s64) if sniper_s64 else f"Team {us.shooter_team}"
             victim_name = nick_for_s64(victim_s64) if victim_s64 else f"Team {us.victim_team}"
             # Forward-compat sanity: in fixed-collector sessions, us.shooter
@@ -2965,6 +3074,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 max_tick = pp.tick
             if pp.tick < min_tick:
                 min_tick = pp.tick
+            # v2.5: presence-window tracking for is_low_activity gate.
+            _touch(pp.picker, pp.tick)
             # match_has_pickup_data stays loose: True on the first PP event
             # regardless of accept/reject, because existing UI gates treat
             # this as "match recorded by a new-schema collector," not "match
@@ -3028,6 +3139,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 s64 = ps.player
                 if s64 <= 0 or s64 not in s64_to_nick:
                     continue
+                # v2.5: presence-window tracking for is_low_activity gate.
+                # UpdateTick is the densest player-presence signal -- every
+                # tick where the player is in the lobby (alive or dead in a
+                # ship) shows up here, so this covers most of the window
+                # bookends. Damage / kill / snipe / pickup touches above
+                # patch the edges for events that pre-date or post-date
+                # the first/last UpdateTick we see for this player.
+                _touch(s64, tick)
                 if ps.odf:
                     all_unit_odfs.add(ps.odf)
                     # v2.3: keep s64_to_current_odf updated every tick so
@@ -3462,6 +3581,23 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     key=lambda r: (-r["time_seconds"], r["ship"])
                 )
 
+        # v2.5: spectator-style exclusion flags. is_campod fires when
+        # the player spent > CAMPOD_MAX_SHARE of match wall-clock in a
+        # camera-pod ship; is_low_activity fires when the event-stream
+        # presence window covered < LOW_ACTIVITY_MIN_PRESENCE of match
+        # duration. scripts/elo.py and js/all-matches-aggregator.js skip
+        # rows where either flag is True -- pure omission, no penalty.
+        # Supporting `campod_share` and `presence_window_sec` are
+        # surfaced too so the UI can render hover-tooltips with actual
+        # numbers ("28% of match in campod" / "joined 4:32 into
+        # 20:00").
+        is_campod_flag, campod_share_val = _is_campod_row(loadout_block, duration_sec)
+        _ft = player_first_tick.get(s64) if s64 else None
+        _lt = player_last_tick.get(s64) if s64 else None
+        is_low_flag, presence_sec_val = _is_low_activity_row(
+            _ft, _lt, tick_rate, duration_sec
+        )
+
         leaderboard.append({
             "player_id": name,
             "name": name,
@@ -3476,6 +3612,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Carried into the per-match JSON so scripts/elo.py
             # compute_elo() can apply the v2.4 commander role adjustment.
             "is_commander": slot in (1, 6),
+            # v2.5: spectator-style exclusion flags + supporting metrics.
+            # See _is_campod_row / _is_low_activity_row up top.
+            "is_campod":           is_campod_flag,
+            "is_low_activity":     is_low_flag,
+            "campod_share":        round(campod_share_val, 4),
+            "presence_window_sec": round(presence_sec_val, 1),
             "steam64": str(s64) if s64 else None,
             "faction": faction,
             "kills": kills,
@@ -3800,13 +3942,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # (`personal.pvp_kills` / `pve_kills` / `pvp_deaths` /
             # `pve_deaths` / `pvp_shots_hit` / `pvp_accuracy`,
             # `weapon_breakdown[w].pvp_hits`, per-player `loadout`,
-            # `per_class_combat`); v5 (this version) adds the proto v2
-            # capture fields: `match.proto_schema_version`,
-            # `match.shutdown_requested`, `match.bullet_hit_distance`.
-            # Absence of v5 fields = legacy data; v5 fields are
-            # null-safe / capture-only and do not change the rendering
-            # contract.
-            "schema_version": 5,
+            # `per_class_combat`); v5 added the proto v2 capture fields:
+            # `match.proto_schema_version`, `match.shutdown_requested`,
+            # `match.bullet_hit_distance`; v6 (this version) adds the
+            # spectator-style exclusion flags + supporting metrics on
+            # each leaderboard row: `is_campod`, `is_low_activity`,
+            # `campod_share`, `presence_window_sec`. scripts/elo.py and
+            # js/all-matches-aggregator.js skip rows where either flag
+            # is True (pure omission, no penalty). Absence of v6 fields
+            # = legacy data; consumers default both flags to False and
+            # treat the row as a normal thug.
+            "schema_version": 6,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
@@ -3996,6 +4142,13 @@ def _extract_contribution(match_data):
             "slot":           slot,
             "team":           p.get("faction"),
             "is_commander":   slot in (1, 6),
+            # v2.5: spectator-style exclusion flags. Mirror the per-match
+            # leaderboard's two booleans onto contribution rows so the
+            # JS aggregator can skip them in career rollups. Default to
+            # False on legacy / pre-v6 rows so mixed-corpus reads pass
+            # through unchanged.
+            "is_campod":       p.get("is_campod", False),
+            "is_low_activity": p.get("is_low_activity", False),
             "dealt":          round(personal.get("dealt", 0), 1),
             "received":       round(personal.get("received", 0), 1),
             "pvp_dealt":      round(personal.get("pvp_dealt", 0), 1),

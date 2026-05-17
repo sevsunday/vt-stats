@@ -17,7 +17,7 @@ Per-match update:
     E_i    = 2 / (1 + 10^((Rbar_i - R^T_i) / S_R)) - 1
     dR     = K_i * S_O * (P_i - E_i),  scaled by L * phi(R^T_i) when negative
 
-v2.4 (current): per-match commander role adjustment. For each commander
+v2.4: per-match commander role adjustment. For each commander
 match-row, post-clip per-axis z-scores get shifted by the negation of a
 typical-commander baseline (then re-clipped to [-1, +1]). 4 audit-derived
 priors apply with shrinkage strength 30; 2 hand-tuned priors are locked
@@ -25,6 +25,21 @@ priors apply with shrinkage strength 30; 2 hand-tuned priors are locked
 Math: for commander row i and shifted axis a:
     z'_{i,a} = clip(clip(z_{i,a}, -2, +2) / 2  -  baseline[a],  -1, +1)
 For thug rows or omitted axes, z'_{i,a} = clip(z_{i,a}, -2, +2) / 2.
+
+v2.5 (current): row-level exclusion gates. Two new boolean flags on each
+per-match leaderboard row (set by scripts/process_stats.py): ``is_campod``
+(player spent > 25% of match wall-clock in a camera-pod ship) and
+``is_low_activity`` (event-stream presence window covered < 75% of match
+duration -- catches late joiners AND mid-match disconnects). Rows where
+either flag is True are omitted from the rated lobby before z-scoring:
+no per-axis contribution, no delta entry in ``elo_history``, no
+``matches_played`` increment, no rating change at all for this match.
+Pure omission, zero penalty -- the match simply did not happen for the
+excluded player rating-wise. Two new pool-level counters on
+``elo_current.json`` (``rows_excluded_campod`` /
+``rows_excluded_low_activity``) make the gates auditable. No algorithm
+changes: axis weights, priors, K-factor, loss aversion, floor taper,
+shrinkage strengths, alpha-blend all unchanged.
 
 Matches with ``player_count < 6`` or ``duration_sec < 240`` don't update
 ratings; they emit a history row with ``match_excluded: true`` so
@@ -143,7 +158,7 @@ COMMANDER_BASELINE_LOCKED_AXES = {"target_lock_pct", "pve_share"}
 
 # Bump if elo_current.json / elo_history.json shape changes (the JS
 # reader checks this).
-ELO_SCHEMA_VERSION = 5
+ELO_SCHEMA_VERSION = 6
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +516,20 @@ def compute_performance_index(
     Audit invariant: for available axes,
     ``Σ_axis (axis_z[axis] * weight'_axis) ≈ per_player_P[i]``.
     """
-    lobby = match_data.get("leaderboard") or []
+    lobby_raw = match_data.get("leaderboard") or []
+    # v2.5: exclude campod-heavy + low-activity rows from the rated lobby
+    # so spectator-style and late-join / mid-match-DC appearances don't
+    # dock real players' VTSR-T and don't deflate the lobby z-score
+    # baseline. Flags are set by scripts/process_stats.py (see
+    # CAMPOD_MAX_SHARE / LOW_ACTIVITY_MIN_PRESENCE up there). Pure
+    # omission semantics -- excluded players get no delta entry in
+    # elo_history, no matches_played bump, no rating change at all for
+    # this match. Legacy rows without the flags pass through unchanged
+    # (.get() returns None which is falsy).
+    lobby = [
+        p for p in lobby_raw
+        if not p.get("is_campod") and not p.get("is_low_activity")
+    ]
     if not lobby:
         return [], [], [], []
 
@@ -649,12 +677,28 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     excluded_low_player_count = 0
     excluded_short_duration   = 0
     excluded_no_winner        = 0  # reserved (alpha-blend slot); always 0 in v1
+    # v2.5: per-row exclusion counters (independent of match-level
+    # exclusions above). A row hitting both flags is counted in both
+    # counters but excluded once from the rated lobby either way.
+    # Counted across the FULL corpus (including rows in matches that
+    # also got match-level-excluded) so the counters give total
+    # visibility into how often each gate fired.
+    excluded_campod_rows       = 0
+    excluded_low_activity_rows = 0
 
     for md in matches:
         m = md.get("match") or {}
         lobby = md.get("leaderboard") or []
         match_id = m.get("id", "")
         match_date = m.get("date", "")
+
+        # v2.5: tally per-row exclusion counters BEFORE the match-level
+        # gate so the totals cover the entire corpus regardless of
+        # whether the parent match itself was rated. compute_performance_index
+        # applies the same skip filter downstream -- this is bookkeeping
+        # only.
+        excluded_campod_rows       += sum(1 for p in lobby if p.get("is_campod"))
+        excluded_low_activity_rows += sum(1 for p in lobby if p.get("is_low_activity"))
 
         # Player count < 6 OR duration < 240s → emit excluded history row, no rating change.
         excluded = False
@@ -866,6 +910,12 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         "matches_excluded_low_player_count": excluded_low_player_count,
         "matches_excluded_short_duration":   excluded_short_duration,
         "matches_excluded_no_winner":        excluded_no_winner,
+        # v2.5: row-level (not match-level) exclusion counters. A row
+        # hitting both flags is counted in both keys. Key naming
+        # diverges from matches_excluded_* intentionally so consumers
+        # can tell row counts from match counts at a glance.
+        "rows_excluded_campod":              excluded_campod_rows,
+        "rows_excluded_low_activity":        excluded_low_activity_rows,
         "weights":            dict(THUG_WEIGHTS),
         # v2.4: commander role-adjustment metadata. Audit-derived priors
         # blend with the running mean as the corpus grows; locked priors

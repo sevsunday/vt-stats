@@ -4,43 +4,43 @@ overview: Detect players who spent more than 25% of a match in a camera-pod (cam
 todos:
   - id: campod-constant
     content: Add CAMPOD_ODFS + CAMPOD_MAX_SHARE constants and _is_campod_row() helper to scripts/process_stats.py
-    status: pending
+    status: completed
   - id: first-last-tick
     content: Track first_event_tick / last_event_tick per steam64 across the event loop in scripts/process_stats.py
-    status: pending
+    status: completed
   - id: low-activity-helper
     content: Add LOW_ACTIVITY_MIN_PRESENCE constant and _is_low_activity_row() helper using first/last tick fields
-    status: pending
+    status: completed
   - id: leaderboard-flags
     content: Emit is_campod, is_low_activity, presence_window_sec, campod_share fields on each leaderboard row
-    status: pending
+    status: completed
   - id: contribution-flags
     content: Mirror is_campod + is_low_activity into _extract_contribution() output
-    status: pending
+    status: completed
   - id: pipeline-version
     content: Bump PIPELINE_VERSION 15 -> 16 and match.schema_version 5 -> 6; extend the doc-comment block at lines 3799-3808 with a v6 stanza describing the new campod / low_activity fields
-    status: pending
+    status: completed
   - id: elo-filter
     content: Filter rows where is_campod or is_low_activity from lobby in scripts/elo.py compute_performance_index
-    status: pending
+    status: completed
   - id: elo-counters
     content: Add rows_excluded_campod + rows_excluded_low_activity counters to elo_current.json; bump ELO_SCHEMA_VERSION 5 -> 6
-    status: pending
+    status: completed
   - id: aggregator-skip
     content: Skip is_campod / is_low_activity rows in js/all-matches-aggregator.js per-match loop
-    status: pending
+    status: completed
   - id: ui-badges
     content: Add Campod + Partial badges and row classes in js/app.js renderLeaderboard (and profile panel)
-    status: pending
+    status: completed
   - id: css
     content: Add .vt-campod-badge, .vt-partial-badge, .vt-row-campod, .vt-row-partial styles to css/vtstats-theme.css
-    status: pending
+    status: completed
   - id: docs
     content: Update docs/DATA_DICTIONARY.md, DEVELOPER_GUIDE.md, project-overview.mdc, AGENTS.md
-    status: pending
+    status: completed
   - id: rerate
     content: Run python scripts/process_stats.py to re-rate the corpus and verify counters
-    status: pending
+    status: completed
 isProject: false
 ---
 
