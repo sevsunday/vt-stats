@@ -4,55 +4,55 @@ overview: Single-script rebuild of [data/odf.min.json](data/odf.min.json) with m
 todos:
   - id: scaffold_safety
     content: "Scaffold scripts/odf/build_odf_db.py: docstring, imports (incl. psutil with clear ImportError), all top-of-file constants (CATEGORIES x12, COMPOSITION_REFS x42, SPECIAL_CATEGORY, CONFIG_DROPLIST, MAX_REF_DEPTH=4, RSS_HARD_CAP_BYTES=2GB, STAGE4_WALLCLOCK_CAP_S=90, PER_ODF_BLOCK_VALVE=5000), argparse with --verbose/--dry-run/--no-deps/--steam-base/--limit/--forensic/--self-check"
-    status: pending
+    status: completed
   - id: watchdog_infra
     content: Implement start_rss_watchdog() daemon thread (250ms poll psutil.Process().memory_info().rss, 2GB hard abort) + abort_with_dump() helper (prints reason + current ODF + settled count + max depth + top-3 ODFs by block count, then os._exit(2)). Wired into main() immediately after argparse so every subsequent run has it armed.
-    status: pending
+    status: completed
   - id: psutil_dep
     content: Add psutil to requirements.txt
-    status: pending
+    status: completed
   - id: stage0_resolve_roots
     content: "Stage 0: detect_steam_base() (winreg HKLM Wow6432Node fallback to plain), parse_mod_ini(), get_mod_label(), resolve_root_dirs() (steam_override -> winreg -> fallback; validate BZ2R + VSR INI; parse [WORKSHOP].assetDependencies; build ordered (path, label) tuples; --no-deps mode)"
-    status: pending
+    status: completed
   - id: stage1_collect
     content: "Stage 1: walk_and_collect(roots) - rglob *.odf per root, key by lowercased basename, last-wins dedup, deterministic sort within root"
-    status: pending
+    status: completed
   - id: stage2_parse
     content: "Stage 2: strip_comment_to_eol() (// AND ; equivalent, quote-aware) + parse_odf_text() (sections [Name], key=value, outer-quote strip, case-insensitive last-wins property keys, all values strings, NO noise filter)"
-    status: pending
+    status: completed
   - id: stage3_inheritance
     content: "Stage 3: find_class_label() + deep_merge() + process_inheritance() - walk classLabel chain, merge parent into child (child wins), build inheritanceChain array, cycle protection"
-    status: pending
+    status: completed
   - id: stage4_safeguarded
     content: "Stage 4: expand_refs() + expand_all_refs() with SHARED-REFERENCE assignment (blocks[new_key] = block_props, NO dict copy), MAX_REF_DEPTH=4, per-ODF block-count valve (>5000 -> break + settle + warn), wall-clock deadline check (time.monotonic > deadline -> abort_with_dump), settled memo, visited cycle protection, unitName backfill special case"
-    status: pending
+    status: completed
   - id: stage5_categorize
     content: "Stage 5: categorize_corpus() - SPECIAL_CATEGORY first, CONFIG_DROPLIST drop, abstract-base check (only [GameObjectClass] -> drop), no-section drop, iterate CATEGORIES in order with first-match-wins, Effect catchall"
-    status: pending
+    status: completed
   - id: stage6_diff_emit
     content: "Stage 6: load_existing_min_json(PROD_PATH read-only), diff_against_existing() (added/removed/changed counts per category, name lists with --verbose), write_output() to scripts/odf/odf.min.json (NEVER data/odf.min.json), emit_summary() with manual hand-copy hint"
-    status: pending
+    status: completed
   - id: stage7_js_crosslinks
     content: "Stage 7: update js/odf-browser.js shouldLinkToODF() categoryProperties - add Ordnance/Mine/Spawn/Explosion/Misc/Config category entries with composition-ref field patterns + weaponConfig on Vehicle + mineName on Weapon"
-    status: pending
+    status: completed
   - id: stage8_forensic_and_selfcheck
     content: "Stage 8: --forensic [N] mode (hand-picked slice of 6 deep weapons + top 5 referenced explosions + random fill, tracemalloc.start(25), per-ref-pattern key-add counter, per-ODF block-count tracking, max prefix depth, forensic report, sys.exit(0)). --self-check mode (run_self_check Layers 1-4: structural correctness, recursive-chain spot checks, parity diff, file-size envelope)"
-    status: pending
+    status: completed
   - id: run_forensic
     content: "Execute: python scripts/odf/build_odf_db.py --forensic. Verify peak RSS < 500 MB, capture forensic report, confirm shared-ref hypothesis (or surface a different bottleneck if not)"
-    status: pending
+    status: completed
   - id: run_limit200
     content: "Execute: python scripts/odf/build_odf_db.py --limit 200. Verify peak RSS < 1 GB, Stage 4 < 5 s. Regression-test the safeguards on a capped corpus."
-    status: pending
+    status: completed
   - id: run_full_selfcheck
     content: "Execute: python scripts/odf/build_odf_db.py --self-check. Verify peak RSS < 2 GB, Stage 4 < 30 s, all 4 self-check layers PASS, output is 25-40 MB minified with ~3000-3300 entries across 12 categories"
-    status: pending
+    status: completed
   - id: manual_copy_and_smoke
     content: "Manual: copy scripts\\odf\\odf.min.json data\\odf.min.json, then open odf/index.html and verify 12 sidebar tabs + new xpl* fields are blue cross-links. Verify scripts/process_stats.py still runs against existing sessions."
-    status: pending
+    status: completed
   - id: cleanup_old_plans
     content: "After successful ship, archive or delete the three superseded plan files: odf_db_rebuild_ff053f23.plan.md, odf_db_safeguards_023e382c.plan.md, odf_db_safeguards_0e5a0271.plan.md"
-    status: pending
+    status: completed
 isProject: false
 ---
 

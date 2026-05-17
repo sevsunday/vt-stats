@@ -1018,45 +1018,59 @@ class ODFBrowser {
             return false;
         }
 
-        const universalProperties = ['classLabel', 'baseName'];
-        if (universalProperties.includes(propertyName)) return true;
+        // Composition-ref property names are universal: an `xplGround` value
+        // points at an Explosion ODF whether it appears at the top level of
+        // an Ordnance ODF or buried inside `Ordnance.LaunchOrd.OrdnanceClass.*`
+        // on a Weapon ODF (e.g. gpoptag.odf -> xpoptaggnd). The field name
+        // alone identifies the reference; the OUTER category of the ODF
+        // being browsed is irrelevant. Mirrors COMPOSITION_REFS in
+        // scripts/odf/build_odf_db.py plus the engine-level classLabel /
+        // baseName / upgradeName / powerName / spawnName / weaponConfig refs.
+        const universalLinkProperties = new Set([
+            // Engine-level
+            'classLabel', 'baseName',
+            // Weapon -> Ordnance / Mine
+            'altName', 'ordName', 'mineName',
+            // Ordnance -> Explosion (5 xpl* fields are the headline case)
+            'xplGround', 'xplVehicle', 'xplBuilding', 'xplBlast', 'xplPulse',
+            'xplDone', 'xplEnter', 'xplExit', 'xplExpire', 'xplName',
+            // Ordnance / Bomber / Quake / Dispenser composition refs
+            'launchOrd', 'payloadName', 'objectClass', 'bombName', 'bomberType',
+            'quakeClass', 'leaderName',
+            // Powerup -> Weapon backref
+            'weaponName',
+            // Building / Vehicle composition refs
+            'upgradeName', 'powerName',
+            // Vehicle / Config -> WeaponConfig
+            'weaponConfig',
+            // Spawn -> Object
+            'spawnName',
+            // Plant secondary explosions
+            'hitGroundName', 'hitByCarName', 'hitByBulletName',
+            // Explosion section's class* sub-targets (13 fields)
+            'classCraft', 'classVehicle', 'classBuilding', 'classStruct',
+            'classChunk', 'classCrash', 'classCollapse', 'classTorpedo',
+            'classPowerup', 'classPerson', 'classAnimal', 'classSign',
+            'classPlant',
+        ]);
+        if (universalLinkProperties.has(propertyName)) return true;
 
-        const categoryProperties = {
-            'Vehicle': [
-                /^weaponName\d*$/,
-                /^requireName\d*$/,
-                /^buildItem\d*$/
-            ],
-            'Weapon': [
-                'altName',
-                'ordName'
-            ],
-            'Pilot': [
-                /^weaponName\d*$/
-            ],
-            'Building': [
-                'upgradeName',
-                /^requireName\d*$/,
-                'powerName',
-                /^buildItem\d*$/
-            ],
-            'Powerup': [
-                'weaponName'
-            ]
-        };
-
-        const patterns = categoryProperties[category] || [];
-        return patterns.some(pattern => {
-            if (pattern instanceof RegExp) {
-                return pattern.test(propertyName);
-            }
-            return propertyName === pattern;
-        });
+        // Numbered slot patterns also work universally - weaponName3 in a
+        // Vehicle's loadout, requireName2 in a Building's tech-tree gate, and
+        // weaponName5 in a *_config.odf all resolve as ODF references.
+        const universalLinkPatterns = [
+            /^weaponName\d+$/,
+            /^requireName\d*$/,
+            /^buildItem\d*$/,
+        ];
+        return universalLinkPatterns.some((re) => re.test(propertyName));
     }
 
     findODFCategory(odfName) {
-        // Bug 3 fix: O(1) via the prebuilt odfIndex.
-        const hit = this.odfIndex?.get(`${odfName}.odf`);
+        // Bug 3 fix: O(1) via the prebuilt odfIndex. Lowercase defensively -
+        // odfIndex keys are lowercased basenames (matching build_odf_db.py),
+        // but raw ODF property values can be any case (e.g. "XPoptagGnd").
+        const hit = this.odfIndex?.get(`${String(odfName).toLowerCase()}.odf`);
         return hit ? hit.category : null;
     }
 
