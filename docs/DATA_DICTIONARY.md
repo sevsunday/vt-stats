@@ -2253,6 +2253,97 @@ Semantics:
   for concrete future uses (VTSR-T axes, weapon-meta engagement-range
   stats, highlight card refinements).
 
+## 10.2 Spectator-Style Exclusion Flags (`match.schema_version` 6)
+
+Two new boolean flags + two supporting numeric metrics on every per-match
+`leaderboard[]` row, set by the pipeline at row build time. Power the
+v2.5 row-level exclusion gates in [scripts/elo.py](../scripts/elo.py) +
+[js/all-matches-aggregator.js](../js/all-matches-aggregator.js). Rows
+where either flag is true are **omitted** from VTSR-T calculations and
+from the All Matches career aggregator -- pure omission, **no penalty**,
+no `delta` in `elo_history`, no `matches_played` increment. The match
+simply does not happen for that player rating-wise.
+
+```json
+"leaderboard": [{
+  "is_campod":           false,   // > CAMPOD_MAX_SHARE of match wall-clock in a camera-pod ship
+  "is_low_activity":     false,   // event-stream presence covered < LOW_ACTIVITY_MIN_PRESENCE of duration
+  "campod_share":        0.0,     // 0.0-1.0 share of match.duration_sec spent in a campod
+  "presence_window_sec": 1203.4   // (last_event_tick - first_event_tick) / tick_rate
+}]
+```
+
+### `is_campod` (Rule 1)
+
+Set when the player's `loadout.ships` total time in camera-pod ODFs
+divided by `match.duration_sec` exceeds `CAMPOD_MAX_SHARE` (currently
+`0.25`, declared in [scripts/process_stats.py](../scripts/process_stats.py)).
+
+The CAMPOD_ODFS set is the complete player-flyable camera-pod variant
+list per `data/odf.min.json`:
+
+- `evcamr_vsr.odf` (Scion campod)
+- `fvcamr_vsr.odf` (Hadean campod)
+- `ivcamr_vsr.odf` (ISDF campod)
+- `camerapod_vsr.odf` (generic campod)
+
+Other "camera"-named ODFs in the DB are intentionally NOT included:
+`gcamr.odf` is a weapon (grapple-cam) and `apcamr.odf` is a deployable
+artifact -- neither is a player-flyable spectator vehicle.
+
+**Denominator is `match.duration_sec`, not `loadout.active_seconds`**.
+A player who sat in a campod for 6 minutes of a 20-minute match (30%
+wall-clock share) is flagged regardless of how often they died /
+respawned during the rest of the time.
+
+### `is_low_activity` (Rule 2)
+
+Set when the player's event-stream presence window covers less than
+`LOW_ACTIVITY_MIN_PRESENCE` of match duration (currently `0.75`).
+
+The presence window is `(last_event_tick - first_event_tick) / tick_rate`,
+where `first_event_tick` / `last_event_tick` are the min/max ticks across
+every event branch that mentions the player's Steam64:
+
+- `UpdateTick` (every `ps.player` in `ut.players`)
+- `DamageDealt` (shooter + victim)
+- `BulletHit` (shooter)
+- `UnitDestroyed` (killer + victim)
+- `PickupPowerup` (picker)
+- `UnitSniped` (slot-derived sniper + victim)
+
+Catches BOTH late joiners (large `first_event_tick`) and mid-match
+disconnects (small `last_event_tick`) with one window check. Players
+who died often but stayed in the match end-to-end have a full presence
+window and are **not** flagged -- their dead time is correctly NOT a
+participation deficit.
+
+### Pool-level counters
+
+Surfaced on [`elo_current.json`](#data-processed-elo-current-json):
+
+- `rows_excluded_campod` — total leaderboard rows across the corpus
+  flagged with `is_campod`.
+- `rows_excluded_low_activity` — total leaderboard rows across the corpus
+  flagged with `is_low_activity`.
+
+These are independent counters; a row hitting both flags is counted in
+both keys but excluded once from the rated lobby either way.
+
+### Cross-references
+
+- The All Matches aggregator skips rows where EITHER flag is true (see
+  [js/all-matches-aggregator.js](../js/all-matches-aggregator.js)) so
+  `career_stats[]`, `commander_stats[]`, `global_weapon_meta`,
+  `global_rivalries`, and `meta_charts` all reflect real-participation
+  rows only.
+- The per-match dashboard keeps excluded rows VISIBLE in the Player
+  Leaderboard (with `Campod` / `Partial` badges + 55% opacity) for
+  transparency.
+- Backward-compatible: pre-v6 rows lack these fields; consumers default
+  both flags to `False` via `.get("is_campod", False)` and treat the
+  row as a normal thug.
+
 ## 11. VTSR / VTSR-T Outputs (`elo_current.json` + `elo_history.json`)
 
 Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `process_stats.py` run. **VTSR-T** (VT Stats Rating — Thug) is the thug-focused rating; the JSON field `vtsr` is the published headline number ($\mathrm{VTSR\text{-}T} = \alpha R^W + (1-\alpha) R^T$ — equal to **thug_elo** when $\alpha=0$). Full algorithm and constants are in [§13 of DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md#vtsr-methodology).
@@ -2260,6 +2351,8 @@ Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `proces
 > **v2.3 rename**: the rating's combat-skill component, previously called *Combat ELO* with JSON field `combat_elo`, is now called **Thug ELO** with JSON field `thug_elo`. Future VTSR-C (Commander) follows the same blend shape with its own commander-axis composite.
 >
 > **v2.4 — commander role adjustment**: per-match commander rows now get a per-axis additive shift in post-clip space so commanders aren't penalized for their role on the unified VTSR-T leaderboard. New top-level fields on `elo_current.json`: `commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed`. New per-rating fields: `matches_as_commander` / `matches_as_thug`. New optional sibling block on commander deltas in `elo_history.json`: `axis_contributions_meta`. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — corpus re-rated.
+>
+> **v2.5 (current) — row-level exclusion gates**: two new boolean flags on every per-match `leaderboard[]` row (`is_campod`, `is_low_activity`) set by [scripts/process_stats.py](../scripts/process_stats.py); rows where either flag is true are **omitted** from the rated lobby in [compute_performance_index](../scripts/elo.py) (no per-axis contribution, no delta entry in `elo_history`, no `matches_played` bump). Two new pool-level counters on `elo_current.json`: `rows_excluded_campod` and `rows_excluded_low_activity`. **All `peak_vtsr` values are likely shifted for the small set of affected players on the v2.5 re-rate** — players who never had a campod / low-activity row see no change. `ELO_SCHEMA_VERSION` 5 → 6 and `PIPELINE_VERSION` 15 → 16. Full per-row schema in [§10.2](#102-spectator-style-exclusion-flags-matchschema_version-6).
 
 ### `data/processed/elo_current.json`
 
@@ -2287,6 +2380,8 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "matches_excluded_low_player_count": 4,
   "matches_excluded_short_duration": 4,
   "matches_excluded_no_winner": 0,
+  "rows_excluded_campod": 13,            // v2.5: leaderboard rows skipped for is_campod (>25% match in camera-pod)
+  "rows_excluded_low_activity": 0,       // v2.5: leaderboard rows skipped for is_low_activity (presence < 75% of match)
   "weights": { "net_damage_share": 0.20, "thug_kill_rate": 0.20, "thug_efficiency": 0.16,
                "thug_accuracy": 0.15, "pve_share": 0.12, "mobility": 0.08,
                "snipe_bonus": 0.05, "target_lock_pct": 0.04 },
