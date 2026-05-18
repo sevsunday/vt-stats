@@ -2253,6 +2253,248 @@ Semantics:
   for concrete future uses (VTSR-T axes, weapon-meta engagement-range
   stats, highlight card refinements).
 
+## 10.2 Spectator-Style Exclusion Flags (`match.schema_version` 6)
+
+Two new boolean flags + two supporting numeric metrics on every per-match
+`leaderboard[]` row, set by the pipeline at row build time. Power the
+v2.5 row-level exclusion gates in [scripts/elo.py](../scripts/elo.py) +
+[js/all-matches-aggregator.js](../js/all-matches-aggregator.js). Rows
+where either flag is true are **omitted** from VTSR-T calculations and
+from the All Matches career aggregator -- pure omission, **no penalty**,
+no `delta` in `elo_history`, no `matches_played` increment. The match
+simply does not happen for that player rating-wise.
+
+```json
+"leaderboard": [{
+  "is_campod":           false,   // > CAMPOD_MAX_SHARE of match wall-clock in a camera-pod ship
+  "is_low_activity":     false,   // event-stream presence covered < LOW_ACTIVITY_MIN_PRESENCE of duration
+  "campod_share":        0.0,     // 0.0-1.0 share of match.duration_sec spent in a campod
+  "presence_window_sec": 1203.4   // (last_event_tick - first_event_tick) / tick_rate
+}]
+```
+
+### `is_campod` (Rule 1)
+
+Set when the player's `loadout.ships` total time in camera-pod ODFs
+divided by `match.duration_sec` exceeds `CAMPOD_MAX_SHARE` (currently
+`0.25`, declared in [scripts/process_stats.py](../scripts/process_stats.py)).
+
+The CAMPOD_ODFS set is the complete player-flyable camera-pod variant
+list per `data/odf.min.json`:
+
+- `evcamr_vsr.odf` (Scion campod)
+- `fvcamr_vsr.odf` (Hadean campod)
+- `ivcamr_vsr.odf` (ISDF campod)
+- `camerapod_vsr.odf` (generic campod)
+
+Other "camera"-named ODFs in the DB are intentionally NOT included:
+`gcamr.odf` is a weapon (grapple-cam) and `apcamr.odf` is a deployable
+artifact -- neither is a player-flyable spectator vehicle.
+
+**Denominator is `match.duration_sec`, not `loadout.active_seconds`**.
+A player who sat in a campod for 6 minutes of a 20-minute match (30%
+wall-clock share) is flagged regardless of how often they died /
+respawned during the rest of the time.
+
+### `is_low_activity` (Rule 2)
+
+Set when the player's event-stream presence window covers less than
+`LOW_ACTIVITY_MIN_PRESENCE` of match duration (currently `0.75`).
+
+The presence window is `(last_event_tick - first_event_tick) / tick_rate`,
+where `first_event_tick` / `last_event_tick` are the min/max ticks across
+every event branch that mentions the player's Steam64:
+
+- `UpdateTick` (every `ps.player` in `ut.players`)
+- `DamageDealt` (shooter + victim)
+- `BulletHit` (shooter)
+- `UnitDestroyed` (killer + victim)
+- `PickupPowerup` (picker)
+- `UnitSniped` (slot-derived sniper + victim)
+
+Catches BOTH late joiners (large `first_event_tick`) and mid-match
+disconnects (small `last_event_tick`) with one window check. Players
+who died often but stayed in the match end-to-end have a full presence
+window and are **not** flagged -- their dead time is correctly NOT a
+participation deficit.
+
+### Pool-level counters
+
+Surfaced on [`elo_current.json`](#data-processed-elo-current-json):
+
+- `rows_excluded_campod` — total leaderboard rows across the corpus
+  flagged with `is_campod`.
+- `rows_excluded_low_activity` — total leaderboard rows across the corpus
+  flagged with `is_low_activity`.
+
+These are independent counters; a row hitting both flags is counted in
+both keys but excluded once from the rated lobby either way.
+
+### Cross-references
+
+- The All Matches aggregator skips rows where EITHER flag is true (see
+  [js/all-matches-aggregator.js](../js/all-matches-aggregator.js)) so
+  `career_stats[]`, `commander_stats[]`, `global_weapon_meta`,
+  `global_rivalries`, and `meta_charts` all reflect real-participation
+  rows only.
+- The per-match dashboard keeps excluded rows VISIBLE in the Player
+  Leaderboard (with `Campod` / `Partial` badges + 55% opacity) for
+  transparency.
+- Backward-compatible: pre-v6 rows lack these fields; consumers default
+  both flags to `False` via `.get("is_campod", False)` and treat the
+  row as a normal thug.
+
+## 10.3 Account Reroutes (`match.schema_version` 7)
+
+Pipeline-side identity rewrite for the shared-PC case: when a different
+real player plays on someone else's Steam account, the in-game nick (as
+recorded in `header.s64_to_nick`) carries a signature that lets us
+reattribute the slot to the actual player's Steam64 **before any
+aggregator runs**. Everything downstream (per-match leaderboard, ELO,
+positioning, highlights, kill feed, faction badges, contributions
+extractor, career rollup) is identity-blind on Steam64, so a single
+rewrite at the top of `process_match` cascades correctly without any
+per-consumer changes.
+
+### Mechanism
+
+Declared in [scripts/process_stats.py](../scripts/process_stats.py) as a
+module-level `ACCOUNT_REROUTES` dict keyed by **owner Steam64** (the
+account being borrowed). Each entry is a list of rules:
+
+```python
+ACCOUNT_REROUTES = {
+    76561198088036138: [  # dd
+        {
+            "pattern":    _ACCOUNT_REROUTE_MAX_NICK,  # compiled re.Pattern
+            "reroute_to": 76561198877763773,           # MAX (dd's son)
+            "label":      "via dd",                    # shown on the leaderboard chip
+        },
+    ],
+}
+```
+
+At the top of `process_match()`, `_resolve_account_reroutes()` walks
+every slot in the match, and for each slot whose owner Steam64 is keyed
+in `ACCOUNT_REROUTES`, tests the raw in-game nick against each rule's
+`pattern`. The first rule that matches (and survives the collision
+guard, below) is applied:
+
+1. The local identity dicts (`slot_to_s64`, `s64_to_slot`, `s64_to_nick`)
+   are rewritten so the slot maps to the target Steam64.
+2. `_apply_account_reroutes_to_events()` walks the full proto event
+   stream and rewrites every player-id field (`shooter`, `victim`,
+   `killer`, `picker`, `update_tick.players[].player`, etc.) to the
+   target Steam64. Handles both v1 and v2 schemas; the only v1/v2
+   difference is `DamageDealt.victim` which exists only in v2.
+
+### Collision guard
+
+If a rule's `reroute_to` target Steam64 is **already present** in the
+match's `slot_to_s64` (i.e. the target player is in the lobby with their
+own real account), the reroute is **skipped with a warning** to prevent
+collapsing two distinct slots onto the same `player_id`. Audit of the
+current corpus shows zero collisions, but the guard is non-negotiable
+defensive code.
+
+### Nick pattern semantics
+
+The MAX rule uses:
+
+```python
+re.compile(r'(?<![A-Za-z0-9])max(?![A-Za-z0-9])', re.IGNORECASE)
+```
+
+The lookarounds treat **only letters and digits** as boundary-blockers,
+so punctuation, underscores, brackets, dots, and spaces are all valid
+separators. Examples:
+
+| Raw nick                | Verdict       | Why                                  |
+|-------------------------|---------------|--------------------------------------|
+| `max`                   | match         | start/end boundaries                 |
+| `Max`, `MAX`            | match         | case-insensitive                     |
+| `_max_`                 | match         | `_` is not a letter/digit            |
+| `[MAX]`                 | match         | brackets are separators              |
+| `max.dd`                | match         | dot is separator                     |
+| `MAX on dd's pc`        | match         | space boundary                       |
+| `Maxwell`, `_maxwell`   | **no match**  | `w` blocks right side                |
+| `maxim`                 | **no match**  | `i` blocks right side                |
+| `climax`                | **no match**  | `a` blocks left side                 |
+| `3max`, `3max `         | **no match**  | digit `3` blocks left side           |
+
+### Per-row provenance: `leaderboard[].rerouted_from`
+
+Non-null on rows whose slot was rewritten. Renderer
+[js/app.js](../js/app.js) surfaces a small `via dd` chip
+(`.vt-reroute-badge`) on the row with a tooltip explaining the
+provenance:
+
+```json
+"leaderboard": [{
+  "rerouted_from": {
+    "steam64":  "76561198088036138",
+    "name":     "dd",
+    "raw_nick": "MAX",
+    "label":    "via dd"
+  }
+}]
+```
+
+Pre-v7 rows have no field; consumers default to `null` via
+`.get("rerouted_from")`.
+
+### Per-match audit log: `match.account_reroutes`
+
+Always emitted (empty list when no reroutes applied) so the JS check is
+`length > 0`, not field existence:
+
+```json
+"match": {
+  "account_reroutes": [
+    {
+      "slot":         1,
+      "from_steam64": "76561198088036138",
+      "from_name":    "dd",
+      "to_steam64":   "76561198877763773",
+      "raw_nick":     "MAX",
+      "label":        "via dd"
+    }
+  ]
+}
+```
+
+Powers the Raw Data Browser's processed-tier provenance banner
+([js/raw-browser.js](../js/raw-browser.js)).
+
+### Provenance contract across the three raw-browser tiers
+
+| Tier               | Identity shown for affected slots          |
+|--------------------|--------------------------------------------|
+| 1 (binpb download) | **Source-accurate**: DD's Steam64 + raw `'MAX'` nick |
+| 2 (decoded JSON)   | **Source-accurate**: DD's Steam64 + raw `'MAX'` nick |
+| 3 (processed JSON) | **Rewritten**: MAX's Steam64 + matched `rerouted_from` block |
+
+The processed-tier rewrite is announced via a banner above the tree so
+debuggers immediately see why the IDs differ between tiers 2 and 3.
+
+### Cache invalidation
+
+Adding, removing, or editing an `ACCOUNT_REROUTES` entry requires
+bumping `PIPELINE_VERSION` to force a full corpus reprocess. Otherwise
+matches cached from a prior run will retain their old attribution.
+
+### Worked example: DD → MAX
+
+- Owner: DD (`76561198088036138`), present in 27 of 98 corpus matches.
+- Audit identified 6 matches where DD's slot had nick exactly `'MAX'`.
+- All 6 reattribute to MAX (`76561198877763773`); 3 of them are
+  commander slots, so the v2.4 commander-axis adjustment now applies to
+  MAX's rating rather than DD's.
+- Before the rewrite, MAX had **zero** corpus presence
+  (`matches_played = 0`); after, MAX clears the `MIN_CAREER_MATCHES = 5`
+  threshold and appears in `career_stats[]` and the VTSR-T leaderboard
+  for the first time.
+
 ## 11. VTSR / VTSR-T Outputs (`elo_current.json` + `elo_history.json`)
 
 Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `process_stats.py` run. **VTSR-T** (VT Stats Rating — Thug) is the thug-focused rating; the JSON field `vtsr` is the published headline number ($\mathrm{VTSR\text{-}T} = \alpha R^W + (1-\alpha) R^T$ — equal to **thug_elo** when $\alpha=0$). Full algorithm and constants are in [§13 of DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md#vtsr-methodology).
@@ -2260,6 +2502,8 @@ Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `proces
 > **v2.3 rename**: the rating's combat-skill component, previously called *Combat ELO* with JSON field `combat_elo`, is now called **Thug ELO** with JSON field `thug_elo`. Future VTSR-C (Commander) follows the same blend shape with its own commander-axis composite.
 >
 > **v2.4 — commander role adjustment**: per-match commander rows now get a per-axis additive shift in post-clip space so commanders aren't penalized for their role on the unified VTSR-T leaderboard. New top-level fields on `elo_current.json`: `commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed`. New per-rating fields: `matches_as_commander` / `matches_as_thug`. New optional sibling block on commander deltas in `elo_history.json`: `axis_contributions_meta`. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — corpus re-rated.
+>
+> **v2.5 (current) — row-level exclusion gates**: two new boolean flags on every per-match `leaderboard[]` row (`is_campod`, `is_low_activity`) set by [scripts/process_stats.py](../scripts/process_stats.py); rows where either flag is true are **omitted** from the rated lobby in [compute_performance_index](../scripts/elo.py) (no per-axis contribution, no delta entry in `elo_history`, no `matches_played` bump). Two new pool-level counters on `elo_current.json`: `rows_excluded_campod` and `rows_excluded_low_activity`. **All `peak_vtsr` values are likely shifted for the small set of affected players on the v2.5 re-rate** — players who never had a campod / low-activity row see no change. `ELO_SCHEMA_VERSION` 5 → 6 and `PIPELINE_VERSION` 15 → 16. Full per-row schema in [§10.2](#102-spectator-style-exclusion-flags-matchschema_version-6).
 
 ### `data/processed/elo_current.json`
 
@@ -2281,12 +2525,14 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "provisional_prior": 10.0,
   "provisional_threshold": 10,
   "min_player_count": 6,
-  "min_duration_sec": 300,
+  "min_duration_sec": 240,
   "computed_at": "2026-05-12T22:00:00Z",
   "match_count": 57,
   "matches_excluded_low_player_count": 4,
   "matches_excluded_short_duration": 4,
   "matches_excluded_no_winner": 0,
+  "rows_excluded_campod": 13,            // v2.5: leaderboard rows skipped for is_campod (>25% match in camera-pod)
+  "rows_excluded_low_activity": 0,       // v2.5: leaderboard rows skipped for is_low_activity (presence < 75% of match)
   "weights": { "net_damage_share": 0.20, "thug_kill_rate": 0.20, "thug_efficiency": 0.16,
                "thug_accuracy": 0.15, "pve_share": 0.12, "mobility": 0.08,
                "snipe_bonus": 0.05, "target_lock_pct": 0.04 },
@@ -2337,7 +2583,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `floor_taper_window` | float | Width of the linear taper above the floor. 150.0 → full losses resume at 1150. |
 | `k_base`, `k_floor`, `provisional_prior` | float | K-decay curve parameters (40 / 12 / 10). |
 | `provisional_threshold` | int | matches_played below which the row gets a "Provisional" badge (10). |
-| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 300). |
+| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 240). |
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
 | `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |

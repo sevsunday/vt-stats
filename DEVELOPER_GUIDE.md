@@ -316,6 +316,8 @@ Players are identified by `uint64` Steam64 IDs. The header provides three maps:
 
 The pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick`.
 
+**Account reroutes (shared-PC handling).** A module-level `ACCOUNT_REROUTES` table in [scripts/process_stats.py](scripts/process_stats.py) maps "owner" Steam64s to nick-pattern rules that rewrite the slot's identity to a target Steam64 at the top of `process_match()` (when a different real player borrows someone's Steam account). The rewrite touches the three local identity dicts above AND every player-id field across the proto event stream BEFORE any aggregator runs, so the per-match leaderboard, ELO, positioning, highlights, kill feed, contributions extractor, and career rollup all attribute to the rerouted player without per-consumer changes. Surfaced on the dashboard as a small `via dd` chip on the leaderboard row and as a provenance banner on the Raw Data Browser's processed tier (tiers 1 and 2 remain byte-accurate to the source recording). Full mechanism, regex semantics, schema, and corpus audit in [§10.3 of DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#103-account-reroutes-matchschema_version-7). Bumps `match.schema_version` to 7 and `PIPELINE_VERSION` to 17.
+
 ### Fullscreen Modal
 
 Every dashboard card has an expand button (`data-expand="section-id"`) that opens the section in a Bootstrap fullscreen modal. For **chart sections**, a fresh `<canvas>` is created in the modal and the chart is re-rendered at full viewport size via registered renderer functions. For **non-chart sections** (tables, HTML content), the card body is cloned into the modal (with `id` attributes stripped to avoid duplicates, and `<canvas>` elements removed to avoid blank cloned charts). Modal charts are destroyed on close.
@@ -1608,6 +1610,12 @@ The rating system is pipeline-emitted, full-corpus, and time-ordered — the das
 
 > **v2.4 — commander role adjustment.** A single unified VTSR-T leaderboard remains the contract, but per-match commander rows now get a per-axis additive shift in **post-clip space** so commanders aren't penalized for their role. 4 audit-derived priors ride a shrunk rolling baseline; 2 hand-tuned priors are **locked** at their seed values; 2 axes are role-blind. `ELO_SCHEMA_VERSION` 4 → 5 and `PIPELINE_VERSION` 14 → 15. **Pre-v2.4 `peak_vtsr` values are no longer comparable** — full corpus re-rated. Full subsection at §13.7.1.
 
+> **v2.5 — row-level exclusion gates.** Two new boolean flags on every per-match `leaderboard[]` row, set by [scripts/process_stats.py](scripts/process_stats.py):
+> - **`is_campod`** — player spent > `CAMPOD_MAX_SHARE` (currently 25%) of match wall-clock in a camera-pod ship (any of the four player-flyable `*camr_vsr.odf` / `camerapod_vsr.odf` variants). Catches spectator-style appearances where the player effectively didn't participate.
+> - **`is_low_activity`** — player's event-stream presence window (`last_event_tick - first_event_tick`) covered less than `LOW_ACTIVITY_MIN_PRESENCE` (currently 75%) of match duration. Catches late joiners AND mid-match disconnects with one window check.
+>
+> Rows where either flag is true are **omitted** from the rated lobby in `compute_performance_index` before z-scoring: no per-axis contribution, no `delta` entry in `elo_history`, no `matches_played` increment, no rating change at all for the affected player on that match. **Pure omission, zero penalty** — the match simply did not happen for that player rating-wise. Two new pool-level counters on `elo_current.json` (`rows_excluded_campod` / `rows_excluded_low_activity`) make the gates auditable. **No algorithm changes** — axis weights, priors, K-factor, loss aversion, floor taper, shrinkage strengths, alpha-blend all unchanged. `ELO_SCHEMA_VERSION` 5 → 6, `PIPELINE_VERSION` 15 → 16, `match.schema_version` 5 → 6. **`peak_vtsr` shifts only for the small set of players who had at least one excluded appearance** on the v2.5 re-rate; everyone else sees no change. Both thresholds are tunable module-level constants — future re-tuning is a one-line change with no schema bump required. Full per-row schema in [docs/DATA_DICTIONARY.md §10.2](docs/DATA_DICTIONARY.md#102-spectator-style-exclusion-flags-matchschema_version-6).
+
 ### 13.1 Final equation
 
 The published rating is a linear blend of two components — a **Wins ELO** ($R^W_i$) and **Thug ELO** ($R^T_i$, i.e. **VTSR-T**):
@@ -1987,7 +1995,7 @@ Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to giv
 
 ### 13.9 Match exclusion + provisional rules
 
-- **Excluded** matches (`player_count < 6` OR `duration_sec < 300`) do not increment `matches_played` and contribute no deltas to ratings. They appear in `elo_history.json` with `match_excluded: true` and an empty `deltas` array so the exclusion counters reconcile.
+- **Excluded** matches (`player_count < 6` OR `duration_sec < 240`) do not increment `matches_played` and contribute no deltas to ratings. They appear in `elo_history.json` with `match_excluded: true` and an empty `deltas` array so the exclusion counters reconcile.
 - **Provisional** badge: rated rows with `matches_played < 10` (`ELO_PROVISIONAL_THRESHOLD`) display a `?` chip. Provisional players ARE rated and ARE shown on the leaderboard (provided they're past `MIN_CAREER_MATCHES = 5`); the chip just signals "rating is still moving fast — interpret with caution".
 - **Leaderboard visibility floor** (`MIN_CAREER_MATCHES = 5`): players with fewer than 5 rated matches in the current scope are hidden from `career_stats[]` and from both leaderboard tables entirely.
 - **Ratings are corpus-wide; the picker filter narrows display only.** A picker filter that narrows to one submitter or one duration band changes which rows appear in the VTSR-T leaderboard but does NOT recompute ratings against the filtered subset — that would change the meaning of every player's rating depending on which filter they happened to be looking at.

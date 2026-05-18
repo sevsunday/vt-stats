@@ -54,13 +54,6 @@
             </button>
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>
-
-          <!-- Mode Toggle -->
-          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-            <i class="bi bi-sun-fill"></i>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
-          </button>
         </div>
       </div>
     </div>
@@ -228,6 +221,15 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- v7: identity-reroute provenance banner. Shown only when
+         view=processed AND the processed JSON's match.account_reroutes
+         is non-empty. Tier 1 (binpb) and Tier 2 (decoded) remain
+         byte-accurate to the source recording; the rewrite is
+         processed-tier only. See docs/DATA_DICTIONARY.md §10.3. -->
+    <div class="alert alert-info vt-raw-reroute-banner d-none" id="raw-reroute-banner" role="status">
+      <!-- Populated by js/raw-browser.js -->
     </div>
 
     <!-- Tree body with its own decode/load spinner -->

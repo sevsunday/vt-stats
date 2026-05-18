@@ -138,6 +138,17 @@ Each `leaderboard[]` row gains two new sibling blocks:
 
 Display-only — no axis math reads these blocks. Career-rolled by `js/all-matches-aggregator.js` into `career_loadout` + `career_per_ship_combat` on each `career_stats[]` row (cached `ship_names[odf]` map populated on first encounter so the rollup emits names without re-resolving).
 
+### Account reroutes — `leaderboard[].rerouted_from` + `match.account_reroutes` (v7)
+
+Pipeline-side identity rewrite for shared-PC cases (e.g. MAX playing on DD's Steam account). The `ACCOUNT_REROUTES` constant in `scripts/process_stats.py` declares per-owner rules of the shape `{pattern: re.Pattern, reroute_to: int, label: str}`; at the top of `process_match`, any slot whose owner Steam64 matches an entry AND whose raw in-game nick matches `pattern` gets its identity rewritten in the three local identity dicts (`slot_to_s64`, `s64_to_slot`, `s64_to_nick`) AND across every player-id field in the proto event stream — **before any aggregator runs**. A collision guard skips the rewrite (with warning) if the target Steam64 is already present in `slot_to_s64`.
+
+Two new schema fields surface the provenance:
+
+- `leaderboard[].rerouted_from`: `{steam64, name, raw_nick, label}` (string Steam64). Non-null only on rewritten rows. Renderer shows a small `via dd` chip (`.vt-reroute-badge`) on the row with a tooltip.
+- `match.account_reroutes`: list of `{slot, from_steam64, from_name, to_steam64, raw_nick, label}`. Always emitted (empty list when no reroutes applied) so consumers can check `length > 0`. Powers the Raw Data Browser's processed-tier provenance banner.
+
+Tier 1 (binpb download) and Tier 2 (decoded JSON) remain byte-accurate to the source recording; the rewrite is processed-tier only. Bumps `match.schema_version` 6 → 7 and `PIPELINE_VERSION` 16 → 17 (full corpus reprocess on next run). Pre-v7 rows have no `rerouted_from` field; consumers default to `null` via `.get("rerouted_from")`. Full mechanism, regex semantics, and corpus audit in `docs/DATA_DICTIONARY.md` §10.3.
+
 ### Source-Level Filters
 
 These are applied by the statsgate collector before data reaches us:

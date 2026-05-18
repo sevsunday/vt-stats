@@ -143,13 +143,6 @@
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>
 
-          <!-- Mode Toggle (light/dark). Handler wired by js/theme.js. -->
-          <button class="vt-nav-icon-btn" data-mode-toggle title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
-            <i class="bi bi-sun-fill"></i>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-dark">Dark mode</span>
-            <span class="vt-nav-label ms-2 vt-nav-label--mode-light">Light mode</span>
-          </button>
-
           <!-- About / Source Repos -->
           <button class="vt-nav-icon-btn" id="about-btn" type="button"
                   data-bs-toggle="modal" data-bs-target="#about-modal"
@@ -157,11 +150,6 @@
             <i class="bi bi-info-circle"></i>
           </button>
 
-          <!-- Landing Preferences (kept last so gear sits on the far right) -->
-          <button class="vt-nav-icon-btn" id="landing-prefs-btn" type="button"
-                  title="Landing preferences" aria-label="Landing preferences">
-            <i class="bi bi-gear"></i><span class="vt-nav-label ms-2">Preferences</span>
-          </button>
         </div>
       </div>
     </div>
@@ -223,9 +211,14 @@
                opened by clicking the thumbnail above. See renderMapInfoModal()
                in js/app.js. -->
           <div id="info-snipes-wrap" class="d-none"><span class="stat-label">Snipes</span><br><strong id="info-snipes">0</strong></div>
-          <a id="info-raw-link" class="vt-nav-icon-btn" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
-            <i class="bi bi-code-square me-1"></i><span>View raw</span>
-          </a>
+          <div class="d-flex flex-column gap-2">
+            <button id="info-back-to-all" class="vt-nav-icon-btn vt-nav-icon-btn--primary" type="button" title="Return to the All Matches aggregate view">
+              <i class="bi bi-grid-3x3-gap me-1"></i><span>All Matches</span>
+            </button>
+            <a id="info-raw-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
+              <i class="bi bi-code-square me-1"></i><span>View Raw Data</span>
+            </a>
+          </div>
         </div>
         <div id="filter-bar" class="vt-filter-bar vt-filter-bar--right">
           <div class="vt-filter-bar-label"><span class="stat-label">Filter</span></div>
@@ -917,7 +910,7 @@
                   >Peak</th>
                   <th data-sort="matches_played" class="text-end"
                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 5 minutes."
+                      title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 4 minutes."
                   >Matches</th>
                 </tr>
               </thead>
@@ -1180,6 +1173,28 @@
 
       <!-- All Tab: Commanders -->
       <div class="tab-pane fade" id="all-tab-commanders" role="tabpanel" aria-labelledby="all-tab-commanders-btn">
+
+        <div class="card mb-4" id="section-commander-cohort">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Commander Cohort <span class="vt-cohort-title-tag">VTSR-C preview</span></h5>
+              <i class="bi bi-info-circle vt-col-info"
+                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                 title="<strong>Commander-vs-commander axis comparison</strong><br>Each commander's thug-axis performance averaged over <em>only the matches they commanded</em>. Pre-shift z-scores &mdash; the v2.4 role-fairness cushion is reversed for this view so true commander-vs-commander gaps surface.<br><br>Defaults to players with at least 40% commander share. Provisional ratings are always excluded; a minimum of 5 commander matches is required so the per-axis means are stable enough to compare. Use <em>Show all commanders</em> to drop the 40% threshold while keeping the 5-match floor.<br><br><strong>VTSR-C<sub>prev</sub></strong> per column is &Sigma; w &times; z&#772; over the player's commander matches (performance space [-1, +1]; not rating-space). Foundation of a future VTSR-C rating &mdash; commander-specific signals (scrap, build tempo) aren't collected upstream yet, so this preview is thug-performance only.<br><br>Sourced from <code>elo_history.json</code> &mdash; <strong>corpus-wide</strong>, independent of the active picker filter."></i>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <div class="btn-group btn-group-sm" role="group" aria-label="Cohort view mode" id="commander-cohort-view-toggle">
+                <button type="button" class="btn btn-outline-secondary active" data-cohort-view="z" title="Per-axis z-score over commander matches only (clipped to [-1, +1], pre-shift). Green = above lobby average, red = below.">Z-scores</button>
+                <button type="button" class="btn btn-outline-secondary" data-cohort-view="contrib" title="Weighted contribution (w &times; z&#772;) over commander matches only. Final row sums to VTSR-C&#8341;&#8347;&#8337;&#8339; for the player.">Weighted</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="commander-cohort-show-all" data-show-all="false" title="Toggle between &ge;40% commander share and every non-provisional player with at least 5 commander matches">Show all commanders</button>
+              <button class="btn btn-sm" data-expand="section-commander-cohort" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="commander-cohort-container"></div>
+          </div>
+        </div>
 
         <div class="card mb-4" id="section-commander-leaderboard">
           <div class="card-header d-flex align-items-center justify-content-between">
@@ -1499,75 +1514,6 @@
             <label class="form-check-label small" for="record-stats-dont-show">Don't show on page load</label>
           </div>
           <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Got it</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Landing Preferences Modal -->
-  <div class="modal fade vt-landing-modal" id="landing-modal" tabindex="-1" aria-labelledby="landing-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header border-bottom">
-          <h5 class="modal-title" id="landing-modal-title">Welcome to VT Stats</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <p class="mb-3" style="color: var(--kb-text-muted); font-size: 0.9rem;">
-            What would you like to see first?
-          </p>
-
-          <fieldset class="mb-4">
-            <legend class="stat-label mb-2" style="font-size: 0.75rem;">Landing view</legend>
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="radio" name="landing-mode" id="landing-mode-all" value="all" checked>
-              <label class="form-check-label" for="landing-mode-all">
-                <strong>All matches</strong>
-                <div class="small" style="color: var(--kb-text-muted);" id="landing-mode-all-hint">Career overview across every recorded match.</div>
-              </label>
-            </div>
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="radio" name="landing-mode" id="landing-mode-recent" value="recent">
-              <label class="form-check-label" for="landing-mode-recent">
-                <strong>Most recent match</strong>
-                <div class="small" style="color: var(--kb-text-muted);" id="landing-mode-recent-hint">Jump straight to the most recently recorded match.</div>
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="landing-mode" id="landing-mode-specific" value="specific">
-              <label class="form-check-label" for="landing-mode-specific">
-                <strong>A specific match</strong>
-                <div class="small" style="color: var(--kb-text-muted);">Always land on the same match.</div>
-              </label>
-              <div class="mt-2 d-none" id="landing-specific-wrap">
-                <select id="landing-specific-select" class="form-select form-select-sm" style="max-width: 320px;" aria-label="Pick a specific match"></select>
-              </div>
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend class="stat-label mb-2" style="font-size: 0.75rem;">Remember my choice</legend>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="landing-persist" id="landing-persist-yes" value="yes" checked>
-              <label class="form-check-label" for="landing-persist-yes">
-                Remember my choice
-              </label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="landing-persist" id="landing-persist-no" value="no">
-              <label class="form-check-label" for="landing-persist-no">
-                Ask me every time
-              </label>
-            </div>
-          </fieldset>
-
-          <p class="small mt-3 mb-0" style="color: var(--kb-text-muted);">
-            <i class="bi bi-info-circle me-1"></i>You can change this anytime from the <strong>Preferences</strong> button in the menu.
-          </p>
-        </div>
-        <div class="modal-footer border-top">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" class="btn btn-primary btn-sm" id="landing-modal-confirm">Continue</button>
         </div>
       </div>
     </div>

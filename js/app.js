@@ -208,45 +208,13 @@
   // the producer (event-stream table row click).
   let pendingReplayTick = null;
 
-  // --- Landing Preferences ---
-  // First-visit modal prompts the user to pick a default landing view.
-  // Stored as JSON in localStorage under LANDING_PREF_KEY. Schema:
-  //   { version: 1, mode: 'ask' | 'recent' | 'all' | 'specific', matchId?: string }
-  // Shared links (any URL intent) always bypass this entirely.
-  // Default landing view changed from 'recent' to 'all' on 2026-05-08;
-  // existing saved prefs preserved deliberately (LANDING_PREF_VERSION not bumped).
-  const LANDING_PREF_KEY = 'vt-landing-pref';
-  const LANDING_PREF_VERSION = 1;
-  const LANDING_MODES = new Set(['ask', 'recent', 'all', 'specific']);
-
-  function readLandingPref() {
-    try {
-      const raw = localStorage.getItem(LANDING_PREF_KEY);
-      if (!raw) return null;
-      const pref = JSON.parse(raw);
-      if (!pref || pref.version !== LANDING_PREF_VERSION) return null;
-      if (!LANDING_MODES.has(pref.mode)) return null;
-      return pref;
-    } catch {
-      return null;
-    }
-  }
-
-  function writeLandingPref(pref) {
-    try {
-      localStorage.setItem(LANDING_PREF_KEY, JSON.stringify(pref));
-    } catch {
-      // Private mode / storage blocked — silently ignore.
-    }
-  }
-
-  function clearLandingPref() {
-    try {
-      localStorage.removeItem(LANDING_PREF_KEY);
-    } catch {
-      // No-op.
-    }
-  }
+  // --- Legacy localStorage cleanup ---
+  // The landing-preferences modal (which once stored `vt-landing-pref`) was
+  // removed in favor of forcing every visit to default to the All Matches
+  // view. Silently nuke the orphaned key on every boot so returning users
+  // get the new behavior without any stale-pref bleed-through. removeItem
+  // on a missing key is a no-op so this is idempotent.
+  try { localStorage.removeItem('vt-landing-pref'); } catch { /* private mode / storage blocked — silently ignore */ }
 
   // --- Record-Your-Own-Stats Modal Dismissal ---
   // Instructional popup that walks users through running the statsgate
@@ -270,167 +238,6 @@
   function clearRecordStatsDismissed() {
     try { localStorage.removeItem(RECORD_STATS_DISMISSED_KEY); }
     catch { /* private mode / storage blocked — silently ignore */ }
-  }
-
-  // Resolves a landing choice into an actual view load. Always keeps the
-  // picker triggers in sync via updateMatchPickerTriggers(), matching the
-  // existing URL-driven boot branches. Unknown modes and missing
-  // specific-matchIds silently fall back to most recent.
-  function applyLandingChoice(choice) {
-    const mode = choice && choice.mode;
-    if (mode === 'all') {
-      updateMatchPickerTriggers('__all__');
-      loadAllMatches();
-      return;
-    }
-    if (mode === 'specific' && choice.matchId) {
-      const entry = manifest.find(m => m.id === choice.matchId);
-      if (entry) {
-        updateMatchPickerTriggers(entry);
-        loadMatch(entry.file);
-        return;
-      }
-      // Fall through to recent if the saved match is gone.
-    }
-    if (manifest.length > 0) {
-      updateMatchPickerTriggers(manifest[0]);
-      loadMatch(manifest[0].file);
-    }
-  }
-
-  // Populates the auto-filled hint under the "All matches" option with the
-  // current corpus snapshot ("Career overview · 47 matches · 14 players ·
-  // last seen May 4, 2026"). Falls back to the static placeholder when the
-  // manifest is empty. The "Most recent" hint is intentionally static and
-  // lives in the HTML markup.
-  function populateLandingHints(manifest) {
-    const $allHint = document.getElementById('landing-mode-all-hint');
-    if (!$allHint) return;
-    if (!manifest || manifest.length === 0) {
-      $allHint.textContent = 'Career overview across every recorded match.';
-      return;
-    }
-    const distinctPlayers = new Set();
-    for (const m of manifest) {
-      if (Array.isArray(m.players)) m.players.forEach(p => distinctPlayers.add(p));
-    }
-    const mostRecent = manifest[0];
-    const shortDate = new Date(mostRecent.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    const matchWord = manifest.length === 1 ? 'match' : 'matches';
-    const playerWord = distinctPlayers.size === 1 ? 'player' : 'players';
-    $allHint.textContent = `Career overview · ${manifest.length} ${matchWord} · ${distinctPlayers.size} ${playerWord} · last seen ${shortDate}`;
-  }
-
-  // Builds and shows the landing preferences modal. Called on first-visit
-  // boot (when no URL intent and no stored pref) and from the Preferences
-  // gear button in the nav. The two entry points differ only in their
-  // onCancel handling: first-visit falls back to the default landing view
-  // (All matches); gear re-open is a no-op so dismissing doesn't disturb
-  // the view.
-  function showLandingModal({ current, onConfirm, onCancel }) {
-    const $modal = document.getElementById('landing-modal');
-    if (!$modal || !window.bootstrap) return;
-
-    const $recentRadio   = document.getElementById('landing-mode-recent');
-    const $allRadio      = document.getElementById('landing-mode-all');
-    const $specificRadio = document.getElementById('landing-mode-specific');
-    const $specificWrap  = document.getElementById('landing-specific-wrap');
-    const $specificSel   = document.getElementById('landing-specific-select');
-    const $persistYes    = document.getElementById('landing-persist-yes');
-    const $persistNo     = document.getElementById('landing-persist-no');
-    const $confirmBtn    = document.getElementById('landing-modal-confirm');
-
-    // Auto-fill the "All matches" hint with the corpus snapshot. The
-    // "Most recent" hint is static and lives in the HTML.
-    populateLandingHints(manifest);
-
-    // Populate the specific-match select from manifest (mirrors the
-    // navbar dropdown's label format).
-    if ($specificSel) {
-      $specificSel.innerHTML = '';
-      manifest.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        const shortDate = new Date(m.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        opt.textContent = `${m.name} — ${shortDate}`;
-        $specificSel.appendChild(opt);
-      });
-    }
-
-    // Pre-select based on `current` (gear re-open) or defaults (first visit).
-    // First-visit default is now "All matches" (changed from "Most recent"
-    // on 2026-05-08) — pre-existing saved prefs preserved deliberately.
-    if (current && current.mode === 'recent') {
-      $recentRadio.checked = true;
-    } else if (current && current.mode === 'specific') {
-      $specificRadio.checked = true;
-      if (current.matchId && $specificSel) {
-        const exists = manifest.some(m => m.id === current.matchId);
-        if (exists) $specificSel.value = current.matchId;
-      }
-    } else {
-      // No saved pref or current.mode === 'all' / 'ask' → default to All matches.
-      $allRadio.checked = true;
-    }
-    // If we have a saved pref (even 'ask'), "Remember" is implicitly the
-    // current stance; treat missing pref as Remember-pre-selected per the
-    // plan's default.
-    if (current && current.mode === 'ask') $persistNo.checked = true;
-    else $persistYes.checked = true;
-
-    // Toggle specific-match select visibility with the radio.
-    function syncSpecificVisibility() {
-      if ($specificRadio.checked) $specificWrap.classList.remove('d-none');
-      else $specificWrap.classList.add('d-none');
-    }
-    function handleSpecificFocus() {
-      $specificRadio.checked = true;
-      syncSpecificVisibility();
-    }
-    syncSpecificVisibility();
-    const modeRadios = [$recentRadio, $allRadio, $specificRadio];
-    modeRadios.forEach(r => r.addEventListener('change', syncSpecificVisibility));
-    // Focusing the dropdown implies they want "specific".
-    if ($specificSel) $specificSel.addEventListener('focus', handleSpecificFocus);
-
-    let confirmed = false;
-
-    function getChoice() {
-      let mode = 'recent';
-      if ($allRadio.checked) mode = 'all';
-      else if ($specificRadio.checked) mode = 'specific';
-      const persist = $persistYes.checked;
-      const choice = { mode, persist };
-      if (mode === 'specific' && $specificSel) choice.matchId = $specificSel.value;
-      return choice;
-    }
-
-    const instance = bootstrap.Modal.getOrCreateInstance($modal);
-
-    function handleConfirm() {
-      confirmed = true;
-      const choice = getChoice();
-      instance.hide();
-      if (typeof onConfirm === 'function') onConfirm(choice);
-    }
-
-    function handleHidden() {
-      // Tear down every listener we added so re-opens don't accumulate.
-      $confirmBtn.removeEventListener('click', handleConfirm);
-      $modal.removeEventListener('hidden.bs.modal', handleHidden);
-      modeRadios.forEach(r => r.removeEventListener('change', syncSpecificVisibility));
-      if ($specificSel) $specificSel.removeEventListener('focus', handleSpecificFocus);
-      if (!confirmed && typeof onCancel === 'function') onCancel();
-    }
-
-    $confirmBtn.addEventListener('click', handleConfirm);
-    $modal.addEventListener('hidden.bs.modal', handleHidden);
-
-    // Hide the preloader spinner behind the modal so the welcome screen
-    // reads cleanly. Loaders re-show #loading themselves when they run.
-    $loading.classList.add('d-none');
-
-    instance.show();
   }
 
   // URLSearchParams.toString() percent-encodes a long list of characters
@@ -670,7 +477,7 @@
 
   let manifest;
   try {
-    const res = await fetch('data/processed/matches.json');
+    const res = await fetch('data/processed/matches.json', { cache: 'no-store' });
     if (!res.ok) throw new Error(res.status);
     manifest = await res.json();
   } catch {
@@ -686,7 +493,7 @@
   // dashes out missing fields.
   let mapRegistry = {};
   try {
-    const regRes = await fetch('data/map-registry.json');
+    const regRes = await fetch('data/map-registry.json', { cache: 'no-store' });
     if (regRes.ok) mapRegistry = await regRes.json();
   } catch {
     // registry is optional — nothing to do
@@ -774,7 +581,9 @@
     // updated dynamically by updateAllMatchesCardCopy() once the picker
     // filters apply. That avoids a second buildMatchPicker() pass when
     // filters change.
-    const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
+    // Meta is rendered as its own stacked block under the head row (not
+    // inside it) so a long "N matches" string can't squeeze the name down
+    // to "Al..." like it did when both lived in the same flex row.
     return `
       <button type="button" class="vt-match-picker-card vt-match-picker-card--all" data-target="__all__" role="listitem">
         <div class="vt-match-picker-card-thumb vt-match-picker-card-thumb--placeholder" aria-hidden="true">
@@ -783,8 +592,8 @@
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
             <span class="vt-match-picker-card-name">All Matches</span>
-            <span class="vt-match-picker-card-meta" data-all-card-meta>${manifest.length} matches &middot; ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}</span>
           </div>
+          <div class="vt-match-picker-card-meta" data-all-card-meta>${manifest.length} matches</div>
           <div class="vt-match-picker-card-submeta">
             <span class="vt-muted" data-all-card-submeta>Career overview across every recorded match.</span>
           </div>
@@ -866,8 +675,7 @@
         ? 'No matches match the current filters.'
         : `Aggregate of ${k} match${k === 1 ? '' : 'es'} matching filters.`;
     } else {
-      const submitters = new Set(manifest.map(m => m.submitter).filter(Boolean));
-      metaEl.textContent = `${total} matches \u00B7 ${submitters.size} submitter${submitters.size === 1 ? '' : 's'}`;
+      metaEl.textContent = `${total} match${total === 1 ? '' : 'es'}`;
       subEl.textContent = 'Career overview across every recorded match.';
     }
   }
@@ -2408,8 +2216,8 @@
   async function ensureEloLoaded() {
     if (window.__vtElo !== undefined) return;
     const [eloRes, histRes] = await Promise.all([
-      fetch('data/processed/elo_current.json').catch(() => null),
-      fetch('data/processed/elo_history.json').catch(() => null),
+      fetch('data/processed/elo_current.json', { cache: 'no-store' }).catch(() => null),
+      fetch('data/processed/elo_history.json', { cache: 'no-store' }).catch(() => null),
     ]);
     try {
       window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
@@ -2434,7 +2242,7 @@
     let contributions = window.__vtContributions;
     if (!contributions) {
       try {
-        const res = await fetch('data/processed/match_contributions.json');
+        const res = await fetch('data/processed/match_contributions.json', { cache: 'no-store' });
         if (!res.ok) throw new Error(res.status);
         contributions = await res.json();
         window.__vtContributions = contributions;
@@ -2579,6 +2387,11 @@
 
     registerTabRenderer('#all-tab-commanders', () => {
       const cs = data.commander_stats || { rows: [], head_to_head: [] };
+      // Cohort card sits above the leaderboard; reads window.__vtElo
+      // directly (corpus-wide / picker-filter-unaware - same contract as
+      // the main-view VTSR-T leaderboard).
+      wireCommanderCohortControls();
+      renderCommanderCohort(window.__vtElo);
       renderCommanderLeaderboard(cs.rows);
       renderCommanderH2H(cs.head_to_head);
       renderCommanderFactionPicks('commander-faction-picks-canvas', cs.rows);
@@ -3886,6 +3699,8 @@
           <span class="vt-profile-name">${esc(player.name)}</span>
           <span class="badge ${fBadge}">Team ${player.faction}</span>
           <span class="small" style="color:var(--kb-text-muted);">Slot ${player.slot}</span>
+          ${player.is_campod ? '<span class="vt-campod-badge" data-bs-toggle="tooltip" title="Spent &gt;25% of the match in a camera-pod — excluded from VTSR-T and career stats">Campod</span>' : ''}
+          ${player.is_low_activity ? '<span class="vt-partial-badge" data-bs-toggle="tooltip" title="Event-stream presence covered &lt;75% of match duration — excluded from VTSR-T and career stats">Partial</span>' : ''}
         </div>
         <div class="d-flex flex-wrap gap-4 mb-3">
           <div class="stat-card"><div class="stat-value">${fmt(ps.dealt)}</div><div class="stat-label">Dealt</div></div>
@@ -4329,7 +4144,7 @@
     }
     if (idx.excluded) {
       const reasonText = idx.exclusion_reason === 'low_player_count' ? 'fewer than 6 players'
-                       : idx.exclusion_reason === 'short_duration'   ? 'shorter than 5 minutes'
+                       : idx.exclusion_reason === 'short_duration'   ? 'shorter than 4 minutes'
                        : 'excluded from rating';
       return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
         title="Match excluded from VTSR-T (${reasonText})"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
@@ -4375,6 +4190,38 @@
       const nickSub = r.in_game_nick
         ? `<small class="vt-nick-sub">@${esc(r.in_game_nick)}</small>`
         : '';
+      // v2.5: spectator-style exclusion badges. is_campod / is_low_activity
+      // are pipeline-set; supporting fields (campod_share,
+      // presence_window_sec) power the hover tooltips. Excluded rows
+      // also get a row-level class for 55% opacity de-emphasis (see
+      // css/vtstats-theme.css). Pure-presentation -- ELO + career
+      // aggregator already omitted these rows by the time we get here,
+      // we're just signaling WHY they don't move the needle.
+      const campodPct = ((r.campod_share || 0) * 100).toFixed(0);
+      const presenceSec = r.presence_window_sec || 0;
+      const presenceMin = Math.floor(presenceSec / 60);
+      const presenceRem = Math.round(presenceSec % 60);
+      const durationSec = (currentData && currentData.match && currentData.match.duration_sec) || 0;
+      const durationMin = Math.floor(durationSec / 60);
+      const durationRem = Math.round(durationSec % 60);
+      const campodBadge = r.is_campod
+        ? ` <span class="vt-campod-badge" data-bs-toggle="tooltip" title="Spent ${campodPct}% of match in a camera-pod — excluded from VTSR-T and career stats">Campod</span>`
+        : '';
+      const partialBadge = r.is_low_activity
+        ? ` <span class="vt-partial-badge" data-bs-toggle="tooltip" title="Only present for ${presenceMin}:${String(presenceRem).padStart(2,'0')} of ${durationMin}:${String(durationRem).padStart(2,'0')} — excluded from VTSR-T and career stats">Partial</span>`
+        : '';
+      // v7 (schema_version 7): identity-reroute provenance chip. Set by the
+      // pipeline's ACCOUNT_REROUTES mechanism (scripts/process_stats.py)
+      // when this slot's Steam64 was rewritten at session-load time
+      // (shared-PC case, e.g. MAX playing on DD's account). All
+      // downstream stats already attribute to the rerouted player; the
+      // chip just surfaces the provenance. See docs/DATA_DICTIONARY.md §10.3.
+      const rerouteBadge = r.rerouted_from
+        ? ` <span class="vt-reroute-badge" data-bs-toggle="tooltip" title="${esc(r.rerouted_from.name)} let this player use their Steam account this match (in-game nick was '${esc(r.rerouted_from.raw_nick)}'). Stats are attributed to ${esc(r.name)}.">${esc(r.rerouted_from.label)}</span>`
+        : '';
+      const rowClass = r.is_campod
+        ? 'vt-row-campod'
+        : (r.is_low_activity ? 'vt-row-partial' : '');
       // v2.3: compact `TOTAL (PvP/PvE)` chip rendering on Kills/Deaths.
       // Sort behavior unchanged (sort key still `kills` / `deaths`,
       // i.e. totals). Tooltip surfaces the explicit split + the
@@ -4384,9 +4231,9 @@
       const dCell = killsDeathsChipCell(r.deaths || 0, ps.pvp_deaths, ps.pve_deaths, 'deaths');
       const eloIdx  = getEloDeltaIndexForCurrentMatch();
       const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
-      return `<tr>
+      return `<tr class="${rowClass}">
         <td>${i + 1}</td>
-        <td class="fw-semibold">${esc(r.name)}${nickSub}</td>
+        <td class="fw-semibold">${esc(r.name)}${nickSub}${campodBadge}${partialBadge}${rerouteBadge}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
         <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>
@@ -6118,6 +5965,394 @@
     ensureTooltips($card);
   }
 
+  // -----------------------------------------------------------------------
+  // Commander Cohort card (All Matches -> Commanders tab, top of pane).
+  //
+  // Side-by-side career-axis comparison across players with a commander
+  // share at or above the active threshold. Two views toggle in place:
+  //   'z'       : per-axis z-score from axis_means (one cell per axis x player)
+  //   'contrib' : weight x z, with a highlighted Sum (~ mean P_i) footer row
+  //
+  // Data source is window.__vtElo (corpus-wide) - the table intentionally
+  // ignores the picker filter, matching the contract used by the dedicated
+  // VTSR-T leaderboard. Reuses VTSR_AXIS_META for axis labels and shares
+  // the --kb-success / --kb-danger color tokens used elsewhere.
+  // -----------------------------------------------------------------------
+
+  // Module-local state. Persist across re-renders within a single session;
+  // reset to defaults each fresh tab-state cycle (see resetTabState).
+  let commanderCohortShowAll = false;   // false -> >=40% only; true -> all rated cmdrs
+  let commanderCohortView    = 'z';     // 'z' | 'contrib'
+
+  const COMMANDER_COHORT_MIN_SHARE   = 0.40;
+  const COMMANDER_COHORT_MIN_MATCHES = 5;     // min matches_as_commander floor
+                                              // (mirrors MIN_CAREER_MATCHES convention)
+
+  // Compute commander share for one rating row. Returns 0 when the
+  // player has zero rated matches (defensive — pure spectators / debutants
+  // shouldn't be in the ratings array anyway).
+  function _cohortShare(r) {
+    const c = r.matches_as_commander || 0;
+    const t = r.matches_as_thug || 0;
+    const denom = c + t;
+    return denom > 0 ? c / denom : 0;
+  }
+
+  // Filter + sort the rating set for the cohort table. Provisional rows
+  // are always excluded (tiny-sample noise dominates the axis_means);
+  // the >=8 commander-match floor further filters players whose role
+  // average isn't yet stable enough to compare side-by-side.
+  function _cohortVisible(elo) {
+    if (!elo || !Array.isArray(elo.ratings)) return [];
+    const minShare = commanderCohortShowAll ? 0 : COMMANDER_COHORT_MIN_SHARE;
+    const out = elo.ratings.filter(r => {
+      if (r.matches_provisional) return false;                       // skip provisional ratings
+      const cmdr = r.matches_as_commander || 0;
+      if (cmdr < COMMANDER_COHORT_MIN_MATCHES) return false;         // need stable commander sample
+      return _cohortShare(r) >= minShare;
+    });
+    // Primary: commander share desc. Secondary: VTSR-T desc.
+    out.sort((a, b) => {
+      const sa = _cohortShare(a);
+      const sb = _cohortShare(b);
+      if (sb !== sa) return sb - sa;
+      return (b.vtsr || 0) - (a.vtsr || 0);
+    });
+    return out;
+  }
+
+  // Color-class helper mirroring the VTSR axis-bar convention.
+  // Returns one of 'is-positive' / 'is-negative' / '' (neutral band).
+  function _cohortValueClass(v) {
+    if (v == null || !isFinite(v)) return '';
+    if (Math.abs(v) < 0.005) return '';
+    return v > 0 ? 'vt-cohort-pos' : 'vt-cohort-neg';
+  }
+
+  // Format a signed numeric cell value with explicit + / - prefix.
+  function _cohortFmt(v, digits) {
+    if (v == null || !isFinite(v)) return '<span class="text-muted">&mdash;</span>';
+    const sign = v >= 0 ? '+' : '';
+    return `${sign}${v.toFixed(digits)}`;
+  }
+
+  // Commander-only axis means. Walks window.__vtEloHistory deltas and
+  // averages each axis's z-score using ONLY rows where the player was a
+  // commander. Commander rows are self-labeling via axis_contributions_meta
+  // (emitted only when v2.4 applied a role-fairness shift). For the four
+  // shifted axes (mobility, thug_kill_rate, net_damage_share,
+  // thug_efficiency) plus the two locked shifted axes (target_lock_pct,
+  // pve_share), we pull z_pre_shift so the v2.4 commander cushion is
+  // reversed - that cushion exists to make VTSR-T fair across roles, but
+  // for commander-vs-commander comparison it artificially flattens gaps.
+  // For the two role-blind axes (thug_accuracy, snipe_bonus) pre == post,
+  // so axis_contributions[axis] is the raw value.
+  //
+  // Returns { [steam64|name]: { axisMeans: {axis: meanZ}, n: int } }
+  // where n is the count of commander matches contributing data for that
+  // player (max across axes - per-axis denominator can be smaller when
+  // an axis was unavailable in some match, mirroring elo.py).
+  function _commanderAxisMeans(eloHistory) {
+    const out = {};
+    if (!eloHistory || !Array.isArray(eloHistory.history)) return out;
+    for (const match of eloHistory.history) {
+      if (match.match_excluded) continue;
+      const deltas = match.deltas || [];
+      for (const d of deltas) {
+        const meta = d.axis_contributions_meta;
+        if (!meta) continue; // thug row in this match
+        const key = d.steam64 || d.name;
+        if (!key) continue;
+        const rec = out[key] || { sums: {}, counts: {}, n: 0 };
+        rec.n += 1;
+        const contribs = d.axis_contributions || {};
+        const seen = new Set([...Object.keys(meta), ...Object.keys(contribs)]);
+        for (const axis of seen) {
+          let z;
+          if (meta[axis] && typeof meta[axis].z_pre_shift === 'number') {
+            z = meta[axis].z_pre_shift;
+          } else if (axis in contribs) {
+            z = contribs[axis];
+          } else {
+            continue;
+          }
+          rec.sums[axis] = (rec.sums[axis] || 0) + z;
+          rec.counts[axis] = (rec.counts[axis] || 0) + 1;
+        }
+        out[key] = rec;
+      }
+    }
+    const result = {};
+    for (const key of Object.keys(out)) {
+      const rec = out[key];
+      const axisMeans = {};
+      for (const axis of Object.keys(rec.sums)) {
+        const c = rec.counts[axis] || 0;
+        if (c > 0) axisMeans[axis] = rec.sums[axis] / c;
+      }
+      result[key] = { axisMeans, n: rec.n };
+    }
+    return result;
+  }
+
+  // Weighted-contribution helper. For a single player, compute (weight x z)
+  // per axis using pro-rata weight redistribution over axes the player
+  // actually has (mirrors compute_performance_index() in scripts/elo.py).
+  // Returns { contribs: {axis: w*z}, sum: number }.
+  function _cohortWeightedContribs(axisMeans, weightsAll) {
+    const present = Object.keys(axisMeans || {})
+      .filter(a => axisMeans[a] != null && isFinite(axisMeans[a]));
+    if (!present.length) return { contribs: {}, sum: 0 };
+    const totalWeight = present.reduce((s, a) => s + (weightsAll[a] || 0), 0);
+    if (totalWeight <= 0) return { contribs: {}, sum: 0 };
+    const contribs = {};
+    let sum = 0;
+    for (const a of present) {
+      const w = (weightsAll[a] || 0) / totalWeight;
+      const c = w * axisMeans[a];
+      contribs[a] = c;
+      sum += c;
+    }
+    return { contribs, sum };
+  }
+
+  // Main renderer. `elo` is window.__vtElo (already loaded by
+  // ensureEloLoaded). When elo is missing / has no ratings, the card
+  // hides itself entirely.
+  function renderCommanderCohort(elo) {
+    const $card = document.getElementById('section-commander-cohort');
+    if (!$card) return;
+
+    const container = document.getElementById('commander-cohort-container');
+    if (!container) return;
+
+    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
+      $card.classList.add('d-none');
+      return;
+    }
+    $card.classList.remove('d-none');
+
+    // Reflect current toggle state in the header controls.
+    document.querySelectorAll('#commander-cohort-view-toggle [data-cohort-view]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.cohortView === commanderCohortView);
+    });
+    const $showAllBtn = document.getElementById('commander-cohort-show-all');
+    if ($showAllBtn) {
+      $showAllBtn.dataset.showAll = String(commanderCohortShowAll);
+      $showAllBtn.textContent = commanderCohortShowAll
+        ? 'Show \u226540% only'
+        : 'Show all commanders';
+      $showAllBtn.classList.toggle('active', commanderCohortShowAll);
+    }
+
+    // Pre-compute commander-only axis means once per render. Reads from
+    // window.__vtEloHistory (eagerly loaded by ensureEloLoaded). Each entry
+    // is { axisMeans, n } keyed by steam64 (name fallback for legacy rows).
+    const cmdrByKey = _commanderAxisMeans(window.__vtEloHistory);
+
+    // Defensive: drop visible rows that have zero commander deltas in
+    // history. matches_as_commander >= 5 in elo_current should already
+    // cover this since the v2.4 corpus re-rate, but a stale history file
+    // would otherwise show empty rows.
+    const visibleAll = _cohortVisible(elo);
+    const visible = visibleAll.filter(r => {
+      const key = r.steam64 || r.name;
+      const c = cmdrByKey[key];
+      return c && c.n > 0;
+    });
+    if (visible.length === 0) {
+      const note = commanderCohortShowAll
+        ? `No non-provisional players with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches yet.`
+        : `No non-provisional players with \u226540% commander share and \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches yet. Try <em>Show all commanders</em>.`;
+      container.innerHTML = `<p class="text-center my-3" style="color:var(--kb-text-muted);">${note}</p>`;
+      return;
+    }
+
+    // Cap displayed players when "Show all" is on to keep the grid
+    // readable; sort already put the highest-cmdr-share players first.
+    const MAX_VISIBLE = 12;
+    const trimmed = visible.slice(0, MAX_VISIBLE);
+    const moreCount = Math.max(0, visible.length - trimmed.length);
+
+    // Axis order locked to weight desc so the heaviest axes lead -
+    // matches what the user sees in the methodology section.
+    const weightsAll = (elo.weights || {});
+    const axisOrder = Object.keys(weightsAll).sort((a, b) =>
+      (weightsAll[b] || 0) - (weightsAll[a] || 0)
+    );
+    // Fallback if elo.weights is missing for some reason: use VTSR_AXIS_META key order.
+    const axes = axisOrder.length ? axisOrder : Object.keys(VTSR_AXIS_META);
+
+    // Pre-compute weighted contribs per player (used by both the header
+    // VTSR-C-prev cell and, when in 'contrib' view, the body cells +
+    // Sum row). Reads commander-only axis means, never career means.
+    const contribByPlayer = {};
+    for (const r of trimmed) {
+      const key = r.steam64 || r.name;
+      const cm = (cmdrByKey[key] && cmdrByKey[key].axisMeans) || {};
+      contribByPlayer[key] = _cohortWeightedContribs(cm, weightsAll);
+    }
+
+    // Header row: one cell per player. Columns are sized via CSS grid;
+    // the axis column lives in its own .vt-cohort-axis-cell column.
+    const headerCells = trimmed.map(r => {
+      const c = r.matches_as_commander || 0;
+      const t = r.matches_as_thug || 0;
+      const sharePct = (_cohortShare(r) * 100).toFixed(0);
+      const peak = Math.round(r.peak_vtsr || r.vtsr || 0);
+      const vtsr = Math.round(r.vtsr || 0);
+      const provBadge = r.matches_provisional
+        ? ' <span class="vt-cohort-prov" title="Provisional rating">Prov</span>'
+        : '';
+      const key = r.steam64 || r.name;
+      const cmdrN = (cmdrByKey[key] && cmdrByKey[key].n) || 0;
+      const composite = (contribByPlayer[key] || { sum: 0 }).sum;
+      const compositeCls = _cohortValueClass(composite);
+      const compositeTip = esc(
+        `VTSR-C (preview): \u03a3 w \u00d7 z\u0304 over the player's ${cmdrN} commander match${cmdrN === 1 ? '' : 'es'}. `
+        + `Performance space [-1, +1]; not rating-space (no anchor/floor). Thug-axis performance only \u2014 commander-specific signals (scrap, build tempo) not yet collected.`
+      );
+      return `<div class="vt-cohort-col-header">
+        <div class="vt-cohort-col-name">${esc(r.name)}${provBadge}</div>
+        <div class="vt-cohort-col-share">${sharePct}% <span class="vt-cohort-col-share-detail">(${c} C / ${t} T)</span></div>
+        <div class="vt-cohort-col-rating"><strong>${vtsr}</strong> <span class="vt-cohort-col-rating-label">VTSR-T</span></div>
+        <div class="vt-cohort-col-vtsrc ${compositeCls}"
+             data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="bottom"
+             title="${compositeTip}">
+          <strong>${_cohortFmt(composite, 2)}</strong>
+          <span class="vt-cohort-col-vtsrc-label">VTSR-C<sub>prev</sub></span>
+        </div>
+        <div class="vt-cohort-col-peak">${cmdrN} cmdr match${cmdrN === 1 ? '' : 'es'} \u00b7 Peak VTSR-T ${peak}</div>
+      </div>`;
+    }).join('');
+
+    // Body rows: one row per axis. Each cell shows either the z value
+    // (z view) or the weighted contribution (contrib view), drawing from
+    // the commander-matches-only means computed above.
+    const bodyRows = axes.map(axisKey => {
+      const meta = VTSR_AXIS_META[axisKey] || { label: axisKey, desc: '', formula: '' };
+      const weight = weightsAll[axisKey] || 0;
+      const axisLabel = commanderCohortView === 'contrib' && weight > 0
+        ? `${esc(meta.label)} <span class="vt-cohort-axis-weight">(w=${weight.toFixed(2)})</span>`
+        : esc(meta.label);
+
+      const tipDesc = meta.desc ? `<br><small>${esc(meta.desc)}</small>` : '';
+      const tipHtml = `<strong>${esc(meta.label)}</strong>${tipDesc}`;
+
+      const cells = trimmed.map(r => {
+        const key = r.steam64 || r.name;
+        const cm = (cmdrByKey[key] && cmdrByKey[key].axisMeans) || {};
+        let raw;
+        if (commanderCohortView === 'contrib') {
+          const cb = contribByPlayer[key] || { contribs: {} };
+          raw = cb.contribs[axisKey];
+        } else {
+          raw = cm[axisKey];
+        }
+        const cls = _cohortValueClass(raw);
+        const txt = commanderCohortView === 'contrib'
+          ? _cohortFmt(raw, 4)
+          : _cohortFmt(raw, 2);
+        return `<div class="vt-cohort-cell ${cls}">${txt}</div>`;
+      }).join('');
+
+      return `<div class="vt-cohort-row">
+        <div class="vt-cohort-axis-cell"
+             data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="right"
+             data-bs-custom-class="vt-axis-tooltip"
+             title="${esc(tipHtml)}">${axisLabel}</div>
+        ${cells}
+      </div>`;
+    }).join('');
+
+    // Footer sum row only in contrib view.
+    let footerRow = '';
+    if (commanderCohortView === 'contrib') {
+      const sumCells = trimmed.map(r => {
+        const key = r.steam64 || r.name;
+        const cb = contribByPlayer[key] || { sum: 0 };
+        const cls = _cohortValueClass(cb.sum);
+        return `<div class="vt-cohort-cell ${cls}"><strong>${_cohortFmt(cb.sum, 4)}</strong></div>`;
+      }).join('');
+      footerRow = `<div class="vt-cohort-row vt-cohort-sum-row">
+        <div class="vt-cohort-axis-cell"><strong>Sum (= VTSR-C<sub>prev</sub>)</strong></div>
+        ${sumCells}
+      </div>`;
+    }
+
+    // CSS grid template: first column is the axis label, rest is one
+    // column per player. We set it inline so the grid scales with the
+    // visible cohort size without needing a stylesheet entry per N.
+    const colCount = trimmed.length;
+    const gridTemplate = `minmax(160px, 1.6fr) repeat(${colCount}, minmax(108px, 1fr))`;
+
+    // Source-note is the only subtitle now - it's dynamic (reflects the
+    // active filter / count). The view-mode explainer (z vs weighted +
+    // color coding) lives in the toggle-button tooltips and the
+    // info-icon tooltip on the card title.
+    const sourceNote = commanderCohortShowAll
+      ? (moreCount
+          ? `All non-provisional commanders with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches (showing first ${trimmed.length} of ${visible.length}, sorted by commander share).`
+          : `All ${visible.length} non-provisional commander${visible.length === 1 ? '' : 's'} with \u2265${COMMANDER_COHORT_MIN_MATCHES} commander matches.`)
+      : `Showing ${trimmed.length} commander${trimmed.length === 1 ? '' : 's'} with \u226540% commander share &middot; minimum ${COMMANDER_COHORT_MIN_MATCHES} commander matches &middot; provisional ratings excluded.`;
+
+    const callout = `
+      <div class="vt-cohort-callout small mb-2">
+        <i class="bi bi-flask vt-cohort-callout-icon"></i>
+        <span><strong>VTSR-C preview.</strong> Measures each commander's thug-axis performance over <em>only the matches they commanded</em>, with the v2.4 role-fairness cushion reversed so true commander-vs-commander gaps surface. A future VTSR-C rating will layer wins and commander-specific signals (economy, build tempo) on top &mdash; those aren't collected upstream yet, so this preview is thug-performance only.</span>
+      </div>
+    `;
+
+    container.innerHTML = `
+      ${callout}
+      <div class="vt-cohort-subtitle text-muted small mb-2">${sourceNote}</div>
+      <div class="vt-cohort-table-wrap">
+        <div class="vt-cohort-grid" style="grid-template-columns:${gridTemplate};">
+          <div class="vt-cohort-row vt-cohort-header-row">
+            <div class="vt-cohort-axis-cell"></div>
+            ${headerCells}
+          </div>
+          ${bodyRows}
+          ${footerRow}
+        </div>
+      </div>
+    `;
+
+    ensureTooltips(container);
+  }
+
+  // One-time wiring for the cohort card's two header controls. Idempotent
+  // via a dataset flag on the card element - safe to call from the tab
+  // renderer on every activation.
+  function wireCommanderCohortControls() {
+    const $card = document.getElementById('section-commander-cohort');
+    if (!$card || $card.dataset.cohortWired === '1') return;
+    $card.dataset.cohortWired = '1';
+
+    // View-mode toggle (z-scores vs weighted-contribution). Delegated so
+    // a future re-render that rebuilds the button group keeps working.
+    const $viewGroup = document.getElementById('commander-cohort-view-toggle');
+    if ($viewGroup) {
+      $viewGroup.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-cohort-view]');
+        if (!btn) return;
+        const next = btn.dataset.cohortView;
+        if (!next || next === commanderCohortView) return;
+        commanderCohortView = next;
+        renderCommanderCohort(window.__vtElo);
+      });
+    }
+
+    // "Show all rated commanders" toggle.
+    const $showAll = document.getElementById('commander-cohort-show-all');
+    if ($showAll) {
+      $showAll.addEventListener('click', () => {
+        commanderCohortShowAll = !commanderCohortShowAll;
+        renderCommanderCohort(window.__vtElo);
+      });
+    }
+  }
+
   // Look up a career row's VTSR-T record from the cached ELO payload.
   // Joins by steam64 (primary) with name fallback for legacy contributions
   // missing steam64. Returns null when ELO data isn't loaded yet (404 path).
@@ -7018,31 +7253,19 @@
     });
   }
 
-  // --- Preferences Gear ---
-  // Re-opens the landing modal pre-filled with the current saved pref so
-  // users can change their mind later. onCancel is a no-op here so
-  // dismissing the modal doesn't disturb whatever they're currently viewing.
-  document.getElementById('landing-prefs-btn')?.addEventListener('click', () => {
-    showLandingModal({
-      current: readLandingPref(),
-      onConfirm: ({ mode, matchId, persist }) => {
-        if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
-        else clearLandingPref();
-        const doLoad = () => applyLandingChoice({ mode, matchId });
-        if (window.VTFx) VTFx.withViewTransition(doLoad);
-        else doLoad();
-      },
-      onCancel: () => { /* no-op: keep current view */ },
-    });
-  });
+  // --- Back-to-All-Matches Button ---
+  // Per-match banner shortcut for jumping back to the aggregate view.
+  // Lives inside #match-info which is hidden whenever the All Matches view
+  // is active, so the button is naturally per-match-only with no extra
+  // visibility wiring. selectMatch handles trigger sync + view-transition.
+  document.getElementById('info-back-to-all')?.addEventListener('click', () => selectMatch('__all__'));
 
   // --- Initial Boot ---
   // Branch to the appropriate loader based on the URL state we already
   // parsed earlier (during picker init — `const initialUrlState` is in
   // scope from the Phase 2 init block above). Shared URLs (any
-  // match/tab/filter/team/players intent) always win and fully bypass the
-  // landing preferences modal. Only when no URL intent exists do we
-  // consult the stored pref (or show the first-visit modal).
+  // match/tab/filter/team/players intent) always win. When no URL intent
+  // is present we always default to the All Matches aggregate view.
   const hasOtherUrlIntent = initialUrlState.tab
     || initialUrlState.filter
     || initialUrlState.team
@@ -7066,22 +7289,9 @@
       updateMatchPickerTriggers(manifest[0]);
       loadMatch(manifest[0].file, initialUrlState);
     } else if (manifest.length > 0) {
-      // No URL intent at all — consult landing pref.
-      const pref = readLandingPref();
-      if (!pref || pref.mode === 'ask') {
-        showLandingModal({
-          current: null,
-          onConfirm: ({ mode, matchId, persist }) => {
-            if (persist) writeLandingPref({ version: LANDING_PREF_VERSION, mode, matchId });
-            applyLandingChoice({ mode, matchId });
-          },
-          // Cancel falls back to the new default (All matches), matching
-          // what the modal showed pre-selected.
-          onCancel: () => applyLandingChoice({ mode: 'all' }),
-        });
-      } else {
-        applyLandingChoice(pref);
-      }
+      // No URL intent at all — universal default is the All Matches view.
+      updateMatchPickerTriggers('__all__');
+      loadAllMatches();
     }
   }
 
@@ -7116,8 +7326,7 @@
     const recordInst = bootstrap.Modal.getOrCreateInstance($recordStatsModal);
     $recordStatsModal.addEventListener('hidden.bs.modal', runInitialBoot, { once: true });
     // Hide the preloader behind the modal so the welcome screen reads
-    // cleanly (mirrors the trick showLandingModal() uses). Loaders
-    // re-show #loading themselves when they actually run.
+    // cleanly. Loaders re-show #loading themselves when they actually run.
     $loading.classList.add('d-none');
     recordInst.show();
   } else {
