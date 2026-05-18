@@ -1,6 +1,6 @@
 ---
 name: player_profile_pages
-overview: Pre-generated `/player/<slug>/` profile pages with per-player OG meta for rich Discord/Twitter unfurls, plus a rich `/player/` directory landing with card-grid + search/filter and a multi-player Compare mode (capped at 4). Per-player pages are HTML stubs whose `<head>` is template-interpolated by [scripts/process_stats.py](scripts/process_stats.py); the body is rendered client-side by a new [js/player.js](js/player.js) which reuses the existing `VTAggregate.build()` pipeline. Adds a sticky slug map, a runtime `?p=`/`?slug=`/`?compare=` fallback on `player/index.html`, and a "most-commanded-against" panel for commander-main players (>=40% commander rate, min 6 commands).
+overview: Pre-generated `/player/<slug>/` profile pages with per-player OG meta for rich Discord/Twitter unfurls, plus a rich `/player/` directory landing with card-grid + search/filter and a multi-player Compare mode (capped at 4). Per-player pages are HTML stubs whose `<head>` is template-interpolated by [scripts/process_stats.py](scripts/process_stats.py); the body is rendered client-side by a new [js/player.js](js/player.js) which reuses the existing `VTAggregate.build()` pipeline. Adds a sticky slug map, a runtime `?p=`/`?slug=`/`?compare=` fallback on `player/index.html`, a vendored Chart.js zoom plugin powering an all-time zoomable rating time-series chart (single-player and overlaid in compare), and a "most-commanded-against" panel for commander-main players (>=40% commander rate, min 6 commands).
 todos:
   - id: phase1-slug
     content: "Phase 1 - Slug map foundation: implement sanitize_to_slug() + allocate_slug() + the sticky slug-map reader/writer in a new scripts/generate_player_pages.py module. Wire into scripts/process_stats.py to emit data/processed/player_slugs.json after elo_current.json. Add PLAYER_TEMPLATE_VERSION=1 constant. Verify deterministic allocation across runs using current corpus."
@@ -15,13 +15,13 @@ todos:
     content: "Phase 4 - Single-player Overview tab in js/player.js: hero card (name, tier, VTSR-T, peak, sparkline, rank), career snapshot, 8-axis radar (reuse renderPlayerRadar career mode with focusNames=[thisPlayer] + median ghost), strengths/weaknesses ranking panel, coaching cards (static per-axis copy dict, triggered when z < median), quick-wins +0.5sigma ΔVTSR projection using elo_current.weights + rating_scale."
     status: pending
   - id: phase5-matchlog
-    content: "Phase 5 - Match Log tab (the headline feature): virtualized sortable table of every match the player appeared in. Columns date/map/faction/role/result/K-D/dealt/acc/ΔVTSR/after/detail chevron. Role pip (commander/thug), excluded-row styling with Campod/Partial badges, ΔVTSR chip from elo_history.history[].deltas[]. Expandable detail shows 8 axis-contribution bars (with commander pre/post shift cushion when axis_contributions_meta present), weapon breakdown collapse, loadout pie. View-Full-Match link to index.html?match=<id>&filter=player&players=<steam64>."
+    content: "Phase 5 - Rating & matches tab (the headline feature): (a) vendor vendor/chartjs-plugin-zoom/chartjs-plugin-zoom.min.js and load it on player pages. (b) Rating time-series chart at top of tab: Chart.js line of `after` rating across the player's matches, date x-axis, signed-colored points, anchor/floor reference lines, peak annotation, faded tier-band background, wheel/pinch zoom + drag-to-pan via the plugin, preset zoom chips (All time / 90d / 30d / Last 10 / Reset), click-point-to-scroll-to-row hookup. (c) Virtualized sortable table below: columns date/map/faction/role/result/K-D/dealt/acc/ΔVTSR/after/detail chevron. Role pip (commander/thug), excluded-row styling with Campod/Partial badges, ΔVTSR chip from elo_history.history[].deltas[]. Expandable detail shows 8 axis-contribution bars (with commander pre/post shift cushion when axis_contributions_meta present), weapon breakdown collapse, loadout pie. View-Full-Match link to index.html?match=<id>&filter=player&players=<steam64>."
     status: pending
   - id: phase6-rest
     content: "Phase 6 - Remaining single-player tabs: axis deep-dive (per-axis time-series), highlights filter (career_highlights subset where player wins / is runner-up), rivals tab with top-10 from global_rivalries[], NEW Most-Commanded-Against panel gated on matches_as_commander>=6 AND matches_as_commander/matches_played>=0.40 (top 5 opposing commanders ranked by matches faced, computed inline from match_contributions[].leaderboard slot 1/6 walk), loadout + per-ship combat tab from career_stats[0].career_loadout and career_stats[0].career_per_ship_combat."
     status: pending
   - id: phase7-compare
-    content: "Phase 7 - Compare mode (NEW): activates via ?compare=<csv-of-slugs> on player/index.html, cap at 4 players. Selection-mode toggle on the directory (cards become tickable, sticky bottom action bar shows N/4 selected + Compare button + Clear). Compare view layout: horizontal mini-hero strip (stacked on mobile), overlaid 8-axis radar with up-to-4 datasets + legend, transposed stat grid (rows = metrics, columns = players, best-in-row + worst-in-row cell highlighting), common-matches table (only matches all selected players appeared in, with each player's ΔVTSR side-by-side), per-player Remove (x) chip + Add another button. URL stays canonical (?compare=a,b,c) so the comparison is shareable."
+    content: "Phase 7 - Compare mode (NEW): activates via ?compare=<csv-of-slugs> on player/index.html, cap at 4 players. Selection-mode toggle on the directory (cards become tickable, sticky bottom action bar shows N/4 selected + Compare button + Clear). Compare view layout: horizontal mini-hero strip (stacked on mobile), overlaid 8-axis radar with up-to-4 datasets + legend, **overlaid rating time-series chart** with N color-matched lines and an x-axis toggle (By date default / By matches played), reusing the same zoom plugin from Phase 5, transposed stat grid (rows = metrics, columns = players, best-in-row + worst-in-row cell highlighting), common-matches table (only matches all selected players appeared in, with each player's ΔVTSR side-by-side), per-player Remove (x) chip + Add another button. URL stays canonical (?compare=a,b,c) so the comparison is shareable."
     status: pending
   - id: phase8-crosslinks
     content: "Phase 8 - Cross-link rollout + docs: wrap player names with <a class=\"vt-player-link\" href=\"player/<slug>/\"> in 6 spots in js/app.js (renderPlayerLeaderboard, renderVtsrLeaderboard, renderCareerTable, renderKillFeed, renderHighlights, renderCommanderHeadToHead). Add a topnav Players link on index.html, docs.html, raw.html, odf/index.html (sibling of ODF) pointing at player/index.html. Add boot-time fetch of data/processed/player_slugs.json + playerHref(steam64) helper. Add .vt-player-link + .vt-player-link-fallback styles to css/vtstats-theme.css mirroring .vt-odf-link. Update AGENTS.md, .cursor/rules/project-overview.mdc, DEVELOPER_GUIDE.md with the new architecture (directory + single + compare modes), slug contract, template version, OG strategy, commander-deep-cut threshold, and 4-player compare cap rationale."
@@ -174,7 +174,20 @@ Bootstrap responsive grid: `col-12 col-md-6 col-lg-4 col-xl-3`. Each card:
 - Coaching cards: static dict in [js/player.js](js/player.js) mapping axis -> copy. Fires per-axis when player z < league median. Concrete tip examples per axis (mobility, thug_accuracy, target_lock_pct, pve_share, snipe_bonus, etc.).
 - Quick-wins projection: per-axis +0.5σ simulation projects estimated ΔVTSR using the published `weights[axis]` and `rating_scale`. Top 2 levers highlighted.
 
-### Tab 2: Match log (the headline feature)
+### Tab 2: Rating & matches (the headline feature)
+
+**Rating time-series chart (top of tab)**:
+- Chart.js line chart of `after` rating across all of the player's matches, in chronological order
+- X-axis: date (linear time scale, not match index)
+- Y-axis: VTSR-T value
+- Reference horizontal lines: anchor (1500, dashed), floor (1000, dashed-muted), the player's peak (gold, annotated)
+- Subtle background tier bands (`--vt-tier-N` colors at low alpha) so the eye locates "they're sitting in Diamond right now"
+- Each data point colored by sign of that match's delta (green = positive, red = negative); excluded-match points rendered hollow / faded
+- **Zoom interactions** via vendored `chartjs-plugin-zoom`: wheel/pinch-zoom on x-axis, drag-to-pan, double-click to reset. Mobile: native pinch + two-finger pan.
+- **Preset zoom chips** above the chart: All time (default) / 90d / 30d / Last 10 / Reset. Just call `chart.zoomScale('x', {min, max})` under the hood.
+- Hover tooltip: rating, signed delta, match name + map + role for that point. Click point -> scroll the match-log table below to the corresponding row (smooth-scroll + brief highlight pulse).
+
+**Match log table (below the chart)**:
 Virtualized sortable table. Columns: Date - Map - Faction - Role - Result - K-D - Dealt - Acc - ΔVTSR - After - Detail chevron.
 
 - **Role**: gold "Commander" pip when in `team_leaders`, else "Thug"
@@ -214,6 +227,7 @@ Activated by `?compare=<csv-of-slugs>` on `player/index.html`. Slugs not in the 
 
 - **Hero strip**: horizontal row of N (2-4) mini player-cards. Each shows name, tier badge, VTSR-T, peak, matches, a "Remove (x)" chip, plus a "View profile" link to that player's full single-player page. An "Add another" placeholder card appears as the (N+1)-th slot when N < 4, opening a small inline player-picker.
 - **Overlaid 8-axis radar**: single Chart.js radar with N datasets, color-coded by player index (`getPlayerColor(0..3)`), each with `fill: true` at ~0.10 alpha. Legend below the chart.
+- **Overlaid rating time-series chart**: same shape as the single-player chart but N (2-4) lines, color-matched to the radar via `getPlayerColor(i)`. Same zoom plugin, same preset chips. Tooltip uses `mode: 'index'` so hover shows all players' ratings at the hovered date. **X-axis toggle** chip-row above the chart: "By date" (default - real calendar time, lines start at each player's first-rated match) or "By matches played" (rebase each player's series to start at match 1, so trajectories compare apples-to-apples regardless of when they started playing). Reference lines (1500 anchor + 1000 floor) shown once.
 - **Transposed stat grid**: a single table; rows are metrics (VTSR-T, Peak, Matches, K/D, PvP K/D, PvE K/D, Accuracy, PvP Acc, Avg dealt, Avg received, etc.), columns are players. The cell with the best value in each row gets a `.vt-compare-best` highlight; the worst gets `.vt-compare-worst` (subtle muted color, so the best stands out).
 - **Common matches table**: only matches all selected players appeared in (intersect their `match_contributions` keys). Columns: date / map / faction summary / each player's ΔVTSR cell. Click row -> opens the dashboard with that match loaded, filter set to all selected players. Empty state when intersection is zero.
 - **Cross-link block**: when at least 2 of the selected players are commander-mains (meet the >=6 / >=40% gates), surface the head-to-head pair counts from `commander_stats.head_to_head` filtered to selected slugs.
@@ -222,6 +236,7 @@ Activated by `?compare=<csv-of-slugs>` on `player/index.html`. Slugs not in the 
 
 - Hero strip stacks vertically (one mini-card per row, full width)
 - Radar full-width, single chart, legend below
+- Rating time-series chart full-width with native pinch-zoom + two-finger pan via the plugin; preset chips wrap to a second row if needed
 - Stat grid becomes a **small-multiples 2x2 grid** of mini-cards: each card shows one player's name + 6-8 stat chips. Comparison is by eyeball rather than aligned columns. This is a fundamental constraint of narrow viewports; the alternative is horizontal scroll which is worse UX.
 - Common-matches table degrades to a horizontally-scrollable Bootstrap `.table-responsive`
 
@@ -240,6 +255,7 @@ NEW files:
 - [css/player.css](css/player.css) -- page-specific styles
 - [player/index.html](player/index.html) -- triple-duty shell: directory landing (no params), single-player runtime fallback (`?p=` / `?slug=`), and compare view (`?compare=`). No per-player OG (the pre-gen stubs carry that; the directory mode has a static OG meta block: "VT Stats Players - browse the roster")
 - [data/og/player-card.png](data/og/player-card.png) -- vendored 1200x630 OG image (one-time copy of `isdf-logo.png` padded onto a 1200x630 background)
+- [vendor/chartjs-plugin-zoom/chartjs-plugin-zoom.min.js](vendor/chartjs-plugin-zoom/chartjs-plugin-zoom.min.js) -- Chart.js zoom plugin (~30KB minified, latest stable). Required by the new rating time-series chart in both single-player and compare modes. Loaded after `vendor/chart.js/chart.umd.min.js` on `player/index.html` and the pre-gen stubs.
 
 GENERATED (per-player, pipeline output):
 - `player/<slug>/index.html` for each player with `matches_played >= 5` (~22 files at current corpus size)
