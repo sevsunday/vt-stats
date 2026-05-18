@@ -1,12 +1,12 @@
 ---
 name: player_profile_pages
-overview: Pre-generated `/player/<slug>/` profile pages with per-player OG meta for rich Discord/Twitter unfurls, plus a rich `/player/` directory landing with card-grid + search/filter and a multi-player Compare mode (capped at 4). Per-player pages are HTML stubs whose `<head>` is template-interpolated by [scripts/process_stats.py](scripts/process_stats.py); the body is rendered client-side by a new [js/player.js](js/player.js) which reuses the existing `VTAggregate.build()` pipeline. Adds a sticky slug map, a runtime `?p=`/`?slug=`/`?compare=` fallback on `player/index.html`, a vendored Chart.js zoom plugin powering an all-time zoomable rating time-series chart (single-player and overlaid in compare), and a "most-commanded-against" panel for commander-main players (>=40% commander rate, min 6 commands).
+overview: Pre-generated `/player/<slug>/` profile pages with per-player OG meta for rich Discord/Twitter unfurls (host = `vtstats.bz` per [CNAME](CNAME)), plus a rich `/player/` directory landing with card-grid + search/filter and a multi-player Compare mode (capped at 4). Per-player pages are HTML stubs whose `<head>` is template-interpolated by [scripts/process_stats.py](scripts/process_stats.py); the body is rendered client-side by a new [js/player.js](js/player.js) which reuses the existing `VTAggregate.build()` pipeline (extended with a `minMatchesThreshold` option so the player page can show low-match players the All Matches view hides). Reuses the already-vendored [vendor/chartjs/chartjs-plugin-zoom.umd.min.js](vendor/chartjs/chartjs-plugin-zoom.umd.min.js) for an all-time zoomable rating time-series chart (single-player and overlaid in compare). Adds a sticky slug map, a runtime `?p=`/`?slug=`/`?compare=` fallback on `player/index.html`, and a "most-commanded-against" panel for commander-main players (>=40% commander rate, min 6 commands). `PIPELINE_VERSION` stays at 16 -- the slug map + stubs are post-processing emits that don't touch per-match cache.
 todos:
   - id: phase1-slug
-    content: "Phase 1 - Slug map foundation: implement sanitize_to_slug() + allocate_slug() + the sticky slug-map reader/writer in a new scripts/generate_player_pages.py module. Wire into scripts/process_stats.py to emit data/processed/player_slugs.json after elo_current.json. Add PLAYER_TEMPLATE_VERSION=1 constant. Verify deterministic allocation across runs using current corpus."
+    content: "Phase 1 - Slug map foundation: implement sanitize_to_slug() (with the RESERVED_SLUGS block-list) + allocate_slug() (sticky) + the slug-map reader/writer in a new scripts/generate_player_pages.py module. Also define module-level constants: SITE_URL='https://vtstats.bz', PLAYER_TEMPLATE_VERSION=1, VTSR_TIERS list mirrored from js/app.js:1448-1454, ELO_PROVISIONAL_THRESHOLD=10. Wire into scripts/process_stats.py main() to emit data/processed/player_slugs.json after elo_current.json. Do NOT bump PIPELINE_VERSION. Verify deterministic allocation across runs using the current corpus."
     status: pending
   - id: phase2-directory
-    content: "Phase 2 - Player directory + runtime shell on player/index.html: rich card-grid landing of every ranked player. Hero band, toolbar (free-text search, tier multi-chips, role-bias chips, faction chips, activity bucket, sort dropdown, compare-mode toggle), responsive grid (col-12 col-md-6 col-lg-4 col-xl-3) of vt-player-card tiles (name, tier badge, VTSR-T big, peak chip, role split chip, primary ship, last-10 sparkline, View-profile click target). Mode dispatcher: ?p=<steam64> or ?slug=<slug> hides directory and renders single-player profile; ?compare=<csv> renders compare view. Smoke test the directory + a single-player runtime render."
+    content: "Phase 2 - Player directory + runtime shell on player/index.html: extend js/all-matches-aggregator.js with the opts.minMatchesThreshold parameter (default 5; player page uses 0). Build rich card-grid landing of every ranked player. Hero band, toolbar (free-text search, tier multi-chips with Tier I-V labels, role-bias chips, faction chips, activity bucket, sort dropdown, compare-mode toggle), responsive grid (col-12 col-md-6 col-lg-4 col-xl-3) of vt-player-card tiles (name, tier badge, VTSR-T big, peak chip, role split chip, primary ship, last-10 inline-SVG sparkline (NOT Chart.js), View-profile click target). Mode dispatcher: ?p=<steam64> or ?slug=<slug> hides directory and renders single-player profile (fetching player_slugs.json first if needed to resolve slug->steam64); ?compare=<csv> renders compare view. Smoke test the directory + a single-player runtime render."
     status: pending
   - id: phase3-pregen
     content: "Phase 3 - Pre-generated stubs: write scripts/player_template.html with {{...}} substitution markers and per-player <head> meta tags (title, description, og:title, og:description, og:url, og:image, twitter:*). Implement generate_player_pages.run() that renders one file per player with matches_played>=5. Idempotent write (skip when content unchanged). Vendor data/og/player-card.png from the supplied isdf-logo.png at 1200x630. Verify Discord/Slack unfurl on a deployed branch."
@@ -15,7 +15,7 @@ todos:
     content: "Phase 4 - Single-player Overview tab in js/player.js: hero card (name, tier, VTSR-T, peak, sparkline, rank), career snapshot, 8-axis radar (reuse renderPlayerRadar career mode with focusNames=[thisPlayer] + median ghost), strengths/weaknesses ranking panel, coaching cards (static per-axis copy dict, triggered when z < median), quick-wins +0.5sigma ΔVTSR projection using elo_current.weights + rating_scale."
     status: pending
   - id: phase5-matchlog
-    content: "Phase 5 - Rating & matches tab (the headline feature): (a) vendor vendor/chartjs-plugin-zoom/chartjs-plugin-zoom.min.js and load it on player pages. (b) Rating time-series chart at top of tab: Chart.js line of `after` rating across the player's matches, date x-axis, signed-colored points, anchor/floor reference lines, peak annotation, faded tier-band background, wheel/pinch zoom + drag-to-pan via the plugin, preset zoom chips (All time / 90d / 30d / Last 10 / Reset), click-point-to-scroll-to-row hookup. (c) Virtualized sortable table below: columns date/map/faction/role/result/K-D/dealt/acc/ΔVTSR/after/detail chevron. Role pip (commander/thug), excluded-row styling with Campod/Partial badges, ΔVTSR chip from elo_history.history[].deltas[]. Expandable detail shows 8 axis-contribution bars (with commander pre/post shift cushion when axis_contributions_meta present), weapon breakdown collapse, loadout pie. View-Full-Match link to index.html?match=<id>&filter=player&players=<steam64>."
+    content: "Phase 5 - Rating & matches tab (the headline feature): (a) Wire the already-vendored vendor/chartjs/{chart.umd.min.js, hammer.min.js, chartjs-plugin-zoom.umd.min.js} into player/index.html + the pre-gen template (same <script> block index.html uses at lines 1693-1702). (b) Rating time-series chart at top of tab: Chart.js line of `after` rating built by walking elo_history.history[].deltas[] filtered by steam64, date x-axis, signed-colored points, anchor (1500) + floor (1000) reference lines via a tiny inline custom plugin (~15 lines), tier-band background via the same inline plugin (5 translucent rects, no chartjs-plugin-annotation needed), peak annotation, wheel/pinch zoom + drag-to-pan via the existing zoom plugin, preset zoom chips (All time / 90d / 30d / Last 10 / Reset) calling chart.zoomScale(), click-point-to-scroll-to-row hookup. (c) Virtualized sortable table below: columns date/map/faction/role/result/K-D/dealt/acc/ΔVTSR/after/detail chevron. Role pip (commander/thug), excluded-row styling with Campod/Partial badges, ΔVTSR chip from elo_history.history[].deltas[]. Expandable detail shows 8 axis-contribution bars (with commander pre/post shift cushion when axis_contributions_meta present), weapon breakdown collapse, loadout pie. View-Full-Match link to index.html?match=<id>&filter=player&players=<steam64>."
     status: pending
   - id: phase6-rest
     content: "Phase 6 - Remaining single-player tabs: axis deep-dive (per-axis time-series), highlights filter (career_highlights subset where player wins / is runner-up), rivals tab with top-10 from global_rivalries[], NEW Most-Commanded-Against panel gated on matches_as_commander>=6 AND matches_as_commander/matches_played>=0.40 (top 5 opposing commanders ranked by matches faced, computed inline from match_contributions[].leaderboard slot 1/6 walk), loadout + per-ship combat tab from career_stats[0].career_loadout and career_stats[0].career_per_ship_combat."
@@ -34,13 +34,24 @@ isProject: false
 ## Decisions locked in from prior turns
 
 - **Routing**: pre-generated `/player/<slug>/index.html` per player; sticky slug map. `/player/` (no slug) is now a **rich directory landing**, with the same `player/index.html` doing triple duty as directory shell, single-player runtime fallback (`?p=<steam64>` / `?slug=<slug>`), and compare view (`?compare=<csv>`).
+- **Production host**: `vtstats.bz` (per [CNAME](CNAME)). Encoded as `SITE_URL = "https://vtstats.bz"` constant in `scripts/generate_player_pages.py`. All `og:url` / `og:image` use this absolute origin.
 - **OG image**: single universal `data/og/player-card.png` derived from the supplied `isdf-logo.png`. No per-player PNG generation in v1.
-- **OG content**: full fidelity. Includes raw VTSR-T rating, tier name, peak, matches count. Git churn is accepted (one HTML file per player touched per pipeline run when their rating moved).
-- **Player threshold**: `matches_played >= 5` get a pre-generated stub. Below threshold, the runtime fallback still renders the page.
+- **OG content**: full fidelity. Includes raw VTSR-T rating, tier label, peak, matches count. Git churn is accepted (one HTML file per player touched per pipeline run when their rating moved).
+- **Player threshold (pre-gen)**: `matches_played >= 5` get a pre-generated stub. Below threshold, the runtime fallback still renders the page using the same renderer (no separate code path).
+- **Aggregator threshold bypass**: [js/all-matches-aggregator.js](js/all-matches-aggregator.js) currently hard-filters `careerStatsKept` at the module-level `MIN_CAREER_MATCHES = 5` (line 854). We add an `opts.minMatchesThreshold` parameter to `VTAggregate.build(contributions, fileIds, elo, opts)` with default `5`. The player page passes `0` so a 3-match player still gets a career row. The All Matches view continues passing nothing (=> default 5). One small flag, no logic fork.
 - **Slug source**: post-normalization `name` from `data/steamid_to_name.txt` (the user already cleaned `DesUxSλsU -> DesUxSAsU` and `ᕭΛ𐍂ЖѴΔᒹΞ -> Darkvale` so almost everyone gets a clean slug).
+- **Reserved slugs**: `sanitize_to_slug()` rejects the small block-list `{api, admin, index, compare, new, edit, delete, og, data, vendor}` so the hash-fallback path catches collisions before they reach the URL. Defensive against any future `player/api/...` paths.
 - **Template file**: separate `scripts/player_template.html` with `{{...}}` markers (not an inline triple-string).
+- **Tier system reuse**: 5 numeric tiers + Provisional, exactly as defined in [js/app.js](js/app.js):1448-1462 (`VTSR_TIERS`). Bands: Tier I (>=1800), Tier II (1650-1800), Tier III (1500-1650), Tier IV (1350-1500), Tier V (1000-1350); Provisional when `matches < 10`. CSS color tokens `--vt-tier-1` through `--vt-tier-5` already exist in [css/vtstats-theme.css](css/vtstats-theme.css):4725-4729. **The Python generator duplicates the 5 thresholds + provisional rule as a module-level constant** in `scripts/generate_player_pages.py` (drift risk noted; documented in `AGENTS.md` so future tier tweaks remember both sides).
+- **Tier label format**: "Tier I", "Tier II", ..., "Tier V", "Provisional". OG description uses these literal strings; the directory's tier filter chips do too.
+- **`PIPELINE_VERSION` stays at 16.** Slug map and stubs are emitted from `main()`'s post-processing block using `elo_current` (always-fresh) + `data/steamid_to_name.txt` (template-versioned). Per-match cache is untouched. Adding `PLAYER_TEMPLATE_VERSION = 1` as a separate constant gives us forced-rebuild without touching per-match invalidation.
+- **Already-vendored deps**: [vendor/chartjs/chartjs-plugin-zoom.umd.min.js](vendor/chartjs/chartjs-plugin-zoom.umd.min.js) and [vendor/chartjs/hammer.min.js](vendor/chartjs/hammer.min.js) exist (see `index.html` lines 1693-1702). Player pages just include the same `<script>` tags -- no new vendoring needed.
+- **Helpers from app.js (IIFE-scoped)**: [js/app.js](js/app.js) wraps `resolveTier`, `tierBadgeHtml`, `VTSR_TIERS` in an IIFE -- they aren't on `window`. **v1 approach: duplicate these into [js/player.js](js/player.js)** (~30 lines). A future refactor pulling them into a shared `js/vt-shared.js` is a separable improvement we defer.
+- **Helpers from charts.js / charts-radar.js**: those files are NOT IIFE-wrapped -- `getPlayerColor`, `glassTooltipConfig`, `renderPlayerRadar` are accessible as global functions once their scripts load. No duplication needed.
 - **Commander deep-cut**: new "Most-Commanded-Against" section, gated to players whose `matches_as_commander >= 6` AND `matches_as_commander / matches_played >= 0.40`, showing up to 5 opposing commanders ranked by matches faced.
 - **Compare cap**: max 4 players selectable at once. Rationale: the 8-axis radar overlays cleanly with 2-4 datasets but becomes unreadable at 5+; the transposed stat grid fits 4 columns at desktop and degrades to a 2-up small-multiples grid on mobile.
+- **History API semantics**: `pushState` for new navigations (Compare button click on the directory, ticking the last selection -> auto-compare), `replaceState` for in-place mutations (removing a player from the compare URL, x-axis toggle).
+- **localStorage compare clipboard**: cleared on every directory load (no TTL needed since lifetime is "one nav round-trip from a single-player page back to the directory").
 
 ## Data flow
 
@@ -77,16 +88,18 @@ A `<noscript>` block on the directory mode shows a static "JS required" notice (
 
 ## Slug allocation rules (deterministic + sticky)
 
-Defined in a new helper in [scripts/process_stats.py](scripts/process_stats.py):
+Defined in a new helper in [scripts/generate_player_pages.py](scripts/generate_player_pages.py):
 
 ```
+RESERVED_SLUGS = {"api", "admin", "index", "compare", "new", "edit", "delete", "og", "data", "vendor"}
+
 def sanitize_to_slug(name: str) -> str | None:
   # 1. NFKD normalize, strip combining marks
   # 2. Keep only [a-zA-Z0-9 _-]
   # 3. Collapse runs of [ _-]+ to single '-'
   # 4. Lowercase
   # 5. Trim leading/trailing '-'
-  # 6. Return None if empty OR len < 3 OR all-digits
+  # 6. Return None if empty OR len < 3 OR all-digits OR in RESERVED_SLUGS
 ```
 
 `allocate_slug(name, steam64, existing_map)`:
@@ -108,15 +121,21 @@ Output schema: `data/processed/player_slugs.json`:
 
 The map is **read in, mutated, written back**. Pre-existing entries are preserved verbatim, so a player's URL can never silently change.
 
-## OG image
+## OG image + meta
 
 Single universal `data/og/player-card.png`, copied from the supplied `isdf-logo.png` once (manual step or one-shot helper). Recommended dimensions: 1200x630 (Discord/Twitter standard). Pipeline does NOT regenerate it; it's a vendored asset.
 
+`SITE_URL = "https://vtstats.bz"` (per [CNAME](CNAME)) is a module-level constant in `scripts/generate_player_pages.py`. OG protocol requires absolute URLs so we always emit `SITE_URL + path` rather than relative paths.
+
 OG meta values that vary per player:
 - `<title>`, `og:title`, `twitter:title`: `"<name> - VT Stats"`
-- `og:description`, `twitter:description`: `"<tier_name> - VTSR-T <vtsr> - Peak <peak> - <matches> matches"` (e.g. `"Master - VTSR-T 1745 - Peak 1745 - 51 matches"`)
-- `og:url`: `"https://stats.example.com/player/<slug>/"` (host from a new `SITE_URL` constant; default for now `https://stats.example.com` -- documented to be re-set when CNAME is finalized)
-- `og:image`: always `"/data/og/player-card.png"` (or a `SITE_URL`-prefixed absolute URL since OG requires absolute)
+- `og:description`, `twitter:description`: `"<tier_label> - VTSR-T <vtsr> - Peak <peak> - <matches> matches"` (e.g. `"Tier I - VTSR-T 1745 - Peak 1745 - 51 matches"`)
+- `og:url`: `"https://vtstats.bz/player/<slug>/"`
+- `og:image`: `"https://vtstats.bz/data/og/player-card.png"` (absolute, as OG requires)
+- `og:type`: `"profile"` (per [ogp.me](https://ogp.me) profile spec)
+- `twitter:card`: `"summary_large_image"`
+
+The directory page (no per-player params) gets a static `<head>` OG block: title "VT Stats Players", description "Browse the VT Stats player roster", same image, `og:type=website`.
 
 ## Directory mode (the root `/player/` landing)
 
@@ -128,7 +147,7 @@ A picker/landing page so the player page system is discoverable from the topnav.
 
 ### Toolbar (sticky)
 - **Free-text search** input filtering by display name (case-insensitive substring)
-- **Tier multi-chip filter**: Provisional / Bronze / Silver / Gold / Platinum / Diamond / Master (computed from `resolveTier()` in [js/app.js](js/app.js))
+- **Tier multi-chip filter**: Provisional / Tier V / Tier IV / Tier III / Tier II / Tier I (computed from the duplicated `resolveTier()` in [js/player.js](js/player.js); colors taken from `--vt-tier-N` tokens already in [css/vtstats-theme.css](css/vtstats-theme.css))
 - **Role-bias multi-chip**: Any / Commander-main (`matches_as_commander/matches_played >= 0.40`) / Thug-main (`< 0.20`) / Balanced (in between)
 - **Faction-bias multi-chip**: Any / ISDF / Hadean / Scion (from `favored_faction` already on `commander_stats.rows`; for non-commander-main players, computed inline from a small walk of `match_contributions`)
 - **Activity bucket** (radio): Any / Last 7 days / Last 30 days / Last 90 days (from `last_match_id` date)
@@ -143,7 +162,7 @@ Bootstrap responsive grid: `col-12 col-md-6 col-lg-4 col-xl-3`. Each card:
 - **Subtitle row**: Peak [peak] - X matches
 - **Role split chip**: e.g. "23 Cmdr / 15 Thug" (or just "23 matches" if pre-v2.3 data)
 - **Primary ship** name + small ODF chip linking into the ODF Browser
-- **Win-history sparkline** (last 10 from `win_history`)
+- **Win-history sparkline** (last 10 from `win_history` -- signed mini bars, not Chart.js): rendered as **inline SVG `<polyline>` + colored `<rect>`s**, ~20 lines of helper code. Critical: ~22 cards on the page means a Chart.js-per-card would create 22 chart instances. SVG sparklines are basically free.
 - Whole card is a click target -> `/player/<slug>/`
 - When compare-mode is on: a tick icon overlay in the top-right corner, click toggles selection (instead of navigating)
 
@@ -160,12 +179,12 @@ Bootstrap responsive grid: `col-12 col-md-6 col-lg-4 col-xl-3`. Each card:
 ## Single-player profile structure (single SPA tab layout, mirrors dashboard)
 
 ### Hero (always rendered)
-- Player name + tier badge (reuse `resolveTier()` + `tierBadgeHtml()` from [js/app.js](js/app.js))
-- Current VTSR-T - Peak VTSR-T (with link to peak match)
-- Rank position in corpus (live computed by sorting `elo_current.ratings[]`)
-- Last-10 win_history sparkline (Chart.js, reuse the shadow plugin)
+- Player name + tier badge (duplicated `resolveTier()` + `tierBadgeHtml()` from [js/app.js](js/app.js) IIFE; see Decisions section)
+- Current VTSR-T - Peak VTSR-T (with link to peak match via `?match=<peak_at>`)
+- Rank position in corpus (live computed by sorting `elo_current.ratings[]` desc by `vtsr`)
+- **Last-10 form sparkline**: signed mini bar chart of `win_history` (deltas, last 10, most-recent-last). Green positive / red negative bars. Chart.js OK here because there's only one instance per page; reuse the shadow plugin from [js/vtstats-fx.js](js/vtstats-fx.js).
 - Matches: total / as commander / as thug + provisional badge when `< 10`
-- Exclusion ledger: "M campod, K low-activity excluded" hover tooltip
+- Exclusion ledger: "M campod, K low-activity excluded" hover tooltip (computed from a one-pass walk over the player's `match_contributions` rows looking for `is_campod` / `is_low_activity` true)
 
 ### Tab 1: Overview
 - Career snapshot: total dealt, received, K/D (PvP/PvE chips), accuracy, fav weapon, fav ship, avg matches per week, longest win/loss streak
@@ -177,15 +196,15 @@ Bootstrap responsive grid: `col-12 col-md-6 col-lg-4 col-xl-3`. Each card:
 ### Tab 2: Rating & matches (the headline feature)
 
 **Rating time-series chart (top of tab)**:
-- Chart.js line chart of `after` rating across all of the player's matches, in chronological order
+- Chart.js line chart of **`after` rating** across all of the player's matches, in chronological order. Data source: walk `elo_history.history[]` (the full corpus history file), filter `deltas[]` by `steam64`, keep `{match_id, match_date, after, delta, match_excluded}`. Sorted ascending by `match_date`.
 - X-axis: date (linear time scale, not match index)
 - Y-axis: VTSR-T value
-- Reference horizontal lines: anchor (1500, dashed), floor (1000, dashed-muted), the player's peak (gold, annotated)
-- Subtle background tier bands (`--vt-tier-N` colors at low alpha) so the eye locates "they're sitting in Diamond right now"
-- Each data point colored by sign of that match's delta (green = positive, red = negative); excluded-match points rendered hollow / faded
-- **Zoom interactions** via vendored `chartjs-plugin-zoom`: wheel/pinch-zoom on x-axis, drag-to-pan, double-click to reset. Mobile: native pinch + two-finger pan.
+- Reference horizontal lines: anchor (1500, dashed), floor (1000, dashed-muted), the player's peak (gold, annotated with peak match id on hover)
+- **Subtle background tier bands** at low alpha (`--vt-tier-N` colors). **Implementation**: tiny inline Chart.js plugin (~15 lines) registered locally for this chart only -- iterates the 5 tier bands and draws translucent rects in the chart area's pixel coords via `ctx.fillRect`. No new vendor dep. The same plugin draws the peak horizontal line. Annotation plugin is **NOT vendored** -- DIY is cheaper here.
+- Each data point colored by sign of that match's delta (green = positive, red = negative); excluded-match points rendered hollow / faded with a tooltip noting "campod" / "partial" / "match excluded"
+- **Zoom interactions** via the already-vendored `vendor/chartjs/chartjs-plugin-zoom.umd.min.js` (+ `hammer.min.js` for touch): wheel/pinch-zoom on x-axis, drag-to-pan, double-click to reset. Mobile: native pinch + two-finger pan.
 - **Preset zoom chips** above the chart: All time (default) / 90d / 30d / Last 10 / Reset. Just call `chart.zoomScale('x', {min, max})` under the hood.
-- Hover tooltip: rating, signed delta, match name + map + role for that point. Click point -> scroll the match-log table below to the corresponding row (smooth-scroll + brief highlight pulse).
+- Hover tooltip: rating, signed delta, match name + map + role for that point. Click point -> scroll the match-log table below to the corresponding row (smooth-scroll + brief highlight pulse via a transient `.vt-row-highlight` class).
 
 **Match log table (below the chart)**:
 Virtualized sortable table. Columns: Date - Map - Faction - Role - Result - K-D - Dealt - Acc - ΔVTSR - After - Detail chevron.
@@ -255,13 +274,18 @@ NEW files:
 - [css/player.css](css/player.css) -- page-specific styles
 - [player/index.html](player/index.html) -- triple-duty shell: directory landing (no params), single-player runtime fallback (`?p=` / `?slug=`), and compare view (`?compare=`). No per-player OG (the pre-gen stubs carry that; the directory mode has a static OG meta block: "VT Stats Players - browse the roster")
 - [data/og/player-card.png](data/og/player-card.png) -- vendored 1200x630 OG image (one-time copy of `isdf-logo.png` padded onto a 1200x630 background)
-- [vendor/chartjs-plugin-zoom/chartjs-plugin-zoom.min.js](vendor/chartjs-plugin-zoom/chartjs-plugin-zoom.min.js) -- Chart.js zoom plugin (~30KB minified, latest stable). Required by the new rating time-series chart in both single-player and compare modes. Loaded after `vendor/chart.js/chart.umd.min.js` on `player/index.html` and the pre-gen stubs.
+
+REUSED (no new vendoring; just include in the player pages' `<script>` tags):
+- [vendor/chartjs/chart.umd.min.js](vendor/chartjs/chart.umd.min.js) -- Chart.js core
+- [vendor/chartjs/hammer.min.js](vendor/chartjs/hammer.min.js) -- gesture lib for the zoom plugin's touch handling
+- [vendor/chartjs/chartjs-plugin-zoom.umd.min.js](vendor/chartjs/chartjs-plugin-zoom.umd.min.js) -- Chart.js zoom plugin v2.2.0 (already loaded by `index.html` lines 1693-1702; player pages reuse the exact same `<script>` block, same load order: chart core -> hammer -> zoom plugin)
 
 GENERATED (per-player, pipeline output):
 - `player/<slug>/index.html` for each player with `matches_played >= 5` (~22 files at current corpus size)
 
 MODIFIED files:
-- [scripts/process_stats.py](scripts/process_stats.py): add `PLAYER_TEMPLATE_VERSION = 1` constant; import + call `generate_player_pages.run(elo_current, ...)` after `elo_current.json` write; bump `PIPELINE_VERSION 16 -> 17` so the slug map + stubs land on the next run
+- [scripts/process_stats.py](scripts/process_stats.py): add `PLAYER_TEMPLATE_VERSION = 1` constant; import + call `generate_player_pages.run(elo_current, ...)` after the `elo_current.json` write block. **`PIPELINE_VERSION` is NOT bumped** -- slug map + stubs are post-processing emits that read `elo_current` (always fresh) and don't depend on per-match cache.
+- [js/all-matches-aggregator.js](js/all-matches-aggregator.js): extend `build(contributions, fileIds, elo)` to `build(contributions, fileIds, elo, opts)` where `opts.minMatchesThreshold` (default `5`, the existing `MIN_CAREER_MATCHES`) controls the `careerStatsKept` filter at line 854. Player page calls with `{minMatchesThreshold: 0}`. All existing callers (dashboard's `loadAllMatches`) need a one-token `, {}` or pass nothing and rely on the default.
 - [data/processed/player_slugs.json](data/processed/player_slugs.json) -- pipeline-emitted output
 - [js/app.js](js/app.js): wrap player names with `<a class="vt-player-link" href="player/<slug>/">` in:
   - `renderPlayerLeaderboard()` (per-match leaderboard names)
@@ -270,13 +294,13 @@ MODIFIED files:
   - `renderKillFeed()` (killer + victim names)
   - `renderHighlights()` (winner names on highlight tiles)
   - `renderCommanderHeadToHead()` (commander pair names) -- this is also where the new most-commanded-against panel back-links into
-  - Load + cache `data/processed/player_slugs.json` once on boot alongside elo files; helper `playerHref(steam64)` returns either the canonical slug URL or the `?p=<steam64>` fallback
-- [css/vtstats-theme.css](css/vtstats-theme.css): add `.vt-player-link` + `.vt-player-link-fallback` styles modeled on existing `.vt-odf-link`. Add `--vt-tier-*` CSS variables (one per tier ID) so the directory cards' top accent stripes pick up the right color without re-importing the tier palette.
+  - Load + cache `data/processed/player_slugs.json` once on boot alongside elo files; helper `playerHref(steam64)` returns either the canonical slug URL or the `?p=<steam64>` fallback when slug not in map
+- [css/vtstats-theme.css](css/vtstats-theme.css): add `.vt-player-link` + `.vt-player-link-fallback` styles modeled on existing `.vt-odf-link`. `--vt-tier-N` tokens already exist (lines 4725-4729) -- no work needed.
 - [index.html](index.html), [docs.html](docs.html), [raw.html](raw.html), [odf/index.html](odf/index.html): add a topnav "Players" link (sibling of the existing ODF link), pointing at `player/index.html`
-- [.gitignore](.gitignore): ensure `player/*/index.html` is **tracked** (not ignored) so generated stubs commit; the runtime `player/index.html` is also tracked
-- [AGENTS.md](AGENTS.md): document the player-page architecture (slug map contract, template versioning, OG strategy, pre-gen threshold)
+- [.gitignore](.gitignore): no changes (currently has no `player/` exclude rule; generated stubs commit naturally)
+- [AGENTS.md](AGENTS.md): document the player-page architecture (slug map contract, template versioning, OG strategy, pre-gen threshold, `SITE_URL=vtstats.bz`, tier-threshold duplication caveat between JS and Python)
 - [.cursor/rules/project-overview.mdc](.cursor/rules/project-overview.mdc): one-paragraph entry mirroring the ODF Browser entry; declare it the project's fifth standalone page
-- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md): new section describing the page structure, slug allocation rules, and OG strategy
+- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md): new section describing the page structure, slug allocation rules, OG strategy, and the aggregator's new `minMatchesThreshold` option
 
 ## Template structure (sketch)
 
@@ -314,11 +338,19 @@ Stale-stub cleanup:
 
 The plan is broken into 8 phases so the work can ship incrementally and the user can stop after any phase without leaving things in a half-built state.
 
-- **Phase 1** - Python slug map (no UI yet)
-- **Phase 2** - `player/index.html` + `js/player.js` + `css/player.css`: directory landing **and** single-player runtime shell live in this same file/JS bundle from day one. After Phase 2 the system is browsable end-to-end (directory -> click card -> single profile renders via runtime fallback), even before pre-gen stubs exist.
-- **Phase 3** - Pre-gen stubs (Python). The system becomes Discord-shareable here.
-- **Phase 4** - Single-player Overview tab (radar, coaching, strengths)
-- **Phase 5** - Single-player Match Log tab (the headline)
+- **Phase 1** - Python slug map + module constants (no UI yet). No `PIPELINE_VERSION` bump.
+- **Phase 2** - `player/index.html` + `js/player.js` + `css/player.css`: directory landing **and** single-player runtime shell live in this same file/JS bundle from day one. Adds the `minMatchesThreshold` option to `VTAggregate.build()`. After Phase 2 the system is browsable end-to-end (directory -> click card -> single profile renders via runtime fallback), even before pre-gen stubs exist.
+- **Phase 3** - Pre-gen stubs (Python) + `data/og/player-card.png` vendoring. The system becomes Discord-shareable here.
+- **Phase 4** - Single-player Overview tab (radar, coaching, strengths). Duplicates `resolveTier` / `tierBadgeHtml` / `VTSR_TIERS` into `js/player.js` (one-time copy from `js/app.js`'s IIFE).
+- **Phase 5** - Single-player Rating & matches tab (the headline). Wires the already-vendored zoom plugin into player pages. Tier-band background via a small DIY Chart.js plugin (no chartjs-plugin-annotation needed).
 - **Phase 6** - Remaining single-player tabs (axis deep-dive, highlights, rivals + most-commanded-against, loadout)
-- **Phase 7** - Compare mode (capped at 4)
+- **Phase 7** - Compare mode (capped at 4). `history.pushState` for navigation into compare; `history.replaceState` for in-page mutations.
 - **Phase 8** - Cross-link rollout + topnav + docs
+
+## Risk register (acknowledged trade-offs)
+
+- **Tier-threshold drift between JS and Python**: the 5 VTSR_TIERS bands are now defined in two places ([js/app.js](js/app.js):1448-1454 and `scripts/generate_player_pages.py`). Mitigation: documented in AGENTS.md so future tier tweaks remember both. Acceptable v1 cost.
+- **OG meta git churn**: every match a player plays that moves their rating across an integer boundary touches their pre-gen stub on the next pipeline run. ~30 files per pipeline run during active play is the upper bound. Idempotent writes (skip when content unchanged) keep this clean when rating doesn't move.
+- **Per-player stubs absent on fresh checkout**: until first pipeline run, only the runtime fallback (`?p=<steam64>`) works. Cross-links to `/player/<slug>/` would 404. Graceful failure; expected.
+- **`<noscript>` users see nothing on the directory**: niche community site assumes JS. OG meta still serves crawlers. Accepted limitation.
+- **Mobile compare page length**: 4-player compare with hero + radar + rating chart + 2x2 small-multiples + common-matches = long scroll on phones. v1 ships as-is; collapsible sections deferable.
