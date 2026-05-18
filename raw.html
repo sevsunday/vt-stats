@@ -223,6 +223,15 @@
       </div>
     </div>
 
+    <!-- v7: identity-reroute provenance banner. Shown only when
+         view=processed AND the processed JSON's match.account_reroutes
+         is non-empty. Tier 1 (binpb) and Tier 2 (decoded) remain
+         byte-accurate to the source recording; the rewrite is
+         processed-tier only. See docs/DATA_DICTIONARY.md §10.3. -->
+    <div class="alert alert-info vt-raw-reroute-banner d-none" id="raw-reroute-banner" role="status">
+      <!-- Populated by js/raw-browser.js -->
+    </div>
+
     <!-- Tree body with its own decode/load spinner -->
     <div class="card vt-raw-tree-card" id="raw-tree-card">
       <div class="card-body p-0">

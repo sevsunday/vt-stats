@@ -1970,6 +1970,28 @@ body::before {
     opacity: 0.9;
 }
 
+/* v7: identity-reroute provenance chip on per-match leaderboard rows.
+   Pipeline-emitted (scripts/process_stats.py ACCOUNT_REROUTES) when a
+   slot's Steam64 was rewritten at session-load time (shared-PC case,
+   e.g. MAX playing on DD's account). Distinct from .vt-campod-badge /
+   .vt-partial-badge -- those signal exclusion, this signals provenance.
+   Info accent (blue) so it reads as informational, not warning. */
+.vt-reroute-badge {
+    display: inline-block;
+    padding: 0.15em 0.55em;
+    margin-left: 0.4em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-info);
+    background: color-mix(in oklab, var(--kb-info) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-info) 50%, var(--kb-border));
+    border-radius: 999px;
+    vertical-align: middle;
+    cursor: help;
+}
+
 /* Winner badge — sits next to "Kill Feed" in the Combat-tab card header.
    Three visual states keyed by data-decided-by:
      - clean      : decisive win (recycler + factory of the loser are dead,

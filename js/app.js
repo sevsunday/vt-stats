@@ -4210,6 +4210,15 @@
       const partialBadge = r.is_low_activity
         ? ` <span class="vt-partial-badge" data-bs-toggle="tooltip" title="Only present for ${presenceMin}:${String(presenceRem).padStart(2,'0')} of ${durationMin}:${String(durationRem).padStart(2,'0')} — excluded from VTSR-T and career stats">Partial</span>`
         : '';
+      // v7 (schema_version 7): identity-reroute provenance chip. Set by the
+      // pipeline's ACCOUNT_REROUTES mechanism (scripts/process_stats.py)
+      // when this slot's Steam64 was rewritten at session-load time
+      // (shared-PC case, e.g. MAX playing on DD's account). All
+      // downstream stats already attribute to the rerouted player; the
+      // chip just surfaces the provenance. See docs/DATA_DICTIONARY.md §10.3.
+      const rerouteBadge = r.rerouted_from
+        ? ` <span class="vt-reroute-badge" data-bs-toggle="tooltip" title="${esc(r.rerouted_from.name)} let this player use their Steam account this match (in-game nick was '${esc(r.rerouted_from.raw_nick)}'). Stats are attributed to ${esc(r.name)}.">${esc(r.rerouted_from.label)}</span>`
+        : '';
       const rowClass = r.is_campod
         ? 'vt-row-campod'
         : (r.is_low_activity ? 'vt-row-partial' : '');
@@ -4224,7 +4233,7 @@
       const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
       return `<tr class="${rowClass}">
         <td>${i + 1}</td>
-        <td class="fw-semibold">${esc(r.name)}${nickSub}${campodBadge}${partialBadge}</td>
+        <td class="fw-semibold">${esc(r.name)}${nickSub}${campodBadge}${partialBadge}${rerouteBadge}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
         <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>

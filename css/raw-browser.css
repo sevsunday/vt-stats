@@ -28,6 +28,32 @@
     border-top: 1px dashed color-mix(in oklab, var(--kb-border-subtle), transparent 50%);
 }
 
+/* v7: identity-reroute provenance banner. Sits above the processed-tier
+   tree only on matches whose match.account_reroutes is non-empty. Theme
+   the Bootstrap alert-info default to match the project's info accent +
+   glassmorphic surface tokens. Compact so it doesn't push the tree
+   below the fold. See docs/DATA_DICTIONARY.md §10.3. */
+.vt-raw-reroute-banner {
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    color: var(--kb-text);
+    background: color-mix(in oklab, var(--kb-info) 10%, var(--kb-surface));
+    border: 1px solid color-mix(in oklab, var(--kb-info) 35%, var(--kb-border));
+    border-radius: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.vt-raw-reroute-banner ul {
+    font-size: 0.85rem;
+}
+
+.vt-raw-reroute-banner code {
+    background: color-mix(in oklab, var(--kb-bg-subtle) 60%, transparent);
+    padding: 0.05em 0.35em;
+    border-radius: 0.25em;
+    font-size: 0.85em;
+}
+
 .vt-raw-stat-chip {
     display: inline-flex;
     align-items: baseline;

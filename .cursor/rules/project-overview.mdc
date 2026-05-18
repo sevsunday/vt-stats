@@ -81,6 +81,8 @@ Players are identified by `uint64` Steam64 IDs. The header provides:
 
 Faction is determined by slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
 
+**Account reroutes** (`match.schema_version` 7): `ACCOUNT_REROUTES` constant in `scripts/process_stats.py` rewrites a slot's Steam64 at the top of `process_match` when the in-game nick matches a pattern (shared-PC case, e.g. MAX playing on DD's account → detected by `(?<![A-Za-z0-9])max(?![A-Za-z0-9])` on `header.s64_to_nick[dd_s64]`, reattributed to MAX's Steam64). Identity rewrite applies to local dicts AND every player-id field across the proto event stream, so downstream aggregation (leaderboard, ELO, positioning, highlights, kill feed, contributions, career rollup) attributes to the rerouted player automatically. Collision guard skips with warning if the target Steam64 is already in `slot_to_s64`. Per-row `leaderboard[].rerouted_from` field + top-level `match.account_reroutes[]` audit log surface the provenance; renderer shows a small `via dd` chip on the leaderboard row (`.vt-reroute-badge`) and a banner above the Raw Data Browser's processed tier. Tiers 1 (binpb) and 2 (decoded) remain byte-accurate to the recording. Full reference: `docs/DATA_DICTIONARY.md` §10.3.
+
 ## Dependencies
 
 All dependencies are vendored locally in `vendor/`. No CDN usage. Bootstrap 5.3.2, Chart.js 4.4.7, Bootstrap Icons, Geist Sans 1.8.0, Geist Mono 1.8.0.

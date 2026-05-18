@@ -2344,6 +2344,157 @@ both keys but excluded once from the rated lobby either way.
   both flags to `False` via `.get("is_campod", False)` and treat the
   row as a normal thug.
 
+## 10.3 Account Reroutes (`match.schema_version` 7)
+
+Pipeline-side identity rewrite for the shared-PC case: when a different
+real player plays on someone else's Steam account, the in-game nick (as
+recorded in `header.s64_to_nick`) carries a signature that lets us
+reattribute the slot to the actual player's Steam64 **before any
+aggregator runs**. Everything downstream (per-match leaderboard, ELO,
+positioning, highlights, kill feed, faction badges, contributions
+extractor, career rollup) is identity-blind on Steam64, so a single
+rewrite at the top of `process_match` cascades correctly without any
+per-consumer changes.
+
+### Mechanism
+
+Declared in [scripts/process_stats.py](../scripts/process_stats.py) as a
+module-level `ACCOUNT_REROUTES` dict keyed by **owner Steam64** (the
+account being borrowed). Each entry is a list of rules:
+
+```python
+ACCOUNT_REROUTES = {
+    76561198088036138: [  # dd
+        {
+            "pattern":    _ACCOUNT_REROUTE_MAX_NICK,  # compiled re.Pattern
+            "reroute_to": 76561198877763773,           # MAX (dd's son)
+            "label":      "via dd",                    # shown on the leaderboard chip
+        },
+    ],
+}
+```
+
+At the top of `process_match()`, `_resolve_account_reroutes()` walks
+every slot in the match, and for each slot whose owner Steam64 is keyed
+in `ACCOUNT_REROUTES`, tests the raw in-game nick against each rule's
+`pattern`. The first rule that matches (and survives the collision
+guard, below) is applied:
+
+1. The local identity dicts (`slot_to_s64`, `s64_to_slot`, `s64_to_nick`)
+   are rewritten so the slot maps to the target Steam64.
+2. `_apply_account_reroutes_to_events()` walks the full proto event
+   stream and rewrites every player-id field (`shooter`, `victim`,
+   `killer`, `picker`, `update_tick.players[].player`, etc.) to the
+   target Steam64. Handles both v1 and v2 schemas; the only v1/v2
+   difference is `DamageDealt.victim` which exists only in v2.
+
+### Collision guard
+
+If a rule's `reroute_to` target Steam64 is **already present** in the
+match's `slot_to_s64` (i.e. the target player is in the lobby with their
+own real account), the reroute is **skipped with a warning** to prevent
+collapsing two distinct slots onto the same `player_id`. Audit of the
+current corpus shows zero collisions, but the guard is non-negotiable
+defensive code.
+
+### Nick pattern semantics
+
+The MAX rule uses:
+
+```python
+re.compile(r'(?<![A-Za-z0-9])max(?![A-Za-z0-9])', re.IGNORECASE)
+```
+
+The lookarounds treat **only letters and digits** as boundary-blockers,
+so punctuation, underscores, brackets, dots, and spaces are all valid
+separators. Examples:
+
+| Raw nick                | Verdict       | Why                                  |
+|-------------------------|---------------|--------------------------------------|
+| `max`                   | match         | start/end boundaries                 |
+| `Max`, `MAX`            | match         | case-insensitive                     |
+| `_max_`                 | match         | `_` is not a letter/digit            |
+| `[MAX]`                 | match         | brackets are separators              |
+| `max.dd`                | match         | dot is separator                     |
+| `MAX on dd's pc`        | match         | space boundary                       |
+| `Maxwell`, `_maxwell`   | **no match**  | `w` blocks right side                |
+| `maxim`                 | **no match**  | `i` blocks right side                |
+| `climax`                | **no match**  | `a` blocks left side                 |
+| `3max`, `3max `         | **no match**  | digit `3` blocks left side           |
+
+### Per-row provenance: `leaderboard[].rerouted_from`
+
+Non-null on rows whose slot was rewritten. Renderer
+[js/app.js](../js/app.js) surfaces a small `via dd` chip
+(`.vt-reroute-badge`) on the row with a tooltip explaining the
+provenance:
+
+```json
+"leaderboard": [{
+  "rerouted_from": {
+    "steam64":  "76561198088036138",
+    "name":     "dd",
+    "raw_nick": "MAX",
+    "label":    "via dd"
+  }
+}]
+```
+
+Pre-v7 rows have no field; consumers default to `null` via
+`.get("rerouted_from")`.
+
+### Per-match audit log: `match.account_reroutes`
+
+Always emitted (empty list when no reroutes applied) so the JS check is
+`length > 0`, not field existence:
+
+```json
+"match": {
+  "account_reroutes": [
+    {
+      "slot":         1,
+      "from_steam64": "76561198088036138",
+      "from_name":    "dd",
+      "to_steam64":   "76561198877763773",
+      "raw_nick":     "MAX",
+      "label":        "via dd"
+    }
+  ]
+}
+```
+
+Powers the Raw Data Browser's processed-tier provenance banner
+([js/raw-browser.js](../js/raw-browser.js)).
+
+### Provenance contract across the three raw-browser tiers
+
+| Tier               | Identity shown for affected slots          |
+|--------------------|--------------------------------------------|
+| 1 (binpb download) | **Source-accurate**: DD's Steam64 + raw `'MAX'` nick |
+| 2 (decoded JSON)   | **Source-accurate**: DD's Steam64 + raw `'MAX'` nick |
+| 3 (processed JSON) | **Rewritten**: MAX's Steam64 + matched `rerouted_from` block |
+
+The processed-tier rewrite is announced via a banner above the tree so
+debuggers immediately see why the IDs differ between tiers 2 and 3.
+
+### Cache invalidation
+
+Adding, removing, or editing an `ACCOUNT_REROUTES` entry requires
+bumping `PIPELINE_VERSION` to force a full corpus reprocess. Otherwise
+matches cached from a prior run will retain their old attribution.
+
+### Worked example: DD → MAX
+
+- Owner: DD (`76561198088036138`), present in 27 of 98 corpus matches.
+- Audit identified 6 matches where DD's slot had nick exactly `'MAX'`.
+- All 6 reattribute to MAX (`76561198877763773`); 3 of them are
+  commander slots, so the v2.4 commander-axis adjustment now applies to
+  MAX's rating rather than DD's.
+- Before the rewrite, MAX had **zero** corpus presence
+  (`matches_played = 0`); after, MAX clears the `MIN_CAREER_MATCHES = 5`
+  threshold and appears in `career_stats[]` and the VTSR-T leaderboard
+  for the first time.
+
 ## 11. VTSR / VTSR-T Outputs (`elo_current.json` + `elo_history.json`)
 
 Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `process_stats.py` run. **VTSR-T** (VT Stats Rating — Thug) is the thug-focused rating; the JSON field `vtsr` is the published headline number ($\mathrm{VTSR\text{-}T} = \alpha R^W + (1-\alpha) R^T$ — equal to **thug_elo** when $\alpha=0$). Full algorithm and constants are in [§13 of DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md#vtsr-methodology).

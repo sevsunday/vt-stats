@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 16
+PIPELINE_VERSION = 17
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -189,6 +189,47 @@ CAMPOD_MAX_SHARE = 0.25  # > 25% of match wall-clock in campod => is_campod=True
 # died-often players whose presence window is full but active_seconds is
 # short -- their dead time is correctly NOT a participation deficit.
 LOW_ACTIVITY_MIN_PRESENCE = 0.75
+
+# Identity reroute table: maps "owner" Steam64 -> list of rules that detect
+# a different real player playing on the owner's Steam account (shared-PC
+# case) and rewrite the in-game identity to the target Steam64 BEFORE any
+# aggregator runs. Applied at the top of `process_match` to local identity
+# dicts AND the proto event stream (via `_apply_account_reroutes_to_events`).
+# Everything downstream is identity-blind, so a clean rewrite at one point
+# cascades correctly through aggregation, ELO, positioning, highlights,
+# contributions extractor, career rollup, kill feed, and faction badges.
+#
+# Rule fields:
+#   pattern    - compiled re.Pattern matched against the raw in-game nick
+#                (header.s64_to_nick[owner])
+#   reroute_to - target Steam64 (int) the slot will be reattributed to
+#   label      - short tag shown on the leaderboard chip ("via dd")
+#
+# Collision guard: if the target Steam64 is ALREADY in slot_to_s64 for the
+# match (e.g. MAX joined the same match from his own machine), the reroute
+# is skipped with a warning to avoid collapsing two distinct slots onto the
+# same player_id.
+#
+# Nick pattern semantics: the `(?<![A-Za-z0-9])max(?![A-Za-z0-9])`
+# lookarounds treat ONLY letters and digits as boundary-blockers, so
+# punctuation, underscores, brackets, dots, and spaces are all valid
+# separators. Matches: "max", "MAX", "_max_", "[MAX]", "MAX on dd's pc".
+# Rejects: "Maxwell", "maxim", "climax", "3max".
+#
+# See docs/DATA_DICTIONARY.md §10.3 "Account Reroutes" for the full rationale,
+# regex test vectors, and the corpus audit that calibrated the current rule.
+_ACCOUNT_REROUTE_MAX_NICK = re.compile(
+    r'(?<![A-Za-z0-9])max(?![A-Za-z0-9])', re.IGNORECASE
+)
+ACCOUNT_REROUTES = {
+    76561198088036138: [  # dd
+        {
+            "pattern":    _ACCOUNT_REROUTE_MAX_NICK,
+            "reroute_to": 76561198877763773,  # MAX (dd's son, plays on dd's PC)
+            "label":      "via dd",
+        },
+    ],
+}
 
 # First-letter -> faction. Reliable for vehicles, structures, and pilots --
 # every BZCC unit ODF in those categories carries a faction prefix as the
@@ -2205,6 +2246,97 @@ def _is_low_activity_row(first_tick, last_tick, tick_rate, duration_sec):
     return (presence_sec / duration_sec) < LOW_ACTIVITY_MIN_PRESENCE, presence_sec
 
 
+def _resolve_account_reroutes(slot_to_s64, s64_to_nick):
+    """Return a list of reroute records for this match.
+
+    Each record is {slot, from_s64, to_s64, raw_nick, label}. Returns []
+    when no reroutes apply. Applies the collision guard: if a rule's
+    target Steam64 is already present in `slot_to_s64`, the rule is
+    skipped and a warning is printed (no rewrite -- avoids collapsing
+    two distinct slots onto the same player_id).
+
+    See ACCOUNT_REROUTES module-level constant for the rule table.
+    """
+    out = []
+    if not ACCOUNT_REROUTES:
+        return out
+    present_targets = set(slot_to_s64.values())
+    for slot, owner_s64 in list(slot_to_s64.items()):
+        rules = ACCOUNT_REROUTES.get(owner_s64)
+        if not rules:
+            continue
+        raw_nick = s64_to_nick.get(owner_s64) or ""
+        for rule in rules:
+            if not rule["pattern"].search(raw_nick):
+                continue
+            target = rule["reroute_to"]
+            if target in present_targets:
+                print(
+                    f"  WARN: account reroute skipped (collision): "
+                    f"owner={owner_s64} target={target} already in slot_to_s64"
+                )
+                continue
+            out.append({
+                "slot":      slot,
+                "from_s64":  owner_s64,
+                "to_s64":    target,
+                "raw_nick":  raw_nick,
+                "label":     rule["label"],
+            })
+            present_targets.add(target)
+            break  # one rule per owner per match
+    return out
+
+
+def _apply_account_reroutes_to_events(events, reroute_map):
+    """Walk every event in the proto stream and rewrite player-id fields
+    per `reroute_map` (owner_s64 -> target_s64). Mutates in place.
+
+    Handles both v1 and v2 proto schemas. Most player-id field names are
+    identical across both (per `scripts/statsgate.proto` +
+    `scripts/statsgate_v1.proto`); the only structural difference is that
+    v1's `DamageDealt` has only `shooter` (victim lives in the separate
+    `DamageReceived` event), while v2's unified `DamageDealt` carries
+    both. `hasattr(x, "victim")` distinguishes the two safely.
+    """
+    if not reroute_map:
+        return
+    g = reroute_map.get
+    for evt in events:
+        kind = evt.WhichOneof("event_type")
+        if kind == "damage_dealt":
+            x = evt.damage_dealt
+            if x.shooter and g(x.shooter): x.shooter = g(x.shooter)
+            # v2 only: v1 DamageDealt has no `victim` field.
+            if hasattr(x, "victim") and x.victim and g(x.victim):
+                x.victim = g(x.victim)
+        elif kind == "damage_received":  # v1 only
+            x = evt.damage_received
+            if x.victim and g(x.victim): x.victim = g(x.victim)
+        elif kind == "bullet_hit":
+            x = evt.bullet_hit
+            if x.shooter and g(x.shooter): x.shooter = g(x.shooter)
+            if x.victim  and g(x.victim):  x.victim  = g(x.victim)
+        elif kind == "bullet_init":
+            x = evt.bullet_init
+            if x.shooter and g(x.shooter): x.shooter = g(x.shooter)
+        elif kind == "unit_destroyed":
+            x = evt.unit_destroyed
+            if x.killer and g(x.killer): x.killer = g(x.killer)
+            if x.victim and g(x.victim): x.victim = g(x.victim)
+        elif kind == "unit_sniped":
+            x = evt.unit_sniped
+            if x.shooter and g(x.shooter): x.shooter = g(x.shooter)
+            if x.victim  and g(x.victim):  x.victim  = g(x.victim)
+        elif kind == "update_tick":
+            for ps in evt.update_tick.players:
+                if ps.player and g(ps.player):
+                    ps.player = g(ps.player)
+        elif kind == "pickup_powerup":
+            x = evt.pickup_powerup
+            if x.picker and g(x.picker): x.picker = g(x.picker)
+
+
 def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2):
     """Process a single match session into pre-computed stats.
 
@@ -2238,6 +2370,33 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
     if known_players is None:
         known_players = {}
+
+    # Identity reroute: if any slot is owned by a Steam64 whose in-game nick
+    # matches a rule in ACCOUNT_REROUTES (shared-PC case, e.g. MAX playing
+    # on DD's account), rewrite the slot's owner Steam64 in the local
+    # identity dicts AND in every player-id field across the event stream
+    # BEFORE any aggregator runs. Everything downstream is identity-blind,
+    # so this single rewrite cascades into the leaderboard, ELO, positioning,
+    # highlights, kill feed, contributions extractor, and career rollup.
+    # See docs/DATA_DICTIONARY.md §10.3 "Account Reroutes" for full details.
+    match_reroutes = _resolve_account_reroutes(slot_to_s64, s64_to_nick)
+    if match_reroutes:
+        reroute_map = {r["from_s64"]: r["to_s64"] for r in match_reroutes}
+        for r in match_reroutes:
+            slot, frm, to = r["slot"], r["from_s64"], r["to_s64"]
+            slot_to_s64[slot] = to
+            s64_to_slot.pop(frm, None)
+            s64_to_slot[to] = slot
+            nick = s64_to_nick.pop(frm, None)
+            if nick is not None:
+                s64_to_nick[to] = nick
+        _apply_account_reroutes_to_events(events, reroute_map)
+        # Stamp the canonical "from_name" (e.g. "dd") so the leaderboard
+        # chip and the raw-browser banner can render a human name instead
+        # of the bare Steam64. Done after the rewrite so the lookup uses
+        # the original owner Steam64 from the rule, not the rerouted one.
+        for r in match_reroutes:
+            r["from_name"] = known_players.get(r["from_s64"]) or f"acct {r['from_s64']}"
 
     nick_map = {}  # slot -> display name
     for slot, s64 in slot_to_s64.items():
@@ -3414,6 +3573,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
     # Build leaderboard
     leaderboard = []
+    # Per-slot lookup for the identity-reroute provenance field on each
+    # leaderboard row. Empty dict when no reroutes apply to this match.
+    reroute_by_slot = {r["slot"]: r for r in match_reroutes}
     for slot in sorted(all_slots):
         name = nick_map.get(slot, f"Player {slot}")
         s64 = slot_to_s64.get(slot)
@@ -3612,6 +3774,22 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Carried into the per-match JSON so scripts/elo.py
             # compute_elo() can apply the v2.4 commander role adjustment.
             "is_commander": slot in (1, 6),
+            # v7 (schema_version 7): identity-reroute provenance. Non-null
+            # when this slot's Steam64 was rewritten at the top of
+            # process_match (shared-PC case, e.g. MAX playing on DD's
+            # account). The renderer surfaces a small `via dd` chip with
+            # the `label` here and a tooltip naming the original account
+            # owner. Pre-v7 matches simply have no field; consumers
+            # default to None. See docs/DATA_DICTIONARY.md §10.3.
+            "rerouted_from": (
+                {
+                    "steam64":  str(reroute_by_slot[slot]["from_s64"]),
+                    "name":     reroute_by_slot[slot]["from_name"],
+                    "raw_nick": reroute_by_slot[slot]["raw_nick"],
+                    "label":    reroute_by_slot[slot]["label"],
+                }
+                if slot in reroute_by_slot else None
+            ),
             # v2.5: spectator-style exclusion flags + supporting metrics.
             # See _is_campod_row / _is_low_activity_row up top.
             "is_campod":           is_campod_flag,
@@ -3928,6 +4106,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # full-match (the renderer reads this block, never the
             # filtered kills.feed). See compute_match_winner().
             "winner": match_winner,
+            # v7: identity-reroute audit log. Non-empty when one or more
+            # slots were rewritten at the top of process_match via
+            # ACCOUNT_REROUTES (shared-PC case, e.g. MAX playing on DD's
+            # account). Always emitted (empty list when no reroutes
+            # applied) so consumers check `length > 0` rather than field
+            # existence. Powers the Raw Data Browser's processed-tier
+            # provenance banner. See docs/DATA_DICTIONARY.md §10.3.
+            "account_reroutes": [
+                {
+                    "slot":         r["slot"],
+                    "from_steam64": str(r["from_s64"]),
+                    "from_name":    r["from_name"],
+                    "to_steam64":   str(r["to_s64"]),
+                    "raw_nick":     r["raw_nick"],
+                    "label":        r["label"],
+                }
+                for r in match_reroutes
+            ],
             "has_position_data": positioning_block["has_position_data"],
             "has_target_lock_data": positioning_block.get("has_target_lock_data", False),
             # True when the match contains at least one pickup_powerup
@@ -3951,8 +4147,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # js/all-matches-aggregator.js skip rows where either flag
             # is True (pure omission, no penalty). Absence of v6 fields
             # = legacy data; consumers default both flags to False and
-            # treat the row as a normal thug.
-            "schema_version": 6,
+            # treat the row as a normal thug. v7 (this version) adds the
+            # identity-reroute provenance: optional `rerouted_from` block
+            # on each leaderboard row + top-level `account_reroutes`
+            # summary array. Both are empty/null on matches without any
+            # reroute (the vast majority); the dashboard renders a small
+            # `via dd` chip when the row carries `rerouted_from`. See
+            # docs/DATA_DICTIONARY.md §10.3.
+            "schema_version": 7,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
