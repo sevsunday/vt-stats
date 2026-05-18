@@ -150,6 +150,9 @@
   // Phase 3 — reconcile view DOM
   let $reconcileCard, $reconcilePlayer, $reconcileBody;
 
+  // v7: identity-reroute provenance banner (processed tier only).
+  let $rerouteBanner;
+
   // --- State ---
 
   const state = {
@@ -1364,6 +1367,40 @@
 
   // --- View mounting ---
 
+  // v7: identity-reroute provenance banner. Populates + toggles the
+  // banner above the tree card based on the active view and the
+  // processed JSON's `match.account_reroutes` array. Shown only when
+  // view=processed AND the array is non-empty. Tiers 1 (binpb) and
+  // 2 (decoded) remain byte-accurate to the source recording; the
+  // rewrite is processed-tier only. See docs/DATA_DICTIONARY.md §10.3.
+  function updateRerouteBanner(view) {
+    if (!$rerouteBanner) return;
+    const reroutes = (state.processed && state.processed.match && state.processed.match.account_reroutes) || [];
+    if (view !== 'processed' || !reroutes.length) {
+      $rerouteBanner.classList.add('d-none');
+      $rerouteBanner.innerHTML = '';
+      return;
+    }
+    const rows = reroutes.map(r =>
+      `<li><code>slot ${r.slot}</code>: <strong>${escapeHtml(r.from_name)}</strong> ` +
+      `(<code>${escapeHtml(r.from_steam64)}</code>) &rarr; ` +
+      `<code>${escapeHtml(r.to_steam64)}</code> ` +
+      `<span class="vt-muted">(rule matched in-game nick <code>${escapeHtml(r.raw_nick)}</code>)</span></li>`
+    ).join('');
+    $rerouteBanner.innerHTML =
+      `<div class="d-flex align-items-start gap-2">` +
+        `<i class="bi bi-info-circle-fill mt-1"></i>` +
+        `<div>` +
+          `<strong>Processed-tier identity reattribution</strong> applied to ` +
+          `${reroutes.length} slot${reroutes.length === 1 ? '' : 's'}:` +
+          `<ul class="mb-1 mt-1 ps-4">${rows}</ul>` +
+          `<small class="vt-muted">Tier 1 (binpb) and Tier 2 (decoded) are byte-accurate to the source recording. ` +
+          `See <code>docs/DATA_DICTIONARY.md</code> &sect;12 for the reroute mechanism.</small>` +
+        `</div>` +
+      `</div>`;
+    $rerouteBanner.classList.remove('d-none');
+  }
+
   function mountView(view) {
     state.view = view;
     // Sync tab active state.
@@ -1381,6 +1418,12 @@
     $search.removeAttribute('data-regex');
     $search.removeAttribute('data-jsonpath');
     $searchCount.textContent = '—';
+
+    // v7: identity-reroute provenance banner is visible ONLY when
+    // view=processed AND the processed JSON's match.account_reroutes is
+    // non-empty. Tiers 1 (binpb) and 2 (decoded) remain byte-accurate
+    // to the source recording -- the rewrite is processed-tier only.
+    updateRerouteBanner(view);
 
     // Reconcile is a distinct view — no tree, no events mode.
     if (view === 'reconcile') {
@@ -2942,6 +2985,9 @@
     $reconcileCard = document.getElementById('raw-reconcile-card');
     $reconcilePlayer = document.getElementById('raw-reconcile-player');
     $reconcileBody = document.getElementById('raw-reconcile-body');
+
+    // v7: identity-reroute provenance banner (processed tier only).
+    $rerouteBanner = document.getElementById('raw-reroute-banner');
   }
 
   async function main() {
