@@ -157,8 +157,13 @@ COMMANDER_BASELINE_SHRINKAGE = 30.0
 COMMANDER_BASELINE_LOCKED_AXES = {"target_lock_pct", "pve_share"}
 
 # Bump if elo_current.json / elo_history.json shape changes (the JS
-# reader checks this).
-ELO_SCHEMA_VERSION = 6
+# reader checks this). v7 = self-damage carve-out (match.schema_version 8):
+# `personal.pvp_dealt` / `pvp_kills` / `pvp_shots_hit` / `pve_dealt` /
+# `pve_kills` no longer include self-events. No code change in this file
+# -- the axis preprocessors just pick up the corrected per-match values.
+# Pre-v7 `peak_vtsr` is no longer comparable since the corpus is re-rated
+# under the cleaner attribution.
+ELO_SCHEMA_VERSION = 7
 
 
 # ---------------------------------------------------------------------------

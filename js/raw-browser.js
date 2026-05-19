@@ -2545,6 +2545,12 @@
       rows.push(renderReconcileRow(computePersonalDealt(s64, name)));
       rows.push(renderReconcileRow(computePersonalReceived(s64, name)));
       rows.push(renderReconcileRow(computePersonalPvpDealt(s64, name)));
+      // match.schema_version 8: self-damage carve-out audit rows.
+      // Verify the invariant `dealt = pvp_dealt + pve_dealt + self_dealt`
+      // and `kills = pvp_kills + pve_kills + self_kills` against the raw
+      // event stream.
+      rows.push(renderReconcileRow(computePersonalSelfDealt(s64, name)));
+      rows.push(renderReconcileRow(computePersonalSelfKills(s64, name)));
       rows.push(renderReconcileRow(computeKills(s64, name)));
     } else {
       rows.push(`<tr class="vt-raw-reconcile-row--skip"><td colspan="5" class="text-center py-3">Select a player above to reconcile personal damage and kill totals.</td></tr>`);
@@ -2664,11 +2670,16 @@
       if (!(r.team > 0)) continue;
       if (!(r.amount > 0)) continue;
       if (isSentinelDamage(r.amount)) continue;
-      // PvP gate: victim must be a human player.
+      // PvP gate: victim must be a human player AND victim != shooter.
+      // match.schema_version 8: self-damage (shooter == victim, e.g.
+      // Blink AOE splash) is now carved out of `personal.pvp_dealt`
+      // and into `personal.self_dealt`. Mirroring that here so the
+      // audit verifies the fixed value, not the legacy bug.
       // v1: look up the paired damageReceived row's victim.
       // v2: victim is on the same row.
       if (isV2) {
         if (!r.victim) continue;
+        if (r.victim === r.shooter) continue;
       } else {
         const j = pairIdx[i];
         if (j < 0) continue;
@@ -2676,6 +2687,7 @@
         // With defaults:false, unset victim is empty string; human
         // victim is the Steam64 string.
         if (!dr.victim) continue;
+        if (dr.victim === dr.shooter) continue;
       }
       sum += r.amount;
     }
@@ -2684,9 +2696,69 @@
       processed: entry && entry.personal ? Number(entry.personal.pvp_dealt) : 0,
       computed: sum,
       rule: isV2
-        ? 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ victim > 0 (v2 unified)'
-        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim > 0 (v1)',
+        ? 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ victim > 0 ∧ victim != shooter (v2 unified)'
+        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim > 0 ∧ dr.victim != dr.shooter (v1)',
       kind: 'float',
+    };
+  }
+
+  // match.schema_version 8: self-damage carve-out reconcile rows.
+  // `self_dealt` is the symmetric counterpart of `pvp_dealt` -- same
+  // gate but with `victim == shooter`. Together they verify the
+  // invariant `dealt = pvp_dealt + pve_dealt + self_dealt` (within
+  // ±0.1 rounding) for any user inspecting raw data.
+  function computePersonalSelfDealt(s64) {
+    const entry = findLeaderboardEntry(s64);
+    const isV2 = state.protoSchemaVersion === PROTO_SCHEMA_V2;
+    const rows = state.events.rows;
+    const pairIdx = state.events.pairIdx;
+    let sum = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.arm !== 'damageDealt') continue;
+      if (r.shooter !== s64) continue;
+      if (!(r.team > 0)) continue;
+      if (!(r.amount > 0)) continue;
+      if (isSentinelDamage(r.amount)) continue;
+      if (isV2) {
+        if (!r.victim) continue;
+        if (r.victim !== r.shooter) continue;
+      } else {
+        const j = pairIdx[i];
+        if (j < 0) continue;
+        const dr = rows[j];
+        if (!dr.victim) continue;
+        if (dr.victim !== dr.shooter) continue;
+      }
+      sum += r.amount;
+    }
+    return {
+      label: `leaderboard[${entry ? entry.slot : '?'}].personal.self_dealt`,
+      processed: entry && entry.personal ? Number(entry.personal.self_dealt || 0) : 0,
+      computed: sum,
+      rule: isV2
+        ? 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ victim == shooter (v2 unified)'
+        : 'Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ amount ≤ 1e6 ∧ paired dr.victim == dr.shooter (v1)',
+      kind: 'float',
+    };
+  }
+
+  function computePersonalSelfKills(s64) {
+    const entry = findLeaderboardEntry(s64);
+    let count = 0;
+    for (const r of state.events.rows) {
+      if (r.arm !== 'unitDestroyed') continue;
+      if (!r.killer || !r.victim) continue;
+      if (r.killer !== s64) continue;
+      if (r.killer !== r.victim) continue;
+      count += 1;
+    }
+    return {
+      label: `leaderboard[${entry ? entry.slot : '?'}].personal.self_kills`,
+      processed: entry && entry.personal ? Number(entry.personal.self_kills || 0) : 0,
+      computed: count,
+      rule: 'count(unitDestroyed) where killer == s64 ∧ victim == s64',
+      kind: 'int',
     };
   }
 

@@ -71,6 +71,17 @@
       total_pve_kills: 0,
       total_pvp_deaths: 0,
       total_pve_deaths: 0,
+      // match.schema_version 8: self-damage carve-out career roll-up.
+      // Self events (shooter == victim, e.g. Blink AOE splash) live in
+      // their own bucket so the cross-match invariant
+      // `total_dealt = total_pvp_dealt + total_pve_dealt + total_self_dealt`
+      // holds within ±0.1 (rounding). Pre-v8 contributions default to 0.
+      // No UI panel reads these yet -- they're reconcile/audit fields.
+      total_self_dealt: 0,
+      total_self_received: 0,
+      total_self_kills: 0,
+      total_self_deaths: 0,
+      total_self_shots_hit: 0,
       total_pickups: 0,
       weapon_totals: Object.create(null), // wname -> {dealt, shots, hits, pvp_hits}
       // v2.3: career loadout accumulator. ship_seconds[odf_lower]
@@ -140,7 +151,7 @@
   function bumpWeapon(weaponTotals, wname, wdata) {
     let acc = weaponTotals[wname];
     if (!acc) {
-      acc = { dealt: 0, shots: 0, hits: 0, pvp_hits: 0 };
+      acc = { dealt: 0, shots: 0, hits: 0, pvp_hits: 0, self_hits: 0 };
       weaponTotals[wname] = acc;
     }
     acc.dealt    += wdata.dealt    || 0;
@@ -150,6 +161,9 @@
     // weapon-breakdown table's PvP Acc column. Pre-v2.3 contributions
     // omit pvp_hits; default to 0 (legacy fallback).
     acc.pvp_hits += wdata.pvp_hits || 0;
+    // match.schema_version 8: per-weapon self-hit count (subset of
+    // `hits`). Pre-v8 contributions default to 0.
+    acc.self_hits += wdata.self_hits || 0;
   }
 
   // Most-common element by Counter semantics: ties broken by first
@@ -499,6 +513,13 @@
         c.total_pve_kills      += p.pve_kills      || 0;
         c.total_pvp_deaths     += p.pvp_deaths     || 0;
         c.total_pve_deaths     += p.pve_deaths     || 0;
+        // match.schema_version 8: self-damage carve-out roll-up.
+        // Pre-v8 contributions default to 0 here.
+        c.total_self_dealt      += p.self_dealt      || 0;
+        c.total_self_received   += p.self_received   || 0;
+        c.total_self_kills      += p.self_kills      || 0;
+        c.total_self_deaths     += p.self_deaths     || 0;
+        c.total_self_shots_hit  += p.self_shots_hit  || 0;
         c.total_kills          += p.kills          || 0;
         c.total_deaths         += p.deaths         || 0;
         c.total_pickups        += p.pickups        || 0;
@@ -846,6 +867,14 @@
         total_pve_kills:     c.total_pve_kills,
         total_pvp_deaths:    c.total_pvp_deaths,
         total_pve_deaths:    c.total_pve_deaths,
+        // match.schema_version 8: self-damage carve-out career totals.
+        // Reconcile/audit fields; no UI panel reads them yet. Pre-v8
+        // matches contribute 0 to all five.
+        total_self_dealt:    r1(c.total_self_dealt),
+        total_self_received: r1(c.total_self_received),
+        total_self_kills:    c.total_self_kills,
+        total_self_deaths:   c.total_self_deaths,
+        total_self_shots_hit: c.total_self_shots_hit,
         total_pickups:       c.total_pickups,
         // v2.3: career loadout + per-ship combat (display-only, no
         // axis math reads these blocks). Null/empty when no v2.3+

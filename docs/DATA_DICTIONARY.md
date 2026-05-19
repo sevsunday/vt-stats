@@ -434,12 +434,14 @@ Opened by clicking the hero banner thumbnail (`#info-map-thumb-btn`). Built by `
 |---|---|---|
 | Player | `leaderboard[].name` | `s64_to_nick[steam64]` |
 | Team | `leaderboard[].faction` | `slot_to_faction(slot)` — slot convention |
-| PvP | `leaderboard[].personal.pvp_dealt` | Player-on-player subset of `dealt` — sum of `rivalry_matrix[name]` (shooter > 0 AND victim > 0). Includes friendly-fire between humans. |
-| PvE | `leaderboard[].personal.pve_dealt` | `dealt − pvp_dealt` — damage to AI units and world props (single bucket) |
-| Dealt | `leaderboard[].personal.dealt` | Sum of `DamageDealt.amount` where `shooter` = this player's Steam64. Equals `pvp_dealt + pve_dealt` within ±0.1 rounding. |
-| PvP In | `leaderboard[].personal.pvp_received` | Damage received from other humans — column sum of `rivalry_matrix` for this victim |
-| PvE In | `leaderboard[].personal.pve_received` | `received − pvp_received` — damage received from AI units / world |
-| Received | `leaderboard[].personal.received` | Sum of `DamageReceived.amount` where `victim` = this player's Steam64. Equals `pvp_received + pve_received` within ±0.1 rounding. |
+| PvP | `leaderboard[].personal.pvp_dealt` | Player-on-player subset of `dealt` — sum of `rivalry_matrix[name]` (shooter > 0 AND victim > 0 AND **shooter != victim**). Includes friendly-fire between humans; **excludes self-damage** (carved into `self_dealt` in `match.schema_version` 8). |
+| PvE | `leaderboard[].personal.pve_dealt` | `dealt − pvp_dealt − self_dealt` — damage to AI units and world props (single bucket) |
+| Self | `leaderboard[].personal.self_dealt` | Self-inflicted damage (shooter == victim, e.g. Blink AOE splash on the firing ship). New in `match.schema_version` 8; pre-v8 matches default to 0. |
+| Dealt | `leaderboard[].personal.dealt` | Sum of `DamageDealt.amount` where `shooter` = this player's Steam64. Equals `pvp_dealt + pve_dealt + self_dealt` within ±0.1 rounding. |
+| PvP In | `leaderboard[].personal.pvp_received` | Damage received from other humans — column sum of `rivalry_matrix` for this victim. Excludes self-damage. |
+| PvE In | `leaderboard[].personal.pve_received` | `received − pvp_received − self_received` — damage received from AI units / world |
+| Self In | `leaderboard[].personal.self_received` | Mirror of `self_dealt` (same event from the victim side; always equal). |
+| Received | `leaderboard[].personal.received` | Sum of `DamageReceived.amount` where `victim` = this player's Steam64. Equals `pvp_received + pve_received + self_received` within ±0.1 rounding. |
 | Net | `leaderboard[].personal.net` | `dealt - received` |
 | Ratio | `leaderboard[].personal.ratio` | `dealt / received` — `null` when received = 0 and dealt > 0 (displayed as ∞) |
 | Accuracy | `leaderboard[].personal.accuracy` | `shots_hit / shots_fired` from bullet events |
@@ -758,12 +760,17 @@ Each entry represents one player, sorted by personal damage dealt (descending).
 
 | Field | Type | Description |
 |---|---|---|
-| `dealt` | `number` | Total personal damage dealt (equals `pvp_dealt + pve_dealt` within ±0.1 rounding) |
-| `received` | `number` | Total personal damage received (equals `pvp_received + pve_received` within ±0.1 rounding) |
-| `pvp_dealt` | `number` | Player-on-player subset of `dealt`. Row sum of `rivalry_matrix[name]`. Includes friendly-fire between humans. |
-| `pve_dealt` | `number` | `dealt − pvp_dealt`. Damage to AI units and world props in one bucket. |
-| `pvp_received` | `number` | Damage received from other humans. Column sum of `rivalry_matrix` for this victim. |
-| `pve_received` | `number` | `received − pvp_received`. Damage received from AI units / world. |
+| `dealt` | `number` | Total personal damage dealt (equals `pvp_dealt + pve_dealt + self_dealt` within ±0.1 rounding from `match.schema_version` 8 onward; pre-v8 the `self_*` term was silently folded into `pvp_dealt`). |
+| `received` | `number` | Total personal damage received (equals `pvp_received + pve_received + self_received` within ±0.1 rounding from `match.schema_version` 8 onward). |
+| `pvp_dealt` | `number` | Player-on-player subset of `dealt`. Row sum of `rivalry_matrix[name]` (`shooter > 0 ∧ victim > 0 ∧ shooter != victim`). Includes friendly-fire between humans; **excludes self-damage** (carved into `self_dealt` from `match.schema_version` 8). |
+| `pve_dealt` | `number` | `dealt − pvp_dealt − self_dealt`. Damage to AI units and world props in one bucket. |
+| `pvp_received` | `number` | Damage received from other humans. Column sum of `rivalry_matrix` for this victim. Self-damage excluded. |
+| `pve_received` | `number` | `received − pvp_received − self_received`. Damage received from AI units / world. |
+| `self_dealt` | `number` | **`match.schema_version` 8.** Self-inflicted damage (shooter == victim, e.g. Blink AOE splash on the firing ship — ~64.5% of all blink damage in the audit corpus). Carved out of `pvp_dealt` so the PvP/PvE attribution is honest. Pre-v8 matches default to 0. |
+| `self_received` | `number` | **`match.schema_version` 8.** Equal to `self_dealt` (same event from the victim side); both halves emitted for symmetry with the dealt/received pattern and to make the Reconcile view's row layout uniform. |
+| `self_kills` | `number` | **`match.schema_version` 8.** Rare — count of `UnitDestroyed` where `killer == victim == this player's Steam64`. Carved out of `pvp_kills`. |
+| `self_deaths` | `number` | **`match.schema_version` 8.** Equal to `self_kills` by definition. |
+| `self_shots_hit` | `number` | **`match.schema_version` 8.** Count of `BulletHit` where `shooter == victim == this player's Steam64`. Carved out of `pvp_shots_hit` (the implicit `pve_shots_hit` is the remainder). |
 | `net` | `number` | `dealt - received` |
 | `ratio` | `number\|null` | `dealt / received`. `null` when infinite (dealt > 0, received = 0). |
 | `shots_fired` | `number` | Total `BulletInit` count |

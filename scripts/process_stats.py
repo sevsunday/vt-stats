@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 17
+PIPELINE_VERSION = 18
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -2447,6 +2447,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     player_pvp_shots_hit = defaultdict(lambda: defaultdict(int))
     player_weapons_used = defaultdict(set)
 
+    # Self-damage carve-out (match.schema_version 8). Captures damage /
+    # hits / kills where shooter == victim so the PvP/PvE split no longer
+    # silently absorbs self-events. Self-damage is most visible on Blink
+    # AOE (~64.5% of all blink damage is self-inflicted in the audit
+    # corpus). Emit alongside `personal.pvp_*` / `pve_*` so the invariant
+    # `dealt = pvp_dealt + pve_dealt + self_dealt` holds within ±0.1.
+    player_self_dealt     = defaultdict(float)                          # s64 -> total self damage
+    player_self_kills     = Counter()                                   # s64 -> rare self-kills
+    player_self_shots_hit = defaultdict(lambda: defaultdict(int))       # s64 -> {odf: count}
+
     # Asset (AI/structure) accumulators per owning slot
     asset_dealt = defaultdict(float)
     asset_received = defaultdict(float)
@@ -2724,7 +2734,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             bh = evt.bullet_hit
             shooter = bh.shooter
             odf = bh.ordnance_odf or ""
-            is_pvp_hit = shooter > 0 and bh.victim > 0
+            # match.schema_version 8: self-damage carve-out. `is_pvp_hit`
+            # excludes self-hits (shooter == victim, e.g. Blink AOE
+            # splash on the firing ship); they're tracked separately in
+            # `player_self_shots_hit` so the invariant
+            # `shots_hit = pvp_shots_hit + pve_shots_hit + self_shots_hit`
+            # holds. The single tightening below also auto-fixes
+            # `player_pvp_shots_hit`, `weapon_breakdown[w].pvp_hits`,
+            # `personal.pvp_shots_hit`, `personal.pvp_accuracy`, and
+            # `per_ship_combat[*]["pvp_hits"]` -- all of those gate on
+            # `is_pvp_hit` downstream.
+            is_pvp_hit = shooter > 0 and bh.victim > 0 and shooter != bh.victim
             # v2.5: presence-window tracking for is_low_activity gate.
             _touch(shooter, bh.tick)
             # BulletHit distance capture (v2-only field on the wire).
@@ -2758,8 +2778,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 per_ship_combat[shooter][ship]["hits"] += 1
                 if is_pvp_hit:
                     per_ship_combat[shooter][ship]["pvp_hits"] += 1
-            if shooter > 0 and bh.victim > 0:
+            # match.schema_version 8: self-damage carve-out. Self-hits
+            # are recorded in `player_self_shots_hit` (per-weapon) so the
+            # leaderboard-side invariant holds; the rivalry-shaped
+            # `player_hits_by_victim` (driver of `hit_targets`) is now
+            # naturally self-free.
+            if shooter > 0 and bh.victim > 0 and shooter != bh.victim:
                 player_hits_by_victim[shooter][bh.victim] += 1
+            elif shooter > 0 and bh.victim > 0 and shooter == bh.victim and odf:
+                player_self_shots_hit[shooter][odf] += 1
             if bh.victim_odf:
                 all_unit_odfs.add(bh.victim_odf)
             if bh.shooter_odf:
@@ -2979,7 +3006,18 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     faction_received[victim_faction] += de_victim_amount
 
                 if not skip_shooter and de_shooter > 0 and victim > 0:
-                    rivalry[de_shooter][victim] += de_amount
+                    # match.schema_version 8: self-damage carve-out. Self
+                    # events (shooter == victim, e.g. Blink AOE splash on
+                    # the firing ship) are routed to player_self_dealt
+                    # instead of the rivalry matrix so they no longer
+                    # inflate `personal.pvp_dealt`. `personal.dealt` /
+                    # `received` continue to include self damage upstream
+                    # (they sum the unguarded `de_amount`); only the PvP
+                    # attribution ledger gates self.
+                    if de_shooter == victim:
+                        player_self_dealt[de_shooter] += de_amount
+                    else:
+                        rivalry[de_shooter][victim] += de_amount
 
         elif event_type == "unit_destroyed":
             ud = evt.unit_destroyed
@@ -3072,7 +3110,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
             killer_is_player = ud.killer > 0
             victim_is_player = ud.victim > 0
-            is_pvp_kill = killer_is_player and victim_is_player
+            # match.schema_version 8: self-damage carve-out. `is_pvp_kill`
+            # excludes self-kills (rare; e.g. blink-spam in close
+            # quarters). Self-kills are tracked separately in
+            # `player_self_kills`. `player_kills` / `player_deaths` still
+            # both increment for a self-kill -- the player did die and
+            # the engine did report the kill -- so the totals stay wire-
+            # accurate. `kill_rivalry` and the two `per_ship_combat` PvP
+            # counters below are auto-corrected by this single tightening.
+            is_pvp_kill = killer_is_player and victim_is_player and ud.killer != ud.victim
+            if killer_is_player and victim_is_player and ud.killer == ud.victim:
+                player_self_kills[ud.killer] += 1
             if killer_is_player:
                 player_kills[ud.killer] += 1
                 # Per-ship combat: attribute kill to killer's active ship.
@@ -3585,12 +3633,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         net = dealt - received
         ratio = dealt / received if received > 0 else (float("inf") if dealt > 0 else 0)
 
-        # PvP/PvE split derived from rivalry matrix (shooter > 0 AND victim > 0).
-        # PvE = remainder = damage to AI units + world props.
+        # PvP/PvE split derived from rivalry matrix (shooter > 0 AND
+        # victim > 0 AND shooter != victim). PvE = remainder = damage to
+        # AI units + world props. match.schema_version 8: self-damage is
+        # carved out of both buckets via `self_d` so the invariant
+        # `dealt = pvp_dealt + pve_dealt + self_dealt` holds within ±0.1.
         pvp_d = sum(rivalry[s64].values()) if s64 else 0.0
         pvp_r = sum(v.get(s64, 0) for v in rivalry.values()) if s64 else 0.0
-        pve_d = max(0.0, dealt - pvp_d)
-        pve_r = max(0.0, received - pvp_r)
+        self_d = player_self_dealt.get(s64, 0.0) if s64 else 0.0
+        pve_d = max(0.0, dealt - pvp_d - self_d)
+        # `self_dealt == self_received` always (same event from both sides).
+        pve_r = max(0.0, received - pvp_r - self_d)
 
         total_fired = sum(player_shots_fired[s64].values()) if s64 else 0
         total_hit = sum(player_shots_hit[s64].values()) if s64 else 0
@@ -3598,18 +3651,27 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         # PvP-only hit count + accuracy (subset of total_hit). Drives the
         # v2.3 thug_accuracy axis (weapon-normalized) at the
         # player+weapon level via weapon_breakdown[w].pvp_hits below.
+        # match.schema_version 8: `player_pvp_shots_hit` already excludes
+        # self-hits via the tightened `is_pvp_hit` upstream.
         total_pvp_hit = sum(player_pvp_shots_hit[s64].values()) if s64 else 0
         pvp_accuracy = total_pvp_hit / total_fired if total_fired > 0 else 0
+        # match.schema_version 8: per-weapon self-hit rollup. Used by the
+        # leaderboard's `personal.self_shots_hit` and (lower down) the
+        # per-weapon `weapon_breakdown[w].self_hits`.
+        self_h = sum(player_self_shots_hit[s64].values()) if s64 else 0
 
         # PvP/PvE kill+death split. PvP = events with both killer and
-        # victim being Steam64 players (already captured in kill_rivalry).
-        # PvE = remainder = kills/deaths against AI units + world.
+        # victim being Steam64 players AND killer != victim (already
+        # captured in kill_rivalry via the tightened is_pvp_kill upstream).
+        # match.schema_version 8: self-kills (rare) are carved out via
+        # `self_k` so `kills = pvp_kills + pve_kills + self_kills`.
         pvp_kills = sum(kill_rivalry[s64].values()) if s64 else 0
         pvp_deaths = sum(victims.get(s64, 0) for victims in kill_rivalry.values()) if s64 else 0
         kills = player_kills.get(s64, 0) if s64 else 0
         deaths = player_deaths.get(s64, 0) if s64 else 0
-        pve_kills = max(0, kills - pvp_kills)
-        pve_deaths = max(0, deaths - pvp_deaths)
+        self_k = player_self_kills.get(s64, 0) if s64 else 0
+        pve_kills = max(0, kills - pvp_kills - self_k)
+        pve_deaths = max(0, deaths - pvp_deaths - self_k)
 
         fav_weapon = "—"
         fav_max = 0
@@ -3631,6 +3693,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             w_shots = player_shots_fired[s64].get(odf, 0)
             w_hits = player_shots_hit[s64].get(odf, 0)
             w_pvp_hits = player_pvp_shots_hit[s64].get(odf, 0) if s64 else 0
+            # match.schema_version 8: per-weapon self-hit counter
+            # (subset of `hits`). Together with `pvp_hits` this makes the
+            # per-weapon view reconcilable: `hits = pvp_hits + pve_hits + self_hits`
+            # (where `pve_hits` is the implicit remainder).
+            w_self_hits = player_self_shots_hit[s64].get(odf, 0) if s64 else 0
             w_acc = w_hits / w_shots if w_shots > 0 else 0
             weapon_breakdown[wpn_name(odf)] = {
                 "dealt": round(w_dealt, 1),
@@ -3638,6 +3705,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "shots": w_shots,
                 "hits": w_hits,
                 "pvp_hits": w_pvp_hits,
+                "self_hits": w_self_hits,
                 "accuracy": round(w_acc, 3),
             }
 
@@ -3827,6 +3895,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "pve_kills":  pve_kills,
                 "pvp_deaths": pvp_deaths,
                 "pve_deaths": pve_deaths,
+                # match.schema_version 8: self-damage carve-out. Self
+                # events (shooter == victim, e.g. Blink AOE splash on
+                # the firing ship) live in their own bucket so the
+                # invariant `dealt = pvp_dealt + pve_dealt + self_dealt`
+                # holds within ±0.1. `self_dealt == self_received` and
+                # `self_kills == self_deaths` always (same event from
+                # both sides); both halves are emitted for visual
+                # symmetry with the existing dealt/received pattern and
+                # so the Reconcile view's row layout is uniform.
+                "self_dealt":     round(self_d, 1),
+                "self_received":  round(self_d, 1),
+                "self_kills":     self_k,
+                "self_deaths":    self_k,
+                "self_shots_hit": self_h,
                 "fav_weapon": fav_weapon,
                 "weapons_used": len(player_weapons_used.get(s64, set())) if s64 else 0,
             },
@@ -4153,8 +4235,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # summary array. Both are empty/null on matches without any
             # reroute (the vast majority); the dashboard renders a small
             # `via dd` chip when the row carries `rerouted_from`. See
-            # docs/DATA_DICTIONARY.md §10.3.
-            "schema_version": 7,
+            # docs/DATA_DICTIONARY.md §10.3. v8 (this version) adds the
+            # self-damage carve-out: each `personal` block gains
+            # `self_dealt` / `self_received` / `self_kills` / `self_deaths`
+            # / `self_shots_hit`, and each `weapon_breakdown[w]` entry
+            # gains `self_hits`. Self-events (shooter == victim, e.g.
+            # Blink AOE splash) no longer inflate `pvp_*`; they're carved
+            # out so the invariant `dealt = pvp_dealt + pve_dealt + self_dealt`
+            # holds within ±0.1. Pre-v8 contributions default to 0 on
+            # all `self_*` fields so mixed-corpus reads keep passing.
+            "schema_version": 8,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
@@ -4375,6 +4465,17 @@ def _extract_contribution(match_data):
             "pve_kills":      personal.get("pve_kills", 0),
             "pvp_deaths":     personal.get("pvp_deaths", 0),
             "pve_deaths":     personal.get("pve_deaths", 0),
+            # match.schema_version 8: self-damage carve-out career
+            # roll-up. Aggregator sums these into `total_self_*` so the
+            # cross-match invariant `total_dealt = total_pvp_dealt +
+            # total_pve_dealt + total_self_dealt` holds. Default to 0 on
+            # legacy contributions (pre-v8) so mixed-corpus reads keep
+            # passing through.
+            "self_dealt":     round(personal.get("self_dealt", 0), 1),
+            "self_received":  round(personal.get("self_received", 0), 1),
+            "self_kills":     personal.get("self_kills", 0),
+            "self_deaths":    personal.get("self_deaths", 0),
+            "self_shots_hit": personal.get("self_shots_hit", 0),
             "pickups":        pickups_by_name.get(p["name"], 0),
             "weapon_breakdown": {
                 wname: {
@@ -4384,6 +4485,9 @@ def _extract_contribution(match_data):
                     # v2.3: per-weapon PvP-hit count for the career
                     # weapon-breakdown table's PvP Hits / PvP Acc cols.
                     "pvp_hits": wdata.get("pvp_hits", 0),
+                    # match.schema_version 8: per-weapon self-hit count
+                    # (subset of `hits`). Pre-v8 contributions default to 0.
+                    "self_hits": wdata.get("self_hits", 0),
                 }
                 for wname, wdata in (p.get("weapon_breakdown") or {}).items()
             },

@@ -99,16 +99,18 @@ Downstream aggregators read the normalized event uniformly; no consumer should b
 - `victim == 0` → **asset** received credit to the owning slot (from `team` field)
 - Both `shooter > 0` AND `victim > 0` (and shooter not skipped) → **rivalry matrix**
 
-### Derived Leaderboard Fields (PvP/PvE Split)
+### Derived Leaderboard Fields (PvP/PvE/Self Split)
 
-The pipeline adds four derived fields to each `leaderboard[].personal` entry, decomposing `dealt` / `received` into human-vs-human and human-vs-non-player components:
+The pipeline decomposes `dealt` / `received` on each `leaderboard[].personal` entry into three buckets — human-vs-human, human-vs-non-player, and self-inflicted (added in `match.schema_version` 8):
 
-- `pvp_dealt` = `sum(rivalry[s64].values())` — player-on-player subset (shooter > 0 AND victim > 0). Includes friendly-fire between humans.
-- `pve_dealt` = `dealt − pvp_dealt` — damage to AI units + world props (single combined bucket).
+- `pvp_dealt` = `sum(rivalry[s64].values())` — player-on-player subset (shooter > 0 AND victim > 0 AND **shooter != victim**). Includes friendly-fire between humans; **excludes self-damage**.
+- `self_dealt` = `player_self_dealt[s64]` — self-inflicted damage (shooter == victim, e.g. Blink AOE splash on the firing ship). New in `match.schema_version` 8; pre-v8 matches default to 0 and the bug routed those amounts into `pvp_dealt` instead.
+- `pve_dealt` = `dealt − pvp_dealt − self_dealt` — damage to AI units + world props (single combined bucket).
 - `pvp_received` = column sum of `rivalry[*][s64]` — damage received from humans.
-- `pve_received` = `received − pvp_received` — damage received from AI units / world.
+- `self_received` = mirror of `self_dealt` (same event from the victim side; always equal). Both halves emitted for symmetry.
+- `pve_received` = `received − pvp_received − self_received` — damage received from AI units / world.
 
-Each is rounded independently to 1 decimal, so `pvp + pve` may differ from the combined `dealt`/`received` by up to ±0.1. The same split is mirrored at the faction level in `faction_totals[n].{pvp_dealt, pve_dealt, pvp_received, pve_received}` and at the career level in the All Matches aggregate's `career_stats[].{total_pvp_dealt, total_pve_dealt, total_pvp_received, total_pve_received}` (built client-side from `match_contributions.json` by `js/all-matches-aggregator.js`).
+Each is rounded independently to 1 decimal, so `pvp + pve + self` may differ from the combined `dealt`/`received` by up to ±0.1. The PvP/PvE half of the split is mirrored at the faction level in `faction_totals[n].{pvp_dealt, pve_dealt, pvp_received, pve_received}` (which auto-corrects once the rivalry matrix loses self-loops — no faction-side `self_*` is emitted because faction = team and self-damage is always within the same team-of-one). At the career level the All Matches aggregate carries `career_stats[].{total_pvp_dealt, total_pve_dealt, total_pvp_received, total_pve_received, total_self_dealt, total_self_received}` (built client-side from `match_contributions.json` by `js/all-matches-aggregator.js`).
 
 ### Structure Damage Attribution (v2.2 addition)
 
@@ -116,18 +118,29 @@ Each is rounded independently to 1 decimal, so `pvp + pve` may differ from the c
 
 In v2.3, `structure_dealt` is no longer a primary VTSR-T axis (v2.2's `structure_share` was broadened to the larger `pve_share`, which sums all enemy non-human damage from `personal.pve_dealt`). `structure_dealt` is still emitted for the dashboard's per-match leaderboard column AND consumed by `scripts/elo.py` to subtract from `thug_efficiency`'s denominator (so structure damage flows entirely to `pve_share` rather than diluting the dogfight efficiency score).
 
-### v2.3 PvP/PvE leaderboard fields (new in match.schema_version 4)
+### v2.3 PvP/PvE leaderboard fields (new in match.schema_version 4; carve-out tightened in v8)
 
 Each `leaderboard[].personal` row gains six new fields supplementing the existing `pvp_dealt`/`pve_dealt`/etc. damage split:
 
-- `pvp_kills`: kills against other human players (sum of `kill_rivalry[s64].values()` — events with both killer and victim being Steam64 players)
-- `pve_kills`: `kills - pvp_kills`, never negative (kills against AI / world)
-- `pvp_deaths`: deaths from other human players (column sum of `kill_rivalry[*][s64]`)
-- `pve_deaths`: `deaths - pvp_deaths`, never negative
-- `pvp_shots_hit`: subset of `shots_hit` where the BulletHit's victim was a Steam64 player. Drives the per-weapon `weapon_breakdown[w].pvp_hits` field.
+- `pvp_kills`: kills against other human players (sum of `kill_rivalry[s64].values()` — events with both killer and victim being Steam64 players AND **killer != victim** as of `match.schema_version` 8)
+- `pve_kills`: `kills - pvp_kills - self_kills`, never negative (kills against AI / world)
+- `pvp_deaths`: deaths from other human players (column sum of `kill_rivalry[*][s64]`). Excludes self-deaths.
+- `pve_deaths`: `deaths - pvp_deaths - self_deaths`, never negative
+- `pvp_shots_hit`: subset of `shots_hit` where the BulletHit's victim was a Steam64 player AND **shooter != victim** as of `match.schema_version` 8. Drives the per-weapon `weapon_breakdown[w].pvp_hits` field.
 - `pvp_accuracy`: `pvp_shots_hit / max(1, shots_fired)`. Subset of `accuracy`.
 
 Each weapon entry on `weapon_breakdown` also gains `pvp_hits` (subset of `hits`). Together these power the v2.3 thug ELO axes (`thug_kill_rate` blends pvp + α·pve; `thug_accuracy` is weapon-normalized using the per-weapon pvp_hits) and the dashboard's `TOTAL (PvP/PvE)` chip rendering.
+
+### Self-damage carve-out (match.schema_version 8)
+
+Self-events (shooter == victim, most visibly Blink AOE splash on the firing ship — ~64.5% of all blink damage in the audit corpus) used to silently inflate `pvp_dealt` / `pvp_kills` / `pvp_shots_hit` because the rivalry / kill_rivalry / `is_pvp_*` gates only checked `shooter > 0 ∧ victim > 0`. Match schema 8 carves them out into their own bucket so the PvP/PvE attribution is honest:
+
+- `personal.self_dealt` / `self_received`: total self-inflicted damage (always equal — same event from both sides).
+- `personal.self_kills` / `self_deaths`: count of self-kills (rare).
+- `personal.self_shots_hit`: count of self-hits.
+- `weapon_breakdown[w].self_hits`: per-weapon self-hit count (subset of `hits`).
+
+`personal.dealt` / `received` continue to include self-damage at the wire level (so `Σ DamageDealt.amount` reconcile still passes); only the attribution buckets change. The career roll-up surfaces `career_stats[].{total_self_dealt, total_self_received, total_self_kills, total_self_deaths, total_self_shots_hit}` (reconcile/audit fields; no UI panel reads them yet). Pre-v8 matches default every `self_*` field to 0 — the bug always routed self-events into the PvP bucket, so legacy `pvp_dealt + pve_dealt == dealt` still holds for those matches without contradiction.
 
 ### Loadout Profile + Per-Ship Combat (v2.3 addition)
 
