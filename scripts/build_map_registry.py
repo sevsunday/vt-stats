@@ -88,6 +88,68 @@ INTER_MAP_REQUEST_DELAY_SEC = 2.0
 VSR_MOD_ID = "1325933293"
 STOCK_MOD_ID = "0"
 
+# Map thumbnail luminance bands (mean luma over a 64x64 downsample, range
+# 0..255). Used by the browser to selectively brighten dark images via CSS
+# filter on `<img>` surfaces and `ctx.filter` on the positioning canvas
+# underlay. Tunable post-ship without a schema bump — re-run
+# `python scripts/build_map_registry.py` to reclassify all cached PNGs
+# locally (no network).
+LUMA_DIM_THRESHOLD = 95   # mean luma below this -> "dim"
+LUMA_DARK_THRESHOLD = 60  # mean luma below this -> "dark"
+
+
+def compute_image_luma(image_abs: Path) -> tuple[int | None, str]:
+    """Sample a cached map PNG and classify its overall brightness.
+
+    Returns `(mean_int_0_255, band)` where `band` is one of
+    `"normal" | "dim" | "dark"`. Falls back to `(None, "normal")` on any
+    failure (corrupted PNG, missing Pillow, IO error) so the pipeline
+    never aborts on this optional enrichment step.
+
+    The image is downsampled to 64x64 with LANCZOS before sampling — the
+    raw thumbs are 1024x1024+ and we only need a coarse mean, so the
+    downsample turns this into a sub-millisecond op per map. We compute
+    on the L (8-bit luminance) channel rather than RGB averaging
+    because L weights green more heavily than red/blue (matching human
+    perception), which gives a more faithful "is this thumbnail dark
+    looking" classifier than a flat RGB mean.
+    """
+    try:
+        # Local imports — Pillow is optional at module level so a fresh
+        # clone without it doesn't break unrelated registry code paths.
+        import warnings
+        from PIL import Image
+        # Palette PNGs with transparency emit a benign UserWarning on open;
+        # `.convert("L")` does the right thing regardless. Suppress the
+        # noisy warning so a 144-map run doesn't spam the console.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Palette images with Transparency",
+                category=UserWarning,
+            )
+            with Image.open(image_abs) as im:
+                small = im.convert("L").resize((64, 64), Image.LANCZOS)
+                # `tobytes()` returns the raw 8-bit luma channel as a `bytes`
+                # object — sum/len work directly on it. Avoids the
+                # `getdata()` Pillow-14 deprecation warning and is faster
+                # (no Python-list materialisation).
+                buf = small.tobytes()
+                if not buf:
+                    return None, "normal"
+                mean = sum(buf) / len(buf)
+                mean_int = int(round(mean))
+                if mean_int < LUMA_DARK_THRESHOLD:
+                    band = "dark"
+                elif mean_int < LUMA_DIM_THRESHOLD:
+                    band = "dim"
+                else:
+                    band = "normal"
+                return mean_int, band
+    except Exception as e:  # pragma: no cover - defensive, see docstring
+        print(f"  luma classify failed for {image_abs.name}: {e}")
+        return None, "normal"
+
 
 def load_vsr_map_data() -> dict:
     """Extract VSR_MAP_DATA from js/bz2api.js.
@@ -314,6 +376,24 @@ def build_per_map(
                 if "image_calibration" not in cached:
                     cached["image_calibration"] = None
                     dirty = True
+                # Luminance classification (additive). Re-derive from the
+                # on-disk image when the field is absent so an upgrade
+                # backfills all 144 cached maps in one local pass — no
+                # network, no full refetch. Once persisted, the field is
+                # treated as authoritative; manual hand-tuned overrides
+                # in the per-map JSON survive subsequent runs because the
+                # backfill only fires when the key is missing.
+                if "luma_band" not in cached or "mean_luminance" not in cached:
+                    img_rel = cached.get("image_path") or ""
+                    img_abs = PROJECT_ROOT / "data" / img_rel if img_rel else None
+                    if img_abs and img_abs.exists():
+                        mean_val, band_val = compute_image_luma(img_abs)
+                        cached["mean_luminance"] = mean_val
+                        cached["luma_band"] = band_val
+                    else:
+                        cached.setdefault("mean_luminance", None)
+                        cached.setdefault("luma_band", "normal")
+                    dirty = True
                 # vsrmaplist-sourced fields. Backfill from the in-memory
                 # vsrmaplist entry without any network call. Skipped when
                 # vsrmaplist coverage is missing for this map (fields stay
@@ -385,6 +465,7 @@ def build_per_map(
         image_rel_remote = _vsrmaplist_image_relpath(vsrmaplist_entry.get("Image"))
     image_path_rel: str | None = None
     image_hash = None
+    image_abs_for_luma: Path | None = None
     if image_rel_remote:
         ext = Path(image_rel_remote).suffix.lower() or ".png"
         image_filename = f"{map_file}{ext}"
@@ -393,6 +474,7 @@ def build_per_map(
             download_image(image_rel_remote, image_abs)
             image_path_rel = f"maps/{image_filename}"
             image_hash = image_hash_from_path(image_rel_remote)
+            image_abs_for_luma = image_abs
         except (HTTPError, URLError) as e:
             print(f"  {map_file}: image download failed: {e}")
             # Keep metadata without image.
@@ -451,6 +533,16 @@ def build_per_map(
         except (json.JSONDecodeError, OSError):
             preserved_calibration = None
 
+    # Luminance classification on the freshly-downloaded image (or None
+    # when no image landed). Drives the browser's selective brightness
+    # lift on dark map thumbnails. See `compute_image_luma()` for the
+    # 64x64 LANCZOS-downsample / mean-of-L methodology and the
+    # LUMA_*_THRESHOLD constants for the band cutoffs.
+    if image_abs_for_luma is not None:
+        mean_luma_val, luma_band_val = compute_image_luma(image_abs_for_luma)
+    else:
+        mean_luma_val, luma_band_val = None, "normal"
+
     # Attribution source string reflects which upstream actually
     # contributed metadata for this entry (vsrmaplist == BZCC-Website
     # vendored index, iondriver == live getdata.php).
@@ -490,6 +582,18 @@ def build_per_map(
         # See docs/DEVELOPER_GUIDE.md "Map Assets & Overlays" for the
         # calibration workflow. Preserved across registry rebuilds.
         "image_calibration": preserved_calibration,
+        # Luminance classification of `image_path`. `mean_luminance` is
+        # an int 0..255 (or null when no image is on disk). `luma_band`
+        # buckets that into "normal" / "dim" / "dark" via the
+        # LUMA_DIM_THRESHOLD / LUMA_DARK_THRESHOLD constants. The browser
+        # uses `luma_band` to apply graduated CSS / canvas brightness
+        # filters on dark thumbnails so the directory grid stays
+        # legible without washing out already-bright maps. Re-running
+        # this script reclassifies any map whose `luma_band` is missing
+        # (additive backfill); existing values are preserved so
+        # hand-tuned overrides survive.
+        "mean_luminance": mean_luma_val,
+        "luma_band": luma_band_val,
         "attribution": {
             "source": attribution_source,
             "map_author": author,

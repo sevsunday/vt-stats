@@ -40,6 +40,32 @@ body {
     z-index: 0;
 }
 
+/* Override Bootstrap's `.h-100` utility on the body element specifically.
+ *
+ * The maps / player / ODF pages (and their per-slug pre-gen stubs) all
+ * open with `<body class="d-flex flex-column h-100">` — the standard
+ * Bootstrap "sticky footer flexbox" pattern. Plain `.h-100` is
+ * `height: 100% !important`, which combined with `<html class="h-100">`
+ * clamps `body` to EXACTLY viewport height even when its content (a
+ * tall card grid, etc.) overflows.
+ *
+ * Why that breaks `<nav class="sticky-top">`: a sticky element cannot
+ * escape its containing block's bottom edge. The navbar's containing
+ * block is `body`. As the document scrolls past
+ * `body_height - navbar_height`, body's box slides up off-screen and
+ * the navbar gets pinned to body's bottom — following it offscreen.
+ * Result: navbar disappears once you scroll far enough.
+ *
+ * `min-height: 100%` preserves the sticky-footer behaviour (body still
+ * fills the viewport on short pages so `main.flex-grow-1` can stretch),
+ * but lets body grow with content so sticky descendants track the full
+ * scroll height. The dashboard's `<body>` (no `h-100` class) is
+ * unaffected — its body is already content-sized. */
+body.h-100 {
+    height: auto !important;
+    min-height: 100%;
+}
+
 h1, h2, h3, h4, h5, h6,
 .h1, .h2, .h3, .h4, .h5, .h6 {
     font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -257,6 +283,18 @@ th[data-sort].sort-active {
 
     /* Ambient background */
     --vt-ambient-opacity: 0.06;
+
+    /* Map thumbnail brightness lift.
+       Applied selectively to <img> surfaces tagged with .vt-map-img-lift-1
+       (dim) or .vt-map-img-lift-2 (dark). The classification is computed
+       once at pipeline time (`compute_image_luma()` in
+       scripts/build_map_registry.py) and persisted on the registry as
+       `luma_band`. Bright maps get no class — no filter cost.
+       The positioning heatmap canvas underlay applies equivalent literal
+       filter strings (canvas `ctx.filter` cannot resolve `var(...)`); keep
+       the two paths in sync when retuning. */
+    --vt-map-img-lift-1: brightness(1.15) contrast(1.04);
+    --vt-map-img-lift-2: brightness(1.30) contrast(1.06) saturate(1.05);
 }
 
 /* Light mode — same effects, reduced intensity */
@@ -3403,6 +3441,24 @@ td.vt-col-split {
     background: var(--kb-bg-subtle);
     display: block;
 }
+
+/* Map thumbnail brightness lift.
+ *
+ * Selectively applied to <img> surfaces when the registry's `luma_band`
+ * field flags an image as `dim` or `dark`. Classification happens once
+ * at pipeline time (`compute_image_luma()` in scripts/build_map_registry.py);
+ * `--vt-map-img-lift-*` custom properties are defined in the :root
+ * block above for theme-layer tunability.
+ *
+ * Surfaces that pick up these classes:
+ *   - .vt-map-thumb, .vt-map-info-image (dashboard banner + Map Info Modal)
+ *   - .vt-map-card-thumb, .vt-map-single-image (/map/ browser pages)
+ *
+ * Equivalent canvas-side lifts live in `_drawMapImageLayer()` in
+ * js/positioning-charts.js (literal filter strings — canvas's
+ * `ctx.filter` cannot resolve `var(...)`). Retune both in lockstep. */
+.vt-map-img-lift-1 { filter: var(--vt-map-img-lift-1); }
+.vt-map-img-lift-2 { filter: var(--vt-map-img-lift-2); }
 
 .vt-map-info-meta {
     margin: 0;

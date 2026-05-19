@@ -711,7 +711,15 @@ function _computeSharedViewport(positioning) {
 // drawImage stretches the bitmap between them. When vp matches imageBounds
 // exactly (default case), the image fills the canvas; when the viewport
 // is tighter (zoomed in), portions of the image fall off-canvas naturally.
-function _drawMapImageLayer(ctx, img, imageBounds, vp, w, h) {
+//
+// `lumaBand` is the pipeline-classified brightness label ('normal' /
+// 'dim' / 'dark') from getMapMeta(). When 'dim' or 'dark', a literal
+// CSS-filter string is set on the context before drawImage so the
+// underlay matches the dashboard's <img> surfaces. We use literal
+// strings (not the --vt-map-img-lift-* custom properties) because
+// canvas `ctx.filter` does NOT resolve `var(...)` -- keep these in
+// lockstep with css/vtstats-theme.css when retuning.
+function _drawMapImageLayer(ctx, img, imageBounds, vp, w, h, lumaBand) {
   if (!img || !imageBounds || !img.complete || !img.naturalWidth) return;
   const dx0 = _worldToScreenX(imageBounds.min.x, vp, w);
   const dy0 = _worldToScreenY(imageBounds.max.z, vp, h); // north edge -> top
@@ -724,6 +732,8 @@ function _drawMapImageLayer(ctx, img, imageBounds, vp, w, h) {
   ctx.globalAlpha = 0.45;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
+  if (lumaBand === 'dark')      ctx.filter = 'brightness(1.30) contrast(1.06) saturate(1.05)';
+  else if (lumaBand === 'dim')  ctx.filter = 'brightness(1.15) contrast(1.04)';
   ctx.drawImage(img, dx0, dy0, dw, dh);
   ctx.restore();
 }
@@ -906,16 +916,18 @@ function _sizeCanvas(canvas) {
   return { ctx, w, h };
 }
 
-// Resolve { img, imageBounds } for the current match via the VTMapRegistry
-// exposed by js/app.js. Returns { img: null, imageBounds: null } when the
-// match has no map registry entry or no bounds — overlay renderers should
-// gracefully skip drawing the image layer in that case.
+// Resolve { img, imageBounds, lumaBand } for the current match via the
+// VTMapRegistry exposed by js/app.js. Returns null/empty fields when the
+// match has no map registry entry or no bounds — overlay renderers
+// should gracefully skip drawing the image layer in that case.
+// `lumaBand` falls back to 'normal' so callers always get a defined
+// string (= no canvas filter applied).
 function _resolveMapOverlay(match) {
-  if (!match || !window.VTMapRegistry) return { img: null, imageBounds: null };
+  if (!match || !window.VTMapRegistry) return { img: null, imageBounds: null, lumaBand: 'normal' };
   const meta = window.VTMapRegistry.getMapMeta(match);
-  if (!meta || !meta.imagePath || !meta.imageBounds) return { img: null, imageBounds: null };
+  if (!meta || !meta.imagePath || !meta.imageBounds) return { img: null, imageBounds: null, lumaBand: 'normal' };
   const img = window.VTMapRegistry.getMapImage(meta.key, meta.imagePath);
-  return { img, imageBounds: meta.imageBounds };
+  return { img, imageBounds: meta.imageBounds, lumaBand: meta.lumaBand || 'normal' };
 }
 
 function renderCombinedHeatmap(canvasId, positioning, match) {
@@ -933,10 +945,10 @@ function renderCombinedHeatmap(canvasId, positioning, match) {
 
   // Draw map image background (if available) between the backdrop and
   // the heatmap cells so data stays legible.
-  const { img, imageBounds } = _resolveMapOverlay(match);
+  const { img, imageBounds, lumaBand } = _resolveMapOverlay(match);
   if (img) {
     if (img.complete && img.naturalWidth) {
-      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h);
+      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h, lumaBand);
     } else {
       img.addEventListener('load', () => {
         // Re-render once the image is ready. Cheap: whole canvas refresh
@@ -987,10 +999,10 @@ function renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, shared
   _drawHeatmapBackdrop(ctx, vp, positioning, t, w, h);
   // Optional map image background (drawn between backdrop and cells so
   // the per-player intensity stays on top). Non-fatal when absent.
-  const { img, imageBounds } = _resolveMapOverlay(match);
+  const { img, imageBounds, lumaBand } = _resolveMapOverlay(match);
   if (img) {
     if (img.complete && img.naturalWidth) {
-      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h);
+      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h, lumaBand);
     } else {
       img.addEventListener('load', () => {
         renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, sharedMaxV, match);

@@ -554,8 +554,12 @@
     const mapKey = (entry.map || '').replace(/\.bzn$/i, '').toLowerCase();
     const regEntry = (mapRegistry && mapRegistry[mapKey]) || null;
     const thumbSrc = regEntry && regEntry.image_path ? ('data/' + regEntry.image_path) : '';
+    // Same brightness lift the banner / modal apply, so picker cards don't
+    // visually disagree with the in-context views downstream of them.
+    const pickerLift = lumaLiftClass(regEntry && regEntry.luma_band);
+    const pickerThumbCls = `vt-match-picker-card-thumb${pickerLift ? ' ' + pickerLift : ''}`;
     const thumbHtml = thumbSrc
-      ? `<img class="vt-match-picker-card-thumb" src="${esc(thumbSrc)}" alt="" decoding="async" loading="lazy">`
+      ? `<img class="${pickerThumbCls}" src="${esc(thumbSrc)}" alt="" decoding="async" loading="lazy">`
       : `<div class="vt-match-picker-card-thumb vt-match-picker-card-thumb--placeholder" aria-hidden="true"><i class="bi bi-map"></i></div>`;
 
     return `
@@ -3439,6 +3443,18 @@
     renderMapBannerFields(info);
   }
 
+  // Map a pipeline-classified `luma_band` to the matching brightness lift
+  // class (defined in css/vtstats-theme.css). 'normal' / unknown -> empty
+  // string so callers can splat directly into a className. Mirrors the
+  // helper in js/maps.js and the canvas branch in
+  // js/positioning-charts.js `_drawMapImageLayer()` -- keep them in
+  // lockstep when retuning the band thresholds or filter values.
+  function lumaLiftClass(band) {
+    if (band === 'dark') return 'vt-map-img-lift-2';
+    if (band === 'dim')  return 'vt-map-img-lift-1';
+    return '';
+  }
+
   // Merge sources for map metadata into a single object used by the hero
   // banner and the overlay renderers (positioning-charts, positioning-player,
   // match-picker thumbnails). Precedence for imageBounds (the projection
@@ -3485,6 +3501,12 @@
       title: registry.title || null,
       imagePath: registry.image_path || null,
       imageBounds,
+      // Pipeline-classified brightness band: 'normal' | 'dim' | 'dark'.
+      // Read by the dashboard banner thumb, Map Info Modal hero image, and
+      // the Positioning heatmap canvas underlay so all three surfaces apply
+      // the same brightness lift on dark map thumbnails. Falls back to
+      // 'normal' (no lift) when the registry pre-dates the field.
+      lumaBand: registry.luma_band || 'normal',
       author: (registry.author || vsr.author || null),
       canonicalB2B: (registry.canonical_b2b != null ? registry.canonical_b2b : (vsr.baseToBase || null)),
       canonicalSize: (registry.canonical_size != null ? registry.canonical_size : librarySize),
@@ -3548,6 +3570,12 @@
         thumb.alt = '';
         thumb.title = '';
       }
+      // Toggle the brightness-lift class to match the registry's luma_band
+      // for this map. Always strip both lift classes first so a switch from
+      // a dark map to a normal one cleanly clears the filter.
+      thumb.classList.remove('vt-map-img-lift-1', 'vt-map-img-lift-2');
+      const lift = lumaLiftClass(meta.lumaBand);
+      if (lift) thumb.classList.add(lift);
     }
     if (thumbBtn) {
       if (meta.imagePath) {
@@ -3636,6 +3664,11 @@
       imageEl.removeAttribute('src');
       if (imageCol) imageCol.classList.add('d-none');
     }
+    // Brightness lift toggling — strip first so a stale class from the
+    // previous match's modal hero doesn't leak across a switch.
+    imageEl.classList.remove('vt-map-img-lift-1', 'vt-map-img-lift-2');
+    const modalLift = lumaLiftClass(meta.lumaBand);
+    if (modalLift) imageEl.classList.add(modalLift);
 
     const reg = registry || {};
 

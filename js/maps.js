@@ -84,6 +84,16 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  /** Map a pipeline-classified `luma_band` to the matching brightness
+   *  lift class (defined in css/vtstats-theme.css). 'normal' / unknown
+   *  -> empty string so callers can splat directly into a class list.
+   *  Mirrors the canvas-side branch in js/positioning-charts.js
+   *  `_drawMapImageLayer()` — keep them in lockstep when retuning. */
+  function lumaLiftClass(band) {
+    if (band === 'dark') return 'vt-map-img-lift-2';
+    if (band === 'dim')  return 'vt-map-img-lift-1';
+    return '';
+  }
   function formatNumber(n) {
     if (!Number.isFinite(+n)) return '\u2014';
     return Math.round(+n).toLocaleString();
@@ -220,6 +230,10 @@
         tags:             (r && Array.isArray(r.tags)) ? r.tags : [],
         net_vars:         (r && r.net_vars) || null,
         mod_resolved:     (r && r.mod_resolved) || null,
+        // Pipeline-classified brightness band: 'normal' | 'dim' | 'dark'.
+        // Drives the .vt-map-img-lift-* class on thumb/hero <img>s. Absent
+        // / unknown values fall back to 'normal' (no filter applied).
+        luma_band:        (r && r.luma_band) || 'normal',
         match_count:      s ? safeNum(s.match_count) : 0,
         avg_duration_sec: s ? safeNum(s.avg_duration_sec) : 0,
         total_duration_sec: s ? safeNum(s.total_duration_sec) : 0,
@@ -349,8 +363,10 @@
     const thumbSrc = row.image_path
       ? `${state.dataPrefix}data/${row.image_path}`
       : '';
+    const liftCls = lumaLiftClass(row.luma_band);
+    const thumbClassAttr = `vt-map-card-thumb${liftCls ? ' ' + liftCls : ''}`;
     const thumbHtml = thumbSrc
-      ? `<img class="vt-map-card-thumb" src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(row.title)} top-down" loading="lazy" decoding="async">`
+      ? `<img class="${thumbClassAttr}" src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(row.title)} top-down" loading="lazy" decoding="async">`
       : `<div class="vt-map-card-thumb vt-map-card-thumb-empty" aria-hidden="true"><i class="bi bi-map"></i></div>`;
     const pools = row.pools != null ? `${row.pools}p` : '';
     const loose = row.loose != null
@@ -483,9 +499,11 @@
     const imgSrc = row.image_path
       ? `${state.dataPrefix}data/${row.image_path}`
       : '';
+    const liftCls = lumaLiftClass(row.luma_band);
+    const heroClassAttr = `vt-map-single-image${liftCls ? ' ' + liftCls : ''}`;
     const imageBlock = imgSrc
       ? `<div class="vt-map-single-image-wrap">
-          <img class="vt-map-single-image" src="${escapeHtml(imgSrc)}"
+          <img class="${heroClassAttr}" src="${escapeHtml(imgSrc)}"
                alt="${escapeHtml(row.title)} top-down" decoding="async" loading="eager">
         </div>`
       : `<div class="vt-map-single-image-wrap vt-map-single-image-empty">

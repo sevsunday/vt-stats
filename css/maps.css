@@ -59,7 +59,19 @@
   border-radius: var(--vt-map-card-radius);
   position: sticky;
   top: calc(var(--vt-navbar-h, 56px) + 0.5rem);
-  z-index: 1030;
+  /* Sit one notch BELOW the .navbar.sticky-top (1020) so the navbar's
+     theme-picker dropdown — whose menu hangs into the viewport area
+     just below the navbar — paints over the toolbar instead of being
+     covered by it. Safe for the mobile filter offcanvas: Bootstrap's
+     `.offcanvas` is `position: fixed` with its own `z-index: 1045`,
+     and we explicitly kill the only ancestor styles that would create
+     a containing block (backdrop-filter / transform — see the rule
+     just below), so the fixed drawer escapes the toolbar's stacking
+     context and renders at root level above the navbar. On md+ the
+     offcanvas is inline (no fixed positioning), so z-index is moot.
+     Re-raising this above 1020 will reintroduce the dropdown overlap
+     bug — keep it strictly less than the navbar's z-index. */
+  z-index: 1019;
 }
 /* Same offcanvas-clipping fix as the player toolbar: kill backdrop
    filter + hover transform on the sticky toolbar so the mobile

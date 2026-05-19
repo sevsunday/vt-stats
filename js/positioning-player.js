@@ -482,6 +482,13 @@
               ctx.globalAlpha = 0.45;
               ctx.imageSmoothingEnabled = true;
               ctx.imageSmoothingQuality = 'high';
+              // Brightness lift on dark map underlays. Mirrors
+              // js/positioning-charts.js _drawMapImageLayer() and the
+              // .vt-map-img-lift-* CSS classes; literal strings here
+              // because canvas ctx.filter cannot resolve var(...). Keep
+              // these in lockstep with css/vtstats-theme.css.
+              if (meta.lumaBand === 'dark')      ctx.filter = 'brightness(1.30) contrast(1.06) saturate(1.05)';
+              else if (meta.lumaBand === 'dim')  ctx.filter = 'brightness(1.15) contrast(1.04)';
               ctx.drawImage(img, dx0, dy0, dw, dh);
               ctx.restore();
             }

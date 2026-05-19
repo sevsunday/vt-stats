@@ -79,14 +79,21 @@
   border-radius: var(--vt-player-card-radius);
   position: sticky;
   top: calc(var(--vt-navbar-h, 56px) + 0.5rem);
-  /* The toolbar is a stacking context (sticky + z-index). It hosts
-     the mobile filter offcanvas as a descendant, so its z-index
-     must sit above the .navbar.sticky-top stacking context (1020)
-     for the drawer to render on top of the navbar. The toolbar
-     itself never overlaps the navbar visually (sticky offset =
-     navbar height + 0.5rem), so a higher root-level z-index is
-     purely a stacking-fix. */
-  z-index: 1030;
+  /* Sit one notch BELOW the .navbar.sticky-top (1020) so the navbar's
+     theme-picker dropdown — whose menu hangs into the viewport area
+     just below the navbar — paints over the toolbar instead of being
+     covered by it. Earlier history (z-index 1030) tried to host the
+     mobile filter offcanvas as a descendant; that's not actually
+     necessary because Bootstrap's `.offcanvas` is `position: fixed`
+     with its own `z-index: 1045`, and the rule just below kills the
+     only ancestor styles that would create a containing block
+     (backdrop-filter + transform), so the fixed drawer escapes the
+     toolbar's stacking context and renders at root level above the
+     navbar regardless. On md+ the offcanvas is inline (no fixed
+     positioning), so z-index is moot. Re-raising this above 1020
+     will reintroduce the theme-dropdown overlap — keep it strictly
+     less than the navbar's z-index. */
+  z-index: 1019;
 }
 /* The global .card glass rule (vtstats-theme.css ~L328) applies
    `backdrop-filter` AND a hover `transform: translateY(-2px)`
