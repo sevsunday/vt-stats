@@ -404,7 +404,6 @@
           : `Showing ${visible.length} of ${rows.length} ranked players.`;
     }
 
-    renderToolbarSummary();
     updateFilterCount();
   }
 
@@ -421,30 +420,6 @@
       el.hidden = false;
     } else {
       el.hidden = true;
-    }
-  }
-
-  function renderToolbarSummary() {
-    const parts = [];
-    const f = state.filters;
-    if (f.query) parts.push(`Search: <strong>${escapeHtml(f.query)}</strong>`);
-    if (f.tiers.size) {
-      const labels = Array.from(f.tiers).map(id => {
-        const t = VTSR_TIERS.find(x => x.id === id);
-        return t ? t.short : '?';
-      }).join(', ');
-      parts.push(`Tier: <strong>${labels}</strong>`);
-    }
-    if (f.role !== 'any') parts.push(`Role: <strong>${f.role === 'commander' ? 'Commander-leaning' : 'Thug-leaning'}</strong>`);
-    if (f.activity !== 'any') {
-      const b = ACTIVITY_BUCKETS[f.activity];
-      parts.push(`Activity: <strong>${b ? b.label : f.activity}</strong>`);
-    }
-    if (parts.length) {
-      dom.summary.innerHTML = `Filtered: ${parts.join(' &middot; ')}`;
-      dom.summary.hidden = false;
-    } else {
-      dom.summary.hidden = true;
     }
   }
 
@@ -3395,7 +3370,6 @@
     dom.activityChips  = $('vt-player-activity-chips');
     dom.sortSelect     = $('vt-player-sort');
     dom.compareToggle  = $('vt-player-compare-toggle');
-    dom.summary        = $('vt-player-toolbar-summary');
     dom.filterCount    = $('vt-player-filter-count');
     dom.grid           = $('vt-player-grid');
     dom.empty          = $('vt-player-empty');

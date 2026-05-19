@@ -45,7 +45,7 @@ SITE_URL = "https://vtstats.bz"
 # and ELO_SCHEMA_VERSION (data contract). Bumped to v2 in Phase 3 when
 # the actual stub template + idempotent renderer landed (forces first
 # generation pass to touch every file).
-PLAYER_TEMPLATE_VERSION = 4
+PLAYER_TEMPLATE_VERSION = 5
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

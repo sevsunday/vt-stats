@@ -43,7 +43,7 @@
       steam64: "76561198163015714",
       slug:    "sponge",
       name:    "sponge",
-      template_version: 4
+      template_version: 5
     };
   </script>
 </head>
@@ -151,44 +151,65 @@
                      placeholder="Search players…" autocomplete="off">
             </div>
 
-            <div class="vt-chip-group" role="group" aria-label="Tier filter" id="vt-player-tier-chips">
-              <span class="vt-chip-group-label">Tier</span>
-            </div>
+            <button type="button" class="vt-player-filter-toggle d-md-none ms-auto"
+                    data-bs-toggle="offcanvas" data-bs-target="#vt-player-filter-offcanvas"
+                    aria-controls="vt-player-filter-offcanvas" aria-label="Open filters">
+              <i class="bi bi-funnel"></i>
+              <span class="vt-player-filter-count" id="vt-player-filter-count" hidden>0</span>
+            </button>
 
-            <div class="vt-chip-group" role="group" aria-label="Role bias" id="vt-player-role-chips">
-              <span class="vt-chip-group-label">Role</span>
-              <button type="button" class="vt-chip" data-role="any" data-selected="true">Any</button>
-              <button type="button" class="vt-chip" data-role="commander">Commander-leaning</button>
-              <button type="button" class="vt-chip" data-role="thug">Thug-leaning</button>
-            </div>
+            <div class="offcanvas-md offcanvas-end vt-player-filter-panel"
+                 tabindex="-1" id="vt-player-filter-offcanvas"
+                 aria-labelledby="vt-player-filter-offcanvas-label">
+              <div class="offcanvas-header d-md-none">
+                <h5 class="offcanvas-title" id="vt-player-filter-offcanvas-label">
+                  <i class="bi bi-funnel me-1"></i>Filters
+                </h5>
+                <button type="button" class="btn-close"
+                        data-bs-dismiss="offcanvas"
+                        data-bs-target="#vt-player-filter-offcanvas"
+                        aria-label="Close"></button>
+              </div>
+              <div class="offcanvas-body">
+                <div class="vt-chip-group" role="group" aria-label="Tier filter" id="vt-player-tier-chips">
+                  <span class="vt-chip-group-label">Tier</span>
+                </div>
 
-            <div class="vt-chip-group" role="group" aria-label="Activity" id="vt-player-activity-chips">
-              <span class="vt-chip-group-label">Activity</span>
-              <button type="button" class="vt-chip" data-activity="any">All</button>
-              <button type="button" class="vt-chip" data-activity="active" data-selected="true">Default</button>
-              <button type="button" class="vt-chip" data-activity="veteran">Active (20+)</button>
-              <button type="button" class="vt-chip" data-activity="pillar">Zoner (40+)</button>
-            </div>
+                <div class="vt-chip-group" role="group" aria-label="Role bias" id="vt-player-role-chips">
+                  <span class="vt-chip-group-label">Role</span>
+                  <button type="button" class="vt-chip" data-role="any" data-selected="true">Any</button>
+                  <button type="button" class="vt-chip" data-role="commander">Commander-leaning</button>
+                  <button type="button" class="vt-chip" data-role="thug">Thug-leaning</button>
+                </div>
 
-            <div class="ms-auto d-flex gap-2 align-items-center">
-              <label for="vt-player-sort" class="form-label mb-0 small text-secondary">Sort</label>
-              <select id="vt-player-sort" class="form-select form-select-sm vt-player-sort-select">
-                <option value="vtsr-desc" selected>VTSR-T (highest)</option>
-                <option value="vtsr-asc">VTSR-T (lowest)</option>
-                <option value="peak-desc">Peak (highest)</option>
-                <option value="matches-desc">Matches played</option>
-                <option value="last-desc">Most recent activity</option>
-                <option value="name-asc">Name (A–Z)</option>
-              </select>
-              <button type="button" id="vt-player-compare-toggle"
-                      class="btn btn-sm vt-player-compare-toggle"
-                      title="Select up to 4 players to compare"
-                      aria-pressed="false">
-                <i class="bi bi-bar-chart-steps me-1"></i>Compare
-              </button>
+                <div class="vt-chip-group" role="group" aria-label="Activity" id="vt-player-activity-chips">
+                  <span class="vt-chip-group-label">Activity</span>
+                  <button type="button" class="vt-chip" data-activity="any">All</button>
+                  <button type="button" class="vt-chip" data-activity="active" data-selected="true">Default</button>
+                  <button type="button" class="vt-chip" data-activity="veteran">Active (20+)</button>
+                  <button type="button" class="vt-chip" data-activity="pillar">Zoner (40+)</button>
+                </div>
+
+                <div class="vt-player-filter-actions ms-md-auto d-flex gap-2 align-items-center">
+                  <label for="vt-player-sort" class="form-label mb-0 small text-secondary">Sort</label>
+                  <select id="vt-player-sort" class="form-select form-select-sm vt-player-sort-select">
+                    <option value="vtsr-desc" selected>VTSR-T (highest)</option>
+                    <option value="vtsr-asc">VTSR-T (lowest)</option>
+                    <option value="peak-desc">Peak (highest)</option>
+                    <option value="matches-desc">Matches played</option>
+                    <option value="last-desc">Most recent activity</option>
+                    <option value="name-asc">Name (A–Z)</option>
+                  </select>
+                  <button type="button" id="vt-player-compare-toggle"
+                          class="btn btn-sm vt-player-compare-toggle"
+                          title="Select up to 4 players to compare"
+                          aria-pressed="false">
+                    <i class="bi bi-bar-chart-steps me-1"></i>Compare
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="vt-player-toolbar-summary text-secondary small mt-2" id="vt-player-toolbar-summary" hidden></div>
         </div>
       </div>
 
