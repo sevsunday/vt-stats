@@ -405,6 +405,23 @@
     }
 
     renderToolbarSummary();
+    updateFilterCount();
+  }
+
+  function updateFilterCount() {
+    const el = dom.filterCount;
+    if (!el) return;
+    const f = state.filters;
+    const n = f.tiers.size
+            + (f.role !== 'any' ? 1 : 0)
+            + (f.activity !== 'active' ? 1 : 0)
+            + ((f.query || '').trim() ? 1 : 0);
+    if (n > 0) {
+      el.textContent = String(n);
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
   }
 
   function renderToolbarSummary() {
@@ -453,6 +470,17 @@
       state.selection.clear();
     }
     syncCompareBar();
+    // On <md the filter offcanvas drawer holds the Compare toggle, so
+    // when entering compare-mode auto-close the drawer to surface the
+    // card grid for tap-to-select. Inline-rendered (>=md) instances
+    // never get the .show class, so this is a no-op on desktop.
+    if (state.compareMode) {
+      const oc = document.getElementById('vt-player-filter-offcanvas');
+      if (oc && oc.classList.contains('show') && window.bootstrap && window.bootstrap.Offcanvas) {
+        const inst = window.bootstrap.Offcanvas.getOrCreateInstance(oc);
+        if (inst) inst.hide();
+      }
+    }
   }
 
   function toggleSelection(steam64) {
@@ -3368,6 +3396,7 @@
     dom.sortSelect     = $('vt-player-sort');
     dom.compareToggle  = $('vt-player-compare-toggle');
     dom.summary        = $('vt-player-toolbar-summary');
+    dom.filterCount    = $('vt-player-filter-count');
     dom.grid           = $('vt-player-grid');
     dom.empty          = $('vt-player-empty');
     dom.clearFiltersBtn= $('vt-player-clear-filters');

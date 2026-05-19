@@ -79,7 +79,37 @@
   border-radius: var(--vt-player-card-radius);
   position: sticky;
   top: calc(var(--vt-navbar-h, 56px) + 0.5rem);
-  z-index: 5;
+  /* The toolbar is a stacking context (sticky + z-index). It hosts
+     the mobile filter offcanvas as a descendant, so its z-index
+     must sit above the .navbar.sticky-top stacking context (1020)
+     for the drawer to render on top of the navbar. The toolbar
+     itself never overlaps the navbar visually (sticky offset =
+     navbar height + 0.5rem), so a higher root-level z-index is
+     purely a stacking-fix. */
+  z-index: 1030;
+}
+/* The global .card glass rule (vtstats-theme.css ~L328) applies
+   `backdrop-filter` AND a hover `transform: translateY(-2px)`
+   (line ~339), both of which create a containing block for any
+   `position: fixed` descendants and would trap the mobile filter
+   offcanvas drawer inside the toolbar's bounds — clipping it to
+   the card's height. Suppress both on the toolbar specifically
+   (visual cost is negligible; the toolbar background is already
+   translucent and a hover lift on a sticky toolbar is more
+   distracting than useful) so the offcanvas escapes to viewport
+   coordinates when it slides in. Same workaround pattern used by
+   the floating player picker (.vt-player-picker--floating in
+   vtstats-theme.css). On touch devices :hover can fire briefly
+   on tap, which is why we kill the hover transform too. */
+.vt-player-toolbar.card,
+.vt-player-toolbar.card:hover {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+}
+.vt-player-toolbar-summary {
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 .vt-player-search-icon {
   position: absolute;
@@ -174,6 +204,141 @@
   color: var(--kb-text-primary);
   background: color-mix(in oklab, var(--kb-primary) 25%, transparent);
   border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+}
+
+/* Mobile filter funnel button (visible only <md). Mirrors the
+   .vt-player-compare-toggle look so the sticky bar reads as a
+   single related cluster. */
+.vt-player-filter-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  background: transparent;
+  color: var(--kb-text-secondary);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.vt-player-filter-toggle:hover,
+.vt-player-filter-toggle:focus-visible {
+  color: var(--kb-text-primary);
+  background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+  border-color: color-mix(in oklab, var(--kb-primary) 40%, transparent);
+  outline: none;
+}
+.vt-player-filter-toggle .bi-funnel { font-size: 1rem; }
+
+.vt-player-filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  padding: 0 0.35rem;
+  background: color-mix(in oklab, var(--kb-primary) 35%, transparent);
+  color: var(--kb-text-primary);
+  border-radius: 999px;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.vt-player-filter-count[hidden] { display: none; }
+
+/* Responsive filter offcanvas. Bootstrap renders .offcanvas-md as
+   a normal flex container at >=md and as a right-side drawer at <md.
+   Both modes need explicit styling so the drawer feels like a card
+   sibling on phones AND the inline mode visually fuses with the
+   search input on the same row at desktop. */
+.vt-player-filter-panel.offcanvas-md {
+  --bs-offcanvas-width: min(86vw, 360px);
+}
+
+/* Inline mode (>=md): zero-pad the body, flex row that wraps,
+   matching the original toolbar gap + alignment. */
+@media (min-width: 768px) {
+  .vt-player-filter-panel.offcanvas-md {
+    background: transparent;
+    border: 0;
+    flex-grow: 1;
+  }
+  .vt-player-filter-panel.offcanvas-md > .offcanvas-body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0;
+    overflow: visible;
+  }
+}
+
+/* Drawer mode (<md): give the panel its own glass surface, stack
+   chip groups vertically so each fits inside the drawer width, and
+   expand the Sort + Compare cluster into a full-width footer row. */
+@media (max-width: 767.98px) {
+  .vt-player-filter-panel.offcanvas-md {
+    background: color-mix(in oklab, var(--kb-bg-card) 96%, transparent);
+    backdrop-filter: blur(var(--vt-glass-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--vt-glass-blur, 12px));
+    border-left: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+    color: var(--kb-text-primary);
+  }
+  .vt-player-filter-panel .offcanvas-header {
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  }
+  .vt-player-filter-panel .offcanvas-title {
+    font-family: 'Geist', system-ui, sans-serif;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+  }
+  .vt-player-filter-panel .offcanvas-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+    padding: 1rem 1rem 1.25rem;
+  }
+  .vt-player-filter-panel .vt-chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 14px;
+    white-space: normal;
+  }
+  .vt-player-filter-panel .vt-chip-group-label {
+    flex: 0 0 100%;
+    margin: 0 0 0.25rem;
+  }
+  .vt-player-filter-panel .vt-chip {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.82rem;
+  }
+  .vt-player-filter-panel .vt-player-filter-actions {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+    margin-top: 0.25rem;
+  }
+  .vt-player-filter-panel .vt-player-filter-actions .form-label {
+    flex: 0 0 auto;
+  }
+  .vt-player-filter-panel .vt-player-sort-select {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .vt-player-filter-panel .vt-player-compare-toggle {
+    flex: 1 1 100%;
+    justify-content: center;
+    padding: 0.5rem 0.75rem;
+  }
 }
 
 /* Grid */
