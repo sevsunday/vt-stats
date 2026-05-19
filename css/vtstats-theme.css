@@ -1437,6 +1437,36 @@ body::before {
     font-size: 0.75rem;
 }
 
+/* Player profile cross-link. Wraps any player display name across the
+   dashboard (leaderboard, VTSR-T leaderboard, career table, kill feed,
+   match/career highlights, commander head-to-head, global rivalries)
+   so a click drops the user onto /player/<slug>/. Twin of .vt-odf-link,
+   defined here (not in css/player.css) so the dashboard picks it up
+   without loading the player-page stylesheet. The .vt-player-link-fallback
+   variant is rendered when the slug map is missing or the player has no
+   slug yet — it's keeps the visual styling consistent (same colored hover)
+   while still functioning as a runtime ?p=<steam64> redirect target. */
+.vt-player-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+    border-bottom: 1px dashed transparent;
+}
+.vt-player-link:hover,
+.vt-player-link:focus-visible {
+    color: var(--kb-primary);
+    border-bottom-color: color-mix(in oklab, var(--kb-primary) 60%, transparent);
+    text-decoration: none;
+}
+.vt-player-link-fallback {
+    color: inherit;
+}
+.vt-player-link-fallback:hover,
+.vt-player-link-fallback:focus-visible {
+    color: var(--kb-primary);
+}
+
 /* Used by Phase 3 cards (Snipe Feed, Powerup/Crate Destruction Breakdown) to fully
    hide a card+grid-column when its data is empty, so the surrounding row
    layout collapses cleanly. */

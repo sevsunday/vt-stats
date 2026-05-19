@@ -2066,3 +2066,137 @@ All numeric fields are tick-joined to the player's active ship at event time via
 
 **Career rollup** (in `js/all-matches-aggregator.js`): `career_loadout` and `career_per_ship_combat` blocks on each `career_stats[]` row, summed across the picker-filtered match subset. Primary/secondary ship is rederived from summed `ship_seconds` (cached via `ship_seconds[odf]` in the per-player accumulator) to avoid double-rounding from per-match strings. Ship pretty names are cached on first encounter from the per-match `loadout.ships[odf].name` so the rollup emits names without re-resolving.
 
+## 14. Player Profile Pages (`player/`)
+
+The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs.html` / `raw.html` / `odf/index.html`. The page system is **dual-runtime**:
+
+1. **Pre-generated stubs** at `player/<slug>/index.html` — one HTML file per player with `matches_played >= 5`, rendered by `scripts/generate_player_pages.py` from `scripts/player_template.html`. Each stub carries per-player Open Graph meta tags in `<head>` for rich Discord / Slack / Twitter unfurls, plus a tiny `window.__vtPlayerBoot` script block that hints the client-side renderer at the player's identity before fetch.
+2. **Runtime fallback** at `player/index.html` — same client-side JS (`js/player.js`) renders unstubbed players (`?p=<steam64>` / `?slug=<slug>`), the **Directory** landing (no params), and the **Compare view** (`?compare=<csv-of-slugs>`, capped at 4 players).
+
+### 14.1 Files
+
+| File | Purpose |
+|---|---|
+| `player/index.html` | Triple-duty shell: Directory landing / runtime single-player / compare view. Loads Chart.js + zoom plugin + the project's standard theme stack. |
+| `js/player.js` | Single bundle that dispatches on URL params (`?p`, `?slug`, `?compare`, none). Renders all six single-player tabs (Overview · Rating · Axes · Highlights · Rivals · Loadout) plus the compare view plus the directory. Self-contained — no shared state with the dashboard. |
+| `css/player.css` | Player-page-specific styles (hero card, tier badges, sparklines, compare grid, axis cards). Sibling of `css/odf-browser.css`. |
+| `scripts/generate_player_pages.py` | Python generator: slug allocator (sticky), stub renderer, idempotent file writer. Wired into `scripts/process_stats.py::main()` after `elo_current.json` is written. |
+| `scripts/player_template.html` | Mustache-style `{{...}}` template for the per-player stubs. Substitutes name, tier, VTSR-T, peak, matches, OG title/description/url/image, canonical link, boot-hint. |
+| `scripts/build_og_card.py` | One-shot Pillow script that builds the single universal 1200x630 `data/og/player-card.png` from `img/isdf-logo.png`. Not invoked from the pipeline (run manually when the design changes). |
+| `data/processed/player_slugs.json` | Sticky `{steam64: slug}` map (schema_version 1). Generator never re-allocates an existing entry — once a player has a slug, the URL is stable forever. |
+| `data/og/player-card.png` | Single universal 1200x630 OG image referenced by every stub. |
+
+### 14.2 Slug allocation
+
+`scripts/generate_player_pages.py::sanitize_to_slug(name)` produces a URL-safe slug from a player display name:
+
+1. NFKD-normalize + strip combining marks.
+2. Lowercase, replace any non-`[a-z0-9]` run with `-`, strip leading/trailing dashes, collapse repeated dashes.
+3. Truncate to 48 characters.
+4. If the result is empty or in `RESERVED_SLUGS` (`{"", "index", "compare", "search", "new", "edit", "api", "_", "-", "null", "undefined"}`), fall back to `player-<steam64-low16>`.
+
+`allocate_slug(name, steam64, existing_map)` is the sticky wrapper:
+
+- If `steam64` already has an entry in `existing_map`, return that entry verbatim — even if the player's display name has since changed. **Stability is the contract.**
+- Otherwise compute `base = sanitize_to_slug(name)`. If `base` collides with an already-allocated slug (for a different `steam64`), append `-<short-hash>` derived from the new `steam64`.
+- Persist the new entry to `existing_map` and return it.
+
+`data/processed/player_slugs.json`:
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-17T19:02:14Z",
+  "slugs": {
+    "76561197960287930": "vtrider",
+    "76561198013527887": "f9bomber"
+  }
+}
+```
+
+**Never bump `schema_version` to indicate slug changes** — slug churn is forbidden by design. Schema bumps would only happen if the JSON shape itself changes.
+
+### 14.3 Template + generation
+
+`scripts/player_template.html` carries `{{...}}` substitution markers. Generator pass:
+
+1. Iterate `elo_current.ratings[]` filtered to `matches_played >= PREGEN_MIN_MATCHES = 5`.
+2. Resolve the player's slug via `allocate_slug()`.
+3. Compute derived fields: tier label (from `VTSR_TIERS` — mirrored from `js/app.js:1448-1454`), peak VTSR-T, peak date, primary ship name, OG-description text (e.g. `"Veteran II • VTSR-T 1623 • 47 matches"`).
+4. Substitute into the template, write to `player/<slug>/index.html`.
+5. **Idempotency**: skip the write if the new content byte-for-byte matches the existing file. Print a one-line summary at the end (`X stubs written, Y unchanged, Z removed`).
+6. **Pruning**: any `player/<existing-slug>/index.html` not in this pass's output set is deleted only if its `<!-- vtstats-player-stub:vN -->` marker matches the current `PLAYER_TEMPLATE_VERSION`. Stub files without the marker are left alone (manual edits, sanity check).
+
+`PLAYER_TEMPLATE_VERSION` (currently `3`) is bumped whenever the rendered stub HTML shape changes (e.g. topnav additions, OG tag tweaks). Bumping forces a full regeneration even when the per-player numbers haven't moved. Does **NOT** require bumping `PIPELINE_VERSION` — the stub HTML is downstream of the JSON contract.
+
+### 14.4 Pages — three modes
+
+**Directory** (`player/index.html` with no params): card grid of every player with a row in `elo_current.ratings[]`. Toolbar: free-text name search + tier multi-chips + role-bias chips (Commander / Mixed / Thug-only, derived from `matches_as_commander / matches_played`) + faction chips (most-flown via `career_loadout.primary_ship`'s first letter) + activity bucket (Active / Rusty / Inactive, based on `last_match_date` distance) + sort dropdown + compare-mode toggle. Each card carries name, tier badge, VTSR-T big number, peak chip, role split chip, primary ship, last-10 inline-SVG sparkline, View-profile click target.
+
+**Single profile** (pre-gen stub or `player/index.html?p=<steam64>` / `?slug=<slug>`): six tabs.
+
+| Tab | Contents |
+|---|---|
+| Overview | Hero card (name, tier, VTSR-T big, peak chip, sparkline, corpus rank). Career snapshot stats. 8-axis radar (reuses `renderPlayerRadar(mode='career')` from `js/charts-radar.js`) with median ghost. Strengths/weaknesses ranking panel. Coaching cards (static per-axis copy dict triggered when z<median) with +0.5σ ΔVTSR quick-wins projection. |
+| Rating | Chart.js time-series of `elo_history.history[].deltas[].after` filtered by steam64. Tier-band background via inline plugin, anchor (1500) + floor (1000) reference lines, peak annotation, wheel/pinch zoom (vendored `chartjs-plugin-zoom`), preset zoom chips (`All` / `Last 50` / `Last 20` / `Last 10`), click-point-to-scroll. Virtualized sortable match-log table below with expandable per-row axis-contribution detail (reads `delta.axis_contributions`). |
+| Axes | Per-axis time-series mini-cards (8 cards in a responsive grid). Each card is a tiny inline-SVG sparkline of the player's `axis_contributions[axis]` over time. |
+| Highlights | `career_highlights.cards[]` filtered to entries where this player is `winner` or `runner_up`. Renders via `renderHighlights(mode='career')` from `js/app.js`. |
+| Rivals | Top-10 from `global_rivalries[]` joined to this player on `a_steam64` / `b_steam64`. Conditional **Most-Commanded-Against** panel: visible only when `matches_as_commander >= 6 AND matches_as_commander / matches_played >= 0.40`. Lists top-5 enemy commanders by head-to-head count from `commander_stats.head_to_head[]`. |
+| Loadout | `career_loadout` ship-share donut. Per-ship combat table from `career_per_ship_combat`. |
+
+**Compare view** (`player/index.html?compare=<slug1>,<slug2>,...`, capped at `COMPARE_MAX = 4`): hero strip of mini-cards (name, tier, VTSR-T, remove `×`, "Add player" slot when under cap), then four panels:
+
+1. Overlaid 8-axis radar — one polygon per player, distinct colors.
+2. Overlaid VTSR-T time-series with `By date` ↔ `By matches played` toggle.
+3. Transposed stat grid — rows are stats (VTSR-T, K/D, accuracy, etc.), columns are players, with best/worst cell highlighting.
+4. Common-matches table — rows are matches all selected players appeared in.
+
+### 14.5 Aggregator extension — `opts.minMatchesThreshold`
+
+`js/all-matches-aggregator.js::build()` historically applied a hard-coded `MIN_CAREER_MATCHES = 5` floor. The player page needs to surface stats for fresh players (1–4 matches) on their own profile, so the function now accepts an optional second-call argument:
+
+```js
+window.VTAggregate.build(contributions, fileIds, elo, opts)
+//   opts.minMatchesThreshold: number | undefined
+//   - undefined → MIN_CAREER_MATCHES (5)
+//   - 0         → no threshold (player page uses this)
+//   - N         → apply threshold N
+```
+
+The dashboard's All Matches view still passes `undefined` (preserves the 5-match floor). `js/player.js` passes `0` so fresh players still get a career row. `meta.min_career_matches` echoes the effective threshold so downstream UI can label it correctly.
+
+### 14.6 Cross-link helpers in `js/app.js`
+
+Three globals power the dashboard-wide cross-linking, all attached to `window` in `js/app.js`:
+
+| Helper | Purpose |
+|---|---|
+| `vtPlayerHref(steam64)` | Returns `player/<slug>/` if the slug map has an entry for `steam64`; otherwise returns `player/index.html?p=<steam64>`. Slug map is cached on `window.__vtSlugMap` (`{[steam64]: slug}`), loaded once in `ensureEloLoaded()` from `data/processed/player_slugs.json`. 404-safe. |
+| `vtPlayerLinkHtml(name, steam64, opts)` | Returns `<a class="vt-player-link" href="...">${name}</a>` when `steam64` is truthy; falls back to a plain `<span class="vt-player-link-fallback">${name}</span>` when no Steam64 is available (e.g. legacy match data). `opts.title` overrides the tooltip; otherwise uses the player name. |
+| `vtSteam64FromName(name)` | Reverse-lookup helper. Iterates `currentData.header.s64_to_nick` to find the Steam64 for a given display name. Used by `renderKillFeed()` because kill-feed entries carry display names only. Returns `null` on miss. |
+
+The Steam64-bearing aggregator fields (`commander_stats.head_to_head[].a_steam64` / `.b_steam64` / `global_rivalries[].a_steam64` / `.b_steam64`) were added so the cross-link helpers can resolve names back to canonical URLs without per-call reverse-lookups. The aggregator builds a `nameToSid` map from `careerStatsKept` and joins it onto the rivalry rows before emit.
+
+Six cross-link locations in `js/app.js`:
+
+1. `renderLeaderboard()` — per-match leaderboard
+2. `renderKillFeed()` — killer + victim names (with `vtSteam64FromName` reverse lookup)
+3. `renderVtsrLeaderboard()` — VTSR-T leaderboard
+4. `renderCareerTable()` — All Matches career table
+5. `renderHighlights()` — winner + runner-up names on both match and career mode
+6. `renderCommanderH2H()` + per-match + global `renderGlobalRivalries()` — name pairs
+
+`.vt-player-link` + `.vt-player-link-fallback` styles live in `css/vtstats-theme.css` (loaded by every dashboard page); they mirror the `.vt-odf-link` pattern.
+
+### 14.7 OG image
+
+`data/og/player-card.png` (1200x630) is the single universal Open Graph image referenced by every stub. Built once from `img/isdf-logo.png` via `scripts/build_og_card.py` (Pillow dependency, not invoked by the pipeline). When opened in Discord / Slack / Twitter, the unfurl carries the universal image + the per-player OG title (`"<Name> — VT Stats"`) + OG description (`"<Tier> • VTSR-T <rating> • <matches> matches"`). Per-player custom images were deferred to keep generation time low and reduce repo churn; if added later, the per-player URL would slot into the `og:image` template marker without further changes.
+
+### 14.8 Production host
+
+`SITE_URL = "https://vtstats.bz"` (module constant in `scripts/generate_player_pages.py`, per the project `CNAME`). Used for absolute OG URLs and the canonical link in each stub's `<head>`. If the host ever changes, this is the single place to update.
+
+### 14.9 Picker filter contract
+
+Player profile pages are **picker-unaware** — they ignore the dashboard's match-picker filter entirely. The directory and per-player views always run against the **full corpus**. This is intentional: a player profile is a stable identity surface that shouldn't shift under filter chips chosen elsewhere. (The dashboard's All Matches view remains picker-aware as before.) The player-page directory has its own toolbar with chips that filter the displayed cards, but those chips never re-aggregate the underlying career stats.
+

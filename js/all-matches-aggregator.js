@@ -287,11 +287,24 @@
    *   provided, powers the Career Highlights "The Champion" card and
    *   joins onto careerStats by steam64. Pass null/omit when ELO data
    *   is unavailable (fresh checkout, file 404).
+   * @param {Object} [opts] - optional aggregator tweaks. Recognised
+   *   keys:
+   *     - `minMatchesThreshold` (number): overrides the default
+   *       MIN_CAREER_MATCHES (=5) threshold that prunes thin career
+   *       rows from `career_stats` and cascades into `global_rivalries`.
+   *       The player-profile pages pass `0` so a player with just a
+   *       handful of matches still gets a full career row. Surfaced
+   *       on `meta.min_career_matches` so UI labels read the actual
+   *       value used.
    * @returns {Object} { meta, career_stats, global_weapon_meta,
    *   global_rivalries, commander_stats, faction_stats, meta_charts,
    *   career_highlights }
    */
-  function build(contributions, fileIds, elo) {
+  function build(contributions, fileIds, elo, opts) {
+    opts = opts || {};
+    const minMatchesThreshold = Number.isFinite(opts.minMatchesThreshold)
+      ? Math.max(0, Math.floor(opts.minMatchesThreshold))
+      : MIN_CAREER_MATCHES;
     const career = new Map();        // player_id -> career bucket
     const globalWeapon = new Map();  // weapon name -> { dealt, shots, hits }
     const globalRivalry = new Map(); // shooter -> Map<victim, dmg>
@@ -394,11 +407,28 @@
       const cmdr2 = lb.find(p => p && p.slot === 6);
       if (cmdr1 && cmdr2 && cmdr1.name && cmdr2.name && cmdr1.name !== cmdr2.name) {
         const sortedAB = cmdr1.name < cmdr2.name ? [cmdr1.name, cmdr2.name] : [cmdr2.name, cmdr1.name];
+        // Phase 8: capture each pair's per-side Steam64 alongside the
+        // display name so `renderCommanderH2H()` can cross-link both
+        // commanders to /player/<slug>/. Last-write-wins is fine — both
+        // names sort deterministically so a_steam64/b_steam64 always
+        // attach to the same slot across pair matches.
+        const ab_s64 = cmdr1.name === sortedAB[0]
+          ? [cmdr1.steam64 || null, cmdr2.steam64 || null]
+          : [cmdr2.steam64 || null, cmdr1.steam64 || null];
         const key = pairKey(cmdr1.name, cmdr2.name);
         let pair = commanderPairs.get(key);
         if (!pair) {
-          pair = { a: sortedAB[0], b: sortedAB[1], matches: 0, a_wins: 0, b_wins: 0, contested: 0 };
+          pair = {
+            a: sortedAB[0], b: sortedAB[1],
+            a_steam64: ab_s64[0], b_steam64: ab_s64[1],
+            matches: 0, a_wins: 0, b_wins: 0, contested: 0,
+          };
           commanderPairs.set(key, pair);
+        } else {
+          // Backfill steam64 on existing pair rows when later matches
+          // carry the Steam64 (legacy rows may not).
+          if (!pair.a_steam64 && ab_s64[0]) pair.a_steam64 = ab_s64[0];
+          if (!pair.b_steam64 && ab_s64[1]) pair.b_steam64 = ab_s64[1];
         }
         pair.matches += 1;
         if (decidedBy === 'contested') pair.contested += 1;
@@ -851,7 +881,7 @@
     // player who's hidden everywhere else. `global_weapon_meta` is left
     // alone — it's a cumulative weapon metric, not per-player.
     const careerStatsAll  = careerStats;
-    const careerStatsKept = careerStats.filter(c => c.matches_played >= MIN_CAREER_MATCHES);
+    const careerStatsKept = careerStats.filter(c => c.matches_played >= minMatchesThreshold);
     const keptNames       = new Set(careerStatsKept.map(c => c.name));
     const playersDropped  = careerStatsAll.length - careerStatsKept.length;
 
@@ -885,8 +915,19 @@
         else                       pm.b_to_a += dmg;
       }
     }
+    // Phase 8: attach a_steam64 / b_steam64 by joining against the
+    // kept careerStats rows so the dashboard's renderGlobalRivalries
+    // can wrap each name in a /player/<slug>/ link. Falls back to null
+    // when the player's career row doesn't carry a steam64 (very rare
+    // — only on pre-Phase-2 contribution rows).
+    const nameToSid = new Map();
+    for (const c of careerStatsKept) {
+      if (c && c.name && c.steam64) nameToSid.set(c.name, c.steam64);
+    }
     const globalRivalries = Array.from(pairMap.values()).map(p => ({
       a: p.a, b: p.b,
+      a_steam64: nameToSid.get(p.a) || null,
+      b_steam64: nameToSid.get(p.b) || null,
       a_to_b: r1(p.a_to_b),
       b_to_a: r1(p.b_to_a),
       total:  r1(p.a_to_b + p.b_to_a),
@@ -1018,7 +1059,7 @@
         matches_with_target_lock_data: matchesWithTargetLock,
         total_sentinel_damage_dropped: totalSentinelDamageDropped,
         matches_with_sentinel_damage:  matchesWithSentinel,
-        min_career_matches:            MIN_CAREER_MATCHES,
+        min_career_matches:            minMatchesThreshold,
         players_dropped_by_min_matches: playersDropped,
       },
       career_stats:       careerStatsKept,

@@ -4,28 +4,28 @@ overview: Pre-generated `/player/<slug>/` profile pages with per-player OG meta 
 todos:
   - id: phase1-slug
     content: "Phase 1 - Slug map foundation: implement sanitize_to_slug() (with the RESERVED_SLUGS block-list) + allocate_slug() (sticky) + the slug-map reader/writer in a new scripts/generate_player_pages.py module. Also define module-level constants: SITE_URL='https://vtstats.bz', PLAYER_TEMPLATE_VERSION=1, VTSR_TIERS list mirrored from js/app.js:1448-1454, ELO_PROVISIONAL_THRESHOLD=10. Wire into scripts/process_stats.py main() to emit data/processed/player_slugs.json after elo_current.json. Do NOT bump PIPELINE_VERSION. Verify deterministic allocation across runs using the current corpus."
-    status: pending
+    status: completed
   - id: phase2-directory
     content: "Phase 2 - Player directory + runtime shell on player/index.html: extend js/all-matches-aggregator.js with the opts.minMatchesThreshold parameter (default 5; player page uses 0). Build rich card-grid landing of every ranked player. Hero band, toolbar (free-text search, tier multi-chips with Tier I-V labels, role-bias chips, faction chips, activity bucket, sort dropdown, compare-mode toggle), responsive grid (col-12 col-md-6 col-lg-4 col-xl-3) of vt-player-card tiles (name, tier badge, VTSR-T big, peak chip, role split chip, primary ship, last-10 inline-SVG sparkline (NOT Chart.js), View-profile click target). Mode dispatcher: ?p=<steam64> or ?slug=<slug> hides directory and renders single-player profile (fetching player_slugs.json first if needed to resolve slug->steam64); ?compare=<csv> renders compare view. Smoke test the directory + a single-player runtime render."
-    status: pending
+    status: completed
   - id: phase3-pregen
     content: "Phase 3 - Pre-generated stubs: write scripts/player_template.html with {{...}} substitution markers and per-player <head> meta tags (title, description, og:title, og:description, og:url, og:image, twitter:*). Implement generate_player_pages.run() that renders one file per player with matches_played>=5. Idempotent write (skip when content unchanged). Vendor data/og/player-card.png from the supplied isdf-logo.png at 1200x630. Verify Discord/Slack unfurl on a deployed branch."
-    status: pending
+    status: completed
   - id: phase4-overview
     content: "Phase 4 - Single-player Overview tab in js/player.js: hero card (name, tier, VTSR-T, peak, sparkline, rank), career snapshot, 8-axis radar (reuse renderPlayerRadar career mode with focusNames=[thisPlayer] + median ghost), strengths/weaknesses ranking panel, coaching cards (static per-axis copy dict, triggered when z < median), quick-wins +0.5sigma ΔVTSR projection using elo_current.weights + rating_scale."
-    status: pending
+    status: completed
   - id: phase5-matchlog
     content: "Phase 5 - Rating & matches tab (the headline feature): (a) Wire the already-vendored vendor/chartjs/{chart.umd.min.js, hammer.min.js, chartjs-plugin-zoom.umd.min.js} into player/index.html + the pre-gen template (same <script> block index.html uses at lines 1693-1702). (b) Rating time-series chart at top of tab: Chart.js line of `after` rating built by walking elo_history.history[].deltas[] filtered by steam64, date x-axis, signed-colored points, anchor (1500) + floor (1000) reference lines via a tiny inline custom plugin (~15 lines), tier-band background via the same inline plugin (5 translucent rects, no chartjs-plugin-annotation needed), peak annotation, wheel/pinch zoom + drag-to-pan via the existing zoom plugin, preset zoom chips (All time / 90d / 30d / Last 10 / Reset) calling chart.zoomScale(), click-point-to-scroll-to-row hookup. (c) Virtualized sortable table below: columns date/map/faction/role/result/K-D/dealt/acc/ΔVTSR/after/detail chevron. Role pip (commander/thug), excluded-row styling with Campod/Partial badges, ΔVTSR chip from elo_history.history[].deltas[]. Expandable detail shows 8 axis-contribution bars (with commander pre/post shift cushion when axis_contributions_meta present), weapon breakdown collapse, loadout pie. View-Full-Match link to index.html?match=<id>&filter=player&players=<steam64>."
-    status: pending
+    status: completed
   - id: phase6-rest
     content: "Phase 6 - Remaining single-player tabs: axis deep-dive (per-axis time-series), highlights filter (career_highlights subset where player wins / is runner-up), rivals tab with top-10 from global_rivalries[], NEW Most-Commanded-Against panel gated on matches_as_commander>=6 AND matches_as_commander/matches_played>=0.40 (top 5 opposing commanders ranked by matches faced, computed inline from match_contributions[].leaderboard slot 1/6 walk), loadout + per-ship combat tab from career_stats[0].career_loadout and career_stats[0].career_per_ship_combat."
-    status: pending
+    status: completed
   - id: phase7-compare
     content: "Phase 7 - Compare mode (NEW): activates via ?compare=<csv-of-slugs> on player/index.html, cap at 4 players. Selection-mode toggle on the directory (cards become tickable, sticky bottom action bar shows N/4 selected + Compare button + Clear). Compare view layout: horizontal mini-hero strip (stacked on mobile), overlaid 8-axis radar with up-to-4 datasets + legend, **overlaid rating time-series chart** with N color-matched lines and an x-axis toggle (By date default / By matches played), reusing the same zoom plugin from Phase 5, transposed stat grid (rows = metrics, columns = players, best-in-row + worst-in-row cell highlighting), common-matches table (only matches all selected players appeared in, with each player's ΔVTSR side-by-side), per-player Remove (x) chip + Add another button. URL stays canonical (?compare=a,b,c) so the comparison is shareable."
-    status: pending
+    status: completed
   - id: phase8-crosslinks
     content: "Phase 8 - Cross-link rollout + docs: wrap player names with <a class=\"vt-player-link\" href=\"player/<slug>/\"> in 6 spots in js/app.js (renderPlayerLeaderboard, renderVtsrLeaderboard, renderCareerTable, renderKillFeed, renderHighlights, renderCommanderHeadToHead). Add a topnav Players link on index.html, docs.html, raw.html, odf/index.html (sibling of ODF) pointing at player/index.html. Add boot-time fetch of data/processed/player_slugs.json + playerHref(steam64) helper. Add .vt-player-link + .vt-player-link-fallback styles to css/vtstats-theme.css mirroring .vt-odf-link. Update AGENTS.md, .cursor/rules/project-overview.mdc, DEVELOPER_GUIDE.md with the new architecture (directory + single + compare modes), slug contract, template version, OG strategy, commander-deep-cut threshold, and 4-player compare cap rationale."
-    status: pending
+    status: completed
 isProject: false
 ---
 

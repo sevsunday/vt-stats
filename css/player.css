@@ -1,0 +1,1050 @@
+/* =============================================================================
+   VT Stats — Player Profile Pages (css/player.css)
+
+   Used by player/index.html and every pre-generated /player/<slug>/index.html.
+   Builds on top of css/vtstats-theme.css; only defines what doesn't already
+   exist there. No hardcoded colors -- everything resolves through the
+   existing --kb-* / --vt-* tokens (and a small set of player-specific
+   --vt-player-* additions below).
+
+   Sections:
+     1. Tokens
+     2. Preloader wrapper
+     3. Directory: hero, toolbar, chips, grid, cards, sparkline, empty
+     4. Compare bar (sticky bottom)
+     5. Single-player: hero, tabs, panels
+     6. Compare view
+     7. Error state
+     ============================================================================ */
+
+/* ---- 1. Tokens ---- */
+:root {
+  /* Directory card sizing knobs */
+  --vt-player-card-min:        260px;     /* CSS grid auto-fill min */
+  --vt-player-card-radius:     14px;
+  --vt-player-card-pad:        1rem;
+
+  /* Spark proportions (inline SVG; height drives the visual weight) */
+  --vt-player-spark-h:         44px;
+  --vt-player-spark-h-hero:    72px;
+
+  /* Sticky compare bar */
+  --vt-player-compare-bar-h:   64px;
+
+  /* Selection ring on cards when compare-mode is on */
+  --vt-player-select-ring:     color-mix(in oklab, var(--kb-primary) 55%, transparent);
+}
+
+/* ---- 2. Preloader wrapper ---- */
+.vt-preloader-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 50vh;
+}
+
+/* ---- 3. Directory ---- */
+
+/* Hero */
+.vt-player-hero { border-radius: var(--vt-player-card-radius); }
+.vt-player-hero-title {
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.5rem, 2.2vw + 1rem, 2.2rem);
+  letter-spacing: -0.02em;
+  color: var(--kb-text-primary);
+  margin: 0;
+}
+.vt-player-hero-subtitle { font-size: 0.95rem; }
+.vt-player-hero-stats { font-size: 0.85rem; }
+.vt-player-hero-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.65rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 999px;
+  color: var(--kb-text-secondary);
+}
+.vt-player-hero-stat .num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+/* Toolbar */
+.vt-player-toolbar {
+  border-radius: var(--vt-player-card-radius);
+  position: sticky;
+  top: calc(var(--vt-navbar-h, 56px) + 0.5rem);
+  z-index: 5;
+}
+.vt-player-search-icon {
+  position: absolute;
+  left: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--kb-text-muted);
+  pointer-events: none;
+}
+.vt-player-search-input {
+  padding-left: 2rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
+  border-color: color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+}
+.vt-player-search-input:focus {
+  background: var(--kb-bg-card);
+  border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+  box-shadow: 0 0 0 0.18rem color-mix(in oklab, var(--kb-primary) 18%, transparent);
+}
+
+.vt-player-sort-select {
+  min-width: 12.5rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
+  border-color: color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+  color: var(--kb-text-primary);
+}
+
+/* Chip groups (Tier / Role / Activity / Faction) */
+.vt-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.4rem 0.15rem 0.55rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 50%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.vt-chip-group-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+.vt-chip {
+  appearance: none;
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  background: transparent;
+  color: var(--kb-text-secondary);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.vt-chip:hover {
+  background: color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+  color: var(--kb-text-primary);
+}
+.vt-chip[data-selected="true"] {
+  background: color-mix(in oklab, var(--kb-primary) 25%, transparent);
+  border-color: color-mix(in oklab, var(--kb-primary) 50%, transparent);
+  color: var(--kb-text-primary);
+}
+
+/* Tier chips: color matches the tier token when selected. */
+.vt-chip[data-tier="1"][data-selected="true"] { background: color-mix(in oklab, var(--vt-tier-1) 28%, transparent); border-color: color-mix(in oklab, var(--vt-tier-1) 55%, transparent); }
+.vt-chip[data-tier="2"][data-selected="true"] { background: color-mix(in oklab, var(--vt-tier-2) 28%, transparent); border-color: color-mix(in oklab, var(--vt-tier-2) 55%, transparent); }
+.vt-chip[data-tier="3"][data-selected="true"] { background: color-mix(in oklab, var(--vt-tier-3) 28%, transparent); border-color: color-mix(in oklab, var(--vt-tier-3) 55%, transparent); }
+.vt-chip[data-tier="4"][data-selected="true"] { background: color-mix(in oklab, var(--vt-tier-4) 28%, transparent); border-color: color-mix(in oklab, var(--vt-tier-4) 55%, transparent); }
+.vt-chip[data-tier="5"][data-selected="true"] { background: color-mix(in oklab, var(--vt-tier-5) 28%, transparent); border-color: color-mix(in oklab, var(--vt-tier-5) 55%, transparent); }
+.vt-chip[data-tier="0"][data-selected="true"] {
+  background: color-mix(in oklab, var(--kb-text-muted) 15%, transparent);
+  border-color: color-mix(in oklab, var(--kb-text-muted) 35%, transparent);
+  border-style: dashed;
+}
+
+.vt-player-compare-toggle {
+  background: transparent;
+  color: var(--kb-text-secondary);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+}
+.vt-player-compare-toggle:hover {
+  color: var(--kb-text-primary);
+  background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+  border-color: color-mix(in oklab, var(--kb-primary) 40%, transparent);
+}
+.vt-player-compare-toggle[aria-pressed="true"] {
+  color: var(--kb-text-primary);
+  background: color-mix(in oklab, var(--kb-primary) 25%, transparent);
+  border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+}
+
+/* Grid */
+.vt-player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--vt-player-card-min), 1fr));
+  gap: 0.85rem;
+}
+
+/* Card */
+.vt-player-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklab, var(--kb-bg-card) var(--vt-glass-opacity), transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) var(--vt-glass-border-luminance), transparent);
+  border-radius: var(--vt-player-card-radius);
+  padding: var(--vt-player-card-pad);
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  overflow: hidden;
+}
+.vt-player-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--kb-primary) 38%, transparent);
+  box-shadow: 0 10px 24px color-mix(in oklab, var(--kb-primary) 12%, transparent);
+}
+.vt-player-card:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--kb-primary) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.vt-player-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.vt-player-card-name {
+  font-family: 'Geist', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  color: var(--kb-text-primary);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  flex: 1;
+}
+.vt-player-card-tier-wrap { flex: 0 0 auto; }
+
+.vt-player-card-rating {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 0.15rem 0 0.6rem;
+}
+.vt-player-card-rating-big {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 1.8rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--kb-text-primary);
+  line-height: 1;
+}
+.vt-player-card-rating-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+}
+
+.vt-player-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.78rem;
+}
+.vt-player-card-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.12rem 0.5rem;
+  background: color-mix(in oklab, var(--kb-bg-primary) 30%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 999px;
+  color: var(--kb-text-secondary);
+}
+.vt-player-card-pill .num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  color: var(--kb-text-primary);
+  font-weight: 600;
+}
+.vt-player-card-pill--peak { color: var(--kb-success); }
+.vt-player-card-pill--role-c { color: var(--vt-tier-1); }
+.vt-player-card-pill--role-t { color: var(--vt-tier-2); }
+
+.vt-player-card-spark {
+  height: var(--vt-player-spark-h);
+  margin-top: auto;
+  margin-bottom: 0.5rem;
+}
+.vt-player-card-spark svg { display: block; width: 100%; height: 100%; }
+.vt-player-card-spark-empty {
+  font-size: 0.72rem;
+  color: var(--kb-text-muted);
+  font-style: italic;
+  text-align: center;
+  line-height: var(--vt-player-spark-h);
+}
+
+.vt-player-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.74rem;
+  color: var(--kb-text-muted);
+}
+
+/* Selection-mode: tickable checkbox in the upper-left of the card. */
+.vt-player-card-checkbox {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid color-mix(in oklab, var(--kb-text-primary) 30%, transparent);
+  background: color-mix(in oklab, var(--kb-bg-primary) 70%, transparent);
+  border-radius: 4px;
+  z-index: 2;
+  font-size: 0.85rem;
+  color: transparent;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+[data-compare-mode="true"] .vt-player-card-checkbox { display: inline-flex; }
+[data-compare-mode="true"] .vt-player-card-head { padding-left: 1.6rem; }
+.vt-player-card[data-selected="true"] {
+  border-color: var(--vt-player-select-ring);
+  box-shadow: 0 0 0 2px var(--vt-player-select-ring) inset;
+}
+.vt-player-card[data-selected="true"] .vt-player-card-checkbox {
+  background: var(--kb-primary);
+  border-color: var(--kb-primary);
+  color: var(--kb-bg-primary);
+}
+
+/* Empty state */
+.vt-player-empty-icon { font-size: 2.5rem; color: var(--kb-text-muted); }
+
+/* ---- 4. Compare bar (sticky bottom) ---- */
+.vt-player-compare-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: color-mix(in oklab, var(--kb-bg-card) 95%, transparent);
+  backdrop-filter: blur(var(--vt-glass-blur));
+  -webkit-backdrop-filter: blur(var(--vt-glass-blur));
+  border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  margin: 1rem -1rem -1rem;
+  padding: 0.75rem 0;
+}
+.vt-player-compare-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  background: color-mix(in oklab, var(--kb-bg-primary) 50%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-primary) 35%, transparent);
+  border-radius: 999px;
+  font-size: 0.82rem;
+}
+.vt-player-compare-chip button {
+  background: transparent;
+  border: 0;
+  color: var(--kb-text-muted);
+  padding: 0 0.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.vt-player-compare-chip button:hover { color: var(--kb-danger); }
+
+/* ---- 5. Single-player view ---- */
+.vt-player-single-hero { border-radius: var(--vt-player-card-radius); }
+.vt-player-single-hero-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+}
+@media (max-width: 768px) {
+  .vt-player-single-hero-body {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+}
+.vt-player-single-name {
+  font-family: 'Geist', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.6rem, 1.6vw + 1.2rem, 2.4rem);
+  letter-spacing: -0.02em;
+  color: var(--kb-text-primary);
+  margin: 0 0 0.4rem;
+}
+.vt-player-single-tier-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.vt-player-single-vtsr {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: clamp(2.4rem, 3vw + 1.5rem, 3.6rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--kb-text-primary);
+  line-height: 1;
+}
+.vt-player-single-peak {
+  font-size: 0.85rem;
+  color: var(--kb-text-muted);
+}
+.vt-player-single-spark { height: var(--vt-player-spark-h-hero); }
+.vt-player-single-spark svg { width: 100%; height: 100%; }
+
+.vt-player-single-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+}
+@media (max-width: 575.98px) {
+  .vt-player-single-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.vt-player-single-stat {
+  background: color-mix(in oklab, var(--kb-bg-primary) 35%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+}
+.vt-player-single-stat-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+  margin-bottom: 0.2rem;
+}
+.vt-player-single-stat-value {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 1.35rem;
+  color: var(--kb-text-primary);
+  line-height: 1.2;
+}
+
+/* Tab pill bar */
+.vt-player-tabs .nav-link {
+  color: var(--kb-text-secondary);
+  background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  font-size: 0.88rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+}
+.vt-player-tabs .nav-link:hover {
+  color: var(--kb-text-primary);
+  border-color: color-mix(in oklab, var(--kb-primary) 30%, transparent);
+}
+.vt-player-tabs .nav-link.active {
+  color: var(--kb-text-primary);
+  background: color-mix(in oklab, var(--kb-primary) 25%, transparent);
+  border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+}
+
+/* ---- 5b. Overview panels (Phase 4) ---- */
+
+/* Axis rank list */
+.vt-axis-list { display: grid; gap: 0.5rem; }
+.vt-axis-row { display: grid; gap: 0.2rem; }
+.vt-axis-row-head {
+  display: grid;
+  grid-template-columns: 1.6rem auto 1fr auto;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.vt-axis-rank {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  color: var(--kb-text-muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.vt-axis-icon { color: var(--kb-text-muted); }
+.vt-axis-label { color: var(--kb-text-primary); }
+.vt-axis-z {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+}
+.vt-axis-track {
+  position: relative;
+  height: 8px;
+  background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.vt-axis-midline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: color-mix(in oklab, var(--kb-text-muted) 60%, transparent);
+  z-index: 1;
+}
+.vt-axis-fill {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 999px;
+  z-index: 0;
+}
+.vt-axis-fill-strong { background: color-mix(in oklab, var(--kb-success) 75%, transparent); }
+.vt-axis-fill-mid    { background: color-mix(in oklab, var(--kb-primary) 65%, transparent); }
+.vt-axis-fill-weak   { background: color-mix(in oklab, var(--kb-danger)  65%, transparent); }
+
+/* Coaching cards */
+.vt-coaching-list { display: grid; gap: 0.65rem; }
+.vt-coaching-card {
+  background: color-mix(in oklab, var(--kb-bg-primary) 40%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-left: 3px solid color-mix(in oklab, var(--kb-warning) 65%, transparent);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+}
+.vt-coaching-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+}
+.vt-coaching-head .bi { color: var(--kb-warning); }
+.vt-coaching-axis {
+  color: var(--kb-text-primary);
+  font-weight: 600;
+  flex: 1;
+}
+.vt-coaching-z {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.vt-coaching-body strong {
+  color: var(--kb-text-primary);
+  display: inline-block;
+  margin-bottom: 0.25rem;
+}
+.vt-coaching-projection {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: color-mix(in oklab, var(--kb-success) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-success) 30%, transparent);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.78rem;
+  color: var(--kb-text-secondary);
+}
+.vt-coaching-projection .bi { color: var(--kb-success); }
+
+/* Optional / suggestion card variant — used for snipe_bonus when it
+   ends up in the worst-3. Softer accent, muted z badge, neutral icon. */
+.vt-coaching-card--optional {
+  border-left-color: color-mix(in oklab, var(--kb-text-muted) 50%, transparent);
+  opacity: 0.92;
+}
+.vt-coaching-card--optional .vt-coaching-head .bi {
+  color: var(--kb-text-muted);
+}
+.vt-coaching-z--muted {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--kb-text-muted);
+}
+
+/* Tighter stat-sub override for the Overview snapshot rows */
+.vt-player-single-stat-sub { color: var(--kb-text-muted); }
+
+/* ---- 5c. Rating tab (Phase 5) ---- */
+
+.vt-rating-chart-wrap {
+  position: relative;
+  height: clamp(240px, 38vh, 420px);
+}
+.vt-rating-chart-wrap canvas { width: 100%; height: 100%; }
+.vt-rating-zoom-chips .vt-chip {
+  padding: 0.15rem 0.55rem;
+  font-size: 0.74rem;
+}
+
+/* Match log table */
+.vt-matchlog-table {
+  --vt-matchlog-row-flash: color-mix(in oklab, var(--kb-primary) 28%, transparent);
+  font-size: 0.85rem;
+}
+.vt-matchlog-table thead th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kb-text-muted);
+  font-weight: 600;
+  border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.vt-matchlog-table thead th:hover { color: var(--kb-text-primary); }
+.vt-matchlog-table tbody td {
+  border-color: color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+}
+.vt-matchlog-table tbody tr:hover {
+  background: color-mix(in oklab, var(--kb-primary) 5%, transparent);
+}
+.vt-matchlog-table .vt-matchlog-num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
+.vt-matchlog-date {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  white-space: nowrap;
+}
+.vt-matchlog-map {
+  color: var(--kb-text-primary);
+  margin-right: 0.3rem;
+}
+.vt-matchlog-expand {
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  color: var(--kb-text-muted);
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+}
+.vt-matchlog-expand:hover {
+  color: var(--kb-text-primary);
+  border-color: color-mix(in oklab, var(--kb-primary) 35%, transparent);
+}
+.vt-matchlog-detail-row td {
+  background: color-mix(in oklab, var(--kb-bg-primary) 35%, transparent);
+}
+.vt-matchlog-detail {
+  padding: 0.85rem 1rem !important;
+}
+.vt-matchlog-row-flash {
+  background: var(--vt-matchlog-row-flash) !important;
+  transition: background 800ms ease;
+}
+.vt-sort-ind { font-size: 0.65rem; opacity: 0.8; }
+
+/* Role pips + result pills */
+.vt-role-pip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  font-size: 0.75rem;
+}
+.vt-role-pip-c { background: color-mix(in oklab, var(--vt-tier-1) 24%, transparent); color: var(--vt-tier-1); }
+.vt-role-pip-t { background: color-mix(in oklab, var(--vt-tier-2) 24%, transparent); color: var(--vt-tier-2); }
+
+.vt-result {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+}
+.vt-result-win  { background: color-mix(in oklab, var(--kb-success) 22%, transparent); color: var(--kb-success); }
+.vt-result-loss { background: color-mix(in oklab, var(--kb-danger)  22%, transparent); color: var(--kb-danger); }
+.vt-result-na   { color: var(--kb-text-muted); }
+
+/* Axis deep-dive cards (Phase 6a) */
+.vt-axis-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+.vt-axis-card-head .bi { color: var(--kb-text-muted); }
+.vt-axis-card-label {
+  color: var(--kb-text-primary);
+  flex: 1;
+  font-weight: 500;
+}
+.vt-axis-card-mean {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+}
+.vt-axis-card-spark {
+  height: 50px;
+  margin: 0.5rem 0;
+}
+.vt-axis-card-spark svg { width: 100%; height: 100%; }
+.vt-axis-card-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
+
+/* Highlight mini cards (Phase 6b) */
+.vt-highlight-card-mini {
+  background: color-mix(in oklab, var(--kb-bg-primary) 35%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-left: 3px solid color-mix(in oklab, var(--kb-primary) 55%, transparent);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+}
+.vt-highlight-card-winner {
+  border-left-color: color-mix(in oklab, var(--vt-tier-1) 70%, transparent);
+}
+.vt-highlight-card-runnerup {
+  border-left-color: color-mix(in oklab, var(--vt-tier-2) 60%, transparent);
+}
+.vt-highlight-mini-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+.vt-highlight-mini-head .bi { color: var(--vt-tier-1); }
+.vt-highlight-card-runnerup .vt-highlight-mini-head .bi { color: var(--vt-tier-2); }
+.vt-highlight-mini-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+.vt-highlight-mini-status {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+}
+.vt-highlight-mini-body { font-size: 0.9rem; color: var(--kb-text-secondary); }
+.vt-highlight-mini-body strong {
+  color: var(--kb-text-primary);
+  margin-right: 0.4rem;
+}
+.vt-highlight-mini-runnerup {
+  color: var(--kb-text-muted);
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed color-mix(in oklab, var(--kb-text-muted) 25%, transparent);
+}
+
+/* Rival balance bar (Phase 6c) */
+.vt-rival-balance {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: color-mix(in oklab, var(--kb-danger) 35%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.vt-rival-out {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--kb-success) 55%, transparent);
+  border-radius: 999px 0 0 999px;
+}
+
+/* Weapon + loadout breakdown bars inside the expanded detail */
+.vt-wbar { margin-bottom: 0.45rem; }
+.vt-wbar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.78rem;
+  margin-bottom: 0.15rem;
+}
+.vt-wbar-name { color: var(--kb-text-primary); }
+.vt-wbar-meta {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  color: var(--kb-text-secondary);
+}
+
+/* ---- 6. Compare view (Phase 7) ---- */
+.vt-player-compare-hero-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+  padding: 1rem;
+}
+
+/* Mini-hero strip — up to 4 player cards + (optional) Add-another slot
+   tucked at the end. Auto-fit gives a clean 4-up at desktop, gracefully
+   wraps to 2-up at tablet and stacks at phone. */
+.vt-compare-hero-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+.vt-compare-mini-card {
+  position: relative;
+  padding: 1rem 1rem 0.85rem;
+  background: color-mix(in oklab, var(--kb-bg-card) calc(var(--vt-glass-opacity) + 4%), transparent);
+  border: 1px solid color-mix(in oklab, var(--vt-compare-accent, var(--kb-primary)) 30%, var(--kb-border) 70%);
+  border-top: 3px solid var(--vt-compare-accent, var(--kb-primary));
+  border-radius: var(--vt-radius, 0.75rem);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.vt-compare-mini-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.28);
+}
+.vt-compare-mini-remove {
+  position: absolute;
+  top: 0.4rem; right: 0.4rem;
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 999px;
+  background: color-mix(in oklab, var(--kb-bg-card) 85%, transparent);
+  color: var(--kb-text-muted);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.vt-compare-mini-remove:hover {
+  background: color-mix(in oklab, var(--kb-danger) 50%, transparent);
+  color: #fff;
+}
+.vt-compare-mini-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.vt-compare-mini-swatch {
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  background: var(--vt-compare-accent, var(--kb-primary));
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--vt-compare-accent, var(--kb-primary)) 40%, transparent);
+}
+.vt-compare-mini-slot {
+  margin-left: auto;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.vt-compare-mini-name {
+  display: block;
+  color: var(--kb-text-primary);
+  font-weight: 600;
+  text-decoration: none;
+  margin-bottom: 0.3rem;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+.vt-compare-mini-name:hover {
+  color: var(--vt-compare-accent, var(--kb-primary));
+}
+.vt-compare-mini-vtsr {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--vt-compare-accent, var(--kb-primary));
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+.vt-compare-mini-vtsr-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--kb-text-muted);
+  margin-left: 0.4rem;
+  letter-spacing: 0.05em;
+}
+.vt-compare-mini-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--kb-text-secondary);
+}
+.vt-compare-mini-stats > div {
+  display: flex; gap: 0.4rem; align-items: center;
+}
+.vt-compare-mini-stats i {
+  color: var(--kb-text-muted);
+  width: 14px;
+}
+
+/* Add-another placeholder slot — same footprint as a real card but
+   a dashed outline + centered "+" trigger so the affordance is clear
+   without overwhelming the real players. */
+.vt-compare-mini-card--add {
+  border: 1.5px dashed color-mix(in oklab, var(--kb-text-muted) 30%, transparent);
+  background: transparent;
+  border-top: 1.5px dashed color-mix(in oklab, var(--kb-text-muted) 30%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  box-shadow: none;
+}
+.vt-compare-mini-card--add:hover { box-shadow: none; transform: none; }
+.vt-compare-add-trigger {
+  background: transparent;
+  border: none;
+  color: var(--kb-text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+  font-size: 0.9rem;
+  transition: color 120ms ease;
+}
+.vt-compare-add-trigger:hover { color: var(--kb-primary); }
+.vt-compare-add-trigger i { font-size: 1.5rem; }
+
+/* Add-another popover. Hand-rolled rather than a Bootstrap dropdown
+   because we need it positioned relative to the trigger but rendered
+   at body root so the card's overflow doesn't clip it. */
+.vt-compare-add-popover {
+  z-index: 1080;
+  width: 320px;
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border);
+  border-radius: var(--vt-radius, 0.75rem);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+}
+.vt-compare-add-popover-head {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--kb-border);
+}
+.vt-compare-add-popover-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 0.25rem;
+}
+.vt-compare-add-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.65rem;
+  background: transparent;
+  border: none;
+  color: var(--kb-text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.88rem;
+}
+.vt-compare-add-row:hover {
+  background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+}
+.vt-compare-add-vtsr {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+  color: var(--kb-text-muted);
+}
+.vt-compare-add-popover-foot {
+  padding: 0.35rem 0.6rem;
+  border-top: 1px solid var(--kb-border);
+  font-size: 0.72rem;
+}
+
+/* Time-series legend chips (rendered below the rating chart). */
+.vt-compare-ts-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 75%, transparent);
+  border: 1px solid var(--kb-border);
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+.vt-compare-swatch {
+  width: 10px; height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+/* Transposed stat grid. Sticky first column + per-row best/worst
+   highlights. Numeric cells right-align by default via .num. */
+.vt-compare-stat-grid {
+  font-size: 0.88rem;
+}
+.vt-compare-stat-grid th,
+.vt-compare-stat-grid td {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.vt-compare-stat-grid .vt-compare-stat-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--kb-bg-card);
+  color: var(--kb-text-secondary);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-right: 1px solid var(--kb-border);
+}
+.vt-compare-stat-grid td .num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+}
+.vt-compare-cell-best {
+  background: color-mix(in oklab, var(--kb-success) 38%, transparent);
+  color: color-mix(in oklab, var(--kb-success) 92%, white);
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--kb-success);
+}
+.vt-compare-cell-best .num { color: inherit; }
+.vt-compare-cell-worst {
+  background: color-mix(in oklab, var(--kb-danger) 26%, transparent);
+  color: color-mix(in oklab, var(--kb-danger) 92%, white);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--kb-danger);
+}
+.vt-compare-cell-worst .num { color: inherit; }
+
+/* Common matches table. */
+.vt-compare-common th,
+.vt-compare-common td {
+  vertical-align: middle;
+  font-size: 0.85rem;
+}
+.vt-compare-common td a {
+  color: var(--kb-text-primary);
+  text-decoration: none;
+}
+.vt-compare-common td a:hover {
+  color: var(--kb-primary);
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .vt-compare-hero-strip { grid-template-columns: 1fr; }
+  .vt-compare-stat-grid { font-size: 0.78rem; }
+}
+
+/* ---- 7. Error state ---- */
+.vt-player-error-icon { font-size: 2.75rem; color: var(--kb-warning); }
+
+/* ---- Misc theming overrides ---- */
+
+/* Make the standalone page hero glass a touch heavier so it carries
+   the title weight without competing with the toolbar that follows. */
+.vt-player-hero.card {
+  background: color-mix(in oklab, var(--kb-bg-card) calc(var(--vt-glass-opacity) + 4%), transparent);
+}

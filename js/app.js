@@ -2215,9 +2215,15 @@
   // renders "—" in the leaderboard column.
   async function ensureEloLoaded() {
     if (window.__vtElo !== undefined) return;
-    const [eloRes, histRes] = await Promise.all([
+    // Phase 8: also fetch the player slug map alongside the elo files so
+    // vtPlayerHref()/vtPlayerLinkHtml() can return canonical
+    // `player/<slug>/` URLs from the first paint. Same graceful-404
+    // pattern as elo: a missing file leaves the cache as `null`, the
+    // helpers fall back to `?p=<steam64>`.
+    const [eloRes, histRes, slugRes] = await Promise.all([
       fetch('data/processed/elo_current.json', { cache: 'no-store' }).catch(() => null),
       fetch('data/processed/elo_history.json', { cache: 'no-store' }).catch(() => null),
+      fetch('data/processed/player_slugs.json', { cache: 'no-store' }).catch(() => null),
     ]);
     try {
       window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
@@ -2225,7 +2231,60 @@
     try {
       window.__vtEloHistory = (histRes && histRes.ok) ? await histRes.json() : null;
     } catch { window.__vtEloHistory = null; }
+    try {
+      window.__vtSlugMap = (slugRes && slugRes.ok) ? await slugRes.json() : null;
+    } catch { window.__vtSlugMap = null; }
   }
+
+  // Phase 8: cross-link helpers. `vtPlayerHref(steam64)` returns the
+  // canonical /player/<slug>/ URL from the cached slug map, with a
+  // graceful fallback to `player/index.html?p=<steam64>` when the map
+  // hasn't loaded yet or the player isn't slugged. `vtPlayerLinkHtml`
+  // wraps a name in the standard `.vt-player-link` anchor; it always
+  // returns *something* (escaped fallback span when steam64 is empty)
+  // so callers can dump its result directly into innerHTML.
+  function vtPlayerHref(steam64) {
+    const sid = String(steam64 || '').trim();
+    if (!sid) return null;
+    const slugs = (window.__vtSlugMap && window.__vtSlugMap.slugs) || null;
+    const entry = slugs ? slugs[sid] : null;
+    if (entry && entry.slug) return `player/${entry.slug}/`;
+    return `player/index.html?p=${encodeURIComponent(sid)}`;
+  }
+  function vtPlayerLinkHtml(name, steam64, opts) {
+    const safeName = esc(name == null ? '' : name);
+    const href = vtPlayerHref(steam64);
+    if (!href) return `<span class="vt-player-link-fallback">${safeName}</span>`;
+    const slugs = (window.__vtSlugMap && window.__vtSlugMap.slugs) || null;
+    const cls = (slugs && slugs[String(steam64)] && slugs[String(steam64)].slug)
+      ? 'vt-player-link' : 'vt-player-link vt-player-link-fallback';
+    const extra = (opts && opts.title) ? ` title="${esc(opts.title)}"` : '';
+    return `<a class="${cls}" href="${href}"${extra}>${safeName}</a>`;
+  }
+  // Expose for downstream modules (all-matches-aggregator renders are
+  // injected as raw HTML by app.js, so they just call the global).
+  window.vtPlayerHref = vtPlayerHref;
+  window.vtPlayerLinkHtml = vtPlayerLinkHtml;
+
+  // Name -> Steam64 reverse-lookup, scoped to the current match. The
+  // kill_feed / snipe_feed entries carry display names (resolved via
+  // the pipeline's nick_for_s64) but not the raw Steam64, so we rebuild
+  // the inverse of header.s64_to_nick at render time. Cached on the
+  // currentData object itself so flipping between tabs is O(1) after
+  // the first call. Returns null when the name doesn't resolve.
+  function vtSteam64FromName(name) {
+    if (!name) return null;
+    const cd = currentData;
+    if (!cd || !cd.header) return null;
+    const cache = cd.__nickToS64Cache || (cd.__nickToS64Cache = (() => {
+      const out = {};
+      const map = cd.header.s64_to_nick || {};
+      for (const sid in map) out[String(map[sid] || '').trim().toLowerCase()] = sid;
+      return out;
+    })());
+    return cache[String(name).trim().toLowerCase()] || null;
+  }
+  window.vtSteam64FromName = vtSteam64FromName;
 
   async function loadAllMatches(urlState) {
     $dashboard.classList.add('d-none');
@@ -3276,9 +3335,14 @@
 
     grid.innerHTML = cards.map(c => {
       const isPair = c.winner && c.winner.type === 'pair';
+      // Phase 8: when the winner is a single named player, link them
+      // through to the canonical profile. Pair cards (Frenemies-style
+      // a-vs-b) wrap both names. Falls through to plain text when the
+      // pipeline didn't emit a steam64 (or the slug map is missing).
+      const w = c.winner || {};
       const winnerName = isPair
-        ? `${esc(c.winner.a)} <span class="vt-highlight-tile-vs">vs</span> ${esc(c.winner.b)}`
-        : esc(c.winner && c.winner.name || '—');
+        ? `${vtPlayerLinkHtml(w.a, w.a_steam64)} <span class="vt-highlight-tile-vs">vs</span> ${vtPlayerLinkHtml(w.b, w.b_steam64)}`
+        : vtPlayerLinkHtml(w.name, w.steam64);
       const valueStr = formatHighlightValue(c.value, c.value_format);
       const breakdown = c.value_breakdown || {};
       // Interpolation context: every documented token from the v2 spec, with
@@ -4233,7 +4297,7 @@
       const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
       return `<tr class="${rowClass}">
         <td>${i + 1}</td>
-        <td class="fw-semibold">${esc(r.name)}${nickSub}${campodBadge}${partialBadge}${rerouteBadge}</td>
+        <td class="fw-semibold">${vtPlayerLinkHtml(r.name, r.steam64)}${nickSub}${campodBadge}${partialBadge}${rerouteBadge}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
         <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>
@@ -4370,8 +4434,13 @@
       card.dataset.rivalryPair = `${r.a}|${r.b}`;
       const info = document.createElement('div');
       info.className = 'flex-grow-1';
+      // Phase 8: per-match rivalries don't carry steam64 directly
+      // (the pipeline keys rivalry_matrix by name); reverse-lookup
+      // against header.s64_to_nick so we can still cross-link.
+      const aSid = r.a_steam64 || vtSteam64FromName(r.a);
+      const bSid = r.b_steam64 || vtSteam64FromName(r.b);
       info.innerHTML = `
-        <div class="fw-bold mb-1">${esc(r.a)} <span style="color:var(--kb-text-muted)">vs</span> ${esc(r.b)}</div>
+        <div class="fw-bold mb-1">${vtPlayerLinkHtml(r.a, aSid)} <span style="color:var(--kb-text-muted)">vs</span> ${vtPlayerLinkHtml(r.b, bSid)}</div>
         <div class="small" style="color:var(--kb-text-secondary)">
           <span style="color:var(--kb-primary)">${esc(r.a)}</span> dealt ${fmt(r.a_to_b)} &nbsp;|&nbsp;
           <span style="color:var(--kb-accent)">${esc(r.b)}</span> dealt ${fmt(r.b_to_a)}
@@ -4663,11 +4732,24 @@
       const victimOdf = (victimOdfResolved && victimOdfBase)
         ? `<a href="odf/index.html?odf=${encodeURIComponent(victimOdfBase)}" target="_blank" rel="noopener" class="vt-odf-link" title="View ${esc(victimOdfResolved)} in ODF Browser">(${esc(victimOdfResolved)})</a>`
         : (victimOdfResolved ? `<span class="vt-odf-link-fallback">(${esc(victimOdfResolved)})</span>` : '');
+      // Phase 8: wrap killer/victim names in the canonical player-link
+      // anchor. The kill_feed schema doesn't carry steam64 directly, so
+      // we reverse the header.s64_to_nick map (cached on currentData).
+      // Names that don't resolve (Team N placeholders, AI units, very
+      // edge-case nick mismatches) fall through as plain styled spans.
+      const killerSid = vtSteam64FromName(entry.killer);
+      const victimSid = vtSteam64FromName(entry.victim);
+      const killerHtml = killerSid
+        ? `<a class="vt-player-link" href="${vtPlayerHref(killerSid)}" style="color:var(--kb-primary);">${esc(entry.killer)}</a>`
+        : `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>`;
+      const victimHtml = victimSid
+        ? `<a class="vt-player-link" href="${vtPlayerHref(victimSid)}" style="color:var(--kb-accent);">${esc(entry.victim)}</a>`
+        : `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>`;
       html += `<div class="d-flex align-items-center gap-2 py-1" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
       html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
-      html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.killer)}</span>${killerNick}${killerOdf}`;
+      html += `<span class="fw-semibold">${killerHtml}</span>${killerNick}${killerOdf}`;
       html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
-      html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>${victimNick}${victimOdf}`;
+      html += `<span class="fw-semibold">${victimHtml}</span>${victimNick}${victimOdf}`;
       html += `</div>`;
     });
     if (milestoneTick !== null && !milestoneRendered) {
@@ -5896,7 +5978,7 @@
           </button>
         </td>
         <td class="text-center">${badge}</td>
-        <td class="fw-semibold"${playerCellAttrs}>${esc(r.name)}</td>
+        <td class="fw-semibold"${playerCellAttrs}>${vtPlayerLinkHtml(r.name, r.steam64)}</td>
         ${primaryShipCell}
         <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
@@ -6645,7 +6727,7 @@
       }
       return `<tr>
         <td class="vt-career-col-shared">${i + 1}</td>
-        <td class="vt-career-col-shared fw-semibold">${esc(c.name)}</td>
+        <td class="vt-career-col-shared fw-semibold">${vtPlayerLinkHtml(c.name, c.steam64)}</td>
         <td class="text-center vt-career-col-shared">${tierCell}</td>
         <td class="text-end vt-career-col-shared">${vtsrCell}</td>
         <td class="text-center vt-career-col-shared"><span style="color:var(--kb-text-muted);" title="Not applicable across matches">—</span></td>
@@ -6901,9 +6983,13 @@
       const subline = determined > 0
         ? `${p.a_wins || 0}&ndash;${p.b_wins || 0} (${determined} decided${p.contested ? `, ${p.contested} contested` : ''})`
         : `${p.matches} matches · no decided outcomes yet`;
+      // Phase 8: cross-link both commander names through to their
+      // canonical /player/<slug>/ profiles. p.a_steam64 / p.b_steam64
+      // are emitted by the aggregator (`commander_stats.head_to_head`);
+      // when missing the helper falls back to a styled span.
       row.innerHTML = `
         <div>
-          <div class="fw-bold">${esc(p.a)} <span style="color:var(--kb-text-muted)">vs</span> ${esc(p.b)}</div>
+          <div class="fw-bold">${vtPlayerLinkHtml(p.a, p.a_steam64)} <span style="color:var(--kb-text-muted)">vs</span> ${vtPlayerLinkHtml(p.b, p.b_steam64)}</div>
           <div class="small" style="color:var(--kb-text-secondary)">${subline}</div>
         </div>
         <div class="text-end" style="color:var(--kb-text-muted); font-size:0.85rem;">
@@ -6923,7 +7009,7 @@
       const info = document.createElement('div');
       info.className = 'flex-grow-1';
       info.innerHTML = `
-        <div class="fw-bold mb-1">${esc(r.a)} <span style="color:var(--kb-text-muted)">vs</span> ${esc(r.b)}</div>
+        <div class="fw-bold mb-1">${vtPlayerLinkHtml(r.a, r.a_steam64)} <span style="color:var(--kb-text-muted)">vs</span> ${vtPlayerLinkHtml(r.b, r.b_steam64)}</div>
         <div class="small" style="color:var(--kb-text-secondary)">
           <span style="color:var(--kb-primary)">${esc(r.a)}</span> dealt ${fmt(r.a_to_b)} &nbsp;|&nbsp;
           <span style="color:var(--kb-accent)">${esc(r.b)}</span> dealt ${fmt(r.b_to_a)}

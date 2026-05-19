@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>blue — VT Stats</title>
+  <meta name="description" content="Tier 3 · VTSR-T 1520 · Peak 1558 · 15 career matches · Commander-leaning">
+
+  <link rel="canonical" href="https://vtstats.bz/player/blue/">
+
+  <!-- Open Graph (Facebook, LinkedIn, Slack, Discord) -->
+  <meta property="og:type" content="profile">
+  <meta property="og:title" content="blue — VT Stats">
+  <meta property="og:description" content="Tier 3 · VTSR-T 1520 · Peak 1558 · 15 career matches · Commander-leaning">
+  <meta property="og:url" content="https://vtstats.bz/player/blue/">
+  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="VT Stats">
+  <meta property="profile:username" content="blue">
+
+  <!-- Twitter card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="blue — VT Stats">
+  <meta name="twitter:description" content="Tier 3 · VTSR-T 1520 · Peak 1558 · 15 career matches · Commander-leaning">
+  <meta name="twitter:image" content="https://vtstats.bz/data/og/player-card.png">
+
+  <link rel="stylesheet" href="../../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../../css/theme-system.css">
+  <link rel="stylesheet" href="../../css/themes.css">
+  <link rel="stylesheet" href="../../css/main.css">
+  <link rel="stylesheet" href="../../css/layout.css">
+  <link rel="stylesheet" href="../../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../../css/player.css">
+
+  <!-- Pre-gen boot hint. Tells js/player.js which player to render
+       without depending on a query string. Falls through to the URL
+       params if the JS finds something there too -- explicit ?p= or
+       ?compare= wins, but the bare canonical path defaults here. -->
+  <script>
+    window.__vtPlayerBoot = {
+      steam64: "76561198043392032",
+      slug:    "blue",
+      name:    "blue",
+      template_version: 2
+    };
+  </script>
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar (mirrors player/index.html navbar) -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../../index.html" class="vt-nav-icon-btn">
+            <i class="bi bi-speedometer2"></i><span class="vt-nav-label ms-2">Dashboard</span>
+          </a>
+          <a href="../" class="vt-nav-icon-btn">
+            <i class="bi bi-people"></i><span class="vt-nav-label ms-2">All players</span>
+          </a>
+          <a href="../../docs.html" class="vt-nav-icon-btn">
+            <i class="bi bi-book"></i><span class="vt-nav-label ms-2">Docs</span>
+          </a>
+          <a href="../../raw.html" class="vt-nav-icon-btn">
+            <i class="bi bi-code-square"></i><span class="vt-nav-label ms-2">Raw data</span>
+          </a>
+          <a href="../../odf/index.html" class="vt-nav-icon-btn">
+            <i class="bi bi-boxes"></i><span class="vt-nav-label ms-2">ODF</span>
+          </a>
+          <a href="../" class="vt-nav-icon-btn"
+             title="Browse player career profiles"
+             aria-label="Players">
+            <i class="bi bi-people"></i><span class="vt-nav-label ms-2">Players</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Loading shim -->
+  <div id="vt-player-loading" class="vt-preloader-wrapper">
+    <div class="vt-preloader">
+      <div class="vt-preloader-ring" role="status">
+        <span class="visually-hidden">Loading&hellip;</span>
+      </div>
+      <div class="vt-preloader-brand"><i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>blue</div>
+      <div class="vt-preloader-status">Loading career data&hellip;</div>
+    </div>
+  </div>
+
+  <main class="container-fluid px-3 px-md-4 py-4 flex-grow-1 d-none" id="vt-player-main">
+
+    <!-- Directory view (hidden under the pre-gen boot path; included
+         so the same JS code path can navigate back here without
+         requiring a second page fetch). -->
+    <section id="vt-player-directory" class="d-none">
+      <header class="vt-player-hero card mb-3">
+        <div class="card-body">
+          <div class="d-flex flex-wrap gap-3 align-items-baseline justify-content-between">
+            <div>
+              <h1 class="vt-player-hero-title mb-1">
+                <i class="bi bi-people-fill me-2" style="color: var(--kb-primary);"></i>Players
+              </h1>
+              <p class="vt-player-hero-subtitle text-secondary mb-0" id="vt-player-hero-subtitle">
+                Loading the roster&hellip;
+              </p>
+            </div>
+            <div class="vt-player-hero-stats d-flex flex-wrap gap-3" id="vt-player-hero-stats"></div>
+          </div>
+        </div>
+      </header>
+
+      <div class="vt-player-toolbar card mb-3" id="vt-player-toolbar">
+        <div class="card-body py-2">
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <div class="vt-player-search position-relative flex-grow-1" style="min-width: 220px; max-width: 360px;">
+              <i class="bi bi-search vt-player-search-icon"></i>
+              <input type="search" id="vt-player-search" class="form-control vt-player-search-input"
+                     placeholder="Search players…" autocomplete="off">
+            </div>
+
+            <div class="vt-chip-group" role="group" aria-label="Tier filter" id="vt-player-tier-chips">
+              <span class="vt-chip-group-label">Tier</span>
+            </div>
+
+            <div class="vt-chip-group" role="group" aria-label="Role bias" id="vt-player-role-chips">
+              <span class="vt-chip-group-label">Role</span>
+              <button type="button" class="vt-chip" data-role="any" data-selected="true">Any</button>
+              <button type="button" class="vt-chip" data-role="commander">Commander-leaning</button>
+              <button type="button" class="vt-chip" data-role="thug">Thug-leaning</button>
+            </div>
+
+            <div class="vt-chip-group" role="group" aria-label="Activity" id="vt-player-activity-chips">
+              <span class="vt-chip-group-label">Activity</span>
+              <button type="button" class="vt-chip" data-activity="any">All</button>
+              <button type="button" class="vt-chip" data-activity="active" data-selected="true">Default</button>
+              <button type="button" class="vt-chip" data-activity="veteran">Active (20+)</button>
+              <button type="button" class="vt-chip" data-activity="pillar">Zoner (40+)</button>
+            </div>
+
+            <div class="ms-auto d-flex gap-2 align-items-center">
+              <label for="vt-player-sort" class="form-label mb-0 small text-secondary">Sort</label>
+              <select id="vt-player-sort" class="form-select form-select-sm vt-player-sort-select">
+                <option value="vtsr-desc" selected>VTSR-T (highest)</option>
+                <option value="vtsr-asc">VTSR-T (lowest)</option>
+                <option value="peak-desc">Peak (highest)</option>
+                <option value="matches-desc">Matches played</option>
+                <option value="last-desc">Most recent activity</option>
+                <option value="name-asc">Name (A–Z)</option>
+              </select>
+              <button type="button" id="vt-player-compare-toggle"
+                      class="btn btn-sm vt-player-compare-toggle"
+                      title="Select up to 4 players to compare"
+                      aria-pressed="false">
+                <i class="bi bi-bar-chart-steps me-1"></i>Compare
+              </button>
+            </div>
+          </div>
+          <div class="vt-player-toolbar-summary text-secondary small mt-2" id="vt-player-toolbar-summary" hidden></div>
+        </div>
+      </div>
+
+      <div class="vt-player-grid" id="vt-player-grid"></div>
+
+      <div class="vt-player-empty text-center text-secondary py-5" id="vt-player-empty" hidden>
+        <i class="bi bi-search vt-player-empty-icon"></i>
+        <p class="mt-3 mb-2">No players match the current filters.</p>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="vt-player-clear-filters">
+          <i class="bi bi-x-circle me-1"></i>Clear filters
+        </button>
+      </div>
+
+      <div class="vt-player-compare-bar" id="vt-player-compare-bar" hidden>
+        <div class="container-fluid px-3 px-md-4">
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <strong class="me-2">Compare:</strong>
+            <div class="d-flex flex-wrap gap-2 align-items-center" id="vt-player-compare-chips"></div>
+            <span class="text-secondary small ms-2" id="vt-player-compare-count">0 of 4 selected</span>
+            <div class="ms-auto d-flex gap-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="vt-player-compare-clear">
+                <i class="bi bi-x-circle me-1"></i>Clear
+              </button>
+              <button type="button" class="btn btn-sm btn-primary" id="vt-player-compare-go" disabled>
+                <i class="bi bi-arrow-right-circle me-1"></i>Compare
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Single-player view (default landing for pre-gen stubs) -->
+    <section id="vt-player-single" class="d-none">
+      <header class="vt-player-single-hero card mb-3" id="vt-player-single-hero"></header>
+      <ul class="nav nav-pills vt-player-tabs mb-3" id="vt-player-tabs" role="tablist"></ul>
+      <div class="tab-content" id="vt-player-tab-content">
+        <div class="tab-pane fade show active" id="vt-player-tab-overview" role="tabpanel"></div>
+        <div class="tab-pane fade" id="vt-player-tab-rating" role="tabpanel"></div>
+        <div class="tab-pane fade" id="vt-player-tab-axes" role="tabpanel"></div>
+        <div class="tab-pane fade" id="vt-player-tab-highlights" role="tabpanel"></div>
+        <div class="tab-pane fade" id="vt-player-tab-rivals" role="tabpanel"></div>
+        <div class="tab-pane fade" id="vt-player-tab-loadout" role="tabpanel"></div>
+      </div>
+    </section>
+
+    <!-- Compare view -->
+    <section id="vt-player-compare" class="d-none">
+      <header class="vt-player-compare-hero card mb-3" id="vt-player-compare-hero"></header>
+      <div id="vt-player-compare-body"></div>
+    </section>
+
+    <!-- Error fallback -->
+    <section id="vt-player-error" class="d-none">
+      <div class="card">
+        <div class="card-body text-center py-5">
+          <i class="bi bi-exclamation-triangle vt-player-error-icon"></i>
+          <h2 class="mt-3" id="vt-player-error-title">Player not found</h2>
+          <p class="text-secondary" id="vt-player-error-body">We could not locate that player in the corpus.</p>
+          <a href="../" class="btn btn-primary mt-2">
+            <i class="bi bi-arrow-left me-1"></i>Back to all players
+          </a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Shared vendor bundle (paths relative to /player/<slug>/) -->
+  <script src="../../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../../vendor/chartjs/chart.umd.min.js"></script>
+  <script src="../../vendor/chartjs/hammer.min.js"></script>
+  <script src="../../vendor/chartjs/chartjs-plugin-zoom.umd.min.js"></script>
+  <script src="../../js/theme.js"></script>
+  <script src="../../js/vtstats-fx.js"></script>
+  <script src="../../js/charts.js"></script>
+  <script src="../../js/charts-radar.js"></script>
+  <script src="../../js/all-matches-aggregator.js"></script>
+  <script src="../../js/player.js"></script>
+</body>
+</html>

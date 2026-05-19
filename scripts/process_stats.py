@@ -5000,6 +5000,7 @@ def main():
     # NEVER picker-filter aware — the dashboard reads elo_current.json
     # once per session and passes ratings through the JS aggregator
     # unchanged. See scripts/elo.py for the algorithm.
+    elo_current = None
     try:
         import elo as elo_module
         elo_current, elo_history = elo_module.compute_elo(all_match_data)
@@ -5018,6 +5019,33 @@ def main():
               f"{excl_dur} excluded short-duration)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T ({e}); skipping.")
+
+    # ----- Player slug map + (Phase 3) per-player HTML stubs -----
+    # Sticky map keyed by Steam64 -> {slug, name}. Drives `/player/<slug>/`
+    # URLs across the dashboard, OG sharing for /player/<slug>/index.html,
+    # and the cross-link rollout in Phase 8. Soft-fails on any error so
+    # a slug hiccup never blocks the rest of the pipeline. NOT cache-
+    # invalidating: this is a post-processing step that reads
+    # elo_current.json, never the per-match raw output.
+    try:
+        import generate_player_pages
+        slug_summary = generate_player_pages.run(
+            elo_current=elo_current,
+            output_dir=OUTPUT_DIR,
+            project_root=PROJECT_ROOT,
+        )
+        if slug_summary["wrote_map"]:
+            verb = "Rewrote" if (OUTPUT_DIR / "player_slugs.json").exists() else "Wrote"
+            print(f"Player slugs: {verb} player_slugs.json "
+                  f"({slug_summary['n_total']} total · "
+                  f"{slug_summary['n_new']} new · "
+                  f"{slug_summary['n_pregen_eligible']} eligible for pre-gen)")
+        else:
+            print(f"Player slugs: no change "
+                  f"({slug_summary['n_total']} total · "
+                  f"{slug_summary['n_pregen_eligible']} eligible for pre-gen)")
+    except Exception as e:
+        print(f"WARN: failed to allocate player slugs ({e}); skipping.")
 
     # Drop a stale seen-players.json from previous pipeline runs (the
     # PIPELINE_VERSION 5 -> 6 bump shipped a `seen-players.json` emit
