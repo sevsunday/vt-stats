@@ -43,13 +43,20 @@
       steam64: "76561198163015714",
       slug:    "sponge",
       name:    "sponge",
-      template_version: 2
+      template_version: 4
     };
   </script>
 </head>
 <body class="d-flex flex-column h-100">
 
-  <!-- Navbar (mirrors player/index.html navbar) -->
+  <!-- Navbar. Mirrors index.html's layout (icon + bare label on desktop)
+       so the player-profile pages feel like a sibling of the dashboard
+       rather than a bolt-on. The `.vt-nav-label` indirection used by the
+       odf/raw browsers is intentionally NOT used here — those pages
+       collapse to icon-only on desktop; player pages don't. The Players
+       link carries `.active + aria-current="page"` so the user gets
+       clear "you are here" feedback. Theme dropdown wires automatically
+       via js/theme.js auto-binding to [data-theme-menu]. -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="../../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
