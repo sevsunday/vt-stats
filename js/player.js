@@ -2045,7 +2045,9 @@
                 <canvas id="vt-player-overview-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
               </div>
               <p class="text-secondary small mb-0 mt-2 text-center">
-                Solid = this player's career; ghost dashed = corpus median.
+                Solid = this player's career average. Dashed = median across all rated
+                players (the "middle" player on each axis). Outside the dashed line = above
+                corpus median; inside = below.
               </p>
             </div>
           </div>
@@ -2097,6 +2099,9 @@
     const kd = career && career.total_deaths > 0
       ? career.total_kills / career.total_deaths
       : (career && career.total_kills > 0 ? Infinity : null);
+    const pvpKd = career && career.total_pvp_deaths > 0
+      ? career.total_pvp_kills / career.total_pvp_deaths
+      : (career && career.total_pvp_kills > 0 ? Infinity : null);
     const acc = career && career.total_shots_fired > 0
       ? career.total_shots_hit / career.total_shots_fired
       : null;
@@ -2106,18 +2111,30 @@
     const tradeRatio = career && career.total_received > 0
       ? career.total_dealt / career.total_received
       : null;
+    const tkey = career && Number.isFinite(+career.mean_target_lock_pct)
+      ? +career.mean_target_lock_pct
+      : null;
+    const snipes = career && Number.isFinite(+career.total_snipes)
+      ? +career.total_snipes
+      : null;
 
     return `
       <div class="vt-player-single-stats">
         ${stat('Matches', formatNumber(matches), `${cm} as commander / ${th} as thug`)}
         ${stat('Career K/D', kd === Infinity ? '\u221E' : (kd != null ? (Math.round(kd * 100) / 100).toFixed(2) : '\u2014'),
                career ? `${formatNumber(career.total_kills)} kills / ${formatNumber(career.total_deaths)} deaths` : '')}
+        ${stat('PvP K/D', pvpKd === Infinity ? '\u221E' : (pvpKd != null ? (Math.round(pvpKd * 100) / 100).toFixed(2) : '\u2014'),
+               career ? `${formatNumber(career.total_pvp_kills)} kills / ${formatNumber(career.total_pvp_deaths)} deaths` : '')}
         ${stat('Accuracy', acc != null ? `${(acc * 100).toFixed(1)}%` : '\u2014',
                career ? `${formatNumber(career.total_shots_hit)} hits / ${formatNumber(career.total_shots_fired)} shots` : '')}
         ${stat('Damage trade', tradeRatio != null ? (Math.round(tradeRatio * 100) / 100).toFixed(2) : '\u2014',
                career ? `${formatNumber(totalDealt)} dealt / ${formatNumber(totalReceived)} taken` : '')}
         ${stat('PvE damage', career ? formatNumber(career.total_pve_dealt) : '\u2014',
                career ? `${((career.total_pve_dealt / Math.max(1, career.total_pve_dealt + career.total_pvp_dealt)) * 100).toFixed(0)}% of damage` : '')}
+        ${stat('T-Key usage', tkey != null ? `${(tkey * 100).toFixed(1)}%` : '\u2014',
+               tkey != null ? 'Avg target-lock time per match' : '')}
+        ${stat('Pilot snipes', snipes != null ? formatNumber(snipes) : '\u2014',
+               snipes != null && matches > 0 ? `${(snipes / matches).toFixed(2)} per match` : '')}
         ${stat('Primary ship', primary || '\u2014',
                career && career.career_loadout ? `${(career.career_loadout.primary_ship.share * 100).toFixed(0)}% of active time` : '')}
       </div>`;
@@ -2230,11 +2247,7 @@
       </div>`;
     }).join('');
 
-    return `<div class="vt-coaching-list">${cards}</div>
-      <p class="text-secondary small mb-0 mt-3">
-        Quick-win deltas are first-order approximations of <code>w &middot; 0.25 &middot; rating_scale &middot; K_eff</code>
-        — actual update depends on the lobby's expected score on the night.
-      </p>`;
+    return `<div class="vt-coaching-list">${cards}</div>`;
   }
 
 
