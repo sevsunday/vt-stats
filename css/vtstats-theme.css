@@ -1437,6 +1437,25 @@ body::before {
     font-size: 0.75rem;
 }
 
+/* Map Info Modal title-link styling. Wraps the modal title text so a
+   click on the modal title opens the map's full /map/<slug>/ page in a
+   new tab. Lives here (not css/maps.css) because the dashboard needs
+   it without loading the map-browser stylesheet. The new-tab semantics
+   prevent accidental modal-title clicks from yanking the user out of
+   their dashboard state mid-navigation. Mirrors the .vt-odf-link
+   pattern exactly. */
+.vt-map-title-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+    border-bottom: 1px dashed transparent;
+}
+.vt-map-title-link:hover {
+    color: var(--kb-primary);
+    border-bottom-color: color-mix(in oklab, var(--kb-primary) 50%, transparent);
+}
+
 /* Player profile cross-link. Wraps any player display name across the
    dashboard (leaderboard, VTSR-T leaderboard, career table, kill feed,
    match/career highlights, commander head-to-head, global rivalries)

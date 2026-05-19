@@ -4,22 +4,22 @@ overview: Add a static `/map/` browser (gallery directory + per-map pre-gen stub
 todos:
   - id: phase1-registry-coverage
     content: "Phase 1 — Pipeline foundations: extend `scripts/build_map_registry.py` to enumerate the union of vsrmaplist (143) and played-map keys; thread the unplayed list into `process_stats.py main()` so `build_registry()` ingests all 143. Add a polite inter-map throttle (`INTER_MAP_REQUEST_DELAY_SEC = 2.0`) between non-cached map fetches to stay under iondriver's rate limit on the first-run image bulk-download (~109 images × ~2s delay ≈ 4 min one-time cost). Idempotent on subsequent runs (cached maps skip the sleep entirely). No UI yet."
-    status: pending
+    status: completed
   - id: phase2-map-stats
     content: "Phase 2 — `data/processed/map_stats.json`: implement `scripts/generate_map_pages.py` with module-level constants (SITE_URL, MAP_TEMPLATE_VERSION=1, RESERVED_MAP_SLUGS, MAX_RECENT_MATCHES=10, MAX_TOP_COMMANDERS=10), `compute_map_stats(all_match_data, registry)` pure aggregator, and `run(...)` entry point. Wire into `scripts/process_stats.py main()` after the player-slug block (soft-fail). Verify aggregation respects the `is_campod` / `is_low_activity` exclusion rule for top_commanders only."
-    status: pending
+    status: completed
   - id: phase3-directory-shell
     content: "Phase 3 — `map/index.html` shell + `js/maps.js` directory mode + `css/maps.css`: triple-duty HTML mirroring `scripts/player_template.html`. Implement directory mode end-to-end (search, pools/size/tags chips, played-status radio, author dropdown, sort dropdown, responsive grid, lazy thumbs, empty/skeleton states). Implement runtime fallback `?file=<mapfile>` for single-map. Smoke-test directory + uncovered fallback render."
-    status: pending
+    status: completed
   - id: phase4-single-page
     content: "Phase 4 — Per-map single view in `js/maps.js`: hero strip lifting Map Info Modal markup (title, author, description, registry chip row), match summary card (count / avg / first / last), Top Commanders card (top 10, em-dash empty), Recent Matches table (10 rows, click-through to dashboard), and the six greyed-out `Coming soon` placeholder cards. Empty-state branch when match_count === 0."
-    status: pending
+    status: completed
   - id: phase5-pregen-stubs
     content: "Phase 5 — Pre-gen stubs: write `scripts/map_template.html` with `{{...}}` markers (CANONICAL_URL, OG_TITLE, OG_DESCRIPTION, OG_IMAGE_URL, MAP_FILE, etc.). Implement `_render_map_stubs()` in `generate_map_pages.py` (idempotent write per `_stable_equals` pattern). Render one stub per map. Vendor `data/og/map-card.png` (one-time copy of an existing brand asset). Verify Discord unfurl on a deployed branch."
-    status: pending
+    status: completed
   - id: phase6-crosslinks-docs
     content: "Phase 6 — Cross-link rollout + docs: (a) Maps topnav link on index.html / docs.html / raw.html / odf/index.html (desktop + mobile burger). (b) Add Maps link to `scripts/player_template.html` topnav and bump `PLAYER_TEMPLATE_VERSION` 5 → 6 to force player-stub re-render. (c) Map Info Modal: title becomes link + add `View full map page` footer button (wired in `renderMapInfoModal()`). (d) Match-info banner: new `info-map-link` (wired in `renderMapBannerFields()`). (e) `renderMetaMapsChart` onClick → `map/<slug>/` in new tab. (f) Add `.vt-map-title-link` to `css/vtstats-theme.css`. (g) Update `AGENTS.md`, `.cursor/rules/project-overview.mdc`, `DEVELOPER_GUIDE.md`, `docs/DATA_DICTIONARY.md`."
-    status: pending
+    status: completed
 isProject: false
 ---
 

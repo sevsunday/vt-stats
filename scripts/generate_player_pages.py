@@ -44,8 +44,9 @@ SITE_URL = "https://vtstats.bz"
 # slugs are unchanged. Orthogonal to PIPELINE_VERSION (per-match cache)
 # and ELO_SCHEMA_VERSION (data contract). Bumped to v2 in Phase 3 when
 # the actual stub template + idempotent renderer landed (forces first
-# generation pass to touch every file).
-PLAYER_TEMPLATE_VERSION = 5
+# generation pass to touch every file). v6 added the Maps topnav link
+# alongside the new /map/ browser pages.
+PLAYER_TEMPLATE_VERSION = 6
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

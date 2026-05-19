@@ -73,6 +73,16 @@ USER_AGENT = (
 HTTP_TIMEOUT_SEC = 10
 HTTP_RETRIES = 3
 
+# Polite inter-map throttle. The map browser plan extends the registry to
+# cover all 143 vsrmaplist entries (vs the prior ~34 played-only set), so a
+# fresh build performs ~109 metadata fetches + image downloads in a row
+# against iondriver. A 2s sleep between non-cached maps spreads that to a
+# ~4-min one-time wall-clock cost and keeps us well under any rate limit.
+# Subsequent runs on a fully-vendored corpus skip the sleep entirely
+# because `build_per_map()` short-circuits on cache hits and reports
+# `from_cache=True`. Tunable post-ship without a schema bump.
+INTER_MAP_REQUEST_DELAY_SEC = 2.0
+
 # Always-tried mod IDs in order. Per-map we also prepend the session's own
 # config_mod if present.
 VSR_MOD_ID = "1325933293"
@@ -258,9 +268,19 @@ def build_per_map(
     primary_mod_id: str | None,
     vsr_entry: dict | None,
     vsrmaplist_entry: dict | None = None,
-) -> dict | None:
-    """Fetch metadata + image for a single map. Returns the per-map JSON
-    dict on success, or None on total failure (all mod IDs 404'd, no
+) -> tuple[dict | None, bool]:
+    """Fetch metadata + image for a single map. Returns
+    `(per_map_dict | None, from_cache: bool)` -- the boolean is the
+    inter-map throttle signal consumed by `build_registry()`.
+
+    `from_cache=True` means we short-circuited on an idempotency hit
+    (per-map JSON + image already on disk) and made zero network calls,
+    so the caller skips the polite delay.
+    `from_cache=False` covers every other branch -- network success,
+    network failure, partial vsrmaplist-only build -- since each of
+    those touched at least one HTTP request.
+
+    Per-map dict is None on total failure (all mod IDs 404'd, no
     vsrmaplist entry, and no fallback image). Side-effect: writes
     `data/maps/<map_file>.{png|jpg}` and `data/maps/<map_file>.json`.
 
@@ -334,7 +354,7 @@ def build_per_map(
                         json.dumps(cached, indent=2, sort_keys=True) + "\n",
                         encoding="utf-8",
                     )
-                return cached
+                return cached, True
         # Metadata present but image missing — fall through to refetch.
 
     # Build mod-id fallback chain.
@@ -353,7 +373,7 @@ def build_per_map(
     # this map: we still build the entry from vendored data + image URL.
     if resp is None and not vsrmaplist_entry:
         print(f"  {map_file}: metadata unavailable (tried mods {mod_chain})")
-        return None
+        return None, False
     if resp is None:
         print(f"  {map_file}: iondriver unavailable, building from vsrmaplist only")
 
@@ -480,7 +500,7 @@ def build_per_map(
 
     MAPS_DIR.mkdir(parents=True, exist_ok=True)
     per_map_json.write_text(json.dumps(per_map, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return per_map
+    return per_map, False
 
 
 def discover_map_files() -> list[tuple[str, str | None]]:
@@ -508,8 +528,52 @@ def discover_map_files() -> list[tuple[str, str | None]]:
     return sorted(map_to_mod.items())
 
 
+def discover_all_maps(
+    played_map_mods: dict[str, str | None] | None = None,
+) -> list[tuple[str, str | None]]:
+    """Return sorted (map_file, primary_mod_id) tuples covering the union
+    of every map in the vendored vsrmaplist plus every map referenced by
+    `played_map_mods` (or `discover_map_files()`'s output when omitted).
+
+    Played maps keep their `config_mod` so the iondriver fallback chain
+    targets the correct mod first. Unplayed maps from vsrmaplist get
+    `None` and fall through to the existing VSR_MOD_ID / STOCK_MOD_ID
+    chain in `build_per_map()`. The map browser plan extends the
+    registry to all 143 vsrmaplist entries (was: ~34 played-only) so
+    `/map/` can show the full VSR catalog including never-recorded
+    maps.
+
+    If vsrmaplist isn't vendored or fails to parse, the universe
+    collapses gracefully to played-maps-only (the helper returns
+    whatever `played_map_mods` covers). Reserved-slug audit is one-time
+    in the plan; collision handling for that edge case lives in
+    `generate_map_pages.py`'s slug normalization, not here.
+    """
+    vsrmaplist = load_vsrmaplist()
+    played: dict[str, str | None] = {}
+    if played_map_mods is not None:
+        for k, mod in played_map_mods.items():
+            if k:
+                played[k.lower()] = mod
+    else:
+        for k, mod in discover_map_files():
+            if k:
+                played[k.lower()] = mod
+
+    merged: dict[str, str | None] = {}
+    # Play maps first so their config_mod survives any vsrmaplist
+    # collision; unplayed entries default to None.
+    merged.update(played)
+    for vsrmaplist_key in vsrmaplist.keys():
+        if vsrmaplist_key not in merged:
+            merged[vsrmaplist_key] = None
+    return sorted(merged.items())
+
+
 def build_registry(
     map_mod_entries: list[tuple[str, str | None]] | None = None,
+    *,
+    inter_map_delay_sec: float | None = None,
 ) -> dict:
     """Main entry: resolve all distinct maps, write per-map JSONs +
     the combined registry. Returns the registry dict.
@@ -520,12 +584,18 @@ def build_registry(
     in memory and avoids re-reading per-match JSON files. When omitted
     (e.g. standalone `python scripts/build_map_registry.py` invocation
     for an ad-hoc registry refresh), fall back to scanning
-    `data/processed/matches.json` via `discover_map_files()`.
+    `data/processed/matches.json` + vsrmaplist via `discover_all_maps()`.
+
+    Polite throttle: between non-cached map fetches we sleep
+    `inter_map_delay_sec` (defaults to `INTER_MAP_REQUEST_DELAY_SEC`)
+    so a fresh first run downloading ~109 vsrmaplist images doesn't
+    hammer iondriver. Cache hits skip the delay entirely; subsequent
+    runs on a fully-vendored corpus stay zero-delay.
     """
     vsr_data = load_vsr_map_data()
     vsrmaplist = load_vsrmaplist()
     entries = (
-        map_mod_entries if map_mod_entries is not None else discover_map_files()
+        map_mod_entries if map_mod_entries is not None else discover_all_maps()
     )
     coverage = sum(1 for k, _ in entries if k in vsrmaplist)
     print(
@@ -533,17 +603,23 @@ def build_registry(
         f"vsrmaplist coverage {coverage}/{len(entries)}"
     )
 
+    delay = (
+        inter_map_delay_sec
+        if inter_map_delay_sec is not None
+        else INTER_MAP_REQUEST_DELAY_SEC
+    )
+
     registry: dict[str, dict] = {}
     skipped = 0
     succeeded = 0
     failed = 0
+    network_iterations = 0
 
-    for map_file, primary_mod in entries:
+    for idx, (map_file, primary_mod) in enumerate(entries):
         vsr_entry = vsr_data.get(map_file)
         vsrmaplist_entry = vsrmaplist.get(map_file)
-        before_exists = (MAPS_DIR / f"{map_file}.json").exists()
         try:
-            per_map = build_per_map(
+            per_map, from_cache = build_per_map(
                 map_file,
                 primary_mod,
                 vsr_entry,
@@ -551,16 +627,24 @@ def build_registry(
             )
         except Exception as e:
             print(f"  {map_file}: unexpected error: {e}")
-            per_map = None
+            per_map, from_cache = None, False
 
         if per_map is None:
             failed += 1
-            continue
-        registry[map_file] = per_map
-        if before_exists:
-            skipped += 1
         else:
-            succeeded += 1
+            registry[map_file] = per_map
+            if from_cache:
+                skipped += 1
+            else:
+                succeeded += 1
+
+        # Polite throttle: only sleep when this iteration touched the
+        # network, and never after the final entry. Skipped on cache
+        # hits even when subsequent entries will be network-bound, so a
+        # mostly-cached corpus with a few stragglers still moves fast.
+        if not from_cache and delay > 0 and idx + 1 < len(entries):
+            network_iterations += 1
+            time.sleep(delay)
 
     REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
     REGISTRY_PATH.write_text(
@@ -568,9 +652,14 @@ def build_registry(
         encoding="utf-8",
     )
 
+    throttle_note = (
+        f" · throttled {network_iterations} delay(s) @ {delay:.1f}s"
+        if network_iterations
+        else ""
+    )
     print(
         f"Map registry: written to {REGISTRY_PATH.relative_to(PROJECT_ROOT)} "
-        f"(new={succeeded} cached={skipped} failed={failed})"
+        f"(new={succeeded} cached={skipped} failed={failed}{throttle_note})"
     )
     return registry
 

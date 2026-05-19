@@ -1,0 +1,707 @@
+/* =============================================================================
+   VT Stats — Map Browser (css/maps.css)
+
+   Used by map/index.html and every pre-generated /map/<slug>/index.html
+   (Phase 5). Builds on top of css/vtstats-theme.css; reuses the same
+   --kb-* / --vt-* tokens. Where the player-pages CSS already establishes
+   a pattern (chip groups, search input, sort select, sticky toolbar),
+   we deliberately mirror class names / patterns rather than coining new
+   ones — and lean on existing `.vt-chip-group`, `.vt-chip` from
+   vtstats-theme.css/player.css for chip controls.
+
+   Sections:
+     1. Tokens
+     2. Hero band
+     3. Toolbar (search + chips + sort)
+     4. Card grid
+     5. Single-map shell + back-link + placeholder section
+     6. Empty / error states
+   ============================================================================ */
+
+/* ---- 1. Tokens ---- */
+:root {
+  --vt-map-card-min:        260px;
+  --vt-map-card-radius:     14px;
+  --vt-map-card-pad:        0.85rem;
+  --vt-map-card-gap:        1rem;
+}
+
+/* ---- 2. Hero band ---- */
+.vt-map-hero { border-radius: var(--vt-map-card-radius); }
+.vt-map-hero-title {
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.5rem, 2.2vw + 1rem, 2.2rem);
+  letter-spacing: -0.02em;
+  color: var(--kb-text-primary);
+  margin: 0;
+}
+.vt-map-hero-subtitle { font-size: 0.95rem; }
+.vt-map-hero-stats { font-size: 0.85rem; }
+.vt-map-hero-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.65rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 999px;
+  color: var(--kb-text-secondary);
+}
+.vt-map-hero-stat .num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+  color: var(--kb-text-primary);
+}
+
+/* ---- 3. Toolbar ---- */
+.vt-map-toolbar {
+  border-radius: var(--vt-map-card-radius);
+  position: sticky;
+  top: calc(var(--vt-navbar-h, 56px) + 0.5rem);
+  z-index: 1030;
+}
+/* Same offcanvas-clipping fix as the player toolbar: kill backdrop
+   filter + hover transform on the sticky toolbar so the mobile
+   filter drawer escapes to viewport coordinates. */
+.vt-map-toolbar.card,
+.vt-map-toolbar.card:hover {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+}
+
+.vt-map-search-icon {
+  position: absolute;
+  left: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--kb-text-muted);
+  pointer-events: none;
+}
+.vt-map-search-input {
+  padding-left: 2rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
+  border-color: color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+}
+.vt-map-search-input:focus {
+  background: var(--kb-bg-card);
+  border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+  box-shadow: 0 0 0 0.18rem color-mix(in oklab, var(--kb-primary) 18%, transparent);
+}
+.vt-map-sort-select {
+  min-width: 10rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
+  border-color: color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+  color: var(--kb-text-primary);
+}
+
+/* Mobile filter toggle (mirrors .vt-player-filter-toggle) */
+.vt-map-filter-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  background: color-mix(in oklab, var(--kb-bg-card) 65%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  border-radius: 8px;
+  color: var(--kb-text-primary);
+  cursor: pointer;
+}
+.vt-map-filter-toggle:hover {
+  background: var(--kb-bg-card);
+  border-color: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+}
+.vt-map-filter-count {
+  position: absolute;
+  top: -4px; right: -4px;
+  background: var(--kb-primary);
+  color: var(--kb-bg-primary, #000);
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Chip groups (Pools / Size / Tags / Status). Generic pill controls
+   used inside the toolbar and offcanvas. Twin of the player.css
+   definitions — duplicated here (not lifted to vtstats-theme.css) so
+   adding the map page didn't risk side-effects on existing
+   dashboard/player styles. If a third consumer ever wants chips, the
+   right move is to lift these to vtstats-theme.css and drop both copies. */
+.vt-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.4rem 0.15rem 0.55rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 50%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.vt-chip-group-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+.vt-chip {
+  appearance: none;
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  background: transparent;
+  color: var(--kb-text-secondary);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.vt-chip:hover {
+  background: color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+  color: var(--kb-text-primary);
+}
+.vt-chip[data-selected="true"] {
+  background: color-mix(in oklab, var(--kb-primary) 25%, transparent);
+  border-color: color-mix(in oklab, var(--kb-primary) 50%, transparent);
+  color: var(--kb-text-primary);
+}
+.vt-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0.18rem color-mix(in oklab, var(--kb-primary) 22%, transparent);
+}
+
+/* Filter offcanvas / inline-md panel (mirrors .vt-player-filter-panel) */
+.vt-map-filter-panel .offcanvas-body,
+.vt-map-filter-panel.offcanvas-md > .offcanvas-body {
+  padding: 0.75rem;
+  display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+}
+@media (min-width: 768px) {
+  .vt-map-filter-panel.offcanvas-md {
+    background: transparent;
+    box-shadow: none;
+    flex: 1 1 auto;
+  }
+  .vt-map-filter-panel.offcanvas-md > .offcanvas-body {
+    padding: 0;
+    flex: 1 1 auto;
+  }
+}
+.vt-map-filter-actions {
+  /* Don't grow / shrink; let the parent's `flex-wrap: wrap` decide if
+     the whole actions group wraps to a new line as a unit. The
+     `ms-md-auto` on the element handles right-alignment without
+     needing flex-grow here. */
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+/* ---- 4. Card grid ---- */
+.vt-map-grid {
+  display: grid;
+  gap: var(--vt-map-card-gap);
+  grid-template-columns: repeat(auto-fill, minmax(var(--vt-map-card-min), 1fr));
+}
+.vt-map-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--vt-map-card-radius);
+  background: color-mix(in oklab, var(--kb-bg-card) 80%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  text-decoration: none;
+  color: var(--kb-text-primary);
+  overflow: hidden;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.vt-map-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in oklab, var(--kb-primary) 45%, transparent);
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--kb-primary) 12%, transparent);
+}
+.vt-map-card[data-played="false"] {
+  opacity: 0.78;
+}
+.vt-map-card[data-played="false"]:hover {
+  opacity: 1;
+}
+
+.vt-map-card-thumb-wrap {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: color-mix(in oklab, var(--kb-bg-card) 92%, var(--kb-text-primary) 4%);
+  overflow: hidden;
+}
+.vt-map-card-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.vt-map-card-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 2.5rem;
+  color: color-mix(in oklab, var(--kb-text-muted) 60%, transparent);
+}
+.vt-map-card-tag-overlay {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.vt-map-card-tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-primary) 25%, transparent);
+  border-radius: 999px;
+  color: var(--kb-text-secondary);
+  backdrop-filter: blur(6px);
+}
+
+.vt-map-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: var(--vt-map-card-pad);
+  flex: 1 1 auto;
+}
+.vt-map-card-title {
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+  color: var(--kb-text-primary);
+  line-height: 1.2;
+  /* Truncate long titles to two lines, ellipsize. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vt-map-card-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--kb-text-secondary);
+}
+.vt-map-card-sub-sep {
+  color: color-mix(in oklab, var(--kb-text-muted) 60%, transparent);
+}
+.vt-map-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  font-size: 0.78rem;
+  border-top: 1px dashed color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+.vt-map-card-played {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--kb-text-primary);
+}
+.vt-map-card-played .num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--kb-primary);
+}
+.vt-map-card-unplayed {
+  font-style: italic;
+  color: var(--kb-text-muted);
+  font-size: 0.78rem;
+}
+.vt-map-card-relative {
+  color: var(--kb-text-muted);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
+
+/* ---- 5. Single-map shell + back-link + placeholder section ---- */
+
+.vt-map-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  color: var(--kb-text-secondary);
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+.vt-map-back-link:hover {
+  color: var(--kb-primary);
+}
+
+.vt-map-single-hero {
+  border-radius: var(--vt-map-card-radius);
+}
+.vt-map-single-hero-row {
+  align-items: stretch;
+}
+.vt-map-single-image-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--kb-bg-card) 92%, var(--kb-text-primary) 4%);
+  aspect-ratio: 1 / 1;
+  max-height: 380px;
+}
+.vt-map-single-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.vt-map-single-image-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 4rem;
+  color: color-mix(in oklab, var(--kb-text-muted) 60%, transparent);
+}
+.vt-map-single-description {
+  font-size: 0.9rem;
+  color: var(--kb-text-secondary);
+  line-height: 1.55;
+  background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  white-space: pre-line;
+}
+.vt-map-single-title {
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.4rem, 2vw + 1rem, 2rem);
+  letter-spacing: -0.02em;
+  color: var(--kb-text-primary);
+  margin: 0;
+}
+.vt-map-single-author {
+  font-size: 0.95rem;
+}
+
+/* Hero meta-chip row -- mirrors the dashboard's Map Info Modal layout
+   but inlined as flex chips. Each chip carries icon / label / value. */
+.vt-map-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--kb-text-secondary);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.vt-map-meta-chip .label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kb-text-muted);
+}
+.vt-map-meta-chip .value {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  color: var(--kb-text-primary);
+  font-weight: 600;
+}
+.vt-map-meta-chip code {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  color: var(--kb-text-primary);
+  background: transparent;
+}
+.vt-map-meta-chip-mono code { font-weight: 600; }
+.vt-map-meta-chip-link {
+  cursor: pointer;
+}
+.vt-map-meta-chip-link:hover {
+  border-color: color-mix(in oklab, var(--kb-primary) 50%, transparent);
+  color: var(--kb-text-primary);
+}
+.vt-map-meta-tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.45rem;
+  margin-left: 0.15rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+  color: var(--kb-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Hero summary stats (right rail) */
+.vt-map-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.vt-map-summary-stat {
+  background: color-mix(in oklab, var(--kb-bg-card) 65%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+}
+.vt-map-summary-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--kb-text-muted);
+}
+.vt-map-summary-value {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: var(--kb-text-primary);
+  line-height: 1.1;
+  margin-top: 0.15rem;
+}
+.vt-map-summary-value-sm {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.vt-map-summary-empty {
+  background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
+  border: 1px dashed color-mix(in oklab, var(--kb-text-muted) 40%, transparent);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  color: var(--kb-text-secondary);
+  font-size: 0.9rem;
+}
+
+/* Top Commanders list */
+.vt-map-cmdr-list {
+  list-style: none;
+  margin: 0; padding: 0;
+}
+.vt-map-cmdr-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+}
+.vt-map-cmdr-row:last-child { border-bottom: none; }
+.vt-map-cmdr-rank {
+  display: inline-block;
+  width: 1.6rem;
+  text-align: center;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--kb-text-muted);
+}
+.vt-map-cmdr-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: var(--kb-text-primary);
+  text-decoration: none;
+}
+.vt-map-cmdr-name:hover {
+  color: var(--kb-primary);
+}
+.vt-map-cmdr-name-fallback {
+  cursor: default;
+}
+.vt-map-cmdr-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.vt-map-cmdr-count .num {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--kb-primary);
+}
+
+/* Recent matches table */
+.vt-map-recent-table {
+  --bs-table-bg: transparent;
+  margin: 0;
+}
+.vt-map-recent-table thead th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kb-text-muted);
+  border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+}
+.vt-map-recent-table tbody td {
+  vertical-align: middle;
+  border-color: color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+}
+.vt-map-recent-row:hover {
+  background: color-mix(in oklab, var(--kb-primary) 6%, transparent);
+}
+.vt-map-recent-link {
+  color: var(--kb-text-primary);
+  text-decoration: none;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+}
+.vt-map-recent-link:hover {
+  color: var(--kb-primary);
+}
+.vt-map-recent-pc, .vt-map-recent-dur {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}
+.vt-map-cmdr-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.vt-map-cmdr-vs {
+  color: var(--kb-text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.vt-map-cmdr-tag {
+  display: inline-block;
+  padding: 0.18rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+}
+.vt-map-cmdr-tag:hover {
+  filter: brightness(1.15);
+}
+.vt-map-cmdr-tag-t1 {
+  color: var(--kb-faction-i, var(--kb-primary));
+  background: color-mix(in oklab, var(--kb-faction-i, var(--kb-primary)) 12%, transparent);
+  border-color: color-mix(in oklab, var(--kb-faction-i, var(--kb-primary)) 28%, transparent);
+}
+.vt-map-cmdr-tag-t2 {
+  color: var(--kb-faction-f, var(--kb-accent));
+  background: color-mix(in oklab, var(--kb-faction-f, var(--kb-accent)) 12%, transparent);
+  border-color: color-mix(in oklab, var(--kb-faction-f, var(--kb-accent)) 28%, transparent);
+}
+
+/* Winner chip */
+.vt-map-winner-chip {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+}
+.vt-map-winner-t1 {
+  color: var(--kb-faction-i, var(--kb-primary));
+  background: color-mix(in oklab, var(--kb-faction-i, var(--kb-primary)) 12%, transparent);
+}
+.vt-map-winner-t2 {
+  color: var(--kb-faction-f, var(--kb-accent));
+  background: color-mix(in oklab, var(--kb-faction-f, var(--kb-accent)) 12%, transparent);
+}
+.vt-map-winner-contested {
+  color: var(--kb-warning, #d97706);
+  background: color-mix(in oklab, var(--kb-warning, #d97706) 14%, transparent);
+}
+.vt-map-winner-unclear {
+  color: var(--kb-text-muted);
+  background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+}
+
+/* Coming-soon grid */
+.vt-map-coming-soon-card .card-header {
+  display: flex;
+  align-items: center;
+}
+.vt-map-coming-soon-sub {
+  font-weight: normal;
+}
+.vt-map-coming-soon-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+/* "Coming soon" placeholder cards. Greyed-out with a dashed border so
+   they read as "future depth" rather than empty content. Used by Phase
+   4 single-view to advertise team-wins / faction-balance / records /
+   etc. before we have the data to populate them. */
+.vt-placeholder-card {
+  opacity: 0.55;
+  border: 1px dashed color-mix(in oklab, var(--kb-text-primary) 22%, transparent);
+  background: color-mix(in oklab, var(--kb-bg-card) 50%, transparent);
+  border-radius: var(--vt-map-card-radius);
+  position: relative;
+  padding: 1rem 1rem 1.1rem;
+  min-height: 7.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.vt-placeholder-card::after {
+  content: 'Coming soon';
+  position: absolute;
+  top: 0.5rem;
+  right: 0.6rem;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kb-text-muted);
+  background: color-mix(in oklab, var(--kb-bg-card) 80%, transparent);
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+.vt-placeholder-card-icon {
+  font-size: 1.6rem;
+  color: color-mix(in oklab, var(--kb-primary) 70%, transparent);
+}
+.vt-placeholder-card-title {
+  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--kb-text-primary);
+}
+.vt-placeholder-card-body {
+  font-size: 0.85rem;
+  color: var(--kb-text-secondary);
+  line-height: 1.45;
+}
+
+/* ---- 6. Empty / error states ---- */
+.vt-map-empty-icon,
+.vt-map-error-icon {
+  font-size: 2.5rem;
+  color: var(--kb-text-muted);
+}
+
+/* Preloader sizing (mirrors the player.css pattern so the boot-shim
+   sits consistent across pages). */
+.vt-preloader-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 50vh;
+}

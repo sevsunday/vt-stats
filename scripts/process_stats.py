@@ -5033,7 +5033,17 @@ def main():
             if not key or key in seen_map:
                 continue
             seen_map[key] = m["match"].get("config_mod")
-        registry = build_map_registry.build_registry(sorted(seen_map.items()))
+        # The map browser plan extends registry coverage to the full
+        # vsrmaplist catalog (143 maps) so /map/ can show every VSR map,
+        # not just the ones with sessions. discover_all_maps() unions
+        # the played-map config_mods with every vsrmaplist key (unplayed
+        # entries get config_mod=None and fall through to the existing
+        # VSR_MOD_ID / STOCK_MOD_ID chain). On first run this triggers
+        # ~109 net-new image downloads; INTER_MAP_REQUEST_DELAY_SEC adds
+        # a polite 2s pause between non-cached maps so we don't hammer
+        # iondriver. Cached runs skip every sleep.
+        all_map_entries = build_map_registry.discover_all_maps(seen_map)
+        registry = build_map_registry.build_registry(all_map_entries)
     except Exception as e:
         print(f"WARN: failed to build map registry ({e}); skipping.")
 
@@ -5150,6 +5160,42 @@ def main():
                   f"{slug_summary['n_pregen_eligible']} eligible for pre-gen)")
     except Exception as e:
         print(f"WARN: failed to allocate player slugs ({e}); skipping.")
+
+    # ----- Map browser pages (map_stats.json + per-map HTML stubs) -----
+    # Map-stats is the corpus-wide, picker-filter-unaware roll-up that
+    # powers `/map/` and `/map/<slug>/`. Mirrors the
+    # generate_player_pages contract: post-processing emit, NOT cache-
+    # invalidating, soft-fails so a hiccup never aborts the pipeline.
+    # Phase 2 emits map_stats.json; Phase 5 fills in stub rendering
+    # (currently a no-op when scripts/map_template.html is missing).
+    try:
+        import generate_map_pages
+        map_summary = generate_map_pages.run(
+            all_match_data=all_match_data,
+            registry=registry,
+            output_dir=OUTPUT_DIR,
+            project_root=PROJECT_ROOT,
+        )
+        verb = "Rewrote" if map_summary["wrote_map_stats"] else "No change to"
+        print(
+            f"Map stats: {verb} map_stats.json "
+            f"({map_summary['n_total_maps']} total · "
+            f"{map_summary['n_played_maps']} with matches · "
+            f"{map_summary['n_unplayed_maps']} unplayed)"
+        )
+        if map_summary["stubs_eligible"]:
+            if map_summary["stubs_written"]:
+                print(
+                    f"Map stubs: wrote {map_summary['stubs_written']}, "
+                    f"skipped {map_summary['stubs_skipped_unchanged']} unchanged "
+                    f"(of {map_summary['stubs_eligible']} eligible)."
+                )
+            else:
+                print(
+                    f"Map stubs: no change ({map_summary['stubs_eligible']} stubs up to date)."
+                )
+    except Exception as e:
+        print(f"WARN: failed to generate map pages ({e}); skipping.")
 
     # Drop a stale seen-players.json from previous pipeline runs (the
     # PIPELINE_VERSION 5 -> 6 bump shipped a `seen-players.json` emit

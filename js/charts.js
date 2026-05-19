@@ -668,6 +668,28 @@ function renderMetaMapsChart(canvasId, mapsArr, mapNameResolver) {
         legend: { position: 'bottom' },
         tooltip: { ...glassTooltipConfig },
       },
+      // Click-to-drill into the per-map catalog page. The slug is the
+      // lowercased map_file stem (e.g. 'havenvsr'); both /map/ stub
+      // and the runtime fallback handle the URL. Open in a new tab so
+      // the user's All Matches → Meta filter / scroll state isn't
+      // disturbed. `top` stays in scope of this Chart instance via
+      // closure; if Chart.js mutates internals on update we hoist it
+      // onto chart.data._sourceMaps for safety, but the current path
+      // is closure-stable.
+      onClick: (evt, elements) => {
+        if (!elements || !elements.length) return;
+        const idx = elements[0].index;
+        const mapField = top[idx] && top[idx].map;
+        if (!mapField) return;
+        const slug = String(mapField).replace(/\.bzn$/i, '').toLowerCase();
+        if (!slug) return;
+        window.open(`map/${encodeURIComponent(slug)}/`, '_blank', 'noopener');
+      },
+      onHover: (evt, elements) => {
+        if (evt && evt.native && evt.native.target) {
+          evt.native.target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+        }
+      },
       scales: {
         x: { stacked: true, beginAtZero: true, title: { display: true, text: 'Matches' } },
         y: { stacked: true, ticks: { font: { size: 11 } } },

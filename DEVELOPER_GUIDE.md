@@ -2263,3 +2263,85 @@ Six cross-link locations in `js/app.js`:
 
 Player profile pages are **picker-unaware** — they ignore the dashboard's match-picker filter entirely. The directory and per-player views always run against the **full corpus**. This is intentional: a player profile is a stable identity surface that shouldn't shift under filter chips chosen elsewhere. (The dashboard's All Matches view remains picker-aware as before.) The player-page directory has its own toolbar with chips that filter the displayed cards, but those chips never re-aggregate the underlying career stats.
 
+## 15. Map Browser Pages (`map/`)
+
+The Map Browser is the project's **sixth standalone page**, sibling to `index.html` / `docs.html` / `raw.html` / `odf/index.html` / `player/index.html`. Mirrors the player-pages architecture with deliberate simplifications: maps already have URL-safe slugs (the lowercased `map_file` stem from `build_map_registry.map_key()`) so there's no allocator and no stickiness layer. The page system is **dual-runtime**:
+
+1. **Pre-generated stubs** at `map/<mapfile>/index.html` — one HTML file per map in `data/map-registry.json` (~143 once Phase 1's universe-extension lands in production), rendered by `scripts/generate_map_pages.py` from `scripts/map_template.html`. Each stub carries per-map Open Graph meta tags pointing at the map's actual top-down screenshot for rich Discord / Slack / Twitter unfurls, plus a tiny `window.__vtMapBoot` script block that hints the client-side renderer at the map identity before fetch.
+2. **Runtime fallback** at `map/index.html` — same client-side JS (`js/maps.js`) renders the **Directory** landing (no params), single maps via `?file=<slug>` for the rare uncovered map, and degrades gracefully when `map_stats.json` is missing.
+
+### 15.1 Files
+
+| File | Purpose |
+|---|---|
+| `map/index.html` | Triple-duty shell: Directory landing / runtime single-map / error fallback. Loads only Bootstrap + theme + `js/maps.js` (no Chart.js — v1 single-map view has no live charts). |
+| `js/maps.js` | Single bundle that dispatches on URL params (`?file`) or the `window.__vtMapBoot` hint set by stubs. Renders the directory grid (search + pools/size/tags chips + played-status radio + author dropdown + sort) and the single-map view (hero strip + match summary + top commanders + recent matches + `Coming soon` placeholders). Self-contained — no shared state with the dashboard. |
+| `css/maps.css` | Map-page-specific styles (hero card, card grid, single-view sections, placeholder cards). Sibling of `css/player.css`. |
+| `scripts/generate_map_pages.py` | Pure module: `compute_map_stats(all_match_data, registry)` aggregator + `_render_map_stubs()` template renderer + `run(...)` entrypoint. Wired into `scripts/process_stats.py::main()` after the player-slug block (soft-fail). |
+| `scripts/map_template.html` | Mustache-style `{{...}}` template for the per-map stubs. Substitutes title, file slug, OG title/description/url/image, canonical link, boot-hint, template-version. |
+| `data/processed/map_stats.json` | Per-map roll-up keyed by `map_file` (`schema_version: 1`). Fields: `match_count`, `total_duration_sec`, `avg_duration_sec`, `first_played`, `last_played`, `top_commanders[]` (top 10 by `matches_commanded`, capped at `MAX_TOP_COMMANDERS = 10`, excludes `is_campod` / `is_low_activity`), `recent_matches[]` (10 most recent, full chronology, capped at `MAX_RECENT_MATCHES = 10`). |
+| `data/og/map-card.png` | Generic 1200×630 OG image used as fallback when a map's per-map screenshot is missing. v1 is a copy of `data/og/player-card.png`; a maps-themed variant is a future polish. |
+
+### 15.2 Slug derivation (no allocator)
+
+Map slugs are the lowercased `map_file` stem from `build_map_registry.map_key()` (e.g. `havenvsr`, `stredslopevsr`, `vsr-training`). Already URL-safe by VSR-map naming convention. No sticky allocation, no schema_version on a slug map — the map filename IS the slug.
+
+`scripts/generate_map_pages.map_slug(map_field)` is the unified resolver: strips `.bzn`, lowercases, runs `SLUG_SAFE_RE = ^[a-z0-9_-]+$` for filesystem safety, and applies the `RESERVED_MAP_SLUGS` collision rename (`<slug>-map` suffix). Currently zero hits on either guard against the 143-map vsrmaplist corpus; both are defensive.
+
+### 15.3 Catalog completeness contract
+
+`compute_map_stats()` emits an entry for **every key in `registry`**, not just maps with sessions. Unplayed maps get the schema with all stat fields zeroed (`match_count: 0`, `top_commanders: []`, `recent_matches: []`, `first_played: null`, `last_played: null`). The directory's hero counter ("X with match data") and the **Unplayed** filter chip both depend on this.
+
+Aggregation rules:
+- `match_count` and friends count every match the map appears in (no exclusion gates — the match itself happened).
+- `top_commanders` excludes per-row `is_campod` and `is_low_activity` (mirrors VTSR-T exclusion contract). Sort key: `(-matches_commanded, -last_appearance_iso)` so ties break to the more-recently-active commander.
+- `recent_matches` is straight `sorted(date desc)[:10]` regardless of exclusion gates — users want the actual chronology, not a sanitised subset. `commanders["1"]` / `commanders["2"]` is `null` when that team-leader slot was unfilled; renderer maps to em-dash. `winner_team` is `null` for `winner_decided_by == "unclear"`.
+
+### 15.4 OG strategy (per-map images)
+
+Each pre-gen stub references `https://vtstats.bz/data/maps/<slug>.png` as `og:image` when that file exists on disk at stub-render time. Falls back to the generic `https://vtstats.bz/data/og/map-card.png` when the per-map PNG is missing (the existence check is critical — registry rows can carry an `image_path` while the actual file is missing if a download failed mid-run). `_resolve_og_image_url()` in `generate_map_pages.py` is the gate.
+
+`og:description` format (`_build_og_description`):
+```
+"<author> · <pools>p / <loose> loose · <formatted_size> · <match_count> matches recorded"
+```
+Em-dashes for missing fields. When `match_count == 0`, the suffix becomes `"no matches recorded yet"` so unfurls don't carry a misleading "0 matches". Truncated to ~280 chars to fit Discord's display limit. A registry blurb prefix is prepended when the core stat row is short enough to leave headroom.
+
+### 15.5 Pre-gen invariants
+
+- `MAP_TEMPLATE_VERSION = 1` (module constant in `scripts/generate_map_pages.py`). Bump only when the rendered stub HTML shape changes — a forced re-render of every stub on the next pipeline run, orthogonal to `PIPELINE_VERSION` (per-match cache).
+- Stub HTML is byte-compared against on-disk content; we only write when the rendered string differs (idempotent — no churn on no-delta runs). Same posture as `_render_player_stubs()`.
+- `map_stats.json` writes use the `_stable_equals` pattern (mirrors `generate_player_pages._stable_equals`) so empty-delta runs don't gratuitously rewrite the file. `generated_at` is excluded from the equality check.
+- Stale-stub cleanup: do **not** delete stubs even when a map disappears from the registry (matches the player-pages stale-stub posture). URLs stay valid forever; the runtime fallback handles the case where the map no longer has data.
+
+### 15.6 Picker filter contract
+
+Map browser pages are **picker-unaware** (mirrors VTSR-T leaderboard). The picker is for narrowing a single match-set; the map browser is for catalog browsing. Per-map stats are computed corpus-wide in the pipeline. `js/maps.js` does no client-side aggregation — it consumes `map_stats.json` + `map-registry.json` directly.
+
+### 15.7 Cross-links
+
+| Site | Wiring |
+|---|---|
+| Topnav `Maps` link | Added on `index.html`, `docs.html`, `raw.html`, `odf/index.html`, and the player template (which forces `PLAYER_TEMPLATE_VERSION` 5 → 6 to re-render every player stub with the new nav). |
+| Map Info Modal title | `#map-info-modal-title-link` wraps the title text; clicks open `/map/<slug>/` in a new tab (`target="_blank" rel="noopener"`) so the modal stays open. Wired in `renderMapInfoModal()` in `js/app.js`. |
+| Map Info Modal footer | New `#map-info-modal-page-link` `View full map page` button next to Close. Same `target="_blank"` semantics. Toggled `d-none` together with the title link when `meta.key` is empty. |
+| Match-info banner | New `#info-map-link` button next to `#info-raw-link`, wired in `renderMapBannerFields()`. Hidden via `d-none` when the match's map isn't in the registry (parallel to the `#info-map-thumb-btn` toggle). |
+| All Matches → Meta tab | `js/charts.js::renderMetaMapsChart()` gains an `onClick` handler that opens `map/<slug>/` in a new tab on bar click, plus an `onHover` cursor-pointer affordance. |
+
+`.vt-map-title-link` styling lives in `css/vtstats-theme.css` (mirror of `.vt-odf-link`) so the dashboard picks it up without loading the map-browser stylesheet.
+
+### 15.8 Title-resolver triplication caveat
+
+The iterative `XYZ: ` prefix-stripping logic for map display titles (`"ST: VSR: TVD: Ebola"` → `"Ebola"`) lives in **four** places:
+
+1. Python `resolve_match_name()` in `scripts/process_stats.py` (manifest emission).
+2. Python `map_title_resolver()` in `scripts/generate_map_pages.py` (stub rendering).
+3. JS `mapNameResolver` in `js/app.js` (All Matches → Meta tab labels).
+4. JS `stripTitlePrefixes()` in `js/maps.js` (gallery + single-map title).
+
+Touch all four when the rule changes. Mirrors the `VTSR_TIERS` duplication caveat between `js/app.js` and `scripts/generate_player_pages.py`.
+
+### 15.9 Production host
+
+Same `SITE_URL = "https://vtstats.bz"` module constant as the player generator (per the project `CNAME`). Used for absolute OG URLs + canonical link.
+

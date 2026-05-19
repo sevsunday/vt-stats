@@ -3564,6 +3564,22 @@
       }
     }
 
+    // Catalog deep-link: hide the "View Map Page" link in the match-info
+    // banner when this match's map isn't in the registry (parallel to
+    // #info-map-thumb-btn's d-none toggle). When present, point at
+    // `map/<slug>/` (relative to dashboard root); the per-map page picks
+    // up its own data without further wiring here.
+    const mapLink = document.getElementById('info-map-link');
+    if (mapLink) {
+      if (meta.key) {
+        mapLink.setAttribute('href', `map/${encodeURIComponent(meta.key)}/`);
+        mapLink.classList.remove('d-none');
+      } else {
+        mapLink.setAttribute('href', '#');
+        mapLink.classList.add('d-none');
+      }
+    }
+
     // Modal contents stay in sync on every banner render so opening the
     // modal after a match switch always reflects the current map. Map size,
     // elevation, base-to-base and author all live inside the modal now (the
@@ -3587,6 +3603,8 @@
   // stays compact for sparse / pre-schema entries.
   function renderMapInfoModal(info, meta, registry) {
     const titleEl = document.getElementById('map-info-modal-title-text');
+    const titleLinkEl = document.getElementById('map-info-modal-title-link');
+    const pageLinkEl = document.getElementById('map-info-modal-page-link');
     const imageEl = document.getElementById('map-info-modal-image');
     const imageCol = document.getElementById('map-info-modal-image-col');
     const descriptionEl = document.getElementById('map-info-modal-description');
@@ -3596,6 +3614,20 @@
     const title = meta.title || (info && info.name) || meta.key || '—';
     titleEl.textContent = title;
     imageEl.alt = title;
+
+    // Wire the modal-title link + footer "View full map page" button.
+    // Both target `_blank` so accidental clicks don't unmount the modal
+    // mid-navigation; we toggle `d-none` on the footer button when no
+    // map key is resolvable so we don't show a CTA leading nowhere
+    // (mirrors the #info-map-thumb-btn / #info-map-link visibility
+    // contract on the banner).
+    const mapPageHref = meta.key ? `map/${encodeURIComponent(meta.key)}/` : '#';
+    if (titleLinkEl) titleLinkEl.setAttribute('href', mapPageHref);
+    if (pageLinkEl) {
+      pageLinkEl.setAttribute('href', mapPageHref);
+      if (meta.key) pageLinkEl.classList.remove('d-none');
+      else          pageLinkEl.classList.add('d-none');
+    }
 
     if (meta.imagePath) {
       imageEl.src = 'data/' + meta.imagePath;

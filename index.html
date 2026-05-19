@@ -90,6 +90,14 @@
         <i class="bi bi-people me-1"></i>Players
       </a>
 
+      <!-- Maps directory link (desktop only). Sibling of Players;
+           opens the VSR map catalog browser. -->
+      <a href="map/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
+         title="Browse the VSR map catalog"
+         aria-label="Maps">
+        <i class="bi bi-map me-1"></i>Maps
+      </a>
+
       <!-- Burger (mobile only). On desktop the collapse menu is always
            expanded and packs to the right after the Docs link. -->
       <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
@@ -133,6 +141,13 @@
              title="Browse player career profiles"
              aria-label="Players">
             <i class="bi bi-people me-1"></i>Players
+          </a>
+
+          <!-- Maps directory link (mobile burger only). Sibling of Players. -->
+          <a href="map/" class="vt-nav-icon-btn d-md-none"
+             title="Browse the VSR map catalog"
+             aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
           </a>
 
           <!-- URL Sharing: Share (one-shot copy) + Live Sync (toggle).
@@ -231,6 +246,14 @@
             </button>
             <a id="info-raw-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
               <i class="bi bi-code-square me-1"></i><span>View Raw Data</span>
+            </a>
+            <!-- Catalog deep-link to the per-map page. Wired by
+                 renderMapBannerFields() in js/app.js to point at
+                 `map/<mapfile>/`; hidden via d-none when the match's
+                 map isn't in the registry (parallel to #info-map-thumb-btn). -->
+            <a id="info-map-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary d-none" href="#"
+               title="View this map's full catalog page">
+              <i class="bi bi-map me-1"></i><span>View Map Page</span>
             </a>
           </div>
         </div>
@@ -1657,14 +1680,28 @@
        plus all map-level metadata available (registry description, author,
        canonical size / b2b, mod ID, team names) and the this-match terrain
        fields (terrain size, elevation, empirical b2b). Populated by
-       renderMapBannerFields() in js/app.js. -->
+       renderMapBannerFields() in js/app.js.
+
+       The modal title text is wrapped in an anchor (`#map-info-modal-title-link`)
+       and the footer carries a `View full map page` button (`#map-info-modal-page-link`)
+       so users can drill into the full /map/<slug>/ catalog page from the
+       in-context summary. Both links carry `target="_blank" rel="noopener"`
+       so accidental clicks don't yank the user out of their dashboard
+       state — the modal stays open and the catalog page opens in a new
+       tab. Wired in `renderMapInfoModal()` in js/app.js; both controls
+       toggle `d-none` together when `meta.key` is empty/unresolved. -->
   <div class="modal fade vt-map-info-modal" id="map-info-modal" tabindex="-1"
        aria-labelledby="map-info-modal-title" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header border-bottom">
           <h5 class="modal-title" id="map-info-modal-title">
-            <i class="bi bi-map me-2"></i><span id="map-info-modal-title-text">&mdash;</span>
+            <i class="bi bi-map me-2"></i>
+            <a id="map-info-modal-title-link" href="#" target="_blank" rel="noopener"
+               class="vt-map-title-link"
+               title="Open this map's full catalog page (new tab)">
+              <span id="map-info-modal-title-text">&mdash;</span>
+            </a>
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
@@ -1684,6 +1721,10 @@
           </div>
         </div>
         <div class="modal-footer border-top">
+          <a id="map-info-modal-page-link" href="#" target="_blank" rel="noopener"
+             class="btn btn-sm btn-primary d-none">
+            <i class="bi bi-box-arrow-up-right me-1"></i>View full map page
+          </a>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
         </div>
       </div>

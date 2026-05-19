@@ -2753,3 +2753,109 @@ Per-leaderboard entries gained:
 | `is_commander` | bool | `slot in {1, 6}` | Role split |
 
 Manifest entries (`data/processed/matches.json`) also gained `team_factions` + `winner_decided_by` for future picker facets.
+
+## 14. Map Browser Outputs (`map_stats.json`)
+
+Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` and consumed by `js/maps.js` (and by the per-map pre-gen stub OG description builder). Corpus-wide and **NOT picker-filter aware** (mirrors VTSR-T contract). Keyed by the lowercased `map_file` stem (same as `data/map-registry.json` keys). See `DEVELOPER_GUIDE.md` §15 for architectural context.
+
+### File: `data/processed/map_stats.json`
+
+```json
+{
+  "schema_version": 1,
+  "template_version": 1,
+  "generated_at": "2026-05-19T16:49:33Z",
+  "site_url": "https://vtstats.bz",
+  "min_recent_matches_shown": 10,
+  "max_top_commanders": 10,
+  "maps": {
+    "havenvsr": {
+      "map_file": "havenvsr",
+      "match_count": 4,
+      "total_duration_sec": 5128,
+      "avg_duration_sec": 1282,
+      "first_played": "2026-04-16T01:27:48.447651+00:00",
+      "last_played":  "2026-04-29T04:07:14.337730+00:00",
+      "top_commanders": [
+        { "steam64": "76561198045727092", "name": "Snake", "matches_commanded": 1 }
+      ],
+      "recent_matches": [
+        {
+          "id":           "2026-04-29T04-07-14",
+          "date":         "2026-04-29T04:07:14.337730+00:00",
+          "duration_sec": 384,
+          "player_count": 6,
+          "commanders":   {
+            "1": { "name": "Snake",   "s64": "76561198045727092" },
+            "2": { "name": "Cloaket", "s64": "76561198025032941" }
+          },
+          "winner_decided_by": "unclear",
+          "winner_team":       null
+        }
+      ]
+    },
+    "vsrabuse": { /* unplayed - all stat fields zeroed */ }
+  }
+}
+```
+
+### Top-level fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema_version` | int | Bumped only when consumers (`js/maps.js`) need to branch on shape changes; adding optional fields stays at v1. |
+| `template_version` | int | Mirrors `MAP_TEMPLATE_VERSION` in `scripts/generate_map_pages.py`. Bumped when the rendered stub HTML shape changes — orthogonal to `schema_version`. |
+| `generated_at` | string (ISO 8601) | UTC timestamp of the last run. Excluded from the `_stable_equals` write check so timestamp drift never triggers a no-delta rewrite. |
+| `site_url` | string | Echoes the `SITE_URL` constant for reference; consumers should still read their own `SITE_URL` rather than depending on this. |
+| `min_recent_matches_shown` | int | Capacity cap for `recent_matches` (currently 10). Future expansions can request more rows by lifting `MAX_RECENT_MATCHES`. |
+| `max_top_commanders` | int | Capacity cap for `top_commanders` (currently 10). |
+| `maps` | object | `{ map_file_stem: per_map_entry }`. **Catalog completeness contract**: every key in `data/map-registry.json` gets an entry here, even with zero matches. The directory's "X with match data" hero counter and the `Unplayed` filter chip both depend on this. |
+
+### Per-map entry fields
+
+| Field | Type | Aggregation rule |
+|---|---|---|
+| `map_file` | string | Same as the parent dict key. Provided redundantly so consumers iterating `Object.values()` keep the slug. |
+| `match_count` | int | Every match the map appears in. **No exclusion gates** — the match itself happened, even if individual players were excluded. |
+| `total_duration_sec` | float | Sum of `match.duration_sec` across all matches on this map. Rounded to 1 decimal place. |
+| `avg_duration_sec` | float | `total_duration_sec / match_count` (zero on unplayed). Rounded to 1 decimal place. |
+| `first_played` | string \| null | Min `match.date` (ISO 8601 with timezone). `null` on unplayed maps. |
+| `last_played` | string \| null | Max `match.date`. `null` on unplayed. |
+| `top_commanders[]` | array | Top 10 by `matches_commanded`. **Exclusion gate**: per-row `is_campod` and `is_low_activity` are skipped (mirrors VTSR-T exclusion contract). Sort key: `(-matches_commanded, -last_appearance_iso)` so ties break to the more-recently-active commander. Capped at `MAX_TOP_COMMANDERS`. |
+| `recent_matches[]` | array | 10 most recent matches by `date desc`. **No exclusion gate** — users want full chronology, not a sanitised subset. Capped at `MAX_RECENT_MATCHES`. |
+
+### `top_commanders[]` row shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `steam64` | string | Source identity for cross-link to `/player/<slug>/`. |
+| `name` | string | Display name from the most recent match the commander appeared on (handles renames; promoted to the latest seen name). |
+| `matches_commanded` | int | Count of slot-1 / slot-6 leaderboard rows on this map where neither exclusion flag was set. |
+
+### `recent_matches[]` row shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Match id (matches `data/processed/matches.json` and the per-match JSON filename stem). Drives the `index.html?match=<id>` cross-link. |
+| `date` | string \| null | `match.date` (ISO 8601 w/ timezone). |
+| `duration_sec` | int \| float | `match.duration_sec`. |
+| `player_count` | int | `match.player_count`. |
+| `commanders["1"]` / `["2"]` | object \| null | `{name, s64}` for each team's commander (slot 1 / slot 6). `null` when the slot was unfilled (no team-leader on that team). The renderer maps `null` to em-dash. |
+| `winner_decided_by` | string | `"clean_win"` / `"contested"` / `"unclear"` (passthrough from `match.winner.decided_by`). |
+| `winner_team` | int \| null | `1` or `2` for `clean_win`; `null` for any other outcome (renderer maps `null` to a muted em-dash chip). |
+
+### Pre-gen stub (`map/<slug>/index.html`) OG block
+
+Each per-map stub's `<head>` carries an Open Graph block that Discord / Slack / Twitter unfurl:
+
+| Meta tag | Source |
+|---|---|
+| `<title>` / `og:title` / `twitter:title` | `"<map title with stripped XYZ: prefixes> — VT Stats"` |
+| `og:description` / `twitter:description` / `<meta name="description">` | `"<author> · <pools>p / <loose> loose · <formatted_size> · <match_count> matches recorded"` (registry blurb prefix added when there's headroom; `"no matches recorded yet"` substituted for the count segment when `match_count == 0`). Truncated to ~280 chars. |
+| `og:url` / `<link rel="canonical">` | `"https://vtstats.bz/map/<slug>/"` |
+| `og:image` / `twitter:image` | `"https://vtstats.bz/data/maps/<slug>.png"` when the per-map screenshot exists at stub-render time; else falls back to `"https://vtstats.bz/data/og/map-card.png"`. |
+| `og:image:width` / `og:image:height` | `1200` / `630` (registry images are typically square 1024+; Discord/Twitter rescale fine). |
+| `og:type` | `"article"` (per-map page is article-shaped — title + description + image). |
+| `twitter:card` | `"summary_large_image"`. |
+| Inline `<script>window.__vtMapBoot = {...}</script>` | `{ map_file: "<slug>", template_version: <int> }` — picked up by `js/maps.js` `dispatch()` to trigger single-map mode without depending on a query string. |
+

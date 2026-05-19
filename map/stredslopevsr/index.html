@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Red Slope — VT Stats</title>
+  <meta name="description" content="Red Slope. 7 Pools, 2 Commanders. by {bac}appel. — {bac}appel · 7p / 255 loose · 1024x1024 · 9 matches recorded">
+
+  <link rel="canonical" href="https://vtstats.bz/map/stredslopevsr/">
+
+  <!-- Open Graph (Facebook, LinkedIn, Slack, Discord). Per-map image
+       points at the map's own top-down screenshot when one is on disk;
+       falls back to the generic data/og/map-card.png. -->
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Red Slope — VT Stats">
+  <meta property="og:description" content="Red Slope. 7 Pools, 2 Commanders. by {bac}appel. — {bac}appel · 7p / 255 loose · 1024x1024 · 9 matches recorded">
+  <meta property="og:url" content="https://vtstats.bz/map/stredslopevsr/">
+  <meta property="og:image" content="https://vtstats.bz/data/maps/stredslopevsr.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="VT Stats">
+
+  <!-- Twitter card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Red Slope — VT Stats">
+  <meta name="twitter:description" content="Red Slope. 7 Pools, 2 Commanders. by {bac}appel. — {bac}appel · 7p / 255 loose · 1024x1024 · 9 matches recorded">
+  <meta name="twitter:image" content="https://vtstats.bz/data/maps/stredslopevsr.png">
+
+  <link rel="stylesheet" href="../../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../../css/theme-system.css">
+  <link rel="stylesheet" href="../../css/themes.css">
+  <link rel="stylesheet" href="../../css/main.css">
+  <link rel="stylesheet" href="../../css/layout.css">
+  <link rel="stylesheet" href="../../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../../css/maps.css">
+
+  <!-- Pre-gen boot hint. Tells js/maps.js which map to render without
+       depending on a query string. The dispatcher honors ?file= when
+       set (dev / direct links), but the canonical /map/<slug>/ path
+       defaults to this. -->
+  <script>
+    window.__vtMapBoot = {
+      map_file:         "stredslopevsr",
+      template_version: 1
+    };
+  </script>
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar mirrors map/index.html and the player template. The Maps
+       link carries `.active aria-current="page"` for "you are here". -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="../../docs.html" class="vt-nav-icon-btn"
+             title="Open the docs" aria-label="Docs">
+            <i class="bi bi-book me-1"></i>Docs
+          </a>
+          <a href="../../raw.html" class="vt-nav-icon-btn"
+             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)"
+             aria-label="Raw data browser">
+            <i class="bi bi-code-square me-1"></i>Raw data
+          </a>
+          <a href="../../odf/" class="vt-nav-icon-btn"
+             title="Browse the BZ2 Object Definition File (ODF) database"
+             aria-label="ODF browser">
+            <i class="bi bi-boxes me-1"></i>ODF
+          </a>
+          <a href="../../player/" class="vt-nav-icon-btn"
+             title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
+          </a>
+          <a href="../" class="vt-nav-icon-btn active" aria-current="page"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Loading shim -->
+  <div id="vt-map-loading" class="vt-preloader-wrapper">
+    <div class="vt-preloader">
+      <div class="vt-preloader-ring" role="status">
+        <span class="visually-hidden">Loading&hellip;</span>
+      </div>
+      <div class="vt-preloader-brand"><i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>Red Slope</div>
+      <div class="vt-preloader-status">Loading map data&hellip;</div>
+    </div>
+  </div>
+
+  <main class="container-fluid px-3 px-md-4 py-4 flex-grow-1 d-none" id="vt-map-main">
+
+    <!-- Directory view (hidden under the pre-gen boot path; included
+         so the same JS code path can navigate back here without a
+         second page fetch). -->
+    <section id="vt-map-directory" class="d-none">
+      <header class="vt-map-hero card mb-3">
+        <div class="card-body">
+          <div class="d-flex flex-wrap gap-3 align-items-baseline justify-content-between">
+            <div>
+              <h1 class="vt-map-hero-title mb-1">
+                <i class="bi bi-map-fill me-2" style="color: var(--kb-primary);"></i>Maps
+              </h1>
+              <p class="vt-map-hero-subtitle text-secondary mb-0" id="vt-map-hero-subtitle">
+                Loading the catalog&hellip;
+              </p>
+            </div>
+            <div class="vt-map-hero-stats d-flex flex-wrap gap-3" id="vt-map-hero-stats"></div>
+          </div>
+        </div>
+      </header>
+
+      <div class="vt-map-toolbar card mb-3" id="vt-map-toolbar">
+        <div class="card-body py-2">
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <div class="vt-map-search position-relative flex-grow-1" style="min-width: 220px; max-width: 360px;">
+              <i class="bi bi-search vt-map-search-icon"></i>
+              <input type="search" id="vt-map-search" class="form-control vt-map-search-input"
+                     placeholder="Search maps&hellip;" autocomplete="off">
+            </div>
+
+            <button type="button" class="vt-map-filter-toggle d-md-none ms-auto"
+                    data-bs-toggle="offcanvas" data-bs-target="#vt-map-filter-offcanvas"
+                    aria-controls="vt-map-filter-offcanvas" aria-label="Open filters">
+              <i class="bi bi-funnel"></i>
+              <span class="vt-map-filter-count" id="vt-map-filter-count" hidden>0</span>
+            </button>
+
+            <div class="offcanvas-md offcanvas-end vt-map-filter-panel"
+                 tabindex="-1" id="vt-map-filter-offcanvas"
+                 aria-labelledby="vt-map-filter-offcanvas-label">
+              <div class="offcanvas-header d-md-none">
+                <h5 class="offcanvas-title" id="vt-map-filter-offcanvas-label">
+                  <i class="bi bi-funnel me-1"></i>Filters
+                </h5>
+                <button type="button" class="btn-close"
+                        data-bs-dismiss="offcanvas"
+                        data-bs-target="#vt-map-filter-offcanvas"
+                        aria-label="Close"></button>
+              </div>
+              <div class="offcanvas-body">
+                <div class="vt-chip-group" role="group" aria-label="Pools filter" id="vt-map-pools-chips">
+                  <span class="vt-chip-group-label">Pools</span>
+                </div>
+
+                <div class="vt-chip-group" role="group" aria-label="Size filter" id="vt-map-size-chips">
+                  <span class="vt-chip-group-label">Size</span>
+                </div>
+
+                <div class="vt-chip-group" role="group" aria-label="Tags filter" id="vt-map-tag-chips">
+                  <span class="vt-chip-group-label">Tags</span>
+                </div>
+
+                <div class="vt-chip-group" role="group" aria-label="Played status" id="vt-map-played-chips">
+                  <span class="vt-chip-group-label">Status</span>
+                  <button type="button" class="vt-chip" data-played="all" data-selected="true">All</button>
+                  <button type="button" class="vt-chip" data-played="played">Has matches</button>
+                  <button type="button" class="vt-chip" data-played="unplayed">Unplayed</button>
+                </div>
+
+                <div class="vt-map-filter-actions ms-md-auto d-flex gap-2 align-items-center">
+                  <label for="vt-map-author" class="form-label mb-0 small text-secondary">Author</label>
+                  <select id="vt-map-author" class="form-select form-select-sm vt-map-sort-select">
+                    <option value="">All</option>
+                  </select>
+                  <label for="vt-map-sort" class="form-label mb-0 small text-secondary">Sort</label>
+                  <select id="vt-map-sort" class="form-select form-select-sm vt-map-sort-select">
+                    <option value="played-desc" selected>Most played</option>
+                    <option value="recent-desc">Recently played</option>
+                    <option value="title-asc">Title (A&ndash;Z)</option>
+                    <option value="pools-desc">Pools (most)</option>
+                    <option value="size-desc">Size (largest)</option>
+                    <option value="author-asc">Author (A&ndash;Z)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vt-map-grid" id="vt-map-grid"></div>
+
+      <div class="vt-map-empty text-center text-secondary py-5" id="vt-map-empty" hidden>
+        <i class="bi bi-search vt-map-empty-icon"></i>
+        <p class="mt-3 mb-2">No maps match the current filters.</p>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="vt-map-clear-filters">
+          <i class="bi bi-x-circle me-1"></i>Clear filters
+        </button>
+      </div>
+    </section>
+
+    <!-- Single-map view (default landing for pre-gen stubs). -->
+    <section id="vt-map-single" class="d-none">
+      <a href="../" id="vt-map-back-link" class="vt-map-back-link mb-3" aria-label="Back to all maps">
+        <i class="bi bi-arrow-left"></i><span>All maps</span>
+      </a>
+      <header class="vt-map-single-hero card mb-3" id="vt-map-single-hero"></header>
+      <div id="vt-map-single-body"></div>
+    </section>
+
+    <!-- Error fallback -->
+    <section id="vt-map-error" class="d-none">
+      <div class="card">
+        <div class="card-body text-center py-5">
+          <i class="bi bi-exclamation-triangle vt-map-error-icon"></i>
+          <h2 class="mt-3" id="vt-map-error-title">Map not found</h2>
+          <p class="text-secondary" id="vt-map-error-body">We could not locate that map in the catalog.</p>
+          <a href="../" class="btn btn-primary mt-2">
+            <i class="bi bi-arrow-left me-1"></i>Back to all maps
+          </a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Shared vendor bundle (paths relative to /map/<slug>/) -->
+  <script src="../../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../../js/theme.js"></script>
+  <script src="../../js/vtstats-fx.js"></script>
+  <script src="../../js/maps.js"></script>
+</body>
+</html>
