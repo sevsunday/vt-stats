@@ -40,25 +40,46 @@
         <i class="bi bi-list"></i>
       </button>
 
+      <!-- Mirrors index.html's topnav shape: icon + bare label on desktop
+           (no .vt-nav-label indirection, which the odf/raw browsers use
+           to render icon-only). The Players link carries `.active +
+           aria-current="page"` so the user gets clear "you are here"
+           feedback. Theme dropdown wires automatically via js/theme.js
+           auto-binding to [data-theme-menu]. -->
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a href="../index.html" class="vt-nav-icon-btn">
-            <i class="bi bi-speedometer2"></i><span class="vt-nav-label ms-2">Dashboard</span>
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
-          <a href="../docs.html" class="vt-nav-icon-btn">
-            <i class="bi bi-book"></i><span class="vt-nav-label ms-2">Docs</span>
+          <a href="../docs.html" class="vt-nav-icon-btn"
+             title="Open the docs" aria-label="Docs">
+            <i class="bi bi-book me-1"></i>Docs
           </a>
-          <a href="../raw.html" class="vt-nav-icon-btn">
-            <i class="bi bi-code-square"></i><span class="vt-nav-label ms-2">Raw data</span>
+          <a href="../raw.html" class="vt-nav-icon-btn"
+             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)"
+             aria-label="Raw data browser">
+            <i class="bi bi-code-square me-1"></i>Raw data
           </a>
-          <a href="../odf/index.html" class="vt-nav-icon-btn">
-            <i class="bi bi-boxes"></i><span class="vt-nav-label ms-2">ODF</span>
+          <a href="../odf/" class="vt-nav-icon-btn"
+             title="Browse the BZ2 Object Definition File (ODF) database"
+             aria-label="ODF browser">
+            <i class="bi bi-boxes me-1"></i>ODF
           </a>
-          <a href="./" class="vt-nav-icon-btn"
-             title="Browse player career profiles"
-             aria-label="Players">
-            <i class="bi bi-people"></i><span class="vt-nav-label ms-2">Players</span>
+          <a href="./" class="vt-nav-icon-btn active" aria-current="page"
+             title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
           </a>
+
+          <!-- Theme Dropdown. js/theme.js auto-binds and populates the
+               [data-theme-menu] ul on boot. Matches the index.html /
+               docs.html shape exactly. -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
         </div>
       </div>
     </div>
@@ -201,6 +222,14 @@
     <!-- SINGLE-PLAYER VIEW — populated via ?p=<steam64> or ?slug=<slug> -->
     <!-- ============================================================== -->
     <section id="vt-player-single" class="d-none">
+      <!-- Breadcrumb back-link. Static href — `./` lands on /player/
+           which always resolves to the directory view since we strip
+           ?p / ?slug / ?compare on the way. The link lives INSIDE the
+           section so it auto-hides whenever showSection() switches
+           away from single-player view; no JS wiring needed. -->
+      <a href="./" class="vt-player-back-link mb-3" aria-label="Back to all players">
+        <i class="bi bi-arrow-left"></i><span>All players</span>
+      </a>
       <!-- Hero card -->
       <header class="vt-player-single-hero card mb-3" id="vt-player-single-hero"></header>
 
@@ -225,6 +254,9 @@
     <!-- COMPARE VIEW — populated via ?compare=<slug,slug,...> (Phase 7) -->
     <!-- ============================================================== -->
     <section id="vt-player-compare" class="d-none">
+      <a href="./" class="vt-player-back-link mb-3" aria-label="Back to all players">
+        <i class="bi bi-arrow-left"></i><span>All players</span>
+      </a>
       <header class="vt-player-compare-hero card mb-3" id="vt-player-compare-hero"></header>
       <div id="vt-player-compare-body"></div>
     </section>

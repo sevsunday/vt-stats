@@ -364,6 +364,42 @@
 .vt-player-compare-chip button:hover { color: var(--kb-danger); }
 
 /* ---- 5. Single-player view ---- */
+
+/* Breadcrumb back-link. Sits above the hero card on both single-player
+   and compare views, gives users a clear "out" back to /player/. Pill
+   shape, neutral border by default, lifts to primary on hover. Marked
+   `inline-flex` so it sizes to its content and doesn't stretch like a
+   block-level anchor would. The `mb-3` utility class on the markup
+   handles the gap to the hero card below it. */
+.vt-player-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem 0.35rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 14%, transparent);
+  background: color-mix(in oklab, var(--kb-bg-muted) 30%, transparent);
+  color: var(--kb-text-secondary);
+  text-decoration: none;
+  font-family: 'Geist', system-ui, sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+.vt-player-back-link:hover,
+.vt-player-back-link:focus-visible {
+  color: var(--kb-primary);
+  border-color: color-mix(in oklab, var(--kb-primary) 50%, transparent);
+  background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+  transform: translateX(-2px);
+  outline: none;
+}
+.vt-player-back-link i {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
 .vt-player-single-hero { border-radius: var(--vt-player-card-radius); }
 .vt-player-single-hero-body {
   display: grid;
