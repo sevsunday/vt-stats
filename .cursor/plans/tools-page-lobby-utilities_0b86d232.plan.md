@@ -1,9 +1,9 @@
 ---
 name: tools-page-lobby-utilities
-overview: Build a new `/tools` page consolidating five lobby-management utilities (Live Session viewer, Player Wheel, Coinflip, Random Map, Team Balance) into a single screen-share-friendly stacked layout. Replace the topnav live-game pill with a slim "live-now" pulse on the new `Tools` topnav link.
+overview: Build a new `/tools` page consolidating five lobby utilities (Live Session viewer, Player Wheel, Coinflip, Random Map, Team Balonce) plus an Active Roster card into a single screen-share-friendly, viewport-fit grid layout. Replace the topnav live-game pill with a slim "live-now" pulse on the new `Tools` topnav link.
 todos:
   - id: phase-0-plumbing
-    content: "Phase 0 — Shared plumbing: factor `js/live-session-card.js` out of `js/active-game-indicator.js`; gut `active-game-indicator.js` to a topnav-pulse-only poller; remove `#vt-active-game` + `#active-game-modal` markup from all 6 shells; add `Tools` topnav link (`bi-dice-5-fill`) to all 6 shells + both pre-gen templates; bump `PLAYER_TEMPLATE_VERSION` 6→7 and `MAP_TEMPLATE_VERSION` 1→2; create `tools/index.html` skeleton + `css/tools.css` + `js/tools/player-resolver.js`"
+    content: "Phase 0 — Shared plumbing: factor `js/live-session-card.js` out of `js/active-game-indicator.js` (keep `.vt-active-game-modal-*` class names for stability); gut `active-game-indicator.js` to a topnav-pulse-only poller; remove `#vt-active-game` + `#active-game-modal` markup from all 6 shells; add `Tools` topnav link (`bi-controller`) to all 6 shells + both pre-gen templates; bump `PLAYER_TEMPLATE_VERSION` 6→7 and `MAP_TEMPLATE_VERSION` 1→2; create `tools/index.html` skeleton + `css/tools.css` + `js/tools/player-resolver.js`"
     status: pending
   - id: phase-1-shell-toggles
     content: "Phase 1 — Page shell + Live Session + Roster + global toggles: implement `js/tools/live-session.js` (known-hosts-filtered poller, session picker, force-refresh, lock-lobby, join/leave diff); `js/tools/toast-manager.js` (Bootstrap toast wrapper); `js/tools/main.js` (bootstrap, Mode/Ignore/Lock/Reset wiring, beforeunload guard); Active Roster card with add-player + custom-entry pickers; commander-history badges on roster rows"
@@ -28,7 +28,19 @@ isProject: false
 
 # Lobby Tools Page
 
-A new picker-unaware, picker-irrelevant, purely-client-side `/tools` page. Five stacked utility cards consume the existing pipeline outputs (`elo_current.json`, `player_slugs.json`, `map-registry.json`, `vsrmaplist.json`, `steamid_to_name.txt`, `known-hosts.json`) plus live BZ2 lobby data via the vendored `BZ2API`. Zero new pipeline outputs needed.
+A new picker-unaware, picker-irrelevant, purely-client-side `/tools` page. Six section cards (Live Session, Active Roster, Player Wheel, Coinflip, Map Roll, Team Balonce) consume the existing pipeline outputs (`elo_current.json`, `player_slugs.json`, `map-registry.json`, `vsrmaplist.json`, `steamid_to_name.txt`, `known-hosts.json`) plus live BZ2 lobby data via the vendored `BZ2API`. Zero new pipeline outputs needed.
+
+## Project conventions inherited (non-negotiable)
+- All styles via CSS custom properties (`--kb-*` for colors, `--vt-*` for effects). Zero hardcoded colors in HTML/JS.
+- Geist Sans / Geist Mono fonts (vendored).
+- Bootstrap 5.3.2 components only (modals, toasts, dropdowns, button groups). No new dependencies.
+- All inline interactions through CSS files only; no `<style>` blocks in HTML.
+- All disabled pills use `disabled` attribute + muted opacity. **Never** add "Coming soon" chips, tooltips, or any future-feature explainer text.
+- Pill groups (selection-method on wheel, mode on coinflip, pool count on map roll) implemented as Bootstrap `btn-group` with radio-style toggle behavior — only one selected at a time.
+
+## Testing
+
+This project has no JS test framework. Verification is manual via the page itself (with fixture data and live lobbies where applicable). Each phase's deliverables include a manual-test checklist captured in the corresponding PR description / commit message.
 
 ## Viewport-fit layout strategy
 
@@ -37,7 +49,7 @@ The page targets a **single-viewport fit** on desktop (no page-scroll on a typic
 - **Above 1280px wide**: CSS Grid 2-column layout. Left column carries the "data trio" (Live Session, Active Roster, Team Balonce); right column carries the "tools trio" (Player Wheel, Coinflip, Map Roll). Header action row spans both columns at the top.
 - **Below 1280px wide**: Falls back to single-column stacked layout with normal page scroll. No attempt to viewport-fit on narrow screens.
 - **Within each card**: internal `overflow-y: auto` on the content area so long content (e.g., 16-entry manual roster) scrolls inside the card instead of pushing the layout.
-- **Section heights**: each card carries a `max-height: calc((100vh - <header-and-toolbar>) / 3)` style ceiling so the grid distributes vertical space evenly. Cards with too little content shrink to natural height; cards with too much enable internal scroll.
+- **Section heights**: each card carries a `max-height: calc((100vh - var(--vt-tools-chrome-offset)) / 3)` ceiling. `--vt-tools-chrome-offset` accounts for the sticky topnav height (~56px) + page header action row (~64px) + grid gap (~24px). Cards with too little content shrink to natural height; cards with too much enable internal scroll.
 - **Toast container** floats top-right (fixed positioning), out of the grid flow.
 - The 1280px breakpoint is tunable post-ship via a single CSS custom property `--vt-tools-grid-breakpoint`.
 
@@ -75,7 +87,8 @@ The pulsing topnav pill is reduced to a tiny "live activity" pulse on the new `T
 - Factor [`js/active-game-indicator.js`](js/active-game-indicator.js)'s `renderModal()` / `renderTeamColumns()` / `renderPlayerRow()` into a new `js/live-session-card.js`. Stateless: `renderLiveSessionCard(session, container, opts)`.
 - Reduce [`js/active-game-indicator.js`](js/active-game-indicator.js) to a "pulse Tools link if known-host lobby is live" mini-poller. Public surface shrinks to just the boot block.
 - Remove `#vt-active-game`, `.vt-active-game-pill`, `.vt-active-game-gamewatch`, `#vt-active-game-dropdown`, `#vt-active-game-join`, `#active-game-modal` from all shells: [`index.html`](index.html), [`docs.html`](docs.html), [`raw.html`](raw.html), [`odf/index.html`](odf/index.html), [`player/index.html`](player/index.html), [`map/index.html`](map/index.html).
-- Add `Tools` topnav link (icon `bi-dice-5-fill`) sibling of `Maps` on the same six shells. The link's container exposes `data-vt-tools-live="0|1"` for the pulse-css to hook into.
+- Add `Tools` topnav link (icon `bi-controller`) sibling of `Maps` on the same six shells. The link's container exposes `data-vt-tools-live="0|1"` for the pulse-css to hook into.
+- **CSS class naming**: the factored `js/live-session-card.js` reuses the existing `.vt-active-game-modal-*` class names verbatim — no rename — to minimize CSS churn. The "active-game" semantic prefix is acceptable historical naming; rename can happen post-ship if it ever becomes confusing.
 - Add `Tools` link to [`scripts/player_template.html`](scripts/player_template.html) and [`scripts/map_template.html`](scripts/map_template.html). Bump `PLAYER_TEMPLATE_VERSION` 6 → 7 in [`scripts/generate_player_pages.py`](scripts/generate_player_pages.py:49); bump `MAP_TEMPLATE_VERSION` 1 → 2 in [`scripts/generate_map_pages.py`](scripts/generate_map_pages.py:54).
 - Create [`tools/index.html`](tools/index.html) skeleton (topnav, header action row, six empty section cards arranged in the **2-col viewport-fit grid layout** with `data-trio` left column [Live Session / Active Roster / Team Balonce] and `tools-trio` right column [Player Wheel / Coinflip / Map Roll], plus modals + toast container).
 - Create [`css/tools.css`](css/tools.css) — set up the `@media (min-width: 1280px)` grid layout from day one with per-card `max-height` ceilings + internal `overflow-y: auto`; component-specific styling added in subsequent phases.
@@ -90,32 +103,50 @@ The pulsing topnav pill is reduced to a tiny "live activity" pulse on the new `T
 - [`js/tools/main.js`](js/tools/main.js):
   - Page bootstrap, wires all section modules.
   - Top-of-page action row: `Reset all` button + `Ignore live data` toggle.
-  - State object `pageState = { mode: 'auto'|'manual', ignoreLive: bool, lobbyLocked: bool, liveRoster: [], manualRoster: [], rosterSnapshotForLockOrSwitch: [], isDirty: bool, components: {...} }`.
-  - Mode toggle (radio): Auto / Manual. Auto→Manual = snapshot current `liveRoster` into `manualRoster`; Manual→Auto = confirm-discard if `manualRoster.length > 0`.
-  - `beforeunload` guard wired to a centralized `pageState.isDirty` computation (manual roster non-empty OR any component has produced a result OR wheel has removals).
+  - State object `pageState = { mode: 'auto'|'manual', ignoreLive: bool, lobbyLocked: bool, liveRoster: [], manualRoster: [], rosterSnapshotForLockOrSwitch: [], lastSessionId: string|null, isDirty: bool, components: {...} }`.
+  - Mode toggle (radio): Auto / Manual. **Lives in the Active Roster card header**, not the page action row.
+    - Auto→Manual = snapshot current `liveRoster` into `manualRoster`; auto-unlock lobby if locked.
+    - Manual→Auto = confirm-discard if `manualRoster.length > 0`; clear `manualRoster`; resume polling-driven roster.
+  - `beforeunload` guard wired to a centralized `isDirty` getter: returns `true` when ANY of — `mode === 'manual' && manualRoster.length > 0` OR wheel has been spun (`wheel.lastWinner !== null`) OR wheel has removals (`wheel.removedSteam64s.size > 0`) OR coin has flipped (`coin.lastResult !== null`) OR map has rolled (`mapRoll.lastResults.some(r => r !== null)`) OR team-balonce has been computed (`balonce.partition !== null`) OR has any manual swap (`balonce.manualSwaps.size > 0`).
   - `Reset all` button opens confirm modal; on confirm, resets every component's state, clears toggles back to defaults (`mode: 'auto', ignoreLive: false, lobbyLocked: false`), wipes dirty flag, triggers a fresh poll if not ignoring.
-- Active Roster card: list of current roster (Auto mode: read-only from live data; Manual mode: editable). Each row carries the resolved display name, lobbyNick subtext (if differs), VTSR-T tier pill, commander-history badge (`Strong cmdr` / `Cmdr-curious` / `Rare cmdr`), Steam icon + VTstats icon, and (Manual mode only) a remove button.
-- Manual mode adds: search-driven `Add player` dropdown (union of `player_slugs` + `steamid_to_name.txt`) + a `Custom entry` input for ad-hoc guests (marked `provisional`, anchored at VTSR 1500).
-- [`js/tools/toast-manager.js`](js/tools/toast-manager.js): tiny Bootstrap-toast wrapper. `showJoin(name, count)` / `showLeave(name, count)`. Stacks top-right, max 5 visible, auto-dismiss 4s. Suppressed when `lobbyLocked` or `ignoreLive`.
-- Join/leave detection: in `live-session.js` after each successful poll, diff previous vs new `roster` by steam64 and call the toast manager.
+  - **Cross-toggle interactions** (made explicit so the state machine is fully specified):
+    - `lobbyLocked` is force-cleared when `ignoreLive` flips ON (no polling = nothing to lock).
+    - `lobbyLocked` is force-cleared when `mode` switches to Manual (manual roster doesn't track live data).
+    - `mode` is forced to `manual` when `ignoreLive` flips ON; Auto radio is disabled with a tooltip until `ignoreLive` is flipped OFF.
+    - Toggling `ignoreLive` OFF does **not** auto-switch mode back to Auto; the user must opt back in via the mode toggle.
+- Active Roster card: list of current roster (Auto mode: read-only from live data; Manual mode: editable). Each row carries the resolved display name, lobbyNick subtext (if differs), VTSR-T tier pill, commander-history badge (`Strong cmdr` / `Cmdr-curious` / `Rare cmdr`), Steam icon + VTstats icon, and (Manual mode only) a remove button. Card header carries the Mode toggle + roster source attribution chip (`Live: <host>'s lobby` / `Locked at HH:MM:SS` / `Manual roster`).
+- Manual mode adds: search-driven `Add player` dropdown (union of `player_slugs` + `steamid_to_name.txt`) + a `Custom entry` input for ad-hoc guests. **Provisional anchoring rules** (used by team-balonce + roster row chips):
+  - Unrated (no entry in `elo_current.ratings[]`): assigned VTSR `1500`, flagged `isUnknown: true`, `isProvisional: true` — renders a `provisional` chip.
+  - Rated but `matches_provisional: true` in `elo_current.json`: their actual VTSR carries through, flagged `isProvisional: true` — also renders a `provisional` chip.
+  - Custom (no Steam64, user-typed name): assigned VTSR `1500`, flagged `isCustom: true`, `isProvisional: true` — renders a `custom` chip.
+- [`js/tools/toast-manager.js`](js/tools/toast-manager.js): tiny Bootstrap-toast wrapper. `showJoin(name, count)` / `showLeave(name, count)`. Stacks in the **toast container** (fixed top-right, `position: fixed; top: 80px; right: 24px; z-index: 1080;` to clear sticky topnav). Max 5 visible, auto-dismiss 4s. Suppressed when `lobbyLocked || ignoreLive || mode === 'manual'`.
+- Join/leave detection: in `live-session.js` after each successful poll, diff previous vs new `roster` by steam64 and call the toast manager. **Baseline reset rules** (no toasts on any of these conditions, to avoid spurious spam):
+  - First successful poll after page load
+  - First successful poll after `ignoreLive` is toggled OFF
+  - First successful poll after the selected `sessionId` changes (user picked a different lobby from the session picker)
+  - First successful poll after `lobbyLocked` is toggled OFF (catches up to whatever the live state is now)
+  - When `mode === 'manual'` (no polling-driven roster diff is meaningful)
 
 ### Phase 2 — Player Wheel
 - [`js/tools/wheel.js`](js/tools/wheel.js).
-- Canvas-based wheel. Slice colors **alternate** `--kb-primary` / `--kb-secondary` (theme-reactive — read via `getComputedStyle()` on init + on theme change). Slice text in `--kb-text-primary` rotated to slice angle. Center hub uses `--kb-bg-card`. Pointer/marker uses `--kb-text-primary`.
-- Selection-method pills above the wheel: `Wheel` (active), `Plinko` (disabled), `Sniper` (disabled). All three rendered same shape; disabled ones get muted opacity but slight hover brightness. **No "Coming soon" chip or label** — pills are just disabled as-is, the absence is its own hint.
-- Spin: click anywhere on the wheel OR a `SPIN` button. Pre-compute target via `Math.random()`, animate angular velocity decay over ~4–6s with friction, decelerate to land on target. `prefers-reduced-motion` → 800ms snap.
-- Result modal (Bootstrap): extravagant reveal with the resolved display name + tier pill + lobbyNick subtext + Steam profile link + VTstats profile link + `Remove from wheel` button + `Spin again` button. Removing populates a `Removed (N)` chip list below the wheel with `Restore` per-item buttons.
+- Canvas-based wheel. Slice colors **alternate** `--kb-primary` / `--kb-secondary`. Slice text in `--kb-text-primary` rotated to slice angle. Center hub uses `--kb-bg-card`. Pointer/marker uses `--kb-text-primary`.
+- **Theme-reactivity mechanism**: on init, resolve colors via `getComputedStyle(document.documentElement).getPropertyValue(...)`. Listen for theme changes via a `MutationObserver` on `<html>` watching `data-theme` / `class` attribute changes. On change → re-read colors and re-render the wheel.
+- Selection-method pills above the wheel: `Wheel` (active), `Plinko` (disabled), `Sniper` (disabled). Implemented as a Bootstrap `btn-group` radio. Disabled pills carry the `disabled` attribute + muted opacity. **No "Coming soon" chip, no label, no tooltip teaser** — pills are just disabled as-is.
+- Spin: click anywhere on the wheel OR the `SPIN` button. Pre-compute target via `Math.random()`. Animation uses `requestAnimationFrame` with angular velocity decay (~4–6s friction-based deceleration) landing on target. `prefers-reduced-motion` → 800ms snap.
+- Result modal (Bootstrap): extravagant reveal with the resolved display name + tier pill + lobbyNick subtext + Steam profile icon link + VTstats profile icon link + `Remove from wheel` button + `Spin again` button. Removing populates a `Removed (N)` chip list below the wheel with `Restore` per-item buttons.
 - Roster sync: when active roster changes, wheel slice list updates silently (no respin). Wheel-local `removedSteam64s` Set persists across roster updates (a removed player who re-joins the lobby stays removed until restored).
+- **Empty states**: 0 active slices → "Add at least 2 players to spin" placeholder, SPIN button disabled. 1 active slice → "Only 1 player available — add or restore others to spin", SPIN button disabled.
 
 ### Phase 3 — Coinflip
 - [`js/tools/coinflip.js`](js/tools/coinflip.js).
-- Mode pills: `Single` (active), `Best 3 of 5` (disabled). Same convention as the wheel pills — disabled pill renders as-is with no "Coming soon" label.
-- Animation: horizontal-shuffle selector bar oscillating between two team cards labeled `Team 1` / `Team 2` (or the live session's `teamNames.svar1` / `svar2` if available). Decelerates onto winner over ~2s; `prefers-reduced-motion` → 500ms snap.
+- Mode pills: `Single` (active), `Best 3 of 5` (disabled). Bootstrap `btn-group` radio. Same convention as wheel pills — disabled pill renders as-is, no chip / label / tooltip teaser.
+- Animation: horizontal-shuffle selector bar oscillating between two team cards labeled `Team 1` / `Team 2` (or the live session's `teamNames.svar1` / `svar2` when present and non-empty). Decelerates onto winner over ~2s using `requestAnimationFrame`; `prefers-reduced-motion` → 500ms snap.
 - Result inline; doesn't open a modal (already attention-grabbing on a stacked page).
+- **No empty-state gate**: coinflip is always operable regardless of roster (it's just choosing a team, not a player).
 
 ### Phase 4 — Random Map (slot machine)
 - [`js/tools/map-roll.js`](js/tools/map-roll.js).
-- Pool count pills: `7+` (default) · `6+` · `All`. Apply to all three reels.
+- Pool count pills: `7+` (default) · `6+` · `All`. Bootstrap `btn-group` radio. Apply to all three reels.
 - Three reels:
   - Reel 1 (Popular): `vsrmaplist.json` entries where `Tags === "popular"`, filtered by pool count
   - Reel 2 (Played before): `map-registry` entries whose `map_file` is in `data/processed/matches.json`, filtered by pool count
@@ -190,7 +221,7 @@ A dynamic horizontal bar that visualises team-strength delta. Sits below the tea
 ## File-by-file summary
 
 ### New files
-- [`tools/index.html`](tools/index.html) — page shell with five stacked section cards + modals (wheel result, reset confirm) + Bootstrap toast container
+- [`tools/index.html`](tools/index.html) — page shell: topnav, page header action row (`Reset all` button + `Ignore live data` toggle), 2-col grid with six section cards (data-trio left: Live Session, Active Roster, Team Balonce; tools-trio right: Player Wheel, Coinflip, Map Roll), modals (wheel result, reset confirm, manual-→-auto discard confirm), Bootstrap toast container (fixed top-right, `z-index: 1080`)
 - [`css/tools.css`](css/tools.css) — 2-col viewport-fit grid (above 1280px) + single-col fallback, per-card max-height + internal overflow, wheel canvas styling, slot machine reel layout, coin animation, team-balonce drag styling, Played Meter gradient track + chevron, section card chrome
 - [`js/tools/main.js`](js/tools/main.js) — page bootstrap, state machine, Mode + Ignore + Lock + Reset wiring, beforeunload guard
 - [`js/tools/player-resolver.js`](js/tools/player-resolver.js) — shared 4-tier Steam64 resolver, eager + lazy loaders
@@ -235,11 +266,11 @@ stateDiagram-v2
   ResetAll --> AutoUnlocked
 ```
 
-- **Lock lobby**: freezes the surfaced roster/session at lock-time; polling continues silently in the background so unlocking is immediate. Suppresses join/leave toasts. Wheel/coin/balance keep working against the frozen roster.
-- **Ignore live data**: full poll kill-switch. Forces Manual mode. Cleanest way to escape bad lobby data.
-- **Reset all**: confirm modal, then wipe — `mode: 'auto', ignoreLive: false, lobbyLocked: false`, all component states (wheel removals, coin result, map results, team balance config, manual swaps), dirty flag. Triggers immediate poll.
-- **Dirty flag** (drives beforeunload): true when ANY of — manual roster non-empty, wheel has been spun, wheel has removals, coin has flipped, map has rolled, team balance has been computed or manually swapped.
-- **Join/leave toasts**: diff each poll's roster against the previous; emit only when `mode === 'auto' AND NOT lobbyLocked AND NOT ignoreLive`. Skip first-load baseline diff.
+- **Lock lobby**: freezes the surfaced roster/session at lock-time; polling continues silently in the background so unlocking is immediate. Suppresses join/leave toasts. Wheel/coin/balonce keep working against the frozen roster. Force-cleared by `ignoreLive` ON and by mode switch to Manual.
+- **Ignore live data**: full poll kill-switch. Force-clears `lobbyLocked`. Forces Manual mode (Auto radio disabled with tooltip). Cleanest way to escape bad lobby data.
+- **Reset all**: confirm modal, then wipe — `mode: 'auto', ignoreLive: false, lobbyLocked: false`, all component states (wheel removals + last winner, coin result, map results, team-balonce commander config + manual swaps + partition), dirty flag. Triggers immediate poll.
+- **Dirty flag** (drives beforeunload): true when ANY of — `mode === 'manual' && manualRoster.length > 0`, wheel has been spun, wheel has removals, coin has flipped, map has rolled, team-balonce has computed partition OR has manual swaps.
+- **Join/leave toasts**: diff each poll's roster against the previous; emit only when `mode === 'auto' AND NOT lobbyLocked AND NOT ignoreLive`. Reset baseline (no toasts on next poll) when: first load, `ignoreLive` toggles OFF, selected `sessionId` changes, `lobbyLocked` toggles OFF.
 
 ## Load order in [`tools/index.html`](tools/index.html)
 
