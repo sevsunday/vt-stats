@@ -1849,32 +1849,35 @@ $$
 
 Even on a top-fragger game, this player loses a small amount of rating. (Under v2.0's $S_R = 400$, $E$ pinned at $+0.997$ and the same match produced a slightly larger $-0.67 \cdot K$ drop.) Across many matches their rating plateaus where typical $P_i \approx E_i$ — i.e. where their rating matches their actual performance. This fine-tuned ELO-style opponent expectation prevents top players from gaining rating indefinitely just by farming soft lobbies; v2.1 lets the plateau sit ~300 pts above the median lobby instead of ~140, restoring a leaderboard-friendly spread.
 
-### 13.7 Migration note — v1 → v2 → v2.1 → v2.2 → v2.3 → v2.4
+### 13.7 Migration note — v1 → v2 → v2.1 → v2.2 → v2.3 → v2.4 → v2.5
 
-| Aspect | v1 | v2.0 | v2.1 | v2.2 | v2.3 (alpha-blended thug composite + Combat ELO → Thug ELO rename) | v2.4 (commander role adjustment) |
-|---|---|---|---|---|---|---|
-| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged | unchanged | unchanged | unchanged |
-| Rating component name | Combat ELO ($R^C$) | unchanged | unchanged | unchanged | **Thug ELO** ($R^T$) | unchanged |
-| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged | unchanged | Median of opponents' Thug ELO | unchanged |
-| Logistic scale ($S_R$) | n/a | $400$ | $\mathbf{800}$ | $800$ | $800$ (unchanged) | $800$ (unchanged) |
-| Outcome scale ($S_O$) | $2.5$ | $2.5$ | $2.5$ | $2.5$ | $2.5$ (unchanged) | $2.5$ (unchanged) |
-| Composite axes | 7 | 7 | 7 | 8 | **8** (rename `kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`; broaden `pve_share` to all enemy non-human dmg) | 8 (unchanged) |
-| Alpha-blended PvE in thug axes | n/a | n/a | n/a | n/a | **$\alpha_{\mathrm{PvE}} = 0.5$** (locked default; tunable post-ship) | unchanged |
-| Weapon-normalized accuracy | flat ratio | flat ratio | flat ratio | flat ratio | **per-weapon ratio vs lobby baseline, shot-share weighted** | unchanged |
-| Commander row per-axis shift | n/a | n/a | n/a | n/a | n/a | **post-clip-space additive shift on 6 of 8 axes; re-clipped to $[-1, +1]$** |
-| Commander baseline drift | n/a | n/a | n/a | n/a | n/a | **shrunk rolling mean (strength 30) for 4 audit-derived priors; LOCKED at seed for 2 hand-tuned priors** |
-| Per-rating `matches_as_commander` / `matches_as_thug` | absent | absent | absent | absent | absent | **added** |
-| Per-delta `axis_contributions_meta` field | absent | absent | absent | absent | absent | **added (commander rows only)** — `{axis: {z_pre_shift, shift, z_post_shift}}` |
-| Top-level `commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed` | absent | absent | absent | absent | absent | **added** |
-| K-factor decay | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
-| Loss aversion + soft floor | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
-| Tier ranges | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
-| Wins ELO blend ($\alpha$) | $0.0$ | $0.0$ | $0.0$ | $0.0$ | $0.0$ (still stubbed) | $0.0$ (still stubbed) |
-| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ | $3$ | $4$ (axis renames; `combat_elo`→`thug_elo` JSON field; new `axis_contributions` per delta + `axis_means` per rating; `alpha_pve` constant in top-level constants block) | $\mathbf{5}$ (commander block on `elo_current.json`; `axis_contributions_meta` on commander deltas; `matches_as_commander` / `matches_as_thug` per rating) |
-| `PIPELINE_VERSION` | $7$ | $8$ | $9$ | $10$ | $11$ (forced full re-process: new pipeline fields incl. per-weapon `pvp_hits`, `loadout`, `per_class_combat`) | $\mathbf{15}$ (forced full re-rate to apply commander shift) |
-| `match.schema_version` | $1$ → $2$ → $3$ | $3$ | $3$ | $3$ | $4$ (per-match leaderboard rows gain `personal.pvp_kills`/`pve_kills`/etc., `weapon_breakdown[w].pvp_hits`, `loadout`, `per_class_combat`) | $4$ (no per-match shape change; the role adjustment is purely inside the rating math) |
-| Per-delta `axis_contributions` field | absent | absent | absent | absent | added (per-axis z-score after clip / 2) | unchanged shape; values for commander rows are now POST-shift |
-| Per-rating `axis_means` field | absent | absent | absent | absent | added (career-average axis z-scores per player) | unchanged shape; for commander-heavy players the career means now reflect post-shift z |
+| Aspect | v1 | v2.0 | v2.1 | v2.2 | v2.3 (alpha-blended thug composite + Combat ELO → Thug ELO rename) | v2.4 (commander role adjustment) | v2.5 (row-level exclusion gates) |
+|---|---|---|---|---|---|---|---|
+| Per-match comparison baseline | Lobby median performance ($P_{\text{med}}$) | Opponent-strength-weighted expected ($E_i$) | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Rating component name | Combat ELO ($R^C$) | unchanged | unchanged | unchanged | **Thug ELO** ($R^T$) | unchanged | unchanged |
+| Lobby reference rating | n/a | Median of opponents' Combat ELO | unchanged | unchanged | Median of opponents' Thug ELO | unchanged | unchanged (computed across the *post-exclusion* lobby) |
+| Logistic scale ($S_R$) | n/a | $400$ | $\mathbf{800}$ | $800$ | $800$ (unchanged) | $800$ (unchanged) | $800$ (unchanged) |
+| Outcome scale ($S_O$) | $2.5$ | $2.5$ | $2.5$ | $2.5$ | $2.5$ (unchanged) | $2.5$ (unchanged) | $2.5$ (unchanged) |
+| Composite axes | 7 | 7 | 7 | 8 | **8** (rename `kill_rate`→`thug_kill_rate`, `accuracy`→`thug_accuracy`, `pvp_share`→`thug_efficiency`, `structure_share`→`pve_share`; broaden `pve_share` to all enemy non-human dmg) | 8 (unchanged) | 8 (unchanged) |
+| Alpha-blended PvE in thug axes | n/a | n/a | n/a | n/a | **$\alpha_{\mathrm{PvE}} = 0.5$** (locked default; tunable post-ship) | unchanged | unchanged |
+| Weapon-normalized accuracy | flat ratio | flat ratio | flat ratio | flat ratio | **per-weapon ratio vs lobby baseline, shot-share weighted** | unchanged | unchanged |
+| Commander row per-axis shift | n/a | n/a | n/a | n/a | n/a | **post-clip-space additive shift on 6 of 8 axes; re-clipped to $[-1, +1]$** | unchanged |
+| Commander baseline drift | n/a | n/a | n/a | n/a | n/a | **shrunk rolling mean (strength 30) for 4 audit-derived priors; LOCKED at seed for 2 hand-tuned priors** | unchanged |
+| Per-row exclusion gates | n/a | n/a | n/a | n/a | n/a | n/a | **`is_campod` (>25% campod-share) + `is_low_activity` (<75% presence window) → row omitted from rated lobby; zero penalty** |
+| Per-rating `matches_as_commander` / `matches_as_thug` | absent | absent | absent | absent | absent | **added** | unchanged |
+| Per-delta `axis_contributions_meta` field | absent | absent | absent | absent | absent | **added (commander rows only)** — `{axis: {z_pre_shift, shift, z_post_shift}}` | unchanged |
+| Top-level `commander_axis_prior` / `commander_baseline_shrinkage` / `commander_baseline_locked_axes` / `commander_baseline_observed` | absent | absent | absent | absent | absent | **added** | unchanged |
+| Top-level `rows_excluded_campod` / `rows_excluded_low_activity` | absent | absent | absent | absent | absent | absent | **added** (auditability counters on `elo_current.json`) |
+| Per-row `is_campod` / `is_low_activity` / `campod_share` / `presence_window_sec` | absent | absent | absent | absent | absent | absent | **added** to `match.leaderboard[]` rows |
+| K-factor decay | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Loss aversion + soft floor | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Tier ranges | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged | unchanged |
+| Wins ELO blend ($\alpha$) | $0.0$ | $0.0$ | $0.0$ | $0.0$ | $0.0$ (still stubbed) | $0.0$ (still stubbed) | $0.0$ (still stubbed) |
+| `ELO_SCHEMA_VERSION` | $1$ | $2$ | $2$ | $3$ | $4$ (axis renames; `combat_elo`→`thug_elo` JSON field; new `axis_contributions` per delta + `axis_means` per rating; `alpha_pve` constant in top-level constants block) | $5$ (commander block on `elo_current.json`; `axis_contributions_meta` on commander deltas; `matches_as_commander` / `matches_as_thug` per rating) | $\mathbf{6}$ (`rows_excluded_*` counters; per-row exclusion fields) |
+| `PIPELINE_VERSION` | $7$ | $8$ | $9$ | $10$ | $11$ (forced full re-process: new pipeline fields incl. per-weapon `pvp_hits`, `loadout`, `per_class_combat`) | $15$ (forced full re-rate to apply commander shift) | $\mathbf{16}$ (forced full re-rate to apply exclusion gates) |
+| `match.schema_version` | $1$ → $2$ → $3$ | $3$ | $3$ | $3$ | $4$ (per-match leaderboard rows gain `personal.pvp_kills`/`pve_kills`/etc., `weapon_breakdown[w].pvp_hits`, `loadout`, `per_class_combat`) | $4$ (no per-match shape change; the role adjustment is purely inside the rating math) | $\mathbf{6}$ (per-row exclusion fields added to `leaderboard[]`) |
+| Per-delta `axis_contributions` field | absent | absent | absent | absent | added (per-axis z-score after clip / 2) | unchanged shape; values for commander rows are now POST-shift | unchanged |
+| Per-rating `axis_means` field | absent | absent | absent | absent | added (career-average axis z-scores per player) | unchanged shape; for commander-heavy players the career means now reflect post-shift z | unchanged |
 
 **Empirical effect (v2)**: compresses the high tail (top players plateau where their typical $P_i$ matches their $E_i$, instead of climbing forever in soft lobbies) and lifts the floor (mid- and low-rated players who play in heavyweight lobbies stop bleeding rating for "average" performances they were never expected to exceed). Existing `peak_vtsr` values from v1 are no longer comparable — every player's rating history was recomputed from scratch on the first v2 pipeline run.
 
@@ -1979,6 +1982,66 @@ Audit invariant: for each shifted axis $a$ on a commander row, `axis_contributio
 **Why we changed it (v2.3 → v2.4)**: VTSR-T was systematically punishing players for being chosen / volunteering as commander, against the explicit design goal of "thug rating, role-fair where the role lets you fight". The audit confirmed both magnitude (~8 ELO/match) and consistency (within-player evidence across 13 dual-role players). The role-baseline z-shift ("Option A" from the algorithm-selection conversation) is the lightest-touch fix that lands the commander mean back at $\approx 0$ without requiring a separate VTSR-C rating to be designed and shipped first. VTSR-C is reserved for future work and will incorporate VTSR-T as one of its inputs.
 
 **Empirical effect (v2.4)**: post-shift, the commander mean $P_i$ lands at $\approx 0$ (within $\pm 0.02$, with a small positive residual from the `pve_share` boost). The 4 audit-derived shifted axes' commander means converge to $\approx 0$. `target_lock_pct` keeps a residual ~$-0.366$ commander mean by design (post-clip empirical $-0.466$ + locked shift $+0.10$). `pve_share` lifts to ~$+0.161$ commander mean by design (post-clip empirical $+0.111$ + locked shift $+0.05$). `thug_accuracy` and `snipe_bonus` are unchanged at empirical means (role-blind by design). Frequent commanders gain ~50–150 ELO; thug-pure players are essentially flat. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — the $P_i$ definition changed for commander rows; historical peaks were recomputed from scratch on the v2.4 re-rate.
+
+### 13.7.2 v2.5 — row-level exclusion gates
+
+VTSR-T's per-lobby z-scoring assumes every player on the leaderboard had a chance to play. Two structural cases violate that: (1) **"campod" rows** where a player spent most of the match in a fly-cam observer ship (zero damage / zero kills against a 9-player baseline reads as the lobby floor on every axis simultaneously), and (2) **"low-activity" rows** where a player joined late or DC'd mid-match (full-match denominators against partial-match presence inflates every "share" metric in the wrong direction). Both deform z-scores for everyone else in the lobby, AND the affected player gets a deflated rating change for circumstances they didn't choose. v2.5 omits these rows from the rated lobby entirely.
+
+**Gates** (set per-row in [scripts/process_stats.py](scripts/process_stats.py); thresholds are tunable module constants):
+
+- `is_campod` — `True` when player spent more than `CAMPOD_MAX_SHARE = 0.25` of match wall-clock in any of `{evcamr_vsr, fvcamr_vsr, ivcamr_vsr, camerapod_vsr}.odf` (the four player-flyable camera-pod ODFs). The exact share is surfaced as `campod_share ∈ [0.0, 1.0]` for UI tooltips.
+- `is_low_activity` — `True` when the event-stream presence window covers less than `LOW_ACTIVITY_MIN_PRESENCE = 0.75` of match duration. Computed as `(last_event_tick - first_event_tick) / total_ticks`. Catches both late joiners and mid-match disconnects in a single window check. The raw window in seconds is surfaced as `presence_window_sec`.
+
+**Behavior.** Rows where either flag is true are dropped from the rated lobby in `compute_performance_index()` **before z-scoring** (see [scripts/elo.py](scripts/elo.py) at the top of `compute_performance_index`). For the affected player on that match: no per-axis z-score is computed, no contribution to lobby z-score denominators for other players, no `delta` entry in `elo_history.deltas[]`, no `matches_played` increment, no rating change at all. **Pure omission, zero penalty** — the match did not happen for that player rating-wise. The match itself is still rated (other players' deltas are computed normally against the post-exclusion lobby).
+
+**Visibility.** The dashboard's per-match Player Leaderboard still shows excluded rows with `Campod` / `Partial` badges (`.vt-campod-badge` / `.vt-partial-badge`) and 55% opacity (`.vt-row-campod` / `.vt-row-partial`) for transparency — only the rating math skips them. The badges carry hover tooltips reading the underlying `campod_share` / `presence_window_sec` so reviewers can audit the gate's decision.
+
+**Auditability.** Two new pool-level counters land on `elo_current.json`:
+
+- `rows_excluded_campod` — count of rated-match rows omitted by the campod gate (currently 13 rows across the corpus).
+- `rows_excluded_low_activity` — count of rated-match rows omitted by the low-activity gate (currently 6 rows across the corpus).
+
+Both thresholds (`CAMPOD_MAX_SHARE`, `LOW_ACTIVITY_MIN_PRESENCE`) are module-level constants in [scripts/process_stats.py](scripts/process_stats.py) — re-tuning is a one-line change with no schema bump (only `PIPELINE_VERSION` to force a cached re-rate).
+
+#### 13.7.2.1 Worked example (v2.5 Domakus)
+
+Real numbers from `data/processed/elo_history.json`, match `2026-05-08T23-46-02` — Domakus's rated match in mid-corpus. Recent, 10-player rated lobby, no excluded rows.
+
+**Inputs:**
+
+- Player: **Domakus** at $R^T = 1689.81$ (high Tier 2), $n \approx 28$ prior rated matches.
+- Lobby reference: $\bar{R}_i \approx 1500$ (median of the other 9 players' Thug ELO).
+- Performance index: $P_i = +0.5665$ (top of the lobby — strong on net damage, kill rate, accuracy, efficiency, mobility, and T-key).
+
+**Step 1 — K-factor:**
+
+$$
+K_i = 40 \cdot \left(1 - \frac{28}{28 + 10}\right) + 12 \approx 22.53
+$$
+
+(Settled-veteran K — half the rookie K.)
+
+**Step 2 — expected performance** ($S_R = 800$, Domakus out-rates the lobby by ~190 pts):
+
+$$
+E_i = \frac{2}{1 + 10^{(1500 - 1689.81) / 800}} - 1 \approx +0.2667
+$$
+
+The rating system expects Domakus to score about $+0.27$ in lobby-z-score units. He scored $+0.567$ — clearly above expectation but not blowout-above (the bar was high to start with).
+
+**Step 3 — delta:**
+
+$$
+\Delta R^T_i = 22.53 \cdot 2.5 \cdot (0.5665 - 0.2667) \approx +16.89
+$$
+
+**Result:** $R^T = 1689.81 \to 1706.70$.
+
+Domakus is a thug-row in this match (his career split is $43$ thug / $4$ commander), so the v2.4 commander shift doesn't apply. v2.5's row-level exclusion gates also don't apply — every row in this lobby cleared both gates. The same K / $E_i$ / blend math from §13.1–§13.5 applies; v2.5's contribution is purely *which rows enter the lobby z-score denominators in the first place*. If a campod row had been present in this lobby, it would simply not appear in the median (Step 2's $\bar{R}_i$) or in any axis's z-score denominators (Step 1's $P_i$).
+
+**Why we changed it (v2.4 → v2.5).** Two regressions in the v2.4 corpus pointed at the same root cause: (1) campod rows scoring extreme z-scores on every axis (zero damage / zero kills against a 9-player baseline reads as the lobby floor across the board), polluting other players' z-scores by deforming the per-axis means and stdevs; (2) late-joiners taking large losses for "underperforming" against full-match denominators (a player who joined at the 60% mark naturally lands near zero on every share-of-total-match metric). Adding row-level gates is strictly less invasive than per-axis adjustment: the affected player gets exact rating-preservation rather than a synthetic correction, and the unaffected players' z-scores are computed against a cleaner baseline. The two thresholds (25% campod-share, 75% presence window) are deliberately conservative — they catch the obvious cases without false-positiving short partial campod usage or a player who dropped for the last 10% of a long match.
+
+**Empirical effect (v2.5)**: 13 campod + 6 low-activity rows omitted across the 84-match rated corpus (~2% of rated rows). `peak_vtsr` shifts only for the small set of players who had at least one excluded appearance (their corpus is shorter, and their adjacent matches' lobby compositions changed); the rest of the corpus is byte-identical to v2.4. **`peak_vtsr` values from v2.4 are no longer comparable to v2.5 for affected players** — the v2.5 re-rate recomputed every player's history chronologically.
 
 ### 13.8 Tier ladder
 

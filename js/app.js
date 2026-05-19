@@ -5105,114 +5105,45 @@
     return '0.00';
   }
 
-  // Pre-rendered KaTeX HTML for the VTSR-T methodology modal. Built
-  // lazily on first modal open so katex.min.js (deferred) is guaranteed
-  // loaded. Cached as a module-local string after first build.
+  // HTML for the VTSR-T methodology modal. Built lazily on first
+  // modal open and cached as a module-local string. Each section is a
+  // `<section class="vt-vtsr-doc-section">` with an h6 title; matching
+  // CSS lives in css/vtstats-theme.css.
   //
-  // v2 (Phase 12): rewritten as a 6-section structured reference (it
-  // stopped being a tooltip 3 iterations ago — the modal can host a
-  // proper layout). Each section is a `<section
-  // class="vt-vtsr-doc-section">` with an h6 title; matching CSS
-  // lives in css/vtstats-theme.css.
-  //
-  // v2.1: bumped the rating-logistic scale from S_R = 400 to 800.
-  // Curve table values (curveRows below) are pre-computed for S_R = 800.
-  // At S_R = 400 the same ±200 / ±400 gaps would read ±0.52 / ±0.82,
-  // not ±0.28 / ±0.52 — relabel if S_R changes again.
+  // v3 (modal slim-down): rewritten as a public-friendly 5-section
+  // reference -- TL;DR + 8 axes table + commander adjustment + tier
+  // ladder + worked example. Zero LaTeX (one inline plain-text "delta
+  // rating = K * (you - expected)" line is the only math gesture).
+  // The full math reference lives in DEVELOPER_GUIDE.md SS13, linked
+  // from the modal footer's "Read the full methodology" button.
   let vtsrTooltipHtmlCache = null;
-  // Returns the rendered modal HTML, or ``null`` when ``katex.min.js``
-  // (deferred in index.html) hasn't finished loading yet. Returning
-  // null instead of a ``<code>``-fallback string is critical: an
-  // earlier version cached the fallback and locked the modal into
-  // showing raw LaTeX forever, even after KaTeX eventually loaded.
-  // The caller (the modal's ``show.bs.modal`` handler) re-attempts on
-  // each open until KaTeX is ready, then locks in the cached result.
+  // Returns the rendered modal HTML, or ``null`` when KaTeX hasn't
+  // loaded yet. The KaTeX gate is preserved as cheap insurance even
+  // though the v3 body has zero equations -- if a future revision
+  // re-introduces math, the lazy show.bs.modal re-attempt logic at
+  // the caller will keep working without changes.
   function buildVtsrTooltipHtml() {
     if (vtsrTooltipHtmlCache) return vtsrTooltipHtmlCache;
     const k = (window.katex && typeof window.katex.renderToString === 'function')
       ? window.katex
       : null;
     if (!k) return null;
-    function tex(latex, displayMode) {
-      try { return k.renderToString(latex, { displayMode, throwOnError: false }); }
-      catch { return `<code>${esc(latex)}</code>`; }
-    }
 
-    // ---- Equations (v2.3: R^C -> R^T to match the Combat ELO ->
-    //                 Thug ELO architectural rename). ----
-    const updateEqGain = tex('\\Delta R^{T}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i)', true);
-    const updateEqLoss = tex('\\Delta R^{T}_{i} \\;=\\; K_i \\cdot S_O \\cdot (P_i - E_i) \\cdot L \\cdot \\varphi(R^{T}_{i}) \\quad \\text{when } (P_i - E_i) < 0', true);
-    const blendEq      = tex('\\mathrm{VTSR\\text{-}T}_i \\;=\\; \\alpha \\cdot R^{W}_i + (1 - \\alpha) \\cdot R^{T}_i', true);
-    const expectedEq   = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(\\bar{R}_i - R^{T}_i) / S_R}} \\;-\\; 1', true);
-    const rbarEq       = tex('\\bar{R}_i \\;=\\; \\mathrm{median}\\{\\, R^{T}_j \\,:\\, j \\neq i \\,\\}', true);
-    const compositeEq  = tex('P_i \\;=\\; \\sum_{a \\in \\mathcal{A}} w\'_a \\cdot \\frac{\\mathrm{clip}_{[-2,+2]}(z_a(x_{i,a}))}{2}', true);
-    const kEq          = tex('K_i \\;=\\; K_{\\text{base}} \\cdot \\left(1 - \\frac{n_i}{n_i + n_{\\text{prior}}}\\right) + K_{\\text{floor}}', true);
-    const phiEq        = tex('\\varphi(R) \\;=\\; \\mathrm{clamp}(0,\\,1,\\,(R - F)/W)', true);
-    // v2.3 alpha-blend formulas surfaced in the new "What is α?"
-    // section. Showing PvP+PvE inputs separately in the kill_rate
-    // formula makes the alpha weighting visually obvious.
-    const thugKillRateEq = tex('\\text{thug\\_kill\\_rate} \\;=\\; \\frac{\\text{pvp\\_kills} + \\alpha_{\\mathrm{PvE}} \\cdot \\text{pve\\_kills}}{\\text{minutes}}', true);
-    const thugAccEq      = tex('\\text{pwa}_p \\;=\\; \\frac{\\sum_w \\frac{\\text{thug\\_hits}_{p,w} \\,/\\, \\text{shots}_{p,w}}{\\text{thug\\_hits}_{w} \\,/\\, \\text{shots}_{w}} \\cdot \\frac{\\text{shots}_{p,w}}{\\text{shots}_{p}}}{\\sum_w \\frac{\\text{shots}_{p,w}}{\\text{shots}_p}}', true);
-    const thugAccHitsEq  = tex('\\text{thug\\_hits} \\;=\\; \\text{pvp\\_hits} + \\alpha_{\\mathrm{PvE}} \\cdot \\text{pve\\_hits}', true);
-    const thugEffEq      = tex('\\text{thug\\_efficiency} \\;=\\; \\frac{\\text{pvp\\_dealt} + \\alpha_{\\mathrm{PvE}} \\cdot \\text{pve\\_to\\_AI}}{\\max(1,\\, \\text{total\\_dealt} - \\text{structure\\_dealt})}', true);
-    const pveShareEq     = tex('\\text{pve\\_share} \\;=\\; \\frac{\\text{pve\\_dealt}}{\\max(1,\\, \\text{total\\_dealt})}', true);
-
-    // ---- Symbol legend (under the hero equation) ----
-    const symbolRows = [
-      ['K_i',                 'K-factor (decays with experience)'],
-      ['S_O = 2.5',           'outcome scale (per-match update magnitude)'],
-      ['P_i',                 'your performance index this match (8-axis thug composite)'],
-      ['E_i',                 'expected performance given your rating vs the lobby'],
-      ['L = 0.85',            'loss aversion multiplier (losses only)'],
-      ['\u03c6(R)',           'soft-floor taper (losses only)'],
-      ['R^T',                 'Thug ELO (combat-skill component of VTSR-T)'],
-      ['\u03b1_PvE = 0.5',    'PvE-credit fraction in the three thug axes'],
-    ].map(([sym, desc]) => `<div><code>${esc(sym)}</code> <span>${esc(desc)}</span></div>`).join('');
-
-    // ---- Expected-score curve intuition table ----
-    // Pre-computed from the formula E_i = 2 / (1 + 10^((Rbar - R) / S_R)) - 1
-    // with S_R = 800 (the v2.1 calibrated value). Recompute these
-    // values if S_R changes — at S_R = 400 the same gaps would produce
-    // ±0.52 / ±0.82 / ±0.92, not ±0.28 / ±0.52 / ±0.80. The 5 rows
-    // below mirror the typical lobby-stratification range we see in
-    // our corpus (±400 pts is roughly Tier 1 vs Tier 4).
-    const curveRows = [
-      ['&minus;400', '&minus;0.52'],
-      ['&minus;200', '&minus;0.28'],
-      ['0',          '0.00'],
-      ['+200',       '+0.28'],
-      ['+400',       '+0.52'],
-    ].map(([gap, e]) => `<tr><td>${gap}</td><td class="text-end">${e}</td></tr>`).join('');
-
-    // ---- 8-axis thug composite (v2.3). Sum = 1.00. ----
-    // Listed in weight order so the heaviest signals lead the table.
-    // v2.3 changes from v2.2:
-    //   * kill_rate -> thug_kill_rate (alpha-blended PvP + α·PvE)
-    //   * accuracy -> thug_accuracy (weapon-normalized + alpha-blended)
-    //   * pvp_share -> thug_efficiency (alpha-blended, denom excl. structure)
-    //   * structure_share -> pve_share (broadened to all enemy non-human dmg)
-    //   * net_damage 0.21 -> 0.20, snipe 0.04 -> 0.05, eff 0.18 -> 0.16,
-    //     pve_share 0.10 -> 0.12.
+    // ---- 8-axis thug composite (v2.3 weights, unchanged through v2.5).
+    // Sum = 1.00. Listed in weight order so the heaviest signals lead.
+    // Descriptions trimmed to public-friendly one-liners.
     const weightsRows = [
-      ['Net damage share', '0.20', 'damage you dealt minus damage you took, as a share of the lobby total'],
-      ['Thug kill rate',   '0.20', 'kills per minute, with PvE kills credited at &alpha; = 0.5 weight (no penalty for role players who farm AI)'],
-      ['Thug efficiency',  '0.16', 'fraction of your <em>non-structure</em> damage that hit players, with PvE-to-AI credited at &alpha; = 0.5'],
-      ['Thug accuracy',    '0.15', 'weapon-normalized hit rate vs the lobby&rsquo;s per-weapon baseline (sniper mains stop getting punished for the rifle&rsquo;s natural lower hit rate)'],
-      ['PvE share',        '0.12', 'damage you landed on enemy non-human assets (structures, scavs, AI tanks) as a share of your total damage'],
-      ['Mobility',         '0.08', 'how much of the map you actually moved across (positioning data)'],
-      ['Snipe bonus',      '0.05', 'sniper rifle hits (capped before z-score so one big game can\u2019t deform the lobby)'],
-      ['T-key usage',      '0.04', 'share of the match you held an active T-key target lock (situational-awareness proxy)'],
+      ['Net damage share', '0.20', 'Damage you dealt minus took, vs the lobby total.'],
+      ['Thug kill rate',   '0.20', 'Kills per minute (PvE kills count for half).'],
+      ['Thug efficiency',  '0.16', 'What % of your non-base damage hit live targets.'],
+      ['Thug accuracy',    '0.15', 'Your hit-rate vs the lobby&rsquo;s, per weapon.'],
+      ['PvE share',        '0.12', 'Damage on enemy bases, scavs, AI tanks.'],
+      ['Mobility',         '0.08', 'How much of the map you covered.'],
+      ['Snipe bonus',      '0.05', 'Sniper rifle hits, capped.'],
+      ['T-key usage',      '0.04', 'How often you held a target lock.'],
     ].map(([n, w, d]) => `<tr><td><strong>${n}</strong><br><small class="text-muted">${d}</small></td><td class="text-end align-top">${w}</td></tr>`).join('');
 
-    // ---- K-decay table ----
-    const kRows = [
-      ['0 matches',  '52', 'rookie — calibrating fast'],
-      ['5 matches',  '~39', ''],
-      ['20 matches', '~25', ''],
-      ['50+ matches', '~19', 'settled veteran'],
-    ].map(([n, k_, note]) => `<tr><td>${n}</td><td class="text-end"><code>${k_}</code></td><td class="text-muted"><small>${esc(note)}</small></td></tr>`).join('');
-
-    // ---- Tier ladder ----
+    // ---- Tier ladder (unchanged from v2). ----
     const tierRows = [
       ['Tier 1', '&ge; 1800',     'top of the ladder'],
       ['Tier 2', '1650 \u2013 1799', ''],
@@ -5221,90 +5152,45 @@
       ['Tier 5', '1000 \u2013 1349', 'wide band; soft floor at 1000'],
     ].map(([n, r, note]) => `<tr><td><strong>${n}</strong></td><td class="text-end"><code>${r}</code></td><td class="text-muted"><small>${esc(note)}</small></td></tr>`).join('');
 
-    // ---- Worked example: Lamper m9 (v2.2 post-rerate) ----
-    // Real numbers captured from data/processed/elo_history.json after
-    // re-rating the corpus under VTSR-T v2.2 (match 2026-05-04T03-45-41,
-    // Lamper's 9th rated match). Lobby (sorted by `before`):
-    //   1333.32 / 1372.60 / 1385.28 / 1449.74 / **1455.77 (median for
-    //   Lamper)** / 1482.74 / 1499.38 / 1543.11 / 1767.39 -- the
-    //   median-of-OTHER-players is what Lamper compares against, so it
-    //   rules out his own 1500.82.
-    // P = +0.5435 (top of lobby), E_i = +0.0647, dR = +40.96.
-    const exKEq  = tex('K_i \\;=\\; 40 \\cdot \\left(1 - \\frac{8}{8 + 10}\\right) + 12 \\;=\\; 34.22', true);
-    const exEEq  = tex('E_i \\;=\\; \\frac{2}{1 + 10^{(1455.77 - 1500.82) / 800}} - 1 \\;\\approx\\; +0.0647', true);
-    const exDREq = tex('\\Delta R^{C}_i \\;=\\; 34.22 \\cdot 2.5 \\cdot (0.5435 - 0.0647) \\;\\approx\\; +40.96', true);
+    // ---- Worked example: Domakus 2026-05-08T23-46-02 (v2.5).
+    // Real numbers from data/processed/elo_history.json:
+    //   before=1689.81, after=1706.70, delta=+16.89,
+    //   performance=+0.5665, expected=+0.2667.
+    // K_i back-solved from delta / (S_O * (P - E)) = 16.89 / (2.5 * 0.2998) = 22.53.
 
     vtsrTooltipHtmlCache = `<div class="vt-katex-tooltip-body">
 
       <section class="vt-vtsr-doc-section">
-        <h6>Performance Composite <span class="text-muted">(P)</span></h6>
-        <p class="mb-2"><strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug) measures thug effectiveness, and the per-match Performance Composite is the heart of it. Your single-match performance index is a weighted sum of eight thug-relevant axes. Each axis is computed per-player, z-scored across the lobby, clipped to &plusmn;2, and divided by 2 to land in &plusmn;1. Missing axes (e.g. no positioning data, nobody in the lobby dealt PvE damage) redistribute their weight pro-rata across the remaining axes.</p>
-        ${compositeEq}
+        <h6>How it works</h6>
+        <p class="mb-2">Each match, we score you on <strong>8 things</strong> (kill rate, accuracy, damage share, etc.) compared to everyone else in the lobby. Those scores blend into one <strong>match performance</strong> number.</p>
+        <p class="mb-2">If you played <strong>better than expected</strong> for a player at your rating, your VTSR-T goes up. Worse, it goes down.</p>
+        <p class="mb-2"><code>&Delta; rating &nbsp;=&nbsp; K &times; (you &minus; expected)</code></p>
+        <p class="mb-0 text-muted small">New players move fast (we&rsquo;re still figuring you out). Veterans move slowly. Losses sting a bit less, and your rating won&rsquo;t fall below 1000.</p>
+      </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>The 8 axes</h6>
         <table class="vt-katex-weights">
           <thead><tr><th>Axis</th><th class="text-end">Weight</th></tr></thead>
           <tbody>${weightsRows}</tbody>
         </table>
-        <div class="vt-katex-caveat">Direct-dogfight axes (thug_kill_rate + thug_accuracy + thug_efficiency) total 0.51; the asset-disruption axis (pve_share) is 0.12; volume + utility axes (net_damage + mobility + snipe + T-key) total 0.37. The v2.3 rebalance recognizes role-player effectiveness alongside pure dogfight skill.</div>
+        <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters.</div>
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>What is &alpha;<sub>PvE</sub>?</h6>
-        <p class="mb-2">A "thug" can be effective in more ways than one. v2.3 introduces a single tunable constant <code>&alpha;<sub>PvE</sub> = 0.5</code> that credits PvE work (damage to AI ships, structures, scavs) at half the weight of equivalent PvP work in the three "thug" axes. Lobby z-scoring still naturally rewards exceptional PvE &mdash; a player who does dramatically more economy work than peers z-scores high on <code>pve_share</code> and <code>thug_efficiency</code> simultaneously, no extra mechanism needed. <code>&alpha;<sub>PvE</sub></code> is exposed in <code>elo_current.json</code> as <code>alpha_pve</code> for transparency and may be tuned post-ship without a schema bump.</p>
-        ${thugKillRateEq}
-        <p class="mb-2 mt-3"><strong>Weapon-normalized accuracy.</strong> Instead of a flat shots_hit/shots_fired ratio (which punishes sniper mains), <code>thug_accuracy</code> compares your per-weapon hit rate against the lobby&rsquo;s per-weapon baseline, weighted by your shot-share. The numerator counts &ldquo;thug hits&rdquo; (PvP at full weight, PvE at &alpha;):</p>
-        ${thugAccHitsEq}
-        ${thugAccEq}
-        <p class="mb-2 mt-3"><strong>Thug efficiency</strong> &mdash; of your non-structure damage, how effectively did you dogfight? Structure damage flows entirely to <code>pve_share</code>; mobile-AI damage gets partial credit here AND full credit on <code>pve_share</code>:</p>
-        ${thugEffEq}
-        <p class="mb-2 mt-3"><strong>PvE share</strong> &mdash; replaces the narrower v2.2 <code>structure_share</code>. Covers all enemy non-human damage (structures + AI tanks + scavs + extractors), so base-busters AND scrap-killers both get credit:</p>
-        ${pveShareEq}
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>The Update Rule</h6>
-        <p class="mb-2">Each rated match changes your Thug ELO by the difference between your performance composite <code>P_i</code> and your expected performance <code>E_i</code>, scaled by an experience-dependent K-factor:</p>
-        ${updateEqGain}
-        <p class="mb-2 mt-2">When the bracket goes negative (loss case), two \u201chope\u201d multipliers soften the drop:</p>
-        ${updateEqLoss}
-        <div class="vt-vtsr-doc-symbols">${symbolRows}</div>
-        <p class="mb-2 mt-3">The published rating blends Wins ELO and Thug ELO:</p>
-        ${blendEq}
-        <div class="vt-katex-caveat">v1 ships with &alpha; = 0.0 (Thug ELO only); Wins ELO is stubbed at the 1500 anchor until the in-game winner-attestation UI lands. The headline <strong>VTSR-T</strong> field therefore equals Thug ELO today. A future VTSR-C (commander) rating will follow the same blend shape with its own commander-axis composite.</div>
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>Expected Performance <span class="text-muted">(E)</span></h6>
-        <p class="mb-2">Instead of comparing your performance to the lobby median alone, we compare it to what we\u2019d <em>expect</em> from a player of your rating in this lobby (fine-tuned ELO-style strength-of-schedule). The reference is the <strong>median</strong> rating of all other players (median, not mean, so a single VTrider doesn\u2019t pull the bar up for everyone).</p>
-        ${rbarEq}
-        ${expectedEq}
-        <p class="mb-2">When you out-rate the lobby, you\u2019re expected to score positive; when you\u2019re the underdog, you\u2019re expected to score negative. Performing as expected leaves your rating unchanged.</p>
-        <table class="vt-vtsr-doc-curve-table">
-          <thead><tr><th>Rating gap (R &minus; R\u0304)</th><th class="text-end">Expected E_i</th></tr></thead>
-          <tbody>${curveRows}</tbody>
-        </table>
-        <div class="vt-katex-caveat">S<sub>R</sub> = 800 (calibrated for our small-population corpus). Classic binary-outcome ELO often uses a ~400-pt logistic denominator; our continuous P_i composite behaves differently, and our ~25-player league means tight denominators pin E_i too aggressively; widening to 800 lets top players plateau ~300 pts above the median lobby instead of ~140.</div>
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>K-factor &amp; Hope Mechanics</h6>
-        <p class="mb-2">Your K-factor scales every per-match update. New players have a high K (their rating moves fast while we calibrate); settled veterans have a low K (their rating is stable).</p>
-        ${kEq}
-        <table class="vt-vtsr-doc-curve-table">
-          <thead><tr><th>Matches played</th><th class="text-end">K_i</th><th></th></tr></thead>
-          <tbody>${kRows}</tbody>
-        </table>
-        <p class="mb-2 mt-3">For losses, two \u201chope\u201d multipliers apply:</p>
+        <h6>If you commanded the match</h6>
+        <p class="mb-2">Commanders naturally score lower on thug stats &mdash; less mobility, fewer kills, less direct combat. To stay fair, the bar adjusts per axis on commander matches:</p>
         <ul class="mb-2">
-          <li><strong>Loss aversion</strong> &middot; every loss is multiplied by L = 0.85 (common in modern ranked ladders).</li>
-          <li><strong>Soft floor</strong> &middot; losses taper to zero as you approach the rating floor F = 1000:</li>
+          <li><strong>Easier on 5 axes</strong> &middot; mobility, kill rate, damage share, efficiency, T-key &mdash; the role-driven shortfalls.</li>
+          <li><strong>Small bonus on PvE share</strong> &middot; commanders get rewarded slightly more for hitting enemy base / scavs.</li>
+          <li><strong>Unchanged on 2 axes</strong> &middot; accuracy and snipes are role-blind.</li>
         </ul>
-        ${phiEq}
-        <div class="vt-katex-caveat">F = 1000 (soft rating floor). W = 150 (taper window: by R = 1150 the full asymmetric loss is restored). A defensive max(F, R) clamp catches float-edge drift.</div>
+        <p class="mb-0 text-muted small">Net effect: a typical commander match nets ~0 ELO &mdash; neither punished nor padded. A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>Tier Ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don\u2019t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
+        <h6>Tier ladder</h6>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
         <table class="vt-katex-tiers">
           <thead><tr><th>Tier</th><th class="text-end">VTSR-T range</th><th></th></tr></thead>
           <tbody>${tierRows}</tbody>
@@ -5312,34 +5198,16 @@
       </section>
 
       <section class="vt-vtsr-doc-section">
-        <h6>Worked Example &middot; The role-player vs the fragger</h6>
-        <p class="mb-2">Imagine a 10-player lobby where two players stand out:</p>
-        <ul class="mb-3">
-          <li><strong>Player 1 (fragger)</strong>: 5k PvP damage, 5 PvP kills, 0 PvE damage. Classic dogfight role.</li>
-          <li><strong>Player 2 (economy cripple)</strong>: 0 PvP damage, 13k PvE damage (4k structure + 9k mobile-AI), ~20 AI kills. Sneak-attacked enemy base, killed scavs, &ldquo;essentially won the game&rdquo;.</li>
+        <h6>Real example</h6>
+        <p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1689.8</strong> to <strong>1706.7</strong> (+16.9).</p>
+        <ul class="mb-2">
+          <li>Match performance: <strong>+0.57</strong> (top of the lobby)</li>
+          <li>Expected: <strong>+0.27</strong> (already a high-rated player &mdash; the bar was high)</li>
+          <li>K-factor: <strong>~22</strong> (settled veteran)</li>
         </ul>
-        <p class="mb-2">Under v2.3 with &alpha;<sub>PvE</sub> = 0.5, lobby z-scoring lights up like this:</p>
-        <ul class="mb-3">
-          <li><code>net_damage_share</code> rewards Player 2 (26% of lobby damage) over Player 1 (10%): roughly <strong>+1.5&sigma; vs 0.0&sigma;</strong></li>
-          <li><code>thug_kill_rate</code> is roughly even (5 PvP &times; 1.0 &asymp; 20 AI &times; 0.5)</li>
-          <li><code>thug_accuracy</code> slightly favors Player 1 (more PvP-focused)</li>
-          <li><code>thug_efficiency</code> favors Player 1 (denominator excludes structure, but their pvp_dealt is higher)</li>
-          <li><code>pve_share</code> rewards Player 2 dramatically: <strong>+2.0&sigma; vs &minus;1.0&sigma;</strong> (Player 2 is the lobby&rsquo;s standout)</li>
-        </ul>
-        <p class="mb-2">Net composite: Player 2 narrowly outperforms Player 1, matching the community-expected outcome. Lobby z-scoring is the &ldquo;exceeded expectations&rdquo; mechanism &mdash; when one player does dramatically more PvE work, it shows up across multiple axes simultaneously.</p>
-        <p class="mb-2 mt-3"><strong>Math walkthrough (carry-over from v2.2 example)</strong>: when Lamper scored P<sub>i</sub> = +0.54 at R = 1500.82 in a lobby with median opponent rating 1455.77 and 8 prior matches:</p>
-        ${exKEq}
-        ${exEEq}
-        ${exDREq}
-        <p class="mb-2 mt-2">Result: Lamper&rsquo;s Thug ELO ticks 1500.82 &rarr; 1541.78 in that match. The same K-factor / E<sub>i</sub> / blend math applies in v2.3; only the axis math changed.</p>
+        <p class="mb-0">He outperformed his expected score, so rating ticked up.</p>
       </section>
 
-      <div class="vt-katex-caveat mt-3">
-        <strong>VTSR-T v2.4 &middot; commander role adjustment.</strong> Each commander match-row now shifts per-axis post-clip z-scores against a typical-commander baseline (then re-clips to the per-axis range). Five axes get penalty relief on commander rows so the natural-commander shortfall (low mobility, fewer kills, lower net damage, etc.) doesn&rsquo;t drag rating; one axis (<code>pve_share</code>) gets a small reward boost because hitting enemy assets is the work commanders should be doing; two axes (<code>thug_accuracy</code>, <code>snipe_bonus</code>) are role-blind. Audit-derived priors blend with a running mean as the corpus grows (shrinkage strength 30); hand-tuned priors (<code>target_lock_pct</code> cushion, <code>pve_share</code> boost) are locked at their seed values. Commanders defying thug-tier expectations &mdash; high mobility, high net damage &mdash; earn extra rating credit naturally because the bar they&rsquo;re being measured against drops. <strong>Pre-v2.4 peak_vtsr values are no longer comparable</strong> &mdash; corpus re-rated.
-      </div>
-      <div class="vt-katex-caveat mt-3">
-        <strong>VTSR-T v2.3 &middot; alpha-blended thug composite.</strong> v2.3 introduces three changes to the Performance Composite: (1) the three "thug" axes (<code>thug_kill_rate</code>, <code>thug_accuracy</code>, <code>thug_efficiency</code>) credit PvE work at &alpha;<sub>PvE</sub> = 0.5 instead of zero, so role players doing economy/utility work aren&rsquo;t penalized for the role choice; (2) <code>thug_accuracy</code> is weapon-normalized against the lobby&rsquo;s per-weapon baseline, removing weapon-mix bias; (3) <code>structure_share</code> broadens to <code>pve_share</code>, covering all enemy non-human damage (structures + mobile AI). Architectural rename: the rating&rsquo;s combat-skill component is now called <strong>Thug ELO</strong> (was Combat ELO) to reflect that it measures thug effectiveness specifically &mdash; sets up future VTSR-C (commander) as a sibling rating. Wins ELO blend (&alpha;) still 0.0; <code>&alpha;<sub>PvE</sub></code> is tunable post-ship via <code>elo_current.json</code>; full algorithm in DEVELOPER_GUIDE &sect;13.
-      </div>
     </div>`;
     return vtsrTooltipHtmlCache;
   }
