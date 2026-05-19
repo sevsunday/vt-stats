@@ -548,7 +548,7 @@
     },
     pve_share: {
       head: 'You\u2019re not doing a lot of damage to non-human stuff.',
-      body: 'This is your damage to enemy non-human assets as a share of your total dealt. If you are typically someone assigned to hit pools and scavs \u2014 this is a great way to improve ELO. Try to also avoid dying for optimal reward (use Radar & T-key!). If you are a dogfighter and seeing this \u2014 you might consider peppering more scavs and pools when you pass them in the field, but in general this metric may not be as much of a factor for you.',
+      body: 'This is your damage to enemy non-human assets as a share of your total dealt.\n\n<u>If you are typically someone assigned to hit pools and scavs</u> \u2014 raise your ELO by doing exactly that! For maximum ELO gain, avoid dying as much as possible. Proactively use radar, t-key and your eyes to evade enemies!\n\n<u>If you are a dogfighter/aggressive roleplayer</u> (typical of higher-tier players) \u2014 this metric typically isn\u2019t an actual issue, it\u2019s just a byproduct of the role you play.',
     },
     mobility: {
       head: 'You\u2019re not moving enough.',
@@ -2018,7 +2018,7 @@
           <div class="card h-100">
             <div class="card-body">
               <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
-                <i class="bi bi-lightbulb me-1"></i>Coaching &amp; quick wins
+                <i class="bi bi-lightbulb me-1"></i>Performance observations
               </h2>
               ${renderCoachingPanel(ranked)}
             </div>
@@ -2189,6 +2189,21 @@
     return `<div class="vt-axis-list">${rows}</div>`;
   }
 
+  // Render a coaching `body` string into one or more <p> tags. Defensively
+  // HTML-escapes (even though COACHING_COPY is module-local) and then
+  // re-allows only the `<u>` inline tag. `\n\n` becomes a paragraph break so
+  // copy can opt into multi-paragraph layout without changing the dict shape.
+  function formatCoachingBody(body) {
+    if (typeof body !== 'string' || !body.length) return '';
+    const escaped = escapeHtml(body)
+      .replace(/&lt;u&gt;/g, '<u>')
+      .replace(/&lt;\/u&gt;/g, '</u>');
+    return escaped
+      .split(/\n\s*\n/)
+      .map(p => `<p class="mb-2 small text-secondary">${p}</p>`)
+      .join('');
+  }
+
   function renderCoachingPanel(ranked) {
     // Rank by impact (|z| * weight) instead of raw z so heavy axes outrank
     // low-weight axes regardless of how negative their z is. snipe_bonus is
@@ -2239,7 +2254,7 @@
         </div>
         <div class="vt-coaching-body">
           <strong>${escapeHtml(copy.head)}</strong>
-          <p class="mb-2 small text-secondary">${escapeHtml(copy.body)}</p>
+          ${formatCoachingBody(copy.body)}
           <div class="vt-coaching-projection">
             <i class="bi bi-graph-up-arrow"></i>
             +0.5&sigma; here &asymp;
