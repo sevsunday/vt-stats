@@ -208,7 +208,7 @@
     bodyEl.innerHTML = `
       <div class="vt-tools-maproll-stage">
         <div class="vt-tools-maproll-reels" id="vt-tools-maproll-reels">
-          ${renderReelMarkup(0, 'Popular',  'Hot picks from the community')}
+          ${renderReelMarkup(0, 'Popular',  'Most Played Maps')}
           ${renderReelMarkup(1, 'Played',   'Maps we have match data on')}
           ${renderReelMarkup(2, 'Unplayed', 'Maps awaiting a first match')}
         </div>
