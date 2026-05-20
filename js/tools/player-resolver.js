@@ -21,12 +21,10 @@
  *
  * Tier resolution (mirror of js/app.js VTSR_TIERS):
  *   TIER 1: VTSR >= 1800
- *   TIER 2: 1700-1799
- *   TIER 3: 1600-1699
- *   TIER 4: 1500-1599
- *   TIER 5: 1400-1499
- *   TIER 6: 1300-1399
- *   TIER 7: < 1300
+ *   TIER 2: 1650-1799
+ *   TIER 3: 1500-1649
+ *   TIER 4: 1350-1499
+ *   TIER 5: < 1350
  *
  * Commander hint thresholds:
  *   strong  : matches_as_commander >= 5 AND cmdr_share >= 0.4
@@ -232,12 +230,10 @@
   function resolveTier(vtsr) {
     if (!Number.isFinite(vtsr)) return null;
     if (vtsr >= 1800) return 1;
-    if (vtsr >= 1700) return 2;
-    if (vtsr >= 1600) return 3;
-    if (vtsr >= 1500) return 4;
-    if (vtsr >= 1400) return 5;
-    if (vtsr >= 1300) return 6;
-    return 7;
+    if (vtsr >= 1650) return 2;
+    if (vtsr >= 1500) return 3;
+    if (vtsr >= 1350) return 4;
+    return 5;
   }
 
   function resolveCmdrHint(matchesAsCmdr, cmdrShare) {
