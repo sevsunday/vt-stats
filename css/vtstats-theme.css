@@ -747,7 +747,7 @@ body::before {
 }
 
 /* ============================================================================
-   ACTIVE GAME INDICATOR
+   ACTIVE GAME INDICATOR (LIVE pill — restored on index.html topnav)
    Topnav widget that polls the live BZ2 lobby and surfaces a pulsing LIVE
    pill whenever a session hosted by an allowlisted Steam64 ID is active.
    Markup: #vt-active-game (Bootstrap dropdown wrapper) -> #vt-active-game-pill
@@ -765,8 +765,6 @@ body::before {
     margin-left: 0.5rem;
 }
 
-/* Base pill: borderless nav-icon style with optional success-tinted bg
-   when a match is live. Disabled in loading/no-match states. */
 .vt-active-game-pill {
     display: inline-flex;
     align-items: center;
@@ -802,8 +800,6 @@ body::before {
     display: none !important;
 }
 
-/* Pulsing LIVE dot. Sits flush left of the pill text. Animation honors
-   prefers-reduced-motion: collapses to a static dot. */
 .vt-active-game-dot {
     display: inline-block;
     width: 8px;
@@ -851,7 +847,6 @@ body::before {
     font-weight: 500;
 }
 
-/* Loading skeleton: tiny shimmering bar inside the pill. */
 .vt-active-game-pill-skeleton {
     display: inline-block;
     width: 12px;
@@ -874,8 +869,6 @@ body::before {
     .vt-active-game-pill-skeleton { animation: none; }
 }
 
-/* Multi-match dropdown menu styling. Uses the standard Bootstrap dropdown
-   surface but each item is a 4-column flex row. */
 .vt-active-game-dropdown {
     min-width: 320px;
     padding: 0.25rem 0;
@@ -914,10 +907,6 @@ body::before {
     font-variant-numeric: tabular-nums;
 }
 
-/* Join + GameWatch buttons. Borderless, mirror .vt-nav-icon-btn weight.
-   Pill-shaped (border-radius 999px) to match the LIVE pill alongside;
-   padding + font-size are kept in lockstep with .vt-active-game-pill so
-   all three siblings render at the same height. */
 .vt-active-game-join,
 .vt-active-game-gamewatch {
     display: inline-flex;
@@ -964,8 +953,6 @@ body::before {
     outline: none;
 }
 
-/* State-driven visibility. Done with attribute selectors so the JS only
-   has to flip data-state on the wrapper. */
 .vt-active-game[data-state="loading"] .vt-active-game-pill {
     opacity: 0.85;
 }
@@ -981,19 +968,11 @@ body::before {
     border-color: color-mix(in oklab, var(--kb-success) 28%, transparent);
 }
 
-/* Hide the topnav GameWatch button whenever a live match is found —
-   the GameWatch link stays accessible from the modal footer. The button
-   is only relevant in no-match state as a "no live games, browse the
-   broader scrapfield catalog" affordance. */
 .vt-active-game[data-state="match-found-1"] .vt-active-game-gamewatch,
 .vt-active-game[data-state="match-found-n"] .vt-active-game-gamewatch {
     display: none !important;
 }
 
-/* Clickability cue: chevron at the tail of the single-match pill +
-   subtle lift on hover. Multi-match pill keeps its existing chevron-
-   down (dropdown semantic); this chevron-right (drill-in semantic) is
-   only emitted from renderMatchFound1(). */
 .vt-active-game-pill-chevron {
     color: var(--kb-text-muted);
     font-size: 0.85em;
@@ -1020,16 +999,11 @@ body::before {
     }
 }
 
-/* Compact-mode segments (mobile) — hidden by default on desktop, swapped
-   in by the breakpoint below. */
 .vt-active-game-pill-loading-compact,
 .vt-active-game-pill-multi-compact {
     display: none;
 }
 
-/* Mobile compact mode: hide the host name segment + the GameWatch label
-   (icon-only chip), and hide the standalone Join button entirely (it
-   remains accessible from the modal footer). */
 @media (max-width: 767.98px) {
     .vt-active-game {
         margin-left: 0.25rem;
@@ -1052,6 +1026,40 @@ body::before {
     .vt-active-game[data-state="match-found-1"] #vt-active-game-join,
     .vt-active-game[data-state="match-found-n"] #vt-active-game-join {
         display: none !important;
+    }
+}
+
+/* ============================================================================
+   TOOLS TOPNAV PULSE
+   Slim "live activity" pulse on the `Tools` topnav link, fired by the same
+   js/active-game-indicator.js poller. Markup contract: any `<a>` with
+   `data-vt-tools-link` carries `data-vt-tools-live="0|1"`. `1` triggers
+   the pulse animation; `0` is the resting state. Same animation as the
+   LIVE pill dot above so the visual language stays consistent across
+   pages (only index.html has both; other pages just have the Tools-link
+   pulse since the widget DOM is absent).
+   ============================================================================ */
+
+.vt-nav-icon-btn--tools[data-vt-tools-live="1"] {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 12%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--kb-success) 50%, transparent);
+    animation: vtToolsLivePulse 2.2s ease-in-out infinite;
+}
+
+.vt-nav-icon-btn--tools[data-vt-tools-live="1"] i {
+    color: var(--kb-success);
+}
+
+@keyframes vtToolsLivePulse {
+    0%   { box-shadow: 0 0 0 0   color-mix(in oklab, var(--kb-success) 55%, transparent); }
+    70%  { box-shadow: 0 0 0 7px color-mix(in oklab, var(--kb-success) 0%,  transparent); }
+    100% { box-shadow: 0 0 0 0   color-mix(in oklab, var(--kb-success) 0%,  transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-nav-icon-btn--tools[data-vt-tools-live="1"] {
+        animation: none;
     }
 }
 

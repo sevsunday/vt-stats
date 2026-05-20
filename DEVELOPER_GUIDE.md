@@ -2345,3 +2345,193 @@ Touch all four when the rule changes. Mirrors the `VTSR_TIERS` duplication cavea
 
 Same `SITE_URL = "https://vtstats.bz"` module constant as the player generator (per the project `CNAME`). Used for absolute OG URLs + canonical link.
 
+## 16. Lobby Tools Page (`tools/`)
+
+The Lobby Tools page is the project's **seventh standalone page**, sibling to the dashboard / docs / raw browser / ODF browser / player pages / map browser. Unlike every other page, it's **purely client-side** with no pipeline output of its own — it composes existing artifacts (`elo_current.json`, `player_slugs.json`, `known-hosts.json`, `steamid_to_name.txt`, `vsrmaplist.json`, `map-registry.json`, `matches.json`) into a screen-share-friendly five-utility surface for in-lobby decisions (commander picks, team balance, map rolls, coinflips).
+
+### 16.1 Files
+
+| File | Purpose |
+|---|---|
+| `tools/index.html` | Page shell: topnav, header action row, six section cards in a 2-col CSS grid (above 1280px) / single-col stack (below), reset/discard modals, Bootstrap toast container. No pre-gen stubs — single page. |
+| `css/tools.css` | All page-specific styling: grid layout, card chrome, wheel canvas, slot machine reels, coinflip selector, team-balonce columns + Played Meter, toast container, etc. |
+| `js/live-session-card.js` | Stateless renderer factored out of the legacy `js/active-game-indicator.js`. Exposes `window.VTLiveSessionCard.{renderTitle, renderBody, renderFooter, renderInto}`. Keeps `.vt-active-game-modal-*` CSS class names verbatim for stability. |
+| `js/tools/player-resolver.js` | 4-tier Steam64 resolver: `player_slugs` → `elo_current.ratings[].name` → `steamid_to_name.txt` → lobby nickname. Eager loaders for known-hosts + elo + slugs + vsrmaplist; lazy loader for steamid-to-name. Exposes `window.VTToolsResolver.{ready, resolve, resolveCustom, searchByName, getKnownHosts, getKnownHostNames, getVsrMapByFile, getCanonicalNames, getEloMeta}`. |
+| `js/tools/live-session.js` | Polls `BZ2API.fetchSessions()` every 30s with the same backoff posture as the topnav pulse, filters by `known-hosts.json` allowlist + `gameBalance === 'VSR'`, renders into the Live Session card via `VTLiveSessionCard`. Lock-lobby toggle freezes the surfaced snapshot; ignore-live toggle stops polling entirely. |
+| `js/tools/toast-manager.js` | Thin Bootstrap-toast wrapper. `showJoin(name, count)` / `showLeave(name, count)`. Suppressed by callers when `lobbyLocked \|\| ignoreLive \|\| mode === 'manual'`. |
+| `js/tools/wheel.js` | Canvas player wheel with theme-reactive alternating `--kb-primary`/`--kb-secondary` slices (read via `getComputedStyle` + `MutationObserver` on `<html>`). Spin physics via `requestAnimationFrame` with ease-out cubic (4–6s; `prefers-reduced-motion` → 800ms snap). Result modal with Steam + VTstats deep-link icons + Remove-from-wheel + Spin again. Wheel-local `removedSteam64s` set persists across roster updates. |
+| `js/tools/coinflip.js` | Horizontal-shuffle team selector. Pre-computed winner via `Math.random() < 0.5`. Decel animation over ~2s; `prefers-reduced-motion` → 500ms snap. Team labels from live session's `teamNames.svar1`/`svar2` when present. |
+| `js/tools/map-roll.js` | Three-reel slot machine. Reel 1 (Popular) reads `vsrmaplist.json` entries where `Tags` contains `popular`. Reel 2 (Played) reads `matches.json` map_files. Reel 3 (Unplayed) reads `map-registry.json` minus Played. Pool-count pills (7+/6+/All) filter all three reels. Staggered reel deceleration 3s/4s/5s. Reveal cards link to per-map `map/<file>/`. Lazy-loads `matches.json` + `map-registry.json` on first interaction. |
+| `js/tools/team-balonce.js` | Commander configurator + odd-lobby-aware partition + drag-to-swap + Played Meter. Intentional community-in-joke misspell (`Balonce`); applies everywhere — file name, section title, CSS class names. |
+| `js/tools/main.js` | Page bootstrap, state machine, Mode/Ignore/Lock/Reset wiring, beforeunload guard. Awaits `VTToolsResolver.ready` before initialising sub-modules. Broadcasts the active roster via a `CustomEvent('vt-tools:roster')` and component reset via `CustomEvent('vt-tools:reset-all')`. |
+
+### 16.2 Page state machine
+
+```
+pageState = {
+  mode:         'auto' | 'manual',
+  ignoreLive:   bool,                    // master kill-switch
+  lobbyLocked:  bool,                    // mirrored from VTLiveSession
+  liveRoster:   ResolvedPlayer[],        // populated by VTLiveSession
+  manualRoster: ResolvedPlayer[],        // populated by Active Roster picker
+  activeRoster: ResolvedPlayer[],        // derived: mode==='auto' ? live : manual
+  lastSessionId: string | null,
+  hostName:     string | null,
+  components: {
+    wheel:    { lastWinner, removedSteam64s: Set, isSpinning, method },
+    coin:     { lastResult, mode },
+    mapRoll:  { lastResults: [r1,r2,r3], poolFilter, isRolling },
+    balonce:  { commanderSetup: {team1, team2}, manualSwaps: Set, partition },
+  },
+}
+```
+
+Cross-toggle interactions (enforced in `main.js::setIgnoreLive` and `setMode`):
+
+| Trigger | Effect |
+|---|---|
+| `ignoreLive` flips ON | Polling stops; `mode` force-set to `manual`; Auto radio disabled with tooltip; `lobbyLocked` force-cleared. |
+| `ignoreLive` flips OFF | Polling resumes; Auto radio re-enabled. Mode stays Manual — user must opt back in via the Mode toggle. |
+| Mode Auto → Manual | Snapshot current `liveRoster` into `manualRoster`; auto-unlock if locked. |
+| Mode Manual → Auto | Confirm-discard modal if `manualRoster.length > 0`; clear `manualRoster`; resume polling-driven roster. |
+| `lobbyLocked` flips ON | Polling continues silently; surfaced session/roster frozen; join/leave toasts suppressed. |
+| `lobbyLocked` flips OFF | Latest polled state applied immediately; toast baseline reset (no spurious join/leave spam). |
+| `Reset all` confirm | Wipe every component state + restore defaults (`mode: 'auto'`, `ignoreLive: false`, `lobbyLocked: false`). Trigger immediate poll. |
+
+### 16.3 Beforeunload (dirty) flag
+
+`window.beforeunload` is guarded by `VTToolsMain.isDirty()` returning `true` when ANY of these conditions holds:
+
+- `mode === 'manual' AND manualRoster.length > 0`
+- `wheel.lastWinner !== null` (wheel has been spun)
+- `wheel.removedSteam64s.size > 0` (any player removed)
+- `coin.lastResult !== null` (coin has flipped)
+- `mapRoll.lastResults.some(r => r !== null)` (any reel has landed)
+- `balonce.partition !== null` (balance has been computed)
+- `balonce.manualSwaps.size > 0` (any drag-swap)
+
+### 16.4 Identity resolution
+
+The 4-tier `VTToolsResolver.resolve(steam64, lobbyNick)` returns a `ResolvedPlayer` with this shape:
+
+```js
+{
+  steam64,               // string or null (custom entries)
+  displayName,           // resolved per the priority chain
+  lobbyNick,             // pass-through, null when same as displayName (case-insens)
+  slug,                  // VTstats slug or null
+  steamProfileUrl,       // https://steamcommunity.com/profiles/<steam64>/ or null
+  vtstatsUrl,            // ../player/<slug>/ or ../player/index.html?p=<steam64>
+  vtsr,                  // 1500 anchor when provisional/unknown/custom
+  thugElo, winsElo,      // numbers or null
+  matchesPlayed,         // number or 0
+  matchesAsCmdr,         // number or 0
+  matchesAsThug,         // number or 0
+  cmdrShare,             // matches_as_cmdr / matches_played
+  tier,                  // 1..7 from VTSR_TIERS (mirrored)
+  cmdrHint,              // 'strong' | 'curious' | 'rare' | null
+  isProvisional,         // bool
+  isUnknown,             // bool — not in any registry
+  isCustom,              // bool — user-typed entry, no Steam64
+}
+```
+
+Priority chain for `displayName`: `player_slugs.json[steam64].name` → `elo_current.ratings[].name` → `steamid_to_name.txt[steam64]` → lobby nickname → `"Unknown player"`.
+
+Provisional anchoring rules (used by team-balonce sums + roster row chips):
+- **Unrated** (no entry in `elo_current.ratings[]`): VTSR `1500`, `isUnknown=true`, `isProvisional=true`, renders `provisional` chip.
+- **Rated but provisional** (`elo_current.ratings[i].matches_provisional=true`): actual VTSR carries through, `isProvisional=true`, renders `provisional` chip.
+- **Custom** (user-typed, no Steam64): VTSR `1500`, `isCustom=true`, `isProvisional=true`, renders `custom` chip.
+
+### 16.5 Topnav scope decision ("Reading C")
+
+The Lobby Tools rollout **deleted** the elaborate LIVE pill widget that previously lived in `index.html`'s topnav (with its multi-match dropdown picker, Join-via-Steam button, GameWatch chip, and click-through modal). The full live-session interaction migrates entirely to `/tools` (where it can render the rich card layout without competing for topnav real estate). What survives in the topnav is a **slim pulse**:
+
+- `js/active-game-indicator.js` was gutted from ~764 LOC to ~150 LOC. It polls every 30s with the same backoff posture and known-host-allowlist filter, but instead of rendering a pill / dropdown / modal, it only flips `data-vt-tools-live="0|1"` on any `[data-vt-tools-link]` it finds in the topnav.
+- The `Tools` topnav link (icon `bi-controller`) is the pulse target. CSS keyframes in `css/vtstats-theme.css` (replacing the deleted `vtActiveGamePulse` block) drive a subtle pulse animation when the attribute is `1`.
+- All six shells (`index.html`, `docs.html`, `raw.html`, `odf/index.html`, `player/index.html`, `map/index.html`) load `js/bz2api.js` + `js/active-game-indicator.js` so the pulse runs site-wide.
+- The two pre-gen templates (`scripts/player_template.html`, `scripts/map_template.html`) carry the same script tags and topnav `Tools` link; `PLAYER_TEMPLATE_VERSION` bumped 6 → 7 and `MAP_TEMPLATE_VERSION` 1 → 2 to force every existing stub to re-render on the next pipeline run.
+
+### 16.6 Played Meter (imbalance gauge)
+
+A horizontal pill-shaped track below the Team Balonce columns. Chevron position formula:
+
+```
+delta = ΣVTSR_team1 − ΣVTSR_team2     // signed
+abs_delta = |delta|
+normalized = min(abs_delta / MAX_PLAYED_METER_DELTA, 1.0)
+chevron_pos% = 50 + 50 * normalized * sign(delta)
+```
+
+`MAX_PLAYED_METER_DELTA = 1000` (module constant in `js/tools/team-balonce.js`; tunable post-ship). At full peg the chevron sits at 0% (Team 1 disadvantaged) or 100% (Team 2 disadvantaged); the center tick mark indicates "perfectly balanced".
+
+Color bands drive the label chip:
+
+| `abs_delta` | Band | Label |
+|---|---|---|
+| `< 100` | green | `Well balanced` |
+| `100 – 300` | yellow | `Slight edge — <team> at disadvantage` |
+| `300 – 600` | orange | `Imbalanced — <team> at disadvantage` |
+| `>= 600` | red | `Heavily imbalanced — <team> at disadvantage` |
+
+Disadvantaged team gets a `Disadvantaged` badge on its column header when `abs_delta >= 100`.
+
+### 16.7 Partition algorithm (odd-lobby aware)
+
+`findBestPartition(thugs, cmdr1, cmdr2)` in `team-balonce.js` exhaustively enumerates ALL `2^M` non-trivial subsets of the thug pool (skip empty + full). Each subset is one team's thugs; complement is the other. Score by `|ΣVTSR_team1 − ΣVTSR_team2|` (where team sums include each commander's VTSR). Enforce `≤5 players per team` (commander + thugs).
+
+This naturally handles odd lobbies (4v3, 5v4, 3v2). Equal-strength uneven splits can beat naively-balanced even ones when the math works out; the algorithm doesn't prefer balanced thug counts unless they minimize the VTSR delta.
+
+Worst case: 10-player lobby with 0 commanders set → thug pool = 10 → `2^10 = 1024` subsets to enumerate. Trivially fast.
+
+### 16.8 Candidacy ranking (commander auto-suggestion)
+
+For unset commander slots, `rankCandidates(pool)` in `team-balonce.js` computes:
+
+```
+candidacy = vtsr_zscore + 1.5 * cmdr_experience_zscore
+cmdr_experience = matches_as_commander / max(matches_played, 1)
+```
+
+Z-scores are computed against the current `activeRoster` pool (not the corpus mean — this is roster-local). The `1.5×` weight on commander experience handles the "Domakus problem" — a high-VTSR low-cmdr-count player won't get auto-suggested unless nobody in the lobby has any commander experience. Tie-break by raw `matches_as_commander` DESC.
+
+Three-scenario banner (in addition to the auto-suggestion):
+
+- **0 commanders set** → orange banner: *"Commander picks suggested from VTSR-T + commander match count. VTSR-T measures thug skill — it's not a perfect proxy for commander ability. Consider setting commanders manually for best results."*
+- **1 commander set** → yellow banner: *"Suggesting the second commander from VTSR-T + commander match count. Same caveat applies."*
+- **2 commanders set** → green/informational banner with `Cmdr ΔVTSR: ±N` chip.
+
+### 16.9 Reset all + dirty flag
+
+The `Reset all` button (top of page) opens a confirm modal listing what's about to be wiped. On confirm:
+
+- `mode → 'auto'`, `ignoreLive → false`, `lobbyLocked → false`
+- `manualRoster → []`
+- `wheel.lastWinner → null`, `wheel.removedSteam64s.clear()`
+- `coin.lastResult → null`
+- `mapRoll.lastResults → [null, null, null]`, `mapRoll.poolFilter → '7'`
+- `balonce.commanderSetup → {team1: null, team2: null}`, `balonce.manualSwaps.clear()`, `balonce.partition → null`
+- Dirty flag cleared
+- Immediate `VTLiveSession.refreshNow()` if not ignoring
+
+`window.dispatchEvent(new CustomEvent('vt-tools:reset-all'))` notifies each component module to reset its own UI.
+
+### 16.10 Disabled pill convention
+
+The plan locked in a strict UX rule: **never** add "Coming soon" chips, labels, or tooltip teasers to the disabled pills (Plinko / Sniper on the wheel; Best 3 of 5 on coinflip). Disabled state alone signals future-only. The convention applies to any future disabled pills as well.
+
+### 16.11 Viewport-fit grid
+
+Above 1280px, the six section cards arrange in a CSS Grid 2-col layout:
+
+- Data trio (left col): Live Session · Active Roster · Team Balonce
+- Tools trio (right col): Player Wheel · Coinflip · Map Roll
+
+Each card carries `max-height: calc((100vh - var(--vt-tools-chrome-offset)) / 3)` so the three rows distribute vertical space evenly. `--vt-tools-chrome-offset` accounts for sticky topnav (~56px) + page header action row (~64px) + grid gaps (~24px) + breathing space. Internal `overflow-y: auto` on each card's body region for long content.
+
+Below 1280px, the grid collapses to single-col and page scrolls. The 1280px breakpoint is tunable post-ship via `--vt-tools-grid-breakpoint`.
+
+### 16.12 Picker filter contract
+
+The Lobby Tools page is **picker-unaware** (mirrors VTSR-T leaderboard and the player/map browser pages). The dashboard's match picker has no influence on tools-page roster, balonce, wheel slices, or map-roll pools — tools is a live-data + manual-curation surface, not a corpus-aggregate view.
+

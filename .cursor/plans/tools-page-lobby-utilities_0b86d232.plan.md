@@ -4,25 +4,25 @@ overview: Build a new `/tools` page consolidating five lobby utilities (Live Ses
 todos:
   - id: phase-0-plumbing
     content: "Phase 0 — Shared plumbing: factor `js/live-session-card.js` out of `js/active-game-indicator.js` (keep `.vt-active-game-modal-*` class names for stability); gut `active-game-indicator.js` to a topnav-pulse-only poller; remove `#vt-active-game` + `#active-game-modal` markup from all 6 shells; add `Tools` topnav link (`bi-controller`) to all 6 shells + both pre-gen templates; bump `PLAYER_TEMPLATE_VERSION` 6→7 and `MAP_TEMPLATE_VERSION` 1→2; create `tools/index.html` skeleton + `css/tools.css` + `js/tools/player-resolver.js`"
-    status: pending
+    status: completed
   - id: phase-1-shell-toggles
     content: "Phase 1 — Page shell + Live Session + Roster + global toggles: implement `js/tools/live-session.js` (known-hosts-filtered poller, session picker, force-refresh, lock-lobby, join/leave diff); `js/tools/toast-manager.js` (Bootstrap toast wrapper); `js/tools/main.js` (bootstrap, Mode/Ignore/Lock/Reset wiring, beforeunload guard); Active Roster card with add-player + custom-entry pickers; commander-history badges on roster rows"
-    status: pending
+    status: completed
   - id: phase-2-wheel
     content: "Phase 2 — Player Wheel: implement `js/tools/wheel.js` with canvas wheel (alternating `--kb-primary`/`--kb-secondary` slices, theme-reactive), spin physics (4–6s decay, `prefers-reduced-motion` short-snap), method pills (Wheel active, Plinko + Sniper disabled signposts), result modal with Steam + VTstats icons + remove-from-wheel + restore-list"
-    status: pending
+    status: completed
   - id: phase-3-coinflip
     content: "Phase 3 — Coinflip: implement `js/tools/coinflip.js` with horizontal-shuffle selector animation, mode pills (Single active, Best 3-of-5 disabled signpost), team labels from live session's svar1/svar2 when present"
-    status: pending
+    status: completed
   - id: phase-4-map-roll
     content: "Phase 4 — Random Map slot machine: implement `js/tools/map-roll.js` with three reels (Popular from `vsrmaplist.json` Tags='popular', Played before from `matches.json`, Unplayed from `map-registry.json` minus played), pool count pills (7+/6+/All) applied to all three reels, staggered deceleration animation, reveal cards with thumbnail + author + pool chip + map-page deep-link"
-    status: pending
+    status: completed
   - id: phase-5-team-balonce
     content: "Phase 5 — Team Balonce (intentional misspell, community in-joke): implement `js/tools/team-balonce.js` with commander configurator (3-scenario banner driven by 0/1/2 commanders set), candidacy score `vtsr_z + 1.5 * cmdr_experience_z`, exhaustive thug partition over ALL non-trivial splits (handles odd lobbies — 4v3, 5v4, etc.), drag-to-swap with live ΔVTSR badge, **Played Meter** imbalance gauge with disadvantaged-team indicator, Reset to best balance button, provisional-anchor handling for unrated/custom entries"
     status: pending
   - id: phase-6-polish-docs
     content: "Phase 6 — Polish + docs: `prefers-reduced-motion` audit across wheel/coin/slot; **viewport-fit 2-col grid layout** above 1280px so all sections fit in a single desktop viewport (below threshold → single-col scrollable); error states (lobby fetch failure, empty roster, empty filter); update `AGENTS.md`, `.cursor/rules/project-overview.mdc`, `DEVELOPER_GUIDE.md` with `/tools` as the project's seventh standalone page and the Reading C topnav scope change"
-    status: pending
+    status: completed
 isProject: false
 ---
 

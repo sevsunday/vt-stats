@@ -1,0 +1,1802 @@
+/* =============================================================================
+   VT Stats - Lobby Tools Page
+   
+   Two-column viewport-fit grid layout above 1280px (data-trio left,
+   tools-trio right); single-col stacked below. Each card carries an
+   internal max-height so the trio rows distribute vertical space evenly.
+   
+   Section ordering: see tools/index.html. Component-specific styling
+   (wheel canvas, slot machine reels, coin animation, balonce drag,
+   played meter, etc.) lives in this file too — added phase by phase.
+   ============================================================================= */
+
+:root {
+    /* Tunable post-ship via :root override or theme switch. */
+    --vt-tools-grid-breakpoint: 1280px;
+    --vt-tools-card-gap: 0.75rem;
+    --vt-tools-card-radius: 12px;
+}
+
+/* ---------------------------------------------------------------- Page main */
+
+.vt-tools-main {
+    padding: 0.75rem;
+    width: 100%;
+}
+
+@media (min-width: 768px) {
+    .vt-tools-main {
+        padding: 1rem 1.5rem 2rem 1.5rem;
+    }
+}
+
+/* ---------------------------------------------------------------- Grid */
+
+/* Two independent column stacks. Each .vt-tools-grid-col is its own
+   flex column with its own gap; cards inside flow naturally with no
+   row-height cross-contamination between left and right columns. The
+   outer .vt-tools-grid arranges the two stacks side-by-side above
+   1280px and stacked single-col below. */
+.vt-tools-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--vt-tools-card-gap);
+    width: 100%;
+    align-items: start;
+}
+
+.vt-tools-grid-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--vt-tools-card-gap);
+    min-width: 0;
+}
+
+@media (min-width: 1280px) {
+    .vt-tools-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+/* ---------------------------------------------------------------- Card chrome */
+
+.vt-tools-card {
+    background-color: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: var(--vt-tools-card-radius);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.vt-tools-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.35rem 0.75rem;
+    border-bottom: 1px solid var(--kb-border-subtle);
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 30%);
+    min-height: 38px;
+    flex-shrink: 0;
+}
+
+.vt-tools-card-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    flex-grow: 1;
+    min-width: 0;
+    line-height: 1.2;
+}
+
+.vt-tools-card-title i {
+    color: var(--kb-primary);
+}
+
+.vt-tools-card-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: nowrap;
+}
+
+.vt-tools-card-body {
+    min-height: 0;
+    padding: 0.5rem 0.75rem 0.75rem 0.75rem;
+}
+
+/* ---------------------------------------------------------------- Compact pills */
+
+/* The plan rule: filter/toggle pills in card headers should never exceed
+   the height of the section title text. Compact font + tight padding
+   match the 0.92rem title. */
+.vt-tools-pill-group .btn,
+.vt-tools-pill-icon {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.18rem 0.5rem;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+}
+
+.vt-tools-pill-group .btn i,
+.vt-tools-pill-icon i {
+    font-size: 0.8rem;
+}
+
+.vt-tools-pill-group .btn i + * {
+    margin-left: 0.2rem;
+}
+
+.vt-tools-pill-icon {
+    /* Square-ish icon buttons (refresh, lock, suggest, reset) */
+    width: 28px;
+    height: 24px;
+    padding: 0 0.4rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vt-tools-pill-icon i {
+    font-size: 0.85rem;
+}
+
+/* Session picker dropdown sits inline with pills — match height. */
+.vt-tools-session-picker {
+    font-size: 0.72rem;
+    padding: 0.18rem 1.6rem 0.18rem 0.5rem;
+    height: 24px;
+    line-height: 1.2;
+    max-width: 200px;
+    min-width: 120px;
+}
+
+/* Topnav action group (left-side, after VT Stats brand). Holds the
+   Ignore-live Bootstrap form-switch + the Reset button. */
+.vt-tools-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.vt-tools-ignore-switch {
+    padding-left: 2.2em;   /* Bootstrap's default; explicit so it doesn't shift in the navbar */
+    font-size: 0.825rem;
+    color: var(--kb-text-secondary);
+    user-select: none;
+    cursor: pointer;
+    min-height: auto;
+    line-height: 1.2;
+}
+
+.vt-tools-ignore-switch .form-check-input {
+    cursor: pointer;
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 80%, transparent);
+    border-color: color-mix(in oklab, var(--kb-border-subtle) 80%, transparent);
+}
+
+.vt-tools-ignore-switch .form-check-input:checked {
+    background-color: var(--kb-warning);
+    border-color: var(--kb-warning);
+}
+
+.vt-tools-ignore-switch .form-check-input:focus {
+    box-shadow: 0 0 0 0.2rem color-mix(in oklab, var(--kb-warning) 25%, transparent);
+}
+
+.vt-tools-ignore-switch .form-check-label {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.vt-tools-ignore-switch .form-check-input:checked + .form-check-label {
+    color: var(--kb-warning);
+}
+
+.vt-nav-icon-btn--danger {
+    color: var(--kb-danger);
+}
+
+.vt-nav-icon-btn--danger:hover,
+.vt-nav-icon-btn--danger:focus-visible {
+    color: var(--kb-danger);
+    background-color: color-mix(in oklab, var(--kb-danger) 12%, transparent);
+}
+
+/* Ephemeral-data modal callout. Theme-coupled via --kb-primary so the
+   contrast holds across every theme — Bootstrap's stock alert-info
+   classes wash out on dark themes that don't remap --bs-info. */
+.vt-tools-ephemeral-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.65rem 0.85rem;
+    background-color: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-primary) 40%, transparent);
+    border-left: 4px solid var(--kb-primary);
+    border-radius: 6px;
+    color: var(--kb-text-primary);
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
+.vt-tools-ephemeral-alert-icon {
+    color: var(--kb-primary);
+    font-size: 1.05rem;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+
+/* ---------------------------------------------------------------- Lobby card (merged) */
+
+/* Lock-lobby toggle visual state. Padlock icon swap is JS-driven. */
+#vt-tools-lock-lobby[aria-pressed="true"] {
+    color: var(--kb-warning);
+    border-color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 12%, transparent);
+}
+
+/* Compact one-line(ish) live-session metadata strip. Renders state badges,
+   map name, host, count, elapsed, and Join/GameWatch buttons inline. */
+.vt-tools-lobby-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding: 0.4rem 0.55rem;
+    margin-bottom: 0.45rem;
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 25%);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 8px;
+    font-size: 0.78rem;
+    line-height: 1.3;
+}
+
+.vt-tools-lobby-meta:empty {
+    display: none;
+}
+
+.vt-tools-lobby-meta-badge {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.12em 0.45em;
+    border-radius: 3px;
+    text-transform: uppercase;
+    color: var(--kb-text-primary);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 80%, transparent);
+}
+
+.vt-tools-lobby-meta-badge--ingame {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 18%, transparent);
+}
+
+.vt-tools-lobby-meta-badge--pregame {
+    color: var(--kb-primary);
+    background-color: color-mix(in oklab, var(--kb-primary) 18%, transparent);
+}
+
+.vt-tools-lobby-meta-badge--vsr {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 18%, transparent);
+}
+
+.vt-tools-lobby-meta-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    object-fit: cover;
+    background-color: var(--kb-bg-muted);
+    flex-shrink: 0;
+}
+
+.vt-tools-lobby-meta-mapname {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-tools-lobby-meta-sep {
+    color: var(--kb-text-muted);
+    opacity: 0.55;
+}
+
+.vt-tools-lobby-meta-host,
+.vt-tools-lobby-meta-count,
+.vt-tools-lobby-meta-elapsed {
+    color: var(--kb-text-secondary);
+    white-space: nowrap;
+}
+
+.vt-tools-lobby-meta-host strong,
+.vt-tools-lobby-meta-count strong {
+    color: var(--kb-text-primary);
+    font-weight: 600;
+}
+
+.vt-tools-lobby-meta-actions {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+}
+
+.vt-tools-lobby-meta-join,
+.vt-tools-lobby-meta-gw {
+    font-size: 0.7rem;
+    padding: 0.18rem 0.5rem;
+    line-height: 1.2;
+    font-weight: 600;
+}
+
+.vt-tools-lobby-meta-lock-banner {
+    width: 100%;
+    background-color: color-mix(in oklab, var(--kb-warning) 14%, transparent);
+    color: var(--kb-warning);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 35%, transparent);
+    border-radius: 6px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 500;
+    margin-top: 0.3rem;
+}
+
+.vt-tools-lobby-meta--ignored {
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 35%, transparent);
+    color: var(--kb-text-secondary);
+    font-style: italic;
+}
+
+.vt-tools-lobby-meta--empty {
+    color: var(--kb-text-muted);
+    font-style: italic;
+}
+
+/* ---------------------------------------------------------------- Active Roster (inside Lobby card) */
+
+.vt-tools-roster-count {
+    font-size: 0.65rem;
+    font-weight: 700;
+    background-color: color-mix(in oklab, var(--kb-primary) 16%, transparent);
+    color: var(--kb-primary);
+    border-radius: 999px;
+    padding: 0.1em 0.5em;
+}
+
+.vt-tools-roster-source {
+    font-size: 0.7rem;
+    margin-bottom: 0.3rem;
+}
+
+.vt-tools-roster-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.vt-tools-roster-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 20%);
+}
+
+.vt-tools-roster-row-name {
+    flex-grow: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+}
+
+.vt-tools-roster-row-displayname {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.82rem;
+}
+
+.vt-tools-roster-row-lobbynick {
+    font-size: 0.66rem;
+    color: var(--kb-text-muted);
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-style: italic;
+}
+
+.vt-tools-roster-row-tier {
+    font-size: 0.64rem;
+    font-weight: 700;
+    color: var(--kb-text-primary);
+    padding: 0.08em 0.4em;
+    border-radius: 3px;
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+}
+
+.vt-tools-roster-row-cmdr-badge {
+    font-size: 0.58rem;
+    font-weight: 600;
+    padding: 0.08em 0.4em;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.vt-tools-roster-row-cmdr-badge--strong {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 16%, transparent);
+}
+
+.vt-tools-roster-row-cmdr-badge--curious {
+    color: var(--kb-primary);
+    background-color: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+}
+
+.vt-tools-roster-row-cmdr-badge--rare {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 14%, transparent);
+}
+
+.vt-tools-roster-row-provisional-chip {
+    font-size: 0.65rem;
+    color: var(--kb-text-muted);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    padding: 0.1em 0.45em;
+    border-radius: 4px;
+    font-style: italic;
+}
+
+.vt-tools-roster-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.vt-tools-roster-row-iconlink,
+.vt-tools-roster-row-iconbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: transparent;
+    color: var(--kb-text-secondary);
+    border-radius: 4px;
+    text-decoration: none;
+    transition: color 0.15s ease, background-color 0.15s ease;
+    font-size: 0.75rem;
+}
+
+.vt-tools-roster-row-iconlink:hover,
+.vt-tools-roster-row-iconbtn:hover {
+    color: var(--kb-text-primary);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+}
+
+/* ---------------------------------------------------------------- Player Picker Modal
+
+   The Manual-mode roster picker is a modal-only flow: the inline search
+   bar + dropdown was removed in favor of a focused "Build lobby"
+   experience. The modal has two columns — a filterable / sortable grid
+   on the left and a "player cart" of current selections on the right.
+   Cart is pre-populated from the existing manual roster on open so the
+   modal is an edit-and-commit flow (not append-only). Submit replaces
+   pageState.manualRoster; Cancel discards changes silently. */
+
+.vt-tools-picker-modal .modal-content {
+    background-color: var(--kb-bg-card);
+}
+
+.vt-tools-picker-modal .modal-xl {
+    max-width: min(1100px, 96vw);
+}
+
+/* Body: 2-column grid (left 60%, right 40%) with a divider gutter.
+   Falls back to single-column stack below 720px. */
+.vt-tools-picker-body {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    max-height: calc(85vh - 7rem);
+    overflow: hidden;
+}
+
+@media (max-width: 719.98px) {
+    .vt-tools-picker-body {
+        grid-template-columns: 1fr;
+        max-height: none;
+    }
+}
+
+.vt-tools-picker-left,
+.vt-tools-picker-right {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.vt-tools-picker-right {
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 35%);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 10px;
+    padding: 0.6rem 0.65rem;
+    gap: 0.4rem;
+}
+
+/* Search + sort controls strip above the grid. */
+.vt-tools-picker-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.vt-tools-picker-search-wrap {
+    position: relative;
+}
+
+.vt-tools-picker-search-icon {
+    position: absolute;
+    top: 50%;
+    left: 0.55rem;
+    transform: translateY(-50%);
+    color: var(--kb-text-muted);
+    font-size: 0.85rem;
+    pointer-events: none;
+}
+
+.vt-tools-picker-search-input {
+    padding-left: 1.85rem;
+}
+
+.vt-tools-picker-sort {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 11rem;
+}
+
+/* Pool filter pill row. Sits between the search/sort controls and the
+   grid. The right-side count label shows N players visible after the
+   pool filter + search query are applied. */
+.vt-tools-picker-pool-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+}
+
+.vt-tools-picker-pool-group .vt-tools-picker-pool-btn {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.55rem;
+    font-weight: 600;
+}
+
+.vt-tools-picker-pool-count {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Grid of player cards. Auto-fill keeps tiles roughly the same size as
+   the viewport widens. Vertical scroll within the grid area when the
+   pool exceeds the modal height. */
+.vt-tools-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(115px, 1fr));
+    grid-auto-rows: min-content; /* row sizes hug content; no row stretching */
+    align-content: start;        /* pack rows at the top — don't distribute spare vertical space */
+    gap: 0.4rem;
+    overflow-y: auto;
+    flex-grow: 1;
+    padding-right: 0.25rem; /* room for scrollbar without clipping cards */
+    min-height: 200px;
+}
+
+.vt-tools-picker-card {
+    position: relative;
+    background-color: var(--kb-bg-card);
+    border: 1.5px solid var(--kb-border-subtle);
+    border-radius: 8px;
+    padding: 0.35rem 0.5rem;
+    cursor: pointer;
+    transition: border-color 0.12s ease, background-color 0.12s ease, transform 0.12s ease;
+    user-select: none;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+}
+
+.vt-tools-picker-card:hover {
+    border-color: color-mix(in oklab, var(--kb-primary) 50%, var(--kb-border-subtle));
+    transform: translateY(-1px);
+}
+
+.vt-tools-picker-card--selected {
+    border-color: var(--kb-primary);
+    background-color: color-mix(in oklab, var(--kb-primary) 14%, var(--kb-bg-card));
+}
+
+.vt-tools-picker-card-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-tools-picker-card-tier {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--kb-text-muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+/* Rated badge (player has played at least one match). The primary color
+   sets them apart from the muted `?` badges of the long tail of
+   never-played community names pulled in from steamid_to_name.txt. */
+.vt-tools-picker-card-tier--rated {
+    color: var(--kb-primary);
+}
+
+.vt-tools-picker-card-check {
+    position: absolute;
+    top: 0.3rem;
+    right: 0.35rem;
+    color: var(--kb-primary);
+    font-size: 0.95rem;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+.vt-tools-picker-card--selected .vt-tools-picker-card-check {
+    opacity: 1;
+}
+
+.vt-tools-picker-grid-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--kb-text-muted);
+    font-style: italic;
+    padding: 2rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+/* ---------------------------------------------------------------- Player Picker Cart */
+
+.vt-tools-picker-cart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--kb-border-subtle);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.2rem;
+}
+
+.vt-tools-picker-cart-title {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    font-size: 0.9rem;
+}
+
+.vt-tools-picker-cart-clear {
+    font-size: 0.75rem;
+    padding: 0 0.25rem;
+    text-decoration: none;
+    color: var(--kb-text-muted);
+}
+
+.vt-tools-picker-cart-clear:hover {
+    color: var(--kb-danger);
+}
+
+.vt-tools-picker-cart-clear:disabled,
+.vt-tools-picker-cart-clear.disabled {
+    color: var(--kb-text-muted);
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.vt-tools-picker-cart-list {
+    overflow-y: auto;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-height: 140px;
+    padding-right: 0.25rem;
+}
+
+.vt-tools-picker-cart-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.82rem;
+}
+
+.vt-tools-picker-cart-row-name {
+    flex-grow: 1;
+    font-weight: 500;
+    color: var(--kb-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-tools-picker-cart-row-tier {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--kb-text-muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.vt-tools-picker-cart-row-tier--rated {
+    color: var(--kb-primary);
+}
+
+.vt-tools-picker-cart-row-remove {
+    background: none;
+    border: none;
+    color: var(--kb-text-muted);
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 0.12s ease, background-color 0.12s ease;
+}
+
+.vt-tools-picker-cart-row-remove:hover {
+    color: var(--kb-danger);
+    background-color: color-mix(in oklab, var(--kb-danger) 14%, transparent);
+}
+
+.vt-tools-picker-cart-empty {
+    color: var(--kb-text-muted);
+    font-style: italic;
+    text-align: center;
+    padding: 1.25rem 0.5rem;
+    font-size: 0.82rem;
+}
+
+.vt-tools-picker-footer-help {
+    flex-grow: 1;
+    margin-right: 1rem;
+}
+
+@media (max-width: 575.98px) {
+    .vt-tools-picker-footer-help {
+        display: none;
+    }
+}
+
+/* ---------------------------------------------------------------- Player Wheel */
+
+.vt-tools-wheel-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.vt-tools-wheel-stage-empty {
+    color: var(--kb-text-muted);
+    text-align: center;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.vt-tools-wheel-canvas-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 340px;
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vt-tools-wheel-canvas {
+    width: 100%;
+    height: 100%;
+    max-width: 340px;
+    max-height: 340px;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+    border-radius: 50%;
+}
+
+.vt-tools-wheel-canvas:hover {
+    transform: scale(1.005);
+}
+
+.vt-tools-wheel-pointer {
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 1.6rem;
+    color: var(--kb-text-primary);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    z-index: 1;
+    line-height: 1;
+}
+
+.vt-tools-wheel-spin-btn {
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 0.5rem 1.5rem;
+    min-width: 140px;
+}
+
+.vt-tools-wheel-removed-wrap {
+    width: 100%;
+    border-top: 1px solid var(--kb-border-subtle);
+    padding-top: 0.5rem;
+}
+
+.vt-tools-wheel-removed-label {
+    margin-bottom: 0.35rem;
+}
+
+.vt-tools-wheel-removed-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.vt-tools-wheel-removed-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    color: var(--kb-text-secondary);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.vt-tools-wheel-removed-chip:hover {
+    color: var(--kb-text-primary);
+    background-color: color-mix(in oklab, var(--kb-success) 18%, transparent);
+}
+
+.vt-tools-wheel-removed-chip i {
+    font-size: 0.7rem;
+}
+
+/* ---------------------------------------------------------------- Team Balonce */
+
+.vt-tools-balonce-empty {
+    text-align: center;
+    line-height: 1.5;
+}
+
+.vt-tools-balonce-cmdr-status {
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 0.1em 0.45em;
+    border-radius: 999px;
+    background-color: color-mix(in oklab, var(--kb-warning) 18%, transparent);
+    color: var(--kb-warning);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.vt-tools-balonce-mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 0.1em 0.45em;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.1;
+}
+
+.vt-tools-balonce-mode i {
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+.vt-tools-balonce-mode--live {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 18%, transparent);
+}
+
+.vt-tools-balonce-mode--manual {
+    color: var(--kb-text-muted);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 75%, transparent);
+}
+
+.vt-tools-balonce-cmdr-status--1 {
+    background-color: color-mix(in oklab, var(--kb-warning) 18%, transparent);
+    color: var(--kb-warning);
+}
+
+.vt-tools-balonce-cmdr-status--2 {
+    background-color: color-mix(in oklab, var(--kb-success) 18%, transparent);
+    color: var(--kb-success);
+}
+
+.vt-tools-balonce-banner {
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.73rem;
+    line-height: 1.35;
+    margin-bottom: 0.4rem;
+}
+
+.vt-tools-balonce-banner--orange {
+    background-color: color-mix(in oklab, var(--kb-warning) 16%, transparent);
+    color: var(--kb-warning);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 35%, transparent);
+}
+
+.vt-tools-balonce-banner--yellow {
+    background-color: color-mix(in oklab, var(--kb-warning) 10%, transparent);
+    color: color-mix(in oklab, var(--kb-warning) 80%, var(--kb-text-primary) 20%);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 28%, transparent);
+}
+
+.vt-tools-balonce-banner--green {
+    background-color: color-mix(in oklab, var(--kb-success) 12%, transparent);
+    color: color-mix(in oklab, var(--kb-success) 80%, var(--kb-text-primary) 20%);
+    border: 1px solid color-mix(in oklab, var(--kb-success) 30%, transparent);
+}
+
+.vt-tools-balonce-banner-note {
+    color: var(--kb-text-muted);
+    font-style: italic;
+}
+
+.vt-tools-balonce-cmdr-delta-chip {
+    display: inline-block;
+    padding: 0.1em 0.5em;
+    background-color: color-mix(in oklab, var(--kb-bg-card) 75%, transparent);
+    color: var(--kb-text-primary);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.vt-tools-balonce-cmdr-config {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.vt-tools-balonce-cmdr-slot {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.vt-tools-balonce-cmdr-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--kb-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.vt-tools-balonce-cmdr-select {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+}
+
+.vt-tools-balonce-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Team column shell. Flex column so the inner team-list can grow to
+   fill, giving the user a generous drop target below the rows.
+   `.is-dragover` highlight is JS-driven. */
+.vt-tools-balonce-team-column {
+    display: flex;
+    flex-direction: column;
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 30%);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.vt-tools-balonce-team-column.is-dragover {
+    background-color: color-mix(in oklab, var(--kb-primary) 10%, transparent);
+    border-color: var(--kb-primary);
+}
+
+.vt-tools-balonce-team-header {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.5rem;
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 50%);
+    border-bottom: 1px solid var(--kb-border-subtle);
+}
+
+.vt-tools-balonce-team-name {
+    font-weight: 700;
+    color: var(--kb-text-primary);
+    font-size: 0.78rem;
+    flex-grow: 1;
+}
+
+.vt-tools-balonce-team-sum {
+    font-weight: 700;
+    color: var(--kb-primary);
+    font-size: 0.78rem;
+    font-feature-settings: "tnum" 1;
+}
+
+.vt-tools-balonce-team-header-disadv {
+    font-size: 0.58rem;
+    font-weight: 700;
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 20%, transparent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.05em 0.4em;
+    border-radius: 3px;
+}
+
+.vt-tools-balonce-team-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.4rem;
+    flex-grow: 1;
+    min-height: 80px;
+}
+
+.vt-tools-balonce-team-empty {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    font-style: italic;
+    text-align: center;
+    padding: 0.5rem 0;
+    border: 1.5px dashed color-mix(in oklab, var(--kb-border-subtle) 80%, transparent);
+    border-radius: 6px;
+}
+
+/* Match the Lobby roster row sizing for easier drag-targeting. Padding
+   + font-size pulled into line with `.vt-tools-roster-row`. */
+.vt-tools-balonce-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.55rem;
+    background-color: color-mix(in oklab, var(--kb-bg-card) 65%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 6px;
+    font-size: 0.82rem;
+    cursor: grab;
+    transition: opacity 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.vt-tools-balonce-row:hover {
+    border-color: var(--kb-primary);
+}
+
+.vt-tools-balonce-row:active {
+    cursor: grabbing;
+}
+
+.vt-tools-balonce-row.is-dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+}
+
+.vt-tools-balonce-row-grip {
+    color: var(--kb-text-muted);
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.vt-tools-balonce-row-cmdrchip {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 22%, transparent);
+    padding: 0.12em 0.45em;
+    border-radius: 4px;
+    letter-spacing: 0.04em;
+}
+
+.vt-tools-balonce-row-name {
+    flex-grow: 1;
+    min-width: 0;
+    color: var(--kb-text-primary);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-tools-balonce-row-tier {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--kb-primary);
+    background-color: color-mix(in oklab, var(--kb-primary) 16%, transparent);
+    padding: 0.12em 0.45em;
+    border-radius: 4px;
+}
+
+.vt-tools-balonce-row-provisional {
+    font-size: 0.62rem;
+    color: var(--kb-text-muted);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    padding: 0.12em 0.45em;
+    border-radius: 4px;
+    font-style: italic;
+}
+
+.vt-tools-balonce-row-vtsr {
+    font-feature-settings: "tnum" 1;
+    color: var(--kb-text-secondary);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- Played Meter */
+
+.vt-tools-balonce-played-meter {
+    margin-top: 0.5rem;
+}
+
+.vt-tools-balonce-played-meter-track {
+    position: relative;
+    height: 14px;
+    border-radius: 7px;
+    background: linear-gradient(
+        to right,
+        color-mix(in oklab, var(--kb-warning) 28%, transparent) 0%,
+        color-mix(in oklab, var(--kb-warning) 12%, transparent) 25%,
+        color-mix(in oklab, var(--kb-success) 22%, transparent) 50%,
+        color-mix(in oklab, var(--kb-warning) 12%, transparent) 75%,
+        color-mix(in oklab, var(--kb-warning) 28%, transparent) 100%
+    );
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.vt-tools-balonce-played-meter-tick {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    left: 50%;
+    width: 2px;
+    background-color: color-mix(in oklab, var(--kb-text-primary) 50%, transparent);
+    transform: translateX(-1px);
+}
+
+.vt-tools-balonce-played-meter-chevron {
+    position: absolute;
+    top: -10px;
+    width: 18px;
+    height: 18px;
+    margin-left: -9px;
+    color: var(--kb-text-primary);
+    font-size: 1.1rem;
+    line-height: 1;
+    text-align: center;
+    transition: left 0.2s ease-out;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-balonce-played-meter-chevron {
+        transition: none;
+    }
+}
+
+.vt-tools-balonce-played-meter-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.4rem;
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-tools-balonce-played-meter-team {
+    flex-shrink: 0;
+    color: var(--kb-text-muted);
+}
+
+.vt-tools-balonce-played-meter-label {
+    text-align: center;
+    flex-grow: 1;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.72rem;
+}
+
+.vt-tools-balonce-played-meter-label--green {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 16%, transparent);
+}
+
+.vt-tools-balonce-played-meter-label--yellow {
+    color: color-mix(in oklab, var(--kb-warning) 75%, var(--kb-text-primary) 25%);
+    background-color: color-mix(in oklab, var(--kb-warning) 12%, transparent);
+}
+
+.vt-tools-balonce-played-meter-label--orange {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 18%, transparent);
+}
+
+.vt-tools-balonce-played-meter-label--red {
+    color: var(--kb-danger);
+    background-color: color-mix(in oklab, var(--kb-danger) 18%, transparent);
+}
+
+/* ---------------------------------------------------------------- Coinflip */
+
+/* 2-col layout: left = team cards + FLIP button; right = prominent
+   winner reveal area. Right column is slightly narrower (3fr/2fr) so
+   the winner panel feels intentional, not just the leftover space. */
+.vt-tools-coinflip-layout {
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: 0.6rem;
+    width: 100%;
+    align-items: stretch;
+}
+
+@media (max-width: 599.98px) {
+    .vt-tools-coinflip-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.vt-tools-coinflip-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.vt-tools-coinflip-stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.4rem 0;
+}
+
+.vt-tools-coinflip-card {
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 35%);
+    border: 1.5px solid var(--kb-border-subtle);
+    border-radius: 10px;
+    padding: 0.65rem 0.5rem;
+    text-align: center;
+    transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+}
+
+.vt-tools-coinflip-card-label {
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--kb-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.15rem;
+}
+
+.vt-tools-coinflip-card-name {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--kb-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+.vt-tools-coinflip-card--team1 .vt-tools-coinflip-card-label {
+    color: var(--kb-primary);
+}
+
+.vt-tools-coinflip-card--team2 .vt-tools-coinflip-card-label {
+    color: var(--kb-secondary);
+}
+
+.vt-tools-coinflip-card--winner {
+    border-color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 18%, transparent);
+    transform: scale(1.03);
+}
+
+/* Selector bar floats over the row of cards. Width is 50% minus the
+   half-gap (which is `0.4rem / 2 = 0.2rem`); `left` is animated via JS
+   from 0% (covers card 1) to 50% (covers card 2). Hidden by default;
+   only visible while a flip is actively oscillating. The winner card
+   uses its own green-tint + scale-up reveal once the selector clears,
+   so the selector's fixed-width frame never has to line up with the
+   scaled winner. */
+.vt-tools-coinflip-selector {
+    position: absolute;
+    top: 0.1rem;
+    bottom: 0.1rem;
+    width: calc(50% - 0.2rem);
+    border: 2px solid var(--kb-primary);
+    border-radius: 12px;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    pointer-events: none;
+    left: 0;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.vt-tools-coinflip-selector--active {
+    opacity: 1;
+}
+
+.vt-tools-coinflip-flip-btn {
+    display: block;
+    margin: 0.25rem auto 0 auto;
+    min-width: 120px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 0.4rem 1rem;
+}
+
+/* ---------------------------------------------------------------- Coinflip winner panel */
+
+.vt-tools-coinflip-right {
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 25%);
+    border: 1.5px dashed var(--kb-border-subtle);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100px;
+    padding: 0.75rem 0.5rem;
+    text-align: center;
+    overflow: hidden;
+}
+
+.vt-tools-coinflip-result-empty {
+    color: var(--kb-text-muted);
+    font-style: italic;
+}
+
+.vt-tools-coinflip-result-empty i {
+    font-size: 1.6rem;
+    display: block;
+    margin-bottom: 0.3rem;
+    color: color-mix(in oklab, var(--kb-text-muted) 70%, transparent);
+}
+
+.vt-tools-coinflip-result-empty-label {
+    font-size: 0.78rem;
+}
+
+.vt-tools-coinflip-result-flipping i {
+    display: block;
+    font-size: 1.8rem;
+    color: var(--kb-primary);
+    margin-bottom: 0.3rem;
+    animation: vtToolsCoinFlipSpin 0.7s linear infinite;
+}
+
+@keyframes vtToolsCoinFlipSpin {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-coinflip-result-flipping i { animation: none; }
+}
+
+.vt-tools-coinflip-result-stage {
+    animation: vtToolsCoinFlipReveal 0.45s cubic-bezier(0.18, 0.84, 0.32, 1);
+}
+
+@keyframes vtToolsCoinFlipReveal {
+    0%   { transform: scale(0.7); opacity: 0; }
+    60%  { transform: scale(1.05); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-coinflip-result-stage { animation: none; }
+}
+
+.vt-tools-coinflip-result-trophy {
+    display: block;
+    font-size: 2rem;
+    color: var(--kb-success);
+    margin-bottom: 0.25rem;
+    text-shadow: 0 2px 8px color-mix(in oklab, var(--kb-success) 35%, transparent);
+}
+
+.vt-tools-coinflip-result-team-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: var(--kb-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.1rem;
+}
+
+.vt-tools-coinflip-result-team-name {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--kb-text-primary);
+    line-height: 1.1;
+    margin-bottom: 0.1rem;
+    word-break: break-word;
+}
+
+.vt-tools-coinflip-result-tagline {
+    font-size: 0.7rem;
+    color: var(--kb-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.vt-tools-coinflip-result--team1 .vt-tools-coinflip-result-team-label {
+    color: var(--kb-primary);
+}
+
+.vt-tools-coinflip-result--team2 .vt-tools-coinflip-result-team-label {
+    color: var(--kb-secondary);
+}
+
+/* ---------------------------------------------------------------- Map Roll (slot machine) */
+
+.vt-tools-maproll-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.vt-tools-maproll-reels {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+}
+
+@media (max-width: 767.98px) {
+    .vt-tools-maproll-reels {
+        grid-template-columns: 1fr;
+    }
+}
+
+.vt-tools-maproll-reel {
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 30%);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.vt-tools-maproll-reel-header {
+    padding: 0.35rem 0.5rem;
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 50%);
+    border-bottom: 1px solid var(--kb-border-subtle);
+    text-align: center;
+}
+
+.vt-tools-maproll-reel-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--kb-text-primary);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.vt-tools-maproll-reel-sub {
+    display: block;
+    font-size: 0.65rem;
+    color: var(--kb-text-muted);
+    line-height: 1.2;
+}
+
+.vt-tools-maproll-reel-window {
+    position: relative;
+    height: 144px;       /* REEL_VISIBLE_CELLS (3) * REEL_CELL_HEIGHT (48) */
+    overflow: hidden;
+}
+
+.vt-tools-maproll-reel-strip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    will-change: transform;
+}
+
+.vt-tools-maproll-reel-marker {
+    position: absolute;
+    pointer-events: none;
+    top: 48px;           /* one row down */
+    left: 0;
+    right: 0;
+    height: 48px;        /* one row */
+    border-top: 2px solid color-mix(in oklab, var(--kb-primary) 70%, transparent);
+    border-bottom: 2px solid color-mix(in oklab, var(--kb-primary) 70%, transparent);
+    background-color: color-mix(in oklab, var(--kb-primary) 6%, transparent);
+}
+
+.vt-tools-maproll-cell {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0 0.4rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 50%);
+}
+
+.vt-tools-maproll-cell img {
+    width: 34px;
+    height: 34px;
+    border-radius: 4px;
+    object-fit: cover;
+    background-color: var(--kb-bg-muted);
+    flex-shrink: 0;
+}
+
+.vt-tools-maproll-cell-name {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--kb-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-tools-maproll-cell-placeholder,
+.vt-tools-maproll-cell-empty {
+    color: var(--kb-text-muted);
+    font-style: italic;
+    justify-content: center;
+}
+
+.vt-tools-maproll-roll-btn {
+    display: block;
+    margin: 0 auto;
+    min-width: 140px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+}
+
+.vt-tools-maproll-results {
+    margin-top: 0.25rem;
+}
+
+.vt-tools-maproll-results-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+}
+
+@media (max-width: 767.98px) {
+    .vt-tools-maproll-results-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.vt-tools-maproll-result-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    background-color: color-mix(in oklab, var(--kb-bg-card), var(--kb-bg-muted) 25%);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.vt-tools-maproll-result-card:hover {
+    border-color: var(--kb-primary);
+    transform: translateY(-2px);
+    color: inherit;
+}
+
+.vt-tools-maproll-result-card-empty {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.vt-tools-maproll-result-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--kb-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.vt-tools-maproll-result-empty {
+    color: var(--kb-text-muted);
+    font-style: italic;
+    font-size: 0.8rem;
+}
+
+.vt-tools-maproll-result-thumb {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 6px;
+    background-color: var(--kb-bg-muted);
+}
+
+.vt-tools-maproll-result-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-tools-maproll-result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+
+.vt-tools-maproll-result-chip {
+    font-size: 0.65rem;
+    color: var(--kb-text-secondary);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+}
+
+.vt-tools-maproll-result-cta {
+    font-size: 0.7rem;
+    color: var(--kb-primary);
+    margin-top: 0.25rem;
+}
+
+/* ---------------------------------------------------------------- Wheel result modal */
+
+.vt-tools-wheel-result-stage {
+    text-align: center;
+    padding: 1rem 0.5rem;
+}
+
+.vt-tools-wheel-result-confetti {
+    font-size: 2.75rem;
+    color: var(--kb-primary);
+    margin-bottom: 0.5rem;
+    animation: vtToolsTrophyBounce 0.6s ease-out;
+}
+
+@keyframes vtToolsTrophyBounce {
+    0%   { transform: scale(0.5) translateY(20px); opacity: 0; }
+    60%  { transform: scale(1.15) translateY(-6px); opacity: 1; }
+    100% { transform: scale(1)    translateY(0);    opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-wheel-result-confetti { animation: none; }
+}
+
+.vt-tools-wheel-result-name {
+    color: var(--kb-text-primary);
+    word-break: break-word;
+}
+
+.vt-tools-wheel-result-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.vt-tools-wheel-result-tier {
+    background-color: color-mix(in oklab, var(--kb-primary) 20%, transparent);
+    color: var(--kb-primary);
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 0.25em 0.7em;
+}
+
+.vt-tools-wheel-result-provisional {
+    background-color: color-mix(in oklab, var(--kb-warning) 18%, transparent);
+    color: var(--kb-warning);
+    font-style: italic;
+}
+
+.vt-tools-wheel-result-vtsr {
+    font-feature-settings: "tnum" 1;
+}
+
+/* ---------------------------------------------------------------- Toast container */
+
+.vt-tools-toast-container {
+    /* Bootstrap's toast-container already positions; this overrides the
+       top offset so toasts clear the sticky topnav. */
+    top: 80px !important;
+    right: 24px !important;
+    z-index: 1080;
+    pointer-events: none;
+}
+
+.vt-tools-toast-container > .toast {
+    pointer-events: auto;
+}
+
+.vt-tools-toast {
+    background-color: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    color: var(--kb-text-primary);
+    min-width: 240px;
+}
+
+.vt-tools-toast--join .toast-header {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 14%, transparent);
+}
+
+.vt-tools-toast--leave .toast-header {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 14%, transparent);
+}
+
+/* ---------------------------------------------------------------- Disabled pills */
+
+/* The radio-style btn-group pill must NEVER show a "Coming soon" chip
+   — disabled state alone signals future-only. */
+.btn-check:disabled + .btn,
+.btn.disabled,
+.btn[disabled] {
+    opacity: 0.4 !important;
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------- Below-1280 fallback */
+
+@media (max-width: 1279.98px) {
+    /* Cards have no max-height; page scrolls vertically. */
+    .vt-tools-card {
+        max-height: none;
+    }
+}

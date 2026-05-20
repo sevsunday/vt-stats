@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lobby Tools — VT Stats</title>
+  <meta name="description" content="Lobby utilities for BZ2 Combat Commander: live session viewer, player wheel, coinflip, random map roller, and team balonce calculator.">
+
+  <link rel="canonical" href="https://vtstats.bz/tools/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Lobby Tools — VT Stats">
+  <meta property="og:description" content="Live session viewer, player wheel, coinflip, random map roller, and team balonce calculator.">
+  <meta property="og:url" content="https://vtstats.bz/tools/">
+  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:site_name" content="VT Stats">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/tools.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar. Mirrors player/index.html shape. The Tools link is active here. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <!-- Tools-page action group. Sits flush against the brand on the left.
+           Ignore-live is a Bootstrap form-switch; Reset is a small button. -->
+      <div class="vt-tools-actions d-none d-md-inline-flex align-items-center gap-2 ms-2">
+        <div class="form-check form-switch vt-tools-ignore-switch m-0"
+             title="Stop polling the live lobby. Forces Manual roster mode.">
+          <input class="form-check-input" type="checkbox" role="switch"
+                 id="vt-tools-ignore-live" aria-describedby="vt-tools-ignore-live-help">
+          <label class="form-check-label" for="vt-tools-ignore-live">
+            <i class="bi bi-broadcast-pin me-1"></i>Ignore live
+          </label>
+          <span id="vt-tools-ignore-live-help" class="visually-hidden">
+            When enabled, no lobby polling happens; mode is forced to Manual.
+          </span>
+        </div>
+        <button class="vt-nav-icon-btn vt-nav-icon-btn--danger" type="button" id="vt-tools-reset-all"
+                data-bs-toggle="modal" data-bs-target="#vt-tools-reset-modal"
+                title="Reset all tools state back to defaults">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+        </button>
+      </div>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="../docs.html" class="vt-nav-icon-btn"
+             title="Open the docs" aria-label="Docs">
+            <i class="bi bi-book me-1"></i>Docs
+          </a>
+          <a href="../raw.html" class="vt-nav-icon-btn"
+             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)"
+             aria-label="Raw data browser">
+            <i class="bi bi-code-square me-1"></i>Raw data
+          </a>
+          <a href="../odf/" class="vt-nav-icon-btn"
+             title="Browse the BZ2 Object Definition File (ODF) database"
+             aria-label="ODF browser">
+            <i class="bi bi-boxes me-1"></i>ODF
+          </a>
+          <a href="../player/" class="vt-nav-icon-btn"
+             title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
+          </a>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="./" class="vt-nav-icon-btn vt-nav-icon-btn--tools active" aria-current="page"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
+          </a>
+
+          <!-- Mobile-only duplicate of the left-side action group. Hidden
+               on desktop (the d-md-inline-flex variant sits next to the
+               brand instead). -->
+          <div class="vt-tools-actions d-md-none d-flex flex-column gap-2 mt-2 pt-2 border-top">
+            <div class="form-check form-switch vt-tools-ignore-switch m-0"
+                 title="Stop polling the live lobby. Forces Manual roster mode.">
+              <input class="form-check-input" type="checkbox" role="switch"
+                     id="vt-tools-ignore-live-mobile">
+              <label class="form-check-label" for="vt-tools-ignore-live-mobile">
+                <i class="bi bi-broadcast-pin me-1"></i>Ignore live data
+              </label>
+            </div>
+            <button class="vt-nav-icon-btn vt-nav-icon-btn--danger" type="button"
+                    data-bs-toggle="modal" data-bs-target="#vt-tools-reset-modal"
+                    title="Reset all tools state back to defaults">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>Reset all tools
+            </button>
+          </div>
+
+          <!-- Theme Dropdown. js/theme.js auto-binds. -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Page main: 2-col auto-row grid above 1280px (left col: Lobby +
+       Team Balonce; right col: Wheel + Coinflip + Map Roll). Cards size
+       to content; page scrolls naturally. -->
+  <main class="vt-tools-main flex-grow-1" id="vt-tools-main">
+
+    <!-- Two independent column stacks so each column's cards flow
+         naturally without inheriting row heights from the other. Above
+         1280px the two stacks render side-by-side via .vt-tools-grid's
+         grid-template-columns; below they fall back to a single column. -->
+    <div class="vt-tools-grid">
+
+      <!-- Left column: data trio (Lobby + Team Balonce). -->
+      <div class="vt-tools-grid-col vt-tools-grid-col--data">
+
+      <!-- ============================================================
+           LOBBY — merges Live Session + Active Roster
+           ============================================================ -->
+
+      <section class="vt-tools-card vt-tools-card--lobby" id="vt-tools-lobby"
+               aria-labelledby="vt-tools-lobby-title">
+        <header class="vt-tools-card-header">
+          <h2 class="vt-tools-card-title" id="vt-tools-lobby-title">
+            <i class="bi bi-broadcast me-2"></i>Lobby
+            <span class="vt-tools-roster-count badge ms-2" id="vt-tools-roster-count">0</span>
+          </h2>
+          <div class="vt-tools-card-header-actions">
+            <select class="form-select form-select-sm vt-tools-session-picker d-none"
+                    id="vt-tools-session-picker" aria-label="Choose lobby"></select>
+            <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Roster mode">
+              <input type="radio" class="btn-check" name="vt-tools-mode" id="vt-tools-mode-auto" value="auto" autocomplete="off" checked>
+              <label class="btn btn-outline-secondary" for="vt-tools-mode-auto" title="Roster auto-syncs with the live lobby">
+                <i class="bi bi-broadcast"></i>Auto
+              </label>
+              <input type="radio" class="btn-check" name="vt-tools-mode" id="vt-tools-mode-manual" value="manual" autocomplete="off">
+              <label class="btn btn-outline-secondary" for="vt-tools-mode-manual" title="Manually curated roster">
+                <i class="bi bi-pencil"></i>Manual
+              </label>
+            </div>
+            <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-pill-icon"
+                    id="vt-tools-refresh-now"
+                    title="Refresh lobby data immediately"
+                    aria-label="Refresh lobby data">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-pill-icon"
+                    id="vt-tools-lock-lobby" aria-pressed="false"
+                    title="Lock the current lobby snapshot (polling continues but the surfaced data is frozen)"
+                    aria-label="Lock lobby snapshot">
+              <i class="bi bi-unlock"></i>
+            </button>
+          </div>
+        </header>
+        <div class="vt-tools-card-body" id="vt-tools-lobby-body">
+          <!-- Compact live-session metadata strip (state badges, map name,
+               host, count, elapsed, Join button). Rendered by main.js. -->
+          <div class="vt-tools-lobby-meta" id="vt-tools-lobby-meta"></div>
+          <!-- Roster source attribution. -->
+          <div class="vt-tools-roster-source text-secondary small" id="vt-tools-roster-source">
+            Waiting for lobby data&hellip;
+          </div>
+          <!-- Roster list (replaces the original session player rows + the
+               Active Roster card body). -->
+          <div class="vt-tools-roster-list" id="vt-tools-roster-list"></div>
+          <!-- Manual-mode picker controls. Hidden in Auto mode.
+               Single primary button opens the build-lobby modal which holds
+               the search/filter/sort grid + selection cart. Free-text entry
+               is intentionally not available; only known players are addable. -->
+          <div class="vt-tools-roster-manual d-none" id="vt-tools-roster-manual">
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-primary btn-sm flex-grow-1"
+                      id="vt-tools-roster-open-picker"
+                      data-bs-toggle="modal" data-bs-target="#vt-tools-picker-modal"
+                      title="Open the player picker to build your lobby">
+                <i class="bi bi-people-fill me-1"></i>Add players
+              </button>
+              <button type="button" class="btn btn-outline-danger btn-sm d-none"
+                      id="vt-tools-roster-clear-all"
+                      title="Clear all manual roster entries">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================
+           TEAM BALONCE (left col, row 2)
+           ============================================================ -->
+
+      <section class="vt-tools-card vt-tools-card--balonce" id="vt-tools-balonce"
+               aria-labelledby="vt-tools-balonce-title">
+        <header class="vt-tools-card-header">
+          <h2 class="vt-tools-card-title" id="vt-tools-balonce-title">
+            <i class="bi bi-scales me-2"></i>Team Balonce
+            <span class="vt-tools-balonce-cmdr-status badge ms-2" id="vt-tools-balonce-cmdr-status">0/2 cmdrs</span>
+            <!-- Mode chip: 'Live' when commanders mirror the live lobby's
+                 isCommander flags; 'Manual' when user has overridden. -->
+            <span class="vt-tools-balonce-mode vt-tools-balonce-mode--live ms-1"
+                  id="vt-tools-balonce-mode"><i class="bi bi-broadcast" aria-hidden="true"></i>Live</span>
+          </h2>
+          <div class="vt-tools-card-header-actions">
+            <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-pill-icon"
+                    id="vt-tools-balonce-auto-suggest"
+                    title="Auto-suggest both commanders from VTSR-T + commander match count (overrides Live)">
+              <i class="bi bi-magic"></i>
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-pill-icon"
+                    id="vt-tools-balonce-reset"
+                    title="Clear manual swaps; snap back to Live commanders if available">
+              <i class="bi bi-arrow-counterclockwise"></i>
+            </button>
+          </div>
+        </header>
+        <div class="vt-tools-card-body" id="vt-tools-balonce-body">
+          <div class="text-muted small p-3">Roster too small to balonce&hellip;</div>
+        </div>
+      </section>
+
+      </div><!-- /.vt-tools-grid-col--data -->
+
+      <!-- Right column: tools trio (Wheel + Coinflip + Map Roll). -->
+      <div class="vt-tools-grid-col vt-tools-grid-col--tools">
+
+      <!-- ============================================================
+           PLAYER WHEEL
+           ============================================================ -->
+
+      <section class="vt-tools-card vt-tools-card--wheel" id="vt-tools-wheel"
+               aria-labelledby="vt-tools-wheel-title">
+        <header class="vt-tools-card-header">
+          <h2 class="vt-tools-card-title" id="vt-tools-wheel-title">
+            <i class="bi bi-circle me-2"></i>Player Picker
+          </h2>
+          <div class="vt-tools-card-header-actions">
+            <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Selection method">
+              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-wheel" value="wheel" autocomplete="off" checked>
+              <label class="btn btn-outline-secondary" for="vt-tools-wheel-method-wheel">
+                <i class="bi bi-circle"></i>Wheel
+              </label>
+              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-plinko" value="plinko" autocomplete="off" disabled>
+              <label class="btn btn-outline-secondary disabled" for="vt-tools-wheel-method-plinko">
+                <i class="bi bi-bricks"></i>Plinko
+              </label>
+              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-sniper" value="sniper" autocomplete="off" disabled>
+              <label class="btn btn-outline-secondary disabled" for="vt-tools-wheel-method-sniper">
+                <i class="bi bi-bullseye"></i>Sniper
+              </label>
+            </div>
+          </div>
+        </header>
+        <div class="vt-tools-card-body" id="vt-tools-wheel-body">
+          <div class="text-muted small p-3">Add at least 2 players to spin.</div>
+        </div>
+      </section>
+
+      <!-- ============================================================
+           COINFLIP (right col, row 2) — small card
+           ============================================================ -->
+
+      <section class="vt-tools-card vt-tools-card--coinflip" id="vt-tools-coinflip"
+               aria-labelledby="vt-tools-coinflip-title">
+        <header class="vt-tools-card-header">
+          <h2 class="vt-tools-card-title" id="vt-tools-coinflip-title">
+            <i class="bi bi-coin me-2"></i>Coinflip
+          </h2>
+          <div class="vt-tools-card-header-actions">
+            <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Coinflip mode">
+              <input type="radio" class="btn-check" name="vt-tools-coin-mode" id="vt-tools-coin-mode-single" value="single" autocomplete="off" checked>
+              <label class="btn btn-outline-secondary" for="vt-tools-coin-mode-single">Single</label>
+              <input type="radio" class="btn-check" name="vt-tools-coin-mode" id="vt-tools-coin-mode-bo5" value="bo5" autocomplete="off" disabled>
+              <label class="btn btn-outline-secondary disabled" for="vt-tools-coin-mode-bo5">Bo5</label>
+            </div>
+          </div>
+        </header>
+        <div class="vt-tools-card-body" id="vt-tools-coinflip-body">
+          <div class="text-muted small p-3">Click Flip to choose a team.</div>
+        </div>
+      </section>
+
+      <!-- ============================================================
+           MAP ROLL (right col, row 3)
+           ============================================================ -->
+
+      <section class="vt-tools-card vt-tools-card--maproll" id="vt-tools-maproll"
+               aria-labelledby="vt-tools-maproll-title">
+        <header class="vt-tools-card-header">
+          <h2 class="vt-tools-card-title" id="vt-tools-maproll-title">
+            <i class="bi bi-dice-6 me-2"></i>Random Map
+          </h2>
+          <div class="vt-tools-card-header-actions">
+            <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Pool count">
+              <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-7" value="7" autocomplete="off" checked>
+              <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-7">7+</label>
+              <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-6" value="6" autocomplete="off">
+              <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-6">6+</label>
+              <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-all" value="all" autocomplete="off">
+              <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-all">All</label>
+            </div>
+          </div>
+        </header>
+        <div class="vt-tools-card-body" id="vt-tools-maproll-body">
+          <div class="text-muted small p-3">Click Roll to spin three reels.</div>
+        </div>
+      </section>
+
+      </div><!-- /.vt-tools-grid-col--tools -->
+
+    </div><!-- /.vt-tools-grid -->
+  </main>
+
+  <!-- ============================================================
+       MODALS
+       ============================================================ -->
+
+  <!-- Wheel result modal. Populated by js/tools/wheel.js. -->
+  <div class="modal fade" id="vt-tools-wheel-result-modal" tabindex="-1"
+       aria-labelledby="vt-tools-wheel-result-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content vt-tools-wheel-result-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-wheel-result-modal-title">
+            <i class="bi bi-trophy-fill me-2" style="color: var(--kb-primary);"></i>The wheel has spoken
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="vt-tools-wheel-result-modal-body">
+          <div class="text-muted small">No winner yet.</div>
+        </div>
+        <div class="modal-footer border-top" id="vt-tools-wheel-result-modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset all confirm modal. -->
+  <div class="modal fade" id="vt-tools-reset-modal" tabindex="-1"
+       aria-labelledby="vt-tools-reset-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-reset-modal-title">
+            <i class="bi bi-arrow-counterclockwise me-2"></i>Reset all tools?
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>This will clear all in-memory state:</p>
+          <ul class="mb-2">
+            <li>Manual roster (if any)</li>
+            <li>Wheel removals and last winner</li>
+            <li>Coinflip result</li>
+            <li>Map roll results</li>
+            <li>Team balonce commander config and manual swaps</li>
+          </ul>
+          <p class="text-secondary small mb-0">Toggles return to defaults (Auto mode, polling on, unlocked).</p>
+        </div>
+        <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger btn-sm" id="vt-tools-reset-confirm" data-bs-dismiss="modal">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset all
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual-to-auto discard confirm modal. Opened by js/tools/main.js
+       when the user flips Mode back to Auto with a non-empty manual roster. -->
+  <div class="modal fade" id="vt-tools-discard-modal" tabindex="-1"
+       aria-labelledby="vt-tools-discard-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-discard-modal-title">
+            <i class="bi bi-exclamation-triangle me-2"></i>Discard manual roster?
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          Switching back to Auto will discard your manually curated roster
+          (<span id="vt-tools-discard-count">0</span> entries) and resume
+          polling-driven roster updates.
+        </div>
+        <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-warning btn-sm" id="vt-tools-discard-confirm" data-bs-dismiss="modal">
+            Discard and switch
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- One-time ephemeral-data acknowledgment modal. Shown on every page
+       load until the user checks "Don't show me this again" (persisted
+       in localStorage as `vt-tools-ephemeral-ack`). Distinct from the
+       browser-native beforeunload prompt which still fires when dirty
+       state would be lost on actual close/refresh. -->
+  <div class="modal fade" id="vt-tools-ephemeral-modal" tabindex="-1"
+       aria-labelledby="vt-tools-ephemeral-modal-title" aria-hidden="true"
+       data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-ephemeral-modal-title">
+            <i class="bi bi-exclamation-triangle-fill me-2" style="color: var(--kb-warning);"></i>Heads up &mdash; this page doesn't persist
+          </h5>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3">The Lobby Tools page is <strong>purely client-side</strong>. Closing or refreshing this page will lose any manual changes beyond the auto-population features.</p>
+          <div class="vt-tools-ephemeral-alert" role="alert">
+            <i class="bi bi-info-circle-fill vt-tools-ephemeral-alert-icon"></i>
+            <div>Tools like Coinflip and the Player Wheel are designed to be run while screen-sharing in Discord. Auto-population features (e.g. live-lobby roster, Team Balonce) are consistent for everyone since they're based on live data from Rebellion.</div>
+          </div>
+        </div>
+        <div class="modal-footer border-top justify-content-between">
+          <div class="form-check m-0">
+            <input class="form-check-input" type="checkbox" id="vt-tools-ephemeral-dont-show">
+            <label class="form-check-label small" for="vt-tools-ephemeral-dont-show">
+              Don't show me this again
+            </label>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="vt-tools-ephemeral-ack" data-bs-dismiss="modal">
+            <i class="bi bi-check-lg me-1"></i>Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       PLAYER PICKER MODAL ("Build lobby")
+       2-column body: left = filterable grid of known players,
+       right = "player cart" of current selections. Cart is
+       pre-populated from the existing manual roster on open so the
+       modal acts as an edit-and-commit flow (not append-only).
+       Submit replaces pageState.manualRoster with the cart contents.
+       Cancel discards changes silently.
+       ============================================================ -->
+  <div class="modal fade vt-tools-picker-modal" id="vt-tools-picker-modal" tabindex="-1"
+       aria-labelledby="vt-tools-picker-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-picker-modal-title">
+            <i class="bi bi-people-fill me-2" style="color: var(--kb-primary);"></i>Build lobby
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body vt-tools-picker-body">
+          <!-- LEFT: filterable grid -->
+          <div class="vt-tools-picker-left">
+            <div class="vt-tools-picker-controls">
+              <div class="vt-tools-picker-search-wrap flex-grow-1">
+                <i class="bi bi-search vt-tools-picker-search-icon" aria-hidden="true"></i>
+                <input type="search" class="form-control form-control-sm vt-tools-picker-search-input"
+                       id="vt-tools-picker-search"
+                       placeholder="Filter players&hellip;" autocomplete="off">
+              </div>
+              <select class="form-select form-select-sm vt-tools-picker-sort"
+                      id="vt-tools-picker-sort"
+                      title="Sort the player grid">
+                <option value="alpha">A &rarr; Z</option>
+                <option value="vtsr-desc">VTSR-T (high &rarr; low)</option>
+                <option value="vtsr-asc">VTSR-T (low &rarr; high)</option>
+                <option value="matches-desc" selected>Matches played</option>
+              </select>
+            </div>
+            <!-- Pool filter pills. `In data` (default) restricts to players
+                 with at least one recorded match (our ELO + slug corpus);
+                 `All` opens the floodgates to every name in
+                 steamid_to_name.txt (~700 entries, mostly never-played). -->
+            <div class="vt-tools-picker-pool-row">
+              <div class="btn-group btn-group-sm vt-tools-picker-pool-group" role="group"
+                   aria-label="Player pool filter">
+                <input type="radio" class="btn-check" name="vt-tools-picker-pool"
+                       id="vt-tools-picker-pool-in-data" value="in-data" checked>
+                <label class="btn btn-outline-primary vt-tools-picker-pool-btn"
+                       for="vt-tools-picker-pool-in-data"
+                       title="Only players with recorded match data">
+                  <i class="bi bi-people-fill me-1"></i>In data
+                </label>
+                <input type="radio" class="btn-check" name="vt-tools-picker-pool"
+                       id="vt-tools-picker-pool-all" value="all">
+                <label class="btn btn-outline-primary vt-tools-picker-pool-btn"
+                       for="vt-tools-picker-pool-all"
+                       title="Show every known Steam ID, including players with no recorded matches">
+                  <i class="bi bi-globe me-1"></i>All
+                </label>
+              </div>
+              <span class="text-secondary small vt-tools-picker-pool-count" id="vt-tools-picker-pool-count"></span>
+            </div>
+            <div class="vt-tools-picker-grid" id="vt-tools-picker-grid" role="listbox"
+                 aria-label="Known players">
+              <!-- Cards rendered by main.js -->
+            </div>
+          </div>
+
+          <!-- RIGHT: player cart -->
+          <div class="vt-tools-picker-right">
+            <div class="vt-tools-picker-cart-header">
+              <div class="vt-tools-picker-cart-title">
+                <i class="bi bi-bag-check me-1"></i>Player cart
+                <span class="badge bg-primary ms-1" id="vt-tools-picker-cart-count">0</span>
+              </div>
+              <button type="button" class="btn btn-link btn-sm vt-tools-picker-cart-clear"
+                      id="vt-tools-picker-cart-clear" title="Empty the cart">
+                Clear cart
+              </button>
+            </div>
+            <div class="vt-tools-picker-cart-list" id="vt-tools-picker-cart-list">
+              <!-- Cart rows rendered by main.js -->
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top justify-content-between">
+          <div class="text-secondary small vt-tools-picker-footer-help">
+            Cards on the left toggle in and out of the cart. Apply to commit.
+          </div>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
+              Cancel
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" id="vt-tools-picker-apply" disabled>
+              <i class="bi bi-check-lg me-1"></i>Apply
+              <span class="ms-1" id="vt-tools-picker-apply-count">(0)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap toast container. Fixed top-right, clears the sticky topnav
+       via top: 80px. Stacks via flex-column with gap. -->
+  <div class="vt-tools-toast-container toast-container position-fixed top-0 end-0 p-3"
+       id="vt-tools-toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- ============================================================
+       SCRIPTS
+       ============================================================ -->
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/bz2api.js"></script>
+  <script src="../js/live-session-card.js"></script>
+  <script src="../js/tools/player-resolver.js"></script>
+  <script src="../js/tools/toast-manager.js"></script>
+  <script src="../js/tools/live-session.js"></script>
+  <script src="../js/tools/wheel.js"></script>
+  <script src="../js/tools/coinflip.js"></script>
+  <script src="../js/tools/map-roll.js"></script>
+  <script src="../js/tools/team-balonce.js"></script>
+  <script src="../js/tools/main.js"></script>
+  <script src="../js/active-game-indicator.js"></script>
+</body>
+</html>

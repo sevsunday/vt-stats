@@ -98,6 +98,18 @@
         <i class="bi bi-map me-1"></i>Maps
       </a>
 
+      <!-- Tools link (desktop only). Lobby utilities (player wheel, coinflip,
+           random map, team balonce) + live-session viewer. `data-vt-tools-link`
+           marks this as the pulse target for the (formerly LIVE-pill)
+           active-game-indicator poller. `data-vt-tools-live="0|1"` is set
+           by js/active-game-indicator.js when a known-host lobby is live. -->
+      <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools d-none d-md-inline-flex order-md-1"
+         data-vt-tools-link data-vt-tools-live="0"
+         title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+         aria-label="Tools">
+        <i class="bi bi-controller me-1"></i>Tools
+      </a>
+
       <!-- Burger (mobile only). On desktop the collapse menu is always
            expanded and packs to the right after the Docs link. -->
       <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
@@ -148,6 +160,16 @@
              title="Browse the VSR map catalog"
              aria-label="Maps">
             <i class="bi bi-map me-1"></i>Maps
+          </a>
+
+          <!-- Tools link (mobile burger only). Sibling of Maps; opens the
+               lobby tools page. `data-vt-tools-link` makes this a live-pulse
+               target for the active-game-indicator. -->
+          <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools d-md-none"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
           </a>
 
           <!-- URL Sharing: Share (one-shot copy) + Live Sync (toggle).
@@ -1457,11 +1479,8 @@
 
   <!-- Active Game Modal. Skeleton populated by js/active-game-indicator.js
        on Bootstrap's `shown.bs.modal` event so the closed modal stays
-       cheap. Body is a session card mirroring the bz2api.js demo: header
-       badges (state, mode, VSR), map thumbnail + map line, players table
-       with HOST/CMDR badges + Steam profile + VTstats deep-link chips,
-       session stats grid, and mods row. Footer carries Join via Steam
-       (or Locked chip), GameWatch, Close. -->
+       cheap. Body is a session card mirroring the bz2api.js demo. Footer
+       carries Join via Steam (or Locked chip), GameWatch, Close. -->
   <div class="modal fade" id="active-game-modal" tabindex="-1"
        aria-labelledby="active-game-modal-title" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
@@ -1771,12 +1790,17 @@
        Consumed by js/app.js's getMapMeta() for hero banner fields. Loaded
        before app.js so window.BZ2API is available during init. -->
   <script src="js/bz2api.js"></script>
+  <!-- Shared live-session card renderer. Used by both the topnav LIVE
+       pill modal (active-game-indicator.js) and the Tools page Lobby
+       card (js/tools/live-session.js). Must load before
+       active-game-indicator.js. -->
+  <script src="js/live-session-card.js"></script>
   <!-- Active Game Indicator: self-contained topnav widget that polls the
        BZ2 lobby via window.BZ2API and surfaces a pulsing LIVE pill +
        click-through modal whenever a session hosted by an allowlisted
-       Steam64 (data/known-hosts.json) is live. Loaded after bz2api.js
-       so window.BZ2API is available, before app.js to keep the topnav
-       responsive even if app.js stalls on per-match data. -->
+       Steam64 (data/known-hosts.json) is live. Also flips the Tools
+       topnav link's data-vt-tools-live attribute when the same condition
+       holds, driving the link's pulse animation. -->
   <script src="js/active-game-indicator.js"></script>
   <script src="js/app.js"></script>
 </body>

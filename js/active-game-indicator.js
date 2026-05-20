@@ -1,10 +1,19 @@
 /**
  * VT Stats - Active Game Indicator
  *
- * Topnav widget that polls the live BZ2 lobby (via the vendored
- * BZ2API.fetchSessions) and surfaces a pulsing LIVE pill whenever a
- * session hosted by an allowlisted Steam64 ID is active. Click-through
- * modal mirrors the bz2api.js demo card with full session metadata.
+ * Topnav widget + cross-page pulse signal. Polls the live BZ2 lobby
+ * (via the vendored BZ2API.fetchSessions) and:
+ *
+ *  - On any page with the [data-vt-tools-link] attribute (Tools topnav
+ *    link), flips data-vt-tools-live="0|1" so the link can pulse when a
+ *    known-host VSR lobby is active.
+ *
+ *  - On pages that ALSO carry the full #vt-active-game widget markup
+ *    (currently only index.html), renders a pulsing LIVE pill, a
+ *    multi-match dropdown, a Join-via-Steam shortcut, and a
+ *    click-through #active-game-modal mirroring the bz2api demo card.
+ *    Body markup is rendered via VTLiveSessionCard (shared with the
+ *    Tools page Lobby).
  *
  * Self-contained: bootstraps on DOMContentLoaded, exposes nothing on
  * window, has zero coupling to js/app.js.
@@ -12,13 +21,9 @@
  * Loaders:
  *   - data/known-hosts.json     (eager, on init) -> allowlist Set + name map
  *   - data/steamid_to_name.txt  (lazy, on first MATCH_FOUND) -> canonical
- *     names Map (broader BZ2 community roster, used as host-label resolver
- *     for pill + dropdown).
+ *     name resolver for pill/dropdown labels.
  *   - data/vsrmaplist.json      (lazy, on first MATCH_FOUND) -> map metadata
- *     Map (File-lowercased -> {Name, Image, Author, Description, ...});
- *     primary source for the modal's map thumbnail + name.
- *   Both lazy loaders run in parallel via Promise.all on first MATCH_FOUND.
- *   Each is idempotent (subsequent calls are no-ops).
+ *     for the modal thumbnail + name fallback.
  *
  * Polling:
  *   - 30s base cadence, paused while document.hidden, immediate refresh
@@ -26,11 +31,6 @@
  *   - In-flight guard prevents overlapping requests.
  *   - Backoff on consecutive errors: 30s -> 60s -> 120s cap, resets on
  *     first success. Errors are silent (state -> NO_MATCH).
- *
- * Map enrichment:
- *   - Skip global enrichment in fetchSessions() to avoid hitting the
- *     iondriver API for every live lobby in the world.
- *   - Run BZ2API.enrichSessionsWithMapData() only on allowlist survivors.
  */
 (function () {
   'use strict';
@@ -41,9 +41,9 @@
   const POLL_MAX_BACKOFF_MS = 120_000;
   const BOOT_DELAY_MS = 500;
 
-  const KNOWN_HOSTS_URL = 'data/known-hosts.json';
-  const STEAM_ROSTER_URL = 'data/steamid_to_name.txt';
-  const VSR_MAP_LIST_URL = 'data/vsrmaplist.json';
+  const KNOWN_HOSTS_URL_CANDIDATES = ['data/known-hosts.json', '../data/known-hosts.json'];
+  const STEAM_ROSTER_URL_CANDIDATES = ['data/steamid_to_name.txt', '../data/steamid_to_name.txt'];
+  const VSR_MAP_LIST_URL_CANDIDATES = ['data/vsrmaplist.json', '../data/vsrmaplist.json'];
   const GAMEWATCH_URL = 'https://battlezonescrapfield.github.io/BZCC-Website/';
 
   // ---------------------------------------------------------------- State
@@ -51,7 +51,7 @@
   /** @type {'loading'|'no-match'|'match-found-1'|'match-found-n'} */
   let state = 'loading';
 
-  /** @type {Array<object>} Filtered, allowlist-only sessions. */
+  /** @type {Array<object>} */
   let activeSessions = [];
 
   /** @type {string|null} GUID (raw `id`) of the session the modal is rendering. */
@@ -60,19 +60,15 @@
   /** @type {Set<string>} Allowlisted host Steam64 IDs. */
   const knownHosts = new Set();
 
-  /** @type {Map<string,string>} Steam64 -> allowlist `name` (display label). */
+  /** @type {Map<string,string>} Steam64 -> allowlist `name`. */
   const knownHostNames = new Map();
 
-  /** @type {Map<string,string>|null} Steam64 -> canonical name from steamid_to_name.txt. */
+  /** @type {Map<string,string>|null} Steam64 -> canonical name. */
   let canonicalNames = null;
-
-  /** @type {Map<string,object>|null} mapFile (lowercased) -> vsrmaplist entry
-   *  ({Name, Image, Author, Description, Pools, Loose, Tags, Size, ...}).
-   *  Used as the primary source for the modal map thumbnail + name lookup. */
-  let vsrMapByFile = null;
-
-  /** @type {Promise<void>|null} In-flight loaders (each de-duped on first call). */
   let canonicalLoadPromise = null;
+
+  /** @type {Map<string,object>|null} lowercased mapFile -> vsrmaplist entry. */
+  let vsrMapByFile = null;
   let vsrMapLoadPromise = null;
 
   let inFlight = false;
@@ -87,37 +83,43 @@
   let dropdownMenuEl = null;
   let joinEl = null;
   let modalEl = null;
+  let toolsLinkEls = [];
 
   // ---------------------------------------------------------------- Loaders
 
+  async function fetchWithFallback(candidates, parse) {
+    for (const url of candidates) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) continue;
+        return await parse(res);
+      } catch (_) { /* try next */ }
+    }
+    return null;
+  }
+
   async function loadKnownHosts() {
-    try {
-      const res = await fetch(KNOWN_HOSTS_URL, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const hosts = Array.isArray(data && data.hosts) ? data.hosts : [];
-      for (const h of hosts) {
-        if (h && typeof h.steam_id === 'string') {
-          knownHosts.add(h.steam_id);
-          if (typeof h.name === 'string') knownHostNames.set(h.steam_id, h.name);
-        }
+    const data = await fetchWithFallback(KNOWN_HOSTS_URL_CANDIDATES, (r) => r.json());
+    if (!data) {
+      console.warn('[active-game] failed to load known-hosts.json');
+      return;
+    }
+    const hosts = Array.isArray(data.hosts) ? data.hosts : [];
+    for (const h of hosts) {
+      if (h && typeof h.steam_id === 'string') {
+        knownHosts.add(h.steam_id);
+        if (typeof h.name === 'string') knownHostNames.set(h.steam_id, h.name);
       }
-    } catch (err) {
-      console.warn('[active-game] failed to load known-hosts.json:', err.message);
     }
   }
 
-  // Lazy load: data/steamid_to_name.txt -> canonicalNames Map. Used by
-  // resolveHostLabel() for the pill + dropdown display label.
   function loadCanonicalNames() {
     if (canonicalNames !== null) return Promise.resolve();
     if (canonicalLoadPromise) return canonicalLoadPromise;
     canonicalLoadPromise = (async () => {
       const names = new Map();
-      try {
-        const res = await fetch(STEAM_ROSTER_URL, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
+      const text = await fetchWithFallback(STEAM_ROSTER_URL_CANDIDATES, (r) => r.text());
+      if (text) {
         for (const rawLine of text.split('\n')) {
           const line = rawLine.trim();
           if (!line || line.startsWith('#')) continue;
@@ -128,29 +130,22 @@
           if (!/^\d{16,}$/.test(id)) continue;
           if (name) names.set(id, name);
         }
-      } catch (err) {
-        console.warn('[active-game] failed to load steamid_to_name.txt:', err.message);
+      } else {
+        console.warn('[active-game] failed to load steamid_to_name.txt');
       }
       canonicalNames = names;
     })();
     return canonicalLoadPromise;
   }
 
-  // Lazy load: data/vsrmaplist.json -> vsrMapByFile Map keyed by lower-
-  // cased File field. Primary source for the modal's map thumbnail +
-  // friendly name; covers ~143 VSR maps (vs our ~34 locally cached PNGs).
-  // Image URL points at gamelistassets.iondriver.com asset hosting which
-  // is fine cross-origin for <img src> (no API CORS gate involved).
   function loadVsrMapList() {
     if (vsrMapByFile !== null) return Promise.resolve();
     if (vsrMapLoadPromise) return vsrMapLoadPromise;
     vsrMapLoadPromise = (async () => {
       const map = new Map();
-      try {
-        const res = await fetch(VSR_MAP_LIST_URL, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const entries = Array.isArray(data && data.Maps) ? data.Maps
+      const data = await fetchWithFallback(VSR_MAP_LIST_URL_CANDIDATES, (r) => r.json());
+      if (data) {
+        const entries = Array.isArray(data.Maps) ? data.Maps
                       : Array.isArray(data) ? data
                       : [];
         for (const entry of entries) {
@@ -158,34 +153,25 @@
             map.set(entry.File.toLowerCase(), entry);
           }
         }
-      } catch (err) {
-        console.warn('[active-game] failed to load vsrmaplist.json:', err && err.message);
+      } else {
+        console.warn('[active-game] failed to load vsrmaplist.json');
       }
       vsrMapByFile = map;
     })();
     return vsrMapLoadPromise;
   }
 
-  // Trigger both lazy loaders in parallel. Each is idempotent so
-  // repeated calls (every poll while a match is live) are cheap.
   function loadResourcesOnce() {
-    return Promise.all([
-      loadCanonicalNames(),
-      loadVsrMapList(),
-    ]);
+    return Promise.all([loadCanonicalNames(), loadVsrMapList()]);
   }
 
   // ---------------------------------------------------------------- Helpers
 
-  // Safe accessor for the BZ2API global. js/bz2api.js declares its
-  // export with `const BZ2API = ...` which (per spec) does NOT bind to
-  // `window` — so `window.BZ2API` is undefined even though the bare
-  // identifier `BZ2API` resolves. typeof guards against ReferenceError.
   function getBZ2API() {
     try {
       // eslint-disable-next-line no-undef
       if (typeof BZ2API !== 'undefined' && BZ2API) return BZ2API;
-    } catch (_) { /* ReferenceError: BZ2API not defined */ }
+    } catch (_) { /* */ }
     if (typeof window !== 'undefined' && window.BZ2API) return window.BZ2API;
     return null;
   }
@@ -195,13 +181,11 @@
     return host && host.steamId ? host.steamId : null;
   }
 
-  /**
-   * Resolve a display label for the host of a session. Priority:
-   *   1. canonical name from steamid_to_name.txt
-   *   2. lobby nickname (whatever the host is calling themselves now)
-   *   3. allowlist `name` from known-hosts.json
-   *   4. literal Steam64 (last resort)
-   */
+  function isLobbyOfInterest(session) {
+    const id = hostSteamIdOf(session);
+    return !!(id && knownHosts.has(id));
+  }
+
   function resolveHostLabel(session) {
     const steamId = hostSteamIdOf(session);
     const lobbyName = session && session.players && session.players[0] && session.players[0].name;
@@ -220,15 +204,6 @@
     return m != null ? `${n}/${m}` : `${n}`;
   }
 
-  function formatElapsed(session) {
-    const t = session && session.timeElapsedMinutes;
-    const state = (session && session.state) || null;
-    const suffix = state ? ` in <code>${escapeHtml(state)}</code> state` : '';
-    if (t === '>255') return `>255 min elapsed${suffix}`;
-    if (Number.isFinite(t)) return `${t} min elapsed${suffix}`;
-    return null;
-  }
-
   function escapeHtml(s) {
     if (s == null) return '';
     return String(s)
@@ -239,17 +214,21 @@
       .replace(/'/g, '&#39;');
   }
 
-  // ---------------------------------------------------------------- Filter
+  // ---------------------------------------------------------------- Tools-link pulse signal
 
-  function filterAllowlisted(sessions) {
-    if (!Array.isArray(sessions)) return [];
-    return sessions.filter((s) => {
-      const id = hostSteamIdOf(s);
-      return id && knownHosts.has(id);
-    });
+  function setToolsLiveSignal(isLive) {
+    if (!toolsLinkEls.length) {
+      toolsLinkEls = Array.from(document.querySelectorAll('[data-vt-tools-link]'));
+    }
+    const v = isLive ? '1' : '0';
+    for (const el of toolsLinkEls) {
+      if (el.getAttribute('data-vt-tools-live') !== v) {
+        el.setAttribute('data-vt-tools-live', v);
+      }
+    }
   }
 
-  // ---------------------------------------------------------------- Renderers
+  // ---------------------------------------------------------------- Widget DOM
 
   function ensureDom() {
     if (!widgetEl) widgetEl = document.getElementById('vt-active-game');
@@ -257,7 +236,7 @@
     if (!dropdownMenuEl) dropdownMenuEl = document.getElementById('vt-active-game-dropdown');
     if (!joinEl) joinEl = document.getElementById('vt-active-game-join');
     if (!modalEl) modalEl = document.getElementById('active-game-modal');
-    return widgetEl && pillEl && joinEl && modalEl;
+    return !!(widgetEl && pillEl && joinEl && modalEl);
   }
 
   function setState(next) {
@@ -300,8 +279,6 @@
     selectedSessionId = session.id || null;
 
     if (pillEl) {
-      // Tear down any stale Bootstrap Dropdown instance from a prior
-      // match-found-n render so the modal toggle is the only handler.
       try {
         const Dropdown = window.bootstrap && window.bootstrap.Dropdown;
         if (Dropdown && Dropdown.getInstance) {
@@ -402,7 +379,7 @@
     if (joinEl) joinEl.hidden = true;
   }
 
-  function dispatch() {
+  function dispatchWidget() {
     if (!ensureDom()) return;
     if (activeSessions.length === 0) {
       renderNoMatch();
@@ -422,242 +399,33 @@
 
   function renderModal(session) {
     if (!modalEl || !session) return;
-
     const titleEl = modalEl.querySelector('#active-game-modal-title');
     const bodyEl = modalEl.querySelector('#active-game-modal-body');
     const footerEl = modalEl.querySelector('#active-game-modal-footer');
     if (!titleEl || !bodyEl || !footerEl) return;
 
-    const mapKey = session && session.mapFile
-      ? String(session.mapFile).replace(/\.bzn$/i, '').toLowerCase()
-      : '';
-    const vsrEntry = mapKey && vsrMapByFile ? vsrMapByFile.get(mapKey) : null;
-
-    const host = resolveHostLabel(session);
-    // Map name priority: iondriver enrichment (if it succeeded) ->
-    // vsrmaplist Name -> raw mapFile -> "Unknown map".
-    const mapName = session.mapName
-      || (vsrEntry && vsrEntry.Name)
-      || session.mapFile
-      || 'Unknown map';
-    const count = formatPlayerCount(session);
-    const elapsed = formatElapsed(session);
-    const isVsr = session.gameBalance === 'VSR';
-    const stateBadge = (session.state || '').toUpperCase();
-    const stateClass = stateBadge === 'INGAME'
-      ? 'vt-active-game-badge--ingame'
-      : (stateBadge === 'PREGAME' ? 'vt-active-game-badge--pregame' : 'vt-active-game-badge--neutral');
-
-    titleEl.innerHTML = `
-      <span class="vt-active-game-modal-title-text">${escapeHtml(session.name || host)}</span>
-      <span class="vt-active-game-modal-title-badges">
-        ${stateBadge ? `<span class="vt-active-game-badge ${stateClass}">${escapeHtml(stateBadge)}</span>` : ''}
-        ${session.gameTypeName ? `<span class="vt-active-game-badge">${escapeHtml(session.gameTypeName)}</span>` : ''}
-        ${isVsr ? '<span class="vt-active-game-badge vt-active-game-badge--vsr">VSR</span>' : ''}
-      </span>
-    `;
-
-    const players = Array.isArray(session.players) ? session.players : [];
-    const isTeamGame = session.isTeamGame === true;
-    const playersHtml = isTeamGame
-      ? renderTeamColumns(players)
-      : (players.length
-          ? players.map((p) => renderPlayerRow(p)).join('')
-          : '<div class="text-muted small">No players in lobby.</div>');
-
-    const mods = Array.isArray(session.mods) ? session.mods : [];
-    const modChips = mods.map((m) => {
-      const label = m.name || m.id || 'Mod';
-      if (m.workshopUrl) {
-        return `<a href="${escapeHtml(m.workshopUrl)}" target="_blank" rel="noopener noreferrer" class="vt-active-game-chip">
-          <i class="bi bi-box-arrow-up-right"></i>${escapeHtml(label)}
-        </a>`;
-      }
-      return `<span class="vt-active-game-chip vt-active-game-chip--static">${escapeHtml(label)}</span>`;
-    }).join('');
-
-    const stats = [
-      ['Version', session.version || '-'],
-      ['Game Mode', session.gameModeName || '-'],
-      ['Respawn', session.respawn || '-'],
-      ['NAT Type', (session.nat && session.nat.name) || '-'],
-      ['TPS', Number.isFinite(session.tps) ? session.tps : '-'],
-      ['Max Ping', Number.isFinite(session.maxPing) ? `${session.maxPing}ms` : '-'],
-      ['Time Limit', session.timeLimitMinutes ? `${session.timeLimitMinutes} min` : 'None'],
-      ['Kill Limit', session.killLimit ? session.killLimit : 'None'],
-    ];
-
-    const statsHtml = stats.map(([label, value]) => `
-      <div class="vt-active-game-stat">
-        <div class="vt-active-game-stat-label">${escapeHtml(label)}</div>
-        <div class="vt-active-game-stat-value">${escapeHtml(String(value))}</div>
-      </div>
-    `).join('');
-
-    // Map image priority chain: local cached PNG -> vsrmaplist Image
-    // (broad coverage, direct asset host) -> iondriver enrichment URL
-    // (only present when getdata.php succeeded via proxy) -> placeholder.
-    // Implementation: stash all candidates as a pipe-delimited
-    // data-fallbacks list; the onerror handler shifts the head on each
-    // failure until the list is empty, at which point we add the
-    // -missing class so the placeholder shows through.
-    const localImg = mapKey ? `data/maps/${encodeURIComponent(mapKey)}.png` : '';
-    const vsrImg = (vsrEntry && vsrEntry.Image) ? vsrEntry.Image : '';
-    const remoteImg = session.mapImageUrl || '';
-    const imgCandidates = [localImg, vsrImg, remoteImg].filter(Boolean);
-    const imgPrimary = imgCandidates[0] || '';
-    const imgFallbacks = imgCandidates.slice(1).join('|');
-    const mapUrl = session.mapUrl || '';
-
-    bodyEl.innerHTML = `
-      <div class="vt-active-game-modal-summary">
-        <div class="vt-active-game-modal-thumb">
-          ${imgPrimary
-            ? `<img src="${escapeHtml(imgPrimary)}"
-                    data-fallbacks="${escapeHtml(imgFallbacks)}"
-                    alt="${escapeHtml(mapName)}"
-                    onerror="(function(el){var list=el.dataset.fallbacks?el.dataset.fallbacks.split('|').filter(Boolean):[];if(list.length===0){el.classList.add('vt-active-game-modal-thumb-missing');return;}var next=list.shift();el.dataset.fallbacks=list.join('|');el.src=next;})(this)">`
-            : '<div class="vt-active-game-modal-thumb-placeholder"><i class="bi bi-map"></i></div>'
-          }
-        </div>
-        <div class="vt-active-game-modal-summary-meta">
-          <div class="vt-active-game-modal-mapline">
-            ${mapUrl
-              ? `<a href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(mapName)} <i class="bi bi-box-arrow-up-right small"></i></a>`
-              : escapeHtml(mapName)}
-          </div>
-          <div class="vt-active-game-modal-host">Hosted by <strong>${escapeHtml(host)}</strong></div>
-          <div class="vt-active-game-modal-count">
-            <i class="bi bi-people-fill me-1"></i>${escapeHtml(count)}
-          </div>
-          ${elapsed ? `
-          <div class="vt-active-game-modal-elapsed">
-            <i class="bi bi-clock-fill me-1"></i>${elapsed}
-          </div>` : ''}
-        </div>
-      </div>
-
-      <div class="vt-active-game-modal-section">
-        <div class="vt-active-game-modal-section-title">Players${isTeamGame ? '' : ' (K / D / S)'}</div>
-        <div class="vt-active-game-modal-players">${playersHtml}</div>
-      </div>
-
-      <div class="vt-active-game-modal-section">
-        <div class="vt-active-game-modal-section-title">Session</div>
-        <div class="vt-active-game-modal-stats">${statsHtml}</div>
-      </div>
-
-      ${mods.length ? `
-      <div class="vt-active-game-modal-section">
-        <div class="vt-active-game-modal-section-title">Mods</div>
-        <div class="vt-active-game-modal-mods">${modChips}</div>
-      </div>` : ''}
-    `;
-
-    const joinHtml = session.steamJoinUrl
-      ? `<a href="${escapeHtml(session.steamJoinUrl)}" class="btn btn-primary btn-sm">
-          <i class="bi bi-play-fill me-1"></i>Join via Steam
-         </a>`
-      : `<span class="btn btn-outline-secondary btn-sm disabled" title="Game is locked or password-protected">
-          <i class="bi bi-lock-fill me-1"></i>Locked
-         </span>`;
-
-    footerEl.innerHTML = `
-      ${joinHtml}
-      <a href="${escapeHtml(GAMEWATCH_URL)}" target="_blank" rel="noopener noreferrer"
-         class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-broadcast-pin me-1"></i>GameWatch
-      </a>
-      <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-    `;
-  }
-
-  // Two-column TEAM 1 / TEAM 2 layout for team-based modes (STRAT/MPI/
-  // Team-DM/etc., gated by session.isTeamGame). bz2api parses player.team
-  // as 1 or 2 for team games; null otherwise. Players with null team in
-  // a team game (rare: spectators / loading slots) drop into a third
-  // section below the grid so they don't disappear from the view.
-  function renderTeamColumns(players) {
-    const team1 = [];
-    const team2 = [];
-    const unassigned = [];
-    for (const p of players) {
-      if (p.team === 1) team1.push(p);
-      else if (p.team === 2) team2.push(p);
-      else unassigned.push(p);
-    }
-    const renderColumn = (label, list) => `
-      <div class="vt-active-game-modal-team-column">
-        <div class="vt-active-game-modal-team-header">${escapeHtml(label)}</div>
-        ${list.length
-          ? list.map((p) => renderPlayerRow(p)).join('')
-          : '<div class="vt-active-game-modal-team-empty">No players</div>'}
-      </div>
-    `;
-    return `
-      <div class="vt-active-game-modal-teams">
-        ${renderColumn('Team 1', team1)}
-        ${renderColumn('Team 2', team2)}
-      </div>
-      ${unassigned.length ? unassigned.map((p) => renderPlayerRow(p)).join('') : ''}
-    `;
-  }
-
-  function renderPlayerRow(p) {
-    const name = p.name || '(unnamed)';
-    const team = Number.isFinite(p.team) ? p.team : null;
-    const k = Number.isFinite(p.kills) ? p.kills : '-';
-    const d = Number.isFinite(p.deaths) ? p.deaths : '-';
-    const s = Number.isFinite(p.score) ? p.score : '-';
-
-    // Host is already surfaced prominently in the modal summary
-    // ("Hosted by <name>") so the per-row HOST badge would just be
-    // visual redundancy. Commander stays — it's per-team, not global.
-    const badges = [];
-    if (p.isCommander) badges.push('<span class="vt-active-game-badge vt-active-game-badge--cmdr">CMDR</span>');
-
-    const chips = [];
-    if (p.profileUrl) {
-      chips.push(`<a href="${escapeHtml(p.profileUrl)}" target="_blank" rel="noopener noreferrer"
-        class="vt-active-game-chip vt-active-game-chip--icon" title="Open Steam profile" aria-label="Open Steam profile">
-        <i class="bi bi-steam"></i>
-      </a>`);
+    const renderer = window.VTLiveSessionCard;
+    if (!renderer) {
+      bodyEl.innerHTML = '<div class="text-muted small">Renderer not loaded.</div>';
+      return;
     }
 
-    const teamCls = team === 1 ? 'vt-active-game-modal-player-row--team1'
-                  : team === 2 ? 'vt-active-game-modal-player-row--team2'
-                  : '';
+    const renderOpts = {
+      canonicalNames: canonicalNames,
+      knownHostNames: knownHostNames,
+      vsrMapByFile: vsrMapByFile,
+      gameWatchUrl: GAMEWATCH_URL,
+    };
 
-    return `
-      <div class="vt-active-game-modal-player-row ${teamCls}">
-        <div class="vt-active-game-modal-player-badges">${badges.join('')}</div>
-        <div class="vt-active-game-modal-player-name">
-          <span class="vt-active-game-modal-player-nick">${escapeHtml(name)}</span>
-          <span class="vt-active-game-modal-player-chips">${chips.join('')}</span>
-        </div>
-        <div class="vt-active-game-modal-player-stats">
-          <span class="vt-active-game-modal-player-stat">${escapeHtml(String(k))}</span>
-          <span class="vt-active-game-modal-player-stat-sep">/</span>
-          <span class="vt-active-game-modal-player-stat">${escapeHtml(String(d))}</span>
-          <span class="vt-active-game-modal-player-stat-sep">/</span>
-          <span class="vt-active-game-modal-player-stat">${escapeHtml(String(s))}</span>
-        </div>
-      </div>
-    `;
+    renderer.renderInto(session, { titleEl, bodyEl, footerEl, opts: renderOpts });
   }
-
-  // ---------------------------------------------------------------- Modal wiring
 
   function wireModalEvents() {
     if (!modalEl) return;
-
     modalEl.addEventListener('shown.bs.modal', () => {
       const session = findSessionById(selectedSessionId);
       if (session) renderModal(session);
     });
-
-    // Re-render when activeSessions changes while modal is open (rare,
-    // but keeps the modal honest if a poll fires mid-view).
     modalEl.addEventListener('vt:active-game-refresh', () => {
       if (!modalEl.classList.contains('show')) return;
       const session = findSessionById(selectedSessionId);
@@ -667,7 +435,6 @@
 
   function wirePillAndDropdown() {
     if (!widgetEl) return;
-
     widgetEl.addEventListener('click', (e) => {
       const item = e.target.closest('.vt-active-game-dropdown-item');
       if (!item) return;
@@ -684,6 +451,11 @@
 
   // ---------------------------------------------------------------- Poller
 
+  function filterAllowlisted(sessions) {
+    if (!Array.isArray(sessions)) return [];
+    return sessions.filter(isLobbyOfInterest);
+  }
+
   async function tick() {
     if (inFlight) return;
     inFlight = true;
@@ -695,23 +467,26 @@
         enrichVsrMaps: false,
       });
       const filtered = filterAllowlisted(result && result.sessions);
-      if (filtered.length > 0) {
+      // Map enrichment on survivors only when widget exists (modal needs it).
+      const hasWidget = !!document.getElementById('vt-active-game');
+      if (hasWidget && filtered.length > 0) {
         try { await api.enrichSessionsWithMapData(filtered); } catch (_) { /* non-fatal */ }
-        // Lazy-trigger all three resource loaders the first time we
-        // have a match. Each is idempotent so repeat calls no-op.
         loadResourcesOnce();
       }
       activeSessions = filtered;
       errorStreak = 0;
       nextDelayMs = POLL_INTERVAL_MS;
-      dispatch();
-      // Notify open modal so it can refresh in place.
-      if (modalEl) modalEl.dispatchEvent(new CustomEvent('vt:active-game-refresh'));
+      setToolsLiveSignal(filtered.length > 0);
+      if (hasWidget) {
+        dispatchWidget();
+        if (modalEl) modalEl.dispatchEvent(new CustomEvent('vt:active-game-refresh'));
+      }
     } catch (err) {
       errorStreak += 1;
       nextDelayMs = Math.min(nextDelayMs * 2, POLL_MAX_BACKOFF_MS);
       activeSessions = [];
-      dispatch();
+      setToolsLiveSignal(false);
+      if (document.getElementById('vt-active-game')) dispatchWidget();
       console.warn('[active-game] poll failed:', err && err.message);
     } finally {
       inFlight = false;
@@ -742,15 +517,17 @@
   // ---------------------------------------------------------------- Init
 
   async function init() {
-    if (!ensureDom()) return;
-    renderLoading();
-    wireModalEvents();
-    wirePillAndDropdown();
+    const hasWidget = ensureDom();
+    if (hasWidget) {
+      renderLoading();
+      wireModalEvents();
+      wirePillAndDropdown();
+    }
     document.addEventListener('visibilitychange', onVisibilityChange);
     await loadKnownHosts();
     if (knownHosts.size === 0) {
-      // No allowlist -> no possible match. Skip polling entirely.
-      renderNoMatch();
+      if (hasWidget) renderNoMatch();
+      setToolsLiveSignal(false);
       return;
     }
     tick();
