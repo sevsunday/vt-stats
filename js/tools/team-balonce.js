@@ -443,8 +443,7 @@
     const opts = activeRoster.map((p) => {
       const key = playerKey(p);
       const sel = key === currentKey ? ' selected' : '';
-      const hint = p.cmdrHint ? ` (${cmdrHintLabel(p.cmdrHint)})` : '';
-      return `<option value="${escapeHtml(key)}"${sel}>${escapeHtml(p.displayName)} - T${p.tier || '?'}${escapeHtml(hint)}</option>`;
+      return `<option value="${escapeHtml(key)}"${sel}>${escapeHtml(p.displayName)} - T${p.tier || '?'}</option>`;
     }).join('');
     return `
       <select class="form-select form-select-sm vt-tools-balonce-cmdr-select"
@@ -452,13 +451,6 @@
         ${optBlank}${opts}
       </select>
     `;
-  }
-
-  function cmdrHintLabel(hint) {
-    if (hint === 'strong') return 'Strong';
-    if (hint === 'curious') return 'Curious';
-    if (hint === 'rare') return 'Rare';
-    return '';
   }
 
   function renderTeamColumns() {

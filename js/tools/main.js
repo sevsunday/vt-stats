@@ -276,9 +276,6 @@
 
   function renderRosterRow(p, idx) {
     const tierBadge = p.tier ? `<span class="vt-tools-roster-row-tier" title="VTSR-T ${Math.round(p.vtsr)}">T${p.tier}</span>` : '';
-    const cmdrBadge = p.cmdrHint
-      ? `<span class="vt-tools-roster-row-cmdr-badge vt-tools-roster-row-cmdr-badge--${p.cmdrHint}" title="${escapeHtml(cmdrHintTitle(p))}">${cmdrHintLabel(p.cmdrHint)}</span>`
-      : '';
     const provisionalChip = p.isCustom
       ? '<span class="vt-tools-roster-row-provisional-chip" title="Custom (non-Steam) entry — anchored at VTSR 1500">custom</span>'
       : p.isProvisional
@@ -310,24 +307,12 @@
           ${lobbyNickRow}
         </div>
         ${tierBadge}
-        ${cmdrBadge}
         ${provisionalChip}
         <div class="vt-tools-roster-row-actions">
           ${steamLink}${vtstatsLink}${removeBtn}
         </div>
       </div>
     `;
-  }
-
-  function cmdrHintLabel(hint) {
-    if (hint === 'strong') return 'Strong cmdr';
-    if (hint === 'curious') return 'Cmdr-curious';
-    if (hint === 'rare') return 'Rare cmdr';
-    return '';
-  }
-
-  function cmdrHintTitle(p) {
-    return `${p.matchesAsCmdr} of ${p.matchesPlayed} matches as commander (${(p.cmdrShare * 100).toFixed(0)}% share)`;
   }
 
   function renderRosterManualControls() {

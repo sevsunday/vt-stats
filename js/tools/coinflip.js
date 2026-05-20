@@ -24,8 +24,18 @@
 
   // ---------------------------------------------------------------- Config
 
-  const FULL_DURATION_MS = 2000;
+  const FULL_DURATION_MS = 3500;
   const REDUCED_MOTION_DURATION_MS = 500;
+
+  // Three-phase animation timing (as fractions of total duration):
+  //   Phase 1 — fast full swings   [0,      P1_END)
+  //   Phase 2 — slower full swings [P1_END, P2_END)
+  //   Phase 3 — deceleration       [P2_END, 1.0]
+  //
+  // P2_END is jittered per-flip so the lock-in moment isn't predictable.
+  const PHASE1_END  = 0.30;
+  const PHASE2_MIN  = 0.58;
+  const PHASE2_MAX  = 0.68;
 
   // ---------------------------------------------------------------- State
 
@@ -124,18 +134,49 @@
     const duration = reducedMotion ? REDUCED_MOTION_DURATION_MS : FULL_DURATION_MS;
     const startTime = performance.now();
 
-    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    // Phase boundary for lock-in jittered per-flip so repeated flips differ.
+    const phase2End = PHASE2_MIN + Math.random() * (PHASE2_MAX - PHASE2_MIN);
+
+    // Frequencies (rad/ms):
+    //   Phase 1 — fast:   ~5 full round trips across the phase 1 window
+    //   Phase 2 — slower: ~2 full round trips across the phase 2 window
+    const FREQ1 = (5 * 2 * Math.PI) / (PHASE1_END * duration);
+    const FREQ2 = (2 * 2 * Math.PI) / ((phase2End - PHASE1_END) * duration);
+
+    function easeInQuart(t) { return t * t * t * t; }
 
     function frame(now) {
       const elapsed = now - startTime;
       const t = Math.min(elapsed / duration, 1);
-      // Oscillation amplitude decays from 1 -> 0; frequency drops slightly so
-      // the selector visibly slows down. Final value lerps toward the winner.
-      const oscFreq = 10 + (1 - t) * 18;   // Hz-ish (radians per second-ish in animation time)
-      const amplitude = 1 - easeOutCubic(t);
       const winnerPos = winner === 1 ? 0 : 1;
-      const osc = Math.sin(elapsed * 0.01 * oscFreq) * 0.5 + 0.5; // [0,1]
-      const pos = amplitude * osc + (1 - amplitude) * winnerPos;
+
+      let pos;
+      if (t <= PHASE1_END) {
+        // Phase 1 — fast full swings. Pure sine, no winner bias.
+        pos = Math.sin(elapsed * FREQ1) * 0.5 + 0.5;
+      } else if (t <= phase2End) {
+        // Phase 2 — slower full swings. Sine continues seamlessly from where
+        // phase 1 left off (same accumulated angle), frequency drops.
+        const p1EndMs = PHASE1_END * duration;
+        const angle1 = p1EndMs * FREQ1;                        // angle at phase boundary
+        const phase2Elapsed = elapsed - p1EndMs;
+        pos = Math.sin(angle1 + phase2Elapsed * FREQ2) * 0.5 + 0.5;
+      } else {
+        // Phase 3 — deceleration lock-in. Amplitude collapses easeInQuart;
+        // winner bias grows as amplitude shrinks. Sine picks up from the
+        // exact angle where phase 2 ended so there's no positional jump.
+        const p1EndMs = PHASE1_END * duration;
+        const p2EndMs = phase2End * duration;
+        const angle1 = p1EndMs * FREQ1;
+        const angle2 = angle1 + (p2EndMs - p1EndMs) * FREQ2;  // angle at phase 2 end
+        const phase3Elapsed = elapsed - p2EndMs;
+        const tPhase3 = (t - phase2End) / (1 - phase2End);    // [0,1] within phase 3
+        const amplitude = 1 - easeInQuart(tPhase3);
+        const FREQ3 = FREQ2 * 0.6;                             // slowing further
+        const osc = Math.sin(angle2 + phase3Elapsed * FREQ3) * 0.5 + 0.5;
+        pos = amplitude * osc + (1 - amplitude) * winnerPos;
+      }
+
       setSelectorPos(pos);
       if (t < 1) {
         requestAnimationFrame(frame);
