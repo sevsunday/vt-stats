@@ -43,7 +43,7 @@
       steam64: "76561198079394192",
       slug:    "tom",
       name:    "tom",
-      template_version: 5
+      template_version: 7
     };
   </script>
 </head>
@@ -92,6 +92,16 @@
           <a href="../" class="vt-nav-icon-btn active" aria-current="page"
              title="Browse player career profiles" aria-label="Players">
             <i class="bi bi-people me-1"></i>Players
+          </a>
+          <a href="../../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="../../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
           </a>
 
           <!-- Theme Dropdown. js/theme.js auto-binds and populates the
@@ -300,5 +310,10 @@
   <script src="../../js/charts-radar.js"></script>
   <script src="../../js/all-matches-aggregator.js"></script>
   <script src="../../js/player.js"></script>
+
+  <!-- Tools-link live-pulse poller. Mirrors player/index.html so the
+       generated stubs keep parity. -->
+  <script src="../../js/bz2api.js"></script>
+  <script src="../../js/active-game-indicator.js"></script>
 </body>
 </html>

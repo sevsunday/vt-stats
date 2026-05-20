@@ -42,7 +42,7 @@
   <script>
     window.__vtMapBoot = {
       map_file:         "vsrrift2",
-      template_version: 1
+      template_version: 2
     };
   </script>
 </head>
@@ -89,6 +89,12 @@
           <a href="../" class="vt-nav-icon-btn active" aria-current="page"
              title="Browse the VSR map catalog" aria-label="Maps">
             <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="../../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
           </a>
 
           <div class="dropdown">
@@ -245,5 +251,10 @@
   <script src="../../js/theme.js"></script>
   <script src="../../js/vtstats-fx.js"></script>
   <script src="../../js/maps.js"></script>
+
+  <!-- Tools-link live-pulse poller. Mirrors map/index.html so the
+       generated stubs keep parity. -->
+  <script src="../../js/bz2api.js"></script>
+  <script src="../../js/active-game-indicator.js"></script>
 </body>
 </html>

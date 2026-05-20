@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mojave — VT Stats</title>
-  <meta name="description" content="Endure in the sweltering heat of the Mojave desert. 7 Pools, medium map by {bac}MalevolencE — {bac}MalevolencE · 7p / 175 loose · 1280x1280 · 6 matches recorded">
+  <meta name="description" content="Endure in the sweltering heat of the Mojave desert. 7 Pools, medium map by {bac}MalevolencE — {bac}MalevolencE · 7p / 175 loose · 1280x1280 · 5 matches recorded">
 
   <link rel="canonical" href="https://vtstats.bz/map/vsrmojave/">
 
@@ -13,7 +13,7 @@
        falls back to the generic data/og/map-card.png. -->
   <meta property="og:type" content="article">
   <meta property="og:title" content="Mojave — VT Stats">
-  <meta property="og:description" content="Endure in the sweltering heat of the Mojave desert. 7 Pools, medium map by {bac}MalevolencE — {bac}MalevolencE · 7p / 175 loose · 1280x1280 · 6 matches recorded">
+  <meta property="og:description" content="Endure in the sweltering heat of the Mojave desert. 7 Pools, medium map by {bac}MalevolencE — {bac}MalevolencE · 7p / 175 loose · 1280x1280 · 5 matches recorded">
   <meta property="og:url" content="https://vtstats.bz/map/vsrmojave/">
   <meta property="og:image" content="https://vtstats.bz/data/maps/vsrmojave.png">
   <meta property="og:image:width" content="1200">
@@ -23,7 +23,7 @@
   <!-- Twitter card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Mojave — VT Stats">
-  <meta name="twitter:description" content="Endure in the sweltering heat of the Mojave desert. 7 Pools, medium map by {bac}MalevolencE — {bac}MalevolencE · 7p / 175 loose · 1280x1280 · 6 matches recorded">
+  <meta name="twitter:description" content="Endure in the sweltering heat of the Mojave desert. 7 Pools, medium map by {bac}MalevolencE — {bac}MalevolencE · 7p / 175 loose · 1280x1280 · 5 matches recorded">
   <meta name="twitter:image" content="https://vtstats.bz/data/maps/vsrmojave.png">
 
   <link rel="stylesheet" href="../../vendor/bootstrap/css/bootstrap.min.css">
@@ -42,7 +42,7 @@
   <script>
     window.__vtMapBoot = {
       map_file:         "vsrmojave",
-      template_version: 1
+      template_version: 2
     };
   </script>
 </head>
@@ -89,6 +89,12 @@
           <a href="../" class="vt-nav-icon-btn active" aria-current="page"
              title="Browse the VSR map catalog" aria-label="Maps">
             <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="../../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
           </a>
 
           <div class="dropdown">
@@ -245,5 +251,10 @@
   <script src="../../js/theme.js"></script>
   <script src="../../js/vtstats-fx.js"></script>
   <script src="../../js/maps.js"></script>
+
+  <!-- Tools-link live-pulse poller. Mirrors map/index.html so the
+       generated stubs keep parity. -->
+  <script src="../../js/bz2api.js"></script>
+  <script src="../../js/active-game-indicator.js"></script>
 </body>
 </html>
