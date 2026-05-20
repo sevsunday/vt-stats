@@ -102,13 +102,22 @@
            random map, team balonce) + live-session viewer. `data-vt-tools-link`
            marks this as the pulse target for the (formerly LIVE-pill)
            active-game-indicator poller. `data-vt-tools-live="0|1"` is set
-           by js/active-game-indicator.js when a known-host lobby is live. -->
+           by js/active-game-indicator.js when a known-host lobby is live.
+
+           TEMPORARILY HIDDEN — the /tools page is still being iterated on.
+           Uncomment to re-expose the link in the topnav. The page itself
+           still works via direct URL (/tools/) and the live-pulse
+           plumbing (active-game-indicator.js) silently no-ops when no
+           `[data-vt-tools-link]` elements are on the page. -->
+      <!--
       <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools d-none d-md-inline-flex order-md-1"
          data-vt-tools-link data-vt-tools-live="0"
          title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
          aria-label="Tools">
         <i class="bi bi-controller me-1"></i>Tools
       </a>
+      -->
+
 
       <!-- Burger (mobile only). On desktop the collapse menu is always
            expanded and packs to the right after the Docs link. -->
@@ -164,13 +173,19 @@
 
           <!-- Tools link (mobile burger only). Sibling of Maps; opens the
                lobby tools page. `data-vt-tools-link` makes this a live-pulse
-               target for the active-game-indicator. -->
+               target for the active-game-indicator.
+
+               TEMPORARILY HIDDEN — paired with the desktop variant above.
+               Uncomment when the /tools page is ready to be promoted. -->
+          <!--
           <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools d-md-none"
              data-vt-tools-link data-vt-tools-live="0"
              title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
              aria-label="Tools">
             <i class="bi bi-controller me-1"></i>Tools
           </a>
+          -->
+
 
           <!-- URL Sharing: Share (one-shot copy) + Live Sync (toggle).
                Both styled as standalone vt-nav-icon-btn to match the rest of
