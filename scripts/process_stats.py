@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 18
+PIPELINE_VERSION = 19
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -1395,7 +1395,8 @@ def load_cache_index():
     if not OUTPUT_DIR.exists():
         return index
     skip = {"matches.json", "match_contributions.json", "all_matches.json",
-            "elo_current.json", "elo_history.json"}
+            "elo_current.json", "elo_history.json",
+            "elo_current_thugs_only.json", "elo_history_thugs_only.json"}
     for json_path in OUTPUT_DIR.glob("*.json"):
         if json_path.name in skip:
             continue
@@ -5114,6 +5115,16 @@ def main():
     # NEVER picker-filter aware — the dashboard reads elo_current.json
     # once per session and passes ratings through the JS aggregator
     # unchanged. See scripts/elo.py for the algorithm.
+    #
+    # Two passes are emitted:
+    #  1. Canonical -- elo_current.json + elo_history.json. All rated
+    #     rows count (commander appearances included; campod /
+    #     low-activity rows still excluded as always).
+    #  2. Thug-only -- elo_current_thugs_only.json +
+    #     elo_history_thugs_only.json. Same algorithm with the
+    #     additional row-skip gate `is_commander`. Powers the
+    #     dashboard's "Exclude commander matches" toggle on the
+    #     VTSR-T Leaderboard card.
     elo_current = None
     try:
         import elo as elo_module
@@ -5133,6 +5144,31 @@ def main():
               f"{excl_dur} excluded short-duration)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T ({e}); skipping.")
+
+    # ----- VTSR-T (thug-only mode) -----
+    # Re-runs the rating loop with `exclude_commanders=True`. Drops every
+    # is_commander row (slot 1 / slot 6) before scoring. Pure omission
+    # semantics mirror is_campod / is_low_activity. Soft-fails so a
+    # hiccup here never blocks the rest of the pipeline.
+    try:
+        import elo as elo_module
+        elo_current_to, elo_history_to = elo_module.compute_elo(
+            all_match_data, exclude_commanders=True
+        )
+        elo_current_to_path = OUTPUT_DIR / "elo_current_thugs_only.json"
+        with open(elo_current_to_path, "w", encoding="utf-8") as f:
+            json.dump(elo_current_to, f, indent=2, ensure_ascii=False)
+        elo_history_to_path = OUTPUT_DIR / "elo_history_thugs_only.json"
+        with open(elo_history_to_path, "w", encoding="utf-8") as f:
+            json.dump(elo_history_to, f, indent=2, ensure_ascii=False)
+        n_ratings_to = len(elo_current_to.get("ratings", []))
+        rated_to = elo_current_to.get("match_count", 0)
+        excl_cmdr_rows = elo_current_to.get("rows_excluded_commander_mode", 0)
+        print(f"VTSR-T (thug-only): {elo_current_to_path.name} "
+              f"({n_ratings_to} players · {rated_to} rated matches · "
+              f"{excl_cmdr_rows} commander rows excluded)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-T (thug-only) ({e}); skipping.")
 
     # ----- Player slug map + (Phase 3) per-player HTML stubs -----
     # Sticky map keyed by Steam64 -> {slug, name}. Drives `/player/<slug>/`

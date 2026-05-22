@@ -23,7 +23,7 @@
   <!-- Navbar -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4 gap-2">
-      <a class="navbar-brand fw-bold" href="#" id="brand-home" style="color: var(--kb-text-primary); text-decoration: none;">
+      <a class="navbar-brand fw-bold" href="index.html" id="brand-home" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
@@ -918,10 +918,43 @@
              (pipeline-emitted, full-corpus). Hides itself entirely when
              that file is missing (fresh checkout, pipeline never run).
              See scripts/elo.py for the algorithm. -->
+        <!-- Page-wide elo-mode banner: surfaced when the user toggles
+             into thug-only mode on the VTSR-T card. JS shows/hides
+             this; copy is static so screen-reader users get it via
+             aria-live announcements wired up in app.js. Plain
+             Bootstrap .alert.alert-warning so the chrome reads as a
+             standard advisory state-change. .vt-elo-mode-banner adds
+             nothing visual -- it's a hook for future tuning. -->
+        <div class="alert alert-warning vt-elo-mode-banner d-none mb-3" id="vt-elo-mode-banner" role="status" aria-live="polite">
+          <div class="d-flex align-items-center gap-3">
+            <div class="flex-grow-1">
+              <i class="bi bi-exclamation-triangle-fill me-1"></i>
+              <strong>Thug-only mode active.</strong>
+              Every VTSR-T number on this page is recomputed using each player's thug appearances only. Commander appearances are omitted entirely (campod and partial-presence rows still excluded as usual).
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-warning flex-shrink-0" id="vt-elo-mode-banner-revert">
+              Switch back
+            </button>
+          </div>
+        </div>
+
         <div class="card mb-4 d-none" id="section-vtsr">
-          <div class="card-header d-flex align-items-center justify-content-between">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
-            <div class="d-flex align-items-center gap-1">
+            <div class="d-flex align-items-center gap-1 flex-wrap">
+              <!-- Elo-mode segmented toggle. JS wires data-elo-mode buttons
+                   to swap window.__vtElo / __vtEloHistory between the
+                   canonical and thug-only datasets. The pending spinner
+                   fades in during the lazy fetch on first toggle ON. -->
+              <div class="btn-group btn-group-sm" role="group" aria-label="VTSR-T scope" id="vtsr-elo-mode-group">
+                <button type="button" class="btn btn-outline-secondary active" data-elo-mode="default"
+                        title="All rated matches (canonical VTSR-T)">All matches</button>
+                <button type="button" class="btn btn-outline-secondary" data-elo-mode="thugs_only"
+                        title="Recompute VTSR-T using each player's thug appearances only (commander matches excluded)">
+                  Thug-only
+                  <span class="spinner-border spinner-border-sm ms-1 d-none" role="status" aria-hidden="true" id="vtsr-elo-mode-spinner"></span>
+                </button>
+              </div>
               <button type="button" class="btn btn-sm vt-vtsr-info-btn"
                       id="vtsr-methodology-btn"
                       data-bs-toggle="modal" data-bs-target="#vtsr-methodology-modal"
@@ -1475,7 +1508,7 @@
             <h5 class="modal-title mb-0" id="vtsr-methodology-modal-title">
               <i class="bi bi-stars me-2"></i>VTSR-T Methodology
             </h5>
-            <small class="text-muted">v2.5 &middot; 8-axis composite</small>
+            <small class="text-muted" id="vtsr-methodology-modal-subtitle">v2.5 &middot; 8-axis composite</small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>

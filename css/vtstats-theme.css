@@ -4919,6 +4919,28 @@ td.vt-col-split {
     background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
 }
 
+/* Page-wide elo-mode banner. Surfaced when the user toggles the
+   VTSR-T leaderboard into thug-only mode -- visible only on the
+   All-Matches view above the VTSR-T card. Pure-Bootstrap
+   `.alert.alert-warning` carries all the chrome (background, border,
+   text color); .vt-elo-mode-banner is a hook for future nudges and
+   currently only tightens the layout. */
+.vt-elo-mode-banner {
+    margin-right: auto;
+    margin-left: auto;
+}
+
+/* Active state on the elo-mode segmented toggle so the user sees at
+   a glance which dataset is feeding the leaderboard. The default
+   `.btn-outline-secondary.active` Bootstrap state already inverts
+   colors, but we tune the active "Thug-only" tone to the warning
+   palette to keep visual continuity with the banner above. */
+#vtsr-elo-mode-group .btn[data-elo-mode="thugs_only"].active {
+    background: color-mix(in oklab, var(--kb-warning, #d4a017) 75%, transparent);
+    border-color: var(--kb-warning, #d4a017);
+    color: var(--kb-on-warning, #1a1a1a);
+}
+
 /* ============================================================================
    KATEX TOOLTIP
    Override Bootstrap tooltip width + KaTeX glyph color so equations pick

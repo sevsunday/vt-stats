@@ -488,6 +488,7 @@ def _target_lock_pct_lobby(
 def compute_performance_index(
     match_data: dict,
     commander_baseline_snapshot: dict[str, float] | None = None,
+    exclude_commanders: bool = False,
 ) -> tuple[
     list[float],
     list[str],
@@ -531,9 +532,19 @@ def compute_performance_index(
     # elo_history, no matches_played bump, no rating change at all for
     # this match. Legacy rows without the flags pass through unchanged
     # (.get() returns None which is falsy).
+    #
+    # Thug-only mode (`exclude_commanders=True`): also drop commander
+    # rows (is_commander = slot 1 / slot 6). Same pure-omission
+    # semantics -- commander appearances simply did not happen for the
+    # rated player. The v2.4 commander baseline machinery still runs
+    # but degenerates to a no-op (no commander rows reach the rolling
+    # buffers; the snapshot equals the seed prior every match; no
+    # commander rows get shifted because none reach scoring).
     lobby = [
         p for p in lobby_raw
-        if not p.get("is_campod") and not p.get("is_low_activity")
+        if not p.get("is_campod")
+        and not p.get("is_low_activity")
+        and not (exclude_commanders and p.get("is_commander"))
     ]
     if not lobby:
         return [], [], [], []
@@ -638,12 +649,27 @@ def _player_key(p: dict) -> str:
 # Top-level rating loop
 # ---------------------------------------------------------------------------
 
-def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
+def compute_elo(
+    all_match_data: list[dict],
+    exclude_commanders: bool = False,
+) -> tuple[dict, dict]:
     """Walk ``all_match_data`` chronologically, applying the ELO update rule
     per match, and return the ``(elo_current, elo_history)`` JSON-ready dicts.
 
     Match order is ``(match.date, match.id)`` — ELO is path-dependent,
     so the composite key handles same-second imports deterministically.
+
+    When ``exclude_commanders=True`` (thug-only mode), every per-match
+    commander row (``is_commander`` set by scripts/process_stats.py for
+    slots 1 and 6) is dropped before scoring. Pure omission semantics
+    mirror the existing ``is_campod`` / ``is_low_activity`` gates: no
+    delta entry, no ``matches_played`` bump, no rating change for the
+    excluded row. The output dicts gain ``excludes_commanders: True``
+    and a ``rows_excluded_commander_mode`` counter. The v2.4 commander
+    role-adjustment machinery still runs but degenerates to a no-op
+    (no commander rows reach the rolling baseline buffers, so the
+    snapshot equals the seed prior every match and no commander rows
+    get shifted because none reach scoring).
     """
     matches = sorted(
         list(all_match_data),
@@ -690,10 +716,14 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     # visibility into how often each gate fired.
     excluded_campod_rows       = 0
     excluded_low_activity_rows = 0
+    # Thug-only mode: per-row commander exclusion counter. Counted
+    # across the full corpus (mirrors the campod / low-activity
+    # counters' contract). Always 0 in canonical mode.
+    excluded_commander_rows    = 0
 
     for md in matches:
         m = md.get("match") or {}
-        lobby = md.get("leaderboard") or []
+        lobby_raw = md.get("leaderboard") or []
         match_id = m.get("id", "")
         match_date = m.get("date", "")
 
@@ -702,8 +732,26 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         # whether the parent match itself was rated. compute_performance_index
         # applies the same skip filter downstream -- this is bookkeeping
         # only.
-        excluded_campod_rows       += sum(1 for p in lobby if p.get("is_campod"))
-        excluded_low_activity_rows += sum(1 for p in lobby if p.get("is_low_activity"))
+        excluded_campod_rows       += sum(1 for p in lobby_raw if p.get("is_campod"))
+        excluded_low_activity_rows += sum(1 for p in lobby_raw if p.get("is_low_activity"))
+        if exclude_commanders:
+            excluded_commander_rows += sum(1 for p in lobby_raw if p.get("is_commander"))
+
+        # Filter the lobby with EXACTLY the same predicate as
+        # compute_performance_index() so the per-key loop below uses an
+        # index that aligns with `keys` returned from that helper. Mixing
+        # filtered keys with the full lobby's positional index would
+        # mis-attribute display_name / steam64 / is_commander reads to
+        # adjacent players whenever any earlier row was dropped (was a
+        # latent bug in v2.5 -- harmless for rare campod / low-activity
+        # rows but dramatically amplified by thug-only mode where slots
+        # 1 / 6 are dropped on every match).
+        lobby = [
+            p for p in lobby_raw
+            if not p.get("is_campod")
+            and not p.get("is_low_activity")
+            and not (exclude_commanders and p.get("is_commander"))
+        ]
 
         # Player count < 6 OR duration < 240s → emit excluded history row, no rating change.
         excluded = False
@@ -741,7 +789,9 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
 
         perfs, keys, axis_z_by_player, axis_meta_by_player = (
             compute_performance_index(
-                md, commander_baseline_snapshot=commander_baseline_snapshot
+                md,
+                commander_baseline_snapshot=commander_baseline_snapshot,
+                exclude_commanders=exclude_commanders,
             )
         )
         if not perfs:
@@ -896,6 +946,10 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     rated_match_count = sum(1 for h in history_entries if not h["match_excluded"])
     elo_current = {
         "schema_version":     ELO_SCHEMA_VERSION,
+        # Thug-only mode flag: True for elo_current_thugs_only.json,
+        # False for the canonical elo_current.json. Lets the dashboard
+        # sanity-check that it loaded the right file when toggling.
+        "excludes_commanders": bool(exclude_commanders),
         "alpha":               ALPHA,
         "alpha_pve":           ALPHA_PVE,
         "anchor":              ELO_ANCHOR,
@@ -921,6 +975,9 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
         # can tell row counts from match counts at a glance.
         "rows_excluded_campod":              excluded_campod_rows,
         "rows_excluded_low_activity":        excluded_low_activity_rows,
+        # Thug-only mode counter. Always 0 on canonical elo_current.json;
+        # tracks how many is_commander rows were dropped on the alt file.
+        "rows_excluded_commander_mode":      excluded_commander_rows,
         "weights":            dict(THUG_WEIGHTS),
         # v2.4: commander role-adjustment metadata. Audit-derived priors
         # blend with the running mean as the corpus grows; locked priors
@@ -957,8 +1014,9 @@ def compute_elo(all_match_data: list[dict]) -> tuple[dict, dict]:
     }
 
     elo_history = {
-        "schema_version": ELO_SCHEMA_VERSION,
-        "history":        history_entries,
+        "schema_version":     ELO_SCHEMA_VERSION,
+        "excludes_commanders": bool(exclude_commanders),
+        "history":             history_entries,
     }
 
     return elo_current, elo_history
