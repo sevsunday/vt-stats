@@ -39,8 +39,9 @@
 
   // ---------------------------------------------------------------- Config
 
-  const POLL_INTERVAL_MS = 30_000;
-  const POLL_MAX_BACKOFF_MS = 120_000;
+  const POLL_INTERVAL_MS = 30_000;          // idle cadence (no allowlisted game)
+  const POLL_INTERVAL_FAST_MS = 5_000;      // active cadence (>=1 allowlisted VSR game)
+  const POLL_MAX_BACKOFF_MS = 120_000;      // error backoff cap (unchanged)
 
   // ---------------------------------------------------------------- State
 
@@ -249,7 +250,12 @@
 
       allowlistedSessions = filtered;
       errorStreak = 0;
-      nextDelayMs = POLL_INTERVAL_MS;
+      // Cadence by presence: when at least one known-host VSR session
+      // is live, poll every 5s so the live-mirror Team Balonce feels
+      // live. When the field is empty, fall back to the 30s idle
+      // cadence. Game ending naturally returns us to slow on the next
+      // tick (filtered drops to 0).
+      nextDelayMs = filtered.length > 0 ? POLL_INTERVAL_FAST_MS : POLL_INTERVAL_MS;
 
       const currentSession = pickPrimarySession(allowlistedSessions);
       const sessionIdChanged = currentSession && currentSession.id !== selectedSessionId;

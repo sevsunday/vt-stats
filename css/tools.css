@@ -915,8 +915,9 @@
 }
 
 .vt-tools-balonce-mode--manual {
-    color: var(--kb-text-muted);
-    background-color: color-mix(in oklab, var(--kb-bg-muted) 75%, transparent);
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 22%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 40%, transparent);
 }
 
 .vt-tools-balonce-cmdr-status--1 {
@@ -958,6 +959,55 @@
 .vt-tools-balonce-banner-note {
     color: var(--kb-text-muted);
     font-style: italic;
+}
+
+.vt-tools-balonce-manual-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.45rem 0.65rem;
+    margin-bottom: 0.5rem;
+    border-radius: 6px;
+    background-color: color-mix(in oklab, var(--kb-warning) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 35%, transparent);
+    color: color-mix(in oklab, var(--kb-warning) 80%, var(--kb-text-primary) 20%);
+    font-size: 0.74rem;
+    line-height: 1.35;
+}
+
+.vt-tools-balonce-manual-banner-icon {
+    font-size: 0.95rem;
+    color: var(--kb-warning);
+    flex-shrink: 0;
+}
+
+.vt-tools-balonce-manual-banner-text {
+    flex-grow: 1;
+}
+
+.vt-tools-balonce-manual-banner-action {
+    flex-shrink: 0;
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 45%, transparent);
+    background-color: color-mix(in oklab, var(--kb-warning) 22%, transparent);
+    color: var(--kb-warning);
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+}
+
+.vt-tools-balonce-manual-banner-action:hover {
+    background-color: color-mix(in oklab, var(--kb-warning) 38%, transparent);
+    color: var(--kb-text-primary);
+}
+
+.vt-tools-balonce-manual-banner-action:focus-visible {
+    outline: 2px solid var(--kb-warning);
+    outline-offset: 1px;
 }
 
 .vt-tools-balonce-cmdr-delta-chip {
@@ -1144,6 +1194,18 @@
     padding: 0.12em 0.45em;
     border-radius: 4px;
     font-style: italic;
+}
+
+.vt-tools-balonce-row-unsplit {
+    font-size: 0.62rem;
+    color: color-mix(in oklab, var(--kb-warning) 75%, var(--kb-text-secondary) 25%);
+    background-color: color-mix(in oklab, var(--kb-warning) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 28%, transparent);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    font-style: italic;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
 }
 
 .vt-tools-balonce-row-vtsr {

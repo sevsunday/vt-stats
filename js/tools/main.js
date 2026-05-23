@@ -55,7 +55,7 @@
       wheel:   { lastWinner: null, removedSteam64s: new Set(), isSpinning: false, method: 'wheel' },
       coin:    { lastResult: null, mode: 'single' },
       mapRoll: { lastResults: [null, null, null], poolFilter: '7', isRolling: false },
-      balonce: { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null },
+      balonce: { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null, mode: 'live' },
     },
   };
 
@@ -771,7 +771,7 @@
     pageState.components.wheel = { lastWinner: null, removedSteam64s: new Set(), isSpinning: false, method: 'wheel' };
     pageState.components.coin = { lastResult: null, mode: 'single' };
     pageState.components.mapRoll = { lastResults: [null, null, null], poolFilter: '7', isRolling: false };
-    pageState.components.balonce = { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null };
+    pageState.components.balonce = { commanderSetup: { team1: null, team2: null }, manualSwaps: new Set(), partition: null, mode: 'live' };
 
     if (modeAutoRadio) {
       modeAutoRadio.disabled = false;
@@ -801,6 +801,10 @@
     if (pageState.components.mapRoll.lastResults.some((r) => r !== null)) return true;
     if (pageState.components.balonce.partition) return true;
     if (pageState.components.balonce.manualSwaps.size > 0) return true;
+    // Any commander edit (dropdown / right-click / swap-cmdrs / suggest)
+    // flips balonce into Manual mode without necessarily touching
+    // manualSwaps. Treat Manual as dirty so beforeunload still prompts.
+    if (pageState.components.balonce.mode === 'manual') return true;
     return false;
   }
 

@@ -51,6 +51,7 @@
   let bodyEl = null;
   let cmdrStatusBadge = null;
   let autoSuggestBtn = null;
+  let swapCmdrsBtn = null;
   let resetBtn = null;
 
   let activeRoster = [];
@@ -220,32 +221,41 @@
   }
 
   function compute() {
-    // Only ACTUAL commanderSetup entries are treated as commanders.
-    // No internal auto-suggestion — when commanderSetup is incomplete,
-    // findBestPartition just splits all-as-thugs into both teams. Top
-    // priority is single-source-of-truth: the green CMDR chip only ever
-    // appears for a player who's explicitly in commanderSetup.
-    const { cmdr1, cmdr2 } = getActiveCommanders();
-    const usedKeys = new Set();
-    if (cmdr1) usedKeys.add(playerKey(cmdr1));
-    if (cmdr2) usedKeys.add(playerKey(cmdr2));
-
-    const thugs = activeRoster.filter((p) => !usedKeys.has(playerKey(p)));
-    bestPartition = findBestPartition(thugs, cmdr1, cmdr2);
-
-    // Build assignment override = bestPartition's team mapping, but RESPECT
-    // any manual swaps the user did.
-    assignmentOverride = new Map();
-    if (bestPartition) {
-      for (const key of bestPartition.team1) assignmentOverride.set(key, 1);
-      for (const key of bestPartition.team2) assignmentOverride.set(key, 2);
-    }
-    // Apply manual swaps (they override the partition)
-    for (const swap of manualSwaps) {
-      const [key, team] = swap.split('|');
-      if (key && team) assignmentOverride.set(key, parseInt(team, 10));
+    // Two-mode dispatch:
+    //
+    //   LIVE   — the panel is a passive mirror of the lobby. Every
+    //            player is placed by `p.liveTeam`. No best-balance
+    //            search happens here — findBestPartition is reserved
+    //            for the magic-wand "Suggest" button.
+    //
+    //   MANUAL — the panel is a sandbox. `assignmentOverride` is the
+    //            authoritative layout. We preserve user assignments
+    //            for everyone still in the roster, prune departed
+    //            players, and place joiners by `liveTeam` if available
+    //            (so a fresh joiner doesn't crash into team 1 by
+    //            default when their lobby slot is observable).
+    if (mode === 'live') {
+      assignmentOverride = deriveLiveTeamAssignments();
+      bestPartition = null;
+      updateMainState();
+      return;
     }
 
+    // Manual mode.
+    const keysNow = new Set(activeRoster.map(playerKey));
+    const next = new Map();
+    for (const key of keysNow) {
+      if (assignmentOverride.has(key)) {
+        next.set(key, assignmentOverride.get(key));
+      } else {
+        // Joiner — place by liveTeam if observable, else team 1.
+        const p = findPlayer(key);
+        const team = p && (p.liveTeam === 1 || p.liveTeam === 2) ? p.liveTeam : 1;
+        next.set(key, team);
+      }
+    }
+    assignmentOverride = next;
+    bestPartition = null;
     updateMainState();
   }
 
@@ -279,6 +289,31 @@
     }
     if (!team1Key && !team2Key) return null;
     return { team1: team1Key, team2: team2Key };
+  }
+
+  /**
+   * Read p.liveTeam for every roster row and return a key -> team map.
+   * Players with liveTeam === null fall back to team 1 (caller-visible
+   * via the `unsplit` chip render path). This is the source of truth for
+   * the team columns when mode === 'live'.
+   */
+  function deriveLiveTeamAssignments() {
+    const map = new Map();
+    for (const p of activeRoster) {
+      const team = (p.liveTeam === 1 || p.liveTeam === 2) ? p.liveTeam : 1;
+      map.set(playerKey(p), team);
+    }
+    return map;
+  }
+
+  /**
+   * True when at least one roster row carries a real liveTeam (1 or 2).
+   * Drives the refresh-button enabled state + the manual-mode banner
+   * visibility (no point telling the user they're "diverging from live"
+   * when there's no live truth to diverge from).
+   */
+  function hasLiveTruth() {
+    return activeRoster.some((p) => p.liveTeam === 1 || p.liveTeam === 2);
   }
 
   /**
@@ -324,6 +359,7 @@
     if (!bodyEl) return;
     const n = activeRoster.length;
     updateModeChip();
+    updateHeaderButtons();
     if (n < 2) {
       bodyEl.innerHTML = `
         <div class="vt-tools-balonce-empty text-secondary small p-3">
@@ -337,12 +373,14 @@
 
     const setCount = (commanderSetup.team1 ? 1 : 0) + (commanderSetup.team2 ? 1 : 0);
     const banner = renderBanner(setCount);
+    const manualBanner = renderManualBanner();
     const cmdrConfig = renderCmdrConfig();
     const teamColumns = renderTeamColumns();
     const playedMeter = renderPlayedMeter();
 
     bodyEl.innerHTML = `
       ${banner}
+      ${manualBanner}
       ${cmdrConfig}
       <div class="vt-tools-balonce-columns">
         ${teamColumns}
@@ -351,8 +389,67 @@
     `;
     updateCmdrStatusBadge(setCount);
 
-    wireDragAndDrop();
+    wireRowEvents();
     wireRowControls();
+    wireManualBannerControls();
+  }
+
+  /**
+   * Gates the three pill-icon buttons in the card header:
+   *   - swap-cmdrs : only when both commander slots are set
+   *   - reset      : only when live data backs the roster
+   *                  (otherwise "snap back to live" has no destination)
+   *   - auto-suggest : always enabled when there are >= 2 players
+   *                    (handled by the n<2 early return in render())
+   */
+  function updateHeaderButtons() {
+    const setCount = (commanderSetup.team1 ? 1 : 0) + (commanderSetup.team2 ? 1 : 0);
+    if (swapCmdrsBtn) {
+      swapCmdrsBtn.disabled = setCount !== 2;
+      swapCmdrsBtn.title = setCount === 2
+        ? 'Swap Team 1 and Team 2 commanders (switches to Manual)'
+        : 'Set both commanders to enable swap';
+    }
+    if (resetBtn) {
+      const live = hasLiveTruth();
+      resetBtn.disabled = !live;
+      resetBtn.title = live
+        ? 'Snap back to the live lobby layout'
+        : 'No live lobby data — nothing to snap back to';
+    }
+  }
+
+  /**
+   * Yellow banner shown ONLY when:
+   *   - mode === 'manual', AND
+   *   - at least one roster row has a real liveTeam (1 or 2)
+   *
+   * The point is to make the divergence visible. In manual roster mode
+   * (page-level Manual) there's no live truth, so the banner stays
+   * hidden — the small Manual chip in the header is enough.
+   */
+  function renderManualBanner() {
+    if (mode !== 'manual') return '';
+    if (!hasLiveTruth()) return '';
+    return `
+      <div class="vt-tools-balonce-manual-banner" role="status">
+        <i class="bi bi-pencil-square vt-tools-balonce-manual-banner-icon" aria-hidden="true"></i>
+        <span class="vt-tools-balonce-manual-banner-text">
+          <strong>Manual mode.</strong>
+          Your layout has diverged from the live lobby.
+        </span>
+        <button type="button" class="vt-tools-balonce-manual-banner-action"
+                data-vt-balonce-snap-to-live
+                title="Discard manual edits and mirror the live lobby layout">
+          <i class="bi bi-arrow-counterclockwise me-1" aria-hidden="true"></i>Snap back to live
+        </button>
+      </div>
+    `;
+  }
+
+  function wireManualBannerControls() {
+    const btn = bodyEl.querySelector('[data-vt-balonce-snap-to-live]');
+    if (btn) btn.addEventListener('click', snapToLive);
   }
 
   function updateCmdrStatusBadge(setCount) {
@@ -369,11 +466,11 @@
     if (mode === 'live') {
       chip.classList.add('vt-tools-balonce-mode--live');
       chip.innerHTML = '<i class="bi bi-broadcast" aria-hidden="true"></i>Live';
-      chip.title = 'Commanders mirror the live lobby. Drag or edit any commander to switch to Manual.';
+      chip.title = 'Team columns mirror the live lobby. Any edit (drag, right-click, swap, suggest) switches to Manual.';
     } else {
       chip.classList.add('vt-tools-balonce-mode--manual');
-      chip.innerHTML = '<i class="bi bi-pencil" aria-hidden="true"></i>Manual';
-      chip.title = 'Commanders are user-set. Click Reset to restore Live (if the lobby has explicit commanders).';
+      chip.innerHTML = '<i class="bi bi-pencil-fill" aria-hidden="true"></i>Manual';
+      chip.title = 'Your edits — Balonce is no longer mirroring the live lobby. Click the refresh icon to snap back.';
     }
   }
 
@@ -516,15 +613,24 @@
     const provisionalChip = p.isProvisional
       ? `<span class="vt-tools-balonce-row-provisional" title="${escapeHtml(p.isCustom ? 'Custom entry' : 'Provisional / unrated')}">${p.isCustom ? 'cust' : 'prov'}</span>`
       : '';
+    // Unsplit chip: in Live mode, players with no live team slot (joined
+    // the lobby but haven't picked a side yet) get parked on Team 1 by
+    // default. Surface that fact so the user knows the placement is a
+    // fallback, not a real lobby choice.
+    const unsplitChip = (mode === 'live' && p.liveTeam !== 1 && p.liveTeam !== 2)
+      ? '<span class="vt-tools-balonce-row-unsplit" title="No team slot in the live lobby yet — parked on Team 1 by default">unsplit</span>'
+      : '';
     return `
       <div class="vt-tools-balonce-row" draggable="true"
            data-vt-balonce-key="${escapeHtml(key)}"
-           data-vt-balonce-team="${team}">
+           data-vt-balonce-team="${team}"
+           title="Right-click to toggle commander">
         <i class="bi bi-grip-vertical vt-tools-balonce-row-grip" aria-hidden="true"></i>
         ${cmdrChip}
         <span class="vt-tools-balonce-row-name" title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</span>
         ${tierBadge}
         ${provisionalChip}
+        ${unsplitChip}
         <span class="vt-tools-balonce-row-vtsr">${Math.round(p.vtsr)}</span>
       </div>
     `;
@@ -580,13 +686,14 @@
     `;
   }
 
-  // ---------------------------------------------------------------- Drag & drop
+  // ---------------------------------------------------------------- Drag & drop / row events
 
-  function wireDragAndDrop() {
+  function wireRowEvents() {
     const rows = bodyEl.querySelectorAll('[data-vt-balonce-key]');
     rows.forEach((row) => {
       row.addEventListener('dragstart', onDragStart);
       row.addEventListener('dragend', onDragEnd);
+      row.addEventListener('contextmenu', onRowContextMenu);
     });
     const targets = bodyEl.querySelectorAll('[data-vt-balonce-droptarget]');
     targets.forEach((target) => {
@@ -628,40 +735,69 @@
     const oldTeam = assignmentOverride.get(key);
     if (newTeam === oldTeam) return;
 
-    // Slot cap check
-    const teamCount = activeRoster.filter((p) => assignmentOverride.get(playerKey(p)) === newTeam).length;
-    if (teamCount >= TEAM_SLOT_CAP) {
-      console.warn('[balonce] cannot drop: target team is at slot cap');
-      return;
-    }
+    // No slot-cap check on drag. The 5-per-team rule is an algorithm
+    // constraint inside findBestPartition (magic-wand only) — manual
+    // experiments are free to stack any split (2v8, 1v9, etc).
 
     // Is the dragged player a commander? Two sub-cases:
     //   - Dropping their own team's CMDR onto the other team: swap the
-    //     commander assignment + flip mode to Manual (user is editing).
+    //     commander assignment.
     //   - Dropping the other team's CMDR onto this team: same — they
     //     command the new team now.
-    // Thug drags don't touch mode (still considered a fluid local tweak
-    // against the current commander setup).
+    // EVERY drag (cmdr or thug) flips to Manual — the user has touched
+    // the layout, so we stop mirroring live.
     const wasCmdrOf = commanderSetup.team1 === key ? 1
                     : commanderSetup.team2 === key ? 2
                     : null;
     if (wasCmdrOf !== null) {
-      // Move the commander to the new team. If the new team already has
-      // a commander, demote them (the new dragger replaces).
       commanderSetup[`team${wasCmdrOf}`] = null;
       commanderSetup[`team${newTeam}`] = key;
-      // Clear any manualSwaps that conflict with the new cmdr placement.
       manualSwaps.clear();
       flipToManual('cmdr-drag');
-      compute();
+      assignmentOverride.set(key, newTeam);
       render();
+      updateMainState();
       return;
     }
 
+    // Thug drag. Persist via assignmentOverride; flip to Manual so live
+    // updates stop fighting the user's choices.
     assignmentOverride.set(key, newTeam);
     manualSwaps.add(`${key}|${newTeam}`);
+    flipToManual('thug-drag');
     render();
     updateMainState();
+  }
+
+  /**
+   * Right-click on a player row: toggle commander status on the team
+   * they're currently on.
+   *   - Already cmdr of this team -> demote (slot clears).
+   *   - Not cmdr -> take the slot. If they were cmdr of the OTHER team,
+   *     vacate that slot. If someone else held this slot, they get
+   *     bumped back to thug duty.
+   * Always flips to Manual mode.
+   */
+  function onRowContextMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const key = this.getAttribute('data-vt-balonce-key');
+    const currentTeam = parseInt(this.getAttribute('data-vt-balonce-team'), 10);
+    if (!key || (currentTeam !== 1 && currentTeam !== 2)) return;
+
+    const slotKey = `team${currentTeam}`;
+    const otherSlotKey = currentTeam === 1 ? 'team2' : 'team1';
+
+    if (commanderSetup[slotKey] === key) {
+      commanderSetup[slotKey] = null;
+    } else {
+      if (commanderSetup[otherSlotKey] === key) commanderSetup[otherSlotKey] = null;
+      commanderSetup[slotKey] = key;
+    }
+    manualSwaps.clear();
+    flipToManual('rightclick-cmdr');
+    compute();
+    render();
   }
 
   // ---------------------------------------------------------------- Row controls
@@ -679,7 +815,14 @@
           if (team === 1) commanderSetup.team2 = null;
           else commanderSetup.team1 = null;
         }
-        // Explicit user edit → flip to Manual; reset swaps.
+        // Align column placement with cmdr-slot assignment so the CMDR
+        // chip actually appears on a row in the correct column. Without
+        // this, picking a player from Team 1's cmdr dropdown who's
+        // currently sitting in the Team 2 column would silently drop the
+        // CMDR chip (the chip render keys off team-match in
+        // renderPlayerRow).
+        if (v) assignmentOverride.set(v, team);
+        // Explicit user edit -> flip to Manual; reset swaps.
         flipToManual('dropdown-change');
         manualSwaps.clear();
         compute();
@@ -698,27 +841,72 @@
     if (ranked.length >= 2) commanderSetup.team2 = playerKey(ranked[1]);
     // Suggest is an algorithmic pick, not live truth → Manual mode.
     flipToManual('suggest');
+    // Also run the best-balance partition so the magic-wand delivers a
+    // full layout (not just commander picks). Mirrors the legacy
+    // expectation that "Suggest" produces a usable balance.
+    runBestPartitionIntoManual();
+    render();
+  }
+
+  /**
+   * Swap Team 1 and Team 2 commanders (with their team assignments in
+   * the column layout if they have any). Always flips to Manual. No-op
+   * unless both commander slots are set.
+   */
+  function swapCommanders() {
+    const { team1, team2 } = commanderSetup;
+    if (!team1 || !team2) return;
+    commanderSetup = { team1: team2, team2: team1 };
+    // Flip their column assignments too so the rendered layout matches
+    // the new commander setup. (In live mode this gets recomputed from
+    // liveTeam on the next compute(), but flipToManual short-circuits
+    // that, so we do it explicitly.)
+    if (assignmentOverride.has(team1)) assignmentOverride.set(team1, 2);
+    if (assignmentOverride.has(team2)) assignmentOverride.set(team2, 1);
+    manualSwaps.clear();
+    flipToManual('swap-cmdrs');
     compute();
     render();
   }
 
   /**
-   * Reset behavior:
-   *   - Always clear manualSwaps (Reset's primary purpose).
-   *   - If live commanders are available right now (regardless of
-   *     current mode), snap back to Live: mirror commanderSetup from
-   *     the live data.
-   *   - If no live cmdrs available, mode stays whatever it was and
-   *     commanderSetup is preserved (but with manualSwaps cleared so
-   *     the partition re-derives from scratch).
+   * Run findBestPartition with the current commanderSetup and write the
+   * result into assignmentOverride. Used by the magic-wand button so a
+   * single click yields both balanced commanders AND a balanced thug
+   * split. Mode is assumed to already be 'manual' (caller's job).
    */
-  function resetBalance() {
-    manualSwaps.clear();
-    const live = deriveLiveCommanderSetup();
-    if (live) {
-      commanderSetup = { team1: live.team1, team2: live.team2 };
-      mode = 'live';
+  function runBestPartitionIntoManual() {
+    const { cmdr1, cmdr2 } = getActiveCommanders();
+    const usedKeys = new Set();
+    if (cmdr1) usedKeys.add(playerKey(cmdr1));
+    if (cmdr2) usedKeys.add(playerKey(cmdr2));
+    const thugs = activeRoster.filter((p) => !usedKeys.has(playerKey(p)));
+    bestPartition = findBestPartition(thugs, cmdr1, cmdr2);
+    assignmentOverride = new Map();
+    if (bestPartition) {
+      for (const key of bestPartition.team1) assignmentOverride.set(key, 1);
+      for (const key of bestPartition.team2) assignmentOverride.set(key, 2);
     }
+    updateMainState();
+  }
+
+  /**
+   * Snap back to the live lobby layout. Universal "exit Manual" lever:
+   * clears every override (commanderSetup, manualSwaps, assignmentOverride)
+   * and flips mode to 'live'. compute() then re-derives both team columns
+   * AND commander assignments from the latest roster's live flags.
+   *
+   * The button this drives is disabled when no live truth exists in the
+   * roster (every `p.liveTeam` is null) — see render() for the gating.
+   */
+  function snapToLive() {
+    manualSwaps.clear();
+    assignmentOverride = new Map();
+    const live = deriveLiveCommanderSetup();
+    commanderSetup = live
+      ? { team1: live.team1, team2: live.team2 }
+      : { team1: null, team2: null };
+    mode = 'live';
     compute();
     render();
   }
@@ -739,24 +927,28 @@
       const [k] = swap.split('|');
       if (!keys.has(k)) manualSwaps.delete(swap);
     }
+    // Drop assignmentOverride entries for departed players (manual-mode
+    // compute() preserves survivors only; cleaning up here keeps the
+    // map honest for both modes).
+    for (const k of Array.from(assignmentOverride.keys())) {
+      if (!keys.has(k)) assignmentOverride.delete(k);
+    }
 
     // Page roster mode transitions:
-    //   - Manual page mode → Balonce should also be Manual (no live
+    //   - Manual page mode -> Balonce should also be Manual (no live
     //     data to sync to). Don't auto-pull live cmdrs.
-    //   - Auto page mode  → Balonce CAN be Live. Honor current Balonce
-    //     mode setting; only resync if mode === 'live'.
+    //   - Auto page mode  -> Balonce can be either. Honor current
+    //     Balonce mode; only resync live cmdrs when mode === 'live'.
     if (pageMode === 'manual') {
-      // Stay out of live-resync when the page itself isn't watching
-      // live. Mode flips to manual to reflect "no live truth backing
-      // this view." Don't clear commanderSetup — the user may have set
-      // it manually and switched to manual roster.
       if (mode === 'live') mode = 'manual';
     } else if (mode === 'live') {
-      // Auto roster mode + balonce.mode === 'live' → resync cmdrs from
-      // the freshly-arrived roster's isLiveCommander flags. Clears
-      // manualSwaps if commanderSetup actually changed (see helper).
+      // Auto roster + balonce.live -> mirror cmdrs from freshly-arrived
+      // roster. Helper handles toast emission + no-op when unchanged.
       maybeSyncLiveCommanders();
     }
+    // Manual-mode rosters: do nothing extra here. compute() below
+    // preserves user assignments for survivors and places joiners by
+    // their liveTeam slot if available.
 
     compute();
     render();
@@ -768,6 +960,7 @@
     bestPartition = null;
     assignmentOverride = new Map();
     mode = 'live';
+    compute();
     render();
   }
 
@@ -777,10 +970,12 @@
     bodyEl = document.getElementById('vt-tools-balonce-body');
     cmdrStatusBadge = document.getElementById('vt-tools-balonce-cmdr-status');
     autoSuggestBtn = document.getElementById('vt-tools-balonce-auto-suggest');
+    swapCmdrsBtn = document.getElementById('vt-tools-balonce-swap-cmdrs');
     resetBtn = document.getElementById('vt-tools-balonce-reset');
 
     if (autoSuggestBtn) autoSuggestBtn.addEventListener('click', autoSuggestBoth);
-    if (resetBtn) resetBtn.addEventListener('click', resetBalance);
+    if (swapCmdrsBtn) swapCmdrsBtn.addEventListener('click', swapCommanders);
+    if (resetBtn) resetBtn.addEventListener('click', snapToLive);
 
     window.addEventListener('vt-tools:roster', onRosterChange);
     window.addEventListener('vt-tools:reset-all', onResetAll);
