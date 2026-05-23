@@ -1,0 +1,414 @@
+/* 3D Map Render POC - minimal HUD styling.
+ *
+ * Canvas is fullscreen; HUD is a fixed-width sidebar overlay on the left.
+ * Color scheme intentionally muted so the 3D scene reads cleanly.
+ */
+
+:root {
+  --bg:           #0c0f14;
+  --bg-panel:    rgba(15, 19, 26, 0.92);
+  --bg-section: rgba(255, 255, 255, 0.04);
+  --border:     rgba(255, 255, 255, 0.08);
+  --text:       #d8dde6;
+  --text-muted: #8b929e;
+  --accent:     #6aa9ff;
+  --hud-width:  280px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+canvas#scene {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+aside#hud {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  width: var(--hud-width);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 10;
+  user-select: none;
+}
+
+.hud-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.hud-header .map-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.hud-section {
+  margin: 14px 0;
+  padding: 8px 10px;
+  background: var(--bg-section);
+  border-radius: 6px;
+}
+
+.hud-section h2 {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.radio-row,
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.radio-row input,
+.check-row input {
+  cursor: pointer;
+}
+
+.counts {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.counts .count-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.counts .count-row .label {
+  color: var(--text-muted);
+}
+
+.counts .count-row .val {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
+.counts .count-aux {
+  color: var(--text-muted);
+  font-weight: normal;
+  margin-left: 2px;
+}
+
+.kv-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.kv-row .val {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
+.map-switcher {
+  width: 100%;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.map-switcher:hover {
+  border-color: var(--accent);
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slider-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+  accent-color: var(--accent);
+}
+
+.slider-row .val {
+  min-width: 40px;
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.hint {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  font-style: italic;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  background: rgba(106, 169, 255, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(106, 169, 255, 0.3);
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.btn:hover { background: rgba(106, 169, 255, 0.2); }
+.btn:active { background: rgba(106, 169, 255, 0.3); }
+
+.hud-footer {
+  margin-top: 14px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.hud-footer a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.hud-footer a:hover {
+  color: var(--accent);
+}
+
+/* Centered status pill shown during initial load + on fatal errors. */
+#status {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 12px 20px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  z-index: 20;
+}
+
+#status.error {
+  color: #ff7777;
+  border-color: rgba(255, 119, 119, 0.4);
+}
+
+#status.hidden,
+#scene.hidden,
+#hud.hidden,
+#directory.hidden {
+  display: none;
+}
+
+/* -----------------------------------------------------------------
+   Directory landing
+   ----------------------------------------------------------------- */
+
+.directory {
+  position: relative;
+  min-height: 100vh;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 36px 28px 64px;
+  overflow-y: auto;
+}
+
+.directory-header {
+  margin-bottom: 28px;
+}
+
+.directory-header h1 {
+  margin: 0 0 14px 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.directory-count {
+  display: inline-block;
+  padding: 3px 12px;
+  margin-left: 10px;
+  border-radius: 999px;
+  background: rgba(106, 169, 255, 0.14);
+  border: 1px solid rgba(106, 169, 255, 0.32);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+.directory-search {
+  width: 100%;
+  max-width: 360px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.directory-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.directory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.dir-card {
+  display: block;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.dir-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+
+.dir-card.search-hidden {
+  display: none;
+}
+
+.dir-card-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #000 center / contain no-repeat;
+  background-color: #14181f;
+}
+
+.dir-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  image-rendering: pixelated;
+}
+
+.dir-card-body {
+  padding: 10px 12px 12px;
+}
+
+.dir-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+}
+
+.dir-card-stem {
+  font-size: 10px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+}
+
+.dir-card-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.dir-card-chip {
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.dir-card-chip.chip-water {
+  background: rgba(106, 169, 255, 0.16);
+  border-color: rgba(106, 169, 255, 0.35);
+  color: #a8c8ff;
+}
+
+.dir-card-chip.chip-tall {
+  background: rgba(255, 169, 106, 0.16);
+  border-color: rgba(255, 169, 106, 0.35);
+  color: #ffc28a;
+}
+
+.directory-footer {
+  margin-top: 32px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.directory-footer a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.directory-footer a:hover {
+  color: var(--accent);
+}
+
+/* Override the renderer's body styles for directory mode -- allow scrolling. */
+body.directory-mode {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* HUD back-to-directory link */
+.hud-back {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-bottom: 6px;
+}
+
+.hud-back:hover {
+  color: var(--accent);
+}

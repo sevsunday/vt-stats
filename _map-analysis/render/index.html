@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VT Stats - 3D Map Render</title>
+<link rel="stylesheet" href="css/style.css">
+
+<script type="importmap">
+{
+  "imports": {
+    "three":         "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+
+<body>
+
+<!--
+  Directory landing -- shown when no `?map=` URL param. The viewer.js boot
+  routine flips this between directory and renderer mode.
+-->
+<div id="directory" class="directory hidden">
+  <header class="directory-header">
+    <h1>VTStats - 3D Map Renders <span class="directory-count" id="directory-count">loading...</span></h1>
+    <input type="search" class="directory-search" id="directory-search"
+           placeholder="filter by name...">
+  </header>
+  <main class="directory-grid" id="directory-grid">
+    <!-- Cards inserted by viewer.js::renderDirectory -->
+  </main>
+  <footer class="directory-footer">
+    <a href="../calibration/index.html">&laquo; back to calibration</a>
+  </footer>
+</div>
+
+<!--
+  Renderer surface -- shown when `?map=` is set. Hidden in directory mode.
+-->
+<canvas id="scene" class="hidden"></canvas>
+
+<aside id="hud" class="hidden">
+  <header class="hud-header">
+    <a href="index.html" class="hud-back" title="Back to map directory">&laquo; All maps</a>
+    <h1 id="map-title">loading...</h1>
+    <div class="map-sub" id="map-sub">&nbsp;</div>
+  </header>
+
+  <section class="hud-section">
+    <h2>Map</h2>
+    <select id="map-switcher" class="map-switcher">
+      <option value="">(loading...)</option>
+    </select>
+  </section>
+
+  <section class="hud-section">
+    <h2>Floor</h2>
+    <label class="radio-row"><input type="radio" name="floor" value="minimap" checked> Minimap decal + height ramp</label>
+    <label class="radio-row"><input type="radio" name="floor" value="ramp">    Height ramp only</label>
+    <label class="radio-row"><input type="radio" name="floor" value="wire">    Wireframe</label>
+  </section>
+
+  <section class="hud-section">
+    <h2>Layers</h2>
+    <label class="check-row"><input type="checkbox" id="toggle-water"> Water plane</label>
+    <label class="check-row"><input type="checkbox" id="toggle-objects" checked> Objects</label>
+  </section>
+
+  <section class="hud-section">
+    <h2>Height exaggeration</h2>
+    <div class="slider-row">
+      <input type="range" id="height-exag" min="0.5" max="6" step="0.1" value="1.5">
+      <span class="val" id="height-exag-val">1.5x</span>
+    </div>
+    <div class="hint">Real heights from `.TER` byte 0 channel. Bump
+      for steeper hills, drop for flatter view.</div>
+  </section>
+
+  <section class="hud-section">
+    <h2>Counts</h2>
+    <div id="counts" class="counts">&mdash;</div>
+  </section>
+
+  <section class="hud-section">
+    <h2>Perf</h2>
+    <div class="kv-row"><span>FPS</span><span class="val" id="fps">&mdash;</span></div>
+    <div class="kv-row"><span>Cells</span><span class="val" id="cells">&mdash;</span></div>
+    <div class="kv-row"><span>World</span><span class="val" id="world-size">&mdash;</span></div>
+  </section>
+
+  <section class="hud-section">
+    <button class="btn" id="reset-camera">Reset camera</button>
+  </section>
+
+  <footer class="hud-footer">
+    <a href="../calibration/index.html">&laquo; back to calibration</a>
+  </footer>
+</aside>
+
+<div id="status">loading map data...</div>
+
+<script type="module" src="js/viewer.js"></script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Calibrate map - VT Stats</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <a class="btn" href="index.html" title="Back to index">&lt; Back</a>
+    <button class="btn" id="prev-btn" title="Previous map in current tier">&lt; Prev</button>
+    <button class="btn" id="next-btn" title="Next map in current tier">Next &gt;</button>
+    <h1 id="map-title" style="margin: 0 0 0 8px;">loading...</h1>
+    <span id="tier-pill" class="canvas-tier-pill" style="background:#9098a8">...</span>
+    <span class="status-line" style="margin-left: auto;">
+      <span class="status-dot" id="save-dot"></span>
+      <span id="save-status">init</span>
+    </span>
+    <button class="info-btn" id="info-btn" title="Help">i</button>
+    <button class="btn primary" id="save-btn" title="Save to file (Ctrl+S)">Save</button>
+  </div>
+</header>
+
+<main class="calibrate-layout">
+  <div class="canvas-area">
+    <div class="canvas-header">
+      <span id="canvas-info">objects load...</span>
+      <span style="margin-left:auto;color:var(--text-muted);">
+        <kbd>Esc</kbd> deselect &middot;
+        <kbd>R</kbd> reset selected &middot;
+        <kbd>Arrows</kbd> nudge 1px (<kbd>Shift</kbd>+arrow 10px) &middot;
+        <kbd>Ctrl</kbd>+<kbd>S</kbd> save
+      </span>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="cal-canvas" width="512" height="512"></canvas>
+    </div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <h3>Calibration</h3>
+      <div class="sidebar-row"><span>Source:</span><span class="val" id="cal-source">-</span></div>
+      <div class="sidebar-row"><span>RMSE max:</span><span class="val" id="cal-rmse">-</span></div>
+      <div class="sidebar-row"><span>Overrides:</span><span class="val" id="cal-overrides">0</span></div>
+      <div class="sidebar-row"><span>Detector:</span><span class="val" id="cal-detector">-</span></div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Tools</h3>
+      <button class="btn" id="reset-selected-btn" disabled
+              title="Remove overrides on selected (R)">Reset selected</button>
+      <button class="btn danger" id="reset-all-btn"
+              style="margin-top:6px;width:100%"
+              title="Remove ALL overrides (will prompt for confirm)">Reset ALL overrides</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Objects</h3>
+      <div class="object-list" id="object-list">loading...</div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Status</h3>
+      <div class="status-line"><span class="status-dot" id="ls-dot"></span>
+        <span id="ls-status">localStorage: -</span>
+      </div>
+      <div class="status-line" style="margin-top:6px;">
+        <span class="status-dot" id="file-dot"></span>
+        <span id="file-status">file save: -</span>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div class="modal-backdrop hidden" id="info-modal-backdrop">
+  <div class="modal" id="info-modal">
+    <button class="modal-close" id="info-modal-close" title="Close">x</button>
+    <h2>Calibration tool quickref</h2>
+    <h3>Selecting</h3>
+    <ul>
+      <li><strong>Click</strong> on a marker to select it</li>
+      <li><strong>Shift+click</strong> to add to current selection</li>
+      <li><strong>Click+drag on empty space</strong> to rubber-band select (rectangle)</li>
+      <li><kbd>Esc</kbd> to deselect all</li>
+    </ul>
+    <h3>Moving</h3>
+    <ul>
+      <li><strong>Drag a selected marker</strong> to move it (the whole selection moves together)</li>
+      <li><strong>Arrow keys</strong> nudge selection by 1 px</li>
+      <li><strong>Shift+arrow</strong> nudges by 10 px</li>
+      <li>Moved objects get stored as <em>overrides</em> in the config</li>
+    </ul>
+    <h3>Resetting</h3>
+    <ul>
+      <li><kbd>R</kbd> reset selected markers to default projection</li>
+      <li><strong>Reset ALL overrides</strong> button removes every saved override on this map</li>
+    </ul>
+    <h3>Saving</h3>
+    <ul>
+      <li><strong>Auto-save</strong>: every drag is saved to localStorage immediately. Close the tab anytime; drafts survive.</li>
+      <li><strong>Ctrl+S</strong> or the Save button writes the actual file.
+        First save asks you to pick the configs folder
+        (<span class="mono">_map-analysis/calibration/configs/</span>);
+        subsequent saves are silent.</li>
+    </ul>
+    <h3>End of session</h3>
+    <p>Run <span class="mono">python _map-analysis/scripts/reprocess.py</span>
+    in a terminal to regenerate all overlay PNGs + the staging/ folder
+    based on the latest configs.</p>
+  </div>
+</div>
+
+<script src="js/shared.js"></script>
+<script src="js/calibrate.js"></script>
+</body>
+</html>

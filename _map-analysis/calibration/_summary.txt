@@ -1,0 +1,1719 @@
+# Plan B test results - per-map calibration summary
+
+Generated in 710.3s across 142 maps (full detector sweep with combinatorial achromatic search).
+
+## Tier counts
+
+- **proven**     (RMSE max < 2.0 px): 48
+- **borderline** (2.0 <= RMSE max < 5.0 px): 2
+- **hand_cal**   (existing calibration.json): 1
+- **failed**     (no good detector fit; fallback used): 91
+- **no_png**     (no iondriver minimap on disk): 0
+
+## Calibrations ready for production
+
+Each block below is ready to drop straight into `data/maps/<stem>.json :: image_calibration.image_bounds_world`.
+Maps are sorted by tier then RMSE. **Skip the `failed` section for production** - those are best-effort fallback overlays only, intended for human inspection.
+
+### Europa Night (vsreuronig)  -  tier=hand  RMSE max=0.00px
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -667, "z": -627 },
+    "max": { "x": 578, "z": 627 }
+  },
+  "source": "hand_calibration"
+}
+```
+
+### Hubris (vsrhubris)  -  tier=proven  RMSE max=0.29px  [axis flips: X,Z]
+method: detector (r3_nms4_white)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -929, "z": -899 },
+    "max": { "x": 882, "z": 911 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Trinity (vsrtrinity)  -  tier=proven  RMSE max=0.35px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -508, "z": -1051 },
+    "max": { "x": 1310, "z": 782 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Dedux (stdeduxvsr)  -  tier=proven  RMSE max=0.35px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -955, "z": -961 },
+    "max": { "x": 917, "z": 939 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Plaza (vsrplaza)  -  tier=proven  RMSE max=0.35px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -676, "z": -905 },
+    "max": { "x": 653, "z": 416 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Garden (vsrgarden)  -  tier=proven  RMSE max=0.40px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -910, "z": -970 },
+    "max": { "x": 969, "z": 923 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Quagmire (stquagmirevsr)  -  tier=proven  RMSE max=0.40px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -831, "z": -790 },
+    "max": { "x": 823, "z": 848 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Terron (vsrterron)  -  tier=proven  RMSE max=0.42px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -892, "z": -893 },
+    "max": { "x": 904, "z": 855 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Phoenix (stphoenixvsr)  -  tier=proven  RMSE max=0.44px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1062, "z": -1086 },
+    "max": { "x": 1027, "z": 1026 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Forgotten (vsrforgot)  -  tier=proven  RMSE max=0.52px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -725, "z": -719 },
+    "max": { "x": 752, "z": 758 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Red Slope (stredslopevsr)  -  tier=proven  RMSE max=0.53px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -890, "z": -1068 },
+    "max": { "x": 970, "z": 786 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Ogg Vorbis (vsrogg)  -  tier=proven  RMSE max=0.62px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -841, "z": -829 },
+    "max": { "x": 879, "z": 863 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Beyond (beyond)  -  tier=proven  RMSE max=0.64px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -684, "z": -254 },
+    "max": { "x": 714, "z": 1163 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Wales (vsrwales)  -  tier=proven  RMSE max=0.66px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -872, "z": -891 },
+    "max": { "x": 816, "z": 794 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### 310 (vsr310)  -  tier=proven  RMSE max=0.68px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -716, "z": -721 },
+    "max": { "x": 753, "z": 742 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### No Mans Land (vsrnomnld)  -  tier=proven  RMSE max=0.71px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -842, "z": -805 },
+    "max": { "x": 692, "z": 726 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Lunar (vsrlunar)  -  tier=proven  RMSE max=0.72px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -944, "z": -968 },
+    "max": { "x": 889, "z": 860 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Rectal (vsrrectal)  -  tier=proven  RMSE max=0.72px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -739, "z": -699 },
+    "max": { "x": 710, "z": 742 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Jurrasic Dog Park (vsrdpark)  -  tier=proven  RMSE max=0.73px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -649, "z": -636 },
+    "max": { "x": 674, "z": 672 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Fort 12C (vsrf12c)  -  tier=proven  RMSE max=0.74px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -879, "z": -908 },
+    "max": { "x": 847, "z": 808 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Reflex (streflexvsr)  -  tier=proven  RMSE max=0.77px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -863, "z": -910 },
+    "max": { "x": 897, "z": 876 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Moonshroud (vsrmoonshrd)  -  tier=proven  RMSE max=0.81px
+method: detector (r3_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -972, "z": -615 },
+    "max": { "x": 168, "z": 507 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Lunix (vsrlunix)  -  tier=proven  RMSE max=0.81px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -584, "z": -594 },
+    "max": { "x": 613, "z": 620 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Hi-Mid-Lo (vsrbighilo)  -  tier=proven  RMSE max=0.82px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -790, "z": -783 },
+    "max": { "x": 769, "z": 758 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Pitfall (vsrpitfall)  -  tier=proven  RMSE max=0.94px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -535, "z": -540 },
+    "max": { "x": 572, "z": 563 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Oldboy (vsroldboy)  -  tier=proven  RMSE max=0.94px  [axis flips: X]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -776, "z": -866 },
+    "max": { "x": 801, "z": 712 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Red Bluff (vsrredbluff)  -  tier=proven  RMSE max=1.05px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -934, "z": -947 },
+    "max": { "x": 913, "z": 915 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Curiosity (curiosityvsr)  -  tier=proven  RMSE max=1.06px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -501, "z": -522 },
+    "max": { "x": 521, "z": 495 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Hilo Blues (stbluesvsr)  -  tier=proven  RMSE max=1.08px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -722, "z": -748 },
+    "max": { "x": 779, "z": 744 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Europa (vsreuropa)  -  tier=proven  RMSE max=1.09px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -680, "z": -669 },
+    "max": { "x": 639, "z": 647 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Wasteland (vsrmortwasteland)  -  tier=proven  RMSE max=1.09px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -682, "z": -624 },
+    "max": { "x": 657, "z": 714 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Ebola (vsrebola)  -  tier=proven  RMSE max=1.10px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -558, "z": -557 },
+    "max": { "x": 589, "z": 594 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Swamp Gas (vsrswgas)  -  tier=proven  RMSE max=1.21px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -564, "z": -504 },
+    "max": { "x": 515, "z": 575 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Tempest (sttempestvsr)  -  tier=proven  RMSE max=1.21px  [axis flips: Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -605, "z": -832 },
+    "max": { "x": 1036, "z": 813 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Pit Bull (stpitbull)  -  tier=proven  RMSE max=1.28px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -709, "z": -678 },
+    "max": { "x": 625, "z": 646 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Jade Green (vsrjade)  -  tier=proven  RMSE max=1.28px
+method: detector (r3_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -763, "z": -779 },
+    "max": { "x": 761, "z": 750 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Insula (vsrinsula)  -  tier=proven  RMSE max=1.34px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -807, "z": -988 },
+    "max": { "x": 941, "z": 722 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Excavation (stvsrexcav)  -  tier=proven  RMSE max=1.35px
+method: detector (r5_nms6)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1029, "z": -993 },
+    "max": { "x": 907, "z": 959 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Ridges (stridges)  -  tier=proven  RMSE max=1.51px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -643, "z": -876 },
+    "max": { "x": 1080, "z": 850 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Abuse (vsrabuse)  -  tier=proven  RMSE max=1.67px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -713, "z": -709 },
+    "max": { "x": 755, "z": 700 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Revolution (vsrrevo)  -  tier=proven  RMSE max=1.70px
+method: detector (r3_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -549, "z": -551 },
+    "max": { "x": 518, "z": 522 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Flooded (vsrflooded)  -  tier=proven  RMSE max=1.71px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1313, "z": -1317 },
+    "max": { "x": 958, "z": 1029 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Cliff (zstcliff)  -  tier=proven  RMSE max=1.72px  [axis flips: X,Z]
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1261, "z": -1287 },
+    "max": { "x": 178, "z": 154 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Toxicity (vsrbridgest)  -  tier=proven  RMSE max=1.73px  [axis flips: Z]
+method: detector (r3_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -740, "z": -773 },
+    "max": { "x": 773, "z": 743 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Crater (vsrcrater)  -  tier=proven  RMSE max=1.73px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -804, "z": -799 },
+    "max": { "x": 843, "z": 847 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Six Way (vsr6way)  -  tier=proven  RMSE max=1.75px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -167, "z": -502 },
+    "max": { "x": 1113, "z": 817 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Casius (vsrcasiusv2)  -  tier=proven  RMSE max=1.85px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -820, "z": -839 },
+    "max": { "x": 830, "z": 722 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Prodigy Ver.2 (zprodigyv2)  -  tier=proven  RMSE max=1.89px
+method: detector (r2_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -665, "z": -686 },
+    "max": { "x": 672, "z": 654 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### CP Outposts (cpoutposts)  -  tier=proven  RMSE max=1.97px  [axis flips: X,Z]
+method: detector (r3_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -973, "z": -800 },
+    "max": { "x": 481, "z": 663 }
+  },
+  "source": "proven_calibration"
+}
+```
+
+### Ancient Hills (stancientvsr)  -  tier=borderline  RMSE max=2.44px
+method: detector (r3_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -925, "z": -959 },
+    "max": { "x": 959, "z": 875 }
+  },
+  "source": "borderline_calibration"
+}
+```
+
+### Selena (vsrlunast)  -  tier=borderline  RMSE max=3.49px  [axis flips: X,Z]
+method: detector (r3_nms4)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -698, "z": -694 },
+    "max": { "x": 659, "z": 670 }
+  },
+  "source": "borderline_calibration"
+}
+```
+
+### Aztec (staztecvsr)  -  tier=failed  RMSE max=5.62px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -754, "z": -755 },
+    "max": { "x": 722, "z": 723 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Echelon (vsrechelon)  -  tier=failed  RMSE max=5.64px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -533, "z": -572 },
+    "max": { "x": 565, "z": 572 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Canyons (vsrcanyons)  -  tier=failed  RMSE max=8.95px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1380, "z": -1803 },
+    "max": { "x": 1092, "z": 1355 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Mars (rjx-mars)  -  tier=failed  RMSE max=12.44px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -933, "z": -1103 },
+    "max": { "x": 485, "z": 591 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Rendon (strendonvsr)  -  tier=failed  RMSE max=12.93px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -873, "z": -1022 },
+    "max": { "x": 1009, "z": 1059 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Magma (stmagmavsr)  -  tier=failed  RMSE max=12.97px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -592, "z": -674 },
+    "max": { "x": 595, "z": 495 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Terrace (vsrterrace)  -  tier=failed  RMSE max=13.13px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -592, "z": -437 },
+    "max": { "x": 682, "z": 661 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Stone Circle (stonevsr)  -  tier=failed  RMSE max=16.26px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -835, "z": -593 },
+    "max": { "x": 736, "z": 689 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Quarry 2 (vsrquarry2)  -  tier=failed  RMSE max=16.85px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -716, "z": -702 },
+    "max": { "x": 748, "z": 670 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Throbbing Gristle (vsrthrob)  -  tier=failed  RMSE max=17.02px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1388, "z": -1396 },
+    "max": { "x": 1390, "z": 1376 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Equinox (vsrequinox)  -  tier=failed  RMSE max=17.50px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1093, "z": -564 },
+    "max": { "x": 1159, "z": 420 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Ice Cold Strat (icecoldbzcc)  -  tier=failed  RMSE max=17.52px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1395, "z": -1671 },
+    "max": { "x": 1363, "z": 1334 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Ice Age (vsriceage)  -  tier=failed  RMSE max=19.38px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -733, "z": -750 },
+    "max": { "x": 714, "z": 709 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Titan (vsrsttitan)  -  tier=failed  RMSE max=19.46px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -334, "z": -678 },
+    "max": { "x": 718, "z": 675 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Amino (vsramino)  -  tier=failed  RMSE max=19.56px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -657, "z": -725 },
+    "max": { "x": 625, "z": 695 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Concrete Jungle (vsrcncrt)  -  tier=failed  RMSE max=20.26px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1064, "z": -871 },
+    "max": { "x": 647, "z": 946 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Rapemas (vsrrapemas)  -  tier=failed  RMSE max=21.55px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -579, "z": -710 },
+    "max": { "x": 611, "z": 742 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Consciousness (vsrconsc)  -  tier=failed  RMSE max=21.85px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -600, "z": -697 },
+    "max": { "x": 615, "z": 724 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Mexican Mission (vsrmexican)  -  tier=failed  RMSE max=22.74px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -500, "z": -899 },
+    "max": { "x": 531, "z": 931 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Ragnarok (vsrragnor)  -  tier=failed  RMSE max=22.81px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -715, "z": -1270 },
+    "max": { "x": 737, "z": 1334 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### CP Devils Cauldron (cpcauldron)  -  tier=failed  RMSE max=22.84px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1071, "z": -1024 },
+    "max": { "x": 1129, "z": 985 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Oxide (vsroxide)  -  tier=failed  RMSE max=23.03px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -978, "z": -913 },
+    "max": { "x": 1067, "z": 1054 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Bowl (stbowlvsr)  -  tier=failed  RMSE max=23.59px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -772, "z": -820 },
+    "max": { "x": 871, "z": 842 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Trail (sttrailvsr)  -  tier=failed  RMSE max=23.76px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1176, "z": -1207 },
+    "max": { "x": 1055, "z": 1052 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Ancient Outposts (stancientposts)  -  tier=failed  RMSE max=24.12px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -915, "z": -1165 },
+    "max": { "x": 848, "z": 1157 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Ravine (vsrravine)  -  tier=failed  RMSE max=24.55px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1073, "z": -1176 },
+    "max": { "x": 849, "z": 792 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Big Chill (chill)  -  tier=failed  RMSE max=25.52px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -413, "z": -1025 },
+    "max": { "x": 998, "z": 577 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Mayhem (stmayhem)  -  tier=failed  RMSE max=25.80px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -474, "z": -899 },
+    "max": { "x": 442, "z": 931 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Overlook (vsroverlook)  -  tier=failed  RMSE max=26.30px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1073, "z": -991 },
+    "max": { "x": 849, "z": 599 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Vegan (vsrvegan)  -  tier=failed  RMSE max=26.38px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -539, "z": -571 },
+    "max": { "x": 577, "z": 604 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Trench (sttrenchvsr)  -  tier=failed  RMSE max=26.44px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -748, "z": -549 },
+    "max": { "x": 716, "z": 540 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Egypt (vsregypt)  -  tier=failed  RMSE max=27.89px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -211, "z": -525 },
+    "max": { "x": 1299, "z": 729 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Impact (vsrimpact2)  -  tier=failed  RMSE max=29.03px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1276, "z": -1646 },
+    "max": { "x": 1335, "z": 1211 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### High & Low (hilo)  -  tier=failed  RMSE max=29.06px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -571, "z": -557 },
+    "max": { "x": 563, "z": 552 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Iraq (stvsriraq)  -  tier=failed  RMSE max=30.94px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -777, "z": -625 },
+    "max": { "x": 778, "z": 657 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Satart (vsrsatart)  -  tier=failed  RMSE max=31.64px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -717, "z": -643 },
+    "max": { "x": 749, "z": 678 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Mesa (stmesavsr)  -  tier=failed  RMSE max=31.95px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -581, "z": -885 },
+    "max": { "x": 544, "z": 853 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Uxbridge (vsruxbridge)  -  tier=failed  RMSE max=32.10px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -618, "z": -618 },
+    "max": { "x": 618, "z": 618 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Cracked (vsrcracked)  -  tier=failed  RMSE max=32.54px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1114, "z": -1064 },
+    "max": { "x": 781, "z": 760 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Supply Lanes (vsrlanes)  -  tier=failed  RMSE max=32.72px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1173, "z": -1156 },
+    "max": { "x": 581, "z": 587 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Mojave (vsrmojave)  -  tier=failed  RMSE max=34.67px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -913, "z": -963 },
+    "max": { "x": 1007, "z": 973 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Aussault (vsrauslt)  -  tier=failed  RMSE max=34.79px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1014, "z": -1046 },
+    "max": { "x": 1046, "z": 1014 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Golden Sun (vsrgoldensun)  -  tier=failed  RMSE max=35.57px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -748, "z": -1045 },
+    "max": { "x": 983, "z": 1221 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Barren (stbarrenvsr)  -  tier=failed  RMSE max=36.20px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1032, "z": -730 },
+    "max": { "x": 829, "z": 750 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Dream (vsrdream)  -  tier=failed  RMSE max=36.55px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1186, "z": -1278 },
+    "max": { "x": 1229, "z": 1283 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Haven (havenvsr)  -  tier=failed  RMSE max=36.60px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -697, "z": -704 },
+    "max": { "x": 674, "z": 711 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Oasis (vsroasis)  -  tier=failed  RMSE max=36.67px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1122, "z": -917 },
+    "max": { "x": 810, "z": 821 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Sinister (stsinister)  -  tier=failed  RMSE max=37.05px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -698, "z": -630 },
+    "max": { "x": 633, "z": 776 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Stack (vsrstack)  -  tier=failed  RMSE max=37.30px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -762, "z": -808 },
+    "max": { "x": 794, "z": 840 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Remnant (vsrremnant)  -  tier=failed  RMSE max=37.95px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -682, "z": -724 },
+    "max": { "x": 767, "z": 637 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Nigeria (vsrnigeria)  -  tier=failed  RMSE max=38.08px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1135, "z": -1020 },
+    "max": { "x": 1119, "z": 1110 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Strategy Arena (starena)  -  tier=failed  RMSE max=38.10px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -664, "z": -637 },
+    "max": { "x": 664, "z": 589 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Dusk (duskvsr)  -  tier=failed  RMSE max=38.45px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -894, "z": -1096 },
+    "max": { "x": 744, "z": 552 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Trapped (vsrtrapped)  -  tier=failed  RMSE max=38.66px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1014, "z": -1042 },
+    "max": { "x": 1056, "z": 1097 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Giza (stgizavsr)  -  tier=failed  RMSE max=38.83px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -872, "z": -1168 },
+    "max": { "x": 875, "z": 1238 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Island of -~V8~-+ (vsrv8)  -  tier=failed  RMSE max=38.88px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1638, "z": -1654 },
+    "max": { "x": 1672, "z": 1586 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Wipeout (vsrwout)  -  tier=failed  RMSE max=39.05px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -570, "z": -970 },
+    "max": { "x": 1067, "z": 518 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Vortex (vsrvort)  -  tier=failed  RMSE max=39.43px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -679, "z": -775 },
+    "max": { "x": 611, "z": 713 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Winter Valley (wintervalley)  -  tier=failed  RMSE max=39.96px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -522, "z": -640 },
+    "max": { "x": 490, "z": 623 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Bolt (stbolt)  -  tier=failed  RMSE max=40.78px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -452, "z": -418 },
+    "max": { "x": 419, "z": 452 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Fire Island (vsrfisle)  -  tier=failed  RMSE max=41.54px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1265, "z": -1250 },
+    "max": { "x": 1250, "z": 1229 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Badlands (stbadlands)  -  tier=failed  RMSE max=42.03px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -620, "z": -583 },
+    "max": { "x": 623, "z": 613 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Sahara (vsrsahara)  -  tier=failed  RMSE max=43.49px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -739, "z": -807 },
+    "max": { "x": 745, "z": 710 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### The War (vsrthewar)  -  tier=failed  RMSE max=44.13px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -533, "z": -625 },
+    "max": { "x": 565, "z": 657 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Scammed (vsrscammed)  -  tier=failed  RMSE max=44.33px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -685, "z": -762 },
+    "max": { "x": 705, "z": 794 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Finland Daylight (vsrfinday)  -  tier=failed  RMSE max=45.77px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -664, "z": -709 },
+    "max": { "x": 664, "z": 709 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Know Thyself (vsrknwthy)  -  tier=failed  RMSE max=46.58px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -812, "z": -670 },
+    "max": { "x": 842, "z": 702 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Death Island (vsrdhisle)  -  tier=failed  RMSE max=50.34px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1122, "z": -1164 },
+    "max": { "x": 703, "z": 940 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Hound (shound)  -  tier=failed  RMSE max=50.43px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1158, "z": -1060 },
+    "max": { "x": 290, "z": 352 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Murky (stmurkybzcc)  -  tier=failed  RMSE max=57.74px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -527, "z": -504 },
+    "max": { "x": 445, "z": 445 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### DC (vsrdc)  -  tier=failed  RMSE max=66.32px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -899, "z": -871 },
+    "max": { "x": 863, "z": 865 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### The Rocks (strock)  -  tier=failed  RMSE max=71.50px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -426, "z": -608 },
+    "max": { "x": 460, "z": 352 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Power Struggle (vsrpstrgle)  -  tier=failed  RMSE max=73.06px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -762, "z": -1071 },
+    "max": { "x": 474, "z": 943 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Domain (vsrdomain)  -  tier=failed  RMSE max=82.72px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -794, "z": -657 },
+    "max": { "x": 762, "z": 625 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### DuneNight (vsr4pool)  -  tier=failed  RMSE max=92.03px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -427, "z": -497 },
+    "max": { "x": 1293, "z": 785 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Twin Peaks (vsrtwinpeaks)  -  tier=failed  RMSE max=122.95px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -551, "z": -643 },
+    "max": { "x": 455, "z": 547 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Snow Central (vsrsnowcentral)  -  tier=failed  RMSE max=136.54px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -716, "z": -556 },
+    "max": { "x": 748, "z": 268 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### JO Crystal (vsrjocrystalst)  -  tier=failed  RMSE max=161.72px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1376, "z": -940 },
+    "max": { "x": 1246, "z": 810 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Marden Warfare (vsrmardenwarfare)  -  tier=failed  RMSE max=177.51px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -657, "z": -696 },
+    "max": { "x": 625, "z": 632 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Two Hills (vsrtwohills)  -  tier=failed  RMSE max=250.99px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -687, "z": -783 },
+    "max": { "x": 789, "z": 655 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Plus (vsrplus)  -  tier=failed  RMSE max=253.59px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -775, "z": -966 },
+    "max": { "x": 773, "z": 615 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Middle Wars (vsrmidwars)  -  tier=failed  RMSE max=265.19px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -900, "z": -939 },
+    "max": { "x": 1147, "z": 752 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Phazon (vsrphazon)  -  tier=failed  RMSE max=332.04px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1199, "z": -1302 },
+    "max": { "x": 1248, "z": 1216 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Miredon (vsrmiredon)  -  tier=failed  RMSE max=339.75px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -668, "z": -774 },
+    "max": { "x": 626, "z": 769 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Scion Central (vsrscioncent)  -  tier=failed  RMSE max=403.01px
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -929, "z": -556 },
+    "max": { "x": 993, "z": 268 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Abundance (vsrabundance)  -  tier=failed  RMSE n/a
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1327, "z": -1242 },
+    "max": { "x": 1316, "z": 1288 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Heated Strat (heatedbzcc)  -  tier=failed  RMSE n/a
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -585, "z": -851 },
+    "max": { "x": 583, "z": 848 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Mountain Pass (mntnpass)  -  tier=failed  RMSE n/a
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -979, "z": -1188 },
+    "max": { "x": 963, "z": 740 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Mountain Top (mtntopbzcc)  -  tier=failed  RMSE n/a
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -757, "z": -819 },
+    "max": { "x": 820, "z": 812 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Rift (vsrrift2)  -  tier=failed  RMSE n/a
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -1297, "z": -1171 },
+    "max": { "x": 1265, "z": 1163 }
+  },
+  "source": "failed_calibration"
+}
+```
+
+### Royal Stadium (vsrroyal)  -  tier=failed  RMSE n/a
+method: fallback (bbox x 1.43)
+```
+"image_calibration": {
+  "image_bounds_world": {
+    "min": { "x": -653, "z": -657 },
+    "max": { "x": 629, "z": 625 }
+  },
+  "source": "failed_calibration"
+}
+```
