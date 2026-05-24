@@ -3274,31 +3274,42 @@ td.vt-col-split {
 /* Sticky table headers — keep column labels visible while scrolling the page.
    Anchored to the .kb-header height (64px). Uses --kb-bg-popover to match
    the existing `.table > thead` background in css/main.css (otherwise the
-   thead would shift color on themes where -popover and -card diverge). */
-.vt-sticky-thead thead th {
-    position: sticky;
-    top: 64px;
-    z-index: 5;
-    background: var(--kb-bg-popover);
-    box-shadow: inset 0 -1px 0 var(--kb-border-subtle);
-}
+   thead would shift color on themes where -popover and -card diverge).
 
-/* The card-body wrapper uses .table-responsive (overflow-x: auto), which the
-   CSS spec promotes into a y-axis scroll container too — that swallows the
-   sticky behaviour. At >=992px (where these tables fit horizontally) drop
-   the wrapper's overflow constraint so page-level scroll drives sticky.
-   Below 992px keep the default behaviour: horizontal table scroll, no sticky. */
+   IMPORTANT: the `position: sticky` declaration itself MUST live inside the
+   >=992px media query alongside the wrapper's `overflow: visible` override.
+   Below 992px the .table-responsive wrapper keeps Bootstrap's overflow-x:auto,
+   which the CSS spec promotes into a y-axis scroll container too. If
+   `position: sticky; top: 64px` were left always-on, the thead would anchor
+   to the wrapper (not the page) and `top: 64px` would push it down 64px
+   inside the wrapper — even though the wrapper never scrolls vertically —
+   visually covering row #1 of the table. Do not hoist the sticky declaration
+   back out of the media query without also fixing that. */
 @media (min-width: 992px) {
     .vt-sticky-thead-card.table-responsive {
         overflow: visible;
+    }
+    .vt-sticky-thead thead th {
+        position: sticky;
+        top: 64px;
+        z-index: 5;
+        background: var(--kb-bg-popover);
+        box-shadow: inset 0 -1px 0 var(--kb-border-subtle);
     }
 }
 
 /* Inside the Fullscreen modal the cloned table sits in its own scroll
    container (.modal-body), and the page header isn't above it — re-anchor
-   sticky to the top of that scroll container. */
+   sticky to the top of that scroll container. Declared independently of the
+   >=992px media query because the modal's .modal-body is always a scroll
+   container regardless of viewport width, so the sticky behaviour is safe
+   (and desirable) at every breakpoint. */
 #fullscreen-modal .vt-sticky-thead thead th {
+    position: sticky;
     top: 0;
+    z-index: 5;
+    background: var(--kb-bg-popover);
+    box-shadow: inset 0 -1px 0 var(--kb-border-subtle);
 }
 
 /* Movement band pill (replaces the muted band-label text) */
