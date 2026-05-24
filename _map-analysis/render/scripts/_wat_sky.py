@@ -256,6 +256,61 @@ def parse_trn_lighting(trn_path: Path | None) -> dict:
     return out
 
 
+# Image extensions the engine accepts in TileTextureN references. Anything
+# in this set gets stripped from the tail of the tile name during
+# normalization so downstream matching against on-disk files is uniform.
+_TILE_NAME_EXTS = (".tga", ".dds", ".bmp", ".png", ".jpg", ".jpeg", ".pic")
+
+
+def _normalize_tile_name(raw: str) -> str:
+    name = raw.strip().strip('"').strip("'").lower()
+    for ext in _TILE_NAME_EXTS:
+        if name.endswith(ext):
+            name = name[: -len(ext)]
+            break
+    return name
+
+
+def parse_trn_tile_textures(trn_path: Path | None) -> list[str | None]:
+    """Pull the `[Texture]` block's TileTextureN list from `.TRN`.
+
+    Returns a fixed-length 16-slot list of normalized tile stems (lowercase,
+    extension stripped). Slot index 0 corresponds to `TileTexture1` (the
+    engine's 1-indexed naming collapsed to 0-indexed so lookup matches
+    `InfoMap`'s 4-bit fields directly). Empty / missing slots are `None`.
+    The returned list is always exactly 16 entries; trailing `None`s are NOT
+    stripped because `InfoMap` may legally reference any slot in 0..15.
+
+    Example .TRN block:
+
+        [Texture]
+        TileTexture1 = "rend.tga"
+        TileTexture2 = "rend2.tga"
+        TileTexture5 = "rend5.dds"      // (slots 3-4 are holes)
+
+    Returns: ['rend', 'rend2', None, None, 'rend5', None, ..., None]
+    (16 entries total)
+
+    Accepts the common image extensions BZ:CC supports (`.tga`/`.dds`/`.bmp`/
+    `.png`/`.jpg`/`.jpeg`/`.pic`); the stripped stem is what we look for
+    on disk during tile extraction.
+    """
+    out: list[str | None] = [None] * 16
+    if trn_path is None or not trn_path.is_file():
+        return out
+    ini = _parse_ini(trn_path)
+    tex = ini.get("Texture", {})
+    for i in range(1, 17):
+        raw = tex.get(f"TileTexture{i}")
+        if raw is None:
+            continue
+        name = _normalize_tile_name(raw)
+        if not name:
+            continue
+        out[i - 1] = name
+    return out
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:

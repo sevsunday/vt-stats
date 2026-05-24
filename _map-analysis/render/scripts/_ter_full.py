@@ -96,6 +96,25 @@ class TerFull:
     # that downsampled into it. Bits per CellType.cs:
     #   0x01 Cliff  0x02 Water  0x04 Building  0x08 Lava  0x10 Sloped
     cell_type_bytes: bytes
+    # Per-cell RGB bytes at SOURCE resolution (src_cells_x * src_cells_z * 3).
+    # The .TER Color channel -- the engine's baked vertex color (per-cell
+    # painted ground tint). Used as the per-pixel tint multiplier in the
+    # tier-3 tile compositing shader.
+    color_rgb_bytes: bytes
+    # Per-cell alpha bytes at SOURCE resolution (src_cells_x * src_cells_z each).
+    # The .TER's 3 alpha-blend channels: per-pixel weights for tile-texture
+    # layers 1/2/3 (layer 0 is always fully visible). Consumed by the tier-3
+    # shader as alphaMap1/2/3.
+    alpha1_bytes: bytes
+    alpha2_bytes: bytes
+    alpha3_bytes: bytes
+    # Per-cluster InfoMap (uint32 little-endian). Length = info_cluster_cols *
+    # info_cluster_rows * 4 bytes. Bits 0-3 = tile index for layer 0, bits 4-7
+    # for layer 1, etc (see Terrain.cs L70-83). The viewer unpacks these into
+    # a DataTexture for the shader.
+    info_map_bytes: bytes
+    info_cluster_cols: int       # = src_cells_x / CLUSTER_SIZE (16)
+    info_cluster_rows: int       # = src_cells_z / CLUSTER_SIZE (16)
     # CellType (cliff/water/building/lava/sloped bit flags per cell)
     # counts -- enables smart sidebar defaults in the viewer.
     total_cells: int          # source-resolution total cells (= src_cells_x * src_cells_z)
@@ -142,10 +161,23 @@ class CellTypeCounts:
     sloped: int      # 0x10
 
 
-def _decode_v5(raw: bytes) -> tuple[list[list[float]], list[list[int]], int, int, tuple[int, int, int, int], CellTypeCounts]:
-    """Decode a v5 .TER. Returns (heights_2d, cell_types_2d, width, height, tile_bounds, cellcounts).
-    Heights are float32 meters. cell_types_2d carries the raw CellType byte
-    (see bits in CellType.cs) per source cell."""
+def _decode_v5(raw: bytes) -> tuple[
+        list[list[float]],   # heightmap
+        list[list[int]],     # cell_types
+        list[bytes],         # color rows (RGB, 3 bytes per cell)
+        list[bytes],         # alpha1 rows (1 byte per cell)
+        list[bytes],         # alpha2 rows
+        list[bytes],         # alpha3 rows
+        bytes,               # info_map_bytes (uint32 LE per cluster, row-major)
+        int,                 # info_cluster_cols
+        int,                 # info_cluster_rows
+        int, int,            # width, height (cells)
+        tuple[int, int, int, int],  # tile bounds (grid min/max X/Z)
+        CellTypeCounts,
+    ]:
+    """Decode a v5 .TER. Returns all per-pixel + per-cluster maps the tier-3
+    renderer needs: heights, cell types (water/lava/cliff), color tint,
+    3 alpha-blend channels, and the InfoMap (per-cluster tile indices)."""
     if raw[:4] != b'TERR':
         raise ValueError('bad magic')
     version = int.from_bytes(raw[4:8], 'little')
@@ -164,6 +196,19 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], list[list[int]], int, int
 
     heightmap = [[0.0] * width for _ in range(height)]
     cell_types = [bytearray(width) for _ in range(height)]
+    # Color channel: RGB bytes per source cell, stored as one bytearray per
+    # row (width * 3 bytes each). Easy to PIL.Image.frombytes() later by
+    # concatenating all rows.
+    color_rows = [bytearray(width * 3) for _ in range(height)]
+    # Alpha channels 1/2/3: 1 byte per source cell each. Same row-bytearray
+    # layout as color_rows for cheap concatenation into image bytes.
+    alpha1_rows = [bytearray(width) for _ in range(height)]
+    alpha2_rows = [bytearray(width) for _ in range(height)]
+    alpha3_rows = [bytearray(width) for _ in range(height)]
+    # InfoMap: one uint32 per cluster, row-major. Capture as flat bytes (LE).
+    info_cluster_cols = width // CLUSTER_SIZE
+    info_cluster_rows = height // CLUSTER_SIZE
+    info_map_bytes = bytearray(info_cluster_cols * info_cluster_rows * 4)
     cells_per_cluster = CLUSTER_SIZE * CLUSTER_SIZE
 
     # Cell type counters
@@ -207,12 +252,54 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], list[list[int]], int, int
                     for xx in range(CLUSTER_SIZE):
                         heightmap[cy + yy][cx + xx] = h
 
-            # Color - 768 bytes per cluster or 3 broadcast (we skip)
-            offset += (cells_per_cluster * 3) if have_color else 3
-            # Alpha1/2/3 - 256 bytes per cluster or 1 broadcast each (we skip)
-            offset += cells_per_cluster if have_a1 else 1
-            offset += cells_per_cluster if have_a2 else 1
-            offset += cells_per_cluster if have_a3 else 1
+            # Color - 768 bytes per cluster (256 RGB triples) or 3 bytes
+            # broadcast for the whole 16x16 cluster.
+            if have_color:
+                # Scatter 256 RGB triples into the 2D color array.
+                for i in range(cells_per_cluster):
+                    yy = i // CLUSTER_SIZE
+                    xx = i % CLUSTER_SIZE
+                    src = offset + i * 3
+                    dst = (cx + xx) * 3
+                    row = color_rows[cy + yy]
+                    row[dst]     = raw[src]
+                    row[dst + 1] = raw[src + 1]
+                    row[dst + 2] = raw[src + 2]
+                offset += cells_per_cluster * 3
+            else:
+                r = raw[offset]
+                g = raw[offset + 1]
+                b = raw[offset + 2]
+                for yy in range(CLUSTER_SIZE):
+                    row = color_rows[cy + yy]
+                    for xx in range(CLUSTER_SIZE):
+                        dst = (cx + xx) * 3
+                        row[dst]     = r
+                        row[dst + 1] = g
+                        row[dst + 2] = b
+                offset += 3
+            # Alpha1/2/3 - 256 bytes per cluster or 1 broadcast each.
+            # Scatter into per-row bytearrays at source resolution.
+            for alpha_rows, have_alpha in (
+                (alpha1_rows, have_a1),
+                (alpha2_rows, have_a2),
+                (alpha3_rows, have_a3),
+            ):
+                if have_alpha:
+                    block = raw[offset:offset + cells_per_cluster]
+                    for i in range(cells_per_cluster):
+                        yy = i // CLUSTER_SIZE
+                        xx = i % CLUSTER_SIZE
+                        alpha_rows[cy + yy][cx + xx] = block[i]
+                    offset += cells_per_cluster
+                else:
+                    b = raw[offset]
+                    if b != 0:
+                        for yy in range(CLUSTER_SIZE):
+                            row = alpha_rows[cy + yy]
+                            for xx in range(CLUSTER_SIZE):
+                                row[cx + xx] = b
+                    offset += 1
             # Cell type - 256 bytes per cluster or 1 broadcast (count + store)
             if have_cell:
                 block = raw[offset:offset + cells_per_cluster]
@@ -241,7 +328,15 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], list[list[int]], int, int
                         for xx in range(CLUSTER_SIZE):
                             row[cx + xx] = b
                 offset += 1
-            # Info map - 1 uint32 per cluster
+            # Info map - 1 uint32 per cluster. Capture as 4 LE bytes packed
+            # into info_map_bytes at the cluster's row-major position.
+            ccol = cx // CLUSTER_SIZE
+            crow = cy // CLUSTER_SIZE
+            ioff = (crow * info_cluster_cols + ccol) * 4
+            info_map_bytes[ioff]     = raw[offset]
+            info_map_bytes[ioff + 1] = raw[offset + 1]
+            info_map_bytes[ioff + 2] = raw[offset + 2]
+            info_map_bytes[ioff + 3] = raw[offset + 3]
             offset += 4
 
     total_cells = width * height
@@ -254,11 +349,19 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], list[list[int]], int, int
         lava=n_lava,
         sloped=n_sloped,
     )
-    # Convert each row from bytearray to bytes for immutability (small cost,
-    # but the caller doesn't need to mutate). Keep as list of bytes for
-    # consistent indexing with heightmap.
     cell_types_out = [bytes(row) for row in cell_types]
-    return heightmap, cell_types_out, width, height, (grid_min_x, grid_min_z, grid_max_x, grid_max_z), counts
+    color_rows_out = [bytes(row) for row in color_rows]
+    a1_out = [bytes(row) for row in alpha1_rows]
+    a2_out = [bytes(row) for row in alpha2_rows]
+    a3_out = [bytes(row) for row in alpha3_rows]
+    return (
+        heightmap, cell_types_out, color_rows_out,
+        a1_out, a2_out, a3_out,
+        bytes(info_map_bytes), info_cluster_cols, info_cluster_rows,
+        width, height,
+        (grid_min_x, grid_min_z, grid_max_x, grid_max_z),
+        counts,
+    )
 
 
 def _box_downsample(src: list[list[float]], factor: int) -> list[list[float]]:
@@ -310,11 +413,21 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
     using each map's measured max height."""
     raw = path.read_bytes()
     try:
-        heightmap_2d, cell_types_2d, width, height, bounds, counts = _decode_v5(raw)
+        (heightmap_2d, cell_types_2d, color_rows,
+         alpha1_rows, alpha2_rows, alpha3_rows,
+         info_map_bytes, info_cluster_cols, info_cluster_rows,
+         width, height, bounds, counts) = _decode_v5(raw)
     except ValueError:
         return None
 
     grid_min_x, grid_min_z, grid_max_x, grid_max_z = bounds
+
+    # Flatten the per-row byte buffers into single bytes blobs at source
+    # resolution. Row 0 = grid_min_z (matches the heightmap convention).
+    color_rgb_bytes = b"".join(color_rows)
+    alpha1_bytes_flat = b"".join(alpha1_rows)
+    alpha2_bytes_flat = b"".join(alpha2_rows)
+    alpha3_bytes_flat = b"".join(alpha3_rows)
 
     # Downsample to keep browser meshes lean. 1024 -> 256 (factor 4).
     factor = DOWNSAMPLE_FACTOR
@@ -376,6 +489,13 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
         height_min_m=h_min,
         height_max_m=h_max,
         cell_type_bytes=cell_type_bytes,
+        color_rgb_bytes=color_rgb_bytes,
+        alpha1_bytes=alpha1_bytes_flat,
+        alpha2_bytes=alpha2_bytes_flat,
+        alpha3_bytes=alpha3_bytes_flat,
+        info_map_bytes=info_map_bytes,
+        info_cluster_cols=info_cluster_cols,
+        info_cluster_rows=info_cluster_rows,
         total_cells=counts.total,
         flat_cells=counts.flat,
         cliff_cells=counts.cliff,

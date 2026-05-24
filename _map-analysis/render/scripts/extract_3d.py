@@ -30,7 +30,12 @@ sys.path.insert(0, str(THIS_DIR))
 sys.path.insert(0, str(THIS_DIR.parent.parent / "scripts"))
 
 from _ter_full import parse_ter_full, read_trn_height_setting  # noqa: E402
-from _wat_sky import parse_wat_header, parse_sky_header, parse_trn_lighting  # noqa: E402
+from _wat_sky import (  # noqa: E402
+    parse_wat_header,
+    parse_sky_header,
+    parse_trn_lighting,
+    parse_trn_tile_textures,
+)
 
 # From _map-analysis/scripts/
 from _paths import (  # noqa: E402
@@ -173,6 +178,52 @@ def build_output(stem: str) -> dict:
         except Exception:
             minimap_dim = None
 
+    # Tier 3 (Game tiles) bake: emit color + alpha1/2/3 as per-map PNGs
+    # at source resolution, plus the InfoMap as base64 inside the .3d.json.
+    # Row 0 of every map = grid_min_z (.TER decode convention), aligned with
+    # the heightmap + cell-types mask conventions.
+    tile_composite = None
+    try:
+        from PIL import Image
+        src_w, src_h = ter.src_cells_x, ter.src_cells_z
+        color_path  = RENDER_DATA_DIR / f"{stem}.color.png"
+        alpha1_path = RENDER_DATA_DIR / f"{stem}.alpha1.png"
+        alpha2_path = RENDER_DATA_DIR / f"{stem}.alpha2.png"
+        alpha3_path = RENDER_DATA_DIR / f"{stem}.alpha3.png"
+        # Color is RGB; alphas are single-channel grayscale.
+        Image.frombytes("RGB", (src_w, src_h), ter.color_rgb_bytes).save(
+            color_path, optimize=True)
+        Image.frombytes("L",   (src_w, src_h), ter.alpha1_bytes).save(
+            alpha1_path, optimize=True)
+        Image.frombytes("L",   (src_w, src_h), ter.alpha2_bytes).save(
+            alpha2_path, optimize=True)
+        Image.frombytes("L",   (src_w, src_h), ter.alpha3_bytes).save(
+            alpha3_path, optimize=True)
+        # InfoMap is per-cluster uint32. Tiny -- embed as base64 inline in
+        # the .3d.json (saves a separate fetch on tier-3 select).
+        info_map_b64 = base64.b64encode(ter.info_map_bytes).decode("ascii")
+        # Tile texture names from .TRN [Texture] block. Fixed 16-slot list;
+        # None for holes. Output as a JSON-safe list (None -> null).
+        tile_texture_names = parse_trn_tile_textures(trn_path) if trn_path else [None] * 16
+        tile_composite = {
+            "color_png_rel":   f"{stem}.color.png",
+            "alpha1_png_rel":  f"{stem}.alpha1.png",
+            "alpha2_png_rel":  f"{stem}.alpha2.png",
+            "alpha3_png_rel":  f"{stem}.alpha3.png",
+            "src_cells_x":     src_w,
+            "src_cells_z":     src_h,
+            "info_map_b64":    info_map_b64,
+            "info_cluster_size": 16,
+            "info_cluster_cols": ter.info_cluster_cols,
+            "info_cluster_rows": ter.info_cluster_rows,
+            "tile_texture_names": tile_texture_names,
+        }
+    except Exception as e:
+        # Pillow / write failure: emit warning, tier-3 will be disabled for
+        # this map in the viewer (graceful fallback to Default mode).
+        print(f"warning: failed to bake tile-composite assets for {stem}: {e}",
+              file=sys.stderr)
+
     # Heightmap comes from the full .TER decode per the bz2terraineditor
     # source: cluster-based, 16x16 cells per cluster, row-major clusters
     # with per-channel compression flags, float32 heights in absolute
@@ -229,7 +280,7 @@ def build_output(stem: str) -> dict:
     cell_types_b64 = base64.b64encode(ter.cell_type_bytes).decode("ascii")
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "map_stem": stem,
         "map_name": map_name,
         "heightmap": {
@@ -279,6 +330,11 @@ def build_output(stem: str) -> dict:
         "world_rect": world_rect,
         "minimap_png_rel": minimap_rel,
         "minimap_dim": minimap_dim,
+        # Tier 3 "Game tiles" floor-quality asset block. Bundles the per-map
+        # inputs the shader needs to composite real BZ:CC tile textures:
+        # color tint PNG + 3 alpha PNGs + base64'd InfoMap + .TRN tile name
+        # list. Null when the bake step failed (viewer disables tier 3).
+        "tile_composite": tile_composite,
         # Water plane Y is in ABSOLUTE engine meters (.WAT byte 16).
         # Viewer subtracts heightmap.base_offset_m to align with the centered mesh.
         "water_y_raw": (wat["water_y"] if wat else None),

@@ -55,9 +55,9 @@ export async function loadMapData(stem) {
     throw new Error(`HTTP ${res.status} fetching ${url}`);
   }
   const raw = await res.json();
-  if (raw.schema_version !== 2) {
+  if (raw.schema_version !== 3) {
     throw new Error(`unsupported schema_version ${raw.schema_version} `
-                    + `(expected 2; re-run extract_3d.py --all to refresh)`);
+                    + `(expected 3; re-run extract_3d.py --all to refresh)`);
   }
 
   // Decode the heightmap base64 -> Int16Array (LE on every supported
@@ -114,6 +114,10 @@ export async function loadMapData(stem) {
     },
     minimapRel:   raw.minimap_png_rel,
     minimapDim:   raw.minimap_dim,
+    // Tier 3 "Game tiles" composite inputs. Bundle of color tint PNG +
+    // 3 alpha PNGs + base64 InfoMap + tile name list. Null when the bake
+    // step failed -- viewer disables the tier-3 radio.
+    tileComposite: raw.tile_composite || null,
     waterY:       raw.water_y,
     waterYRaw:    raw.water_y_raw,
     skyTint:      raw.sky_tint,
@@ -135,6 +139,36 @@ export async function loadMapData(stem) {
       defaultExaggeration: (raw.defaults && raw.defaults.default_exaggeration) || 1.5,
     },
   };
+}
+
+// Fetch the tiles manifest once (shared across all maps). Used by viewer.js
+// to look up per-tile filename / format for the tier-3 floor mode.
+let _tilesManifestCache = null;
+export async function loadTilesManifest() {
+  if (_tilesManifestCache !== null) return _tilesManifestCache;
+  try {
+    const res = await fetch(`${DATA_DIR}/tiles/_manifest.json`);
+    if (!res.ok) {
+      _tilesManifestCache = { tiles: [], byName: {}, missing: [] };
+      return _tilesManifestCache;
+    }
+    const raw = await res.json();
+    const byName = {};
+    for (const t of (raw.tiles || [])) {
+      if (t && t.name) byName[t.name] = t;
+    }
+    _tilesManifestCache = {
+      tiles: raw.tiles || [],
+      byName,
+      missing: raw.missing || [],
+      conflicts: raw.conflicts || [],
+    };
+    return _tilesManifestCache;
+  } catch (e) {
+    console.warn('tiles manifest load failed:', e);
+    _tilesManifestCache = { tiles: [], byName: {}, missing: [] };
+    return _tilesManifestCache;
+  }
 }
 
 // ----------- Helpers -----------
