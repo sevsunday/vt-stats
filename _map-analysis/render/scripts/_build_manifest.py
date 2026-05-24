@@ -24,6 +24,7 @@ for p in sorted(DATA_DIR.glob('*.3d.json')):
         'height_min_m': hm.get('height_min_m'),
         'height_max_m': hm.get('height_max_m'),
         'has_visible_water': defaults.get('has_visible_water', False),
+        'has_visible_lava':  defaults.get('has_visible_lava', False),
         'default_exaggeration': defaults.get('default_exaggeration', 1.5),
     })
 
@@ -38,4 +39,5 @@ for e in entries:
     print(f'  {e["stem"]:<18s} {e["name"]:<24s} '
           f'{e["src_cells_x"]}x{e["src_cells_z"]} '
           f'h[{e["height_min_m"]:.0f}..{e["height_max_m"]:.0f}]m  '
-          f'water={e["has_visible_water"]} exag={e["default_exaggeration"]}x')
+          f'water={e["has_visible_water"]} lava={e["has_visible_lava"]} '
+          f'exag={e["default_exaggeration"]}x')

@@ -91,6 +91,11 @@ class TerFull:
     scale: float              # meters per int16 unit
     height_min_m: float       # actual min height in decoded data
     height_max_m: float       # actual max height in decoded data
+    # Per-cell CellType bytes at OUTPUT resolution (cells_x * cells_z bytes).
+    # Each byte is the OR of all bits set in any source cell of the 4x4 block
+    # that downsampled into it. Bits per CellType.cs:
+    #   0x01 Cliff  0x02 Water  0x04 Building  0x08 Lava  0x10 Sloped
+    cell_type_bytes: bytes
     # CellType (cliff/water/building/lava/sloped bit flags per cell)
     # counts -- enables smart sidebar defaults in the viewer.
     total_cells: int          # source-resolution total cells (= src_cells_x * src_cells_z)
@@ -137,9 +142,10 @@ class CellTypeCounts:
     sloped: int      # 0x10
 
 
-def _decode_v5(raw: bytes) -> tuple[list[list[float]], int, int, tuple[int, int, int, int], CellTypeCounts]:
-    """Decode a v5 .TER. Returns (heights_2d, width, height, tile_bounds, cellcounts).
-    Heights are float32 meters."""
+def _decode_v5(raw: bytes) -> tuple[list[list[float]], list[list[int]], int, int, tuple[int, int, int, int], CellTypeCounts]:
+    """Decode a v5 .TER. Returns (heights_2d, cell_types_2d, width, height, tile_bounds, cellcounts).
+    Heights are float32 meters. cell_types_2d carries the raw CellType byte
+    (see bits in CellType.cs) per source cell."""
     if raw[:4] != b'TERR':
         raise ValueError('bad magic')
     version = int.from_bytes(raw[4:8], 'little')
@@ -157,6 +163,7 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], int, int, tuple[int, int,
         raise ValueError(f'dimensions {width}x{height} not multiple of {CLUSTER_SIZE}')
 
     heightmap = [[0.0] * width for _ in range(height)]
+    cell_types = [bytearray(width) for _ in range(height)]
     cells_per_cluster = CLUSTER_SIZE * CLUSTER_SIZE
 
     # Cell type counters
@@ -206,9 +213,15 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], int, int, tuple[int, int,
             offset += cells_per_cluster if have_a1 else 1
             offset += cells_per_cluster if have_a2 else 1
             offset += cells_per_cluster if have_a3 else 1
-            # Cell type - 256 bytes per cluster or 1 broadcast (WE COUNT)
+            # Cell type - 256 bytes per cluster or 1 broadcast (count + store)
             if have_cell:
-                count_bytes(raw[offset:offset + cells_per_cluster])
+                block = raw[offset:offset + cells_per_cluster]
+                count_bytes(block)
+                # Scatter the per-cell bytes into the 2D bitmap.
+                for i in range(cells_per_cluster):
+                    yy = i // CLUSTER_SIZE
+                    xx = i % CLUSTER_SIZE
+                    cell_types[cy + yy][cx + xx] = block[i]
                 offset += cells_per_cluster
             else:
                 # Broadcast: the single byte applies to all 256 cells.
@@ -221,6 +234,12 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], int, int, tuple[int, int,
                     if b & 0x04: n_building += cells_per_cluster
                     if b & 0x08: n_lava     += cells_per_cluster
                     if b & 0x10: n_sloped   += cells_per_cluster
+                # Fill the cluster's 16x16 block in the 2D bitmap.
+                if b != 0:
+                    for yy in range(CLUSTER_SIZE):
+                        row = cell_types[cy + yy]
+                        for xx in range(CLUSTER_SIZE):
+                            row[cx + xx] = b
                 offset += 1
             # Info map - 1 uint32 per cluster
             offset += 4
@@ -235,7 +254,11 @@ def _decode_v5(raw: bytes) -> tuple[list[list[float]], int, int, tuple[int, int,
         lava=n_lava,
         sloped=n_sloped,
     )
-    return heightmap, width, height, (grid_min_x, grid_min_z, grid_max_x, grid_max_z), counts
+    # Convert each row from bytearray to bytes for immutability (small cost,
+    # but the caller doesn't need to mutate). Keep as list of bytes for
+    # consistent indexing with heightmap.
+    cell_types_out = [bytes(row) for row in cell_types]
+    return heightmap, cell_types_out, width, height, (grid_min_x, grid_min_z, grid_max_x, grid_max_z), counts
 
 
 def _box_downsample(src: list[list[float]], factor: int) -> list[list[float]]:
@@ -260,6 +283,26 @@ def _box_downsample(src: list[list[float]], factor: int) -> list[list[float]]:
     return dst
 
 
+def _downsample_celltypes(src: list[bytes], factor: int, out_w: int, out_h: int) -> bytes:
+    """OR-reduce each factor x factor block of CellType bytes into one output
+    byte. Any bit set in any source cell propagates to the output. Preserves
+    small water bodies / lava patches that would be lost to a majority filter.
+    Returns flat bytes in row-major order, length out_w * out_h."""
+    out = bytearray(out_w * out_h)
+    for oy in range(out_h):
+        sy = oy * factor
+        base = oy * out_w
+        for ox in range(out_w):
+            sx = ox * factor
+            acc = 0
+            for dy in range(factor):
+                row = src[sy + dy]
+                for dx in range(factor):
+                    acc |= row[sx + dx]
+            out[base + ox] = acc
+    return bytes(out)
+
+
 def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull | None:
     """Decode .TER and return a downsampled int16 heightmap suitable for
     transport to the browser. `height_setting` is no longer used --
@@ -267,7 +310,7 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
     using each map's measured max height."""
     raw = path.read_bytes()
     try:
-        heightmap_2d, width, height, bounds, counts = _decode_v5(raw)
+        heightmap_2d, cell_types_2d, width, height, bounds, counts = _decode_v5(raw)
     except ValueError:
         return None
 
@@ -280,6 +323,10 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
     down = _box_downsample(heightmap_2d, factor)
     out_h = len(down)
     out_w = len(down[0])
+
+    # Downsample the CellType bitmap to the same output resolution. Use OR
+    # reduction so a single water/lava cell within a 4x4 block survives.
+    cell_type_bytes = _downsample_celltypes(cell_types_2d, factor, out_w, out_h)
 
     # Find the actual height range so we can quantize tightly.
     flat = [v for row in down for v in row]
@@ -328,6 +375,7 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
         scale=scale,
         height_min_m=h_min,
         height_max_m=h_max,
+        cell_type_bytes=cell_type_bytes,
         total_cells=counts.total,
         flat_cells=counts.flat,
         cliff_cells=counts.cliff,

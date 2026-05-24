@@ -193,8 +193,11 @@ def build_output(stem: str) -> dict:
     # threshold at >= 0.5% of total cells so spurious single-cell mishaps
     # don't trigger a misleading water plane. For VSR competitive maps this
     # is almost always 0; campaign maps with coastlines will trigger.
+    LIQUID_VISIBILITY_THRESHOLD = 0.005
     water_ratio = ter.water_cells / max(1, ter.total_cells)
-    has_visible_water = water_ratio >= 0.005
+    has_visible_water = water_ratio >= LIQUID_VISIBILITY_THRESHOLD
+    lava_ratio = ter.lava_cells / max(1, ter.total_cells)
+    has_visible_lava = lava_ratio >= LIQUID_VISIBILITY_THRESHOLD
 
     # default_exaggeration: heuristic to give every map a visually
     # interesting default Y. We aim for ~12% visual slope at 1x by dividing
@@ -220,8 +223,13 @@ def build_output(stem: str) -> dict:
     cell_m_x = (hm_world_max_x - hm_world_min_x) / hm_cells_x
     cell_m_z = (hm_world_max_z - hm_world_min_z) / hm_cells_z
 
+    # Per-cell CellType bitmap at render resolution. One byte per output cell,
+    # bits per CellType.cs. Used by the viewer as an alphaMap on the
+    # water/lava planes so liquids only render on flagged cells.
+    cell_types_b64 = base64.b64encode(ter.cell_type_bytes).decode("ascii")
+
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "map_stem": stem,
         "map_name": map_name,
         "heightmap": {
@@ -250,8 +258,22 @@ def build_output(stem: str) -> dict:
             "lava":     ter.lava_cells,
             "sloped":   ter.sloped_cells,
         },
+        "cell_types_map": {
+            "cells_x": hm_cells_x,
+            "cells_z": hm_cells_z,
+            "encoding": "uint8_base64",
+            "data": cell_types_b64,
+            "bits": {
+                "cliff":    0x01,
+                "water":    0x02,
+                "building": 0x04,
+                "lava":     0x08,
+                "sloped":   0x10,
+            },
+        },
         "defaults": {
             "has_visible_water": has_visible_water,
+            "has_visible_lava":  has_visible_lava,
             "default_exaggeration": default_exaggeration,
         },
         "world_rect": world_rect,

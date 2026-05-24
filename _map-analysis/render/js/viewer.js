@@ -39,6 +39,9 @@ const STATE = {
   terrainRampMat: null,         // material: vertex-color height ramp
   terrainMinimapMat: null,      // material: iondriver minimap as texture
   waterMesh: null,
+  lavaMesh: null,
+  waterBaseY: null,
+  lavaBaseY: null,
   objectsGroup: null,
   // FPS tracking:
   fpsAvg: 0,
@@ -115,6 +118,8 @@ function makeCard(m) {
   if (range)  chips.push(`<span class="dir-card-chip">${range}</span>`);
   if (m.has_visible_water)
     chips.push(`<span class="dir-card-chip chip-water">water</span>`);
+  if (m.has_visible_lava)
+    chips.push(`<span class="dir-card-chip chip-lava">lava</span>`);
   if (m.height_max_m != null && m.height_min_m != null
       && (m.height_max_m - m.height_min_m) > 400)
     chips.push(`<span class="dir-card-chip chip-tall">mountainous</span>`);
@@ -175,8 +180,8 @@ async function boot(stem) {
 
   // Apply per-map smart defaults BEFORE building the scene, so initial
   // mesh + object positioning use the right exaggeration.
-  if (data.defaults && typeof data.defaults.default_exaggeration === 'number') {
-    STATE.terrainExaggeration = data.defaults.default_exaggeration;
+  if (data.defaults && typeof data.defaults.defaultExaggeration === 'number') {
+    STATE.terrainExaggeration = data.defaults.defaultExaggeration;
   }
 
   setStatus('building scene...');
@@ -184,7 +189,8 @@ async function boot(stem) {
   initScene(data);
   await initFloor(data);          // async because of texture loading
   initLights(data);
-  initWater(data);
+  initLiquid(data, 'water');
+  initLiquid(data, 'lava');
   initObjects(data);
   initCamera(data);
   wireHud(data);
@@ -401,58 +407,143 @@ function loadTexture(url) {
   });
 }
 
-// ---------------- Water ----------------
+// ---------------- Liquids (water + lava) ----------------
 
-function initWater(data) {
+const LIQUID_KIND_BIT = { water: 0x02, lava: 0x08 };
+
+function initLiquid(data, kind) {
+  const bit = LIQUID_KIND_BIT[kind];
+  if (!bit) return;
+
+  // Need both a liquid surface Y and a CellType mask to know WHERE the
+  // engine actually placed liquid. Without the mask, we'd be back to the
+  // "infinite plane" pathology that prompted this refactor.
   if (data.waterY == null && data.waterYRaw == null) return;
+  if (!data.cellTypesMap) return;
+
+  // Bail early if the bit is set on zero cells -- no point allocating a
+  // mesh + texture only to leave them invisible forever.
+  const bytes = data.cellTypesMap.bytes;
+  let cellsSet = 0;
+  for (let i = 0; i < bytes.length; i++) if (bytes[i] & bit) cellsSet++;
+  if (cellsSet === 0) return;
+
   const hm = data.heightmap;
   const lighting = data.lighting || {};
 
   // The .WAT byte-16 float is in ABSOLUTE engine meters. Our mesh is
   // centered on the heightmap's midpoint (baseOffsetM) so any heights
-  // we sample are RELATIVE to that midpoint. The water plane must use
+  // we sample are RELATIVE to that midpoint. The liquid plane must use
   // the same relative origin, otherwise it floats above/below the mesh
-  // and just looks like a tinted skybox.
+  // and looks like a tinted skybox.
   const yRaw = data.waterY != null ? data.waterY : data.waterYRaw;
   const yRelative = yRaw - (hm.baseOffsetM || 0);
-  // Apply the height-exaggeration multiplier so the water tracks the
-  // mesh when the slider moves.
   const yScaled = yRelative * STATE.terrainExaggeration;
-  STATE.waterBaseY = yRelative;  // stored for live re-pose on exag changes
 
-  const w = hm.cellsX * hm.cellMetersX * 1.5;
-  const d = hm.cellsZ * hm.cellMetersZ * 1.5;
-  const geom = new THREE.PlaneGeometry(w, d, 1, 1);
-  geom.rotateX(-Math.PI / 2);
-  geom.translate(
-    hm.worldOriginX + hm.cellsX * hm.cellMetersX * 0.5,
-    yScaled,
-    hm.worldOriginZ + hm.cellsZ * hm.cellMetersZ * 0.5
+  // Mesh covers the full heightmap extent (NOT 1.5x like the previous
+  // single-plane water; the mask handles "no liquid outside playable
+  // area" by tagging only flagged cells).
+  const worldW = hm.cellsX * hm.cellMetersX;
+  const worldD = hm.cellsZ * hm.cellMetersZ;
+  const centerX = hm.worldOriginX + worldW * 0.5;
+  const centerZ = hm.worldOriginZ + worldD * 0.5;
+
+  // Build a Three.js DataTexture from the CellType bytes, mapping each
+  // cell to 0 or 255 based on the relevant bit.
+  //
+  // KEY GOTCHA: Three.js's alphaMap shader samples the GREEN channel
+  // (see alphamap_fragment.glsl.js -> `texture2D(alphaMap, ...).g`).
+  // A RedFormat texture has G=0 everywhere, so alphaMap would evaluate
+  // to 0 (fully transparent) and the liquid plane would be invisible.
+  // We use RGBAFormat with the mask byte replicated into all four
+  // channels so the shader's `.g` read does the right thing regardless
+  // of Three.js version.
+  const ctm = data.cellTypesMap;
+  const w = ctm.cellsX, h = ctm.cellsZ;
+  const mask = new Uint8Array(w * h * 4);
+  for (let i = 0; i < bytes.length; i++) {
+    const v = (bytes[i] & bit) ? 255 : 0;
+    const j = i * 4;
+    mask[j]     = v;
+    mask[j + 1] = v;
+    mask[j + 2] = v;
+    mask[j + 3] = v;
+  }
+  const tex = new THREE.DataTexture(
+    mask, w, h, THREE.RGBAFormat, THREE.UnsignedByteType,
   );
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
 
-  const colorHex = lighting.water_color_hex || '#1a4a70';
-  // Depth-correct rendering: write to depth so terrain peaks above water
-  // properly occlude the water plane. Slight transparency for a "water
-  // feel" but with depthWrite ON so we don't get the previous "blue
-  // glasses" effect where terrain shows through everything.
-  const opacity = (lighting.water_opacity != null)
-    ? Math.max(0.55, lighting.water_opacity * 1.5)  // engine alpha 0.5 reads too thin
-    : 0.85;
-  const mat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(colorHex),
-    transparent: true,
-    opacity,
-    metalness: 0.55,
-    roughness: 0.35,
-    depthWrite: true,            // KEY FIX: write depth so terrain occludes water
-    side: THREE.DoubleSide,
-  });
+  const geom = new THREE.PlaneGeometry(worldW, worldD, 1, 1);
+  geom.rotateX(-Math.PI / 2);
+  geom.translate(centerX, yScaled, centerZ);
+  // Compute UVs from each vertex's actual world position. The .TER
+  // decode iterates cy=0..height where cy=0 -> grid_min_z (world's
+  // minZ). With DataTexture's default flipY=false, V=0 samples byte 0
+  // = row 0 = minZ. So V grows with world +Z.
+  const pos = geom.attributes.position;
+  const uvs = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    const wx = pos.getX(i);
+    const wz = pos.getZ(i);
+    uvs[i * 2]     = (wx - hm.worldOriginX) / worldW;
+    uvs[i * 2 + 1] = (wz - hm.worldOriginZ) / worldD;
+  }
+  geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
+  // Per-kind material settings. Lava is hot + emissive so it reads
+  // correctly even when the scene's sun is dim (campaign maps with
+  // SunAngle < 10deg, like Cracked's sister maps).
+  let mat;
+  if (kind === 'water') {
+    const colorHex = lighting.water_color_hex || '#1a4a70';
+    const opacity = (lighting.water_opacity != null)
+      ? Math.max(0.55, lighting.water_opacity * 1.5)
+      : 0.85;
+    mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(colorHex),
+      alphaMap: tex,
+      transparent: true,
+      opacity,
+      alphaTest: 0.5,
+      metalness: 0.55,
+      roughness: 0.35,
+      depthWrite: true,
+      side: THREE.DoubleSide,
+    });
+  } else { // lava
+    mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color('#ff5a18'),
+      emissive: new THREE.Color('#cc2200'),
+      emissiveIntensity: 0.6,
+      alphaMap: tex,
+      transparent: true,
+      opacity: 0.95,
+      alphaTest: 0.5,
+      metalness: 0.1,
+      roughness: 0.6,
+      depthWrite: true,
+      side: THREE.DoubleSide,
+    });
+  }
+
   const mesh = new THREE.Mesh(geom, mat);
-  mesh.name = 'water';
-  mesh.renderOrder = 1;          // render AFTER opaque terrain
-  mesh.visible = false;          // toggled on via HUD checkbox per-map default
-  STATE.waterMesh = mesh;
+  mesh.name = kind;
+  mesh.renderOrder = 1;            // after opaque terrain
+  mesh.visible = false;            // toggled on by HUD per-map default
   STATE.scene.add(mesh);
+
+  if (kind === 'water') {
+    STATE.waterMesh = mesh;
+    STATE.waterBaseY = yRelative;
+  } else {
+    STATE.lavaMesh = mesh;
+    STATE.lavaBaseY = yRelative;
+  }
 }
 
 // ---------------- Objects ----------------
@@ -570,17 +661,13 @@ function wireHud(data) {
     });
   });
 
-  // Layer toggles. Auto-check water plane if the .TER says the map
-  // actually uses the engine water cell type.
-  const waterToggle = $('toggle-water');
-  const wantWater = !!(data.defaults && data.defaults.has_visible_water);
-  if (waterToggle) {
-    waterToggle.checked = wantWater;
-    if (STATE.waterMesh) STATE.waterMesh.visible = wantWater;
-    waterToggle.addEventListener('change', e => {
-      if (STATE.waterMesh) STATE.waterMesh.visible = e.target.checked;
-    });
-  }
+  // Layer toggles. Auto-check liquid planes when the .TER's per-cell
+  // CellType bitmap tags any cells with the matching bit.
+  wireLiquidToggle($('toggle-water'), STATE.waterMesh,
+                   !!(data.defaults && data.defaults.hasVisibleWater));
+  wireLiquidToggle($('toggle-lava'),  STATE.lavaMesh,
+                   !!(data.defaults && data.defaults.hasVisibleLava));
+
   $('toggle-objects').addEventListener('change', e => {
     if (STATE.objectsGroup) STATE.objectsGroup.visible = e.target.checked;
   });
@@ -609,6 +696,24 @@ function wireHud(data) {
   });
 }
 
+function wireLiquidToggle(input, mesh, wantOn) {
+  if (!input) return;
+  // Disable the checkbox when no mesh exists for this kind (zero
+  // CellType cells on the map). Avoids confusing UX where ticking the
+  // box does nothing.
+  if (!mesh) {
+    input.checked = false;
+    input.disabled = true;
+    return;
+  }
+  input.disabled = false;
+  input.checked = wantOn;
+  mesh.visible = wantOn;
+  input.addEventListener('change', e => {
+    mesh.visible = e.target.checked;
+  });
+}
+
 function applyHeightExaggeration(factor) {
   STATE.terrainExaggeration = factor;
   if (!STATE.terrainMesh || !STATE.terrainBaseHeights) return;
@@ -632,9 +737,12 @@ function applyHeightExaggeration(factor) {
     oldGeom.dispose();
   }
 
-  // Reposition the water plane so it keeps tracking the mesh midpoint.
+  // Reposition liquid planes so they keep tracking the mesh midpoint.
   if (STATE.waterMesh && STATE.waterBaseY != null) {
     STATE.waterMesh.position.y = STATE.waterBaseY * factor;
+  }
+  if (STATE.lavaMesh && STATE.lavaBaseY != null) {
+    STATE.lavaMesh.position.y = STATE.lavaBaseY * factor;
   }
 
   // Re-place objects: rebuild the group from scratch with a scaled

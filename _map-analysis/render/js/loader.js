@@ -55,8 +55,9 @@ export async function loadMapData(stem) {
     throw new Error(`HTTP ${res.status} fetching ${url}`);
   }
   const raw = await res.json();
-  if (raw.schema_version !== 1) {
-    throw new Error(`unsupported schema_version ${raw.schema_version}`);
+  if (raw.schema_version !== 2) {
+    throw new Error(`unsupported schema_version ${raw.schema_version} `
+                    + `(expected 2; re-run extract_3d.py --all to refresh)`);
   }
 
   // Decode the heightmap base64 -> Int16Array (LE on every supported
@@ -67,6 +68,21 @@ export async function loadMapData(stem) {
     throw new Error(`unsupported heightmap encoding ${hm.encoding}`);
   }
   const heights = decodeInt16LEBase64(hm.data, hm.cells_x * hm.cells_z);
+
+  // Decode the per-cell CellType bitmap (uint8 per cell, OR-downsampled from
+  // the source .TER). Bits per CellType.cs: 0x01 Cliff, 0x02 Water, 0x04
+  // Building, 0x08 Lava, 0x10 Sloped. Used as alphaMap for liquid planes.
+  let cellTypesMap = null;
+  if (raw.cell_types_map && raw.cell_types_map.encoding === 'uint8_base64') {
+    const ct = raw.cell_types_map;
+    const bytes = decodeUint8Base64(ct.data);
+    cellTypesMap = {
+      cellsX: ct.cells_x,
+      cellsZ: ct.cells_z,
+      bytes,
+      bits: ct.bits || { cliff: 1, water: 2, building: 4, lava: 8, sloped: 16 },
+    };
+  }
 
   const wr = raw.world_rect;
   const width  = wr.max.x - wr.min.x;
@@ -112,11 +128,23 @@ export async function loadMapData(stem) {
     })),
     counts:       raw.object_count_by_kind || {},
     cellTypes:    raw.cell_types || null,
-    defaults:     raw.defaults || {},
+    cellTypesMap,
+    defaults:     {
+      hasVisibleWater:     !!(raw.defaults && raw.defaults.has_visible_water),
+      hasVisibleLava:      !!(raw.defaults && raw.defaults.has_visible_lava),
+      defaultExaggeration: (raw.defaults && raw.defaults.default_exaggeration) || 1.5,
+    },
   };
 }
 
 // ----------- Helpers -----------
+
+function decodeUint8Base64(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
 function decodeInt16LEBase64(b64, expectedCount) {
   // atob() returns a binary-string; copy bytes into a Uint8Array, then
