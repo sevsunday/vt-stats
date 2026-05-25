@@ -447,6 +447,42 @@ body::before {
     box-shadow: 0 2px 8px color-mix(in oklab, var(--kb-primary), transparent 60%);
 }
 
+/* TEMP: vt-tab-new-badge - remove this whole block when the Replay tab is no
+   longer "new". Paired with the inline <span> on #tab-replay-btn in index.html.
+   Single rule + .active override so the pill stays readable on both inactive
+   (primary-tinted) and active (primary-bg) tab states. */
+.vt-tab-new-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+    vertical-align: middle;
+    box-shadow: 0 1px 4px color-mix(in oklab, var(--kb-primary), transparent 60%);
+    animation: vt-tab-new-badge-pulse 2.4s ease-in-out infinite;
+}
+
+#match-tabs .nav-link.active .vt-tab-new-badge {
+    background: var(--kb-primary-fg);
+    color: var(--kb-primary);
+    box-shadow: none;
+}
+
+@keyframes vt-tab-new-badge-pulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tab-new-badge { animation: none; }
+}
+
 /* ============================================================================
    TABLE ROW HOVER — Subtle left-border indicator + text color fix
    ============================================================================ */
