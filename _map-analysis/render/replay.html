@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VT Stats - Match Replay (Ace Combat-style)</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/replay-style.css">
+
+<script type="importmap">
+{
+  "imports": {
+    "three":         "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+
+<body class="replay-mode">
+
+<!--
+  Match picker landing. Hidden by default; shown when no `?match=` URL
+  param is present. Boot routine in replay.js flips between this and the
+  renderer mode. Card click navigates to `replay.html?match=<id>`.
+-->
+<div id="directory" class="directory hidden"></div>
+
+<!--
+  Renderer surface. Phase 1 doesn't ship a directory landing page yet (the
+  match-picker UI lands in Phase 4) so we always boot straight into the
+  default match unless ?match= overrides.
+-->
+<canvas id="scene"></canvas>
+
+<!--
+  DOM-overlay layer for actor labels. We project each actor's world position
+  to screen coords every frame and update absolute-positioned divs inside
+  this container; cheaper than vendoring CSS2DRenderer for 10 labels.
+-->
+<div id="replay-labels" class="replay-labels" aria-hidden="true"></div>
+
+<!--
+  Letterbox bars (Phase 3 wires the toggle, but the DOM is here so the
+  L hotkey works against `body.replay-letterboxed` from Phase 2).
+-->
+<div class="replay-letterbox-bar replay-letterbox-bar--top"></div>
+<div class="replay-letterbox-bar replay-letterbox-bar--bottom"></div>
+
+<!--
+  Cinematic atmosphere layers. Pure CSS: vignette = radial-gradient,
+  film grain = inline SVG noise as a tiled background. Both pointer-events
+  none so they never block input. Phase 3.
+-->
+<div class="replay-vignette" aria-hidden="true"></div>
+<div class="replay-grain"    aria-hidden="true"></div>
+
+<!--
+  Chase-cam speed lines. Pure CSS streak texture; visibility gated by
+  `.replay-chase-active` body class. Phase 4.
+-->
+<div class="replay-speedlines" aria-hidden="true"></div>
+
+<!--
+  Top-left HUD: match strip + map controls. Mirrors the index.html layout
+  so users feel at home; the right side carries the roster panel and the
+  bottom carries the transport bar.
+-->
+<aside id="hud">
+  <header class="hud-header">
+    <a href="index.html" class="hud-back" title="Back to map directory">&laquo; All maps</a>
+    <h1 id="match-name">loading...</h1>
+    <div class="map-sub" id="match-meta">&nbsp;</div>
+    <div class="map-sub" id="match-winner">&nbsp;</div>
+  </header>
+
+  <section class="hud-section">
+    <h2>Floor</h2>
+    <label class="radio-row"><input type="radio" name="floor" value="minimap" checked> Minimap</label>
+    <label class="radio-row"><input type="radio" name="floor" value="tiles" disabled> Game tiles <span class="hint-inline">(soon)</span></label>
+    <label class="radio-row"><input type="radio" name="floor" value="ramp"> Height ramp</label>
+    <label class="radio-row"><input type="radio" name="floor" value="wire"> Wireframe</label>
+  </section>
+
+  <section class="hud-section">
+    <h2>Height exaggeration</h2>
+    <div class="slider-row">
+      <input type="range" id="height-exag" min="0.5" max="6" step="0.1" value="1.5">
+      <span class="val" id="height-exag-val">1.5x</span>
+    </div>
+    <div class="hint">Real heights from .TER. Bump for steeper hills, drop
+      for flatter view. Actors auto-track.</div>
+  </section>
+
+  <section class="hud-section">
+    <h2>Perf</h2>
+    <div class="kv-row"><span>FPS</span><span class="val" id="fps">&mdash;</span></div>
+  </section>
+
+  <footer class="hud-footer">
+    <a href="../calibration/index.html">&laquo; back to calibration</a>
+  </footer>
+</aside>
+
+<!--
+  Right-edge collapsible roster panel. Phase 2 layers chase-cam wiring on
+  top of the focus affordance + adds keyboard cycling.
+-->
+<aside id="roster-panel" class="roster-panel">
+  <header class="roster-head">
+    <span class="roster-title">Roster</span>
+    <span class="roster-bulk">
+      <button id="roster-all-on" title="ALL ON">on</button>
+      <button id="roster-all-off" title="ALL OFF">off</button>
+      <button id="roster-invert" title="Invert">inv</button>
+    </span>
+  </header>
+  <div class="roster-body" id="roster-list"></div>
+  <footer class="roster-foot">
+    <span class="roster-hint">[ ] cycle &middot; \\ hide &middot; V toggle all &middot; H collapse</span>
+  </footer>
+</aside>
+
+<!--
+  Bottom-right rolling kill ticker. Max 6 entries, fade with age. Phase 2.
+-->
+<div id="kill-ticker" class="kill-ticker"></div>
+
+<!--
+  Bottom transport bar. Phase 1: scrub + play/pause + step ±5s + speed pill.
+  Phase 3 layers cam-mode pills and a Labels toggle into a parallel tray.
+-->
+<footer id="transport" class="transport">
+  <button id="btn-restart" class="t-btn t-btn-icon" title="Restart (Home)">&#9198;</button>
+  <button id="btn-step-back" class="t-btn t-btn-icon" title="Step back 5s (Left)">&#10094;&#10094;</button>
+  <button id="btn-play" class="t-btn t-btn-play" title="Play (Space)">&#9654;</button>
+  <button id="btn-step-fwd" class="t-btn t-btn-icon" title="Step forward 5s (Right)">&#10095;&#10095;</button>
+
+  <span class="t-time"><span id="t-cur">0:00</span> / <span id="t-tot">0:00</span></span>
+
+  <span class="scrub-wrap">
+    <input type="range" id="scrub" class="scrub" min="0" max="1000" value="0" step="1">
+    <span class="scrub-markers" id="scrub-markers" aria-hidden="true"></span>
+  </span>
+
+  <select id="speed" class="t-speed" title="Playback speed">
+    <option value="1">1x</option>
+  </select>
+
+  <!--
+    Right-side cluster: camera-mode pills + Labels toggle. Letterbox uses
+    the `L` hotkey (no UI button by design; per plan).
+  -->
+  <span class="t-cam-pills">
+    <button class="cam-pill" data-cam="free"    title="Free orbit (1)">Free</button>
+    <button class="cam-pill" data-cam="chase"   title="Chase cam (2)">Chase</button>
+    <button class="cam-pill" data-cam="topdown" title="Top-down (3)">Top</button>
+    <button class="cam-pill" data-cam="cinema"  title="Cinema auto (4)">Cinema</button>
+  </span>
+  <button id="btn-labels" class="t-btn t-btn-icon t-toggle" title="Labels (N)">Labels</button>
+</footer>
+
+<div id="status">loading match data...</div>
+
+<script type="module" src="js/replay.js"></script>
+</body>
+</html>

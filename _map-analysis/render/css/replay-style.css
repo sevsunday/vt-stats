@@ -1,0 +1,1073 @@
+/* render/css/replay-style.css
+ *
+ * Replay-specific HUD styling layered ON TOP of style.css. Keeps style.css
+ * untouched so the non-replay viewer is unaffected.
+ *
+ * Design surface (Phase 1):
+ *   - Top-left aside#hud: match strip + floor + height + perf (reuses base styles)
+ *   - Right-edge aside#roster-panel: 10 actors grouped by team
+ *   - Bottom transport bar (footer#transport): scrub + play + step + speed
+ *   - Faction-tint variables mirroring `--kb-faction-*` from production CSS
+ *
+ * Phase 2 will extend the roster row affordances + label styling.
+ * Phase 3 will add letterbox + vignette + film grain.
+ * Phase 4 will add the directory landing card grid.
+ */
+
+:root {
+  /* Mirror of `--kb-faction-i/-e/-f` from `css/vtstats-theme.css` so the
+   * production palette is the single source of truth for faction tints. */
+  --vt-faction-i: #5dadff;   /* ISDF blue */
+  --vt-faction-e: #ff8a55;   /* Hadean orange */
+  --vt-faction-f: #a87cff;   /* Scion purple */
+  --vt-faction-_: #9aa3b0;   /* unknown */
+
+  --vt-roster-width: 280px;
+  --vt-transport-height: 56px;
+
+  --vt-success: #66e088;
+  --vt-warn:    #ffb86c;
+  --vt-danger:  #ff7777;
+  --vt-gold:    #ffd24a;
+}
+
+/* Body layout: replay mode keeps the canvas full-bleed and lays UI on top. */
+body.replay-mode {
+  overflow: hidden;
+}
+
+/* In directory mode, suppress the cinematic atmosphere overlays + letterbox
+   so the picker is clean. */
+body.directory-mode .replay-vignette,
+body.directory-mode .replay-grain,
+body.directory-mode .replay-letterbox-bar,
+body.directory-mode #replay-labels,
+body.directory-mode #kill-ticker,
+body.directory-mode #transport,
+body.directory-mode #roster-panel {
+  display: none !important;
+}
+
+/* Reuse the base aside#hud width but allow it to shrink so it doesn't crowd
+ * the roster panel on narrow displays. */
+aside#hud {
+  max-width: 280px;
+}
+
+/* Hint chip used inside disabled radio rows ("Game tiles (soon)"). */
+.hint-inline {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+}
+
+/* -----------------------------------------------------------------
+   Roster panel (right edge)
+   ----------------------------------------------------------------- */
+
+.roster-panel {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: var(--vt-roster-width);
+  max-height: calc(100vh - var(--vt-transport-height) - 24px);
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 12px 14px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 10;
+  user-select: none;
+  font-size: 12px;
+}
+
+.roster-panel.is-collapsed {
+  width: 56px;
+  overflow: hidden;
+}
+.roster-panel.is-collapsed .roster-body,
+.roster-panel.is-collapsed .roster-bulk {
+  display: none;
+}
+
+.roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.roster-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.roster-bulk {
+  display: inline-flex;
+  gap: 4px;
+}
+.roster-bulk button {
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, color 0.15s;
+}
+.roster-bulk button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.roster-team + .roster-team {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.roster-team-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.roster-team-name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vt-faction-_);
+}
+.roster-team-name[data-faction="i"] { color: var(--vt-faction-i); }
+.roster-team-name[data-faction="e"] { color: var(--vt-faction-e); }
+.roster-team-name[data-faction="f"] { color: var(--vt-faction-f); }
+
+.roster-team-actions {
+  display: inline-flex;
+  gap: 3px;
+}
+.rt-btn {
+  padding: 1px 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-family: inherit;
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.rt-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.roster-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.roster-row {
+  display: grid;
+  grid-template-columns: 22px 1fr 22px;
+  align-items: stretch;
+  gap: 4px;
+  background: var(--bg-section);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+}
+
+.roster-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.roster-row.is-hidden { opacity: 0.36; }
+.roster-row.is-hidden .r-name .r-disp,
+.roster-row.is-hidden .r-name .r-ship { text-decoration: line-through; }
+
+.roster-row.is-focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(106, 169, 255, 0.25);
+  animation: rosterFocusPulse 1.6s ease-in-out infinite;
+}
+@keyframes rosterFocusPulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(106, 169, 255, 0.25); }
+  50%      { box-shadow: 0 0 0 2px rgba(106, 169, 255, 0.55); }
+}
+
+.r-eye, .r-name, .r-follow {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  text-align: left;
+}
+
+.r-eye {
+  justify-content: center;
+  color: var(--text-muted);
+  border-right: 1px solid var(--border);
+}
+.r-eye:hover { color: var(--accent); }
+
+.r-name {
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.r-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vt-faction-_);
+  flex-shrink: 0;
+  box-shadow: 0 0 4px currentColor;
+}
+.r-dot[data-faction="i"] { background: var(--vt-faction-i); color: var(--vt-faction-i); }
+.r-dot[data-faction="e"] { background: var(--vt-faction-e); color: var(--vt-faction-e); }
+.r-dot[data-faction="f"] { background: var(--vt-faction-f); color: var(--vt-faction-f); }
+
+.r-disp {
+  font-weight: 500;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.r-ship {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.r-follow {
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 10px;
+  border-left: 1px solid var(--border);
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.roster-row:hover .r-follow { opacity: 1; }
+.r-follow:hover { color: var(--accent); }
+
+/* -----------------------------------------------------------------
+   Transport (bottom edge)
+   ----------------------------------------------------------------- */
+
+.transport {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: var(--vt-transport-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 12;
+  user-select: none;
+}
+
+.t-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  height: 36px;
+  padding: 0 10px;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.t-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.t-btn:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.t-btn-icon {
+  min-width: 36px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.t-btn-play {
+  min-width: 56px;
+  background: rgba(106, 169, 255, 0.15);
+  border-color: rgba(106, 169, 255, 0.4);
+  color: var(--accent);
+  font-size: 16px;
+}
+
+.t-btn-play:hover {
+  background: rgba(106, 169, 255, 0.25);
+}
+
+.t-time {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  min-width: 100px;
+  text-align: center;
+}
+.t-time #t-cur { color: var(--text); font-weight: 500; }
+
+.scrub {
+  flex: 1 1 auto;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: linear-gradient(to right,
+    rgba(106, 169, 255, 0.45) 0%,
+    rgba(106, 169, 255, 0.45) var(--scrub-pct, 0%),
+    rgba(255, 255, 255, 0.1) var(--scrub-pct, 0%),
+    rgba(255, 255, 255, 0.1) 100%);
+  border-radius: 3px;
+  cursor: pointer;
+  outline: none;
+}
+.scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: grab;
+  box-shadow: 0 0 6px rgba(106, 169, 255, 0.6);
+}
+.scrub::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: grab;
+  box-shadow: 0 0 6px rgba(106, 169, 255, 0.6);
+}
+
+.t-speed {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  cursor: pointer;
+  min-width: 60px;
+  text-align: center;
+}
+.t-speed:hover { border-color: var(--accent); }
+
+/* -----------------------------------------------------------------
+   Roster footer (keyboard hint)
+   ----------------------------------------------------------------- */
+
+.roster-foot {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.roster-hint {
+  display: block;
+  font-size: 9px;
+  text-align: center;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* -----------------------------------------------------------------
+   Transport: cam pills + Labels toggle
+   ----------------------------------------------------------------- */
+
+.t-cam-pills {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-left: 6px;
+}
+
+.cam-pill {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.cam-pill + .cam-pill { border-left: 1px solid var(--border); }
+.cam-pill:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.cam-pill.is-active {
+  background: rgba(106, 169, 255, 0.18);
+  color: var(--accent);
+}
+
+.t-toggle {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.t-toggle.is-active {
+  background: rgba(106, 169, 255, 0.18);
+  color: var(--accent);
+  border-color: rgba(106, 169, 255, 0.45);
+}
+
+/* -----------------------------------------------------------------
+   Actor labels (DOM overlay over canvas)
+   ----------------------------------------------------------------- */
+
+.replay-labels {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", -apple-system, sans-serif;
+}
+
+.replay-labels.is-hidden { display: none; }
+
+.vt-actor-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px 2px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(15, 19, 26, 0.65);
+  border-bottom: 1px solid var(--vt-faction-_);
+  border-radius: 4px 4px 4px 0;
+  white-space: nowrap;
+  user-select: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  will-change: transform;
+}
+
+.vt-actor-label[data-faction="i"] { border-bottom-color: var(--vt-faction-i); }
+.vt-actor-label[data-faction="e"] { border-bottom-color: var(--vt-faction-e); }
+.vt-actor-label[data-faction="f"] { border-bottom-color: var(--vt-faction-f); }
+
+.vt-actor-label-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vt-faction-_);
+  box-shadow: 0 0 4px currentColor;
+}
+.vt-actor-label[data-faction="i"] .vt-actor-label-dot { background: var(--vt-faction-i); color: var(--vt-faction-i); }
+.vt-actor-label[data-faction="e"] .vt-actor-label-dot { background: var(--vt-faction-e); color: var(--vt-faction-e); }
+.vt-actor-label[data-faction="f"] .vt-actor-label-dot { background: var(--vt-faction-f); color: var(--vt-faction-f); }
+
+.vt-actor-label-name {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.vt-actor-label-ship {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  margin-left: 2px;
+}
+
+/* -----------------------------------------------------------------
+   Kill ticker (rolling list bottom-right)
+   ----------------------------------------------------------------- */
+
+.kill-ticker {
+  position: fixed;
+  bottom: calc(var(--vt-transport-height) + 28px);
+  right: 12px;
+  width: 320px;
+  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 11;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", -apple-system, sans-serif;
+}
+
+.kill-ticker-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  background: rgba(15, 19, 26, 0.78);
+  border-left: 3px solid var(--vt-faction-_);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  transform: translateX(20px);
+  transition: opacity 0.32s ease, transform 0.32s ease;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.kill-ticker-row.is-shown {
+  opacity: 1;
+  transform: translateX(0);
+}
+.kill-ticker-row[data-faction="i"] { border-left-color: var(--vt-faction-i); }
+.kill-ticker-row[data-faction="e"] { border-left-color: var(--vt-faction-e); }
+.kill-ticker-row[data-faction="f"] { border-left-color: var(--vt-faction-f); }
+
+.kt-killer { font-weight: 600; }
+.kt-arrow  { color: var(--text-muted); }
+.kt-victim { font-weight: 500; }
+.kt-weapon {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+/* -----------------------------------------------------------------
+   Letterbox bars (Phase 3 wires the toggle UI; markup ships in Phase 2 so
+   the L hotkey works immediately)
+   ----------------------------------------------------------------- */
+
+.replay-letterbox-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 12vh;
+  background: #000;
+  pointer-events: none;
+  z-index: 8;
+  transform: translateY(-100%);
+  transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.replay-letterbox-bar--top    { top: 0; }
+.replay-letterbox-bar--bottom { bottom: 0; transform: translateY(100%); }
+
+body.replay-letterboxed .replay-letterbox-bar--top    { transform: translateY(0); }
+body.replay-letterboxed .replay-letterbox-bar--bottom { transform: translateY(0); }
+
+/* -----------------------------------------------------------------
+   Cinematic atmosphere (Phase 3)
+   ----------------------------------------------------------------- */
+
+.replay-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  background: radial-gradient(ellipse at center,
+    rgba(0, 0, 0, 0)  40%,
+    rgba(0, 0, 0, 0.35) 88%,
+    rgba(0, 0, 0, 0.6)  100%);
+}
+
+/* Film grain. Inline SVG fractal noise, scaled small + tiled. The
+   animation cycles a tiny hue to give a "moving grain" feel without
+   needing a video texture. */
+.replay-grain {
+  position: fixed;
+  inset: -50%;
+  width: 200%;
+  height: 200%;
+  pointer-events: none;
+  z-index: 7;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='2' stitchTiles='stitch'/></filter><rect width='240' height='240' filter='url(%23n)' opacity='0.85'/></svg>");
+  background-size: 240px 240px;
+  background-repeat: repeat;
+  animation: replayGrainShift 0.9s steps(2) infinite;
+  mix-blend-mode: overlay;
+}
+
+@keyframes replayGrainShift {
+  0%   { transform: translate(0,    0); }
+  25%  { transform: translate(-3px, 2px); }
+  50%  { transform: translate(2px, -2px); }
+  75%  { transform: translate(-1px, 1px); }
+  100% { transform: translate(0,    0); }
+}
+
+/* -----------------------------------------------------------------
+   Scrub markers (Phase 3): kill ticks + winner-decided gold pulse
+   ----------------------------------------------------------------- */
+
+.scrub-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  height: 24px;
+}
+
+.scrub-markers {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 14px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.scrub-marker {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.scrub-marker--kill {
+  background: rgba(255, 119, 119, 0.7);
+  height: 8px;
+  width: 1.5px;
+}
+
+.scrub-marker--winner {
+  width: 10px;
+  height: 16px;
+  margin-left: -5px;
+  background: var(--vt-gold);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--vt-gold);
+  pointer-events: auto;
+  cursor: pointer;
+  animation: scrubWinnerPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes scrubWinnerPulse {
+  0%, 100% {
+    box-shadow: 0 0 6px var(--vt-gold);
+    transform: translateY(-50%) scale(1);
+  }
+  50%      {
+    box-shadow: 0 0 14px var(--vt-gold), 0 0 28px rgba(255, 210, 74, 0.45);
+    transform: translateY(-50%) scale(1.18);
+  }
+}
+
+/* -----------------------------------------------------------------
+   Match-picker landing (Phase 4)
+   ----------------------------------------------------------------- */
+
+.picker-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.picker-select {
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.picker-select:hover { border-color: var(--accent); }
+
+.picker-chip-group {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.picker-chip {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 6px 11px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.picker-chip + .picker-chip { border-left: 1px solid var(--border); }
+.picker-chip:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.picker-chip.is-active {
+  background: rgba(106, 169, 255, 0.18);
+  color: var(--accent);
+}
+
+.picker-empty {
+  grid-column: 1 / -1;
+  padding: 32px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.picker-card .dir-card-thumb {
+  position: relative;
+}
+
+.picker-card-winner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 7px;
+  background: rgba(15, 19, 26, 0.86);
+  border: 1px solid var(--vt-faction-_);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 2;
+}
+
+.picker-card-winner.is-contested { border-color: var(--vt-warn); color: var(--vt-warn); }
+.picker-card-winner.is-unclear   { border-color: var(--vt-faction-_); color: var(--vt-faction-_); }
+
+.picker-card-faction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.picker-card-faction-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* -----------------------------------------------------------------
+   Chase-cam speed lines (Phase 4)
+   ----------------------------------------------------------------- */
+
+.replay-speedlines {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 7;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  background:
+    linear-gradient(85deg,
+      transparent 0%, transparent 20%,
+      rgba(255, 255, 255, 0.06) 22%, transparent 24%,
+      transparent 32%,
+      rgba(255, 255, 255, 0.05) 33%, transparent 35%,
+      transparent 56%,
+      rgba(255, 255, 255, 0.07) 57%, transparent 59%,
+      transparent 70%,
+      rgba(255, 255, 255, 0.05) 71%, transparent 73%,
+      transparent 84%,
+      rgba(255, 255, 255, 0.06) 85%, transparent 87%,
+      transparent 100%);
+  mix-blend-mode: screen;
+  animation: replaySpeedShift 0.6s linear infinite;
+}
+
+body.replay-chase-active .replay-speedlines {
+  opacity: 0.6;
+}
+
+@keyframes replaySpeedShift {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-30px); }
+}
+
+/* -----------------------------------------------------------------
+   Post-match results screen (Phase 4)
+   ----------------------------------------------------------------- */
+
+.replay-results {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.replay-results.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.results-shade {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 11, 16, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.results-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(960px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  transform: translate(-50%, -50%);
+  background: rgba(15, 19, 26, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px 26px 26px;
+  overflow-y: auto;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- Winner banner ---- */
+
+.results-banner {
+  text-align: center;
+  padding: 14px 16px 18px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--results-accent, var(--accent));
+  margin-bottom: 18px;
+}
+
+.results-banner-title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--results-accent, var(--accent));
+  text-shadow: 0 0 18px rgba(106, 169, 255, 0.4);
+}
+
+.results-banner-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  align-items: center;
+}
+
+.results-banner-vs { font-weight: 600; }
+.results-banner-fac { font-weight: 700; }
+.results-banner-decided { color: var(--text-muted); }
+
+/* ---- Section titles ---- */
+
+.results-section-title {
+  margin: 16px 0 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.results-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin: 12px 0;
+}
+
+/* ---- Highlights grid ---- */
+
+.results-highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.results-highlight-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--vt-faction-_);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.results-highlight-card[data-faction="i"] { border-left-color: var(--vt-faction-i); }
+.results-highlight-card[data-faction="e"] { border-left-color: var(--vt-faction-e); }
+.results-highlight-card[data-faction="f"] { border-left-color: var(--vt-faction-f); }
+
+.results-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.results-card-icon {
+  /* Bootstrap Icons aren't vendored; we just show category as small text. */
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.results-card-label { font-weight: 600; }
+
+.results-card-winner {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 2px 0;
+}
+
+.results-card-value {
+  font-size: 13px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--text);
+}
+
+.results-card-runner {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ---- Damage chart ---- */
+
+.results-damage-chart {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  position: relative;
+}
+
+.results-damage-chart svg { display: block; }
+
+.results-chart-grid  { stroke: rgba(255, 255, 255, 0.06); stroke-width: 1; }
+.results-chart-line  { stroke-width: 1.4; fill: none; opacity: 0.85; }
+.results-chart-axis  { fill: var(--text-muted); font-size: 9px; font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+
+.results-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.results-chart-legend-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.results-chart-swatch {
+  width: 10px;
+  height: 2px;
+  display: inline-block;
+}
+
+/* ---- Actions ---- */
+
+.results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
+.results-action-btn {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* On narrow viewports the transport stretches edge-to-edge and the roster
+   collapses to a thin pill. */
+@media (max-width: 1024px) {
+  .roster-panel {
+    width: 220px;
+    font-size: 11px;
+  }
+}
+@media (max-width: 768px) {
+  aside#hud {
+    max-width: 220px;
+    font-size: 11px;
+  }
+  .roster-panel {
+    top: auto;
+    bottom: calc(var(--vt-transport-height) + 24px);
+    width: calc(100vw - 24px);
+    max-height: 220px;
+    right: 12px;
+    left: 12px;
+  }
+}
