@@ -51,19 +51,36 @@ Then browse to:
 
 ## Run the pipeline
 
-Re-extract whenever the BZN, the .TER, or the calibration config
-changes:
+The full extraction output ships in git (see "Folder layout" above), so
+**you typically don't need to run anything to use the viewer**. Re-extract
+only when the BZN, the .TER, the calibration config, or the extractor
+itself changes:
 
 ```powershell
+# Single map:
 python _map-analysis\render\scripts\extract_3d.py vsreuronig
 # -> _map-analysis\render\data\vsreuronig.3d.json   (about 2 MB)
+
+# Full corpus (overwrites every *.3d.json + composite PNG in-place):
+python _map-analysis\render\scripts\extract_3d.py --all
+
+# Refresh the manifest after a corpus pass so has_tier3 flags re-sync:
+python _map-analysis\render\scripts\_build_manifest.py
 ```
 
-To render a different map (e.g. Hubris): run `extract_3d.py vsrhubris`
-first, then visit `index.html?map=vsrhubris`. Heads up: maps with axis
-flips in their calibration (`x_flipped` / `y_flipped` on `affine`) will
-need the viewer to honor those flags before the decal aligns — for now
-only `vsreuronig` is verified.
+Tier-3 tile textures live in `data/tiles/` and are also tracked in git.
+Regenerate from a local BZ:CC install only if the corpus changes:
+
+```powershell
+python _map-analysis\render\scripts\extract_tile_textures.py
+# Defaults to --steam-root "C:/Program Files (x86)/Steam"
+```
+
+To render a different map (e.g. Hubris): just visit
+`index.html?map=vsrhubris` — the JSON is already on disk. Heads up: maps
+with axis flips in their calibration (`x_flipped` / `y_flipped` on
+`affine`) will need the viewer to honor those flags before the decal
+aligns — for now only `vsreuronig` is verified.
 
 ## Folder layout
 
@@ -84,9 +101,27 @@ render/
     extract_3d.py            one-map pipeline driver
     _ter_full.py             full-grid .TER decoder
     _wat_sky.py              .WAT + .SKY header decoders
-  data/
-    <stem>.3d.json           generated extraction output
+  data/                      EXTRACTION OUTPUTS (all tracked in git)
+    _manifest.json           map-switcher directory
+    <stem>.3d.json           per-map heightmap + objects + tier-3 composite
+                             block (142 maps, ~60 MB total)
+    <stem>.color.png         tier-3 composite input: color tint
+    <stem>.alpha1.png        tier-3 composite input: alpha layer 1
+    <stem>.alpha2.png        tier-3 composite input: alpha layer 2
+    <stem>.alpha3.png        tier-3 composite input: alpha layer 3
+    tiles/                   tier-3 floor textures
+      _manifest.json         tile inventory + per-map slot mapping
+      <name>.dds             GPU-native BC-compressed tile texture
+                             (~420 MB, 219 files; copied verbatim from a
+                             local BZ:CC Steam install via
+                             extract_tile_textures.py)
 ```
+
+The entire `data/` tree ships pre-baked in git so a fresh clone can open
+`render/index.html?map=<stem>` without running any pipeline first. The
+regen path is still fully documented under "Run the pipeline" below; you
+only need to invoke it after re-ingesting maps, changing calibration,
+or improving the extractor.
 
 ## Data contract: `<stem>.3d.json`
 
