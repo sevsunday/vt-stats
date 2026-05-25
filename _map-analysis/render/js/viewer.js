@@ -434,7 +434,7 @@ const COLOR_TINT_STRENGTH = 0.45;
 // Load a single grayscale or RGB PNG with the same orientation conventions
 // as the color bake (flipY=false, sRGB color, linear mip).
 async function loadAtlasPng(rel, opts = {}) {
-  const tex = await loadTexture(`./data/${rel}`);
+  const tex = await loadTexture(`../../data/render/${rel}`);
   tex.colorSpace = opts.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   tex.flipY = false;
   tex.magFilter = THREE.LinearFilter;
@@ -450,7 +450,7 @@ async function loadAtlasPng(rel, opts = {}) {
 // works (UV outside [0,1] tiles).
 function loadTileFromManifestEntry(entry) {
   return new Promise((resolve, reject) => {
-    const url = `./data/tiles/${entry.filename}`;
+    const url = `../../data/render/tiles/${entry.filename}`;
     const onLoad = (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.wrapS = THREE.RepeatWrapping;

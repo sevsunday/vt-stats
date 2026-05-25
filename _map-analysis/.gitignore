@@ -40,19 +40,23 @@ calibration/no_png/
 # Production-bound clean overlay PNGs (output stage; same regenerator).
 calibration/staging/
 
-# Note: render/data/ is INTENTIONALLY tracked in git so a fresh clone can
-# open render/index.html?map=<stem> without running any pipeline first.
-# That includes:
-#   - render/data/*.3d.json        (per-map heightmap + objects, ~60 MB)
-#   - render/data/*.{color,alpha1,alpha2,alpha3}.png  (tier-3 composite
+# Note: the 3D-render-extract data tree (formerly `_map-analysis/render/data/`)
+# was moved to project-root `data/render/` in the 2026-05 render-pipeline
+# consolidation. It's still INTENTIONALLY tracked in git so a fresh clone can
+# open _map-analysis/render/index.html?map=<stem> without running any
+# pipeline first. The tracked artifacts now live under `data/render/`:
+#   - data/render/*.3d.json        (per-map heightmap + objects, ~60 MB)
+#   - data/render/*.{color,alpha1,alpha2,alpha3}.png  (tier-3 composite
 #                                   inputs, ~95 MB)
-#   - render/data/tiles/*.dds      (BZ:CC tile textures copied from a local
+#   - data/render/tiles/*.dds      (BZ:CC tile textures copied from a local
 #                                   Steam install, ~420 MB)
-#   - render/data/_manifest.json   (map switcher directory)
-#   - render/data/tiles/_manifest.json
-# All of these are regenerable via `extract_3d.py --all` +
-# `extract_tile_textures.py` after an `ingest_maps.py` pass, but we
-# vendor them so the viewer is one-click reviewable post-clone.
+#   - data/render/_manifest.json   (map switcher directory)
+#   - data/render/tiles/_manifest.json
+# All of these are regenerable via `python scripts/process_stats.py`
+# (which transparently runs `build_3d_extracts` -> `extract_3d.extract_one`)
+# or by hand via `python scripts/extract_3d.py --all` +
+# `python scripts/extract_tile_textures.py` after an `ingest_maps.py` pass.
+# We vendor them so the viewer is one-click reviewable post-clone.
 # Heads up: the .dds tiles are BZ:CC game assets and are tracked under
 # the implicit assumption that this repo's distribution scope tolerates
 # that. Strip them back to ignored if that ever changes.

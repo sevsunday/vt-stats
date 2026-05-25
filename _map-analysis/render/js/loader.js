@@ -22,7 +22,12 @@
  *   }
  */
 
-const DATA_DIR = './data';
+// Render-pipeline output dir. Was `./data` pre-2026-05; the 3D-extract
+// outputs (per-map .3d.json + sidecar PNGs + tiles/ + _manifest.json)
+// migrated to `data/render/` at the project root so they live alongside
+// every other pipeline output. Resolved relative to the document URL
+// (replay.html / index.html) inside `_map-analysis/render/`.
+const DATA_DIR = '../../data/render';
 
 export function readUrlParams() {
   const url = new URL(location.href);

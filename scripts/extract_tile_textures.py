@@ -31,16 +31,10 @@ import sys
 import time
 from pathlib import Path
 
-
-THIS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(THIS_DIR))
-sys.path.insert(0, str(THIS_DIR.parent.parent / "scripts"))
-
-from _wat_sky import parse_trn_tile_textures  # noqa: E402
-from _paths import VSRMAPLIST_DIR  # noqa: E402
+from _wat_sky import parse_trn_tile_textures
+from _paths import VSRMAPLIST_DIR, TILES_DIR, PROJECT_ROOT
 
 
-TILES_DIR = THIS_DIR.parent / "data" / "tiles"
 MANIFEST_PATH = TILES_DIR / "_manifest.json"
 MANIFEST_SCHEMA = 1
 # Image extensions to look for on disk. .dds + .tga are the primary BZ:CC
@@ -290,7 +284,11 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     # Step 3: materialize.
-    print(f"[3/3] materializing tiles into {TILES_DIR.relative_to(THIS_DIR.parent.parent)}/")
+    try:
+        rel = TILES_DIR.relative_to(PROJECT_ROOT)
+    except ValueError:
+        rel = TILES_DIR
+    print(f"[3/3] materializing tiles into {rel}/")
     if not args.dry_run:
         TILES_DIR.mkdir(parents=True, exist_ok=True)
 

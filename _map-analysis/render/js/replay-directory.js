@@ -4,7 +4,7 @@
  *
  * Renders a card grid of all matches that:
  *   1. Have positioning data (`has_position_data: true` in matches.json), AND
- *   2. Have a 3D extract present in `_map-analysis/render/data/_manifest.json`.
+ *   2. Have a 3D extract present in `data/render/_manifest.json`.
  *
  * Cards show: map thumbnail, map name, winner badge, faction matchup chip,
  * duration band, player count, submitter, and date. Card click navigates to

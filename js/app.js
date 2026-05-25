@@ -1976,10 +1976,157 @@
     syncUrl();
   }
 
+  // --- Replay Tab (3D viewer iframe) ---
+  // Replaces the legacy js/timeline-player.js (Chart.js damage timeline +
+  // companion panels). The standalone _map-analysis/render/replay.html owns
+  // the entire interactive surface: trail playback, ship tracking, kill
+  // flashes, scrap-pool overlay, four camera modes, roster, transport,
+  // results overlay. We just embed it in an iframe pointed at
+  //   _map-analysis/render/replay.html?match=<id>[&t=<sec>]
+  // and decorate the wrapper with a fullscreen button.
+  //
+  // Two boot-time gates decide between iframe vs empty-state:
+  //   1. data.positioning.has_position_data === true
+  //   2. map stem present in data/render/_manifest.json
+  // The render manifest is fetched once per session (lazy) into the
+  // module-scoped Set below. 404 / parse failure leaves the set empty,
+  // which forces every match to the empty state -- a degraded but
+  // crash-free outcome.
+  const REPLAY_VIEWER_PATH = '_map-analysis/render/replay.html';
+  const REPLAY_MANIFEST_PATH = 'data/render/_manifest.json';
+  let __replayManifestPromise = null;
+  let __replayManifestStems = null; // Set<string> | null
+
+  function ensureReplayManifest() {
+    if (__replayManifestPromise) return __replayManifestPromise;
+    __replayManifestPromise = fetch(REPLAY_MANIFEST_PATH)
+      .then(res => (res.ok ? res.json() : { maps: [] }))
+      .catch(() => ({ maps: [] }))
+      .then(json => {
+        const maps = (json && json.maps) || [];
+        __replayManifestStems = new Set(
+          maps.map(m => (m && m.stem) || '').filter(Boolean),
+        );
+        return __replayManifestStems;
+      });
+    return __replayManifestPromise;
+  }
+
+  function deriveMapStem(matchMeta) {
+    return ((matchMeta && matchMeta.map) || '').replace(/\.bzn$/i, '').toLowerCase();
+  }
+
+  function renderReplayTab(container, data, tickHint) {
+    if (!container) return;
+    const matchMeta = (data && data.match) || (currentData && currentData.match) || {};
+    const matchId = matchMeta.id || '';
+    const stem = deriveMapStem(matchMeta);
+    const stems = __replayManifestStems || new Set();
+    const hasPosition = !!(data && data.positioning && data.positioning.has_position_data);
+    const hasExtract = !!stem && stems.has(stem);
+    const available = !!matchId && hasPosition && hasExtract;
+
+    // Same-match re-activation? Preserve iframe state so the user keeps
+    // their playhead/camera/focus when they tab away and back.
+    if (container.dataset.matchId === matchId
+        && container.dataset.replayState === (available ? 'ready' : 'empty')
+        && tickHint == null) {
+      return;
+    }
+
+    container.innerHTML = '';
+
+    if (!available) {
+      const reason = !hasPosition
+        ? "This match has no positioning data, so the 3D replay can't be reconstructed."
+        : "This match's map has no 3D extract yet, so the 3D replay isn't available here.";
+      const empty = document.createElement('div');
+      empty.className = 'vt-replay-3d-empty';
+      empty.innerHTML = `
+        <i class="bi bi-camera-video-off" aria-hidden="true"></i>
+        <div class="vt-replay-3d-empty-title">3D replay not available</div>
+        <div class="vt-replay-3d-empty-body">${reason}</div>
+      `;
+      container.appendChild(empty);
+      container.dataset.matchId = matchId;
+      container.dataset.replayState = 'empty';
+      return;
+    }
+
+    // Forward `?t=<tick>` deep links from the raw browser by converting
+    // ticks -> seconds via the match's tick_rate. Consume-and-clear so a
+    // later tab re-activation builds a clean URL and doesn't yank the
+    // user's scrub position.
+    let tParam = '';
+    if (tickHint != null && isFinite(tickHint)) {
+      const tickRate = Number(matchMeta.tick_rate) || 10;
+      const tSec = Math.max(0, tickHint / tickRate);
+      tParam = `&t=${encodeURIComponent(tSec.toFixed(3))}`;
+    }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'vt-replay-3d-wrap';
+
+    const frame = document.createElement('iframe');
+    frame.className = 'vt-replay-3d-frame';
+    frame.title = '3D match replay';
+    frame.setAttribute('allow', 'fullscreen');
+    frame.setAttribute('allowfullscreen', '');
+    frame.src = `${REPLAY_VIEWER_PATH}?match=${encodeURIComponent(matchId)}${tParam}`;
+
+    const fsBtn = document.createElement('button');
+    fsBtn.type = 'button';
+    fsBtn.className = 'vt-replay-3d-fs-btn';
+    fsBtn.title = 'Fullscreen (Esc to exit)';
+    fsBtn.innerHTML = '<i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>';
+    fsBtn.addEventListener('click', () => {
+      if (typeof frame.requestFullscreen === 'function') {
+        // Promise rejection (e.g. user gesture issues, blocked by perms)
+        // is silently ignored -- users can still F11 the whole tab.
+        frame.requestFullscreen().catch(() => { /* noop */ });
+      }
+    });
+
+    // Swap icon while the iframe is fullscreened. Esc / "exit" button on
+    // the OS chrome will fire fullscreenchange too.
+    const onFsChange = () => {
+      const isFs = document.fullscreenElement === frame;
+      const icon = fsBtn.querySelector('i');
+      if (icon) {
+        icon.className = isFs ? 'bi bi-fullscreen-exit' : 'bi bi-arrows-fullscreen';
+      }
+      fsBtn.title = isFs ? 'Exit fullscreen (Esc)' : 'Fullscreen (Esc to exit)';
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    // Stash the listener on the wrap so clearReplayTab() can remove it
+    // (avoids the listener accumulating across match changes).
+    wrap.__vtFsListener = onFsChange;
+
+    wrap.appendChild(frame);
+    wrap.appendChild(fsBtn);
+    container.appendChild(wrap);
+    container.dataset.matchId = matchId;
+    container.dataset.replayState = 'ready';
+  }
+
+  function clearReplayTab() {
+    const container = document.getElementById('tab-replay');
+    if (!container) return;
+    // Detach any fullscreenchange listener stashed by renderReplayTab().
+    const wrap = container.querySelector('.vt-replay-3d-wrap');
+    if (wrap && wrap.__vtFsListener) {
+      document.removeEventListener('fullscreenchange', wrap.__vtFsListener);
+      wrap.__vtFsListener = null;
+    }
+    container.innerHTML = '';
+    delete container.dataset.matchId;
+    delete container.dataset.replayState;
+  }
+
   // --- Render Match Data (shared by loadMatch + applyFilter) ---
   function renderMatchData(data) {
     currentFilteredData = data;
-    if (window.VTReplay) window.VTReplay.destroy();
+    clearReplayTab();
     if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
@@ -2075,16 +2222,20 @@
     });
 
     registerTabRenderer('#tab-replay', () => {
-      if (window.VTReplay) {
-        window.VTReplay.init(document.getElementById('tab-replay'), data, currentData.match);
-        // One-shot jump to a URL-specified tick (from raw.html events-table
-        // row click). Consume-and-clear: subsequent renders ignore it so
-        // scrubbing stays user-controlled.
-        if (pendingReplayTick != null && typeof window.VTReplay.jumpToTick === 'function') {
-          window.VTReplay.jumpToTick(pendingReplayTick);
-          pendingReplayTick = null;
-        }
-      }
+      // Lazy-fetch the render manifest on first activation; subsequent
+      // calls reuse the cached Set. While the fetch is in flight we still
+      // render synchronously (with stems = empty), then re-render once
+      // the manifest resolves -- this avoids a default-then-flash on
+      // first activation where a brief empty-state would precede the
+      // iframe boot. The dataset.matchId guard inside renderReplayTab
+      // prevents a redundant rebuild when the second pass finds the same
+      // match still loaded.
+      const tickHint = pendingReplayTick;
+      pendingReplayTick = null;
+      const container = document.getElementById('tab-replay');
+      ensureReplayManifest().then(() => {
+        renderReplayTab(container, data, tickHint);
+      });
     });
 
     registerMatchCharts(data, allNames);
@@ -2112,7 +2263,7 @@
     $loading.classList.remove('d-none');
     // Restore default preloader content in case a prior error replaced it
     restorePreloader();
-    if (window.VTReplay) window.VTReplay.destroy();
+    clearReplayTab();
     if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
@@ -2534,7 +2685,7 @@
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
     restorePreloader();
-    if (window.VTReplay) window.VTReplay.destroy();
+    clearReplayTab();
     if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
@@ -7444,12 +7595,10 @@
       if (typeof renderPlayerRadar !== 'function') return null;
       return renderPlayerRadar(canvasId, data, { mode: 'team' });
     });
-    registerChartRenderer('section-replay', (canvasId) => {
-      if (window.VTReplay && window.VTReplay.hasInstance()) {
-        return window.VTReplay.renderFullscreenSnapshot(canvasId);
-      }
-      return null;
-    });
+    // The Replay tab used to register a chart-fullscreen renderer here for
+    // the legacy Chart.js damage timeline. The 3D viewer iframe owns its
+    // own fullscreen affordance (Fullscreen API on the iframe element via
+    // the .vt-replay-3d-fs-btn button), so no registration is needed.
   }
 
   function registerAllMatchesCharts(data) {
@@ -7518,7 +7667,7 @@
   function showMatchNotFound(badId) {
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
-    if (window.VTReplay) window.VTReplay.destroy();
+    clearReplayTab();
     if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
 

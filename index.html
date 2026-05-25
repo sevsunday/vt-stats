@@ -823,7 +823,9 @@
         </div>
       </div>
 
-      <!-- Tab: Replay (DOM built by js/timeline-player.js on activation) -->
+      <!-- Tab: Replay (3D viewer iframe + fullscreen button injected by
+           js/app.js renderReplayTab() on activation, or empty-state card
+           when the match has no position data / no 3D extract). -->
       <div class="tab-pane fade" id="tab-replay" role="tabpanel" aria-labelledby="tab-replay-btn"></div>
 
     </div>
@@ -1814,7 +1816,6 @@
   <script src="js/charts.js"></script>
   <script src="js/charts-radar.js"></script>
   <script src="js/positioning-charts.js"></script>
-  <script src="js/timeline-player.js"></script>
   <script src="js/positioning-player.js"></script>
   <!-- All Matches aggregator: pure summation over a contributions dict.
        Documented exception to the "no aggregation in JS" rule so the All

@@ -179,7 +179,7 @@ async function boot() {
     mapData = await load3dData(stem);
   } catch (err) {
     throw new Error(
-      `no 3D extract for ${stem} (looked for _map-analysis/render/data/${stem}.3d.json). `
+      `no 3D extract for ${stem} (looked for data/render/${stem}.3d.json). `
       + `Run scripts/extract_3d.py ${stem}. Source: ${err.message}`,
     );
   }

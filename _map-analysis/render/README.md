@@ -14,7 +14,7 @@ The Python pipeline only reads from existing assets elsewhere in
 There's a small wrinkle: ES modules + `fetch()` won't run from a `file://`
 URL on most modern browsers due to CORS. Serve a static HTTP server
 **rooted at the repo root** so the viewer can reach both
-`_map-analysis/render/data/<stem>.3d.json` and the calibrated minimap
+`data/render/<stem>.3d.json` and the calibrated minimap
 PNG over at `data/maps/<stem>.png`:
 
 ```powershell
@@ -27,9 +27,9 @@ Then browse to:
 **http://127.0.0.1:8765/_map-analysis/render/index.html?map=vsreuronig**
 
 > Rooting the server at `_map-analysis/render/` looks tempting but breaks
-> the minimap fetch -- `../../../data/maps/...` would escape the server
-> root, which `http.server` rejects. Root at the project root and
-> everything resolves.
+> the minimap + render-data fetches -- `../../data/render/...` would
+> escape the server root, which `http.server` rejects. Root at the
+> project root and everything resolves.
 
 > If you'd rather double-click the HTML, launch Chrome with
 > `--allow-file-access-from-files` or use the
@@ -56,23 +56,38 @@ The full extraction output ships in git (see "Folder layout" above), so
 only when the BZN, the .TER, the calibration config, or the extractor
 itself changes:
 
+**Easy path** (everything wired into the production pipeline):
+
 ```powershell
-# Single map:
-python _map-analysis\render\scripts\extract_3d.py vsreuronig
-# -> _map-analysis\render\data\vsreuronig.3d.json   (about 2 MB)
-
-# Full corpus (overwrites every *.3d.json + composite PNG in-place):
-python _map-analysis\render\scripts\extract_3d.py --all
-
-# Refresh the manifest after a corpus pass so has_tier3 flags re-sync:
-python _map-analysis\render\scripts\_build_manifest.py
+# Runs the full session pipeline AND auto-builds 3D extracts for every
+# map a session references. Bootstraps vsrmaplist + tiles on a fresh
+# Steam-equipped clone (one-shot; idempotent thereafter).
+python scripts\process_stats.py
 ```
 
-Tier-3 tile textures live in `data/tiles/` and are also tracked in git.
-Regenerate from a local BZ:CC install only if the corpus changes:
+**Manual extracts** (if you only want the render layer to refresh):
 
 ```powershell
-python _map-analysis\render\scripts\extract_tile_textures.py
+# Single map:
+python scripts\extract_3d.py vsreuronig
+# -> data\render\vsreuronig.3d.json   (about 2 MB)
+
+# Full corpus (overwrites every *.3d.json + composite PNG in-place):
+python scripts\extract_3d.py --all
+
+# Refresh the manifest after a corpus pass so has_tier3 flags re-sync:
+python scripts\build_render_manifest.py
+
+# Or do all three (corpus + manifest + bootstrap helpers if needed):
+python scripts\build_3d_extracts.py
+```
+
+Tier-3 tile textures live in `data/render/tiles/` and are also tracked
+in git. Regenerate from a local BZ:CC install only if the corpus
+changes:
+
+```powershell
+python scripts\extract_tile_textures.py
 # Defaults to --steam-root "C:/Program Files (x86)/Steam"
 ```
 
@@ -97,31 +112,48 @@ render/
     three.module.js
     addons/controls/OrbitControls.js
     LICENSE
-  scripts/
-    extract_3d.py            one-map pipeline driver
-    _ter_full.py             full-grid .TER decoder
-    _wat_sky.py              .WAT + .SKY header decoders
-  data/                      EXTRACTION OUTPUTS (all tracked in git)
-    _manifest.json           map-switcher directory
-    <stem>.3d.json           per-map heightmap + objects + tier-3 composite
+```
+
+```
+scripts/                     PIPELINE (lives at project root, not under
+                             _map-analysis/, so it sits next to every
+                             other production script)
+  extract_3d.py              one-map pipeline driver
+  build_render_manifest.py   refreshes data/render/_manifest.json
+  build_3d_extracts.py       per-stem skip-on-existence + soft-fail glue
+                             (auto-bootstrap of vsrmaplist + tiles)
+  extract_tile_textures.py   tier-3 tile texture extractor (Steam-only)
+  _ter_full.py               full-grid .TER decoder
+  _wat_sky.py                .WAT + .SKY header decoders
+  _corpus_stats.py           dev utility (corpus-wide audits)
+  _paths.py                  shared path constants (canonical home)
+  _schema.py                 schema helpers for calibration configs
+```
+
+```
+data/render/                 EXTRACTION OUTPUTS (all tracked in git;
+                             relocated from _map-analysis/render/data/
+                             in the 2026-05 consolidation)
+  _manifest.json             map-switcher directory
+  <stem>.3d.json             per-map heightmap + objects + tier-3 composite
                              block (142 maps, ~60 MB total)
-    <stem>.color.png         tier-3 composite input: color tint
-    <stem>.alpha1.png        tier-3 composite input: alpha layer 1
-    <stem>.alpha2.png        tier-3 composite input: alpha layer 2
-    <stem>.alpha3.png        tier-3 composite input: alpha layer 3
-    tiles/                   tier-3 floor textures
-      _manifest.json         tile inventory + per-map slot mapping
-      <name>.dds             GPU-native BC-compressed tile texture
+  <stem>.color.png           tier-3 composite input: color tint
+  <stem>.alpha1.png          tier-3 composite input: alpha layer 1
+  <stem>.alpha2.png          tier-3 composite input: alpha layer 2
+  <stem>.alpha3.png          tier-3 composite input: alpha layer 3
+  tiles/                     tier-3 floor textures
+    _manifest.json           tile inventory + per-map slot mapping
+    <name>.dds               GPU-native BC-compressed tile texture
                              (~420 MB, 219 files; copied verbatim from a
                              local BZ:CC Steam install via
                              extract_tile_textures.py)
 ```
 
-The entire `data/` tree ships pre-baked in git so a fresh clone can open
-`render/index.html?map=<stem>` without running any pipeline first. The
-regen path is still fully documented under "Run the pipeline" below; you
-only need to invoke it after re-ingesting maps, changing calibration,
-or improving the extractor.
+The entire `data/render/` tree ships pre-baked in git so a fresh clone can
+open `_map-analysis/render/index.html?map=<stem>` without running any
+pipeline first. The regen path is still fully documented under "Run the
+pipeline" above; you only need to invoke it after re-ingesting maps,
+changing calibration, or improving the extractor.
 
 ## Data contract: `<stem>.3d.json`
 
@@ -223,7 +255,7 @@ everywhere).
   visually centered at y=0. The viewer recovers meters via
   `int16 * scale + base_offset` and adds a vertical-exaggeration
   multiplier on top.
-- Emitted as `data/<stem>.3d.json` alongside the calibrated minimap,
+- Emitted as `data/render/<stem>.3d.json` alongside the calibrated minimap,
   object positions, sky tint, and water plane height (the .WAT byte-16
   float, suppressed by default per the v1 contract).
 

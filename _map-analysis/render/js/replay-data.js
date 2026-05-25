@@ -6,7 +6,7 @@
  * What lives here:
  *   - URL param parsing (match id, time, cam, focus, hide list, floor mode)
  *   - Production match-JSON fetch from `data/processed/<id>.json`
- *   - 3D extract fetch from `_map-analysis/render/data/<stem>.3d.json`
+ *   - 3D extract fetch from `data/render/<stem>.3d.json`
  *     (proxied via the existing loader.js so we share the int16 base64 decoder)
  *   - Calibration tier sniffing from `calibration/configs/<stem>.config.json`
  *     (drives the auto floor-mode default per the plan's Layer-1 contract)

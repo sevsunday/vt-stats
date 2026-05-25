@@ -2604,270 +2604,112 @@ h4:hover .docs-heading-anchor,
 }
 
 /* ============================================================
- * Replay Player (Timeline Playback)
- * Transport bar, scrub slider, speed pills, running leaderboard,
- * faction tug-of-war, momentum chip, bucket spotlight.
+ * Replay Player (3D embed)
+ * Iframe wrapper around the standalone _map-analysis/render/replay.html
+ * viewer. The iframe owns its own UI (transport bar, roster panel, kill
+ * ticker, camera pills, scrub markers, etc.) -- this stylesheet only
+ * positions the wrapper in the dashboard's #tab-replay pane and skins
+ * the dashboard-side fullscreen button + the empty-state card.
  * ============================================================ */
 
-.vt-replay-transport {
-    padding: 0.75rem;
+.vt-replay-3d-wrap {
+    position: relative;
+    width: 100%;
+    /* Size the iframe to FIT inside the visible viewport area below the
+       topnav + match-info banner + tab strip so the bottom transport bar
+       (`position: fixed; bottom: 12px` inside replay.html) is always in
+       view without scrolling. `min(...)` (no floor) guarantees the iframe
+       shrinks with short viewports; the `min-height` safety net only
+       kicks in on tiny screens (<660px tall) where some scroll is
+       unavoidable. The 1400px ceiling caps it on 4K so the canvas
+       doesn't grow unreasonably tall. The 240px subtractor approximates
+       the chrome above the iframe (topnav ~60 + match-info banner ~120
+       + tab strip ~52 + padding ~8). */
+    height: min(calc(100vh - 240px), 1400px);
+    min-height: 420px;
     border-radius: 10px;
-    background: color-mix(in oklab, var(--kb-bg-subtle) 60%, transparent);
+    overflow: hidden;
+    background: var(--kb-bg-subtle);
     border: 1px solid var(--kb-border-subtle);
 }
 
-.vt-replay-transport-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.vt-replay-play.btn-primary {
-    min-width: 2.5rem;
-}
-
-.vt-replay-time {
-    min-width: 7.5rem;
-    text-align: center;
-    color: var(--kb-text-secondary);
-    font-size: 0.85rem;
-}
-
-.vt-replay-scrub-wrap {
-    flex: 1 1 200px;
-    min-width: 160px;
-    display: flex;
-    align-items: center;
-}
-
-.vt-replay-scrub {
-    -webkit-appearance: none;
-    appearance: none;
+.vt-replay-3d-frame {
     width: 100%;
-    height: 6px;
-    border-radius: 3px;
-    background: color-mix(in oklab, var(--kb-border-subtle), transparent 30%);
-    outline: none;
+    height: 100%;
+    border: 0;
+    display: block;
+    /* Match the wrapper's rounded corners so there's no white seam. */
+    background: var(--kb-bg-subtle);
+}
+
+/* Native fullscreen on the iframe element itself -- Esc exits in every
+   browser. Override the wrapper's clamped height so we go edge-to-edge. */
+.vt-replay-3d-frame:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+}
+
+.vt-replay-3d-fs-btn {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 5;
+    padding: 0.4rem 0.65rem;
+    background: color-mix(in oklab, var(--kb-bg-card) 75%, transparent);
+    color: var(--kb-text-primary);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 6px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
     cursor: pointer;
+    transition: background var(--vt-anim-duration) var(--vt-anim-ease),
+                border-color var(--vt-anim-duration) var(--vt-anim-ease);
 }
 
-.vt-replay-scrub::-webkit-slider-runnable-track {
-    height: 6px;
-    border-radius: 3px;
-    background: linear-gradient(to right,
-        var(--kb-primary) 0%,
-        var(--kb-primary) var(--vt-scrub-progress, 0%),
-        color-mix(in oklab, var(--kb-border-subtle), transparent 30%) var(--vt-scrub-progress, 0%));
+.vt-replay-3d-fs-btn:hover {
+    background: color-mix(in oklab, var(--kb-primary) 18%, var(--kb-bg-card));
+    border-color: color-mix(in oklab, var(--kb-primary), transparent 50%);
 }
 
-.vt-replay-scrub::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--kb-primary);
-    border: 2px solid var(--kb-bg-card);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    cursor: grab;
-    margin-top: -5px;
+.vt-replay-3d-fs-btn i {
+    font-size: 0.95rem;
+    line-height: 1;
 }
 
-.vt-replay-scrub::-moz-range-track {
-    height: 6px;
-    border-radius: 3px;
-    background: color-mix(in oklab, var(--kb-border-subtle), transparent 30%);
-}
-
-.vt-replay-scrub::-moz-range-progress {
-    height: 6px;
-    border-radius: 3px;
-    background: var(--kb-primary);
-}
-
-.vt-replay-scrub::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--kb-primary);
-    border: 2px solid var(--kb-bg-card);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    cursor: grab;
-}
-
-.vt-replay-scrub:active::-webkit-slider-thumb { cursor: grabbing; }
-.vt-replay-scrub:active::-moz-range-thumb { cursor: grabbing; }
-
-.vt-replay-speed-pills .btn {
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
-}
-
-/* Running leaderboard with smooth reorder via CSS flex order */
-.vt-replay-leaderboard {
+/* Empty state card for matches without position data or 3D extract. */
+.vt-replay-3d-empty {
     display: flex;
     flex-direction: column;
-    gap: 0.375rem;
-}
-
-.vt-replay-lb-row {
-    display: grid;
-    grid-template-columns: 1.75rem 0.75rem minmax(0, 1fr) minmax(60px, 2fr) auto;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.375rem 0.5rem;
-    border-radius: 6px;
-    background: color-mix(in oklab, var(--kb-bg-subtle) 40%, transparent);
-    transition: background var(--vt-anim-duration) var(--vt-anim-ease);
-    font-size: 0.85rem;
-}
-
-.vt-replay-lb-rank {
-    color: var(--kb-text-muted);
-    font-size: 0.8rem;
-    text-align: right;
-}
-
-.vt-replay-lb-swatch {
-    display: inline-block;
-    width: 0.75rem;
-    height: 0.75rem;
-    border-radius: 2px;
-    background: var(--kb-primary);
-}
-
-.vt-replay-lb-name {
-    color: var(--kb-text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.vt-replay-lb-bar-wrap {
-    height: 6px;
-    border-radius: 3px;
-    background: color-mix(in oklab, var(--kb-border-subtle), transparent 30%);
-    overflow: hidden;
-    position: relative;
-}
-
-.vt-replay-lb-bar {
-    display: block;
-    height: 100%;
-    width: 0%;
-    background: var(--kb-primary);
-    border-radius: 3px;
-    transition: width var(--vt-anim-duration) var(--vt-anim-ease);
-}
-
-.vt-replay-lb-val {
-    color: var(--kb-text-secondary);
-    font-size: 0.8rem;
-    text-align: right;
-    min-width: 3rem;
-}
-
-/* Faction tug-of-war bar */
-.vt-replay-tugbar {
-    display: flex;
-    width: 100%;
-    height: 1.5rem;
-    border-radius: 8px;
-    overflow: hidden;
-    background: color-mix(in oklab, var(--kb-border-subtle), transparent 30%);
-}
-
-.vt-replay-tugbar-seg {
-    height: 100%;
-    transition: width var(--vt-anim-duration) var(--vt-anim-ease);
-}
-
-.vt-replay-tugbar-t1 {
-    background: var(--kb-primary);
-}
-
-.vt-replay-tugbar-t2 {
-    background: var(--kb-success);
-}
-
-.vt-replay-tugbar-legend {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 0.5rem;
-    font-size: 0.8rem;
-    color: var(--kb-text-secondary);
-}
-
-.vt-replay-swatch {
-    display: inline-block;
-    width: 0.75rem;
-    height: 0.75rem;
-    border-radius: 2px;
-    margin-right: 0.375rem;
-    vertical-align: middle;
-}
-
-.vt-replay-swatch-t1 { background: var(--kb-primary); }
-.vt-replay-swatch-t2 { background: var(--kb-success); }
-
-/* Momentum chip */
-.vt-replay-momentum-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 500;
+    justify-content: center;
+    gap: 0.75rem;
+    min-height: 360px;
+    padding: 2.5rem 1.5rem;
+    border-radius: 10px;
     background: color-mix(in oklab, var(--kb-bg-subtle) 60%, transparent);
-    border: 1px solid var(--kb-border-subtle);
+    border: 1px dashed var(--kb-border-subtle);
     color: var(--kb-text-secondary);
+    text-align: center;
 }
 
-.vt-replay-momentum-t1 {
-    color: var(--kb-primary);
-    border-color: color-mix(in oklab, var(--kb-primary), transparent 60%);
+.vt-replay-3d-empty i {
+    font-size: 2.25rem;
+    color: var(--kb-text-muted);
+    opacity: 0.7;
 }
 
-.vt-replay-momentum-t2 {
-    color: var(--kb-success);
-    border-color: color-mix(in oklab, var(--kb-success), transparent 60%);
+.vt-replay-3d-empty-title {
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--kb-text-primary);
 }
 
-/* Bucket spotlight */
-.vt-replay-spotlight {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.vt-replay-spotlight-time {
-    font-size: 1.5rem;
-    color: var(--kb-primary);
-    min-width: 4rem;
-}
-
-.vt-replay-spotlight-body {
-    color: var(--kb-text-secondary);
-    font-size: 0.9rem;
-    flex: 1;
-}
-
-/* Responsive: stack transport on narrow screens */
-@media (max-width: 575.98px) {
-    .vt-replay-time {
-        min-width: 0;
-        flex: 1 0 100%;
-        text-align: left;
-    }
-    .vt-replay-speed-pills {
-        flex: 1 0 100%;
-    }
-    .vt-replay-scrub-wrap {
-        flex: 1 0 100%;
-    }
+.vt-replay-3d-empty-body {
+    font-size: 0.875rem;
+    max-width: 32rem;
+    line-height: 1.5;
 }
 
 /* ============================================================================

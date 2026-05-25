@@ -5047,6 +5047,32 @@ def main():
         registry = build_map_registry.build_registry(all_map_entries)
     except Exception as e:
         print(f"WARN: failed to build map registry ({e}); skipping.")
+        seen_map = {}
+
+    # Build 3D-render extracts so the dashboard's Replay-tab iframe has a
+    # <stem>.3d.json for every map a match references. Soft-fails per stem;
+    # stems with no vsrmaplist/<MapName>/ on disk degrade to the dashboard's
+    # "no 3D extract" empty state. Idempotent: cached stems are skipped.
+    # Refreshes data/render/_manifest.json automatically when new stems are
+    # extracted. Mirrors the build_map_registry try/except + WARN pattern.
+    # Bootstrap helpers run inside build_3d_extracts() before the per-stem
+    # extract loop -- they no-op when vsrmaplist/ is populated and
+    # data/render/tiles/_manifest.json exists; on a fresh-clone Steam-equipped
+    # box they auto-run ingest_maps + extract_tile_textures one-shot.
+    try:
+        import build_3d_extracts
+        counts_3d = build_3d_extracts.build_3d_extracts(
+            list(seen_map.keys()),
+            force=args.force,
+        )
+        print(
+            f"3D extracts: {counts_3d['ok']} new, {counts_3d['skipped']} cached, "
+            f"{counts_3d['failed']} skipped/failed"
+            + (" (manifest refreshed)" if counts_3d["manifest_refreshed"] else "")
+        )
+    except Exception as e:
+        print(f"WARN: 3D-extract step failed ({e}); skipping. "
+              f"Dashboard Replay tabs may show empty state for affected matches.")
 
     # Build manifest using registry-resolved names (with filename fallback
     # for any map the registry couldn't satisfy).

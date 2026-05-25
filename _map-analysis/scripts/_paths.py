@@ -1,91 +1,43 @@
-"""Centralized path constants for `_map-analysis/scripts/*.py`.
+"""Backwards-compat shim. Path constants moved to scripts/_paths.py
+(post-2026-05 render-pipeline-consolidation). Existing calibration tooling
+imports stay valid through this re-export.
 
-Layout (all relative to MAP_ANALYSIS_DIR):
+Implementation note: we load the real module via `importlib` against an
+explicit file path to avoid Python's module-cache aliasing
+(`sys.modules['_paths']` may already point at THIS shim when calibration
+tooling injects `_map-analysis/scripts/` ahead of `scripts/` on sys.path).
+The real module is registered under the name `_paths_real`, then its public
+names are re-exported into this shim's namespace.
 
-    _map-analysis/
-      scripts/         <- THIS_DIR (where the .py files live)
-      vsrmaplist/      <- ingested per-map source files
-      ppm/             <- King's PPM renders (legacy reference data)
-      calibration/     <- the calibration webapp + per-map artifacts
-        configs/       <- per-map calibration configs (user state)
-        map_data/      <- per-map BZN-derived data (regenerated)
-        proven/, borderline/, hand_cal/, failed/, no_png/  <- tier overlays
-        staging/       <- clean overlays for production export
-      archive/         <- deprecated stuff
-    data/
-      maps/            <- iondriver minimap PNGs (the calibration target)
-      vsrmaplist.json  <- BZCC-Website map manifest
-
-Anything outside `_map-analysis/` (e.g. `data/maps/`) lives in PROJECT_ROOT.
+Add a `from _paths import ...` to any new script in `scripts/` directly --
+this file is only here so the calibration tooling cluster
+(`init_configs.py`, `reprocess.py`, `render_overlays.py`, `build_browser.py`,
+`analyze_map.py`, `ingest_maps.py`, `prove_png_calibration.py`, `bz2_paths.py`)
+keeps working without per-file import surgery.
 """
-
+import importlib.util
+import sys
 from pathlib import Path
 
-# THIS file lives in _map-analysis/scripts/.
-THIS_DIR = Path(__file__).resolve().parent
-MAP_ANALYSIS_DIR = THIS_DIR.parent
-PROJECT_ROOT = MAP_ANALYSIS_DIR.parent
+_REAL_PATHS_PY = (
+    Path(__file__).resolve().parents[2] / "scripts" / "_paths.py"
+)
+_spec = importlib.util.spec_from_file_location("_paths_real", _REAL_PATHS_PY)
+_real = importlib.util.module_from_spec(_spec)
+sys.modules["_paths_real"] = _real
+_spec.loader.exec_module(_real)
 
-# Within _map-analysis/
-VSRMAPLIST_DIR = MAP_ANALYSIS_DIR / "vsrmaplist"
-PPM_DIR = MAP_ANALYSIS_DIR / "ppm"
-ARCHIVE_DIR = MAP_ANALYSIS_DIR / "archive"
+# Re-export every public name from the real module into this shim's namespace.
+for _name in dir(_real):
+    if not _name.startswith("_"):
+        globals()[_name] = getattr(_real, _name)
 
-# Within _map-analysis/calibration/  (was: main/  pre-2026-05 rename)
-CALIBRATION_DIR = MAP_ANALYSIS_DIR / "calibration"
-CONFIGS_DIR = CALIBRATION_DIR / "configs"
-MAP_DATA_DIR = CALIBRATION_DIR / "map_data"
-STAGING_DIR = CALIBRATION_DIR / "staging"
-TIER_DIRS = {
-    "proven":     CALIBRATION_DIR / "proven",
-    "borderline": CALIBRATION_DIR / "borderline",
-    "hand_cal":   CALIBRATION_DIR / "hand_cal",
-    "failed":     CALIBRATION_DIR / "failed",
-    "no_png":     CALIBRATION_DIR / "no_png",
-}
-INDEX_HTML = CALIBRATION_DIR / "index.html"
-CALIBRATE_HTML = CALIBRATION_DIR / "calibrate.html"
-SUMMARY_TXT = CALIBRATION_DIR / "_summary.txt"
-README_MD = CALIBRATION_DIR / "_README.md"
+# Expose `ensure_dirs` explicitly for type checkers / star-import edge cases.
+ensure_dirs = _real.ensure_dirs  # noqa: F401
 
-# Within data/ (project-root)
-DATA_MAPS_DIR = PROJECT_ROOT / "data" / "maps"
-VSRMAPLIST_MANIFEST = PROJECT_ROOT / "data" / "vsrmaplist.json"
-
-# Legacy paths (for migration)
-LEGACY_CALIBRATE_ARCHIVE = ARCHIVE_DIR / "vsrmaplist_legacy_calibrate_html"
-
-
-def ensure_dirs() -> None:
-    """Create every output directory if it doesn't exist."""
-    for d in (CONFIGS_DIR, MAP_DATA_DIR, STAGING_DIR,
-              *TIER_DIRS.values()):
-        d.mkdir(parents=True, exist_ok=True)
+del _name, _spec, _REAL_PATHS_PY, importlib, Path
 
 
 if __name__ == "__main__":
-    # Diagnostic: print all resolved paths
-    print(f"THIS_DIR:          {THIS_DIR}")
-    print(f"MAP_ANALYSIS_DIR:  {MAP_ANALYSIS_DIR}")
-    print(f"PROJECT_ROOT:      {PROJECT_ROOT}")
-    print()
-    print("Within _map-analysis/:")
-    for name, p in (
-        ("VSRMAPLIST_DIR", VSRMAPLIST_DIR),
-        ("PPM_DIR", PPM_DIR),
-        ("ARCHIVE_DIR", ARCHIVE_DIR),
-        ("CALIBRATION_DIR", CALIBRATION_DIR),
-        ("CONFIGS_DIR", CONFIGS_DIR),
-        ("MAP_DATA_DIR", MAP_DATA_DIR),
-        ("STAGING_DIR", STAGING_DIR),
-    ):
-        exists = "OK" if p.exists() else "missing"
-        print(f"  {name:<22s} {exists}  {p}")
-    print()
-    print("Within data/:")
-    for name, p in (
-        ("DATA_MAPS_DIR", DATA_MAPS_DIR),
-        ("VSRMAPLIST_MANIFEST", VSRMAPLIST_MANIFEST),
-    ):
-        exists = "OK" if p.exists() else "missing"
-        print(f"  {name:<22s} {exists}  {p}")
+    import runpy
+    runpy.run_module("_paths_real", run_name="__main__")

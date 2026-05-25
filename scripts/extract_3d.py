@@ -1,20 +1,25 @@
 """Extract one map's 3D-render JSON.
 
 Reads from existing pipeline artifacts:
-  - vsrmaplist/<MapName>/<stem>.{bzn, TER, WAT, SKY, TRN, inf, des}
+  - _map-analysis/vsrmaplist/<MapName>/<stem>.{bzn, TER, WAT, SKY, TRN, inf, des}
   - _map-analysis/calibration/configs/<stem>.config.json   (calibrated world_rect)
   - _map-analysis/calibration/map_data/<stem>.json         (BZN-derived objects)
-  - data/maps/<stem>.png                            (calibrated minimap)
+  - data/maps/<stem>.png                                   (calibrated minimap)
 
 Emits:
-  - _map-analysis/render/data/<stem>.3d.json
+  - data/render/<stem>.3d.json
+  - data/render/<stem>.{color,alpha1,alpha2,alpha3}.png    (tier-3 composite inputs)
 
-The output JSON is consumed by `render/js/loader.js`. See the README in
-`render/` for the schema and rendering contract.
+The output JSON is consumed by `_map-analysis/render/js/loader.js`. See the
+README in `_map-analysis/render/` for the schema and rendering contract.
 
 CLI:
-    python _map-analysis/render/scripts/extract_3d.py vsreuronig
-    python _map-analysis/render/scripts/extract_3d.py vsreuronig --out custom.json
+    python scripts/extract_3d.py vsreuronig
+    python scripts/extract_3d.py vsreuronig --out custom.json
+    python scripts/extract_3d.py --all --skip-existing
+
+Public API (called by scripts/build_3d_extracts.py):
+    extract_one(stem: str, out_path: Path | None = None) -> Path
 """
 from __future__ import annotations
 
@@ -24,31 +29,22 @@ import json
 import sys
 from pathlib import Path
 
-# Allow imports from sibling render/scripts/ and from _map-analysis/scripts/.
-THIS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(THIS_DIR))
-sys.path.insert(0, str(THIS_DIR.parent.parent / "scripts"))
-
-from _ter_full import parse_ter_full, read_trn_height_setting  # noqa: E402
-from _wat_sky import (  # noqa: E402
+from _ter_full import parse_ter_full, read_trn_height_setting
+from _wat_sky import (
     parse_wat_header,
     parse_sky_header,
     parse_trn_lighting,
     parse_trn_tile_textures,
 )
-
-# From _map-analysis/scripts/
-from _paths import (  # noqa: E402
+from _paths import (
     VSRMAPLIST_DIR,
     DATA_MAPS_DIR,
+    RENDER_DATA_DIR,
 )
-from _schema import (  # noqa: E402
+from _schema import (
     load_config,
     load_map_data,
 )
-
-
-RENDER_DATA_DIR = THIS_DIR.parent / "data"
 
 # Object kinds that get rendered as primitives in the viewer. Everything
 # else (ai_path, marker, mission_script, etc.) is skipped.
@@ -400,14 +396,32 @@ def _all_stems_from_vsrmaplist() -> list[str]:
     return stems
 
 
-def _extract_one(stem: str, quiet: bool = False) -> tuple[bool, str]:
-    """Extract one map's JSON. Returns (ok, message)."""
-    out_path = RENDER_DATA_DIR / f"{stem}.3d.json"
+def extract_one(stem: str, out_path: Path | None = None) -> Path:
+    """Public entrypoint for one-stem extraction. Used by both the CLI and
+    `scripts/build_3d_extracts.py` (the production-pipeline glue).
+
+    Raises on failure (FileNotFoundError when vsrmaplist/<MapName>/ is
+    missing or .TER absent, RuntimeError on parse failure, etc.).
+    Caller is expected to soft-fail per stem.
+
+    Returns the output path actually written.
+    """
+    if out_path is None:
+        out_path = RENDER_DATA_DIR / f"{stem}.3d.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = build_output(stem)
+    out_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    return out_path
+
+
+def _extract_one_cli(stem: str, quiet: bool = False) -> tuple[bool, str]:
+    """CLI wrapper around extract_one() that catches exceptions and emits
+    a one-line status string for the --all loop's progress output."""
+    out_path = RENDER_DATA_DIR / f"{stem}.3d.json"
     try:
-        payload = build_output(stem)
-        out_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        extract_one(stem, out_path)
         if not quiet:
+            payload = json.loads(out_path.read_text(encoding="utf-8"))
             preview = {k: v for k, v in payload.items() if k != "heightmap"}
             preview["heightmap_summary"] = {
                 k: v for k, v in payload["heightmap"].items() if k != "data"
@@ -446,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"extracting {len(stems)} maps...")
         ok = 0; fail = 0
         for i, stem in enumerate(stems, 1):
-            success, msg = _extract_one(stem, quiet=True)
+            success, msg = _extract_one_cli(stem, quiet=True)
             tag = "OK " if success else "ERR"
             print(f"[{i:>3}/{len(stems)}] {tag}  {msg}")
             if success: ok += 1
@@ -460,13 +474,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     stem = args.stem.lower()
     out_path = Path(args.out) if args.out else (RENDER_DATA_DIR / f"{stem}.3d.json")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"extracting 3D data for {stem}...")
-    payload = build_output(stem)
+    extract_one(stem, out_path)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
 
-    # Pretty preview before writing the JSON (which contains a 2 MB
-    # base64 blob and would obliterate the terminal).
+    # Pretty preview AFTER writing (the JSON contains a 2 MB base64 blob
+    # that would obliterate the terminal if dumped raw).
     preview = {k: v for k, v in payload.items() if k != "heightmap"}
     preview["heightmap_summary"] = {
         k: v for k, v in payload["heightmap"].items() if k != "data"
@@ -474,7 +488,6 @@ def main(argv: list[str] | None = None) -> int:
     preview["heightmap_summary"]["data_base64_len"] = len(payload["heightmap"]["data"])
     print(json.dumps(preview, indent=2))
 
-    out_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
     size_mb = out_path.stat().st_size / (1024 * 1024)
     print(f"\nwrote {out_path}  ({size_mb:.2f} MB)")
     return 0
