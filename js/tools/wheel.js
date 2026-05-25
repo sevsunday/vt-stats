@@ -327,7 +327,11 @@
 
   function renderRemovedList() {
     if (!removedListEl) return;
+    // The wheel DOM can be temporarily detached (e.g. user switched the
+    // Player Picker to Sniper mode). Internal state still updates; DOM
+    // updates are skipped until the wheel shell is restored.
     const wrap = document.getElementById('vt-tools-wheel-removed-wrap');
+    if (!wrap) return;
     const countEl = document.getElementById('vt-tools-wheel-removed-count');
     const items = [];
     // Build chip data from the union of (page roster + last-known wheel state)
@@ -566,6 +570,32 @@
     window.addEventListener('vt-tools:roster', onRosterChange);
     window.addEventListener('vt-tools:reset-all', onResetAll);
   }
+
+  // ---------------------------------------------------------------- Public API
+  //
+  // Surface used by sibling picker modes (e.g. the Sniper picker)
+  // so they can hand a chosen player back to the existing wheel
+  // result modal without reimplementing the Steam / VTstats / remove
+  // / spin-again pipeline. Safe to delete if the Sniper feature is
+  // ever removed — it's a harmless extra surface otherwise.
+  window.VTToolsWheel = {
+    showResult(player) {
+      if (!player) return;
+      lastWinner = player;
+      updateMainState();
+      showResult(player);
+    },
+    getActivePlayers() {
+      return activePlayers().slice();
+    },
+    removeFromWheel(player) {
+      if (!player) return;
+      removeFromWheel(player);
+    },
+    getRemovedKeys() {
+      return new Set(removedSteam64s);
+    },
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

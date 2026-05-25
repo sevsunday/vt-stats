@@ -24,6 +24,21 @@
   <link rel="stylesheet" href="../css/layout.css">
   <link rel="stylesheet" href="../css/vtstats-theme.css">
   <link rel="stylesheet" href="../css/tools.css">
+  <link rel="stylesheet" href="../css/tools-sniper.css">
+
+  <!-- Import map for the Sniper picker game's Three.js ESM build.
+       sniper-modal.js is a plain script that dynamic-import()s the
+       sniper-game.js ES module; the module then resolves bare specifier
+       'three' against this map. Required because we ship without a
+       bundler. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
 </head>
 <body class="d-flex flex-column h-100">
 
@@ -275,8 +290,8 @@
               <label class="btn btn-outline-secondary disabled" for="vt-tools-wheel-method-plinko">
                 <i class="bi bi-bricks"></i>Plinko
               </label>
-              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-sniper" value="sniper" autocomplete="off" disabled>
-              <label class="btn btn-outline-secondary disabled" for="vt-tools-wheel-method-sniper">
+              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-sniper" value="sniper" autocomplete="off">
+              <label class="btn btn-outline-secondary" for="vt-tools-wheel-method-sniper">
                 <i class="bi bi-bullseye"></i>Sniper
               </label>
             </div>
@@ -363,6 +378,82 @@
         </div>
         <div class="modal-footer border-top" id="vt-tools-wheel-result-modal-footer">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sniper result modal. Populated by js/tools/sniper/sniper-modal.js.
+       Structural mirror of the wheel result modal above — same player-card
+       body shape so it picks up the same .vt-tools-wheel-result-* styling —
+       but with a sniper-themed title icon and a "Snipe again" primary CTA
+       in place of "Spin again". -->
+  <div class="modal fade" id="vt-tools-sniper-result-modal" tabindex="-1"
+       aria-labelledby="vt-tools-sniper-result-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content vt-tools-wheel-result-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-sniper-result-modal-title">
+            <i class="bi bi-crosshair me-2" style="color: var(--kb-primary);"></i>Target acquired
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="vt-tools-sniper-result-modal-body">
+          <div class="text-muted small">No shot yet.</div>
+        </div>
+        <div class="modal-footer border-top" id="vt-tools-sniper-result-modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sniper picker modal. Hidden by default; opened by js/tools/sniper/sniper-modal.js.
+       Static backdrop + keyboard=false so accidental ESC during aim doesn't bail;
+       the explicit Abort button is the only exit path besides successful shot. -->
+  <div class="modal fade vt-tools-sniper-modal" id="vt-tools-sniper-modal" tabindex="-1"
+       aria-labelledby="vt-tools-sniper-modal-title" aria-hidden="true"
+       data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-fullscreen">
+      <div class="modal-content vt-tools-sniper-modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-sniper-modal-title">
+            <i class="bi bi-bullseye me-2" style="color: var(--kb-primary);"></i>Sniper picker
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="vt-tools-sniper-stage" id="vt-tools-sniper-stage">
+            <!-- Three.js canvas mounts here. Overlays (vignette, crosshair,
+                 muzzle flash, reveal label) are injected by sniper-game.js. -->
+
+            <!-- Warning banner — divergence between locked roster and live roster. -->
+            <div class="vt-tools-sniper-warning" id="vt-tools-sniper-warning" role="alert" aria-live="polite">
+              <i class="bi bi-exclamation-triangle-fill vt-tools-sniper-warning-icon" aria-hidden="true"></i>
+              <div class="vt-tools-sniper-warning-body" id="vt-tools-sniper-warning-body"></div>
+            </div>
+
+            <!-- Loading + error overlays. -->
+            <div class="vt-tools-sniper-loading" id="vt-tools-sniper-loading" style="display:none;">
+              <div class="vt-tools-sniper-loading-spinner" aria-hidden="true"></div>
+              <div>Loading scene&hellip;</div>
+            </div>
+            <div class="vt-tools-sniper-error" id="vt-tools-sniper-error" style="display:none;"></div>
+          </div>
+          <div class="vt-tools-sniper-hud">
+            <span class="vt-tools-sniper-hud-targets" id="vt-tools-sniper-hud-targets">
+              <i class="bi bi-bullseye me-1"></i>Targets locked: <span class="vt-tools-sniper-hud-targets-count">0</span>
+            </span>
+            <div class="vt-tools-sniper-hud-actions">
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="vt-tools-sniper-restart"
+                      title="Snapshot the current lobby roster and rebuild the field of targets">
+                <i class="bi bi-arrow-clockwise me-1"></i>Restart with current lobby
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
+                <i class="bi bi-x-lg me-1"></i>Abort
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -583,6 +674,7 @@
   <script src="../js/tools/toast-manager.js"></script>
   <script src="../js/tools/live-session.js"></script>
   <script src="../js/tools/wheel.js"></script>
+  <script src="../js/tools/sniper/sniper-modal.js"></script>
   <script src="../js/tools/coinflip.js"></script>
   <script src="../js/tools/map-roll.js"></script>
   <script src="../js/tools/team-balonce.js"></script>

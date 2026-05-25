@@ -1,0 +1,375 @@
+/* ============================================================
+   VT Stats — Tools Page — Sniper Picker Game
+
+   All styles for the Three.js sniper-scope picker mode.
+   Scoped under .vt-tools-sniper-* so removal is grep-and-delete.
+   Loaded only on tools/index.html.
+
+   Effects use the project --kb-* theme tokens so the warning
+   banner / muzzle flash / scope vignette follow dark/light mode.
+
+   Reduced motion: muzzle flash + recoil shake + idle sway + fall
+   easing all collapse to instant transitions when the user prefers
+   reduced motion.
+   ============================================================ */
+
+/* ---------------------------------------------------------------- Modal shell */
+
+.vt-tools-sniper-modal .modal-content {
+    background-color: #050505;
+    border: 1px solid var(--kb-border-default);
+    color: var(--kb-text-primary);
+    overflow: hidden;
+}
+
+.vt-tools-sniper-modal .modal-header {
+    background-color: var(--kb-bg-card);
+}
+
+.vt-tools-sniper-modal .modal-body {
+    background-color: #000;
+    position: relative;
+    /* Fullscreen modal: stack the stage on top of the HUD and let the
+       stage flex-grow to fill every pixel of available height. The HUD
+       sits at the bottom with its natural height. */
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* The pre-game shell (between Take Aim click and game boot, plus
+   the empty / under-roster gates) lives inside the same stage. */
+.vt-tools-sniper-prelaunch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    aspect-ratio: 16 / 9;
+    padding: 1rem;
+    color: var(--kb-text-secondary);
+    text-align: center;
+}
+
+.vt-tools-sniper-prelaunch-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+}
+
+.vt-tools-sniper-prelaunch-sub {
+    font-size: 0.85rem;
+    max-width: 32ch;
+}
+
+.vt-tools-sniper-prelaunch .btn {
+    min-width: 11rem;
+}
+
+/* ---------------------------------------------------------------- Stage / canvas */
+
+.vt-tools-sniper-stage {
+    position: relative;
+    width: 100%;
+    /* In the fullscreen modal the stage flex-grows to fill the viewport
+       height between the modal-header and the HUD. The pre-launch shell
+       (which lives in the wheel card BEFORE the modal opens) has its own
+       aspect-ratio rule on `.vt-tools-sniper-prelaunch` and is not
+       affected by this change. */
+    flex: 1 1 auto;
+    min-height: 0;
+    background: radial-gradient(circle at 50% 50%, #1c1a16 0%, #050402 100%);
+    overflow: hidden;
+    cursor: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.vt-tools-sniper-stage canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* Scope vignette + crosshair. Drawn via a stacked overlay so the
+   three.js canvas underneath stays untouched. Vignette is a radial
+   gradient that fades to opaque black at the edges, simulating the
+   scope's circular cutout. */
+.vt-tools-sniper-scope {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    background:
+        radial-gradient(
+            circle at 50% 50%,
+            transparent 0%,
+            transparent 38%,
+            rgba(0, 0, 0, 0.55) 42%,
+            rgba(0, 0, 0, 0.92) 48%,
+            #000 56%
+        );
+}
+
+.vt-tools-sniper-crosshair {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 28%;
+    height: auto;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 3;
+    color: rgba(220, 220, 220, 0.65);
+    mix-blend-mode: screen;
+}
+
+/* Mil-dot crosshair color follows theme primary for accent. */
+.vt-tools-sniper-crosshair-line {
+    stroke: currentColor;
+    stroke-width: 1.2;
+    fill: none;
+}
+
+.vt-tools-sniper-crosshair-dot {
+    fill: var(--kb-primary);
+    opacity: 0.85;
+}
+
+.vt-tools-sniper-crosshair-tick {
+    stroke: currentColor;
+    stroke-width: 1;
+    fill: none;
+    opacity: 0.75;
+}
+
+/* ---------------------------------------------------------------- Muzzle flash */
+
+.vt-tools-sniper-muzzle-flash {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+    background:
+        radial-gradient(circle at 50% 50%,
+            rgba(255, 240, 200, 0.85) 0%,
+            rgba(255, 180, 60, 0.55) 12%,
+            rgba(255, 80, 0, 0.20) 30%,
+            transparent 55%);
+    opacity: 0;
+    transition: opacity 60ms ease-out;
+}
+
+.vt-tools-sniper-muzzle-flash--active {
+    opacity: 1;
+}
+
+/* Wrapper that takes the recoil shake. We shake the stage container,
+   not the canvas, so the scope vignette also rocks with the rifle. */
+.vt-tools-sniper-stage--recoil {
+    animation: vtSniperRecoilShake 0.4s ease-out;
+}
+
+@keyframes vtSniperRecoilShake {
+    0%   { transform: translate(0, 0); }
+    10%  { transform: translate(0, -5px); }
+    20%  { transform: translate(0, 2px); }
+    35%  { transform: translate(0, -2px); }
+    55%  { transform: translate(0, 1px); }
+    100% { transform: translate(0, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-sniper-stage--recoil { animation: none; }
+    .vt-tools-sniper-muzzle-flash { transition: none; }
+}
+
+/* ---------------------------------------------------------------- HUD bar */
+
+.vt-tools-sniper-hud {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background-color: var(--kb-bg-card);
+    border-top: 1px solid var(--kb-border-default);
+    color: var(--kb-text-secondary);
+    font-size: 0.85rem;
+}
+
+.vt-tools-sniper-hud-targets {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-feature-settings: "tnum" 1;
+}
+
+.vt-tools-sniper-hud-targets-count {
+    font-weight: 700;
+    color: var(--kb-text-primary);
+}
+
+.vt-tools-sniper-hud-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* ---------------------------------------------------------------- Warning banner
+
+   Surfaces lobby divergence while the modal is open. Mode-agnostic:
+   fires for both live-mode roster events AND manual-mode edits.
+   Hidden by default; toggled via .vt-tools-sniper-warning--visible.
+
+   Positioned absolute on the stage so it overlays the top of the
+   scene without distorting the 16:9 aspect ratio. */
+.vt-tools-sniper-warning {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 5;
+    padding: 0.5rem 0.75rem;
+    background-color: color-mix(in oklab, var(--kb-warning) 22%, #000 78%);
+    color: var(--kb-warning);
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-warning) 45%, transparent);
+    font-size: 0.85rem;
+    line-height: 1.35;
+    display: none;
+    backdrop-filter: blur(2px);
+}
+
+.vt-tools-sniper-warning--visible {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    animation: vtSniperWarningSlide 0.22s ease-out;
+}
+
+@keyframes vtSniperWarningSlide {
+    from { transform: translateY(-6px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-sniper-warning--visible { animation: none; }
+}
+
+.vt-tools-sniper-warning-icon {
+    flex-shrink: 0;
+    font-size: 1rem;
+    margin-top: 1px;
+}
+
+.vt-tools-sniper-warning-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.vt-tools-sniper-warning-headline {
+    font-weight: 600;
+    color: color-mix(in oklab, var(--kb-warning), white 25%);
+    margin-bottom: 0.15rem;
+}
+
+.vt-tools-sniper-warning-detail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.vt-tools-sniper-warning-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background-color: color-mix(in oklab, var(--kb-warning) 18%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-warning) 35%, transparent);
+}
+
+.vt-tools-sniper-warning-name--added   { color: var(--kb-success); border-color: color-mix(in oklab, var(--kb-success) 40%, transparent); background-color: color-mix(in oklab, var(--kb-success) 14%, transparent); }
+.vt-tools-sniper-warning-name--removed { color: var(--kb-danger);  border-color: color-mix(in oklab, var(--kb-danger)  40%, transparent); background-color: color-mix(in oklab, var(--kb-danger)  14%, transparent); }
+
+.vt-tools-sniper-warning-overflow {
+    font-size: 0.78rem;
+    color: var(--kb-text-secondary);
+}
+
+/* ---------------------------------------------------------------- Target reveal label
+
+   Drawn in DOM (positioned over the canvas at the projected target
+   location). Three.js sprite labels were considered but DOM gives
+   cleaner type rendering at low FOV. Updated per-frame by the game. */
+.vt-tools-sniper-reveal {
+    position: absolute;
+    z-index: 4;
+    transform: translate(-50%, -100%);
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.78);
+    border: 1px solid var(--kb-primary);
+    color: var(--kb-text-primary);
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--kb-primary) 18%, transparent),
+                0 4px 16px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+    white-space: nowrap;
+}
+
+.vt-tools-sniper-reveal--visible {
+    opacity: 1;
+    transform: translate(-50%, -110%) scale(1.05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-sniper-reveal { transition: opacity 0.15s linear, transform 0.15s linear; }
+}
+
+/* ---------------------------------------------------------------- Stage loading + error state */
+
+.vt-tools-sniper-loading,
+.vt-tools-sniper-error {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    background-color: rgba(0, 0, 0, 0.85);
+    color: var(--kb-text-secondary);
+    font-size: 0.9rem;
+}
+
+.vt-tools-sniper-error {
+    color: var(--kb-danger);
+}
+
+.vt-tools-sniper-loading-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 3px solid color-mix(in oklab, var(--kb-text-secondary) 35%, transparent);
+    border-top-color: var(--kb-primary);
+    border-radius: 50%;
+    animation: vtSniperSpin 0.9s linear infinite;
+}
+
+@keyframes vtSniperSpin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-tools-sniper-loading-spinner { animation: vtSniperSpin 2.5s linear infinite; }
+}

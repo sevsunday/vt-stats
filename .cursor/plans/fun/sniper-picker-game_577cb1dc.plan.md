@@ -4,28 +4,28 @@ overview: Add a CS2-flavored Sniper picker mode to the Player Picker card on the
 todos:
   - id: vendor-three
     content: Copy three.module.js + LICENSE from _map-analysis/render/vendor/three/ to vendor/three/ (also copy addons/loaders/RGBELoader.js for optional HDRI upgrade path; OrbitControls + DDSLoader NOT needed)
-    status: pending
+    status: completed
   - id: css-overlay
     content: Create css/tools-sniper.css with scope vignette, crosshair SVG, modal sizing, HUD bar, recoil/muzzle flash overlays, fall animation, reveal label, reduced-motion fallback
-    status: pending
+    status: completed
   - id: sniper-game-js
     content: Create js/tools/sniper/sniper-game.js as ES module (Three.js scene, procedural sky/ground/rifle, target placement, mouse-look aim, raycast shoot, recoil controller, WebAudio synth SFX + optional file overrides, fall animation, name reveal, dispose)
-    status: pending
+    status: completed
   - id: sniper-modal-js
     content: Create js/tools/sniper/sniper-modal.js (non-module shim) with method-radio listener, wheel-stage swap, modal lifecycle, dynamic import of sniper-game.js, onShot → wheel-result handoff, reset/cleanup hooks
-    status: pending
+    status: completed
   - id: wheel-api-export
     content: Add window.VTToolsWheel = { showResult, getActivePlayers, removeFromWheel, getRemovedKeys } public API at the bottom of js/tools/wheel.js
-    status: pending
+    status: completed
   - id: html-wiring
     content: "tools/index.html: enable sniper radio, add importmap in <head>, link tools-sniper.css, add #vt-tools-sniper-modal block, append sniper-modal.js script after wheel.js"
-    status: pending
+    status: completed
   - id: assets-readme
     content: Create data/sniper/README.md documenting the optional asset drop-in upgrade path (file names, expected formats, recommended CC0 sources, license attribution template). NO binary asset downloads in this initial pass — game runs fully procedural by default.
-    status: pending
+    status: completed
   - id: smoke-test
     content: "Manual smoke test: (1) page loads with no console errors, (2) switching to Sniper radio swaps the wheel canvas for the TAKE AIM shell, (3) TAKE AIM opens the modal, three.js lazy-loads, scene renders ~60fps, (4) mouse aim moves crosshair smoothly, (5) shooting a target triggers recoil + audio + fall + reveal, (6) wheel-result modal fires with the correct player, (7) Remove-from-wheel button removes the picked player from getActivePlayers() and a re-roll skips them, (8) switching back to Wheel restores the original wheel canvas without state loss, (9) Reset all closes the sniper modal and clears state, (10) dispose verified via DevTools memory snapshot before/after."
-    status: pending
+    status: completed
 isProject: false
 ---
 
