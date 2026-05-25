@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Calibrate map overlay</title>
+  <style>
+    :root {
+      --bg: #0e1015;
+      --panel: #181b22;
+      --panel-border: #2a2f3a;
+      --text: #e2e3e7;
+      --text-muted: #9098a8;
+      --accent: #6aa9ff;
+      --accent-strong: #2563eb;
+      --good: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 24px;
+      min-height: 100vh;
+    }
+    h1 { margin: 0 0 4px 0; font-size: 22px; }
+    h2 { margin: 16px 0 8px 0; font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .canvas-wrap {
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--panel-border);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      image-rendering: pixelated;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+    canvas.dragging { cursor: grabbing; }
+    .canvas-tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(15, 18, 24, 0.95);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.55);
+      max-width: 260px;
+      line-height: 1.45;
+      display: none;
+      z-index: 10;
+    }
+    .canvas-tooltip .ct-title {
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 2px;
+    }
+    .canvas-tooltip .ct-class {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+    .canvas-tooltip .ct-coords {
+      color: var(--good);
+      margin-top: 4px;
+      font-size: 11px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 20px;
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+    }
+    .slider-row {
+      display: grid;
+      grid-template-columns: 80px 1fr 90px;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .slider-row label { font-size: 14px; color: var(--text-muted); font-weight: 600; }
+    .slider-row input[type=range] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .slider-row input[type=number] {
+      background: var(--bg);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      text-align: right;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 9px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-top: 4px;
+    }
+    button:hover { background: var(--accent-strong); }
+    button.secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--panel-border);
+    }
+    button.secondary:hover { color: var(--text); border-color: var(--accent); background: transparent; }
+    pre.json-output {
+      background: var(--bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--good);
+      overflow-x: auto;
+      margin-top: 8px;
+      white-space: pre;
+    }
+    .hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .checkbox-row input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .stat-row span:last-child { font-family: ui-monospace, monospace; color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="canvas-wrap">
+    <canvas id="cv" width="1024" height="1024"></canvas>
+    <div class="canvas-tooltip" id="tooltip">
+      <div class="ct-title" id="ct-title"></div>
+      <div class="ct-class" id="ct-class"></div>
+      <div class="ct-coords" id="ct-coords"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h1 id="map-title">VSR: Loading...</h1>
+    <div class="hint">
+      <strong>Click + drag</strong> on the canvas to pan markers.
+      <strong>Scroll wheel</strong> to zoom around the cursor.
+      Sliders below are for fine-tune nudges. Goal: line up the small dot at
+      each marker's center with the actual base structures on the minimap.
+    </div>
+
+    <h2>Calibration controls</h2>
+    <div class="slider-row">
+      <label>min_x</label>
+      <input type="range" id="r_min_x" min="-1500" max="0" step="1" value="-600">
+      <input type="number" id="n_min_x" step="1" value="-600">
+    </div>
+    <div class="slider-row">
+      <label>max_x</label>
+      <input type="range" id="r_max_x" min="0" max="1500" step="1" value="600">
+      <input type="number" id="n_max_x" step="1" value="600">
+    </div>
+    <div class="slider-row">
+      <label>min_z</label>
+      <input type="range" id="r_min_z" min="-1500" max="0" step="1" value="-600">
+      <input type="number" id="n_min_z" step="1" value="-600">
+    </div>
+    <div class="slider-row">
+      <label>max_z</label>
+      <input type="range" id="r_max_z" min="0" max="1500" step="1" value="600">
+      <input type="number" id="n_max_z" step="1" value="600">
+    </div>
+
+    <div class="stat-row"><span>x width</span><span id="stat-xw">1200</span></div>
+    <div class="stat-row"><span>z depth</span><span id="stat-zd">1200</span></div>
+    <div class="stat-row"><span>x center</span><span id="stat-xc">0</span></div>
+    <div class="stat-row"><span>z center</span><span id="stat-zc">0</span></div>
+
+    <div style="margin-top:14px;">
+      <button class="secondary" id="btn-reset-trn">Reset to .TRN</button>
+      <button class="secondary" id="btn-reset-600">Reset to &plusmn;600</button>
+      <button class="secondary" id="btn-lock-aspect">Link X &harr; Z (1:1)</button>
+    </div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="cb-symmetric" checked>
+      <label for="cb-symmetric">Symmetric mode (max = -min)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="cb-show-grid">
+      <label for="cb-show-grid">Show world-coord grid (100m lines)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="cb-show-loose" checked>
+      <label for="cb-show-loose">Show loose scrap dots</label>
+    </div>
+
+    <h2>Output</h2>
+    <div class="hint" id="initial-banner" style="display:none;"></div>
+    <pre class="json-output" id="json-out"></pre>
+    <button id="btn-copy">Copy JSON</button>
+    <button id="btn-download">Download calibration.json</button>
+    <div class="hint" style="margin-top:8px;">
+      Save the downloaded <span class="mono">calibration.json</span> into
+      <span class="mono">_map-analysis/vsrmaplist/&lt;your map&gt;/</span> &mdash; the
+      next time you re-run <span class="mono">build_vsrmaplist_browser.py</span>
+      the page will open with these values pre-loaded and the index will mark
+      this map as <strong>Calibrated</strong>.
+    </div>
+  </div>
+
+  <script>
+    const payload = {"map_name": "VSR: Mountain Top", "terrain_name": "MtntopBZCC", "img_w": 128, "img_h": 128, "mini_data_url": "data:image/png;base64,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", "objects": [{"kind": "spawn_point", "obj_class": "pspwn_1", "unit_name": "", "db_category": "", "x": -219.92100524902344, "z": -432.64801025390625, "color": "#5dadff", "radius": 12, "letter": "S"}, {"kind": "spawn_point", "obj_class": "pspwn_1", "unit_name": "", "db_category": "", "x": 306.7969970703125, "z": 367.96099853515625, "color": "#5dadff", "radius": 12, "letter": "S"}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 14.52079963684082, "z": -22.320100784301758, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -5.445040225982666, "z": -30.480899810791016, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -9.356229782104492, "z": -47.85860061645508, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -4.032169818878174, "z": -67.47640228271484, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 13.548999786376953, "z": -71.20850372314453, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 36.48649978637695, "z": -65.96209716796875, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 40.08209991455078, "z": -50.07870101928711, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 36.924800872802734, "z": -30.643999099731445, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -20.031400680541992, "z": 0.9209020137786865, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 10.41670036315918, "z": 11.248200416564941, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 52.79439926147461, "z": -0.4074400067329407, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -26.206499099731445, "z": -95.5624008178711, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 13.974900245666504, "z": -110.37899780273438, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 52.549400329589844, "z": -101.63700103759766, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -53.56829833984375, "z": -191.93600463867188, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 5.877739906311035, "z": -215.18299865722656, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 61.75699996948242, "z": -201.32899475097656, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -45.29669952392578, "z": 85.33920288085938, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 28.145099639892578, "z": 100.08799743652344, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 88.0636978149414, "z": 67.40119934082031, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 228.26600646972656, "z": 342.77899169921875, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 229.3209991455078, "z": 331.5450134277344, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 241.72300720214844, "z": 343.6789855957031, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 251.38600158691406, "z": 329.24700927734375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 241.04600524902344, "z": 335.510009765625, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 237.39700317382812, "z": 324.9729919433594, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 73.00990295410156, "z": 310.1210021972656, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 73.42610168457031, "z": 292.90399169921875, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 91.785400390625, "z": 307.2030029296875, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 89.9468994140625, "z": 294.2130126953125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 82.47440338134766, "z": 301.125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 83.03050231933594, "z": 313.885986328125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -90.7656021118164, "z": 410.34698486328125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -87.76820373535156, "z": 394.7749938964844, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -72.67469787597656, "z": 412.6159973144531, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -70.98300170898438, "z": 398.1419982910156, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -79.80449676513672, "z": 403.28900146484375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -79.15619659423828, "z": 387.3330078125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 427.9649963378906, "z": 331.9010009765625, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 457.0710144042969, "z": 282.91900634765625, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 496.08599853515625, "z": 215.35000610351562, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 503.5830078125, "z": 139.76199340820312, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 485.56298828125, "z": 78.44819641113281, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 476.8089904785156, "z": -3.034019947052002, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -184.42999267578125, "z": -356.89300537109375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -185.4530029296875, "z": -371.260986328125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -167.7519989013672, "z": -355.72198486328125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -167.09100341796875, "z": -375.9849853515625, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -174.5540008544922, "z": -365.24798583984375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -177.83799743652344, "z": -381.2080078125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 4.252880096435547, "z": -325.58599853515625, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 21.069799423217773, "z": -325.2799987792969, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 17.870500564575195, "z": -336.84698486328125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 7.625490188598633, "z": -344.8999938964844, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 24.7677001953125, "z": -344.9490051269531, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 28.758800506591797, "z": -334.64801025390625, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 135.07200622558594, "z": -453.0719909667969, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 133.6300048828125, "z": -468.6000061035156, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 148.6719970703125, "z": -452.8760070800781, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 152.25599670410156, "z": -471.9739990234375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 143.2480010986328, "z": -462.0150146484375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 139.2760009765625, "z": -479.4389953613281, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -335.29901123046875, "z": -387.7699890136719, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -396.7359924316406, "z": -344.5320129394531, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -432.04400634765625, "z": -288.1940002441406, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -435.6960144042969, "z": -215.45399475097656, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -420.7539978027344, "z": -146.28599548339844, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -415.6319885253906, "z": -78.38279724121094, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -411.2139892578125, "z": 301.2650146484375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -476.6369934082031, "z": 331.2829895019531, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -469.80999755859375, "z": 276.4179992675781, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 440.69500732421875, "z": -335.177001953125, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 517.843994140625, "z": -316.9649963378906, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 482.7539978027344, "z": -380.6440124511719, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscr1", "unit_name": "Scrap", "db_category": "Misc", "x": -476.3680114746094, "z": 330.99700927734375, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscr1", "unit_name": "Scrap", "db_category": "Misc", "x": -410.9859924316406, "z": 301.1759948730469, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscr1", "unit_name": "Scrap", "db_category": "Misc", "x": -469.7959899902344, "z": 276.2030029296875, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscr2", "unit_name": "Scrap", "db_category": "Misc", "x": 482.7950134277344, "z": -380.9209899902344, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscr2", "unit_name": "Scrap", "db_category": "Misc", "x": 441.00799560546875, "z": -335.7720031738281, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscr2", "unit_name": "Scrap", "db_category": "Misc", "x": 518.0609741210938, "z": -316.9930114746094, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "scrap_pool", "obj_class": "aegmtn01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 16.0, "z": -48.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "aegmtn01", "unit_name": "Biometal Pool", "db_category": "Building", "x": -304.0, "z": -432.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "aegmtn01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 336.0, "z": -432.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "aegmtn01", "unit_name": "Biometal Pool", "db_category": "Building", "x": -400.0, "z": -16.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "aegmtn01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 464.0, "z": -48.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "aegmtn01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 400.0, "z": 368.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "aegmtn01", "unit_name": "Biometal Pool", "db_category": "Building", "x": -304.0, "z": 400.0, "color": "#ffd24a", "radius": 10, "letter": "P"}], "trn_bounds": {"min_x": -2048.0, "max_x": 2048.0, "min_z": -2048.0, "max_z": 2048.0}, "initial_bounds": {"min_x": -657.5413970947266, "max_x": 721.0323638916016, "min_z": -716.7028427124023, "max_z": 709.5858383178711}, "initial_bounds_source": "inferred", "has_saved": false};
+
+    const UPSCALE = 8;
+    const cv = document.getElementById("cv");
+    const ctx = cv.getContext("2d");
+    cv.width = payload.img_w * UPSCALE;
+    cv.height = payload.img_h * UPSCALE;
+    cv.style.width = (payload.img_w * UPSCALE / 2) + "px"; // shrink for display
+
+    document.getElementById("map-title").textContent = payload.map_name;
+
+    const img = new Image();
+    img.src = payload.mini_data_url;
+
+    const state = {
+      min_x: payload.initial_bounds.min_x,
+      max_x: payload.initial_bounds.max_x,
+      min_z: payload.initial_bounds.min_z,
+      max_z: payload.initial_bounds.max_z,
+      symmetric: true,
+      show_grid: false,
+      show_loose: true,
+    };
+
+    function worldToPx(wx, wz) {
+      const px = (wx - state.min_x) / (state.max_x - state.min_x) * cv.width;
+      const py = cv.height - (wz - state.min_z) / (state.max_z - state.min_z) * cv.height;
+      return [px, py];
+    }
+
+    function draw() {
+      if (!img.complete) return;
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.strokeRect(0.5, 0.5, cv.width - 1, cv.height - 1);
+
+      if (state.show_grid) {
+        ctx.strokeStyle = "rgba(255,220,0,0.2)";
+        ctx.lineWidth = 1;
+        for (let w = -1500; w <= 1500; w += 100) {
+          const [px, _] = worldToPx(w, 0);
+          if (px >= 0 && px <= cv.width) {
+            ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, cv.height); ctx.stroke();
+          }
+          const [_2, py] = worldToPx(0, w);
+          if (py >= 0 && py <= cv.height) {
+            ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(cv.width, py); ctx.stroke();
+          }
+        }
+      }
+
+      const [ox, oy] = worldToPx(0, 0);
+      ctx.strokeStyle = "rgba(255,220,0,0.85)";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(ox - 14, oy); ctx.lineTo(ox + 14, oy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ox, oy - 14); ctx.lineTo(ox, oy + 14); ctx.stroke();
+
+      const layer = ["ai_path","marker","pilot","loose_scrap","mission_script",
+                     "starting_unit","player_slot","recycler","geyser","spawn_point","scrap_pool"];
+      const byKind = {};
+      for (const o of payload.objects) (byKind[o.kind] = byKind[o.kind] || []).push(o);
+
+      for (const k of layer) {
+        if (k === "loose_scrap" && !state.show_loose) continue;
+        for (const o of (byKind[k] || [])) {
+          const [cx, cy] = worldToPx(o.x, o.z);
+          const r = Math.min(o.radius * (UPSCALE / 4), 24);
+          ctx.fillStyle = hexA(o.color, 0x55);
+          ctx.strokeStyle = o.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = "#000";
+          ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = o.color; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.stroke();
+          if (o.letter) {
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 14px monospace";
+            ctx.fillText(o.letter, cx + r + 3, cy - r + 6);
+          }
+        }
+      }
+    }
+
+    function hexA(hex, alpha) {
+      const a = (alpha & 0xff).toString(16).padStart(2, "0");
+      return hex + a;
+    }
+
+    function updateStats() {
+      const xw = state.max_x - state.min_x;
+      const zd = state.max_z - state.min_z;
+      document.getElementById("stat-xw").textContent = xw.toFixed(0);
+      document.getElementById("stat-zd").textContent = zd.toFixed(0);
+      document.getElementById("stat-xc").textContent = ((state.max_x + state.min_x) / 2).toFixed(0);
+      document.getElementById("stat-zc").textContent = ((state.max_z + state.min_z) / 2).toFixed(0);
+
+      const cal = {
+        image_calibration: {
+          image_bounds_world: {
+            min: { x: Math.round(state.min_x), z: Math.round(state.min_z) },
+            max: { x: Math.round(state.max_x), z: Math.round(state.max_z) },
+          },
+          note: "calibrated by overlaying BZN pool/spawn positions on minimap",
+        }
+      };
+      document.getElementById("json-out").textContent = JSON.stringify(cal, null, 2);
+    }
+
+    function setVal(key, val) {
+      state[key] = val;
+      const sym = state.symmetric;
+      if (sym) {
+        if (key === "min_x") state.max_x = -val;
+        else if (key === "max_x") state.min_x = -val;
+        else if (key === "min_z") state.max_z = -val;
+        else if (key === "max_z") state.min_z = -val;
+      }
+      syncInputs();
+      updateStats();
+      draw();
+    }
+
+    function syncInputs() {
+      for (const k of ["min_x","max_x","min_z","max_z"]) {
+        document.getElementById("r_" + k).value = state[k];
+        document.getElementById("n_" + k).value = Math.round(state[k]);
+      }
+    }
+
+    for (const k of ["min_x","max_x","min_z","max_z"]) {
+      document.getElementById("r_" + k).addEventListener("input", e => setVal(k, parseFloat(e.target.value)));
+      document.getElementById("n_" + k).addEventListener("change", e => setVal(k, parseFloat(e.target.value)));
+    }
+    document.getElementById("cb-symmetric").addEventListener("change", e => {
+      state.symmetric = e.target.checked;
+    });
+    document.getElementById("cb-show-grid").addEventListener("change", e => {
+      state.show_grid = e.target.checked; draw();
+    });
+    document.getElementById("cb-show-loose").addEventListener("change", e => {
+      state.show_loose = e.target.checked; draw();
+    });
+    document.getElementById("btn-reset-trn").addEventListener("click", () => {
+      const tb = payload.trn_bounds;
+      state.min_x = tb.min_x; state.max_x = tb.max_x;
+      state.min_z = tb.min_z; state.max_z = tb.max_z;
+      syncInputs(); updateStats(); draw();
+    });
+    document.getElementById("btn-reset-600").addEventListener("click", () => {
+      state.min_x = -600; state.max_x = 600;
+      state.min_z = -600; state.max_z = 600;
+      syncInputs(); updateStats(); draw();
+    });
+    document.getElementById("btn-lock-aspect").addEventListener("click", () => {
+      const cx = (state.min_x + state.max_x) / 2;
+      const cz = (state.min_z + state.max_z) / 2;
+      const w = (state.max_x - state.min_x);
+      const d = (state.max_z - state.min_z);
+      const m = (w + d) / 2;
+      state.min_x = cx - m / 2; state.max_x = cx + m / 2;
+      state.min_z = cz - m / 2; state.max_z = cz + m / 2;
+      syncInputs(); updateStats(); draw();
+    });
+    document.getElementById("btn-copy").addEventListener("click", async () => {
+      const text = document.getElementById("json-out").textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        const b = document.getElementById("btn-copy");
+        b.textContent = "Copied!";
+        setTimeout(() => b.textContent = "Copy JSON", 1200);
+      } catch (e) {
+        alert("Copy failed; select the JSON above manually.");
+      }
+    });
+
+    document.getElementById("btn-download").addEventListener("click", () => {
+      const text = document.getElementById("json-out").textContent;
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "calibration.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 200);
+    });
+
+    // --- Canvas interactions: click-drag to pan, wheel to zoom ----------------
+
+    function cssToCanvasPx(evt) {
+      // The canvas is displayed at half its internal resolution (style.width =
+      // cv.width / 2) so a 1 CSS-px mouse delta is 2 canvas-px on each axis.
+      const rect = cv.getBoundingClientRect();
+      const sx = cv.width / rect.width;
+      const sy = cv.height / rect.height;
+      return {
+        cx: (evt.clientX - rect.left) * sx,
+        cy: (evt.clientY - rect.top) * sy,
+        sx, sy,
+      };
+    }
+
+    function turnOffSymmetric() {
+      if (state.symmetric) {
+        state.symmetric = false;
+        document.getElementById("cb-symmetric").checked = false;
+      }
+    }
+
+    let drag = null;
+    cv.addEventListener("pointerdown", (e) => {
+      const p = cssToCanvasPx(e);
+      drag = {
+        start_canvas_px: { x: p.cx, y: p.cy },
+        start_bounds: { ...state },
+        scale: { sx: p.sx, sy: p.sy },
+        moved: false,
+      };
+      cv.classList.add("dragging");
+      cv.setPointerCapture(e.pointerId);
+    });
+    cv.addEventListener("pointermove", (e) => {
+      const p = cssToCanvasPx(e);
+      if (drag) {
+        const dx_px = p.cx - drag.start_canvas_px.x;
+        const dy_px = p.cy - drag.start_canvas_px.y;
+        if (Math.abs(dx_px) > 1 || Math.abs(dy_px) > 1) {
+          drag.moved = true;
+          turnOffSymmetric();
+        }
+        const sb = drag.start_bounds;
+        const x_range = sb.max_x - sb.min_x;
+        const z_range = sb.max_z - sb.min_z;
+        // Pan in world space so the world point under the cursor stays under the cursor.
+        // dx_px > 0 (drag right) -> bounds shift left (markers move right)
+        // dy_px > 0 (drag down)  -> bounds shift up in world (markers move down)
+        const dx_world = dx_px * x_range / cv.width;
+        const dy_world = dy_px * z_range / cv.height;
+        state.min_x = sb.min_x - dx_world;
+        state.max_x = sb.max_x - dx_world;
+        state.min_z = sb.min_z + dy_world;
+        state.max_z = sb.max_z + dy_world;
+        syncInputs(); updateStats(); draw();
+        hideTooltip();
+      } else {
+        updateTooltip(e, p);
+      }
+    });
+
+    // --- Hover tooltip: pick nearest visible marker within HIT_PX ---------------
+
+    const HIT_PX = 24;  // canvas-px hit radius (~12 CSS-px given the 2x display)
+    const tooltipEl = document.getElementById("tooltip");
+    const ctTitle = document.getElementById("ct-title");
+    const ctClass = document.getElementById("ct-class");
+    const ctCoords = document.getElementById("ct-coords");
+
+    function hideTooltip() {
+      tooltipEl.style.display = "none";
+    }
+
+    function updateTooltip(evt, p) {
+      let best = null;
+      let bestDist = HIT_PX * HIT_PX;
+      for (const o of payload.objects) {
+        if (o.kind === "loose_scrap" && !state.show_loose) continue;
+        const [cx, cy] = worldToPx(o.x, o.z);
+        const dx = cx - p.cx;
+        const dy = cy - p.cy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestDist) {
+          bestDist = d2;
+          best = o;
+        }
+      }
+      if (!best) {
+        hideTooltip();
+        return;
+      }
+      const niceName = best.unit_name || prettyKind(best.kind);
+      ctTitle.textContent = niceName;
+      const classBits = [best.obj_class];
+      if (best.db_category) classBits.push(best.db_category);
+      ctClass.textContent = classBits.join("  -  ");
+      ctCoords.textContent = "world (x=" + best.x.toFixed(1) + ", z=" + best.z.toFixed(1) + ")";
+
+      // Position next to cursor, clamped inside .canvas-wrap so it never
+      // extends past the right/bottom edges and gets clipped by overflow:hidden.
+      const wrap = cv.parentElement.getBoundingClientRect();
+      tooltipEl.style.display = "block";
+      const ttRect = tooltipEl.getBoundingClientRect();
+      let left = evt.clientX - wrap.left + 14;
+      let top = evt.clientY - wrap.top + 14;
+      if (left + ttRect.width > wrap.width - 8) {
+        left = (evt.clientX - wrap.left) - ttRect.width - 14;
+      }
+      if (top + ttRect.height > wrap.height - 8) {
+        top = (evt.clientY - wrap.top) - ttRect.height - 14;
+      }
+      tooltipEl.style.left = Math.max(4, left) + "px";
+      tooltipEl.style.top = Math.max(4, top) + "px";
+    }
+
+    function prettyKind(k) {
+      return ({
+        "scrap_pool":   "Scrap Pool",
+        "loose_scrap":  "Loose Scrap",
+        "spawn_point":  "Spawn Point",
+      })[k] || k;
+    }
+
+    cv.addEventListener("pointerleave", hideTooltip);
+    function endDrag(e) {
+      if (!drag) return;
+      try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+      drag = null;
+      cv.classList.remove("dragging");
+    }
+    cv.addEventListener("pointerup", endDrag);
+    cv.addEventListener("pointercancel", endDrag);
+    cv.addEventListener("pointerleave", endDrag);
+
+    // Wheel = zoom around the cursor. World point under cursor stays put.
+    cv.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const p = cssToCanvasPx(e);
+      // Each wheel tick scales by ~7% (capped to one tick per event)
+      const ZOOM_PER_TICK = 1.07;
+      // deltaY > 0 = scroll down = zoom OUT (range grows)
+      // deltaY < 0 = scroll up   = zoom IN  (range shrinks)
+      const dir = Math.sign(e.deltaY);
+      if (dir === 0) return;
+      const factor = dir > 0 ? ZOOM_PER_TICK : 1 / ZOOM_PER_TICK;
+      // Cursor world coords (using current bounds)
+      const cursor_world_x = state.min_x + (p.cx / cv.width) * (state.max_x - state.min_x);
+      const cursor_world_z = state.min_z + ((cv.height - p.cy) / cv.height) * (state.max_z - state.min_z);
+      // Scale the rectangle around the cursor world point
+      state.min_x = cursor_world_x + (state.min_x - cursor_world_x) * factor;
+      state.max_x = cursor_world_x + (state.max_x - cursor_world_x) * factor;
+      state.min_z = cursor_world_z + (state.min_z - cursor_world_z) * factor;
+      state.max_z = cursor_world_z + (state.max_z - cursor_world_z) * factor;
+      // A non-uniform pre-existing calibration could re-align under symmetric;
+      // but in general wheel zoom can keep symmetry intact if it was on.
+      const isStillSymmetric =
+        Math.abs(state.min_x + state.max_x) < 0.001 &&
+        Math.abs(state.min_z + state.max_z) < 0.001;
+      if (!isStillSymmetric) turnOffSymmetric();
+      syncInputs(); updateStats(); draw();
+    }, { passive: false });
+
+    // Initialize state from payload (handles saved / inferred / TRN / default).
+    state.min_x = payload.initial_bounds.min_x;
+    state.max_x = payload.initial_bounds.max_x;
+    state.min_z = payload.initial_bounds.min_z;
+    state.max_z = payload.initial_bounds.max_z;
+
+    // Show a friendly status banner explaining which assumption the page opened with.
+    const banner = document.getElementById("initial-banner");
+    const SOURCE_MESSAGES = {
+      "saved":    '<span style="color: var(--good);">&#10003;</span> Loaded saved calibration from <span class="mono">calibration.json</span>. Tweak below as needed.',
+      "inferred": 'Initial bounds <em>inferred from object positions</em> (placed pools/spawns/scrap, padded ~25% outward). Drag the canvas to align with the minimap.',
+      "trn":      'Initial bounds from the <span class="mono">.TRN [Size]</span> block. NB: the terrain mesh is often larger than the minimap actually shows.',
+      "default":  'No object data found - opened with the &plusmn;625 m default. Drag the canvas to position.',
+    };
+    const msg = SOURCE_MESSAGES[payload.initial_bounds_source];
+    if (msg) {
+      banner.innerHTML = msg;
+      banner.style.display = "block";
+    }
+
+    if (payload.has_saved) {
+      // Asymmetric saved calibrations would fight symmetric mode -> turn it off
+      const isSymmetric = (state.min_x === -state.max_x) && (state.min_z === -state.max_z);
+      if (!isSymmetric) {
+        state.symmetric = false;
+        document.getElementById("cb-symmetric").checked = false;
+      }
+    } else if (payload.initial_bounds_source === "inferred") {
+      // Inferred bounds are generally asymmetric too (object placement is rarely
+      // perfectly centered). Pre-flip the toggle so the first drag doesn't snap.
+      const isSymmetric =
+        Math.abs(state.min_x + state.max_x) < 0.001 &&
+        Math.abs(state.min_z + state.max_z) < 0.001;
+      if (!isSymmetric) {
+        state.symmetric = false;
+        document.getElementById("cb-symmetric").checked = false;
+      }
+    }
+
+    img.addEventListener("load", () => { syncInputs(); updateStats(); draw(); });
+  </script>
+</body>
+</html>

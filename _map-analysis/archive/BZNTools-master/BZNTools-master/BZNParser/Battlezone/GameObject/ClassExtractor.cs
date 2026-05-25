@@ -1,0 +1,149 @@
+﻿using BZNParser.Tokenizer;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace BZNParser.Battlezone.GameObject
+{
+    [ObjectClass(BZNFormat.Battlezone2, "extractor")]
+    public class ClassExtractorFactory : IClassFactory
+    {
+        public bool Create(BZNFileBattlezone parent, BZNStreamReader reader, EntityDescriptor preamble, string classLabel, out Entity? obj, bool create = true)
+        {
+            obj = null;
+            if (create)
+            {
+                obj = new ClassExtractor(preamble, classLabel);
+                obj.DisableMalformationAutoFix();
+            }
+            try
+            {
+                return ClassExtractor.Hydrate(parent, reader, obj as ClassExtractor).Success;
+            }
+            finally
+            {
+                obj?.EnableMalformationAutoFix();
+            }
+        }
+    }
+    public class ClassExtractor : ClassBuilding
+    {
+        public float scrapTimer { get; set; }
+        public bool animStart { get; set; }
+        //public string saveLabel { get; set; }
+        //public string saveName { get; set; }
+
+        public ClassExtractor(EntityDescriptor preamble, string classLabel) : base(preamble, classLabel)
+        {
+            scrapTimer = 0;
+            animStart = false;
+            //saveLabel = string.Empty;
+            //saveName = string.Empty;
+        }
+
+        public override void ClearMalformations()
+        {
+            Malformations.Clear();
+            base.ClearMalformations();
+        }
+
+        public override void DisableMalformationAutoFix()
+        {
+            base.DisableMalformationAutoFix();
+        }
+
+        public override void EnableMalformationAutoFix()
+        {
+            base.EnableMalformationAutoFix();
+        }
+
+
+        public static ParseResult Hydrate(BZNFileBattlezone parent, BZNStreamReader reader, ClassExtractor? obj)
+        {
+            IBZNToken? tok;
+
+            tok = reader.ReadToken();
+            if (tok == null || !tok.Validate("scrapTimer", BinaryFieldType.DATA_FLOAT))
+                return ParseResult.Fail("Failed to parse scrapTimer/FLOAT");
+            tok.ApplySingle(obj, x => x.scrapTimer, format: reader.FloatFormat);
+
+            if (reader.Version < 1147)
+            {
+                //tok = reader.ReadToken();
+                //if (!tok.Validate("saveClass", BinaryFieldType.DATA_CHAR)) throw new Exception("Failed to parse saveClass/CHAR");
+                //string saveClass = tok.GetString();
+                //if (obj != null) obj.saveClass = obj.Malformations.AddBinaryMessString("saveClass", saveClass);
+                //string saveClass = reader.ReadGameObjectClass_BZ2(parent, "saveClass", obj?.Malformations);
+                //if (obj != null) obj.saveClass = saveClass;
+                (_, string saveClass) = reader.ReadSizedString("saveClass", obj, x => x.saveClass);
+
+                if (!string.IsNullOrEmpty(saveClass))
+                {
+                    tok = reader.ReadToken();
+                    if (tok == null || !tok.Validate("saveTeam", BinaryFieldType.DATA_LONG))
+                        return ParseResult.Fail("Failed to parse saveTeam/LONG");
+                    tok.ApplyInt32(obj, x => x.saveTeam);
+
+                    tok = reader.ReadToken();
+                    if (tok == null || !tok.Validate("saveSeqno", BinaryFieldType.DATA_LONG))
+                        return ParseResult.Fail("Failed to parse saveSeqno/LONG");
+                    //if (obj != null) obj.saveSeqno = tok.GetInt32H();
+                    tok.ApplyUInt32h(obj, x => x.saveSeqno); // Int32?
+
+                    //string saveLabel = reader.ReadSizedString_BZ2_1145("saveLabel", 32, obj?.Malformations);
+                    //if (obj != null) obj.saveLabel = saveLabel;
+                    reader.ReadSizedString("saveLabel", obj, x => x.saveLabel);
+                    //string saveName = reader.ReadSizedString_BZ2_1145("saveName", 32, obj?.Malformations);
+                    //if (obj != null) obj.saveName = saveName;
+                    reader.ReadSizedString("saveName", obj, x => x.saveName);
+                }
+            }
+
+            if (reader.Version > 1102)
+            {
+                tok = reader.ReadToken();
+                if (tok == null || !tok.Validate("animStart", BinaryFieldType.DATA_BOOL))
+                    return ParseResult.Fail("Failed to parse animStart/BOOL");
+                tok.ApplyBoolean(obj, x => x.animStart);
+            }
+
+            return ClassBuilding.Hydrate(parent, reader, obj as ClassBuilding);
+        }
+
+        public override void Write(BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            Dehydrate(this, parent, writer, binary, save);
+        }
+
+        public static void Dehydrate(ClassExtractor obj, BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            writer.WriteSingle("scrapTimer", obj, x => x.scrapTimer);
+            if (writer.Version < 1147)
+            {
+                //writer.WriteChars("saveClass", obj.saveClass, obj.Malformations);
+                //writer.WriteGameObjectClass_BZ2(parent, "saveClass", obj.saveClass ?? string.Empty, obj.Malformations);
+                writer.WriteSizedString("saveClass", obj, x => x.saveClass);
+
+                if (!string.IsNullOrEmpty(obj.saveClass.Value))
+                {
+                    writer.WriteInt32("saveTeam", obj, x => x.saveTeam);
+
+                    // this was a short until a version 1128 file (going backwards) where it is a long
+                    //writer.WriteUnsignedHexLValues("saveSeqno", (UInt32)obj.saveSeqno); // unsure if this down-cast is safe, if bool writes LONG instead of SHORT it doesn't
+                    writer.WriteUInt32h("saveSeqno", obj, x => x.saveSeqno);
+
+                    //writer.WriteSizedString_BZ2_1145("saveLabel", 32, obj.saveLabel, obj.Malformations); // TODO: figure out what this actually does
+                    writer.WriteSizedString("saveLabel", obj, x => x.saveLabel);
+                    //writer.WriteSizedString_BZ2_1145("saveName", 32, obj.saveName, obj.Malformations); // TODO: figure out what this actually does
+                    writer.WriteSizedString("saveName", obj, x => x.saveName);
+                }
+            }
+            if (writer.Version > 1102)
+            {
+                writer.WriteBoolean("animStart", obj, x => x.animStart);
+            }
+            ClassBuilding.Dehydrate(obj, parent, writer, binary, save);
+        }
+    }
+}

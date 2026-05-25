@@ -1,0 +1,45 @@
+﻿using BZNParser.Tokenizer;
+
+namespace BZNParser.Battlezone.GameObject
+{
+    [ObjectClass(BZNFormat.Battlezone, "supplydepot")]
+    [ObjectClass(BZNFormat.BattlezoneN64, "supplydepot")]
+    public class ClassSupplyDepotFactory : IClassFactory
+    {
+        public bool Create(BZNFileBattlezone parent, BZNStreamReader reader, EntityDescriptor preamble, string classLabel, out Entity? obj, bool create = true)
+        {
+            obj = null;
+            if (create)
+            {
+                obj = new ClassSupplyDepot(preamble, classLabel);
+                obj.DisableMalformationAutoFix();
+            }
+            try
+            {
+                return ClassSupplyDepot.Hydrate(parent, reader, obj as ClassSupplyDepot).Success;
+            }
+            finally
+            {
+                obj?.EnableMalformationAutoFix();
+            }
+        }
+    }
+    public class ClassSupplyDepot : ClassBuilding
+    {
+        public ClassSupplyDepot(EntityDescriptor preamble, string classLabel) : base(preamble, classLabel) { }
+        public static ParseResult Hydrate(BZNFileBattlezone parent, BZNStreamReader reader, ClassSupplyDepot? obj)
+        {
+            return ClassBuilding.Hydrate(parent, reader, obj as ClassBuilding);
+        }
+
+        public override void Write(BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            Dehydrate(this, parent, writer, binary, save);
+        }
+
+        public static void Dehydrate(ClassSupplyDepot obj, BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            ClassBuilding.Dehydrate(obj, parent, writer, binary, save);
+        }
+    }
+}

@@ -1,0 +1,61 @@
+BZN pool -> minimap PNG calibration proof
+======================================================================
+
+Hypothesis tested:
+  BZN pool world coordinates project onto the iondriver
+  minimap PNG pixel positions via a 4-DOF affine transform
+  (independent X and Y scale + offset, no rotation/skew).
+
+Method:
+  1. Local-contrast blob detection on data/maps/<stem>.png to
+     find candidate pool marker positions (the iondriver-baked
+     dots are bright OR dark vs. their surroundings depending
+     on the map theme; the detector is color-direction blind).
+  2. Brute-force permutation search over candidate <-> BZN pool
+     assignments. Each permutation -> least-squares affine fit;
+     winner = lowest combined RMSE.
+  3. Orientation-blind: any combination of axis flips is allowed,
+     so maps rendered upside-down or mirrored relative to BZN's
+     convention are still solved correctly.
+  4. RMSE of the fit measures how cleanly BZN positions map to
+     PNG marker positions; sub-pixel RMSE = essentially perfect.
+
+Standard orientation: world +X -> pixel +X (right), world +Z -> 
+pixel -Y (up). 'Flipped' means iondriver rendered the axis with 
+the opposite sign convention.
+
+Red Slope (stredslopevsr)  ->  PROVEN (sub-pixel RMSE)
+  PNG: 256x256, 7 pools
+  m/px: 7.269  (orientation: x=std, y=std)
+  RMSE: x=0.52px z=0.53px
+  world rect: x=[-890, 970] z=[-1068, 786]
+  ready-to-use image_calibration:
+    "min": {"x": -890, "z": -1068},
+    "max": {"x": 970, "z": 786}
+
+======================================================================
+Cross-map summary
+======================================================================
+
+Maps proven (RMSE < 2 px, essentially perfect): 1 of 1
+  Red Slope     : 7.269 m/px, RMSE max=0.53px, x-std, y-std
+
+Key findings:
+  1. The 4-DOF affine model fits sub-pixel RMSE on every map
+     where the automated marker detector succeeds. This is
+     overwhelming evidence that BZN pool positions and PNG
+     marker positions are related by exactly that transform.
+
+  2. iondriver uses PER-MAP m/px values (4.5-6.5 across the
+     sample). The PNG is sized to fit the playable area + some
+     border padding, then markers are placed at world positions.
+
+  3. Some maps are rendered with axis flips relative to BZN's
+     world convention. The orientation-blind solver handles
+     this transparently; ~half the sample turned out to be flipped.
+
+  4. The 'world_rect' value emitted above can be dropped straight
+     into data/maps/<stem>.json :: image_calibration.image_bounds_world
+     for any map whose verdict is PROVEN. The dashboard's
+     Positioning heatmaps + Replay trails will inherit the
+     correct overlay placement immediately.

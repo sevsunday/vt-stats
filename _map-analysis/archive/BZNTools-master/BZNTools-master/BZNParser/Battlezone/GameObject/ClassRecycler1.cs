@@ -1,0 +1,81 @@
+﻿using BZNParser.Tokenizer;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace BZNParser.Battlezone.GameObject
+{
+    [ObjectClass(BZNFormat.Battlezone, "recycler")]
+    [ObjectClass(BZNFormat.BattlezoneN64, "recycler")]
+    public class ClassRecycler1Factory : IClassFactory
+    {
+        public bool Create(BZNFileBattlezone parent, BZNStreamReader reader, EntityDescriptor preamble, string classLabel, out Entity? obj, bool create = true)
+        {
+            obj = null;
+            if (create)
+            {
+                obj = new ClassRecycler1(preamble, classLabel);
+                obj.DisableMalformationAutoFix();
+            }
+            try
+            {
+                return ClassRecycler1.Hydrate(parent, reader, obj as ClassRecycler1).Success;
+            }
+            finally
+            {
+                obj?.EnableMalformationAutoFix();
+            }
+        }
+    }
+    public class ClassRecycler1 : ClassProducer
+    {
+        public UInt32 undefptr { get; set; }
+
+        public ClassRecycler1(EntityDescriptor preamble, string classLabel) : base(preamble, classLabel)
+        {
+            this.undefptr = 0;
+        }
+
+        public override void ClearMalformations()
+        {
+            Malformations.Clear();
+            base.ClearMalformations();
+        }
+
+        public override void DisableMalformationAutoFix()
+        {
+            base.DisableMalformationAutoFix();
+        }
+
+        public override void EnableMalformationAutoFix()
+        {
+            base.EnableMalformationAutoFix();
+        }
+
+
+        public static ParseResult Hydrate(BZNFileBattlezone parent, BZNStreamReader reader, ClassRecycler1? obj)
+        {
+            IBZNToken? tok = reader.ReadToken();
+            if (tok == null || !tok.Validate("undefptr", BinaryFieldType.DATA_PTR))
+                return ParseResult.Fail("Failed to parse undefptr/PTR");
+            //if (obj != null) obj.undefptr = tok.GetUInt32H(); // dropObj
+            tok.ApplyUInt32H8(obj, x => x.undefptr);
+
+            return ClassProducer.Hydrate(parent, reader, obj as ClassProducer);
+        }
+
+        public override void Write(BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            Dehydrate(this, parent, writer, binary, save);
+        }
+
+        public static void Dehydrate(ClassRecycler1 obj, BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            //writer.WriteBZ1_Ptr("undefptr", obj.undefptr); // dropObj
+            writer.WritePtr("undefptr", obj, x => x.undefptr);
+
+            ClassProducer.Dehydrate(obj, parent, writer, binary, save);
+        }
+    }
+}

@@ -1,0 +1,93 @@
+﻿using BZNParser.Tokenizer;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
+namespace BZNParser.Battlezone.GameObject
+{
+    [ObjectClass(BZNFormat.Battlezone2, "bomberbay")]
+    public class ClassBomberBayFactory : IClassFactory
+    {
+        public bool Create(BZNFileBattlezone parent, BZNStreamReader reader, EntityDescriptor preamble, string classLabel, out Entity? obj, bool create = true)
+        {
+            obj = null;
+            if (create)
+            {
+                obj = new ClassBomberBay(preamble, classLabel);
+                obj.DisableMalformationAutoFix();
+            }
+            try
+            {
+                return ClassBomberBay.Hydrate(parent, reader, obj as ClassBomberBay).Success;
+            }
+            finally
+            {
+                obj?.EnableMalformationAutoFix();
+            }
+        }
+    }
+    public class ClassBomberBay : ClassPoweredBuilding
+    {
+        protected int m_MyBomber { get; set; }
+        public ClassBomberBay(EntityDescriptor preamble, string classLabel) : base(preamble, classLabel)
+        {
+            m_MyBomber = 0;
+        }
+
+        public override void ClearMalformations()
+        {
+            Malformations.Clear();
+            base.ClearMalformations();
+        }
+
+        public override void DisableMalformationAutoFix()
+        {
+            base.DisableMalformationAutoFix();
+        }
+
+        public override void EnableMalformationAutoFix()
+        {
+            base.EnableMalformationAutoFix();
+        }
+
+
+        public static ParseResult Hydrate(BZNFileBattlezone parent, BZNStreamReader reader, ClassBomberBay? obj)
+        {
+            IBZNToken? tok;
+
+            if (reader.Version >= 1131)
+            {
+                tok = reader.ReadToken();
+                if (tok == null || !tok.Validate("Handle", BinaryFieldType.DATA_LONG))
+                    return ParseResult.Fail("Failed to parse Handle/LONG");
+                tok.ApplyInt32(obj, x => x.m_MyBomber);
+            }
+            else
+            {
+                if (obj != null)
+                {
+                    obj.m_MyBomber = 0;
+                    // find bomber via TEAM_SLOT_BOMBER scan
+                    // if this is mid load doesn't that require the bomber come first in the BZN file? Maybe do this in a post-load step or write a malformation that tries to auto-fix?
+                }
+            }
+
+            return ClassPoweredBuilding.Hydrate(parent, reader, obj as ClassPoweredBuilding);
+        }
+
+        public override void Write(BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            Dehydrate(this, parent, writer, binary, save);
+        }
+
+        public static void Dehydrate(ClassBomberBay obj, BZNFileBattlezone parent, BZNStreamWriter writer, bool binary, bool save)
+        {
+            if (writer.Version >= 1131)
+            {
+                writer.WriteInt32("Handle", obj, x => x.m_MyBomber);
+            }
+            ClassPoweredBuilding.Dehydrate(obj, parent, writer, binary, save);
+        }
+    }
+}

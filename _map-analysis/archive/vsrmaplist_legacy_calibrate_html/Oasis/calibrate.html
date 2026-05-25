@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Calibrate map overlay</title>
+  <style>
+    :root {
+      --bg: #0e1015;
+      --panel: #181b22;
+      --panel-border: #2a2f3a;
+      --text: #e2e3e7;
+      --text-muted: #9098a8;
+      --accent: #6aa9ff;
+      --accent-strong: #2563eb;
+      --good: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 24px;
+      min-height: 100vh;
+    }
+    h1 { margin: 0 0 4px 0; font-size: 22px; }
+    h2 { margin: 16px 0 8px 0; font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .canvas-wrap {
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--panel-border);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      image-rendering: pixelated;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+    canvas.dragging { cursor: grabbing; }
+    .canvas-tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(15, 18, 24, 0.95);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.55);
+      max-width: 260px;
+      line-height: 1.45;
+      display: none;
+      z-index: 10;
+    }
+    .canvas-tooltip .ct-title {
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 2px;
+    }
+    .canvas-tooltip .ct-class {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+    .canvas-tooltip .ct-coords {
+      color: var(--good);
+      margin-top: 4px;
+      font-size: 11px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 20px;
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+    }
+    .slider-row {
+      display: grid;
+      grid-template-columns: 80px 1fr 90px;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .slider-row label { font-size: 14px; color: var(--text-muted); font-weight: 600; }
+    .slider-row input[type=range] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .slider-row input[type=number] {
+      background: var(--bg);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      text-align: right;
+    }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 9px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-top: 4px;
+    }
+    button:hover { background: var(--accent-strong); }
+    button.secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--panel-border);
+    }
+    button.secondary:hover { color: var(--text); border-color: var(--accent); background: transparent; }
+    pre.json-output {
+      background: var(--bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--good);
+      overflow-x: auto;
+      margin-top: 8px;
+      white-space: pre;
+    }
+    .hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .checkbox-row input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .stat-row span:last-child { font-family: ui-monospace, monospace; color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="canvas-wrap">
+    <canvas id="cv" width="1024" height="1024"></canvas>
+    <div class="canvas-tooltip" id="tooltip">
+      <div class="ct-title" id="ct-title"></div>
+      <div class="ct-class" id="ct-class"></div>
+      <div class="ct-coords" id="ct-coords"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h1 id="map-title">VSR: Loading...</h1>
+    <div class="hint">
+      <strong>Click + drag</strong> on the canvas to pan markers.
+      <strong>Scroll wheel</strong> to zoom around the cursor.
+      Sliders below are for fine-tune nudges. Goal: line up the small dot at
+      each marker's center with the actual base structures on the minimap.
+    </div>
+
+    <h2>Calibration controls</h2>
+    <div class="slider-row">
+      <label>min_x</label>
+      <input type="range" id="r_min_x" min="-1500" max="0" step="1" value="-600">
+      <input type="number" id="n_min_x" step="1" value="-600">
+    </div>
+    <div class="slider-row">
+      <label>max_x</label>
+      <input type="range" id="r_max_x" min="0" max="1500" step="1" value="600">
+      <input type="number" id="n_max_x" step="1" value="600">
+    </div>
+    <div class="slider-row">
+      <label>min_z</label>
+      <input type="range" id="r_min_z" min="-1500" max="0" step="1" value="-600">
+      <input type="number" id="n_min_z" step="1" value="-600">
+    </div>
+    <div class="slider-row">
+      <label>max_z</label>
+      <input type="range" id="r_max_z" min="0" max="1500" step="1" value="600">
+      <input type="number" id="n_max_z" step="1" value="600">
+    </div>
+
+    <div class="stat-row"><span>x width</span><span id="stat-xw">1200</span></div>
+    <div class="stat-row"><span>z depth</span><span id="stat-zd">1200</span></div>
+    <div class="stat-row"><span>x center</span><span id="stat-xc">0</span></div>
+    <div class="stat-row"><span>z center</span><span id="stat-zc">0</span></div>
+
+    <div style="margin-top:14px;">
+      <button class="secondary" id="btn-reset-trn">Reset to .TRN</button>
+      <button class="secondary" id="btn-reset-600">Reset to &plusmn;600</button>
+      <button class="secondary" id="btn-lock-aspect">Link X &harr; Z (1:1)</button>
+    </div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="cb-symmetric" checked>
+      <label for="cb-symmetric">Symmetric mode (max = -min)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="cb-show-grid">
+      <label for="cb-show-grid">Show world-coord grid (100m lines)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="cb-show-loose" checked>
+      <label for="cb-show-loose">Show loose scrap dots</label>
+    </div>
+
+    <h2>Output</h2>
+    <div class="hint" id="initial-banner" style="display:none;"></div>
+    <pre class="json-output" id="json-out"></pre>
+    <button id="btn-copy">Copy JSON</button>
+    <button id="btn-download">Download calibration.json</button>
+    <div class="hint" style="margin-top:8px;">
+      Save the downloaded <span class="mono">calibration.json</span> into
+      <span class="mono">_map-analysis/vsrmaplist/&lt;your map&gt;/</span> &mdash; the
+      next time you re-run <span class="mono">build_vsrmaplist_browser.py</span>
+      the page will open with these values pre-loaded and the index will mark
+      this map as <strong>Calibrated</strong>.
+    </div>
+  </div>
+
+  <script>
+    const payload = {"map_name": "VSR: Oasis", "terrain_name": "VSROasis", "img_w": 256, "img_h": 256, "mini_data_url": "data:image/png;base64,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", "objects": [{"kind": "spawn_point", "obj_class": "pspwn_1", "unit_name": "", "db_category": "", "x": 16.0, "z": 560.0, "color": "#5dadff", "radius": 12, "letter": "S"}, {"kind": "spawn_point", "obj_class": "pspwn_1", "unit_name": "", "db_category": "", "x": 48.0, "z": -656.0, "color": "#5dadff", "radius": 12, "letter": "S"}, {"kind": "scrap_pool", "obj_class": "uepool01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 16.0, "z": -48.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "uepool01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 112.0, "z": 528.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "uepool01", "unit_name": "Biometal Pool", "db_category": "Building", "x": -48.0, "z": -592.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "uepool01", "unit_name": "Biometal Pool", "db_category": "Building", "x": -336.0, "z": -432.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "uepool01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 400.0, "z": 368.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "uepool01", "unit_name": "Biometal Pool", "db_category": "Building", "x": -240.0, "z": 208.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "scrap_pool", "obj_class": "uepool01", "unit_name": "Biometal Pool", "db_category": "Building", "x": 272.0, "z": -304.0, "color": "#ffd24a", "radius": 10, "letter": "P"}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 36.9410057, "z": -21.8502426, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -6.06301308, "z": -79.5584335, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 20.8009777, "z": -78.8146515, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 11.8712215, "z": -21.2826462, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -10.3197765, "z": -30.7795563, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 46.263443, "z": -65.7874985, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -19.5004902, "z": -55.7110214, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 50.7393494, "z": -46.2610703, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -203.290146, "z": 208.834503, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -279.434418, "z": 209.323761, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -239.258423, "z": 174.297546, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -238.80069, "z": 237.256927, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 239.403, "z": -306.957794, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 271.758331, "z": -334.413025, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 270.71521, "z": -274.94928, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 303.22583, "z": -301.452576, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -33.316452, "z": -549.256348, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -27.341774, "z": -539.884338, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -19.2941055, "z": -518.188232, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -17.1216278, "z": -506.188599, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -22.8592758, "z": -531.779236, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -17.1761703, "z": -493.434662, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 89.107605, "z": 388.000488, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 84.4411926, "z": 400.882141, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 82.9360962, "z": 415.133972, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 87.0373383, "z": 430.524048, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 92.8339081, "z": 445.285919, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 101.065788, "z": 455.07962, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 290.031494, "z": 61.3197861, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 315.911652, "z": 54.5480652, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 311.98877, "z": 76.6139755, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 304.42688, "z": 57.3218079, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 323.570679, "z": 60.8333817, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 316.565796, "z": 64.8094711, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 302.871887, "z": 78.5672302, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": 306.349823, "z": 67.8184357, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -277.669647, "z": -134.716904, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -258.959198, "z": -151.233826, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -258.947815, "z": -129.070297, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -268.496521, "z": -137.25, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -268.198669, "z": -148.938858, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -251.700409, "z": -150.666199, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -267.084412, "z": -127.769508, "color": "#7ee787", "radius": 3, "letter": ""}, {"kind": "loose_scrap", "obj_class": "npscrx", "unit_name": "Scrap", "db_category": "Misc", "x": -260.985748, "z": -118.285881, "color": "#7ee787", "radius": 3, "letter": ""}], "trn_bounds": {"min_x": -2048.0, "max_x": 2048.0, "min_z": -2048.0, "max_z": 2048.0}, "initial_bounds": {"min_x": -1000.005814, "max_x": 688.148636, "min_z": -808.0, "max_z": 712.0}, "initial_bounds_source": "inferred", "has_saved": false};
+
+    const UPSCALE = 8;
+    const cv = document.getElementById("cv");
+    const ctx = cv.getContext("2d");
+    cv.width = payload.img_w * UPSCALE;
+    cv.height = payload.img_h * UPSCALE;
+    cv.style.width = (payload.img_w * UPSCALE / 2) + "px"; // shrink for display
+
+    document.getElementById("map-title").textContent = payload.map_name;
+
+    const img = new Image();
+    img.src = payload.mini_data_url;
+
+    const state = {
+      min_x: payload.initial_bounds.min_x,
+      max_x: payload.initial_bounds.max_x,
+      min_z: payload.initial_bounds.min_z,
+      max_z: payload.initial_bounds.max_z,
+      symmetric: true,
+      show_grid: false,
+      show_loose: true,
+    };
+
+    function worldToPx(wx, wz) {
+      const px = (wx - state.min_x) / (state.max_x - state.min_x) * cv.width;
+      const py = cv.height - (wz - state.min_z) / (state.max_z - state.min_z) * cv.height;
+      return [px, py];
+    }
+
+    function draw() {
+      if (!img.complete) return;
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.strokeRect(0.5, 0.5, cv.width - 1, cv.height - 1);
+
+      if (state.show_grid) {
+        ctx.strokeStyle = "rgba(255,220,0,0.2)";
+        ctx.lineWidth = 1;
+        for (let w = -1500; w <= 1500; w += 100) {
+          const [px, _] = worldToPx(w, 0);
+          if (px >= 0 && px <= cv.width) {
+            ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, cv.height); ctx.stroke();
+          }
+          const [_2, py] = worldToPx(0, w);
+          if (py >= 0 && py <= cv.height) {
+            ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(cv.width, py); ctx.stroke();
+          }
+        }
+      }
+
+      const [ox, oy] = worldToPx(0, 0);
+      ctx.strokeStyle = "rgba(255,220,0,0.85)";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(ox - 14, oy); ctx.lineTo(ox + 14, oy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ox, oy - 14); ctx.lineTo(ox, oy + 14); ctx.stroke();
+
+      const layer = ["ai_path","marker","pilot","loose_scrap","mission_script",
+                     "starting_unit","player_slot","recycler","geyser","spawn_point","scrap_pool"];
+      const byKind = {};
+      for (const o of payload.objects) (byKind[o.kind] = byKind[o.kind] || []).push(o);
+
+      for (const k of layer) {
+        if (k === "loose_scrap" && !state.show_loose) continue;
+        for (const o of (byKind[k] || [])) {
+          const [cx, cy] = worldToPx(o.x, o.z);
+          const r = Math.min(o.radius * (UPSCALE / 4), 24);
+          ctx.fillStyle = hexA(o.color, 0x55);
+          ctx.strokeStyle = o.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = "#000";
+          ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = o.color; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.stroke();
+          if (o.letter) {
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 14px monospace";
+            ctx.fillText(o.letter, cx + r + 3, cy - r + 6);
+          }
+        }
+      }
+    }
+
+    function hexA(hex, alpha) {
+      const a = (alpha & 0xff).toString(16).padStart(2, "0");
+      return hex + a;
+    }
+
+    function updateStats() {
+      const xw = state.max_x - state.min_x;
+      const zd = state.max_z - state.min_z;
+      document.getElementById("stat-xw").textContent = xw.toFixed(0);
+      document.getElementById("stat-zd").textContent = zd.toFixed(0);
+      document.getElementById("stat-xc").textContent = ((state.max_x + state.min_x) / 2).toFixed(0);
+      document.getElementById("stat-zc").textContent = ((state.max_z + state.min_z) / 2).toFixed(0);
+
+      const cal = {
+        image_calibration: {
+          image_bounds_world: {
+            min: { x: Math.round(state.min_x), z: Math.round(state.min_z) },
+            max: { x: Math.round(state.max_x), z: Math.round(state.max_z) },
+          },
+          note: "calibrated by overlaying BZN pool/spawn positions on minimap",
+        }
+      };
+      document.getElementById("json-out").textContent = JSON.stringify(cal, null, 2);
+    }
+
+    function setVal(key, val) {
+      state[key] = val;
+      const sym = state.symmetric;
+      if (sym) {
+        if (key === "min_x") state.max_x = -val;
+        else if (key === "max_x") state.min_x = -val;
+        else if (key === "min_z") state.max_z = -val;
+        else if (key === "max_z") state.min_z = -val;
+      }
+      syncInputs();
+      updateStats();
+      draw();
+    }
+
+    function syncInputs() {
+      for (const k of ["min_x","max_x","min_z","max_z"]) {
+        document.getElementById("r_" + k).value = state[k];
+        document.getElementById("n_" + k).value = Math.round(state[k]);
+      }
+    }
+
+    for (const k of ["min_x","max_x","min_z","max_z"]) {
+      document.getElementById("r_" + k).addEventListener("input", e => setVal(k, parseFloat(e.target.value)));
+      document.getElementById("n_" + k).addEventListener("change", e => setVal(k, parseFloat(e.target.value)));
+    }
+    document.getElementById("cb-symmetric").addEventListener("change", e => {
+      state.symmetric = e.target.checked;
+    });
+    document.getElementById("cb-show-grid").addEventListener("change", e => {
+      state.show_grid = e.target.checked; draw();
+    });
+    document.getElementById("cb-show-loose").addEventListener("change", e => {
+      state.show_loose = e.target.checked; draw();
+    });
+    document.getElementById("btn-reset-trn").addEventListener("click", () => {
+      const tb = payload.trn_bounds;
+      state.min_x = tb.min_x; state.max_x = tb.max_x;
+      state.min_z = tb.min_z; state.max_z = tb.max_z;
+      syncInputs(); updateStats(); draw();
+    });
+    document.getElementById("btn-reset-600").addEventListener("click", () => {
+      state.min_x = -600; state.max_x = 600;
+      state.min_z = -600; state.max_z = 600;
+      syncInputs(); updateStats(); draw();
+    });
+    document.getElementById("btn-lock-aspect").addEventListener("click", () => {
+      const cx = (state.min_x + state.max_x) / 2;
+      const cz = (state.min_z + state.max_z) / 2;
+      const w = (state.max_x - state.min_x);
+      const d = (state.max_z - state.min_z);
+      const m = (w + d) / 2;
+      state.min_x = cx - m / 2; state.max_x = cx + m / 2;
+      state.min_z = cz - m / 2; state.max_z = cz + m / 2;
+      syncInputs(); updateStats(); draw();
+    });
+    document.getElementById("btn-copy").addEventListener("click", async () => {
+      const text = document.getElementById("json-out").textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        const b = document.getElementById("btn-copy");
+        b.textContent = "Copied!";
+        setTimeout(() => b.textContent = "Copy JSON", 1200);
+      } catch (e) {
+        alert("Copy failed; select the JSON above manually.");
+      }
+    });
+
+    document.getElementById("btn-download").addEventListener("click", () => {
+      const text = document.getElementById("json-out").textContent;
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "calibration.json";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 200);
+    });
+
+    // --- Canvas interactions: click-drag to pan, wheel to zoom ----------------
+
+    function cssToCanvasPx(evt) {
+      // The canvas is displayed at half its internal resolution (style.width =
+      // cv.width / 2) so a 1 CSS-px mouse delta is 2 canvas-px on each axis.
+      const rect = cv.getBoundingClientRect();
+      const sx = cv.width / rect.width;
+      const sy = cv.height / rect.height;
+      return {
+        cx: (evt.clientX - rect.left) * sx,
+        cy: (evt.clientY - rect.top) * sy,
+        sx, sy,
+      };
+    }
+
+    function turnOffSymmetric() {
+      if (state.symmetric) {
+        state.symmetric = false;
+        document.getElementById("cb-symmetric").checked = false;
+      }
+    }
+
+    let drag = null;
+    cv.addEventListener("pointerdown", (e) => {
+      const p = cssToCanvasPx(e);
+      drag = {
+        start_canvas_px: { x: p.cx, y: p.cy },
+        start_bounds: { ...state },
+        scale: { sx: p.sx, sy: p.sy },
+        moved: false,
+      };
+      cv.classList.add("dragging");
+      cv.setPointerCapture(e.pointerId);
+    });
+    cv.addEventListener("pointermove", (e) => {
+      const p = cssToCanvasPx(e);
+      if (drag) {
+        const dx_px = p.cx - drag.start_canvas_px.x;
+        const dy_px = p.cy - drag.start_canvas_px.y;
+        if (Math.abs(dx_px) > 1 || Math.abs(dy_px) > 1) {
+          drag.moved = true;
+          turnOffSymmetric();
+        }
+        const sb = drag.start_bounds;
+        const x_range = sb.max_x - sb.min_x;
+        const z_range = sb.max_z - sb.min_z;
+        // Pan in world space so the world point under the cursor stays under the cursor.
+        // dx_px > 0 (drag right) -> bounds shift left (markers move right)
+        // dy_px > 0 (drag down)  -> bounds shift up in world (markers move down)
+        const dx_world = dx_px * x_range / cv.width;
+        const dy_world = dy_px * z_range / cv.height;
+        state.min_x = sb.min_x - dx_world;
+        state.max_x = sb.max_x - dx_world;
+        state.min_z = sb.min_z + dy_world;
+        state.max_z = sb.max_z + dy_world;
+        syncInputs(); updateStats(); draw();
+        hideTooltip();
+      } else {
+        updateTooltip(e, p);
+      }
+    });
+
+    // --- Hover tooltip: pick nearest visible marker within HIT_PX ---------------
+
+    const HIT_PX = 24;  // canvas-px hit radius (~12 CSS-px given the 2x display)
+    const tooltipEl = document.getElementById("tooltip");
+    const ctTitle = document.getElementById("ct-title");
+    const ctClass = document.getElementById("ct-class");
+    const ctCoords = document.getElementById("ct-coords");
+
+    function hideTooltip() {
+      tooltipEl.style.display = "none";
+    }
+
+    function updateTooltip(evt, p) {
+      let best = null;
+      let bestDist = HIT_PX * HIT_PX;
+      for (const o of payload.objects) {
+        if (o.kind === "loose_scrap" && !state.show_loose) continue;
+        const [cx, cy] = worldToPx(o.x, o.z);
+        const dx = cx - p.cx;
+        const dy = cy - p.cy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestDist) {
+          bestDist = d2;
+          best = o;
+        }
+      }
+      if (!best) {
+        hideTooltip();
+        return;
+      }
+      const niceName = best.unit_name || prettyKind(best.kind);
+      ctTitle.textContent = niceName;
+      const classBits = [best.obj_class];
+      if (best.db_category) classBits.push(best.db_category);
+      ctClass.textContent = classBits.join("  -  ");
+      ctCoords.textContent = "world (x=" + best.x.toFixed(1) + ", z=" + best.z.toFixed(1) + ")";
+
+      // Position next to cursor, clamped inside .canvas-wrap so it never
+      // extends past the right/bottom edges and gets clipped by overflow:hidden.
+      const wrap = cv.parentElement.getBoundingClientRect();
+      tooltipEl.style.display = "block";
+      const ttRect = tooltipEl.getBoundingClientRect();
+      let left = evt.clientX - wrap.left + 14;
+      let top = evt.clientY - wrap.top + 14;
+      if (left + ttRect.width > wrap.width - 8) {
+        left = (evt.clientX - wrap.left) - ttRect.width - 14;
+      }
+      if (top + ttRect.height > wrap.height - 8) {
+        top = (evt.clientY - wrap.top) - ttRect.height - 14;
+      }
+      tooltipEl.style.left = Math.max(4, left) + "px";
+      tooltipEl.style.top = Math.max(4, top) + "px";
+    }
+
+    function prettyKind(k) {
+      return ({
+        "scrap_pool":   "Scrap Pool",
+        "loose_scrap":  "Loose Scrap",
+        "spawn_point":  "Spawn Point",
+      })[k] || k;
+    }
+
+    cv.addEventListener("pointerleave", hideTooltip);
+    function endDrag(e) {
+      if (!drag) return;
+      try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+      drag = null;
+      cv.classList.remove("dragging");
+    }
+    cv.addEventListener("pointerup", endDrag);
+    cv.addEventListener("pointercancel", endDrag);
+    cv.addEventListener("pointerleave", endDrag);
+
+    // Wheel = zoom around the cursor. World point under cursor stays put.
+    cv.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const p = cssToCanvasPx(e);
+      // Each wheel tick scales by ~7% (capped to one tick per event)
+      const ZOOM_PER_TICK = 1.07;
+      // deltaY > 0 = scroll down = zoom OUT (range grows)
+      // deltaY < 0 = scroll up   = zoom IN  (range shrinks)
+      const dir = Math.sign(e.deltaY);
+      if (dir === 0) return;
+      const factor = dir > 0 ? ZOOM_PER_TICK : 1 / ZOOM_PER_TICK;
+      // Cursor world coords (using current bounds)
+      const cursor_world_x = state.min_x + (p.cx / cv.width) * (state.max_x - state.min_x);
+      const cursor_world_z = state.min_z + ((cv.height - p.cy) / cv.height) * (state.max_z - state.min_z);
+      // Scale the rectangle around the cursor world point
+      state.min_x = cursor_world_x + (state.min_x - cursor_world_x) * factor;
+      state.max_x = cursor_world_x + (state.max_x - cursor_world_x) * factor;
+      state.min_z = cursor_world_z + (state.min_z - cursor_world_z) * factor;
+      state.max_z = cursor_world_z + (state.max_z - cursor_world_z) * factor;
+      // A non-uniform pre-existing calibration could re-align under symmetric;
+      // but in general wheel zoom can keep symmetry intact if it was on.
+      const isStillSymmetric =
+        Math.abs(state.min_x + state.max_x) < 0.001 &&
+        Math.abs(state.min_z + state.max_z) < 0.001;
+      if (!isStillSymmetric) turnOffSymmetric();
+      syncInputs(); updateStats(); draw();
+    }, { passive: false });
+
+    // Initialize state from payload (handles saved / inferred / TRN / default).
+    state.min_x = payload.initial_bounds.min_x;
+    state.max_x = payload.initial_bounds.max_x;
+    state.min_z = payload.initial_bounds.min_z;
+    state.max_z = payload.initial_bounds.max_z;
+
+    // Show a friendly status banner explaining which assumption the page opened with.
+    const banner = document.getElementById("initial-banner");
+    const SOURCE_MESSAGES = {
+      "saved":    '<span style="color: var(--good);">&#10003;</span> Loaded saved calibration from <span class="mono">calibration.json</span>. Tweak below as needed.',
+      "inferred": 'Initial bounds <em>inferred from object positions</em> (placed pools/spawns/scrap, padded ~25% outward). Drag the canvas to align with the minimap.',
+      "trn":      'Initial bounds from the <span class="mono">.TRN [Size]</span> block. NB: the terrain mesh is often larger than the minimap actually shows.',
+      "default":  'No object data found - opened with the &plusmn;625 m default. Drag the canvas to position.',
+    };
+    const msg = SOURCE_MESSAGES[payload.initial_bounds_source];
+    if (msg) {
+      banner.innerHTML = msg;
+      banner.style.display = "block";
+    }
+
+    if (payload.has_saved) {
+      // Asymmetric saved calibrations would fight symmetric mode -> turn it off
+      const isSymmetric = (state.min_x === -state.max_x) && (state.min_z === -state.max_z);
+      if (!isSymmetric) {
+        state.symmetric = false;
+        document.getElementById("cb-symmetric").checked = false;
+      }
+    } else if (payload.initial_bounds_source === "inferred") {
+      // Inferred bounds are generally asymmetric too (object placement is rarely
+      // perfectly centered). Pre-flip the toggle so the first drag doesn't snap.
+      const isSymmetric =
+        Math.abs(state.min_x + state.max_x) < 0.001 &&
+        Math.abs(state.min_z + state.max_z) < 0.001;
+      if (!isSymmetric) {
+        state.symmetric = false;
+        document.getElementById("cb-symmetric").checked = false;
+      }
+    }
+
+    img.addEventListener("load", () => { syncInputs(); updateStats(); draw(); });
+  </script>
+</body>
+</html>

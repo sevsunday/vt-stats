@@ -1,0 +1,213 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{DEE4FBCC-F404-48FF-A0B9-2D2FF0899459}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>BZ2TerrainEditor</RootNamespace>
+    <AssemblyName>BZCCTerrainEditor</AssemblyName>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup>
+    <StartupObject />
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="BitMiracle.LibTiff.NET40, Version=2.4.584.0, Culture=neutral, PublicKeyToken=53879b3e20e7a7d6, processorArchitecture=MSIL">
+      <HintPath>..\packages\BitMiracle.LibTiff.NET.2.4.584.1\lib\net40\BitMiracle.LibTiff.NET40.dll</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Deployment" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="AboutDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="AboutDialog.Designer.cs">
+      <DependentUpon>AboutDialog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="CellType.cs" />
+    <Compile Include="Editor.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Editor.Designer.cs">
+      <DependentUpon>Editor.cs</DependentUpon>
+    </Compile>
+    <Compile Include="HeightMapRangeDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="HeightMapRangeDialog.Designer.cs">
+      <DependentUpon>HeightMapRangeDialog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="HeightMapRescaleDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="HeightMapRescaleDialog.Designer.cs">
+      <DependentUpon>HeightMapRescaleDialog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="HeightMapTranslatePanDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="HeightMapTranslatePanDialog.Designer.cs">
+      <DependentUpon>HeightMapTranslatePanDialog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="HeightMapTranslateDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="HeightMapTranslateDialog.Designer.cs">
+      <DependentUpon>HeightMapTranslateDialog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ImageViewer.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="ImageViewer.Designer.cs">
+      <DependentUpon>ImageViewer.cs</DependentUpon>
+    </Compile>
+    <Compile Include="NetPBM.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+    <Compile Include="RGB.cs" />
+    <Compile Include="SizeDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="SizeDialog.Designer.cs">
+      <DependentUpon>SizeDialog.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Terrain.cs" />
+    <EmbeddedResource Include="AboutDialog.resx">
+      <DependentUpon>AboutDialog.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Editor.resx">
+      <DependentUpon>Editor.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="HeightMapRangeDialog.resx">
+      <DependentUpon>HeightMapRangeDialog.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="HeightMapRescaleDialog.resx">
+      <DependentUpon>HeightMapRescaleDialog.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="HeightMapTranslatePanDialog.resx">
+      <DependentUpon>HeightMapTranslatePanDialog.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="HeightMapTranslateDialog.resx">
+      <DependentUpon>HeightMapTranslateDialog.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ImageViewer.resx">
+      <DependentUpon>ImageViewer.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <SubType>Designer</SubType>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <EmbeddedResource Include="SizeDialog.resx">
+      <DependentUpon>SizeDialog.cs</DependentUpon>
+    </EmbeddedResource>
+    <None Include="packages.config" />
+    <None Include="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
+    <Compile Include="Properties\Settings.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\map.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\folder-open.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\disk-black.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\disks-black.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\cross.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\document-import.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\document-export.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Resources\magnifier.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="icon.ico" />
+    <Content Include="Resources\arrow-rescale-090.png" />
+    <None Include="Resources\arrow-move.png" />
+    <None Include="Resources\exclamation-circle.png" />
+    <None Include="Resources\arrow-resize-090.png" />
+    <None Include="Resources\bzforums.png" />
+    <None Include="Resources\document-import-3.png" />
+    <None Include="Resources\document-import-2.png" />
+    <None Include="Resources\document-import-1.png" />
+    <None Include="Resources\document-import-0.png" />
+    <None Include="Resources\document-export-3.png" />
+    <None Include="Resources\document-export-2.png" />
+    <None Include="Resources\document-export-1.png" />
+    <None Include="Resources\document-export-0.png" />
+    <None Include="Resources\information.png" />
+    <None Include="Resources\water-import.png" />
+    <None Include="Resources\water-export.png" />
+    <None Include="Resources\fire-import.png" />
+    <None Include="Resources\fire-export.png" />
+    <None Include="Resources\building-import.png" />
+    <None Include="Resources\building-export.png" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>
