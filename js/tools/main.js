@@ -91,7 +91,7 @@
   // Working-set state held only while the modal is open. Lives outside the
   // module-level closure so handlers below can mutate it.
   let pickerCart = []; // ResolvedPlayer[]
-  let pickerSortMode = 'matches-desc';
+  let pickerSortMode = 'alpha';
   let pickerSearchQuery = '';
   // Pool filter: 'in-data' = matchesPlayed > 0 (default), 'all' = full directory.
   let pickerPoolFilter = 'in-data';
@@ -474,7 +474,7 @@
 
     pickerSearchQuery = '';
     if (pickerSearchEl) pickerSearchEl.value = '';
-    pickerSortMode = pickerSortEl ? pickerSortEl.value : 'matches-desc';
+    pickerSortMode = pickerSortEl ? pickerSortEl.value : 'alpha';
 
     // Snap pool filter back to its default ('In data') on each open.
     pickerPoolFilter = 'in-data';
