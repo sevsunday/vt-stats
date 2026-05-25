@@ -113,25 +113,20 @@ const CALIB_TIER_PRIORITY = {
 };
 
 /**
- * Sniff the calibration tier and recommend a floor mode per the Layer-1
- * contract. Returns one of `minimap | tiles | ramp | wire`. `null` config
- * (404 / absent) treated as failed-fallback so we never accidentally wreck
- * the visual on an uncalibrated map.
+ * Recommend a floor mode for the replay. We default to `minimap` everywhere
+ * now -- the calibration-tier sniff that used to drop us to `tiles` / `ramp`
+ * on `auto_failed_fallback` maps was overly cautious; the visual mismatch
+ * on a poorly-aligned minimap is easier to live with than the loss of map
+ * imagery on every uncalibrated map.
+ *
+ * `wireFloorMode()` still gracefully demotes to ramp/wire when the minimap
+ * material wasn't built for a given map, so this is a safe blanket default.
+ *
+ * Args are kept for call-site compatibility (and to leave the door open for
+ * a future per-map override) but are unused.
  */
-export async function resolveDefaultFloorMode(stem, manifestEntry) {
-  const url = `${CALIB_CONFIG_DIR}/${stem}.config.json`;
-  let source = null;
-  try {
-    const res = await fetch(url);
-    if (res.ok) {
-      const cfg = await res.json();
-      source = cfg && cfg.affine && cfg.affine.source;
-    }
-  } catch (_) { /* tolerated; treat as missing */ }
-  const recommended = CALIB_TIER_PRIORITY[source];
-  if (recommended === 'minimap') return 'minimap';
-  // Fallback path: prefer tiles when we have them, otherwise ramp.
-  return (manifestEntry && manifestEntry.has_tier3) ? 'tiles' : 'ramp';
+export async function resolveDefaultFloorMode(_stem, _manifestEntry) {
+  return 'minimap';
 }
 
 // -------------------- 3D extract --------------------

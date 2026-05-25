@@ -52,6 +52,7 @@ import {
 } from './replay-fx.js';
 import { createCameraController } from './replay-cameras.js';
 import { killsAtTick, killsInWindow } from './replay-data.js';
+import { buildObjectsGroup } from './objects.js';
 import { bootReplayDirectory } from './replay-directory.js';
 import { showResultsScreen, hideResultsScreen, isResultsShowing } from './replay-results.js';
 import { buildShipTracker } from './replay-ship-tracker.js';
@@ -92,6 +93,14 @@ const STATE = {
   beacons: null,
   tlocks: null,
   tlocksGroup: null,
+  // Static map-feature overlay (scrap pools). Loose scrap and spawn points
+  // are intentionally excluded -- the latter is already represented by the
+  // spawn beacon layer, the former has no pickup data so we'd be drawing
+  // markers of unknown current state. Pools never move, so this group is
+  // built once at boot and rebuilt only when the exaggeration slider moves.
+  poolsGroup: null,
+  pools: null,
+  poolsVisible: true,
   // Camera controller (Phase 2 layer over OrbitControls)
   cameraCtl: null,
   camMode: 'free',
@@ -206,6 +215,7 @@ async function boot() {
   initLabels();
   initBeacons();
   initTLocks();
+  initPools();
   initCamera(mapData);
 
   wireMatchStrip(matchMeta);
@@ -217,6 +227,7 @@ async function boot() {
   wireRoster();
   wireKeyboard();
   wireLabelsToggle();
+  wirePoolsToggle();
 
   applyFloorMode(resolvedFloor);
   setStatus(null);
@@ -471,6 +482,38 @@ function initTLocks() {
   STATE.scene.add(group);
 }
 
+function initPools() {
+  const allObjs = (STATE.mapData && STATE.mapData.objects) || [];
+  const objs = allObjs.filter(o => o && o.kind === 'scrap_pool');
+  if (objs.length === 0) return;
+  const baseHm = STATE.mapData.heightmap;
+  // buildObjectsGroup samples terrain via sampleTerrainHeight(hm, x, z).
+  // The exaggeration slider scales the visible terrain by multiplying
+  // hm.scale, so we hand the same scaled-view shim to keep markers glued
+  // to the lifted terrain (mirrors initBeacons's exaggeration argument).
+  const scaledHm = { ...baseHm, scale: baseHm.scale * STATE.terrainExaggeration };
+  const group = buildObjectsGroup({ ...STATE.mapData, heightmap: scaledHm, objects: objs });
+  group.name = 'replay-pools';
+  group.visible = STATE.poolsVisible;
+  STATE.poolsGroup = group;
+  STATE.pools = objs;
+  STATE.scene.add(group);
+}
+
+function disposePools() {
+  if (!STATE.poolsGroup) return;
+  STATE.scene.remove(STATE.poolsGroup);
+  STATE.poolsGroup.traverse(obj => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const m of mats) m.dispose();
+    }
+  });
+  STATE.poolsGroup = null;
+  STATE.pools = null;
+}
+
 // ============================================================================
 // Camera
 // ============================================================================
@@ -692,6 +735,11 @@ function applyHeightExaggeration(factor) {
     disposeSpawnBeacons(STATE.beaconsGroup);
   }
   initBeacons();
+
+  // Same story for scrap-pool markers -- their y is sampled from the
+  // (now-scaled) heightmap, so they need to be rebuilt in lockstep.
+  disposePools();
+  initPools();
 }
 
 // ============================================================================
@@ -990,6 +1038,19 @@ function wireLabelsToggle() {
   });
 }
 
+function wirePoolsToggle() {
+  const btn = document.getElementById('btn-pools');
+  if (!btn) return;
+  // Defaults to on; the markup carries `.is-active` so the visual matches
+  // STATE.poolsVisible at boot without an extra reflow.
+  btn.classList.toggle('is-active', STATE.poolsVisible);
+  btn.addEventListener('click', () => {
+    STATE.poolsVisible = !STATE.poolsVisible;
+    btn.classList.toggle('is-active', STATE.poolsVisible);
+    if (STATE.poolsGroup) STATE.poolsGroup.visible = STATE.poolsVisible;
+  });
+}
+
 function setActorVisibilityByName(name, visible) {
   const actor = STATE.actors.find(a => a.name === name);
   if (!actor) return;
@@ -1082,6 +1143,13 @@ function wireKeyboard() {
       case 'KeyN':
         e.preventDefault();
         toggleLabelsHotkey();
+        break;
+      case 'KeyP':
+        e.preventDefault();
+        {
+          const btn = document.getElementById('btn-pools');
+          if (btn) btn.click();
+        }
         break;
     }
   });
