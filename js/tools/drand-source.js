@@ -26,8 +26,26 @@
  * Health monitor:
  *   - Periodic probe every HEALTH_POLL_INTERVAL_MS (60s default)
  *   - Opportunistic re-probe on document visibilitychange -> visible
- *   - navigator.online/offline event hooks
- *   - On-demand re-probe at the top of every commitFlip()
+ *   - navigator.online/offline event hooks (hint only - probe still runs)
+ *   - On-demand recovery sequence at the top of every commitFlip()
+ *
+ * Resilience layer:
+ *   - Asymmetric hysteresis: rawState (latest probe verdict) updates
+ *     immediately; displayedState (what UI sees) only flips to a
+ *     fallback variant after FAILURE_THRESHOLD consecutive bad probes.
+ *     A single good probe heals displayedState immediately.
+ *   - Strike-chain auto-retry: a failed probe schedules a follow-up
+ *     after RETRY_BACKOFF_MS instead of waiting the full poll interval.
+ *   - Visibility grace: a probe that fails within VISIBILITY_GRACE_MS
+ *     of the tab becoming visible doesn't count toward the threshold.
+ *   - /latest rollover-race demotion: when both relays return data on
+ *     adjacent rounds (a timing race during the 3s drand period), it's
+ *     classified as DEGRADED rather than FALLBACK_MISMATCH. Real same-
+ *     round byte disagreements (specific-round flip rolls) still escalate.
+ *   - Recovery sequence: commitFlip / retryHealthCheck run up to
+ *     RECOVERY_PROBE_ATTEMPTS back-to-back probes when displayedState
+ *     is in a fallback variant, healing the pill before the flip starts
+ *     when drand actually is reachable.
  *
  * Fallback contract: when health state is FALLBACK_OFFLINE or
  * FALLBACK_MISMATCH, commitFlip() returns a synthetic commitment
@@ -58,6 +76,18 @@
   const LOOKAHEAD_ROUNDS = 2;                // commit round = currentRound + 2
   const SESSION_LOG_MAX = 100;               // FIFO eviction cap
 
+  // Resilience tunables. The displayed status pill is intentionally
+  // smoothed: a single failed probe (network blip, /latest rollover race
+  // between relays, backgrounded-tab fetch error, etc.) does NOT flip
+  // the UI red. Only after FAILURE_THRESHOLD consecutive failures does
+  // displayedState change to a fallback variant. Recovery is asymmetric -
+  // the first successful probe immediately flips back to ONLINE.
+  const FAILURE_THRESHOLD = 3;               // consecutive bad probes before flipping red
+  const RETRY_BACKOFF_MS = 3000;             // delay between auto-retry probes within a strike chain
+  const RECOVERY_PROBE_ATTEMPTS = 3;         // attempts during commitFlip-while-red recovery
+  const RECOVERY_PROBE_INTERVAL_MS = 600;    // delay between recovery attempts
+  const VISIBILITY_GRACE_MS = 1500;          // failures within this window of becoming visible don't count toward the threshold
+
   const HEALTH_STATES = Object.freeze({
     ONLINE: 'ONLINE',
     DEGRADED: 'DEGRADED',
@@ -67,6 +97,14 @@
 
   // ---------------------------------------------------------------- Health state
 
+  // Two-layer state model:
+  //   - rawState        : verdict of the most recent probe (truth)
+  //   - displayedState  : what the UI sees (smoothed via FAILURE_THRESHOLD)
+  // Asymmetric hysteresis: rawState going bad takes FAILURE_THRESHOLD
+  // strikes to surface; rawState going good surfaces immediately.
+  // healthSnapshot.state mirrors displayedState so external readers
+  // (panel, cross-card data-attrs) only see the smoothed signal.
+  //
   // `unknown` for relays before the first probe completes. State starts
   // optimistic so the panel renders ONLINE chrome on cold load and
   // immediately reconciles on first probe (~200ms).
@@ -78,6 +116,13 @@
     latestRound: null,
     inFlight: false,
   };
+
+  let rawState = HEALTH_STATES.ONLINE;       // last probe verdict (untouched by threshold)
+  let displayedState = HEALTH_STATES.ONLINE; // what the UI sees (smoothed)
+  let consecutiveFailures = 0;               // strike count toward FAILURE_THRESHOLD
+  let lastVisibilityChangeMs = 0;            // for visibility-grace check on returning probes
+  let recoveryProbeInFlight = false;         // guards _recoverHealthIfNeeded re-entry
+  let pendingRetryTimer = null;              // strike-chain auto-retry handle
 
   const healthListeners = new Set();
   let pollTimer = null;
@@ -182,9 +227,37 @@
 
   // ---------------------------------------------------------------- Health monitor
 
-  function _classifyProbeReport(report) {
+  // Classify a cross-checked probe report into a HEALTH_STATES verdict.
+  //
+  // `isLatestProbe` flips the interpretation of `mismatch`: when probing
+  // /latest, drand quicknet's 3s period means relays can be on adjacent
+  // rounds during a rollover (relay A serves N+1, relay B still on N for
+  // a few hundred ms). That's a benign timing race, NOT a security
+  // incident - we demote it to DEGRADED so the pill stays green-ish.
+  // Specific-round probes (rollOutcome / multiRollOutcome) pass
+  // isLatestProbe=false because there a bytes-disagree-on-same-round IS
+  // a real cross-check failure worth surfacing.
+  function _classifyProbeReport(report, isLatestProbe) {
     if (report.allFailed) return HEALTH_STATES.FALLBACK_OFFLINE;
-    if (report.mismatch)  return HEALTH_STATES.FALLBACK_MISMATCH;
+    if (report.mismatch) {
+      if (isLatestProbe) {
+        const okResults = report.results.filter(r => r.ok && r.data);
+        if (okResults.length === 2) {
+          const r0 = okResults[0].data.round;
+          const r1 = okResults[1].data.round;
+          if (Number.isFinite(r0) && Number.isFinite(r1) && Math.abs(r0 - r1) <= 1) {
+            // Benign rollover race - both relays were reachable, just
+            // ~one period out of sync. Promote the higher-round beacon
+            // onto report.beacon so the displayed latestRound advances.
+            const higher = (r0 >= r1) ? okResults[0] : okResults[1];
+            report.beacon = higher.data;
+            report.chosenRelayId = higher.relayId;
+            return HEALTH_STATES.DEGRADED;
+          }
+        }
+      }
+      return HEALTH_STATES.FALLBACK_MISMATCH;
+    }
     if (report.singleSource) return HEALTH_STATES.DEGRADED;
     if (report.crossChecked) return HEALTH_STATES.ONLINE;
     return HEALTH_STATES.FALLBACK_OFFLINE;
@@ -200,64 +273,102 @@
     }
   }
 
-  async function _runHealthProbe() {
-    // navigator.onLine === false short-circuits: skip the probe entirely
-    // and snap to OFFLINE. Browser-reported offline state is more
-    // authoritative (and faster) than waiting for fetch timeouts.
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      const prevState = healthSnapshot.state;
-      healthSnapshot = {
-        state: HEALTH_STATES.FALLBACK_OFFLINE,
-        lastCheckMs: Date.now(),
-        lastError: 'Browser reports no internet (navigator.onLine === false)',
-        relays: { apiDrandSh: 'err', cloudflare: 'err' },
-        latestRound: healthSnapshot.latestRound,
-        inFlight: false,
-      };
-      if (prevState !== healthSnapshot.state) _emitHealth();
-      return healthSnapshot;
-    }
+  // Run a single /latest probe. Updates rawState always; mutates
+  // displayedState only when threshold-crossing logic decides to.
+  // Schedules a strike-chain auto-retry on failure unless caller passes
+  // noReschedule:true (used by recovery sequences that drive their own loop).
+  //
+  // navigator.onLine is intentionally NOT treated as authoritative -
+  // some Windows configs report false during sleep/wake / network
+  // switches. We let the actual fetch decide; a real offline situation
+  // fails fast through the same threshold flow.
+  async function _runHealthProbe(opts) {
+    opts = opts || {};
 
     if (healthSnapshot.inFlight) return healthSnapshot;
     healthSnapshot = { ...healthSnapshot, inFlight: true };
 
+    let report = null;
+    let probeError = null;
     try {
-      const report = await QN.fetchRoundCrossChecked('latest', {
+      report = await QN.fetchRoundCrossChecked('latest', {
         timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
       });
-      const newState = _classifyProbeReport(report);
+    } catch (err) {
+      probeError = err;
+    }
 
-      const relays = { apiDrandSh: 'unknown', cloudflare: 'unknown' };
+    let newRaw;
+    let lastError = null;
+    let relays = { apiDrandSh: 'unknown', cloudflare: 'unknown' };
+    let latestRound = healthSnapshot.latestRound;
+
+    if (probeError) {
+      newRaw = HEALTH_STATES.FALLBACK_OFFLINE;
+      lastError = (probeError && probeError.message) || String(probeError);
+      relays = { apiDrandSh: 'err', cloudflare: 'err' };
+    } else {
+      newRaw = _classifyProbeReport(report, /*isLatestProbe*/ true);
       for (const r of report.results) {
         relays[r.relayId] = r.ok ? 'ok' : 'err';
       }
-
-      const lastError = (newState === HEALTH_STATES.ONLINE)
-        ? null
-        : report.mismatch
-          ? 'Both relays reachable but /latest bytes disagreed'
-          : report.allFailed
-            ? (report.results.map(r => `${r.relayId}: ${r.error}`).join('; ') || 'Both relays unreachable')
-            : null;
-
-      healthSnapshot = {
-        state: newState,
-        lastCheckMs: Date.now(),
-        lastError,
-        relays,
-        latestRound: report.beacon ? report.beacon.round : healthSnapshot.latestRound,
-        inFlight: false,
-      };
-    } catch (err) {
-      healthSnapshot = {
-        ...healthSnapshot,
-        state: HEALTH_STATES.FALLBACK_OFFLINE,
-        lastCheckMs: Date.now(),
-        lastError: (err && err.message) || String(err),
-        inFlight: false,
-      };
+      if (report.beacon) latestRound = report.beacon.round;
+      if (newRaw === HEALTH_STATES.FALLBACK_MISMATCH) {
+        lastError = 'Both relays reachable but /latest bytes disagreed';
+      } else if (newRaw === HEALTH_STATES.FALLBACK_OFFLINE) {
+        lastError = report.results.map(r => `${r.relayId}: ${r.error}`).filter(Boolean).join('; ')
+                 || 'Both relays unreachable';
+      }
     }
 
+    rawState = newRaw;
+    const isHealthy = (newRaw === HEALTH_STATES.ONLINE || newRaw === HEALTH_STATES.DEGRADED);
+
+    // Visibility grace: a failed probe that lands within
+    // VISIBILITY_GRACE_MS of the tab becoming visible is treated as a
+    // free probe (the browser may have killed in-flight fetches while
+    // hidden). The strike counter doesn't advance; a follow-up retry
+    // gets the chance to confirm on its own merits.
+    const inVisibilityGrace = !isHealthy
+      && lastVisibilityChangeMs > 0
+      && (Date.now() - lastVisibilityChangeMs) < VISIBILITY_GRACE_MS;
+
+    if (isHealthy) {
+      consecutiveFailures = 0;
+      if (pendingRetryTimer) { clearTimeout(pendingRetryTimer); pendingRetryTimer = null; }
+      // Asymmetric hysteresis: heal immediately on first good probe.
+      if (displayedState !== newRaw) displayedState = newRaw;
+    } else {
+      if (!inVisibilityGrace) consecutiveFailures++;
+      if (consecutiveFailures >= FAILURE_THRESHOLD) {
+        if (displayedState !== newRaw) displayedState = newRaw;
+      }
+      // Schedule a follow-up probe inside the strike chain so we don't
+      // wait the full HEALTH_POLL_INTERVAL_MS (60s) to verify.
+      if (!opts.noReschedule && consecutiveFailures < FAILURE_THRESHOLD) {
+        if (pendingRetryTimer) clearTimeout(pendingRetryTimer);
+        pendingRetryTimer = setTimeout(() => {
+          pendingRetryTimer = null;
+          _runHealthProbe();
+        }, RETRY_BACKOFF_MS);
+      }
+    }
+
+    healthSnapshot = {
+      state: displayedState,
+      lastCheckMs: Date.now(),
+      // Surface an error string only when the smoothed state actually
+      // shows a fallback variant; suppressing it during silent-hold
+      // strikes keeps the panel banner from flickering.
+      lastError: _isFallbackState(displayedState) ? lastError : null,
+      relays,
+      latestRound,
+      inFlight: false,
+    };
+
+    // Always emit at probe end so consumers that track inFlight (the
+    // retry button spinner, mid-recovery affordances) settle correctly
+    // even on silent-hold strikes that don't change displayedState.
     _emitHealth();
     return healthSnapshot;
   }
@@ -270,7 +381,15 @@
 
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') _runHealthProbe();
+        if (document.visibilityState === 'visible') {
+          // Stamp the visibility transition before kicking the probe.
+          // The probe's failure-threshold logic checks this timestamp to
+          // grant a grace window: a probe that fails immediately after
+          // the tab becomes visible (likely a stale aborted fetch from
+          // backgrounded throttling) doesn't count as a strike.
+          lastVisibilityChangeMs = Date.now();
+          _runHealthProbe();
+        }
       });
     }
     if (typeof window !== 'undefined') {
@@ -286,7 +405,11 @@
       lastError: healthSnapshot.lastError,
       relays: { ...healthSnapshot.relays },
       latestRound: healthSnapshot.latestRound,
-      inFlight: healthSnapshot.inFlight,
+      // External callers see `inFlight=true` for the entire duration of
+      // a recovery sequence (multiple back-to-back probes with delays
+      // between them), not just per-probe. This keeps the retry button
+      // spinner from flickering between recovery iterations.
+      inFlight: !!healthSnapshot.inFlight || recoveryProbeInFlight,
     };
   }
 
@@ -297,7 +420,10 @@
   }
 
   async function retryHealthCheck() {
-    await _runHealthProbe();
+    // Manual user-triggered Retry runs the same aggressive recovery
+    // sequence as a flip-time recovery so a single click behaves like
+    // a "force re-verify" rather than a single optimistic probe.
+    await _recoverHealthIfNeeded();
     return getHealthStatus();
   }
 
@@ -312,12 +438,56 @@
     return state === HEALTH_STATES.FALLBACK_MISMATCH ? 'mismatch' : 'offline';
   }
 
+  // Pre-flight health check. When the panel is already healthy, run a
+  // single probe (cheap freshness check). When the displayed state is
+  // already in a fallback variant - typically because the user is
+  // clicking FLIP/SPIN/ROLL during a sustained outage or while the pill
+  // is showing a stale red from a transient blip - run an aggressive
+  // recovery sequence: up to RECOVERY_PROBE_ATTEMPTS probes back-to-back
+  // separated by RECOVERY_PROBE_INTERVAL_MS. Because _runHealthProbe
+  // applies asymmetric hysteresis (heal-immediately on first good
+  // probe), a single successful recovery probe flips displayedState to
+  // ONLINE / DEGRADED and emits a health event, which the panel
+  // re-paints to green BEFORE the flip animation starts.
+  //
+  // noReschedule:true prevents the recovery probes from spawning their
+  // own strike-chain timers - we drive the loop ourselves here.
+  async function _recoverHealthIfNeeded() {
+    if (recoveryProbeInFlight) return getHealthStatus();
+    if (!_isFallbackState(displayedState)) {
+      // Healthy - just refresh.
+      await _runHealthProbe({ noReschedule: true });
+      return getHealthStatus();
+    }
+    recoveryProbeInFlight = true;
+    try {
+      for (let i = 0; i < RECOVERY_PROBE_ATTEMPTS; i++) {
+        await _runHealthProbe({ noReschedule: true });
+        if (!_isFallbackState(displayedState)) break;
+        if (i < RECOVERY_PROBE_ATTEMPTS - 1) {
+          await _delay(RECOVERY_PROBE_INTERVAL_MS);
+        }
+      }
+    } finally {
+      recoveryProbeInFlight = false;
+      // Emit once more so listeners observing the exported `inFlight`
+      // field (which OR's recoveryProbeInFlight) see the recovery end
+      // even though the final probe's emit fired a moment earlier when
+      // recoveryProbeInFlight was still true.
+      _emitHealth();
+    }
+    return getHealthStatus();
+  }
+
   // Returns a commitment record immediately. Does NOT await the round
-  // publish. Runs an on-demand health probe first so a transient outage
-  // that recovered between polls is detected before the user clicks.
+  // publish. Runs an on-demand health check first so a transient outage
+  // that recovered between polls is detected before the user clicks. If
+  // the panel is currently red, runs an aggressive recovery sequence so
+  // the user gets a fresh verdict (and a real drand round) when drand
+  // is actually reachable.
   async function commitFlip(opts) {
     opts = opts || {};
-    await _runHealthProbe();
+    await _recoverHealthIfNeeded();
     const snap = getHealthStatus();
 
     if (_isFallbackState(snap.state)) {
