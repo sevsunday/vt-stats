@@ -51,6 +51,7 @@
   let wheelRotation = 0;      // current accumulated rotation in radians
   let isSpinning = false;
   let lastWinner = null;
+  let lastOutcome = null;
   let spinRafId = null;
   let resultModalInst = null;
 
@@ -383,61 +384,186 @@
     spin();
   }
 
-  function spin() {
+  // OUTCOME SOURCE = drand (with crypto fallback under graceful degrade).
+  //
+  // The original Math.floor(Math.random() * players.length) was the only
+  // call here that mattered for fairness - everything else (fullRotations,
+  // in-slice jitter) is cosmetic. We now commit to a future drand round
+  // BEFORE the spin starts (commitFlip), kick off the spin animation
+  // immediately at constant velocity, and concurrently await
+  // rollOutcome(round, players.length). When the outcome resolves, the
+  // animation transitions to a 3.3s ease-out deceleration onto the
+  // winner's slice. This folds the ~1.5s avg drand wait INTO the 4.8s
+  // spin envelope - no perceived delay on the happy path.
+  async function spin() {
     const players = activePlayers();
     if (players.length < 2) return;
     isSpinning = true;
     if (spinBtnEl) spinBtnEl.disabled = true;
 
-    const winnerIdx = Math.floor(Math.random() * players.length);
-    const winner = players[winnerIdx];
-
     const sliceAngle = (Math.PI * 2) / players.length;
-    // We want winner slice center to align with the top (pointer position).
-    // After all our rotation transforms in draw(), the slice at the top is
-    // the one whose midpoint angle satisfies: (midpoint + wheelRotation - PI/2) mod 2PI = -PI/2
-    // i.e. (winnerIdx * sliceAngle + sliceAngle/2) + wheelRotation = 0 (mod 2*PI)
-    // => wheelRotation_target = -(winnerIdx * sliceAngle + sliceAngle/2)
-    // Add several full rotations for the spinny effect.
-
-    const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const fullRotations = Math.floor(MIN_FULL_ROTATIONS + Math.random() * (MAX_FULL_ROTATIONS - MIN_FULL_ROTATIONS + 1));
-    const baseTarget = -(winnerIdx * sliceAngle + sliceAngle / 2);
-    // Add a tiny jitter inside the slice so it doesn't always land dead-center
-    const jitter = (Math.random() - 0.5) * (sliceAngle * 0.6);
-    const targetRotation = baseTarget + jitter + fullRotations * Math.PI * 2;
-    // Normalize: ensure final > current so we always spin "forward"
-    while (targetRotation <= wheelRotation) {
-      // shouldn't happen given the multiple full rotations, but safety:
-    }
-
+    const inputSnapshot = players.map(p => p.displayName || p.lobbyNick || String(p.steam64 || '?'));
     const startRotation = wheelRotation;
-    const startTime = performance.now();
-    const duration = reducedMotion ? REDUCED_MOTION_DURATION_MS : FULL_SPIN_DURATION_MS;
+    const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    function easeOutCubic(t) {
-      return 1 - Math.pow(1 - t, 3);
+    // Reduced-motion path: pre-await drand, then snap to winner.
+    if (reducedMotion) {
+      let outcome = null;
+      try {
+        const commit = await window.VTToolsDrand.commitFlip({ lookahead: 1 });
+        outcome = await window.VTToolsDrand.rollOutcome(commit.round, players.length);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[wheel] drand failed', err);
+      }
+      if (!outcome) {
+        isSpinning = false;
+        if (spinBtnEl) spinBtnEl.disabled = false;
+        return;
+      }
+      const winner = players[outcome.index];
+      wheelRotation = -(outcome.index * sliceAngle + sliceAngle / 2);
+      wheelRotation = ((wheelRotation % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      draw();
+      finishSpin(winner, outcome, inputSnapshot);
+      return;
     }
+
+    // Animated path: constant velocity until drand resolves, then
+    // ease-out deceleration to the target slice.
+    const PHASE1_ANGULAR_VELOCITY = (Math.PI * 2) * 1.5;  // 1.5 rotations/sec
+    const PHASE2_DURATION_MS = 3300;
+    const SPIN_HARD_TIMEOUT_MS = 18000;  // safety net (drand timeout is 12s + buffer)
+
+    const startTime = performance.now();
+    let outcome = null;
+    let outcomeErr = null;
+    let phase2StartTime = null;
+    let phase2StartRotation = null;
+    let targetRotation = null;
+
+    // Fire-and-forget drand resolution. frame() polls the outer-scope
+    // `outcome` and transitions when it becomes non-null.
+    (async () => {
+      try {
+        const commit = await window.VTToolsDrand.commitFlip({ lookahead: 1 });
+        const o = await window.VTToolsDrand.rollOutcome(commit.round, players.length);
+        if (o) outcome = o;
+      } catch (err) {
+        outcomeErr = err;
+      }
+    })();
+
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
     function frame(now) {
-      const elapsed = now - startTime;
-      const t = Math.min(elapsed / duration, 1);
-      wheelRotation = startRotation + (targetRotation - startRotation) * easeOutCubic(t);
+      if (now - startTime > SPIN_HARD_TIMEOUT_MS) {
+        // eslint-disable-next-line no-console
+        console.warn('[wheel] spin timed out without outcome', outcomeErr);
+        isSpinning = false;
+        if (spinBtnEl) spinBtnEl.disabled = false;
+        return;
+      }
+
+      if (!outcome) {
+        // Phase 1: constant velocity while drand resolves.
+        const elapsed = (now - startTime) / 1000;
+        wheelRotation = startRotation + elapsed * PHASE1_ANGULAR_VELOCITY;
+        draw();
+        spinRafId = requestAnimationFrame(frame);
+        return;
+      }
+
+      if (phase2StartTime === null) {
+        // Transition: snapshot current rotation + compute the final target
+        // so winner's slice lands at the top of the wheel.
+        phase2StartTime = now;
+        phase2StartRotation = wheelRotation;
+        // Cosmetic Math.random calls (rotation count + in-slice jitter) -
+        // they only affect VISUAL flair, not which player wins.
+        const fullRotations = Math.floor(MIN_FULL_ROTATIONS + Math.random() * (MAX_FULL_ROTATIONS - MIN_FULL_ROTATIONS + 1));
+        const baseTarget = -(outcome.index * sliceAngle + sliceAngle / 2);
+        const jitter = (Math.random() - 0.5) * (sliceAngle * 0.6);
+        // Bring target to the same lap as current rotation, then add full
+        // rotations so we always spin "forward" with several visible turns.
+        let candidate = baseTarget + jitter;
+        while (candidate < wheelRotation) candidate += Math.PI * 2;
+        targetRotation = candidate + fullRotations * Math.PI * 2;
+      }
+
+      const t = Math.min((now - phase2StartTime) / PHASE2_DURATION_MS, 1);
+      wheelRotation = phase2StartRotation + (targetRotation - phase2StartRotation) * easeOutCubic(t);
       draw();
       if (t < 1) {
         spinRafId = requestAnimationFrame(frame);
       } else {
         // Normalize wheelRotation to [0, 2PI) so future spins don't accumulate
         wheelRotation = ((wheelRotation % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-        isSpinning = false;
-        lastWinner = winner;
-        updateMainState();
-        if (spinBtnEl) spinBtnEl.disabled = false;
-        showResult(winner);
+        const winner = players[outcome.index];
+        finishSpin(winner, outcome, inputSnapshot);
       }
     }
 
     spinRafId = requestAnimationFrame(frame);
+  }
+
+  function finishSpin(winner, outcome, inputSnapshot) {
+    isSpinning = false;
+    lastWinner = winner;
+    lastOutcome = outcome;
+    updateMainState();
+    if (spinBtnEl) spinBtnEl.disabled = false;
+    _logWheelEvent(winner, outcome, inputSnapshot);
+    showResult(winner, outcome);
+  }
+
+  function _logWheelEvent(winner, outcome, inputSnapshot) {
+    if (!window.VTToolsDrand || !window.VTToolsDrand.logEvent) return;
+    window.VTToolsDrand.logEvent({
+      tool: 'shitwheel',
+      round: outcome.beacon ? outcome.beacon.round : null,
+      outcomeLabel: winner.displayName || winner.lobbyNick || `index ${outcome.index}`,
+      rawOutcome: {
+        index: outcome.index,
+        derivation: outcome.derivation,
+        outcomeHex: outcome.outcomeHex,
+      },
+      inputSnapshot,
+      verifyUrl: outcome.verifyUrl,
+      crossChecked: outcome.crossChecked,
+      isFallback: outcome.isFallback,
+      fallbackReason: outcome.fallbackReason,
+      chosenRelayId: outcome.chosenRelayId,
+    });
+  }
+
+  function _renderWheelDrandBadge(outcome) {
+    if (!outcome) return '';
+    if (outcome.isFallback) {
+      const reason = outcome.fallbackReason === 'mismatch' ? 'cross-check failed' : 'drand offline';
+      return `
+        <span class="vt-tools-drand-badge vt-tools-drand-badge--fallback"
+              title="Outcome derived from local crypto.getRandomValues (UNAUDITED)">
+          <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+          FALLBACK &middot; ${escapeHtml(reason)}
+        </span>
+      `;
+    }
+    if (!outcome.beacon) return '';
+    const cls = outcome.crossChecked ? '' : ' vt-tools-drand-badge--single';
+    const title = outcome.crossChecked
+      ? 'Both api.drand.sh and drand.cloudflare.com returned identical bytes'
+      : 'Only one relay responded - outcome derived from a single source';
+    return `
+      <a class="vt-tools-drand-badge${cls}"
+         href="${escapeHtml(outcome.verifyUrl)}"
+         target="_blank" rel="noopener noreferrer"
+         title="${escapeHtml(title)}">
+        <i class="bi bi-shield-check" aria-hidden="true"></i>
+        <span>drand round</span>
+        <span class="vt-tools-drand-badge-round">${outcome.beacon.round.toLocaleString()}</span>
+      </a>
+    `;
   }
 
   function updateMainState() {
@@ -451,7 +577,7 @@
 
   // ---------------------------------------------------------------- Result modal
 
-  function showResult(winner) {
+  function showResult(winner, outcome) {
     const modalEl = document.getElementById('vt-tools-wheel-result-modal');
     const bodyMEl = document.getElementById('vt-tools-wheel-result-modal-body');
     const footerMEl = document.getElementById('vt-tools-wheel-result-modal-footer');
@@ -475,8 +601,11 @@
          </a>`
       : '';
 
+    const drandBadge = _renderWheelDrandBadge(outcome);
+    const stampCls = outcome && outcome.isFallback ? ' vt-tools-drand-unaudited-stamp' : '';
+
     bodyMEl.innerHTML = `
-      <div class="vt-tools-wheel-result-stage">
+      <div class="vt-tools-wheel-result-stage${stampCls}">
         <div class="vt-tools-wheel-result-confetti" aria-hidden="true">
           <i class="bi bi-trophy-fill"></i>
         </div>
@@ -491,6 +620,7 @@
         <div class="vt-tools-wheel-result-links d-flex flex-wrap gap-2 justify-content-center mt-3">
           ${steamLink}${vtstatsLink}
         </div>
+        ${drandBadge ? `<div class="vt-tools-wheel-result-drand-wrap mt-3">${drandBadge}</div>` : ''}
       </div>
     `;
 
@@ -552,9 +682,21 @@
   function onResetAll() {
     removedSteam64s.clear();
     lastWinner = null;
+    lastOutcome = null;
     wheelRotation = 0;
     draw();
     renderRemovedList();
+  }
+
+  function onTabShown(e) {
+    // Re-paint when the ShitWheel pane first becomes visible. Canvas is
+    // a fixed 380x380 bitmap so dimensions don't need recalculating, but
+    // a redraw smooths over any theme changes that happened while hidden.
+    if (!e || !e.detail || e.detail.tabId !== 'shitwheel') return;
+    if (canvasEl) {
+      readThemeColors();
+      draw();
+    }
   }
 
   // ---------------------------------------------------------------- Init
@@ -569,6 +711,7 @@
 
     window.addEventListener('vt-tools:roster', onRosterChange);
     window.addEventListener('vt-tools:reset-all', onResetAll);
+    window.addEventListener('vt-tools:tab-shown', onTabShown);
   }
 
   // ---------------------------------------------------------------- Public API
@@ -582,8 +725,11 @@
     showResult(player) {
       if (!player) return;
       lastWinner = player;
+      // External callers (e.g. sniper-modal.js) don't have a drand outcome
+      // to attach; passing null skips the drand badge + UNAUDITED treatment.
+      lastOutcome = null;
       updateMainState();
-      showResult(player);
+      showResult(player, null);
     },
     getActivePlayers() {
       return activePlayers().slice();

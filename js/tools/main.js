@@ -786,6 +786,13 @@
       window.VTLiveSession.refreshNow();
     }
 
+    // Wipe the drand session log so the "Provably Random" panel returns
+    // to its post-cold-load state (drand health pill is left alone -
+    // it's a system-wide indicator, not a per-page-session artifact).
+    if (window.VTToolsDrand && typeof window.VTToolsDrand.clearSessionLog === 'function') {
+      window.VTToolsDrand.clearSessionLog();
+    }
+
     // Notify component modules that they should reset their UI.
     window.dispatchEvent(new CustomEvent('vt-tools:reset-all'));
     broadcastRosterChange('reset-all');

@@ -9,6 +9,14 @@
  *
  * Pool count pills (7+/6+/All) apply to all three reels.
  *
+ * Randomness source: plain Math.random(). The Map Picker is intentionally
+ * NOT wired to the drand verification layer - rolling a map for a lobby
+ * is low-stakes and "did the host rig this?" isn't a real concern. Keeping
+ * it off drand also avoids burning verifier bandwidth on every reel spin
+ * (each reel would otherwise emit its own log row), keeps the Session log
+ * focused on the genuinely-trust-sensitive outputs (coinflip + ShitWheel),
+ * and lets the reels start animating instantly with no commit latency.
+ *
  * Animation:
  *   - Build a synthetic strip of ~60-80 cells per reel, with the winning
  *     map placed near the end. Animate via translateY with ease-out cubic.
@@ -446,6 +454,7 @@
     poolFilter = '7';
     const pill7 = document.getElementById('vt-tools-maproll-pools-7');
     if (pill7) pill7.checked = true;
+    if (rollBtnEl) rollBtnEl.disabled = false;
     for (let i = 0; i < 3; i++) placeholderReel(i);
     renderResults();
   }

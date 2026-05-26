@@ -5,12 +5,21 @@
  * the live session's svar1/svar2 team names when present) sit side-by-side;
  * a selector bar oscillates between them and decelerates onto the winner.
  *
+ * Outcome source: window.VTToolsDrand. commitFlip() reserves a future
+ * drand quicknet round, rollOutcome(round, 2) derives the index from
+ * SHA-256(randomness) mod 2 (with unbiased rejection sampling). Falls
+ * back to crypto.getRandomValues when drand is unreachable - the
+ * fallback result carries isFallback=true so the UI can stamp an
+ * UNAUDITED watermark + show a red FALLBACK badge.
+ *
  * Animation:
- *   - Pre-compute winner via Math.random() < 0.5 ? 1 : 2
- *   - Animate selector position via requestAnimationFrame, ease-out cubic,
- *     ~2s total. The position oscillates rapidly (sin wave) early on and
- *     decays into landing on the winner.
+ *   - Pre-await drand outcome (~1.5s avg), then animate. Selector
+ *     oscillates rapidly (sin wave) early on and decays onto the winner.
  *   - prefers-reduced-motion: skip animation, snap to result in 500ms.
+ *   - The PHASE2 boundary jitter (line ~138 below) intentionally uses
+ *     Math.random - cosmetic only; it just keeps the lock-in moment
+ *     unpredictable within a tiny window. The consequential outcome
+ *     comes from drand.
  *
  * Mode pills:
  *   - Single (active)
@@ -49,6 +58,7 @@
 
   let isFlipping = false;
   let lastResult = null;
+  let lastOutcome = null;
   let teamNames = { team1: 'Team 1', team2: 'Team 2' };
 
   // ---------------------------------------------------------------- Render
@@ -121,20 +131,47 @@
 
   // ---------------------------------------------------------------- Flip
 
-  function flip() {
+  async function flip() {
     if (isFlipping) return;
     isFlipping = true;
-    if (flipBtnEl) flipBtnEl.disabled = true;
+    setFlipBtnState('committing');
     renderResultPending();
     clearWinnerHighlight();
     setSelectorVisible(true);
 
-    const winner = Math.random() < 0.5 ? 1 : 2;
+    // OUTCOME SOURCE = drand (with crypto fallback under graceful degrade).
+    // The Math.random() that used to live here was a critical
+    // host-riggable surface; replacing it with a committed-then-revealed
+    // drand round makes the flip cryptographically unriggable.
+    let outcome = null;
+    try {
+      const commit = await window.VTToolsDrand.commitFlip();
+      outcome = await window.VTToolsDrand.rollOutcome(commit.round, 2);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[coinflip] drand failed', err);
+    }
+
+    if (!outcome) {
+      // Defensive only - rollOutcome falls back to crypto on hard failure,
+      // so this branch should be effectively unreachable. Bail safely.
+      isFlipping = false;
+      setFlipBtnState('idle');
+      renderResultEmpty();
+      return;
+    }
+
+    setFlipBtnState('idle');
+    const winner = outcome.index === 0 ? 1 : 2;
+    lastOutcome = outcome;
+
     const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const duration = reducedMotion ? REDUCED_MOTION_DURATION_MS : FULL_DURATION_MS;
     const startTime = performance.now();
 
     // Phase boundary for lock-in jittered per-flip so repeated flips differ.
+    // Cosmetic Math.random - this jitter shifts the LOCK-IN MOMENT by a few
+    // dozen ms; it does not influence WHICH team wins (drand already decided).
     const phase2End = PHASE2_MIN + Math.random() * (PHASE2_MAX - PHASE2_MIN);
 
     // Frequencies (rad/ms):
@@ -223,11 +260,73 @@
   function finishFlip(team) {
     isFlipping = false;
     lastResult = team;
-    if (flipBtnEl) flipBtnEl.disabled = false;
+    setFlipBtnState('idle');
     highlightWinner(team);
     setSelectorVisible(false);
-    renderResultWinner(team);
+    renderResultWinner(team, lastOutcome);
+    if (lastOutcome) _logEvent(team, lastOutcome);
     updateMainState();
+  }
+
+  function setFlipBtnState(state) {
+    if (!flipBtnEl) return;
+    if (state === 'committing') {
+      flipBtnEl.disabled = true;
+      flipBtnEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Committing&hellip;';
+    } else {
+      flipBtnEl.disabled = false;
+      flipBtnEl.innerHTML = '<i class="bi bi-coin me-1"></i>FLIP';
+    }
+  }
+
+  function _logEvent(team, outcome) {
+    if (!window.VTToolsDrand || !window.VTToolsDrand.logEvent) return;
+    const name = team === 1 ? teamNames.team1 : teamNames.team2;
+    window.VTToolsDrand.logEvent({
+      tool: 'coinflip',
+      round: outcome.beacon ? outcome.beacon.round : null,
+      outcomeLabel: `Team ${team} (${name})`,
+      rawOutcome: {
+        index: outcome.index,
+        derivation: outcome.derivation,
+        outcomeHex: outcome.outcomeHex,
+      },
+      inputSnapshot: [teamNames.team1, teamNames.team2],
+      verifyUrl: outcome.verifyUrl,
+      crossChecked: outcome.crossChecked,
+      isFallback: outcome.isFallback,
+      fallbackReason: outcome.fallbackReason,
+      chosenRelayId: outcome.chosenRelayId,
+    });
+  }
+
+  function _renderDrandBadge(outcome) {
+    if (!outcome) return '';
+    if (outcome.isFallback) {
+      const reason = outcome.fallbackReason === 'mismatch' ? 'cross-check failed' : 'drand offline';
+      return `
+        <span class="vt-tools-drand-badge vt-tools-drand-badge--fallback"
+              title="Outcome derived from local crypto.getRandomValues (UNAUDITED)">
+          <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+          FALLBACK &middot; ${escapeHtml(reason)}
+        </span>
+      `;
+    }
+    if (!outcome.beacon) return '';
+    const cls = outcome.crossChecked ? '' : ' vt-tools-drand-badge--single';
+    const title = outcome.crossChecked
+      ? 'Both api.drand.sh and drand.cloudflare.com returned identical bytes'
+      : 'Only one relay responded - outcome derived from a single source';
+    return `
+      <a class="vt-tools-drand-badge${cls}"
+         href="${escapeHtml(outcome.verifyUrl)}"
+         target="_blank" rel="noopener noreferrer"
+         title="${escapeHtml(title)}">
+        <i class="bi bi-shield-check" aria-hidden="true"></i>
+        <span>drand round</span>
+        <span class="vt-tools-drand-badge-round">${outcome.beacon.round.toLocaleString()}</span>
+      </a>
+    `;
   }
 
   function renderResultPending() {
@@ -240,16 +339,19 @@
     `;
   }
 
-  function renderResultWinner(team) {
+  function renderResultWinner(team, outcome) {
     if (!resultEl) return;
     const name = team === 1 ? teamNames.team1 : teamNames.team2;
     const cls = team === 1 ? 'vt-tools-coinflip-result--team1' : 'vt-tools-coinflip-result--team2';
+    const badge = _renderDrandBadge(outcome);
+    const stampCls = outcome && outcome.isFallback ? ' vt-tools-drand-unaudited-stamp' : '';
     resultEl.innerHTML = `
-      <div class="vt-tools-coinflip-result-stage ${cls}">
+      <div class="vt-tools-coinflip-result-stage ${cls}${stampCls}">
         <i class="bi bi-trophy-fill vt-tools-coinflip-result-trophy"></i>
         <div class="vt-tools-coinflip-result-team-label">Team ${team}</div>
         <div class="vt-tools-coinflip-result-team-name">${escapeHtml(name)}</div>
         <div class="vt-tools-coinflip-result-tagline">wins the flip</div>
+        ${badge ? `<div class="vt-tools-coinflip-result-badge-wrap">${badge}</div>` : ''}
       </div>
     `;
   }
@@ -287,10 +389,17 @@
 
   function onResetAll() {
     lastResult = null;
+    lastOutcome = null;
     clearWinnerHighlight();
     setSelectorPos(0.5);
     setSelectorVisible(false);
     renderResultEmpty();
+  }
+
+  function onTabShown(/* e */) {
+    // Coinflip is pure DOM / CSS - no canvas reflow needed when its pane
+    // becomes visible. Listener is kept as a hook for symmetry with the
+    // wheel + map-roll components.
   }
 
   // ---------------------------------------------------------------- Init
@@ -307,6 +416,7 @@
     }
     window.addEventListener('vt-tools:roster', onRosterChange);
     window.addEventListener('vt-tools:reset-all', onResetAll);
+    window.addEventListener('vt-tools:tab-shown', onTabShown);
   }
 
   if (document.readyState === 'loading') {

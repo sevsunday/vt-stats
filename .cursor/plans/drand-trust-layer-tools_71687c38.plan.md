@@ -4,49 +4,49 @@ overview: Vendor a slim drand quicknet HTTP client, replace the four consequenti
 todos:
   - id: vendor-drand
     content: Create vendor/drand/ with drand-quicknet.js (slim cross-relay HTTP client, no crypto deps, quicknet constants baked in), LICENSE-APACHE, LICENSE-MIT, README.md copied/derived from drand-client-master.
-    status: pending
+    status: completed
   - id: drand-source
     content: "Build js/tools/drand-source.js exposing window.VTToolsDrand: commitFlip(), rollOutcome(round, modulus, domainTag?), sha256Hex(), unbiasedModFromHex(), logEvent(), clearSessionLog(), getHealthStatus(), onHealthChange(callback), retryHealthCheck(). One-round-three-derivations support for map-roll reels via domain-separated SHA-256. Internal: cryptoFallbackRoll(modulus) using crypto.getRandomValues with rejection sampling for unbiased modulo."
-    status: pending
+    status: completed
   - id: drand-health
     content: "Health-monitoring subsystem inside drand-source.js: periodic /latest probe of both relays every HEALTH_POLL_INTERVAL_MS = 60000ms (tunable), opportunistic re-check on Page Visibility 'visible', and an on-demand check on every commitFlip() call. Four states - ONLINE (both relays healthy + bytes match on /latest cross-check), DEGRADED (one relay 404/5xx or slow >5s, the other healthy), FALLBACK_OFFLINE (both relays unreachable), FALLBACK_MISMATCH (both reachable but disagree on /latest bytes, indicates relay corruption or MITM). emits 'vt-tools:drand-health' events on every transition so the panel + per-component badges can repaint."
-    status: pending
+    status: completed
   - id: fallback-flow
-    content: "Wire FALLBACK_OFFLINE and FALLBACK_MISMATCH paths into commitFlip / rollOutcome so a flip during a drand outage proceeds with crypto.getRandomValues instead of blocking. Fallback log rows carry isFallback=true, no round number, no verifyUrl - just a red FALLBACK badge with reason ('drand offline' or 'cross-check mismatch'). Per-component result panels also stamp a red UNAUDITED watermark when isFallback=true so screen-share viewers see the broken trust guarantee even if they're not looking at the drand panel."
-    status: pending
+    content: Wire FALLBACK_OFFLINE and FALLBACK_MISMATCH paths into commitFlip / rollOutcome so a flip during a drand outage proceeds with crypto.getRandomValues instead of blocking. Fallback log rows carry isFallback=true, no round number, no verifyUrl - just a red FALLBACK badge with reason ('drand offline' or 'cross-check mismatch'). Per-component result panels also stamp a red UNAUDITED watermark when isFallback=true so screen-share viewers see the broken trust guarantee even if they're not looking at the drand panel.
+    status: completed
   - id: drand-panel
     content: "Build js/tools/drand-panel.js: renders the Provably Random section. Status indicator that ALWAYS reflects current health (4 visual states: green dot 'drand quicknet ONLINE - next round in X.Xs', yellow 'drand DEGRADED - single relay verified', red 'drand UNREACHABLE - using crypto fallback (UNAUDITED)', red+pulsing 'drand CROSS-CHECK FAILED - using crypto fallback (UNAUDITED)'). Manual 'Retry connection' button appears in degraded/fallback states. Verifier form with tool selector + round input + tool-specific input pads. Session log table with per-row beacon-open / copy-link / expand-derivation actions; fallback log rows are red-shaded with FALLBACK badge. Download receipts JSON. Auto-parses ?verify=...&round=... URL params on boot. Listens to 'vt-tools:drand-health' events to repaint."
-    status: pending
+    status: completed
   - id: drand-howto-modal
     content: Add the 'How verify works' modal to tools/index.html documenting the SHA-256 derivation rules per tool (coinflip mod 2, wheel mod N, map-roll three domain-separated reels).
-    status: pending
+    status: completed
   - id: tabbed-shell
     content: "Refactor right column of tools/index.html: replace the three stacked sections (wheel, coinflip, map-roll) with one Provably Random section + one tabbed Randomizer section using Bootstrap nav-pills. Move existing #vt-tools-wheel-body / #vt-tools-coinflip-body / #vt-tools-maproll-body INSIDE the tab-panes without changing their IDs so the existing self-bootstrapping IIFEs keep working. Move each tool's method/mode/pool sub-pills inside their own pane subheaders. Rename 'Player Picker' to 'ShitWheel' (card title text only, no internal ID changes)."
-    status: pending
+    status: completed
   - id: randomizer-tabs
     content: "Build js/tools/randomizer-tabs.js: wires Bootstrap shown.bs.tab on the nav-pills, dispatches a new vt-tools:tab-shown CustomEvent with detail.tabId so each component can re-paint its visible surface. Reads optional ?tab=... URL param on boot to pre-activate a specific pill."
-    status: pending
+    status: completed
   - id: tools-css
     content: "Add .vt-tools-drand-panel-*, .vt-tools-randomizer-pills, .vt-tools-drand-badge, .vt-tools-drand-log-row, .vt-tools-pane-subheader blocks to css/tools.css. Health-state variants: .vt-tools-drand-status--online (green dot), .vt-tools-drand-status--degraded (yellow dot, slow blink), .vt-tools-drand-status--fallback (red dot, pulsing), .vt-tools-drand-status--mismatch (red+yellow alternating pulse). Fallback warning banner .vt-tools-drand-fallback-banner across the top of the drand card body (large red-on-warning background, immovable until drand returns). Per-result UNAUDITED watermark .vt-tools-drand-unaudited-stamp (transparent red diagonal text on result panels). Log row .vt-tools-drand-log-row--fallback (red-tinted background, FALLBACK pill). Reuse existing card chrome. Verify below-1280 single-col fallback still flows naturally (drand panel above tabbed randomizer)."
-    status: pending
+    status: completed
   - id: coinflip-drand
     content: "Wire js/tools/coinflip.js to drand: replace the consequential Math.random() on line 132 with commitFlip() + rollOutcome(round, 2). Keep PHASE2 jitter on line 138 as cosmetic Math.random(). Render a per-result drand badge (round + verify URL) in the result panel HTML. Add a no-op vt-tools:tab-shown listener (DOM-only, no canvas reflow needed)."
-    status: pending
+    status: completed
   - id: wheel-drand
     content: "Wire js/tools/wheel.js to drand: replace winnerIdx on line 392 with await rollOutcome(round, players.length). Keep cosmetic Math.random() jitter on lines 404 + 407. Fold the ~2s drand fetch wait into the existing 4.8s spin envelope so there's no perceived delay. Render drand badge in the result modal body. Add a vt-tools:tab-shown listener that re-runs canvas resize + draw so the wheel renders correctly when the pill is first activated."
-    status: pending
+    status: completed
   - id: maproll-drand
     content: "Wire js/tools/map-roll.js to drand: replace winnerFile on line 370 with three domain-separated rolls from a SINGLE round (reel 1 = SHA-256(randomness || ':popular'), reel 2 = ':played', reel 3 = ':unplayed'). Keep cosmetic filler-cell Math.random() on line 387. Add a vt-tools:tab-shown listener that re-paints reel transforms. Per-reel drand badge in each result card."
-    status: pending
+    status: completed
   - id: main-reset-hook
     content: Update js/tools/main.js Reset-All confirm handler to call window.VTToolsDrand.clearSessionLog() alongside existing per-tool resets. Update the reset modal's list in tools/index.html to mention 'Provably Random session log'. Optionally fire vt-tools:tab-shown for the default-active pill after DOMContentLoaded so the wheel canvas paints correctly on first load.
-    status: pending
+    status: completed
   - id: script-includes
     content: "Add the three new script tags to tools/index.html in dependency order: drand-source.js BEFORE wheel/coinflip/map-roll (they import it), drand-panel.js + randomizer-tabs.js AFTER (they only render UI). Verify the existing main.js still bootstraps last."
-    status: pending
+    status: completed
   - id: manual-smoke-test
     content: "Manual smoke test in browser: (1) cold load, status pill shows ONLINE with green dot, verifier countdown ticks; (2) flip coin, log row appears, drand badge in result panel shows round number, both relay icons green; (3) switch to ShitWheel tab, spin, coinflip badge persists in the (now hidden) coinflip pane state; (4) switch to Map Picker, roll, three reel badges + three log rows; (5) click 'copy verify link' on a log row, paste in new tab, verifier autofills + auto-runs + matches the original outcome; (6) type bare round number in verifier, accepts; (7) hit Reset All, log clears, panes back to defaults, drand panel remains and status persists; (8) FALLBACK simulation - use devtools Network tab to block 'api.drand.sh' AND 'drand.cloudflare.com' AND wait for next health poll OR click Retry: status pill flips to red 'UNREACHABLE', big red banner appears, FLIP/SPIN/ROLL buttons turn red-tinted, perform a flip in fallback mode - result panel stamps UNAUDITED watermark, log row is red with FALLBACK pill, no round number, no verify URL. (9) Unblock the relays, click Retry - status flips back to ONLINE, toast 'drand back online', subsequent flips return to green-cross-checked badges. (10) DEGRADED simulation - block only api.drand.sh, leave cloudflare unblocked: status pill yellow 'DEGRADED', subsequent flips succeed via single-source, log rows show yellow single-source badge. (11) navigator.onLine simulation via devtools 'Offline' checkbox - same as FALLBACK_OFFLINE path. (12) below-1280 viewport, drand panel stacks above tabbed card cleanly."
-    status: pending
+    status: completed
 isProject: false
 ---
 

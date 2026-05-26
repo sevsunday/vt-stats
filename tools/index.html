@@ -267,89 +267,196 @@
 
       </div><!-- /.vt-tools-grid-col--data -->
 
-      <!-- Right column: tools trio (Wheel + Coinflip + Map Roll). -->
+      <!-- Right column: Provably Random trust panel + tabbed Randomizer card.
+           Refactored from the original three-stacked-cards layout to recover
+           vertical space and surface drand integrity controls page-wide. -->
       <div class="vt-tools-grid-col vt-tools-grid-col--tools">
 
       <!-- ============================================================
-           PLAYER WHEEL
+           PROVABLY RANDOM — drand status + verifier + session log
            ============================================================ -->
 
-      <section class="vt-tools-card vt-tools-card--wheel" id="vt-tools-wheel"
-               aria-labelledby="vt-tools-wheel-title">
+      <section class="vt-tools-card vt-tools-card--drand" id="vt-tools-drand"
+               data-drand-state="online"
+               data-collapsed="true"
+               aria-labelledby="vt-tools-drand-title">
         <header class="vt-tools-card-header">
-          <h2 class="vt-tools-card-title" id="vt-tools-wheel-title">
-            <i class="bi bi-circle me-2"></i>Player Picker
+          <h2 class="vt-tools-card-title" id="vt-tools-drand-title">
+            <i class="bi bi-shield-check me-2"></i>Provably Random
+            <span class="vt-tools-drand-status-pill vt-tools-drand-status--online"
+                  id="vt-tools-drand-status-pill"
+                  aria-live="polite">
+              <span class="vt-tools-drand-status-dot" aria-hidden="true"></span>
+              <span class="vt-tools-drand-status-text">drand quicknet ONLINE</span>
+              <span class="vt-tools-drand-status-meta" id="vt-tools-drand-status-meta">
+                · next round in <span id="vt-tools-drand-countdown">3.0s</span>
+              </span>
+            </span>
           </h2>
           <div class="vt-tools-card-header-actions">
-            <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Selection method">
-              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-wheel" value="wheel" autocomplete="off" checked>
-              <label class="btn btn-outline-secondary" for="vt-tools-wheel-method-wheel">
-                <i class="bi bi-circle"></i>Wheel
-              </label>
-              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-plinko" value="plinko" autocomplete="off" disabled>
-              <label class="btn btn-outline-secondary disabled" for="vt-tools-wheel-method-plinko">
-                <i class="bi bi-bricks"></i>Plinko
-              </label>
-              <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-sniper" value="sniper" autocomplete="off">
-              <label class="btn btn-outline-secondary" for="vt-tools-wheel-method-sniper">
-                <i class="bi bi-bullseye"></i>Sniper
-              </label>
-            </div>
+            <span class="vt-tools-drand-receipt-count"
+                  id="vt-tools-drand-receipt-count"
+                  title="Verifiable receipts collected this session"
+                  hidden>
+              <i class="bi bi-receipt me-1" aria-hidden="true"></i><span id="vt-tools-drand-receipt-count-n">0</span> receipts
+            </span>
+            <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-drand-retry-btn"
+                    id="vt-tools-drand-retry"
+                    title="Re-check connection to drand relays"
+                    style="display:none;">
+              <i class="bi bi-arrow-clockwise me-1"></i>Retry
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-pill-icon"
+                    data-bs-toggle="modal" data-bs-target="#vt-tools-drand-howto-modal"
+                    title="How to verify a roll independently"
+                    aria-label="How verify works">
+              <i class="bi bi-question-circle"></i>
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm vt-tools-pill-icon vt-tools-drand-collapse-toggle"
+                    id="vt-tools-drand-collapse-toggle"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#vt-tools-drand-body"
+                    aria-expanded="false"
+                    aria-controls="vt-tools-drand-body"
+                    title="Expand to see verifier + session log"
+                    aria-label="Toggle drand panel body">
+              <i class="bi bi-chevron-down" aria-hidden="true"></i>
+            </button>
           </div>
         </header>
-        <div class="vt-tools-card-body" id="vt-tools-wheel-body">
-          <div class="text-muted small p-3">Add at least 2 players to spin.</div>
+        <div class="vt-tools-card-body collapse" id="vt-tools-drand-body">
+          <!-- Fallback banner: hidden when ONLINE/DEGRADED, visible (and red)
+               on FALLBACK_OFFLINE / FALLBACK_MISMATCH. Reason text differs
+               by state and is set by drand-panel.js. -->
+          <div class="vt-tools-drand-fallback-banner"
+               id="vt-tools-drand-fallback-banner"
+               role="alert"
+               style="display:none;">
+            <i class="bi bi-exclamation-triangle-fill vt-tools-drand-fallback-banner-icon" aria-hidden="true"></i>
+            <div class="vt-tools-drand-fallback-banner-body">
+              <strong>DRAND UNREACHABLE — RANDOMIZATION IS UNAUDITED</strong>
+              <div class="vt-tools-drand-fallback-banner-reason"
+                   id="vt-tools-drand-fallback-banner-reason"></div>
+            </div>
+          </div>
+          <!-- Verifier (form + result) - built dynamically by drand-panel.js. -->
+          <div class="vt-tools-drand-verifier" id="vt-tools-drand-verifier"></div>
+          <!-- Session log (chronological, in-memory) - built by drand-panel.js. -->
+          <div class="vt-tools-drand-log" id="vt-tools-drand-log"></div>
         </div>
       </section>
 
       <!-- ============================================================
-           COINFLIP (right col, row 2) — small card
+           RANDOMIZER — ShitWheel / Coinflip / Map Picker tabs
+           Existing self-bootstrapping IIFEs (wheel.js, coinflip.js,
+           map-roll.js) read static body IDs and listen for live roster
+           events. Those bodies are nested inside .tab-pane wrappers
+           without changing their IDs, so the existing JS continues to
+           work. Hidden panes still receive vt-tools:roster events so
+           internal state is preserved across tab switches.
            ============================================================ -->
 
-      <section class="vt-tools-card vt-tools-card--coinflip" id="vt-tools-coinflip"
-               aria-labelledby="vt-tools-coinflip-title">
-        <header class="vt-tools-card-header">
-          <h2 class="vt-tools-card-title" id="vt-tools-coinflip-title">
-            <i class="bi bi-coin me-2"></i>Coinflip
-          </h2>
-          <div class="vt-tools-card-header-actions">
-            <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Coinflip mode">
-              <input type="radio" class="btn-check" name="vt-tools-coin-mode" id="vt-tools-coin-mode-single" value="single" autocomplete="off" checked>
-              <label class="btn btn-outline-secondary" for="vt-tools-coin-mode-single">Single</label>
-              <input type="radio" class="btn-check" name="vt-tools-coin-mode" id="vt-tools-coin-mode-bo5" value="bo5" autocomplete="off" disabled>
-              <label class="btn btn-outline-secondary disabled" for="vt-tools-coin-mode-bo5">Bo5</label>
-            </div>
-          </div>
+      <section class="vt-tools-card vt-tools-card--randomizer" id="vt-tools-randomizer"
+               aria-labelledby="vt-tools-randomizer-title">
+        <header class="vt-tools-card-header vt-tools-card-header--pills">
+          <h2 class="visually-hidden" id="vt-tools-randomizer-title">Randomizer</h2>
+          <ul class="nav nav-pills vt-tools-randomizer-pills" role="tablist"
+              id="vt-tools-randomizer-pills">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="vt-tools-pill-shitwheel"
+                      data-bs-toggle="pill" data-bs-target="#vt-tools-pane-shitwheel"
+                      data-vt-tab-id="shitwheel"
+                      type="button" role="tab"
+                      aria-controls="vt-tools-pane-shitwheel" aria-selected="true">
+                <i class="bi bi-circle me-1"></i>ShitWheel
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="vt-tools-pill-coinflip"
+                      data-bs-toggle="pill" data-bs-target="#vt-tools-pane-coinflip"
+                      data-vt-tab-id="coinflip"
+                      type="button" role="tab"
+                      aria-controls="vt-tools-pane-coinflip" aria-selected="false">
+                <i class="bi bi-coin me-1"></i>Coinflip
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="vt-tools-pill-maproll"
+                      data-bs-toggle="pill" data-bs-target="#vt-tools-pane-maproll"
+                      data-vt-tab-id="maproll"
+                      type="button" role="tab"
+                      aria-controls="vt-tools-pane-maproll" aria-selected="false">
+                <i class="bi bi-dice-6 me-1"></i>Map Picker
+              </button>
+            </li>
+          </ul>
         </header>
-        <div class="vt-tools-card-body" id="vt-tools-coinflip-body">
-          <div class="text-muted small p-3">Click Flip to choose a team.</div>
-        </div>
-      </section>
+        <div class="vt-tools-card-body vt-tools-card-body--randomizer">
+          <div class="tab-content">
 
-      <!-- ============================================================
-           MAP ROLL (right col, row 3)
-           ============================================================ -->
-
-      <section class="vt-tools-card vt-tools-card--maproll" id="vt-tools-maproll"
-               aria-labelledby="vt-tools-maproll-title">
-        <header class="vt-tools-card-header">
-          <h2 class="vt-tools-card-title" id="vt-tools-maproll-title">
-            <i class="bi bi-dice-6 me-2"></i>Random Map
-          </h2>
-          <div class="vt-tools-card-header-actions">
-            <span class="text-secondary small me-1">Pools:</span>
-            <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Pool count">
-              <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-7" value="7" autocomplete="off" checked>
-              <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-7">7+</label>
-              <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-6" value="6" autocomplete="off">
-              <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-6">6+</label>
-              <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-all" value="all" autocomplete="off">
-              <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-all">All</label>
+            <!-- ShitWheel pane. Method-pill subheader carries the original
+                 Wheel/Plinko/Sniper radio group (IDs unchanged so
+                 sniper-modal.js's wheel-method-wheel / wheel-method-sniper
+                 lookups still resolve). -->
+            <div class="tab-pane fade show active" id="vt-tools-pane-shitwheel"
+                 role="tabpanel" aria-labelledby="vt-tools-pill-shitwheel">
+              <div class="vt-tools-pane-subheader">
+                <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Selection method">
+                  <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-wheel" value="wheel" autocomplete="off" checked>
+                  <label class="btn btn-outline-secondary" for="vt-tools-wheel-method-wheel">
+                    <i class="bi bi-circle"></i>Wheel
+                  </label>
+                  <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-plinko" value="plinko" autocomplete="off" disabled>
+                  <label class="btn btn-outline-secondary disabled" for="vt-tools-wheel-method-plinko">
+                    <i class="bi bi-bricks"></i>Plinko
+                  </label>
+                  <input type="radio" class="btn-check" name="vt-tools-wheel-method" id="vt-tools-wheel-method-sniper" value="sniper" autocomplete="off">
+                  <label class="btn btn-outline-secondary" for="vt-tools-wheel-method-sniper">
+                    <i class="bi bi-bullseye"></i>Sniper
+                  </label>
+                </div>
+              </div>
+              <div id="vt-tools-wheel-body">
+                <div class="text-muted small p-3">Add at least 2 players to spin.</div>
+              </div>
             </div>
+
+            <!-- Coinflip pane. -->
+            <div class="tab-pane fade" id="vt-tools-pane-coinflip"
+                 role="tabpanel" aria-labelledby="vt-tools-pill-coinflip">
+              <div class="vt-tools-pane-subheader">
+                <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Coinflip mode">
+                  <input type="radio" class="btn-check" name="vt-tools-coin-mode" id="vt-tools-coin-mode-single" value="single" autocomplete="off" checked>
+                  <label class="btn btn-outline-secondary" for="vt-tools-coin-mode-single">Single</label>
+                  <input type="radio" class="btn-check" name="vt-tools-coin-mode" id="vt-tools-coin-mode-bo5" value="bo5" autocomplete="off" disabled>
+                  <label class="btn btn-outline-secondary disabled" for="vt-tools-coin-mode-bo5">Bo5</label>
+                </div>
+              </div>
+              <div id="vt-tools-coinflip-body">
+                <div class="text-muted small p-3">Click Flip to choose a team.</div>
+              </div>
+            </div>
+
+            <!-- Map Picker pane. -->
+            <div class="tab-pane fade" id="vt-tools-pane-maproll"
+                 role="tabpanel" aria-labelledby="vt-tools-pill-maproll">
+              <div class="vt-tools-pane-subheader">
+                <span class="text-secondary small me-1">Pools:</span>
+                <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Pool count">
+                  <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-7" value="7" autocomplete="off" checked>
+                  <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-7">7+</label>
+                  <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-6" value="6" autocomplete="off">
+                  <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-6">6+</label>
+                  <input type="radio" class="btn-check" name="vt-tools-maproll-pools" id="vt-tools-maproll-pools-all" value="all" autocomplete="off">
+                  <label class="btn btn-outline-secondary" for="vt-tools-maproll-pools-all">All</label>
+                </div>
+              </div>
+              <div id="vt-tools-maproll-body">
+                <div class="text-muted small p-3">Click Roll to spin three reels.</div>
+              </div>
+            </div>
+
           </div>
-        </header>
-        <div class="vt-tools-card-body" id="vt-tools-maproll-body">
-          <div class="text-muted small p-3">Click Roll to spin three reels.</div>
         </div>
       </section>
 
@@ -478,8 +585,9 @@
             <li>Coinflip result</li>
             <li>Map roll results</li>
             <li>Team balonce commander config and manual swaps</li>
+            <li>Provably Random session log</li>
           </ul>
-          <p class="text-secondary small mb-0">Toggles return to defaults (Auto mode, polling on, unlocked).</p>
+          <p class="text-secondary small mb-0">Toggles return to defaults (Auto mode, polling on, unlocked). The drand health indicator persists — it reflects network state, not user state.</p>
         </div>
         <div class="modal-footer border-top">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
@@ -658,6 +766,84 @@
     </div>
   </div>
 
+  <!-- ============================================================
+       DRAND "HOW VERIFY WORKS" MODAL
+       Opened from the Provably Random panel's '?' button and from the
+       verifier "How does this work?" link. Documents the commit-reveal
+       flow + per-tool SHA-256 derivation rules so any viewer can audit
+       a roll independently.
+       ============================================================ -->
+  <div class="modal fade" id="vt-tools-drand-howto-modal" tabindex="-1"
+       aria-labelledby="vt-tools-drand-howto-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="vt-tools-drand-howto-modal-title">
+            <i class="bi bi-shield-check me-2" style="color: var(--kb-primary);"></i>How verification works
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body vt-tools-drand-howto-body">
+          <p class="mb-3">
+            Every coinflip and wheel spin here is locked to a future round of
+            <a href="https://drand.love" target="_blank" rel="noopener">drand</a>, a
+            public network-wide randomness service. The host commits to a specific
+            round number <em>before</em> that round's randomness exists, so they can't
+            predict or rig the result.
+          </p>
+
+          <h6 class="mt-3">
+            <i class="bi bi-clipboard-check me-1" style="color: var(--kb-primary);"></i>Verify a roll someone else did
+          </h6>
+          <ol class="small mb-2">
+            <li>Grab the <strong>round number</strong> from their result (e.g. <code>28,970,906</code>).</li>
+            <li>Open the <strong>Provably Random</strong> panel here and expand it with the chevron.</li>
+            <li>
+              In <strong>Verify a roll</strong>, pick the tool (Coinflip / ShitWheel), paste
+              the round number, and fill in the same inputs the host used (team labels for
+              Coinflip, or the same items / roster order for ShitWheel).
+            </li>
+            <li>Hit <strong>Verify</strong> &mdash; you should see the same outcome.</li>
+          </ol>
+          <p class="small text-muted mb-0">
+            If the host shares the <em>verify</em> deep link from their result card, just
+            open the link &mdash; the form auto-fills and runs verification on load.
+          </p>
+
+          <h6 class="mt-4">
+            <i class="bi bi-gear me-1" style="color: var(--kb-primary);"></i>How it works
+          </h6>
+          <ul class="small mb-0">
+            <li>The host reserves a future drand round number at click time and shows it publicly in the result.</li>
+            <li>About 6 seconds later, the page fetches that round from two independent relays and rejects the result if their bytes disagree.</li>
+            <li>The page derives the outcome from those bytes using a fixed, public rule, so anyone who fetches the same round can recompute the same answer.</li>
+          </ul>
+
+          <hr>
+
+          <h6 class="mt-3 vt-tools-drand-howto-fallback-head">
+            <i class="bi bi-exclamation-triangle-fill me-1"
+               style="color: var(--kb-warning);"></i>Fallback mode
+          </h6>
+          <p class="small mb-0">
+            If drand is unreachable, the page falls back to your browser's local random
+            source. Those results carry an <strong>UNAUDITED</strong> watermark and can't
+            be independently verified &mdash; wait for drand to recover (the
+            <strong>Retry</strong> button) if trust matters.
+          </p>
+        </div>
+        <div class="modal-footer border-top">
+          <a href="https://drand.love" target="_blank" rel="noopener"
+             class="me-auto small">
+             Learn more about drand
+             <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+          </a>
+          <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Got it</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Bootstrap toast container. Fixed top-right, clears the sticky topnav
        via top: 80px. Stacks via flex-column with gap. -->
   <div class="vt-tools-toast-container toast-container position-fixed top-0 end-0 p-3"
@@ -673,11 +859,19 @@
   <script src="../js/tools/player-resolver.js"></script>
   <script src="../js/tools/toast-manager.js"></script>
   <script src="../js/tools/live-session.js"></script>
+  <!-- Drand trust layer. Must load BEFORE wheel/coinflip/map-roll so their
+       commitFlip()/rollOutcome() calls find window.VTToolsDrand defined. -->
+  <script src="../vendor/drand/drand-quicknet.js"></script>
+  <script src="../js/tools/drand-source.js"></script>
   <script src="../js/tools/wheel.js"></script>
   <script src="../js/tools/sniper/sniper-modal.js"></script>
   <script src="../js/tools/coinflip.js"></script>
   <script src="../js/tools/map-roll.js"></script>
   <script src="../js/tools/team-balonce.js"></script>
+  <!-- Drand UI + tab plumbing. Render only - load after the components so
+       any boot-time render hooks find DOM populated. -->
+  <script src="../js/tools/randomizer-tabs.js"></script>
+  <script src="../js/tools/drand-panel.js"></script>
   <script src="../js/tools/main.js"></script>
   <script src="../js/active-game-indicator.js"></script>
 </body>
