@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VTSR-T Systemic Shortfalls Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#151e2e',
+                            900: '#0f172a',
+                        },
+                        accent: '#38bdf8',
+                        danger: '#f43f5e',
+                        success: '#10b981',
+                        warning: '#fbbf24'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .glow-text {
+            text-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col md:flex-row">
+
+    <!-- Sidebar Navigation -->
+    <aside class="w-full md:w-72 md:fixed h-auto md:h-screen bg-slate-900 border-b md:border-b-0 md:border-r border-slate-700 p-6 z-20 overflow-y-auto">
+        <div class="mb-8">
+            <div class="flex items-center gap-2 mb-2">
+                <svg class="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                <h1 class="text-xl font-bold text-white tracking-tight">VTSR-T Critique</h1>
+            </div>
+            <p class="text-xs text-slate-400">Analysis of Systemic Shortfalls</p>
+        </div>
+
+        <nav class="space-y-1">
+            <a href="#sec-6-1" class="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">6.1 Predictive Validation</a>
+            <a href="#sec-6-2" class="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">6.2 Median vs. MAX Fallacy</a>
+            <a href="#sec-6-3" class="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">6.3 Deterministic K-Factor</a>
+            <a href="#sec-6-4" class="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">6.4 Hand-Tuned Priors</a>
+            <a href="#sec-6-5" class="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">6.5 Engagement Optimization</a>
+            <div class="h-px bg-slate-700 my-2"></div>
+            <a href="#sec-fixes" class="block px-3 py-2 rounded-lg text-sm font-medium text-emerald-400 hover:bg-slate-800 hover:text-emerald-300 transition-colors">7.0 Strategic Fixes</a>
+        </nav>
+
+        <div class="mt-12 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+            <p class="text-xs text-slate-400 font-mono">Reference Material:</p>
+            <p class="text-xs text-slate-300 mt-1">vtsr_t_expert_evaluation_v2</p>
+            <p class="text-xs text-slate-300 mt-1">Section 6</p>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 md:ml-72 p-4 md:p-8 lg:p-12">
+        <header class="max-w-5xl mx-auto mb-12">
+            <h2 class="text-3xl md:text-4xl font-bold text-white mb-4 glow-text">Systemic Shortfalls in VTSR-T</h2>
+            <p class="text-slate-400 text-lg leading-relaxed">
+                While VTSR-T executes rigorous telemetry sanitization, benchmarking it against modern probabilistic tier-one standards (like Glicko-2 and TrueSkill 2) exposes profound structural vulnerabilities in its mathematical assumptions and validation mechanisms.
+            </p>
+        </header>
+
+        <div class="max-w-5xl mx-auto space-y-16">
+
+            <!-- 6.1 Predictive Validation -->
+            <section id="sec-6-1" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <div class="flex items-start gap-4 mb-6">
+                        <div class="p-3 bg-danger/10 rounded-xl border border-danger/20 shrink-0">
+                            <svg class="w-6 h-6 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">6.1 The Total Absence of Predictive Validation</h3>
+                            <p class="text-slate-300 text-sm">The "Skill Issues" Gap: The system lacks a fundamental verification mechanism.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                        <div>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                In modern matchmaking science (e.g., the Cambridge <i>"Skill Issues"</i> study), a rating system is judged by its <strong>predictive accuracy</strong>. Can it reliably determine who will win before the match starts?
+                            </p>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                VTSR-T relies on calculating a composite z-score matrix rather than using a binary win/loss ground truth. Because it never tests its output ratings against held-out datasets to predict future outcomes, there is <strong>zero empirical proof</strong> that a VTSR-T rating of 1800 represents true skill better than a 1400 rating.
+                            </p>
+                            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                                <span class="text-xs font-mono text-danger">CONCLUSION:</span>
+                                <p class="text-sm text-white mt-1">VTSR-T acts as an arbitrary leaderboard score, not a scientifically validated reflection of "true skill."</p>
+                            </div>
+                        </div>
+
+                        <!-- Visualization Flowchart -->
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 relative flex flex-col items-center justify-center gap-4 py-8">
+                            
+                            <!-- TrueSkill Model -->
+                            <div class="w-full max-w-sm">
+                                <div class="text-xs text-slate-400 mb-2 font-mono uppercase tracking-wider text-center">Modern Probabilistic Model</div>
+                                <div class="flex items-center justify-between bg-slate-800 rounded-lg p-3 border border-success/30">
+                                    <span class="text-sm font-medium text-slate-300">Player Ratings</span>
+                                    <svg class="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                                    <span class="text-sm font-medium text-success text-center">Predict Outcome<br><span class="text-xs text-slate-400">(Log-Loss Benchmark)</span></span>
+                                </div>
+                            </div>
+
+                            <div class="h-px w-full bg-slate-700 my-2 relative">
+                                <span class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-slate-900 px-2 text-xs text-slate-500 font-mono">VS</span>
+                            </div>
+
+                            <!-- VTSR-T Model -->
+                            <div class="w-full max-w-sm">
+                                <div class="text-xs text-slate-400 mb-2 font-mono uppercase tracking-wider text-center">VTSR-T Model</div>
+                                <div class="flex items-center justify-between bg-slate-800 rounded-lg p-3 border border-danger/30">
+                                    <span class="text-sm font-medium text-slate-300">Composite Matrix (P_i)</span>
+                                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                                    <span class="text-sm font-medium text-white">Delta Rating (dR)</span>
+                                </div>
+                                <div class="mt-3 flex justify-center">
+                                    <div class="border-2 border-dashed border-danger/50 text-danger/80 bg-danger/5 px-4 py-2 rounded-lg text-xs font-mono text-center relative">
+                                        No predictive validation step exists.<br>Is 1800 > 1400? Unproven.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6.2 Median Baseline -->
+            <section id="sec-6-2" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <div class="flex items-start gap-4 mb-6">
+                        <div class="p-3 bg-warning/10 rounded-xl border border-warning/20 shrink-0">
+                            <svg class="w-6 h-6 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">6.2 The Mathematical Fallacy of the Median Baseline</h3>
+                            <p class="text-slate-300 text-sm">Under-evaluating the "Carry" Potential in Tactical Shooters.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <!-- Chart Area -->
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]">
+                            <canvas id="medianMaxChart"></canvas>
+                        </div>
+
+                        <div class="flex flex-col justify-center">
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                To calculate expected performance ($E_i$), VTSR-T compares a player against the <strong>median rating ($\bar{R}_i$)</strong> of the opposing lobby. While this prevents outlier skewing, it fundamentally misunderstands tactical game dynamics.
+                            </p>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                As proven by Dehpanah et al. (2021) in an analysis of 100k+ matches, team threat in tactical shooters is empirically determined by the <strong>MAX rating</strong> (the most skilled "carry" member).
+                            </p>
+                            <p class="text-slate-300 text-sm leading-relaxed bg-warning/10 p-4 border border-warning/20 rounded-lg">
+                                In a lobby of four 1100s and one 2500, the median remains at 1100. VTSR-T mathematically ignores the massive lethality of the 2500-rated player, resulting in deeply flawed expected performance curves.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6.3 Deterministic K-Factor -->
+            <section id="sec-6-3" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <div class="flex items-start gap-4 mb-6">
+                        <div class="p-3 bg-accent/10 rounded-xl border border-accent/20 shrink-0">
+                            <svg class="w-6 h-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">6.3 Deterministic K-Factor vs. True Bayesian Uncertainty</h3>
+                            <p class="text-slate-300 text-sm">Failing to account for skill decay over time.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div class="flex flex-col justify-center order-2 md:order-1">
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                VTSR-T uses a decaying K-factor ($K_i$) acting as a "poor man's confidence parameter." It reduces rating volatility strictly based on the <em>absolute number of matches played</em>.
+                            </p>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                Genuine probabilistic systems like Glicko-2 track <strong>Rating Deviation ($RD$)</strong>. Crucially, $RD$ expands (increases volatility) when a player is inactive for long periods, reflecting decreased confidence in their static skill rating.
+                            </p>
+                            <p class="text-slate-300 text-sm leading-relaxed border-l-4 border-accent pl-4">
+                                VTSR-T treats a veteran returning after 3 years identically to one who played yesterday ($K_i = 12$). This leads to a stagnant upper leaderboard populated by historical peaks rather than actively validated skill.
+                            </p>
+                        </div>
+
+                        <!-- Chart Area -->
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px] order-1 md:order-2">
+                            <canvas id="uncertaintyChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6.4 Hand-Tuned Priors -->
+            <section id="sec-6-4" class="scroll-mt-8">
+                <div class="glass-panel rounded-2xl p-6 md:p-8">
+                    <div class="flex items-start gap-4 mb-6">
+                        <div class="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20 shrink-0">
+                            <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">6.4 Hand-Tuned Priors Compromise Empirical Integrity</h3>
+                            <p class="text-slate-300 text-sm">Rating as a behavioral conditioning tool rather than an objective measure.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                        <!-- Custom Visual for Priors -->
+                        <div class="bg-slate-900 rounded-xl p-6 border border-slate-700 relative overflow-hidden">
+                            <div class="absolute inset-0 opacity-10 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-500 via-slate-900 to-slate-900"></div>
+                            
+                            <h4 class="text-slate-400 text-xs font-mono text-center uppercase mb-6 relative z-10">Commander Prior Override (pve_share)</h4>
+                            
+                            <div class="flex justify-between items-end gap-4 relative z-10">
+                                <!-- Empirical -->
+                                <div class="w-1/2 flex flex-col items-center">
+                                    <div class="h-24 w-12 bg-slate-700 rounded-t-lg relative flex items-end">
+                                        <div class="w-full bg-slate-500 rounded-t-sm" style="height: 100%;"></div>
+                                        <span class="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-mono text-slate-300">+0.111</span>
+                                    </div>
+                                    <div class="text-xs text-slate-400 mt-2 text-center">Empirical Audit<br>(What they do)</div>
+                                </div>
+                                
+                                <div class="pb-10">
+                                    <svg class="w-6 h-6 text-purple-400 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"></path></svg>
+                                </div>
+
+                                <!-- Hand-tuned -->
+                                <div class="w-1/2 flex flex-col items-center">
+                                    <div class="h-24 w-12 bg-slate-700 rounded-t-lg relative flex items-end">
+                                        <div class="w-full bg-purple-500 rounded-t-sm" style="height: 30%;"></div>
+                                        <span class="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-mono text-purple-400">-0.050</span>
+                                    </div>
+                                    <div class="text-xs text-slate-400 mt-2 text-center">Locked Override<br>(What they "should" do)</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                VTSR-T implements Bayesian shrinkage to adjust for role disadvantages (e.g., Commanders generating fewer kills). However, it corrupts this by deploying <strong>"Hand-Tuned Locked Priors"</strong>.
+                            </p>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                For example, the script actively inverts the empirical <code class="bg-slate-800 px-1 py-0.5 rounded text-slate-400">+0.111</code> audit for `pve_share` by manually locking it at <code class="bg-slate-800 px-1 py-0.5 rounded text-purple-400">-0.050</code>. 
+                            </p>
+                            <p class="text-slate-300 text-sm leading-relaxed">
+                                By manipulating the mathematics to enforce a specific game design philosophy (rewarding PvE work Commanders *should* be doing), VTSR-T ceases to be an objective skill evaluator and operates as a <strong>behavioral conditioning tool</strong>.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6.5 EOMM -->
+            <section id="sec-6-5" class="scroll-mt-8 mb-24">
+                <div class="glass-panel rounded-2xl p-6 md:p-8 border-t-4 border-t-emerald-500">
+                    <div class="flex items-start gap-4 mb-6">
+                        <div class="p-3 bg-success/10 rounded-xl border border-success/20 shrink-0">
+                            <svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">6.5 Engagement Optimization vs. Skill Accuracy</h3>
+                            <p class="text-slate-300 text-sm">Prioritizing psychological safety over mathematical zero-sum integrity.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                        <div>
+                            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                VTSR-T explicitly implements Engagement Optimized Matchmaking (EOMM) principles to prevent player churn. Research shows strict 50% win rates cause "loss aversion" abandonment.
+                            </p>
+                            <ul class="list-disc list-inside text-slate-300 text-sm mb-4 space-y-2 marker:text-emerald-500">
+                                <li><strong>Soft Floor Taper (1000.0):</strong> Stops the rating free-fall for low-tier players.</li>
+                                <li><strong>Loss Aversion Multiplier (0.85):</strong> Winning grants full $dR$, while losing is mathematically dampened.</li>
+                            </ul>
+                            <p class="text-slate-300 text-sm leading-relaxed">
+                                <strong>The Shortfall:</strong> This creates a highly inflationary rating economy. Average ratings artificially creep upward purely through sustained participation (grinding), even if underlying true skill remains entirely static. It is a retention mechanic disguised as an Elo ladder.
+                            </p>
+                        </div>
+
+                        <!-- Chart Area -->
+                        <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[300px]">
+                            <canvas id="inflationChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 7.0 Strategic Fixes -->
+            <section id="sec-fixes" class="scroll-mt-8 mb-24">
+                <header class="mb-8">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white mb-4 glow-text" style="text-shadow: 0 0 15px rgba(16, 185, 129, 0.5);">7.0 Strategic Fixes & Roadmap</h2>
+                    <p class="text-slate-400 text-lg leading-relaxed">
+                        Transitioning VTSR-T from an engagement leaderboard into a scientifically validated skill evaluator requires direct interventions in the Python rating pipeline (`elo.py`).
+                    </p>
+                </header>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <!-- Fix 1: Predictive Validation -->
+                    <div class="glass-panel rounded-2xl p-6 border-l-4 border-l-emerald-500 hover:bg-slate-800/80 transition-colors">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </div>
+                            <h4 class="text-lg font-semibold text-white">1. Implement $P_i$ Benchmarking</h4>
+                        </div>
+                        <p class="text-slate-300 text-sm mb-4">
+                            Since reliable `match.winner` data is sparse, use the composite performance metric ($P_i$) as the validation target. Build a <code>skillbench</code> emulator to test log-loss prediction: <em>Does a higher rating reliably predict a higher $P_i$ in upcoming matches?</em>
+                        </p>
+                        <div class="bg-slate-900 p-3 rounded border border-slate-700 text-xs font-mono text-emerald-400">
+                            > Objective: Establish a baseline accuracy score.
+                        </div>
+                    </div>
+
+                    <!-- Fix 2: MAX Baseline -->
+                    <div class="glass-panel rounded-2xl p-6 border-l-4 border-l-emerald-500 hover:bg-slate-800/80 transition-colors">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                            </div>
+                            <h4 class="text-lg font-semibold text-white">2. Shift to MAX Threat Topology</h4>
+                        </div>
+                        <p class="text-slate-300 text-sm mb-4">
+                            Rewrite the expected performance algorithm in <code>elo.py</code>. Replace <code>Rbar_i = median{R^T_j}</code> with a weighted average that heavily biases the <strong>highest</strong> opposing rating, acknowledging the massive impact of "carries" in tactical shooters.
+                        </p>
+                    </div>
+
+                    <!-- Fix 3: Glicko-2 RD -->
+                    <div class="glass-panel rounded-2xl p-6 border-l-4 border-l-emerald-500 hover:bg-slate-800/80 transition-colors">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </div>
+                            <h4 class="text-lg font-semibold text-white">3. Adopt True Bayesian RD</h4>
+                        </div>
+                        <p class="text-slate-300 text-sm mb-4">
+                            Deprecate the deterministic match-count <code>K_i</code> factor. Introduce a time-based Glicko-style Rating Deviation ($RD$). If a player hasn't played in 30 days, their $RD$ should mathematically expand, increasing the volatility of their next match rating swing.
+                        </p>
+                    </div>
+
+                    <!-- Fix 4: Dual Track EOMM -->
+                    <div class="glass-panel rounded-2xl p-6 border-l-4 border-l-emerald-500 hover:bg-slate-800/80 transition-colors">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                            </div>
+                            <h4 class="text-lg font-semibold text-white">4. Decouple Skill from Engagement</h4>
+                        </div>
+                        <p class="text-slate-300 text-sm mb-4">
+                            Run two parallel tracks: A pure, zero-sum <strong>Hidden MMR</strong> (no soft floors, no loss-aversion multiplier) used strictly for matchmaking and validation, and a <strong>Display Rating</strong> (current VTSR-T) that retains the EOMM mechanics to prevent player churn.
+                        </p>
+                    </div>
+
+                    <!-- Fix 5: Empirical Priors -->
+                    <div class="glass-panel rounded-2xl p-6 border-l-4 border-l-emerald-500 hover:bg-slate-800/80 transition-colors md:col-span-2">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                            </div>
+                            <h4 class="text-lg font-semibold text-white">5. Un-lock the Hand-Tuned Priors</h4>
+                        </div>
+                        <p class="text-slate-300 text-sm mb-4">
+                            In <code>elo.py</code>, clear out the <code>COMMANDER_BASELINE_LOCKED_AXES</code>. Stop dictating what a role <em>should</em> output, and let the Bayesian shrinkage adapt to what the role <em>actually</em> outputs (the empirical running mean). This restores the mathematical integrity of the system.
+                        </p>
+                        <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 font-mono text-xs overflow-x-auto text-slate-300">
+                            <span class="text-danger"># OLD: Manual overrides distort the math</span><br>
+                            COMMANDER_BASELINE_LOCKED_AXES = {"pve_share"}<br>
+                            COMMANDER_AXIS_PRIOR = {"pve_share": -0.050}<br><br>
+                            <span class="text-success"># NEW: Rely entirely on observed empirical running mean</span><br>
+                            COMMANDER_BASELINE_LOCKED_AXES = set()<br>
+                            <span class="text-slate-500"># System dynamically adjusts to the true +0.111 audit over time</span>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <script>
+        // Common Chart Defaults
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = 'Inter, sans-serif';
+        Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(15, 23, 42, 0.9)';
+        Chart.defaults.plugins.tooltip.titleColor = '#fff';
+        Chart.defaults.plugins.tooltip.borderColor = '#334155';
+        Chart.defaults.plugins.tooltip.borderWidth = 1;
+
+        // 6.2 Median vs Max Chart
+        const ctxMedian = document.getElementById('medianMaxChart').getContext('2d');
+        new Chart(ctxMedian, {
+            type: 'bar',
+            data: {
+                labels: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5 (Smurf/Carry)'],
+                datasets: [{
+                    label: 'Player Rating',
+                    data: [1100, 1050, 1150, 1100, 2500],
+                    backgroundColor: ['#3b82f6', '#3b82f6', '#3b82f6', '#3b82f6', '#ef4444'],
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: true },
+                    annotation: {
+                        // We simulate annotations using a custom plugin below, or visually explain it
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 3000,
+                        grid: { color: '#1e293b' }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { display: false } // hide labels for space
+                    }
+                }
+            },
+            plugins: [{
+                id: 'customLines',
+                afterDraw: (chart) => {
+                    const ctx = chart.ctx;
+                    const yAxis = chart.scales.y;
+                    const xAxis = chart.scales.x;
+                    
+                    // Draw Median Line
+                    const medianY = yAxis.getPixelForValue(1100);
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(xAxis.left, medianY);
+                    ctx.lineTo(xAxis.right, medianY);
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = '#fbbf24'; // Warning color
+                    ctx.setLineDash([5, 5]);
+                    ctx.stroke();
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.fillText('VTSR-T Expected Threat (Median: 1100)', xAxis.left + 10, medianY - 10);
+                    
+                    // Draw Max Line
+                    const maxY = yAxis.getPixelForValue(2500);
+                    ctx.beginPath();
+                    ctx.moveTo(xAxis.left, maxY);
+                    ctx.lineTo(xAxis.right, maxY);
+                    ctx.strokeStyle = '#ef4444'; // Danger color
+                    ctx.stroke();
+                    ctx.fillStyle = '#ef4444';
+                    ctx.fillText('True Actual Threat (MAX: 2500)', xAxis.left + 10, maxY - 10);
+                    ctx.restore();
+                }
+            }]
+        });
+
+        // 6.3 Uncertainty Decay Chart
+        const ctxUncertainty = document.getElementById('uncertaintyChart').getContext('2d');
+        const labelsUncertainty = ['M1','M2','M3','M4','M5', '1 Year Break', 'M6','M7'];
+        new Chart(ctxUncertainty, {
+            type: 'line',
+            data: {
+                labels: labelsUncertainty,
+                datasets: [
+                    {
+                        label: 'Glicko-2 Uncertainty (RD)',
+                        data: [100, 80, 60, 45, 35, null, 150, 110],
+                        spanGaps: true,
+                        borderColor: '#38bdf8', // Accent
+                        backgroundColor: 'transparent',
+                        tension: 0.3,
+                        borderWidth: 2,
+                    },
+                    {
+                        label: 'VTSR-T K-Factor',
+                        data: [52, 45, 38, 25, 12, null, 12, 12],
+                        spanGaps: true,
+                        borderColor: '#94a3b8',
+                        borderDash: [5, 5],
+                        backgroundColor: 'transparent',
+                        tension: 0.3,
+                        borderWidth: 2,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        title: { display: true, text: 'Volatility / Uncertainty', color: '#64748b' },
+                        grid: { color: '#1e293b' }
+                    },
+                    x: {
+                        grid: { color: '#1e293b' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { boxWidth: 12, color: '#e2e8f0' }
+                    }
+                }
+            }
+        });
+
+        // 6.5 Inflation Chart
+        const ctxInflation = document.getElementById('inflationChart').getContext('2d');
+        // Generate pseudo-data
+        let trueSkill = Array(50).fill(1100);
+        let vtsrRating = [1000];
+        let currentRating = 1000;
+        for(let i=1; i<50; i++) {
+            // Player performs exactly at a 1100 level. Win/Loss is 50/50 roughly.
+            let outcome = Math.random() > 0.5 ? 1 : -1;
+            let dR = outcome * 15; 
+            if(dR < 0) {
+                // Apply Loss Aversion
+                dR = dR * 0.85;
+                // Soft floor taper effect simulated
+                if(currentRating < 1150) {
+                    let taper = Math.max(0, (currentRating - 1000) / 150);
+                    dR = dR * taper;
+                }
+            }
+            currentRating += dR;
+            vtsrRating.push(currentRating);
+        }
+
+        new Chart(ctxInflation, {
+            type: 'line',
+            data: {
+                labels: Array.from({length: 50}, (_, i) => i + 1),
+                datasets: [
+                    {
+                        label: 'Static "True" Skill',
+                        data: trueSkill,
+                        borderColor: '#64748b',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        borderDash: [5, 5]
+                    },
+                    {
+                        label: 'VTSR-T Inflationary Rating',
+                        data: vtsrRating,
+                        borderColor: '#10b981', // Success
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        fill: true,
+                        borderWidth: 2,
+                        pointRadius: 1,
+                        tension: 0.2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        min: 900,
+                        max: 1300,
+                        grid: { color: '#1e293b' }
+                    },
+                    x: {
+                        title: { display: true, text: 'Matches Played', color: '#64748b' },
+                        grid: { display: false }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { boxWidth: 12, color: '#e2e8f0' }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
