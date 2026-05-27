@@ -84,12 +84,21 @@
             <a href="#sec-6-5" class="block px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">6.5 EOMM &amp; Inflation</a>
             <div class="h-px bg-slate-700 my-2"></div>
             <a href="#sec-fixes" class="block px-3 py-2 rounded-lg text-sm font-medium text-emerald-400 hover:bg-slate-800 hover:text-emerald-300 transition-colors">7.0 Recommended Fixes</a>
+            <div class="h-px bg-slate-700 my-2"></div>
+            <a href="#sec-8-results" class="block px-3 py-2 rounded-lg text-sm font-medium text-sky-400 hover:bg-slate-800 hover:text-sky-300 transition-colors">8.0 Results &amp; Path Forward</a>
+            <a href="#sec-8-validator" class="block px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-slate-800 hover:text-white transition-colors pl-6">8.1 The Validator</a>
+            <a href="#sec-8-baseline" class="block px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-slate-800 hover:text-white transition-colors pl-6">8.2 Phase 1+2A Baseline</a>
+            <a href="#sec-8-priors" class="block px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-slate-800 hover:text-white transition-colors pl-6">8.3 Priors Ablation</a>
+            <a href="#sec-8-kboost" class="block px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-slate-800 hover:text-white transition-colors pl-6">8.4 Inactivity K-Boost</a>
+            <a href="#sec-8-max" class="block px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-slate-800 hover:text-white transition-colors pl-6">8.5 MAX vs Median</a>
+            <a href="#sec-8-next" class="block px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-slate-800 hover:text-white transition-colors pl-6">8.6 What's Next</a>
         </nav>
 
         <div class="mt-12 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
             <p class="text-xs text-slate-400 font-mono">Reference Material:</p>
-            <p class="text-xs text-slate-300 mt-1">elo-analysis-v2.md</p>
-            <p class="text-xs text-slate-300 mt-1">Sections 6 &amp; 9</p>
+            <p class="text-xs text-slate-300 mt-1">elo-analysis-v3.md</p>
+            <p class="text-xs text-slate-300 mt-1">Sections 6, 8, 9</p>
+            <p class="text-xs text-slate-400 mt-1">+ critique/decisions/*.md</p>
         </div>
     </aside>
 
@@ -99,6 +108,9 @@
             <h2 class="text-3xl md:text-4xl font-bold text-white mb-4 glow-text">VTSR-T: Combined Critique &amp; Path Forward</h2>
             <p class="text-slate-400 text-lg leading-relaxed">
                 A synthesis of two readings &mdash; the Cambridge-paper-grounded measurement framing and a production-systems benchmarking against Glicko-2, TrueSkill 2, PandaSkill, and CS2's dual-track. Where the two agree, the convergence is load-bearing. Where they disagree, we propose an empirical tiebreaker. Every critique below maps to a tractable fix in &sect;7.
+            </p>
+            <p class="text-sky-300/90 text-base leading-relaxed mt-4 border-l-2 border-sky-500 pl-4">
+                <strong class="text-sky-400">v3 retrospective (&sect;8 below):</strong> the validator was built, three reforms were tested, one shipped in canonical, two were refuted. Section 8 condenses the empirical record &mdash; what was tested, what survived, and what didn't &mdash; into a single readable view.
             </p>
         </header>
 
@@ -433,6 +445,342 @@
                 </div>
             </section>
 
+            <!-- 8.0 Empirical Results & Path Forward (v3 retrospective) -->
+            <section id="sec-8-results" class="scroll-mt-8 mb-24">
+                <header class="mb-8">
+                    <h2 class="text-3xl md:text-4xl font-bold text-white mb-4 glow-text" style="text-shadow: 0 0 15px rgba(56, 189, 248, 0.5);">8.0 Empirical Results &amp; Path Forward</h2>
+                    <p class="text-slate-400 text-lg leading-relaxed">
+                        The retrospective view of &sect;7's hypotheses. The validator (item #1) shipped, three reforms (#2 priors, #3 MAX, #5 K-boost) were tested end-to-end, and the results below are what we found. Two reforms refuted; one shipped in canonical. Full per-phase reasoning lives in <code>critique/decisions/*.md</code> and <code>elo-analysis-v3.md</code>.
+                    </p>
+                </header>
+
+                <div class="space-y-8">
+
+                <!-- 8.1 The Validator -->
+                <section id="sec-8-validator" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                        <div class="flex items-start gap-4 mb-6">
+                            <div class="p-3 bg-success/10 rounded-xl border border-success/20 shrink-0">
+                                <svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">8.1 The Validator <span class="text-success text-sm font-mono ml-2">SHIPPED</span></h3>
+                                <p class="text-slate-300 text-sm">A read-only consumer of pipeline JSON. Nine independent metrics. No winner data required.</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    <code>scripts/validate_elo.py</code> scores VTSR-T against nine independent properties. Output lands in <code>_validation/report.{md,json}</code> and <code>bootstrap.json</code>. Run from repo root via <code>python scripts/validate_elo.py</code>; alt-mode flags (<code>--elo-mode unlocked|max|softmax|thugs_only</code>) score the forensic alt JSON pairs side-by-side.
+                                </p>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    The validator does <strong>not</strong> require winner data. Eight of the nine metrics use only <code>R_pre</code> and <code>P_i</code>. The ninth (<code>clean_win</code> prediction + log-loss) uses the small reliable subset, but the <strong>synthetic-winner proxy validated at 93.3%</strong> means a future <code>α &gt; 0</code> blend can be tested against the full corpus.
+                                </p>
+                            </div>
+
+                            <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                                <h4 class="text-slate-400 text-xs font-mono uppercase mb-3">9 metrics, in shipping order</h4>
+                                <ul class="space-y-2 text-xs">
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[1]</span><span class="text-slate-300"><strong>Spearman ρ R_pre &rarr; P_i</strong> &mdash; does pre-match rating predict in-match performance?</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[2]</span><span class="text-slate-300"><strong>Calibration MAE</strong> &mdash; do predicted E_i match observed P_i across rating-gap buckets?</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[3]</span><span class="text-slate-300"><strong>Self-consistency ρ</strong> &mdash; does past P_i predict future P_i? (ceiling for the rating)</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[4]</span><span class="text-slate-300"><strong>Bootstrap stability</strong> &mdash; 100&times;80% resampling &rarr; top-20 Jaccard + per-player σ</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[5]</span><span class="text-slate-300"><strong>Synthetic-winner proxy</strong> &mdash; team with higher mean P_i vs clean_win (≥85% unlocks α&gt;0)</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[6]</span><span class="text-slate-300"><strong>clean_win prediction</strong> &mdash; mean / hard MAX / softmax MAX team aggregations scored side-by-side</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[7]</span><span class="text-slate-300"><strong>Log-loss on clean_win</strong> &mdash; can we tell 51%-confident from 95%-confident apart?</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[8]</span><span class="text-slate-300"><strong>Single-axis ablation</strong> &mdash; drop each axis, measure ranking displacement</span></li>
+                                    <li class="flex items-start gap-2"><span class="text-success font-mono">[9]</span><span class="text-slate-300"><strong>Dirichlet weight perturbation</strong> &mdash; 50 samples around current weights, ranking stability</span></li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 8.2 Phase 1+2A Baseline -->
+                <section id="sec-8-baseline" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                        <div class="flex items-start gap-4 mb-6">
+                            <div class="p-3 bg-accent/10 rounded-xl border border-accent/20 shrink-0">
+                                <svg class="w-6 h-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">8.2 Phase 1 + 2A Baseline</h3>
+                                <p class="text-slate-300 text-sm">First validator run on canonical VTSR-T. 100 matches, 35 players, 30 clean_wins.</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    <strong>What worked.</strong> The composite axes are doing real work (self-consistency 0.804). Pre-match rating tracks in-match performance (Spearman 0.462 across 884 player-matches). The leaderboard is stable under match resampling. Predictions are calibrated within 2pp of observation.
+                                </p>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    <strong>What was unexpected.</strong> Predicting team wins from team mean rating fell to <strong>43.3%</strong> on the small clean_win subset &mdash; below coin-flip, well below Cambridge's 60-64% benchmark. A follow-up Phase 2A diagnostic showed hard MAX team-aggregation lifted this to 53.3% (+10pp), in exactly the direction Dehpanah 2021 predicted. <strong>This was the smoking gun that motivated Phase 2C.</strong>
+                                </p>
+                                <p class="text-slate-300 text-sm leading-relaxed bg-warning/5 p-3 border-l-4 border-warning rounded">
+                                    <strong>Caveat: zero of 30 clean_wins have a team R-gap &gt; 100 ELO.</strong> The 43.3% / 53.3% numbers are measured exclusively on tightly-balanced matches. The system's true predictive ceiling on lopsided matches remains untestable on this corpus.
+                                </p>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                                    <div class="text-xs text-slate-400 font-mono uppercase">Spearman ρ R_pre &rarr; P_i</div>
+                                    <div class="text-3xl font-bold text-accent mt-2">0.462</div>
+                                    <div class="text-xs text-slate-400 mt-1">across 884 player-matches</div>
+                                </div>
+                                <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                                    <div class="text-xs text-slate-400 font-mono uppercase">Self-consistency ρ</div>
+                                    <div class="text-3xl font-bold text-accent mt-2">0.804</div>
+                                    <div class="text-xs text-slate-400 mt-1">composite is stable</div>
+                                </div>
+                                <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                                    <div class="text-xs text-slate-400 font-mono uppercase">Bootstrap top-20 Jaccard</div>
+                                    <div class="text-3xl font-bold text-accent mt-2">0.826</div>
+                                    <div class="text-xs text-slate-400 mt-1">σ ≈ 27 ELO median</div>
+                                </div>
+                                <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                                    <div class="text-xs text-slate-400 font-mono uppercase">Synthetic-winner agreement</div>
+                                    <div class="text-3xl font-bold text-success mt-2">93.3%</div>
+                                    <div class="text-xs text-slate-400 mt-1">unlocks α &gt; 0 on full corpus</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 8.3 Phase 2B Priors Ablation - REFUTED -->
+                <section id="sec-8-priors" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                        <div class="flex items-start gap-4 mb-6">
+                            <div class="p-3 bg-slate-700/30 rounded-xl border border-slate-600 shrink-0">
+                                <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">8.3 Phase 2B: Locked Priors Ablation <span class="text-slate-400 text-sm font-mono ml-2">REFUTED</span></h3>
+                                <p class="text-slate-300 text-sm">v2 &sect;6.2 hypothesis: hand-tuned commander priors "corrupt empirical integrity." Tested via full re-rate.</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    Added <code>exclude_locked_priors=True</code> as an alt mode in <code>compute_elo()</code>. Re-rated the full corpus with the two locked commander priors removed (<code>target_lock_pct: -0.10</code> and <code>pve_share: -0.05</code>). Validator scored canonical and unlocked side-by-side.
+                                </p>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    <strong>Top single-player rating delta: 3.9 ELO. Bootstrap noise floor: 27 ELO.</strong> The locks have less effect on commander ratings than the natural noise in the rating itself. All headline validator metrics are flat across modes (Spearman 0.4623 / 0.4623; self-consistency 0.804 / 0.806; synthetic-winner 93.3% / 93.3%).
+                                </p>
+                                <p class="text-slate-300 text-sm leading-relaxed bg-slate-700/30 p-3 border border-slate-600 rounded">
+                                    <strong>Decision: keep canonical locks.</strong> Data did not show the locks materially affect anything; choice now reduces to a values question (descriptive empirical vs. normative design intent). The forensic alt JSON pair (<code>elo_current_unlocked.json</code>) is retained for re-evaluation at corpus n &gt; 200.
+                                </p>
+                            </div>
+
+                            <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[280px]">
+                                <canvas id="priorsAblationChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 8.4 Phase 2B Inactivity K-Boost - SHIPPED -->
+                <section id="sec-8-kboost" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                        <div class="flex items-start gap-4 mb-6">
+                            <div class="p-3 bg-success/10 rounded-xl border border-success/20 shrink-0">
+                                <svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">8.4 Phase 2B: Inactivity K-Boost <span class="text-success text-sm font-mono ml-2">SHIPPED IN CANONICAL</span></h3>
+                                <p class="text-slate-300 text-sm">v2 &sect;7.1 compromise (additive K-boost vs full Glicko-2). The <strong>only</strong> canonical algorithm change since v2.</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div class="flex flex-col justify-center">
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    Modified <code>k_factor()</code> to add <code>+min(20, 0.05 &times; days_inactive)</code> on top of the existing matches-played K. <code>compute_elo()</code> now tracks each player's last-match date through the chronological loop and threads <code>days_inactive</code> into every K-factor call.
+                                </p>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    On dense data (everyone plays close together) the boost is essentially zero. The mechanism is built to absorb returning-player uncertainty when somebody actually disappears for months &mdash; without inflating volatility on regular players. <strong>Validator drift pre vs post: identical to four decimal places.</strong> No regressions.
+                                </p>
+                                <p class="text-slate-300 text-sm leading-relaxed bg-success/10 p-3 border-l-4 border-success rounded">
+                                    <strong>No <code>PIPELINE_VERSION</code> / <code>ELO_SCHEMA_VERSION</code> bump required.</strong> New constants (<code>K_INACTIVITY_BOOST_RATE</code>, <code>K_INACTIVITY_BOOST_MAX</code>) surface as additive sentinels on <code>elo_current.json</code>; existing readers unaffected.
+                                </p>
+                            </div>
+
+                            <div class="bg-slate-900 rounded-xl p-6 border border-slate-700">
+                                <h4 class="text-slate-400 text-xs font-mono uppercase mb-4">Audit on current corpus (849 player-rows)</h4>
+                                <div class="space-y-3">
+                                    <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                        <span class="text-sm text-slate-400">Median days inactive per row</span>
+                                        <span class="text-sm font-mono text-slate-200">0.02 days</span>
+                                    </div>
+                                    <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                        <span class="text-sm text-slate-400">p90 days inactive</span>
+                                        <span class="text-sm font-mono text-slate-200">3.05 days</span>
+                                    </div>
+                                    <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                        <span class="text-sm text-slate-400">Max gap (single player)</span>
+                                        <span class="text-sm font-mono text-warning">25.9 days</span>
+                                    </div>
+                                    <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                        <span class="text-sm text-slate-400">Max K boost applied</span>
+                                        <span class="text-sm font-mono text-success">+1.30 ELO</span>
+                                    </div>
+                                    <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                        <span class="text-sm text-slate-400">Rows hitting 20.0 cap</span>
+                                        <span class="text-sm font-mono text-success">0 (0.0%)</span>
+                                    </div>
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-sm text-slate-400">Total extra K applied</span>
+                                        <span class="text-sm font-mono text-slate-200">40.7 ELO</span>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-slate-500 mt-4 italic">Mechanism is inert on dense play; ready to absorb future returning-player uncertainty without penalizing regulars.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 8.5 Phase 2C MAX vs Median - REFUTED CATASTROPHICALLY -->
+                <section id="sec-8-max" class="scroll-mt-8">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                        <div class="flex items-start gap-4 mb-6">
+                            <div class="p-3 bg-danger/10 rounded-xl border border-danger/20 shrink-0">
+                                <svg class="w-6 h-6 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">8.5 Phase 2C: MAX vs Median <span class="text-danger text-sm font-mono ml-2">REFUTED CATASTROPHICALLY</span></h3>
+                                <p class="text-slate-300 text-sm">v2 &sect;6.1 hypothesis (motivated by Dehpanah 2021 + Phase 2A's +10pp preview): swap <code>compute_elo</code>'s <code>median(R_others)</code> reference to <code>max(R_others)</code> or softmax-weighted MAX.</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    Added <code>expected_performance_mode</code> parameter to <code>compute_elo()</code> supporting <code>median</code> / <code>hard_max</code> / <code>softmax_max</code>. Pipeline emitted two forensic alt JSON pairs (<code>elo_current_max.json</code>, <code>elo_current_softmax.json</code>). Each is a complete corpus re-rate, not a post-processing reweight.
+                                </p>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                                    <strong>Hard MAX collapsed.</strong> Spearman ρ fell from 0.462 to 0.188. Mean rating drifted +522 ELO above the 1500 anchor. Bootstrap proxy std nearly doubled (27 &rarr; 50 ELO). VTrider, the canonical #1, dropped <em>out</em> of the top 5 entirely. Softmax MAX is a less-pathological version of the same failure mode &mdash; still strictly worse than canonical on every headline metric.
+                                </p>
+                                <p class="text-slate-300 mb-4 text-sm leading-relaxed bg-danger/5 p-3 border-l-4 border-danger rounded">
+                                    <strong>Why it broke.</strong> When E_i is computed against <code>max(opponents)</code>, every sub-max player has their reference dragged toward the lobby ceiling. They are expected to do much worse than they actually do, so the rating math gives them positive points every match. Result: systematic upward drift, not skill-tracking.
+                                </p>
+                                <p class="text-slate-300 text-sm leading-relaxed bg-success/5 p-3 border-l-4 border-success rounded">
+                                    <strong>What survives.</strong> Phase 2A's +10pp finding for <em>post-hoc team aggregation</em> at lobby-formation time is still real and useful for downstream consumers like Lobby Tools' Team Balonce. Different question, different answer. See &sect;8.6.
+                                </p>
+                            </div>
+
+                            <div class="bg-slate-900 rounded-xl p-4 border border-slate-700 h-[400px]">
+                                <canvas id="maxRatingDriftChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 8.6 What's Next -->
+                <section id="sec-8-next" class="scroll-mt-8 mb-24">
+                    <div class="glass-panel rounded-2xl p-6 md:p-8">
+                        <div class="flex items-start gap-4 mb-6">
+                            <div class="p-3 bg-accent/10 rounded-xl border border-accent/20 shrink-0">
+                                <svg class="w-6 h-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-xl md:text-2xl font-semibold text-white mb-2">8.6 What's Next</h3>
+                                <p class="text-slate-300 text-sm">The Phase 3+ roadmap, ranked by (data-readiness &times; empirical leverage &divide; effort).</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+
+                            <!-- Ready now -->
+                            <div>
+                                <h4 class="text-sm font-mono uppercase text-success mb-3 tracking-wider">Ready now (no data dependencies)</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="glass-panel rounded-xl p-5 border-l-4 border-l-success">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h5 class="text-sm font-semibold text-white">8.6.1 Tools Team Balonce: softmax-weighted aggregation</h5>
+                                            <span class="text-xs font-mono text-success bg-success/10 px-2 py-0.5 rounded">~1-2h</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-2">Phase 2A's +10pp finding operationalized for lobby-formation. Scoped to Tools page; canonical ratings unchanged.</p>
+                                        <p class="text-xs text-slate-500"><strong>Why now:</strong> lowest-effort, highest-confidence improvement on the table.</p>
+                                    </div>
+
+                                    <div class="glass-panel rounded-xl p-5 border-l-4 border-l-success">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h5 class="text-sm font-semibold text-white">8.6.2 α &gt; 0 win/loss blend pilot</h5>
+                                            <span class="text-xs font-mono text-success bg-success/10 px-2 py-0.5 rounded">~2-3d</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-2">Sweep α at 0.1, 0.25, 0.5 against canonical. Synthetic-winner proxy at 93.3% means the experiment runs against the full corpus.</p>
+                                        <p class="text-xs text-slate-500"><strong>Why now:</strong> data is unblocked; most likely positive empirical update from future work.</p>
+                                    </div>
+
+                                    <div class="glass-panel rounded-xl p-5 border-l-4 border-l-success">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h5 class="text-sm font-semibold text-white">8.6.3 Predictive-power growth tracking</h5>
+                                            <span class="text-xs font-mono text-success bg-success/10 px-2 py-0.5 rounded">~half day</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-2">Run validator on every pipeline run; accumulate headline metrics over time. Early warning if any canonical assumption starts to break.</p>
+                                        <p class="text-xs text-slate-500"><strong>Why now:</strong> cheap, recurring, future-proofs the audit trail.</p>
+                                    </div>
+
+                                    <div class="glass-panel rounded-xl p-5 border-l-4 border-l-success">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h5 class="text-sm font-semibold text-white">8.6.4 Axis weight retune (low priority)</h5>
+                                            <span class="text-xs font-mono text-success bg-success/10 px-2 py-0.5 rounded">~1d</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-2">Validator showed <code>snipe_bonus</code> + <code>target_lock_pct</code> are near dead weight. Trial weight redistribution; small expected lift.</p>
+                                        <p class="text-xs text-slate-500"><strong>Why low priority:</strong> Dirichlet ρ 0.986 says weight perturbations cannot flip rankings; the lift would be marginal.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Data-gated -->
+                            <div>
+                                <h4 class="text-sm font-mono uppercase text-warning mb-3 tracking-wider mt-6">Data-gated (waiting on something)</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="glass-panel rounded-xl p-5 border-l-4 border-l-warning">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h5 class="text-sm font-semibold text-white">8.6.5 EOMM / dual-track audit</h5>
+                                            <span class="text-xs font-mono text-warning bg-warning/10 px-2 py-0.5 rounded">~2-3d + integration</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-2">Compare canonical (Display) vs pure (Hidden MMR with no floor + no loss aversion). Test whether EOMM mechanics measurably affect prediction.</p>
+                                        <p class="text-xs text-slate-500"><strong>Blocker:</strong> 8.6.2 (α &gt; 0) must land first &mdash; otherwise both versions predict identically.</p>
+                                    </div>
+
+                                    <div class="glass-panel rounded-xl p-5 border-l-4 border-l-warning">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h5 class="text-sm font-semibold text-white">8.6.6 Lopsided-match prediction ceiling</h5>
+                                            <span class="text-xs font-mono text-warning bg-warning/10 px-2 py-0.5 rounded">passive</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-2">Currently zero of 30 clean_wins have R-gap &gt; 100 ELO. The system's predictive ceiling on lopsided matches is intrinsically untestable on this corpus.</p>
+                                        <p class="text-xs text-slate-500"><strong>Blocker:</strong> corpus growth, or manual winner attestation on existing lopsided matches.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Probably never -->
+                            <div>
+                                <h4 class="text-sm font-mono uppercase text-slate-500 mb-3 tracking-wider mt-6">Probably never (high cost, no measurable lift)</h4>
+                                <div class="grid grid-cols-1 gap-4">
+                                    <div class="glass-panel rounded-xl p-5 border-l-4 border-l-slate-600">
+                                        <div class="flex items-center justify-between mb-2">
+                                            <h5 class="text-sm font-semibold text-slate-300">8.6.7 Full Glicko-2 / TrueSkillPlayers migration</h5>
+                                            <span class="text-xs font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded">3+ weeks</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-2">Phase 2B kboost is currently sufficient (zero rows hit cap; validator drift at 4th decimal place). Cambridge Figure 2 shows defaults are near-optimal in most rating systems.</p>
+                                        <p class="text-xs text-slate-500"><strong>Trigger to revisit:</strong> if returning players (&gt;180 days inactive) miscalibrate by &gt;50 ELO over their first 5 matches back, even with K-boost active.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </section>
+
+                </div>
+            </section>
+
         </div>
     </main>
 
@@ -630,6 +978,147 @@
                     legend: {
                         position: 'top',
                         labels: { boxWidth: 12, color: '#e2e8f0' }
+                    }
+                }
+            }
+        });
+
+        // 8.3 Phase 2B Priors Ablation Chart
+        // Top 15 commander rating deltas vs the 27 ELO bootstrap noise floor.
+        // Source: critique/decisions/phase-2b-priors-ablation.md §4.
+        const ctxPriors = document.getElementById('priorsAblationChart').getContext('2d');
+        new Chart(ctxPriors, {
+            type: 'bar',
+            data: {
+                labels: [
+                    'vacuum34', 'Darkvale', 'blue', 'Cloaket', 'Snake',
+                    'Sev', 'Lithium', 'C.Bad Guy', 'Nomad', 'F9bomber',
+                    'econchump', 'dd', 'VTrider', 'Waddles', 'judgeguns'
+                ],
+                datasets: [{
+                    label: 'Rating delta (canonical → unlocked, ELO)',
+                    data: [-3.9, -3.8, -3.5, -3.3, -3.0, -3.0, -3.0, -3.0, -2.7, -2.7, -2.7, -2.6, -2.5, -2.5, -2.5],
+                    backgroundColor: '#94a3b8',
+                    borderRadius: 3,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: true }
+                },
+                scales: {
+                    x: {
+                        min: -30,
+                        max: 5,
+                        grid: { color: '#1e293b' },
+                        title: { display: true, text: 'ELO delta', color: '#64748b', font: { size: 10 } }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { font: { size: 10 }, color: '#94a3b8' }
+                    }
+                }
+            },
+            plugins: [{
+                id: 'noiseFloor',
+                afterDraw: (chart) => {
+                    const ctx = chart.ctx;
+                    const xAxis = chart.scales.x;
+                    const yAxis = chart.scales.y;
+                    // Draw shaded noise band: -27 to +27 ELO
+                    const xLeft = xAxis.getPixelForValue(-27);
+                    const xRight = xAxis.getPixelForValue(0);
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(251, 191, 36, 0.10)';
+                    ctx.fillRect(xLeft, yAxis.top, xRight - xLeft, yAxis.bottom - yAxis.top);
+                    // Boundary lines
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.setLineDash([4, 4]);
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(xLeft, yAxis.top);
+                    ctx.lineTo(xLeft, yAxis.bottom);
+                    ctx.stroke();
+                    // Label
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = '10px Inter';
+                    ctx.fillText('27 ELO bootstrap noise floor →', xLeft + 4, yAxis.top + 14);
+                    ctx.restore();
+                }
+            }]
+        });
+
+        // 8.5 Phase 2C MAX vs Median Chart (grouped bars)
+        // Source: critique/decisions/phase-2c-max-vs-median.md §1 + §3.
+        const ctxMax = document.getElementById('maxRatingDriftChart').getContext('2d');
+        new Chart(ctxMax, {
+            type: 'bar',
+            data: {
+                labels: ['Canonical (median)', 'Hard MAX', 'Softmax MAX (τ=200)'],
+                datasets: [
+                    {
+                        label: 'Spearman ρ × 1000 (predictive ceiling, higher is better)',
+                        data: [462, 188, 359],
+                        backgroundColor: ['#10b981', '#f43f5e', '#fbbf24'],
+                        borderRadius: 4,
+                        yAxisID: 'ySpearman',
+                    },
+                    {
+                        label: 'Mean rating drift above 1500 anchor (ELO, lower is better)',
+                        data: [32, 522, 163],
+                        backgroundColor: ['rgba(16, 185, 129, 0.4)', 'rgba(244, 63, 94, 0.4)', 'rgba(251, 191, 36, 0.4)'],
+                        borderColor: ['#10b981', '#f43f5e', '#fbbf24'],
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        yAxisID: 'yDrift',
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { boxWidth: 12, color: '#e2e8f0', font: { size: 11 } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                if (ctx.dataset.yAxisID === 'ySpearman') {
+                                    return `Spearman ρ: ${(ctx.raw / 1000).toFixed(3)}`;
+                                }
+                                return `Drift: +${ctx.raw} ELO above anchor`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    ySpearman: {
+                        type: 'linear',
+                        position: 'left',
+                        min: 0,
+                        max: 1000,
+                        title: { display: true, text: 'Spearman ρ (× 1000)', color: '#10b981', font: { size: 10 } },
+                        grid: { color: '#1e293b' },
+                        ticks: { color: '#10b981' }
+                    },
+                    yDrift: {
+                        type: 'linear',
+                        position: 'right',
+                        min: 0,
+                        max: 600,
+                        title: { display: true, text: 'Mean drift above anchor (ELO)', color: '#f43f5e', font: { size: 10 } },
+                        grid: { display: false },
+                        ticks: { color: '#f43f5e' }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#94a3b8', font: { size: 10 } }
                     }
                 }
             }
