@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VT Stats — Axis Analysis</title>
+  <meta name="description" content="Investigative timeline explorer for VTSR-T axes. Compare up to 5 players on any of the 8 thug-composite axes over time, with raw values or post-clip z-scores.">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="./axis-analysis.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Minimal navbar -- sandbox page, only back-to-dashboard + theme. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+      <span class="vt-axis-page-title align-self-center text-secondary small ms-2 d-none d-md-inline">
+        <i class="bi bi-graph-up-arrow me-1"></i>Axis Analysis
+        <span class="text-muted ms-2">/ investigation sandbox</span>
+      </span>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="../player/" class="vt-nav-icon-btn"
+             title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
+          </a>
+          <!-- Theme dropdown -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                    title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid flex-grow-1 px-2 px-md-3 py-3">
+
+    <!-- Loading splash (replaced by JS once data is in) -->
+    <div id="vt-axis-loading" class="text-center text-muted py-5">
+      <div class="spinner-border text-secondary" role="status"></div>
+      <div class="mt-3 small">Loading axis timeline...</div>
+    </div>
+
+    <!-- Main app (hidden until data loads) -->
+    <div id="vt-axis-app" class="d-none">
+
+      <!-- Page intro / context strip -->
+      <header class="vt-axis-intro mb-3">
+        <h1 class="h4 mb-1">
+          <i class="bi bi-graph-up-arrow me-2"></i>VTSR-T Axis Timeline
+        </h1>
+        <p class="text-secondary small mb-1">
+          Compare per-match raw values or post-clip z-scores across the 8 thug-composite axes.
+          Sandbox investigation page -- not linked from the main site.
+        </p>
+        <p class="text-muted small mb-0">
+          <span id="vt-axis-meta-counts"></span>
+        </p>
+      </header>
+
+      <!-- Sticky control panel -->
+      <section class="vt-axis-control-panel mb-3" aria-label="Chart controls">
+        <div class="row g-3 align-items-end">
+
+          <div class="col-12 col-lg-7">
+            <label class="form-label small text-uppercase text-muted mb-2">
+              Players <span class="text-muted">(up to 5)</span>
+              <span id="vt-axis-player-count" class="ms-1 badge text-bg-secondary">0/5</span>
+            </label>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-primary" id="vt-axis-preset-top4">
+                <i class="bi bi-stars me-1"></i>Top 4 (Dom / Nomad / Snake / VTrider)
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="vt-axis-preset-clear">
+                <i class="bi bi-x-circle me-1"></i>Clear
+              </button>
+              <input type="search" id="vt-axis-player-search" class="form-control form-control-sm vt-axis-player-search"
+                     placeholder="Filter players..." autocomplete="off">
+            </div>
+            <div id="vt-axis-player-chips" class="vt-axis-player-chips" role="group" aria-label="Player selector"></div>
+          </div>
+
+          <div class="col-12 col-lg-5">
+            <div class="row g-2">
+              <div class="col-12">
+                <label class="form-label small text-uppercase text-muted mb-1" for="vt-axis-axis-select">Axis</label>
+                <select id="vt-axis-axis-select" class="form-select form-select-sm"></select>
+              </div>
+
+              <div class="col-12 col-sm-6">
+                <label class="form-label small text-uppercase text-muted mb-1">Mode</label>
+                <div class="btn-group btn-group-sm w-100" role="group" aria-label="Mode">
+                  <input type="radio" class="btn-check" name="vt-axis-mode" id="vt-axis-mode-raw" value="raw" checked>
+                  <label class="btn btn-outline-primary" for="vt-axis-mode-raw" title="Raw per-match value (e.g. TLP = 0..1 ratio)">Raw</label>
+                  <input type="radio" class="btn-check" name="vt-axis-mode" id="vt-axis-mode-z" value="z">
+                  <label class="btn btn-outline-primary" for="vt-axis-mode-z" title="Post-clip z-score in [-1, +1], what the rating system consumes">Z-score</label>
+                </div>
+              </div>
+
+              <div class="col-12 col-sm-6">
+                <label class="form-label small text-uppercase text-muted mb-1" for="vt-axis-smoothing">Smoothing</label>
+                <select id="vt-axis-smoothing" class="form-select form-select-sm">
+                  <option value="1">Per-match</option>
+                  <option value="3">3-match rolling</option>
+                  <option value="5" selected>5-match rolling</option>
+                  <option value="7">7-match rolling</option>
+                </select>
+              </div>
+
+              <div class="col-12 col-sm-6">
+                <label class="form-label small text-uppercase text-muted mb-1">X-axis</label>
+                <div class="btn-group btn-group-sm w-100" role="group" aria-label="X-axis">
+                  <input type="radio" class="btn-check" name="vt-axis-xmode" id="vt-axis-xmode-date" value="date" checked>
+                  <label class="btn btn-outline-secondary" for="vt-axis-xmode-date">By date</label>
+                  <input type="radio" class="btn-check" name="vt-axis-xmode" id="vt-axis-xmode-index" value="index">
+                  <label class="btn btn-outline-secondary" for="vt-axis-xmode-index">By match #</label>
+                </div>
+              </div>
+
+              <div class="col-12 col-sm-6">
+                <label class="form-label small text-uppercase text-muted mb-1">Markers</label>
+                <div class="form-check form-switch m-0">
+                  <input class="form-check-input" type="checkbox" id="vt-axis-cmdr-markers" checked>
+                  <label class="form-check-label small" for="vt-axis-cmdr-markers">
+                    Diamond markers for commander matches
+                  </label>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Axis description strip -->
+      <p id="vt-axis-axis-description" class="text-muted small mb-2"></p>
+
+      <!-- Main chart -->
+      <section class="vt-axis-chart-card mb-3">
+        <div class="vt-axis-chart-host">
+          <canvas id="vt-axis-chart"></canvas>
+        </div>
+        <div id="vt-axis-empty-state" class="text-center text-muted py-5 d-none">
+          <i class="bi bi-people fs-2 d-block mb-2"></i>
+          <div class="small">Pick up to 5 players above to see their trajectories.</div>
+        </div>
+      </section>
+
+      <!-- Per-player stat panel -->
+      <section id="vt-axis-stat-panel" class="row g-2 g-md-3" aria-label="Per-player career stats for the active axis"></section>
+
+      <!-- Footer note -->
+      <footer class="mt-4 text-muted small">
+        <p class="mb-1">
+          <strong>Excluded matches:</strong> rows with <code>is_campod</code> or <code>is_low_activity</code>
+          set by the pipeline are dropped from the per-axis lobby BEFORE z-scoring (mirrors
+          <code>scripts/elo.py</code> v2.5). They simply don't appear in any player's series.
+        </p>
+        <p class="mb-1">
+          <strong>Missing axis data:</strong> some axes only became available after
+          <code>match.schema_version</code> bumps (e.g. <code>target_lock_pct</code> needs
+          <code>has_target_lock_data</code>). Matches without an axis show as a gap in the line.
+        </p>
+        <p class="mb-0">
+          Page is read-only / investigative. To regenerate the data after a pipeline run:
+          <code>python _axis-analysis/build_axis_timeline.py</code>
+        </p>
+      </footer>
+
+    </div>
+  </main>
+
+  <!-- Vendored deps -->
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../vendor/chartjs/chart.umd.min.js"></script>
+  <!-- Theme system (gives us palette dropdown + data-theme attr handling) -->
+  <script src="../js/theme.js"></script>
+  <!-- Page logic -->
+  <script src="./axis-analysis.js"></script>
+</body>
+</html>
