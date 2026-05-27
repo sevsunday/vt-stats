@@ -15,6 +15,35 @@
 
 ---
 
+## 0. What the validator actually told us (Phase 1 + 2A — done)
+
+This section was added after the doc was first written. We built the validator (the "single biggest recommendation" above) and ran it on 100 matches, 35 players, 30 confirmed clean wins. Here's what it found, in plain English.
+
+### Things that worked
+
+- **Past performance does predict future performance.** When you split each player's matches in half and check whether their first-half average score predicts their second-half average, the agreement is very strong (0.80 out of 1.0). This means the eight axes are doing real work — the system is measuring something real about each player, not noise. **If this number had been low, no rating math could fix it.** It wasn't low.
+- **Pre-match rating predicts how you'll do in the next match.** Across 884 player-matches, the rank correlation between "your rating going in" and "your composite score that match" is 0.46. Not perfect, but well above noise. Higher-rated players really do score better.
+- **The leaderboard is stable.** When we randomly resample 80% of matches and re-run the rating 100 times, the top 20 stays mostly the same (83% overlap). Per-player rating jitter under resampling is about ±27 points — that's a real confidence band we could show on the dashboard.
+- **The system isn't tuned on a knife edge.** Wobble the eight axis weights randomly and the rankings barely budge. Drop entire axes one at a time and almost nothing changes for `snipe_bonus` (those points are basically dead weight) or `target_lock_pct` (small but measurable). The most load-bearing axis is `net_damage_share` — drop it and rankings shuffle visibly.
+
+### Things that broke in interesting ways
+
+- **The synthetic-winner proxy passed.** When we declare "the team with higher average composite performance won" as a fake winner and check it against the 30 matches where we *know* the real winner, the fake winner agrees 93% of the time. That's well above the 85% threshold we set. **The huge consequence:** we no longer need reliable winner data to ship a `α > 0` blend (item #8 on the list). The fake winner is good enough to test against the full corpus.
+- **The system is *worse than chance* at predicting team wins from team average rating.** This was the big finding. Across the 30 clean-win matches, "team with higher mean rating" picks the actual winner only 43% of the time. Random would be 50%. Cambridge's CS:GO results were 60–64%. We were below the floor.
+- **Phase 2A then ran a follow-up experiment that explained the 43%.** Instead of using each team's *average* rating, try the *highest* rating on each team — Dehpanah's 2021 paper said the top player matters most in tactical shooters. Result: accuracy jumped to 53% (+10 percentage points). This is "directionally confirmed" — the sample size is small (30 matches) so the confidence intervals overlap, but the lift is in exactly the direction the paper predicted. **This is what makes Phase 2C the magnum opus.**
+- **The commander breakout was dead on arrival.** We wanted to compare prediction accuracy on matches *with* a commander vs matches with *no* commanders. Out of 30 clean-win matches, all 30 had at least one commander. We can't run that comparison until we have either (a) more matches, or (b) a different ground-truth subset.
+- **The rating-gap breakout reframed the headline.** We wanted to check: does the rating predict better when one team is clearly stronger? Out of 30 clean-win matches, *zero* had a rating gap of more than 100 points between the two teams. This means the 43% number is being measured *only on tightly balanced matches* — exactly the matches where the rating shouldn't be expected to do well. The rating's true predictive ceiling on lopsided matches remains untested.
+
+### What this changes about the plan
+
+The validator (item #1) and the sensitivity suite (item #4) and the synthetic-winner proxy (item #6) are all done. The MAX-vs-mean experiment (item #3) is now the highest-priority active item — Phase 2A told us where the broken thing is, and item #3 is the fix. The locked-priors ablation (item #2) and inactivity K-boost (item #5) are also active, alongside item #3, in the next week or two.
+
+The Hidden MMR / dual-track / α > 0 / Glicko-2 items (7, 8, 9, 10) are deferred. None of them have empirical urgency from the Phase 2A data — and #8 specifically depends on item #3 landing first (we want the right team-aggregation math before we start blending winners against it).
+
+> **In one sentence:** the eight axes work, the per-player rating is well-calibrated, and the team-aggregation math is the thing we got wrong — exactly what §6.1 hypothesized.
+
+---
+
 ## 1. The two critiques in one paragraph each
 
 **The Cambridge paper** (`csgo-rating-paper.pdf`) tested five rating systems on 10,000 professional CS:GO matches and asked one question: can the system predict the winner before a match starts? Random gets 50%, the dumbest baseline gets ~60%, the best system tested gets 64.1%. Their key finding: rating each individual player works better than rating each team. Their key blind spot: their dataset is win/loss only, so they couldn't evaluate any system that uses richer per-player performance data — which is exactly what we use.
@@ -123,6 +152,16 @@ Three real critiques that v1 missed.
 We currently use the median for the first job, but the *applications* of VTSR-T (matchmaking, future win/loss blending) implicitly depend on the second. Same rating, two jobs, different math.
 
 **The fix:** ship a parallel MAX-weighted version *alongside* the median version. Run the validator with both. Three possible outcomes: median wins for one job, MAX wins for the other (most likely); MAX wins for both (the harder critique is right); median wins for both (v1 was right and the finding doesn't transfer to BZCC). Empirically settle-able in days.
+
+**Phase 2A update (validator preview, completed):** the validator now scores three different ways to combine team ratings on the 30 clean-win matches:
+
+| How we combine team ratings | Picked the right winner |
+|---|---|
+| Average of all rated players (current) | 43% |
+| **Highest single player on each team** | **53%** |
+| Smoothed-highest (favors top players, doesn't ignore the rest) | 47% |
+
+The Dehpanah paper said "the highest-rated player dominates in tactical shooters." The validator says, on our data, hard MAX gives a +10 percentage-point lift over our current mean approach. The sample is small (30 matches), so the confidence intervals overlap and we can't yet say "decisive" — but the direction is the one the paper predicted. **Phase 2C is now the highest-priority active item:** ship MAX (and a smoothed version) as parallel rating files, do the *full* corpus re-rate (not just this validator preview, which is a post-processing reweight), and let the validator pick the winner.
 
 ### 6.2. Locked priors — descriptive vs normative
 
@@ -234,7 +273,17 @@ Source codes: **C** = Cambridge / v1, **A** = §1b production-systems reading, *
 - #7 is the prerequisite for #9. Ship #7 as a parallel JSON file first (low risk, easy revert), promote to full dual-track once #1 confirms it predicts at least as well as Display Rating.
 - #10 is optional — Cambridge's Figure 2 showed defaults are usually near-optimal, and chasing 1-2% predictive lift we can't yet measure is bad ROI until #5 proves insufficient.
 
-The whole list is gated on **#1**. If you only do one thing, do #1.
+The whole list **was** gated on **#1**. **#1 has shipped.** The gate is open.
+
+> **Phase 1 + 2A status overlay** (added post-empirical-findings — see §0 above for context):
+> - Item #1 (validator): ✅ **shipped** as `scripts/validate_elo.py` v1.1
+> - Item #4 (stability suite): ✅ **shipped** (Dirichlet wobble + axis ablation built into the validator)
+> - Item #6 (fake-winner proxy): ✅ **passed at 93%** — unblocks #8 against the full corpus
+> - Items #2 + #5: 🔵 **active in Phase 2B** (locked-priors ablation as alt mode + inactivity K-boost)
+> - Item #3: 🔵 **active in Phase 2C, the magnum opus** — Phase 2A confirmed the direction
+> - Item #8: ⏸ Phase 3 (data-unblocked, but waiting on Phase 2C to land first so we have the right team math to blend against)
+> - Items #7, #9 (Hidden MMR + dual-track): ⏸ Phase 3+ (no urgency from Phase 2A)
+> - Item #10 (full Glicko-2): ⚪ probably never
 
 ---
 

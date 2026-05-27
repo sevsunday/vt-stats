@@ -15,6 +15,47 @@
 
 ---
 
+## 0. Empirical findings — Phase 1 + 2A (completed)
+
+This section was added after the doc was first written. The validator (`scripts/validate_elo.py`, originally proposed in §5.1 / §9 item #1) was built and run against the live corpus. Where the doc previously hypothesized, we now have empirical receipts. Findings below are from a 100-rated-match, 35-player, 30-clean_win corpus.
+
+### What survived contact with data
+
+- **The composite is sound.** Self-consistency Spearman ρ = **0.804** (per-player split-half mean P_i): if past performance doesn't predict future performance, no rating math can fix it. It does. Calibration MAE = **0.018** — observed mean P_i tracks predicted E_i across rating-gap buckets near-perfectly.
+- **Pre-match rating predicts in-match performance.** Pooled Spearman ρ (R_pre → P_i) = **0.462** across 884 player-matches. Higher-rated players reliably score higher composite. The 8 axes are doing real signal work.
+- **The ratings are stable under resampling.** Bootstrap top-20 Jaccard mean = 0.826 (min 0.667), per-player rating-proxy σ ≈ 27 ELO median. Real ±27 ELO confidence band.
+- **The system isn't tuned on a knife edge.** Dirichlet weight perturbation ρ distribution: mean 0.986, min 0.931. Small weight changes barely move rankings.
+- **Two axes are near dead-weight.** Single-axis ablation: dropping `snipe_bonus` moves rankings by ρ = 0.999 (essentially zero); `target_lock_pct` by ρ = 0.994. `net_damage_share` is the most load-bearing (drop ρ = 0.946). Worth revisiting axis weights post-Phase 2C.
+
+### What broke in surprising ways
+
+- **The synthetic-winner proxy (§9 item #6) PASSED its threshold.** Agreement with `clean_win` ground truth = **93.3%** (Wilson 95% CI 78.7–98.2%) — well above the 85% bar. **This unlocks full-corpus α > 0 validation in Phase 3** without requiring more reliable winner data.
+- **Predicting team wins from team mean R is *worse than chance*.** clean_win accuracy = **43.3%** (95% CI 27.4–60.8%). Log-loss 0.701 vs the 0.693 coin-flip baseline. Cambridge's CS:GO skillbench numbers are 60–64%; we're 17 points below. **This was the headline finding of Phase 1.**
+- **Phase 2A diagnostic 1 (§6.1 MAX-vs-median preview) directionally confirmed Dehpanah:** hard MAX = 53.3% (+10pp on mean), softmax MAX with τ=200 = 46.7%. The rating *does* contain predictive signal for team outcomes — we were just aggregating wrong. **CIs heavily overlap (n=30), so this is "directionally confirmed" not "decisively shown."** Phase 2C runs the full re-rate to confirm the lift survives.
+- **Phase 2A diagnostic 2 (§6.2 commander breakout) is structurally untestable on current data.** Of 30 clean_wins, **30 have at least one commander.** All-thug subset = 0. Can't isolate v2.4 commander axis-shift effects without either more matches or a different ground-truth set.
+- **Phase 2A diagnostic 3 (§6.3 rating-gap breakout) reframed the headline.** Of 30 clean_wins, 14 have R-gap < 25 ELO and 16 have 25–100. **Zero have gap > 100.** Both buckets predict identically badly (~43%). The 43% figure isn't necessarily because the rating is broken — *we have no lopsided matches in the test set*. The rating's predictive ceiling is currently untestable; Phase 2C may surface it as the team-aggregation math improves.
+
+### What this changes about the §9 recommendations
+
+| §9 item | Pre-2A status | Post-2A status |
+|---|---|---|
+| #1 build validator | "single highest-leverage thing to ship" | ✅ **Shipped** (`scripts/validate_elo.py`, v1.1) |
+| #2 locked-priors ablation | cheap one-liner | Still cheap — promote to Phase 2B alongside K-boost |
+| #3 parallel MAX `E_i` | "high if MAX wins" | ✅ **Empirically motivated** — Phase 2A preview shows +10pp directional lift; promote to Phase 2C as the magnum opus |
+| #4 sensitivity suite | 1-2 days | ✅ **Built into validator v1.1** (single-axis ablation + Dirichlet perturbation) |
+| #5 inactivity K-boost | safe-blind half-day | Unchanged. Phase 2B alongside priors ablation |
+| #6 synthetic-winner proxy | "if 85% then full corpus unlocks" | ✅ **PASSED at 93.3%** — full-corpus α > 0 validation now unblocked |
+| #7 parallel Hidden MMR | "2-3 days" | Deferred to Phase 3+ (see §10 below) |
+| #8 α > 0 blend | "data-gated" | Now data-unblocked but deferred to Phase 3 (gated on Phase 2C landing first — need the right `E_i` before blending winners against it) |
+| #9 full dual-track | "1-2 weeks" | Deferred to Phase 3+ |
+| #10 full Glicko-2 RD | "only if K-boost insufficient" | Unchanged. Most likely never. |
+
+### The Phase 2A reframe in one sentence
+
+> The composite axes work, the rating itself is well-calibrated to individual performance, and the team-aggregation math is the highest-leverage broken thing — exactly what §6.1 hypothesized.
+
+---
+
 ## 1. The two critiques in two pages
 
 ### 1a. The Cambridge paper (`csgo-rating-paper.pdf`)
@@ -200,6 +241,21 @@ This is genuinely empirically settle-able with the §5.1 validator, in days not 
 
 **Implementation note:** "weighted MAX" should not be literally `max()` — that's noisy on small lobbies. Standard practice (per Dehpanah and PandaSkill) is to use a softmax-style weighted average that approaches `max()` as a temperature parameter goes to 0. A reasonable starting point: `R̄_max = (Σ R_j · exp(R_j / τ)) / (Σ exp(R_j / τ))` with `τ = 200`. Then `α_blend · median + (1 - α_blend) · MAX` is the most flexible variant — let the validator find `α_blend ∈ [0, 1]`.
 
+**Phase 2A empirical preview (validator v1.1, completed):** the validator now scores three aggregations side-by-side on the eligible clean_win subset (n=30):
+
+| Aggregation | Accuracy | 95% CI | Log-loss (mean) | Log-loss (median) |
+|---|---|---|---|---|
+| team mean R (current) | 43.3% | 27.4–60.8% | 0.701 | 0.698 |
+| team **hard MAX R** | **53.3%** | 36.1–69.8% | 0.725 | **0.680** |
+| team softmax R (τ=200) | 46.7% | 30.2–63.9% | 0.714 | 0.695 |
+
+**Interpretation.** Hard MAX wins on accuracy (+10pp on mean) and *median* log-loss, but loses on *mean* log-loss — meaning when MAX is wrong, it's confidently wrong (a few high-loss tail outliers drag the mean above median). Softmax MAX is the most balanced metric-wise: modest accuracy lift, log-loss in line with mean. CIs overlap heavily because n=30 is small, so the 10pp lift is "directionally confirmed" not "decisively shown." Phase 2C runs the full corpus re-rate (not just the validator preview, which is a post-processing reweight on existing axis_contributions) to confirm the lift survives the cascading R_before chain effects.
+
+**Operational consequence.** This empirical preview is what justifies promoting §9 item #3 (parallel MAX `E_i`) to Phase 2C as the magnum opus. The "ship both, let the validator pick" plan is unchanged in shape but the validator has now told us which side is currently winning. After full re-rate, the decision tree is:
+- **MAX/softmax wins by ≥5pp on full re-rate:** swap canonical to softmax MAX (per the "willing to swap if validator clearly shows winner" stance from the Phase 2 lock-in)
+- **Lift shrinks to <5pp:** keep median canonical; ship MAX as opt-in alt JSON pair for forensics
+- **Lift flips:** revert; the cascading R_before effects ate the gain
+
 ### 6.2. Locked priors vs PandaSkill-style empirical-only (§2.4 of the §1b reading)
 
 **The claim:** the locked overrides for `pve_share` (-0.05 vs empirical +0.111) and `target_lock_pct` (-0.10 vs empirical -0.466) "corrupt empirical integrity." PandaSkill (2025, LoL) solves role asymmetry via independent ML role models + OpenSkill, *without* hand-tuned overrides. Net: VTSR-T is "a behavioral conditioning tool rather than an objective skill evaluator."
@@ -324,6 +380,16 @@ The unified action list. Each item attributes its source so future code reviews 
 | 9 | **Full dual-track architecture** — promote #7's `vtsr_t_pure` to first-class: Lobby Tools' Team Balonce reads from Hidden MMR, dashboard shows Display Rating, both surfaced in Player Profile pages. Mirrors CS2. | A | Medium (1-2 weeks) | High (matchmaking integrity) | No |
 | 10 | **Optional: full Glicko-2 RD migration** — only if #1 + #5 prove the additive K-boost is empirically insufficient (>50 ELO miscalibration on returning players). | A | High (3+ weeks) | Probably small per Cambridge's own findings | No |
 
+> **Phase 1 + 2A status overlay** (added post-empirical-findings — see §0 above for context):
+> - Item #1: ✅ shipped as `scripts/validate_elo.py` v1.1
+> - Item #4: ✅ shipped (Dirichlet + single-axis ablation built into validator)
+> - Item #6: ✅ PASSED at 93.3% — unblocks #8
+> - Items #2 + #5: 🔵 Phase 2B (current) — locked-priors as alt mode + inactivity K-boost direct edit
+> - Item #3: 🔵 Phase 2C (current, magnum opus) — Phase 2A confirmed +10pp directional lift on hard MAX
+> - Item #8: ⏸ Phase 3 (data-unblocked but gated on Phase 2C)
+> - Items #7, #9: ⏸ Phase 3+ (no Phase 2A urgency)
+> - Item #10: ⚪ Probably never
+
 **Sequencing notes:**
 
 - **Items #1–#5 ship in any order, none gated on winner data.** Do #1 first; everything else gets easier (and more justified) after.
@@ -331,7 +397,7 @@ The unified action list. Each item attributes its source so future code reviews 
 - **#7 is the prerequisite for #9.** Ship #7 as a parallel JSON pair first (low risk, easy revert), promote to full dual-track once #1 confirms it predicts at least as well as Display Rating.
 - **#10 is optional.** Cambridge's Figure 2 shows defaults are usually near-optimal; a full Glicko-2 port chasing 1-2% predictive lift we can't even measure yet is bad ROI until #5 proves insufficient.
 
-The whole list is gated on **#1**. If you only do one thing, do #1.
+The whole list **was** gated on **#1**. **#1 has shipped.** The gate is open.
 
 ---
 

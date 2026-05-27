@@ -156,6 +156,39 @@ COMMANDER_BASELINE_SHRINKAGE = 30.0
 # to warrant a seed-value revisit.
 COMMANDER_BASELINE_LOCKED_AXES = {"target_lock_pct", "pve_share"}
 
+# Phase 2C (current): expected-performance opponent-reference modes.
+# Three options for aggregating per-opponent ratings into the single
+# `r_opponents_ref` value fed into the logistic E_i curve:
+#   * "median"      -- numpy-free population median (canonical, current)
+#   * "hard_max"    -- max(opponents); Dehpanah-style team-threat proxy
+#   * "softmax_max" -- softmax-weighted mean approaching max as tau -> 0
+# Phase 2A validator preview showed hard_max gives a +10pp directional
+# lift over median on clean_win team prediction (53.3% vs 43.3%, n=30).
+# Phase 2C ships the parallel re-rate to test whether the lift survives
+# the cascading R_before chain effects of full corpus re-rating. See
+# `_validation/2c_max_comparison.md` for the side-by-side. Tunable
+# without a schema bump.
+EXPECTED_PERFORMANCE_MODES = ("median", "hard_max", "softmax_max")
+ELO_SOFTMAX_TAU            = 200.0   # Default tau for softmax_max mode.
+
+# Phase 2B (current): inactivity-driven K-factor boost. Players returning
+# after a long absence are uncertain, even at static skill -- their rating
+# should re-locate faster on first matches back. Match-count K decay is
+# real signal (a 1-match player has more uncertainty than a 100-match
+# player at the same elapsed time), but it doesn't capture the *time*
+# component. We add an additive boost to the matches-played K curve:
+#
+#     K_inactivity = min(K_INACTIVITY_BOOST_MAX,
+#                        K_INACTIVITY_BOOST_RATE * days_inactive)
+#     K_i_total    = k_factor(matches_played) + K_inactivity
+#
+# 0.05 ELO/day rate * 400-day cap = +20 ELO ceiling. Picks up the bulk of
+# Glicko-2 RD's time-decay benefit at ~5% of the engineering cost. New
+# corpus / first-match players see days_inactive=0 (no boost). Tunable
+# without a schema bump.
+K_INACTIVITY_BOOST_RATE = 0.05    # ELO per day inactive.
+K_INACTIVITY_BOOST_MAX  = 20.0    # Hard cap on the inactivity addition.
+
 # Bump if elo_current.json / elo_history.json shape changes (the JS
 # reader checks this). v7 = self-damage carve-out (match.schema_version 8):
 # `personal.pvp_dealt` / `pvp_kills` / `pvp_shots_hit` / `pve_dealt` /
@@ -170,10 +203,25 @@ ELO_SCHEMA_VERSION = 7
 # Pure helpers
 # ---------------------------------------------------------------------------
 
-def k_factor(matches_played: int) -> float:
-    """K-factor decay curve. Rookie (n=0) ≈ 52, n=10 → 32, n=50 → ~18.7."""
+def k_factor(matches_played: int, days_inactive: float = 0.0) -> float:
+    """K-factor decay curve with optional inactivity boost.
+
+    Match-count component (Phase 1): rookie (n=0) ≈ 52, n=10 → 32,
+    n=50 → ~18.7.
+
+    Inactivity boost (Phase 2B): for ``days_inactive`` days since the
+    player's last rated match, add ``min(K_INACTIVITY_BOOST_MAX,
+    K_INACTIVITY_BOOST_RATE * days_inactive)``. With the defaults
+    (0.05 ELO/day, 20 ELO cap), a player gone for 400+ days re-enters
+    with the full +20 ELO ceiling on top of their match-count K. First
+    appearance for a player has ``days_inactive=0`` (no boost).
+    """
     n = max(0, int(matches_played))
-    return ELO_K_BASE * (1 - n / (n + ELO_PROVISIONAL_PRIOR)) + ELO_K_FLOOR
+    base = ELO_K_BASE * (1 - n / (n + ELO_PROVISIONAL_PRIOR)) + ELO_K_FLOOR
+    if days_inactive <= 0.0:
+        return base
+    boost = min(K_INACTIVITY_BOOST_MAX, K_INACTIVITY_BOOST_RATE * days_inactive)
+    return base + boost
 
 
 def floor_taper(rating: float) -> float:
@@ -204,6 +252,102 @@ def expected_performance(r_i: float, r_opponents_ref: float) -> float:
     if exponent < -16.0:
         return 1.0
     return 2.0 / (1.0 + 10.0 ** exponent) - 1.0
+
+
+def opponent_reference_rating(
+    opponents: list[float],
+    mode: str = "median",
+    softmax_tau: float | None = None,
+) -> float:
+    """Aggregate a list of opponent ratings into a single reference value.
+
+    Three aggregation modes:
+
+    * ``"median"`` (current canonical) -- numpy-free population median.
+      Robust to one ringer warping the lobby norm. Right answer for
+      "what should I expect this individual to do?" framing.
+
+    * ``"hard_max"`` (Phase 2C alt mode) -- literally ``max(opponents)``.
+      Dehpanah et al. 2021 (Apex / PUBG / CS:GO, 100k+ matches): in
+      tactical shooters the team's threat is dominated by its single
+      strongest member. Right answer for team-prediction framing.
+
+    * ``"softmax_max"`` (Phase 2C alt mode) -- softmax-weighted mean
+      that approaches ``max()`` as ``softmax_tau -> 0``. Smoothes the
+      hard-MAX over noisy lobbies; lower variance than hard_max with
+      most of the predictive lift.
+
+    ``softmax_tau`` defaults to ``ELO_SOFTMAX_TAU`` when not provided
+    (only consulted for ``softmax_max``). With ``tau=200``, a +200-ELO
+    opponent gets ~e times the weight of the median; +400-ELO gets
+    ~e^2. Empty ``opponents`` returns ``ELO_ANCHOR`` (debutant fallback).
+    """
+    if not opponents:
+        return ELO_ANCHOR
+    if mode == "median":
+        return _median(opponents)
+    if mode == "hard_max":
+        return max(opponents)
+    if mode == "softmax_max":
+        tau = ELO_SOFTMAX_TAU if softmax_tau is None else float(softmax_tau)
+        if tau <= 0.0:
+            return max(opponents)
+        # Numeric stability: subtract max before the exp.
+        m = max(opponents)
+        weights = [math.exp((r - m) / tau) for r in opponents]
+        z = sum(weights)
+        if z <= 0.0:
+            return _median(opponents)
+        return sum(r * w for r, w in zip(opponents, weights)) / z
+    raise ValueError(f"unknown opponent_reference_rating mode: {mode!r}")
+
+
+def expected_performance_max(
+    r_i: float,
+    opponents: list[float],
+    mode: str = "median",
+    softmax_tau: float | None = None,
+) -> float:
+    """Convenience wrapper: ``E_i`` against a configurable opponent reference.
+
+    Equivalent to ``expected_performance(r_i, opponent_reference_rating(
+    opponents, mode, softmax_tau))``. ``compute_elo``'s per-row loop calls
+    the two underlying helpers directly to avoid recomputing the
+    reference per E_i evaluation; this wrapper is here for callers that
+    prefer the bundled signature (validator, ad-hoc scripts).
+    """
+    ref = opponent_reference_rating(opponents, mode=mode, softmax_tau=softmax_tau)
+    return expected_performance(r_i, ref)
+
+
+def _parse_match_date(value: str | None) -> datetime | None:
+    """Parse a ``match.date`` string into a UTC datetime.
+
+    Accepts the project's canonical ISO formats (with / without ``T``
+    separator, with / without trailing ``Z``). Returns ``None`` on
+    empty / malformed input -- callers fall back to no inactivity
+    boost in that case.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    # ISO 8601 ``Z`` suffix is widely supported; Python <3.11 does not
+    # parse ``Z`` natively in fromisoformat. Normalize to +00:00.
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        # Date-only fallback (some legacy entries are YYYY-MM-DD).
+        try:
+            dt = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _median(values: list[float]) -> float:
@@ -248,23 +392,34 @@ def _clip(x: float, lo: float, hi: float) -> float:
 
 
 def commander_shrunk_baseline(
-    axis: str, running_sum: float, running_count: int
+    axis: str,
+    running_sum: float,
+    running_count: int,
+    locked_axes: set[str] | frozenset[str] | None = None,
 ) -> float:
     """Shrunk baseline for a commander-shifted axis (post-clip space).
 
-    LOCKED axes (``COMMANDER_BASELINE_LOCKED_AXES``) always return the
-    seed prior - their design intent is hand-tuned and should never drift
-    toward live empirical mean. Audit-derived axes blend the seed prior
-    with the running mean of observed pre-shift commander z-scores using
-    shrinkage strength ``COMMANDER_BASELINE_SHRINKAGE``:
+    LOCKED axes (``locked_axes``, defaulting to
+    ``COMMANDER_BASELINE_LOCKED_AXES``) always return the seed prior -
+    their design intent is hand-tuned and should never drift toward live
+    empirical mean. Audit-derived axes blend the seed prior with the
+    running mean of observed pre-shift commander z-scores using shrinkage
+    strength ``COMMANDER_BASELINE_SHRINKAGE``:
 
         baseline[a] = (n * running_mean[a] + s * prior[a]) / (n + s)
 
     With ``n = 0`` (no commander rows seen yet) the baseline equals the
     prior; as ``n`` grows the baseline tracks live empirical reality.
+
+    Phase 2B unlocked-priors mode: pass ``locked_axes=set()`` to make
+    every audit-derived AND hand-tuned axis ride the shrunk rolling
+    baseline (no hand-tuned overrides). The seed prior is still used
+    when ``running_count <= 0`` so debutant-corpus behavior is unchanged.
     """
+    if locked_axes is None:
+        locked_axes = COMMANDER_BASELINE_LOCKED_AXES
     prior = COMMANDER_AXIS_PRIOR[axis]
-    if axis in COMMANDER_BASELINE_LOCKED_AXES:
+    if axis in locked_axes:
         return prior
     if running_count <= 0:
         return prior
@@ -652,6 +807,8 @@ def _player_key(p: dict) -> str:
 def compute_elo(
     all_match_data: list[dict],
     exclude_commanders: bool = False,
+    exclude_locked_priors: bool = False,
+    expected_performance_mode: str = "median",
 ) -> tuple[dict, dict]:
     """Walk ``all_match_data`` chronologically, applying the ELO update rule
     per match, and return the ``(elo_current, elo_history)`` JSON-ready dicts.
@@ -670,7 +827,43 @@ def compute_elo(
     (no commander rows reach the rolling baseline buffers, so the
     snapshot equals the seed prior every match and no commander rows
     get shifted because none reach scoring).
+
+    Phase 2B unlocked-priors mode: when ``exclude_locked_priors=True``
+    every commander axis listed in ``COMMANDER_AXIS_PRIOR`` rides the
+    shrunk rolling baseline. The two hand-tuned LOCKED axes
+    (``target_lock_pct`` cushion, ``pve_share`` reward boost) lose
+    their hand-tuned overrides and are blended with live empirical
+    means at shrinkage strength ``COMMANDER_BASELINE_SHRINKAGE``,
+    same as the audit-derived axes. The output dicts gain
+    ``excludes_locked_priors: True`` and ``commander_baseline_locked_axes``
+    is empty on the alt JSON pair. Orthogonal to ``exclude_commanders``
+    -- both flags can be set independently. NOTE: when both flags are
+    set together the unlocked-priors machinery degenerates (no
+    commander rows reach scoring), so the alt-mode JSON pairs are
+    expected to be canonical-only or thug-only-only, not both.
+
+    Phase 2C expected-performance opponent-reference mode: when
+    ``expected_performance_mode != "median"`` the per-row E_i
+    computation aggregates opponent ratings via the requested mode
+    (``"hard_max"`` or ``"softmax_max"``) instead of the canonical
+    population median. Median is robust to a single high-rated
+    outlier; hard_max captures Dehpanah-style team-threat dominance;
+    softmax_max smoothes hard_max with ``tau=ELO_SOFTMAX_TAU=200``.
+    The output dicts gain ``expected_performance_mode`` (echoes the
+    selected mode) and ``expected_performance_softmax_tau`` (always
+    surfaced for visibility, only consulted when mode is softmax_max).
+    Orthogonal to both v2.7 flags above. Phase 2A validator preview
+    showed hard_max gives a +10pp directional lift over median on
+    clean_win team prediction; this flag exists to test whether the
+    lift survives the cascading R_before chain effects of full
+    corpus re-rating.
     """
+    if expected_performance_mode not in EXPECTED_PERFORMANCE_MODES:
+        raise ValueError(
+            f"unknown expected_performance_mode: "
+            f"{expected_performance_mode!r}; "
+            f"expected one of {EXPECTED_PERFORMANCE_MODES}"
+        )
     matches = sorted(
         list(all_match_data),
         key=lambda md: (
@@ -679,12 +872,26 @@ def compute_elo(
         ),
     )
 
+    # Phase 2B: when running the unlocked-priors alt mode, drop every
+    # entry from the lock set so all six commander axes ride the shrunk
+    # rolling baseline. Canonical mode keeps the project default
+    # (``COMMANDER_BASELINE_LOCKED_AXES``).
+    effective_locked_axes: frozenset[str] = (
+        frozenset() if exclude_locked_priors
+        else frozenset(COMMANDER_BASELINE_LOCKED_AXES)
+    )
+
     thug_elo: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
     matches_played: dict[str, int] = defaultdict(int)
     display_name: dict[str, str] = {}
     steam64_for_key: dict[str, str | None] = {}
     last_match_id: dict[str, str] = {}
     last_delta: dict[str, float] = {}
+    # Phase 2B inactivity K-boost: track each player's last-rated-match
+    # datetime so we can compute days_inactive on the next appearance.
+    # `None` means we have a row but date parsing failed (defensive
+    # fallback -- no boost applied that match).
+    last_match_dt: dict[str, datetime | None] = {}
     peak_vtsr: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
     peak_at: dict[str, str] = {}
     win_history: dict[str, list[float]] = defaultdict(list)
@@ -726,6 +933,10 @@ def compute_elo(
         lobby_raw = md.get("leaderboard") or []
         match_id = m.get("id", "")
         match_date = m.get("date", "")
+        # Parse match.date for the inactivity K-boost. Defensive: if the
+        # date is empty / malformed, current_match_dt is None and every
+        # row in this match falls back to days_inactive=0.0 (no boost).
+        current_match_dt: datetime | None = _parse_match_date(match_date)
 
         # v2.5: tally per-row exclusion counters BEFORE the match-level
         # gate so the totals cover the entire corpus regardless of
@@ -783,6 +994,7 @@ def compute_elo(
                 a,
                 commander_axis_running_sum[a],
                 commander_axis_running_count[a],
+                locked_axes=effective_locked_axes,
             )
             for a in COMMANDER_AXIS_PRIOR
         }
@@ -814,11 +1026,28 @@ def compute_elo(
         for i, key in enumerate(keys):
             n_before = matches_played[key]
             r_before = ratings_before[i]
-            ki = k_factor(n_before)
-            # Median (not mean) of opponent ratings: a single high-rated
-            # outlier shouldn't pull the reference up for everyone.
+            # Phase 2B: compute days_inactive against the player's last
+            # rated match. First-appearance players have no prior date
+            # tracked -> 0.0 (no boost). Defensive fallback when either
+            # date is unparseable.
+            prev_dt = last_match_dt.get(key)
+            if prev_dt is not None and current_match_dt is not None:
+                delta_days = (current_match_dt - prev_dt).total_seconds() / 86400.0
+                days_inactive = max(0.0, delta_days)
+            else:
+                days_inactive = 0.0
+            ki = k_factor(n_before, days_inactive)
+            # Opponent-reference rating fed into the logistic E_i curve.
+            # Phase 2C: aggregation mode is configurable via
+            # ``expected_performance_mode``; "median" preserves the v1
+            # canonical behavior, while "hard_max" / "softmax_max" test
+            # the Dehpanah team-threat hypothesis on full corpus re-rate.
             others = [r for j, r in enumerate(ratings_before) if j != i]
-            r_opp_ref = _median(others) if others else ELO_ANCHOR
+            r_opp_ref = opponent_reference_rating(
+                others,
+                mode=expected_performance_mode,
+                softmax_tau=ELO_SOFTMAX_TAU,
+            )
             e_i = expected_performance(r_before, r_opp_ref)
             dr_raw = ki * ELO_RATING_SCALE * (perfs[i] - e_i)
             if dr_raw >= 0:
@@ -834,6 +1063,10 @@ def compute_elo(
             matches_played[key] = n_before + 1
             last_match_id[key] = match_id
             last_delta[key] = dr
+            # Phase 2B: stash the parsed match datetime for the next
+            # appearance's days_inactive computation. We only record on
+            # rated rows so excluded matches don't reset the clock.
+            last_match_dt[key] = current_match_dt
             display_name[key] = lobby[i].get("name") or display_name.get(key, "")
             if not steam64_for_key.get(key):
                 steam64_for_key[key] = lobby[i].get("steam64")
@@ -950,6 +1183,17 @@ def compute_elo(
         # False for the canonical elo_current.json. Lets the dashboard
         # sanity-check that it loaded the right file when toggling.
         "excludes_commanders": bool(exclude_commanders),
+        # Phase 2B unlocked-priors mode flag: True for
+        # elo_current_unlocked.json. Validator + analysis tooling reads
+        # this to confirm it loaded the unlocked variant. Orthogonal to
+        # excludes_commanders.
+        "excludes_locked_priors": bool(exclude_locked_priors),
+        # Phase 2C expected-performance opponent-reference mode. One of
+        # ("median", "hard_max", "softmax_max"). "median" is canonical;
+        # the other two emit alt JSON pairs and are validator-scored
+        # against canonical to test the Dehpanah team-threat hypothesis.
+        "expected_performance_mode": expected_performance_mode,
+        "expected_performance_softmax_tau": ELO_SOFTMAX_TAU,
         "alpha":               ALPHA,
         "alpha_pve":           ALPHA_PVE,
         "anchor":              ELO_ANCHOR,
@@ -960,6 +1204,12 @@ def compute_elo(
         "floor_taper_window": ELO_FLOOR_TAPER_WINDOW,
         "k_base":             ELO_K_BASE,
         "k_floor":             ELO_K_FLOOR,
+        # Phase 2B inactivity K-boost: additive boost on returning-player
+        # K, capped at K_INACTIVITY_BOOST_MAX. Tunable post-ship without
+        # a schema bump. With defaults (0.05, 20.0): full +20 ELO ceiling
+        # at 400+ days inactive, +10 ELO at ~200 days, +5 ELO at ~100 days.
+        "k_inactivity_boost_rate": K_INACTIVITY_BOOST_RATE,
+        "k_inactivity_boost_max":  K_INACTIVITY_BOOST_MAX,
         "provisional_prior":  ELO_PROVISIONAL_PRIOR,
         "provisional_threshold": ELO_PROVISIONAL_THRESHOLD,
         "min_player_count":   ELO_MIN_PLAYER_COUNT,
@@ -985,7 +1235,15 @@ def compute_elo(
         # only — `locked: true` makes that obvious in the JSON).
         "commander_axis_prior":           dict(COMMANDER_AXIS_PRIOR),
         "commander_baseline_shrinkage":   COMMANDER_BASELINE_SHRINKAGE,
-        "commander_baseline_locked_axes": sorted(COMMANDER_BASELINE_LOCKED_AXES),
+        # Effective lock set used during this rating run. Canonical:
+        # mirrors the module constant (``target_lock_pct`` + ``pve_share``).
+        # Unlocked alt mode: empty list -- every axis rode the shrunk
+        # rolling baseline. The module-constant view stays available via
+        # ``commander_baseline_locked_axes_module_default`` for forensics.
+        "commander_baseline_locked_axes": sorted(effective_locked_axes),
+        "commander_baseline_locked_axes_module_default": sorted(
+            COMMANDER_BASELINE_LOCKED_AXES
+        ),
         "commander_baseline_observed": {
             a: {
                 "n":            commander_axis_running_count[a],
@@ -1003,10 +1261,11 @@ def compute_elo(
                         a,
                         commander_axis_running_sum[a],
                         commander_axis_running_count[a],
+                        locked_axes=effective_locked_axes,
                     ),
                     4,
                 ),
-                "locked": a in COMMANDER_BASELINE_LOCKED_AXES,
+                "locked": a in effective_locked_axes,
             }
             for a in COMMANDER_AXIS_PRIOR
         },
@@ -1014,8 +1273,10 @@ def compute_elo(
     }
 
     elo_history = {
-        "schema_version":     ELO_SCHEMA_VERSION,
-        "excludes_commanders": bool(exclude_commanders),
+        "schema_version":      ELO_SCHEMA_VERSION,
+        "excludes_commanders":      bool(exclude_commanders),
+        "excludes_locked_priors":   bool(exclude_locked_priors),
+        "expected_performance_mode": expected_performance_mode,
         "history":             history_entries,
     }
 

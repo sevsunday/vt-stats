@@ -1396,7 +1396,10 @@ def load_cache_index():
         return index
     skip = {"matches.json", "match_contributions.json", "all_matches.json",
             "elo_current.json", "elo_history.json",
-            "elo_current_thugs_only.json", "elo_history_thugs_only.json"}
+            "elo_current_thugs_only.json", "elo_history_thugs_only.json",
+            "elo_current_unlocked.json", "elo_history_unlocked.json",
+            "elo_current_max.json", "elo_history_max.json",
+            "elo_current_softmax.json", "elo_history_softmax.json"}
     for json_path in OUTPUT_DIR.glob("*.json"):
         if json_path.name in skip:
             continue
@@ -5195,6 +5198,84 @@ def main():
               f"{excl_cmdr_rows} commander rows excluded)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T (thug-only) ({e}); skipping.")
+
+    # ----- VTSR-T (unlocked-priors alt mode, Phase 2B) -----
+    # Re-runs the rating loop with `exclude_locked_priors=True`. The two
+    # hand-tuned LOCKED commander axes (target_lock_pct cushion,
+    # pve_share reward boost) lose their hand-tuned overrides and ride
+    # the shrunk rolling baseline same as the audit-derived axes.
+    # Forensic / decision input only -- the validator (--elo-mode unlocked)
+    # scores this against canonical to determine whether the locks are
+    # doing useful predictive work or whether they should be dropped.
+    # Soft-fails so a hiccup here never blocks the rest of the pipeline.
+    try:
+        import elo as elo_module
+        elo_current_un, elo_history_un = elo_module.compute_elo(
+            all_match_data, exclude_locked_priors=True
+        )
+        elo_current_un_path = OUTPUT_DIR / "elo_current_unlocked.json"
+        with open(elo_current_un_path, "w", encoding="utf-8") as f:
+            json.dump(elo_current_un, f, indent=2, ensure_ascii=False)
+        elo_history_un_path = OUTPUT_DIR / "elo_history_unlocked.json"
+        with open(elo_history_un_path, "w", encoding="utf-8") as f:
+            json.dump(elo_history_un, f, indent=2, ensure_ascii=False)
+        n_ratings_un = len(elo_current_un.get("ratings", []))
+        rated_un = elo_current_un.get("match_count", 0)
+        print(f"VTSR-T (unlocked priors): {elo_current_un_path.name} "
+              f"({n_ratings_un} players · {rated_un} rated matches)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-T (unlocked priors) ({e}); skipping.")
+
+    # ----- VTSR-T (hard MAX expected-performance, Phase 2C) -----
+    # Re-runs the rating loop with `expected_performance_mode="hard_max"`.
+    # E_i is computed against the literal max(opponents) instead of the
+    # canonical median. Validator (--elo-mode max) scores this against
+    # canonical to test the Dehpanah team-threat hypothesis on full
+    # corpus re-rate. Soft-fails so a hiccup here never blocks the rest
+    # of the pipeline.
+    try:
+        import elo as elo_module
+        elo_current_mx, elo_history_mx = elo_module.compute_elo(
+            all_match_data, expected_performance_mode="hard_max"
+        )
+        elo_current_mx_path = OUTPUT_DIR / "elo_current_max.json"
+        with open(elo_current_mx_path, "w", encoding="utf-8") as f:
+            json.dump(elo_current_mx, f, indent=2, ensure_ascii=False)
+        elo_history_mx_path = OUTPUT_DIR / "elo_history_max.json"
+        with open(elo_history_mx_path, "w", encoding="utf-8") as f:
+            json.dump(elo_history_mx, f, indent=2, ensure_ascii=False)
+        n_ratings_mx = len(elo_current_mx.get("ratings", []))
+        rated_mx = elo_current_mx.get("match_count", 0)
+        print(f"VTSR-T (hard MAX E): {elo_current_mx_path.name} "
+              f"({n_ratings_mx} players · {rated_mx} rated matches)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-T (hard MAX) ({e}); skipping.")
+
+    # ----- VTSR-T (softmax MAX expected-performance, Phase 2C) -----
+    # Re-runs the rating loop with `expected_performance_mode=
+    # "softmax_max"`. E_i is computed against a softmax-weighted mean
+    # of opponents (default tau=200). Smooths hard_max while retaining
+    # most of the team-threat signal. Validator (--elo-mode softmax)
+    # scores this against canonical and hard MAX to triangulate the
+    # right reference aggregation. Soft-fails.
+    try:
+        import elo as elo_module
+        elo_current_sm, elo_history_sm = elo_module.compute_elo(
+            all_match_data, expected_performance_mode="softmax_max"
+        )
+        elo_current_sm_path = OUTPUT_DIR / "elo_current_softmax.json"
+        with open(elo_current_sm_path, "w", encoding="utf-8") as f:
+            json.dump(elo_current_sm, f, indent=2, ensure_ascii=False)
+        elo_history_sm_path = OUTPUT_DIR / "elo_history_softmax.json"
+        with open(elo_history_sm_path, "w", encoding="utf-8") as f:
+            json.dump(elo_history_sm, f, indent=2, ensure_ascii=False)
+        n_ratings_sm = len(elo_current_sm.get("ratings", []))
+        rated_sm = elo_current_sm.get("match_count", 0)
+        tau_sm = elo_current_sm.get("expected_performance_softmax_tau")
+        print(f"VTSR-T (softmax MAX E, tau={tau_sm}): {elo_current_sm_path.name} "
+              f"({n_ratings_sm} players · {rated_sm} rated matches)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-T (softmax MAX) ({e}); skipping.")
 
     # ----- Player slug map + (Phase 3) per-player HTML stubs -----
     # Sticky map keyed by Steam64 -> {slug, name}. Drives `/player/<slug>/`
