@@ -1092,7 +1092,7 @@ def compute_highlights(match_data):
 # Movement band thresholds on activity_score (0-100): Defensive ... Aggressive
 # 0 = camper (stayed at base), 100 = roamer (covered map).
 POSITIONING_BANDS = [
-    (20, "Defensive"),
+    (20, "Garden Gnome"),
     (40, "Territorial"),
     (60, "Balanced"),
     (80, "Mobile"),
