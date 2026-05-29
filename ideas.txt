@@ -1,0 +1,318 @@
+VT Stats — Ideas & Future Work
+================================
+Last updated: 2026-05-29
+
+Ordered roughly by value-per-effort. Items that depend on a larger v2
+corpus are flagged with [CORPUS GATE]. Items that touch VTSR-T directly
+are flagged with [RATING] and held behind explicit validation gates.
+
+
+==============================================================
+1. Health & Ammo Analytics
+==============================================================
+
+PlayerState.health and .ammo are sampled on every UpdateTick but never
+aggregated. A single extra pass in the existing UpdateTick loop gets all
+of these for free (the loop already fires for positioning; health/ammo
+just need to be read alongside position).
+
+NOTE: health and ammo are ABSOLUTE values (engine units, not ratios) per
+the proto comment. Normalization by ship max-HP/ammo will be needed for
+cross-player and cross-ship comparisons. Max values are not in the proto
+directly — derive per player per match as the observed maximum, or look
+up from odf.min.json weapon/vehicle entries.
+
+----- Cheap pipeline additions -----
+
+"Time spent low-health"
+  Fraction of alive-ticks where health < 25% of the player's observed
+  match-maximum for that ship. A "lives dangerously" descriptor.
+  Emit as personal.time_low_health_pct (0–1).
+
+"Ammo-out moments"
+  Count of distinct episodes where ammo == 0 (debounced across
+  consecutive ticks). Measures supply discipline / trigger management.
+  Emit as personal.ammo_out_episodes (int).
+
+HP-efficiency
+  Damage dealt divided by HP lost. A rough "damage-for-HP" economy.
+  Distinct from K/D in that it captures partial exchanges.
+  Emit as personal.hp_efficiency (float, null if no damage taken).
+
+----- Medium — genuinely novel skill-adjacent signals -----
+
+Risk/aggression profile
+  Mean health at the moment a player's bullet hits an enemy (join
+  BulletHit shooter to the PlayerState sample nearest that tick). A
+  brawler trades at 30% HP; a careful player only engages near full.
+  Emit as personal.mean_health_at_engagement (float, 0–1 normalized).
+  Pairs with the distance range fingerprint (Section 2) to build a
+  2-axis playstyle descriptor — see Section 3.
+
+Clutch / comeback detection (highlight card candidate)
+  A player who dropped below ~10% HP and then survived (HP recovered
+  past 50%) or got a kill before dying. Real, legible skill moment.
+  "Bullet Sponge" tracks damage absorbed; this is distinct: actual
+  survival after near-death. Gates: need health data AND UnitDestroyed
+  alignment to know the player wasn't actually killed.
+
+Free servicing / repair inference
+  A sharp upward step in HP or ammo between consecutive ticks = a
+  service-pad or repair visit, inferred without relying on the noisy
+  PickupPowerup event stream. Useful cross-check against pickup data;
+  could clean up the "pad visit" counting problem described in
+  DATA_DICTIONARY.md §8.
+
+----- Longer horizon -----
+
+Health overlay in the Replay / Timeline player
+  Per-player HP line running under the playhead. Turns the replay into
+  something you can narrate frame-by-frame ("watch the bar crater at
+  tick 4200"). High wow-factor; moderate effort since the timeline
+  engine already exists in js/timeline-player.js.
+
+"Death anatomy"
+  Reconstruct the last N seconds of HP before each death (burst vs
+  attrition). Feeds a per-match "how people died" meta chart: instant
+  burst deaths vs drawn-out attrition deaths vs snipes.
+
+[RATING] HP-grounded survivability axis
+  The current Survivability radar axis is a proxy (damage-trade ratio
+  + K/D composite). With real HP you can measure damage absorbed before
+  death and HP-efficiency directly — replacing the proxy with a real
+  measurement. This is the ONE health idea worth eventually feeding into
+  VTSR-T, but only after:
+  (a) the descriptive version ships and looks sane, and
+  (b) scripts/validate_elo.py confirms the new axis improves predictive
+      accuracy vs the current proxy.
+  [CORPUS GATE: ~150+ v2 matches before attempting]
+
+
+==============================================================
+2. Distance & Engagement Range
+==============================================================
+
+Source field: BulletHit.distance_to_target (float, world units).
+Available only in v2 sessions. Gate any consumer on
+match.bullet_hit_distance.with_distance > 0.
+
+Framing note: accuracy-as-a-function-of-distance is too confounded to
+be a player STRENGTH signal (weapon choice drives range more than skill),
+and the v2 corpus is too small to weapon-normalize it into a VTSR-T
+axis. Treat distance as a PLAYSTYLE DESCRIPTOR and META-ANALYSIS input,
+not a quality metric. Do NOT add a distance-based VTSR-T axis until
+validate_elo.py shows it improves prediction with a large corpus.
+
+----- Worth doing now -----
+
+Per-weapon engagement-range meta (match and corpus-wide)
+  For each weapon ODF: mean / p50 / p95 hit distance across all BulletHit
+  events. Shows how the community actually deploys each weapon vs what
+  the ODF specs imply. Natural fit for the All Matches → Meta tab or the
+  docs page weapon table.
+  Pipeline: in the bullet_hit loop accumulate per-odf distance lists
+  (or running Welford mean + sorted p95 estimate).
+
+Per-player range fingerprint (descriptive, not scored)
+  Bucket PvP hits into [0–50m, 50–150m, 150–400m, >400m] per player.
+  Render as a small 4-bar sparkline in the Player Leaderboard or profile.
+  Frame as "Brawler / Skirmisher / Sniper" flavor — NOT a quality score.
+  Emit as personal.distance_buckets: {close, mid, long, extreme} (counts).
+
+Long-range kill chip in the kill feed
+  When a kill follows a BulletHit with distance_to_target > 400m,
+  tag the kill-feed entry with long_range_kill: true. Renders as a
+  flavor chip in the feed (e.g. "⟩400m"). No strength claim.
+
+----- Deferred -----
+
+Distance-weighted accuracy as a VTSR-T axis — DEFERRED INDEFINITELY.
+  Weapon choice confound is too strong. Revisit only if weapon-normalized
+  hit-rate proves predictive in validate_elo.py with a large corpus.
+
+"The Sniper" highlight card — DEFERRED.
+  Same underlying issue. Frame as a flavor note (long-range kill chip)
+  rather than an award until the signal is validated.
+
+----- Implementation notes -----
+
+- Normalize by base_to_base_distance for cross-map comparisons
+  (200m is "across the map" on Octavia; barely past spawn on Bunker Trip).
+  base_to_base_distance is available from the positioning block.
+- Filter to PvP-only and shooter_team != victim_team before any analytics.
+- v1 sessions always have distance_to_target == 0.0 (field absent in
+  legacy proto — protobuf default). The >0 gate is sufficient to skip them.
+
+
+==============================================================
+3. Playstyle Profile (synthesis of distance + health)
+==============================================================
+
+Combine the range fingerprint (Section 2) and the risk/aggression metric
+(Section 1) into a 2-axis playstyle quadrant per player:
+
+  Axis 1 (X): engagement range  — brawler (short) ↔ sniper (long)
+  Axis 2 (Y): aggression        — cautious (high HP at engagement) ↔
+                                   reckless (low HP at engagement)
+
+Renders as a small scatterplot on the player profile page (or a
+quadrant-badge: "Cautious Sniper" / "Reckless Brawler" etc.). Purely
+descriptive, highly shareable, and avoids any validity-of-skill claim.
+
+Both inputs (distance bucket mode + mean_health_at_engagement) are
+pipeline-computable in the same loop pass. The rendering is lightweight
+(a single Chart.js scatter point per player on the match leaderboard,
+or a named label on the profile).
+
+
+==============================================================
+4. Faction Analytics
+==============================================================
+
+team1_race / team2_race from the v2 StatHeader are already ground-truthed
+(pipeline uses them as authoritative in detect_team_factions() since the
+v2 rollout). The missing layer is analytics ON TOP of the faction data.
+
+NOTE: faction balance is a META property, not a player-skill property.
+Do NOT bake faction into VTSR-T — it would penalize players for their
+assigned faction, not their play.
+
+----- Trivial / useful -----
+
+Faction matchup matrix (All Matches → Meta tab)
+  ISDF vs Scion vs Hadean (and mirror matches) win rates + determined-
+  match counts. All the data exists: match.winner + match.team_factions.
+  Gate behind the existing "≥5 determined matches" em-dash floor per cell.
+  Add faction balance over time (by match date) and by map as variants.
+
+----- Medium -----
+
+Per-player faction performance (player profile page)
+  Does a player have a higher K/D or VTSR-T delta as Scion vs ISDF?
+  The loyalist highlights (isdf_loyalist etc.) already track *frequency*;
+  this is faction-conditioned *performance*. A "specialist vs generalist"
+  descriptor + per-faction stat split block on the profile would be
+  genuinely novel.
+
+Faction heatmap splits on the positioning tab
+  Overlay per-faction movement traces with different colors (already have
+  faction code per player). Useful on maps with lopsided base geometry.
+
+----- Deferred -----
+
+Faction-aware VTSR-T axis — DEFERRED. Same reasoning as above.
+  [CORPUS GATE: reassess when ≥150 v2 matches AND validate_elo.py shows
+  faction-conditioning improves win-rate prediction]
+
+
+==============================================================
+5. Positioning & Movement (Phase 4)
+==============================================================
+
+Bundle 5A + 5B together — both are positioning visualizations. Users
+notice the layout shift once instead of twice.
+
+----- 5A. Heatmap calibration tool (build first) -----
+
+Every map in data/map-registry.json has image_calibration: null, so the
+dashboard falls back to terrain_bounds for everyone → most maps are
+subtly misaligned. Hand-tuning JSON via file-edit-reload is too slow.
+
+Tasks:
+  1. Build calibrate.html (or ?calibrate=1 mode on dashboard).
+     - Loads any one match's positioning data + map image.
+     - Two draggable corner handles (or 4 sliders) for
+       min.x / max.x / min.z / max.z of image_bounds_world.
+     - Live re-render of the heatmap on every drag.
+     - "Copy JSON" button outputs the calibration block ready
+       to paste into data/maps/<key>.json.
+  2. build_map_registry.py already preserves the per-map JSON
+     calibration across reruns (lines 265-296). No pipeline change needed.
+
+----- 5B. Audit + tune real maps -----
+
+Tasks:
+  1. Build tools/heatmap-audit.html: a single-page grid view showing
+     every map at thumbnail size with terrain bounds outlined and a
+     synthetic heatmap overlaid. One-glance answer to "which maps need
+     fixing?".
+  2. Hand-calibrate the top N most-played maps using the tool from 5A.
+  3. Look for batch patterns: maps screenshotted with the same conventions
+     may share the same offset.
+
+----- 5C. Document the calibration workflow -----
+
+In DEVELOPER_GUIDE.md "Map Assets and Overlays":
+  - The two-source precedence (image_calibration → terrain_bounds).
+  - Why iondriver images often don't match terrain extents.
+  - Step-by-step using the calibration tool.
+  - Calibration values can be negative (terrain origin is map-center
+    for many maps).
+
+Do NOT:
+  - Auto-derive image bounds from terrain_bounds. They're often genuinely
+    different and any heuristic will be wrong as often as right.
+  - Crop/resize the underlying images. Calibrate the projection, not the asset.
+
+----- 5D. Distance-from-Spawn chart fate -----
+
+Recommendation: demote the chart to a per-player drilldown only.
+It currently occupies col-lg-7 (60% of a row) for three view modes
+plus a smoothing toggle. Lots of real estate for one chart.
+
+Stretch: replace the demoted chart with two sharper cards:
+  - "First leave" timeline: horizontal swimlane, 1 row per player, marks
+    the tick when each player first crossed R_base. The actually
+    interesting story buried in the current chart.
+  - "Time near base" stacked bar: one bar per player, segmented by
+    in-base vs out-of-base seconds.
+
+Implementation pointers:
+  - renderDistanceTimeline() lives at js/positioning-charts.js line 416.
+    Existing modes stay; just call from a per-player modal instead.
+  - Card removed from index.html ~line 583. Replace with new cards or
+    leave the col empty for the heatmap to grow.
+
+
+==============================================================
+6. Small Wins & UI Polish
+==============================================================
+
+Surface career_stats[].total_pickups in the career table
+  Data already exists post-Phase 3. Just add the column.
+
+meta.schema_version consumer
+  meta.schema_version was added in Phase 3 but has no consumer.
+  Add a one-time loader check in js/app.js that warns when
+  schema_version < SUPPORTED_MIN, so legacy pre-Phase-3 JSONs flag
+  themselves rather than silently rendering with empty pickups/snipes.
+
+pickups.has_pickup_data badge
+  Surface in the match-info banner as a small "no pickup data" badge
+  for pre-schema matches, so users know the absence is the data, not the UI.
+
+Deployable destructions panel (mine activity)
+  The data block is emitted in Phase 3 but has no UI consumer.
+  A small "Mines Deployed vs Destroyed" panel on the Combat tab.
+  Pair with bullet_init events filtered by KNOWN_DEPLOYABLE_ODFS to
+  count deployments alongside destructions.
+
+Snipe Feed widget promotion
+  Consider promoting top snipers to a sidebar widget on the Combat tab
+  if matches trend snipe-heavy.
+
+Career: total_powerup_destructions and total_deployable_kills
+  Fall out naturally from existing per-match blocks. Skipped in Phase 3
+  to keep career_stats minimal; add when the data proves interesting.
+
+KNOWN_POWERUP_ODFS / KNOWN_DEPLOYABLE_ODFS maintenance
+  Re-run scripts/audit_pickup_powerup.mjs whenever a new map/mod ships.
+  Look for unfamiliar ODFs with team-zero >= 80%, total >= 5. Apply
+  domain knowledge to classify. Do NOT auto-promote based on team-zero
+  signal alone — see fball2c.odf precedent in DATA_DICTIONARY.md §8.
+
+PlayerState.speed
+  Never read (movement is derived from position deltas instead). Low
+  priority, but "average speed while dealing/taking damage" is a cheap
+  mobility-flavor stat, and it's a free cross-validation of the
+  heatmap activity pipeline if ever needed.
