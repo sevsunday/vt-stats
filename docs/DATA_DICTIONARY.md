@@ -638,12 +638,11 @@ The Positioning tab is gated by `match.has_position_data`. When `false`, every c
 | Distance from Spawn — Focused mode | Same as above | One player drawn full-opacity over faded team bands. Click a leaderboard row to pick. |
 | Distance from Spawn — Smooth (5s) toggle | Same as above | Centered 5-second rolling median applied before band computation, suppresses tick-to-tick noise. |
 | Trail teleport gaps | `positioning.players[name].trail.segments` | Index ranges split at teleport detections; each segment renders as a separate polyline so the trail visibly breaks instead of flying across the map. |
-| All Players Heatmap (combined) | Sum of `positioning.players[*].heatmap_grid_xz` | 2D canvas. Spawn markers drawn at each `team_base[n].centroid`. Faction-tint overlay drawn iff `base_separation / map_diagonal > 0.3`. Compass rose, scale label. |
-| Per-Player Movemint Heatmaps grid | `positioning.players[name].heatmap_grid_xz` | Small-multiples grid. **Shared viewport** (all cards use the same world-space extent fitted to everyone's p95 positions) and **shared p95 intensity scale** (one cell's brightness means the same thing across cards). Compact legend strip explains the visual language. |
+| All Players Heatmap (combined) | Sum of `positioning.players[*].heatmap_grid_xz` | **Grid-native** 2D canvas: the `heatmap_grid_xz` bins are drawn directly to the canvas (no map-image underlay, no world-space viewport). All cards share one **activity crop** (bounding box of every visited + spawn cell, squared) so they fill the container yet stay comparable. One fixed-color spawn marker per team at `team_base[n].centroid` (blue = Team 1, red = Team 2). Hover a cell for total visits + top-3 contributor breakdown. Compass rose, scale label, fullscreen re-renders at elevated DPR. |
+| Per-Player Movemint Heatmaps grid | `positioning.players[name].heatmap_grid_xz` | Grid-native small-multiples grid. **Shared activity crop** + **shared p95 intensity scale** (one cell's brightness means the same thing across cards). Cells + spawn marker use the player's fixed team color; the enemy team's spawn is drawn muted for spatial context. Fixed two-row card headers keep every canvas vertically aligned regardless of name length. Compact legend strip; fullscreen re-renders every card at elevated DPR. |
 | Time by Distance Band ring histogram | `positioning.players[name].trail` + `base_separation` | Stacked horizontal bar per player: Inner Base / Outer Base / Front Line / Deep Push, where band thresholds derive from `base_separation`. |
-| Animated Positioning Timeline | `positioning.players[name].trail.{t, x, y, z, segments}` | Transport controls (play / pause / step / scrub / 0.5x-20x speeds, default 4x). Sub-second interpolation on sparse `trail.t[]`. Pulsing current-position dots colored by faction. Live ticker with per-player "in base / N u out" chips. Respects `prefers-reduced-motion`. |
 
-Filter integration: `renderPositioningTab` narrows `positioning.players` to the filtered leaderboard for the Movemint Leaderboard + small-multiples highlighting, but always passes the full `positioning` block so the combined heatmap backdrop, team centroids, and opposing-team spawn markers still render for spatial context.
+Filter integration: `renderPositioningTab` narrows `positioning.players` to the filtered leaderboard for the Movemint Leaderboard + per-player small-multiples, but always passes the full `positioning` block to the combined heatmap so its team centroids and both teams' spawn markers still render for spatial context.
 
 ### Match Picker Modal
 
@@ -971,7 +970,7 @@ Player movement analytics derived from `UpdateTick` events. Captured positions a
 | `last_seen_sec` | `number` | Last `trail.t[]` value |
 | `metrics` | `object` | Derived metrics (see below) |
 | `trail` | `object` | Downsampled position arrays + segment breaks |
-| `heatmap_grid_xz` | `number[][]` | 32×32 bin counts over `map_bounds`. `[row][col]` where row = x-index (0 = west), col = z-index (0 = south) |
+| `heatmap_grid_xz` | `number[][]` | 64×64 bin counts over `map_bounds`. `[row][col]` where row = x-index (0 = west), col = z-index (0 = south). Grid resolution is `POSITIONING_HEATMAP_GRID_SIZE` in the pipeline; the renderer reads the array length so a bump needs no JS change |
 | `heatmap_polar` | `number[][]` | 16 angular × 8 radial bin counts around personal spawn. Angular bin 0 = due East (+X), increasing counter-clockwise. Radial bins span `0 .. p95_dist` |
 
 ##### Pipeline overview

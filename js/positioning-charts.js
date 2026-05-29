@@ -154,636 +154,271 @@ function _attr(s) {
   return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// --- Distance-from-Spawn Timeline ---
+// --- Top-down heatmap (imperative canvas, grid-native) ---
+// Renders a single player's heatmap OR a combined-all-players heatmap by
+// drawing the pipeline's NxN heatmap_grid_xz bins DIRECTLY to the canvas,
+// edge-to-edge. There is no map-image underlay and no world-space viewport:
+// the grid IS the coordinate system. Every card shares one "activity crop"
+// (the bounding box of every player's visited cells + spawn cells, squared)
+// so cards stay directly comparable while still filling their container.
 //
-// Three view modes handle the "10 overlapping lines" legibility problem:
-//   - 'bands'  (default): per-faction IQR envelope (p25-p75) + median line.
-//                         Collapses 10 series into 2 team stories.
-//   - 'all':   Every player at low opacity; hover-to-highlight one at a time
-//              (triggered by canvas hover OR Movement Leaderboard row hover).
-//   - 'focus': One player's line in full color on top of a faint band backdrop
-//              for team context. Focus name is set by clicking a Movement
-//              Leaderboard row.
-//
-// The optional Smooth toggle applies a centered 5-second rolling median to
-// every per-player series BEFORE the quantile step so bands also smooth.
+// Grid index convention (mirror of scripts/process_stats.py _build_heatmap_grid):
+//   grid[rx][cz]  where  rx = x-index (0 = West,  +X = East)
+//                        cz = z-index (0 = South, +Z = North)
+// Screen mapping inverts cz so North is up.
 
-const DISTANCE_SMOOTH_WINDOW = 5;
-// Max per-player null-run length (in seconds) that gets linearly interpolated
-// across before the quantile step. Typical respawn/eject pauses fall inside
-// this window; anything longer is treated as a genuine absence and left as a
-// gap so the chart still reflects team-wipe events honestly.
-const DISTANCE_GAP_BRIDGE = 5;
+const HEATMAP_GRID_FALLBACK_SIZE = 64;
 
-// Resample all players onto a uniform 1-second grid [0..duration].
-// Linear interpolation within each trail.segments span; ticks outside any
-// segment stay `null` so quantile computation and line drawing both skip them
-// (no teleport flyovers, no polluted IQR).
-function _buildDistanceSeries(positioning, factionMap) {
-  const names = Object.keys(positioning.players);
-  let duration = 0;
-  for (const name of names) {
-    const tr = positioning.players[name].trail;
-    if (tr && tr.t && tr.t.length) {
-      const last = tr.t[tr.t.length - 1];
-      if (last > duration) duration = last;
-    }
-  }
-  duration = Math.max(1, Math.ceil(duration));
-  const tGrid = new Array(duration + 1);
-  for (let i = 0; i <= duration; i++) tGrid[i] = i;
-
-  const perPlayer = {};
-  for (const name of names) {
-    const p = positioning.players[name];
-    const tr = p.trail;
-    const sx = p.spawn.x;
-    const sz = p.spawn.z;
-    const d = new Array(tGrid.length).fill(null);
-    if (!tr || !tr.t || !tr.t.length) {
-      perPlayer[name] = { d, faction: (factionMap && factionMap[name]) || 0 };
-      continue;
-    }
-    const segs = tr.segments && tr.segments.length ? tr.segments : [[0, tr.t.length - 1]];
-    // Walk each segment and interpolate into the integer-second grid. The
-    // sample rate is already ~1 Hz (see positioning.sample_rate_hz=1), so
-    // this is usually a direct index map with occasional gaps to interpolate.
-    for (const [a, b] of segs) {
-      for (let i = a; i < b; i++) {
-        const t0 = tr.t[i];
-        const t1 = tr.t[i + 1];
-        const dx0 = tr.x[i] - sx, dz0 = tr.z[i] - sz;
-        const dx1 = tr.x[i + 1] - sx, dz1 = tr.z[i + 1] - sz;
-        const d0 = Math.sqrt(dx0 * dx0 + dz0 * dz0);
-        const d1 = Math.sqrt(dx1 * dx1 + dz1 * dz1);
-        const gStart = Math.max(0, Math.ceil(t0));
-        const gEnd = Math.min(duration, Math.floor(t1));
-        for (let g = gStart; g <= gEnd; g++) {
-          const span = t1 - t0;
-          const frac = span > 0 ? (g - t0) / span : 0;
-          d[g] = d0 + (d1 - d0) * frac;
-        }
-      }
-      // Ensure endpoint is captured even when segment is a single sample
-      const endT = tr.t[b];
-      if (endT >= 0 && endT <= duration) {
-        const g = Math.round(endT);
-        if (d[g] == null) {
-          const dxE = tr.x[b] - sx, dzE = tr.z[b] - sz;
-          d[g] = Math.sqrt(dxE * dxE + dzE * dzE);
-        }
-      }
-    }
-    perPlayer[name] = { d, faction: (factionMap && factionMap[name]) || 0 };
-  }
-  return { perPlayer, tGrid, duration };
+// Fixed, high-contrast team colors for spawn markers + per-player cells.
+// Exposed as CSS custom properties so themes can retune; literal hex
+// fallbacks keep them readable when the vars are missing.
+function _teamColor(team) {
+  if (team === 1) return getCSSVar('--vt-heatmap-team1') || '#3b82f6';
+  if (team === 2) return getCSSVar('--vt-heatmap-team2') || '#ef4444';
+  return getCSSVar('--kb-text-muted') || '#888';
 }
 
-// Linearly interpolates across contiguous null runs of length <= maxGap, so
-// normal respawn flicker doesn't shatter the team IQR band. Longer null runs
-// (true team-wipes, late joiners, early leavers) are preserved as gaps so the
-// line honestly breaks there. Only bridges runs that have finite samples on
-// both sides; leading/trailing null runs are left untouched.
-function _bridgeShortGaps(arr, maxGap) {
-  const out = arr.slice();
-  let i = 0;
-  while (i < out.length) {
-    if (out[i] != null) { i++; continue; }
-    let j = i;
-    while (j < out.length && out[j] == null) j++;
-    const runLen = j - i;
-    const hasLeft = i > 0 && out[i - 1] != null && Number.isFinite(out[i - 1]);
-    const hasRight = j < out.length && out[j] != null && Number.isFinite(out[j]);
-    if (runLen <= maxGap && hasLeft && hasRight) {
-      const left = out[i - 1];
-      const right = out[j];
-      for (let k = 0; k < runLen; k++) {
-        const frac = (k + 1) / (runLen + 1);
-        out[i + k] = left + (right - left) * frac;
-      }
-    }
-    i = j;
+// Assign a player to team 1 or 2 by nearest team-base centroid (mirrors the
+// retired _factionColorForPlayer heuristic). Returns null when neither base
+// exists.
+function _playerTeam(name, positioning) {
+  const p = positioning.players[name];
+  if (!p) return null;
+  const t1 = positioning.team_base['1'];
+  const t2 = positioning.team_base['2'];
+  if (t1 && t2) {
+    const d1 = Math.hypot(p.spawn.x - t1.centroid.x, p.spawn.z - t1.centroid.z);
+    const d2 = Math.hypot(p.spawn.x - t2.centroid.x, p.spawn.z - t2.centroid.z);
+    return d1 <= d2 ? 1 : 2;
   }
-  return out;
+  if (t1) return 1;
+  if (t2) return 2;
+  return null;
 }
 
-// Centered rolling median. Ignores nulls inside the window; leaves positions
-// whose window has no finite samples as null.
-function _smoothMedian(arr, window) {
-  const w = window || DISTANCE_SMOOTH_WINDOW;
-  const half = Math.floor(w / 2);
-  const out = new Array(arr.length);
-  const buf = [];
-  for (let i = 0; i < arr.length; i++) {
-    buf.length = 0;
-    const lo = Math.max(0, i - half);
-    const hi = Math.min(arr.length - 1, i + half);
-    for (let j = lo; j <= hi; j++) {
-      const v = arr[j];
-      if (v != null && Number.isFinite(v)) buf.push(v);
-    }
-    if (!buf.length) { out[i] = null; continue; }
-    buf.sort((a, b) => a - b);
-    const mid = buf.length >> 1;
-    out[i] = buf.length % 2 ? buf[mid] : (buf[mid - 1] + buf[mid]) / 2;
+// Grid resolution read from the data (self-describing) so a pipeline bump
+// doesn't require a JS change.
+function _gridSize(positioning) {
+  for (const p of Object.values(positioning.players)) {
+    const g = p.heatmap_grid_xz;
+    if (g && g.length) return g.length;
   }
-  return out;
+  return HEATMAP_GRID_FALLBACK_SIZE;
 }
 
-// Compute p25/p50/p75 at each tick across all players in `faction`.
-// Behavior by sample count at that tick:
-//   0 players -> all three null (band hidden, median hidden)
-//   1 player  -> median = that value, p25/p75 null (line continues through
-//                the single surviving player; band correctly hides since IQR
-//                of a single point is meaningless, and Chart.js with
-//                `fill: '-1'` skips rendering the band when either edge
-//                is null)
-//   2+ players -> full IQR + median
-function _quantileBands(perPlayer, tGrid, faction) {
-  const names = Object.keys(perPlayer).filter(n => perPlayer[n].faction === faction);
-  const p25 = new Array(tGrid.length);
-  const p50 = new Array(tGrid.length);
-  const p75 = new Array(tGrid.length);
-  for (let i = 0; i < tGrid.length; i++) {
-    const col = [];
-    for (const n of names) {
-      const v = perPlayer[n].d[i];
-      if (v != null && Number.isFinite(v)) col.push(v);
-    }
-    if (col.length === 0) {
-      p25[i] = p50[i] = p75[i] = null;
-      continue;
-    }
-    if (col.length === 1) {
-      p50[i] = col[0];
-      p25[i] = null;
-      p75[i] = null;
-      continue;
-    }
-    col.sort((a, b) => a - b);
-    const q = (p) => {
-      const idx = (col.length - 1) * p;
-      const lo = Math.floor(idx);
-      const hi = Math.ceil(idx);
-      if (lo === hi) return col[lo];
-      return col[lo] + (col[hi] - col[lo]) * (idx - lo);
-    };
-    p25[i] = q(0.25);
-    p50[i] = q(0.50);
-    p75[i] = q(0.75);
-  }
-  return { p25, p50, p75 };
+// World point -> fractional grid coordinate (not floored) so markers sit
+// precisely. gx in [0, size], gz in [0, size].
+function _worldToGridFrac(x, z, mb, size) {
+  const dx = (mb.max.x - mb.min.x) || 1;
+  const dz = (mb.max.z - mb.min.z) || 1;
+  return { gx: (x - mb.min.x) / dx * size, gz: (z - mb.min.z) / dz * size };
 }
 
-function _toXY(tGrid, d) {
-  const out = new Array(tGrid.length);
-  for (let i = 0; i < tGrid.length; i++) {
-    out[i] = { x: tGrid[i], y: d[i] };
-  }
-  return out;
-}
-
-function _bandDatasets(faction, bands, tGrid, color, mode) {
-  // IQR band is rendered as two datasets: upper (p75) fills DOWN to the
-  // previous dataset (the lower/p25 line) via `fill: '-1'`. Median sits on top
-  // as a solid line. In 'focus' mode the band is faded to serve as backdrop.
-  const bandFill = mode === 'focus' ? color + '1a' : color + '33';
-  const lineAlpha = mode === 'focus' ? 'aa' : 'ff';
-  const label = `Team ${faction}`;
-  return [
-    {
-      label: `${label} p25`,
-      data: _toXY(tGrid, bands.p25),
-      borderColor: 'transparent',
-      backgroundColor: bandFill,
-      borderWidth: 0,
-      pointRadius: 0,
-      fill: false,
-      cubicInterpolationMode: 'monotone',
-      spanGaps: false,
-      _bandRole: 'lower',
-      _faction: faction,
-    },
-    {
-      label: `${label} p75`,
-      data: _toXY(tGrid, bands.p75),
-      borderColor: 'transparent',
-      backgroundColor: bandFill,
-      borderWidth: 0,
-      pointRadius: 0,
-      fill: '-1',
-      cubicInterpolationMode: 'monotone',
-      spanGaps: false,
-      _bandRole: 'upper',
-      _faction: faction,
-    },
-    {
-      label: `${label} median (shaded: IQR p25-p75)`,
-      data: _toXY(tGrid, bands.p50),
-      borderColor: color + lineAlpha,
-      backgroundColor: 'transparent',
-      borderWidth: mode === 'focus' ? 1.5 : 2,
-      pointRadius: 0,
-      fill: false,
-      cubicInterpolationMode: 'monotone',
-      spanGaps: false,
-      _bandRole: 'median',
-      _faction: faction,
-    },
-  ];
-}
-
-function _playerDataset(name, perPlayer, tGrid, baseColor, mode) {
-  // In 'all' mode every line is dimmed by default and boosted on hover. In
-  // 'focus' mode only the focused player is drawn via this helper at full
-  // strength. Other modes don't call this.
-  const isAll = mode === 'all';
+// World point -> integer grid index, clamped to [0, size-1].
+function _worldToGridIndex(x, z, mb, size) {
+  const { gx, gz } = _worldToGridFrac(x, z, mb, size);
   return {
-    label: name,
-    data: _toXY(tGrid, perPlayer[name].d),
-    borderColor: baseColor + (isAll ? '55' : 'ff'),
-    backgroundColor: baseColor + '33',
-    borderWidth: isAll ? 1 : 2,
-    pointRadius: 0,
-    cubicInterpolationMode: 'monotone',
-    spanGaps: false,
-    _playerName: name,
-    _baseColor: baseColor,
-    _dimmed: isAll,
+    rx: Math.max(0, Math.min(size - 1, Math.floor(gx))),
+    cz: Math.max(0, Math.min(size - 1, Math.floor(gz))),
   };
 }
 
-function renderDistanceTimeline(canvasId, positioning, allNames, opts) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return null;
-  const container = canvas.parentElement && canvas.parentElement.parentElement;
-  if (!positioning || !positioning.has_position_data || !Object.keys(positioning.players).length) {
-    if (container) container.innerHTML = '<p style="color:var(--kb-text-muted);padding:1rem;">No positioning data.</p>';
-    return null;
-  }
-  applyThemeDefaults();
-  const t = getThemeColors();
-
-  const mode = (opts && opts.mode) || 'bands';
-  const smooth = !!(opts && opts.smooth);
-  const factionMap = (opts && opts.factionMap) || {};
-  const focusName = (opts && opts.focusName) || null;
-
-  // If we previously rendered here, tear down the old chart so we don't leak
-  // into activeCharts. This function is called on every mode/smooth toggle.
-  if (typeof Chart !== 'undefined' && Chart.getChart) {
-    const existing = Chart.getChart(canvas);
-    if (existing) {
-      if (typeof activeCharts !== 'undefined') {
-        const idx = activeCharts.indexOf(existing);
-        if (idx >= 0) activeCharts.splice(idx, 1);
-      }
-      existing.destroy();
-    }
-  }
-
-  const colorMap = buildPlayerColorMap(allNames);
-  const series = _buildDistanceSeries(positioning, factionMap);
-  // Bridge BEFORE smoothing so the rolling median sees a continuous series
-  // across short respawn pauses; otherwise the smoother would either skip
-  // those windows or pull in noise from the boundaries.
-  for (const n of Object.keys(series.perPlayer)) {
-    series.perPlayer[n].d = _bridgeShortGaps(series.perPlayer[n].d, DISTANCE_GAP_BRIDGE);
-  }
-  if (smooth) {
-    for (const n of Object.keys(series.perPlayer)) {
-      series.perPlayer[n].d = _smoothMedian(series.perPlayer[n].d, DISTANCE_SMOOTH_WINDOW);
-    }
-  }
-
-  const factionsPresent = new Set();
-  for (const n of Object.keys(series.perPlayer)) {
-    const f = series.perPlayer[n].faction;
-    if (f === 1 || f === 2) factionsPresent.add(f);
-  }
-  const f1Color = getCSSVar('--kb-primary') || '#6366f1';
-  const f2Color = getCSSVar('--kb-accent') || '#8b5cf6';
-
-  const datasets = [];
-  if (mode === 'bands' || mode === 'focus') {
-    if (factionsPresent.has(1)) {
-      const b = _quantileBands(series.perPlayer, series.tGrid, 1);
-      datasets.push(..._bandDatasets(1, b, series.tGrid, f1Color, mode));
-    }
-    if (factionsPresent.has(2)) {
-      const b = _quantileBands(series.perPlayer, series.tGrid, 2);
-      datasets.push(..._bandDatasets(2, b, series.tGrid, f2Color, mode));
-    }
-  }
-  if (mode === 'all') {
-    for (const name of Object.keys(series.perPlayer)) {
-      datasets.push(_playerDataset(name, series.perPlayer, series.tGrid,
-        colorMap[name] || t.textMuted, 'all'));
-    }
-  } else if (mode === 'focus' && focusName && series.perPlayer[focusName]) {
-    datasets.push(_playerDataset(focusName, series.perPlayer, series.tGrid,
-      colorMap[focusName] || t.textMuted, 'focus'));
-  }
-
-  // Tooltip helpers: bands mode aggregates the three triplet datasets into a
-  // single "Team N median (IQR a-b)" line per team. All/focus modes keep the
-  // per-player "Name: Nu from spawn" format.
-  function bandsTooltipLabel(item) {
-    const ds = item.dataset;
-    if (!ds || !ds._faction || ds._bandRole !== 'median') return null;
-    const i = item.dataIndex;
-    const allDs = item.chart.data.datasets;
-    let lo = null, hi = null;
-    for (const d of allDs) {
-      if (d._faction !== ds._faction) continue;
-      if (d._bandRole === 'lower') lo = d.data[i] && d.data[i].y;
-      if (d._bandRole === 'upper') hi = d.data[i] && d.data[i].y;
-    }
-    const med = Math.round(item.parsed.y).toLocaleString();
-    if (lo != null && hi != null) {
-      return `Team ${ds._faction} median: ${med}m (IQR ${Math.round(lo).toLocaleString()}-${Math.round(hi).toLocaleString()}m)`;
-    }
-    return `Team ${ds._faction} median: ${med}m`;
-  }
-
-  const ctx = canvas.getContext('2d');
-  const chart = new Chart(ctx, {
-    type: 'line',
-    data: { datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      parsing: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        tooltip: {
-          ...glassTooltipConfig,
-          filter: (item) => {
-            const ds = item.dataset || {};
-            // Bands mode: only show the median row per faction (skip p25/p75
-            // synthetic datasets, which are style-only).
-            if (mode === 'bands' || mode === 'focus') {
-              if (ds._bandRole && ds._bandRole !== 'median') return false;
-            }
-            return true;
-          },
-          callbacks: {
-            title: (items) => {
-              const sec = items[0].parsed.x;
-              const m = Math.floor(sec / 60);
-              const s = Math.floor(sec % 60);
-              return `${m}:${String(s).padStart(2, '0')}`;
-            },
-            label: (item) => {
-              const ds = item.dataset;
-              if (ds && ds._bandRole === 'median') {
-                const line = bandsTooltipLabel(item);
-                if (line) return line;
-              }
-              return `${ds.label}: ${Math.round(item.parsed.y).toLocaleString()}m from spawn`;
-            },
-          },
-        },
-        legend: {
-          position: 'bottom',
-          labels: {
-            boxWidth: 12,
-            padding: 8,
-            font: { size: 11 },
-            // Hide the synthetic band boundary datasets; keep medians + players.
-            filter: (legendItem, data) => {
-              const ds = data.datasets[legendItem.datasetIndex];
-              if (ds && ds._bandRole && ds._bandRole !== 'median') return false;
-              return true;
-            },
-          },
-        },
-      },
-      scales: {
-        x: {
-          type: 'linear',
-          title: { display: true, text: 'Match Time (s)' },
-          ticks: {
-            callback: (v) => {
-              const m = Math.floor(v / 60);
-              const s = v % 60;
-              return `${m}:${String(s).padStart(2, '0')}`;
-            },
-          },
-        },
-        y: {
-          title: { display: true, text: 'Distance from Spawn (meters)' },
-          beginAtZero: true,
-        },
-      },
-    },
-  });
-
-  // Stash metadata on the chart instance so cross-component hover handlers
-  // (Movement Leaderboard row hover) can locate it and mutate dataset styles
-  // without a full re-render.
-  chart.$vtDistance = { mode, focusName, smooth };
-
-  // 'all' mode: hover a line on the canvas to bring it to full opacity.
-  // Listener is attached directly to the canvas element; prior listeners are
-  // cleared in the Chart.destroy() teardown above because the canvas element
-  // itself is reused only within this function's lifetime.
-  if (mode === 'all') {
-    _attachAllModeHover(chart);
-  }
-
-  activeCharts.push(chart);
-  return chart;
+// Center an interval [lo,hi] to a target side length within [0,size-1].
+function _fitAxis(lo, hi, side, size) {
+  const center = (lo + hi) / 2;
+  let nlo = Math.round(center - (side - 1) / 2);
+  let nhi = nlo + side - 1;
+  if (nlo < 0) { nhi -= nlo; nlo = 0; }
+  if (nhi > size - 1) { nlo -= (nhi - (size - 1)); nhi = size - 1; }
+  if (nlo < 0) nlo = 0;
+  return [nlo, nhi];
 }
 
-// Hover-to-highlight implementation for 'all' mode. Finds the nearest dataset
-// under the cursor and boosts its borderWidth/opacity while dimming siblings.
-// Resets everything on mouseleave. Uses chart.update('none') to skip the
-// animation frame - hover tracking needs to feel instant.
-function _attachAllModeHover(chart) {
-  const canvas = chart.canvas;
-  function setHighlight(name) {
-    let dirty = false;
-    for (const ds of chart.data.datasets) {
-      if (!ds._playerName) continue;
-      const base = ds._baseColor || '#999';
-      const want = name == null
-        ? { w: 1, c: base + '55' }
-        : (ds._playerName === name ? { w: 2.5, c: base + 'ff' } : { w: 1, c: base + '22' });
-      if (ds.borderWidth !== want.w || ds.borderColor !== want.c) {
-        ds.borderWidth = want.w;
-        ds.borderColor = want.c;
-        dirty = true;
+// Shared activity crop: bounding box (in grid indices) of every visited cell
+// across all players, unioned with every spawn cell, padded by 1 cell, and
+// squared so the canvas isn't distorted. Falls back to the full grid when no
+// player visited any cell.
+function _computeSharedGridCrop(positioning) {
+  const size = _gridSize(positioning);
+  const mb = positioning.map_bounds;
+  let rx0 = Infinity, rx1 = -Infinity, cz0 = Infinity, cz1 = -Infinity;
+  for (const p of Object.values(positioning.players)) {
+    const g = p.heatmap_grid_xz || [];
+    for (let rx = 0; rx < g.length; rx++) {
+      const row = g[rx];
+      for (let cz = 0; cz < row.length; cz++) {
+        if (row[cz] > 0) {
+          if (rx < rx0) rx0 = rx;
+          if (rx > rx1) rx1 = rx;
+          if (cz < cz0) cz0 = cz;
+          if (cz > cz1) cz1 = cz;
+        }
       }
     }
-    if (dirty) chart.update('none');
+    if (mb && p.spawn) {
+      const { rx, cz } = _worldToGridIndex(p.spawn.x, p.spawn.z, mb, size);
+      if (rx < rx0) rx0 = rx;
+      if (rx > rx1) rx1 = rx;
+      if (cz < cz0) cz0 = cz;
+      if (cz > cz1) cz1 = cz;
+    }
   }
-  function onMove(ev) {
-    const pts = chart.getElementsAtEventForMode(ev, 'nearest', { intersect: false }, false);
-    if (!pts.length) { setHighlight(null); return; }
-    const ds = chart.data.datasets[pts[0].datasetIndex];
-    setHighlight(ds && ds._playerName ? ds._playerName : null);
+  if (!isFinite(rx0)) {
+    return { rx0: 0, rx1: size - 1, cz0: 0, cz1: size - 1, size };
   }
-  function onLeave() { setHighlight(null); }
-  canvas.addEventListener('mousemove', onMove);
-  canvas.addEventListener('mouseleave', onLeave);
-  // Expose for programmatic highlighting from Movement Leaderboard row hover.
-  chart.$vtDistance.setHighlight = setHighlight;
+  rx0 = Math.max(0, rx0 - 1); rx1 = Math.min(size - 1, rx1 + 1);
+  cz0 = Math.max(0, cz0 - 1); cz1 = Math.min(size - 1, cz1 + 1);
+  const cols = rx1 - rx0 + 1;
+  const rows = cz1 - cz0 + 1;
+  const side = Math.min(Math.max(cols, rows), size);
+  [rx0, rx1] = _fitAxis(rx0, rx1, side, size);
+  [cz0, cz1] = _fitAxis(cz0, cz1, side, size);
+  return { rx0, rx1, cz0, cz1, size };
 }
 
-// Public helper: called by Movement Leaderboard row hover handlers in app.js
-// so the distance chart reacts without a re-render.
-function distanceTimelineHighlight(name) {
-  const canvas = document.getElementById('distance-timeline-chart');
-  if (!canvas) return;
-  const chart = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(canvas) : null;
-  if (!chart || !chart.$vtDistance) return;
-  if (typeof chart.$vtDistance.setHighlight === 'function') {
-    chart.$vtDistance.setHighlight(name);
+// Fractional grid coord -> screen pixel within the crop. North (high cz) at top.
+function _gridScreenX(gx, crop, w) {
+  const cols = crop.rx1 - crop.rx0 + 1;
+  return ((gx - crop.rx0) / cols) * w;
+}
+function _gridScreenY(gz, crop, h) {
+  const rows = crop.cz1 - crop.cz0 + 1;
+  return ((crop.cz1 + 1 - gz) / rows) * h;
+}
+
+// Neutral backdrop + bin-aligned grid lines (every 8 absolute grid cells)
+// so the grid structure stays readable even when a player only lit a few
+// cells. No map image, no faction-tint halving (geographic context is gone
+// without a minimap, so the tint would be meaningless noise).
+function _drawHeatmapBackdropNative(ctx, crop, w, h, t) {
+  ctx.fillStyle = getCSSVar('--kb-bg-subtle') || '#1a1a24';
+  ctx.fillRect(0, 0, w, h);
+  const cols = crop.rx1 - crop.rx0 + 1;
+  const rows = crop.cz1 - crop.cz0 + 1;
+  const cellW = w / cols;
+  const cellH = h / rows;
+  ctx.strokeStyle = t.border || 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  for (let rx = crop.rx0; rx <= crop.rx1 + 1; rx++) {
+    if (rx % 8 !== 0) continue;
+    const x = Math.round((rx - crop.rx0) * cellW) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let cz = crop.cz0; cz <= crop.cz1 + 1; cz++) {
+    if (cz % 8 !== 0) continue;
+    const y = Math.round((crop.cz1 + 1 - cz) * cellH) + 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
   }
 }
 
-// --- Top-down heatmap (imperative canvas) ---
-// Renders a single player's heatmap OR a combined-all-players heatmap.
-// Accepts an options object; handles backdrop, spawn markers, base radius
-// circle, compass rose, and faction-tint halves (gated).
-
-function _computeHeatmapViewport(positioning, focusName) {
-  // Fit to union of all spawns + p95-ish of positions to avoid empty edges.
-  const players = focusName ? [positioning.players[focusName]] : Object.values(positioning.players);
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const p of players) {
-    if (!p) continue;
-    minX = Math.min(minX, p.spawn.x);
-    maxX = Math.max(maxX, p.spawn.x);
-    minZ = Math.min(minZ, p.spawn.z);
-    maxZ = Math.max(maxZ, p.spawn.z);
-    // Include p95 positions: since we don't ship p95 x/z directly, use max_dist
-    // from spawn as a conservative radius.
-    const r = p.metrics.p95_dist || p.metrics.max_dist;
-    minX = Math.min(minX, p.spawn.x - r);
-    maxX = Math.max(maxX, p.spawn.x + r);
-    minZ = Math.min(minZ, p.spawn.z - r);
-    maxZ = Math.max(maxZ, p.spawn.z + r);
+// Draw the cropped grid region edge-to-edge. sqrt intensity, 1px gutters
+// between cells (when cells are big enough) for a crisp pixel-grid look.
+function _drawHeatmapCellsNative(ctx, grid, crop, w, h, color, sharedMaxV) {
+  if (!grid || !grid.length) return;
+  let maxV = sharedMaxV || 0;
+  if (!maxV) {
+    for (let rx = crop.rx0; rx <= crop.rx1; rx++) {
+      const row = grid[rx];
+      if (!row) continue;
+      for (let cz = crop.cz0; cz <= crop.cz1; cz++) if (row[cz] > maxV) maxV = row[cz];
+    }
   }
-  if (!isFinite(minX)) {
-    const mb = positioning.map_bounds || { min: { x: -500, z: -500 }, max: { x: 500, z: 500 } };
-    minX = mb.min.x; maxX = mb.max.x; minZ = mb.min.z; maxZ = mb.max.z;
+  if (maxV <= 0) return;
+  const cols = crop.rx1 - crop.rx0 + 1;
+  const rows = crop.cz1 - crop.cz0 + 1;
+  const cellW = w / cols;
+  const cellH = h / rows;
+  const gutter = Math.min(cellW, cellH) >= 6 ? 1 : 0;
+  for (let rx = crop.rx0; rx <= crop.rx1; rx++) {
+    const row = grid[rx];
+    if (!row) continue;
+    for (let cz = crop.cz0; cz <= crop.cz1; cz++) {
+      const v = row[cz];
+      if (!v) continue;
+      const intensity = Math.sqrt(Math.min(v / maxV, 1.0));
+      const ix = rx - crop.rx0;
+      const rowFromTop = crop.cz1 - cz; // 0 = northmost (top)
+      const x0 = Math.round(ix * cellW);
+      const x1 = Math.round((ix + 1) * cellW);
+      const y0 = Math.round(rowFromTop * cellH);
+      const y1 = Math.round((rowFromTop + 1) * cellH);
+      ctx.fillStyle = color + _hexAlpha(Math.round(intensity * 200 + 40));
+      ctx.fillRect(x0, y0, Math.max(1, x1 - x0 - gutter), Math.max(1, y1 - y0 - gutter));
+    }
   }
-  // Add 5% padding
-  const padX = (maxX - minX) * 0.05;
-  const padZ = (maxZ - minZ) * 0.05;
-  minX -= padX; maxX += padX; minZ -= padZ; maxZ += padZ;
-  // Enforce square viewport so north-up orientation isn't distorted
-  const w = maxX - minX, h = maxZ - minZ;
-  if (w > h) {
-    const d = (w - h) / 2;
-    minZ -= d; maxZ += d;
-  } else {
-    const d = (h - w) / 2;
-    minX -= d; maxX += d;
-  }
-  return { minX, maxX, minZ, maxZ };
 }
 
-// Shared viewport across every player in the positioning block. Used by
-// small-multiple cards so aggressive players' trails visibly cover more of
-// the card than campers' trails (visual matches the activity_score direction).
-function _computeSharedViewport(positioning) {
-  return _computeHeatmapViewport(positioning);
-}
-
-// Draw the top-down map image (from data/maps/<mapFile>.png) as a tinted
-// background layer. Called between the solid-color fill and the heatmap
-// cells / trails so data still reads clearly on top. Projection uses
-// imageBounds, which either comes from the registry's image_calibration
-// override or falls back to match.terrain_bounds via getMapMeta() in
-// js/app.js. When either `img` or `imageBounds` is missing, this is a
-// no-op and the caller's existing backdrop renders unchanged.
-//
-// Image coordinate contract:
-//   - Image's top-left pixel represents world point (imageBounds.min.x,
-//     imageBounds.max.z) — north-west corner (image top = north, per
-//     positioning-charts convention).
-//   - Image's bottom-right pixel represents (imageBounds.max.x,
-//     imageBounds.min.z) — south-east corner.
-// We project those two corners through the current viewport (vp) and
-// drawImage stretches the bitmap between them. When vp matches imageBounds
-// exactly (default case), the image fills the canvas; when the viewport
-// is tighter (zoomed in), portions of the image fall off-canvas naturally.
-//
-// `lumaBand` is the pipeline-classified brightness label ('normal' /
-// 'dim' / 'dark') from getMapMeta(). When 'dim' or 'dark', a literal
-// CSS-filter string is set on the context before drawImage so the
-// underlay matches the dashboard's <img> surfaces. We use literal
-// strings (not the --vt-map-img-lift-* custom properties) because
-// canvas `ctx.filter` does NOT resolve `var(...)` -- keep these in
-// lockstep with css/vtstats-theme.css when retuning.
-function _drawMapImageLayer(ctx, img, imageBounds, vp, w, h, lumaBand) {
-  if (!img || !imageBounds || !img.complete || !img.naturalWidth) return;
-  const dx0 = _worldToScreenX(imageBounds.min.x, vp, w);
-  const dy0 = _worldToScreenY(imageBounds.max.z, vp, h); // north edge -> top
-  const dx1 = _worldToScreenX(imageBounds.max.x, vp, w);
-  const dy1 = _worldToScreenY(imageBounds.min.z, vp, h); // south edge -> bottom
-  const dw = dx1 - dx0;
-  const dh = dy1 - dy0;
-  if (dw <= 0 || dh <= 0) return;
+// A spawn marker: colored core + contrast ring + white inner stroke so it
+// reads on both hot and cold cells. `opts.alpha` mutes enemy markers.
+function _drawSpawnDot(ctx, sx, sy, color, radius, opts) {
+  opts = opts || {};
+  const alpha = opts.alpha != null ? opts.alpha : 1;
   ctx.save();
-  ctx.globalAlpha = 0.45;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  if (lumaBand === 'dark')      ctx.filter = 'brightness(1.30) contrast(1.06) saturate(1.05)';
-  else if (lumaBand === 'dim')  ctx.filter = 'brightness(1.15) contrast(1.04)';
-  ctx.drawImage(img, dx0, dy0, dw, dh);
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.arc(sx, sy, radius + 1.5, 0, Math.PI * 2);
+  ctx.fillStyle = opts.ringColor || 'rgba(0,0,0,0.55)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = opts.strokeColor || 'rgba(255,255,255,0.85)';
+  ctx.beginPath();
+  ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 
-function _drawHeatmapBackdrop(ctx, vp, positioning, t, w, h) {
-  // Solid card background via CSS variable (approx)
-  ctx.fillStyle = getCSSVar('--kb-bg-subtle') || '#1a1a24';
-  ctx.fillRect(0, 0, w, h);
-
-  // Faction-tint halves — only when bases are well-separated
-  const bs = positioning.base_separation || 0;
-  const md = positioning.map_diagonal || 1;
-  const tint = bs / md > 0.3 && positioning.team_base['1'] && positioning.team_base['2'];
-  if (tint) {
-    const c1 = positioning.team_base['1'].centroid;
-    const c2 = positioning.team_base['2'].centroid;
-    const wx1 = _worldToScreenX(c1.x, vp, w);
-    const wz1 = _worldToScreenY(c1.z, vp, h);
-    const wx2 = _worldToScreenX(c2.x, vp, w);
-    const wz2 = _worldToScreenY(c2.z, vp, h);
-    const mx = (wx1 + wx2) / 2;
-    const my = (wz1 + wz2) / 2;
-    const dx = wx2 - wx1;
-    const dy = wz2 - wz1;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    const nx = dx / len;
-    const ny = dy / len;
-    // Dividing line is perpendicular to centroid-centroid vector through midpoint.
-    // Shade team-1 side and team-2 side with primary/accent tints.
-    const grd = ctx.createLinearGradient(
-      mx - nx * w, my - ny * h,
-      mx + nx * w, my + ny * h
-    );
-    grd.addColorStop(0.0, (getCSSVar('--kb-primary') || '#6366f1') + '14');
-    grd.addColorStop(0.5, 'transparent');
-    grd.addColorStop(1.0, (getCSSVar('--kb-accent') || '#8b5cf6') + '14');
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, 0, w, h);
+// Combined heatmap: exactly one marker per team at its base centroid, in the
+// fixed high-contrast team colors (blue = Team 1, red = Team 2).
+function _drawTeamSpawnMarkers(ctx, positioning, crop, w, h) {
+  const mb = positioning.map_bounds;
+  if (!mb) return;
+  for (const n of [1, 2]) {
+    const tb = positioning.team_base[String(n)];
+    if (!tb || !tb.centroid) continue;
+    const { gx, gz } = _worldToGridFrac(tb.centroid.x, tb.centroid.z, mb, crop.size);
+    _drawSpawnDot(ctx, _gridScreenX(gx, crop, w), _gridScreenY(gz, crop, h), _teamColor(n), 7);
   }
+}
 
-  // Grid (subtle)
-  ctx.strokeStyle = t.border || 'rgba(255,255,255,0.05)';
-  ctx.lineWidth = 1;
-  const gridN = 8;
-  for (let i = 0; i <= gridN; i++) {
-    const x = (i / gridN) * w;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-    const y = (i / gridN) * h;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+// Per-player heatmap: own spawn prominent in team color (+ dashed base-radius
+// ring), enemy team spawn muted for spatial context.
+function _drawSpawnMarkersPlayer(ctx, positioning, playerName, crop, w, h) {
+  const mb = positioning.map_bounds;
+  if (!mb) return;
+  const pl = positioning.players[playerName];
+  if (!pl) return;
+  const myTeam = _playerTeam(playerName, positioning);
+  const enemyTeam = myTeam === 1 ? 2 : myTeam === 2 ? 1 : null;
+  if (enemyTeam) {
+    const tb = positioning.team_base[String(enemyTeam)];
+    if (tb && tb.centroid) {
+      const { gx, gz } = _worldToGridFrac(tb.centroid.x, tb.centroid.z, mb, crop.size);
+      _drawSpawnDot(ctx, _gridScreenX(gx, crop, w), _gridScreenY(gz, crop, h),
+        _teamColor(enemyTeam), 4, { alpha: 0.4, strokeColor: 'rgba(255,255,255,0.4)' });
+    }
   }
+  const color = _teamColor(myTeam);
+  const { gx, gz } = _worldToGridFrac(pl.spawn.x, pl.spawn.z, mb, crop.size);
+  const sx = _gridScreenX(gx, crop, w);
+  const sy = _gridScreenY(gz, crop, h);
+  const cellWorldW = (mb.max.x - mb.min.x) / crop.size;
+  if (cellWorldW > 0 && pl.personal_base_radius) {
+    const cols = crop.rx1 - crop.rx0 + 1;
+    const rPx = (pl.personal_base_radius / cellWorldW / cols) * w;
+    ctx.save();
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = color + 'cc';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(sx, sy, rPx, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  _drawSpawnDot(ctx, sx, sy, color, 6);
 }
 
 function _drawCompassRose(ctx, w, h, t) {
@@ -807,130 +442,40 @@ function _drawCompassRose(ctx, w, h, t) {
   ctx.restore();
 }
 
-function _worldToScreenX(wx, vp, w) {
-  return ((wx - vp.minX) / (vp.maxX - vp.minX)) * w;
-}
-
-function _worldToScreenY(wz, vp, h) {
-  // Invert so +Z (North) is up on screen
-  return ((vp.maxZ - wz) / (vp.maxZ - vp.minZ)) * h;
-}
-
-function _drawSpawnMarkers(ctx, positioning, vp, w, h, focusName) {
-  for (const [name, p] of Object.entries(positioning.players)) {
-    const isFocus = !focusName || focusName === name;
-    const sx = _worldToScreenX(p.spawn.x, vp, w);
-    const sy = _worldToScreenY(p.spawn.z, vp, h);
-    const fc = _factionColorForPlayer(name, positioning);
-    ctx.fillStyle = isFocus ? fc : (fc + '66');
-    ctx.strokeStyle = isFocus ? fc : 'transparent';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(sx, sy - 4);
-    ctx.lineTo(sx + 4, sy);
-    ctx.lineTo(sx, sy + 4);
-    ctx.lineTo(sx - 4, sy);
-    ctx.closePath();
-    ctx.fill();
-    if (isFocus && focusName) {
-      // Dashed base-radius circle
-      const r = p.personal_base_radius;
-      const rPx = (r / (vp.maxX - vp.minX)) * w;
-      ctx.save();
-      ctx.setLineDash([3, 3]);
-      ctx.strokeStyle = fc + 'cc';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(sx, sy, rPx, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
-}
-
-function _factionColorForPlayer(name, positioning) {
-  // Approximate: look up spawn and compare to team centroids
-  const p = positioning.players[name];
-  if (!p) return getCSSVar('--kb-text-muted') || '#888';
-  const t1 = positioning.team_base['1'];
-  const t2 = positioning.team_base['2'];
-  let team = null;
-  if (t1 && t2) {
-    const d1 = Math.hypot(p.spawn.x - t1.centroid.x, p.spawn.z - t1.centroid.z);
-    const d2 = Math.hypot(p.spawn.x - t2.centroid.x, p.spawn.z - t2.centroid.z);
-    team = d1 < d2 ? 1 : 2;
-  } else if (t1) team = 1;
-  else if (t2) team = 2;
-  return team === 1 ? (getCSSVar('--kb-primary') || '#6366f1')
-       : team === 2 ? (getCSSVar('--kb-accent') || '#8b5cf6')
-       : (getCSSVar('--kb-text-muted') || '#888');
-}
-
-function _drawHeatmapCells(ctx, grid, mapBounds, vp, w, h, color, sharedMaxV) {
-  const rows = grid.length;
-  if (!rows) return;
-  const cols = grid[0].length;
-  let maxV = sharedMaxV || 0;
-  if (!maxV) {
-    for (const row of grid) for (const v of row) if (v > maxV) maxV = v;
-  }
-  if (maxV === 0) return;
-  const cellWorldW = (mapBounds.max.x - mapBounds.min.x) / rows;
-  const cellWorldH = (mapBounds.max.z - mapBounds.min.z) / cols;
-  for (let rx = 0; rx < rows; rx++) {
-    for (let cz = 0; cz < cols; cz++) {
-      const v = grid[rx][cz];
-      if (!v) continue;
-      // Clip to 1.0 so shared-normalizer outliers (cells hotter than p95)
-      // cap at full intensity instead of overflowing.
-      const intensity = Math.sqrt(Math.min(v / maxV, 1.0));
-      const wx1 = mapBounds.min.x + rx * cellWorldW;
-      const wx2 = wx1 + cellWorldW;
-      const wz1 = mapBounds.min.z + cz * cellWorldH;
-      const wz2 = wz1 + cellWorldH;
-      const sx1 = _worldToScreenX(wx1, vp, w);
-      const sx2 = _worldToScreenX(wx2, vp, w);
-      const sy1 = _worldToScreenY(wz2, vp, h); // inverted
-      const sy2 = _worldToScreenY(wz1, vp, h);
-      ctx.fillStyle = color + _hexAlpha(Math.round(intensity * 200 + 20));
-      ctx.fillRect(sx1, sy1, sx2 - sx1, sy2 - sy1);
-    }
-  }
-}
-
 function _hexAlpha(n) {
   const v = Math.max(0, Math.min(255, n));
   return v.toString(16).padStart(2, '0');
 }
 
-function _sizeCanvas(canvas) {
+// `opts` overrides for fullscreen high-resolution re-renders:
+//   { width, height } — explicit logical size (else read from layout)
+//   { dpr }           — device-pixel-ratio multiplier (else window value)
+function _sizeCanvas(canvas, opts) {
+  opts = opts || {};
   const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(200, Math.floor(rect.width));
-  const h = Math.max(200, Math.floor(rect.height || rect.width));
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
+  const dpr = opts.dpr || window.devicePixelRatio || 1;
+  const w = Math.max(120, Math.floor(opts.width || rect.width));
+  const h = Math.max(120, Math.floor(opts.height || rect.height || rect.width || w));
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  if (opts.width) canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { ctx, w, h };
 }
 
-// Resolve { img, imageBounds, lumaBand } for the current match via the
-// VTMapRegistry exposed by js/app.js. Returns null/empty fields when the
-// match has no map registry entry or no bounds — overlay renderers
-// should gracefully skip drawing the image layer in that case.
-// `lumaBand` falls back to 'normal' so callers always get a defined
-// string (= no canvas filter applied).
-function _resolveMapOverlay(match) {
-  if (!match || !window.VTMapRegistry) return { img: null, imageBounds: null, lumaBand: 'normal' };
-  const meta = window.VTMapRegistry.getMapMeta(match);
-  if (!meta || !meta.imagePath || !meta.imageBounds) return { img: null, imageBounds: null, lumaBand: 'normal' };
-  const img = window.VTMapRegistry.getMapImage(meta.key, meta.imagePath);
-  return { img, imageBounds: meta.imageBounds, lumaBand: meta.lumaBand || 'normal' };
+// Shared sizing for fullscreen renders: a combined heatmap fills a fixed
+// square (targetPx); per-player grid cells keep their CSS width but render
+// at an elevated DPR.
+function _fullscreenSizeOpts(opts) {
+  if (!opts || !opts.fullscreen) return undefined;
+  const dpr = opts.dpr || Math.min((window.devicePixelRatio || 1) * 2, 3);
+  return opts.targetPx ? { width: opts.targetPx, height: opts.targetPx, dpr } : { dpr };
 }
 
-function renderCombinedHeatmap(canvasId, positioning, match) {
+function renderCombinedHeatmap(canvasId, positioning, match, opts) {
+  opts = opts || {};
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
   if (!positioning || !positioning.has_position_data) {
@@ -938,97 +483,151 @@ function renderCombinedHeatmap(canvasId, positioning, match) {
     return null;
   }
   canvas.style.display = '';
-  const { ctx, w, h } = _sizeCanvas(canvas);
-  const t = getThemeColors();
-  const vp = _computeHeatmapViewport(positioning);
-  _drawHeatmapBackdrop(ctx, vp, positioning, t, w, h);
-
-  // Draw map image background (if available) between the backdrop and
-  // the heatmap cells so data stays legible.
-  const { img, imageBounds, lumaBand } = _resolveMapOverlay(match);
-  if (img) {
-    if (img.complete && img.naturalWidth) {
-      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h, lumaBand);
-    } else {
-      img.addEventListener('load', () => {
-        // Re-render once the image is ready. Cheap: whole canvas refresh
-        // via the same entry point so all downstream layers repaint in
-        // the correct order. Cross-origin caching means this only fires
-        // once per map per page lifetime.
-        renderCombinedHeatmap(canvasId, positioning, match);
-      }, { once: true });
-    }
+  if (opts.fullscreen && opts.targetPx) {
+    canvas.style.display = 'block';
+    canvas.style.margin = '0 auto';
   }
+  const { ctx, w, h } = _sizeCanvas(canvas, _fullscreenSizeOpts(opts));
+  const t = getThemeColors();
+  const crop = _computeSharedGridCrop(positioning);
+  _drawHeatmapBackdropNative(ctx, crop, w, h, t);
 
-  // Combined heatmap: sum grids across all players
+  // Combined heatmap: sum grids across all players.
   const players = Object.values(positioning.players);
+  let combined = null;
   if (players.length) {
-    const size = players[0].heatmap_grid_xz.length;
-    const combined = [];
-    for (let r = 0; r < size; r++) {
-      combined.push(new Array(size).fill(0));
-    }
+    const size = crop.size;
+    combined = [];
+    for (let r = 0; r < size; r++) combined.push(new Array(size).fill(0));
     for (const p of players) {
-      for (let r = 0; r < size; r++) {
-        for (let c = 0; c < size; c++) {
-          combined[r][c] += p.heatmap_grid_xz[r][c];
-        }
+      const g = p.heatmap_grid_xz || [];
+      for (let r = 0; r < g.length; r++) {
+        const row = g[r];
+        for (let c = 0; c < row.length; c++) combined[r][c] += row[c];
       }
     }
-    _drawHeatmapCells(ctx, combined, positioning.map_bounds, vp, w, h, getCSSVar('--kb-info') || '#22d3ee');
+    _drawHeatmapCellsNative(ctx, combined, crop, w, h, getCSSVar('--kb-info') || '#22d3ee');
   }
-  _drawSpawnMarkers(ctx, positioning, vp, w, h, null);
+  _drawTeamSpawnMarkers(ctx, positioning, crop, w, h);
   _drawCompassRose(ctx, w, h, t);
-  return { destroy() {}, canvas };
+
+  _ensureCombinedLegend(canvas, positioning, crop);
+  _wireCombinedHover(canvas, { positioning, combined, crop });
+  return { destroy() { _unwireCombinedHover(canvas); }, canvas };
 }
 
-// Render one player's heatmap. When sharedVp / sharedMaxV are provided
-// (small-multiples grid), every card uses the same viewport + brightness
-// scale so aggressive players visibly fill more of the card. When omitted
-// (combined heatmap, future fullscreen drill-down), falls back to per-player
-// auto-zoom and per-grid intensity.
-function renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, sharedMaxV, match) {
+// Render one player's heatmap into the shared crop using their team color.
+// sharedCrop / sharedMaxV come from the small-multiples grid so every card is
+// directly comparable. `opts.fullscreen` bumps the render DPR.
+function renderPlayerHeatmap(canvasId, positioning, playerName, sharedCrop, sharedMaxV, match, opts) {
+  opts = opts || {};
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
   if (!positioning || !positioning.has_position_data) return null;
   const pl = positioning.players[playerName];
   if (!pl) return null;
-  const { ctx, w, h } = _sizeCanvas(canvas);
+  const { ctx, w, h } = _sizeCanvas(canvas, _fullscreenSizeOpts(opts));
   const t = getThemeColors();
-  const vp = sharedVp || _computeHeatmapViewport(positioning, playerName);
-  _drawHeatmapBackdrop(ctx, vp, positioning, t, w, h);
-  // Optional map image background (drawn between backdrop and cells so
-  // the per-player intensity stays on top). Non-fatal when absent.
-  const { img, imageBounds, lumaBand } = _resolveMapOverlay(match);
-  if (img) {
-    if (img.complete && img.naturalWidth) {
-      _drawMapImageLayer(ctx, img, imageBounds, vp, w, h, lumaBand);
-    } else {
-      img.addEventListener('load', () => {
-        renderPlayerHeatmap(canvasId, positioning, playerName, sharedVp, sharedMaxV, match);
-      }, { once: true });
-    }
-  }
-  const color = _factionColorForPlayer(playerName, positioning);
-  _drawHeatmapCells(ctx, pl.heatmap_grid_xz, positioning.map_bounds, vp, w, h, color, sharedMaxV);
-  _drawSpawnMarkers(ctx, positioning, vp, w, h, playerName);
+  const crop = sharedCrop || _computeSharedGridCrop(positioning);
+  _drawHeatmapBackdropNative(ctx, crop, w, h, t);
+  const color = _teamColor(_playerTeam(playerName, positioning));
+  _drawHeatmapCellsNative(ctx, pl.heatmap_grid_xz, crop, w, h, color, sharedMaxV);
+  _drawSpawnMarkersPlayer(ctx, positioning, playerName, crop, w, h);
   _drawCompassRose(ctx, w, h, t);
   return { destroy() {}, canvas };
 }
 
-// JS-side mirror of POSITIONING_HEATMAP_GRID_SIZE in scripts/process_stats.py.
-// Drives the "~X m per cell" label in the legend.
-const HEATMAP_GRID_SIZE = 32;
+// Insert/refresh the combined-heatmap legend as the previous sibling of the
+// canvas wrapper (works for both the inline card and the fullscreen modal).
+function _ensureCombinedLegend(canvas, positioning, crop) {
+  const wrap = canvas.closest('.vt-heatmap-wrap') || canvas.parentElement;
+  if (!wrap || !wrap.parentElement) return;
+  const existing = wrap.previousElementSibling;
+  const html = _buildHeatmapLegend(positioning, crop, true);
+  if (existing && existing.classList && existing.classList.contains('vt-heatmap-legend')) {
+    existing.outerHTML = html;
+  } else {
+    wrap.insertAdjacentHTML('beforebegin', html);
+  }
+}
 
-// Build the small-multiples legend. Generated in JS so the per-match scale
-// (derived from positioning.map_bounds) is accurate.
-function _buildHeatmapLegend(positioning) {
+// --- Combined-heatmap hover tooltip (cell visit total + top contributors) ---
+function _heatmapHoverTip() {
+  let tip = document.getElementById('vt-heatmap-hover-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'vt-heatmap-hover-tip';
+    tip.className = 'vt-heatmap-hover-tip';
+    tip.style.display = 'none';
+    document.body.appendChild(tip);
+  }
+  return tip;
+}
+
+function _unwireCombinedHover(canvas) {
+  if (canvas._vtHeatMove) canvas.removeEventListener('mousemove', canvas._vtHeatMove);
+  if (canvas._vtHeatLeave) canvas.removeEventListener('mouseleave', canvas._vtHeatLeave);
+  canvas._vtHeatMove = null;
+  canvas._vtHeatLeave = null;
+}
+
+function _wireCombinedHover(canvas, ctxData) {
+  _unwireCombinedHover(canvas);
+  const { positioning, combined, crop } = ctxData;
+  if (!combined) return;
+  const cols = crop.rx1 - crop.rx0 + 1;
+  const rows = crop.cz1 - crop.cz0 + 1;
+  const tip = _heatmapHoverTip();
+  const onMove = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    if (px < 0 || py < 0 || px > rect.width || py > rect.height) { tip.style.display = 'none'; return; }
+    const ix = Math.floor(px / (rect.width / cols));
+    const rowFromTop = Math.floor(py / (rect.height / rows));
+    const rx = crop.rx0 + ix;
+    const cz = crop.cz1 - rowFromTop;
+    if (rx < 0 || rx >= crop.size || cz < 0 || cz >= crop.size) { tip.style.display = 'none'; return; }
+    const total = (combined[rx] && combined[rx][cz]) || 0;
+    if (!total) { tip.style.display = 'none'; return; }
+    const contrib = [];
+    for (const [name, p] of Object.entries(positioning.players)) {
+      const g = p.heatmap_grid_xz;
+      const v = g && g[rx] ? g[rx][cz] : 0;
+      if (v > 0) contrib.push([name, v]);
+    }
+    contrib.sort((a, b) => b[1] - a[1]);
+    const top = contrib.slice(0, 3).map(([n, v]) =>
+      `<div class="vt-heatmap-hover-row"><span>${_esc(n)}</span><span>${Math.round(v / total * 100)}%</span></div>`).join('');
+    tip.innerHTML = `<div class="vt-heatmap-hover-total">${total} visit${total === 1 ? '' : 's'}</div>${top}`;
+    tip.style.display = 'block';
+    tip.style.left = (e.clientX + 14) + 'px';
+    tip.style.top = (e.clientY + 14) + 'px';
+  };
+  const onLeave = () => { tip.style.display = 'none'; };
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseleave', onLeave);
+  canvas._vtHeatMove = onMove;
+  canvas._vtHeatLeave = onLeave;
+}
+
+// Build the legend strip. `combinedMode` swaps the single generic "spawn"
+// marker for explicit Team 1 / Team 2 swatches. Cell scale is per absolute
+// grid cell (crop only changes how many cells are shown).
+function _buildHeatmapLegend(positioning, crop, combinedMode) {
   const mb = positioning.map_bounds;
-  const cellU = mb ? Math.round((mb.max.x - mb.min.x) / HEATMAP_GRID_SIZE) : null;
+  const size = crop ? crop.size : _gridSize(positioning);
+  const cellU = mb ? Math.round((mb.max.x - mb.min.x) / size) : null;
   const scaleLabel = cellU ? `~${cellU}m per cell` : '';
+  const team1 = _teamColor(1);
+  const team2 = _teamColor(2);
+  const spawnLegend = combinedMode
+    ? `<span class="vt-heatmap-legend-item"><span class="vt-heatmap-legend-dot" style="background:${team1};"></span> Team 1 spawn</span>
+       <span class="vt-heatmap-legend-item"><span class="vt-heatmap-legend-dot" style="background:${team2};"></span> Team 2 spawn</span>`
+    : `<span class="vt-heatmap-legend-item"><span class="vt-heatmap-legend-dot" style="background:${team1};"></span><span class="vt-heatmap-legend-dot" style="background:${team2};"></span> team spawn</span>`;
   return `
     <div class="vt-heatmap-legend">
-      <span class="vt-heatmap-legend-item"><span class="vt-heatmap-legend-diamond"></span> spawn</span>
+      ${spawnLegend}
       <span class="vt-heatmap-legend-item">
         <span class="vt-heatmap-legend-label">fewer visits</span>
         <span class="vt-heatmap-legend-gradient"></span>
@@ -1056,6 +655,45 @@ function _computeSharedHeatmapMax(positioning) {
   return all[idx] || 1;
 }
 
+// Two-row card header so cards line up regardless of name length: row 1 is
+// the team diamond + truncated name, row 2 is the score chip + movement band.
+// A fixed min-height in CSS keeps every header the same height.
+function _buildHeatmapCardTitle(name, p, positioning) {
+  const color = _teamColor(_playerTeam(name, positioning));
+  const scoreColor = _movementScoreColor(p.metrics.activity_score);
+  const el = document.createElement('div');
+  el.className = 'vt-heatmap-grid-title';
+  el.innerHTML = `
+    <div class="vt-heatmap-grid-title-row1">
+      <span class="vt-heatmap-grid-dot" style="color:${color};">\u25c6</span>
+      <span class="vt-heatmap-grid-name fw-semibold" title="${_esc(name)}">${_esc(name)}</span>
+    </div>
+    <div class="vt-heatmap-grid-title-row2">
+      <span class="vt-movement-chip" style="background:${scoreColor}33;color:${scoreColor};">${p.metrics.activity_score}</span>
+      <span class="vt-heatmap-grid-band">${_esc(p.metrics.movement_band)}</span>
+    </div>`;
+  return el;
+}
+
+function _buildHeatmapGridCells(positioning, gridEl, idPrefix) {
+  const names = Object.keys(positioning.players);
+  for (const name of names) {
+    const p = positioning.players[name];
+    const cell = document.createElement('div');
+    cell.className = 'vt-heatmap-grid-cell';
+    cell.dataset.player = name;
+    cell.appendChild(_buildHeatmapCardTitle(name, p, positioning));
+    const wrap = document.createElement('div');
+    wrap.className = 'vt-heatmap-small';
+    const canvas = document.createElement('canvas');
+    canvas.id = idPrefix + name.replace(/[^A-Za-z0-9]/g, '_');
+    wrap.appendChild(canvas);
+    cell.appendChild(wrap);
+    gridEl.appendChild(cell);
+  }
+  return names;
+}
+
 function renderHeatmapGrid(containerId, positioning, match) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -1064,38 +702,59 @@ function renderHeatmapGrid(containerId, positioning, match) {
     container.innerHTML = '<p style="color:var(--kb-text-muted);">No positioning data for this match.</p>';
     return;
   }
-  container.insertAdjacentHTML('beforeend', _buildHeatmapLegend(positioning));
+  const crop = _computeSharedGridCrop(positioning);
+  container.insertAdjacentHTML('beforeend', _buildHeatmapLegend(positioning, crop, false));
+  const grid = document.createElement('div');
+  grid.className = 'vt-heatmap-grid-inner';
+  container.appendChild(grid);
 
-  const names = Object.keys(positioning.players);
-  for (const name of names) {
-    const p = positioning.players[name];
-    const cell = document.createElement('div');
-    cell.className = 'vt-heatmap-grid-cell';
-    const title = document.createElement('div');
-    title.className = 'vt-heatmap-grid-title';
-    const color = _factionColorForPlayer(name, positioning);
-    const scoreColor = _movementScoreColor(p.metrics.activity_score);
-    title.innerHTML = `<span style="color:${color};">\u25c6</span> <span class="fw-semibold">${_esc(name)}</span> <span class="vt-movement-chip" style="background:${scoreColor}33;color:${scoreColor};">${p.metrics.activity_score}</span> <span style="color:var(--kb-text-muted);font-size:0.75rem;">${p.metrics.movement_band}</span>`;
-    const wrap = document.createElement('div');
-    wrap.className = 'vt-heatmap-small';
-    const canvas = document.createElement('canvas');
-    canvas.id = 'heatmap-canvas-' + name.replace(/[^A-Za-z0-9]/g, '_');
-    wrap.appendChild(canvas);
-    cell.appendChild(title);
-    cell.appendChild(wrap);
-    container.appendChild(cell);
-  }
-  // Shared viewport + shared intensity so every card is directly comparable
-  // and visual "amount painted" matches the activity_score direction.
-  const sharedVp = _computeSharedViewport(positioning);
+  const idPrefix = 'heatmap-canvas-';
+  const names = _buildHeatmapGridCells(positioning, grid, idPrefix);
+  // Shared crop + shared intensity so every card is directly comparable and
+  // visual "amount painted" matches the activity_score direction.
   const sharedMaxV = _computeSharedHeatmapMax(positioning);
   // Size + draw after append so getBoundingClientRect is accurate.
   requestAnimationFrame(() => {
     for (const name of names) {
-      const cid = 'heatmap-canvas-' + name.replace(/[^A-Za-z0-9]/g, '_');
-      renderPlayerHeatmap(cid, positioning, name, sharedVp, sharedMaxV, match);
+      renderPlayerHeatmap(idPrefix + name.replace(/[^A-Za-z0-9]/g, '_'),
+        positioning, name, crop, sharedMaxV, match);
     }
   });
+}
+
+// Fullscreen variant: builds its own grid inside the modal body and re-renders
+// every player canvas at an elevated DPR for crisp high-resolution detail.
+function renderHeatmapGridFullscreen(positioning, match, container) {
+  if (!container) return { destroy() {} };
+  container.innerHTML = '';
+  if (!positioning || !positioning.has_position_data) {
+    container.innerHTML = '<p style="color:var(--kb-text-muted);">No positioning data for this match.</p>';
+    return { destroy() {} };
+  }
+  const crop = _computeSharedGridCrop(positioning);
+  container.insertAdjacentHTML('beforeend', _buildHeatmapLegend(positioning, crop, false));
+  const grid = document.createElement('div');
+  grid.className = 'vt-heatmap-grid-inner vt-heatmap-grid-inner--fullscreen';
+  container.appendChild(grid);
+
+  const idPrefix = 'heatmap-fs-canvas-';
+  const names = _buildHeatmapGridCells(positioning, grid, idPrefix);
+  const sharedMaxV = _computeSharedHeatmapMax(positioning);
+  const dpr = Math.min((window.devicePixelRatio || 1) * 2, 3);
+  requestAnimationFrame(() => {
+    for (const name of names) {
+      const cid = idPrefix + name.replace(/[^A-Za-z0-9]/g, '_');
+      const canvas = document.getElementById(cid);
+      if (!canvas) continue;
+      // Pin to a true square sized off the (square, aspect-ratio'd) wrapper so
+      // the canvas can't skew if the grid column reflows.
+      const wrap = canvas.parentElement;
+      const side = Math.max(160, Math.floor((wrap && wrap.clientWidth) || canvas.getBoundingClientRect().width));
+      renderPlayerHeatmap(cid, positioning, name, crop, sharedMaxV, match,
+        { fullscreen: true, targetPx: side, dpr });
+    }
+  });
+  return { destroy() {} };
 }
 
 // --- Ring Histogram: time spent in each distance band, stacked per player ---

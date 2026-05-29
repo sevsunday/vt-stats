@@ -119,20 +119,6 @@ code, pre, .font-monospace {
     min-height: 200px;
 }
 
-/* Distance from Spawn card: stretch the chart container to fill all space the
-   card offers (so it visually matches the neighbour All Players Heatmap card
-   in the same row). Scoped to this one section so other chart cards keep
-   their current 320px fixed-ish behavior. */
-#section-distance-timeline .card-body {
-    display: flex;
-    flex-direction: column;
-}
-
-#section-distance-timeline .card-body > .chart-container {
-    flex: 1 1 auto;
-    min-height: 320px;
-}
-
 .heatmap-cell {
     font-size: 0.75rem;
     min-width: 60px;
@@ -199,23 +185,6 @@ th[data-sort].sort-active {
 .badge-f2 {
     background: var(--kb-accent);
     color: var(--kb-accent-fg);
-}
-
-/* Movement Leaderboard rows double as the focus selector for the Distance
-   from Spawn chart — clicking a row sets focus mode, clicking the same row
-   again clears it. The `vt-row-focused` tint mirrors the card-header toggle
-   so it's obvious which row the chart is tracking. */
-#movement-leaderboard tr.vt-movement-row {
-    cursor: pointer;
-}
-
-#movement-leaderboard tr.vt-row-focused {
-    background: var(--kb-primary-muted);
-    box-shadow: inset 3px 0 0 0 var(--kb-primary);
-}
-
-#movement-leaderboard tr.vt-row-focused > td {
-    background: transparent;
 }
 
 .config-mod {
@@ -295,6 +264,13 @@ th[data-sort].sort-active {
        the two paths in sync when retuning. */
     --vt-map-img-lift-1: brightness(1.15) contrast(1.04);
     --vt-map-img-lift-2: brightness(1.30) contrast(1.06) saturate(1.05);
+
+    /* Fixed high-contrast team colors for Movemint heatmap spawn markers
+       and per-player heatmap cells. Deliberately literal blue/red (not the
+       themeable --kb-primary/--kb-accent) so opposing spawns always read
+       clearly regardless of the active accent theme. */
+    --vt-heatmap-team1: #3b82f6;
+    --vt-heatmap-team2: #ef4444;
 }
 
 /* Light mode — same effects, reduced intensity */
@@ -2999,11 +2975,19 @@ h4:hover .docs-heading-anchor,
     border: 1px solid var(--kb-border-subtle);
 }
 
-/* Per-player small-multiples grid */
-.vt-heatmap-grid {
+/* Per-player small-multiples grid. `.vt-heatmap-grid` is a plain wrapper
+   (it also holds the legend strip); `.vt-heatmap-grid-inner` is the actual
+   responsive grid of cards. */
+.vt-heatmap-grid-inner {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 0.75rem;
+}
+
+/* Fullscreen variant: larger cards for high-resolution detail. */
+.vt-heatmap-grid-inner--fullscreen {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
 }
 
 .vt-heatmap-grid-cell {
@@ -3016,12 +3000,46 @@ h4:hover .docs-heading-anchor,
     border: 1px solid var(--kb-border-subtle);
 }
 
+/* Two-row header: row 1 = diamond + name, row 2 = score chip + band.
+   Fixed min-height keeps every card's canvas at the same vertical offset
+   regardless of name length wrapping. */
 .vt-heatmap-grid-title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.8rem;
+    min-height: 2.5rem;
+}
+
+.vt-heatmap-grid-title-row1 {
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    flex-wrap: wrap;
-    font-size: 0.8rem;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+
+.vt-heatmap-grid-dot {
+    flex: 0 0 auto;
+    line-height: 1;
+}
+
+.vt-heatmap-grid-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.vt-heatmap-grid-title-row2 {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.vt-heatmap-grid-band {
+    color: var(--kb-text-muted);
+    font-size: 0.75rem;
 }
 
 .vt-heatmap-small {
@@ -3035,6 +3053,34 @@ h4:hover .docs-heading-anchor,
     height: 100%;
     display: block;
     border-radius: 6px;
+}
+
+/* Combined-heatmap hover tooltip (cell visit total + top contributors). */
+.vt-heatmap-hover-tip {
+    position: fixed;
+    z-index: 2000;
+    pointer-events: none;
+    background: var(--kb-bg-elevated, var(--kb-bg-subtle));
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 6px;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.75rem;
+    color: var(--kb-text);
+    box-shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.6);
+    min-width: 120px;
+}
+
+.vt-heatmap-hover-total {
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+    font-family: 'Geist Mono', ui-monospace, monospace;
+}
+
+.vt-heatmap-hover-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: var(--kb-text-muted);
 }
 
 /* Empty-state card */
@@ -3215,7 +3261,6 @@ td.vt-col-split {
    ============================================================================ */
 
 .vt-heatmap-legend {
-    grid-column: 1 / -1;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -3239,6 +3284,15 @@ td.vt-col-split {
     background: var(--kb-info);
     transform: rotate(45deg);
     display: inline-block;
+}
+
+/* Team spawn swatch in the heatmap legend. Inline color set per item. */
+.vt-heatmap-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
 }
 
 .vt-heatmap-legend-gradient {

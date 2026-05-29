@@ -2127,7 +2127,6 @@
   function renderMatchData(data) {
     currentFilteredData = data;
     clearReplayTab();
-    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -2264,7 +2263,6 @@
     // Restore default preloader content in case a prior error replaced it
     restorePreloader();
     clearReplayTab();
-    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
     // Reset Rivalry Radar state on match switch so each match starts fresh
@@ -2686,7 +2684,6 @@
     $loading.classList.remove('d-none');
     restorePreloader();
     clearReplayTab();
-    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
     resetTabState();
 
@@ -2914,17 +2911,18 @@
   // keeping positioning.players intact so opposing-team spawns still
   // render for spatial context.
   let positioningSortState = { key: 'activity_score', asc: false };
+  // The filtered positioning view rendered into the per-player heatmap grid.
+  // Stashed so the fullscreen expand re-renders the same player set.
+  let positioningFilteredView = null;
 
   function renderPositioningTab(data) {
     const positioning = currentData && currentData.positioning;
     const emptyEl = document.getElementById('section-positioning-empty');
     const sectionIds = [
       'section-movement-leaderboard',
-      'section-distance-timeline',
       'section-combined-heatmap',
       'section-heatmap-grid',
       'section-ring-histogram',
-      'section-positioning-player',
     ];
 
     const hasData = positioning && positioning.has_position_data;
@@ -2945,27 +2943,14 @@
         Object.entries(positioning.players).filter(([n]) => filteredNames.has(n))
       ),
     };
+    positioningFilteredView = filteredView;
 
     renderMovementLeaderboard('movement-leaderboard', filteredView, data.leaderboard, positioningSortState);
     wireMovementLeaderboardSort(data);
     ensureTooltips(document.getElementById('movement-leaderboard'));
-    renderDistanceChart(data, filteredView);
-    wireDistanceTimelineControls(data, filteredView);
-    wireMovementLeaderboardFocus(data, filteredView);
-    ensureTooltips(document.getElementById('section-distance-timeline'));
     renderCombinedHeatmap('combined-heatmap-canvas', positioning, data.match);
     renderHeatmapGrid('heatmap-grid-content', filteredView, data.match);
     renderRingHistogram('ring-histogram-chart', filteredView);
-
-    // Stage 3 player mount-point is already in the DOM; the player will
-    // self-init here once its module is shipped.
-    if (window.VTPositionPlayer) {
-      window.VTPositionPlayer.init(
-        document.getElementById('positioning-player-content'),
-        filteredView,
-        currentData.match
-      );
-    }
   }
 
   function wireMovementLeaderboardSort(data) {
@@ -2985,151 +2970,9 @@
         if (filteredView) {
           renderMovementLeaderboard('movement-leaderboard', filteredView, data.leaderboard, positioningSortState);
           wireMovementLeaderboardSort(data);
-          // Re-bind click/hover handlers since the sort re-rendered the <tbody>.
-          // applyFocusedRowClass() is called inside wireMovementLeaderboardFocus.
-          wireMovementLeaderboardFocus(data, filteredView);
         }
       };
     });
-  }
-
-  // ------------------------------------------------------------------
-  // Distance-from-Spawn timeline: per-session view preferences.
-  //
-  // `mode` is one of 'bands' (default) | 'all' | 'focus', remembered across
-  // matches in localStorage so a user who prefers the raw view keeps it.
-  // `smooth` is a 5s centered rolling median toggle, off by default so the
-  // chart still reflects the raw samples unless explicitly requested.
-  // `focusName` is only meaningful in 'focus' mode; set by clicking a row
-  // in the Movement Leaderboard. Not persisted because it's match-specific.
-  // ------------------------------------------------------------------
-  const DISTANCE_PREFS_KEY = {
-    mode: 'vtstats.distanceTimeline.mode',
-    smooth: 'vtstats.distanceTimeline.smooth',
-  };
-  let distanceMode = _readDistanceMode();
-  let distanceSmooth = _readDistanceSmooth();
-  let distanceFocusName = null;
-
-  function _readDistanceMode() {
-    try {
-      const v = localStorage.getItem(DISTANCE_PREFS_KEY.mode);
-      return (v === 'bands' || v === 'all' || v === 'focus') ? v : 'bands';
-    } catch (_) { return 'bands'; }
-  }
-  function _writeDistanceMode(v) {
-    try { localStorage.setItem(DISTANCE_PREFS_KEY.mode, v); } catch (_) { /* ignore */ }
-  }
-  function _readDistanceSmooth() {
-    try { return localStorage.getItem(DISTANCE_PREFS_KEY.smooth) === '1'; }
-    catch (_) { return false; }
-  }
-  function _writeDistanceSmooth(v) {
-    try { localStorage.setItem(DISTANCE_PREFS_KEY.smooth, v ? '1' : '0'); }
-    catch (_) { /* ignore */ }
-  }
-
-  function _factionMapFor(data) {
-    const map = {};
-    for (const p of data.leaderboard) map[p.name] = p.faction;
-    return map;
-  }
-
-  function renderDistanceChart(data, filteredView) {
-    // If the stored mode is 'focus' but no player is selected yet (or the
-    // selected player is filtered out), fall back to 'bands' so we never show
-    // an empty chart on first render.
-    const effectiveMode = (distanceMode === 'focus' && (!distanceFocusName
-      || !filteredView.players[distanceFocusName])) ? 'bands' : distanceMode;
-    renderDistanceTimeline(
-      'distance-timeline-chart',
-      filteredView,
-      data.leaderboard.map(p => p.name),
-      {
-        mode: effectiveMode,
-        focusName: distanceFocusName,
-        smooth: distanceSmooth,
-        factionMap: _factionMapFor(data),
-      }
-    );
-  }
-
-  function wireDistanceTimelineControls(data, filteredView) {
-    const group = document.getElementById('distance-mode-toggle');
-    if (group) {
-      group.querySelectorAll('[data-distance-mode]').forEach(btn => {
-        const m = btn.dataset.distanceMode;
-        btn.classList.toggle('active', m === distanceMode);
-        btn.onclick = () => {
-          distanceMode = m;
-          _writeDistanceMode(m);
-          group.querySelectorAll('[data-distance-mode]').forEach(b => {
-            b.classList.toggle('active', b.dataset.distanceMode === m);
-          });
-          renderDistanceChart(data, filteredView);
-        };
-      });
-    }
-    const smoothEl = document.getElementById('distance-smooth-toggle');
-    if (smoothEl) {
-      smoothEl.checked = distanceSmooth;
-      smoothEl.onchange = () => {
-        distanceSmooth = !!smoothEl.checked;
-        _writeDistanceSmooth(distanceSmooth);
-        renderDistanceChart(data, filteredView);
-      };
-    }
-  }
-
-  function applyFocusedRowClass() {
-    const rows = document.querySelectorAll('#movement-leaderboard tr.vt-movement-row');
-    rows.forEach(r => {
-      r.classList.toggle('vt-row-focused',
-        distanceMode === 'focus' && r.dataset.name === distanceFocusName);
-    });
-  }
-
-  function wireMovementLeaderboardFocus(data, filteredView) {
-    const rows = document.querySelectorAll('#movement-leaderboard tr.vt-movement-row');
-    rows.forEach(row => {
-      const name = row.dataset.name;
-      row.onclick = (ev) => {
-        // Let sortable header clicks through; rows don't contain <th> but a
-        // click inside the row shouldn't also trigger button/link handlers.
-        if (ev.target && ev.target.closest && ev.target.closest('a, button')) return;
-        // Toggle off if clicking the already-focused row while in focus mode.
-        if (distanceMode === 'focus' && distanceFocusName === name) {
-          distanceFocusName = null;
-          distanceMode = 'bands';
-          _writeDistanceMode('bands');
-        } else {
-          distanceFocusName = name;
-          distanceMode = 'focus';
-          _writeDistanceMode('focus');
-        }
-        const group = document.getElementById('distance-mode-toggle');
-        if (group) {
-          group.querySelectorAll('[data-distance-mode]').forEach(b => {
-            b.classList.toggle('active', b.dataset.distanceMode === distanceMode);
-          });
-        }
-        applyFocusedRowClass();
-        renderDistanceChart(data, filteredView);
-      };
-      row.onmouseenter = () => {
-        // Programmatic highlight only applies to 'all' mode. Other modes are
-        // visually distinct enough that hover nudging would be noise.
-        if (distanceMode === 'all' && typeof distanceTimelineHighlight === 'function') {
-          distanceTimelineHighlight(name);
-        }
-      };
-      row.onmouseleave = () => {
-        if (distanceMode === 'all' && typeof distanceTimelineHighlight === 'function') {
-          distanceTimelineHighlight(null);
-        }
-      };
-    });
-    applyFocusedRowClass();
   }
 
   // --- Banner ---
@@ -3860,8 +3703,8 @@
   }
 
   // Merge sources for map metadata into a single object used by the hero
-  // banner and the overlay renderers (positioning-charts, positioning-player,
-  // match-picker thumbnails). Precedence for imageBounds (the projection
+  // banner and the overlay renderers (positioning-charts, match-picker
+  // thumbnails). Precedence for imageBounds (the projection
   // basis shared by the image background and all data points rendered on
   // top of it):
   //   1. data/map-registry.json -> image_calibration.image_bounds_world
@@ -3943,7 +3786,7 @@
   }
 
   // Expose the meta helper + image cache to other renderer modules that live
-  // outside this IIFE (positioning-charts, positioning-player). They read
+  // outside this IIFE (positioning-charts). They read
   // through window.VTMapRegistry rather than re-implementing the precedence
   // rules. No-op for consumers that don't need it.
   window.VTMapRegistry = {
@@ -7416,6 +7259,14 @@
     chartRenderers[sectionId] = renderFn;
   }
 
+  // DOM renderers fill the whole modal body themselves (multi-canvas grids,
+  // etc.) rather than driving a single chart canvas. They receive modalBody
+  // and must return a handle with a destroy() method (cleaned up on close).
+  const domRenderers = {};
+  function registerDomRenderer(sectionId, renderFn) {
+    domRenderers[sectionId] = renderFn;
+  }
+
   function expandSection(sectionId) {
     const card = document.getElementById(sectionId);
     if (!card) return;
@@ -7424,7 +7275,17 @@
     modalTitle.textContent = title ? title.textContent : '';
     modalBody.innerHTML = '';
 
-    if (chartRenderers[sectionId]) {
+    if (domRenderers[sectionId]) {
+      // Defer to shown.bs.modal so the modal's open animation + scrollbar
+      // layout are final before the DOM renderer measures cell sizes (a bare
+      // rAF measures mid-animation and skews the static heatmap canvases).
+      const fn = domRenderers[sectionId];
+      modalEl.addEventListener('shown.bs.modal', function onShown() {
+        modalEl.removeEventListener('shown.bs.modal', onShown);
+        modalChart = fn(modalBody);
+      });
+      bsModal.show();
+    } else if (chartRenderers[sectionId]) {
       const wrap = document.createElement('div');
       wrap.style.cssText = 'position:relative;width:100%;height:calc(100vh - 120px);';
       const canvas = document.createElement('canvas');
@@ -7595,6 +7456,25 @@
       if (typeof renderPlayerRadar !== 'function') return null;
       return renderPlayerRadar(canvasId, data, { mode: 'team' });
     });
+    // Movemint heatmaps re-render at high resolution in fullscreen rather than
+    // cloning the (canvas-stripped) card body.
+    registerChartRenderer('section-combined-heatmap', (canvasId) => {
+      if (typeof renderCombinedHeatmap !== 'function') return null;
+      const positioning = currentData && currentData.positioning;
+      if (!positioning) return null;
+      const targetPx = Math.max(240, Math.min(window.innerWidth - 64, window.innerHeight - 160));
+      return renderCombinedHeatmap(canvasId, positioning, currentData.match, {
+        fullscreen: true,
+        targetPx,
+        dpr: Math.min((window.devicePixelRatio || 1) * 2, 3),
+      });
+    });
+    registerDomRenderer('section-heatmap-grid', (body) => {
+      if (typeof renderHeatmapGridFullscreen !== 'function') return { destroy() {} };
+      const view = positioningFilteredView || (currentData && currentData.positioning);
+      if (!view) return { destroy() {} };
+      return renderHeatmapGridFullscreen(view, currentData.match, body);
+    });
     // The Replay tab used to register a chart-fullscreen renderer here for
     // the legacy Chart.js damage timeline. The 3D viewer iframe owns its
     // own fullscreen affordance (Fullscreen API on the iframe element via
@@ -7668,7 +7548,6 @@
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     clearReplayTab();
-    if (window.VTPositionPlayer) window.VTPositionPlayer.destroy();
     destroyAllCharts();
 
     const panel = document.createElement('div');

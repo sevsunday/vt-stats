@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 19
+PIPELINE_VERSION = 20
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -74,7 +74,7 @@ POSITIONING_PERSONAL_RADIUS_FALLBACK = 150.0
 POSITIONING_RETURN_HYSTERESIS_OUT = 1.2  # out when dist > R_base * this
 POSITIONING_RETURN_HYSTERESIS_IN = 0.8  # in when dist < R_base * this
 POSITIONING_RETURN_MIN_OUT_SEC = 5  # must be sustained outside this many seconds before a return counts
-POSITIONING_HEATMAP_GRID_SIZE = 32
+POSITIONING_HEATMAP_GRID_SIZE = 64
 POSITIONING_POLAR_ANGULAR_BINS = 16
 POSITIONING_POLAR_RADIAL_BINS = 8
 
@@ -1792,7 +1792,7 @@ def _compute_return_count(dists, segments, personal_base_radius, t_arr,
 
 
 def _build_heatmap_grid(trail, map_min_x, map_max_x, map_min_z, map_max_z):
-    """32x32 bin counts over map_bounds. [row][col] where row=x-index, col=z-index."""
+    """64x64 bin counts over map_bounds. [row][col] where row=x-index, col=z-index."""
     size = POSITIONING_HEATMAP_GRID_SIZE
     grid = [[0] * size for _ in range(size)]
     if map_max_x <= map_min_x or map_max_z <= map_min_z:
