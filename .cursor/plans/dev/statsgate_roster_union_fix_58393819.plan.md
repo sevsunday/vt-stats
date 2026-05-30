@@ -9,7 +9,7 @@ todos:
     content: "Refactor first_tick(): remove the inline slot loop (lines 341-351) and player_count increments; after *stat_session.mutable_header() = header; call scan_players()."
     status: pending
   - id: record_update
-    content: "In record_update(): call scan_players() after the recording-start gate; add `if (!h) continue;` guard before using the handle in the per-slot position loop."
+    content: "In record_update(): call scan_players() after the recording-start gate; in the per-slot loop, move `Handle h = GetPlayerHandle(teamnum);` above `add_players()`, add `if (!h) continue;`, delete the stale 'guaranteed to be a player' comment, and keep the `[teamnum, nick]` binding unchanged."
     status: pending
   - id: verify
     content: Verify diff is only src/stat_client.cpp and src/stat_client.h; run the AI-remnant grep; confirm fork CI compiles at protobuf 6.33.4; runtime-decode a fresh recording with scripts/tojson.py to confirm union roster + all players per tick.
@@ -57,7 +57,10 @@ Declared in `stat_client.h` under `// Helper functions`, near `first_tick`/`last
 Currently `first_tick()` builds a local `StatHeader header`, runs the slot loop (lines 341-351), then assigns `*stat_session.mutable_header() = header;` (line 406). Change: remove the inline slot loop and the `player_count` increments; after the existing `*stat_session.mutable_header() = header;`, call `scan_players();`. Static fields (map, start_time, author, tick_rate, config_mod, terrain, races, shutdown) are untouched.
 
 ### 3. `record_update()` keeps the union live and guards empty slots
-At the top, after the recording-start gate (after line 164), call `scan_players();`. In the per-slot loop (lines 169-191) add a null-handle guard before using the handle:
+At the top, after the recording-start gate (after line 164), call `scan_players();`. Then make three precise edits to the existing per-slot loop (lines 169-191):
+- Keep the structured binding exactly as-is: `for (auto& [teamnum, nick] : ...)`. The value is unused in the body (the loop reads `exu2::GetSteam64(teamnum)` live), so it is NOT renamed -- no cosmetic churn on an untouched line.
+- Move `Handle h = GetPlayerHandle(teamnum);` from its current position (line 173, *after* `add_players()`) to the top of the loop body, *before* `auto* player = tick->add_players();`, and add `if (!h) continue;`. The reorder is required so an absent slot does not emit an empty `PlayerState`.
+- Delete the now-inaccurate trailing comment `// teamnum should be guaranteed to be a player at this point` on that line; the `!h` guard makes it false.
 
 ```cpp
 	scan_players(); // keep roster in sync: late joiners + rejoins
@@ -65,7 +68,7 @@ At the top, after the recording-start gate (after line 164), call `scan_players(
 	auto* tick = stat_session.add_event_stream()->mutable_update_tick();
 	long cur_turn = GetLockstepTurn();
 	tick->set_tick(cur_turn);
-	for (auto& [teamnum, s64] : stat_session.header().teamnum_to_s64())
+	for (auto& [teamnum, nick] : stat_session.header().teamnum_to_s64())
 	{
 		Handle h = GetPlayerHandle(teamnum);
 		if (!h)
@@ -83,6 +86,8 @@ The `if (!h) continue;` is also a real robustness fix: with the roster now growi
 - `player_count` derived from `s64_to_nick_size()`: required, else it inflates on every rescan.
 - `s64 == 0` guard: decoded Bowl shows `GetSteam64(teamnum)` transiently returns 0 during transitions/teardown; without the guard, repeated scanning would insert a phantom player and over-count.
 - `if (!h) continue;`: prevents `GetPosition(null)` now that the loop iterates a growing roster.
+- Delete the stale `// teamnum should be guaranteed to be a player at this point` comment: the guard makes it untrue, and comments must stay truthful.
+- Keep the `[teamnum, nick]` binding unchanged: renaming an unused binding is an unjustified diff.
 
 ## Edge cases handled
 - 1 player at tick 0, 8 by tick 3 -> union grows to 8, `player_count=8`, valid (the exact target case).
