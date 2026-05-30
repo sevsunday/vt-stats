@@ -9,10 +9,10 @@ todos:
     content: "Refactor first_tick(): remove the inline slot loop (lines 341-351) and player_count increments; after *stat_session.mutable_header() = header; call scan_players()."
     status: pending
   - id: record_update
-    content: "In record_update(): call scan_players() after the recording-start gate; in the per-slot loop, move `Handle h = GetPlayerHandle(teamnum);` above `add_players()`, add `if (!h) continue;`, delete the stale 'guaranteed to be a player' comment, and keep the `[teamnum, nick]` binding unchanged."
+    content: "In record_update(): call `if (recording) scan_players();` after the recording-start gate (guarded so it never runs in the freestanding not-recording fall-through path); in the per-slot loop, move `Handle h = GetPlayerHandle(teamnum);` above `add_players()`, add `if (!h) continue;`, delete the stale 'guaranteed to be a player' comment, and keep the `[teamnum, nick]` binding unchanged."
     status: pending
   - id: verify
-    content: Verify diff is only src/stat_client.cpp and src/stat_client.h; run the AI-remnant grep; confirm fork CI compiles at protobuf 6.33.4; runtime-decode a fresh recording with scripts/tojson.py to confirm union roster + all players per tick.
+    content: "Verify diff is only src/stat_client.cpp and src/stat_client.h; run the AI-remnant grep; confirm fork CI compiles at protobuf 6.33.4 (the C++ cannot be compiled in the agent environment, so fork CI is the first compile); runtime-decode a fresh recording with scripts/tojson.py to confirm union roster + all players per tick; and decode one pre-change recording to confirm backward-compatible parsing."
     status: pending
 isProject: false
 ---
@@ -51,19 +51,20 @@ void stat_client::scan_players()
 	header->set_player_count(header->s64_to_nick_size());
 }
 ```
-Declared in `stat_client.h` under `// Helper functions`, near `first_tick`/`last_tick`.
+Declared in `stat_client.h` as a private member `void scan_players();` under `// Helper functions`, near `first_tick`/`last_tick`.
 
 ### 2. `first_tick()` delegates the initial scan
 Currently `first_tick()` builds a local `StatHeader header`, runs the slot loop (lines 341-351), then assigns `*stat_session.mutable_header() = header;` (line 406). Change: remove the inline slot loop and the `player_count` increments; after the existing `*stat_session.mutable_header() = header;`, call `scan_players();`. Static fields (map, start_time, author, tick_rate, config_mod, terrain, races, shutdown) are untouched.
 
 ### 3. `record_update()` keeps the union live and guards empty slots
-At the top, after the recording-start gate (after line 164), call `scan_players();`. Then make three precise edits to the existing per-slot loop (lines 169-191):
+At the top, after the recording-start gate (after line 164), call the rescan guarded by the recording flag: `if (recording) scan_players();`. The guard is required: for a freestanding client that is not yet running, the gate's `break` falls through to this code with `recording == false`, so an unguarded call would scan and mutate a header that `first_tick()` has not initialized. With the guard it runs every tick once recording has started (including the first recording tick, right after `first_tick()` sets the flag -- an intentional, idempotent double-scan) and is a no-op while idle. Then make three precise edits to the existing per-slot loop (lines 169-191):
 - Keep the structured binding exactly as-is: `for (auto& [teamnum, nick] : ...)`. The value is unused in the body (the loop reads `exu2::GetSteam64(teamnum)` live), so it is NOT renamed -- no cosmetic churn on an untouched line.
 - Move `Handle h = GetPlayerHandle(teamnum);` from its current position (line 173, *after* `add_players()`) to the top of the loop body, *before* `auto* player = tick->add_players();`, and add `if (!h) continue;`. The reorder is required so an absent slot does not emit an empty `PlayerState`.
 - Delete the now-inaccurate trailing comment `// teamnum should be guaranteed to be a player at this point` on that line; the `!h` guard makes it false.
 
 ```cpp
-	scan_players(); // keep roster in sync: late joiners + rejoins
+	if (recording)
+		scan_players(); // keep roster in sync: late joiners + rejoins
 
 	auto* tick = stat_session.add_event_stream()->mutable_update_tick();
 	long cur_turn = GetLockstepTurn();
@@ -84,6 +85,7 @@ The `if (!h) continue;` is also a real robustness fix: with the roster now growi
 - Rescan each update: directly implements the in-code TODO; decoded evidence shows the lobby materializes ~2000 ticks after the tick-0 capture.
 - `emplace` (first-seen wins): preserves initial commanders in slots 1/6; matches existing semantics.
 - `player_count` derived from `s64_to_nick_size()`: required, else it inflates on every rescan.
+- `if (recording)` guard on the `record_update` rescan: the freestanding not-running path `break`s past the gate with `recording == false`; the guard prevents scanning/mutating an uninitialized header in that path.
 - `s64 == 0` guard: decoded Bowl shows `GetSteam64(teamnum)` transiently returns 0 during transitions/teardown; without the guard, repeated scanning would insert a phantom player and over-count.
 - `if (!h) continue;`: prevents `GetPosition(null)` now that the loop iterates a growing roster.
 - Delete the stale `// teamnum should be guaranteed to be a player at this point` comment: the guard makes it untrue, and comments must stay truthful.
@@ -97,11 +99,13 @@ The `if (!h) continue;` is also a real robustness fix: with the roster now growi
 - Transient `GetSteam64==0` -> skipped, no phantom entry.
 
 ## Validation
+- The C++ cannot be compiled in the agent environment (no MSBuild / vcpkg / protobuf 6.33.4 here), so correctness rests on careful review plus the first real compile in fork CI.
 - Compile via the fork's Actions (workflow is `on: push: branches:[main]`, vcpkg -> protobuf 6.33.4). Push and confirm green.
 - Runtime: rebuild `statsgate.dll`, record a multiplayer session (ideally with a late joiner), decode with the repo's `scripts/tojson.py`; confirm `player_count` reaches the true count, `s64_to_nick`/`teamnum_to_s64` contain everyone, and every `UpdateTick` lists all present players.
 - Backward-compat: decode an existing pre-change recording and confirm it still parses.
 
 ## Commit / PR hygiene (no AI traces)
+- Execution boundary: the agent stops after editing `src/stat_client.cpp` / `.h` and running the local `git diff` / `grep` hygiene checks. You perform build, commit, push, and the issue/PR.
 - You make all commits/pushes yourself in the fork.
 - Verify identity: `git -C statsgate-dev config user.name` / `user.email` are yours; no co-author trailers, no emoji, no "generated" text.
 - Diff must contain only `src/stat_client.cpp` and `src/stat_client.h`; verify with `git status` / `git diff`.
