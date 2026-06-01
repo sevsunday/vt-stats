@@ -4,22 +4,21 @@ overview: "Add a gated, low-tier-only VTSR-T adjustment that stops penalizing th
 todos:
   - id: pipeline-atbase
     content: "process_stats.py: is_pilot_odf helper, thread pilot flag through position_samples + normalize, compute at_base_pilot_sec/share in _compute_positioning metrics"
-    status: pending
+    status: completed
   - id: elo-lift
     content: "elo.py: lift constants, lowtier_eligibility param in compute_performance_index (additive thug_kill_rate z-shift), factor compute_elo loop into _rating_pass + two-pass eligibility, emit lowtier_lift metadata"
-    status: pending
+    status: completed
   - id: version-bumps
     content: Bump PIPELINE_VERSION 20->21, match.schema_version 8->9, ELO_SCHEMA_VERSION 7->8; note peak_vtsr re-rate
-    status: pending
+    status: completed
   - id: docs
     content: Update DEVELOPER_GUIDE.md S13, docs/DATA_DICTIONARY.md (positioning metrics + elo_current fields), project-overview.mdc, AGENTS.md
-    status: pending
+    status: completed
   - id: validate
     content: Run pipeline --force + validate_elo; confirm rho ~0.452, structural metrics intact, mid/high <=1.3 ELO; verify rollback constant
-    status: pending
+    status: completed
 isProject: false
 ---
-
 
 # Low-Tier At-Base Lift (VTSR-T)
 

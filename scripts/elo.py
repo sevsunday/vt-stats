@@ -189,6 +189,26 @@ ELO_SOFTMAX_TAU            = 200.0   # Default tau for softmax_max mode.
 K_INACTIVITY_BOOST_RATE = 0.05    # ELO per day inactive.
 K_INACTIVITY_BOOST_MAX  = 20.0    # Hard cap on the inactivity addition.
 
+# v2.8 (current): low-tier at-base lift. Established-low-tier thug rows get
+# their thug_kill_rate recomputed over EFFECTIVE time (match minus the
+# player's "at-base on-foot" ship-denied seconds, from positioning), and the
+# improvement is applied as an additive post-clip z-shift on that row only
+# (mirrors the v2.4 commander axis-shift; lobby mean/std stay canonical so
+# non-eligible players are unaffected). Eligibility is derived from the
+# CANONICAL (no-lift) rating so the gate can never sustain itself:
+#
+#     eligibility = clip((LOWTIER_LIFT_CUTOFF - canonical_vtsr) / TAPER, 0, 1)
+#
+# compute_elo runs two passes (canonical -> eligibility -> lifted). The lift
+# only ever helps (additive, clipped to +1) and only the genuinely low-tier
+# (eligibility 0 for mid/high). Commanders are excluded (they build their own
+# ships). All four constants are tunable without a schema bump.
+LOWTIER_LIFT_ENABLED      = True
+LOWTIER_LIFT_CUTOFF       = 1460.0   # eligibility hits 0 at/above this VTSR
+LOWTIER_LIFT_TAPER        = 60.0     # taper width below the cutoff
+LOWTIER_LIFT_AXIS         = "thug_kill_rate"
+LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-ship minutes
+
 # Bump if elo_current.json / elo_history.json shape changes (the JS
 # reader checks this). v7 = self-damage carve-out (match.schema_version 8):
 # `personal.pvp_dealt` / `pvp_kills` / `pvp_shots_hit` / `pve_dealt` /
@@ -196,7 +216,12 @@ K_INACTIVITY_BOOST_MAX  = 20.0    # Hard cap on the inactivity addition.
 # -- the axis preprocessors just pick up the corrected per-match values.
 # Pre-v7 `peak_vtsr` is no longer comparable since the corpus is re-rated
 # under the cleaner attribution.
-ELO_SCHEMA_VERSION = 7
+# v8 (current) = low-tier at-base lift: additive `lowtier_lift` block on
+# elo_current.json + per-rating `lowtier_lift_factor`. Established-low-tier
+# thug rows get a gated thug_kill_rate lift for at-base (ship-denied) time.
+# Additive fields only (existing JS readers unaffected), but ratings change
+# so **pre-v8 `peak_vtsr` is no longer comparable** (corpus re-rated).
+ELO_SCHEMA_VERSION = 8
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +669,7 @@ def compute_performance_index(
     match_data: dict,
     commander_baseline_snapshot: dict[str, float] | None = None,
     exclude_commanders: bool = False,
+    lowtier_eligibility: dict[str, float] | None = None,
 ) -> tuple[
     list[float],
     list[str],
@@ -768,6 +794,50 @@ def compute_performance_index(
                 }
         z_by_axis[axis] = clipped
 
+    # v2.8: low-tier at-base lift. For eligible (established-low-tier) thug
+    # rows, recompute thug_kill_rate over EFFECTIVE time (match minus the
+    # player's at-base on-foot "ship-denied" seconds) and apply the
+    # improvement as an additive post-clip z-shift on that row only. The
+    # lobby mean/std stay canonical (computed from full-time kill rate), so
+    # every non-eligible player's score is byte-identical. Mirrors the v2.4
+    # commander shift. Commanders excluded (they build their own ships).
+    if (
+        lowtier_eligibility
+        and LOWTIER_LIFT_AXIS in z_by_axis
+        and raw.get(LOWTIER_LIFT_AXIS) is not None
+    ):
+        kr_full = raw[LOWTIER_LIFT_AXIS]
+        n_kr = len(kr_full)
+        mu_kr = sum(kr_full) / n_kr if n_kr else 0.0
+        sd_kr = (
+            math.sqrt(sum((v - mu_kr) ** 2 for v in kr_full) / n_kr)
+            if n_kr else 0.0
+        )
+        if sd_kr > 1e-9:
+            clipped_kr = z_by_axis[LOWTIER_LIFT_AXIS]
+            for i, p in enumerate(lobby):
+                if p.get("is_commander"):
+                    continue
+                factor = lowtier_eligibility.get(_player_key(p), 0.0)
+                if factor <= 0.0:
+                    continue
+                metrics = ((pos_players.get(p.get("name")) or {}).get("metrics") or {})
+                at_base = metrics.get("at_base_pilot_sec", 0.0) or 0.0
+                if at_base <= 0.0:
+                    continue
+                eff_min = minutes - at_base / 60.0
+                if eff_min < LOWTIER_LIFT_MIN_SHIP_MIN:
+                    continue  # small-sample guard: too little ship-time to trust
+                pd = p.get("personal", {}) or {}
+                if "pvp_kills" in pd or "pve_kills" in pd:
+                    blended = (pd.get("pvp_kills", 0) or 0) + ALPHA_PVE * (pd.get("pve_kills", 0) or 0)
+                else:
+                    blended = p.get("kills", 0) or 0
+                kr_eff = blended / eff_min
+                z_eff = _clip((kr_eff - mu_kr) / sd_kr, -2.0, 2.0) / 2.0
+                z_full_i = clipped_kr[i]
+                clipped_kr[i] = max(-1.0, min(1.0, z_full_i + (z_eff - z_full_i) * factor))
+
     # Pro-rata weight redistribution so available weights still sum to 1.
     total_available_weight = sum(THUG_WEIGHTS[a] for a in available)
     weights = {a: THUG_WEIGHTS[a] / total_available_weight for a in available}
@@ -804,14 +874,24 @@ def _player_key(p: dict) -> str:
 # Top-level rating loop
 # ---------------------------------------------------------------------------
 
-def compute_elo(
+def _rating_pass(
     all_match_data: list[dict],
     exclude_commanders: bool = False,
     exclude_locked_priors: bool = False,
     expected_performance_mode: str = "median",
-) -> tuple[dict, dict]:
+    lowtier_eligibility: dict[str, float] | None = None,
+    canonical_before_by_match: dict | None = None,
+) -> tuple[dict, dict, dict, dict]:
     """Walk ``all_match_data`` chronologically, applying the ELO update rule
-    per match, and return the ``(elo_current, elo_history)`` JSON-ready dicts.
+    per match, and return ``(elo_current, elo_history, final_ratings_map)``
+    JSON-ready dicts (the third is ``{player_key: vtsr}`` used by
+    ``compute_elo`` to seed the v2.8 low-tier-lift eligibility).
+
+    When ``lowtier_eligibility`` is provided (the second of ``compute_elo``'s
+    two passes), the per-match composite passes it into
+    ``compute_performance_index`` so eligible low-tier thug rows get the
+    at-base ``thug_kill_rate`` lift. ``None`` (the first pass) yields the
+    canonical, unbuffered ratings.
 
     Match order is ``(match.date, match.id)`` — ELO is path-dependent,
     so the composite key handles same-second imports deterministically.
@@ -911,6 +991,9 @@ def compute_elo(
     commander_match_count:        dict[str, int]   = defaultdict(int)
 
     history_entries: list[dict] = []
+    # v2.8: per-match canonical pre-match ratings (match_id -> {key: r_before}).
+    # Built every pass; consumed by compute_elo's pass 2 to anchor E_i.
+    canonical_before_out: dict[str, dict[str, float]] = {}
 
     excluded_low_player_count = 0
     excluded_short_duration   = 0
@@ -1004,6 +1087,7 @@ def compute_elo(
                 md,
                 commander_baseline_snapshot=commander_baseline_snapshot,
                 exclude_commanders=exclude_commanders,
+                lowtier_eligibility=lowtier_eligibility,
             )
         )
         if not perfs:
@@ -1021,6 +1105,13 @@ def compute_elo(
         # debutants to ELO_ANCHOR.
         ratings_before = [thug_elo[k] for k in keys]
         n_lobby = len(keys)
+        # v2.8: record this match's pre-match ratings keyed by player so the
+        # second (lift) pass can anchor E_i to the canonical snapshot. Only
+        # meaningful on the canonical pass (lowtier_eligibility is None); the
+        # lift pass receives the pass-1 map via canonical_before_by_match.
+        canonical_before_out[match_id] = {
+            keys[j]: ratings_before[j] for j in range(n_lobby)
+        }
 
         match_deltas = []
         for i, key in enumerate(keys):
@@ -1042,7 +1133,28 @@ def compute_elo(
             # ``expected_performance_mode``; "median" preserves the v1
             # canonical behavior, while "hard_max" / "softmax_max" test
             # the Dehpanah team-threat hypothesis on full corpus re-rate.
-            others = [r for j, r in enumerate(ratings_before) if j != i]
+            # v2.8: when re-rating WITH the low-tier lift (pass 2), anchor
+            # the OPPONENT ratings in E_i to the CANONICAL (no-lift)
+            # snapshot, but keep each player's OWN live rating for self.
+            # Two effects, both intended:
+            #   * Non-eligible players are byte-identical to canonical:
+            #     their P_i is already canonical (factor 0), their own live
+            #     rating equals canonical inductively, and canonical
+            #     opponents make E_i -- hence dr and the whole trajectory --
+            #     exactly canonical. The lift can NEVER drift mid/high via
+            #     the opponent-median chain.
+            #   * Eligible players still self-damp: their own live (rising)
+            #     rating feeds E_i, so expectations climb as they do and the
+            #     lift can't run away. Only the opponent baseline is frozen.
+            # Pass 1 (canonical_before_by_match is None) uses live ratings.
+            if canonical_before_by_match is not None:
+                cb = canonical_before_by_match.get(match_id, {})
+                others = [
+                    cb.get(keys[j], ratings_before[j])
+                    for j in range(n_lobby) if j != i
+                ]
+            else:
+                others = [r for j, r in enumerate(ratings_before) if j != i]
             r_opp_ref = opponent_reference_rating(
                 others,
                 mode=expected_performance_mode,
@@ -1136,12 +1248,14 @@ def compute_elo(
 
     # ----- Build elo_current.json shape -----
     ratings = []
+    final_map: dict[str, float] = {}
     for key in thug_elo:
         t_elo = thug_elo[key]
         n     = matches_played[key]
         # Final VTSR-T = blend(R^W, R^T). R^W stubbed at anchor in v1.
         wins_elo = ELO_ANCHOR
         vtsr = ALPHA * wins_elo + (1.0 - ALPHA) * t_elo
+        final_map[key] = round(vtsr, 1)
         # Per-axis career means; each axis's denominator is the number
         # of rated matches where that axis was available for the lobby.
         axis_means: dict[str, float] = {}
@@ -1171,6 +1285,9 @@ def compute_elo(
             "peak_at":          peak_at.get(key, ""),
             "win_history":      list(win_history.get(key, [])),
             "axis_means":       axis_means,
+            # v2.8: low-tier at-base lift eligibility factor applied to this
+            # player's thug rows this pass (0.0 when not eligible / lift off).
+            "lowtier_lift_factor": round((lowtier_eligibility or {}).get(key, 0.0), 4),
         })
 
     # Sort by VTSR desc, then name asc (deterministic).
@@ -1229,6 +1346,21 @@ def compute_elo(
         # tracks how many is_commander rows were dropped on the alt file.
         "rows_excluded_commander_mode":      excluded_commander_rows,
         "weights":            dict(THUG_WEIGHTS),
+        # v2.8: low-tier at-base lift metadata. `enabled` reflects whether this
+        # pass applied the lift (True only on compute_elo's second pass). The
+        # gate keys on the canonical (no-lift) VTSR so it can't self-sustain;
+        # see scripts/elo.py LOWTIER_LIFT_* constants. Per-rating eligibility
+        # is on each ratings[] row as `lowtier_lift_factor`.
+        "lowtier_lift": {
+            "enabled":          lowtier_eligibility is not None,
+            "cutoff":           LOWTIER_LIFT_CUTOFF,
+            "taper":            LOWTIER_LIFT_TAPER,
+            "axis":             LOWTIER_LIFT_AXIS,
+            "min_ship_minutes": LOWTIER_LIFT_MIN_SHIP_MIN,
+            "eligible_count":   sum(
+                1 for v in (lowtier_eligibility or {}).values() if v > 0.0
+            ),
+        },
         # v2.4: commander role-adjustment metadata. Audit-derived priors
         # blend with the running mean as the corpus grows; locked priors
         # always equal the seed value (running_mean tracked for visibility
@@ -1280,4 +1412,52 @@ def compute_elo(
         "history":             history_entries,
     }
 
-    return elo_current, elo_history
+    return elo_current, elo_history, final_map, canonical_before_out
+
+
+def compute_elo(
+    all_match_data: list[dict],
+    exclude_commanders: bool = False,
+    exclude_locked_priors: bool = False,
+    expected_performance_mode: str = "median",
+    enable_lowtier_lift: bool = True,
+) -> tuple[dict, dict]:
+    """Public entrypoint: two-pass VTSR-T with the v2.8 low-tier at-base lift.
+
+    Pass 1 runs the canonical (no-lift) rating to establish each player's
+    unbuffered VTSR. Lift eligibility is derived from that canonical rating
+    (``clip((LOWTIER_LIFT_CUTOFF - vtsr) / LOWTIER_LIFT_TAPER, 0, 1)``) so the
+    gate can never sustain itself (no feedback loop). Pass 2 re-rates with the
+    lift applied to eligible low-tier thug rows only. When the lift is disabled
+    (``LOWTIER_LIFT_ENABLED`` module flag or ``enable_lowtier_lift=False``) or
+    nobody is eligible, the canonical pass-1 result is returned unchanged.
+
+    Returns the same ``(elo_current, elo_history)`` shape as before, so
+    existing callers are unaffected. ``exclude_commanders`` /
+    ``exclude_locked_priors`` / ``expected_performance_mode`` behave exactly as
+    documented on ``_rating_pass``; the lift composes with all of them.
+    """
+    cur1, hist1, final1, canonical_before = _rating_pass(
+        all_match_data,
+        exclude_commanders=exclude_commanders,
+        exclude_locked_priors=exclude_locked_priors,
+        expected_performance_mode=expected_performance_mode,
+        lowtier_eligibility=None,
+    )
+    if not (LOWTIER_LIFT_ENABLED and enable_lowtier_lift):
+        return cur1, hist1
+    eligibility = {
+        key: _clip((LOWTIER_LIFT_CUTOFF - vtsr) / LOWTIER_LIFT_TAPER, 0.0, 1.0)
+        for key, vtsr in final1.items()
+    }
+    if not any(v > 0.0 for v in eligibility.values()):
+        return cur1, hist1
+    cur2, hist2, _, _ = _rating_pass(
+        all_match_data,
+        exclude_commanders=exclude_commanders,
+        exclude_locked_priors=exclude_locked_priors,
+        expected_performance_mode=expected_performance_mode,
+        lowtier_eligibility=eligibility,
+        canonical_before_by_match=canonical_before,
+    )
+    return cur2, hist2

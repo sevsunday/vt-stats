@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 20
+PIPELINE_VERSION = 21
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -264,6 +264,17 @@ PILOT_ODFS = frozenset({
     "esuser_m.odf",   # Hadean pilot
     "fsuser_m.odf",   # Scion pilot
 })
+
+
+def is_pilot_odf(odf):
+    """True when the ODF is a player-on-foot (pilot) unit.
+
+    Substring match on ``user_m`` catches the three faction pilots
+    (isuser_m / esuser_m / fsuser_m) plus any VSR-mod variants. Used by
+    the positioning pass to flag on-foot samples so the VTSR-T low-tier
+    at-base lift can measure ship-denied ("at base on foot") time.
+    """
+    return "user_m" in (odf or "").lower()
 
 
 def faction_from_odf(odf):
@@ -1900,6 +1911,8 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
 
     # Build per-player sparse trails (already downsampled in the main loop).
     # `target` is parallel to t/x/y/z and carries the has_target bool per sample.
+    # `pilot` is parallel too and flags on-foot (pilot ODF) samples; defaults to
+    # False for legacy buffers that predate the 6-tuple (len(s) < 6).
     trails = {}
     for s64, samples in raw_samples_by_s64.items():
         if not samples:
@@ -1909,9 +1922,10 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         y_arr = [s[2] for s in samples]
         z_arr = [s[3] for s in samples]
         target_arr = [bool(s[4]) for s in samples]
+        pilot_arr = [bool(s[5]) if len(s) > 5 else False for s in samples]
         trails[s64] = {
             "t": t_arr, "x": x_arr, "y": y_arr, "z": z_arr,
-            "target": target_arr,
+            "target": target_arr, "pilot": pilot_arr,
             "first_seen": t_arr[0], "last_seen": t_arr[-1],
             "sample_count": len(t_arr),
         }
@@ -2049,6 +2063,22 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         # Time in base + first leave
         ticks_in_base = sum(1 for d in dists if d < personal_base_radius)
         time_in_base_pct = ticks_in_base / sample_count if sample_count else 0.0
+
+        # At-base pilot time (VTSR-T low-tier lift signal): samples where the
+        # player was on foot (pilot ODF) AND within their base radius -- i.e.
+        # positioned to be rebuilt a ship but still shipless ("ship-denied").
+        # On-foot time OUT in the field (walking back from a death) is NOT
+        # counted. Samples are ~1 Hz so the count divided by the sample rate
+        # is seconds. `pilot` parallels `dists` index-for-index.
+        pilot_flags = tr.get("pilot") or [False] * sample_count
+        at_base_pilot_samples = sum(
+            1 for k in range(sample_count)
+            if pilot_flags[k] and dists[k] < personal_base_radius
+        )
+        at_base_pilot_sec = at_base_pilot_samples / POSITIONING_SAMPLE_RATE_HZ
+        at_base_pilot_share = (
+            at_base_pilot_samples / sample_count if sample_count else 0.0
+        )
         time_to_first_leave = None
         for idx, d in enumerate(dists):
             if d > personal_base_radius:
@@ -2111,6 +2141,12 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                 "activity_score": activity_score,
                 "movement_band": band,
                 "target_lock_pct": target_lock_pct,
+                # VTSR-T low-tier at-base lift signal (match.schema_version 9):
+                # seconds on foot within the base radius (ship-denied time) and
+                # that as a share of this player's positioning samples. Read by
+                # scripts/elo.py to compute the gated thug_kill_rate lift.
+                "at_base_pilot_sec": round(at_base_pilot_sec, 1),
+                "at_base_pilot_share": round(at_base_pilot_share, 3),
             },
             "trail": {
                 "t": tr["t"],
@@ -2599,7 +2635,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     slot_faction_votes = defaultdict(Counter)  # slot -> Counter[faction_code]
 
     # Positioning: per-player raw sample buffer (downsampled to ~1 Hz in the loop below).
-    # Keyed by Steam64 -> list of (t_sec, x, y, z, has_target) tuples in tick order.
+    # Keyed by Steam64 -> list of (tick, x, y, z, has_target, is_pilot) tuples in tick order.
+    # is_pilot flags on-foot samples (pilot ODF) so the VTSR-T low-tier at-base lift
+    # can measure ship-denied time (on foot AND within the base radius).
     position_samples = defaultdict(list)
     position_last_kept_tick = {}  # s64 -> last tick we kept a sample for (for 1 Hz downsample)
     tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
@@ -3401,6 +3439,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     float(ps.position.y),
                     float(ps.position.z),
                     has_target,
+                    is_pilot_odf(ps.odf),
                 ))
             i += 1
 
@@ -4085,9 +4124,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         normalized_samples = {}
         for s64, samples in position_samples.items():
             normalized = []
-            for t_raw, x, y, z, has_target in samples:
+            for t_raw, x, y, z, has_target, is_pilot in samples:
                 t_sec = int((t_raw - min_tick) / tick_rate)
-                normalized.append((t_sec, x, y, z, has_target))
+                normalized.append((t_sec, x, y, z, has_target, is_pilot))
             normalized_samples[s64] = normalized
     else:
         normalized_samples = {}
@@ -4248,7 +4287,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # out so the invariant `dealt = pvp_dealt + pve_dealt + self_dealt`
             # holds within ±0.1. Pre-v8 contributions default to 0 on
             # all `self_*` fields so mixed-corpus reads keep passing.
-            "schema_version": 8,
+            # v9 (this version) adds the VTSR-T low-tier at-base lift signal:
+            # each positioning.players[].metrics block gains `at_base_pilot_sec`
+            # and `at_base_pilot_share` (on-foot time within the base radius =
+            # ship-denied time). Read by scripts/elo.py's low-tier lift; absent
+            # on pre-v9 / no-positioning matches (consumers default to 0).
+            "schema_version": 9,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
