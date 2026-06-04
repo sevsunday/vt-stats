@@ -83,12 +83,15 @@
         <i class="bi bi-boxes me-1"></i>ODF
       </a>
 
-      <!-- Players directory link (desktop only). Sits to the right of ODF. -->
+      <!-- Players directory link (desktop only). Sits to the right of ODF.
+           Hidden to de-emphasize player ratings; restore by uncommenting. -->
+      <!--
       <a href="player/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
          title="Browse player career profiles"
          aria-label="Players">
         <i class="bi bi-people me-1"></i>Players
       </a>
+      -->
 
       <!-- Maps directory link (desktop only). Sibling of Players;
            opens the VSR map catalog browser. -->
@@ -149,12 +152,15 @@
             <i class="bi bi-boxes me-1"></i>ODF
           </a>
 
-          <!-- Players directory link (mobile burger only). Sibling of ODF. -->
+          <!-- Players directory link (mobile burger only). Sibling of ODF.
+               Hidden to de-emphasize player ratings; restore by uncommenting. -->
+          <!--
           <a href="player/" class="vt-nav-icon-btn d-md-none"
              title="Browse player career profiles"
              aria-label="Players">
             <i class="bi bi-people me-1"></i>Players
           </a>
+          -->
 
           <!-- Maps directory link (mobile burger only). Sibling of Players. -->
           <a href="map/" class="vt-nav-icon-btn d-md-none"
@@ -430,12 +436,17 @@
                   <th data-sort="accuracy" class="text-end">Accuracy</th>
                   <th data-sort="kills" class="text-end">Kills</th>
                   <th data-sort="deaths" class="text-end">Deaths</th>
+                  <!-- VTSR-T per-match column hidden to de-emphasize ratings.
+                       Restore by uncommenting this <th> AND re-adding the matching
+                       ${eloCell} body cell in js/app.js renderLeaderboard(). -->
+                  <!--
                   <th data-sort="elo_delta" class="text-end">
                     <i class="bi bi-graph-up-arrow me-1"></i>VTSR-T
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>VTSR-T Change</strong><br>Rating gained or lost from this match.<br>Same number that drives the &lsquo;Last&rsquo; column on the All Matches VTSR-T leaderboard.<br>&mdash; if the match was excluded (&lt;6 players or &lt;5 min)."></i>
                   </th>
+                  -->
                   <th data-sort="asset_dealt" class="text-end">
                     Unit Dmg
                     <i class="bi bi-info-circle vt-col-info ms-1"
@@ -872,131 +883,6 @@
       <!-- All Tab: Overview -->
       <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
 
-        <!-- VTSR-T Leaderboard (VT Stats Rating — Thug). Sorted by rating
-             by default. Reads data/processed/elo_current.json
-             (pipeline-emitted, full-corpus). Hides itself entirely when
-             that file is missing (fresh checkout, pipeline never run).
-             See scripts/elo.py for the algorithm. -->
-        <!-- Page-wide elo-mode banner: surfaced when the user toggles
-             into thug-only mode on the VTSR-T card. JS shows/hides
-             this; copy is static so screen-reader users get it via
-             aria-live announcements wired up in app.js. Plain
-             Bootstrap .alert.alert-warning so the chrome reads as a
-             standard advisory state-change. .vt-elo-mode-banner adds
-             nothing visual -- it's a hook for future tuning. -->
-        <div class="alert alert-warning vt-elo-mode-banner d-none mb-3" id="vt-elo-mode-banner" role="status" aria-live="polite">
-          <div class="d-flex align-items-center gap-3">
-            <div class="flex-grow-1">
-              <i class="bi bi-exclamation-triangle-fill me-1"></i>
-              <strong>Thug-only mode active.</strong>
-              Every VTSR-T number on this page is recomputed using each player's thug appearances only. Commander appearances are omitted entirely (campod and partial-presence rows still excluded as usual).
-            </div>
-            <button type="button" class="btn btn-sm btn-outline-warning flex-shrink-0" id="vt-elo-mode-banner-revert">
-              Switch back
-            </button>
-          </div>
-        </div>
-
-        <div class="card mb-4 d-none" id="section-vtsr">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
-            <div class="d-flex align-items-center gap-1 flex-wrap">
-              <!-- Elo-mode segmented toggle. JS wires data-elo-mode buttons
-                   to swap window.__vtElo / __vtEloHistory between the
-                   canonical and thug-only datasets. The pending spinner
-                   fades in during the lazy fetch on first toggle ON. -->
-              <div class="btn-group btn-group-sm" role="group" aria-label="VTSR-T scope" id="vtsr-elo-mode-group">
-                <button type="button" class="btn btn-outline-secondary active" data-elo-mode="default"
-                        title="All rated matches (canonical VTSR-T)">All matches</button>
-                <button type="button" class="btn btn-outline-secondary" data-elo-mode="thugs_only"
-                        title="Recompute VTSR-T using each player's thug appearances only (commander matches excluded)">
-                  Thug-only
-                  <span class="spinner-border spinner-border-sm ms-1 d-none" role="status" aria-hidden="true" id="vtsr-elo-mode-spinner"></span>
-                </button>
-              </div>
-              <button type="button" class="btn btn-sm vt-vtsr-info-btn"
-                      id="vtsr-methodology-btn"
-                      data-bs-toggle="modal" data-bs-target="#vtsr-methodology-modal"
-                      aria-label="How VTSR-T is calculated">
-                <i class="bi bi-info-circle me-1"></i>How It's Calculated
-              </button>
-              <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body table-responsive vt-sticky-thead-card">
-            <table id="vtsr-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
-              <thead>
-                <tr>
-                  <th data-bs-toggle="tooltip" data-bs-placement="top"
-                      title="Rank within the visible filter (1 = highest VTSR-T in scope)."
-                  >#</th>
-                  <th class="vt-vtsr-expand-col"
-                      data-bs-toggle="tooltip" data-bs-placement="top"
-                      title="Click the chevron on any row to expand the per-axis breakdown, raw PvP/PvE counts, and ship + weapon distributions."
-                  ></th>
-                  <th class="text-center"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Tier</strong><br>Absolute thresholds: Tier 1 (&ge;1800), Tier 2 (1650-1799), Tier 3 (1500-1649), Tier 4 (1350-1499), Tier 5 (1000-1349). Players with fewer than 10 rated matches show <strong>Provisional</strong>."
-                  >Tier</th>
-                  <th data-sort="name"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Player</strong><br>Display name (most-recent canonical alias). Hover the cell to see Steam64 + in-game nick when they differ."
-                  >Player</th>
-                  <th data-sort="primary_ship" class="text-center"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Primary Ship</strong><br>Most-played ship ODF across the player's career (raw lowercased ODF stem -- e.g. <code>ivscout_vsr</code>, <code>fvtank_vsr</code>). Hover the cell for share + secondary ship + active hours."
-                  >Primary Ship</th>
-                  <th data-sort="vtsr" class="text-end sort-active"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>VTSR-T</strong><br>Published rating. <code>VTSR-T = &alpha;&middot;Wins ELO + (1-&alpha;)&middot;Thug ELO</code>. With &alpha; = 0 (current ship), VTSR-T equals Thug ELO. Anchored at 1500, soft floor at 1000."
-                  >VTSR-T</th>
-                  <th data-sort="pvp_kd" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>PvP K/D</strong><br>Career kills against human players &divide; deaths from human players. Click the row chevron for the raw PvP K + PvP D counts and the per-axis breakdown."
-                  >PvP K/D</th>
-                  <th data-sort="pve_kd" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>PvE K/D</strong><br>Career kills against AI / structures &divide; deaths from AI / world. Click the row chevron for the raw PvE K + PvE D counts."
-                  >PvE K/D</th>
-                  <th data-sort="accuracy" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Accuracy</strong><br>Career hits &divide; shots fired. Includes both PvP + PvE hits. Hover the cell for raw hits / shots."
-                  >Acc</th>
-                  <th data-sort="pvp_accuracy" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>PvP Accuracy</strong><br>Career PvP hits &divide; shots fired. The per-weapon-normalized variant (used by the <code>thug_accuracy</code> ELO axis) lives in the row's expand panel."
-                  >PvP Acc</th>
-                  <th data-sort="last_delta" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Last delta</strong><br>Most recent rated-match rating change (positive = gain, negative = loss). Click the row chevron for the per-axis breakdown of why the rating moved."
-                  >Last</th>
-                  <th data-sort="peak_vtsr" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Peak</strong><br>Highest published VTSR-T this player has ever held. Hover the cell to see when it was reached."
-                  >Peak</th>
-                  <th data-sort="matches_played" class="text-end"
-                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                      title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 4 minutes."
-                  >Matches</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Career Highlights — sibling of the per-match Match Highlights
-             card. 24 cards: 12 career-rolled (career_*) plus 12 cross-
-             match-only (the_champion, the_veteran, etc.). Built client-side
-             by buildCareerHighlights() in js/all-matches-aggregator.js
-             from career_stats / commander_stats / faction_stats / ELO. -->
-        <div class="card mb-4 vt-highlights-card d-none" id="section-career-highlights">
-          <div class="card-header"><h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Career Highlights</h5></div>
-          <div class="card-body">
-            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="career-highlights-grid"></div>
-          </div>
-        </div>
-
         <div class="card mb-4" id="section-career">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0">Career Leaderboard</h5>
@@ -1015,24 +901,30 @@
                 <tr>
                   <th class="vt-career-col-shared">#</th>
                   <th class="vt-career-col-shared" data-sort="name">Player</th>
+                  <!-- Tier career column hidden to de-emphasize ratings.
+                       Restore by uncommenting this <th> AND re-adding the matching
+                       ${tierCell} body cell in js/app.js renderCareerTable(). -->
+                  <!--
                   <th class="text-center vt-career-col-shared" data-sort="tier">
                     Tier
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>Tier</strong><br>VTSR-T-driven 5-tier classification: Tier 1 (>=1800), Tier 2 (1650-1799), Tier 3 (1500-1649, anchor), Tier 4 (1350-1499), Tier 5 (1000-1349, wide band). Provisional badge for players with fewer than 10 rated matches."></i>
                   </th>
+                  -->
+                  <!-- VTSR-T career column hidden to de-emphasize ratings.
+                       Restore by uncommenting this <th> AND re-adding the matching
+                       ${vtsrCell} body cell in js/app.js renderCareerTable(). -->
+                  <!--
                   <th data-sort="vtsr" class="text-end vt-career-col-shared">
                     VTSR-T
                     <i class="bi bi-info-circle vt-col-info ms-1"
                        data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                        title="<strong>VTSR-T</strong> (VT Stats Rating &mdash; Thug)<br>Fine-tuned combat ELO (eight-axis thug composite), anchored at 1500, soft floor at 1000. With Wins blend &alpha;=0 this equals the headline rating; full methodology in the VTSR-T Leaderboard card above."></i>
                   </th>
-                  <th class="text-center vt-career-col-shared">
-                    Team
-                    <i class="bi bi-info-circle vt-col-info ms-1"
-                       data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                       title="<strong>Team (career)</strong><br>Not applicable as a single value — players may be on either team across different matches."></i>
-                  </th>
+                  -->
+                  <!-- Team column removed from the All Matches Career Leaderboard:
+                       team is a per-match attribute, not a meaningful career-wide value. -->
                   <th data-sort="matches_played" class="text-end vt-career-col-shared">Matches</th>
                   <th data-sort="total_pvp_dealt" class="text-end vt-col-split vt-career-col-total">
                     PvP
@@ -1175,6 +1067,131 @@
             </table>
           </div>
         </div>
+        <!-- Career Highlights — sibling of the per-match Match Highlights
+             card. 24 cards: 12 career-rolled (career_*) plus 12 cross-
+             match-only (the_champion, the_veteran, etc.). Built client-side
+             by buildCareerHighlights() in js/all-matches-aggregator.js
+             from career_stats / commander_stats / faction_stats / ELO. -->
+        <div class="card mb-4 vt-highlights-card d-none" id="section-career-highlights">
+          <div class="card-header"><h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Career Highlights</h5></div>
+          <div class="card-body">
+            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="career-highlights-grid"></div>
+          </div>
+        </div>
+
+        <!-- VTSR-T Leaderboard (VT Stats Rating — Thug). Sorted by rating
+             by default. Reads data/processed/elo_current.json
+             (pipeline-emitted, full-corpus). Hides itself entirely when
+             that file is missing (fresh checkout, pipeline never run).
+             See scripts/elo.py for the algorithm. -->
+        <!-- Page-wide elo-mode banner: surfaced when the user toggles
+             into thug-only mode on the VTSR-T card. JS shows/hides
+             this; copy is static so screen-reader users get it via
+             aria-live announcements wired up in app.js. Plain
+             Bootstrap .alert.alert-warning so the chrome reads as a
+             standard advisory state-change. .vt-elo-mode-banner adds
+             nothing visual -- it's a hook for future tuning. -->
+        <div class="alert alert-warning vt-elo-mode-banner d-none mb-3" id="vt-elo-mode-banner" role="status" aria-live="polite">
+          <div class="d-flex align-items-center gap-3">
+            <div class="flex-grow-1">
+              <i class="bi bi-exclamation-triangle-fill me-1"></i>
+              <strong>Thug-only mode active.</strong>
+              Every VTSR-T number on this page is recomputed using each player's thug appearances only. Commander appearances are omitted entirely (campod and partial-presence rows still excluded as usual).
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-warning flex-shrink-0" id="vt-elo-mode-banner-revert">
+              Switch back
+            </button>
+          </div>
+        </div>
+
+        <div class="card mb-4 d-none" id="section-vtsr">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
+            <div class="d-flex align-items-center gap-1 flex-wrap">
+              <!-- Elo-mode segmented toggle. JS wires data-elo-mode buttons
+                   to swap window.__vtElo / __vtEloHistory between the
+                   canonical and thug-only datasets. The pending spinner
+                   fades in during the lazy fetch on first toggle ON. -->
+              <div class="btn-group btn-group-sm" role="group" aria-label="VTSR-T scope" id="vtsr-elo-mode-group">
+                <button type="button" class="btn btn-outline-secondary active" data-elo-mode="default"
+                        title="All rated matches (canonical VTSR-T)">All matches</button>
+                <button type="button" class="btn btn-outline-secondary" data-elo-mode="thugs_only"
+                        title="Recompute VTSR-T using each player's thug appearances only (commander matches excluded)">
+                  Thug-only
+                  <span class="spinner-border spinner-border-sm ms-1 d-none" role="status" aria-hidden="true" id="vtsr-elo-mode-spinner"></span>
+                </button>
+              </div>
+              <button type="button" class="btn btn-sm vt-vtsr-info-btn"
+                      id="vtsr-methodology-btn"
+                      data-bs-toggle="modal" data-bs-target="#vtsr-methodology-modal"
+                      aria-label="How VTSR-T is calculated">
+                <i class="bi bi-info-circle me-1"></i>How It's Calculated
+              </button>
+              <button class="btn btn-sm" data-expand="section-vtsr" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body table-responsive vt-sticky-thead-card">
+            <table id="vtsr-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
+              <thead>
+                <tr>
+                  <th data-bs-toggle="tooltip" data-bs-placement="top"
+                      title="Rank within the visible filter (1 = highest VTSR-T in scope)."
+                  >#</th>
+                  <th class="vt-vtsr-expand-col"
+                      data-bs-toggle="tooltip" data-bs-placement="top"
+                      title="Click the chevron on any row to expand the per-axis breakdown, raw PvP/PvE counts, and ship + weapon distributions."
+                  ></th>
+                  <th class="text-center"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Tier</strong><br>Absolute thresholds: Tier 1 (&ge;1800), Tier 2 (1650-1799), Tier 3 (1500-1649), Tier 4 (1350-1499), Tier 5 (1000-1349). Players with fewer than 10 rated matches show <strong>Provisional</strong>."
+                  >Tier</th>
+                  <th data-sort="name"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Player</strong><br>Display name (most-recent canonical alias). Hover the cell to see Steam64 + in-game nick when they differ."
+                  >Player</th>
+                  <th data-sort="primary_ship" class="text-center"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Primary Ship</strong><br>Most-played ship ODF across the player's career (raw lowercased ODF stem -- e.g. <code>ivscout_vsr</code>, <code>fvtank_vsr</code>). Hover the cell for share + secondary ship + active hours."
+                  >Primary Ship</th>
+                  <th data-sort="vtsr" class="text-end sort-active"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>VTSR-T</strong><br>Published rating. <code>VTSR-T = &alpha;&middot;Wins ELO + (1-&alpha;)&middot;Thug ELO</code>. With &alpha; = 0 (current ship), VTSR-T equals Thug ELO. Anchored at 1500, soft floor at 1000."
+                  >VTSR-T</th>
+                  <th data-sort="pvp_kd" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>PvP K/D</strong><br>Career kills against human players &divide; deaths from human players. Click the row chevron for the raw PvP K + PvP D counts and the per-axis breakdown."
+                  >PvP K/D</th>
+                  <th data-sort="pve_kd" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>PvE K/D</strong><br>Career kills against AI / structures &divide; deaths from AI / world. Click the row chevron for the raw PvE K + PvE D counts."
+                  >PvE K/D</th>
+                  <th data-sort="accuracy" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Accuracy</strong><br>Career hits &divide; shots fired. Includes both PvP + PvE hits. Hover the cell for raw hits / shots."
+                  >Acc</th>
+                  <th data-sort="pvp_accuracy" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>PvP Accuracy</strong><br>Career PvP hits &divide; shots fired. The per-weapon-normalized variant (used by the <code>thug_accuracy</code> ELO axis) lives in the row's expand panel."
+                  >PvP Acc</th>
+                  <th data-sort="last_delta" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Last delta</strong><br>Most recent rated-match rating change (positive = gain, negative = loss). Click the row chevron for the per-axis breakdown of why the rating moved."
+                  >Last</th>
+                  <th data-sort="peak_vtsr" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Peak</strong><br>Highest published VTSR-T this player has ever held. Hover the cell to see when it was reached."
+                  >Peak</th>
+                  <th data-sort="matches_played" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 4 minutes."
+                  >Matches</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="card mb-4" id="section-career-radar">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">

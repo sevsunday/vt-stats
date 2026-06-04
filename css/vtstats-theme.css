@@ -175,6 +175,17 @@ th[data-sort]:hover {
 
 th[data-sort].sort-active {
     color: var(--kb-primary);
+    font-weight: 700;
+}
+
+/* Active-sort highlight must beat the higher-specificity muted color applied
+   to split columns (#leaderboard / #career-table thead th.vt-col-split below),
+   otherwise PvP/PvE split + per-match average columns never light up when they
+   are the active sort column (including the default 'Dealt/m' sort). */
+#leaderboard thead th[data-sort].sort-active,
+#career-table thead th[data-sort].sort-active {
+    color: var(--kb-primary);
+    font-weight: 700;
 }
 
 .badge-f1 {

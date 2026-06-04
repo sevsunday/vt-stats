@@ -1401,7 +1401,7 @@
   // its native navigation to the canonical root URL. Per
   // project-overview.mdc, any visit to index.html without an explicit
   // ?match= / ?tab= / ?filter= URL intent opens straight into the
-  // All Matches aggregate, which is exactly what we want here.
+  // most-recent match, which is exactly what we want here.
   // Picker state (sessionStorage) and eloMode (localStorage) survive
   // the reload so user preferences aren't trampled by a brand click.
   // No JS handler — that makes the brand link consistent with every
@@ -1515,6 +1515,10 @@
   let filterState = { mode: 'all', players: [], team: null, persist: false };
   let timelineMode = 'player';
   let sortState = { key: 'dealt', asc: false };
+  // NOTE: in the default 'Per match' column view this is remapped to the
+  // visible 'Dealt/m' (avg_total_dealt) column by remapCareerSortKeyForColumnView()
+  // on All Matches load, so the sort-active header highlight lands on a
+  // visible column.
   let careerSortState = { key: 'total_dealt', asc: false };
   // Dedicated VTSR-T table sort. Defaults to vtsr desc (highest rating at top).
   let vtsrSortState = { key: 'vtsr', asc: false };
@@ -4636,8 +4640,12 @@
       // pvp/pve fields are absent (pre-v4 schema).
       const kCell = killsDeathsChipCell(r.kills || 0, ps.pvp_kills, ps.pve_kills, 'kills');
       const dCell = killsDeathsChipCell(r.deaths || 0, ps.pvp_deaths, ps.pve_deaths, 'deaths');
-      const eloIdx  = getEloDeltaIndexForCurrentMatch();
-      const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
+      // VTSR-T per-match column hidden to de-emphasize ratings. To restore:
+      // uncomment the two lines below, re-add the `${eloCell}` cell to the row
+      // template (between dCell and the Unit Dmg cell), and uncomment the
+      // matching <th data-sort="elo_delta"> in index.html.
+      // const eloIdx  = getEloDeltaIndexForCurrentMatch();
+      // const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
       return `<tr class="${rowClass}">
         <td>${i + 1}</td>
         <td class="fw-semibold">${vtPlayerLinkHtml(r.name, r.steam64)}${nickSub}${campodBadge}${partialBadge}${rerouteBadge}</td>
@@ -4653,7 +4661,7 @@
         <td class="text-end">${(ps.accuracy * 100).toFixed(1)}%</td>
         ${kCell}
         ${dCell}
-        ${eloCell}
+        <!-- VTSR-T per-match column hidden; restore the eloCell here (see comment above) -->
         <td class="text-end">${fmt(r.assets.dealt)}</td>
         <td>${moveCell}</td>
         <td><span class="badge bg-secondary">${esc(ps.fav_weapon)}</span></td>
@@ -6950,9 +6958,9 @@
       return `<tr>
         <td class="vt-career-col-shared">${i + 1}</td>
         <td class="vt-career-col-shared fw-semibold">${vtPlayerLinkHtml(c.name, c.steam64)}</td>
-        <td class="text-center vt-career-col-shared">${tierCell}</td>
-        <td class="text-end vt-career-col-shared">${vtsrCell}</td>
-        <td class="text-center vt-career-col-shared"><span style="color:var(--kb-text-muted);" title="Not applicable across matches">—</span></td>
+        <!-- Tier career column hidden; restore the tierCell cell here + the <th> in index.html -->
+        <!-- VTSR-T career column hidden; restore the vtsrCell cell here + the <th> in index.html -->
+        <!-- Team column removed (team is per-match, not career-wide) -->
         <td class="text-end vt-career-col-shared">${c.matches_played}</td>
         <td class="text-end vt-col-split vt-career-col-total">${fmt(c.total_pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split vt-career-col-avg">${fmt(careerPerMatchAvg(c.total_pvp_dealt || 0, m))}</td>
@@ -7617,7 +7625,9 @@
   // parsed earlier (during picker init — `const initialUrlState` is in
   // scope from the Phase 2 init block above). Shared URLs (any
   // match/tab/filter/team/players intent) always win. When no URL intent
-  // is present we always default to the All Matches aggregate view.
+  // is present we default to the most-recent match. The All Matches
+  // aggregate stays reachable via ?match=all, the match picker, and the
+  // per-match banner's "All Matches" button.
   const hasOtherUrlIntent = initialUrlState.tab
     || initialUrlState.filter
     || initialUrlState.team
@@ -7641,9 +7651,10 @@
       updateMatchPickerTriggers(manifest[0]);
       loadMatch(manifest[0].file, initialUrlState);
     } else if (manifest.length > 0) {
-      // No URL intent at all — universal default is the All Matches view.
-      updateMatchPickerTriggers('__all__');
-      loadAllMatches();
+      // No URL intent at all — default to the most-recent match
+      // (manifest is sorted newest-first, so manifest[0] is newest).
+      updateMatchPickerTriggers(manifest[0]);
+      loadMatch(manifest[0].file);
     }
   }
 
