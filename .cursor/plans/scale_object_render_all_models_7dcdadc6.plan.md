@@ -12,10 +12,10 @@ todos:
     content: Rewrite scripts/convert_msh.py to index .msh across ALL roots (base + workshop packs), enumerate geometryName + shotGeometry, dedup to ~709 meshes; per model emit ONE geometry GLB (materials named by diffuse stem, no embedded texture) + perf PNG @512 (deduped, tex/perf/) + native .dds copy (deduped, tex/hq/) + thumbnail; richer index.json; per-mesh try/except + caching + --force/--limit.
     status: pending
   - id: thumbnails
-    content: Add scripts/msh_thumbnail.py (promote spike render_glb PIL rasterizer); render a static 3/4 textured thumbnail per model into data/models/thumbs/ from the perf textures.
+    content: "Add scripts/msh_thumbnail.py: per-pixel numpy rasterizer (perspective-correct barycentric UV + bilinear HQ-texture sampling + smooth vertex-normal shading + z-buffer + 2x supersample AA). Per model emit a hero thumbnail (thumbnails/<stem>.png ~256px) AND a high-quality 7-angle gallery (shots/<stem>/{hero,front,back,left,right,top,bottom}.png ~512px). Add numpy as a dev-only dep."
     status: pending
   - id: viewer-textures
-    content: Rework _object-render/js/viewer.js to assign diffuse textures at runtime by material name from the chosen set (TextureLoader for perf PNG, vendored DDSLoader for HQ .dds); per-object Performance/HQ toggle + global always-HQ pref (localStorage). Verify orientation/sRGB in-browser.
+    content: Rework _object-render/js/viewer.js to assign diffuse textures at runtime by material name from the chosen set (TextureLoader for perf PNG, vendored DDSLoader for HQ .dds); per-object Performance/HQ toggle + global always-HQ pref (localStorage) + an on-demand HQ multi-angle Capture button (toDataURL downloads). Verify orientation/sRGB in-browser.
     status: pending
   - id: browser
     content: "Rebuild _object-render/ directory: toolbar (search + category + faction chips + sort) + lazy static-thumbnail grid scaling to ~709 models + global quality toggle, click-through to the detail viewer."
@@ -55,7 +55,8 @@ Three pieces with different lifespans, placed in their FINAL homes now so the ev
     geometry/<stem>.glb
     textures/perf/<stem>.png
     textures/hq/<stem>.dds
-    thumbnails/<stem>.png
+    thumbnails/<stem>.png        # small hero (~256px) for the grid cards
+    shots/<stem>/<angle>.png     # multi-angle gallery (~512px): hero/front/back/left/right/top/bottom
   ```
   (The current 4-model POC assets at `data/models/*.glb` + `data/models/textures/*.png` get reorganized into these subdirs.)
 - **`_object-render/`** -- STAGING UI only (`index.html` + `js/` + `css/` + `vendor/three/` + `spike/`). Folds into `odf/` (ODF browser model view) + the replay later, then retires. Scripts + data never move.
@@ -85,7 +86,8 @@ flowchart LR
   conv --> glb["data/models/geometry/*.glb<br/>(geometry, no embedded tex)"]
   conv --> perf["data/models/textures/perf/*.png<br/>(512 mip, deduped)"]
   conv --> hq["data/models/textures/hq/*.dds<br/>(native 2048, copied, deduped)"]
-  conv --> thumb["data/models/thumbnails/*.png (~256px)"]
+  conv --> thumb["data/models/thumbnails/*.png (hero ~256px)"]
+  conv --> shots["data/models/shots/&lt;stem&gt;/*.png<br/>(7-angle gallery ~512px)"]
   conv --> man["data/models/index.json<br/>(models[] + odf_index)"]
   man --> browser["_object-render/ directory<br/>(search/filter/grid)"]
   glb --> viewer["detail view: GLB geometry +<br/>runtime texture assign by name"]
@@ -99,7 +101,7 @@ Add `.gitattributes` tracking `data/models/**/*.glb`, `data/models/**/*.dds`, `d
 
 ### 2. `scripts/dds_decode.py` -- mip-level decode
 
-Add a `max_dim` arg to `decode_dds()`: compute the byte offset of the smallest mip whose largest side is `>= max_dim` (skip prior BC1/BC3 mips via `ceil(w/4)*ceil(h/4)*blockBytes`), decode just that mip, downscale to exactly `max_dim` if needed. Used only for the **performance** PNGs (512) + thumbnails; the **HQ** path copies the native `.dds` (no decode).
+Add a `max_dim` arg to `decode_dds()`: compute the byte offset of the smallest mip whose largest side is `>= max_dim` (skip prior BC1/BC3 mips via `ceil(w/4)*ceil(h/4)*blockBytes`), decode just that mip, downscale to exactly `max_dim` if needed. Used for the **performance** PNGs (`max_dim=512`) AND for the gallery rasterizer's HQ sampling source (`max_dim>=1024`). The browser **HQ** path still copies the native `.dds` verbatim (no decode).
 
 ### 3. `scripts/convert_msh.py` -- convert all ~709 (dual texture sets)
 
@@ -110,18 +112,29 @@ Add a `max_dim` arg to `decode_dds()`: compute the byte offset of the smallest m
   - perf: decode diffuse `.dds` -> `data/models/textures/perf/<stem>.png` @512 (mip).
   - hq: copy the native diffuse `.dds` -> `data/models/textures/hq/<stem>.dds` verbatim.
 - Per-mesh `try/except` (resilient over ~709); caching by `.glb` existence + `.msh` mtime; `--force`, `--limit N`.
-- `data/models/index.json`: `{ schema_version, models: [ {stem, glb:"geometry/<stem>.glb", thumb:"thumbnails/<stem>.png", unitName, primaryOdf, odfs[], category, factionCode, factionName, triangles, groups, textures[] (diffuse stems), radius, bboxSize} ], odf_index: {"<odf>.odf": "<stem>"} }`.
+- `data/models/index.json`: `{ schema_version, models: [ {stem, glb:"geometry/<stem>.glb", thumb:"thumbnails/<stem>.png", shots:["shots/<stem>/hero.png", ...], unitName, primaryOdf, odfs[], category, factionCode, factionName, triangles, groups, textures[] (diffuse stems), radius, bboxSize} ], odf_index: {"<odf>.odf": "<stem>"} }`.
 - Faction from rep ODF prefix: `i`->ISDF, `e`->Hadean, `f`->Scion, `c`->Cerberi, else Other. Category from odf.min.json bucket; `Ordnance` for `shotGeometry`-sourced.
 - Reorganize the existing 4-model POC outputs into the new subdirs (or just `--force` a full rebuild).
 
-### 4. `scripts/msh_thumbnail.py` (new) -- static thumbnails
+### 4. `scripts/msh_thumbnail.py` (new) -- HQ static thumbnails + multi-angle gallery
 
-Promote the spike `render_glb.py` flat-textured PIL rasterizer into a reusable helper. `convert_msh.py` calls it after each model (reusing the in-memory mesh + the decoded perf diffuse images) -> one 3/4 view at `data/models/thumbs/<stem>.png` (~256px). Static thumbnails are required because live per-card WebGL can't scale past ~16 contexts.
+A **per-pixel** software rasterizer (numpy-vectorized; numpy added as a dev-only dependency to keep the full run ~40 min instead of hours) that renders genuinely high-quality shots -- NOT the spike's flat-per-triangle sampler:
+- Samples the **HQ diffuse texture** per pixel via perspective-correct barycentric UV interpolation + **bilinear** texel lookup (so the 2048 HQ detail actually shows). The HQ diffuse is decoded from the native `.dds` at high res (`decode_dds(max_dim=1024+)`) for sampling.
+- **Smooth shading** from interpolated vertex normals (not flat per-triangle), with the viewer's lighting rig approximated.
+- **Supersampled AA**: render at 2x then downscale (e.g. gallery 1024 -> 512, hero 512 -> 256).
+- Z-buffer for correct occlusion (replaces painter's sort).
+
+`convert_msh.py` calls it after each model (reusing the in-memory mesh + HQ diffuse images) so this runs **fully automatically for all ~709 models in the single build run -- zero manual capture**:
+- **Hero thumbnail** -> `data/models/thumbnails/<stem>.png` (~256px, 3/4 view) -- grid cards + future ODF-browser previews.
+- **Multi-angle gallery** -> `data/models/shots/<stem>/{hero,front,back,left,right,top,bottom}.png` (~512px) -- 7 canonical angles, **high quality** (HQ-textured, smooth-shaded, AA).
+
+This build-time gallery is the **bulk, automated, committed** HQ screenshot mechanism. The viewer Capture button (section 5) is **optional/supplementary** -- a convenience for grabbing a one-off GPU-perfect shot of a single model; it is NEVER required for the full set.
 
 ### 5. Viewer -- runtime texture assignment + quality toggle (`viewer-textures`)
 
 - [_object-render/js/viewer.js](_object-render/js/viewer.js): after `GLTFLoader` loads the geometry GLB, traverse meshes and for each material load its diffuse by name from the active set -- `TextureLoader` for `../data/models/textures/perf/<name>.png`, vendored `DDSLoader` for `../data/models/textures/hq/<name>.dds` -- set `material.map` (sRGB), keep faction-neutral. Add `setQuality('perf'|'hq')` that re-binds textures live. Handle `flipY`/sRGB so orientation matches (DDS compressed textures can't GPU-flip; verify on first run, flip V in GLB UVs if needed).
 - Detail-view UI: a **Performance | HQ** toggle button; honors the global pref but can override per-object.
+- **Capture button** (HQ, on-demand -- OPTIONAL convenience, not the bulk mechanism): for a single model being viewed, **temporarily forces HQ textures** (regardless of the active toggle) + **supersamples** (render at 2x, downscale), captures the 7 canonical angles via camera repositioning + `renderer.domElement.toDataURL()`, downloads them as PNGs (or a contact sheet), then restores the prior quality mode. The committed galleries for all ~709 models come from the build script (section 4) -- this button is just for grabbing a one-off GPU-perfect shot by hand when desired.
 
 ### 6. Browser rebuild -- `_object-render/`
 
@@ -131,7 +144,7 @@ Promote the spike `render_glb.py` flat-textured PIL rasterizer into a reusable h
 
 ### 7. Commit (git LFS)
 
-Everything under `data/models/` (`geometry/*.glb`, `textures/perf/*.png`, `textures/hq/*.dds`, `thumbnails/*.png`, `index.json`) commits via LFS so a clone is fully portable. Size is not a constraint (likely a few GB; HQ `.dds` are ~2.7MB each, perf PNGs ~150KB, both deduped). README updated with the dual-version model, all-roots indexing, and the regen command.
+Everything under `data/models/` (`geometry/*.glb`, `textures/perf/*.png`, `textures/hq/*.dds`, `thumbnails/*.png`, `shots/**/*.png`, `index.json`) commits via LFS so a clone is fully portable. Size is not a constraint (likely a few GB; HQ `.dds` are ~2.7MB each, perf PNGs ~150KB, both deduped). Build tooling adds a dev-only `numpy` dependency (for the gallery rasterizer) -- noted in the README alongside Pillow; not a runtime/site dependency. README updated with the dual-version model, all-roots indexing, and the regen command.
 
 ### Out of scope (noted)
 
@@ -141,6 +154,6 @@ Everything under `data/models/` (`geometry/*.glb`, `textures/perf/*.png`, `textu
 
 ### Validation
 
-- `convert_msh.py` summary shows ~709 OK + any skips; both `tex/perf/` and `tex/hq/` populated; `validate_glb.py` over a sample.
-- Spot-check thumbnails for a vehicle + a building + a Cerberi/Hadean unit.
-- In-browser: directory search + category/faction filters + sort work; detail view loads **perf** textures by default and the **HQ toggle** swaps to crisp `.dds`; global "Prefer HQ" pref persists; textures are correctly oriented + colored (sRGB), not flipped; scout still symmetric rest pose with all 4 wings.
+- `convert_msh.py` summary shows ~709 OK + any skips; both `textures/perf/` and `textures/hq/` populated; `validate_glb.py` over a sample.
+- Spot-check the hero thumbnail + the 7-angle `shots/` gallery for a vehicle + a building + a Cerberi/Hadean unit -- confirm they're high quality (HQ-textured, smooth-shaded, anti-aliased), not faceted.
+- In-browser: directory search + category/faction filters + sort work; detail view loads **perf** textures by default and the **HQ toggle** swaps to crisp `.dds`; global "Prefer HQ" pref persists; the **Capture button** downloads multi-angle HQ PNGs; textures are correctly oriented + colored (sRGB), not flipped; scout still symmetric rest pose with all 4 wings.
