@@ -4,19 +4,19 @@ overview: Build an offline DOCB .msh -> glTF/GLB converter and a standalone _obj
 todos:
   - id: spike-decode
     content: "Spike 0: check BZCC editor/console for a mesh export path; if none, reverse-engineer the DOCB .msh header + geometry layout against ivscout00.msh until vertex/face dump + OBJ is recognizably a scout. Document format + fallbacks (OBJ-only, FBX bundle, engine export)."
-    status: pending
+    status: completed
   - id: convert-script
     content: "Build scripts/convert_msh.py: locate baked tree via bz2_paths.py, resolve the 4 proof units via geometryName from odf.min.json, parse .msh geometry, bake Z-up->Y-up + meter scale, emit data/models/<unit>.glb + data/models/index.json manifest (dev-only trimesh dep)."
-    status: pending
+    status: completed
   - id: viewer-page
     content: "Build _object-render/index.html + js/viewer.js (vendored three + OrbitControls): single-object viewer with FULL 360/all-angle orbit (unrestricted azimuth + full 0..PI polar so the underside is viewable, damping, zoom, pan, pivot on bbox center, optional idle auto-rotate, camera-attached lighting), plus grid + wireframe toggle. Validate on ivscout_vsr and the other 3 units."
-    status: pending
+    status: completed
   - id: object-browser
     content: Add rough directory grid to _object-render/ driven by data/models/index.json (card per unit, click-through to single view).
-    status: pending
+    status: completed
   - id: textures
     content: "Milestone 4: parse .material slots -> resolve .dds, load via vendored DDSLoader (or offline .dds->.png), apply diffuse + _c team-color tint for faction coloring."
-    status: pending
+    status: completed
 isProject: false
 ---
 

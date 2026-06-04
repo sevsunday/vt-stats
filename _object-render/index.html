@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VT Stats &middot; Object Render (POC)</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">BZCC Object Render <span class="tag">POC</span></div>
+    <div class="hint">Click a unit to inspect &middot; drag to orbit (all angles) &middot; scroll to zoom</div>
+  </header>
+
+  <!-- Directory grid -->
+  <main id="directory" class="directory">
+    <div id="model-grid" class="model-grid"></div>
+  </main>
+
+  <!-- Single-object viewer -->
+  <section id="viewer" class="viewer" hidden>
+    <div class="viewer-bar">
+      <a id="back-btn" class="btn back" href="?">&larr; All objects</a>
+      <div class="viewer-titlewrap">
+        <span id="viewer-title" class="viewer-title"></span>
+        <span id="viewer-meta" class="viewer-meta"></span>
+      </div>
+      <div class="viewer-actions">
+        <button id="wire-btn" class="btn toggle">Wireframe</button>
+        <button id="spin-btn" class="btn toggle">Auto-rotate</button>
+        <button id="reset-btn" class="btn">Reset view</button>
+      </div>
+    </div>
+    <div id="stage" class="stage"></div>
+  </section>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
