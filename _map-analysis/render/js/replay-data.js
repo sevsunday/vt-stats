@@ -312,10 +312,12 @@ export function interpolateTrailXYZ(trail, tSec) {
   if (!t || !t.length) return null;
   const n = t.length;
   if (tSec <= t[0]) {
-    return finite3(trail.x[0], trail.y[0], trail.z[0], 0);
+    return finite3(trail.x[0], trail.y[0], trail.z[0], 0,
+      scalarAt(trail.hp, 0), scalarAt(trail.ammo, 0));
   }
   if (tSec >= t[n - 1]) {
-    return finite3(trail.x[n - 1], trail.y[n - 1], trail.z[n - 1], n - 1);
+    return finite3(trail.x[n - 1], trail.y[n - 1], trail.z[n - 1], n - 1,
+      scalarAt(trail.hp, n - 1), scalarAt(trail.ammo, n - 1));
   }
   // Binary search for the bracketing pair (lo, hi) where t[lo] <= tSec <= t[hi].
   let lo = 0, hi = n - 1;
@@ -327,11 +329,13 @@ export function interpolateTrailXYZ(trail, tSec) {
   // teleport/respawn happens between them) hold position at lo.
   const segs = (trail.segments && trail.segments.length) ? trail.segments : [[0, n - 1]];
   if (segOfIdx(lo, segs) !== segOfIdx(hi, segs)) {
-    return finite3(trail.x[lo], trail.y[lo], trail.z[lo], lo);
+    return finite3(trail.x[lo], trail.y[lo], trail.z[lo], lo,
+      scalarAt(trail.hp, lo), scalarAt(trail.ammo, lo));
   }
   const span = t[hi] - t[lo];
   if (span <= 0) {
-    return finite3(trail.x[lo], trail.y[lo], trail.z[lo], lo);
+    return finite3(trail.x[lo], trail.y[lo], trail.z[lo], lo,
+      scalarAt(trail.hp, lo), scalarAt(trail.ammo, lo));
   }
   const frac = (tSec - t[lo]) / span;
   return finite3(
@@ -339,7 +343,24 @@ export function interpolateTrailXYZ(trail, tSec) {
     trail.y[lo] + (trail.y[hi] - trail.y[lo]) * frac,
     trail.z[lo] + (trail.z[hi] - trail.z[lo]) * frac,
     lo,
+    lerpScalar(trail.hp, lo, hi, frac),
+    lerpScalar(trail.ammo, lo, hi, frac),
   );
+}
+
+// hp/ammo channels (match.schema_version 10) ride parallel to t/x/y/z and may
+// be null (ship had no resolvable cap) or absent (pre-v10 match). Both helpers
+// return null in those cases so the renderer hides the bar.
+function scalarAt(arr, idx) {
+  if (!arr) return null;
+  const v = arr[idx];
+  return (v == null || !Number.isFinite(v)) ? null : v;
+}
+function lerpScalar(arr, lo, hi, frac) {
+  if (!arr) return null;
+  const a = arr[lo], b = arr[hi];
+  if (a == null || b == null || !Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return a + (b - a) * frac;
 }
 
 function segOfIdx(i, segs) {
@@ -354,9 +375,9 @@ function segOfIdx(i, segs) {
 // occasionally pads. NaN positions would visually park actors at the world
 // origin, which would scream "bug" forever; better to return null and let
 // the actor go invisible for this frame.
-function finite3(x, y, z, idx) {
+function finite3(x, y, z, idx, hp = null, ammo = null) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
-  return { x, y, z, idx };
+  return { x, y, z, idx, hp, ammo };
 }
 
 /**

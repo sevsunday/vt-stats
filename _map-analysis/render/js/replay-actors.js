@@ -346,6 +346,8 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
     if (!interp) {
       // NaN guard. Hold last valid position; don't park at origin.
       actor.mesh.visible = !!actor.lastValidPos;
+      actor.curHp = null;
+      actor.curAmmo = null;
       continue;
     }
 
@@ -353,6 +355,10 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
     const yPos = y + actor.yOffset;
     actor.mesh.position.set(interp.x, yPos, interp.z);
     actor.lastValidPos = { x: interp.x, y: yPos, z: interp.z };
+    // Live HP/ammo ratios (0-1, or null when the ship has no cap / pre-v10
+    // match). Read by the floating label bars and the side-roster HUD.
+    actor.curHp = interp.hp;
+    actor.curAmmo = interp.ammo;
 
     // Heading: atan2 over (x, z). Note +Y up world convention: rotation around
     // +Y of `theta` matches a yaw such that an X-forward glyph points in the
@@ -527,10 +533,58 @@ export function disposeTrails(group) {
 // closer actors layer on top.
 // ============================================================================
 
+// Shared HP-band thresholds for the replay vital bars (floating labels + HUD).
+// Kept in one place so both renderers flip green/yellow/red at the same points.
+const HP_BAND_HIGH = 0.5;   // ratio > this  -> green
+const HP_BAND_LOW  = 0.25;  // ratio <= this -> red; in-between -> yellow
+
+/**
+ * Apply hp/ammo ratios (0-1, or null) to a set of bar refs. Sets the inner
+ * fill width %, swaps the HP band class (is-hp-high / -mid / -low), and hides
+ * a bar whose ratio is null/undefined (ship has no cap, or the match predates
+ * match.schema_version 10). Shared by the floating actor labels and the side
+ * roster HUD so the band thresholds live in exactly one place. `refs` may be
+ * any object carrying { hpBar, hpFill, ammoBar, ammoFill, vitalsEl? }.
+ */
+export function applyVitalBars(refs, hp, ammo) {
+  if (!refs) return;
+
+  if (refs.hpBar && refs.hpFill) {
+    if (hp == null || !Number.isFinite(hp)) {
+      if (refs.hpBar.style.display !== 'none') refs.hpBar.style.display = 'none';
+    } else {
+      refs.hpBar.style.display = '';
+      refs.hpFill.style.width = (Math.max(0, Math.min(1, hp)) * 100).toFixed(1) + '%';
+      const band = hp > HP_BAND_HIGH ? 'is-hp-high' : (hp > HP_BAND_LOW ? 'is-hp-mid' : 'is-hp-low');
+      if (refs._hpBand !== band) {
+        refs.hpFill.classList.remove('is-hp-high', 'is-hp-mid', 'is-hp-low');
+        refs.hpFill.classList.add(band);
+        refs._hpBand = band;
+      }
+    }
+  }
+
+  if (refs.ammoBar && refs.ammoFill) {
+    if (ammo == null || !Number.isFinite(ammo)) {
+      if (refs.ammoBar.style.display !== 'none') refs.ammoBar.style.display = 'none';
+    } else {
+      refs.ammoBar.style.display = '';
+      refs.ammoFill.style.width = (Math.max(0, Math.min(1, ammo)) * 100).toFixed(1) + '%';
+    }
+  }
+
+  if (refs.vitalsEl) {
+    const bothHidden = (!refs.hpBar || refs.hpBar.style.display === 'none')
+                    && (!refs.ammoBar || refs.ammoBar.style.display === 'none');
+    refs.vitalsEl.style.display = bothHidden ? 'none' : '';
+  }
+}
+
 /**
  * Build label DOM nodes for every actor. `container` is the parent
  * <div class="replay-labels"> the renderer mounted in HTML. Returns an
- * array of { actor, el, dotEl, nameEl, shipEl } objects.
+ * array of { actor, el, dotEl, nameEl, shipEl, vitalsEl, hpBar, hpFill,
+ * ammoBar, ammoFill } objects.
  */
 export function buildActorLabels(actors, container) {
   const labels = [];
@@ -554,8 +608,28 @@ export function buildActorLabels(actors, container) {
     el.appendChild(dot);
     el.appendChild(name);
     el.appendChild(ship);
+
+    // HP/ammo bars (match.schema_version 10). Two stacked tracks with an
+    // inner fill whose width is set each frame from the actor's curHp/curAmmo
+    // ratio. HP fill swaps a band class (green/yellow/red); ammo stays blue.
+    // Hidden entirely when the ship has no cap / the match predates the data.
+    const vitals = document.createElement('span');
+    vitals.className = 'vt-actor-vitals';
+    const hpBar = document.createElement('span');
+    hpBar.className = 'vt-actor-bar vt-actor-bar-hp';
+    const hpFill = document.createElement('i');
+    hpBar.appendChild(hpFill);
+    const ammoBar = document.createElement('span');
+    ammoBar.className = 'vt-actor-bar vt-actor-bar-ammo';
+    const ammoFill = document.createElement('i');
+    ammoBar.appendChild(ammoFill);
+    vitals.appendChild(hpBar);
+    vitals.appendChild(ammoBar);
+    el.appendChild(vitals);
+
     container.appendChild(el);
-    labels.push({ actor, el, dotEl: dot, nameEl: name, shipEl: ship });
+    labels.push({ actor, el, dotEl: dot, nameEl: name, shipEl: ship,
+      vitalsEl: vitals, hpBar, hpFill, ammoBar, ammoFill });
     actor.labelObj = labels[labels.length - 1];
   }
   return labels;
@@ -607,6 +681,9 @@ export function updateActorLabels(labels, camera, renderer, opts = {}) {
     // closest, +1 (far) is farthest; a 1000-step zindex range is plenty.
     const zi = Math.round(1000 - _projectVec.z * 500);
     lbl.el.style.zIndex = String(zi);
+
+    // HP/ammo bars track the actor's current ratios (set by updateActors).
+    applyVitalBars(lbl, actor.curHp, actor.curAmmo);
   }
 }
 

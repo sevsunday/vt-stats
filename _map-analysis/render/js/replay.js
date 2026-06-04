@@ -38,6 +38,7 @@ import {
   updateTrails,
   buildActorLabels,
   updateActorLabels,
+  applyVitalBars,
 } from './replay-actors.js';
 import {
   buildSpawnBeacons,
@@ -944,6 +945,22 @@ function handleActorShipChange(actor /*, oldOdf, newOdf */) {
   cell.textContent = actor.currentShipName || '';
 }
 
+/**
+ * Per-frame HP/ammo bar sync for the side roster rows. Reads the live
+ * curHp/curAmmo ratios that updateActors() stamped on each actor and applies
+ * them to the cached row bar refs via the same applyVitalBars() helper the
+ * floating labels use (so the green/yellow/red thresholds match). Cheap:
+ * 10 rows, refs cached, no querySelector. Out-of-window actors have null
+ * curHp/curAmmo so their bars hide automatically.
+ */
+function syncRosterVitals(actors) {
+  if (!actors) return;
+  for (const actor of actors) {
+    if (!actor.rosterBars) continue;
+    applyVitalBars(actor.rosterBars, actor.curHp, actor.curAmmo);
+  }
+}
+
 function buildRosterRow(actor) {
   const li = document.createElement('li');
   li.className = 'roster-row';
@@ -961,6 +978,10 @@ function buildRosterRow(actor) {
       <span class="r-dot" data-faction="${actor.factionCode || '_'}"></span>
       <span class="r-disp">${escapeHtml(actor.displayName || actor.name)}</span>
       <span class="r-ship">${escapeHtml(initialShipName)}</span>
+      <span class="r-vitals">
+        <span class="r-bar r-bar-hp"><i></i></span>
+        <span class="r-bar r-bar-ammo"><i></i></span>
+      </span>
     </button>
     <button class="r-follow" title="Follow">&#9654;</button>
   `;
@@ -971,6 +992,16 @@ function buildRosterRow(actor) {
   const focusFn = () => focusActor(actor.name);
   li.querySelector('.r-name').addEventListener('click', focusFn);
   li.querySelector('.r-follow').addEventListener('click', focusFn);
+  // Cache HP/ammo bar refs on the actor so syncRosterVitals() can update them
+  // every frame without a per-row querySelector. Field names match the
+  // applyVitalBars() contract shared with the floating labels.
+  const hpBar = li.querySelector('.r-bar-hp');
+  const ammoBar = li.querySelector('.r-bar-ammo');
+  actor.rosterBars = {
+    vitalsEl: li.querySelector('.r-vitals'),
+    hpBar, hpFill: hpBar.querySelector('i'),
+    ammoBar, ammoFill: ammoBar.querySelector('i'),
+  };
   return li;
 }
 
@@ -1281,6 +1312,8 @@ function renderFrame(dtSec = 0) {
         onShipChange: handleActorShipChange,
       },
     );
+    // HP/ammo bars on the side roster follow the same live ratios.
+    syncRosterVitals(STATE.actors);
   }
   // 2. Update trails (reads trail.t/x/y/z directly, terrain-relative Y).
   if (STATE.trails) {

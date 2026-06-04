@@ -29,6 +29,7 @@
   --vt-warn:    #ffb86c;
   --vt-danger:  #ff7777;
   --vt-gold:    #ffd24a;
+  --vt-ammo:    #4ea3ff;   /* ammo bar (always blue) */
 }
 
 /* Body layout: replay mode keeps the canvas full-bleed and lays UI on top. */
@@ -259,8 +260,38 @@ aside#hud {
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 110px;
+  max-width: 86px;
 }
+
+/* HP/ammo mini-bars on each roster row (match.schema_version 10). Stacked
+   pair at the right edge, width-driven each frame by syncRosterVitals() via
+   the shared applyVitalBars() helper (same bands as the floating labels). */
+.r-vitals {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  width: 40px;
+  margin-left: 6px;
+}
+.r-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.r-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 2px;
+  transition: width 0.12s linear;
+}
+.r-bar-hp > i.is-hp-high { background: var(--vt-success); }
+.r-bar-hp > i.is-hp-mid  { background: var(--vt-warn); }
+.r-bar-hp > i.is-hp-low  { background: var(--vt-danger); }
+.r-bar-ammo > i { background: var(--vt-ammo); }
 
 .r-follow {
   justify-content: center;
@@ -518,6 +549,35 @@ aside#hud {
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   margin-left: 2px;
 }
+
+/* HP/ammo bars (match.schema_version 10). Two stacked tracks anchored to the
+   right edge of the floating label; an inner <i> fill is width-driven each
+   frame by applyVitalBars(). HP fill color swaps via band class; ammo blue. */
+.vt-actor-vitals {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 4px;
+  width: 34px;
+}
+.vt-actor-bar {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+.vt-actor-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 2px;
+  transition: width 0.12s linear;
+}
+.vt-actor-bar-hp > i.is-hp-high { background: var(--vt-success); }
+.vt-actor-bar-hp > i.is-hp-mid  { background: var(--vt-warn); }
+.vt-actor-bar-hp > i.is-hp-low  { background: var(--vt-danger); }
+.vt-actor-bar-ammo > i { background: var(--vt-ammo); }
 
 /* -----------------------------------------------------------------
    Kill ticker (rolling list bottom-right)

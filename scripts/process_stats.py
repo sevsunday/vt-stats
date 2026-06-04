@@ -53,13 +53,18 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 21
+PIPELINE_VERSION = 22
 
 TIMELINE_BUCKET_SECONDS = 10
 
 # --- Positioning (player movement) constants ---
 # Axis convention: +X East, +Y Up, +Z North (developer-confirmed for Z).
 # Horizontal plane = (x, z); all distance/path math ignores y.
+
+# Health/ammo (3D replay bars + cheap personal.* stats). HP ratio below this
+# counts toward personal.time_low_health_pct ("lives dangerously"). Tunable
+# without a schema bump (bump PIPELINE_VERSION).
+LOW_HEALTH_RATIO = 0.25
 
 POSITIONING_SAMPLE_RATE_HZ = 1  # downsample UpdateTicks to 1 Hz regardless of source tick_rate
 POSITIONING_SPAWN_SAMPLES = 3  # median of first N kept samples = spawn reference
@@ -1204,6 +1209,54 @@ def build_unit_name_resolver(odf_db):
     return resolve
 
 
+def _clamp01(v):
+    """Clamp a float into [0, 1]. Pass-through for None so callers can keep a
+    'no data' sentinel without branching at every site."""
+    if v is None:
+        return None
+    if v < 0.0:
+        return 0.0
+    if v > 1.0:
+        return 1.0
+    return v
+
+
+def build_ship_caps_resolver(odf_db):
+    """Map each ODF to its (max_health, max_ammo) caps from the ODF DB.
+
+    Reads `GameObjectClass.maxHealth` / `maxAmmo` (stored as strings in
+    `data/odf.min.json`) and parses them to floats. Used to normalize the
+    absolute `PlayerState.health` / `.ammo` samples into 0-1 ratios for the
+    3D replay HP/ammo bars (and the cheap personal.* health stats). Keys are
+    stored BOTH with and without the trailing `.odf` (lowercased) so callers
+    can look up a raw `PlayerState.odf` string directly. A cap that is
+    non-numeric or <= 0 is stored as `None` for that channel so the consumer
+    skips normalization (the bar hides rather than dividing by zero).
+    """
+    def _to_float(v):
+        try:
+            f = float(v)
+            return f if f > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    caps = {}
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            goc = (entry or {}).get("GameObjectClass", {}) or {}
+            max_hp = _to_float(goc.get("maxHealth"))
+            max_ammo = _to_float(goc.get("maxAmmo"))
+            if max_hp is None and max_ammo is None:
+                continue
+            key = odf_key.lower()
+            stem = re.sub(r"\.odf$", "", key)
+            caps[key] = (max_hp, max_ammo)
+            caps[stem] = (max_hp, max_ammo)
+    return caps
+
+
 def disambiguate_names(odf_set, resolve_fn):
     """When multiple ODF strings resolve to the same display name, append the raw ODF stem.
 
@@ -1882,7 +1935,8 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                          terrain_bounds=None):
     """Compute the positioning block from raw per-player samples.
 
-    raw_samples_by_s64: dict[s64] -> list of (t_sec, x, y, z, has_target) tuples,
+    raw_samples_by_s64: dict[s64] -> list of
+    (t_sec, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio) tuples,
     in tick order. match_has_target_lock_data is the match-global flag captured
     in the main event loop (True iff any PlayerState had has_target=True during
     the match).
@@ -1923,9 +1977,15 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         z_arr = [s[3] for s in samples]
         target_arr = [bool(s[4]) for s in samples]
         pilot_arr = [bool(s[5]) if len(s) > 5 else False for s in samples]
+        # hp/ammo are 0-1 ratios (or None when the ship had no resolvable cap).
+        # Guarded by len() so legacy buffers that predate the 8-tuple default
+        # to all-None and the replay simply hides the bars.
+        hp_arr = [s[6] if len(s) > 6 else None for s in samples]
+        ammo_arr = [s[7] if len(s) > 7 else None for s in samples]
         trails[s64] = {
             "t": t_arr, "x": x_arr, "y": y_arr, "z": z_arr,
             "target": target_arr, "pilot": pilot_arr,
+            "hp": hp_arr, "ammo": ammo_arr,
             "first_seen": t_arr[0], "last_seen": t_arr[-1],
             "sample_count": len(t_arr),
         }
@@ -2153,6 +2213,12 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                 "x": [round(v, 2) for v in tr["x"]],
                 "z": [round(v, 2) for v in tr["z"]],
                 "y": [round(v, 2) for v in tr["y"]],
+                # match.schema_version 10: 0-1 HP/ammo ratios parallel to
+                # t/x/y/z. None when the ship had no resolvable cap (replay
+                # hides that bar). Drives the 3D replay HP (green/yellow/red)
+                # and ammo (blue) bars.
+                "hp": [round(v, 3) if v is not None else None for v in tr["hp"]],
+                "ammo": [round(v, 3) if v is not None else None for v in tr["ammo"]],
                 "segments": segments,
             },
             "heatmap_grid_xz": heatmap_grid_xz,
@@ -2377,7 +2443,7 @@ def _apply_account_reroutes_to_events(events, reroute_map):
             if x.picker and g(x.picker): x.picker = g(x.picker)
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -2397,6 +2463,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     events = session.event_stream
 
     tick_rate = header.tick_rate or 20
+
+    # Per-ODF (max_health, max_ammo) caps for normalizing absolute
+    # PlayerState.health / .ammo samples into 0-1 ratios (3D replay bars +
+    # cheap personal.* health stats). Empty dict when the ODF DB is missing
+    # so all normalization degrades to None (bars hide, stats null).
+    ship_caps = ship_caps or {}
 
     # Header-provided terrain bounds (new-schema sessions). None when absent so
     # _compute_positioning falls back to observed-extent map_bounds. Also
@@ -2635,12 +2707,26 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     slot_faction_votes = defaultdict(Counter)  # slot -> Counter[faction_code]
 
     # Positioning: per-player raw sample buffer (downsampled to ~1 Hz in the loop below).
-    # Keyed by Steam64 -> list of (tick, x, y, z, has_target, is_pilot) tuples in tick order.
+    # Keyed by Steam64 -> list of (tick, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio) tuples in tick order.
     # is_pilot flags on-foot samples (pilot ODF) so the VTSR-T low-tier at-base lift
     # can measure ship-denied time (on foot AND within the base radius).
     position_samples = defaultdict(list)
     position_last_kept_tick = {}  # s64 -> last tick we kept a sample for (for 1 Hz downsample)
     tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
+
+    # Health/ammo accumulators (match.schema_version 10). Computed at FULL tick
+    # resolution -- i.e. before the 1 Hz positioning downsample `continue` -- so
+    # hp_lost / low-health / ammo-out are precise even though the replay trail
+    # itself stores only the 1 Hz samples. Caps come from `ship_caps` keyed on
+    # the player's current ship ODF; samples with no resolvable cap contribute
+    # nothing (the bar hides, the stat divides by a smaller denominator).
+    hp_alive_ticks = defaultdict(int)     # s64 -> ticks with a known HP ratio
+    hp_low_ticks = defaultdict(int)       # s64 -> ticks where HP ratio < LOW_HEALTH_RATIO
+    hp_lost_total = defaultdict(float)    # s64 -> sum of positive HP drops (absolute units)
+    ammo_out_episodes = defaultdict(int)  # s64 -> count of >0 -> ==0 ammo transitions
+    _prev_health = {}                     # s64 -> last raw health (hp_lost; reset on ship change/heal)
+    _prev_health_odf = {}                 # s64 -> odf of the last health sample (reset trigger)
+    _ammo_was_empty = defaultdict(bool)   # s64 -> debounce flag for ammo-out episodes
 
     # ----- Loadout / per-ship combat accumulators (v2.3) -----
     # Per-tick ship-time. UpdateTick is the only signal that says "what
@@ -3429,6 +3515,44 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 has_target = bool(ps.has_target)
                 if has_target:
                     match_has_target_lock_data = True
+
+                # --- Health/ammo (match.schema_version 10) ---
+                # Normalize absolute PlayerState.health / .ammo to 0-1 ratios
+                # against this player's CURRENT ship caps. Done every tick so
+                # the cheap stats below are full-resolution; the kept ratios
+                # ride the 1 Hz tuple for the replay bars.
+                _odf_lower = ps.odf.lower() if ps.odf else None
+                _cap = ship_caps.get(_odf_lower) if _odf_lower else None
+                _cap_hp = _cap[0] if _cap else None
+                _cap_ammo = _cap[1] if _cap else None
+                hp_ratio = _clamp01(ps.health / _cap_hp) if _cap_hp else None
+                ammo_ratio = _clamp01(ps.ammo / _cap_ammo) if _cap_ammo else None
+
+                if hp_ratio is not None:
+                    hp_alive_ticks[s64] += 1
+                    if hp_ratio < LOW_HEALTH_RATIO:
+                        hp_low_ticks[s64] += 1
+
+                # HP lost (absolute units): only count decreases, and reset the
+                # baseline on a ship change or any health increase (heal /
+                # repair / rebuild / respawn) so those never register as damage
+                # taken. A death (health -> 0 in the same ship) IS counted.
+                _ph = _prev_health.get(s64)
+                if (_ph is not None and _prev_health_odf.get(s64) == ps.odf
+                        and ps.health < _ph):
+                    hp_lost_total[s64] += (_ph - ps.health)
+                _prev_health[s64] = ps.health
+                _prev_health_odf[s64] = ps.odf
+
+                # Ammo-out episodes: count each >0 -> ==0 transition (debounced
+                # so a run of empty ticks counts once). Only on ships that
+                # actually have an ammo cap, so ammo-less hulls don't read "out".
+                if _cap_ammo:
+                    _empty_now = (ps.ammo <= 0.0)
+                    if _empty_now and not _ammo_was_empty[s64]:
+                        ammo_out_episodes[s64] += 1
+                    _ammo_was_empty[s64] = _empty_now
+
                 last_kept = position_last_kept_tick.get(s64)
                 if last_kept is not None and (tick - last_kept) < tick_stride:
                     continue
@@ -3440,6 +3564,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     float(ps.position.z),
                     has_target,
                     is_pilot_odf(ps.odf),
+                    hp_ratio,
+                    ammo_ratio,
                 ))
             i += 1
 
@@ -3954,6 +4080,22 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "self_shots_hit": self_h,
                 "fav_weapon": fav_weapon,
                 "weapons_used": len(player_weapons_used.get(s64, set())) if s64 else 0,
+                # match.schema_version 10: health/ammo-derived stats, computed
+                # at full tick resolution from PlayerState.health / .ammo.
+                #   time_low_health_pct: share of ticks (with a known HP ratio)
+                #     spent below LOW_HEALTH_RATIO -- a "lives dangerously" gauge.
+                #   ammo_out_episodes: debounced count of >0 -> ==0 ammo runs.
+                #   hp_efficiency: damage dealt per absolute HP lost (None when
+                #     no HP was lost). Data foundation for future UI surfaces.
+                "time_low_health_pct": (
+                    round(hp_low_ticks.get(s64, 0) / hp_alive_ticks[s64], 3)
+                    if s64 and hp_alive_ticks.get(s64) else None
+                ),
+                "ammo_out_episodes": ammo_out_episodes.get(s64, 0) if s64 else 0,
+                "hp_efficiency": (
+                    round(dealt / hp_lost_total[s64], 2)
+                    if s64 and hp_lost_total.get(s64, 0.0) > 0 else None
+                ),
             },
             "assets": {
                 "dealt": round(asset_dealt.get(slot, 0), 1),
@@ -4124,9 +4266,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         normalized_samples = {}
         for s64, samples in position_samples.items():
             normalized = []
-            for t_raw, x, y, z, has_target, is_pilot in samples:
+            for t_raw, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio in samples:
                 t_sec = int((t_raw - min_tick) / tick_rate)
-                normalized.append((t_sec, x, y, z, has_target, is_pilot))
+                normalized.append((t_sec, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio))
             normalized_samples[s64] = normalized
     else:
         normalized_samples = {}
@@ -4292,7 +4434,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # and `at_base_pilot_share` (on-foot time within the base radius =
             # ship-denied time). Read by scripts/elo.py's low-tier lift; absent
             # on pre-v9 / no-positioning matches (consumers default to 0).
-            "schema_version": 9,
+            # v10 (this version) reads the previously-unused PlayerState.health
+            # / .ammo: each positioning.players[].trail gains parallel `hp` /
+            # `ammo` arrays (0-1 ratios vs per-ship maxHealth/maxAmmo, None when
+            # the ship has no cap) driving the 3D replay HP/ammo bars, and each
+            # `personal` block gains `time_low_health_pct` / `ammo_out_episodes`
+            # / `hp_efficiency`. Absent on pre-v10 / no-positioning matches
+            # (replay hides the bars; consumers default the stats to None/0).
+            "schema_version": 10,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
@@ -5003,6 +5152,8 @@ def main():
 
     resolve_weapon = build_weapon_name_resolver(odf_db)
     resolve_unit = build_unit_name_resolver(odf_db)
+    ship_caps = build_ship_caps_resolver(odf_db)
+    print(f"  Ship-cap set: {len(ship_caps)} ODF keys with maxHealth/maxAmmo")
     known_powerup_odfs = _load_known_powerup_odfs(odf_db)
     print(f"  Powerup classification set: {len(known_powerup_odfs)} ODFs (DB Powerup bucket + VSR variants)")
     building_odfs = _load_building_odfs(odf_db)
@@ -5050,6 +5201,7 @@ def main():
                 resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs,
                 known_players,
                 schema=schema,
+                ship_caps=ship_caps,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"
