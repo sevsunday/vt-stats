@@ -2110,6 +2110,76 @@ body::before {
     cursor: help;
 }
 
+/* Range fingerprint mini-bar (match.schema_version 11) — a 4-segment
+   close/mid/long/extreme stacked sparkline in the Shot Accuracy table's
+   Range column. Monochrome --kb-primary opacity ramp (close -> extreme)
+   to read as a neutral distribution, NOT a good/bad scale. Segment widths
+   are proportional via inline flex-grow set by rangeFingerprintHtml(). */
+.vt-range-fingerprint {
+    display: inline-flex;
+    width: 84px;
+    height: 10px;
+    gap: 1px;
+    border-radius: 3px;
+    overflow: hidden;
+    vertical-align: middle;
+    cursor: help;
+    background: color-mix(in oklab, var(--kb-text-muted) 10%, transparent);
+}
+
+.vt-range-seg {
+    display: block;
+    height: 100%;
+    min-width: 2px;
+}
+
+.vt-range-seg-1 { background: color-mix(in oklab, var(--kb-primary) 30%, transparent); }
+.vt-range-seg-2 { background: color-mix(in oklab, var(--kb-primary) 50%, transparent); }
+.vt-range-seg-3 { background: color-mix(in oklab, var(--kb-primary) 72%, transparent); }
+.vt-range-seg-4 { background: var(--kb-primary); }
+
+/* Engagement Envelope cell (match.schema_version 12) — weapon-fair mean
+   "% of weapon max range" for a player. Number + band label + mini-bar.
+   Neutral coloring (no good/bad connotation); the bar uses the --kb-primary
+   ramp like the range fingerprint. */
+.vt-range-envelope {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    min-width: 64px;
+    cursor: help;
+    line-height: 1.15;
+}
+
+.vt-range-envelope-val {
+    font-family: "Geist Mono", monospace;
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.vt-range-envelope-band {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--kb-text-muted);
+}
+
+.vt-range-envelope-bar {
+    display: block;
+    width: 60px;
+    height: 4px;
+    border-radius: 2px;
+    background: color-mix(in oklab, var(--kb-text-muted) 16%, transparent);
+    overflow: hidden;
+}
+
+.vt-range-envelope-bar > span {
+    display: block;
+    height: 100%;
+    background: var(--kb-primary);
+}
+
 /* Winner badge — sits next to "Kill Feed" in the Combat-tab card header.
    Three visual states keyed by data-decided-by:
      - clean      : decisive win (recycler + factory of the loser are dead,

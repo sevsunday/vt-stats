@@ -449,6 +449,276 @@ function renderWeaponAccuracy(canvasId, weaponMeta) {
   return chart;
 }
 
+// --- Weapon Engagement Range (per-match) ---
+// Descriptive playstyle/meta view of how far each weapon is actually used,
+// built from the per-(player,weapon,channel) `range_hist` histograms emitted
+// by the pipeline (match.schema_version 11). Histograms are additive, so we
+// merge them across the (already player-filtered) leaderboard for the active
+// channel, then estimate p10/median/p95/max per weapon via linear
+// interpolation over the shared `match.distance_bin_edges`. Renders a
+// horizontal floating bar (p10 to p95) with a median tick and a dashed max
+// whisker. All distances are raw world units == in-game meters.
+//
+// NOT a skill signal -- weapon/ship access drives range far more than skill.
+
+// Estimate distribution stats from a fixed-bin histogram + shared edges.
+// Bin i covers [edges[i-1], edges[i]); the final bin is overflow
+// [edges[last], inf) and is collapsed to the last edge for display.
+function histRangeStats(hist, edges) {
+  const total = hist.reduce((s, c) => s + c, 0);
+  if (!total) return null;
+  const binLo = (i) => (i === 0 ? 0 : edges[i - 1]);
+  const binHi = (i) => (i < edges.length ? edges[i] : edges[edges.length - 1]);
+  const pct = (q) => {
+    const target = q * total;
+    let cum = 0;
+    for (let i = 0; i < hist.length; i++) {
+      const c = hist[i];
+      if (c > 0 && cum + c >= target) {
+        const lo = binLo(i), hi = binHi(i);
+        return lo + (hi - lo) * ((target - cum) / c);
+      }
+      cum += c;
+    }
+    return binHi(hist.length - 1);
+  };
+  let lastNon = 0, wsum = 0;
+  for (let i = 0; i < hist.length; i++) {
+    if (hist[i]) lastNon = i;
+    const lo = binLo(i), hi = binHi(i);
+    wsum += hist[i] * ((lo + hi) / 2);
+  }
+  return {
+    p10: pct(0.10), p50: pct(0.50), p95: pct(0.95),
+    max: binHi(lastNon), mean: wsum / total, n: total,
+  };
+}
+
+// Merge a weapon's range_hist for the active channel ('pvp' | 'pve' | 'both').
+function mergeRangeHist(rangeHist, channel, nbins) {
+  const out = new Array(nbins).fill(0);
+  if (!rangeHist) return out;
+  const add = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (let i = 0; i < nbins && i < arr.length; i++) out[i] += arr[i] || 0;
+  };
+  if (channel === 'pvp' || channel === 'both') add(rangeHist.pvp);
+  if (channel === 'pve' || channel === 'both') add(rangeHist.pve);
+  return out;
+}
+
+// Per-player engagement envelope: mean (and median) % of weapon max range
+// across all of a roster row's hits, for the active channel. Returns null
+// when the player has no %-of-max data (v1 / no usable ordnance ranges).
+function weaponEnvelopePct(weaponBreakdown, channel, pctEdges) {
+  if (!Array.isArray(pctEdges) || pctEdges.length === 0) return null;
+  const nbins = pctEdges.length + 1;
+  const merged = new Array(nbins).fill(0);
+  let any = false;
+  for (const w in (weaponBreakdown || {})) {
+    const rph = weaponBreakdown[w] && weaponBreakdown[w].range_pct_hist;
+    if (!rph) continue;
+    const m = mergeRangeHist(rph, channel || 'both', nbins);
+    for (let i = 0; i < nbins; i++) { merged[i] += m[i]; if (m[i]) any = true; }
+  }
+  if (!any) return null;
+  const st = histRangeStats(merged, pctEdges);
+  return st ? { mean: st.mean, median: st.p50, n: st.n } : null;
+}
+
+function renderWeaponRange(canvasId, leaderboard, channel, binEdges, opts) {
+  const ch = channel || 'both';
+  const o = opts || {};
+  const unit = o.unit === 'pct' ? 'pct' : 'm';
+  const isPct = unit === 'pct';
+  const edges = isPct ? o.pctEdges : binEdges;
+  const weaponRanges = o.weaponRanges || {};
+  const histKey = isPct ? 'range_pct_hist' : 'range_hist';
+  const unitLabel = isPct ? '%' : 'm';
+  // Resolve the card body even when a prior render replaced the canvas with
+  // an empty-state message (channel toggling can flip empty<->populated).
+  const body = document.getElementById(canvasId)?.closest('.card-body')
+    || document.querySelector('#section-weapon-range .card-body');
+  const showEmpty = (msg) => { if (body) body.innerHTML = `<p style="color:var(--kb-text-muted)">${msg}</p>`; };
+  const ensureCanvas = () => {
+    if (!document.getElementById(canvasId) && body) {
+      body.innerHTML = `<div class="chart-container"><canvas id="${canvasId}"></canvas></div>`;
+    }
+  };
+  if (!Array.isArray(edges) || edges.length === 0) {
+    showEmpty(isPct
+      ? 'No weapon-max-range data for this match.'
+      : 'No engagement-range data for this match.');
+    return null;
+  }
+  const nbins = edges.length + 1;
+
+  // Merge histograms per weapon across the (filtered) roster.
+  const perWeapon = {};
+  (leaderboard || []).forEach((p) => {
+    const wb = p.weapon_breakdown || {};
+    for (const wname in wb) {
+      const rh = wb[wname] && wb[wname][histKey];
+      if (!rh) continue;
+      const merged = mergeRangeHist(rh, ch, nbins);
+      if (!perWeapon[wname]) perWeapon[wname] = new Array(nbins).fill(0);
+      for (let i = 0; i < nbins; i++) perWeapon[wname][i] += merged[i];
+    }
+  });
+
+  const rows = Object.keys(perWeapon)
+    .map((w) => ({ weapon: w, stats: histRangeStats(perWeapon[w], edges), maxRange: weaponRanges[w] }))
+    .filter((r) => r.stats && r.stats.n > 0)
+    .sort((a, b) => b.stats.p50 - a.stats.p50)
+    .slice(0, 15);
+
+  if (rows.length === 0) {
+    const what = ch === 'pvp' ? 'PvP' : ch === 'pve' ? 'PvE' : '';
+    showEmpty(`No ${what} engagement-range data for this selection.`);
+    return null;
+  }
+
+  ensureCanvas();
+  applyThemeDefaults();
+  const t = getThemeColors();
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const labels = rows.map((r) => r.weapon);
+  const stats = rows.map((r) => r.stats);
+  const maxRanges = rows.map((r) => r.maxRange);
+  const colors = rows.map((_, i) => getPlayerColor(i));
+
+  // Custom markers: median tick (solid) + dashed whisker p95->observed-max,
+  // plus a faint theoretical-max reference tick (meters mode: weapon book
+  // range; pct mode: a 100%-of-envelope reference line).
+  const rangeMarkers = {
+    id: 'rangeMarkers',
+    afterDatasetsDraw(chart) {
+      const { ctx: c, chartArea, scales: { x } } = chart;
+      const meta = chart.getDatasetMeta(0);
+      // pct mode: single full-height 100% reference line.
+      if (isPct) {
+        const x100 = x.getPixelForValue(100);
+        if (x100 >= chartArea.left && x100 <= chartArea.right) {
+          c.save();
+          c.strokeStyle = t.textMuted;
+          c.lineWidth = 1;
+          c.setLineDash([4, 3]);
+          c.beginPath();
+          c.moveTo(x100, chartArea.top);
+          c.lineTo(x100, chartArea.bottom);
+          c.stroke();
+          c.setLineDash([]);
+          c.restore();
+        }
+      }
+      stats.forEach((s, i) => {
+        const bar = meta.data[i];
+        if (!bar) return;
+        const y = bar.y;
+        const h = bar.height || 12;
+        c.save();
+        // dashed whisker p95 -> observed max
+        const x95 = x.getPixelForValue(s.p95);
+        const xmax = x.getPixelForValue(s.max);
+        if (xmax > x95 + 0.5) {
+          c.strokeStyle = t.textMuted;
+          c.lineWidth = 1;
+          c.setLineDash([2, 2]);
+          c.beginPath();
+          c.moveTo(x95, y);
+          c.lineTo(xmax, y);
+          c.stroke();
+          c.setLineDash([]);
+          c.beginPath();
+          c.moveTo(xmax, y - h / 4);
+          c.lineTo(xmax, y + h / 4);
+          c.stroke();
+        }
+        // meters mode: faint theoretical-max (book range) reference tick.
+        if (!isPct && maxRanges[i]) {
+          const xr = x.getPixelForValue(maxRanges[i]);
+          if (xr >= chartArea.left && xr <= chartArea.right) {
+            c.strokeStyle = t.textMuted;
+            c.globalAlpha = 0.55;
+            c.lineWidth = 1;
+            c.setLineDash([1, 3]);
+            c.beginPath();
+            c.moveTo(xr, y - h / 2);
+            c.lineTo(xr, y + h / 2);
+            c.stroke();
+            c.setLineDash([]);
+            c.globalAlpha = 1;
+          }
+        }
+        // median tick
+        const mx = x.getPixelForValue(s.p50);
+        c.strokeStyle = t.text;
+        c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(mx, y - h / 2);
+        c.lineTo(mx, y + h / 2);
+        c.stroke();
+        c.restore();
+      });
+    },
+  };
+
+  const xScale = {
+    title: { display: true, text: isPct ? '% of weapon max range' : 'Engagement range (m)' },
+    beginAtZero: true,
+  };
+  if (isPct) xScale.suggestedMax = 120;
+
+  const chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: stats.map((s) => [s.p10, s.p95]),
+        backgroundColor: colors.map((cc) => cc + '66'),
+        borderColor: colors,
+        borderWidth: 1,
+        borderSkipped: false,
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            label: (item) => {
+              const s = stats[item.dataIndex];
+              const u = unitLabel;
+              const out = [
+                `median ${Math.round(s.p50)}${u}`,
+                `p10-p95: ${Math.round(s.p10)}-${Math.round(s.p95)}${u}`,
+                `mean ${Math.round(s.mean)}${u} | max ${Math.round(s.max)}${u}`,
+                `${s.n.toLocaleString()} hits`,
+              ];
+              if (!isPct && maxRanges[item.dataIndex]) {
+                out.push(`book max ${Math.round(maxRanges[item.dataIndex])} m`);
+              }
+              return out;
+            },
+          },
+        },
+      },
+      scales: {
+        x: xScale,
+        y: { ticks: { font: { size: 11 } } },
+      },
+    },
+    plugins: [rangeMarkers],
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
 // --- Global Weapon Meta (for All Matches) ---
 
 function renderGlobalWeaponMeta(canvasId, weaponMeta) {

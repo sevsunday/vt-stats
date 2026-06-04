@@ -1514,6 +1514,15 @@
   let currentFilteredData = null;
   let filterState = { mode: 'all', players: [], team: null, persist: false };
   let timelineMode = 'player';
+  // Weapon Engagement Range channel toggle (PvP / PvE / Both). In-memory only,
+  // shared by the range strip and the accuracy-table range fingerprint.
+  let weaponRangeChannel = 'both';
+  // Weapon Engagement Range unit toggle (Meters | % of weapon max range).
+  // 'm' shows raw distances; 'pct' shows the weapon-fair % of envelope.
+  let weaponRangeUnit = 'm';
+  // Leaderboard currently backing the Weapons & Accuracy tab, stashed so the
+  // channel toggle can re-render both range surfaces without a full tab pass.
+  let weaponsTabLeaderboard = null;
   let sortState = { key: 'dealt', asc: false };
   // NOTE: in the default 'Per match' column view this is remapped to the
   // visible 'Dealt/m' (avg_total_dealt) column by remapCareerSortKeyForColumnView()
@@ -1723,6 +1732,50 @@
       btn.classList.add('active');
       timelineMode = btn.dataset.timelineMode;
       if (currentFilteredData && tabRendered['#tab-combat']) renderTimelineSection(currentFilteredData);
+    });
+  });
+
+  // Shared opts builder for the engagement-range strip (unit mode + the
+  // shared %-bin layout + the per-weapon book-range reference values).
+  function weaponRangeOpts() {
+    const m = (currentData && currentData.match) || {};
+    return {
+      unit: weaponRangeUnit,
+      pctEdges: m.distance_pct_bin_edges,
+      weaponRanges: m.weapon_ranges,
+    };
+  }
+  function rerenderWeaponRangeSurfaces() {
+    if (!(weaponsTabLeaderboard && tabRendered['#tab-weapons'])) return;
+    const edges = currentData && currentData.match && currentData.match.distance_bin_edges;
+    renderWeaponRange('weapon-range-chart', weaponsTabLeaderboard, weaponRangeChannel, edges, weaponRangeOpts());
+    renderAccuracyTable(weaponsTabLeaderboard, weaponRangeChannel);
+  }
+
+  // Weapon Engagement Range channel toggle (PvP / PvE / Both). Re-renders the
+  // range strip and the accuracy-table range fingerprint + envelope against
+  // the stashed (already filtered) leaderboard. No-op until the tab rendered.
+  document.querySelectorAll('#weapon-range-channel [data-range-channel]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#weapon-range-channel [data-range-channel]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      weaponRangeChannel = btn.dataset.rangeChannel;
+      rerenderWeaponRangeSurfaces();
+    });
+  });
+
+  // Weapon Engagement Range unit toggle (Meters | % of weapon max range).
+  // Only the strip changes between modes; the envelope/fingerprint columns
+  // are unit-agnostic, but re-rendering the table is harmless and cheap.
+  document.querySelectorAll('#weapon-range-unit [data-range-unit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#weapon-range-unit [data-range-unit]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      weaponRangeUnit = btn.dataset.rangeUnit;
+      if (weaponsTabLeaderboard && tabRendered['#tab-weapons']) {
+        const edges = currentData && currentData.match && currentData.match.distance_bin_edges;
+        renderWeaponRange('weapon-range-chart', weaponsTabLeaderboard, weaponRangeChannel, edges, weaponRangeOpts());
+      }
     });
   });
 
@@ -2210,9 +2263,37 @@
     });
 
     registerTabRenderer('#tab-weapons', () => {
+      weaponsTabLeaderboard = data.leaderboard;
       renderPlayerWeapons('player-weapons-chart', data.leaderboard, data.weapon_meta);
-      renderAccuracyTable(data.leaderboard);
+      renderAccuracyTable(data.leaderboard, weaponRangeChannel);
       renderWeaponAccuracy('weapon-accuracy-chart', data.weapon_meta);
+      // Weapon Engagement Range card (match.schema_version 11/12). Self-hides
+      // on v1 / no-distance matches; otherwise render the strip for the
+      // active PvP/PvE/Both channel + Meters|% unit. The "% of max" unit
+      // toggle is hidden (and the mode forced back to meters) when the match
+      // has no weapon-max-range data (v11 matches reprocessed before v12).
+      const rangeCard = document.getElementById('section-weapon-range');
+      const m = (currentData && currentData.match) || {};
+      const bhd = m.bullet_hit_distance;
+      const edges = m.distance_bin_edges;
+      const unitGroup = document.getElementById('weapon-range-unit');
+      const hasPct = Array.isArray(m.distance_pct_bin_edges);
+      if (unitGroup) {
+        unitGroup.style.display = hasPct ? '' : 'none';
+        if (!hasPct && weaponRangeUnit !== 'm') {
+          weaponRangeUnit = 'm';
+          unitGroup.querySelectorAll('[data-range-unit]').forEach(b =>
+            b.classList.toggle('active', b.dataset.rangeUnit === 'm'));
+        }
+      }
+      if (rangeCard) {
+        if (bhd && bhd.with_distance > 0 && Array.isArray(edges)) {
+          rangeCard.style.display = '';
+          renderWeaponRange('weapon-range-chart', data.leaderboard, weaponRangeChannel, edges, weaponRangeOpts());
+        } else {
+          rangeCard.style.display = 'none';
+        }
+      }
       renderHitTargets(data.leaderboard);
     });
 
@@ -4927,8 +5008,69 @@
   }
 
   // --- Accuracy Table ---
-  function renderAccuracyTable(leaderboard) {
+  // Range fingerprint mini-bar (match.schema_version 11). Renders a 4-segment
+  // close/mid/long/extreme stacked sparkline from personal.distance_buckets
+  // for the given channel ('pvp' | 'pve' | 'both'). Returns an em-dash when
+  // the player has no engagement-range data (v1 / no-distance / no hits in
+  // the selected channel). Purely descriptive playstyle flavor.
+  const RANGE_BANDS = [
+    { key: 'close', label: 'Close', cls: 'vt-range-seg-1' },
+    { key: 'mid', label: 'Mid', cls: 'vt-range-seg-2' },
+    { key: 'long', label: 'Long', cls: 'vt-range-seg-3' },
+    { key: 'extreme', label: 'Extreme', cls: 'vt-range-seg-4' },
+  ];
+  function rangeFingerprintHtml(buckets, channel) {
+    if (!buckets) return '<span style="color:var(--kb-text-muted)">—</span>';
+    const ch = channel || 'both';
+    const pick = (b) => b || { close: 0, mid: 0, long: 0, extreme: 0 };
+    const pvp = pick(buckets.pvp);
+    const pve = pick(buckets.pve);
+    const merged = {};
+    RANGE_BANDS.forEach(({ key }) => {
+      merged[key] = (ch === 'pvp' || ch === 'both' ? (pvp[key] || 0) : 0)
+        + (ch === 'pve' || ch === 'both' ? (pve[key] || 0) : 0);
+    });
+    const total = RANGE_BANDS.reduce((s, { key }) => s + merged[key], 0);
+    if (total <= 0) return '<span style="color:var(--kb-text-muted)">—</span>';
+    const segs = RANGE_BANDS
+      .filter(({ key }) => merged[key] > 0)
+      .map(({ key, cls }) => `<span class="vt-range-seg ${cls}" style="flex-grow:${merged[key]}"></span>`)
+      .join('');
+    const tip = RANGE_BANDS
+      .map(({ key, label }) => `${label} ${((merged[key] / total) * 100).toFixed(0)}%`)
+      .join(' · ');
+    return `<span class="vt-range-fingerprint" data-bs-toggle="tooltip" title="${esc(tip)} (${total.toLocaleString()} hits)">${segs}</span>`;
+  }
+
+  // Engagement Envelope cell (match.schema_version 12). Weapon-fair mean
+  // "% of weapon max range" across the player's hits for the active channel,
+  // rendered as a number + band label + mini-bar. Weapon-normalized, so it
+  // is comparable across players regardless of loadout. Em-dash when the
+  // player has no %-of-max data (v1 / no usable ordnance ranges).
+  function envelopeBand(pct) {
+    if (pct > 100) return 'Over-range';
+    if (pct >= 66) return 'Edge';
+    if (pct >= 33) return 'Mid';
+    return 'Point-blank';
+  }
+  function rangeEnvelopeHtml(weaponBreakdown, channel, pctEdges) {
+    if (typeof weaponEnvelopePct !== 'function') return '<span style="color:var(--kb-text-muted)">—</span>';
+    const env = weaponEnvelopePct(weaponBreakdown, channel, pctEdges);
+    if (!env) return '<span style="color:var(--kb-text-muted)">—</span>';
+    const pct = env.mean;
+    const band = envelopeBand(pct);
+    const w = Math.max(0, Math.min(100, pct));
+    const tip = `Mean ${pct.toFixed(0)}% of weapon max range · median ${env.median.toFixed(0)}% · ${env.n.toLocaleString()} hits`;
+    return `<span class="vt-range-envelope" data-bs-toggle="tooltip" title="${esc(tip)}">`
+      + `<span class="vt-range-envelope-val">${pct.toFixed(0)}%</span>`
+      + `<span class="vt-range-envelope-band">${band}</span>`
+      + `<span class="vt-range-envelope-bar"><span style="width:${w}%"></span></span>`
+      + `</span>`;
+  }
+
+  function renderAccuracyTable(leaderboard, channel) {
     const tbody = document.querySelector('#accuracy-table tbody');
+    const pctEdges = currentData && currentData.match && currentData.match.distance_pct_bin_edges;
     const sorted = [...leaderboard].sort((a, b) => b.personal.accuracy - a.personal.accuracy);
     tbody.innerHTML = sorted.map(p => {
       const ps = p.personal;
@@ -4938,8 +5080,11 @@
         <td class="text-end">${ps.shots_fired.toLocaleString()}</td>
         <td class="text-end">${ps.shots_hit.toLocaleString()}</td>
         <td class="text-end fw-bold" style="color:${accColor}">${(ps.accuracy * 100).toFixed(1)}%</td>
+        <td class="text-end">${rangeFingerprintHtml(ps.distance_buckets, channel)}</td>
+        <td class="text-end">${rangeEnvelopeHtml(p.weapon_breakdown, channel, pctEdges)}</td>
       </tr>`;
     }).join('');
+    ensureTooltips(tbody);
   }
 
   // --- Kill Feed ---
@@ -7449,6 +7594,10 @@
     });
     registerChartRenderer('section-weapon-accuracy', (canvasId) => {
       return renderWeaponAccuracy(canvasId, data.weapon_meta);
+    });
+    registerChartRenderer('section-weapon-range', (canvasId) => {
+      const edges = currentData && currentData.match && currentData.match.distance_bin_edges;
+      return renderWeaponRange(canvasId, data.leaderboard, weaponRangeChannel, edges, weaponRangeOpts());
     });
     registerChartRenderer('section-vehicle-kills', (canvasId) => {
       return renderVehicleKills(canvasId, currentData.kills.by_vehicle);

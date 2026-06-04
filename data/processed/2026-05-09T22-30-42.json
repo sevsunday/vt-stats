@@ -3,7 +3,7 @@
     "id": "2026-05-09T22-30-42",
     "source_file": "2026-05-09-22-30-42.binpb.gz",
     "source_size_bytes": 6111408,
-    "pipeline_version": 22,
+    "pipeline_version": 24,
     "submitter": "Sev",
     "map": "STGizavsr.bzn",
     "date": "2026-05-09T22:30:42.092495+00:00",
@@ -136,14 +136,54 @@
     "has_position_data": true,
     "has_target_lock_data": true,
     "has_pickup_data": true,
-    "schema_version": 10,
+    "schema_version": 12,
     "proto_schema_version": "v2",
     "shutdown_requested": false,
     "bullet_hit_distance": {
       "count": 7993,
       "with_distance": 7993,
+      "with_max_range": 7992,
       "mean": 69.127,
       "max": 761.73
+    },
+    "distance_bin_edges": [
+      10,
+      20,
+      30,
+      40,
+      50,
+      75,
+      100,
+      150,
+      200,
+      300,
+      400,
+      600,
+      800,
+      1200
+    ],
+    "distance_pct_bin_edges": [
+      10,
+      20,
+      30,
+      40,
+      50,
+      60,
+      70,
+      80,
+      90,
+      100,
+      120
+    ],
+    "weapon_ranges": {
+      "Minigun": 105.0,
+      "FAF Msl": 120.0,
+      "Pulse": 200.1,
+      "Chain Gun": 135.0,
+      "Laser": 120.0,
+      "Shadower Msl": 800.0,
+      "Blast": 170.0,
+      "Sniper": 200.0
     },
     "terrain_bounds": {
       "min": {
@@ -208,6 +248,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Chain Gun",
         "weapons_used": 16,
+        "distance_buckets": {
+          "pvp": {
+            "close": 360,
+            "mid": 864,
+            "long": 25,
+            "extreme": 1
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.021,
         "ammo_out_episodes": 14,
         "hp_efficiency": 5.36
@@ -224,7 +278,42 @@
           "hits": 11,
           "pvp_hits": 11,
           "self_hits": 0,
-          "accuracy": 0.647
+          "accuracy": 0.647,
+          "range_hist": {
+            "pvp": [
+              1,
+              0,
+              0,
+              2,
+              1,
+              1,
+              1,
+              4,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              1,
+              0,
+              3,
+              1,
+              0,
+              2,
+              2,
+              0,
+              1,
+              1,
+              0,
+              0
+            ]
+          }
         },
         "Chain Gun": {
           "dealt": 46472.0,
@@ -233,7 +322,42 @@
           "hits": 337,
           "pvp_hits": 337,
           "self_hits": 0,
-          "accuracy": 0.136
+          "accuracy": 0.136,
+          "range_hist": {
+            "pvp": [
+              41,
+              60,
+              2,
+              26,
+              35,
+              43,
+              54,
+              75,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              66,
+              36,
+              31,
+              45,
+              22,
+              13,
+              18,
+              51,
+              36,
+              18,
+              0,
+              1
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 650.0,
@@ -242,7 +366,42 @@
           "hits": 5,
           "pvp_hits": 5,
           "self_hits": 0,
-          "accuracy": 0.385
+          "accuracy": 0.385,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              3,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              2,
+              1,
+              0,
+              0,
+              1,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 9400.0,
@@ -251,7 +410,42 @@
           "hits": 29,
           "pvp_hits": 29,
           "self_hits": 0,
-          "accuracy": 0.879
+          "accuracy": 0.879,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              1,
+              2,
+              2,
+              10,
+              14,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              3,
+              2,
+              0,
+              0,
+              6,
+              14,
+              4,
+              0,
+              0
+            ]
+          }
         },
         "Minigun": {
           "dealt": 17442.0,
@@ -260,7 +454,42 @@
           "hits": 727,
           "pvp_hits": 727,
           "self_hits": 0,
-          "accuracy": 0.318
+          "accuracy": 0.318,
+          "range_hist": {
+            "pvp": [
+              0,
+              8,
+              21,
+              46,
+              71,
+              263,
+              268,
+              49,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              10,
+              34,
+              53,
+              61,
+              72,
+              137,
+              175,
+              94,
+              71,
+              19,
+              1
+            ]
+          }
         },
         "Mortar": {
           "dealt": 17100.0,
@@ -269,7 +498,26 @@
           "hits": 1,
           "pvp_hits": 1,
           "self_hits": 0,
-          "accuracy": 0.037
+          "accuracy": 0.037,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Pulse": {
           "dealt": 1669.0,
@@ -278,7 +526,42 @@
           "hits": 114,
           "pvp_hits": 114,
           "self_hits": 0,
-          "accuracy": 0.286
+          "accuracy": 0.286,
+          "range_hist": {
+            "pvp": [
+              14,
+              14,
+              0,
+              9,
+              5,
+              10,
+              9,
+              44,
+              8,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              28,
+              9,
+              7,
+              11,
+              6,
+              1,
+              34,
+              15,
+              2,
+              0,
+              0,
+              1
+            ]
+          }
         },
         "Shadower Msl": {
           "dealt": 22900.0,
@@ -287,7 +570,42 @@
           "hits": 26,
           "pvp_hits": 26,
           "self_hits": 0,
-          "accuracy": 0.377
+          "accuracy": 0.377,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              10,
+              10,
+              4,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              1,
+              13,
+              12,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 1049.1,
@@ -549,6 +867,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Shadower Msl",
         "weapons_used": 10,
+        "distance_buckets": {
+          "pvp": {
+            "close": 172,
+            "mid": 385,
+            "long": 25,
+            "extreme": 0
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.034,
         "ammo_out_episodes": 10,
         "hp_efficiency": 3.64
@@ -565,7 +897,42 @@
           "hits": 3,
           "pvp_hits": 3,
           "self_hits": 0,
-          "accuracy": 0.333
+          "accuracy": 0.333,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 13450.0,
@@ -574,7 +941,42 @@
           "hits": 36,
           "pvp_hits": 36,
           "self_hits": 0,
-          "accuracy": 0.581
+          "accuracy": 0.581,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              2,
+              0,
+              4,
+              14,
+              14,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              3,
+              0,
+              0,
+              4,
+              4,
+              8,
+              6,
+              8,
+              2,
+              1
+            ]
+          }
         },
         "Minigun": {
           "dealt": 12298.0,
@@ -583,7 +985,42 @@
           "hits": 374,
           "pvp_hits": 374,
           "self_hits": 0,
-          "accuracy": 0.258
+          "accuracy": 0.258,
+          "range_hist": {
+            "pvp": [
+              8,
+              17,
+              2,
+              32,
+              40,
+              152,
+              99,
+              23,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              9,
+              16,
+              4,
+              30,
+              80,
+              36,
+              66,
+              60,
+              37,
+              22,
+              13,
+              1
+            ]
+          }
         },
         "Pulse": {
           "dealt": 2055.0,
@@ -592,7 +1029,42 @@
           "hits": 140,
           "pvp_hits": 140,
           "self_hits": 0,
-          "accuracy": 0.461
+          "accuracy": 0.461,
+          "range_hist": {
+            "pvp": [
+              33,
+              11,
+              5,
+              3,
+              17,
+              33,
+              7,
+              26,
+              4,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              44,
+              8,
+              31,
+              22,
+              4,
+              9,
+              9,
+              11,
+              1,
+              0,
+              0,
+              1
+            ]
+          }
         },
         "Shadower Msl": {
           "dealt": 32260.0,
@@ -601,7 +1073,42 @@
           "hits": 29,
           "pvp_hits": 29,
           "self_hits": 0,
-          "accuracy": 0.252
+          "accuracy": 0.252,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              11,
+              6,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              2,
+              10,
+              15,
+              2,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 1582.5,
@@ -816,6 +1323,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Shadower Msl",
         "weapons_used": 11,
+        "distance_buckets": {
+          "pvp": {
+            "close": 402,
+            "mid": 423,
+            "long": 14,
+            "extreme": 4
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.035,
         "ammo_out_episodes": 13,
         "hp_efficiency": 1.89
@@ -832,7 +1353,42 @@
           "hits": 188,
           "pvp_hits": 188,
           "self_hits": 0,
-          "accuracy": 0.231
+          "accuracy": 0.231,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              2,
+              2,
+              1,
+              9,
+              28,
+              146,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              2,
+              2,
+              4,
+              0,
+              10,
+              18,
+              94,
+              30,
+              28,
+              0,
+              0
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 780.0,
@@ -841,7 +1397,42 @@
           "hits": 8,
           "pvp_hits": 8,
           "self_hits": 0,
-          "accuracy": 0.444
+          "accuracy": 0.444,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              2,
+              2,
+              3,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              2,
+              3,
+              2,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 17450.0,
@@ -850,7 +1441,42 @@
           "hits": 40,
           "pvp_hits": 40,
           "self_hits": 0,
-          "accuracy": 0.69
+          "accuracy": 0.69,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              3,
+              6,
+              14,
+              15,
+              0,
+              0,
+              1,
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              2,
+              5,
+              2,
+              10,
+              2,
+              7,
+              10,
+              0,
+              2
+            ]
+          }
         },
         "Minigun": {
           "dealt": 11844.0,
@@ -859,7 +1485,42 @@
           "hits": 401,
           "pvp_hits": 401,
           "self_hits": 0,
-          "accuracy": 0.313
+          "accuracy": 0.313,
+          "range_hist": {
+            "pvp": [
+              5,
+              66,
+              97,
+              80,
+              70,
+              65,
+              13,
+              0,
+              0,
+              2,
+              0,
+              3,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              9,
+              70,
+              109,
+              83,
+              57,
+              41,
+              14,
+              10,
+              3,
+              0,
+              0,
+              5
+            ]
+          }
         },
         "Pulse": {
           "dealt": 1995.0,
@@ -868,7 +1529,42 @@
           "hits": 195,
           "pvp_hits": 195,
           "self_hits": 0,
-          "accuracy": 0.385
+          "accuracy": 0.385,
+          "range_hist": {
+            "pvp": [
+              8,
+              25,
+              17,
+              7,
+              14,
+              86,
+              14,
+              19,
+              5,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              33,
+              24,
+              46,
+              61,
+              7,
+              14,
+              0,
+              8,
+              2,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Shadower Msl": {
           "dealt": 18880.0,
@@ -877,7 +1573,42 @@
           "hits": 11,
           "pvp_hits": 11,
           "self_hits": 0,
-          "accuracy": 0.172
+          "accuracy": 0.172,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              2,
+              2,
+              3,
+              2,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              1,
+              5,
+              3,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 1882.0,
@@ -1092,6 +1823,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Chain Gun",
         "weapons_used": 12,
+        "distance_buckets": {
+          "pvp": {
+            "close": 361,
+            "mid": 864,
+            "long": 39,
+            "extreme": 0
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.021,
         "ammo_out_episodes": 22,
         "hp_efficiency": 1.68
@@ -1108,7 +1853,42 @@
           "hits": 285,
           "pvp_hits": 285,
           "self_hits": 0,
-          "accuracy": 0.187
+          "accuracy": 0.187,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              46,
+              239,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              12,
+              26,
+              50,
+              66,
+              119,
+              12,
+              0
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 530.0,
@@ -1117,7 +1897,42 @@
           "hits": 5,
           "pvp_hits": 5,
           "self_hits": 0,
-          "accuracy": 0.455
+          "accuracy": 0.455,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              1,
+              1,
+              2,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              2,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 2800.0,
@@ -1126,7 +1941,42 @@
           "hits": 8,
           "pvp_hits": 8,
           "self_hits": 0,
-          "accuracy": 1.0
+          "accuracy": 1.0,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              2,
+              0,
+              2,
+              2,
+              2,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              2,
+              0,
+              2,
+              0,
+              0,
+              2,
+              2,
+              0,
+              0
+            ]
+          }
         },
         "Minigun": {
           "dealt": 17207.0,
@@ -1135,7 +1985,42 @@
           "hits": 672,
           "pvp_hits": 672,
           "self_hits": 0,
-          "accuracy": 0.349
+          "accuracy": 0.349,
+          "range_hist": {
+            "pvp": [
+              9,
+              35,
+              45,
+              117,
+              36,
+              336,
+              82,
+              10,
+              1,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              9,
+              39,
+              50,
+              116,
+              44,
+              144,
+              168,
+              63,
+              19,
+              10,
+              6,
+              4
+            ]
+          }
         },
         "Pulse": {
           "dealt": 3327.0,
@@ -1144,7 +2029,42 @@
           "hits": 293,
           "pvp_hits": 293,
           "self_hits": 0,
-          "accuracy": 0.265
+          "accuracy": 0.265,
+          "range_hist": {
+            "pvp": [
+              20,
+              4,
+              8,
+              34,
+              49,
+              29,
+              44,
+              68,
+              36,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              24,
+              42,
+              67,
+              19,
+              36,
+              45,
+              21,
+              17,
+              6,
+              15,
+              0,
+              1
+            ]
+          }
         },
         "Shadower Msl": {
           "dealt": 8800.0,
@@ -1153,7 +2073,42 @@
           "hits": 1,
           "pvp_hits": 1,
           "self_hits": 0,
-          "accuracy": 0.037
+          "accuracy": 0.037,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 2072.9,
@@ -1381,6 +2336,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Chain Gun",
         "weapons_used": 8,
+        "distance_buckets": {
+          "pvp": {
+            "close": 288,
+            "mid": 348,
+            "long": 23,
+            "extreme": 1
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.008,
         "ammo_out_episodes": 19,
         "hp_efficiency": 2.23
@@ -1397,7 +2366,42 @@
           "hits": 86,
           "pvp_hits": 86,
           "self_hits": 0,
-          "accuracy": 0.033
+          "accuracy": 0.033,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              2,
+              29,
+              4,
+              12,
+              2,
+              37,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              33,
+              2,
+              2,
+              12,
+              0,
+              0,
+              20,
+              12,
+              5,
+              0
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 200.0,
@@ -1406,7 +2410,42 @@
           "hits": 2,
           "pvp_hits": 2,
           "self_hits": 0,
-          "accuracy": 0.182
+          "accuracy": 0.182,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 7000.0,
@@ -1415,7 +2454,42 @@
           "hits": 16,
           "pvp_hits": 16,
           "self_hits": 0,
-          "accuracy": 0.571
+          "accuracy": 0.571,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              2,
+              0,
+              0,
+              0,
+              6,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              2,
+              0,
+              0,
+              0,
+              2,
+              2,
+              4,
+              6,
+              0,
+              0
+            ]
+          }
         },
         "Minigun": {
           "dealt": 13351.0,
@@ -1424,7 +2498,42 @@
           "hits": 390,
           "pvp_hits": 390,
           "self_hits": 0,
-          "accuracy": 0.209
+          "accuracy": 0.209,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              33,
+              63,
+              75,
+              125,
+              82,
+              10,
+              0,
+              1,
+              0,
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              39,
+              67,
+              87,
+              85,
+              18,
+              28,
+              40,
+              22,
+              2,
+              2
+            ]
+          }
         },
         "Pulse": {
           "dealt": 2385.0,
@@ -1433,7 +2542,42 @@
           "hits": 166,
           "pvp_hits": 166,
           "self_hits": 0,
-          "accuracy": 0.206
+          "accuracy": 0.206,
+          "range_hist": {
+            "pvp": [
+              11,
+              25,
+              29,
+              6,
+              9,
+              20,
+              15,
+              29,
+              22,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              36,
+              35,
+              16,
+              14,
+              14,
+              15,
+              12,
+              9,
+              7,
+              8,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 1502.9,
@@ -1634,6 +2778,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Chain Gun",
         "weapons_used": 8,
+        "distance_buckets": {
+          "pvp": {
+            "close": 236,
+            "mid": 622,
+            "long": 27,
+            "extreme": 1
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.036,
         "ammo_out_episodes": 60,
         "hp_efficiency": 2.08
@@ -1650,7 +2808,42 @@
           "hits": 247,
           "pvp_hits": 247,
           "self_hits": 0,
-          "accuracy": 0.123
+          "accuracy": 0.123,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              7,
+              6,
+              49,
+              32,
+              152,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              7,
+              8,
+              35,
+              22,
+              5,
+              57,
+              65,
+              40,
+              7,
+              1
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 980.0,
@@ -1659,7 +2852,42 @@
           "hits": 6,
           "pvp_hits": 6,
           "self_hits": 0,
-          "accuracy": 0.462
+          "accuracy": 0.462,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              2,
+              3,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              0,
+              2,
+              1,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 4000.0,
@@ -1668,7 +2896,42 @@
           "hits": 10,
           "pvp_hits": 10,
           "self_hits": 0,
-          "accuracy": 0.625
+          "accuracy": 0.625,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              6,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              2,
+              0,
+              0,
+              8,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Minigun": {
           "dealt": 17578.0,
@@ -1677,7 +2940,42 @@
           "hits": 360,
           "pvp_hits": 360,
           "self_hits": 0,
-          "accuracy": 0.158
+          "accuracy": 0.158,
+          "range_hist": {
+            "pvp": [
+              0,
+              24,
+              11,
+              36,
+              59,
+              148,
+              74,
+              8,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              24,
+              15,
+              42,
+              64,
+              64,
+              65,
+              34,
+              29,
+              17,
+              6,
+              0
+            ]
+          }
         },
         "Pulse": {
           "dealt": 3056.0,
@@ -1686,7 +2984,42 @@
           "hits": 263,
           "pvp_hits": 263,
           "self_hits": 0,
-          "accuracy": 0.348
+          "accuracy": 0.348,
+          "range_hist": {
+            "pvp": [
+              12,
+              17,
+              30,
+              19,
+              15,
+              37,
+              56,
+              50,
+              26,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              29,
+              49,
+              29,
+              40,
+              39,
+              37,
+              10,
+              14,
+              10,
+              5,
+              1,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 1654.7,
@@ -1903,6 +3236,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Chain Gun",
         "weapons_used": 8,
+        "distance_buckets": {
+          "pvp": {
+            "close": 241,
+            "mid": 375,
+            "long": 0,
+            "extreme": 1
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.077,
         "ammo_out_episodes": 1,
         "hp_efficiency": 3.54
@@ -1919,7 +3266,42 @@
           "hits": 242,
           "pvp_hits": 242,
           "self_hits": 0,
-          "accuracy": 0.114
+          "accuracy": 0.114,
+          "range_hist": {
+            "pvp": [
+              0,
+              23,
+              25,
+              14,
+              20,
+              60,
+              9,
+              91,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              42,
+              20,
+              30,
+              46,
+              8,
+              2,
+              30,
+              45,
+              19,
+              0,
+              0
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 50.0,
@@ -1928,7 +3310,42 @@
           "hits": 1,
           "pvp_hits": 1,
           "self_hits": 0,
-          "accuracy": 0.25
+          "accuracy": 0.25,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 4300.0,
@@ -1937,7 +3354,42 @@
           "hits": 10,
           "pvp_hits": 10,
           "self_hits": 0,
-          "accuracy": 0.5
+          "accuracy": 0.5,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              2,
+              4,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              2,
+              0,
+              0,
+              2,
+              0,
+              4,
+              2,
+              0,
+              0
+            ]
+          }
         },
         "Minigun": {
           "dealt": 11247.0,
@@ -1946,7 +3398,42 @@
           "hits": 330,
           "pvp_hits": 330,
           "self_hits": 0,
-          "accuracy": 0.331
+          "accuracy": 0.331,
+          "range_hist": {
+            "pvp": [
+              6,
+              47,
+              47,
+              26,
+              30,
+              133,
+              40,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              8,
+              50,
+              44,
+              31,
+              27,
+              44,
+              70,
+              39,
+              15,
+              1,
+              0,
+              1
+            ]
+          }
         },
         "Pulse": {
           "dealt": 405.0,
@@ -1955,7 +3442,42 @@
           "hits": 34,
           "pvp_hits": 34,
           "self_hits": 0,
-          "accuracy": 0.351
+          "accuracy": 0.351,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              17,
+              4,
+              13,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              6,
+              13,
+              2,
+              7,
+              4,
+              2,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 627.7,
@@ -2144,6 +3666,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Laser",
         "weapons_used": 11,
+        "distance_buckets": {
+          "pvp": {
+            "close": 125,
+            "mid": 340,
+            "long": 10,
+            "extreme": 3
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.031,
         "ammo_out_episodes": 9,
         "hp_efficiency": 2.34
@@ -2160,7 +3696,42 @@
           "hits": 39,
           "pvp_hits": 39,
           "self_hits": 0,
-          "accuracy": 0.074
+          "accuracy": 0.074,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              39,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              6,
+              33,
+              0,
+              0
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 1050.0,
@@ -2169,7 +3740,42 @@
           "hits": 10,
           "pvp_hits": 10,
           "self_hits": 0,
-          "accuracy": 0.625
+          "accuracy": 0.625,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              2,
+              0,
+              5,
+              2,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              1,
+              0,
+              2,
+              3,
+              2,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 33550.0,
@@ -2178,7 +3784,42 @@
           "hits": 80,
           "pvp_hits": 80,
           "self_hits": 0,
-          "accuracy": 0.714
+          "accuracy": 0.714,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              5,
+              1,
+              18,
+              26,
+              25,
+              0,
+              0,
+              1,
+              2,
+              1,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              3,
+              3,
+              8,
+              9,
+              16,
+              4,
+              24,
+              5,
+              4,
+              4
+            ]
+          }
         },
         "Minigun": {
           "dealt": 8263.0,
@@ -2187,7 +3828,42 @@
           "hits": 279,
           "pvp_hits": 279,
           "self_hits": 0,
-          "accuracy": 0.228
+          "accuracy": 0.228,
+          "range_hist": {
+            "pvp": [
+              8,
+              21,
+              34,
+              39,
+              5,
+              85,
+              59,
+              28,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              10,
+              22,
+              38,
+              32,
+              7,
+              21,
+              60,
+              22,
+              24,
+              32,
+              9,
+              2
+            ]
+          }
         },
         "Pulse": {
           "dealt": 635.0,
@@ -2196,7 +3872,42 @@
           "hits": 62,
           "pvp_hits": 62,
           "self_hits": 0,
-          "accuracy": 0.318
+          "accuracy": 0.318,
+          "range_hist": {
+            "pvp": [
+              3,
+              0,
+              2,
+              1,
+              2,
+              39,
+              7,
+              2,
+              3,
+              3,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              3,
+              3,
+              27,
+              16,
+              5,
+              2,
+              0,
+              0,
+              0,
+              3,
+              2,
+              1
+            ]
+          }
         },
         "Shadower Msl": {
           "dealt": 5280.0,
@@ -2205,7 +3916,42 @@
           "hits": 8,
           "pvp_hits": 8,
           "self_hits": 0,
-          "accuracy": 0.615
+          "accuracy": 0.615,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              5,
+              1,
+              2,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              5,
+              3,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 946.3,
@@ -2420,6 +4166,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Shadower Msl",
         "weapons_used": 12,
+        "distance_buckets": {
+          "pvp": {
+            "close": 372,
+            "mid": 407,
+            "long": 33,
+            "extreme": 3
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.05,
         "ammo_out_episodes": 20,
         "hp_efficiency": 2.05
@@ -2436,7 +4196,42 @@
           "hits": 117,
           "pvp_hits": 117,
           "self_hits": 0,
-          "accuracy": 0.321
+          "accuracy": 0.321,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              28,
+              16,
+              0,
+              0,
+              29,
+              44,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              14,
+              30,
+              0,
+              0,
+              0,
+              16,
+              26,
+              27,
+              4,
+              0,
+              0
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 450.0,
@@ -2445,7 +4240,42 @@
           "hits": 4,
           "pvp_hits": 4,
           "self_hits": 0,
-          "accuracy": 0.5
+          "accuracy": 0.5,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              3,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              2,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 5000.0,
@@ -2454,7 +4284,42 @@
           "hits": 12,
           "pvp_hits": 12,
           "self_hits": 0,
-          "accuracy": 0.857
+          "accuracy": 0.857,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              2,
+              0,
+              2,
+              5,
+              2,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              2,
+              2,
+              0,
+              2,
+              3,
+              2,
+              0,
+              0,
+              1
+            ]
+          }
         },
         "Minigun": {
           "dealt": 13158.0,
@@ -2463,7 +4328,42 @@
           "hits": 507,
           "pvp_hits": 507,
           "self_hits": 0,
-          "accuracy": 0.338
+          "accuracy": 0.338,
+          "range_hist": {
+            "pvp": [
+              14,
+              22,
+              48,
+              129,
+              75,
+              121,
+              82,
+              12,
+              0,
+              2,
+              0,
+              2,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              16,
+              23,
+              52,
+              134,
+              81,
+              60,
+              34,
+              53,
+              32,
+              6,
+              9,
+              7
+            ]
+          }
         },
         "Pulse": {
           "dealt": 2025.0,
@@ -2472,7 +4372,42 @@
           "hits": 163,
           "pvp_hits": 163,
           "self_hits": 0,
-          "accuracy": 0.326
+          "accuracy": 0.326,
+          "range_hist": {
+            "pvp": [
+              2,
+              0,
+              9,
+              10,
+              16,
+              69,
+              11,
+              21,
+              25,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              2,
+              19,
+              63,
+              29,
+              4,
+              5,
+              15,
+              1,
+              24,
+              1,
+              0,
+              0
+            ]
+          }
         },
         "Shadower Msl": {
           "dealt": 22340.0,
@@ -2481,7 +4416,42 @@
           "hits": 8,
           "pvp_hits": 8,
           "self_hits": 0,
-          "accuracy": 0.114
+          "accuracy": 0.114,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              2,
+              0,
+              1,
+              5,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              2,
+              2,
+              4,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Sniper": {
           "dealt": 800.0,
@@ -2490,7 +4460,42 @@
           "hits": 4,
           "pvp_hits": 4,
           "self_hits": 0,
-          "accuracy": 1.0
+          "accuracy": 1.0,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              2,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              1,
+              0,
+              0,
+              0,
+              1,
+              1,
+              0,
+              1,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 1359.0,
@@ -2701,6 +4706,20 @@
         "self_shots_hit": 0,
         "fav_weapon": "Laser",
         "weapons_used": 12,
+        "distance_buckets": {
+          "pvp": {
+            "close": 160,
+            "mid": 424,
+            "long": 10,
+            "extreme": 4
+          },
+          "pve": {
+            "close": 0,
+            "mid": 0,
+            "long": 0,
+            "extreme": 0
+          }
+        },
         "time_low_health_pct": 0.055,
         "ammo_out_episodes": 7,
         "hp_efficiency": 1.51
@@ -2717,7 +4736,42 @@
           "hits": 81,
           "pvp_hits": 81,
           "self_hits": 0,
-          "accuracy": 0.333
+          "accuracy": 0.333,
+          "range_hist": {
+            "pvp": [
+              18,
+              20,
+              11,
+              4,
+              2,
+              0,
+              2,
+              24,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              18,
+              27,
+              8,
+              2,
+              0,
+              0,
+              0,
+              11,
+              7,
+              8,
+              0,
+              0
+            ]
+          }
         },
         "FAF Msl": {
           "dealt": 650.0,
@@ -2726,7 +4780,42 @@
           "hits": 5,
           "pvp_hits": 5,
           "self_hits": 0,
-          "accuracy": 0.625
+          "accuracy": 0.625,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              1,
+              1,
+              3,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              1,
+              1,
+              1,
+              2,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Laser": {
           "dealt": 17700.0,
@@ -2735,7 +4824,42 @@
           "hits": 26,
           "pvp_hits": 26,
           "self_hits": 0,
-          "accuracy": 0.812
+          "accuracy": 0.812,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              3,
+              4,
+              0,
+              8,
+              4,
+              3,
+              0,
+              0,
+              0,
+              3,
+              1,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              2,
+              1,
+              4,
+              5,
+              3,
+              2,
+              0,
+              3,
+              2,
+              0,
+              4
+            ]
+          }
         },
         "Minigun": {
           "dealt": 13765.0,
@@ -2744,7 +4868,42 @@
           "hits": 413,
           "pvp_hits": 413,
           "self_hits": 0,
-          "accuracy": 0.272
+          "accuracy": 0.272,
+          "range_hist": {
+            "pvp": [
+              10,
+              2,
+              5,
+              0,
+              46,
+              276,
+              65,
+              8,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              10,
+              2,
+              5,
+              2,
+              111,
+              80,
+              112,
+              56,
+              22,
+              8,
+              4,
+              1
+            ]
+          }
         },
         "Pulse": {
           "dealt": 690.0,
@@ -2753,7 +4912,42 @@
           "hits": 60,
           "pvp_hits": 60,
           "self_hits": 0,
-          "accuracy": 0.42
+          "accuracy": 0.42,
+          "range_hist": {
+            "pvp": [
+              0,
+              15,
+              6,
+              6,
+              6,
+              18,
+              5,
+              3,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              15,
+              12,
+              16,
+              8,
+              5,
+              3,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Shadower Msl": {
           "dealt": 3000.0,
@@ -2762,7 +4956,42 @@
           "hits": 6,
           "pvp_hits": 6,
           "self_hits": 0,
-          "accuracy": 0.316
+          "accuracy": 0.316,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              2,
+              0,
+              0,
+              2,
+              2,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              2,
+              0,
+              4,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
         },
         "Sniper": {
           "dealt": 850.0,
@@ -2771,7 +5000,42 @@
           "hits": 7,
           "pvp_hits": 7,
           "self_hits": 0,
-          "accuracy": 1.0
+          "accuracy": 1.0,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              2,
+              4,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              2,
+              0,
+              2,
+              2,
+              0,
+              0
+            ]
+          }
         },
         "xcarxpl": {
           "dealt": 1889.0,

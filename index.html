@@ -683,6 +683,8 @@
                       <th class="text-end">Fired</th>
                       <th class="text-end">Hit</th>
                       <th class="text-end">Accuracy</th>
+                      <th class="text-end">Range</th>
+                      <th class="text-end">Envelope</th>
                     </tr>
                   </thead>
                   <tbody></tbody>
@@ -699,6 +701,24 @@
               <div class="card-body"><div class="chart-container-sm"><canvas id="weapon-accuracy-chart"></canvas></div></div>
             </div>
           </div>
+        </div>
+        <div class="card mb-4" id="section-weapon-range">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Weapon Engagement Range</h5>
+            <div class="d-flex align-items-center gap-2">
+              <div class="btn-group btn-group-sm" role="group" aria-label="Engagement range unit" id="weapon-range-unit">
+                <button class="btn btn-outline-secondary active" type="button" data-range-unit="m">Meters</button>
+                <button class="btn btn-outline-secondary" type="button" data-range-unit="pct">% of max</button>
+              </div>
+              <div class="btn-group btn-group-sm" role="group" aria-label="Engagement range channel" id="weapon-range-channel">
+                <button class="btn btn-outline-secondary" type="button" data-range-channel="pvp">PvP</button>
+                <button class="btn btn-outline-secondary" type="button" data-range-channel="pve">PvE</button>
+                <button class="btn btn-outline-secondary active" type="button" data-range-channel="both">Both</button>
+              </div>
+              <button class="btn btn-sm" data-expand="section-weapon-range" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="weapon-range-chart"></canvas></div></div>
         </div>
         <div class="card mb-4" id="section-hit-targets">
           <div class="card-header d-flex align-items-center justify-content-between">

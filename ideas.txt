@@ -105,19 +105,29 @@ validate_elo.py shows it improves prediction with a large corpus.
 
 ----- Worth doing now -----
 
-Per-weapon engagement-range meta (match and corpus-wide)
-  For each weapon ODF: mean / p50 / p95 hit distance across all BulletHit
-  events. Shows how the community actually deploys each weapon vs what
-  the ODF specs imply. Natural fit for the All Matches → Meta tab or the
-  docs page weapon table.
-  Pipeline: in the bullet_hit loop accumulate per-odf distance lists
-  (or running Welford mean + sorted p95 estimate).
+Per-weapon engagement-range meta (match) — SHIPPED (match.schema_version 11)
+  Per-(player, weapon, channel) fixed-bin histograms over
+  match.distance_bin_edges, emitted on weapon_breakdown[w].range_hist
+  ({pvp, pve}). Rendered as the Weapon Engagement Range strip
+  (renderWeaponRange in js/charts.js) on the per-match Weapons & Accuracy
+  tab: horizontal p10→p95 floating bars with a median tick + dashed max
+  whisker, PvP/PvE/Both toggle. Corpus-wide rollup deliberately deferred
+  (contributions slice drops range_hist).
 
-Per-player range fingerprint (descriptive, not scored)
-  Bucket PvP hits into [0–50m, 50–150m, 150–400m, >400m] per player.
-  Render as a small 4-bar sparkline in the Player Leaderboard or profile.
-  Frame as "Brawler / Skirmisher / Sniper" flavor — NOT a quality score.
-  Emit as personal.distance_buckets: {close, mid, long, extreme} (counts).
+Per-player range fingerprint (descriptive, not scored) — SHIPPED (v11)
+  personal.distance_buckets = {pvp:{close,mid,long,extreme}, pve:{...}}
+  rendered as a 4-segment monochrome sparkline in the Shot Accuracy table's
+  Range column (shares the PvP/PvE/Both toggle). Flavor only, no score.
+
+% of weapon max range + Engagement Envelope — SHIPPED (match.schema_version 12)
+  Weapon max range derived from ODF shotSpeed * lifeSpan
+  (build_ordnance_range_resolver). Per-(player, weapon, channel)
+  range_pct_hist (distance / max_range) on weapon_breakdown, shared
+  match.distance_pct_bin_edges, match.weapon_ranges for the meters-mode
+  reference marker. Strip gains a Meters | % of max toggle; the Shot
+  Accuracy table gains a weapon-FAIR Engagement Envelope column (mean % of
+  max, band labels Point-blank/Mid/Edge/Over-range). Lobbed ordnance
+  excluded via MAX_REASONABLE_RANGE. Still descriptive-only, no VTSR-T axis.
 
 Long-range kill chip in the kill feed
   When a kill follows a BulletHit with distance_to_target > 400m,

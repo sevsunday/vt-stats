@@ -1220,7 +1220,11 @@ The legacy `all_matches.json` artifact is no longer written; `scripts/process_st
         "asset_dealt": 0.0, "structure_dealt": 4218.7,
         "shots_fired": 3700, "shots_hit": 3116,
         "kills": 0, "deaths": 0, "pickups": 17,
-        "weapon_breakdown": { "Minigun": { "dealt": 20576.0, "shots": 958, "hits": 651 } },
+        "weapon_breakdown": { "Minigun": { "dealt": 20576.0, "shots": 958, "hits": 651,
+          "range_hist": { "pvp": [120, 88, 60, ...], "pve": [10, 4, ...] },
+          "range_pct_hist": { "pvp": [40, 70, 88, ...], "pve": [3, 5, ...] } } },
+        "distance_buckets": { "pvp": { "close": 268, "mid": 90, "long": 12, "extreme": 1 },
+                              "pve": { "close": 14, "mid": 2, "long": 0, "extreme": 0 } },
         "activity_score": 84, "movement_band": "Aggressive",
         "path_length": 17154.2,
         "target_lock_pct": null
@@ -1229,10 +1233,34 @@ The legacy `all_matches.json` artifact is no longer written; `scripts/process_st
     "weapon_meta": [
       { "weapon": "Minigun", "total_damage": 20576.0, "total_shots": 958, "total_hits": 651 }
     ],
+    "distance_bin_edges": [10, 20, 30, 40, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200],
+    "distance_pct_bin_edges": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120],
+    "weapon_ranges": { "Minigun": 105.0, "Sabot": 800.0 },
     "rivalry_matrix": { "VTrider": { "Domakus": 18900.1 } }
   }
 }
 ```
+
+**Engagement-range fields (`match.schema_version` 11, v2-only).**
+
+| Field | Type | Description |
+|---|---|---|
+| `match.distance_bin_edges` | `number[]` \| `null` | Shared bin layout (world units == meters) for all `range_hist` arrays and `distance_buckets`. `null` on v1 / no-distance matches. Bin `i` = `[edges[i-1], edges[i])`; trailing bin is overflow `[edges[-1], inf)`. Histogram length = `len(edges)+1`. |
+| `weapon_breakdown[w].range_hist` | `{pvp?: number[], pve?: number[]}` | Per-weapon engagement-distance histogram per channel. `pvp` = player-vs-player hits (self-hits excluded); `pve` = player shooter vs non-player victim. A channel is omitted when it has no hits; `range_hist` is absent entirely when neither channel recorded distance. |
+| `personal.distance_buckets` | `{pvp:{close,mid,long,extreme}, pve:{...}}` \| `null` | Per-player coarse range fingerprint (counts). Boundaries `0-50 / 50-150 / 150-400 / >400` m. `null` when the player had no engagement-range data. |
+
+All three are **descriptive playstyle/meta only — never a skill signal or VTSR-T axis** (weapon/ship access confounds range). Histograms are additive so the dashboard sums them across the player-filtered roster and across channels (`Both` = `pvp`+`pve`) before estimating percentiles for the Weapon Engagement Range strip; the Shot Accuracy table renders the `distance_buckets` fingerprint. Both surfaces gate on `match.bullet_hit_distance.with_distance > 0`. The slim `match_contributions.json` slice intentionally drops `range_hist` (no career range rollup in v1).
+
+**Weapon-fair engagement % fields (`match.schema_version` 12, v2-only).**
+
+| Field | Type | Description |
+|---|---|---|
+| `match.distance_pct_bin_edges` | `number[]` \| `null` | Shared `%`-bin layout for `range_pct_hist`. `[10,20,...,100,120]`; trailing bin = `>120%` (exceeds book range). `null` on v1 / no-max-range matches. |
+| `match.weapon_ranges` | `{display: number}` \| `null` | Hit-weighted representative theoretical max range (m) per weapon display name, from ODF `shotSpeed * lifeSpan`. Drives the meters-mode theoretical-max reference marker + tooltips. |
+| `weapon_breakdown[w].range_pct_hist` | `{pvp?: number[], pve?: number[]}` | Per-weapon histogram of `100 * distance / ordnance_max_range`, per channel. Only filled for hits whose ordnance has a usable (non-lobbed) max range. |
+| `match.bullet_hit_distance.with_max_range` | `number` | Count of distance-bearing hits that also had a usable ordnance max range (fed the `%` histograms). Coverage telemetry vs `with_distance`. |
+
+The `%`-of-max view is **weapon-fair** (normalizes away weapon-choice differences), so it is the basis for the Shot Accuracy table's per-player **Engagement Envelope** column (weapon-weighted mean `%` of max, sortable, with `Point-blank`/`Mid`/`Edge`/`Over-range` bands) and the strip's `Meters | % of max` toggle. Lobbed/timed ordnance (`lifeSpan ~ 1e30`) is excluded via `MAX_REASONABLE_RANGE = 2000` (still counted in meters). Still **descriptive-only — not a VTSR-T axis**. The contributions slice drops `range_pct_hist` (no career rollup).
 
 #### Aggregate shape (built in-memory by `VTAggregate.build()`)
 

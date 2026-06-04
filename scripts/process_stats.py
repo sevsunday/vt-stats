@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 22
+PIPELINE_VERSION = 24
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -194,6 +194,134 @@ CAMPOD_MAX_SHARE = 0.25  # > 25% of match wall-clock in campod => is_campod=True
 # died-often players whose presence window is full but active_seconds is
 # short -- their dead time is correctly NOT a participation deficit.
 LOW_ACTIVITY_MIN_PRESENCE = 0.75
+
+# --- Weapon engagement-range histograms (match.schema_version 11) ----------
+# BulletHit.distance_to_target (v2-only float, world units == in-game meters)
+# is bucketed per (player, weapon, channel) into a fixed-bin histogram. The
+# edges are emitted once on the match block as `distance_bin_edges` so the
+# frontend doesn't duplicate the constant. Histograms are additive, so the
+# client can sum them across the filtered roster and across PvP/PvE channels
+# ("Both") before estimating percentiles -- keeping the per-match player
+# filter contract intact.
+#
+# Edges are denser near 0 because engagements cluster under ~60 m, and the
+# coarse fingerprint boundaries (50 / 150 / 400) are members of the edge list
+# so `personal.distance_buckets` are exact sub-sums of the fine histogram.
+# A histogram of length len(EDGES)+1 has one bin per [edge[i-1], edge[i]) plus
+# a trailing overflow bin [edge[-1], inf). Bin i covers [EDGES[i-1], EDGES[i]).
+#
+# Strictly a playstyle / meta descriptor -- NOT a skill signal and NOT a
+# VTSR-T axis (weapon/ship access confounds range). Tunable without a schema
+# bump (bump PIPELINE_VERSION to invalidate the cache).
+DIST_BIN_EDGES = [10, 20, 30, 40, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200]
+# Coarse fingerprint buckets, expressed as (lo, hi) world-unit ranges. The
+# boundaries 50 / 150 / 400 are all members of DIST_BIN_EDGES.
+DIST_COARSE_BUCKETS = (
+    ("close",   0,   50),
+    ("mid",     50,  150),
+    ("long",    150, 400),
+    ("extreme", 400, float("inf")),
+)
+
+
+def _dist_bin_index(d):
+    """Return the histogram bin index for a distance `d` (world units).
+
+    Bin i covers [DIST_BIN_EDGES[i-1], DIST_BIN_EDGES[i]); the final bin
+    (index len(DIST_BIN_EDGES)) is the overflow bin [DIST_BIN_EDGES[-1], inf).
+    """
+    for i, edge in enumerate(DIST_BIN_EDGES):
+        if d < edge:
+            return i
+    return len(DIST_BIN_EDGES)
+
+
+def _dist_coarse_buckets(hist):
+    """Collapse a fine histogram into the 4 coarse fingerprint buckets.
+
+    Relies on the coarse boundaries (50/150/400) being members of
+    DIST_BIN_EDGES so each coarse bucket is an exact sum of fine bins.
+    """
+    out = {name: 0 for name, _, _ in DIST_COARSE_BUCKETS}
+    for i, count in enumerate(hist):
+        if not count:
+            continue
+        lo = DIST_BIN_EDGES[i - 1] if i > 0 else 0
+        for name, blo, bhi in DIST_COARSE_BUCKETS:
+            if blo <= lo < bhi:
+                out[name] += count
+                break
+    return out
+
+# --- Weapon engagement range as % of weapon max (match.schema_version 12) ---
+# Each ordnance ODF declares OrdnanceClass.shotSpeed (world units/sec) and
+# lifeSpan (sec); their product is the projectile's theoretical max range in
+# world units == meters (physics exploits can nudge it slightly, but it's a
+# solid book value). Dividing each BulletHit.distance_to_target by its
+# ordnance's max range yields a weapon-FAIR "% of envelope" -- this removes
+# the weapon-choice confound that raw meters has (a Gauss naturally reaches
+# farther than a Minigun), so it's the right basis for the per-player
+# "Engagement Envelope" highlight. Still descriptive playstyle/meta only --
+# NOT a VTSR-T axis (ship access + role still confound it).
+#
+# Percentage histograms are additive (same as the meters ones), so the client
+# sums them across the filtered roster and channels before estimating
+# percentiles / the envelope mean. The trailing bin is the >120% overflow
+# (physics-exploited or grazing-edge hits that exceed the book range).
+DIST_PCT_BIN_EDGES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120]
+# Lobbed / timed ordnance (grenades, mortars, bounce bombs) declare an
+# effectively-infinite lifeSpan (~1e30), so shotSpeed * lifeSpan explodes to
+# ~1e31 m -- physically meaningless as an "engagement range". Any computed max
+# range above this cutoff is discarded (the hit still counts in the meters
+# histogram, but is excluded from the % view). Safely above every real
+# direct-fire weapon (max observed ~800 m). Tunable without a schema bump.
+MAX_REASONABLE_RANGE = 2000.0
+
+
+def _dist_pct_bin_index(pct):
+    """Return the histogram bin index for an engagement % (of weapon max).
+
+    Bin i covers [DIST_PCT_BIN_EDGES[i-1], DIST_PCT_BIN_EDGES[i]); the final
+    bin (index len(DIST_PCT_BIN_EDGES)) is the overflow bin [last, inf) -- the
+    >120% "exceeds book range" bucket.
+    """
+    for i, edge in enumerate(DIST_PCT_BIN_EDGES):
+        if pct < edge:
+            return i
+    return len(DIST_PCT_BIN_EDGES)
+
+
+def build_ordnance_range_resolver(odf_db):
+    """Map each ordnance ODF to its theoretical max range (shotSpeed*lifeSpan).
+
+    Reads `OrdnanceClass.shotSpeed` / `lifeSpan` (stored as strings in
+    `data/odf.min.json`, often in scientific notation like `1e3` / `170e-3`;
+    `float()` parses both). Keys are stored BOTH with and without the trailing
+    `.odf` (lowercased) so callers can look up a raw `BulletHit.ordnance_odf`
+    string directly. Entries whose product is non-numeric, `<= 0`, or
+    `> MAX_REASONABLE_RANGE` (lobbed/timed ordnance with ~1e30 lifeSpan) are
+    omitted so the consumer treats them as "no usable max range".
+
+    Real VSR ordnance variants (`chainvsr_c`, `snipevsr`, ...) are present in
+    the DB directly and are MORE accurate than their stock parents
+    (`snipevsr` = 200 m vs stock `snipe` = 300 m), so direct lookup is
+    preferred; the `_resolve_max_range` closure falls back to the stock parent
+    via `_strip_vsr_suffix` only on a direct miss.
+    """
+    ranges = {}
+    for odf_key, entry in (odf_db.get("Ordnance") or {}).items():
+        oc = (entry or {}).get("OrdnanceClass", {}) or {}
+        try:
+            mr = float(oc.get("shotSpeed")) * float(oc.get("lifeSpan"))
+        except (TypeError, ValueError):
+            continue
+        if mr <= 0 or mr > MAX_REASONABLE_RANGE:
+            continue
+        key = odf_key.lower()
+        stem = re.sub(r"\.odf$", "", key)
+        ranges[key] = mr
+        ranges[stem] = mr
+    return ranges
 
 # Identity reroute table: maps "owner" Steam64 -> list of rules that detect
 # a different real player playing on the owner's Steam account (shared-PC
@@ -2443,7 +2571,7 @@ def _apply_account_reroutes_to_events(events, reroute_map):
             if x.picker and g(x.picker): x.picker = g(x.picker)
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -2469,6 +2597,26 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # cheap personal.* health stats). Empty dict when the ODF DB is missing
     # so all normalization degrades to None (bars hide, stats null).
     ship_caps = ship_caps or {}
+
+    # Per-ordnance theoretical max range (shotSpeed * lifeSpan) for the
+    # engagement %-of-max view (match.schema_version 12). Empty dict when the
+    # ODF DB is missing -> the % histograms stay empty and the UI degrades to
+    # meters-only. Direct lookup preferred; stock-parent fallback via
+    # _strip_vsr_suffix only on a direct miss.
+    ordnance_ranges = ordnance_ranges or {}
+
+    def _resolve_max_range(odf):
+        if not odf:
+            return None
+        key = odf.lower()
+        mr = ordnance_ranges.get(key)
+        if mr is None and not key.endswith(".odf"):
+            mr = ordnance_ranges.get(f"{key}.odf")
+        if mr is None:
+            stripped = _strip_vsr_suffix(key if key.endswith(".odf") else f"{key}.odf")
+            if stripped:
+                mr = ordnance_ranges.get(stripped) or ordnance_ranges.get(re.sub(r"\.odf$", "", stripped))
+        return mr
 
     # Header-provided terrain bounds (new-schema sessions). None when absent so
     # _compute_positioning falls back to observed-extent map_bounds. Also
@@ -2558,6 +2706,28 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # weapon_breakdown[w].pvp_hits field.
     player_pvp_shots_hit = defaultdict(lambda: defaultdict(int))
     player_weapons_used = defaultdict(set)
+
+    # Engagement-range histograms (match.schema_version 11). Keyed
+    # s64 -> {odf: [counts]} where each list has len(DIST_BIN_EDGES)+1 bins.
+    # Populated only for v2 sessions (BulletHit.distance_to_target > 0); v1
+    # matches leave these empty so the emit below omits the fields entirely.
+    _DIST_NBINS = len(DIST_BIN_EDGES) + 1
+    player_weapon_dist_pvp = defaultdict(lambda: defaultdict(lambda: [0] * _DIST_NBINS))
+    player_weapon_dist_pve = defaultdict(lambda: defaultdict(lambda: [0] * _DIST_NBINS))
+
+    # Engagement %-of-weapon-max histograms (match.schema_version 12). Same
+    # per-(player, weapon, channel) shape as the meters histograms above, but
+    # bucketing 100 * distance / ordnance_max_range. Only filled when the
+    # ordnance has a usable max range (excludes lobbed/timed ordnance). Drives
+    # the weapon-fair "% of max" strip view + per-player Engagement Envelope.
+    _DISTPCT_NBINS = len(DIST_PCT_BIN_EDGES) + 1
+    player_weapon_distpct_pvp = defaultdict(lambda: defaultdict(lambda: [0] * _DISTPCT_NBINS))
+    player_weapon_distpct_pve = defaultdict(lambda: defaultdict(lambda: [0] * _DISTPCT_NBINS))
+    # Per-ordnance hit-weighted max-range accumulators so the match-global
+    # weapon_ranges map can emit a representative max range per display name
+    # (a display name can collapse several ordnance ODFs with different maxes).
+    # odf -> [sum_max_range_over_hits, hit_count].
+    weapon_maxrange_acc = defaultdict(lambda: [0.0, 0])
 
     # Self-damage carve-out (match.schema_version 8). Captures damage /
     # hits / kills where shooter == victim so the PvP/PvE split no longer
@@ -2687,6 +2857,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     bullet_hit_distance_max = 0.0
     bullet_hit_distance_count = 0  # BulletHits seen
     bullet_hit_distance_with = 0   # BulletHits with distance_to_target > 0
+    # match.schema_version 12: count of distance-bearing hits that also had a
+    # usable ordnance max range (i.e. fed the %-of-max histograms). Coverage
+    # telemetry surfaced on bullet_hit_distance.with_max_range.
+    bullet_hit_distance_with_maxrange = 0
 
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
@@ -2887,6 +3061,30 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     bullet_hit_distance_total += _dt
                     if _dt > bullet_hit_distance_max:
                         bullet_hit_distance_max = _dt
+                    # Per-(player, weapon, channel) engagement-range histogram
+                    # (match.schema_version 11). PvP = player-vs-player
+                    # (is_pvp_hit, self-hits already excluded); PvE = player
+                    # shooter vs non-player victim (bh.victim == 0).
+                    if shooter > 0 and odf:
+                        _bin = _dist_bin_index(_dt)
+                        _is_pve = (not is_pvp_hit) and bh.victim == 0
+                        if is_pvp_hit:
+                            player_weapon_dist_pvp[shooter][odf][_bin] += 1
+                        elif _is_pve:
+                            player_weapon_dist_pve[shooter][odf][_bin] += 1
+                        # match.schema_version 12: %-of-weapon-max histogram +
+                        # hit-weighted max-range accumulator. Only when the
+                        # ordnance has a usable (non-lobbed) max range.
+                        _maxr = _resolve_max_range(odf)
+                        if _maxr:
+                            bullet_hit_distance_with_maxrange += 1
+                            weapon_maxrange_acc[odf][0] += _maxr
+                            weapon_maxrange_acc[odf][1] += 1
+                            _pbin = _dist_pct_bin_index(100.0 * _dt / _maxr)
+                            if is_pvp_hit:
+                                player_weapon_distpct_pvp[shooter][odf][_pbin] += 1
+                            elif _is_pve:
+                                player_weapon_distpct_pve[shooter][odf][_pbin] += 1
             if shooter > 0 and odf:
                 all_ordnance.add(odf)
                 player_shots_hit[shooter][odf] += 1
@@ -3854,6 +4052,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         if s64:
             all_wpn_odfs = set(player_weapon_dealt[s64].keys()) | set(player_shots_fired[s64].keys())
         weapon_breakdown = {}
+        # Engagement-range coarse buckets (match.schema_version 11), summed
+        # across this player's per-weapon histograms. Stays at zeros for v1 /
+        # no-distance matches; the emit below detects that and omits the field.
+        dist_total_pvp = [0] * _DIST_NBINS
+        dist_total_pve = [0] * _DIST_NBINS
         # Sort by display name for deterministic output across pipeline reruns
         # (set iteration order over all_wpn_odfs is non-deterministic).
         for odf in sorted(all_wpn_odfs, key=lambda o: wpn_name(o).lower()):
@@ -3868,7 +4071,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # (where `pve_hits` is the implicit remainder).
             w_self_hits = player_self_shots_hit[s64].get(odf, 0) if s64 else 0
             w_acc = w_hits / w_shots if w_shots > 0 else 0
-            weapon_breakdown[wpn_name(odf)] = {
+            entry = {
                 "dealt": round(w_dealt, 1),
                 "received": round(w_recv, 1),
                 "shots": w_shots,
@@ -3876,6 +4079,47 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "pvp_hits": w_pvp_hits,
                 "self_hits": w_self_hits,
                 "accuracy": round(w_acc, 3),
+            }
+            # match.schema_version 11: engagement-range histogram per channel.
+            # Emit a channel only when it has any hits; omit `range_hist`
+            # entirely when neither channel recorded distance data (v1 / no
+            # target-distance). Frontend reads `match.distance_bin_edges` for
+            # the shared bin layout.
+            h_pvp = player_weapon_dist_pvp[s64].get(odf) if s64 else None
+            h_pve = player_weapon_dist_pve[s64].get(odf) if s64 else None
+            range_hist = {}
+            if h_pvp and any(h_pvp):
+                range_hist["pvp"] = list(h_pvp)
+                dist_total_pvp = [a + b for a, b in zip(dist_total_pvp, h_pvp)]
+            if h_pve and any(h_pve):
+                range_hist["pve"] = list(h_pve)
+                dist_total_pve = [a + b for a, b in zip(dist_total_pve, h_pve)]
+            if range_hist:
+                entry["range_hist"] = range_hist
+            # match.schema_version 12: %-of-weapon-max histogram per channel.
+            # Same omit-when-empty rules; frontend reads
+            # `match.distance_pct_bin_edges` for the shared bin layout.
+            hp_pvp = player_weapon_distpct_pvp[s64].get(odf) if s64 else None
+            hp_pve = player_weapon_distpct_pve[s64].get(odf) if s64 else None
+            range_pct_hist = {}
+            if hp_pvp and any(hp_pvp):
+                range_pct_hist["pvp"] = list(hp_pvp)
+            if hp_pve and any(hp_pve):
+                range_pct_hist["pve"] = list(hp_pve)
+            if range_pct_hist:
+                entry["range_pct_hist"] = range_pct_hist
+            weapon_breakdown[wpn_name(odf)] = entry
+
+        # match.schema_version 11: per-player range fingerprint. Coarse
+        # close/mid/long/extreme bucket counts per channel, summed from the
+        # per-weapon histograms above. None when this player recorded no
+        # engagement-distance data (v1 / no target-distance) so the UI hides
+        # the fingerprint cell.
+        distance_buckets = None
+        if any(dist_total_pvp) or any(dist_total_pve):
+            distance_buckets = {
+                "pvp": _dist_coarse_buckets(dist_total_pvp),
+                "pve": _dist_coarse_buckets(dist_total_pve),
             }
 
         # ---- v2.3 Loadout Profile + per-ship combat block. ----
@@ -4080,6 +4324,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "self_shots_hit": self_h,
                 "fav_weapon": fav_weapon,
                 "weapons_used": len(player_weapons_used.get(s64, set())) if s64 else 0,
+                # match.schema_version 11: engagement-range fingerprint
+                # (close/mid/long/extreme counts per PvP/PvE channel). None on
+                # v1 / no-distance matches; the dashboard hides the cell.
+                "distance_buckets": distance_buckets,
                 # match.schema_version 10: health/ammo-derived stats, computed
                 # at full tick resolution from PlayerState.health / .ammo.
                 #   time_low_health_pct: share of ticks (with a known HP ratio)
@@ -4217,6 +4465,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # Secondary sort by weapon name to break ties deterministically
     # (support weapons often carry total_damage = 0).
     weapon_meta.sort(key=lambda w: (-w["total_damage"], w["weapon"].lower()))
+
+    # match.schema_version 12: hit-weighted representative max range per
+    # weapon display name. A display name (wpn_name) can collapse several
+    # ordnance ODFs with different theoretical maxes, so aggregate by summing
+    # the per-odf (sum_max_over_hits, hit_count) accumulators and dividing.
+    _wr_acc = defaultdict(lambda: [0.0, 0])
+    for odf, (s, c) in weapon_maxrange_acc.items():
+        if c > 0:
+            disp = wpn_name(odf)
+            _wr_acc[disp][0] += s
+            _wr_acc[disp][1] += c
+    weapon_ranges_map = {
+        disp: round(s / c, 1) for disp, (s, c) in _wr_acc.items() if c > 0
+    }
 
     # Timeline
     total_buckets = ((max_tick - min_tick) // bucket_size + 1) if bucket_size > 0 and max_tick > min_tick else 0
@@ -4441,7 +4703,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # `personal` block gains `time_low_health_pct` / `ammo_out_episodes`
             # / `hp_efficiency`. Absent on pre-v10 / no-positioning matches
             # (replay hides the bars; consumers default the stats to None/0).
-            "schema_version": 10,
+            # v11 (this version) adds weapon engagement-range histograms: each
+            # `weapon_breakdown[w]` may carry `range_hist` ({pvp:[...], pve:[...]}
+            # over the shared `match.distance_bin_edges`), each `personal` block
+            # gains a `distance_buckets` fingerprint ({pvp/pve: close/mid/long/
+            # extreme}), and `match.distance_bin_edges` is emitted once. v2-only
+            # (BulletHit.distance_to_target); absent/None on v1 / no-distance
+            # matches (the dashboard self-hides the range card + fingerprint).
+            # Purely descriptive playstyle/meta -- NOT a VTSR-T axis.
+            # v12 (this version) adds the weapon-FAIR engagement view: each
+            # `weapon_breakdown[w]` may carry `range_pct_hist` ({pvp/pve} over
+            # `match.distance_pct_bin_edges`, bucketing distance / ordnance
+            # max range from ODF shotSpeed*lifeSpan), `match.weapon_ranges`
+            # ({display: max_range_m}) is emitted once for the meters-mode
+            # reference marker, and `bullet_hit_distance.with_max_range` reports
+            # %-coverage. Lobbed/timed ordnance (~1e30 lifeSpan) is excluded via
+            # MAX_REASONABLE_RANGE. Drives the "% of max" strip + per-player
+            # Engagement Envelope. Still descriptive-only -- NOT a VTSR-T axis.
+            "schema_version": 12,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
@@ -4459,12 +4738,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "shutdown_requested": bool(getattr(header, "shutdown_requested", False)),
             # BulletHit distance-to-target summary (v2-only). v1 matches
             # emit count=N total but with_distance=0 and mean/max=null
-            # because the proto field doesn't exist. See
-            # `distance_to_target.txt` at the repo root for the planned
-            # future uses.
+            # because the proto field doesn't exist. The dashboard's
+            # Weapon Engagement Range card + range fingerprint gate on
+            # `with_distance > 0`.
             "bullet_hit_distance": {
                 "count": int(bullet_hit_distance_count),
                 "with_distance": int(bullet_hit_distance_with),
+                # match.schema_version 12: hits that also had a usable ordnance
+                # max range (fed the %-of-max histograms). Coverage telemetry.
+                "with_max_range": int(bullet_hit_distance_with_maxrange),
                 "mean": (
                     round(bullet_hit_distance_total / bullet_hit_distance_with, 3)
                     if bullet_hit_distance_with > 0 else None
@@ -4474,6 +4756,25 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if bullet_hit_distance_with > 0 else None
                 ),
             },
+            # match.schema_version 11: shared bin layout for the per-weapon
+            # `range_hist` arrays and per-player `distance_buckets`. Emitted
+            # once here so Python and JS don't duplicate the edge list. None
+            # on v1 / no-distance matches. A histogram of length len(edges)+1
+            # has bin i = [edges[i-1], edges[i]); the last bin is the overflow
+            # bin [edges[-1], inf).
+            "distance_bin_edges": (
+                list(DIST_BIN_EDGES) if bullet_hit_distance_with > 0 else None
+            ),
+            # match.schema_version 12: shared % bin layout for the per-weapon
+            # `range_pct_hist` arrays. None on v1 / no-distance matches.
+            "distance_pct_bin_edges": (
+                list(DIST_PCT_BIN_EDGES) if bullet_hit_distance_with_maxrange > 0 else None
+            ),
+            # match.schema_version 12: hit-weighted representative theoretical
+            # max range (m) per weapon display name, from ODF shotSpeed*lifeSpan.
+            # Drives the meters-mode theoretical-max reference marker + tooltips.
+            # None on v1 / no-distance matches.
+            "weapon_ranges": (weapon_ranges_map or None),
             "terrain_bounds": terrain_bounds,
             "base_to_base_distance": positioning_block.get("base_to_base_distance"),
             "sentinel_damage": {
@@ -5154,6 +5455,8 @@ def main():
     resolve_unit = build_unit_name_resolver(odf_db)
     ship_caps = build_ship_caps_resolver(odf_db)
     print(f"  Ship-cap set: {len(ship_caps)} ODF keys with maxHealth/maxAmmo")
+    ordnance_ranges = build_ordnance_range_resolver(odf_db)
+    print(f"  Ordnance-range set: {len(ordnance_ranges)} ODF keys with usable max range")
     known_powerup_odfs = _load_known_powerup_odfs(odf_db)
     print(f"  Powerup classification set: {len(known_powerup_odfs)} ODFs (DB Powerup bucket + VSR variants)")
     building_odfs = _load_building_odfs(odf_db)
@@ -5202,6 +5505,7 @@ def main():
                 known_players,
                 schema=schema,
                 ship_caps=ship_caps,
+                ordnance_ranges=ordnance_ranges,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"

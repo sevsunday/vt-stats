@@ -991,16 +991,27 @@ The pipeline writes `data/processed/match_contributions.json`, a dict keyed by `
         "pvp_dealt": ..., "pve_dealt": ..., "pvp_received": ..., "pve_received": ...,
         "asset_dealt": ..., "shots_fired": ..., "shots_hit": ...,
         "kills": ..., "deaths": ..., "pickups": ...,
-        "weapon_breakdown": { "<wpn>": { "dealt": ..., "shots": ..., "hits": ... } },
+        "weapon_breakdown": { "<wpn>": { "dealt": ..., "shots": ..., "hits": ...,
+          "range_hist": { "pvp": [counts...], "pve": [counts...] },
+          "range_pct_hist": { "pvp": [counts...], "pve": [counts...] } } },
+        "distance_buckets": { "pvp": { "close": .., "mid": .., "long": .., "extreme": .. },
+                              "pve": { ... } },
         "activity_score": 72, "movement_band": "Mobile", "path_length": 25000.0,
         "target_lock_pct": null
       }
     ],
     "weapon_meta":    [{ "weapon": "...", "total_damage": ..., "total_shots": ..., "total_hits": ... }],
+    "distance_bin_edges": [10, 20, 30, 40, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200],
+    "distance_pct_bin_edges": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120],
+    "weapon_ranges": { "<wpn>": 170.0 },
     "rivalry_matrix": { "<shooter>": { "<victim>": damage } }
   }
 }
 ```
+
+**Weapon engagement range (`match.schema_version` 11, v2-only).** `BulletHit.distance_to_target` (raw world units == in-game meters) is bucketed per `(player, weapon, channel)` into fixed-bin histograms over the shared `match.distance_bin_edges` (emitted once; `null` on v1 / no-distance matches). Bin `i` covers `[edges[i-1], edges[i])`; the trailing bin is the overflow `[edges[-1], inf)`. Each `weapon_breakdown[w].range_hist` carries a `pvp` and/or `pve` array (a channel is omitted when empty; the whole `range_hist` key is omitted when neither channel recorded distance). `personal.distance_buckets` is the per-player coarse fingerprint (`close`/`mid`/`long`/`extreme` per channel, exact sub-sums of the fine histogram since `50`/`150`/`400` are edge members). All of this is **purely descriptive playstyle/meta — never a skill signal or VTSR-T axis** (weapon/ship access drives range far more than skill). Histograms are additive, so the dashboard sums them across the player-filtered roster and across channels (`Both` = `pvp`+`pve`) before estimating percentiles. The contributions slice deliberately drops `range_hist` (no career range rollup). Consumed by the Weapons & Accuracy tab's Weapon Engagement Range strip + Shot Accuracy range fingerprint, gated on `match.bullet_hit_distance.with_distance > 0`.
+
+**Weapon-fair engagement % (`match.schema_version` 12, v2-only).** Each ordnance ODF declares `OrdnanceClass.shotSpeed * lifeSpan` = the projectile's theoretical max range in meters. Dividing each hit's distance by its ordnance's max range yields a weapon-**fair** `% of envelope` that removes the weapon-choice confound raw meters has. Per `(player, weapon, channel)` percentage histograms ride on `weapon_breakdown[w].range_pct_hist` over the shared `match.distance_pct_bin_edges` (`[10..100,120]`; trailing bin = `>120%` over-range); a representative hit-weighted book range per weapon display name is emitted once on `match.weapon_ranges` (drives the meters-mode theoretical-max reference marker + tooltips); `match.bullet_hit_distance.with_max_range` reports `%`-coverage. Lobbed/timed ordnance (`lifeSpan ~ 1e30` → ~1e31 m) is excluded via the `MAX_REASONABLE_RANGE = 2000` cap (such hits still count in the meters histogram but not the `%` view). Drives the strip's `Meters | % of max` toggle and the Shot Accuracy table's per-player **Engagement Envelope** column (weapon-weighted mean `%` of max, sortable, with `Point-blank`/`Mid`/`Edge`/`Over-range` band labels). Still **descriptive playstyle/meta only — not a VTSR-T axis** (ship access + role still confound). `null`/absent on v1 / no-distance matches; the contributions slice drops `range_pct_hist` too.
 
 `js/all-matches-aggregator.js` exposes `window.VTAggregate.build(contributions, fileIds)`. Pure summation; produces the `{meta, career_stats, global_weapon_meta, global_rivalries}` shape below. The All Matches view fetches `match_contributions.json` once per session, caches it on `window.__vtContributions`, and rebuilds the aggregate over whatever `fileIds` subset the active picker filter resolves to (when no filter is engaged, the subset is every key in the contributions dict — i.e. the unfiltered career view).
 
