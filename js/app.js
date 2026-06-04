@@ -5044,26 +5044,16 @@
 
   // Engagement Envelope cell (match.schema_version 12). Weapon-fair mean
   // "% of weapon max range" across the player's hits for the active channel,
-  // rendered as a number + band label + mini-bar. Weapon-normalized, so it
-  // is comparable across players regardless of loadout. Em-dash when the
-  // player has no %-of-max data (v1 / no usable ordnance ranges).
-  function envelopeBand(pct) {
-    if (pct > 100) return 'Over-range';
-    if (pct >= 66) return 'Edge';
-    if (pct >= 33) return 'Mid';
-    return 'Point-blank';
-  }
-  function rangeEnvelopeHtml(weaponBreakdown, channel, pctEdges) {
-    if (typeof weaponEnvelopePct !== 'function') return '<span style="color:var(--kb-text-muted)">—</span>';
-    const env = weaponEnvelopePct(weaponBreakdown, channel, pctEdges);
+  // rendered as a number + mini-bar. Weapon-normalized, so it is comparable
+  // across players regardless of loadout. Em-dash when the player has no
+  // %-of-max data (v1 / no usable ordnance ranges).
+  function rangeEnvelopeHtml(env) {
     if (!env) return '<span style="color:var(--kb-text-muted)">—</span>';
     const pct = env.mean;
-    const band = envelopeBand(pct);
     const w = Math.max(0, Math.min(100, pct));
     const tip = `Mean ${pct.toFixed(0)}% of weapon max range · median ${env.median.toFixed(0)}% · ${env.n.toLocaleString()} hits`;
     return `<span class="vt-range-envelope" data-bs-toggle="tooltip" title="${esc(tip)}">`
       + `<span class="vt-range-envelope-val">${pct.toFixed(0)}%</span>`
-      + `<span class="vt-range-envelope-band">${band}</span>`
       + `<span class="vt-range-envelope-bar"><span style="width:${w}%"></span></span>`
       + `</span>`;
   }
@@ -5071,8 +5061,13 @@
   function renderAccuracyTable(leaderboard, channel) {
     const tbody = document.querySelector('#accuracy-table tbody');
     const pctEdges = currentData && currentData.match && currentData.match.distance_pct_bin_edges;
-    const sorted = [...leaderboard].sort((a, b) => b.personal.accuracy - a.personal.accuracy);
-    tbody.innerHTML = sorted.map(p => {
+    const envOf = (p) => (typeof weaponEnvelopePct === 'function'
+      ? weaponEnvelopePct(p.weapon_breakdown, channel, pctEdges) : null);
+    // Sort by engagement envelope (mean % of weapon max range) desc; players
+    // with no %-of-max data sort last.
+    const rows = leaderboard.map(p => ({ p, env: envOf(p) }));
+    rows.sort((a, b) => (b.env ? b.env.mean : -1) - (a.env ? a.env.mean : -1));
+    tbody.innerHTML = rows.map(({ p, env }) => {
       const ps = p.personal;
       const accColor = ps.accuracy >= 0.7 ? 'var(--kb-success)' : ps.accuracy >= 0.4 ? 'var(--kb-warning)' : 'var(--kb-danger)';
       return `<tr>
@@ -5081,7 +5076,7 @@
         <td class="text-end">${ps.shots_hit.toLocaleString()}</td>
         <td class="text-end fw-bold" style="color:${accColor}">${(ps.accuracy * 100).toFixed(1)}%</td>
         <td class="text-end">${rangeFingerprintHtml(ps.distance_buckets, channel)}</td>
-        <td class="text-end">${rangeEnvelopeHtml(p.weapon_breakdown, channel, pctEdges)}</td>
+        <td class="text-end">${rangeEnvelopeHtml(env)}</td>
       </tr>`;
     }).join('');
     ensureTooltips(tbody);
