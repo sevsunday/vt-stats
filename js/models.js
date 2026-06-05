@@ -241,10 +241,45 @@ function showViewer(entry) {
     activeViewer.setFreeSpin(on);
     els.stage.classList.toggle('grabbable', on);
   };
-  els.reset.onclick = () => activeViewer.resetView();
+  els.reset.onclick = () => resetAllViewer();
   els.capture.onclick = () => doCapture(entry);
   els.lightBtn.onclick = () => setLightOn(!els.lightBtn.classList.contains('on'));
   els.back.onclick = (ev) => { ev.preventDefault(); goDirectory(); };
+}
+
+/* "Reset all": restore the entire viewer to defaults -- toggles off, quality
+ * back to the global Prefer-HQ default, sun light back to default
+ * on/intensity/azimuth/elevation (persisted + live + panel), and the camera /
+ * model orientation / free-spin momentum reset. The global Prefer-HQ directory
+ * preference is intentionally left intact (it's a cross-view setting). */
+function resetAllViewer() {
+  if (!activeViewer) return;
+
+  // Toggles -> off.
+  els.wire.classList.remove('on');
+  activeViewer.setWireframe(false);
+  els.spin.classList.remove('on');
+  activeViewer.setAutoRotate(false);
+  els.freespin.classList.remove('on');
+  els.stage.classList.remove('grabbable');
+  activeViewer.setFreeSpin(false);
+
+  // Quality -> the global default (honors the Prefer-HQ pref).
+  const quality = preferHq() ? 'hq' : 'perf';
+  syncQualitySeg(quality);
+  activeViewer.setQuality(quality);
+
+  // Sun light -> defaults (persisted + live + panel sliders + button).
+  localStorage.setItem(LIGHT_AZ_KEY, String(LIGHT_DEFAULT.az));
+  localStorage.setItem(LIGHT_EL_KEY, String(LIGHT_DEFAULT.el));
+  localStorage.setItem(LIGHT_INTENSITY_KEY, String(LIGHT_DEFAULT.intensity));
+  activeViewer.setLightAngle(LIGHT_DEFAULT.az, LIGHT_DEFAULT.el);
+  activeViewer.setLightIntensity(LIGHT_DEFAULT.intensity);
+  initLightPanel({ ...LIGHT_DEFAULT });   // re-sync slider values + handlers
+  setLightOn(LIGHT_DEFAULT.on);           // button highlight + panel dim + viewer + persist
+
+  // Camera, model orientation, and any free-spin momentum.
+  activeViewer.resetView();
 }
 
 /* Single source of truth for the sun on/off state: drives the top button
