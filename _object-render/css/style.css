@@ -238,6 +238,9 @@ html, body {
 
 .stage { flex: 1; min-height: 0; position: relative; }
 .stage canvas { display: block; }
+/* Free-spin grab affordance (set on .stage while Free spin is active). */
+.stage.grabbable canvas { cursor: grab; }
+.stage.grabbable canvas:active { cursor: grabbing; }
 
 /* Floating light-control panel (overlaid bottom-left of the stage). */
 .light-panel {

@@ -47,6 +47,19 @@ const LIGHT_CAPTURE_AZ = 215;
 const LIGHT_CAPTURE_EL = 45;
 const LIGHT_CAPTURE_INTENSITY = 2.6;
 
+// Free-spin feel (all tunable). DRAG_SENS is radians of model rotation per pixel
+// of drag; momentum velocity (rad/sec) = pixel velocity (px/sec) * DRAG_SENS.
+const DRAG_SENS = 0.01;
+const SPIN_FRICTION_PER_SEC = 0.85;   // fraction of velocity retained per second (->1 = spins longer)
+const SPIN_MAX_VEL = 40;              // rad/sec cap so a hard flick can't strobe
+const SPIN_IDLE_MS = 80;              // release this long after the last move => no fling
+const VEL_EMA_ALPHA = 0.35;           // smoothing of the tracked drag velocity
+const SPIN_MIN_VEL = 0.02;            // rad/sec below which we snap to a stop
+const SPIN_UP = new THREE.Vector3(0, 1, 0);
+const SPIN_RIGHT = new THREE.Vector3(1, 0, 0);
+
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
 export class ObjectViewer {
   constructor(container, opts = {}) {
     this.container = container;
@@ -66,6 +79,14 @@ export class ObjectViewer {
     this._lightAz = Number.isFinite(lopts.az) ? lopts.az : LIGHT_DEFAULT_AZ;
     this._lightEl = Number.isFinite(lopts.el) ? lopts.el : LIGHT_DEFAULT_EL;
     this._lightIntensity = Number.isFinite(lopts.intensity) ? lopts.intensity : LIGHT_DEFAULT_INTENSITY;
+
+    // Free-spin state.
+    this._freeSpin = false;
+    this._dragging = false;
+    this._spinVel = { x: 0, y: 0 };   // px/sec while dragging, rad/sec after release
+    this._lastPtr = { x: 0, y: 0 };
+    this._lastMoveT = 0;
+    this._clock = new THREE.Clock();
 
     const w = container.clientWidth || 800;
     const h = container.clientHeight || 600;
@@ -140,8 +161,62 @@ export class ObjectViewer {
     this._onResize = () => this.resize();
     window.addEventListener('resize', this._onResize);
 
+    // Free-spin pointer handlers (only act when _freeSpin is on).
+    this._onPointerDown = this._onPointerDown.bind(this);
+    this._onPointerMove = this._onPointerMove.bind(this);
+    this._onPointerUp = this._onPointerUp.bind(this);
+    const el = this.renderer.domElement;
+    el.addEventListener('pointerdown', this._onPointerDown);
+    el.addEventListener('pointermove', this._onPointerMove);
+    el.addEventListener('pointerup', this._onPointerUp);
+    el.addEventListener('pointercancel', this._onPointerUp);
+
     this._animate = this._animate.bind(this);
     this.renderer.setAnimationLoop(this._animate);
+  }
+
+  _onPointerDown(e) {
+    if (!this._freeSpin || e.button !== 0 || !this._spin) return;
+    this._dragging = true;
+    this._spinVel.x = 0;          // grab = catch the spinner (stop it)
+    this._spinVel.y = 0;
+    this._lastPtr.x = e.clientX;
+    this._lastPtr.y = e.clientY;
+    this._lastMoveT = performance.now();
+    try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* noop */ }
+  }
+
+  _onPointerMove(e) {
+    if (!this._dragging || !this._spin) return;
+    const now = performance.now();
+    const dx = e.clientX - this._lastPtr.x;
+    const dy = e.clientY - this._lastPtr.y;
+    const dt = Math.max((now - this._lastMoveT) / 1000, 1e-4);
+    // Direct 1:1 rotation while dragging (world axes -> predictable yaw/pitch).
+    this._spin.rotateOnWorldAxis(SPIN_UP, dx * DRAG_SENS);
+    this._spin.rotateOnWorldAxis(SPIN_RIGHT, dy * DRAG_SENS);
+    // Track a smoothed pixel velocity (px/sec) for the release fling.
+    const instX = dx / dt;
+    const instY = dy / dt;
+    this._spinVel.x += (instX - this._spinVel.x) * VEL_EMA_ALPHA;
+    this._spinVel.y += (instY - this._spinVel.y) * VEL_EMA_ALPHA;
+    this._lastPtr.x = e.clientX;
+    this._lastPtr.y = e.clientY;
+    this._lastMoveT = now;
+  }
+
+  _onPointerUp(e) {
+    if (!this._dragging) return;
+    this._dragging = false;
+    try { this.renderer.domElement.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    // Released after a pause => no fling. Otherwise convert px/sec -> rad/sec.
+    if (performance.now() - this._lastMoveT > SPIN_IDLE_MS) {
+      this._spinVel.x = 0;
+      this._spinVel.y = 0;
+      return;
+    }
+    this._spinVel.x = clamp(this._spinVel.x * DRAG_SENS, -SPIN_MAX_VEL, SPIN_MAX_VEL);
+    this._spinVel.y = clamp(this._spinVel.y * DRAG_SENS, -SPIN_MAX_VEL, SPIN_MAX_VEL);
   }
 
   async load(url) {
@@ -149,8 +224,8 @@ export class ObjectViewer {
     const gltf = await loader.loadAsync(url);
     if (this.disposed) return;
 
-    if (this._model) {
-      this.scene.remove(this._model);
+    if (this._spin) {
+      this.scene.remove(this._spin);   // pivot holds the model (see _frame)
     }
     this._materials = [];
     const names = new Set();
@@ -166,8 +241,7 @@ export class ObjectViewer {
     });
     this._textureNames = [...names];
     this._model = model;
-    this.scene.add(model);
-    this._frame(model);
+    this._frame(model);   // builds the spin pivot, reparents model, adds to scene
     this.setWireframe(this._wireframe);
     await this._applyTextures();
     return gltf;
@@ -242,6 +316,15 @@ export class ObjectViewer {
     // Sit the model on the grid (bottom at y=0) and pivot on its center.
     model.position.y -= box.min.y;
     center.y -= box.min.y;
+
+    // Wrap the model in a pivot group centered on its (grid-sat) bbox center so
+    // free-spin rotates the model about its visual center, not its local origin.
+    // model.position is preserved in world space: pivot.pos + model.pos unchanged.
+    this._spin = new THREE.Group();
+    this._spin.position.copy(center);
+    this.scene.add(this._spin);
+    this._spin.add(model);
+    model.position.sub(center);
 
     this.controls.target.copy(center);
     const dist = radius / Math.tan((this.camera.fov * Math.PI) / 360) * 1.6;
@@ -321,6 +404,23 @@ export class ObjectViewer {
     this.controls.autoRotate = !!on;
   }
 
+  /* Free spin: lock the camera (no rotate/pan; zoom still works) and let pointer
+   * drags spin the model with momentum. Disabling restores camera orbit + pan. */
+  setFreeSpin(on) {
+    this._freeSpin = !!on;
+    this.controls.enableRotate = !on;
+    this.controls.enablePan = !on;
+    if (on) {
+      this.controls.autoRotate = false;
+      this._spinVel.x = 0;
+      this._spinVel.y = 0;
+    } else {
+      this._dragging = false;
+      this._spinVel.x = 0;
+      this._spinVel.y = 0;
+    }
+  }
+
   setLightEnabled(on) {
     this._lightOn = !!on;
     this._applyLightEnabled();
@@ -346,6 +446,10 @@ export class ObjectViewer {
   }
 
   resetView() {
+    // Stop any free spin and return the model to its canonical orientation.
+    this._spinVel.x = 0;
+    this._spinVel.y = 0;
+    if (this._spin) this._spin.quaternion.identity();
     if (this._home) {
       this.camera.position.copy(this._home.pos);
       this.controls.target.copy(this._home.target);
@@ -370,12 +474,18 @@ export class ObjectViewer {
     const camTarget = this.controls.target.clone();
     const bg = this.scene.background;
     const prevLight = this.getLightState();
+    const prevSpinQuat = this._spin ? this._spin.quaternion.clone() : null;
+    const prevSpinVel = { x: this._spinVel.x, y: this._spinVel.y };
 
     this.controls.autoRotate = false;
     this.setWireframe(false);
     this.grid.visible = false;
     this.axes.visible = false;
     this.scene.background = new THREE.Color(0x14171c);
+    // Capture from the canonical orientation regardless of any free spin.
+    if (this._spin) this._spin.quaternion.identity();
+    this._spinVel.x = 0;
+    this._spinVel.y = 0;
     // Force the canonical sun (on, fixed angle + intensity, shadows) for the
     // capture so thumbnails are reproducible regardless of slider state.
     this._lightOn = true;
@@ -431,6 +541,9 @@ export class ObjectViewer {
     this.setLightAngle(prevLight.az, prevLight.el);
     this.setLightIntensity(prevLight.intensity);
     this._applyLightEnabled();
+    if (prevSpinQuat && this._spin) this._spin.quaternion.copy(prevSpinQuat);
+    this._spinVel.x = prevSpinVel.x;
+    this._spinVel.y = prevSpinVel.y;
     await this.setQuality(prevQuality);
     return shots;
   }
@@ -445,6 +558,20 @@ export class ObjectViewer {
   }
 
   _animate() {
+    const dt = this._clock.getDelta();
+    // Free-spin momentum: integrate angular velocity, then apply friction decay.
+    if (this._freeSpin && !this._dragging && this._spin) {
+      const v = this._spinVel;
+      if (Math.abs(v.x) > SPIN_MIN_VEL || Math.abs(v.y) > SPIN_MIN_VEL) {
+        this._spin.rotateOnWorldAxis(SPIN_UP, v.x * dt);
+        this._spin.rotateOnWorldAxis(SPIN_RIGHT, v.y * dt);
+        const decay = Math.pow(SPIN_FRICTION_PER_SEC, dt);
+        v.x *= decay;
+        v.y *= decay;
+        if (Math.abs(v.x) <= SPIN_MIN_VEL) v.x = 0;
+        if (Math.abs(v.y) <= SPIN_MIN_VEL) v.y = 0;
+      }
+    }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
@@ -453,6 +580,11 @@ export class ObjectViewer {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
     window.removeEventListener('resize', this._onResize);
+    const el = this.renderer.domElement;
+    el.removeEventListener('pointerdown', this._onPointerDown);
+    el.removeEventListener('pointermove', this._onPointerMove);
+    el.removeEventListener('pointerup', this._onPointerUp);
+    el.removeEventListener('pointercancel', this._onPointerUp);
     this.controls.dispose();
     for (const t of this._texCache.values()) { if (t) t.dispose(); }
     this._texCache.clear();

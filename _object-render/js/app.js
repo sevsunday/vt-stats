@@ -50,6 +50,7 @@ const els = {
   back: document.getElementById('back-btn'),
   wire: document.getElementById('wire-btn'),
   spin: document.getElementById('spin-btn'),
+  freespin: document.getElementById('freespin-btn'),
   reset: document.getElementById('reset-btn'),
   capture: document.getElementById('capture-btn'),
   qualitySeg: document.getElementById('quality-seg'),
@@ -200,6 +201,8 @@ function showViewer(entry) {
   syncQualitySeg(quality);
   els.wire.classList.remove('on');
   els.spin.classList.remove('on');
+  els.freespin.classList.remove('on');
+  els.stage.classList.remove('grabbable');
   // The top "Light" button is the on/off toggle; the panel (intensity/angle
   // sliders) is always visible while a model is open.
   els.lightPanel.hidden = false;
@@ -220,7 +223,23 @@ function showViewer(entry) {
   els.spin.onclick = () => {
     const on = !els.spin.classList.contains('on');
     els.spin.classList.toggle('on', on);
+    if (on) {
+      // Auto-rotate (camera) and Free spin (model) are mutually exclusive.
+      els.freespin.classList.remove('on');
+      els.stage.classList.remove('grabbable');
+      activeViewer.setFreeSpin(false);
+    }
     activeViewer.setAutoRotate(on);
+  };
+  els.freespin.onclick = () => {
+    const on = !els.freespin.classList.contains('on');
+    els.freespin.classList.toggle('on', on);
+    if (on) {
+      els.spin.classList.remove('on');
+      activeViewer.setAutoRotate(false);
+    }
+    activeViewer.setFreeSpin(on);
+    els.stage.classList.toggle('grabbable', on);
   };
   els.reset.onclick = () => activeViewer.resetView();
   els.capture.onclick = () => doCapture(entry);
