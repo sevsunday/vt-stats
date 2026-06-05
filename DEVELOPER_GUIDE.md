@@ -1732,7 +1732,7 @@ Eight thug axes (v2.3 — locked, $\sum w = 1.00$, exported as `THUG_WEIGHTS` in
 | Axis | Weight | Per-match metric (before z-score) |
 |---|---|---|
 | `net_damage_share` | 0.20 | $(\text{dealt} - \text{received}) / \max(1, \sum_{\text{lobby}} \text{dealt})$ |
-| `thug_kill_rate`   | 0.20 | $(\text{pvp\_kills} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_kills}) / \text{minutes\_played}$ |
+| `thug_kill_rate`   | 0.20 | $(\text{effective\_pvp\_kills} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_kills}) / \text{minutes\_played}$ (v2.9; was raw `pvp_kills` pre-v2.9 — see §13.4.1) |
 | `thug_efficiency`  | 0.16 | $(\text{pvp\_dealt} + \alpha_{\mathrm{PvE}} \cdot \text{pve\_to\_AI}) / \max(1, \text{total\_dealt} - \text{structure\_dealt})$ |
 | `thug_accuracy`    | 0.15 | weapon-normalized hit-rate ratio vs lobby (see formula below) |
 | `pve_share`        | 0.12 | $\text{pve\_dealt} / \max(1, \text{total\_dealt})$ — damage to enemy non-human assets (structures + mobile AI) as share of total (omit axis if lobby has zero PvE damage) |
@@ -1775,6 +1775,25 @@ $$
 When an axis is missing for the entire lobby (e.g. pre-positioning matches lack `mobility`), its weight redistributes pro-rata to the surviving axes so $\sum w = 1$ always.
 
 **Z-score edge cases**: when every player ties on an axis ($\sigma = 0$), the z-score is undefined; we set every player's contribution on that axis to 0. Same when $\sigma < 10^{-9}$ (numerical noise).
+
+### 13.4.1 Assist-aware effective kills (v2.9)
+
+Raw last-hit kills are a noisy performance signal. A high-tier player who is focus-fired and does the bulk of the damage to a target often doesn't land the killing blow — a teammate who shows up at the end "steals" full credit. An empirical pass over the corpus (100 rated matches) confirmed the scale of the problem: in **46%** of victim cases the top damage-dealer to that victim was *not* the player credited with the most kills on them, and the median finisher had personally dealt only **~29%** of their victim's received damage.
+
+To fix this at the source (rather than by blunt-force down-weighting the axis), `thug_kill_rate` reads **`personal.effective_pvp_kills`** (`match.schema_version` 13) instead of raw `pvp_kills`. For each PvP `UnitDestroyed` of victim $V$ by finisher $K$ at tick $T$, kill credit is distributed among the shooters who damaged $V$ within the window $[T - W, T]$ (where $W = $ `EFFECTIVE_KILL_WINDOW_SEC` $\times$ `tick_rate`, default 10s):
+
+$$
+\text{credit}_s \;=\; (1 - F)\cdot\frac{\text{dmg}_{s \to V}^{[T-W,\,T]}}{\sum_{s'} \text{dmg}_{s' \to V}^{[T-W,\,T]}}, \qquad \text{credit}_K \mathrel{+}= F
+$$
+
+with finisher floor $F = $ `EFFECTIVE_KILL_FINISHER_FLOOR` (default 0.30). Credit per kill sums to 1.0, so the per-match invariant **$\sum_{\text{lobby}} \text{effective\_pvp\_kills} = \sum_{\text{lobby}} \text{pvp\_kills}$** holds — only the *distribution* changes. When no in-window damage is attributable (crush / mine / environmental), credit falls back to pure last-hit ($\{K: 1.0\}$).
+
+Design notes:
+
+- **Finisher floor**, not pure proportional: closing the kill still matters (the engine reports the finisher; securing a removal before the enemy repairs is a real skill in BZCC). $F = 0.30$ guarantees the finisher a meaningful slice even when they dealt little in-window damage.
+- **PvE kills stay raw** — kill-stealing is a PvP-only concern, and the `rivalry_matrix` that drives the windowed credit is human-only.
+- **Computed in the pipeline** (`scripts/process_stats.py::_compute_effective_kills`), not in `elo.py` — the rating module just prefers the new per-row field. Both constants are tunable without a schema bump (bump `PIPELINE_VERSION`).
+- **Weights unchanged.** This release fixes attribution only; any retune of the `thug_kill_rate` *weight* is a separate, validation-gated follow-up (the original rationale for down-weighting kills — bad attribution — is now addressed at the source). `ELO_SCHEMA_VERSION` is **not** bumped (input-only change), but ratings shift so **pre-v2.9 `peak_vtsr` is no longer comparable** (corpus re-rated).
 
 ### 13.5 Hope mechanics — loss aversion + soft floor
 

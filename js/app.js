@@ -1483,7 +1483,7 @@
   // hide it under the Per-match column-mode). Returns a complete
   // <td>...</td> string. When pvp/pve aren't present (pre-v4 schema),
   // falls back to plain integer rendering (same extraCls applied).
-  function killsDeathsChipCell(total, pvp, pve, kind, extraCls) {
+  function killsDeathsChipCell(total, pvp, pve, kind, extraCls, opts) {
     const tot = total || 0;
     const cls = ('text-end ' + (extraCls || '')).trim();
     const hasSplit = (pvp != null && pve != null);
@@ -1492,10 +1492,28 @@
     }
     const pvpN = pvp || 0;
     const pveN = pve || 0;
-    const tip = kind === 'deaths'
-      ? `PvP: ${pvpN} from players · PvE: ${pveN} from AI / world`
-      : `PvP: ${pvpN} on players · PvE: ${pveN} on AI / structures (thug_kill_rate weights PvP at 1.0 and PvE at α=0.5)`;
-    return `<td class="${cls}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">${tot} <span class="vt-kd-split text-muted small">(${pvpN}/${pveN})</span></td>`;
+    // match.schema_version 13: assist-aware effective kills. When the kills
+    // cell carries effective/assist data, surface effective PvP kill credit
+    // in the tooltip and a small `+N` assist badge next to the count. The
+    // sort key + displayed total stay the raw kills count (unchanged).
+    const eff = opts && opts.effective != null ? opts.effective : null;
+    const assists = opts && opts.assists != null ? (opts.assists || 0) : 0;
+    let tip;
+    if (kind === 'deaths') {
+      tip = `PvP: ${pvpN} from players · PvE: ${pveN} from AI / world`;
+    } else {
+      tip = `PvP: ${pvpN} on players · PvE: ${pveN} on AI / structures (thug_kill_rate weights PvP at 1.0 and PvE at α=0.5)`;
+      if (eff != null) {
+        tip += ` · Effective PvP kills: ${eff.toFixed(2)} (damage-share + finisher-floor weighted)`;
+      }
+      if (assists > 0) {
+        tip += ` · ${assists} assist${assists === 1 ? '' : 's'}`;
+      }
+    }
+    const assistBadge = (kind !== 'deaths' && assists > 0)
+      ? ` <span class="vt-assist-badge">+${assists}</span>`
+      : '';
+    return `<td class="${cls}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">${tot} <span class="vt-kd-split text-muted small">(${pvpN}/${pveN})</span>${assistBadge}</td>`;
   }
 
   // Single-source-of-truth badge HTML used by both the dedicated VTSR-T
@@ -4719,7 +4737,10 @@
       // i.e. totals). Tooltip surfaces the explicit split + the
       // alpha-blend weighting note. Falls back to plain integer when
       // pvp/pve fields are absent (pre-v4 schema).
-      const kCell = killsDeathsChipCell(r.kills || 0, ps.pvp_kills, ps.pve_kills, 'kills');
+      const kCell = killsDeathsChipCell(r.kills || 0, ps.pvp_kills, ps.pve_kills, 'kills', '', {
+        effective: ps.effective_pvp_kills,
+        assists: ps.pvp_assists,
+      });
       const dCell = killsDeathsChipCell(r.deaths || 0, ps.pvp_deaths, ps.pve_deaths, 'deaths');
       // VTSR-T per-match column hidden to de-emphasize ratings. To restore:
       // uncomment the two lines below, re-add the `${eloCell}` cell to the row
@@ -5236,11 +5257,27 @@
       const victimHtml = victimSid
         ? `<a class="vt-player-link" href="${vtPlayerHref(victimSid)}" style="color:var(--kb-accent);">${esc(entry.victim)}</a>`
         : `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>`;
-      html += `<div class="d-flex align-items-center gap-2 py-1" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
+      // match.schema_version 13: assist credit. entry.assists is a list of
+      // non-finisher contributors [{name, steam64, share}] (descending
+      // share). Render as a muted "assist:" trailer with player links and
+      // damage-share percentages. Empty for PvE / unattributed kills.
+      let assistHtml = '';
+      if (Array.isArray(entry.assists) && entry.assists.length > 0) {
+        const parts = entry.assists.map(a => {
+          const pct = Math.round((a.share || 0) * 100);
+          const nameHtml = a.steam64
+            ? `<a class="vt-player-link" href="${vtPlayerHref(a.steam64)}">${esc(a.name)}</a>`
+            : esc(a.name);
+          return `${nameHtml} ${pct}%`;
+        }).join(', ');
+        assistHtml = `<span class="vt-killfeed-assist text-muted">assist: ${parts}</span>`;
+      }
+      html += `<div class="d-flex align-items-center gap-2 py-1 flex-wrap" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
       html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
       html += `<span class="fw-semibold">${killerHtml}</span>${killerNick}${killerOdf}`;
       html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
       html += `<span class="fw-semibold">${victimHtml}</span>${victimNick}${victimOdf}`;
+      html += assistHtml;
       html += `</div>`;
     });
     if (milestoneTick !== null && !milestoneRendered) {

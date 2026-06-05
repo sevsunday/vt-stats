@@ -71,6 +71,13 @@
       total_pve_kills: 0,
       total_pvp_deaths: 0,
       total_pve_deaths: 0,
+      // match.schema_version 13: assist-aware effective kills career
+      // roll-up. `total_effective_pvp_kills` sums each contribution's
+      // damage-share + finisher-floor weighted PvP kill credit (defaults to
+      // raw pvp_kills on pre-v13 contributions); `total_pvp_assists` counts
+      // assist credits. Drives the Career Leaderboard assist display.
+      total_effective_pvp_kills: 0,
+      total_pvp_assists: 0,
       // match.schema_version 8: self-damage carve-out career roll-up.
       // Self events (shooter == victim, e.g. Blink AOE splash) live in
       // their own bucket so the cross-match invariant
@@ -513,6 +520,11 @@
         c.total_pve_kills      += p.pve_kills      || 0;
         c.total_pvp_deaths     += p.pvp_deaths     || 0;
         c.total_pve_deaths     += p.pve_deaths     || 0;
+        // match.schema_version 13: assist-aware effective kills roll-up.
+        // Pre-v13 contributions lack effective_pvp_kills; fall back to the
+        // raw pvp_kills so mixed-corpus career totals stay sensible.
+        c.total_effective_pvp_kills += (p.effective_pvp_kills != null ? p.effective_pvp_kills : (p.pvp_kills || 0));
+        c.total_pvp_assists         += p.pvp_assists || 0;
         // match.schema_version 8: self-damage carve-out roll-up.
         // Pre-v8 contributions default to 0 here.
         c.total_self_dealt      += p.self_dealt      || 0;
@@ -867,6 +879,11 @@
         total_pve_kills:     c.total_pve_kills,
         total_pvp_deaths:    c.total_pvp_deaths,
         total_pve_deaths:    c.total_pve_deaths,
+        // match.schema_version 13: assist-aware effective kills career
+        // totals. `total_effective_pvp_kills` is a float (kill credit);
+        // `total_pvp_assists` counts assist credits.
+        total_effective_pvp_kills: r1(c.total_effective_pvp_kills),
+        total_pvp_assists:   c.total_pvp_assists,
         // match.schema_version 8: self-damage carve-out career totals.
         // Reconcile/audit fields; no UI panel reads them yet. Pre-v8
         // matches contribute 0 to all five.

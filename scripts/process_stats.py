@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 24
+PIPELINE_VERSION = 25
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -194,6 +194,29 @@ CAMPOD_MAX_SHARE = 0.25  # > 25% of match wall-clock in campod => is_campod=True
 # died-often players whose presence window is full but active_seconds is
 # short -- their dead time is correctly NOT a participation deficit.
 LOW_ACTIVITY_MIN_PRESENCE = 0.75
+
+# --- Assist-aware effective kills (match.schema_version 13) -----------------
+# Raw last-hit PvP kills are a noisy performance signal: a teammate who lands
+# the killing blow gets full credit even if someone else did the bulk of the
+# damage (the classic "kill steal" against a focus-fired high-tier player).
+# We instead distribute each PvP kill by damage contribution within a time
+# window before the kill, with a guaranteed minimum to the finisher so that
+# closing the kill still matters.
+#
+# For each PvP kill of victim V by killer K at tick T, over the window
+# [T - W, T] (W = EFFECTIVE_KILL_WINDOW_SEC * tick_rate ticks):
+#   base[s]   = dmg_to_V_in_window[s] / total_in_window
+#   credit[s] = (1 - FLOOR) * base[s]   for every shooter s
+#   credit[K] += FLOOR                  (finisher floor)
+# Credit per kill sums to 1.0, so the per-match invariant
+# `Σ effective_pvp_kills == Σ pvp_kills` holds. When no in-window damage is
+# recorded (crush / mine / environmental edge cases) we fall back to pure
+# last-hit: credit = {K: 1.0}.
+#
+# Both constants are tunable without a schema bump (bump PIPELINE_VERSION).
+EFFECTIVE_KILL_WINDOW_SEC = 10.0      # damage-attribution window before a kill
+EFFECTIVE_KILL_FINISHER_FLOOR = 0.30  # guaranteed credit share to the finisher
+EFFECTIVE_KILL_ASSIST_EPS = 1e-3      # min credit to count as an assist
 
 # --- Weapon engagement-range histograms (match.schema_version 11) ----------
 # BulletHit.distance_to_target (v2-only float, world units == in-game meters)
@@ -2480,6 +2503,69 @@ def _is_low_activity_row(first_tick, last_tick, tick_rate, duration_sec):
     return (presence_sec / duration_sec) < LOW_ACTIVITY_MIN_PRESENCE, presence_sec
 
 
+def _compute_effective_kills(pvp_kill_log, dmg_by_victim, tick_rate, nick_for_s64):
+    """Distribute PvP kill credit by in-window damage share + finisher floor.
+
+    match.schema_version 13. For each PvP kill (tick T, killer K, victim V)
+    in ``pvp_kill_log``, sum each shooter's damage to V over the window
+    ``[T - W, T]`` (W = EFFECTIVE_KILL_WINDOW_SEC * tick_rate ticks) from
+    ``dmg_by_victim[V]`` (a list of ``(tick, shooter, amount)``), then:
+
+        base[s]   = dmg_in_window[s] / total_in_window
+        credit[s] = (1 - FLOOR) * base[s]      for every shooter s
+        credit[K] += FLOOR                     (finisher floor)
+
+    Credit per kill sums to 1.0, so ``Σ effective_pvp_kills == Σ pvp_kills``
+    across the match. When no in-window damage is recorded (crush / mine /
+    environmental, or all damage older than the window) we fall back to
+    pure last-hit: ``credit = {K: 1.0}``.
+
+    Returns ``(effective_pvp_kills, pvp_assists, kill_feed_assists)``:
+      * ``effective_pvp_kills`` -- dict[s64 -> float] summed credit
+      * ``pvp_assists``         -- dict[s64 -> int] count of kills where the
+        player got non-finisher credit above EFFECTIVE_KILL_ASSIST_EPS
+      * ``kill_feed_assists``   -- dict[feed_idx -> [{name, steam64, share}]]
+        non-finisher contributors (descending share) for the kill-feed UI
+    """
+    effective_pvp_kills = defaultdict(float)
+    pvp_assists = defaultdict(int)
+    kill_feed_assists = {}
+    window_ticks = EFFECTIVE_KILL_WINDOW_SEC * tick_rate if tick_rate > 0 else 0.0
+
+    for tick, killer, victim, feed_idx in pvp_kill_log:
+        lo = tick - window_ticks
+        dmg_in_window = defaultdict(float)
+        for d_tick, shooter, amount in dmg_by_victim.get(victim, ()):  # noqa: E501
+            if lo <= d_tick <= tick and amount > 0:
+                dmg_in_window[shooter] += amount
+        total = sum(dmg_in_window.values())
+
+        if total <= 0:
+            # No attributable damage in the window -> pure last-hit.
+            effective_pvp_kills[killer] += 1.0
+            kill_feed_assists[feed_idx] = []
+            continue
+
+        floor = EFFECTIVE_KILL_FINISHER_FLOOR
+        credit = {s: (1.0 - floor) * (dmg / total) for s, dmg in dmg_in_window.items()}
+        credit[killer] = credit.get(killer, 0.0) + floor
+
+        assists = []
+        for s, c in credit.items():
+            effective_pvp_kills[s] += c
+            if s != killer and c > EFFECTIVE_KILL_ASSIST_EPS:
+                pvp_assists[s] += 1
+                assists.append({
+                    "name": nick_for_s64(s),
+                    "steam64": str(s),
+                    "share": round(c, 4),
+                })
+        assists.sort(key=lambda a: -a["share"])
+        kill_feed_assists[feed_idx] = assists
+
+    return effective_pvp_kills, pvp_assists, kill_feed_assists
+
+
 def _resolve_account_reroutes(slot_to_s64, s64_to_nick):
     """Return a list of reroute records for this match.
 
@@ -2764,6 +2850,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
     # Rivalry matrix (player-on-player only, keyed on Steam64)
     rivalry = defaultdict(lambda: defaultdict(float))
+
+    # Assist-aware effective kills (match.schema_version 13). We log each PvP
+    # damage event per victim (tick, shooter, amount) and each PvP kill
+    # (tick, killer, victim, kill_feed_index) during the event loop, then
+    # post-loop distribute kill credit by in-window damage share with a
+    # finisher floor. See EFFECTIVE_KILL_* constants near the top of the file.
+    dmg_by_victim = defaultdict(list)  # victim_s64 -> [(tick, shooter_s64, amount), ...]
+    pvp_kill_log = []                  # [(tick, killer_s64, victim_s64, feed_idx), ...]
 
     # Faction totals
     faction_dealt = defaultdict(float)
@@ -3344,6 +3438,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         player_self_dealt[de_shooter] += de_amount
                     else:
                         rivalry[de_shooter][victim] += de_amount
+                        # match.schema_version 13: per-victim PvP damage log
+                        # feeding the post-loop assist-aware effective-kill
+                        # credit. Logs only real PvP damage (shooter > 0,
+                        # victim > 0, shooter != victim).
+                        dmg_by_victim[victim].append((de_tick, de_shooter, de_amount))
 
         elif event_type == "unit_destroyed":
             ud = evt.unit_destroyed
@@ -3512,6 +3611,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 else:
                     victim_name = "World"
 
+            # match.schema_version 13: capture the kill_feed index of this
+            # event so the post-loop assist-credit pass can attach an
+            # `assists` list to the matching entry. Recorded BEFORE the
+            # append so it points at the row about to be added.
+            feed_idx = len(kill_feed)
             kill_feed.append({
                 "tick": ud.tick,
                 "killer": killer_name,
@@ -3532,6 +3636,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "victim_in_game_nick": in_game_nick_for(ud.victim, victim_name) if ud.victim > 0 else None,
                 "victim_odf": ud.victim_odf,
             })
+            # match.schema_version 13: log PvP kills for assist-aware credit.
+            if is_pvp_kill:
+                pvp_kill_log.append((ud.tick, ud.killer, ud.victim, feed_idx))
             i += 1
 
         elif event_type == "unit_sniped":
@@ -3986,6 +4093,19 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             if skip_filter or vfc != team_fc:
                 player_structure_dealt[s64] += amount
 
+    # match.schema_version 13: assist-aware effective kills. Distribute each
+    # PvP kill by in-window damage share + finisher floor (see
+    # _compute_effective_kills + the EFFECTIVE_KILL_* constants). Feeds the
+    # leaderboard personal block + the kill_feed `assists` annotations + the
+    # VTSR-T thug_kill_rate axis (via scripts/elo.py).
+    effective_pvp_kills, pvp_assists, kill_feed_assists = _compute_effective_kills(
+        pvp_kill_log, dmg_by_victim, tick_rate, nick_for_s64,
+    )
+    # Attach the per-kill assist list to the matching kill_feed entries.
+    # PvE / unattributed kills (no pvp_kill_log entry) default to [].
+    for idx, entry in enumerate(kill_feed):
+        entry["assists"] = kill_feed_assists.get(idx, [])
+
     # Build leaderboard
     leaderboard = []
     # Per-slot lookup for the identity-reroute provenance field on each
@@ -4308,6 +4428,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "pve_kills":  pve_kills,
                 "pvp_deaths": pvp_deaths,
                 "pve_deaths": pve_deaths,
+                # match.schema_version 13: assist-aware effective kills.
+                # `effective_pvp_kills` distributes each PvP kill by in-window
+                # damage share + finisher floor (sum across the lobby equals
+                # the raw pvp_kills total). Feeds the VTSR-T thug_kill_rate
+                # axis (scripts/elo.py prefers it over raw pvp_kills).
+                # `pvp_assists` counts kills where this player contributed
+                # non-finisher credit. Both default to 0 on a player with no
+                # PvP kills/assists. See EFFECTIVE_KILL_* constants.
+                "effective_pvp_kills": round(effective_pvp_kills.get(s64, 0.0), 2) if s64 else 0.0,
+                "pvp_assists":         pvp_assists.get(s64, 0) if s64 else 0,
                 # match.schema_version 8: self-damage carve-out. Self
                 # events (shooter == victim, e.g. Blink AOE splash on
                 # the firing ship) live in their own bucket so the
@@ -4720,7 +4850,19 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # %-coverage. Lobbed/timed ordnance (~1e30 lifeSpan) is excluded via
             # MAX_REASONABLE_RANGE. Drives the "% of max" strip + per-player
             # Engagement Envelope. Still descriptive-only -- NOT a VTSR-T axis.
-            "schema_version": 12,
+            # v13 (this version) adds assist-aware effective kills: each
+            # `personal` block gains `effective_pvp_kills` (float; PvP kill
+            # credit distributed by in-window damage share + finisher floor,
+            # summing across the lobby to the raw pvp_kills total) and
+            # `pvp_assists` (int; kills where the player contributed
+            # non-finisher credit), and each `kill_feed` entry gains an
+            # `assists` list ([{name, steam64, share}], descending share;
+            # empty for PvE / unattributed kills). scripts/elo.py's
+            # thug_kill_rate axis prefers `effective_pvp_kills` over raw
+            # pvp_kills. Pre-v13 data lacks these fields; consumers default
+            # `effective_pvp_kills` to pvp_kills, `pvp_assists` to 0, and
+            # `assists` to []. See EFFECTIVE_KILL_* constants.
+            "schema_version": 13,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
@@ -4963,6 +5105,13 @@ def _extract_contribution(match_data):
             "pve_kills":      personal.get("pve_kills", 0),
             "pvp_deaths":     personal.get("pvp_deaths", 0),
             "pve_deaths":     personal.get("pve_deaths", 0),
+            # match.schema_version 13: assist-aware effective kills career
+            # roll-up. Aggregator sums these into `total_effective_pvp_kills`
+            # / `total_pvp_assists`. `effective_pvp_kills` defaults to the raw
+            # `pvp_kills` on pre-v13 contributions so mixed-corpus career
+            # totals stay sensible; `pvp_assists` defaults to 0.
+            "effective_pvp_kills": personal.get("effective_pvp_kills", personal.get("pvp_kills", 0)),
+            "pvp_assists":         personal.get("pvp_assists", 0),
             # match.schema_version 8: self-damage carve-out career
             # roll-up. Aggregator sums these into `total_self_*` so the
             # cross-match invariant `total_dealt = total_pvp_dealt +

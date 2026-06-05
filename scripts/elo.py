@@ -221,6 +221,14 @@ LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-sh
 # thug rows get a gated thug_kill_rate lift for at-base (ship-denied) time.
 # Additive fields only (existing JS readers unaffected), but ratings change
 # so **pre-v8 `peak_vtsr` is no longer comparable** (corpus re-rated).
+#
+# NOTE (match.schema_version 13, assist-aware effective kills): the
+# thug_kill_rate axis now reads `personal.effective_pvp_kills` (damage-share
+# + finisher-floor weighted) instead of raw `pvp_kills`. This is an INPUT
+# change only -- the elo_current.json / elo_history.json output shape is
+# unchanged, so ELO_SCHEMA_VERSION is intentionally NOT bumped (existing JS
+# readers are unaffected). Ratings DO change, so **pre-change `peak_vtsr` is
+# no longer comparable** -- the corpus is re-rated on the next pipeline run.
 ELO_SCHEMA_VERSION = 8
 
 
@@ -472,17 +480,32 @@ def _net_damage_share_lobby(lobby: list[dict]) -> list[float]:
 
 
 def _thug_kill_rate_lobby(lobby: list[dict], minutes_played: float) -> list[float]:
-    """Alpha-blended kill rate: (pvp_kills + α·pve_kills) / minutes.
+    """Alpha-blended kill rate: (effective_pvp_kills + α·pve_kills) / minutes.
 
-    Falls back to flat ``kills`` when pvp/pve fields are absent (legacy data).
+    match.schema_version 13: prefers ``personal.effective_pvp_kills`` over
+    raw ``pvp_kills``. Effective kills distribute each PvP kill by in-window
+    damage share with a finisher floor (computed in
+    scripts/process_stats.py::_compute_effective_kills), so a teammate who
+    lands the killing blow on a target someone else softened up gets only a
+    fraction of the credit. This de-noises the "kill steal" attribution
+    problem at the source while leaving the axis weight unchanged. The
+    per-match invariant ``Σ effective_pvp_kills == Σ pvp_kills`` means the
+    lobby total is identical -- only the per-player distribution changes.
+
+    Fallback chain: ``effective_pvp_kills`` -> raw ``pvp_kills`` (pre-v13
+    data) -> flat ``kills`` (legacy data with no pvp/pve split). PvE kills
+    stay raw (kill-stealing is a PvP-only concern; the rivalry matrix that
+    drives the windowed credit is human-only).
     """
     minutes = max(1e-3, minutes_played)
     out = []
     for p in lobby:
         pd = p.get("personal", {}) or {}
-        if "pvp_kills" in pd or "pve_kills" in pd:
+        pve_k = pd.get("pve_kills", 0) or 0
+        if "effective_pvp_kills" in pd:
+            blended = (pd.get("effective_pvp_kills", 0.0) or 0.0) + ALPHA_PVE * pve_k
+        elif "pvp_kills" in pd or "pve_kills" in pd:
             pvp_k = pd.get("pvp_kills", 0) or 0
-            pve_k = pd.get("pve_kills", 0) or 0
             blended = pvp_k + ALPHA_PVE * pve_k
         else:
             blended = p.get("kills", 0) or 0

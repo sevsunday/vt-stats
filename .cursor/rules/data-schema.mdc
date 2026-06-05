@@ -142,6 +142,16 @@ Self-events (shooter == victim, most visibly Blink AOE splash on the firing ship
 
 `personal.dealt` / `received` continue to include self-damage at the wire level (so `Σ DamageDealt.amount` reconcile still passes); only the attribution buckets change. The career roll-up surfaces `career_stats[].{total_self_dealt, total_self_received, total_self_kills, total_self_deaths, total_self_shots_hit}` (reconcile/audit fields; no UI panel reads them yet). Pre-v8 matches default every `self_*` field to 0 — the bug always routed self-events into the PvP bucket, so legacy `pvp_dealt + pve_dealt == dealt` still holds for those matches without contradiction.
 
+### Assist-aware effective kills (match.schema_version 13)
+
+Raw last-hit `pvp_kills` over-credits the finisher of a focus-fired target. An audit of the corpus found the top damage-dealer to a victim was NOT the credited killer in ~46% of cases (median finisher dealt only ~29% of the victim's received damage). Match schema 13 distributes each PvP kill by in-window damage share with a guaranteed finisher floor, computed in `scripts/process_stats.py::_compute_effective_kills`:
+
+- `personal.effective_pvp_kills` (float): for each PvP `UnitDestroyed` of victim V by finisher K at tick T, sum each shooter's damage to V over `[T - W, T]` (`W = EFFECTIVE_KILL_WINDOW_SEC * tick_rate`, default 10s), then `credit[s] = (1 - FLOOR) * dmg_share[s]` with `credit[K] += FLOOR` (`EFFECTIVE_KILL_FINISHER_FLOOR = 0.30`). Per-kill credit sums to 1.0 → **`Σ effective_pvp_kills == Σ pvp_kills`** across the lobby (auditable invariant). No in-window damage → pure last-hit fallback (`{K: 1.0}`).
+- `personal.pvp_assists` (int): count of PvP kills where this player got non-finisher credit > `EFFECTIVE_KILL_ASSIST_EPS` (1e-3). Display-only.
+- `kills.feed[].assists`: `[{name, steam64, share}]` non-finisher contributors per PvP kill (descending share); empty for PvE / unattributed kills.
+
+`scripts/elo.py`'s `thug_kill_rate` axis prefers `effective_pvp_kills` over raw `pvp_kills` (fallback chain: `effective_pvp_kills` → `pvp_kills` → flat `kills`). PvE kills stay raw (kill-stealing is PvP-only; `rivalry_matrix` is human-only). Career roll-up: `career_stats[].{total_effective_pvp_kills, total_pvp_assists}` (aggregator defaults `effective_pvp_kills` to raw `pvp_kills` on pre-v13 contributions). **Weights unchanged** — this fixes attribution only; any `thug_kill_rate` weight retune is a separate validation-gated follow-up. `ELO_SCHEMA_VERSION` NOT bumped (input-only change); ratings shift so pre-v13 `peak_vtsr` is no longer comparable. Bumps `match.schema_version` 12 → 13 and `PIPELINE_VERSION` 24 → 25 (full corpus reprocess). `EFFECTIVE_KILL_WINDOW_SEC` / `EFFECTIVE_KILL_FINISHER_FLOOR` tunable without a schema bump.
+
 ### Weapon engagement range (match.schema_version 11, v2-only)
 
 `BulletHit.distance_to_target` (raw world units == in-game meters; absent on v1 sessions so it defaults to `0.0` and is skipped) is bucketed per `(player, weapon, channel)` into fixed-bin histograms over `DIST_BIN_EDGES` (module constant in `scripts/process_stats.py`, currently `[10,20,30,40,50,75,100,150,200,300,400,600,800,1200]`). Channels: **PvP** = player-vs-player hits (reuses the self-free `is_pvp_hit`); **PvE** = player shooter vs non-player victim (`bh.victim == 0`). Self-hits excluded.

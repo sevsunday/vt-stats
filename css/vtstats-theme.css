@@ -5121,6 +5121,28 @@ td.vt-col-split {
     margin-left: 0.15em;
 }
 
+/* Assist-aware effective kills (match.schema_version 13). The `+N` chip on
+   the Player Leaderboard's Kills cell flags how many kills this player
+   contributed assist credit to; the kill-feed trailer lists the assisting
+   players + their damage-share %. Success accent so assists read as a
+   positive contribution. */
+.vt-assist-badge {
+    display: inline-block;
+    padding: 0.05em 0.4em;
+    margin-left: 0.3em;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--kb-success);
+    background: color-mix(in oklab, var(--kb-success) 14%, transparent);
+    border-radius: 0.5em;
+}
+
+.vt-killfeed-assist {
+    font-size: 0.92em;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Loadout Profile card. Stacked horizontal bar + per-class list,
    shown inside renderPlayerProfile and the All Matches Career card.
    Uses the same chart-palette tokens as the Combat Timeline so a
