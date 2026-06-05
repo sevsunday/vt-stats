@@ -1,7 +1,7 @@
 # BZCC baked `.msh` (DOCB) format -- decode notes
 
 Reverse-engineering record for the object-render POC. The parser is
-[scripts/msh_parser.py](../../scripts/msh_parser.py); these are the findings
+[scripts/object-render/msh_parser.py](../../scripts/object-render/msh_parser.py); these are the findings
 that validated it.
 
 ## Source of truth

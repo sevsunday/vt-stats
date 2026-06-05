@@ -4,7 +4,7 @@ render_local.py -- LOCAL-mode extraction proof: build scout geometry from the
 instead of the flat block-level faces, then render with PIL.
 
 If the wings land at the REAR (matching the reference FBX), this is the fix to
-port into scripts/msh_parser.py + convert_msh.py.
+port into scripts/object-render/msh_parser.py + convert_msh.py.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import sys
 from ctypes import sizeof
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "object-render"))
 import msh_parser as M  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 

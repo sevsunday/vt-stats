@@ -18,6 +18,11 @@ import { ObjectViewer } from './viewer.js';
 
 const MODELS_BASE = '../data/models/';
 const QUALITY_KEY = 'vt.obj.quality';
+const LIGHT_ON_KEY = 'vt.obj.light.on';
+const LIGHT_AZ_KEY = 'vt.obj.light.az';
+const LIGHT_EL_KEY = 'vt.obj.light.el';
+const LIGHT_INTENSITY_KEY = 'vt.obj.light.intensity';
+const LIGHT_DEFAULT = { on: true, az: 215, el: 45, intensity: 2.6 };
 // The full asset set (incl. the native HQ .dds textures) is published as plain
 // git blobs and served by GitHub Pages, so the HQ toggle + Prefer-HQ control +
 // Capture are enabled. Set to false to force perf-only (e.g. if HQ is dropped
@@ -48,6 +53,14 @@ const els = {
   reset: document.getElementById('reset-btn'),
   capture: document.getElementById('capture-btn'),
   qualitySeg: document.getElementById('quality-seg'),
+  lightBtn: document.getElementById('light-btn'),
+  lightPanel: document.getElementById('light-panel'),
+  lightIntensity: document.getElementById('light-intensity'),
+  lightIntensityVal: document.getElementById('light-intensity-val'),
+  lightAz: document.getElementById('light-az'),
+  lightEl: document.getElementById('light-el'),
+  lightAzVal: document.getElementById('light-az-val'),
+  lightElVal: document.getElementById('light-el-val'),
 };
 
 let manifest = [];
@@ -55,6 +68,19 @@ let activeViewer = null;
 const filters = { q: '', faction: 'all', category: 'all', sort: 'name' };
 
 function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) === 'hq'; }
+
+function lightPrefs() {
+  const on = localStorage.getItem(LIGHT_ON_KEY);
+  const az = parseFloat(localStorage.getItem(LIGHT_AZ_KEY));
+  const el = parseFloat(localStorage.getItem(LIGHT_EL_KEY));
+  const intensity = parseFloat(localStorage.getItem(LIGHT_INTENSITY_KEY));
+  return {
+    on: on === null ? LIGHT_DEFAULT.on : on === '1',
+    az: Number.isFinite(az) ? az : LIGHT_DEFAULT.az,
+    el: Number.isFinite(el) ? el : LIGHT_DEFAULT.el,
+    intensity: Number.isFinite(intensity) ? intensity : LIGHT_DEFAULT.intensity,
+  };
+}
 
 // ---------------- directory ----------------
 
@@ -162,16 +188,22 @@ function showViewer(entry) {
     `${entry.groups === 1 ? 'part' : 'parts'} \u00b7 ${entry.primaryOdf || ''}`;
 
   const quality = preferHq() ? 'hq' : 'perf';
-  activeViewer = new ObjectViewer(els.stage, { quality });
+  const light = lightPrefs();
+  activeViewer = new ObjectViewer(els.stage, { quality, light });
   activeViewer.load(MODELS_BASE + entry.glb).catch((e) => {
     els.stage.innerHTML = `<div class="error">Failed to load ${escapeHtml(entry.glb)}: ${escapeHtml(String(e))}</div>`;
   });
+  initLightPanel(light);
 
   els.qualitySeg.hidden = !HQ_AVAILABLE;
   els.capture.hidden = !HQ_AVAILABLE;  // Capture forces HQ, unavailable here
   syncQualitySeg(quality);
   els.wire.classList.remove('on');
   els.spin.classList.remove('on');
+  // The top "Light" button is the on/off toggle; the panel (intensity/angle
+  // sliders) is always visible while a model is open.
+  els.lightPanel.hidden = false;
+  els.lightBtn.classList.toggle('on', light.on);
 
   els.qualitySeg.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.onclick = async () => {
@@ -192,7 +224,47 @@ function showViewer(entry) {
   };
   els.reset.onclick = () => activeViewer.resetView();
   els.capture.onclick = () => doCapture(entry);
+  els.lightBtn.onclick = () => setLightOn(!els.lightBtn.classList.contains('on'));
   els.back.onclick = (ev) => { ev.preventDefault(); goDirectory(); };
+}
+
+/* Single source of truth for the sun on/off state: drives the top button
+ * highlight, the panel dim, the viewer, and localStorage. */
+function setLightOn(on) {
+  els.lightBtn.classList.toggle('on', on);
+  els.lightPanel.classList.toggle('off', !on);
+  localStorage.setItem(LIGHT_ON_KEY, on ? '1' : '0');
+  if (activeViewer) activeViewer.setLightEnabled(on);
+}
+
+/* Sync the light panel inputs to the persisted state and wire their handlers to
+ * the active viewer + localStorage. Called on each viewer open. */
+function initLightPanel(light) {
+  els.lightIntensity.value = String(light.intensity);
+  els.lightAz.value = String(Math.round(light.az));
+  els.lightEl.value = String(Math.round(light.el));
+  els.lightIntensityVal.textContent = light.intensity.toFixed(1);
+  els.lightAzVal.textContent = `${Math.round(light.az)}\u00b0`;
+  els.lightElVal.textContent = `${Math.round(light.el)}\u00b0`;
+  els.lightPanel.classList.toggle('off', !light.on);
+
+  els.lightIntensity.oninput = () => {
+    const v = parseFloat(els.lightIntensity.value);
+    els.lightIntensityVal.textContent = v.toFixed(1);
+    localStorage.setItem(LIGHT_INTENSITY_KEY, String(v));
+    if (activeViewer) activeViewer.setLightIntensity(v);
+  };
+  const onAngle = () => {
+    const az = parseFloat(els.lightAz.value);
+    const el = parseFloat(els.lightEl.value);
+    els.lightAzVal.textContent = `${Math.round(az)}\u00b0`;
+    els.lightElVal.textContent = `${Math.round(el)}\u00b0`;
+    localStorage.setItem(LIGHT_AZ_KEY, String(az));
+    localStorage.setItem(LIGHT_EL_KEY, String(el));
+    if (activeViewer) activeViewer.setLightAngle(az, el);
+  };
+  els.lightAz.oninput = onAngle;
+  els.lightEl.oninput = onAngle;
 }
 
 function syncQualitySeg(q) {

@@ -17,7 +17,7 @@ import sys
 from ctypes import sizeof
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "object-render"))
 import msh_parser as M  # noqa: E402
 from PIL import Image, ImageDraw  # noqa: E402
 

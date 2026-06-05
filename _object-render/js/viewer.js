@@ -3,8 +3,13 @@
  * Single-object 3D viewer for converted BZCC .glb models. Full 360 / all-angle
  * orbit (unrestricted azimuth + full 0..PI polar so the underside is viewable),
  * damping, zoom, pan, pivot-on-bbox-center, optional idle auto-rotate, and a
- * wireframe toggle. Lighting is camera-attached + hemisphere fill so the model
- * stays lit from every angle (no dark side when orbiting underneath).
+ * wireframe toggle. Lighting is a fixed world-space "sun" key light (default
+ * ~45 deg above, front-left) that casts soft shadows onto an invisible ground
+ * plane, plus a hemisphere + ambient base fill. The sun is toggleable and its
+ * azimuth/elevation are adjustable (see setLightEnabled / setLightAngle); when
+ * the sun is off the fill is boosted so the model stays evenly visible (flat,
+ * no shadow). The sun is anchored to the scene (NOT the camera) so it rakes
+ * across the surface to reveal form as you orbit.
  *
  * Textures are NOT embedded in the GLB. The GLB carries per-primitive materials
  * named by their lowercased diffuse stem; this viewer assigns the diffuse map
@@ -23,12 +28,24 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 
 const TEX_BASE = '../data/models/textures/';
+const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
-  // [name, azimuthDeg, elevationDeg] -- mirrors scripts/msh_thumbnail.ANGLES
+  // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
   // (front = camera on the -Z side, az=180, so the model's nose faces us).
   ['hero', 215, 22], ['front', 180, 6], ['back', 0, 6], ['left', 90, 6],
   ['right', -90, 6], ['top', 180, 89], ['bottom', 180, -89],
 ];
+
+// Default sun placement: front-left and ~45 deg up. Azimuth follows the same
+// convention as the camera framing (front 3/4 on the -X/-Z side).
+const LIGHT_DEFAULT_AZ = 215;
+const LIGHT_DEFAULT_EL = 45;
+const LIGHT_DEFAULT_INTENSITY = 2.6;
+// Canonical sun for reproducible HQ Capture thumbnails (independent of the
+// user's current slider state).
+const LIGHT_CAPTURE_AZ = 215;
+const LIGHT_CAPTURE_EL = 45;
+const LIGHT_CAPTURE_INTENSITY = 2.6;
 
 export class ObjectViewer {
   constructor(container, opts = {}) {
@@ -43,6 +60,13 @@ export class ObjectViewer {
     this._texLoader = new THREE.TextureLoader();
     this._ddsLoader = new DDSLoader();
 
+    // Sun light state (persisted by the caller; see opts.light).
+    const lopts = opts.light || {};
+    this._lightOn = lopts.on !== false;            // default on
+    this._lightAz = Number.isFinite(lopts.az) ? lopts.az : LIGHT_DEFAULT_AZ;
+    this._lightEl = Number.isFinite(lopts.el) ? lopts.el : LIGHT_DEFAULT_EL;
+    this._lightIntensity = Number.isFinite(lopts.intensity) ? lopts.intensity : LIGHT_DEFAULT_INTENSITY;
+
     const w = container.clientWidth || 800;
     const h = container.clientHeight || 600;
 
@@ -56,6 +80,8 @@ export class ObjectViewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
     // Controls: full sphere coverage.
@@ -69,23 +95,47 @@ export class ObjectViewer {
     this.controls.autoRotate = false;
     this.controls.autoRotateSpeed = 1.2;
 
-    // Lighting: hemisphere fill + ambient + a key light parented to the camera
-    // so it tracks the view (the model is never in shadow from any orbit angle).
-    this.scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x202833, 1.0));
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.35));
-    const key = new THREE.DirectionalLight(0xffffff, 1.6);
-    key.position.set(2, 3, 4);
-    this.camera.add(key);
-    const rim = new THREE.DirectionalLight(0x99bbff, 0.5);
-    rim.position.set(-3, 1, -4);
-    this.camera.add(rim);
+    // Lighting: hemisphere + ambient base fill, plus a world-space "sun" key
+    // light that casts shadows. The sun is added to the scene (NOT the camera)
+    // so it stays fixed and rakes across the model as you orbit, revealing form.
+    // Base-fill intensities are stored so setLightEnabled() can boost them when
+    // the sun is off (model stays evenly visible, just flat).
+    this._hemiBase = 0.85;
+    this._ambBase = 0.25;
+    this._hemiOff = 1.5;
+    this._ambOff = 0.7;
+    this.hemi = new THREE.HemisphereLight(0xbfd4ff, 0x202833, this._hemiBase);
+    this.scene.add(this.hemi);
+    this.ambient = new THREE.AmbientLight(0xffffff, this._ambBase);
+    this.scene.add(this.ambient);
+
+    this.sun = new THREE.DirectionalLight(0xffffff, this._lightIntensity);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.bias = -0.0005;
+    this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
     this.scene.add(this.camera);
+
+    // Invisible shadow-receiving ground (ShadowMaterial shows only the shadow,
+    // preserving the dark background). The grid sits just above it.
+    this.ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.ShadowMaterial({ opacity: 0.35 }),
+    );
+    this.ground.rotation.x = -Math.PI / 2;
+    this.ground.position.y = -0.005;   // avoid z-fight with the grid at y=0
+    this.ground.receiveShadow = true;
+    this.scene.add(this.ground);
 
     // Ground grid + axes for spatial reference.
     this.grid = new THREE.GridHelper(40, 40, 0x3a4150, 0x262b34);
     this.scene.add(this.grid);
     this.axes = new THREE.AxesHelper(3);
     this.scene.add(this.axes);
+
+    this._placeSun();
+    this._applyLightEnabled();
 
     this._onResize = () => this.resize();
     window.addEventListener('resize', this._onResize);
@@ -108,6 +158,8 @@ export class ObjectViewer {
     model.traverse((o) => {
       if (o.isMesh) {
         o.material.side = o.material.side ?? THREE.FrontSide;
+        o.castShadow = true;
+        o.receiveShadow = true;
         this._materials.push(o.material);
         if (o.material.name) names.add(o.material.name);
       }
@@ -210,6 +262,11 @@ export class ObjectViewer {
     this.grid = new THREE.GridHelper(gridSize, Math.min(gridSize, 60), 0x3a4150, 0x262b34);
     this.scene.add(this.grid);
 
+    // Match the shadow-catcher plane to the grid footprint (centered on x/z).
+    this.ground.geometry.dispose();
+    this.ground.geometry = new THREE.PlaneGeometry(gridSize, gridSize);
+    this.ground.position.set(center.x, -0.005, center.z);
+
     this.controls.update();
     this._home = {
       pos: this.camera.position.clone(),
@@ -217,6 +274,42 @@ export class ObjectViewer {
     };
     this._radius = radius;
     this._center = center.clone();
+
+    // Place + apply the sun now that center/radius are known.
+    this._placeSun();
+    this._applyLightEnabled();
+  }
+
+  /* Position the world sun from (azimuth, elevation) around the model center,
+   * and size its orthographic shadow frustum to the model footprint. */
+  _placeSun() {
+    const center = this._center || new THREE.Vector3();
+    const radius = this._radius || 1;
+    const az = this._lightAz * DEG;
+    const el = this._lightEl * DEG;
+    const d = radius * 4;
+    this.sun.position.set(
+      center.x + d * Math.cos(el) * Math.sin(az),
+      center.y + d * Math.sin(el),
+      center.z + d * Math.cos(el) * Math.cos(az),
+    );
+    this.sun.target.position.copy(center);
+    this.sun.target.updateMatrixWorld();
+    const s = radius * 1.6;
+    const cam = this.sun.shadow.camera;
+    cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s;
+    cam.near = 0.1; cam.far = d * 2;
+    cam.updateProjectionMatrix();
+  }
+
+  /* Reflect this._lightOn onto the sun + base fill. Sun off -> boosted fill so
+   * the model stays evenly visible (flat, no shadow). */
+  _applyLightEnabled() {
+    const on = this._lightOn;
+    this.sun.visible = on;
+    this.sun.castShadow = on;
+    this.hemi.intensity = on ? this._hemiBase : this._hemiOff;
+    this.ambient.intensity = on ? this._ambBase : this._ambOff;
   }
 
   setWireframe(on) {
@@ -226,6 +319,30 @@ export class ObjectViewer {
 
   setAutoRotate(on) {
     this.controls.autoRotate = !!on;
+  }
+
+  setLightEnabled(on) {
+    this._lightOn = !!on;
+    this._applyLightEnabled();
+  }
+
+  setLightAngle(azDeg, elDeg) {
+    if (Number.isFinite(azDeg)) this._lightAz = azDeg;
+    if (Number.isFinite(elDeg)) this._lightEl = elDeg;
+    this._placeSun();
+  }
+
+  setLightIntensity(v) {
+    if (!Number.isFinite(v)) return;
+    this._lightIntensity = v;
+    this.sun.intensity = v;
+  }
+
+  getLightState() {
+    return {
+      on: this._lightOn, az: this._lightAz, el: this._lightEl,
+      intensity: this._lightIntensity,
+    };
   }
 
   resetView() {
@@ -238,7 +355,8 @@ export class ObjectViewer {
 
   /* Capture the 7 canonical angles at HQ + supersampled, returning an array of
    * { name, dataUrl }. Temporarily forces HQ textures + 2x render scale + hides
-   * the grid/axes, then restores the prior state. */
+   * the grid/axes + a canonical sun (so thumbnails are reproducible regardless
+   * of the user's light slider state), then restores the prior state. */
   async captureGallery({ size = 1024, supersample = 2 } = {}) {
     if (!this._model) return [];
     const prevQuality = this._quality;
@@ -251,12 +369,19 @@ export class ObjectViewer {
     const camPos = this.camera.position.clone();
     const camTarget = this.controls.target.clone();
     const bg = this.scene.background;
+    const prevLight = this.getLightState();
 
     this.controls.autoRotate = false;
     this.setWireframe(false);
     this.grid.visible = false;
     this.axes.visible = false;
     this.scene.background = new THREE.Color(0x14171c);
+    // Force the canonical sun (on, fixed angle + intensity, shadows) for the
+    // capture so thumbnails are reproducible regardless of slider state.
+    this._lightOn = true;
+    this.setLightAngle(LIGHT_CAPTURE_AZ, LIGHT_CAPTURE_EL);
+    this.setLightIntensity(LIGHT_CAPTURE_INTENSITY);
+    this._applyLightEnabled();
     await this.setQuality('hq');
 
     const px = size * supersample;
@@ -302,6 +427,10 @@ export class ObjectViewer {
     this.scene.background = bg;
     this.setWireframe(prevWire);
     this.controls.autoRotate = prevAuto;
+    this._lightOn = prevLight.on;
+    this.setLightAngle(prevLight.az, prevLight.el);
+    this.setLightIntensity(prevLight.intensity);
+    this._applyLightEnabled();
     await this.setQuality(prevQuality);
     return shots;
   }

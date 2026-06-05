@@ -61,11 +61,31 @@
         </div>
         <button id="wire-btn" class="btn toggle">Wireframe</button>
         <button id="spin-btn" class="btn toggle">Auto-rotate</button>
+        <button id="light-btn" class="btn toggle" aria-expanded="false" title="Toggle the light panel">Light</button>
         <button id="reset-btn" class="btn">Reset view</button>
         <button id="capture-btn" class="btn" title="Render the 7 canonical angles at HQ + supersampled and download them">Capture HQ</button>
       </div>
     </div>
-    <div id="stage" class="stage"></div>
+    <div id="stage" class="stage">
+      <div id="light-panel" class="light-panel">
+        <div class="light-row light-head"><span>Sun light</span></div>
+        <label class="light-row">
+          <span class="light-label">Intensity</span>
+          <input id="light-intensity" type="range" min="0" max="6" step="0.1" />
+          <span id="light-intensity-val" class="light-val"></span>
+        </label>
+        <label class="light-row">
+          <span class="light-label">Azimuth</span>
+          <input id="light-az" type="range" min="0" max="360" step="1" />
+          <span id="light-az-val" class="light-val"></span>
+        </label>
+        <label class="light-row">
+          <span class="light-label">Elevation</span>
+          <input id="light-el" type="range" min="0" max="90" step="1" />
+          <span id="light-el-val" class="light-val"></span>
+        </label>
+      </div>
+    </div>
   </section>
 
   <script type="module" src="js/app.js"></script>

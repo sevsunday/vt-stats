@@ -65,14 +65,14 @@ data/models/                        (committed via git LFS)
 ```
 BZCC baked **/<geo>.msh (DOCB binary, across base + workshop packs)
         |
-        v   scripts/msh_parser.py     decode geometry (rest pose via inverse
-        |                             bind matrices; faithful mesh-tree walk)
-        |   scripts/dds_decode.py     BC1/BC3 .dds -> RGBA, mip-level decode
-        |   scripts/glb_writer.py     stdlib glTF 2.0 binary writer
-        |   scripts/msh_thumbnail.py  per-pixel numpy rasterizer (bilinear HQ
-        |                             texture, smooth normals, z-buffer, 2x AA)
+        v   scripts/object-render/msh_parser.py     decode geometry (rest pose
+        |                             via inverse bind matrices; faithful walk)
+        |   scripts/object-render/dds_decode.py     BC1/BC3 .dds -> RGBA, mip
+        |   scripts/object-render/glb_writer.py     stdlib glTF 2.0 binary writer
+        |   scripts/object-render/msh_thumbnail.py  per-pixel numpy rasterizer
+        |                             (bilinear HQ texture, smooth normals, 2x AA)
         v
-scripts/convert_msh.py  ->  data/models/{geometry,textures/{perf,hq},thumbnails,shots,index.json}
+scripts/object-render/convert_msh.py  ->  data/models/{geometry,textures/{perf,hq},thumbnails,shots,index.json}
         |
         v
 _object-render/index.html + js/     three.js r170 + OrbitControls + GLTFLoader + DDSLoader
@@ -87,10 +87,10 @@ stdlib + **Pillow** (`.dds` decode) + **numpy** (the build-time gallery
 rasterizer -- DEV-only, not shipped to the site).
 
 ```
-python scripts/convert_msh.py --limit 20         # smoke run (first 20 by stem)
-python scripts/convert_msh.py --jobs 12           # full run, parallel
-python scripts/convert_msh.py --force --jobs 12   # ignore the cache, rebuild all
-python scripts/convert_msh.py --odf ivscout_vsr.odf
+python scripts/object-render/convert_msh.py --limit 20        # smoke run (first 20 by stem)
+python scripts/object-render/convert_msh.py --jobs 12          # full run, parallel
+python scripts/object-render/convert_msh.py --force --jobs 12  # ignore cache, rebuild all
+python scripts/object-render/convert_msh.py --odf ivscout_vsr.odf
 ```
 
 Caching: a model is skipped when its `.glb` + hero thumbnail + 7 gallery shots
@@ -168,11 +168,11 @@ external host and point `TEX_BASE` (and the thumbnail/glb bases) at it.
 
 ## Files
 
-- `scripts/msh_parser.py` -- DOCB `.msh` geometry parser (stdlib)
-- `scripts/dds_decode.py` -- BC1/BC3 `.dds` decoder, mip-level (stdlib + Pillow)
-- `scripts/glb_writer.py` -- minimal glTF 2.0 `.glb` writer (stdlib)
-- `scripts/msh_thumbnail.py` -- per-pixel numpy rasterizer (hero + gallery)
-- `scripts/convert_msh.py` -- orchestrator -> `data/models/`
+- `scripts/object-render/msh_parser.py` -- DOCB `.msh` geometry parser (stdlib)
+- `scripts/object-render/dds_decode.py` -- BC1/BC3 `.dds` decoder, mip-level (stdlib + Pillow)
+- `scripts/object-render/glb_writer.py` -- minimal glTF 2.0 `.glb` writer (stdlib)
+- `scripts/object-render/msh_thumbnail.py` -- per-pixel numpy rasterizer (hero + gallery)
+- `scripts/object-render/convert_msh.py` -- orchestrator -> `data/models/`
 - `_object-render/index.html`, `js/app.js`, `js/viewer.js`, `css/style.css`
 - `_object-render/vendor/three/` -- vendored three r170 + addons (incl. DDSLoader)
 - `_object-render/spike/` -- reverse-engineering record (FORMAT.md, preview renderers)

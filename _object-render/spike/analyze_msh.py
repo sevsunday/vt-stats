@@ -6,7 +6,7 @@ Read-only forensic dumper: reads a single `.msh`, prints the header, walks the
 node/string/float regions, and tries several vertex-stride interpretations so
 we can lock down the layout against a known unit (ivscout00).
 
-NOT the production converter -- that's scripts/convert_msh.py. This stays in
+NOT the production converter -- that's scripts/object-render/convert_msh.py. This stays in
 _object-render/spike/ as the format-decode work record.
 
 Usage:
