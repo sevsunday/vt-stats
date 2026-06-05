@@ -38,15 +38,18 @@ from PIL import Image
 BG = (20, 23, 28)  # matches the viewer scene background (#14171c-ish)
 
 # Canonical gallery angles as (azimuth_deg, elevation_deg). Azimuth orbits about
-# +Y (0 = looking toward -Z "front face"); elevation tilts up (+) / down (-).
+# +Y; elevation tilts up (+) / down (-). The camera at azimuth A sits on the +Z
+# side at A=0 looking toward -Z, which lands on the model's REAR -- so the
+# named faces are offset by 180 deg (front = camera on the -Z side, az=180) and
+# the cardinal pair is swapped accordingly. The hero is a front 3/4 (215 deg).
 ANGLES = {
-    "hero":   (35.0, 22.0),
-    "front":  (0.0, 6.0),
-    "back":   (180.0, 6.0),
-    "left":   (-90.0, 6.0),
-    "right":  (90.0, 6.0),
-    "top":    (0.0, 89.0),
-    "bottom": (0.0, -89.0),
+    "hero":   (215.0, 22.0),
+    "front":  (180.0, 6.0),
+    "back":   (0.0, 6.0),
+    "left":   (90.0, 6.0),
+    "right":  (-90.0, 6.0),
+    "top":    (180.0, 89.0),
+    "bottom": (180.0, -89.0),
 }
 
 

@@ -171,6 +171,34 @@ def resolve_roots(steam_override=None):
     raise SystemExit("Could not locate the BZ2R install.")
 
 
+def workshop_content_dir(steam_override=None):
+    """Locate the BZCC workshop content dir (.../workshop/content/624970) so we
+    can index EVERY subscribed item as a last-resort texture fallback, not just
+    the VSR asset dependencies."""
+    if bz2_paths is not None:
+        if steam_override:
+            base = Path(steam_override).expanduser().resolve()
+        else:
+            base = bz2_paths.detect_steam_base() or bz2_paths.STEAM_BASE_FALLBACK
+        ws = base / bz2_paths.WORKSHOP_RELATIVE
+        if ws.is_dir():
+            return ws
+    fallback = Path(
+        r"C:\Program Files (x86)\Steam\steamapps\workshop\content\624970")
+    return fallback if fallback.is_dir() else None
+
+
+def build_workshop_index(ws_dir, ext):
+    """stem(lower) -> Path for every *.<ext> across the ENTIRE workshop tree.
+    first-wins (don't override; only a fallback layer)."""
+    idx = {}
+    if not ws_dir:
+        return idx
+    for f in ws_dir.rglob(f"*.{ext}"):
+        idx.setdefault(f.stem.lower(), f)
+    return idx
+
+
 # ----------------------------- material / texture -----------------------------
 
 
@@ -185,8 +213,11 @@ def parse_material(msh_dir: Path, material_filename: str):
     if not p.is_file():
         p = msh_dir / "materials" / material_filename
     if not p.is_file():
+        key = _stem(material_filename)
         mat_index = _G["mat_index"] if _G else {}
-        p = mat_index.get(_stem(material_filename))
+        mat_index_all = _G["mat_index_all"] if _G else {}
+        # VSR-scoped match wins; full-workshop is last-resort fallback.
+        p = mat_index.get(key) or mat_index_all.get(key)
     if not p or not Path(p).is_file():
         return rgba, diffuse_dds
     try:
@@ -231,8 +262,11 @@ def _find_diffuse_src(msh_dir: Path, dds_name: str):
     for c in candidates:
         if c.is_file():
             return c
+    key = _stem(dds_name)
     dds_index = _G["dds_index"] if _G else {}
-    return dds_index.get(_stem(dds_name))
+    dds_index_all = _G["dds_index_all"] if _G else {}
+    # VSR-scoped match wins; full-workshop is last-resort fallback.
+    return dds_index.get(key) or dds_index_all.get(key)
 
 
 def resolve_diffuse(msh_dir: Path, dds_name: str, cache: dict):
@@ -297,17 +331,25 @@ def _png_bytes(img: Image.Image) -> bytes:
 def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
     """Weld each material group once into (positions, normals, uvs, indices) +
     resolve its material (name, base color, texture array). Returns the GLB
-    builder, the rasterizer prim list, and the set of textured material keys."""
+    builder, the rasterizer prim list, the set of textured material keys, and
+    the set of texture stems that were referenced but did NOT resolve to a
+    `.dds` (for the missing-texture report)."""
     gb = GlbBuilder()
     prims = []
     tex_keys = set()
+    unresolved = set()
     tex_cache: dict = {}
     zf = -1.0 if handedness_fix else 1.0
 
     for gi, g in enumerate(mesh.groups):
         if g.hidden or not g.tris:
             continue
-        rgba, diffuse_dds = parse_material(msh_dir, g.material)
+        rgba, mat_diffuse = parse_material(msh_dir, g.material)
+        # The MSH-embedded diffuse name (g.texture) wins -- workshop models
+        # (Cerberi etc.) use inline material names with no `.material` file but
+        # carry the diffuse here; the `.material` [texture] diffuse is the
+        # fallback for game-baked models where g.texture is empty.
+        diffuse_dds = g.texture or mat_diffuse
         tex_key = None
         tex_arr = None
         if diffuse_dds:
@@ -315,6 +357,8 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
             if res:
                 tex_key, tex_arr = res
                 tex_keys.add(tex_key)
+            else:
+                unresolved.add(_stem(diffuse_dds))
         base_color = (1.0, 1.0, 1.0, 1.0) if tex_key else rgba
         mat_name = tex_key or (_stem(g.material) if g.material else f"mat{gi}")
 
@@ -358,7 +402,7 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
             "tex": tex_arr,
         })
 
-    return gb, prims, tex_keys
+    return gb, prims, tex_keys, unresolved
 
 
 def process_model(job: dict) -> dict:
@@ -373,7 +417,8 @@ def process_model(job: dict) -> dict:
             return {"stem": stem, "error": "no blocks parsed"}
         mesh = meshes[0]
 
-        gb, prims, tex_keys = _build_groups(mesh, msh_path.parent, cfg["handedness"])
+        gb, prims, tex_keys, unresolved = _build_groups(
+            mesh, msh_path.parent, cfg["handedness"])
         if not prims:
             return {"stem": stem, "error": "no renderable groups"}
 
@@ -407,6 +452,7 @@ def process_model(job: dict) -> dict:
             "triangles": tris,
             "groups": groups,
             "textures": sorted(tex_keys),
+            "unresolvedTextures": sorted(unresolved - tex_keys),
             "radius": round(mesh.radius, 3),
             "bboxSize": [round(hi[i] - lo[i], 3) for i in range(3)],
             "_glb_bytes": len(glb_bytes),
@@ -416,9 +462,10 @@ def process_model(job: dict) -> dict:
                 "trace": traceback.format_exc(limit=3)}
 
 
-def _worker_init(dds_index, mat_index, cfg):
+def _worker_init(dds_index, mat_index, dds_index_all, mat_index_all, cfg):
     global _G
-    _G = {"dds_index": dds_index, "mat_index": mat_index, **cfg}
+    _G = {"dds_index": dds_index, "mat_index": mat_index,
+          "dds_index_all": dds_index_all, "mat_index_all": mat_index_all, **cfg}
 
 
 # ----------------------------- caching -----------------------------
@@ -459,6 +506,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "triangles": p.get("triangles", 0),
         "groups": p.get("groups", 0),
         "textures": p.get("textures", []),
+        "unresolvedTextures": p.get("unresolvedTextures", []),
         "radius": p.get("radius", 0),
         "bboxSize": p.get("bboxSize", [0, 0, 0]),
     }
@@ -496,7 +544,11 @@ def main():
     msh_index = build_file_index(roots, "msh")
     dds_index = build_file_index(roots, "dds")
     mat_index = build_file_index(roots, "material")
-    print(f"indexed {len(msh_index)} .msh, {len(dds_index)} .dds, {len(mat_index)} .material")
+    print(f"indexed {len(msh_index)} .msh, {len(dds_index)} .dds, {len(mat_index)} .material (VSR-scoped)")
+    ws_dir = workshop_content_dir(args.steam_base)
+    dds_index_all = build_workshop_index(ws_dir, "dds")
+    mat_index_all = build_workshop_index(ws_dir, "material")
+    print(f"full-workshop fallback: {len(dds_index_all)} .dds, {len(mat_index_all)} .material ({ws_dir})")
 
     # Resolve each target to a baked .msh; record the misses.
     resolved = []
@@ -577,13 +629,13 @@ def main():
             with ProcessPoolExecutor(
                 max_workers=args.jobs,
                 initializer=_worker_init,
-                initargs=(dds_index, mat_index, cfg),
+                initargs=(dds_index, mat_index, dds_index_all, mat_index_all, cfg),
             ) as ex:
                 futs = [ex.submit(process_model, j) for j in jobs]
                 for f in as_completed(futs):
                     _handle(f.result())
         else:
-            _worker_init(dds_index, mat_index, cfg)
+            _worker_init(dds_index, mat_index, dds_index_all, mat_index_all, cfg)
             for j in jobs:
                 _handle(process_model(j))
 
@@ -593,10 +645,27 @@ def main():
     for m in manifest:
         for odf in m.get("odfs", []):
             odf_index[odf] = m["stem"]
+
+    # Missing-texture report: models with no resolved diffuse, split into those
+    # that referenced a `.dds` we couldn't find (unresolved) vs. genuinely
+    # untextured (no texture name anywhere).
+    no_tex = [m for m in manifest if not m.get("textures")]
+    unresolved = {m["stem"]: m["unresolvedTextures"]
+                  for m in no_tex if m.get("unresolvedTextures")}
+    genuinely = sorted(m["stem"] for m in no_tex if not m.get("unresolvedTextures"))
+    texture_report = {
+        "models_total": len(manifest),
+        "models_textured": len(manifest) - len(no_tex),
+        "models_no_texture": len(no_tex),
+        "models_unresolved_refs": len(unresolved),
+        "genuinely_untextured": genuinely,
+        "unresolved": dict(sorted(unresolved.items())),
+    }
     idx_path.write_text(json.dumps({
-        "schema_version": 2,
+        "schema_version": 3,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "count": len(manifest),
+        "texture_report": texture_report,
         "models": manifest,
         "odf_index": odf_index,
     }, indent=2), encoding="utf-8")
@@ -604,6 +673,13 @@ def main():
     dt = time.perf_counter() - t0
     print(f"\nwrote {idx_path} -- {len(manifest)} models "
           f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed)")
+    print(f"textures: {texture_report['models_textured']} textured, "
+          f"{texture_report['models_no_texture']} without "
+          f"({texture_report['models_unresolved_refs']} have unresolved refs, "
+          f"{len(genuinely)} genuinely untextured)")
+    if unresolved:
+        miss = sorted({n for names in unresolved.values() for n in names})
+        print(f"  unresolved texture stems ({len(miss)}): {', '.join(miss)}")
     print(f"elapsed {dt:.1f}s")
     if errors and args.verbose:
         for e in errors[:20]:

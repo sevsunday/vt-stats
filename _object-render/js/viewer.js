@@ -25,8 +25,9 @@ import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 const TEX_BASE = '../data/models/textures/';
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/msh_thumbnail.ANGLES
-  ['hero', 35, 22], ['front', 0, 6], ['back', 180, 6], ['left', -90, 6],
-  ['right', 90, 6], ['top', 0, 89], ['bottom', 0, -89],
+  // (front = camera on the -Z side, az=180, so the model's nose faces us).
+  ['hero', 215, 22], ['front', 180, 6], ['back', 0, 6], ['left', 90, 6],
+  ['right', -90, 6], ['top', 180, 89], ['bottom', 180, -89],
 ];
 
 export class ObjectViewer {
@@ -188,10 +189,12 @@ export class ObjectViewer {
 
     this.controls.target.copy(center);
     const dist = radius / Math.tan((this.camera.fov * Math.PI) / 360) * 1.6;
+    // Open on a front 3/4 (negative X+Z) so the model's nose faces the viewer,
+    // matching the front-facing thumbnail/gallery convention.
     this.camera.position.set(
-      center.x + dist * 0.7,
+      center.x - dist * 0.7,
       center.y + dist * 0.55,
-      center.z + dist * 0.9,
+      center.z - dist * 0.9,
     );
     this.camera.near = Math.max(0.01, radius / 100);
     this.camera.far = radius * 100;
