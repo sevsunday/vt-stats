@@ -33,9 +33,9 @@ the per-model render (the bottleneck). Texture writes are idempotent + atomic so
 parallel workers are safe.
 
 Usage:
-  python scripts/convert_msh.py --limit 20        # smoke run
-  python scripts/convert_msh.py --jobs 8          # full run, parallel
-  python scripts/convert_msh.py --odf ivscout_vsr.odf
+  python scripts/object-render/convert_msh.py --limit 20    # smoke run
+  python scripts/object-render/convert_msh.py --jobs 8      # full run, parallel
+  python scripts/object-render/convert_msh.py --odf ivscout_vsr.odf
 """
 
 from __future__ import annotations
@@ -52,8 +52,8 @@ from pathlib import Path
 
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "object-render"))
 sys.path.insert(0, str(PROJECT_ROOT / "_map-analysis" / "scripts"))
 
 import msh_thumbnail  # noqa: E402
