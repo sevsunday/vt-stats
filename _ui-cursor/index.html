@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BZCC Cursor — smoke test</title>
+<style>
+  :root {
+    --native: 64;            /* source frame size in px (cursorHD_x2_0 = 64x64) */
+    --display: 32px;         /* on-screen frame size (CSS px) -- 32 maps the 64px
+                                source 1:1 on a dpr=2 (4K/Retina) display => crisp */
+    --scale: 1;              /* display scale multiplier */
+    --frames: 64;            /* sprite count (HD x2_0 = 64-frame loop) */
+    --spin: 1.2s;            /* full-loop duration */
+    --hotspot-x: 12;         /* comet tip, in native (64px) frame coords */
+    --hotspot-y: 21;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #e7ecf3;
+    background:
+      radial-gradient(1200px 600px at 70% -10%, #1b2a4a 0%, transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, #34204a 0%, transparent 55%),
+      #0b0f17;
+    /* Hide the native cursor everywhere so our sprite is the only pointer. */
+    cursor: none;
+    overflow-x: hidden;
+  }
+
+  a, button, input, .card { cursor: none; }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 56px 24px 120px; }
+
+  h1 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 8px; letter-spacing: -0.02em; }
+  .sub { color: #9fb0c7; margin: 0 0 36px; font-size: 16px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 28px 0; }
+
+  .card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 14px;
+    padding: 20px;
+    backdrop-filter: blur(8px);
+  }
+  .card h3 { margin: 0 0 8px; font-size: 16px; }
+  .card p { margin: 0; color: #9fb0c7; font-size: 14px; line-height: 1.5; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 18px 0; }
+
+  button {
+    background: linear-gradient(180deg, #2c6cf0, #1f54c8);
+    color: #fff; border: 0; border-radius: 10px;
+    padding: 12px 18px; font-size: 15px; font-weight: 600;
+  }
+  button.ghost { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); }
+
+  a { color: #6db0ff; }
+
+  .controls {
+    position: sticky; top: 0; z-index: 5;
+    background: rgba(8,12,20,0.7); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 14px;
+    padding: 16px 18px; margin-bottom: 30px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px,1fr)); gap: 16px 24px;
+  }
+  .ctl { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #9fb0c7; }
+  .ctl b { color: #e7ecf3; font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; }
+  label.chk { flex-direction: row; align-items: center; gap: 8px; }
+
+  /* ---- the custom cursor ---- */
+  #vt-cursor {
+    position: fixed; left: 0; top: 0;
+    width: calc(var(--display) * var(--scale));
+    height: calc(var(--display) * var(--scale));
+    background-image: url("cursor_strip_hd.png");
+    background-repeat: no-repeat;
+    /* scale the 64-frame strip down so each cell == display size */
+    background-size: calc(var(--display) * var(--frames) * var(--scale)) calc(var(--display) * var(--scale));
+    pointer-events: none;
+    z-index: 9999;
+    /* hotspot given in native (64px) coords -> convert to display px so the
+       comet tip lands on the real pointer position at any display size */
+    margin-left: calc(var(--hotspot-x) * var(--display) / var(--native) * var(--scale) * -1);
+    margin-top: calc(var(--hotspot-y) * var(--display) / var(--native) * var(--scale) * -1);
+    animation: vt-spin var(--spin) steps(var(--frames)) infinite;
+    will-change: transform;
+  }
+  #vt-cursor.pixelated { image-rendering: pixelated; }
+  #vt-cursor.show-hotspot { outline: 1px dashed rgba(255,80,80,0.5); }
+
+  @keyframes vt-spin {
+    from { background-position-x: 0; }
+    to   { background-position-x: calc(var(--display) * var(--frames) * var(--scale) * -1); }
+  }
+
+  /* a tiny crosshair marking the exact hotspot point for verification */
+  #vt-hotdot {
+    position: fixed; left: 0; top: 0; width: 3px; height: 3px;
+    margin-left: -1.5px; margin-top: -1.5px;
+    background: #ff3b3b; border-radius: 50%; z-index: 10000;
+    pointer-events: none; display: none;
+  }
+  body.show-hotspot #vt-hotdot { display: block; }
+
+  @media (prefers-reduced-motion: reduce) {
+    #vt-cursor { animation: none; }
+  }
+  .note { color: #6f7f96; font-size: 13px; margin-top: 40px; }
+  code { background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <div id="vt-cursor"></div>
+  <div id="vt-hotdot"></div>
+
+  <div class="wrap">
+    <h1>BZCC cursor — live smoke test</h1>
+    <p class="sub">Continuously-spinning DOM-follower cursor decoded from <code>cursorHD_x2_0.dds</code> (64-frame DXT5 sprite sheet, 64&times;64 per frame &mdash; pixel-exact on 4K/Retina). Move your mouse anywhere on this page.</p>
+
+    <div class="controls">
+      <div class="ctl">Spin speed <b><span id="speedVal">1.20</span>s / loop</b>
+        <input id="speed" type="range" min="0.3" max="3" step="0.05" value="1.2" />
+      </div>
+      <div class="ctl">Scale <b><span id="scaleVal">1.0</span>×</b>
+        <input id="scale" type="range" min="1" max="3" step="0.25" value="1" />
+      </div>
+      <div class="ctl">Follow smoothing <b><span id="smoothVal">0</span>%</b>
+        <input id="smooth" type="range" min="0" max="90" step="5" value="0" />
+      </div>
+      <div class="ctl">
+        <label class="chk ctl"><input id="pixel" type="checkbox" /> Pixelated scaling</label>
+        <label class="chk ctl"><input id="hot" type="checkbox" /> Show hotspot marker</label>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card"><h3>Hover targets</h3><p>Buttons, links, and inputs all keep the custom cursor since the native one is hidden globally.</p></div>
+      <div class="card"><h3>Continuous spin</h3><p>The orb rotates on a CSS <code>steps(64)</code> loop regardless of mouse movement — exactly like in-game.</p></div>
+      <div class="card"><h3>Hotspot</h3><p>The comet tip (~12,21 per 64px frame) is pinned to the real pointer via negative margins.</p></div>
+    </div>
+
+    <div class="row">
+      <button>Primary button</button>
+      <button class="ghost">Secondary</button>
+      <a href="#">A text link</a>
+      <input type="text" placeholder="Type here…" style="padding:11px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:#fff;" />
+    </div>
+
+    <p class="note">Approach: page sets <code>cursor:none</code>; a fixed <code>&lt;div&gt;</code> follows the mouse and plays the 64-frame strip with a CSS keyframe. This is the recommended path for a truly <em>animated</em> cursor (CSS <code>cursor:url()</code> can't animate). Respects <code>prefers-reduced-motion</code>.</p>
+  </div>
+
+  <script>
+    const root = document.documentElement;
+    const cur = document.getElementById('vt-cursor');
+    const dot = document.getElementById('vt-hotdot');
+
+    // ---- mouse follow (with optional smoothing/lag) ----
+    let tx = window.innerWidth / 2, ty = window.innerHeight / 2; // target
+    let cx = tx, cy = ty;                                        // current
+    let smoothing = 0; // 0 = instant snap
+
+    window.addEventListener('mousemove', (e) => {
+      tx = e.clientX; ty = e.clientY;
+      if (smoothing === 0) { cx = tx; cy = ty; place(); }
+    });
+
+    function place() {
+      // Snap to whole device pixels so the sprite composites 1:1 (no subpixel
+      // resample blur). At dpr=2 a 32px display cell maps the 64px source 1:1.
+      const dpr = window.devicePixelRatio || 1;
+      const sx = Math.round(cx * dpr) / dpr;
+      const sy = Math.round(cy * dpr) / dpr;
+      cur.style.transform = `translate(${sx}px, ${sy}px)`;
+      dot.style.transform = `translate(${tx}px, ${ty}px)`;
+    }
+
+    function loop() {
+      if (smoothing > 0) {
+        const k = 1 - smoothing; // lerp factor
+        cx += (tx - cx) * k;
+        cy += (ty - cy) * k;
+        place();
+      }
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // ---- controls ----
+    const speed = document.getElementById('speed');
+    const scale = document.getElementById('scale');
+    const smooth = document.getElementById('smooth');
+    const pixel = document.getElementById('pixel');
+    const hot = document.getElementById('hot');
+
+    speed.addEventListener('input', () => {
+      root.style.setProperty('--spin', speed.value + 's');
+      document.getElementById('speedVal').textContent = (+speed.value).toFixed(2);
+    });
+    scale.addEventListener('input', () => {
+      root.style.setProperty('--scale', scale.value);
+      document.getElementById('scaleVal').textContent = (+scale.value).toFixed(2);
+    });
+    smooth.addEventListener('input', () => {
+      smoothing = +smooth.value / 100;
+      document.getElementById('smoothVal').textContent = smooth.value;
+    });
+    pixel.addEventListener('change', () => cur.classList.toggle('pixelated', pixel.checked));
+    hot.addEventListener('change', () => {
+      cur.classList.toggle('show-hotspot', hot.checked);
+      document.body.classList.toggle('show-hotspot', hot.checked);
+    });
+
+    place();
+  </script>
+</body>
+</html>
