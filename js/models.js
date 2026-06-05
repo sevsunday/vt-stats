@@ -10,8 +10,9 @@
  *    Performance | HQ texture toggle, and an on-demand HQ multi-angle Capture.
  *
  * A global "Prefer HQ" preference (localStorage vt.obj.quality) seeds the
- * viewer's default quality. Manifest + assets are served from ../data/models/
- * (run from a local static server; see README).
+ * viewer's default quality. HQ is the default -- only an explicit 'perf' choice
+ * opts out. Manifest + assets are served from ../data/models/ (run from a local
+ * static server; see README).
  */
 
 import { ObjectViewer } from './models-viewer.js';
@@ -68,7 +69,8 @@ let manifest = [];
 let activeViewer = null;
 const filters = { q: '', faction: 'all', category: 'all', sort: 'name' };
 
-function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) === 'hq'; }
+// HQ is the default; only an explicit 'perf' choice opts out (null/unset -> HQ).
+function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) !== 'perf'; }
 
 function lightPrefs() {
   const on = localStorage.getItem(LIGHT_ON_KEY);
