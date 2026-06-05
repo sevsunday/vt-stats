@@ -1,14 +1,20 @@
 # Object Render
 
+> **Promoted to production.** The browser POC that used to live here now ships
+> as the standalone **Models** page: [`models/index.html`](../models/index.html)
+> + [`js/models.js`](../js/models.js) + [`js/models-viewer.js`](../js/models-viewer.js)
+> + [`css/models.css`](../css/models.css), with three.js vendored at
+> `vendor/three/`. This folder is retained only as the reverse-engineering
+> record (`FORMAT.md`) and the diagnostic `spike/` scripts. The conversion
+> pipeline lives at `scripts/object-render/` and still writes `data/models/`.
+
 Extracts real Battlezone: Combat Commander ship/building/projectile geometry
 from the game's baked `.msh` files and renders it in three.js -- a standalone
 single-object viewer (full 360 orbit) plus a searchable/filterable object
 browser scaled to the **entire renderable corpus** (~700 models).
 
-This is a dev/research surface (like `_map-analysis/`), self-contained and
-movable. It is NOT (yet) wired into the production dashboard; the generated
-assets under `data/models/` are the durable output the ODF browser + match
-replays will read later.
+The generated assets under `data/models/` are the durable output the Models
+page reads (and the ODF browser + match replays may read later).
 
 ## Coverage
 
@@ -75,7 +81,7 @@ BZCC baked **/<geo>.msh (DOCB binary, across base + workshop packs)
 scripts/object-render/convert_msh.py  ->  data/models/{geometry,textures/{perf,hq},thumbnails,shots,index.json}
         |
         v
-_object-render/index.html + js/     three.js r170 + OrbitControls + GLTFLoader + DDSLoader
+models/index.html + js/models*.js   three.js r170 + OrbitControls + GLTFLoader + DDSLoader
 ```
 
 ## Regenerate the assets
@@ -173,6 +179,6 @@ external host and point `TEX_BASE` (and the thumbnail/glb bases) at it.
 - `scripts/object-render/glb_writer.py` -- minimal glTF 2.0 `.glb` writer (stdlib)
 - `scripts/object-render/msh_thumbnail.py` -- per-pixel numpy rasterizer (hero + gallery)
 - `scripts/object-render/convert_msh.py` -- orchestrator -> `data/models/`
-- `_object-render/index.html`, `js/app.js`, `js/viewer.js`, `css/style.css`
-- `_object-render/vendor/three/` -- vendored three r170 + addons (incl. DDSLoader)
-- `_object-render/spike/` -- reverse-engineering record (FORMAT.md, preview renderers)
+- `models/index.html`, `js/models.js`, `js/models-viewer.js`, `css/models.css` -- the production browser (promoted from this POC)
+- `vendor/three/` -- vendored three r170 + addons (OrbitControls / GLTFLoader / DDSLoader / BufferGeometryUtils)
+- `_object-render/spike/` + `_object-render/FORMAT.md` -- reverse-engineering record + diagnostic preview renderers (kept here)

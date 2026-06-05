@@ -60,6 +60,7 @@ Then visit `http://localhost:8080`.
 - **Movemint Profile** — 0-100 activity score per player, match-self-calibrated against the roster's p95 of `max_dist` and `path_length_per_sec`, with bands from Defensive to Aggressive. Surfaces in the main leaderboard, a dedicated Movemint Leaderboard, the Player Performance Radar, and career aggregates.
 - **T-Key Usage / Target Lock** — captured from `PlayerState.has_target` per tick (tap-to-toggle in BZCC: the boolean reflects whether target mode is active, not key-press state or aim placement), surfaced as the 8th Radar axis. Cross-match comparable (absolute 0-1 ratio).
 - **Raw Data Browser** (`raw.html`) — isolated standalone page that decodes `.binpb.gz` client-side (vendored protobufjs-light + native `DecompressionStream`) and renders three tiers per match: raw binpb metadata + download, faithful decoded JSON, and processed JSON. Includes virtualized event-stream table, JSONPath search, proto-schema field tooltips, sentinel damage badge, and a Reconcile view that verifies processed-tier aggregates against tier-2 event sums.
+- **3D Models Browser** (`models/`) — standalone three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles, decoded from the game's baked `.msh` + `.dds` by the `scripts/object-render/` pipeline). Searchable/filterable thumbnail directory routing to a single-object viewer: full 360 orbit, dual performance / native-HQ textures, a toggleable sun light with cast shadows + intensity/angle controls, a momentum-based **Free spin** mode, and an HQ multi-angle capture. three.js vendored locally.
 - **Sentinel Damage Filter** — engine-emitted force-kill events (`amount = 2^28`) are dropped at ingest with full per-match telemetry. See [docs/DATA_DICTIONARY.md §7](docs/DATA_DICTIONARY.md#7-sentinel-damage-filter).
 - **Live Sync URL Sharing** — every state change (match, filter, tab, replay tick) is shareable via query parameters; an opt-in topnav toggle keeps the URL in sync with the current view, and a one-shot Share button copies the link regardless.
 - **Career Roster Minimum** — the All Matches view's career table only surfaces players with 5+ matches in the current scope (picker-filter aware).
@@ -73,6 +74,7 @@ Then visit `http://localhost:8080`.
 - **Chart.js 4.4.7** with `chartjs-plugin-zoom` for visualizations (vendored)
 - **Geist Sans + Geist Mono 1.8.0** for typography (vendored — variable woff2)
 - **protobufjs 7.4.0** light build for the Raw Data Browser's client-side decode (vendored)
+- **three.js r170** for the 3D Models Browser (vendored, with OrbitControls / GLTFLoader / DDSLoader addons)
 - **Custom theme system** with 44 themes, light/dark modes, and a glassmorphic effect layer
 
 All dependencies are vendored locally — no CDN usage, fully offline-capable.

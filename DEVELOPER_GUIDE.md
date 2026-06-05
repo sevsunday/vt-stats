@@ -2602,3 +2602,31 @@ Below 1280px, the grid collapses to single-col and page scrolls. The 1280px brea
 
 The Lobby Tools page is **picker-unaware** (mirrors VTSR-T leaderboard and the player/map browser pages). The dashboard's match picker has no influence on tools-page roster, balonce, wheel slices, or map-roll pools — tools is a live-data + manual-curation surface, not a corpus-aggregate view.
 
+## 17. Models Browser (`models/`)
+
+The project's **eighth standalone page**, sibling to `index.html` / `docs.html` / `raw.html` / `odf/index.html` / `player/index.html` / `map/index.html` / `tools/index.html`. An interactive three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles), promoted from the `_object-render/` proof-of-concept.
+
+### 17.1 Files
+
+- `models/index.html` — themed standalone shell (Bootstrap + theme system + Geist + theme dropdown + Tools-link pulse poller), importmap mapping `three` → `../vendor/three/`.
+- `js/models.js` — directory grid (committed static thumbnails, search + faction/category chips + sort + Prefer-HQ), `?model=<stem>` router, and viewer wiring. Asset base `../data/models/` resolves relative to the page (one level deep).
+- `js/models-viewer.js` — the `ObjectViewer` three.js class.
+- `css/models.css` — fully on `--kb-*` theme tokens; mobile rules (scrollable control bar, bottom-sheet light panel, `touch-action: none` canvas).
+- three.js r170 vendored at `vendor/three/` (`three.module.js` + `addons/{controls/OrbitControls,loaders/GLTFLoader,loaders/DDSLoader,utils/BufferGeometryUtils}.js`).
+
+### 17.2 Assets + pipeline
+
+Reads `data/models/`: `geometry/<stem>.glb` (geometry + UVs + per-primitive materials named by their lowercased diffuse stem), `textures/perf/<stem>.png` (512px, low-VRAM default), `textures/hq/<stem>.dds` (native BC-compressed, max fidelity), `thumbnails/<stem>.png`, `shots/<stem>/<angle>.png`, and `index.json` (manifest + odf index). These are emitted by the **standalone** conversion pipeline at `scripts/object-render/` (`convert_msh.py` orchestrator + `msh_parser.py` + `glb_writer.py` + `dds_decode.py` + `msh_thumbnail.py`), decoding the game's baked `.msh` + `.dds`. The pipeline is NOT invoked by `process_stats.py`; run `python scripts/object-render/convert_msh.py`. Reverse-engineering notes live in `_object-render/FORMAT.md`; diagnostic scripts in `_object-render/spike/`.
+
+### 17.3 Viewer features
+
+- Full 360 `OrbitControls` orbit (unrestricted azimuth + full polar), damping, zoom, pan.
+- **Dual textures** assigned at runtime by material name: Performance (PNG via `TextureLoader`) ↔ HQ (`.dds` via `DDSLoader`, degrades to the perf PNG when a `.dds` is absent). Per-object segmented toggle + a global Prefer-HQ preference (`localStorage vt.obj.quality`).
+- **Lighting**: a fixed world-space sun key light with `PCFSoftShadowMap` cast shadows onto an invisible `ShadowMaterial` ground plane, plus hemisphere + ambient fill (boosted when the sun is off). Top-bar toggle + a panel with intensity / azimuth / elevation sliders, persisted in `localStorage vt.obj.light.*`.
+- **Free spin**: a camera-locked mode (rotate + pan disabled, zoom kept) where pointer drags spin the model about its bounding-box-centered pivot with drag-relative momentum and friction decay — a nod to the in-game fidget-spin bug. Mutually exclusive with Auto-rotate.
+- **HQ Capture**: renders the 7 canonical angles at supersampled HQ with a canonical sun + identity orientation, downloading reproducible PNGs.
+
+### 17.4 Picker filter contract
+
+Picker-unaware (mirrors ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The `Models` topnav link (`bi-box`) sits immediately after ODF on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` + `MAP_TEMPLATE_VERSION` bumped to thread it through all stubs).
+

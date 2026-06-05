@@ -53,7 +53,7 @@ SITE_URL = "https://vtstats.bz"
 # `map_stats.json` itself (consumer contract).
 # v3 threads the site-wide custom-cursor + Settings gear script
 # (js/cursor-settings.js) through every map stub.
-MAP_TEMPLATE_VERSION = 3
+MAP_TEMPLATE_VERSION = 4
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently

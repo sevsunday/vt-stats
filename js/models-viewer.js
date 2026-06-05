@@ -1,4 +1,4 @@
-/* _object-render/js/viewer.js
+/* js/models-viewer.js  (promoted from _object-render/js/viewer.js)
  *
  * Single-object 3D viewer for converted BZCC .glb models. Full 360 / all-angle
  * orbit (unrestricted azimuth + full 0..PI polar so the underside is viewable),

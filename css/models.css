@@ -1,0 +1,317 @@
+/* css/models.css -- 3D Models browser (promoted from the _object-render POC).
+ * All colors come from the project theme (--kb-* tokens in css/themes.css);
+ * Geist is inherited from the shell. The page lives at models/index.html and
+ * consumes data/models/ (geometry GLB + perf/HQ textures + thumbnails). */
+
+/* ---------------- directory ---------------- */
+
+.models-page { min-height: 0; }
+
+.directory { padding: 1.25rem; }
+
+.directory-hint {
+  max-width: 1320px;
+  margin: 0 auto 0.75rem;
+  color: var(--kb-text-secondary);
+  font-size: 0.82rem;
+}
+
+/* toolbar */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  max-width: 1320px;
+  margin: 0 auto 0.5rem;
+}
+.search {
+  flex: 1 1 240px;
+  min-width: 200px;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+}
+.search:focus { outline: none; border-color: var(--kb-primary); }
+.chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.filter-chip {
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  cursor: pointer;
+}
+.filter-chip:hover { border-color: var(--kb-primary); color: var(--kb-text-primary); }
+.filter-chip.on {
+  background: var(--kb-primary);
+  border-color: var(--kb-primary);
+  color: var(--kb-primary-fg);
+}
+.toolbar-right { display: flex; align-items: center; gap: 1rem; margin-left: auto; }
+.sortwrap, .qualtoggle {
+  font-size: 0.8rem;
+  color: var(--kb-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.sort {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+}
+.qualtoggle { cursor: pointer; }
+.count-label {
+  max-width: 1320px;
+  margin: 0 auto 0.75rem;
+  color: var(--kb-text-secondary);
+  font-size: 0.78rem;
+}
+.empty { text-align: center; color: var(--kb-text-secondary); padding: 3rem 1rem; }
+
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.model-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 12px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.model-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--kb-primary);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+.thumb {
+  width: 100%;
+  height: 180px;
+  display: block;
+  object-fit: contain;
+  background:
+    radial-gradient(circle at 50% 42%, var(--kb-bg-muted) 0%, var(--kb-bg-body) 72%);
+}
+.thumb-missing::after {
+  content: "no preview";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--kb-text-secondary);
+  font-size: 0.75rem;
+}
+.card-body { padding: 0.7rem 0.8rem 0.85rem; }
+.card-title { font-weight: 650; font-size: 0.98rem; }
+.card-sub { display: flex; gap: 0.4rem; margin: 0.4rem 0 0.5rem; }
+.chip {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  color: var(--kb-primary-fg);
+  background: var(--c, var(--kb-primary));
+}
+.chip-ghost {
+  background: transparent;
+  color: var(--kb-text-secondary);
+  border: 1px solid var(--kb-border-default);
+}
+.card-stats { color: var(--kb-text-secondary); font-size: 0.78rem; }
+.card-odf {
+  color: var(--kb-text-muted);
+  font-size: 0.72rem;
+  font-family: var(--bs-font-monospace, ui-monospace, "Cascadia Code", Consolas, monospace);
+  margin-top: 0.25rem;
+}
+
+/* ---------------- viewer ---------------- */
+
+.viewer { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--kb-border-default);
+  background: var(--kb-bg-card);
+}
+.viewer-titlewrap { display: flex; flex-direction: column; line-height: 1.25; flex: 1; min-width: 0; }
+.viewer-title { font-weight: 700; }
+.viewer-meta { color: var(--kb-text-secondary); font-size: 0.78rem; }
+.viewer-actions { display: flex; gap: 0.5rem; }
+
+.btn {
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.btn:hover { border-color: var(--kb-primary); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn.toggle.on {
+  background: var(--kb-primary);
+  color: var(--kb-primary-fg);
+  border-color: var(--kb-primary);
+  font-weight: 650;
+}
+.back { color: var(--kb-text-secondary); }
+
+/* segmented Performance | HQ control */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.seg-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-input);
+  border: none;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--kb-border-default); }
+.seg-btn:hover { color: var(--kb-text-primary); }
+.seg-btn.on { background: var(--kb-primary); color: var(--kb-primary-fg); font-weight: 650; }
+
+.stage { flex: 1; min-height: 0; position: relative; }
+.stage canvas { display: block; touch-action: none; }
+/* Free-spin grab affordance (set on .stage while Free spin is active). */
+.stage.grabbable canvas { cursor: grab; }
+.stage.grabbable canvas:active { cursor: grabbing; }
+
+/* Floating light-control panel (overlaid bottom-left of the stage). */
+.light-panel {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  width: 230px;
+  background: color-mix(in srgb, var(--kb-bg-card) 92%, transparent);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+.light-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--kb-text-secondary);
+}
+.light-head {
+  color: var(--kb-text-primary);
+  font-weight: 600;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--kb-border-default);
+}
+.light-label { flex: 0 0 60px; }
+.light-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--kb-primary);
+}
+.light-val {
+  flex: 0 0 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--kb-text-primary);
+}
+/* Disabled (sun off) -> dim the angle sliders. */
+.light-panel.off .light-row:not(.light-head) { opacity: 0.45; }
+
+.error {
+  padding: 1.5rem;
+  color: var(--kb-danger);
+  font-size: 0.9rem;
+}
+
+/* ---------------- mobile ---------------- */
+
+@media (max-width: 640px) {
+  .directory { padding: 0.85rem; }
+
+  /* Toolbar stacks; search takes the full width. */
+  .toolbar { gap: 0.5rem; }
+  .search { flex: 1 1 100%; }
+  .toolbar-right { width: 100%; justify-content: space-between; margin-left: 0; }
+  /* Chip rows scroll horizontally instead of wrapping into tall blocks. */
+  .chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    padding-bottom: 2px;
+  }
+  .filter-chip { flex: 0 0 auto; padding: 0.4rem 0.7rem; }
+
+  /* Stack the viewer bar: title row on top, actions row below. */
+  .viewer-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  /* Control bar becomes a single horizontally-scrollable row (all buttons
+     stay reachable by swipe -- chosen mobile pattern). */
+  .viewer-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .viewer-actions > * { flex: 0 0 auto; }
+  /* Larger tap targets. */
+  .btn, .seg-btn { padding: 0.55rem 0.8rem; }
+
+  /* Light panel docks as a bottom sheet. */
+  .light-panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    border-radius: 12px 12px 0 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .model-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .thumb { height: 140px; }
+}

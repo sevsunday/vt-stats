@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Models — VT Stats</title>
+  <meta name="description" content="Browse interactive 3D models of BZCC units and buildings.">
+
+  <link rel="canonical" href="https://vtstats.bz/models/">
+
+  <!-- Open Graph (directory landing). -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Models — VT Stats">
+  <meta property="og:description" content="Browse interactive 3D models of BZCC units and buildings.">
+  <meta property="og:url" content="https://vtstats.bz/models/">
+  <meta property="og:site_name" content="VT Stats">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/models.css">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar. Mirrors map/index.html navbar shape. The Models link carries
+       `.active aria-current="page"` for "you are here" feedback. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="../docs.html" class="vt-nav-icon-btn"
+             title="Open the docs" aria-label="Docs">
+            <i class="bi bi-book me-1"></i>Docs
+          </a>
+          <a href="../raw.html" class="vt-nav-icon-btn"
+             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)"
+             aria-label="Raw data browser">
+            <i class="bi bi-code-square me-1"></i>Raw data
+          </a>
+          <a href="../odf/" class="vt-nav-icon-btn"
+             title="Browse the BZ2 Object Definition File (ODF) database"
+             aria-label="ODF browser">
+            <i class="bi bi-boxes me-1"></i>ODF
+          </a>
+          <a href="./" class="vt-nav-icon-btn active" aria-current="page"
+             title="Browse 3D unit & building models" aria-label="Models">
+            <i class="bi bi-box me-1"></i>Models
+          </a>
+          <a href="../player/" class="vt-nav-icon-btn"
+             title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
+          </a>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
+          </a>
+
+          <!-- Theme Dropdown. js/theme.js auto-binds and populates the
+               [data-theme-menu] ul on boot. -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Directory grid -->
+  <main id="directory" class="directory flex-grow-1">
+    <div class="directory-hint">Click a unit to inspect &middot; drag to orbit (all angles) &middot; scroll to zoom</div>
+    <div class="toolbar">
+      <input id="search" class="search" type="search" placeholder="Search name or ODF..." autocomplete="off" />
+      <div id="faction-chips" class="chips" data-group="faction"></div>
+      <div id="category-chips" class="chips" data-group="category"></div>
+      <div class="toolbar-right">
+        <label class="sortwrap">Sort
+          <select id="sort" class="sort">
+            <option value="name">Name</option>
+            <option value="faction">Faction</option>
+            <option value="category">Category</option>
+            <option value="triangles-desc">Triangles (high)</option>
+            <option value="triangles-asc">Triangles (low)</option>
+          </select>
+        </label>
+        <label class="qualtoggle" title="Prefer the native 2048 .dds textures everywhere (more VRAM)">
+          <input id="prefer-hq" type="checkbox" /> Prefer HQ
+        </label>
+      </div>
+    </div>
+    <div id="count-label" class="count-label"></div>
+    <div id="model-grid" class="model-grid"></div>
+    <div id="empty" class="empty" hidden>No models match the current filters.</div>
+  </main>
+
+  <!-- Single-object viewer -->
+  <section id="viewer" class="viewer flex-grow-1" hidden>
+    <div class="viewer-bar">
+      <a id="back-btn" class="btn back" href="?">&larr; All objects</a>
+      <div class="viewer-titlewrap">
+        <span id="viewer-title" class="viewer-title"></span>
+        <span id="viewer-meta" class="viewer-meta"></span>
+      </div>
+      <div class="viewer-actions">
+        <div class="seg" id="quality-seg">
+          <button class="seg-btn" data-q="perf">Performance</button>
+          <button class="seg-btn" data-q="hq">HQ</button>
+        </div>
+        <button id="wire-btn" class="btn toggle">Wireframe</button>
+        <button id="spin-btn" class="btn toggle">Auto-rotate</button>
+        <button id="freespin-btn" class="btn toggle" title="Lock the camera and click-drag (fling) to spin the model">Free spin</button>
+        <button id="light-btn" class="btn toggle" aria-expanded="false" title="Toggle the light panel">Light</button>
+        <button id="reset-btn" class="btn">Reset view</button>
+        <button id="capture-btn" class="btn" title="Render the 7 canonical angles at HQ + supersampled and download them">Capture HQ</button>
+      </div>
+    </div>
+    <div id="stage" class="stage">
+      <div id="light-panel" class="light-panel">
+        <div class="light-row light-head"><span>Sun light</span></div>
+        <label class="light-row">
+          <span class="light-label">Intensity</span>
+          <input id="light-intensity" type="range" min="0" max="6" step="0.1" />
+          <span id="light-intensity-val" class="light-val"></span>
+        </label>
+        <label class="light-row">
+          <span class="light-label">Azimuth</span>
+          <input id="light-az" type="range" min="0" max="360" step="1" />
+          <span id="light-az-val" class="light-val"></span>
+        </label>
+        <label class="light-row">
+          <span class="light-label">Elevation</span>
+          <input id="light-el" type="range" min="0" max="90" step="1" />
+          <span id="light-el-val" class="light-val"></span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script type="module" src="../js/models.js"></script>
+
+  <!-- Tools-link live-pulse poller. See index.html for the same pattern. -->
+  <script src="../js/bz2api.js"></script>
+  <script src="../js/active-game-indicator.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-/* _object-render/js/app.js
+/* js/models.js  (Models Browser; promoted from _object-render/js/app.js)
  *
  * Object browser + router for the BZCC model-render asset set (scaled to the
  * full ~700-model corpus).
@@ -14,7 +14,7 @@
  * (run from a local static server; see README).
  */
 
-import { ObjectViewer } from './viewer.js';
+import { ObjectViewer } from './models-viewer.js';
 
 const MODELS_BASE = '../data/models/';
 const QUALITY_KEY = 'vt.obj.quality';
