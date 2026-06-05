@@ -5637,3 +5637,117 @@ td.vt-col-split {
     color: var(--kb-text-primary);
 }
 
+/* ============================================================================
+   Custom cursor (BZCC in-game cursor) + Settings gear
+   Driven by js/cursor-settings.js. The overlay plays the HD sprite strip
+   (data/ui/cursor-sprite.png, 4096x64, 64 frames of 64px) via a steps(64)
+   keyframe for a continuous in-game-style spin, downscaled to a 32px on-screen
+   cursor. CSS vars are set on :root by the module; background-image is set
+   inline on the element (path resolved at runtime per page depth).
+   ========================================================================= */
+
+:root {
+    --vt-cursor-scale: 1;
+    --vt-cursor-speed: 1.05s;
+    /* --vt-cursor-frame is the on-screen DISPLAY size of one frame; the HD
+       sprite strip (4096x64, 64 frames of 64px) downscales to it crisply. */
+    --vt-cursor-frame: 32px;
+    --vt-cursor-frames: 64;
+    --vt-cursor-hotspot-x: 5px;
+    --vt-cursor-hotspot-y: 10px;
+}
+
+/* When active, the native pointer is fully replaced everywhere. */
+html.vt-cursor-active,
+html.vt-cursor-active * {
+    cursor: none !important;
+}
+
+.vt-cursor {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: calc(var(--vt-cursor-frame) * var(--vt-cursor-scale));
+    height: calc(var(--vt-cursor-frame) * var(--vt-cursor-scale));
+    background-repeat: no-repeat;
+    background-size:
+        calc(var(--vt-cursor-frame) * var(--vt-cursor-frames) * var(--vt-cursor-scale))
+        calc(var(--vt-cursor-frame) * var(--vt-cursor-scale));
+    /* offset so the comet tip (hotspot) lands on the real pointer position */
+    margin-left: calc(var(--vt-cursor-hotspot-x) * var(--vt-cursor-scale) * -1);
+    margin-top: calc(var(--vt-cursor-hotspot-y) * var(--vt-cursor-scale) * -1);
+    pointer-events: none;
+    z-index: 2147483646;
+    opacity: 0;
+    will-change: transform;
+    animation: vt-cursor-spin var(--vt-cursor-speed) steps(var(--vt-cursor-frames)) infinite;
+}
+
+@keyframes vt-cursor-spin {
+    from { background-position-x: 0; }
+    to {
+        background-position-x: calc(
+            var(--vt-cursor-frame) * var(--vt-cursor-frames) * var(--vt-cursor-scale) * -1);
+    }
+}
+
+/* Reduced-motion: keep the cursor visible but stop the spin (rests on frame 0). */
+@media (prefers-reduced-motion: reduce) {
+    .vt-cursor {
+        animation: none;
+    }
+}
+
+/* ---------- Settings gear dropdown panel ---------- */
+
+.vt-settings-panel {
+    min-width: 260px;
+    padding: 0.75rem;
+}
+
+.vt-settings-section-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.6rem;
+}
+
+.vt-settings-row {
+    margin-bottom: 0.85rem;
+}
+
+.vt-settings-row:last-of-type {
+    margin-bottom: 0;
+}
+
+.vt-settings-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.85rem;
+    color: var(--kb-text-primary);
+    margin-bottom: 0.2rem;
+}
+
+.vt-settings-label b {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-weight: 600;
+    color: var(--kb-primary);
+}
+
+.vt-settings-scale-hints {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.68rem;
+    color: var(--kb-text-muted);
+    margin-top: -0.1rem;
+}
+
+.vt-settings-actions {
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+

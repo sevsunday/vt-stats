@@ -46,7 +46,9 @@ SITE_URL = "https://vtstats.bz"
 # the actual stub template + idempotent renderer landed (forces first
 # generation pass to touch every file). v6 added the Maps topnav link
 # alongside the new /map/ browser pages.
-PLAYER_TEMPLATE_VERSION = 7
+# v8 threads the site-wide custom-cursor + Settings gear script
+# (js/cursor-settings.js) through every player stub.
+PLAYER_TEMPLATE_VERSION = 8
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

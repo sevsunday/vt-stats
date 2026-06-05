@@ -51,7 +51,9 @@ SITE_URL = "https://vtstats.bz"
 # the underlying map_stats.json hasn't moved. Orthogonal to
 # PIPELINE_VERSION (per-match cache) and the schema_version field on
 # `map_stats.json` itself (consumer contract).
-MAP_TEMPLATE_VERSION = 2
+# v3 threads the site-wide custom-cursor + Settings gear script
+# (js/cursor-settings.js) through every map stub.
+MAP_TEMPLATE_VERSION = 3
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently
