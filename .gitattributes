@@ -1,0 +1,8 @@
+# Git LFS tracking for the generated 3D model asset set (data/models/).
+# These are large, deduped binary artifacts produced by scripts/convert_msh.py
+# (geometry GLBs, native HQ .dds diffuse textures, perf PNGs, thumbnails, and
+# multi-angle gallery shots). Tracking via LFS keeps git history lean while a
+# clone still pulls the full multi-GB asset set.
+data/models/**/*.glb filter=lfs diff=lfs merge=lfs -text
+data/models/**/*.dds filter=lfs diff=lfs merge=lfs -text
+data/models/**/*.png filter=lfs diff=lfs merge=lfs -text

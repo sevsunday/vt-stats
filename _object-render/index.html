@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VT Stats &middot; Object Render (POC)</title>
+  <title>VT Stats &middot; Object Render</title>
   <link rel="stylesheet" href="css/style.css" />
   <script type="importmap">
   {
@@ -22,7 +22,28 @@
 
   <!-- Directory grid -->
   <main id="directory" class="directory">
+    <div class="toolbar">
+      <input id="search" class="search" type="search" placeholder="Search name or ODF..." autocomplete="off" />
+      <div id="faction-chips" class="chips" data-group="faction"></div>
+      <div id="category-chips" class="chips" data-group="category"></div>
+      <div class="toolbar-right">
+        <label class="sortwrap">Sort
+          <select id="sort" class="sort">
+            <option value="name">Name</option>
+            <option value="faction">Faction</option>
+            <option value="category">Category</option>
+            <option value="triangles-desc">Triangles (high)</option>
+            <option value="triangles-asc">Triangles (low)</option>
+          </select>
+        </label>
+        <label class="qualtoggle" title="Prefer the native 2048 .dds textures everywhere (more VRAM)">
+          <input id="prefer-hq" type="checkbox" /> Prefer HQ
+        </label>
+      </div>
+    </div>
+    <div id="count-label" class="count-label"></div>
     <div id="model-grid" class="model-grid"></div>
+    <div id="empty" class="empty" hidden>No models match the current filters.</div>
   </main>
 
   <!-- Single-object viewer -->
@@ -34,9 +55,14 @@
         <span id="viewer-meta" class="viewer-meta"></span>
       </div>
       <div class="viewer-actions">
+        <div class="seg" id="quality-seg">
+          <button class="seg-btn" data-q="perf">Performance</button>
+          <button class="seg-btn" data-q="hq">HQ</button>
+        </div>
         <button id="wire-btn" class="btn toggle">Wireframe</button>
         <button id="spin-btn" class="btn toggle">Auto-rotate</button>
         <button id="reset-btn" class="btn">Reset view</button>
+        <button id="capture-btn" class="btn" title="Render the 7 canonical angles at HQ + supersampled and download them">Capture HQ</button>
       </div>
     </div>
     <div id="stage" class="stage"></div>

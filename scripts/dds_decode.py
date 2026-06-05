@@ -7,8 +7,14 @@ doesn't implement the sRGB-tagged DX10 variants, so we decode the BC blocks
 ourselves (the block layout is standard regardless of the sRGB tag) and hand
 back an RGBA Pillow image of the largest mip.
 
-Only what the texture step needs: decode the base (mip 0) image. Returns a
-PIL.Image (RGBA). Raises UnsupportedDDS for formats we don't handle.
+Only what the texture step needs: decode an image. Returns a PIL.Image (RGBA).
+Raises UnsupportedDDS for formats we don't handle.
+
+`decode_dds(path, max_dim=N)` skips the BC mip pyramid down to the smallest mip
+whose largest side is still `>= N` and decodes only that mip (then downscales to
+exactly N if it overshoots). This makes the performance-texture path (512px) and
+the thumbnail rasterizer's HQ sampling source (1024px) fast + low-memory by
+never touching the full 2048 base image. `max_dim=None` (default) decodes mip 0.
 """
 
 from __future__ import annotations
@@ -89,7 +95,12 @@ def _decode_bc3_block(data, off, out, ox, oy, w, h):
                 out[(y * w + x)] = (r, g, b, alpha[aidx])
 
 
-def decode_dds(path) -> Image.Image:
+def _mip_bytes(w: int, h: int, block_bytes: int) -> int:
+    """Stored size of one BC mip of dimensions (w, h)."""
+    return ((w + 3) // 4) * ((h + 3) // 4) * block_bytes
+
+
+def decode_dds(path, max_dim: int | None = None) -> Image.Image:
     b = Path(path).read_bytes()
     if b[:4] != b"DDS ":
         raise UnsupportedDDS("not a DDS file")
@@ -119,29 +130,57 @@ def decode_dds(path) -> Image.Image:
     else:
         raise UnsupportedDDS(f"fourCC {fourcc!r}")
 
-    out = [(0, 0, 0, 0)] * (width * height)
     block_bytes = 8 if bc == 1 else 16
+
+    # Walk the mip pyramid (smaller each level) to the smallest mip whose
+    # largest side is still >= max_dim, advancing the data offset past every
+    # skipped mip. mipcount may be 0 (treated as 1).
     off = data_off
-    for by in range(0, height, 4):
-        for bx in range(0, width, 4):
+    mw, mh = width, height
+    levels = max(1, mipcount)
+    if max_dim:
+        for _ in range(levels - 1):
+            nw, nh = max(1, mw >> 1), max(1, mh >> 1)
+            if max(nw, nh) < max_dim:
+                break
+            off += _mip_bytes(mw, mh, block_bytes)
+            mw, mh = nw, nh
+
+    out = [(0, 0, 0, 0)] * (mw * mh)
+    for by in range(0, mh, 4):
+        for bx in range(0, mw, 4):
             if bc == 1:
-                _decode_bc1_block(b, off, out, bx, by, width, height)
+                _decode_bc1_block(b, off, out, bx, by, mw, mh)
             else:
                 # BC2/BC3 both 16 bytes; we decode the BC3-style (DXT5) alpha.
                 # BC2 (explicit alpha) is rare for diffuse; treat as BC3.
-                _decode_bc3_block(b, off, out, bx, by, width, height)
+                _decode_bc3_block(b, off, out, bx, by, mw, mh)
             off += block_bytes
 
-    img = Image.new("RGBA", (width, height))
+    img = Image.new("RGBA", (mw, mh))
     img.putdata(out)
+    if max_dim and max(mw, mh) > max_dim:
+        scale = max_dim / max(mw, mh)
+        img = img.resize(
+            (max(1, round(mw * scale)), max(1, round(mh * scale))),
+            Image.LANCZOS,
+        )
     return img
 
 
 if __name__ == "__main__":
     import sys
-    for p in sys.argv[1:]:
+    import time
+    md = None
+    args = sys.argv[1:]
+    if args and args[0].startswith("--max-dim="):
+        md = int(args[0].split("=", 1)[1])
+        args = args[1:]
+    for p in args:
         try:
-            im = decode_dds(p)
-            print(f"{Path(p).name}: {im.size} {im.mode}")
+            t = time.perf_counter()
+            im = decode_dds(p, max_dim=md)
+            dt = (time.perf_counter() - t) * 1000
+            print(f"{Path(p).name}: {im.size} {im.mode} (max_dim={md}, {dt:.0f}ms)")
         except UnsupportedDDS as e:
             print(f"{Path(p).name}: UNSUPPORTED ({e})")

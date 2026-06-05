@@ -1,25 +1,37 @@
 /* _object-render/js/app.js
  *
- * Rough object browser + router for the BZCC model-render POC.
+ * Object browser + router for the BZCC model-render asset set (scaled to the
+ * full ~700-model corpus).
  *
- *  - No ?model param  -> directory grid (one card per data/models/index.json
- *    entry, each with a lazy live-rotating 3D thumbnail).
- *  - ?model=<glb>     -> full single-object viewer (viewer.js) with 360 orbit.
+ *  - No ?model param -> directory: a searchable / filterable / sortable grid of
+ *    cards backed by committed STATIC thumbnails (data/models/thumbnails/<stem>.png,
+ *    lazy <img loading="lazy">) -- no live WebGL per card, so it scales.
+ *  - ?model=<stem>   -> full single-object viewer (viewer.js) with 360 orbit, a
+ *    Performance | HQ texture toggle, and an on-demand HQ multi-angle Capture.
  *
- * Models + manifest are served from ../data/models/ (run from a local static
- * server; see _object-render/README.md).
+ * A global "Prefer HQ" preference (localStorage vt.obj.quality) seeds the
+ * viewer's default quality. Manifest + assets are served from ../data/models/
+ * (run from a local static server; see README).
  */
 
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ObjectViewer } from './viewer.js';
 
 const MODELS_BASE = '../data/models/';
-const FACTION_COLOR = { i: '#5dadff', e: '#ff8a55', f: '#a87cff', _: '#9aa3b0' };
+const QUALITY_KEY = 'vt.obj.quality';
+const FACTION_COLOR = {
+  i: '#5dadff', e: '#ff8a55', f: '#a87cff', c: '#4ad6a0', _: '#9aa3b0',
+};
 
 const els = {
   directory: document.getElementById('directory'),
   grid: document.getElementById('model-grid'),
+  empty: document.getElementById('empty'),
+  count: document.getElementById('count-label'),
+  search: document.getElementById('search'),
+  factionChips: document.getElementById('faction-chips'),
+  categoryChips: document.getElementById('category-chips'),
+  sort: document.getElementById('sort'),
+  preferHq: document.getElementById('prefer-hq'),
   viewer: document.getElementById('viewer'),
   stage: document.getElementById('stage'),
   title: document.getElementById('viewer-title'),
@@ -28,112 +40,108 @@ const els = {
   wire: document.getElementById('wire-btn'),
   spin: document.getElementById('spin-btn'),
   reset: document.getElementById('reset-btn'),
+  capture: document.getElementById('capture-btn'),
+  qualitySeg: document.getElementById('quality-seg'),
 };
 
 let manifest = [];
-const thumbs = [];   // active thumbnail render contexts
 let activeViewer = null;
+const filters = { q: '', faction: 'all', category: 'all', sort: 'name' };
 
-// ---------------- shared thumbnail render loop ----------------
-
-function startThumbLoop() {
-  function tick() {
-    for (const t of thumbs) {
-      if (!t.ready) continue;
-      t.model.rotation.y += 0.012;
-      t.renderer.render(t.scene, t.camera);
-    }
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-}
-
-function makeThumbnail(canvas, url) {
-  const w = canvas.clientWidth || 240;
-  const h = canvas.clientHeight || 160;
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(w, h, false);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(40, w / h, 0.05, 5000);
-  scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x202833, 1.1));
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const key = new THREE.DirectionalLight(0xffffff, 1.5);
-  key.position.set(2, 3, 4);
-  camera.add(key);
-  scene.add(camera);
-
-  const ctx = { renderer, scene, camera, model: null, ready: false };
-  thumbs.push(ctx);
-
-  new GLTFLoader().loadAsync(url).then((gltf) => {
-    const model = gltf.scene;
-    const box = new THREE.Box3().setFromObject(model);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
-    model.position.sub(center);
-    const dist = radius / Math.tan((camera.fov * Math.PI) / 360) * 1.5;
-    camera.position.set(dist * 0.6, dist * 0.45, dist * 0.85);
-    camera.lookAt(0, 0, 0);
-    camera.near = radius / 100;
-    camera.far = radius * 100;
-    camera.updateProjectionMatrix();
-    // Pivot around a wrapper so rotation.y spins around center cleanly.
-    const wrap = new THREE.Group();
-    wrap.add(model);
-    scene.add(wrap);
-    ctx.model = wrap;
-    ctx.ready = true;
-  }).catch((e) => console.warn('thumb load failed', url, e));
-}
+function preferHq() { return localStorage.getItem(QUALITY_KEY) === 'hq'; }
 
 // ---------------- directory ----------------
 
-function renderDirectory() {
-  els.grid.innerHTML = '';
-  const io = new IntersectionObserver((entries, obs) => {
-    for (const e of entries) {
-      if (e.isIntersecting) {
-        const cv = e.target.querySelector('canvas');
-        if (cv && !cv.dataset.init) {
-          cv.dataset.init = '1';
-          makeThumbnail(cv, MODELS_BASE + cv.dataset.glb);
-        }
-        obs.unobserve(e.target);
-      }
-    }
-  }, { rootMargin: '200px' });
+function uniqueSorted(getter) {
+  return [...new Set(manifest.map(getter).filter(Boolean))].sort();
+}
 
-  for (const m of manifest) {
+function buildChips() {
+  const factions = uniqueSorted((m) => m.factionName);
+  const categories = uniqueSorted((m) => m.category);
+  renderChipGroup(els.factionChips, 'faction', ['All', ...factions]);
+  renderChipGroup(els.categoryChips, 'category', ['All', ...categories]);
+}
+
+function renderChipGroup(container, group, labels) {
+  container.innerHTML = '';
+  for (const label of labels) {
+    const val = label === 'All' ? 'all' : label;
+    const chip = document.createElement('button');
+    chip.className = 'filter-chip' + (filters[group] === val ? ' on' : '');
+    chip.textContent = label;
+    chip.dataset.value = val;
+    chip.onclick = () => {
+      filters[group] = val;
+      [...container.children].forEach((c) =>
+        c.classList.toggle('on', c.dataset.value === val));
+      renderDirectory();
+    };
+    container.appendChild(chip);
+  }
+}
+
+function applyFilters() {
+  const q = filters.q.trim().toLowerCase();
+  let rows = manifest.filter((m) => {
+    if (filters.faction !== 'all' && m.factionName !== filters.faction) return false;
+    if (filters.category !== 'all' && m.category !== filters.category) return false;
+    if (q) {
+      const hay = `${m.unitName} ${m.stem} ${(m.odfs || []).join(' ')}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const s = filters.sort;
+  rows = rows.slice().sort((a, b) => {
+    if (s === 'triangles-desc') return b.triangles - a.triangles;
+    if (s === 'triangles-asc') return a.triangles - b.triangles;
+    if (s === 'faction') return cmp(a.factionName, b.factionName) || cmp(a.unitName, b.unitName);
+    if (s === 'category') return cmp(a.category, b.category) || cmp(a.unitName, b.unitName);
+    return cmp(a.unitName, b.unitName) || cmp(a.stem, b.stem);
+  });
+  return rows;
+}
+
+function cmp(a, b) { return String(a || '').localeCompare(String(b || '')); }
+
+function renderDirectory() {
+  const rows = applyFilters();
+  els.count.textContent = `Showing ${rows.length.toLocaleString()} of ${manifest.length.toLocaleString()} models`;
+  els.empty.hidden = rows.length > 0;
+  els.grid.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  for (const m of rows) {
     const card = document.createElement('a');
     card.className = 'model-card';
-    card.href = `?model=${encodeURIComponent(m.glb)}`;
+    card.href = `?model=${encodeURIComponent(m.stem)}`;
     const color = FACTION_COLOR[m.factionCode] || FACTION_COLOR._;
     card.style.setProperty('--accent', color);
 
-    const cv = document.createElement('canvas');
-    cv.className = 'thumb';
-    cv.dataset.glb = m.glb;
+    const img = document.createElement('img');
+    img.className = 'thumb';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = m.unitName || m.stem;
+    img.src = MODELS_BASE + (m.thumb || `thumbnails/${m.stem}.png`);
+    img.onerror = () => { img.classList.add('thumb-missing'); img.removeAttribute('src'); };
 
     const body = document.createElement('div');
     body.className = 'card-body';
     body.innerHTML = `
-      <div class="card-title">${escapeHtml(m.unitName || m.glb)}</div>
+      <div class="card-title">${escapeHtml(m.unitName || m.stem)}</div>
       <div class="card-sub">
         <span class="chip" style="--c:${color}">${escapeHtml(m.factionName || '?')}</span>
         <span class="chip chip-ghost">${escapeHtml(m.category || '')}</span>
       </div>
-      <div class="card-stats">${m.triangles.toLocaleString()} tris &middot; ${m.groups} ${m.groups === 1 ? 'part' : 'parts'}</div>
-      <div class="card-odf">${escapeHtml(m.odf)}</div>`;
+      <div class="card-stats">${m.triangles.toLocaleString()} tris &middot; ${m.groups} ${m.groups === 1 ? 'part' : 'parts'} &middot; ${(m.textures || []).length} tex</div>
+      <div class="card-odf">${escapeHtml(m.primaryOdf || '')}</div>`;
 
-    card.appendChild(cv);
+    card.appendChild(img);
     card.appendChild(body);
-    els.grid.appendChild(card);
-    io.observe(card);
+    frag.appendChild(card);
   }
+  els.grid.appendChild(frag);
 }
 
 // ---------------- detail viewer ----------------
@@ -141,20 +149,29 @@ function renderDirectory() {
 function showViewer(entry) {
   els.directory.hidden = true;
   els.viewer.hidden = false;
-  els.title.textContent = entry.unitName || entry.glb;
+  els.title.textContent = entry.unitName || entry.stem;
   els.meta.textContent =
     `${entry.factionName || '?'} \u00b7 ${entry.category || ''} \u00b7 ` +
     `${entry.triangles.toLocaleString()} tris \u00b7 ${entry.groups} ` +
-    `${entry.groups === 1 ? 'part' : 'parts'} \u00b7 ${entry.odf}`;
+    `${entry.groups === 1 ? 'part' : 'parts'} \u00b7 ${entry.primaryOdf || ''}`;
 
-  activeViewer = new ObjectViewer(els.stage);
+  const quality = preferHq() ? 'hq' : 'perf';
+  activeViewer = new ObjectViewer(els.stage, { quality });
   activeViewer.load(MODELS_BASE + entry.glb).catch((e) => {
     els.stage.innerHTML = `<div class="error">Failed to load ${escapeHtml(entry.glb)}: ${escapeHtml(String(e))}</div>`;
   });
 
+  syncQualitySeg(quality);
   els.wire.classList.remove('on');
   els.spin.classList.remove('on');
 
+  els.qualitySeg.querySelectorAll('.seg-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      const q = btn.dataset.q;
+      syncQualitySeg(q);
+      await activeViewer.setQuality(q);
+    };
+  });
   els.wire.onclick = () => {
     const on = !els.wire.classList.contains('on');
     els.wire.classList.toggle('on', on);
@@ -166,7 +183,37 @@ function showViewer(entry) {
     activeViewer.setAutoRotate(on);
   };
   els.reset.onclick = () => activeViewer.resetView();
+  els.capture.onclick = () => doCapture(entry);
   els.back.onclick = (ev) => { ev.preventDefault(); goDirectory(); };
+}
+
+function syncQualitySeg(q) {
+  els.qualitySeg.querySelectorAll('.seg-btn').forEach((b) =>
+    b.classList.toggle('on', b.dataset.q === q));
+}
+
+async function doCapture(entry) {
+  if (!activeViewer) return;
+  const label = els.capture.textContent;
+  els.capture.disabled = true;
+  els.capture.textContent = 'Rendering...';
+  try {
+    const shots = await activeViewer.captureGallery({ size: 1024, supersample: 2 });
+    for (const { name, dataUrl } of shots) {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${entry.stem}_${name}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      await new Promise((r) => setTimeout(r, 120)); // let the browser flush each download
+    }
+  } catch (e) {
+    console.error('capture failed', e);
+  } finally {
+    els.capture.disabled = false;
+    els.capture.textContent = label;
+  }
 }
 
 function goDirectory() {
@@ -181,7 +228,7 @@ function route() {
   const params = new URLSearchParams(location.search);
   const model = params.get('model');
   if (model) {
-    const entry = manifest.find((m) => m.glb === model);
+    const entry = manifest.find((m) => m.stem === model || m.glb === model);
     if (entry) { showViewer(entry); return; }
   }
   els.viewer.hidden = true;
@@ -194,8 +241,22 @@ function escapeHtml(s) {
   ));
 }
 
+function wireToolbar() {
+  els.search.oninput = () => { filters.q = els.search.value; renderDirectory(); };
+  els.sort.onchange = () => { filters.sort = els.sort.value; renderDirectory(); };
+  els.preferHq.checked = preferHq();
+  els.preferHq.onchange = () => {
+    localStorage.setItem(QUALITY_KEY, els.preferHq.checked ? 'hq' : 'perf');
+    if (activeViewer) {
+      const q = els.preferHq.checked ? 'hq' : 'perf';
+      syncQualitySeg(q);
+      activeViewer.setQuality(q);
+    }
+  };
+}
+
 async function boot() {
-  startThumbLoop();
+  wireToolbar();
   try {
     const res = await fetch(MODELS_BASE + 'index.json');
     const data = await res.json();
@@ -204,6 +265,7 @@ async function boot() {
     els.grid.innerHTML = `<div class="error">Could not load index.json. Run from a local static server (see README).</div>`;
     return;
   }
+  buildChips();
   renderDirectory();
   route();
   window.addEventListener('popstate', () => {
