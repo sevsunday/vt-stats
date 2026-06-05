@@ -1,8 +1,12 @@
-# Git LFS tracking for the generated 3D model asset set (data/models/).
-# These are large, deduped binary artifacts produced by scripts/convert_msh.py
-# (geometry GLBs, native HQ .dds diffuse textures, perf PNGs, thumbnails, and
-# multi-angle gallery shots). Tracking via LFS keeps git history lean while a
-# clone still pulls the full multi-GB asset set.
-data/models/**/*.glb filter=lfs diff=lfs merge=lfs -text
-data/models/**/*.dds filter=lfs diff=lfs merge=lfs -text
-data/models/**/*.png filter=lfs diff=lfs merge=lfs -text
+# NOTE: Git LFS is intentionally NOT used for the data/models/ asset set.
+#
+# GitHub Pages (this site is served from the repo via "deploy from a branch")
+# does NOT resolve Git LFS objects -- it serves the ~130-byte LFS POINTER text
+# instead of the real binary, which breaks the .glb/.png loaders. GitHub Pages
+# also caps a published site at 1 GB.
+#
+# So the published asset set is kept small (geometry GLBs + 512px perf PNG
+# textures + hero thumbnails, ~230 MB) and committed as PLAIN git blobs that
+# Pages serves correctly. The high-quality .dds set and the multi-angle shots/
+# gallery are NOT committed (gitignored); they are regenerated locally by
+# scripts/convert_msh.py and can be moved to an external host later.

@@ -18,6 +18,11 @@ import { ObjectViewer } from './viewer.js';
 
 const MODELS_BASE = '../data/models/';
 const QUALITY_KEY = 'vt.obj.quality';
+// The native HQ .dds set is not published to GitHub Pages (exceeds the 1 GB
+// site limit), so the live site is perf-only: the HQ toggle + Prefer-HQ control
+// are hidden and the viewer serves the 512px perf PNGs everywhere. Flip to true
+// if the HQ set is ever served from an external host (see viewer.js TEX_HQ_BASE).
+const HQ_AVAILABLE = false;
 const FACTION_COLOR = {
   i: '#5dadff', e: '#ff8a55', f: '#a87cff', c: '#4ad6a0', _: '#9aa3b0',
 };
@@ -48,7 +53,7 @@ let manifest = [];
 let activeViewer = null;
 const filters = { q: '', faction: 'all', category: 'all', sort: 'name' };
 
-function preferHq() { return localStorage.getItem(QUALITY_KEY) === 'hq'; }
+function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) === 'hq'; }
 
 // ---------------- directory ----------------
 
@@ -161,6 +166,8 @@ function showViewer(entry) {
     els.stage.innerHTML = `<div class="error">Failed to load ${escapeHtml(entry.glb)}: ${escapeHtml(String(e))}</div>`;
   });
 
+  els.qualitySeg.hidden = !HQ_AVAILABLE;
+  els.capture.hidden = !HQ_AVAILABLE;  // Capture forces HQ, unavailable here
   syncQualitySeg(quality);
   els.wire.classList.remove('on');
   els.spin.classList.remove('on');
@@ -244,6 +251,10 @@ function escapeHtml(s) {
 function wireToolbar() {
   els.search.oninput = () => { filters.q = els.search.value; renderDirectory(); };
   els.sort.onchange = () => { filters.sort = els.sort.value; renderDirectory(); };
+  if (!HQ_AVAILABLE) {
+    const wrap = els.preferHq.closest('.qualtoggle');
+    if (wrap) wrap.hidden = true;
+  }
   els.preferHq.checked = preferHq();
   els.preferHq.onchange = () => {
     localStorage.setItem(QUALITY_KEY, els.preferHq.checked ? 'hq' : 'perf');

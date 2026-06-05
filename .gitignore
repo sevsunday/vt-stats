@@ -21,6 +21,15 @@ __pycache__/
 # Regenerable from any pipeline run; not part of the dashboard contract.
 /_validation/
 
+# Object-render assets too large for the GitHub Pages 1 GB site limit: the
+# high-quality native .dds texture set (~885 MB) and the multi-angle static
+# gallery (~578 MB). The browser doesn't load shots/ at all, and HQ degrades to
+# the perf PNG set. Both are regenerated locally by scripts/convert_msh.py and
+# could be moved to an external host later. Only geometry/ + textures/perf/ +
+# thumbnails/ + index.json are published.
+/data/models/textures/hq/
+/data/models/shots/
+
 # Scratch commit message files used to pipe HEREDOC-style messages into
 # git commit (PowerShell doesn't support heredoc). Always transient.
 _commit_msg.txt

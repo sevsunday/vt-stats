@@ -116,11 +116,32 @@ canonical angles at HQ + 2x supersample and downloads them -- a one-off
 convenience; the committed galleries for every model already come from the build
 script).
 
-## git LFS
+## Hosting (GitHub Pages) -- published vs local-only assets
 
-`data/models/**/*.{glb,dds,png}` is tracked via git LFS (`.gitattributes`) so a
-clone pulls the full multi-GB asset set without bloating git history. Run
-`git lfs install` once after cloning.
+The site is served from this repo via GitHub Pages, which has two hard limits
+that shape what gets committed:
+
+- GitHub Pages does NOT resolve Git LFS -- it serves the ~130-byte LFS pointer
+  text instead of the real binary, breaking the `.glb`/`.png` loaders. So the
+  model assets are committed as PLAIN git blobs (no LFS), not via LFS.
+- A published GitHub Pages site is capped at 1 GB.
+
+To fit, only the **perf set is published** (committed as plain blobs, ~230 MB):
+
+```
+data/models/geometry/<stem>.glb     committed
+data/models/textures/perf/<stem>.png committed
+data/models/thumbnails/<stem>.png   committed
+data/models/index.json              committed
+```
+
+The **HQ `.dds` set (~885 MB) and the `shots/` gallery (~578 MB) are NOT
+committed** (gitignored). They are regenerated locally by
+`scripts/convert_msh.py` and could be moved to an external host (e.g. a CDN /
+object store) later -- at which point flip `HQ_AVAILABLE = true` in
+[js/app.js](js/app.js) and point `TEX_BASE` at the host. The browser is
+**perf-only on the live site** (HQ toggle + Prefer-HQ control hidden); the
+viewer's HQ path degrades to the perf PNG when a `.dds` is absent.
 
 ## Coordinate / format notes
 

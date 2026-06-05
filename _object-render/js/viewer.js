@@ -159,7 +159,11 @@ export class ObjectViewer {
     if (quality === 'hq') {
       const url = `${TEX_BASE}hq/${name}.dds`;
       return new Promise((resolve) => {
-        this._ddsLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
+        this._ddsLoader.load(url, (t) => resolve(finish(t)), undefined, () => {
+          // HQ .dds not published (GitHub Pages perf-only) -> degrade to perf.
+          this._texLoader.load(`${TEX_BASE}perf/${name}.png`,
+            (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
+        });
       });
     }
     const url = `${TEX_BASE}perf/${name}.png`;
