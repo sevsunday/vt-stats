@@ -18,11 +18,12 @@ import { ObjectViewer } from './viewer.js';
 
 const MODELS_BASE = '../data/models/';
 const QUALITY_KEY = 'vt.obj.quality';
-// The native HQ .dds set is not published to GitHub Pages (exceeds the 1 GB
-// site limit), so the live site is perf-only: the HQ toggle + Prefer-HQ control
-// are hidden and the viewer serves the 512px perf PNGs everywhere. Flip to true
-// if the HQ set is ever served from an external host (see viewer.js TEX_HQ_BASE).
-const HQ_AVAILABLE = false;
+// The full asset set (incl. the native HQ .dds textures) is published as plain
+// git blobs and served by GitHub Pages, so the HQ toggle + Prefer-HQ control +
+// Capture are enabled. Set to false to force perf-only (e.g. if HQ is dropped
+// from the published set again); the viewer's HQ path also degrades to the perf
+// PNG when a .dds is missing.
+const HQ_AVAILABLE = true;
 const FACTION_COLOR = {
   i: '#5dadff', e: '#ff8a55', f: '#a87cff', c: '#4ad6a0', _: '#9aa3b0',
 };

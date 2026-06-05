@@ -2,11 +2,8 @@
 #
 # GitHub Pages (this site is served from the repo via "deploy from a branch")
 # does NOT resolve Git LFS objects -- it serves the ~130-byte LFS POINTER text
-# instead of the real binary, which breaks the .glb/.png loaders. GitHub Pages
-# also caps a published site at 1 GB.
-#
-# So the published asset set is kept small (geometry GLBs + 512px perf PNG
-# textures + hero thumbnails, ~230 MB) and committed as PLAIN git blobs that
-# Pages serves correctly. The high-quality .dds set and the multi-angle shots/
-# gallery are NOT committed (gitignored); they are regenerated locally by
-# scripts/convert_msh.py and can be moved to an external host later.
+# instead of the real binary, which breaks the .glb/.png loaders. So the full
+# data/models/ asset set (geometry GLBs + perf PNG + HQ .dds textures + hero
+# thumbnails + the multi-angle shots/ gallery) is committed as PLAIN git blobs
+# that Pages serves correctly. (GitHub Pages documents a 1 GB published-site
+# limit, but it isn't strictly enforced here -- the full set serves fine.)

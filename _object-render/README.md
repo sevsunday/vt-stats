@@ -116,32 +116,33 @@ canonical angles at HQ + 2x supersample and downloads them -- a one-off
 convenience; the committed galleries for every model already come from the build
 script).
 
-## Hosting (GitHub Pages) -- published vs local-only assets
+## Hosting (GitHub Pages) -- no Git LFS
 
-The site is served from this repo via GitHub Pages, which has two hard limits
-that shape what gets committed:
+The site is served from this repo via GitHub Pages. The one hard rule:
 
 - GitHub Pages does NOT resolve Git LFS -- it serves the ~130-byte LFS pointer
-  text instead of the real binary, breaking the `.glb`/`.png` loaders. So the
-  model assets are committed as PLAIN git blobs (no LFS), not via LFS.
-- A published GitHub Pages site is capped at 1 GB.
+  text instead of the real binary, breaking the `.glb`/`.png`/`.dds` loaders.
+  So the entire `data/models/` asset set is committed as **PLAIN git blobs**
+  (never LFS).
 
-To fit, only the **perf set is published** (committed as plain blobs, ~230 MB):
+The **full set is published** (geometry GLBs + perf PNG + HQ `.dds` + hero
+thumbnails + the multi-angle `shots/` gallery, ~1.7 GB total):
 
 ```
-data/models/geometry/<stem>.glb     committed
-data/models/textures/perf/<stem>.png committed
-data/models/thumbnails/<stem>.png   committed
-data/models/index.json              committed
+data/models/geometry/<stem>.glb       committed
+data/models/textures/perf/<stem>.png  committed (512px, default)
+data/models/textures/hq/<stem>.dds    committed (native 2048, HQ toggle)
+data/models/thumbnails/<stem>.png     committed
+data/models/shots/<stem>/*.png        committed (capture targets / future OG)
+data/models/index.json                committed
 ```
 
-The **HQ `.dds` set (~885 MB) and the `shots/` gallery (~578 MB) are NOT
-committed** (gitignored). They are regenerated locally by
-`scripts/convert_msh.py` and could be moved to an external host (e.g. a CDN /
-object store) later -- at which point flip `HQ_AVAILABLE = true` in
-[js/app.js](js/app.js) and point `TEX_BASE` at the host. The browser is
-**perf-only on the live site** (HQ toggle + Prefer-HQ control hidden); the
-viewer's HQ path degrades to the perf PNG when a `.dds` is absent.
+GitHub Pages documents a 1 GB published-site limit, but it is not strictly
+enforced here -- the multi-GB repo serves fine. The browser defaults to perf
+with a working **HQ** toggle (`HQ_AVAILABLE = true` in [js/app.js](js/app.js));
+the viewer's HQ path still degrades to the perf PNG if a `.dds` is ever absent.
+If repo size becomes a problem later, move `textures/hq/` + `shots/` to an
+external host and point `TEX_BASE` (and the thumbnail/glb bases) at it.
 
 ## Coordinate / format notes
 
