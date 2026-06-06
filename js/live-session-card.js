@@ -140,7 +140,7 @@
                   : '';
 
     return `
-      <div class="vt-active-game-modal-player-row ${teamCls}">
+      <div class="vt-active-game-modal-player-row ${teamCls}" data-steam64="${escapeHtml(p.steamId || '')}">
         <div class="vt-active-game-modal-player-badges">${badges.join('')}</div>
         <div class="vt-active-game-modal-player-name">
           <span class="vt-active-game-modal-player-nick">${escapeHtml(name)}</span>

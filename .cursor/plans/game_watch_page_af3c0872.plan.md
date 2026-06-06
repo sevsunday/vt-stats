@@ -4,28 +4,28 @@ overview: Build a definitive, visually rich /gw "Game Watch" page that lists eve
 todos:
   - id: enrich
     content: "Create js/gw/local-map-enrich.js: one-time map-registry.json loader (slug-keyed, URL-candidate fallback, ready promise) + enrichSessionsLocal(sessions, registry) setting mapName/mapDescription/mapImageUrl(local PNG)/teamNames and returning catalog misses."
-    status: pending
+    status: completed
   - id: reconciler
     content: "Create js/gw/reconciler.js: keyed reconcileList(container, items, {keyFn, createFn, patchFn, exitFn}) with enter/exit/FLIP-reorder, setText/setAttr write-only-if-changed helpers, prefers-reduced-motion snap, single-rAF batching, and steam64-keyed roster sub-reconcile."
-    status: pending
+    status: completed
   - id: renderer-hook
     content: Add additive data-steam64 attribute to renderPlayerRow() in js/live-session-card.js so the reconciler can key/patch roster rows (non-breaking for index.html + tools).
-    status: pending
+    status: completed
   - id: poller
     content: "Create js/gw/poller.js: full-list poll lifecycle (no filtering) with adaptive cadence (5s when an of-interest lobby is INGAME/PREGAME else ~12s), in-flight guard, error backoff, visibility pause/refresh; tick = fetchSessions -> enrichSessionsLocal -> miss-only enrichSessionsWithMapData fallback -> onSnapshot."
-    status: pending
+    status: completed
   - id: main
     content: "Create js/gw/main.js: await resolver+registry ready, init poller, tag isOfInterest via known-hosts, ALWAYS reconcile of-interest into pinned #gw-interest above #gw-all, stable sort within each section, drive reconcileList (createFn via VTLiveSessionCard.renderInto with dataPrefix '../data/' so every card gets the Join/Locked footer, patchFn per the field map incl. join-status flip), 1s updated-ago ticker, hide empty #gw-interest, empty-state toggle."
-    status: pending
+    status: completed
   - id: shell
     content: "Create gw/index.html: standalone shell (data-theme/data-mode) + shared navbar with new Game Watch link, header strip (#gw-updated, #gw-count, poll dot), pinned #gw-interest + #gw-all sections, empty-state node; REQUIRED CSS load order with gw.css last, theme.js-first JS order, all ../ prefixed; zero inline <style>; canonical + OG meta."
-    status: pending
+    status: completed
   - id: styles
     content: "Create css/gw.css (loaded last): Bootstrap-grid #gw-all, of-interest hero cards + glow + Community badge, all colors via --kb-* (zero hardcoded), glass-surface + --vt-shadow reuse, Geist Mono (.vt-mono/tabular-nums) for #gw-count/#gw-updated/K-D-S, .gw-enter/.gw-exit + FLIP transitions via --vt-anim-* with a prefers-reduced-motion zeroing block, header strip + poll-dot."
-    status: pending
+    status: completed
   - id: verify
     content: "Manually verify: no-flicker refresh, of-interest ALWAYS pinned first + highlighted when present, Join button on every joinable lobby (Locked state otherwise), local-PNG thumbnails with no iondriver calls except catalog miss (network tab), independent updated-ago ticker, polling pauses when backgrounded, theme switch recolors via --kb-* with no reload, reduced-motion disables transitions."
-    status: pending
+    status: completed
 isProject: false
 ---
 

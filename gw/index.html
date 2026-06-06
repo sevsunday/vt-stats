@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Watch — VT Stats</title>
+  <meta name="description" content="Live view of every active Battlezone: Combat Commander lobby worldwide, with community matches of interest pinned first.">
+
+  <link rel="canonical" href="https://vtstats.bz/gw/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Game Watch — VT Stats">
+  <meta property="og:description" content="Live view of every active BZ2 Combat Commander lobby worldwide, community matches pinned first.">
+  <meta property="og:url" content="https://vtstats.bz/gw/">
+  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:site_name" content="VT Stats">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/gw.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar. Mirrors the standalone-page shell; Game Watch link is active. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="../docs.html" class="vt-nav-icon-btn"
+             title="Open the docs" aria-label="Docs">
+            <i class="bi bi-book me-1"></i>Docs
+          </a>
+          <a href="../raw.html" class="vt-nav-icon-btn"
+             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)"
+             aria-label="Raw data browser">
+            <i class="bi bi-code-square me-1"></i>Raw data
+          </a>
+          <a href="../odf/" class="vt-nav-icon-btn"
+             title="Browse the BZ2 Object Definition File (ODF) database"
+             aria-label="ODF browser">
+            <i class="bi bi-boxes me-1"></i>ODF
+          </a>
+          <a href="../models/" class="vt-nav-icon-btn"
+             title="Browse 3D unit & building models" aria-label="Models">
+            <i class="bi bi-box me-1"></i>Models
+          </a>
+          <a href="../player/" class="vt-nav-icon-btn"
+             title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
+          </a>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
+          </a>
+          <a href="./" class="vt-nav-icon-btn active" aria-current="page"
+             title="Watch every active lobby live" aria-label="Game Watch">
+            <i class="bi bi-broadcast-pin me-1"></i>Game Watch
+          </a>
+
+          <!-- Theme Dropdown. js/theme.js auto-binds. -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="vt-gw-main flex-grow-1">
+    <div class="container-fluid px-3 px-md-4 py-3 py-md-4">
+
+      <!-- Header strip: live pulse dot + title + count/updated chips. -->
+      <header class="vt-gw-header">
+        <div class="vt-gw-header-lead">
+          <span class="gw-dot" id="gw-status-dot" aria-hidden="true"></span>
+          <h1 class="vt-gw-title mb-0"><i class="bi bi-broadcast-pin me-2"></i>Game Watch</h1>
+        </div>
+        <div class="vt-gw-header-meta">
+          <span class="vt-gw-chip vt-mono" id="gw-count">Checking lobbies...</span>
+          <span class="vt-gw-chip vt-mono" id="gw-updated">connecting...</span>
+        </div>
+      </header>
+
+      <!-- Pinned: known-host community lobbies, always first. -->
+      <section class="vt-gw-section vt-gw-section--interest" id="gw-interest" hidden aria-labelledby="gw-interest-title">
+        <h2 class="vt-gw-section-title" id="gw-interest-title">
+          <i class="bi bi-star-fill me-2"></i>Matches of interest
+        </h2>
+        <div class="vt-gw-grid vt-gw-grid--interest" id="gw-interest-body"></div>
+      </section>
+
+      <!-- Every other active lobby worldwide. -->
+      <section class="vt-gw-section" id="gw-all" aria-labelledby="gw-all-title">
+        <h2 class="vt-gw-section-title" id="gw-all-title">
+          <i class="bi bi-globe2 me-2"></i>All active lobbies
+        </h2>
+        <div class="vt-gw-grid" id="gw-all-body"></div>
+      </section>
+
+      <!-- Empty state: no lobbies anywhere. -->
+      <div class="vt-gw-empty" id="gw-empty" hidden>
+        <i class="bi bi-cup-hot vt-gw-empty-icon" aria-hidden="true"></i>
+        <p class="vt-gw-empty-title mb-1">No active lobbies right now</p>
+        <p class="vt-gw-empty-sub mb-0">Nobody is hosting at the moment. This page updates automatically the second a lobby goes live.</p>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ============================================================
+       SCRIPTS
+       ============================================================ -->
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/bz2api.js"></script>
+  <script src="../js/live-session-card.js"></script>
+  <script src="../js/tools/player-resolver.js"></script>
+  <script src="../js/gw/local-map-enrich.js"></script>
+  <script src="../js/gw/reconciler.js"></script>
+  <script src="../js/gw/gw-card.js"></script>
+  <script src="../js/gw/poller.js"></script>
+  <script src="../js/gw/main.js"></script>
+  <script src="../js/active-game-indicator.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+</body>
+</html>
