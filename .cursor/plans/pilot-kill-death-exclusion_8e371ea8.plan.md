@@ -4,22 +4,22 @@ overview: Exclude on-foot pilot deaths from kill/death stats and VTSR-T by gatin
 todos:
   - id: gate-process-stats
     content: "Add victim_is_pilot (is_pilot_odf) gate in UnitDestroyed CATEGORY 4 of scripts/process_stats.py: wrap player_kills/deaths, per_ship_combat, kill_rivalry, vehicle_destruction_count, player_self_kills, and pvp_kill_log increments in `if not victim_is_pilot`; keep _touch, all_unit_odfs.add, faction votes, display resolution, and kill_feed.append always-on."
-    status: pending
+    status: completed
   - id: feed-flag
     content: Add is_pilot_victim flag to kill_feed entry dict; reuse the early victim_is_pilot for the existing line ~3592 display label (switch PILOT_ODFS read to is_pilot_odf).
-    status: pending
+    status: completed
   - id: bump-versions
     content: Bump PIPELINE_VERSION 25->26 and match schema_version 13->14 in process_stats.py; bump ELO_SCHEMA_VERSION 8->9 in elo.py with a re-rate comment.
-    status: pending
+    status: completed
   - id: killfeed-badge
     content: Render a vt-pilot-badge next to the victim in renderKillFeed() (js/app.js) when entry.is_pilot_victim; add .vt-pilot-badge to css/vtstats-theme.css mirroring .vt-campod-badge.
-    status: pending
+    status: completed
   - id: docs-rules
     content: Update docs/DATA_DICTIONARY.md (UnitDestroyed §8 CATEGORY 5 + kills.feed is_pilot_victim + leaderboard personal notes), DEVELOPER_GUIDE.md §13 (v2.9 subsection), .cursor/rules/data-schema.mdc, .cursor/rules/project-overview.mdc, and AGENTS.md.
-    status: pending
+    status: completed
   - id: verify
     content: Reprocess with --force; spot-check a high-pilot-kill match (counts drop, feed flagged, by_vehicle clean), confirm pilot-vs-ship kills still credit, verify kills=pvp+pve+self invariant, and confirm elo + dashboard render.
-    status: pending
+    status: completed
 isProject: false
 ---
 

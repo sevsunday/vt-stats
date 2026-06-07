@@ -747,8 +747,8 @@ Each entry represents one player, sorted by personal damage dealt (descending).
 | `slot` | `number` | Team slot (1-10) |
 | `steam64` | `string` | Steam64 ID as string |
 | `faction` | `number` | Team number (1 or 2) |
-| `kills` | `number` | UnitDestroyed events where this player is killer |
-| `deaths` | `number` | UnitDestroyed events where this player is victim |
+| `kills` | `number` | UnitDestroyed events where this player is killer. **v2.9 (`match.schema_version` 14):** on-foot pilot-victim events are excluded (see [§8.1](#81-pilot-victim-exclusion-v29)) — killing an ejected pilot earns no kill. Killing a *ship* while on foot still counts. |
+| `deaths` | `number` | UnitDestroyed events where this player is victim. **v2.9:** dying as an on-foot pilot is excluded (see [§8.1](#81-pilot-victim-exclusion-v29)) — e.g. artillery-spammed pilots are not penalized. |
 | `kd_ratio` | `number\|null` | `kills / deaths`. `null` when deaths = 0. |
 | `personal` | `object` | Personal combat stats (see below) |
 | `assets` | `object` | Asset damage stats: `{ dealt, received }` |
@@ -878,7 +878,7 @@ Kill/death data from UnitDestroyed events. After Phase 3, only **real-vehicle** 
 | Field | Type | Description |
 |---|---|---|
 | `leaderboard` | `array` | Sorted by kills descending. Each: `{ player_id, name, kills, deaths, kd_ratio }` |
-| `feed` | `array` | Chronological kill events. Each: `{ tick, killer, killer_team, killer_in_game_nick, killer_odf, victim, victim_team, victim_in_game_nick, victim_odf, assists }`. `killer_team` / `victim_team` are raw uint slots (1-10, or 0 for unattributed) carried through from the proto so winner-inference can attribute kills to a faction without re-deriving identity from the display string. The `killer` / `victim` display strings fall back to `"Team 1"` / `"Team 2"` (faction-aligned) when no Steam64 is present, `"Self"` when the victim died on foot in a pilot ODF and the killer is fully unattributed, and `"World"` otherwise. `assists` (**`match.schema_version` 13**) is a list of non-finisher contributors to a PvP kill — `[{ name, steam64, share }]` sorted by descending damage `share` (0-1, the player's `effective_pvp_kills` credit for that kill); empty for PvE / unattributed kills and on pre-v13 data. See [`personal.effective_pvp_kills`](#leaderboard) for the credit model. Pure-noise rows (every attribution field zero/empty) are dropped during pipeline aggregation. |
+| `feed` | `array` | Chronological kill events. Each: `{ tick, killer, killer_team, killer_in_game_nick, killer_odf, victim, victim_team, victim_in_game_nick, victim_odf, is_pilot_victim, assists }`. `is_pilot_victim` (**`match.schema_version` 14**, v2.9) is `true` when the destroyed unit was an on-foot pilot ODF; these rows stay in the feed (UI renders a muted `pilot` badge) but are excluded from every kill/death aggregation — see [§8.1 Pilot-victim exclusion](#81-pilot-victim-exclusion-v29). Pre-v14 entries lack the field (default `false`). `killer_team` / `victim_team` are raw uint slots (1-10, or 0 for unattributed) carried through from the proto so winner-inference can attribute kills to a faction without re-deriving identity from the display string. The `killer` / `victim` display strings fall back to `"Team 1"` / `"Team 2"` (faction-aligned) when no Steam64 is present, `"Self"` when the victim died on foot in a pilot ODF and the killer is fully unattributed, and `"World"` otherwise. `assists` (**`match.schema_version` 13**) is a list of non-finisher contributors to a PvP kill — `[{ name, steam64, share }]` sorted by descending damage `share` (0-1, the player's `effective_pvp_kills` credit for that kill); empty for PvE / unattributed kills and on pre-v13 data. See [`personal.effective_pvp_kills`](#leaderboard) for the credit model. Pure-noise rows (every attribution field zero/empty) are dropped during pipeline aggregation. |
 | `by_vehicle` | `array` | Vehicle types destroyed, sorted by count descending. Each: `{ odf, name, count }`. `name` is resolved via the same `prettify_odf` chain that powers `odf_map`. Capped to top 15 after filtering ignored ODFs (see `VEHICLE_DESTRUCTION_IGNORE_ODFS` in `scripts/process_stats.py`). |
 | `kill_rivalry_matrix` | `object` | Nested `{ "KillerName": { "VictimName": killCount } }`. Only player-on-player kills. |
 
@@ -1730,10 +1730,12 @@ flowchart TD
   Start[unit_destroyed event] --> InDep{victim_odf in<br/>KNOWN_DEPLOYABLE_ODFS?}
   InDep -- yes --> Dep[deployable_destructions block<br/>SKIP all kill aggregations]
   InDep -- no --> InPow{victim_odf in<br/>KNOWN_POWERUP_ODFS?}
-  InPow -- no --> Vehicle[Real vehicle<br/>FLOW THROUGH to existing<br/>kills accumulators]
+  InPow -- no --> IsPilot{"is_pilot_odf(victim_odf)?<br/>(v2.9)"}
   InPow -- yes --> KT{killer_team == 0?}
   KT -- yes --> Pickup[Powerup pickup<br/>SKIP. New-schema gets<br/>rich pickup_powerup data]
   KT -- no --> Destruction[powerup_destructions block<br/>SKIP all kill aggregations]
+  IsPilot -- yes --> PilotVic["Pilot victim<br/>SKIP kill/death aggregation;<br/>KEEP flagged kill_feed row"]
+  IsPilot -- no --> Vehicle[Real vehicle<br/>FLOW THROUGH to existing<br/>kills accumulators]
 ```
 
 Categorical effect on per-match output:
@@ -1741,9 +1743,45 @@ Categorical effect on per-match output:
 | Bucket | `kills.*` | New JSON block | Notes |
 |---|---|---|---|
 | Real vehicle | full passthrough | none | Existing accumulators untouched |
+| Pilot victim (v2.9) | suppressed for kills/deaths; kept in `kills.feed[]` flagged `is_pilot_victim: true` | none | On-foot pilot ODF (`is_pilot_odf`). Victim-only gate -- a pilot who destroys a *ship* still scores normally. See [§8.1](#81-pilot-victim-exclusion-v29) |
 | Powerup pickup | suppressed | `pickups.feed[]` (new-schema only, populated from real `pickup_powerup` events) | Synthetic `unit_destroyed` companion is silently dropped |
 | Powerup/crate destruction | suppressed | `powerup_destructions.{feed,by_player,by_odf,totals}` | Real player shot the powerup before someone picked it up, effectively denying the enemy economy |
 | Deployable destruction | suppressed | `deployable_destructions.{by_player,by_odf,totals}` | No `feed` (too noisy) |
+
+### 8.1 Pilot-victim exclusion (v2.9)
+
+`match.schema_version 14` / `PIPELINE_VERSION 26`. Within the real-vehicle
+branch, the pipeline applies one more **victim-only** gate before any kill /
+death accumulator runs: if `is_pilot_odf(victim_odf)` (substring `user_m` --
+catches `isuser_m` / `esuser_m` / `fsuser_m` plus VSR-mod pilot variants),
+the event is a **pure omission**:
+
+- No `player_kills` for the killer, no `player_deaths` for the victim.
+- No `kill_rivalry`, no `per_ship_combat` kill/death/pvp credit.
+- No `pvp_kill_log` entry (so it never enters `effective_pvp_kills`).
+- No `vehicle_destruction_count` (so the pilot ODF never appears in `kills.by_vehicle`).
+
+Rationale: ejected on-foot pilots are near-harmless, so farming them earned
+trivial-but-real kill credit, and dying as a pilot (e.g. artillery spam)
+imposed unearned death penalties. Excluding the event from both sides fixes
+both at once.
+
+**The gate inspects only the victim.** A pilot who *destroys a ship* (pulse
+rifle / low-damage sniper finish during the ejection window) generates an
+`UnitDestroyed` whose `victim_odf` is a **vehicle**, so it flows through
+normally and the on-foot killer keeps full credit (attributed to the pilot
+ODF in `per_ship_combat`, i.e. their Loadout). Pilot-vs-pilot kills are
+excluded (victim is a pilot regardless of killer).
+
+The event is still appended to `kills.feed[]` with `is_pilot_victim: true`
+for display transparency (the dashboard renders a muted `pilot` badge); ODF
+registration (`odf_map`) and faction-detection votes still run. Snipes
+(`UnitSniped`, separate event, vehicle `victim_odf`), all damage buckets, and
+`net_damage_share` are unaffected. No `scripts/elo.py` axis-math change --
+the corrected per-row `personal.*` kill/death values flow into the existing
+`thug_kill_rate` (effective kills) and K/D-derived surfaces automatically.
+Bumps `ELO_SCHEMA_VERSION 8 -> 9`; **pre-v9 `peak_vtsr` is no longer
+comparable** (corpus re-rated).
 
 ### Evidence
 

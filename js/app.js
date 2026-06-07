@@ -5272,11 +5272,17 @@
         }).join(', ');
         assistHtml = `<span class="vt-killfeed-assist text-muted">assist: ${parts}</span>`;
       }
+      // match.schema_version 14 (v2.9): on-foot pilot kills stay in the
+      // feed for transparency but earn no kill/death credit. Flag them with
+      // a muted badge. Pre-v14 entries lack the field and render normally.
+      const pilotBadge = entry.is_pilot_victim
+        ? ` <span class="vt-pilot-badge" data-bs-toggle="tooltip" title="On-foot pilot kill \u2014 not counted in kills/deaths or VTSR-T">pilot</span>`
+        : '';
       html += `<div class="d-flex align-items-center gap-2 py-1 flex-wrap" style="font-size:0.82rem;border-bottom:1px solid var(--kb-border-subtle);">`;
       html += `<span class="text-nowrap" style="color:var(--kb-text-muted);min-width:3.5em;">${ts}</span>`;
       html += `<span class="fw-semibold">${killerHtml}</span>${killerNick}${killerOdf}`;
       html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
-      html += `<span class="fw-semibold">${victimHtml}</span>${victimNick}${victimOdf}`;
+      html += `<span class="fw-semibold">${victimHtml}</span>${victimNick}${victimOdf}${pilotBadge}`;
       html += assistHtml;
       html += `</div>`;
     });
@@ -5288,6 +5294,8 @@
     }
     html += '</div>';
     container.innerHTML = html;
+    // Init tooltips for any in-feed badges (e.g. the v2.9 pilot badge).
+    ensureTooltips(container);
   }
 
   // --- Snipe Feed (Phase 3) ---

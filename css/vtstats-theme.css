@@ -2051,7 +2051,8 @@ body::before {
    .vt-row-* row classes below. Tooltips carry the actual share /
    presence numbers. */
 .vt-campod-badge,
-.vt-partial-badge {
+.vt-partial-badge,
+.vt-pilot-badge {
     display: inline-block;
     padding: 0.15em 0.55em;
     margin-left: 0.4em;
@@ -2065,6 +2066,14 @@ body::before {
     border-radius: 999px;
     vertical-align: middle;
     cursor: help;
+}
+
+/* v2.9: on-foot pilot kill marker in the kill feed. Neutral/muted tone --
+   it's informational (these rows are kept for transparency but earn no
+   kill/death credit), not a warning. Smaller margin since it trails an
+   ODF chip rather than a leaderboard name. */
+.vt-pilot-badge {
+    margin-left: 0.25em;
 }
 
 /* Partial badge gets the warning accent so the two states are visually

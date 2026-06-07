@@ -229,7 +229,15 @@ LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-sh
 # unchanged, so ELO_SCHEMA_VERSION is intentionally NOT bumped (existing JS
 # readers are unaffected). Ratings DO change, so **pre-change `peak_vtsr` is
 # no longer comparable** -- the corpus is re-rated on the next pipeline run.
-ELO_SCHEMA_VERSION = 8
+# v9 (current) = pilot-victim kill/death exclusion (match.schema_version 14,
+# pipeline v2.9). On-foot pilot kills no longer count toward kills / deaths /
+# pvp_kills / pve_kills / effective_pvp_kills, so the thug_kill_rate axis
+# (effective kills) and every K/D-derived surface shed those near-harmless
+# farm kills automatically via the corrected per-match `personal.*` inputs.
+# INPUT change only -- no axis math, weights, priors, or output shape change.
+# Ratings DO move, so **pre-v9 `peak_vtsr` is no longer comparable** (corpus
+# re-rated on the next pipeline run).
+ELO_SCHEMA_VERSION = 9
 
 
 # ---------------------------------------------------------------------------

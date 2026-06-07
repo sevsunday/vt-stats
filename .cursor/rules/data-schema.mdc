@@ -152,6 +152,12 @@ Raw last-hit `pvp_kills` over-credits the finisher of a focus-fired target. An a
 
 `scripts/elo.py`'s `thug_kill_rate` axis prefers `effective_pvp_kills` over raw `pvp_kills` (fallback chain: `effective_pvp_kills` → `pvp_kills` → flat `kills`). PvE kills stay raw (kill-stealing is PvP-only; `rivalry_matrix` is human-only). Career roll-up: `career_stats[].{total_effective_pvp_kills, total_pvp_assists}` (aggregator defaults `effective_pvp_kills` to raw `pvp_kills` on pre-v13 contributions). **Weights unchanged** — this fixes attribution only; any `thug_kill_rate` weight retune is a separate validation-gated follow-up. `ELO_SCHEMA_VERSION` NOT bumped (input-only change); ratings shift so pre-v13 `peak_vtsr` is no longer comparable. Bumps `match.schema_version` 12 → 13 and `PIPELINE_VERSION` 24 → 25 (full corpus reprocess). `EFFECTIVE_KILL_WINDOW_SEC` / `EFFECTIVE_KILL_FINISHER_FLOOR` tunable without a schema bump.
 
+### Pilot-victim kill/death exclusion (match.schema_version 14, v2.9)
+
+On-foot pilots (`*suser_m.odf`) are near-harmless, so farming them earned trivial-but-real kill credit and dying as a pilot (artillery spam) imposed unearned death penalties. In `scripts/process_stats.py`'s `UnitDestroyed` real-vehicle branch, a **victim-only** gate — `is_pilot_odf(victim_odf)` (substring `user_m`) — drops the event from `player_kills`, `player_deaths`, `kill_rivalry`, `per_ship_combat`, `pvp_kill_log` (so it never enters `effective_pvp_kills`), and `vehicle_destruction_count` (so it never appears in `kills.by_vehicle`). Killing and dying are the same event from two sides, so one gate handles both.
+
+**The gate inspects only the victim.** A pilot who *destroys a ship* (pulse rifle / low-damage sniper finish) produces an `UnitDestroyed` with a *vehicle* `victim_odf` → flows through normally, on-foot killer keeps full credit. Pilot-vs-pilot kills are excluded (victim is a pilot regardless of killer). The event stays in `kills.feed[]` flagged `is_pilot_victim: true` (UI renders a muted `.vt-pilot-badge`); ODF registration + faction votes still run. Snipes (`UnitSniped`, separate event, vehicle `victim_odf`), all damage buckets, and `net_damage_share` are deliberately unaffected — damage to/from/as a pilot remains counted. No `scripts/elo.py` axis-math change (corrected per-row `personal.*` values feed `thug_kill_rate` + K/D surfaces automatically). The client aggregator (`js/all-matches-aggregator.js`) is a passthrough so career totals auto-correct. Bumps `match.schema_version` 13 → 14, `PIPELINE_VERSION` 25 → 26, `ELO_SCHEMA_VERSION` 8 → 9; **pre-v9 `peak_vtsr` no longer comparable** (corpus re-rated). Full reference: `docs/DATA_DICTIONARY.md` §8.1.
+
 ### Weapon engagement range (match.schema_version 11, v2-only)
 
 `BulletHit.distance_to_target` (raw world units == in-game meters; absent on v1 sessions so it defaults to `0.0` and is skipped) is bucketed per `(player, weapon, channel)` into fixed-bin histograms over `DIST_BIN_EDGES` (module constant in `scripts/process_stats.py`, currently `[10,20,30,40,50,75,100,150,200,300,400,600,800,1200]`). Channels: **PvP** = player-vs-player hits (reuses the self-free `is_pvp_hit`); **PvE** = player shooter vs non-player victim (`bh.victim == 0`). Self-hits excluded.
@@ -224,7 +230,7 @@ Slot membership tells you which team a player is on, but not which **faction** t
 Constants in `scripts/process_stats.py`:
 - `RECYCLER_ODFS` / `FACTORY_ODFS` — recycler + factory ODFs grouped by faction (used by faction detection's documentation + `compute_match_winner()`).
 - `FACTION_BY_PREFIX = {"i": "ISDF", "e": "Hadean", "f": "Scion"}` — first-letter -> faction name. Reliable for vehicles/structures/pilots, NOT for weapon ordnance or generic deployables.
-- `PILOT_ODFS` — `is*_m` / `es*_m` / `fs*_m` pilot variants used for the kill-feed Self/World fallback.
+- `PILOT_ODFS` — canonical set of the three base faction pilot ODFs (`isuser_m` / `esuser_m` / `fsuser_m`), kept for reference. Runtime pilot detection goes through `is_pilot_odf(odf)` (substring `user_m`, catches VSR-mod variants) — used by the kill-feed Self/World display fallback, the positioning at-base lift, AND the v2.9 pilot-victim kill/death exclusion gate.
 - `faction_from_odf(odf)` — returns the faction code (`'i'` / `'e'` / `'f'`) or `None` for empty/unrecognized ODFs. Vote sources call this on every team-attributed unit ODF.
 - `detect_team_factions(slot_first_odf, slot_faction_votes)` — combines A + B and returns `{1: {"code", "name"} | None, 2: {"code", "name"} | None}`.
 
@@ -243,15 +249,18 @@ flowchart TD
   Start[unit_destroyed event] --> InDep{victim_odf in<br/>KNOWN_DEPLOYABLE_ODFS?}
   InDep -- yes --> Dep[deployable_destructions block<br/>SKIP all kill aggregations]
   InDep -- no --> InPow{victim_odf in<br/>KNOWN_POWERUP_ODFS?}
-  InPow -- no --> Vehicle[Real vehicle<br/>FLOW THROUGH to existing<br/>kills accumulators]
+  InPow -- no --> IsPilot{"is_pilot_odf(victim_odf)?<br/>(v2.9)"}
   InPow -- yes --> KT{killer_team == 0?}
   KT -- yes --> Pickup[Powerup pickup<br/>SKIP. New-schema gets<br/>rich pickup_powerup data]
   KT -- no --> Destruction[powerup_destructions block<br/>SKIP all kill aggregations]
+  IsPilot -- yes --> PilotVic["Pilot victim<br/>SKIP kill/death aggregation;<br/>KEEP flagged kill_feed row"]
+  IsPilot -- no --> Vehicle[Real vehicle<br/>FLOW THROUGH to existing<br/>kills accumulators]
 ```
 
 | Bucket | `kills.*` impact | New JSON block | Notes |
 |---|---|---|---|
 | Real vehicle | full passthrough | none | Existing `player_kills`, `kill_feed`, `vehicle_destruction_count`, `kill_rivalry` accumulators |
+| Pilot victim (v2.9) | suppressed for kills/deaths; kept in `kills.feed[]` flagged `is_pilot_victim: true` | none | On-foot pilot ODF (`is_pilot_odf`). **Victim-only gate** — a pilot who destroys a *ship* still scores normally; killing/dying-as a pilot earns/costs nothing. UI shows a muted `pilot` badge. `match.schema_version 14` |
 | Powerup pickup | suppressed | `pickups.feed` (new-schema only, populated from real `PickupPowerup` events) | Synthetic `unit_destroyed` companion silently dropped; engine continues to double-emit even in new-schema sessions |
 | Powerup/crate destruction | suppressed | `powerup_destructions.{feed, by_player, by_odf, totals}` | Real player shot the powerup before pickup, effectively denying the enemy economy |
 | Deployable destruction | suppressed | `deployable_destructions.{by_player, by_odf, totals}` | No `feed` (too noisy); mines self-detonate, expire, or get shot |

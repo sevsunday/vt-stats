@@ -53,7 +53,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 25
+PIPELINE_VERSION = 26
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -412,9 +412,11 @@ RACE_TO_FACTION_CODE = {
     statsgate_pb2.RACE_HADEAN: "e",
 }
 
-# Pilot ODFs (player on foot). When a kill_feed entry has killer_team == 0
-# AND killer == 0 AND the victim died in one of these ODFs, the death is
-# treated as self-inflicted ("Self") rather than environmental ("World").
+# Canonical set of the three base faction pilot ODFs (player on foot).
+# Kept for reference / documentation; runtime pilot detection goes through
+# `is_pilot_odf()` below (substring match) so VSR-mod pilot variants are
+# also caught by the kill-feed Self/World fallback and the v2.9 pilot-victim
+# kill/death exclusion gate.
 PILOT_ODFS = frozenset({
     "isuser_m.odf",   # ISDF pilot
     "esuser_m.odf",   # Hadean pilot
@@ -427,8 +429,9 @@ def is_pilot_odf(odf):
 
     Substring match on ``user_m`` catches the three faction pilots
     (isuser_m / esuser_m / fsuser_m) plus any VSR-mod variants. Used by
-    the positioning pass to flag on-foot samples so the VTSR-T low-tier
-    at-base lift can measure ship-denied ("at base on foot") time.
+    the positioning pass to flag on-foot samples (VTSR-T low-tier at-base
+    lift), by the kill-feed Self/World display fallback, and by the v2.9
+    pilot-victim kill/death exclusion gate in the UnitDestroyed handler.
     """
     return "user_m" in (odf or "").lower()
 
@@ -3535,6 +3538,19 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
             killer_is_player = ud.killer > 0
             victim_is_player = ud.victim > 0
+            # v2.9 (match.schema_version 14): pilot-victim kill/death
+            # exclusion. When the destroyed unit is an on-foot pilot ODF
+            # (`is_pilot_odf` -- substring `user_m`, catches the three
+            # faction pilots + VSR-mod variants), the event is NOT counted
+            # as a kill or a death for anyone: killing a near-harmless
+            # ejected pilot earns no credit, and dying as a pilot (e.g.
+            # artillery spam) costs no death. The gate inspects ONLY the
+            # victim -- a pilot who DESTROYS a ship (pulse/sniper finish)
+            # still gets full kill credit because that event's victim is a
+            # vehicle, not a pilot. The event is still appended to
+            # kill_feed (flagged `is_pilot_victim`) for display
+            # transparency, and ODF registration + faction votes still run.
+            victim_is_pilot = is_pilot_odf(ud.victim_odf)
             # match.schema_version 8: self-damage carve-out. `is_pvp_kill`
             # excludes self-kills (rare; e.g. blink-spam in close
             # quarters). Self-kills are tracked separately in
@@ -3544,26 +3560,34 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # accurate. `kill_rivalry` and the two `per_ship_combat` PvP
             # counters below are auto-corrected by this single tightening.
             is_pvp_kill = killer_is_player and victim_is_player and ud.killer != ud.victim
-            if killer_is_player and victim_is_player and ud.killer == ud.victim:
-                player_self_kills[ud.killer] += 1
-            if killer_is_player:
-                player_kills[ud.killer] += 1
-                # Per-ship combat: attribute kill to killer's active ship.
-                kc_ship = _ship_key(ud.killer)
-                per_ship_combat[ud.killer][kc_ship]["kills"] += 1
+            # v2.9: pure omission for pilot victims -- no kill, no death,
+            # no rivalry, no per-ship credit, no by-vehicle tally, no
+            # effective-kill log entry. ODF registration / faction votes /
+            # the (flagged) kill_feed row below are unaffected.
+            if not victim_is_pilot:
+                if killer_is_player and victim_is_player and ud.killer == ud.victim:
+                    player_self_kills[ud.killer] += 1
+                if killer_is_player:
+                    player_kills[ud.killer] += 1
+                    # Per-ship combat: attribute kill to killer's active ship.
+                    kc_ship = _ship_key(ud.killer)
+                    per_ship_combat[ud.killer][kc_ship]["kills"] += 1
+                    if is_pvp_kill:
+                        per_ship_combat[ud.killer][kc_ship]["pvp_kills"] += 1
+                if victim_is_player:
+                    player_deaths[ud.victim] += 1
+                    # Death attributed to victim's active ship at time of death.
+                    vc_ship = _ship_key(ud.victim)
+                    per_ship_combat[ud.victim][vc_ship]["deaths"] += 1
+                    if is_pvp_kill:
+                        per_ship_combat[ud.victim][vc_ship]["pvp_deaths"] += 1
                 if is_pvp_kill:
-                    per_ship_combat[ud.killer][kc_ship]["pvp_kills"] += 1
-            if victim_is_player:
-                player_deaths[ud.victim] += 1
-                # Death attributed to victim's active ship at time of death.
-                vc_ship = _ship_key(ud.victim)
-                per_ship_combat[ud.victim][vc_ship]["deaths"] += 1
-                if is_pvp_kill:
-                    per_ship_combat[ud.victim][vc_ship]["pvp_deaths"] += 1
-            if is_pvp_kill:
-                kill_rivalry[ud.killer][ud.victim] += 1
+                    kill_rivalry[ud.killer][ud.victim] += 1
+                if ud.victim_odf:
+                    vehicle_destruction_count[ud.victim_odf] += 1
+            # ODF registration is unconditional so pilot ODFs still resolve
+            # in odf_map for the (flagged) kill_feed row.
             if ud.victim_odf:
-                vehicle_destruction_count[ud.victim_odf] += 1
                 all_unit_odfs.add(ud.victim_odf)
             if ud.killer_odf:
                 all_unit_odfs.add(ud.killer_odf)
@@ -3587,10 +3611,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Slot 0 means no team attribution at all -- render as
             # "Self" when the victim died on foot in a pilot ODF
             # (typical for pilot suicide / fall / drown / off-map),
-            # otherwise "World" (env damage / unattributed).
-            victim_lower_odf_disp = (ud.victim_odf or "").lower()
-            victim_is_pilot = victim_lower_odf_disp in PILOT_ODFS
-
+            # otherwise "World" (env damage / unattributed). Reuses the
+            # `victim_is_pilot` computed above for the v2.9 exclusion gate.
             if ud.killer > 0:
                 killer_name = nick_for_s64(ud.killer)
             else:
@@ -3635,9 +3657,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "victim_team": int(ud.victim_team),
                 "victim_in_game_nick": in_game_nick_for(ud.victim, victim_name) if ud.victim > 0 else None,
                 "victim_odf": ud.victim_odf,
+                # match.schema_version 14 (v2.9): True when the destroyed
+                # unit was an on-foot pilot ODF. These rows are kept in the
+                # feed for transparency but excluded from every kill/death
+                # aggregation (see the v2.9 gate above). UI renders a muted
+                # `pilot` badge. Always present on v14+; pre-v14 consumers
+                # default to False.
+                "is_pilot_victim": bool(victim_is_pilot),
             })
             # match.schema_version 13: log PvP kills for assist-aware credit.
-            if is_pvp_kill:
+            # v2.9: pilot-victim kills are excluded (no effective-kill credit).
+            if is_pvp_kill and not victim_is_pilot:
                 pvp_kill_log.append((ud.tick, ud.killer, ud.victim, feed_idx))
             i += 1
 
@@ -4862,7 +4892,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # pvp_kills. Pre-v13 data lacks these fields; consumers default
             # `effective_pvp_kills` to pvp_kills, `pvp_assists` to 0, and
             # `assists` to []. See EFFECTIVE_KILL_* constants.
-            "schema_version": 13,
+            # v14 (v2.9) excludes on-foot pilot-victim UnitDestroyed events
+            # from all kill/death aggregation (kills, deaths, kill_rivalry,
+            # effective_pvp_kills, per_ship_combat, kills.by_vehicle) -- a
+            # victim-only gate (`is_pilot_odf(victim_odf)`), so a pilot who
+            # destroys a ship still gets full credit. Pilot-victim rows stay
+            # in `kill_feed` flagged with `is_pilot_victim: true`. Pre-v14
+            # consumers default that flag to False.
+            "schema_version": 14,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = current
