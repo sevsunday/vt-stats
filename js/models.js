@@ -208,6 +208,7 @@ function showViewer(entry) {
   // The top "Light" button is the on/off toggle; the panel (intensity/angle
   // sliders) is always visible while a model is open.
   els.lightPanel.hidden = false;
+  els.lightBtn.disabled = false;   // never inherit a wireframe-locked state across opens
   els.lightBtn.classList.toggle('on', light.on);
 
   els.qualitySeg.querySelectorAll('.seg-btn').forEach((btn) => {
@@ -218,9 +219,7 @@ function showViewer(entry) {
     };
   });
   els.wire.onclick = () => {
-    const on = !els.wire.classList.contains('on');
-    els.wire.classList.toggle('on', on);
-    activeViewer.setWireframe(on);
+    applyWireframe(!els.wire.classList.contains('on'));
   };
   els.spin.onclick = () => {
     const on = !els.spin.classList.contains('on');
@@ -257,9 +256,10 @@ function showViewer(entry) {
 function resetAllViewer() {
   if (!activeViewer) return;
 
-  // Toggles -> off.
-  els.wire.classList.remove('on');
-  activeViewer.setWireframe(false);
+  // Toggles -> off. Wireframe off also re-enables the Light button (the light
+  // itself is reset to default below via setLightOn).
+  applyWireframe(false);
+  els.lightBtn.disabled = false;
   els.spin.classList.remove('on');
   activeViewer.setAutoRotate(false);
   els.freespin.classList.remove('on');
@@ -291,6 +291,26 @@ function setLightOn(on) {
   els.lightPanel.classList.toggle('off', !on);
   localStorage.setItem(LIGHT_ON_KEY, on ? '1' : '0');
   if (activeViewer) activeViewer.setLightEnabled(on);
+}
+
+/* Wireframe toggle. In wireframe mode the sun would cast the wireframe outline
+ * as a shadow on the ground, so we also force the sun off and lock the Light
+ * button while wireframe is active. The off-state is applied directly to the
+ * viewer (NOT via setLightOn) so the user's persisted light preference is left
+ * intact and restored when wireframe is turned back off. */
+function applyWireframe(on) {
+  if (!activeViewer) return;
+  els.wire.classList.toggle('on', on);
+  activeViewer.setWireframe(on);
+  if (on) {
+    activeViewer.setLightEnabled(false);
+    els.lightBtn.classList.remove('on');
+    els.lightPanel.classList.add('off');
+    els.lightBtn.disabled = true;
+  } else {
+    els.lightBtn.disabled = false;
+    setLightOn(lightPrefs().on);   // restore the persisted on/off preference
+  }
 }
 
 /* Sync the light panel inputs to the persisted state and wire their handlers to

@@ -65,6 +65,7 @@ export class ObjectViewer {
     this.container = container;
     this.disposed = false;
     this._wireframe = false;
+    this._wireSaved = null;  // per-material {map,color,emissive,emissiveIntensity} stash while wireframe is on
     this._materials = [];
     this._model = null;
     this._quality = opts.quality === 'hq' ? 'hq' : 'perf';
@@ -228,6 +229,7 @@ export class ObjectViewer {
       this.scene.remove(this._spin);   // pivot holds the model (see _frame)
     }
     this._materials = [];
+    this._wireSaved = null;  // drop any stale stash from a prior model
     const names = new Set();
     const model = gltf.scene;
     model.traverse((o) => {
@@ -251,10 +253,26 @@ export class ObjectViewer {
    * Tolerates missing textures (textureless/solid materials keep baseColor). */
   async _applyTextures() {
     const q = this._quality;
-    await Promise.all(this._materials.map(async (mat) => {
+    const wf = this._wireframe && this._wireSaved;
+    await Promise.all(this._materials.map(async (mat, i) => {
       if (!mat.name) return;
       const tex = await this._loadTexture(q, mat.name);
       if (this.disposed) return;
+      if (wf) {
+        // Wireframe active: write into the restore stash instead of the live
+        // material (which stays on the white override) so toggling wireframe off
+        // -- or capturing -- shows the freshly loaded quality's true texture.
+        const saved = this._wireSaved[i];
+        if (saved) {
+          if (tex) {
+            saved.map = tex;
+            if (saved.color) saved.color.setRGB(1, 1, 1); else saved.color = new THREE.Color(0xffffff);
+          } else {
+            saved.map = null; // keep baseColorFactor
+          }
+        }
+        return;
+      }
       if (tex) {
         mat.map = tex;
         mat.color = new THREE.Color(0xffffff); // let the texture show true color
@@ -263,6 +281,9 @@ export class ObjectViewer {
       }
       mat.needsUpdate = true;
     }));
+    // Re-assert the white override on the live materials in case a quality swap
+    // while wireframe is on touched anything; no-op when wireframe is off.
+    if (this._wireframe && this._wireSaved) this._paintWireframeWhite();
   }
 
   _loadTexture(quality, name) {
@@ -395,9 +416,63 @@ export class ObjectViewer {
     this.ambient.intensity = on ? this._ambBase : this._ambOff;
   }
 
+  /* Wireframe renders flat static-white lines (lighting-independent) rather than
+   * the textured/lit surface: while on, each material's diffuse map/color is
+   * neutralized and emissive is forced white so the sun/fill can't tint or darken
+   * the edges. Originals are stashed and restored losslessly when turning off. */
   setWireframe(on) {
-    this._wireframe = !!on;
-    for (const m of this._materials) m.wireframe = this._wireframe;
+    const next = !!on;
+    if (next) {
+      this._wireframe = true;
+      this._applyWireframeOverride();
+    } else {
+      this._restoreWireframeOverride();
+      this._wireframe = false;
+      for (const m of this._materials) m.wireframe = false;
+    }
+  }
+
+  _applyWireframeOverride() {
+    // Stash originals once (guard against re-entry, e.g. setWireframe(true) twice
+    // or _applyTextures re-asserting the override after a quality swap).
+    if (!this._wireSaved) {
+      this._wireSaved = this._materials.map((m) => ({
+        map: m.map,
+        color: m.color ? m.color.clone() : null,
+        emissive: m.emissive ? m.emissive.clone() : null,
+        emissiveIntensity: m.emissiveIntensity,
+      }));
+    }
+    this._paintWireframeWhite();
+  }
+
+  /* Force every material to flat unlit white lines. Mutates the live materials
+   * only -- the restore values live in this._wireSaved. */
+  _paintWireframeWhite() {
+    for (const m of this._materials) {
+      m.wireframe = true;
+      m.map = null;
+      if (m.color) m.color.setRGB(0, 0, 0);
+      if (m.emissive) m.emissive.setRGB(1, 1, 1);
+      if ('emissiveIntensity' in m) m.emissiveIntensity = 1;
+      m.needsUpdate = true;
+    }
+  }
+
+  _restoreWireframeOverride() {
+    if (!this._wireSaved) return;
+    this._materials.forEach((m, i) => {
+      const saved = this._wireSaved[i];
+      if (!saved) return;
+      m.map = saved.map;
+      if (m.color && saved.color) m.color.copy(saved.color);
+      if (m.emissive && saved.emissive) m.emissive.copy(saved.emissive);
+      if ('emissiveIntensity' in m && saved.emissiveIntensity !== undefined) {
+        m.emissiveIntensity = saved.emissiveIntensity;
+      }
+      m.needsUpdate = true;
+    });
+    this._wireSaved = null;
   }
 
   setAutoRotate(on) {
