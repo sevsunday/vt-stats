@@ -1642,6 +1642,8 @@ The rating system is pipeline-emitted, full-corpus, and time-ordered — the das
 >
 > **v2.9 — pilot-victim kill/death exclusion.** On-foot pilot kills no longer count. A victim-only gate (`is_pilot_odf(victim_odf)`) in the `UnitDestroyed` handler drops the event from kills / deaths / `kill_rivalry` / `effective_pvp_kills` / `per_ship_combat` / `kills.by_vehicle`, so farming near-harmless ejected pilots earns nothing and dying as a pilot (artillery spam) costs nothing. The gate inspects only the victim, so a pilot who *destroys a ship* keeps full kill credit. Rows stay in `kills.feed[]` flagged `is_pilot_victim` (muted `pilot` badge). No `scripts/elo.py` axis-math change — corrected per-row `personal.*` values feed `thug_kill_rate` (effective kills) and the K/D surfaces automatically; snipes / damage / `net_damage_share` are unaffected. Schema bumps: `PIPELINE_VERSION 25 → 26`, `match.schema_version 13 → 14`, `ELO_SCHEMA_VERSION 8 → 9`. **Pre-v9 `peak_vtsr` no longer comparable** (corpus re-rated). Full derivation in §13.7.4.
 
+> **v2.10 — snipe/T-key de-weight.** `snipe_bonus` and `target_lock_pct` cut from 0.05 / 0.04 to **0.005 each** so the two luxury/preview axes stay visible (leaderboard detail + radar still show who's dominating them) but no longer handicap strong no-frills thugs who skip them — each axis is lobby-z-scored, so *not* sniping / *not* using the T-key used to mean a negative contribution. The six core axes are untouched, so the raw `THUG_WEIGHTS` sum is now ≈0.92 (always renormalized over present axes at runtime — see §13.4 / §13.7.5). Frontend: the two axes are dropped from the Player Profile coaching cards and the Strengths & weaknesses panel is reordered heaviest-weight-first. `ELO_SCHEMA_VERSION 9 → 10` (re-rate signal only; no `PIPELINE_VERSION` / `match.schema_version` bump). **Pre-v10 `peak_vtsr` no longer comparable** (corpus re-rated). Full derivation in §13.7.5.
+
 ### 13.1 Final equation
 
 The published rating is a linear blend of two components — a **Wins ELO** ($R^W_i$) and **Thug ELO** ($R^T_i$, i.e. **VTSR-T**):
@@ -1729,7 +1731,7 @@ The rookie curve ($K \approx 52$ decaying toward $K \approx 12$–16 settled) mi
 
 ### 13.4 Performance index
 
-Eight thug axes (v2.3 — locked, $\sum w = 1.00$, exported as `THUG_WEIGHTS` in `scripts/elo.py`):
+Eight thug axes (exported as `THUG_WEIGHTS` in `scripts/elo.py`). v2.10 cut `snipe_bonus` + `target_lock_pct` to 0.005 each, so the **raw weights sum to ≈0.92, NOT 1.00** — they are renormalized over the axes present in each lobby at runtime (`weights[a] = THUG_WEIGHTS[a] / \sum_{\text{available}} w`), so every axis's *effective* weight is `raw / 0.92` when all eight are present:
 
 | Axis | Weight | Per-match metric (before z-score) |
 |---|---|---|
@@ -1739,10 +1741,10 @@ Eight thug axes (v2.3 — locked, $\sum w = 1.00$, exported as `THUG_WEIGHTS` in
 | `thug_accuracy`    | 0.15 | weapon-normalized hit-rate ratio vs lobby (see formula below) |
 | `pve_share`        | 0.12 | $\text{pve\_dealt} / \max(1, \text{total\_dealt})$ — damage to enemy non-human assets (structures + mobile AI) as share of total (omit axis if lobby has zero PvE damage) |
 | `mobility`         | 0.08 | $\text{activity\_score} / 100$ (omit axis if no positioning) |
-| `snipe_bonus`      | 0.05 | $\min(\text{snipes} / 5, 1)$ — capped before z-score |
-| `target_lock_pct`  | 0.04 | $\text{target\_lock\_pct} \in [0, 1]$ (omit axis if `has_target_lock_data` is false) |
+| `snipe_bonus`      | 0.005 | $\min(\text{snipes} / 5, 1)$ — capped before z-score. **v2.10 luxury/preview axis** (was 0.05) |
+| `target_lock_pct`  | 0.005 | $\text{target\_lock\_pct} \in [0, 1]$ (omit axis if `has_target_lock_data` is false). **v2.10 luxury/preview axis** (was 0.04) |
 
-Direct-dogfight axes (`thug_kill_rate + thug_accuracy + thug_efficiency`) total **0.51**; the asset-disruption axis (`pve_share`) is **0.12**; volume + utility axes (`net_damage_share + mobility + snipe_bonus + target_lock_pct`) total **0.37**. The v2.3 composite is explicitly more multi-modal than v2.2 — role players doing economy work no longer get penalized.
+Direct-dogfight axes (`thug_kill_rate + thug_accuracy + thug_efficiency`) total **0.51** of the raw weight (≈55% effective); the asset-disruption axis (`pve_share`) is **0.12**; `net_damage_share + mobility` total **0.28**; the two **luxury axes** (`snipe_bonus + target_lock_pct`) total just **0.01** (~1% effective). v2.10 kept them in the composite so the leaderboard / radar still show who's dominating snipe / T-key, but cut their pull to near-zero so a strong no-frills thug isn't handicapped for skipping them (see §13.7.5).
 
 **`ALPHA_PVE = 0.5`** (locked module constant in `scripts/elo.py`, surfaced as `alpha_pve` in `elo_current.json`). PvE work in the three "thug" axes counts at half the weight of equivalent PvP work — a nonzero floor so role players doing PvE work get credit, with PvP retaining the higher signal. Lobby z-scoring still naturally rewards exceptional PvE — a player who does dramatically more PvE damage than peers z-scores high on `pve_share` and `thug_efficiency` simultaneously without needing a separate "PvE excellence" axis. Tunable post-ship without a schema bump.
 
@@ -1762,7 +1764,7 @@ $$
 
 **`pve_share`** (was `structure_share` in v2.2): broadened from buildings-only to all enemy non-human damage — covers structures + mobile AI like Scavengers, Producers, Extractors. Sources from `personal.pve_dealt`, which is already `total_dealt - pvp_dealt` and excludes player-owned-AI damage by construction. Returns `None` when no player in the lobby dealt PvE damage (axis-missing → weight redistribution).
 
-**`target_lock_pct`** (carried over from v2.2): reads `positioning.players[name].metrics.target_lock_pct`. Gated on the match-global `has_target_lock_data` flag — pre-schema sessions return `None` (weight redistributes). Low weight (0.04) is deliberate: a discipline reward, not a dominator signal.
+**`target_lock_pct`** (carried over from v2.2): reads `positioning.players[name].metrics.target_lock_pct`. Gated on the match-global `has_target_lock_data` flag — pre-schema sessions return `None` (weight redistributes). v2.10 cut its weight to **0.005** (~0.5% effective): it stays as a dominance preview but is now a near-zero-stakes luxury axis, not a discipline reward that can move a rating.
 
 **`asset_multiplier`** was removed in v2.2 and reserved for a future **VTSR-C** (Commander) rating. Damage by player-owned AI tracks build/route quality (commander signal) rather than dogfight skill (thug signal). The underlying `assets.dealt` field still flows into `match_contributions.json` so career highlights like Puppeteer continue to work — only the ELO axis was retired.
 
@@ -2123,6 +2125,18 @@ Keying on the *canonical* rating (not the lifted one) is the load-bearing stabil
 **Transparency.** The event is still appended to `kills.feed[]` with `is_pilot_victim: true`; the dashboard's kill feed renders a muted `pilot` badge (`.vt-pilot-badge`). ODF registration (`odf_map`) and faction-detection votes still run.
 
 **No axis-math change.** `scripts/elo.py` is untouched except the version bump + comment — the corrected per-row `personal.{kills,deaths,pvp_kills,pve_kills,effective_pvp_kills}` values flow into the existing `thug_kill_rate` (effective kills) and K/D-derived axes automatically. Snipes (`UnitSniped`, separate event, vehicle `victim_odf`), all damage buckets, and `net_damage_share` are deliberately unaffected (damage to/from/as a pilot remains fully counted — pilots can chip the last HP off a ship, and a suspected-sniper pilot is a legit target). Schema bumps: `PIPELINE_VERSION 25 → 26`, `match.schema_version 13 → 14`, `ELO_SCHEMA_VERSION 8 → 9`. **Pre-v9 `peak_vtsr` is no longer comparable** — the corpus is re-rated. Full classification context: [docs/DATA_DICTIONARY.md §8.1](docs/DATA_DICTIONARY.md).
+
+### 13.7.5 v2.10 — snipe/T-key de-weight
+
+**Problem.** `snipe_bonus` (0.05) and `target_lock_pct` (0.04) are convenience/luxury behaviors, not core thug skill. Because each axis is z-scored against the lobby, a player who simply *doesn't snipe* or *doesn't toggle the T-key* lands below the lobby mean and eats a **negative** contribution — i.e. strong no-frills thugs (e.g. Sev, blue, who dominate the heavy axes) were quietly handicapped for skipping the two least-important signals. A smoke-test re-rate confirmed dropping the two axes lifts exactly those players (Sev +12.6, blue +15.5, econchump +21) with no top-of-board inversions.
+
+**The change (config only).** Cut both weights to **0.005** each in `THUG_WEIGHTS` ([scripts/elo.py](scripts/elo.py)); the six core axes are untouched. The axes stay in the composite — and in `elo_current.json.weights`, the leaderboard detail panel, and the Player Profile radar — so the *dominance preview* ("who's sniping / locking the most") survives, but at ~0.5% effective weight each (~1% combined) they can no longer make or break a rating. A genuine no-frills thug is no longer penalized for performing well only on the bigger axes.
+
+**Weights no longer sum to 1.00 — and that's fine.** Leaving the six core axes alone makes the raw dict sum to **≈0.92**. The composite has *always* renormalized over the axes present in each lobby (`weights[a] = THUG_WEIGHTS[a] / \sum_{\text{available}} w`), so this is mathematically identical to the analyzed smoke test: each axis's effective weight is `raw / 0.92` with all eight present (the six core axes pick up a proportional ~8.7% uplift as a pure side-effect; snipe / T-key land at ~0.5% effective each). Editing only the two knobs is the most honest representation of "we only de-weighted the luxuries."
+
+**Frontend follow-through.** The two axes are removed from the Player Profile "Performance observations" coaching cards (nothing actionable to coach at ~0.5% weight) and the "Strengths & weaknesses" panel is reordered by **axis weight** descending (heaviest signal first) so `Snipe Bonus` / `T-Key Usage` always sit at the bottom — see [js/player.js](js/player.js).
+
+**No axis-math, priors, or output-shape change.** `ELO_SCHEMA_VERSION 9 → 10` is purely a re-rate / comparability signal (the `weights` field *values* change and the corpus is re-rated); the JS reader never branches on it. **No** `PIPELINE_VERSION` / `match.schema_version` bump — ELO recomputes unconditionally every pipeline run and the per-match JSON is unchanged. **Pre-v10 `peak_vtsr` is no longer comparable.**
 
 ### 13.8 Tier ladder
 

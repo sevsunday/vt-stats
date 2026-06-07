@@ -2610,7 +2610,7 @@
     }
     const subtitle = document.getElementById('vtsr-methodology-modal-subtitle');
     if (subtitle) {
-      const base = 'v2.5 \u00b7 8-axis composite';
+      const base = 'v2.10 \u00b7 8-axis composite';
       subtitle.innerHTML = eloMode === 'thugs_only'
         ? `${base} \u00b7 <span class="text-warning">thug-only mode</span>`
         : base;
@@ -5665,18 +5665,21 @@
       : null;
     if (!k) return null;
 
-    // ---- 8-axis thug composite (v2.3 weights, unchanged through v2.5).
-    // Sum = 1.00. Listed in weight order so the heaviest signals lead.
+    // ---- 8-axis thug composite (v2.10 weights). Listed in weight order so
+    // the heaviest signals lead. v2.10 cut Snipe bonus + T-key usage to 0.005
+    // each, so the raw weights sum to ~0.92 (not 1.00) and are renormalized
+    // over the axes present in each lobby at runtime. The two luxury axes are
+    // kept for the dominance preview but contribute ~1% combined.
     // Descriptions trimmed to public-friendly one-liners.
     const weightsRows = [
-      ['Net damage share', '0.20', 'Damage you dealt minus took, vs the lobby total.'],
-      ['Thug kill rate',   '0.20', 'Kills per minute (PvE kills count for half).'],
-      ['Thug efficiency',  '0.16', 'What % of your non-base damage hit live targets.'],
-      ['Thug accuracy',    '0.15', 'Your hit-rate vs the lobby&rsquo;s, per weapon.'],
-      ['PvE share',        '0.12', 'Damage on enemy bases, scavs, AI tanks.'],
-      ['Mobility',         '0.08', 'How much of the map you covered.'],
-      ['Snipe bonus',      '0.05', 'Sniper rifle hits, capped.'],
-      ['T-key usage',      '0.04', 'How often you held a target lock.'],
+      ['Net damage share', '0.20',  'Damage you dealt minus took, vs the lobby total.'],
+      ['Thug kill rate',   '0.20',  'Kills per minute (PvE kills count for half).'],
+      ['Thug efficiency',  '0.16',  'What % of your non-base damage hit live targets.'],
+      ['Thug accuracy',    '0.15',  'Your hit-rate vs the lobby&rsquo;s, per weapon.'],
+      ['PvE share',        '0.12',  'Damage on enemy bases, scavs, AI tanks.'],
+      ['Mobility',         '0.08',  'How much of the map you covered.'],
+      ['Snipe bonus',      '0.005', 'Sniper rifle hits, capped. Luxury axis &mdash; barely moves your rating.'],
+      ['T-key usage',      '0.005', 'How often you held a target lock. Luxury axis &mdash; barely moves your rating.'],
     ].map(([n, w, d]) => `<tr><td><strong>${n}</strong><br><small class="text-muted">${d}</small></td><td class="text-end align-top">${w}</td></tr>`).join('');
 
     // ---- Tier ladder (unchanged from v2). ----

@@ -109,8 +109,8 @@ THUG_WEIGHTS_FALLBACK = {
     "thug_efficiency":   0.16,
     "pve_share":         0.12,
     "mobility":          0.08,
-    "snipe_bonus":       0.05,
-    "target_lock_pct":   0.04,
+    "snipe_bonus":       0.005,  # v2.10: luxury/preview axis (was 0.05)
+    "target_lock_pct":   0.005,  # v2.10: luxury/preview axis (was 0.04)
 }
 
 # Self-consistency floor: minimum matches per player to be included in

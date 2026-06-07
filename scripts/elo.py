@@ -92,8 +92,18 @@ ELO_FLOOR_TAPER_WINDOW = 150.0
 # for auditability; tunable without a schema bump.
 ALPHA_PVE = 0.5
 
-# Thug composite weights (locked, sum = 1.00). Per-row inline comments
-# describe what each axis measures.
+# Thug composite weights. v2.10: snipe_bonus + target_lock_pct cut to
+# 0.005 each (were 0.05 / 0.04) so they stay visible as a dominance
+# preview but contribute ~1% of the rating combined -- a strong no-frills
+# thug is no longer handicapped for skipping the two "luxury" axes. The
+# six core axes are deliberately untouched, so the RAW dict now sums to
+# ~0.92 (NOT 1.00). This is fine: compute_performance_index() always
+# renormalizes available-axis weights at runtime
+# (`weights[a] = THUG_WEIGHTS[a] / sum(available)`), so each axis's
+# effective weight is `raw / 0.92` when all eight are present (the six
+# core axes each pick up a proportional ~8.7% uplift purely as a
+# side-effect; snipe / T-key land at ~0.5% effective each). Per-row
+# inline comments describe what each axis measures.
 THUG_WEIGHTS = {
     "net_damage_share":  0.20,   # damage you dealt minus what you took, vs lobby total
     "thug_kill_rate":    0.20,   # (pvp_kills + ALPHA_PVE * pve_kills) / minutes
@@ -101,8 +111,8 @@ THUG_WEIGHTS = {
     "thug_efficiency":   0.16,   # (pvp_dealt + α * pve_to_AI) / max(1, total - structure)
     "pve_share":         0.12,   # pve_dealt / total_dealt (asset disruption)
     "mobility":          0.08,   # activity_score from positioning data
-    "snipe_bonus":       0.05,   # capped sniper-rifle hits
-    "target_lock_pct":   0.04,   # T-key situational-awareness proxy
+    "snipe_bonus":       0.005,  # v2.10: luxury/preview axis (was 0.05); ~0.5% effective
+    "target_lock_pct":   0.005,  # v2.10: luxury/preview axis (was 0.04); ~0.5% effective
 }
 
 ALPHA = 0.0   # Wins-ELO blend weight. Stubbed at 0 until winner data lands.
@@ -229,7 +239,7 @@ LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-sh
 # unchanged, so ELO_SCHEMA_VERSION is intentionally NOT bumped (existing JS
 # readers are unaffected). Ratings DO change, so **pre-change `peak_vtsr` is
 # no longer comparable** -- the corpus is re-rated on the next pipeline run.
-# v9 (current) = pilot-victim kill/death exclusion (match.schema_version 14,
+# v9 = pilot-victim kill/death exclusion (match.schema_version 14,
 # pipeline v2.9). On-foot pilot kills no longer count toward kills / deaths /
 # pvp_kills / pve_kills / effective_pvp_kills, so the thug_kill_rate axis
 # (effective kills) and every K/D-derived surface shed those near-harmless
@@ -237,7 +247,17 @@ LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-sh
 # INPUT change only -- no axis math, weights, priors, or output shape change.
 # Ratings DO move, so **pre-v9 `peak_vtsr` is no longer comparable** (corpus
 # re-rated on the next pipeline run).
-ELO_SCHEMA_VERSION = 9
+# v10 (current) = snipe/T-key de-weight (pipeline v2.10). `snipe_bonus` and
+# `target_lock_pct` cut to 0.005 each (were 0.05 / 0.04) so they stay in the
+# composite as a dominance preview but no longer materially move the rating
+# (~1% combined). This is a genuine WEIGHTS change (not input-only): the
+# emitted `weights` field values change and the corpus is re-rated, so
+# **pre-v10 `peak_vtsr` is no longer comparable**. Output SHAPE is unchanged
+# (still 8 weight keys), so the bump is purely a re-rate / comparability
+# signal -- the JS reader never branches on ELO_SCHEMA_VERSION. The raw dict
+# now sums to ~0.92; available-axis weights are renormalized at runtime as
+# always (see THUG_WEIGHTS note).
+ELO_SCHEMA_VERSION = 10
 
 
 # ---------------------------------------------------------------------------

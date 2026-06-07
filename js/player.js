@@ -554,14 +554,10 @@
       head: 'You\u2019re not moving enough.',
       body: 'This is your positioning activity score \u2014 how much of the map you covered relative to peers. Don\u2019t stay in base if you can help it, and use the minimap to find opportunities for PvE.',
     },
-    snipe_bonus: {
-      head: 'Snipes could add an optional edge.',
-      body: 'This is a small bonus axis (4% weight) for snipes. Not required by any means, but the added bonus and the kills that come with snipes can give you an edge on ELO gain.',
-    },
-    target_lock_pct: {
-      head: 'You\u2019re under-using the T-key.',
-      body: 'This is the fraction of match time you had a target locked. Targeting enemies improves aim and provides more situational awareness. Make tapping T a reflex during matches. Weight is small (4%) but the lever is free \u2014 costs nothing to climb.',
-    },
+    // v2.10: snipe_bonus + target_lock_pct are luxury/preview axes (~0.5%
+    // weight each) and no longer surface as coaching suggestions -- see the
+    // COACHING_EXCLUDE filter in renderCoachingPanel. Their copy was removed
+    // because there's nothing actionable for a player to gain from them now.
   };
 
   // Approximate ΔVTSR for a +0.5σ improvement on a given axis. Mirrors
@@ -2165,7 +2161,20 @@
     if (!ranked.length) {
       return '<p class="text-secondary mb-0">No axis breakdown available for this player.</p>';
     }
-    const rows = ranked.map((e, i) => {
+    // v2.10: order by axis WEIGHT desc (heaviest signal first) rather than by
+    // z, so players read their most-affecting axes at the top and the two
+    // luxury axes (snipe_bonus / target_lock_pct, ~0.5% each) always sit at
+    // the bottom. Primary key = elo.weights[key]; tiebreak = canonical
+    // VTSR_AXES order (which is already authored heaviest-first), so this
+    // degrades gracefully to VTSR_AXES order if elo.weights is missing (404).
+    const weights = (state.elo && state.elo.weights) || {};
+    const axisOrder = new Map(VTSR_AXES.map((def, i) => [def.key, i]));
+    const ordered = ranked.slice().sort((a, b) => {
+      const wDiff = (+weights[b.axisDef.key] || 0) - (+weights[a.axisDef.key] || 0);
+      if (wDiff !== 0) return wDiff;
+      return (axisOrder.get(a.axisDef.key) ?? 99) - (axisOrder.get(b.axisDef.key) ?? 99);
+    });
+    const rows = ordered.map((e, i) => {
       const z = e.z;
       const pct = Math.min(100, Math.max(0, ((z + 1) / 2) * 100));
       const fillCls = z >= 0.25 ? 'vt-axis-fill-strong'
@@ -2204,23 +2213,20 @@
       .join('');
   }
 
+  // v2.10: the two luxury axes carry ~0.5% weight each, so there's nothing
+  // actionable to coach -- they're excluded from Performance observations
+  // entirely (they still appear in the Strengths & weaknesses preview).
+  const COACHING_EXCLUDE = new Set(['snipe_bonus', 'target_lock_pct']);
+
   function renderCoachingPanel(ranked) {
     // Rank by impact (|z| * weight) instead of raw z so heavy axes outrank
-    // low-weight axes regardless of how negative their z is. snipe_bonus is
-    // then force-pinned to the last position when it lands in the slice so it
-    // reads as a suggestion, not a deficit.
+    // low-weight axes regardless of how negative their z is.
     const weights = (state.elo && state.elo.weights) || {};
-    const SNIPE_KEY = 'snipe_bonus';
     const weak = ranked
-      .filter(e => e.z < 0)
+      .filter(e => e.z < 0 && !COACHING_EXCLUDE.has(e.axisDef.key))
       .map(e => ({ ...e, impact: Math.abs(e.z) * (+weights[e.axisDef.key] || 0) }))
       .sort((a, b) => b.impact - a.impact)
       .slice(0, 3);
-    const snipeIdx = weak.findIndex(e => e.axisDef.key === SNIPE_KEY);
-    if (snipeIdx >= 0 && snipeIdx !== weak.length - 1) {
-      const [snipe] = weak.splice(snipeIdx, 1);
-      weak.push(snipe);
-    }
 
     if (!weak.length) {
       return `<p class="text-secondary mb-3">
@@ -2237,14 +2243,8 @@
         body: 'No specific coaching tip wired yet for this axis.',
       };
       const projection = quickWinDeltaPerMatch(e.axisDef.key);
-      const isOptional = e.axisDef.key === SNIPE_KEY;
-      const cardCls = isOptional
-        ? 'vt-coaching-card vt-coaching-card--optional'
-        : 'vt-coaching-card';
-      const zCls = isOptional
-        ? 'vt-coaching-z vt-coaching-z--muted'
-        : `vt-coaching-z ${e.z >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}`;
-      return `<div class="${cardCls}">
+      const zCls = `vt-coaching-z ${e.z >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}`;
+      return `<div class="vt-coaching-card">
         <div class="vt-coaching-head">
           <i class="bi ${e.axisDef.icon}"></i>
           <span class="vt-coaching-axis">${escapeHtml(e.axisDef.label)}</span>
