@@ -13,7 +13,7 @@
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 8px 12px; background: rgba(20,23,28,.92); border-bottom: 1px solid #2a2f37;
   }
-  #stage { position: fixed; inset: 0; top: 96px; }
+  #stage { position: fixed; inset: 0; top: 140px; }
   select, button { font: inherit; background: #20242c; color: #e6e8ec; border: 1px solid #3a4049;
     border-radius: 6px; padding: 5px 10px; cursor: pointer; }
   button.clip { background: #2a3340; }
@@ -39,11 +39,12 @@
   <label>Slow-mo <input id="slowmo" type="range" min="0.1" max="5" step="0.05" value="0.1" /></label>
   <span id="slowmoval">native</span>
   <span class="sep"></span>
+  <button id="textures" class="active">Textures</button>
   <button id="wire">Wireframe</button>
   <span class="sep"></span>
   <span id="meta"></span>
 </div>
-<div id="clips" style="position:fixed;top:48px;left:0;right:0;z-index:10;padding:6px 12px;background:rgba(20,23,28,.92);border-bottom:1px solid #2a2f37;"></div>
+<div id="clips" style="position:fixed;top:92px;left:0;right:0;z-index:10;padding:6px 12px;background:rgba(20,23,28,.92);border-bottom:1px solid #2a2f37;"></div>
 <div id="stage"></div>
 
 <script type="importmap">
@@ -79,11 +80,52 @@ scene.add(grid);
 scene.add(new THREE.AxesHelper(5));
 
 const loader = new GLTFLoader();
+const texLoader = new THREE.TextureLoader();
+const texCache = new Map();   // name -> THREE.Texture | null
 let current = null;        // THREE.Object3D
 let mixer = null;
 let actions = {};          // name -> AnimationAction
 let activeAction = null;
 let wire = false;
+let texturesOn = true;     // replicate production runtime texture assignment
+
+// Mirror production models-viewer._loadTexture / _applyTextures: load the perf
+// PNG by MATERIAL NAME (= diffuse stem) from data/models/textures/perf, with the
+// same texture settings, and assign as the diffuse map (color -> white). This is
+// the exact production path, so it proves textures work with the animated GLBs.
+const TEX_BASE = '/data/models/textures/perf/';
+function loadTex(name) {
+  if (texCache.has(name)) return Promise.resolve(texCache.get(name));
+  return new Promise((res) => {
+    texLoader.load(`${TEX_BASE}${name}.png`, (t) => {
+      t.flipY = false;
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      t.needsUpdate = true;
+      texCache.set(name, t); res(t);
+    }, undefined, () => { texCache.set(name, null); res(null); });
+  });
+}
+async function applyTextures() {
+  if (!current) return;
+  const mats = new Set();
+  current.traverse((o) => {
+    if (o.isMesh) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => mats.add(m));
+  });
+  await Promise.all([...mats].map(async (m) => {
+    if (!m.name) return;
+    if (m.userData.origColor === undefined) m.userData.origColor = m.color.clone();
+    if (texturesOn) {
+      const t = await loadTex(m.name);
+      if (t) { m.map = t; m.color.setRGB(1, 1, 1); }
+      else { m.map = null; m.color.copy(m.userData.origColor); }
+    } else {
+      m.map = null; m.color.copy(m.userData.origColor);
+    }
+    m.needsUpdate = true;
+  }));
+}
 let loopOn = false;        // play-once + clamp by default; Loop toggles repeat
 const clock = new THREE.Clock();
 
@@ -121,6 +163,7 @@ async function load(stem) {
   current = gltf.scene;
   scene.add(current);
   applyWire();
+  applyTextures();
   frame(current);
 
   const clipsEl = document.getElementById('clips');
@@ -188,6 +231,7 @@ document.getElementById('slowmo').oninput = (e) => {
   document.getElementById('slowmoval').textContent = v <= 0.1 ? 'native' : `min ${v.toFixed(2)}s`;
   if (activeAction) activeAction.timeScale = effectiveTimeScale(activeAction.getClip());
 };
+document.getElementById('textures').onclick = (e) => { texturesOn = !texturesOn; e.target.classList.toggle('active', texturesOn); applyTextures(); };
 document.getElementById('wire').onclick = (e) => { wire = !wire; e.target.classList.toggle('active', wire); applyWire(); };
 
 function resize() {

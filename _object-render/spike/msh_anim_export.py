@@ -157,7 +157,7 @@ def parse_full(path):
             aname = M._read_name(f)
             M._read_u32(f)  # anim_type
             max_frame = struct.unpack("<f", f.read(4))[0]
-            struct.unpack("<f", f.read(4))[0]  # end_frame
+            end_frame = struct.unpack("<f", f.read(4))[0]
             ns = M._read_u32(f); f.read(ns * ANIMKEY)  # block-level states (unused)
             n_anim = M._read_u32(f)
             tracks = {}
@@ -166,7 +166,8 @@ def parse_full(path):
                 struct.unpack("<f", f.read(4))[0]  # per-anim max
                 kc = M._read_u32(f)
                 tracks[idx] = _read_keys(f, kc)
-            clips.append({"name": aname, "max_frame": max_frame, "tracks": tracks})
+            clips.append({"name": aname, "max_frame": max_frame,
+                          "end_frame": end_frame, "tracks": tracks})
 
         # mesh tree (capture nodes + parent links), mirrors msh_parser walk
         nodes = []
@@ -204,7 +205,7 @@ def parse_full(path):
         for i, nd in enumerate(nodes):
             nd["parent"] = parents[i]
         return {"name": block_name, "scale": mh.scale, "skinned": bool(mh.skinned),
-                "nodes": nodes, "clips": clips,
+                "msh_dir": str(path.parent), "nodes": nodes, "clips": clips,
                 "block": {"verts": b_verts, "norms": b_norms, "uvs": b_uvs,
                           "faces": b_faces, "buckys": buckys,
                           "vert_to_state": vert_to_state, "state_mats": state_mats}}
@@ -435,6 +436,33 @@ def _node_color(i, n):
     return (r, g, b, 1.0)
 
 
+# Texture resolution mirrors production convert_msh._build_groups: the diffuse
+# stem is the MSH-embedded texture name (workshop models) or the `.material`
+# [texture] diffuse (game-baked). We NAME the glTF material by that stem so the
+# viewer can assign data/models/textures/perf/<stem>.png at runtime exactly like
+# the production models-viewer does. Falls back to a per-part pastel when there's
+# no resolvable texture.
+def _ensure_tex_setup():
+    import convert_msh as C
+    if C._G is None or "mat_index" not in (C._G or {}):
+        roots = C.resolve_roots(None)
+        C._G = {"mat_index": C.build_file_index(roots, "material"),
+                "mat_index_all": {}, "dds_index": {}, "dds_index_all": {},
+                "verbose": False, "force": False}
+    return C
+
+
+def resolve_tex_key(msh_dir, mat_name, tex_name):
+    import convert_msh as C
+    diffuse = tex_name
+    if not diffuse and mat_name:
+        try:
+            _rgba, diffuse = C.parse_material(Path(msh_dir), mat_name)
+        except Exception:  # noqa: BLE001
+            diffuse = None
+    return C._stem(diffuse) if diffuse else None
+
+
 def build_glb(parsed, fps=30.0):
     glb = Glb()
     nodes = parsed["nodes"]
@@ -454,14 +482,14 @@ def build_glb(parsed, fps=30.0):
                            "translation": t, "rotation": q, "scale": s})
         si_to_node[nd["state_index"]] = i
 
+    msh_dir = parsed.get("msh_dir")
     if not skinned:
         for i, nd in enumerate(nodes):
             flags = nd["flags"]
             if not (flags & (M.RS_HIDDEN | M.RS_COLLIDABLE)) and nd["verts"]:
-                mat_idx = glb.material(nd["name"] or f"n{i}", _node_color(i, len(nodes)))
-                prim = _build_prim(glb, nd, mat_idx)
-                if prim is not None:
-                    meshes.append({"name": nd["name"], "primitives": [prim]})
+                prims = _build_prims_rigid(glb, nd, i, msh_dir)
+                if prims:
+                    meshes.append({"name": nd["name"], "primitives": prims})
                     gltf_nodes[i]["mesh"] = len(meshes) - 1
 
     # parent -> children
@@ -492,7 +520,7 @@ def build_glb(parsed, fps=30.0):
             joints.append(ni)
             ibm.append(matrix_to_gltf_colmajor(smats[s]) if s < len(smats) else list(IDENTITY16))
         ibm_acc = glb.mat4(ibm)
-        prims = _build_skinned_prims(glb, parsed["block"], joint_pos)
+        prims = _build_skinned_prims(glb, parsed["block"], joint_pos, msh_dir)
         meshes.append({"name": parsed["name"], "primitives": prims})
         gltf_nodes.append({"name": (parsed["name"] or "mesh") + "_skin",
                            "mesh": len(meshes) - 1, "skin": 0})
@@ -506,10 +534,21 @@ def build_glb(parsed, fps=30.0):
     for clip in parsed["clips"]:
         channels = []
         samplers = []
+        # The frame at max_frame is a loop-return duplicate of frame 0; end_frame
+        # marks the true final pose. Trim the trailing duplicate so play-once ends
+        # on the real pose (not snapped back to rest) and paired parts read as
+        # symmetric at the end.
+        end_frame = clip.get("end_frame")
+        max_frame = clip.get("max_frame")
+        trim = end_frame is not None and max_frame is not None and end_frame < max_frame
         for si, keys in clip["tracks"].items():
             node_idx = si_to_node.get(si)
             if node_idx is None or not keys:
                 continue
+            if trim:
+                kept = [k for k in keys if k["frame"] <= end_frame + 1e-3]
+                if kept:
+                    keys = kept
             times = [k["frame"] / fps for k in keys]
             # AnimKey.type bitmask: bit0(1)=translation, bit1(2)=rotation.
             has_trans = any(k["type"] & 1 for k in keys)
@@ -548,9 +587,10 @@ def build_glb(parsed, fps=30.0):
     return _pack_glb(gltf, glb.bin), animations
 
 
-def _build_skinned_prims(glb, block, joint_pos):
+def _build_skinned_prims(glb, block, joint_pos, msh_dir):
     """One primitive per (non-hidden) bucky group, built from block-level
-    faces/vertices with JOINTS_0/WEIGHTS_0 from vert_to_state."""
+    faces/vertices with JOINTS_0/WEIGHTS_0 from vert_to_state. Each bucky's
+    material is named by its resolved texture stem (production convention)."""
     verts = block["verts"]
     norms = block["norms"]
     uvs = block["uvs"]
@@ -599,7 +639,11 @@ def _build_skinned_prims(glb, block, joint_pos):
             idx.extend((tri[0], tri[2], tri[1]) if MIRROR_Z else tri)
         if not positions:
             continue
-        mat_idx = glb.material(f"bucky{bi}", _node_color(bi * 7 + 3, 16))
+        bk = buckys[bi] if bi < len(buckys) else {}
+        tex_key = resolve_tex_key(msh_dir, bk.get("mat"), bk.get("tex"))
+        name = tex_key or f"bucky{bi}"
+        color = (1.0, 1.0, 1.0, 1.0) if tex_key else _node_color(bi * 7 + 3, 16)
+        mat_idx = glb.material(name, color)
         attrs = {"POSITION": glb.vec3(positions), "NORMAL": glb.vec3(normals_o),
                  "TEXCOORD_0": glb.vec2(uvs_o),
                  "JOINTS_0": glb.vec4u(joints_o), "WEIGHTS_0": glb.vec4(weights_o)}
@@ -616,15 +660,18 @@ def _safe_quat(q):
     return [x / n, y / n, z / n, w / n]
 
 
-def _build_prim(glb, nd, mat_idx):
+def _build_prims_rigid(glb, nd, node_index, msh_dir):
+    """One primitive PER vertex-group (material), so each part carries its own
+    texture-named material (mirrors production per-group prims)."""
     verts = nd["verts"]
     indices_all = nd["indices"]
-    positions, normals, uvs, idx = [], [], [], []
-    weld = {}
+    prims = []
     vert_start = 0
     index_start = 0
-    for (vc, ic, _mat, _tex) in nd["groups"]:
+    for gi, (vc, ic, mat_name, tex_name) in enumerate(nd["groups"]):
         grp = indices_all[index_start:index_start + ic]
+        positions, normals, uvs, idx = [], [], [], []
+        weld = {}
         for t in range(0, len(grp) - 2, 3):
             tri = []
             ok = True
@@ -645,11 +692,17 @@ def _build_prim(glb, nd, mat_idx):
                 idx.extend((tri[0], tri[2], tri[1]) if MIRROR_Z else tri)
         vert_start += vc
         index_start += ic
-    if not positions or not idx:
-        return None
-    attrs = {"POSITION": glb.vec3(positions), "NORMAL": glb.vec3(normals),
-             "TEXCOORD_0": glb.vec2(uvs)}
-    return {"attributes": attrs, "indices": glb.indices(idx), "mode": 4, "material": mat_idx}
+        if not positions or not idx:
+            continue
+        tex_key = resolve_tex_key(msh_dir, mat_name, tex_name)
+        name = tex_key or f"n{node_index}_{gi}"
+        color = (1.0, 1.0, 1.0, 1.0) if tex_key else _node_color(node_index, 0)
+        mat_idx = glb.material(name, color)
+        attrs = {"POSITION": glb.vec3(positions), "NORMAL": glb.vec3(normals),
+                 "TEXCOORD_0": glb.vec2(uvs)}
+        prims.append({"attributes": attrs, "indices": glb.indices(idx),
+                      "mode": 4, "material": mat_idx})
+    return prims
 
 
 def _pack_glb(gltf, binblob):
@@ -685,6 +738,7 @@ def main():
     args = ap.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_tex_setup()  # index .material files so materials get texture-stem names
 
     manifest = []
     for s in args.stems:
