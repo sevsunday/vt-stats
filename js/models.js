@@ -24,6 +24,11 @@ const LIGHT_AZ_KEY = 'vt.obj.light.az';
 const LIGHT_EL_KEY = 'vt.obj.light.el';
 const LIGHT_INTENSITY_KEY = 'vt.obj.light.intensity';
 const LIGHT_DEFAULT = { on: true, az: 215, el: 45, intensity: 2.6 };
+const SCENE_BG_KEY = 'vt.obj.scene.bg';   // 'dark' (default) | 'light'
+const GRID_KEY = 'vt.obj.grid';
+const AXES_KEY = 'vt.obj.axes';
+const SCENE_BG_VALUES = ['dark', 'light'];
+const ULTRA_AO_KEY = 'vt.obj.ultra.ao';
 // The full asset set (incl. the native HQ .dds textures) is published as plain
 // git blobs and served by GitHub Pages, so the HQ toggle + Prefer-HQ control +
 // Capture are enabled. Set to false to force perf-only (e.g. if HQ is dropped
@@ -51,6 +56,12 @@ const els = {
   back: document.getElementById('back-btn'),
   wire: document.getElementById('wire-btn'),
   wireHq: document.getElementById('wire-hq-btn'),
+  sceneBtn: document.getElementById('scene-btn'),
+  scenePanel: document.getElementById('scene-panel'),
+  sceneBgSeg: document.querySelector('#scene-panel .scene-bg-seg'),
+  sceneGrid: document.getElementById('scene-grid'),
+  sceneAxes: document.getElementById('scene-axes'),
+  ultraAo: document.getElementById('ultra-ao'),
   spin: document.getElementById('spin-btn'),
   freespin: document.getElementById('freespin-btn'),
   reset: document.getElementById('reset-btn'),
@@ -95,6 +106,24 @@ function lightPrefs() {
     el: Number.isFinite(el) ? el : LIGHT_DEFAULT.el,
     intensity: Number.isFinite(intensity) ? intensity : LIGHT_DEFAULT.intensity,
   };
+}
+
+function scenePrefs() {
+  const bg = localStorage.getItem(SCENE_BG_KEY);
+  const grid = localStorage.getItem(GRID_KEY);
+  const axes = localStorage.getItem(AXES_KEY);
+  return {
+    // Dark background is the default; light only when the user opts in.
+    bg: SCENE_BG_VALUES.includes(bg) ? bg : 'dark',
+    // Grid/axes default ON when unset.
+    grid: grid === null ? true : grid === '1',
+    axes: axes === null ? true : axes === '1',
+  };
+}
+
+// Ultra post-processing is opt-in (off by default; it carries a GPU cost).
+function ultraPrefs() {
+  return { ao: localStorage.getItem(ULTRA_AO_KEY) === '1' };
 }
 
 // ---------------- directory ----------------
@@ -233,9 +262,19 @@ function showViewer(entry) {
 
   const quality = preferHq() ? 'hq' : 'perf';
   const light = lightPrefs();
-  activeViewer = new ObjectViewer(els.stage, { quality, light });
+  const scene = scenePrefs();
+  activeViewer = new ObjectViewer(els.stage, { quality, light, bgMode: scene.bg });
   activeViewer.load(MODELS_BASE + entry.glb)
-    .then(() => { if (activeViewer) setupAnimUI(); })
+    .then(() => {
+      if (!activeViewer) return;
+      setupAnimUI();
+      // Apply persisted display + Ultra prefs once the model exists.
+      activeViewer.setBackgroundMode(scene.bg);
+      activeViewer.setGridVisible(scene.grid);
+      activeViewer.setAxesVisible(scene.axes);
+      activeViewer.setUltraAO(ultraPrefs().ao);
+      syncScenePanel();
+    })
     .catch((e) => {
       els.stage.innerHTML = `<div class="error">Failed to load ${escapeHtml(entry.glb)}: ${escapeHtml(String(e))}</div>`;
     });
@@ -255,6 +294,12 @@ function showViewer(entry) {
   els.lightPanel.hidden = false;
   els.lightBtn.disabled = false;   // never inherit a wireframe-locked state across opens
   els.lightBtn.classList.toggle('on', light.on);
+
+  // Scene panel starts closed; controls are synced by syncScenePanel() post-load.
+  els.scenePanel.hidden = true;
+  els.sceneBtn.classList.remove('on');
+  els.sceneBtn.setAttribute('aria-expanded', 'false');
+  els.ultraAo.classList.toggle('on', ultraPrefs().ao);
 
   // Animation controls start hidden; setupAnimUI() reveals them once the GLB
   // resolves and reports baked clips.
@@ -326,6 +371,52 @@ function showViewer(entry) {
     els.animSlowmoVal.textContent = v <= 0 ? 'native' : `${v.toFixed(2)}s`;
     if (activeViewer) activeViewer.setAnimMinDuration(v);
   };
+
+  // Scene panel. The button toggles the floating panel; the controls drive the
+  // viewer + persistence.
+  els.sceneBtn.onclick = () => {
+    const show = els.scenePanel.hidden;
+    els.scenePanel.hidden = !show;
+    els.sceneBtn.classList.toggle('on', show);
+    els.sceneBtn.setAttribute('aria-expanded', String(show));
+  };
+  els.sceneBgSeg.querySelectorAll('.seg-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const bg = btn.dataset.bg === 'light' ? 'light' : 'dark';
+      localStorage.setItem(SCENE_BG_KEY, bg);
+      if (activeViewer) activeViewer.setBackgroundMode(bg);
+      syncSceneBgSeg(bg);
+    };
+  });
+  els.sceneGrid.onchange = () => {
+    localStorage.setItem(GRID_KEY, els.sceneGrid.checked ? '1' : '0');
+    if (activeViewer) activeViewer.setGridVisible(els.sceneGrid.checked);
+  };
+  els.sceneAxes.onchange = () => {
+    localStorage.setItem(AXES_KEY, els.sceneAxes.checked ? '1' : '0');
+    if (activeViewer) activeViewer.setAxesVisible(els.sceneAxes.checked);
+  };
+  els.ultraAo.onclick = () => {
+    const on = !els.ultraAo.classList.contains('on');
+    els.ultraAo.classList.toggle('on', on);
+    localStorage.setItem(ULTRA_AO_KEY, on ? '1' : '0');
+    if (activeViewer) activeViewer.setUltraAO(on);
+  };
+}
+
+/* Reflect the viewer's current display state onto the panel controls. */
+function syncScenePanel() {
+  if (!activeViewer) return;
+  const st = activeViewer.getSceneState();
+  syncSceneBgSeg(st.bgMode);
+  els.sceneGrid.checked = st.grid;
+  els.sceneAxes.checked = st.axes;
+}
+
+function syncSceneBgSeg(bg) {
+  els.sceneBgSeg.querySelectorAll('.seg-btn').forEach((b) => {
+    b.classList.toggle('on', b.dataset.bg === bg);
+  });
 }
 
 /* Build the clip chip list + reveal the Animations button when the loaded GLB
@@ -404,6 +495,23 @@ function resetAllViewer() {
   activeViewer.setLightIntensity(LIGHT_DEFAULT.intensity);
   initLightPanel({ ...LIGHT_DEFAULT });   // re-sync slider values + handlers
   setLightOn(LIGHT_DEFAULT.on);           // button highlight + panel dim + viewer + persist
+
+  // Display -> dark background, grid + axes on.
+  localStorage.setItem(SCENE_BG_KEY, 'dark');
+  localStorage.setItem(GRID_KEY, '1');
+  localStorage.setItem(AXES_KEY, '1');
+  els.scenePanel.hidden = true;
+  els.sceneBtn.classList.remove('on');
+  els.sceneBtn.setAttribute('aria-expanded', 'false');
+  activeViewer.setBackgroundMode('dark');
+  activeViewer.setGridVisible(true);
+  activeViewer.setAxesVisible(true);
+  syncScenePanel();
+
+  // Ultra post-processing -> off.
+  localStorage.setItem(ULTRA_AO_KEY, '0');
+  els.ultraAo.classList.remove('on');
+  activeViewer.setUltraAO(false);
 
   // Camera, model orientation, and any free-spin momentum.
   activeViewer.resetView();

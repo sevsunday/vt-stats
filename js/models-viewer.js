@@ -26,6 +26,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const TEX_BASE = '../data/models/textures/';
 const DEG = Math.PI / 180;
@@ -46,6 +51,10 @@ const LIGHT_DEFAULT_INTENSITY = 2.6;
 const LIGHT_CAPTURE_AZ = 215;
 const LIGHT_CAPTURE_EL = 45;
 const LIGHT_CAPTURE_INTENSITY = 2.6;
+
+// Flat viewer background colors. Dark is the default; the user can switch to a
+// light backdrop (choice persisted by the caller). No environment / tone mapping.
+const SCENE_BG = { light: 0xf4f5f7, dark: 0x14171c };
 
 // Free-spin feel (all tunable). DRAG_SENS is radians of model rotation per pixel
 // of drag; momentum velocity (rad/sec) = pixel velocity (px/sec) * DRAG_SENS.
@@ -170,6 +179,21 @@ export class ObjectViewer {
     this.scene.add(this.grid);
     this.axes = new THREE.AxesHelper(3);
     this.scene.add(this.axes);
+
+    // Background + display state. Dark is the default; the user can switch.
+    this._bgMode = opts.bgMode === 'light' ? 'light' : 'dark';
+    this._gridVisible = true;
+    this._axesVisible = true;
+    this._applySceneBg();
+
+    // Ultra post-processing state (EffectComposer pipeline, built lazily).
+    // Ambient occlusion (SSAO) + SMAA anti-aliasing + higher-res shadows.
+    this._ultraAO = false;
+    this._composer = null;
+    this._renderPass = null;
+    this._ssaoPass = null;
+    this._smaaPass = null;
+    this._outputPass = null;
 
     this._placeSun();
     this._applyLightEnabled();
@@ -392,20 +416,23 @@ export class ObjectViewer {
     const gridSize = Math.max(10, Math.ceil(radius * 4));
     this.scene.remove(this.grid);
     this.grid = new THREE.GridHelper(gridSize, Math.min(gridSize, 60), 0x3a4150, 0x262b34);
+    this.grid.visible = this._gridVisible;   // honor the current scene toggle
     this.scene.add(this.grid);
+    this.axes.visible = this._axesVisible;
 
     // Match the shadow-catcher plane to the grid footprint (centered on x/z).
     this.ground.geometry.dispose();
     this.ground.geometry = new THREE.PlaneGeometry(gridSize, gridSize);
     this.ground.position.set(center.x, -0.005, center.z);
 
+    this._radius = radius;
+    this._center = center.clone();
+
     this.controls.update();
     this._home = {
       pos: this.camera.position.clone(),
       target: this.controls.target.clone(),
     };
-    this._radius = radius;
-    this._center = center.clone();
 
     // Place + apply the sun now that center/radius are known.
     this._placeSun();
@@ -641,6 +668,82 @@ export class ObjectViewer {
     };
   }
 
+  /* ---- Background + display -------------------------------------------- */
+
+  getSceneState() {
+    return { bgMode: this._bgMode, grid: this._gridVisible, axes: this._axesVisible };
+  }
+
+  setGridVisible(on) {
+    this._gridVisible = !!on;
+    if (this.grid) this.grid.visible = this._gridVisible;
+  }
+
+  setAxesVisible(on) {
+    this._axesVisible = !!on;
+    if (this.axes) this.axes.visible = this._axesVisible;
+  }
+
+  isGridVisible() { return this._gridVisible; }
+  isAxesVisible() { return this._axesVisible; }
+
+  /* Flat background: dark (default) or light. Choice persisted by the caller. */
+  setBackgroundMode(mode) {
+    this._bgMode = mode === 'light' ? 'light' : 'dark';
+    this._applySceneBg();
+  }
+
+  _applySceneBg() {
+    this.scene.background = new THREE.Color(SCENE_BG[this._bgMode] ?? SCENE_BG.dark);
+    this.scene.backgroundBlurriness = 0;
+  }
+
+  /* ---- Ultra post-processing (EffectComposer) -------------------------- */
+  /* Ambient occlusion (SSAO) + SMAA anti-aliasing + higher-res soft shadows. */
+
+  setUltraAO(on) { this._ultraAO = !!on; this._applyUltra(); }
+  getUltraState() { return { ao: this._ultraAO }; }
+
+  _ultraActive() { return this._ultraAO; }
+
+  _applyUltra() {
+    const active = this._ultraActive();
+    if (active) {
+      this._ensureComposer();
+      this._updateComposerPasses();
+    }
+    // Crisper shadows when Ultra is on; drop the cached map so the size takes.
+    this.sun.shadow.mapSize.set(active ? 4096 : 2048, active ? 4096 : 2048);
+    if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+    this.sun.shadow.needsUpdate = true;
+  }
+
+  _ensureComposer() {
+    if (this._composer) return;
+    const sz = this.renderer.getSize(new THREE.Vector2());
+    const dpr = this.renderer.getPixelRatio();
+    this._composer = new EffectComposer(this.renderer);
+    this._composer.setPixelRatio(dpr);
+    this._composer.setSize(sz.x, sz.y);
+    this._renderPass = new RenderPass(this.scene, this.camera);
+    this._ssaoPass = new SSAOPass(this.scene, this.camera, sz.x, sz.y);
+    this._ssaoPass.kernelRadius = 8;
+    this._ssaoPass.minDistance = 0.0015;
+    this._ssaoPass.maxDistance = 0.08;
+    this._outputPass = new OutputPass();
+    this._smaaPass = new SMAAPass(sz.x * dpr, sz.y * dpr);
+  }
+
+  /* Order: Render -> [SSAO] -> Output (sRGB) -> SMAA. */
+  _updateComposerPasses() {
+    if (!this._composer) return;
+    this._composer.passes.length = 0;
+    this._composer.addPass(this._renderPass);
+    if (this._ultraAO) this._composer.addPass(this._ssaoPass);
+    this._composer.addPass(this._outputPass);
+    this._composer.addPass(this._smaaPass);
+  }
+
   resetView() {
     // Stop any free spin and return the model to its canonical orientation.
     this._spinVel.x = 0;
@@ -668,7 +771,7 @@ export class ObjectViewer {
     const axesVisible = this.axes.visible;
     const camPos = this.camera.position.clone();
     const camTarget = this.controls.target.clone();
-    const bg = this.scene.background;
+    const prevBgMode = this._bgMode;
     const prevLight = this.getLightState();
     const prevSpinQuat = this._spin ? this._spin.quaternion.clone() : null;
     const prevSpinVel = { x: this._spinVel.x, y: this._spinVel.y };
@@ -684,9 +787,11 @@ export class ObjectViewer {
 
     this.controls.autoRotate = false;
     this.setWireframe(false);
+    // Force the canonical dark background + hide grid/axes so committed thumbnails
+    // stay reproducible regardless of the user's chosen background.
+    this.setBackgroundMode('dark');
     this.grid.visible = false;
     this.axes.visible = false;
-    this.scene.background = new THREE.Color(0x14171c);
     // Capture from the canonical orientation regardless of any free spin.
     if (this._spin) this._spin.quaternion.identity();
     this._spinVel.x = 0;
@@ -737,14 +842,14 @@ export class ObjectViewer {
     this.camera.position.copy(camPos);
     this.controls.target.copy(camTarget);
     this.controls.update();
-    this.grid.visible = gridVisible;
-    this.axes.visible = axesVisible;
-    this.scene.background = bg;
-    this.setWireframe(prevWire);
-    this.controls.autoRotate = prevAuto;
     this._lightOn = prevLight.on;
     this.setLightAngle(prevLight.az, prevLight.el);
     this.setLightIntensity(prevLight.intensity);
+    this.setBackgroundMode(prevBgMode);
+    this.setGridVisible(gridVisible);
+    this.setAxesVisible(axesVisible);
+    this.setWireframe(prevWire);
+    this.controls.autoRotate = prevAuto;
     this._applyLightEnabled();
     if (prevSpinQuat && this._spin) this._spin.quaternion.copy(prevSpinQuat);
     this._spinVel.x = prevSpinVel.x;
@@ -761,6 +866,13 @@ export class ObjectViewer {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    if (this._composer) {
+      const dpr = this.renderer.getPixelRatio();
+      this._composer.setPixelRatio(dpr);
+      this._composer.setSize(w, h);
+      if (this._ssaoPass) this._ssaoPass.setSize(w, h);
+      if (this._smaaPass) this._smaaPass.setSize(w * dpr, h * dpr);
+    }
   }
 
   _animate() {
@@ -780,7 +892,8 @@ export class ObjectViewer {
       }
     }
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+    if (this._composer && this._ultraActive()) this._composer.render();
+    else this.renderer.render(this.scene, this.camera);
   }
 
   dispose() {
@@ -796,6 +909,10 @@ export class ObjectViewer {
     this.controls.dispose();
     for (const t of this._texCache.values()) { if (t) t.dispose(); }
     this._texCache.clear();
+    // Post-processing pipeline.
+    if (this._composer) this._composer.dispose();
+    if (this._ssaoPass && this._ssaoPass.dispose) this._ssaoPass.dispose();
+    if (this._smaaPass && this._smaaPass.dispose) this._smaaPass.dispose();
     this.scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) {

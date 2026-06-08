@@ -300,6 +300,45 @@ body.embed #back-btn { display: none; }
 .anim-transport { display: flex; flex-wrap: wrap; gap: 6px; }
 .btn.anim-mini { padding: 0.3rem 0.55rem; font-size: 0.78rem; }
 
+/* Scene panel: mirrors .light-panel but anchored TOP-left so it clears the
+   bottom light/anim panels. */
+.scene-panel {
+  top: 14px;
+  bottom: auto;
+  width: 230px;
+  max-height: 76vh;
+  overflow-y: auto;
+}
+/* Background: label stacked ABOVE a full-width Dark/Light segmented control. */
+.scene-bg-block { display: flex; flex-direction: column; gap: 6px; }
+.scene-bg-label {
+  color: var(--kb-text-primary);
+  font-weight: 600;
+  font-size: 12px;
+}
+.scene-bg-seg { display: flex; width: 100%; }
+.scene-bg-seg .seg-btn { flex: 1; }
+.scene-check { cursor: pointer; }
+.scene-check input[type="checkbox"] {
+  margin-left: auto;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--kb-primary);
+  cursor: pointer;
+}
+.scene-ultra-head {
+  color: var(--kb-text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 8px;
+  border-top: 1px solid var(--kb-border-default);
+}
+.scene-ultra { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn.scene-ultra-btn { padding: 0.3rem 0.55rem; font-size: 0.78rem; }
+.btn.scene-ultra-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .error {
   padding: 1.5rem;
   color: var(--kb-danger);
@@ -350,6 +389,17 @@ body.embed #back-btn { display: none; }
     bottom: 0;
     width: auto;
     border-radius: 12px 12px 0 0;
+  }
+  /* Scene panel docks as a TOP sheet so it clears the always-visible bottom
+     light panel + the bottom-right anim panel. */
+  .scene-panel {
+    top: 0;
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: 60vh;
+    border-radius: 0 0 12px 12px;
   }
 }
 
