@@ -3,6 +3,13 @@
  * Geist is inherited from the shell. The page lives at models/index.html and
  * consumes data/models/ (geometry GLB + perf/HQ textures + thumbnails). */
 
+/* ---------------- embed mode ----------------
+ * When loaded inside an iframe (e.g. the ODF browser's Renders tab) with
+ * ?embed=1, js/models.js adds body.embed; hide the page navbar + the viewer's
+ * back-to-directory button so only the viewer chrome shows. */
+body.embed .navbar,
+body.embed #back-btn { display: none; }
+
 /* ---------------- directory ---------------- */
 
 .models-page { min-height: 0; }

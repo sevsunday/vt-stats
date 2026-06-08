@@ -72,6 +72,20 @@ function debounce(func, wait) {
     };
 }
 
+// Renders tab: the model-render asset set lives under ../data/models/ (the same
+// assets the standalone Models browser serves). Shots follow a fixed 7-angle
+// convention emitted by scripts/object-render/, keyed by the model geometry
+// stem (the .fbx basename declared by the ODF's GameObjectClass.geometryName).
+const SHOT_ANGLES = ['hero', 'front', 'back', 'left', 'right', 'top', 'bottom'];
+const MODELS_SHOTS_BASE = '../data/models/shots/';
+const MODELS_VIEWER_BASE = '../models/index.html';
+
+// Geometry stems are model filenames (e.g. "evrecy00", "ispilo_rifle_skel"); keep
+// only the safe filename charset so the value is safe in a path / URL / markup.
+function sanitizeStem(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+}
+
 class ODFBrowser {
     constructor() {
         this.data = null;
@@ -80,6 +94,9 @@ class ODFBrowser {
         this.searchTerm = '';
         this.selectedODF = null;
         this.currentAudio = null;
+        // Renders tab: stem -> bool (has render shots on disk). Avoids re-probing
+        // hero.png on every revisit of the same ODF / model.
+        this.rendersProbeCache = new Map();
 
         this.sidebar = document.getElementById('odfSidebarContent');
         this.content = document.getElementById('odfContentContent');
@@ -107,6 +124,24 @@ class ODFBrowser {
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                             <button type="button" class="btn btn-primary" id="confirmCompare" disabled>Compare</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        // Render lightbox modal — opened when a Renders-tab thumbnail is clicked.
+        // Dedicated (not coupled to compareModal) so the two stay independent.
+        document.body.insertAdjacentHTML('beforeend', `
+            <div class="modal fade" id="renderLightboxModal" tabindex="-1" aria-labelledby="renderLightboxLabel" aria-hidden="true">
+                <div class="modal-dialog modal-xl modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="renderLightboxLabel">Render</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body vt-odf-render-lightbox-body">
+                            <img id="renderLightboxImg" class="vt-odf-render-lightbox-img" src="" alt="Render">
                         </div>
                     </div>
                 </div>
@@ -790,9 +825,7 @@ class ODFBrowser {
         });
 
         document.querySelectorAll('[data-bs-toggle="pill"]').forEach(tab => {
-            tab.addEventListener('shown.bs.tab', () => {
-                this.handlePropertySearch(propertySearch.value);
-            });
+            tab.addEventListener('shown.bs.tab', (e) => this.handleContentTabShown(e));
         });
 
         this.groupedEntries = groupedEntries;
@@ -805,6 +838,20 @@ class ODFBrowser {
                 }
             }, true);
         });
+
+        // Renders tab: resolve the model stem and probe for render shots. The
+        // pill/pane are revealed asynchronously only if shots exist, so legacy /
+        // geometry-less ODFs (weapons, ordnance, powerups) never show the tab and
+        // the layout never flashes a broken tab. Guard against a stale resolution
+        // (user clicked another ODF before the probe finished).
+        const modelStem = this.resolveModelStem(odfData);
+        if (modelStem) {
+            this.probeRenders(modelStem).then(hasRenders => {
+                if (hasRenders && this.selectedODF?.filename === filename) {
+                    this.revealRendersTab(modelStem);
+                }
+            });
+        }
 
         // Rebuild the compare-modal body so the heading reflects the current
         // ODF. The seed wired this in displayODFData; we keep that behaviour.
@@ -1340,6 +1387,167 @@ class ODFBrowser {
                 entry instanceof Element ? entry.outerHTML : this.formatODFDataColumn([entry])
             )
             .join('');
+    }
+
+    // ----- Renders tab -------------------------------------------------------
+
+    // Resolve the model geometry stem from the (inheritance-flattened) ODF data.
+    // e.g. GameObjectClass.geometryName "evrecy00.fbx" -> "evrecy00". Returns
+    // null when the ODF declares no geometry (weapons / ordnance / powerups).
+    resolveModelStem(odfData) {
+        const geom = odfData?.GameObjectClass?.geometryName;
+        if (!geom) return null;
+        const stem = sanitizeStem(String(geom).replace(/\.[^.]+$/, ''));
+        return stem || null;
+    }
+
+    // Probe for render shots by loading the canonical hero.png. Resolves to a
+    // bool; cached per stem so revisits don't re-fetch.
+    probeRenders(stem) {
+        if (!stem) return Promise.resolve(false);
+        if (this.rendersProbeCache.has(stem)) {
+            return Promise.resolve(this.rendersProbeCache.get(stem));
+        }
+        return new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => { this.rendersProbeCache.set(stem, true); resolve(true); };
+            img.onerror = () => { this.rendersProbeCache.set(stem, false); resolve(false); };
+            img.src = `${MODELS_SHOTS_BASE}${stem}/hero.png`;
+        });
+    }
+
+    buildRendersPaneHtml(stem) {
+        const thumbs = SHOT_ANGLES.map(angle => {
+            const src = `${MODELS_SHOTS_BASE}${stem}/${angle}.png`;
+            return `
+                <button type="button" class="vt-odf-render-thumb" data-render-src="${src}" title="${angle}">
+                    <img src="${src}" alt="${angle} render" loading="lazy" decoding="async"
+                         onerror="this.closest('.vt-odf-render-thumb').remove()">
+                    <span class="vt-odf-render-angle">${angle}</span>
+                </button>`;
+        }).join('');
+
+        const viewerUrl = `${MODELS_VIEWER_BASE}?model=${encodeURIComponent(stem)}`;
+        return `
+            <div class="vt-odf-renders">
+                <div class="vt-odf-renders-toolbar">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="odfLoad3dBtn" data-stem="${stem}">
+                        <i class="bi bi-badge-3d me-1"></i>Load 3D render
+                    </button>
+                    <a class="btn btn-sm btn-outline-secondary" href="${viewerUrl}" target="_blank" rel="noopener">
+                        Open in Models browser
+                    </a>
+                </div>
+                <div class="vt-odf-renders-grid">${thumbs}</div>
+                <div class="vt-odf-renders-viewer" id="odfRendersViewer" hidden></div>
+            </div>`;
+    }
+
+    wireRendersTab(stem) {
+        const pane = document.getElementById('content-Renders');
+        if (!pane) return;
+
+        const loadBtn = pane.querySelector('#odfLoad3dBtn');
+        const viewerHost = pane.querySelector('#odfRendersViewer');
+        if (loadBtn && viewerHost) {
+            loadBtn.addEventListener('click', () => {
+                if (viewerHost.dataset.loaded === '1') return;
+                const iframe = document.createElement('iframe');
+                iframe.className = 'vt-odf-renders-iframe';
+                iframe.src = `${MODELS_VIEWER_BASE}?model=${encodeURIComponent(stem)}&embed=1`;
+                iframe.loading = 'lazy';
+                iframe.title = `3D render of ${stem}`;
+                viewerHost.appendChild(iframe);
+                viewerHost.hidden = false;
+                viewerHost.dataset.loaded = '1';
+                loadBtn.disabled = true;
+                loadBtn.innerHTML = '<i class="bi bi-check2 me-1"></i>3D render loaded';
+            });
+        }
+
+        pane.querySelectorAll('.vt-odf-render-thumb').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.openRenderLightbox(btn.dataset.renderSrc, stem);
+            });
+        });
+    }
+
+    openRenderLightbox(src, stem) {
+        if (!src) return;
+        const modalEl = document.getElementById('renderLightboxModal');
+        if (!modalEl) return;
+        const img = modalEl.querySelector('#renderLightboxImg');
+        const label = modalEl.querySelector('#renderLightboxLabel');
+        if (img) { img.src = src; img.alt = `${stem} render`; }
+        if (label) label.textContent = stem;
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+
+    // Shared content-pill activation handler: refresh the property filter for
+    // the newly active tab, and hide the (irrelevant) property filter box while
+    // the Renders tab is active.
+    handleContentTabShown(e) {
+        const isRenders = e.target?.getAttribute('data-bs-target') === '#content-Renders';
+        const search = document.getElementById('odfPropertySearch');
+        const filterWrap = search?.closest('.position-relative');
+        if (filterWrap) filterWrap.style.visibility = isRenders ? 'hidden' : '';
+        if (search && !isRenders) this.handlePropertySearch(search.value);
+    }
+
+    // Attach the shared content-pill handlers (shown + arrow-key guard) to a
+    // dynamically-created pill button.
+    _wireContentPill(btn) {
+        btn.addEventListener('shown.bs.tab', (e) => this.handleContentTabShown(e));
+        btn.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
+    }
+
+    // Inject the Renders pill (left of All) + its pane after the async probe
+    // confirms shots exist. Handles both the multi-group case (a pill bar
+    // already exists) and the single-group case (no pill bar yet — create one
+    // with an All pill so the user can switch back).
+    revealRendersTab(stem) {
+        const cardBody = this.content.querySelector('.card-body');
+        const tabContent = cardBody?.querySelector('.tab-content');
+        if (!cardBody || !tabContent) return;
+        if (document.getElementById('content-Renders')) return; // already revealed
+
+        let navUl = cardBody.querySelector('ul.nav-pills');
+        if (!navUl) {
+            navUl = document.createElement('ul');
+            navUl.className = 'nav nav-pills mb-3 small ps-2';
+            navUl.setAttribute('role', 'tablist');
+            navUl.setAttribute('data-bs-keyboard', 'false');
+            navUl.innerHTML = `
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active py-1" id="content-tab-All" data-bs-toggle="pill"
+                            data-bs-target="#content-All" type="button" role="tab">All</button>
+                </li>`;
+            cardBody.insertBefore(navUl, tabContent);
+            this._wireContentPill(navUl.querySelector('#content-tab-All'));
+        }
+
+        const li = document.createElement('li');
+        li.className = 'nav-item';
+        li.setAttribute('role', 'presentation');
+        li.innerHTML = `
+            <button class="nav-link py-1" id="content-tab-Renders" data-bs-toggle="pill"
+                    data-bs-target="#content-Renders" type="button" role="tab">Renders</button>`;
+        navUl.insertBefore(li, navUl.firstChild);
+        this._wireContentPill(li.querySelector('#content-tab-Renders'));
+
+        const pane = document.createElement('div');
+        pane.className = 'tab-pane fade';
+        pane.id = 'content-Renders';
+        pane.setAttribute('role', 'tabpanel');
+        pane.innerHTML = this.buildRendersPaneHtml(stem);
+        tabContent.appendChild(pane);
+
+        this.wireRendersTab(stem);
     }
 
     loadFirstVehicleODF() {

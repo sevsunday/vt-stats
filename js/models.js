@@ -533,6 +533,12 @@ function wireToolbar() {
 }
 
 async function boot() {
+  // Embed mode (e.g. iframed from the ODF browser's Renders tab): hide the page
+  // navbar + viewer back button so only the viewer chrome shows. CSS in
+  // css/models.css keys off body.embed.
+  if (new URLSearchParams(location.search).get('embed') === '1') {
+    document.body.classList.add('embed');
+  }
   wireToolbar();
   try {
     const res = await fetch(MODELS_BASE + 'index.json');
