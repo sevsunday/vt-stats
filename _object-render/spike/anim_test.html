@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MSH animation PoC</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #14171c; color: #e6e8ec; }
+  #bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 8px 12px; background: rgba(20,23,28,.92); border-bottom: 1px solid #2a2f37;
+  }
+  #stage { position: fixed; inset: 0; top: 96px; }
+  select, button { font: inherit; background: #20242c; color: #e6e8ec; border: 1px solid #3a4049;
+    border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button.clip { background: #2a3340; }
+  button.clip.active { background: #4f6bed; border-color: #4f6bed; }
+  button.active { background: #4f6bed; border-color: #4f6bed; }
+  button:hover { border-color: #4f6bed; }
+  #clips { display: flex; flex-wrap: wrap; gap: 6px; }
+  label { font-size: 13px; opacity: .85; display: inline-flex; align-items: center; gap: 6px; }
+  #meta { font-size: 12px; opacity: .7; }
+  .sep { width: 1px; align-self: stretch; background: #2a2f37; margin: 0 4px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <label>Model
+    <select id="model"></select>
+  </label>
+  <span class="sep"></span>
+  <button id="play">Play</button>
+  <button id="pause">Pause</button>
+  <button id="stop">Stop (rest)</button>
+  <button id="loop">Loop</button>
+  <label>Slow-mo <input id="slowmo" type="range" min="0.1" max="5" step="0.05" value="0.1" /></label>
+  <span id="slowmoval">native</span>
+  <span class="sep"></span>
+  <button id="wire">Wireframe</button>
+  <span class="sep"></span>
+  <span id="meta"></span>
+</div>
+<div id="clips" style="position:fixed;top:48px;left:0;right:0;z-index:10;padding:6px 12px;background:rgba(20,23,28,.92);border-bottom:1px solid #2a2f37;"></div>
+<div id="stage"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "../../vendor/three/three.module.js",
+    "three/addons/": "../../vendor/three/addons/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14171c);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x202024, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(30, 50, 20);
+scene.add(sun);
+const grid = new THREE.GridHelper(80, 40, 0x3a4049, 0x262b33);
+scene.add(grid);
+scene.add(new THREE.AxesHelper(5));
+
+const loader = new GLTFLoader();
+let current = null;        // THREE.Object3D
+let mixer = null;
+let actions = {};          // name -> AnimationAction
+let activeAction = null;
+let wire = false;
+let loopOn = false;        // play-once + clamp by default; Loop toggles repeat
+const clock = new THREE.Clock();
+
+// Slow-mo: the slider sets a MINIMUM playback duration (seconds). A clip plays in
+// max(clipDuration, minDuration) wall-clock, so short clips (e.g. ivscout 0.1s)
+// stretch up to 5s while clips already longer stay native. Never speeds up.
+function effectiveTimeScale(clip) {
+  const minDur = parseFloat(document.getElementById('slowmo').value);
+  return clip.duration / Math.max(clip.duration, minDur);
+}
+
+function frame(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+  const dist = radius / Math.tan((camera.fov * Math.PI) / 360) * 1.9;
+  camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.9);
+  controls.target.copy(center);
+  camera.near = radius / 100; camera.far = radius * 100;
+  camera.updateProjectionMatrix();
+  controls.update();
+  grid.position.y = box.min.y;
+}
+
+function clearModel() {
+  if (current) { scene.remove(current); current.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  current = null; mixer = null; actions = {}; activeAction = null;
+  document.getElementById('clips').innerHTML = '';
+}
+
+async function load(stem) {
+  clearModel();
+  const gltf = await loader.loadAsync(`anim_out/${stem}.glb`);
+  current = gltf.scene;
+  scene.add(current);
+  applyWire();
+  frame(current);
+
+  const clipsEl = document.getElementById('clips');
+  if (gltf.animations.length) {
+    mixer = new THREE.AnimationMixer(current);
+    gltf.animations.forEach(clip => {
+      actions[clip.name] = mixer.clipAction(clip);
+      const b = document.createElement('button');
+      b.className = 'clip'; b.textContent = `${clip.name}  (${clip.duration.toFixed(2)}s)`;
+      b.onclick = () => playClip(clip.name);
+      clipsEl.appendChild(b);
+    });
+  } else {
+    clipsEl.innerHTML = '<span style="opacity:.6">no animations in this GLB</span>';
+  }
+  document.getElementById('meta').textContent =
+    `${stem} · ${gltf.animations.length} clips · ${countMeshes(current)} meshes`;
+}
+
+function countMeshes(o) { let n = 0; o.traverse(x => { if (x.isMesh) n++; }); return n; }
+
+function playClip(name) {
+  if (!mixer || !actions[name]) return;
+  if (activeAction) activeAction.stop();
+  activeAction = actions[name];
+  const clip = activeAction.getClip();
+  activeAction.reset();
+  activeAction.clampWhenFinished = !loopOn;     // hold final frame when not looping
+  activeAction.setLoop(loopOn ? THREE.LoopRepeat : THREE.LoopOnce, loopOn ? Infinity : 1);
+  activeAction.timeScale = effectiveTimeScale(clip);
+  activeAction.play();
+  for (const b of document.querySelectorAll('.clip')) {
+    b.classList.toggle('active', b.textContent.startsWith(name + '  '));
+  }
+}
+
+function applyWire() {
+  if (!current) return;
+  current.traverse(o => {
+    if (o.isMesh) {
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(m => { m.wireframe = wire; });
+    }
+  });
+}
+
+document.getElementById('play').onclick = () => { if (activeAction) activeAction.paused = false; };
+document.getElementById('pause').onclick = () => { if (activeAction) activeAction.paused = true; };
+document.getElementById('stop').onclick = () => {
+  if (activeAction) { activeAction.stop(); activeAction = null; }
+  if (mixer) mixer.setTime(0);
+  for (const b of document.querySelectorAll('.clip')) b.classList.remove('active');
+};
+document.getElementById('loop').onclick = (e) => {
+  loopOn = !loopOn;
+  e.target.classList.toggle('active', loopOn);
+  if (activeAction) {
+    activeAction.clampWhenFinished = !loopOn;
+    activeAction.setLoop(loopOn ? THREE.LoopRepeat : THREE.LoopOnce, loopOn ? Infinity : 1);
+    if (loopOn) { activeAction.paused = false; activeAction.play(); }
+  }
+};
+document.getElementById('slowmo').oninput = (e) => {
+  const v = parseFloat(e.target.value);
+  document.getElementById('slowmoval').textContent = v <= 0.1 ? 'native' : `min ${v.toFixed(2)}s`;
+  if (activeAction) activeAction.timeScale = effectiveTimeScale(activeAction.getClip());
+};
+document.getElementById('wire').onclick = (e) => { wire = !wire; e.target.classList.toggle('active', wire); applyWire(); };
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+function tick() {
+  requestAnimationFrame(tick);
+  if (mixer) mixer.update(clock.getDelta()); else clock.getDelta();
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+(async function init() {
+  const manifest = await (await fetch('anim_out/manifest.json')).json();
+  const sel = document.getElementById('model');
+  manifest.forEach(m => {
+    const o = document.createElement('option');
+    o.value = m.stem;
+    o.textContent = `${m.stem} ${m.skinned ? '[skinned]' : ''} (${m.clips.length} clips)`;
+    sel.appendChild(o);
+  });
+  sel.onchange = () => load(sel.value);
+  resize();
+  tick();
+  if (manifest.length) load(manifest[0].stem);
+})();
+</script>
+</body>
+</html>
