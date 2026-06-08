@@ -76,7 +76,9 @@ const els = {
 
 let manifest = [];
 let activeViewer = null;
-const filters = { q: '', faction: 'all', category: 'all', sort: 'name' };
+// faction: single-select string ('all' = no filter), default ISDF.
+// category: multi-select Set (empty = no filter / "All"), default Building+Vehicle.
+const filters = { q: '', faction: 'ISDF', category: new Set(['Building', 'Vehicle']), sort: 'name' };
 
 // HQ is the default; only an explicit 'perf' choice opts out (null/unset -> HQ).
 function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) !== 'perf'; }
@@ -107,18 +109,47 @@ function buildChips() {
   renderChipGroup(els.categoryChips, 'category', ['All', ...categories]);
 }
 
+/* "on" state for a chip: faction is single-select; category is a multi-select Set
+ * where an empty Set means "All". */
+function chipIsOn(group, val) {
+  if (group === 'category') {
+    return val === 'all' ? filters.category.size === 0 : filters.category.has(val);
+  }
+  return filters[group] === val;
+}
+
+function syncChips(container, group) {
+  [...container.children].forEach((c) =>
+    c.classList.toggle('on', chipIsOn(group, c.dataset.value)));
+}
+
 function renderChipGroup(container, group, labels) {
+  const multi = group === 'category';
   container.innerHTML = '';
   for (const label of labels) {
     const val = label === 'All' ? 'all' : label;
     const chip = document.createElement('button');
-    chip.className = 'filter-chip' + (filters[group] === val ? ' on' : '');
+    chip.className = 'filter-chip' + (chipIsOn(group, val) ? ' on' : '');
     chip.textContent = label;
     chip.dataset.value = val;
-    chip.onclick = () => {
-      filters[group] = val;
-      [...container.children].forEach((c) =>
-        c.classList.toggle('on', c.dataset.value === val));
+    if (multi && val !== 'all') {
+      chip.title = 'Click to select; Ctrl/Cmd+click to multi-select';
+    }
+    chip.onclick = (ev) => {
+      if (group === 'category') {
+        if (val === 'all') {
+          filters.category.clear();                 // empty Set = no category filter
+        } else if (ev.ctrlKey || ev.metaKey) {
+          // Toggle this category in/out of the multi-select.
+          if (filters.category.has(val)) filters.category.delete(val);
+          else filters.category.add(val);
+        } else {
+          filters.category = new Set([val]);         // plain click = single select
+        }
+      } else {
+        filters[group] = val;
+      }
+      syncChips(container, group);
       renderDirectory();
     };
     container.appendChild(chip);
@@ -129,7 +160,7 @@ function applyFilters() {
   const q = filters.q.trim().toLowerCase();
   let rows = manifest.filter((m) => {
     if (filters.faction !== 'all' && m.factionName !== filters.faction) return false;
-    if (filters.category !== 'all' && m.category !== filters.category) return false;
+    if (filters.category.size && !filters.category.has(m.category)) return false;
     if (q) {
       const hay = `${m.unitName} ${m.stem} ${(m.odfs || []).join(' ')}`.toLowerCase();
       if (!hay.includes(q)) return false;

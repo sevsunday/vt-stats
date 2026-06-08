@@ -79,7 +79,9 @@ DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gal
 # Bump when the animated-GLB emission shape changes; mismatch vs the prior
 # index.json forces a full regen (animated GLBs aren't invalidated by msh mtime
 # since only the export CODE changed, not the source mesh).
-ANIM_FORMAT_VERSION = 1
+#   v2: rigid weld key includes UV (fix texture seams); deploy+loop buildings bake
+#       the deployed pose as the node default (loop plays deployed, not folded).
+ANIM_FORMAT_VERSION = 2
 
 FACTION_NAMES = {"i": "ISDF", "e": "Hadean", "f": "Scion", "c": "Cerberi"}
 

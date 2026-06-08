@@ -343,6 +343,37 @@ def _safe_quat(q):
     return [x / n, y / n, z / n, w / n]
 
 
+def _bake_deploy_default(clips, default_trs, si_to_node):
+    """Buildings carry a one-shot `deploy` clip (folded -> deployed) plus a `loop`
+    that animates only the moving parts while assuming the structure is already
+    deployed. The loop does NOT reposition the structural joints, so they'd fall
+    back to the folded rest pose. To match in-game (deploy once, then loop while
+    deployed), bake the deploy clip's END pose as the node default for deploy+loop
+    models -- so the rest view + loop both sit at the deployed position, and the
+    deploy clip still plays folded->deployed and clamps back onto the default."""
+    names = {c["name"].lower(): c for c in clips}
+    deploy = names.get("deploy")
+    if not deploy or "loop" not in names:
+        return
+    ef = deploy.get("end_frame")
+    mf = deploy.get("max_frame")
+    cutoff = ef if (ef is not None and mf is not None and ef < mf) else None
+    for si, keys in deploy["tracks"].items():
+        ni = si_to_node.get(si)
+        if ni is None or not keys:
+            continue
+        kept = [k for k in keys if cutoff is None or k["frame"] <= cutoff + 1e-3] or keys
+        kf = kept[-1]
+        has_trans = any(k["type"] & 1 for k in keys)
+        has_rot = any(k["type"] & 2 for k in keys)
+        t, q, s = default_trs[ni]
+        if has_rot:
+            q = list(_mirror_quat(_quat_conjugate(_safe_quat(kf["quat"]))))
+        if has_trans:
+            t = list(_mirror_vec3(kf["vect"]))
+        default_trs[ni] = (t, q, s)
+
+
 def _pastel(i):
     r, g, b = colorsys.hsv_to_rgb((i * 0.61803398875) % 1.0, 0.45, 0.95)
     return (r, g, b, 1.0)
@@ -487,8 +518,12 @@ def _build_prims_rigid(glb, nd, node_index, msh_dir, resolve_tex_key, handedness
                     ok = False; break
                 pos, nrm, uv = verts[vi]
                 pos = _mirror_vec3(pos); nrm = _mirror_vec3(nrm)
+                # UV must be part of the weld key, else corners that share a
+                # position+normal but sit on a UV seam get merged -> texture
+                # distortion (the welded static path keys on UV too).
                 key = (round(pos[0], 5), round(pos[1], 5), round(pos[2], 5),
-                       round(nrm[0], 4), round(nrm[1], 4), round(nrm[2], 4))
+                       round(nrm[0], 4), round(nrm[1], 4), round(nrm[2], 4),
+                       round(uv[0], 5), round(uv[1], 5))
                 wi = weld.get(key)
                 if wi is None:
                     wi = len(positions); weld[key] = wi
@@ -592,14 +627,15 @@ def build_animated_glb(parsed, resolve_tex_key, fps=30.0):
     msh_dir = parsed.get("msh_dir")
     gltf_nodes = []
     meshes = []
-    si_to_node = {}
 
     default_trs = _node_default_trs(nodes, parsed["block"]["state_mats"])
+    si_to_node = {nd["state_index"]: i for i, nd in enumerate(nodes)}
+    # Deploy+loop buildings: rest/default = deployed pose (see _bake_deploy_default).
+    _bake_deploy_default(parsed["clips"], default_trs, si_to_node)
     for i, nd in enumerate(nodes):
         t, q, s = default_trs[i]
         gltf_nodes.append({"name": nd["name"] or f"n{i}",
                            "translation": t, "rotation": q, "scale": s})
-        si_to_node[nd["state_index"]] = i
 
     if not skinned:
         for i, nd in enumerate(nodes):
