@@ -57,8 +57,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "object-render"))
 sys.path.insert(0, str(PROJECT_ROOT / "_map-analysis" / "scripts"))
 
 import msh_thumbnail  # noqa: E402
-from msh_parser import parse_msh  # noqa: E402
-from glb_writer import GlbBuilder  # noqa: E402
+from msh_parser import parse_msh, parse_msh_full  # noqa: E402
+from glb_writer import GlbBuilder, build_animated_glb  # noqa: E402
 from dds_decode import decode_dds, UnsupportedDDS  # noqa: E402
 from PIL import Image  # noqa: E402
 
@@ -75,6 +75,11 @@ TEX_HQ_DIR = OUT_DIR / "textures" / "hq"
 
 PERF_MAX_DIM = 512       # performance PNG largest side
 DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gallery)
+
+# Bump when the animated-GLB emission shape changes; mismatch vs the prior
+# index.json forces a full regen (animated GLBs aren't invalidated by msh mtime
+# since only the export CODE changed, not the source mesh).
+ANIM_FORMAT_VERSION = 1
 
 FACTION_NAMES = {"i": "ISDF", "e": "Hadean", "f": "Scion", "c": "Cerberi"}
 
@@ -424,6 +429,37 @@ def process_model(job: dict) -> dict:
 
         GEO_DIR.mkdir(parents=True, exist_ok=True)
         glb_bytes = gb.to_bytes(node_name=mesh.name or stem)
+
+        # Animated models: replace the welded GLB with a node-hierarchy /
+        # SkinnedMesh GLB carrying the baked clips. Materials are named by the same
+        # texture stems so the viewer's runtime texture assignment is unchanged.
+        # Thumbnails + stats below still come from the welded `prims` (rest pose).
+        clips = []
+        animated = False
+        try:
+            full = parse_msh_full(msh_path)
+        except Exception:  # noqa: BLE001
+            full = None
+        if full and full.get("clips"):
+            def _resolve_tex_key(msh_dir, mat_name, tex_name):
+                diffuse = tex_name
+                if not diffuse and mat_name:
+                    try:
+                        _rgba, diffuse = parse_material(Path(msh_dir), mat_name)
+                    except Exception:  # noqa: BLE001
+                        diffuse = None
+                return _stem(diffuse) if diffuse else None
+            try:
+                anim_bytes, clips = build_animated_glb(full, _resolve_tex_key)
+                if clips:
+                    glb_bytes = anim_bytes
+                    animated = True
+            except Exception:  # noqa: BLE001 - fall back to the welded GLB
+                if cfg.get("verbose"):
+                    print(f"    [{stem}] animated GLB failed; using welded:\n"
+                          f"{traceback.format_exc(limit=2)}")
+                clips = []
+
         _atomic_write_bytes(GEO_DIR / f"{stem}.glb", glb_bytes)
 
         shots = []
@@ -434,6 +470,10 @@ def process_model(job: dict) -> dict:
                 supersample=cfg["supersample"], want_gallery=cfg["gallery"],
             )
             shots = written.get("shots", [])
+        elif job.get("prior_shots"):
+            # --no-render: keep the existing (committed) gallery references rather
+            # than emitting [] when reprocessing only the GLB (e.g. anim regen).
+            shots = job["prior_shots"]
 
         lo, hi = mesh.bbox()
         tris = sum(len(g.tris) for g in mesh.groups if not g.hidden)
@@ -455,6 +495,8 @@ def process_model(job: dict) -> dict:
             "unresolvedTextures": sorted(unresolved - tex_keys),
             "radius": round(mesh.radius, 3),
             "bboxSize": [round(hi[i] - lo[i], 3) for i in range(3)],
+            "animated": animated,
+            "clips": clips,
             "_glb_bytes": len(glb_bytes),
         }
     except Exception as e:  # noqa: BLE001 - resilient over ~700 models
@@ -509,6 +551,8 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "unresolvedTextures": p.get("unresolvedTextures", []),
         "radius": p.get("radius", 0),
         "bboxSize": p.get("bboxSize", [0, 0, 0]),
+        "animated": p.get("animated", False),
+        "clips": p.get("clips", []),
     }
 
 
@@ -570,16 +614,24 @@ def main():
     for d in (GEO_DIR, TEX_PERF_DIR, TEX_HQ_DIR, OUT_DIR / "thumbnails"):
         d.mkdir(parents=True, exist_ok=True)
 
-    # Prior manifest (for cache reuse of geometry stats).
+    # Prior manifest (for cache reuse of geometry stats). A change in
+    # ANIM_FORMAT_VERSION forces a full regen (the GLB shape changed even though
+    # the source meshes did not, so mtime-based freshness can't catch it).
     prior = {}
+    prior_anim_version = None
     idx_path = OUT_DIR / "index.json"
     if idx_path.exists():
         try:
-            prior = {m["stem"]: m for m in
-                     json.loads(idx_path.read_text(encoding="utf-8")).get("models", [])
-                     if "stem" in m}
+            prior_doc = json.loads(idx_path.read_text(encoding="utf-8"))
+            prior_anim_version = prior_doc.get("anim_format_version")
+            prior = {m["stem"]: m for m in prior_doc.get("models", []) if "stem" in m}
         except (json.JSONDecodeError, KeyError):
             prior = {}
+    anim_version_changed = prior_anim_version != ANIM_FORMAT_VERSION
+    if anim_version_changed and prior:
+        print(f"anim_format_version {prior_anim_version} -> {ANIM_FORMAT_VERSION}: "
+              f"forcing full regen")
+    force = args.force or anim_version_changed
 
     want_gallery = not args.no_gallery and not args.no_render
     cfg = {
@@ -598,12 +650,13 @@ def main():
     manifest = []
     cached = 0
     for stem, meta, mp in resolved:
-        if (not args.force and stem in prior
+        if (not force and stem in prior
                 and _outputs_fresh(stem, mp, want_gallery)):
             manifest.append(_cached_entry(stem, meta, prior))
             cached += 1
             continue
-        jobs.append({"stem": stem, "msh": str(mp), **meta})
+        jobs.append({"stem": stem, "msh": str(mp),
+                     "prior_shots": prior.get(stem, {}).get("shots"), **meta})
 
     print(f"{cached} cached, {len(jobs)} to process "
           f"(jobs={args.jobs}, render={cfg['render']}, gallery={cfg['gallery']})")
@@ -661,10 +714,13 @@ def main():
         "genuinely_untextured": genuinely,
         "unresolved": dict(sorted(unresolved.items())),
     }
+    animated_count = sum(1 for m in manifest if m.get("animated"))
     idx_path.write_text(json.dumps({
-        "schema_version": 3,
+        "schema_version": 4,
+        "anim_format_version": ANIM_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "count": len(manifest),
+        "animated_count": animated_count,
         "texture_report": texture_report,
         "models": manifest,
         "odf_index": odf_index,
@@ -672,7 +728,8 @@ def main():
 
     dt = time.perf_counter() - t0
     print(f"\nwrote {idx_path} -- {len(manifest)} models "
-          f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed)")
+          f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed, "
+          f"{animated_count} animated)")
     print(f"textures: {texture_report['models_textured']} textured, "
           f"{texture_report['models_no_texture']} without "
           f"({texture_report['models_unresolved_refs']} have unresolved refs, "

@@ -89,6 +89,14 @@ export class ObjectViewer {
     this._lastMoveT = 0;
     this._clock = new THREE.Clock();
 
+    // Animation state (populated by load() when the GLB carries clips).
+    this._mixer = null;
+    this._clips = [];
+    this._actions = {};
+    this._activeAction = null;
+    this._animLoop = false;        // play-once + clamp by default
+    this._animMinDuration = 0;     // slow-mo floor (seconds); 0 = native speed
+
     const w = container.clientWidth || 800;
     const h = container.clientHeight || 600;
 
@@ -243,6 +251,19 @@ export class ObjectViewer {
     });
     this._textureNames = [...names];
     this._model = model;
+
+    // Animation: build a mixer + name->action map from any baked clips. Default
+    // is play-once + clamp on the final frame (Loop toggles repeat). The mixer
+    // targets `model`, which _frame() nests under this._spin -- still valid.
+    this._disposeMixer();
+    this._clips = gltf.animations || [];
+    this._mixer = this._clips.length ? new THREE.AnimationMixer(model) : null;
+    this._actions = {};
+    this._activeAction = null;
+    if (this._mixer) {
+      for (const clip of this._clips) this._actions[clip.name] = this._mixer.clipAction(clip);
+    }
+
     this._frame(model);   // builds the spin pivot, reparents model, adds to scene
     this.setWireframe(this._wireframe);
     await this._applyTextures();
@@ -475,6 +496,77 @@ export class ObjectViewer {
     this._wireSaved = null;
   }
 
+  /* ---- Animation playback ---------------------------------------------- */
+
+  hasAnimations() { return !!(this._mixer && this._clips.length); }
+
+  getClips() {
+    return this._clips.map((c) => ({ name: c.name, duration: c.duration }));
+  }
+
+  /* Slow-mo: a clip plays in max(clipDuration, minDuration) wall-clock, so short
+   * clips (e.g. steering poses) stretch up to `sec` while long ones stay native.
+   * Never speeds up. */
+  _timeScaleFor(clip) {
+    const mn = this._animMinDuration;
+    if (!mn || clip.duration <= 0) return 1;
+    return clip.duration / Math.max(clip.duration, mn);
+  }
+
+  playClip(name) {
+    if (!this._mixer || !this._actions[name]) return;
+    if (this._activeAction) this._activeAction.stop();
+    const action = this._actions[name];
+    this._activeAction = action;
+    action.reset();
+    action.clampWhenFinished = !this._animLoop;     // hold final frame when not looping
+    action.setLoop(this._animLoop ? THREE.LoopRepeat : THREE.LoopOnce,
+                   this._animLoop ? Infinity : 1);
+    action.timeScale = this._timeScaleFor(action.getClip());
+    action.play();
+  }
+
+  pauseAnim() { if (this._activeAction) this._activeAction.paused = true; }
+  resumeAnim() { if (this._activeAction) this._activeAction.paused = false; }
+
+  /* Return to the rest/bind pose (stop the active clip + rewind the mixer). */
+  stopAnim() {
+    if (this._activeAction) { this._activeAction.stop(); this._activeAction = null; }
+    if (this._mixer) this._mixer.setTime(0);
+  }
+
+  getActiveClip() {
+    return this._activeAction ? this._activeAction.getClip().name : null;
+  }
+
+  setAnimLoop(on) {
+    this._animLoop = !!on;
+    if (this._activeAction) {
+      this._activeAction.clampWhenFinished = !this._animLoop;
+      this._activeAction.setLoop(this._animLoop ? THREE.LoopRepeat : THREE.LoopOnce,
+                                 this._animLoop ? Infinity : 1);
+      if (this._animLoop) { this._activeAction.paused = false; this._activeAction.play(); }
+    }
+  }
+
+  setAnimMinDuration(sec) {
+    this._animMinDuration = Number.isFinite(sec) && sec > 0 ? sec : 0;
+    if (this._activeAction) {
+      this._activeAction.timeScale = this._timeScaleFor(this._activeAction.getClip());
+    }
+  }
+
+  _disposeMixer() {
+    if (this._mixer) {
+      this._mixer.stopAllAction();
+      if (this._model) this._mixer.uncacheRoot(this._model);
+    }
+    this._mixer = null;
+    this._clips = [];
+    this._actions = {};
+    this._activeAction = null;
+  }
+
   setAutoRotate(on) {
     this.controls.autoRotate = !!on;
   }
@@ -552,6 +644,15 @@ export class ObjectViewer {
     const prevSpinQuat = this._spin ? this._spin.quaternion.clone() : null;
     const prevSpinVel = { x: this._spinVel.x, y: this._spinVel.y };
 
+    // Capture the rest/bind pose: pause any playing clip and rewind to t=0 so
+    // the gallery stays reproducible (matches the static thumbnails).
+    const prevActiveClip = this.getActiveClip();
+    if (this._mixer) {
+      if (this._activeAction) this._activeAction.stop();
+      this._activeAction = null;
+      this._mixer.setTime(0);
+    }
+
     this.controls.autoRotate = false;
     this.setWireframe(false);
     this.grid.visible = false;
@@ -619,6 +720,7 @@ export class ObjectViewer {
     if (prevSpinQuat && this._spin) this._spin.quaternion.copy(prevSpinQuat);
     this._spinVel.x = prevSpinVel.x;
     this._spinVel.y = prevSpinVel.y;
+    if (prevActiveClip) this.playClip(prevActiveClip);
     await this.setQuality(prevQuality);
     return shots;
   }
@@ -634,6 +736,7 @@ export class ObjectViewer {
 
   _animate() {
     const dt = this._clock.getDelta();
+    if (this._mixer) this._mixer.update(dt);
     // Free-spin momentum: integrate angular velocity, then apply friction decay.
     if (this._freeSpin && !this._dragging && this._spin) {
       const v = this._spinVel;
@@ -653,6 +756,7 @@ export class ObjectViewer {
 
   dispose() {
     this.disposed = true;
+    this._disposeMixer();
     this.renderer.setAnimationLoop(null);
     window.removeEventListener('resize', this._onResize);
     const el = this.renderer.domElement;

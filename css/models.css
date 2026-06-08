@@ -258,6 +258,41 @@
 /* Disabled (sun off) -> dim the angle sliders. */
 .light-panel.off .light-row:not(.light-head) { opacity: 0.45; }
 
+/* Animation panel: mirrors .light-panel but anchored bottom-RIGHT so it doesn't
+   overlap the light panel. */
+.anim-panel {
+  left: auto;
+  right: 14px;
+  width: 260px;
+}
+.anim-clips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.anim-chip {
+  font: inherit;
+  font-size: 11px;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.anim-chip:hover { color: var(--kb-text-primary); border-color: var(--kb-primary); }
+.anim-chip.on {
+  background: var(--kb-primary);
+  color: var(--kb-primary-fg);
+  border-color: var(--kb-primary);
+  font-weight: 650;
+}
+.anim-transport { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn.anim-mini { padding: 0.3rem 0.55rem; font-size: 0.78rem; }
+
 .error {
   padding: 1.5rem;
   color: var(--kb-danger);

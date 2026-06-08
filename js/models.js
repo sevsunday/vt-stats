@@ -63,6 +63,15 @@ const els = {
   lightEl: document.getElementById('light-el'),
   lightAzVal: document.getElementById('light-az-val'),
   lightElVal: document.getElementById('light-el-val'),
+  animBtn: document.getElementById('anim-btn'),
+  animPanel: document.getElementById('anim-panel'),
+  animClips: document.getElementById('anim-clips'),
+  animPlay: document.getElementById('anim-play'),
+  animPause: document.getElementById('anim-pause'),
+  animStop: document.getElementById('anim-stop'),
+  animLoop: document.getElementById('anim-loop'),
+  animSlowmo: document.getElementById('anim-slowmo'),
+  animSlowmoVal: document.getElementById('anim-slowmo-val'),
 };
 
 let manifest = [];
@@ -193,9 +202,11 @@ function showViewer(entry) {
   const quality = preferHq() ? 'hq' : 'perf';
   const light = lightPrefs();
   activeViewer = new ObjectViewer(els.stage, { quality, light });
-  activeViewer.load(MODELS_BASE + entry.glb).catch((e) => {
-    els.stage.innerHTML = `<div class="error">Failed to load ${escapeHtml(entry.glb)}: ${escapeHtml(String(e))}</div>`;
-  });
+  activeViewer.load(MODELS_BASE + entry.glb)
+    .then(() => { if (activeViewer) setupAnimUI(); })
+    .catch((e) => {
+      els.stage.innerHTML = `<div class="error">Failed to load ${escapeHtml(entry.glb)}: ${escapeHtml(String(e))}</div>`;
+    });
   initLightPanel(light);
 
   els.qualitySeg.hidden = !HQ_AVAILABLE;
@@ -210,6 +221,15 @@ function showViewer(entry) {
   els.lightPanel.hidden = false;
   els.lightBtn.disabled = false;   // never inherit a wireframe-locked state across opens
   els.lightBtn.classList.toggle('on', light.on);
+
+  // Animation controls start hidden; setupAnimUI() reveals them once the GLB
+  // resolves and reports baked clips.
+  els.animBtn.hidden = true;
+  els.animBtn.classList.remove('on');
+  els.animPanel.hidden = true;
+  els.animLoop.classList.remove('on');
+  els.animSlowmo.value = '0';
+  els.animSlowmoVal.textContent = 'native';
 
   els.qualitySeg.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.onclick = async () => {
@@ -246,6 +266,61 @@ function showViewer(entry) {
   els.capture.onclick = () => doCapture(entry);
   els.lightBtn.onclick = () => setLightOn(!els.lightBtn.classList.contains('on'));
   els.back.onclick = (ev) => { ev.preventDefault(); goDirectory(); };
+
+  // Animation controls. The "Animations" button toggles the clip panel; the
+  // transport drives the viewer's playback API.
+  els.animBtn.onclick = () => {
+    const show = els.animPanel.hidden;
+    els.animPanel.hidden = !show;
+    els.animBtn.classList.toggle('on', show);
+  };
+  els.animPlay.onclick = () => { if (activeViewer) activeViewer.resumeAnim(); };
+  els.animPause.onclick = () => { if (activeViewer) activeViewer.pauseAnim(); };
+  els.animStop.onclick = () => { if (activeViewer) { activeViewer.stopAnim(); syncClipChips(null); } };
+  els.animLoop.onclick = () => {
+    const on = !els.animLoop.classList.contains('on');
+    els.animLoop.classList.toggle('on', on);
+    if (activeViewer) activeViewer.setAnimLoop(on);
+  };
+  els.animSlowmo.oninput = (e) => {
+    const v = parseFloat(e.target.value);
+    els.animSlowmoVal.textContent = v <= 0 ? 'native' : `${v.toFixed(2)}s`;
+    if (activeViewer) activeViewer.setAnimMinDuration(v);
+  };
+}
+
+/* Build the clip chip list + reveal the Animations button when the loaded GLB
+ * carries baked clips. Defaults: loop off, native speed, panel closed. */
+function setupAnimUI() {
+  if (!activeViewer) return;
+  const clips = activeViewer.getClips();
+  els.animClips.innerHTML = '';
+  els.animLoop.classList.remove('on');
+  els.animSlowmo.value = '0';
+  els.animSlowmoVal.textContent = 'native';
+  activeViewer.setAnimLoop(false);
+  activeViewer.setAnimMinDuration(0);
+  if (!clips.length) {
+    els.animBtn.hidden = true;
+    els.animBtn.classList.remove('on');
+    els.animPanel.hidden = true;
+    return;
+  }
+  els.animBtn.hidden = false;
+  clips.forEach((c) => {
+    const b = document.createElement('button');
+    b.className = 'anim-chip';
+    b.dataset.clip = c.name;
+    b.textContent = `${c.name} (${c.duration.toFixed(2)}s)`;
+    b.onclick = () => { activeViewer.playClip(c.name); syncClipChips(c.name); };
+    els.animClips.appendChild(b);
+  });
+}
+
+function syncClipChips(name) {
+  els.animClips.querySelectorAll('.anim-chip').forEach((b) => {
+    b.classList.toggle('on', b.dataset.clip === name);
+  });
 }
 
 /* "Reset all": restore the entire viewer to defaults -- toggles off, quality
@@ -265,6 +340,17 @@ function resetAllViewer() {
   els.freespin.classList.remove('on');
   els.stage.classList.remove('grabbable');
   activeViewer.setFreeSpin(false);
+
+  // Animation -> rest pose, loop off, native speed (panel visibility untouched).
+  if (activeViewer.hasAnimations()) {
+    activeViewer.stopAnim();
+    syncClipChips(null);
+    els.animLoop.classList.remove('on');
+    activeViewer.setAnimLoop(false);
+    els.animSlowmo.value = '0';
+    els.animSlowmoVal.textContent = 'native';
+    activeViewer.setAnimMinDuration(0);
+  }
 
   // Quality -> the global default (honors the Prefer-HQ pref).
   const quality = preferHq() ? 'hq' : 'perf';

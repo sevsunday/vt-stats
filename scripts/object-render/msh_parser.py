@@ -550,6 +550,146 @@ def _parse_block(f) -> MshMesh:
     return MshMesh(name, sphere.radius, ordered)
 
 
+# ----------------------------- full structural parse (animation) -----------------------------
+#
+# parse_msh_full() exposes everything the animated-GLB exporter needs that the
+# welded parse_msh() discards: the mesh-tree node hierarchy (per-node LOCAL
+# geometry + parent links + state_index + node matrix), the block-level single
+# geometry + per-vertex skin weights (vert_to_state), the per-node rest/bind
+# state_matrices, and the named animation clips (anim_list). Stdlib-only, like the
+# rest of this module; the numeric/glTF math lives in glb_writer.build_animated_glb.
+
+_ANIMKEY_SIZE = sizeof(_AnimKey)  # frame f32 + type u32 + quat 4f + vect 3f = 36
+
+
+def _read_anim_keys(f, n):
+    """Read n AnimKeys. Quaternion is returned reordered to glTF (x, y, z, w)."""
+    out = []
+    raw = f.read(n * _ANIMKEY_SIZE)
+    for i in range(n):
+        fr, ty, qs, qx, qy, qz, vx, vy, vz = struct.unpack_from(
+            "<f I 4f 3f", raw, i * _ANIMKEY_SIZE)
+        out.append({"frame": fr, "type": ty, "quat": (qx, qy, qz, qs),
+                    "vect": (vx, vy, vz)})
+    return out
+
+
+def parse_msh_full(path) -> dict | None:
+    """Parse a baked `.msh` into the full structure needed for animation export.
+
+    Returns a dict (or None if not a geometry DOCB block):
+      name        : block name (str)
+      scale       : MSH_Header.scale (float)
+      skinned     : MSH_Header.skinned != 0 (bool)
+      msh_dir     : str(path.parent) (for sibling .material/.dds resolution)
+      nodes[]     : {name, state_index, flags, matrix(_Matrix), parent(int),
+                     verts[((pos),(norm),(uv))], groups[(vc,ic,mat,tex)], indices[]}
+      clips[]     : {name, max_frame, end_frame, tracks: {state_index: [keys]}}
+      block       : {verts, norms, uvs, faces, buckys[], vert_to_state, state_mats}
+                    (ctypes arrays + plain lists; the skinned-mesh source geometry)
+    """
+    path = Path(path)
+    with path.open("rb") as f:
+        hdr = _read_struct(f, _BlockHeader)
+        if bytes(hdr.fileType) != b"DOCB" or hdr.blockCount == 0:
+            return None
+        _read_struct(f, _BlockInfo)
+        block_name = _read_name(f)
+        _read_struct(f, _Sphere)
+        mh = _read_struct(f, _MshHeader)
+
+        # Block-level single-geometry arrays (the skinned-mesh source).
+        n = _read_u32(f); b_verts = _read_array(f, _Vec3, n)
+        n = _read_u32(f); b_norms = _read_array(f, _Vec3, n)
+        n = _read_u32(f); b_uvs = _read_array(f, _UV, n)
+        n = _read_u32(f); f.read(n * sizeof(_Color))
+        n = _read_u32(f); b_faces = _read_array(f, _FaceObj, n)
+        nb = _read_u32(f)
+        buckys = []
+        for _ in range(nb):
+            fl = _read_u32(f); ic = _read_u32(f); vc = _read_u32(f)
+            mat, tex = _read_optionals(f)
+            buckys.append({"flags": fl, "index_count": ic, "vert_count": vc,
+                           "mat": mat, "tex": tex})
+        nvts = _read_u32(f)
+        vert_to_state = []  # per block-vertex: list[(weight, state_index)]
+        for _ in range(nvts):
+            m = _read_u32(f)
+            infl = []
+            for _ in range(m):
+                w = struct.unpack("<f", f.read(4))[0]
+                si = struct.unpack("<H", f.read(2))[0]
+                infl.append((w, si))
+            vert_to_state.append(infl)
+        n = _read_u32(f)
+        for _ in range(n):
+            _read_vert_group(f)
+        ni = _read_u32(f); f.read(ni * 2)
+        npl = _read_u32(f); f.read(npl * sizeof(_Plane))
+        n_sm = _read_u32(f); state_mats = _read_array(f, _Matrix, n_sm)
+        n_states = _read_u32(f); f.read(n_states * _ANIMKEY_SIZE)
+
+        # anim_list: named clips, each a set of per-node keyframe tracks.
+        clips = []
+        n_al = _read_u32(f)
+        for _ in range(n_al):
+            aname = _read_name(f)
+            _read_u32(f)  # anim_type
+            max_frame = struct.unpack("<f", f.read(4))[0]
+            end_frame = struct.unpack("<f", f.read(4))[0]
+            ns = _read_u32(f); f.read(ns * _ANIMKEY_SIZE)  # block-level states (unused)
+            n_anim = _read_u32(f)
+            tracks = {}
+            for _ in range(n_anim):
+                idx = _read_u32(f)
+                struct.unpack("<f", f.read(4))[0]  # per-anim max
+                kc = _read_u32(f)
+                tracks[idx] = _read_anim_keys(f, kc)
+            clips.append({"name": aname, "max_frame": max_frame,
+                          "end_frame": end_frame, "tracks": tracks})
+
+        # mesh tree (capture nodes + parent links), mirrors the parse_msh walk.
+        nodes = []
+        parents = []
+        try:
+            root = _read_node(f)
+            nodes.append(root); parents.append(-1)
+            mesh_at = [0]; il = 0; in_mesh = 1
+            while in_mesh > 0:
+                marker = _read_u32(f)
+                if marker == MSH_CHILD:
+                    node = _read_node(f); idx = len(nodes)
+                    nodes.append(node); parents.append(mesh_at[il]); il += 1
+                    if len(mesh_at) < il + 1:
+                        mesh_at.append(idx)
+                    else:
+                        mesh_at[il] = idx
+                    in_mesh += 1
+                elif marker == MSH_SIBLING:
+                    node = _read_node(f); idx = len(nodes)
+                    nodes.append(node)
+                    parents.append(mesh_at[il - 1] if il > 0 else -1)
+                    mesh_at[il] = idx; in_mesh += 1
+                elif marker == MSH_END:
+                    in_mesh -= 1
+                    while in_mesh < il:
+                        il -= 1
+                elif marker == MSH_EOF:
+                    break
+                else:
+                    break
+        except MshError:
+            pass
+
+        for i, nd in enumerate(nodes):
+            nd["parent"] = parents[i]
+        return {"name": block_name, "scale": mh.scale, "skinned": bool(mh.skinned),
+                "msh_dir": str(path.parent), "nodes": nodes, "clips": clips,
+                "block": {"verts": b_verts, "norms": b_norms, "uvs": b_uvs,
+                          "faces": b_faces, "buckys": buckys,
+                          "vert_to_state": vert_to_state, "state_mats": state_mats}}
+
+
 if __name__ == "__main__":
     import sys
     import json
