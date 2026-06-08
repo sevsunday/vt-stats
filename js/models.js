@@ -50,6 +50,7 @@ const els = {
   meta: document.getElementById('viewer-meta'),
   back: document.getElementById('back-btn'),
   wire: document.getElementById('wire-btn'),
+  wireHq: document.getElementById('wire-hq-btn'),
   spin: document.getElementById('spin-btn'),
   freespin: document.getElementById('freespin-btn'),
   reset: document.getElementById('reset-btn'),
@@ -244,6 +245,8 @@ function showViewer(entry) {
   els.capture.hidden = !HQ_AVAILABLE;  // Capture forces HQ, unavailable here
   syncQualitySeg(quality);
   els.wire.classList.remove('on');
+  els.wireHq.classList.remove('on');
+  els.wireHq.hidden = true;
   els.spin.classList.remove('on');
   els.freespin.classList.remove('on');
   els.stage.classList.remove('grabbable');
@@ -271,6 +274,11 @@ function showViewer(entry) {
   });
   els.wire.onclick = () => {
     applyWireframe(!els.wire.classList.contains('on'));
+  };
+  els.wireHq.onclick = () => {
+    const on = !els.wireHq.classList.contains('on');
+    els.wireHq.classList.toggle('on', on);
+    if (activeViewer) activeViewer.setWireHQ(on);
   };
   els.spin.onclick = () => {
     const on = !els.spin.classList.contains('on');
@@ -419,12 +427,18 @@ function applyWireframe(on) {
   if (!activeViewer) return;
   els.wire.classList.toggle('on', on);
   activeViewer.setWireframe(on);
+  // The "Crisp lines" toggle is only meaningful while wireframe is active.
+  els.wireHq.hidden = !on;
   if (on) {
     activeViewer.setLightEnabled(false);
     els.lightBtn.classList.remove('on');
     els.lightPanel.classList.add('off');
     els.lightBtn.disabled = true;
   } else {
+    // Drop crisp-lines supersampling when leaving wireframe so we never pay
+    // the GPU cost in normal lit/textured viewing.
+    els.wireHq.classList.remove('on');
+    activeViewer.setWireHQ(false);
     els.lightBtn.disabled = false;
     setLightOn(lightPrefs().on);   // restore the persisted on/off preference
   }

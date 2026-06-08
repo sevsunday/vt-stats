@@ -49,6 +49,11 @@ const LIGHT_CAPTURE_INTENSITY = 2.6;
 
 // Free-spin feel (all tunable). DRAG_SENS is radians of model rotation per pixel
 // of drag; momentum velocity (rad/sec) = pixel velocity (px/sec) * DRAG_SENS.
+// Native WebGL wireframe lines render at exactly 1 device pixel (linewidth is
+// ignored on virtually every platform). Supersampling the backing store while
+// wireframe is on shrinks that 1-device-pixel line to a sub-CSS-pixel,
+// anti-aliased hairline. Scoped to wireframe so normal lit viewing isn't taxed.
+const WIRE_PIXEL_RATIO = 4;
 const DRAG_SENS = 0.01;
 const SPIN_FRICTION_PER_SEC = 0.85;   // fraction of velocity retained per second (->1 = spins longer)
 const SPIN_MAX_VEL = 40;              // rad/sec cap so a hard flick can't strobe
@@ -65,6 +70,7 @@ export class ObjectViewer {
     this.container = container;
     this.disposed = false;
     this._wireframe = false;
+    this._wireHQ = false;    // opt-in supersampled "crisp" wireframe lines (perf cost; off by default)
     this._wireSaved = null;  // per-material {map,color,emissive,emissiveIntensity} stash while wireframe is on
     this._materials = [];
     this._model = null;
@@ -107,7 +113,8 @@ export class ObjectViewer {
     this.camera.position.set(8, 5, 12);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this._basePixelRatio = Math.min(window.devicePixelRatio, 2);
+    this.renderer.setPixelRatio(this._basePixelRatio);
     this.renderer.setSize(w, h);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
@@ -451,6 +458,28 @@ export class ObjectViewer {
       this._wireframe = false;
       for (const m of this._materials) m.wireframe = false;
     }
+    this._updateWirePixelRatio();
+  }
+
+  /* Opt-in "crisp" wireframe: supersamples the backing store so the
+   * 1-device-pixel GL lines render as sub-CSS-pixel anti-aliased hairlines.
+   * Off by default (16x fragment cost at ratio 4); only meaningful in wireframe. */
+  setWireHQ(on) {
+    this._wireHQ = !!on;
+    this._updateWirePixelRatio();
+  }
+
+  /* Drive the renderer pixel ratio from the wireframe + crisp-lines state.
+   * Supersamples only while BOTH are on; otherwise restores the base ratio. */
+  _updateWirePixelRatio() {
+    if (!this.renderer || !this.container) return;
+    const hq = this._wireframe && this._wireHQ;
+    const target = hq ? Math.max(this._basePixelRatio, WIRE_PIXEL_RATIO) : this._basePixelRatio;
+    if (this.renderer.getPixelRatio() === target) return;
+    this.renderer.setPixelRatio(target);
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    if (w && h) this.renderer.setSize(w, h);
   }
 
   _applyWireframeOverride() {
