@@ -62,6 +62,9 @@ const els = {
   sceneGrid: document.getElementById('scene-grid'),
   sceneAxes: document.getElementById('scene-axes'),
   ultraAo: document.getElementById('ultra-ao'),
+  stageLoading: document.getElementById('stage-loading'),
+  stageLoadingLabel: document.getElementById('stage-loading-label'),
+  fps: document.getElementById('fps-counter'),
   spin: document.getElementById('spin-btn'),
   freespin: document.getElementById('freespin-btn'),
   reset: document.getElementById('reset-btn'),
@@ -88,6 +91,7 @@ const els = {
 
 let manifest = [];
 let activeViewer = null;
+let aoCompiled = false;   // per-viewer: whether the SSAO/SMAA shaders have compiled
 // faction: single-select string ('all' = no filter), default ISDF.
 // category: multi-select Set (empty = no filter / "All"), default Building+Vehicle.
 const filters = { q: '', faction: 'ISDF', category: new Set(['Building', 'Vehicle']), sort: 'name' };
@@ -263,7 +267,10 @@ function showViewer(entry) {
   const quality = preferHq() ? 'hq' : 'perf';
   const light = lightPrefs();
   const scene = scenePrefs();
-  activeViewer = new ObjectViewer(els.stage, { quality, light, bgMode: scene.bg });
+  activeViewer = new ObjectViewer(els.stage, {
+    quality, light, bgMode: scene.bg,
+    onFps: (fps) => { els.fps.textContent = `${Math.round(fps)} fps`; },
+  });
   activeViewer.load(MODELS_BASE + entry.glb)
     .then(() => {
       if (!activeViewer) return;
@@ -272,7 +279,7 @@ function showViewer(entry) {
       activeViewer.setBackgroundMode(scene.bg);
       activeViewer.setGridVisible(scene.grid);
       activeViewer.setAxesVisible(scene.axes);
-      activeViewer.setUltraAO(ultraPrefs().ao);
+      if (ultraPrefs().ao) setUltraAO(true);
       syncScenePanel();
     })
     .catch((e) => {
@@ -300,6 +307,10 @@ function showViewer(entry) {
   els.sceneBtn.classList.remove('on');
   els.sceneBtn.setAttribute('aria-expanded', 'false');
   els.ultraAo.classList.toggle('on', ultraPrefs().ao);
+  // New viewer instance -> the AO passes will need to compile again.
+  aoCompiled = false;
+  hideStageLoading();
+  els.fps.textContent = '\u2014 fps';
 
   // Animation controls start hidden; setupAnimUI() reveals them once the GLB
   // resolves and reports baked clips.
@@ -400,8 +411,32 @@ function showViewer(entry) {
     const on = !els.ultraAo.classList.contains('on');
     els.ultraAo.classList.toggle('on', on);
     localStorage.setItem(ULTRA_AO_KEY, on ? '1' : '0');
-    if (activeViewer) activeViewer.setUltraAO(on);
+    setUltraAO(on);
   };
+}
+
+/* Enable/disable Ambient occlusion. The first enable compiles the SSAO/SMAA
+ * shaders, which briefly stalls the main thread -- show a loading overlay that
+ * paints BEFORE the stall and clears once the first post-processed frame lands. */
+function setUltraAO(on) {
+  if (!activeViewer) return;
+  if (!on) { activeViewer.setUltraAO(false); hideStageLoading(); return; }
+  if (aoCompiled) { activeViewer.setUltraAO(true); return; }
+  showStageLoading('Loading ambient occlusion\u2026');
+  // Defer two frames so the overlay is actually painted before the compile stall.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (!activeViewer) { hideStageLoading(); return; }
+    activeViewer.setUltraAO(true, () => { aoCompiled = true; hideStageLoading(); });
+  }));
+}
+
+function showStageLoading(label) {
+  els.stageLoadingLabel.textContent = label || 'Loading\u2026';
+  els.stageLoading.hidden = false;
+}
+
+function hideStageLoading() {
+  els.stageLoading.hidden = true;
 }
 
 /* Reflect the viewer's current display state onto the panel controls. */
@@ -511,7 +546,7 @@ function resetAllViewer() {
   // Ultra post-processing -> off.
   localStorage.setItem(ULTRA_AO_KEY, '0');
   els.ultraAo.classList.remove('on');
-  activeViewer.setUltraAO(false);
+  setUltraAO(false);
 
   // Camera, model orientation, and any free-spin momentum.
   activeViewer.resetView();
@@ -613,6 +648,8 @@ async function doCapture(entry) {
 
 function goDirectory() {
   if (activeViewer) { activeViewer.dispose(); activeViewer = null; }
+  hideStageLoading();
+  els.fps.textContent = '';
   history.pushState({}, '', location.pathname);
   route();
 }

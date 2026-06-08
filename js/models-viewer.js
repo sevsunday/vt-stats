@@ -104,6 +104,17 @@ export class ObjectViewer {
     this._lastMoveT = 0;
     this._clock = new THREE.Clock();
 
+    // Optional FPS readout (sampled ~twice a second).
+    this._onFps = typeof opts.onFps === 'function' ? opts.onFps : null;
+    this._fpsAccum = 0;
+    this._fpsFrames = 0;
+
+    // Last seen viewport dims, polled each frame so the canvas re-fits on ANY
+    // size change (monitor move, window resize) without depending on resize
+    // events / ResizeObserver firing -- which proved unreliable here.
+    this._lastViewW = 0;
+    this._lastViewH = 0;
+
     // Animation state (populated by load() when the GLB carries clips).
     this._mixer = null;
     this._clips = [];
@@ -127,6 +138,11 @@ export class ObjectViewer {
     this.renderer.setSize(w, h);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
+    // The scene is static while orbiting (fixed light + model), so don't re-render
+    // the shadow map every frame -- we flag it dirty only when something that
+    // affects shadows actually moves (light, model load, spin, animation).
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
@@ -194,12 +210,27 @@ export class ObjectViewer {
     this._ssaoPass = null;
     this._smaaPass = null;
     this._outputPass = null;
+    this._ultraReadyCb = null;     // fired after the first post-processed frame
+    this._ultraReadyFrames = 0;
 
     this._placeSun();
     this._applyLightEnabled();
 
+    // Keep the canvas matched to the stage. A ResizeObserver catches every size
+    // change (monitor moves, layout shifts, devtools) -- not just window resizes,
+    // which don't always fire when dragging the window between displays. The work
+    // is deferred to an animation frame to avoid ResizeObserver feedback loops.
     this._onResize = () => this.resize();
     window.addEventListener('resize', this._onResize);
+    this._resizePending = false;
+    if (typeof ResizeObserver !== 'undefined') {
+      this._resizeObserver = new ResizeObserver(() => {
+        if (this._resizePending) return;
+        this._resizePending = true;
+        requestAnimationFrame(() => { this._resizePending = false; this.resize(); });
+      });
+      this._resizeObserver.observe(this.container);
+    }
 
     // Free-spin pointer handlers (only act when _freeSpin is on).
     this._onPointerDown = this._onPointerDown.bind(this);
@@ -459,6 +490,12 @@ export class ObjectViewer {
     cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s;
     cam.near = 0.1; cam.far = d * 2;
     cam.updateProjectionMatrix();
+    this._markShadowDirty();
+  }
+
+  /* Flag the (non-auto-updating) shadow map for a one-shot re-render. */
+  _markShadowDirty() {
+    if (this.renderer) this.renderer.shadowMap.needsUpdate = true;
   }
 
   /* Reflect this._lightOn onto the sun + base fill. Sun off -> boosted fill so
@@ -469,6 +506,7 @@ export class ObjectViewer {
     this.sun.castShadow = on;
     this.hemi.intensity = on ? this._hemiBase : this._hemiOff;
     this.ambient.intensity = on ? this._ambBase : this._ambOff;
+    this._markShadowDirty();
   }
 
   /* Wireframe renders flat static-white lines (lighting-independent) rather than
@@ -701,21 +739,31 @@ export class ObjectViewer {
   /* ---- Ultra post-processing (EffectComposer) -------------------------- */
   /* Ambient occlusion (SSAO) + SMAA anti-aliasing + higher-res soft shadows. */
 
-  setUltraAO(on) { this._ultraAO = !!on; this._applyUltra(); }
+  /* Enable/disable SSAO. `onReady` (optional) fires once the first post-processed
+   * frame has rendered -- i.e. after the one-time shader compile that briefly
+   * stalls the main thread -- so the UI can show/hide a loading indicator. */
+  setUltraAO(on, onReady = null) {
+    this._ultraAO = !!on;
+    this._applyUltra();
+    if (this._ultraAO && this._composer) {
+      this._ultraReadyCb = typeof onReady === 'function' ? onReady : null;
+      this._ultraReadyFrames = 2;   // let the SSAO + SMAA passes compile + settle
+    } else {
+      this._ultraReadyCb = null;
+      if (typeof onReady === 'function') onReady();
+    }
+  }
+
   getUltraState() { return { ao: this._ultraAO }; }
 
   _ultraActive() { return this._ultraAO; }
 
   _applyUltra() {
-    const active = this._ultraActive();
-    if (active) {
+    if (this._ultraActive()) {
       this._ensureComposer();
       this._updateComposerPasses();
     }
-    // Crisper shadows when Ultra is on; drop the cached map so the size takes.
-    this.sun.shadow.mapSize.set(active ? 4096 : 2048, active ? 4096 : 2048);
-    if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
-    this.sun.shadow.needsUpdate = true;
+    this._markShadowDirty();
   }
 
   _ensureComposer() {
@@ -726,7 +774,8 @@ export class ObjectViewer {
     this._composer.setPixelRatio(dpr);
     this._composer.setSize(sz.x, sz.y);
     this._renderPass = new RenderPass(this.scene, this.camera);
-    this._ssaoPass = new SSAOPass(this.scene, this.camera, sz.x, sz.y);
+    // kernelSize 16 (vs the default 32) roughly halves the AO sample loop.
+    this._ssaoPass = new SSAOPass(this.scene, this.camera, sz.x, sz.y, 16);
     this._ssaoPass.kernelRadius = 8;
     this._ssaoPass.minDistance = 0.0015;
     this._ssaoPass.maxDistance = 0.08;
@@ -734,12 +783,12 @@ export class ObjectViewer {
     this._smaaPass = new SMAAPass(sz.x * dpr, sz.y * dpr);
   }
 
-  /* Order: Render -> [SSAO] -> Output (sRGB) -> SMAA. */
+  /* Order: Render -> SSAO -> Output (sRGB) -> SMAA. */
   _updateComposerPasses() {
     if (!this._composer) return;
     this._composer.passes.length = 0;
     this._composer.addPass(this._renderPass);
-    if (this._ultraAO) this._composer.addPass(this._ssaoPass);
+    this._composer.addPass(this._ssaoPass);
     this._composer.addPass(this._outputPass);
     this._composer.addPass(this._smaaPass);
   }
@@ -860,6 +909,7 @@ export class ObjectViewer {
   }
 
   resize() {
+    if (!this.container) return;
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     if (!w || !h) return;
@@ -876,8 +926,25 @@ export class ObjectViewer {
   }
 
   _animate() {
+    // Re-fit on any viewport change. innerWidth/innerHeight are cheap reads and
+    // change for window resizes AND monitor moves; this is the reliable trigger
+    // (resize events / ResizeObserver don't fire when the stale flex layout keeps
+    // the stage box unchanged).
+    if (window.innerWidth !== this._lastViewW || window.innerHeight !== this._lastViewH) {
+      this._lastViewW = window.innerWidth;
+      this._lastViewH = window.innerHeight;
+      this.resize();
+    }
+
     const dt = this._clock.getDelta();
-    if (this._mixer) this._mixer.update(dt);
+    // The model only moves (-> shadows change) while an animation is playing or a
+    // free-spin is in motion; flag the shadow map dirty just for those frames so
+    // the otherwise-static scene doesn't re-render shadows every frame.
+    let moving = false;
+    if (this._mixer) {
+      this._mixer.update(dt);
+      if (this._activeAction && !this._activeAction.paused) moving = true;
+    }
     // Free-spin momentum: integrate angular velocity, then apply friction decay.
     if (this._freeSpin && !this._dragging && this._spin) {
       const v = this._spinVel;
@@ -889,11 +956,36 @@ export class ObjectViewer {
         v.y *= decay;
         if (Math.abs(v.x) <= SPIN_MIN_VEL) v.x = 0;
         if (Math.abs(v.y) <= SPIN_MIN_VEL) v.y = 0;
+        moving = true;
       }
     }
+    if (this._dragging) moving = true;   // dragging the free-spin model
+    if (moving) this.renderer.shadowMap.needsUpdate = true;
+
     this.controls.update();
-    if (this._composer && this._ultraActive()) this._composer.render();
-    else this.renderer.render(this.scene, this.camera);
+
+    if (this._onFps) {
+      this._fpsAccum += dt;
+      this._fpsFrames++;
+      if (this._fpsAccum >= 0.5) {
+        this._onFps(this._fpsFrames / this._fpsAccum);
+        this._fpsAccum = 0;
+        this._fpsFrames = 0;
+      }
+    }
+
+    if (this._composer && this._ultraActive()) {
+      this._composer.render();
+      // The first render after enabling AO compiles the SSAO/SMAA shaders (the
+      // stall). Once a couple frames are through, notify the readiness callback.
+      if (this._ultraReadyCb && --this._ultraReadyFrames <= 0) {
+        const cb = this._ultraReadyCb;
+        this._ultraReadyCb = null;
+        cb();
+      }
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   dispose() {
@@ -901,6 +993,7 @@ export class ObjectViewer {
     this._disposeMixer();
     this.renderer.setAnimationLoop(null);
     window.removeEventListener('resize', this._onResize);
+    if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
     const el = this.renderer.domElement;
     el.removeEventListener('pointerdown', this._onPointerDown);
     el.removeEventListener('pointermove', this._onPointerMove);

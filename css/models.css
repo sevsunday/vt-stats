@@ -10,11 +10,27 @@
 body.embed .navbar,
 body.embed #back-btn { display: none; }
 
+/* ---------------- page layout lock ----------------
+ * Lock the page to the viewport so the 3D viewer's stage always fits. Without
+ * this, the body is content-sized (Bootstrap's .h-100 resolves to `auto` here)
+ * and the canvas's fixed pixel height lets the flex column grow PAST the
+ * viewport -- forcing page scroll and pushing the FPS counter + Sun-light panel
+ * below the fold until a refresh. Pinning the body to the dynamic viewport
+ * height + `overflow:hidden` makes the flex chain shrink the stage on every
+ * resize; the directory grid scrolls internally instead of the whole page.
+ * (Scoped to the Models page -- models.css is only loaded here.) */
+html.h-100, body.h-100 {
+  height: 100vh !important;        /* fallback for browsers without dvh */
+  height: 100dvh !important;
+  min-height: 0 !important;
+}
+body { overflow: hidden; }
+
 /* ---------------- directory ---------------- */
 
 .models-page { min-height: 0; }
 
-.directory { padding: 1.25rem; }
+.directory { padding: 1.25rem; overflow-y: auto; min-height: 0; }
 
 .directory-hint {
   max-width: 1320px;
@@ -214,7 +230,7 @@ body.embed #back-btn { display: none; }
 .seg-btn:hover { color: var(--kb-text-primary); }
 .seg-btn.on { background: var(--kb-primary); color: var(--kb-primary-fg); font-weight: 650; }
 
-.stage { flex: 1; min-height: 0; position: relative; }
+.stage { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 .stage canvas { display: block; touch-action: none; }
 /* Free-spin grab affordance (set on .stage while Free spin is active). */
 .stage.grabbable canvas { cursor: grab; }
@@ -338,6 +354,43 @@ body.embed #back-btn { display: none; }
 .scene-ultra { display: flex; flex-wrap: wrap; gap: 6px; }
 .btn.scene-ultra-btn { padding: 0.3rem 0.55rem; font-size: 0.78rem; }
 .btn.scene-ultra-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Tiny FPS readout, bottom-right of the viewport. */
+.fps-counter {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 6;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--kb-bg-card) 80%, transparent);
+  border: 1px solid var(--kb-border-default);
+  color: var(--kb-text-secondary);
+  font-family: var(--kb-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Loading overlay (shown e.g. while the Ambient occlusion passes compile). */
+.stage-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: color-mix(in srgb, var(--kb-bg-base) 55%, transparent);
+  backdrop-filter: blur(2px);
+  color: var(--kb-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.stage-loading .spinner-border { color: var(--kb-primary); }
 
 .error {
   padding: 1.5rem;
