@@ -73,8 +73,10 @@ OUT_DIR = PROJECT_ROOT / "data" / "models"
 GEO_DIR = OUT_DIR / "geometry"
 TEX_PERF_DIR = OUT_DIR / "textures" / "perf"
 TEX_HQ_DIR = OUT_DIR / "textures" / "hq"
+TEX_TEAMCOLOR_DIR = OUT_DIR / "textures" / "teamcolor"
 
 PERF_MAX_DIM = 512       # performance PNG largest side
+TEAMCOLOR_MAX_DIM = 512  # team-color mask largest side (coverage+shading; no HQ set)
 DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gallery)
 
 # Bump when the animated-GLB emission shape changes; mismatch vs the prior
@@ -87,6 +89,14 @@ DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gal
 #       and the tread material) survive into the published GLB for the viewer's
 #       interactive articulation. Adds the per-model `parts` manifest block.
 ANIM_FORMAT_VERSION = 3
+
+# Bump when the emitted texture SET shape changes (new texture kind / dir layout)
+# without the GLB geometry changing. A mismatch vs the prior index.json forces a
+# reprocess so the new textures get emitted; the GLB write is guarded (skipped
+# when fresh) so this does NOT churn the ~700 geometry GLBs.
+#   v1: add the team-color mask set (textures/teamcolor/<stem>.png) + the per-model
+#       `teamColorTextures` manifest block.
+TEXTURE_FORMAT_VERSION = 1
 
 # Render flags (mirror msh_parser): hidden/collision geometry is not drawable.
 RS_HIDDEN = 0x400
@@ -269,12 +279,15 @@ def build_workshop_index(ws_dir, ext):
 
 
 def parse_material(msh_dir: Path, material_filename: str):
-    """Read the [solid] diffuse RGBA + [texture] diffuse .dds name from a sibling
-    (or globally-indexed) `.material` file. Returns (rgba, diffuse_dds|None)."""
+    """Read the [solid] diffuse RGBA + [texture] diffuse/teamColor .dds names from
+    a sibling (or globally-indexed) `.material` file. Returns
+    (rgba, diffuse_dds|None, teamcolor_dds|None). `teamColor = <stem>_c.dds` marks
+    the team-colorable mask (BC3: alpha = colorizable region, RGB = shading)."""
     rgba = (0.8, 0.8, 0.8, 1.0)
     diffuse_dds = None
+    teamcolor_dds = None
     if not material_filename:
-        return rgba, diffuse_dds
+        return rgba, diffuse_dds, teamcolor_dds
     p = msh_dir / material_filename
     if not p.is_file():
         p = msh_dir / "materials" / material_filename
@@ -285,11 +298,11 @@ def parse_material(msh_dir: Path, material_filename: str):
         # VSR-scoped match wins; full-workshop is last-resort fallback.
         p = mat_index.get(key) or mat_index_all.get(key)
     if not p or not Path(p).is_file():
-        return rgba, diffuse_dds
+        return rgba, diffuse_dds, teamcolor_dds
     try:
         text = Path(p).read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return rgba, diffuse_dds
+        return rgba, diffuse_dds, teamcolor_dds
     section = None
     for line in text.splitlines():
         s = line.strip()
@@ -310,7 +323,9 @@ def parse_material(msh_dir: Path, material_filename: str):
                 pass
         elif section == "texture" and kl == "diffuse":
             diffuse_dds = val.strip()
-    return rgba, diffuse_dds
+        elif section == "texture" and kl == "teamcolor":
+            teamcolor_dds = val.strip()
+    return rgba, diffuse_dds, teamcolor_dds
 
 
 def _atomic_write_bytes(path: Path, data: bytes):
@@ -384,6 +399,41 @@ def resolve_diffuse(msh_dir: Path, dds_name: str, cache: dict):
     return tex_key, arr
 
 
+def resolve_teammask(msh_dir: Path, mask_dds_name: str, out_key: str, cache: set):
+    """Resolve + emit a team-color mask `.dds` to textures/teamcolor/<out_key>.png
+    (<=512px, RGBA preserved: alpha = colorizable region, RGB = shading). Keyed by
+    the DIFFUSE/material stem (`out_key`) so the viewer maps material name -> mask.
+    Perf PNG only (no HQ DDS set). Idempotent + atomic. Returns out_key or None.
+
+    `cache` is a per-model set of already-emitted out_keys so groups sharing a
+    diffuse only emit once."""
+    if not mask_dds_name or not out_key:
+        return None
+    if out_key in cache:
+        return out_key
+    src = _find_diffuse_src(msh_dir, mask_dds_name)
+    if src is None:
+        return None
+    src = Path(src)
+    try:
+        pil = decode_dds(src, max_dim=TEAMCOLOR_MAX_DIM).convert("RGBA")
+    except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
+        if _G and _G.get("verbose"):
+            print(f"    teammask decode failed {mask_dds_name}: {e}")
+        return None
+    w, h = pil.size
+    if max(w, h) > TEAMCOLOR_MAX_DIM:
+        scale = TEAMCOLOR_MAX_DIM / max(w, h)
+        pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.LANCZOS)
+    force = _G["force"] if _G else False
+    out_path = TEX_TEAMCOLOR_DIR / f"{out_key}.png"
+    if force or not out_path.exists():
+        _atomic_write_bytes(out_path, _png_bytes(pil))
+    cache.add(out_key)
+    return out_key
+
+
 def _png_bytes(img: Image.Image) -> bytes:
     import io
     bio = io.BytesIO()
@@ -397,20 +447,23 @@ def _png_bytes(img: Image.Image) -> bytes:
 def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
     """Weld each material group once into (positions, normals, uvs, indices) +
     resolve its material (name, base color, texture array). Returns the GLB
-    builder, the rasterizer prim list, the set of textured material keys, and
-    the set of texture stems that were referenced but did NOT resolve to a
-    `.dds` (for the missing-texture report)."""
+    builder, the rasterizer prim list, the set of textured material keys, the set
+    of texture keys that also emitted a team-color mask, and the set of texture
+    stems that were referenced but did NOT resolve to a `.dds` (missing-texture
+    report)."""
     gb = GlbBuilder()
     prims = []
     tex_keys = set()
+    teammask_keys = set()
     unresolved = set()
     tex_cache: dict = {}
+    teammask_cache: set = set()
     zf = -1.0 if handedness_fix else 1.0
 
     for gi, g in enumerate(mesh.groups):
         if g.hidden or not g.tris:
             continue
-        rgba, mat_diffuse = parse_material(msh_dir, g.material)
+        rgba, mat_diffuse, mat_teamcolor = parse_material(msh_dir, g.material)
         # The MSH-embedded diffuse name (g.texture) wins -- workshop models
         # (Cerberi etc.) use inline material names with no `.material` file but
         # carry the diffuse here; the `.material` [texture] diffuse is the
@@ -427,6 +480,12 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
                 unresolved.add(_stem(diffuse_dds))
         base_color = (1.0, 1.0, 1.0, 1.0) if tex_key else rgba
         mat_name = tex_key or (_stem(g.material) if g.material else f"mat{gi}")
+        # Team-color mask: emit only for textured groups (need the diffuse stem as
+        # the key so the viewer maps material name -> mask). The mask is keyed by
+        # the diffuse stem (mat_name), NOT the `_c` stem.
+        if tex_key and mat_teamcolor:
+            if resolve_teammask(msh_dir, mat_teamcolor, tex_key, teammask_cache):
+                teammask_keys.add(tex_key)
 
         weld = {}
         positions, normals, uvs, indices = [], [], [], []
@@ -468,7 +527,7 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
             "tex": tex_arr,
         })
 
-    return gb, prims, tex_keys, unresolved
+    return gb, prims, tex_keys, teammask_keys, unresolved
 
 
 def process_model(job: dict) -> dict:
@@ -483,66 +542,81 @@ def process_model(job: dict) -> dict:
             return {"stem": stem, "error": "no blocks parsed"}
         mesh = meshes[0]
 
-        gb, prims, tex_keys, unresolved = _build_groups(
+        gb, prims, tex_keys, teammask_keys, unresolved = _build_groups(
             mesh, msh_path.parent, cfg["handedness"])
         if not prims:
             return {"stem": stem, "error": "no renderable groups"}
 
         GEO_DIR.mkdir(parents=True, exist_ok=True)
-        glb_bytes = gb.to_bytes(node_name=mesh.name or stem)
 
-        # Animated models: replace the welded GLB with a node-hierarchy /
-        # SkinnedMesh GLB carrying the baked clips. Materials are named by the same
-        # texture stems so the viewer's runtime texture assignment is unchanged.
-        # Thumbnails + stats below still come from the welded `prims` (rest pose).
+        # GLB-write guard: when the existing geometry GLB is already fresh (e.g. a
+        # texture-format-only regen to emit the new team-color masks), `_build_groups`
+        # above has already re-emitted the diffuse + masks idempotently, so we skip
+        # the geometry GLB rewrite + animated rebuild + thumbnail render entirely and
+        # reuse the prior entry's animated/clips/parts/shots. This keeps a team-color
+        # regen from churning the ~700 deterministic GLBs.
+        glb_fresh = bool(job.get("glb_fresh"))
         clips = []
         animated = False
         parts = None
-        try:
-            full = parse_msh_full(msh_path)
-        except Exception:  # noqa: BLE001
-            full = None
-        # Emit a node-hierarchy GLB (preserving named moveable parts: turret_y /
-        # turret_x / recoil* nodes + the tread material) whenever the mesh has
-        # baked clips OR is a rigid multi-part model. Welding is kept only for
-        # single-node rigid meshes and skinned meshes without clips (skinned
-        # needs the dedicated skin path, which is only built when clips exist).
-        rigid_multinode = bool(
-            full and not full.get("skinned") and _renderable_node_count(full) > 1)
-        if full and (full.get("clips") or rigid_multinode):
-            def _resolve_tex_key(msh_dir, mat_name, tex_name):
-                diffuse = tex_name
-                if not diffuse and mat_name:
-                    try:
-                        _rgba, diffuse = parse_material(Path(msh_dir), mat_name)
-                    except Exception:  # noqa: BLE001
-                        diffuse = None
-                return _stem(diffuse) if diffuse else None
+        glb_bytes = b""
+        if glb_fresh:
+            animated = job.get("prior_animated", False)
+            clips = job.get("prior_clips", []) or []
+            parts = job.get("prior_parts")
+            shots = job.get("prior_shots") or []
+        else:
+            glb_bytes = gb.to_bytes(node_name=mesh.name or stem)
+
+            # Animated models: replace the welded GLB with a node-hierarchy /
+            # SkinnedMesh GLB carrying the baked clips. Materials are named by the same
+            # texture stems so the viewer's runtime texture assignment is unchanged.
+            # Thumbnails + stats below still come from the welded `prims` (rest pose).
             try:
-                anim_bytes, clips = build_animated_glb(full, _resolve_tex_key)
-                glb_bytes = anim_bytes
-                animated = bool(clips)
-            except Exception:  # noqa: BLE001 - fall back to the welded GLB
-                if cfg.get("verbose"):
-                    print(f"    [{stem}] node-hierarchy GLB failed; using welded:\n"
-                          f"{traceback.format_exc(limit=2)}")
-                clips = []
-            parts = _classify_parts(full, clips)
+                full = parse_msh_full(msh_path)
+            except Exception:  # noqa: BLE001
+                full = None
+            # Emit a node-hierarchy GLB (preserving named moveable parts: turret_y /
+            # turret_x / recoil* nodes + the tread material) whenever the mesh has
+            # baked clips OR is a rigid multi-part model. Welding is kept only for
+            # single-node rigid meshes and skinned meshes without clips (skinned
+            # needs the dedicated skin path, which is only built when clips exist).
+            rigid_multinode = bool(
+                full and not full.get("skinned") and _renderable_node_count(full) > 1)
+            if full and (full.get("clips") or rigid_multinode):
+                def _resolve_tex_key(msh_dir, mat_name, tex_name):
+                    diffuse = tex_name
+                    if not diffuse and mat_name:
+                        try:
+                            _rgba, diffuse, _team = parse_material(Path(msh_dir), mat_name)
+                        except Exception:  # noqa: BLE001
+                            diffuse = None
+                    return _stem(diffuse) if diffuse else None
+                try:
+                    anim_bytes, clips = build_animated_glb(full, _resolve_tex_key)
+                    glb_bytes = anim_bytes
+                    animated = bool(clips)
+                except Exception:  # noqa: BLE001 - fall back to the welded GLB
+                    if cfg.get("verbose"):
+                        print(f"    [{stem}] node-hierarchy GLB failed; using welded:\n"
+                              f"{traceback.format_exc(limit=2)}")
+                    clips = []
+                parts = _classify_parts(full, clips)
 
-        _atomic_write_bytes(GEO_DIR / f"{stem}.glb", glb_bytes)
+            _atomic_write_bytes(GEO_DIR / f"{stem}.glb", glb_bytes)
 
-        shots = []
-        if cfg["render"]:
-            written = msh_thumbnail.render_model(
-                prims, OUT_DIR, stem,
-                hero_size=cfg["hero_size"], gallery_size=cfg["gallery_size"],
-                supersample=cfg["supersample"], want_gallery=cfg["gallery"],
-            )
-            shots = written.get("shots", [])
-        elif job.get("prior_shots"):
-            # --no-render: keep the existing (committed) gallery references rather
-            # than emitting [] when reprocessing only the GLB (e.g. anim regen).
-            shots = job["prior_shots"]
+            shots = []
+            if cfg["render"]:
+                written = msh_thumbnail.render_model(
+                    prims, OUT_DIR, stem,
+                    hero_size=cfg["hero_size"], gallery_size=cfg["gallery_size"],
+                    supersample=cfg["supersample"], want_gallery=cfg["gallery"],
+                )
+                shots = written.get("shots", [])
+            elif job.get("prior_shots"):
+                # --no-render: keep the existing (committed) gallery references rather
+                # than emitting [] when reprocessing only the GLB (e.g. anim regen).
+                shots = job["prior_shots"]
 
         lo, hi = mesh.bbox()
         tris = sum(len(g.tris) for g in mesh.groups if not g.hidden)
@@ -561,6 +635,7 @@ def process_model(job: dict) -> dict:
             "triangles": tris,
             "groups": groups,
             "textures": sorted(tex_keys),
+            "teamColorTextures": sorted(teammask_keys),
             "unresolvedTextures": sorted(unresolved - tex_keys),
             "radius": round(mesh.radius, 3),
             "bboxSize": [round(hi[i] - lo[i], 3) for i in range(3)],
@@ -618,6 +693,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "triangles": p.get("triangles", 0),
         "groups": p.get("groups", 0),
         "textures": p.get("textures", []),
+        "teamColorTextures": p.get("teamColorTextures", []),
         "unresolvedTextures": p.get("unresolvedTextures", []),
         "radius": p.get("radius", 0),
         "bboxSize": p.get("bboxSize", [0, 0, 0]),
@@ -682,26 +758,38 @@ def main():
         resolved = resolved[:args.limit]
         print(f"--limit: capped to {len(resolved)} models")
 
-    for d in (GEO_DIR, TEX_PERF_DIR, TEX_HQ_DIR, OUT_DIR / "thumbnails"):
+    for d in (GEO_DIR, TEX_PERF_DIR, TEX_HQ_DIR, TEX_TEAMCOLOR_DIR, OUT_DIR / "thumbnails"):
         d.mkdir(parents=True, exist_ok=True)
 
     # Prior manifest (for cache reuse of geometry stats). A change in
     # ANIM_FORMAT_VERSION forces a full regen (the GLB shape changed even though
-    # the source meshes did not, so mtime-based freshness can't catch it).
+    # the source meshes did not, so mtime-based freshness can't catch it). A
+    # change in TEXTURE_FORMAT_VERSION forces a TEXTURE-only re-emit: otherwise-
+    # fresh models are reprocessed but the GLB write is guarded (skipped) so the
+    # geometry GLBs don't churn -- only the new texture set + index.json change.
     prior = {}
     prior_anim_version = None
+    prior_tex_version = None
     idx_path = OUT_DIR / "index.json"
     if idx_path.exists():
         try:
             prior_doc = json.loads(idx_path.read_text(encoding="utf-8"))
             prior_anim_version = prior_doc.get("anim_format_version")
+            prior_tex_version = prior_doc.get("texture_format_version")
             prior = {m["stem"]: m for m in prior_doc.get("models", []) if "stem" in m}
         except (json.JSONDecodeError, KeyError):
             prior = {}
     anim_version_changed = prior_anim_version != ANIM_FORMAT_VERSION
+    tex_version_changed = prior_tex_version != TEXTURE_FORMAT_VERSION
     if anim_version_changed and prior:
         print(f"anim_format_version {prior_anim_version} -> {ANIM_FORMAT_VERSION}: "
               f"forcing full regen")
+    if tex_version_changed and prior and not anim_version_changed:
+        print(f"texture_format_version {prior_tex_version} -> {TEXTURE_FORMAT_VERSION}: "
+              f"re-emitting textures (GLB writes guarded)")
+    # `force` = full rebuild incl. geometry GLB. A texture-version bump alone does
+    # NOT set force -- it only re-runs fresh models with glb_fresh=True so the GLB
+    # write is skipped.
     force = args.force or anim_version_changed
 
     want_gallery = not args.no_gallery and not args.no_render
@@ -716,18 +804,27 @@ def main():
         "verbose": args.verbose,
     }
 
-    # Partition into cache-hits (reuse prior entry) and jobs (process).
+    # Partition into cache-hits (reuse prior entry) and jobs (process). When only
+    # the texture version changed, an otherwise-fresh model is reprocessed with
+    # glb_fresh=True (emit textures/masks, skip the GLB rewrite + render).
     jobs = []
     manifest = []
     cached = 0
     for stem, meta, mp in resolved:
-        if (not force and stem in prior
-                and _outputs_fresh(stem, mp, want_gallery)):
+        fresh = stem in prior and _outputs_fresh(stem, mp, want_gallery)
+        if not force and fresh and not tex_version_changed:
             manifest.append(_cached_entry(stem, meta, prior))
             cached += 1
             continue
+        glb_fresh = (not force) and fresh   # GLB reusable -> texture-only re-emit
+        p = prior.get(stem, {})
         jobs.append({"stem": stem, "msh": str(mp),
-                     "prior_shots": prior.get(stem, {}).get("shots"), **meta})
+                     "prior_shots": p.get("shots"),
+                     "glb_fresh": glb_fresh,
+                     "prior_animated": p.get("animated", False),
+                     "prior_clips": p.get("clips", []),
+                     "prior_parts": p.get("parts"),
+                     **meta})
 
     print(f"{cached} cached, {len(jobs)} to process "
           f"(jobs={args.jobs}, render={cfg['render']}, gallery={cfg['gallery']})")
@@ -786,12 +883,15 @@ def main():
         "unresolved": dict(sorted(unresolved.items())),
     }
     animated_count = sum(1 for m in manifest if m.get("animated"))
+    teamcolor_count = sum(1 for m in manifest if m.get("teamColorTextures"))
     idx_path.write_text(json.dumps({
-        "schema_version": 5,
+        "schema_version": 6,
         "anim_format_version": ANIM_FORMAT_VERSION,
+        "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "count": len(manifest),
         "animated_count": animated_count,
+        "teamcolor_count": teamcolor_count,
         "texture_report": texture_report,
         "models": manifest,
         "odf_index": odf_index,
@@ -800,7 +900,7 @@ def main():
     dt = time.perf_counter() - t0
     print(f"\nwrote {idx_path} -- {len(manifest)} models "
           f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed, "
-          f"{animated_count} animated)")
+          f"{animated_count} animated, {teamcolor_count} team-colorable)")
     print(f"textures: {texture_report['models_textured']} textured, "
           f"{texture_report['models_no_texture']} without "
           f"({texture_report['models_unresolved_refs']} have unresolved refs, "

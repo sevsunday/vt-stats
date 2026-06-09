@@ -103,7 +103,39 @@ const els = {
   partsDriveSection: document.getElementById('parts-drive-section'),
   partsDrive: document.getElementById('parts-drive'),
   partsDriveVal: document.getElementById('parts-drive-val'),
+  colorsBtn: document.getElementById('colors-btn'),
+  colorsPanel: document.getElementById('colors-panel'),
+  colorSwatches: document.getElementById('color-swatches'),
+  colorSwatchesBold: document.getElementById('color-swatches-bold'),
+  colorsCustom: document.getElementById('colors-custom'),
+  colorsOff: document.getElementById('colors-off'),
 };
+
+// In-game team-color palette presets (team 1 / team 2 plus common FFA hues).
+const TEAM_COLOR_PRESETS = [
+  { hex: '#e23b3b', label: 'Red' },
+  { hex: '#3b6fe2', label: 'Blue' },
+  { hex: '#36b94a', label: 'Green' },
+  { hex: '#e2c235', label: 'Yellow' },
+  { hex: '#e2802f', label: 'Orange' },
+  { hex: '#9b4fd6', label: 'Purple' },
+  { hex: '#2fc7d6', label: 'Cyan' },
+  { hex: '#e8e8e8', label: 'White' },
+];
+
+// "Bold colors" -- a designer-grade luxury palette (deep, saturated, old-money
+// hues: think oxblood leather, racing/hunter green, midnight navy, cognac,
+// champagne brass). Distinct from the brighter in-game team presets above.
+const BOLD_COLOR_PRESETS = [
+  { hex: '#5e1224', label: 'Oxblood' },
+  { hex: '#1f4d38', label: 'Hunter Green' },
+  { hex: '#16243f', label: 'Midnight Navy' },
+  { hex: '#4b2142', label: 'Aubergine' },
+  { hex: '#9a5b33', label: 'Cognac' },
+  { hex: '#c9a86a', label: 'Champagne Gold' },
+  { hex: '#1d4e5f', label: 'Deep Teal' },
+  { hex: '#3a3d42', label: 'Graphite' },
+];
 
 let manifest = [];
 let activeViewer = null;
@@ -120,6 +152,12 @@ function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) !
 function hasMoveableParts(m) {
   const p = m && m.parts;
   return !!(p && (p.turret || p.pitch || p.recoil > 0 || p.treads));
+}
+
+// True when a manifest entry has at least one team-colorable material (a `_c`
+// mask was emitted) -- drives the directory "Team color" badge + Colors button.
+function hasTeamColorMask(m) {
+  return !!(m && Array.isArray(m.teamColorTextures) && m.teamColorTextures.length);
 }
 
 function lightPrefs() {
@@ -266,6 +304,7 @@ function renderDirectory() {
         <span class="chip" style="--c:${color}">${escapeHtml(m.factionName || '?')}</span>
         <span class="chip chip-ghost">${escapeHtml(m.category || '')}</span>
         ${hasMoveableParts(m) ? '<span class="chip chip-parts" title="Has moveable parts (turret / guns / treads)">Articulated</span>' : ''}
+        ${hasTeamColorMask(m) ? '<span class="chip chip-colors" title="Supports multiplayer team colors">Team color</span>' : ''}
       </div>
       <div class="card-stats">${m.triangles.toLocaleString()} tris &middot; ${m.groups} ${m.groups === 1 ? 'part' : 'parts'} &middot; ${(m.textures || []).length} tex</div>
       <div class="card-odf">${escapeHtml(m.primaryOdf || '')}</div>`;
@@ -301,6 +340,7 @@ function showViewer(entry) {
       if (!activeViewer) return;
       setupAnimUI();
       setupArticulationUI();
+      setupColorsUI();
       updateControlsHint();
       // Apply persisted display + Ultra prefs once the model exists.
       activeViewer.setBackgroundMode(scene.bg);
@@ -354,6 +394,12 @@ function showViewer(entry) {
   els.partsBtn.classList.remove('on');
   els.partsPanel.hidden = true;
   els.partsAim.classList.remove('on');
+
+  // Team-color controls start hidden; setupColorsUI() reveals them once the GLB
+  // resolves and reports team-colorable materials. Each open starts uncolored.
+  els.colorsBtn.hidden = true;
+  els.colorsBtn.classList.remove('on');
+  els.colorsPanel.hidden = true;
 
   // Controls legend repopulates once the model loads (updateControlsHint()).
   els.controlsHint.hidden = true;
@@ -429,6 +475,11 @@ function showViewer(entry) {
     const show = els.partsPanel.hidden;
     els.partsPanel.hidden = !show;
     els.partsBtn.classList.toggle('on', show);
+    if (show) {  // parts + colors share the top-right slot -> mutually exclusive
+      els.colorsPanel.hidden = true;
+      els.colorsBtn.classList.remove('on');
+      els.colorsBtn.setAttribute('aria-expanded', 'false');
+    }
   };
   els.partsYaw.oninput = (e) => {
     const v = parseFloat(e.target.value);
@@ -463,6 +514,27 @@ function showViewer(entry) {
     const v = parseFloat(e.target.value);
     els.partsDriveVal.textContent = v.toFixed(2);
     if (activeViewer) activeViewer.setDrive(v);
+  };
+
+  // Team color: the button toggles the floating panel; swatches + the custom
+  // picker apply a hue, Original reverts to the baked diffuse.
+  els.colorsBtn.onclick = () => {
+    const show = els.colorsPanel.hidden;
+    els.colorsPanel.hidden = !show;
+    els.colorsBtn.classList.toggle('on', show);
+    els.colorsBtn.setAttribute('aria-expanded', String(show));
+    if (show) {  // parts + colors share the top-right slot -> mutually exclusive
+      els.partsPanel.hidden = true;
+      els.partsBtn.classList.remove('on');
+    }
+  };
+  els.colorsCustom.oninput = (e) => {
+    if (activeViewer) activeViewer.setTeamColor(e.target.value);
+    syncColorSwatches(e.target.value);
+  };
+  els.colorsOff.onclick = () => {
+    if (activeViewer) activeViewer.clearTeamColor();
+    syncColorSwatches(null);
   };
 
   // Scene panel. The button toggles the floating panel; the controls drive the
@@ -640,6 +712,60 @@ function setupArticulationUI() {
   els.partsDriveVal.textContent = '0';
 }
 
+/* Reveal + populate the Colors panel when the loaded model has team-colorable
+ * materials. Each open starts uncolored (Original); the panel stays closed until
+ * the user clicks the Colors button. */
+function setupColorsUI() {
+  if (!activeViewer) return;
+  if (!activeViewer.hasTeamColor()) {
+    els.colorsBtn.hidden = true;
+    els.colorsBtn.classList.remove('on');
+    els.colorsPanel.hidden = true;
+    return;
+  }
+  els.colorsBtn.hidden = false;
+
+  // Build the preset swatch rows once (idempotent across opens).
+  buildSwatchRow(els.colorSwatches, TEAM_COLOR_PRESETS);
+  buildSwatchRow(els.colorSwatchesBold, BOLD_COLOR_PRESETS);
+  syncColorSwatches(null);
+}
+
+/* Populate a swatch grid from a preset list (no-op if already built). */
+function buildSwatchRow(container, presets) {
+  if (!container || container.childElementCount) return;
+  const frag = document.createDocumentFragment();
+  for (const { hex, label } of presets) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'color-swatch';
+    b.dataset.hex = hex;
+    b.style.setProperty('--sw', hex);
+    b.title = label;
+    b.setAttribute('aria-label', `Team color ${label}`);
+    b.onclick = () => {
+      if (activeViewer) activeViewer.setTeamColor(hex);
+      if (els.colorsCustom) els.colorsCustom.value = hex;
+      syncColorSwatches(hex);
+    };
+    frag.appendChild(b);
+  }
+  container.appendChild(frag);
+}
+
+/* Reflect the active team color on both swatch rows + the Original button.
+ * `hex` null means uncolored (Original active). */
+function syncColorSwatches(hex) {
+  const norm = hex ? String(hex).toLowerCase() : null;
+  for (const row of [els.colorSwatches, els.colorSwatchesBold]) {
+    if (!row) continue;
+    row.querySelectorAll('.color-swatch').forEach((b) => {
+      b.classList.toggle('on', norm !== null && b.dataset.hex.toLowerCase() === norm);
+    });
+  }
+  els.colorsOff.classList.toggle('on', norm === null);
+}
+
 /* "Reset all": restore the entire viewer to defaults -- toggles off, quality
  * back to the global Prefer-HQ default, sun light back to default
  * on/intensity/azimuth/elevation (persisted + live + panel), and the camera /
@@ -676,6 +802,12 @@ function resetAllViewer() {
     syncTurretSliders(0, 0);
     els.partsDrive.value = '0';
     els.partsDriveVal.textContent = '0';
+  }
+
+  // Team color -> off (Original). Keeps the swatch row; just clears the tint.
+  if (activeViewer.hasTeamColor()) {
+    activeViewer.clearTeamColor();
+    syncColorSwatches(null);
   }
   updateControlsHint();
 

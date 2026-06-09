@@ -166,6 +166,11 @@ body { overflow: hidden; }
   color: var(--kb-primary);
   border: 1px solid color-mix(in srgb, var(--kb-primary) 55%, transparent);
 }
+.chip-colors {
+  background: transparent;
+  color: var(--kb-accent, var(--kb-secondary, var(--kb-primary)));
+  border: 1px solid color-mix(in srgb, var(--kb-accent, var(--kb-secondary, var(--kb-primary))) 55%, transparent);
+}
 .card-stats { color: var(--kb-text-secondary); font-size: 0.78rem; }
 .card-odf {
   color: var(--kb-text-muted);
@@ -346,6 +351,65 @@ body { overflow: hidden; }
 }
 .btn.parts-fire:hover { filter: brightness(1.08); }
 
+/* Team-color panel: shares the TOP-right slot with the parts panel (the two are
+   mutually exclusive in the UI). */
+.colors-panel {
+  left: auto;
+  right: 14px;
+  top: 14px;
+  bottom: auto;
+  width: 234px;
+  max-height: 76vh;
+  overflow-y: auto;
+}
+.color-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.color-swatch {
+  appearance: none;
+  border: 2px solid var(--kb-border-default);
+  border-radius: 8px;
+  height: 30px;
+  padding: 0;
+  cursor: pointer;
+  background: var(--sw);
+  transition: transform 0.08s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.color-swatch:hover { transform: translateY(-1px); border-color: var(--kb-text-secondary); }
+.color-swatch.on {
+  border-color: var(--kb-text-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sw) 60%, transparent);
+}
+/* Sub-section divider inside the colors panel (e.g. "Bold colors"). */
+.color-section-head {
+  color: var(--kb-text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-top: 8px;
+  border-top: 1px solid var(--kb-border-default);
+}
+.color-custom-row { gap: 10px; }
+.color-custom {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  background: var(--kb-bg-input);
+  cursor: pointer;
+}
+.colors-off.on {
+  background: var(--kb-primary);
+  color: var(--kb-primary-fg);
+  border-color: var(--kb-primary);
+  font-weight: 650;
+}
+
 /* Scene panel: mirrors .light-panel but anchored TOP-left so it clears the
    bottom light/anim panels. */
 .scene-panel {
@@ -512,10 +576,11 @@ body { overflow: hidden; }
     width: auto;
     border-radius: 12px 12px 0 0;
   }
-  /* Scene + Parts panels dock as TOP sheets so they clear the always-visible
-     bottom light panel + the bottom-right anim panel. */
+  /* Scene + Parts + Colors panels dock as TOP sheets so they clear the
+     always-visible bottom light panel + the bottom-right anim panel. */
   .scene-panel,
-  .parts-panel {
+  .parts-panel,
+  .colors-panel {
     top: 0;
     bottom: auto;
     left: 0;

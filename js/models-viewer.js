@@ -33,6 +33,9 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const TEX_BASE = '../data/models/textures/';
+// Team-color masks live in a single perf-resolution set (no HQ variant); keyed by
+// the diffuse/material stem so a material name maps straight to its mask.
+const TEX_TEAMCOLOR_BASE = '../data/models/textures/teamcolor/';
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -115,6 +118,27 @@ const ART_AXIS_X = new THREE.Vector3(1, 0, 0);
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
+// ---- Team color (BZCC `_c` mask compositing) --------------------------------
+// The `_c` mask is BC3: alpha = colorizable region (coverage), RGB = shading
+// detail. We tint the masked region with the chosen team color, modulated by the
+// mask luminance (to preserve panel shading) and lifted by TEAM_GAIN so the hue
+// reads near in-game brightness, then blended by the coverage. Recoloring is just
+// a uniform update (no texture reload). Default mix is 0 (off until the user picks
+// a color). The exact engine formula isn't published; TEAM_GAIN is the tuning knob.
+const TEAM_GAIN = 1.6;
+const TEAM_DEFAULT_HEX = 0xe23b3b;   // team-1 red, the in-game default
+const TEAM_UNIFORM_DECL =
+  'uniform vec3 uTeamColor;\nuniform sampler2D uTeamMask;\nuniform float uTeamMix;\n';
+const TEAM_MAP_FRAG_INJECT = `#include <map_fragment>
+  {
+    vec4 vtTeamMask = texture2D( uTeamMask, vMapUv );
+    float vtTeamCov = vtTeamMask.a;
+    float vtTeamShade = dot( vtTeamMask.rgb, vec3( 0.299, 0.587, 0.114 ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb,
+                            uTeamColor * vtTeamShade * ${TEAM_GAIN.toFixed(4)},
+                            vtTeamCov * uTeamMix );
+  }`;
+
 export class ObjectViewer {
   constructor(container, opts = {}) {
     this.container = container;
@@ -129,6 +153,14 @@ export class ObjectViewer {
     this._texCache = new Map();  // `${quality}:${name}` -> THREE.Texture
     this._texLoader = new THREE.TextureLoader();
     this._ddsLoader = new DDSLoader();
+
+    // Team-color state. `_teamColorMaterials` = materials wired with the mask
+    // shader; `_teamColorMix` is the intended strength (0 off / 1 on), gated to 0
+    // while wireframe is active. `_teamColor` is the current hue (kept across opens).
+    this._teamColor = new THREE.Color(TEAM_DEFAULT_HEX);
+    this._teamColorMix = 0;
+    this._teamColorMaterials = [];
+    this._teamMaskCache = new Map();  // `team:${name}` -> THREE.Texture | null
 
     // Sun light state (persisted by the caller; see opts.light).
     const lopts = opts.light || {};
@@ -368,6 +400,8 @@ export class ObjectViewer {
     }
     this._materials = [];
     this._wireSaved = null;  // drop any stale stash from a prior model
+    this._teamColorMaterials = [];
+    this._teamColorMix = 0;  // each model opens uncolored (off by default)
     const names = new Set();
     const model = gltf.scene;
     model.traverse((o) => {
@@ -398,6 +432,7 @@ export class ObjectViewer {
     this._detectArticulation(model);
     this.setWireframe(this._wireframe);
     await this._applyTextures();
+    await this._applyTeamMasks();
     return gltf;
   }
 
@@ -476,6 +511,115 @@ export class ObjectViewer {
     if (q === this._quality) return;
     this._quality = q;
     if (this._model) await this._applyTextures();
+  }
+
+  /* ---- Team color (BZCC `_c` mask) ------------------------------------- */
+
+  /* For every material whose name has a published team-color mask, load the mask
+   * and inject the compositing shader (default mix 0 = off). Materials without a
+   * mask are untouched. Called after _applyTextures() so the diffuse map (and its
+   * vMapUv varying) exist when our injected #include <map_fragment> snippet runs. */
+  async _applyTeamMasks() {
+    this._teamColorMaterials = [];
+    await Promise.all(this._materials.map(async (mat) => {
+      if (!mat.name) return;
+      const tex = await this._loadTeamMask(mat.name);
+      if (this.disposed || !tex) return;
+      this._wireTeamColor(mat, tex);
+    }));
+    this._syncTeamColorUniforms();
+  }
+
+  _loadTeamMask(name) {
+    const cacheKey = `team:${name}`;
+    if (this._teamMaskCache.has(cacheKey)) return Promise.resolve(this._teamMaskCache.get(cacheKey));
+    const finish = (tex) => {
+      if (tex) {
+        tex.flipY = false;                  // GLB UVs authored flipY=false (match diffuse)
+        tex.colorSpace = THREE.NoColorSpace; // mask is data: alpha=coverage, rgb=shading
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+        tex.needsUpdate = true;
+      }
+      this._teamMaskCache.set(cacheKey, tex || null);
+      return tex || null;
+    };
+    const url = `${TEX_TEAMCOLOR_BASE}${name}.png`;
+    return new Promise((resolve) => {
+      this._texLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
+    });
+  }
+
+  /* Inject the team-color blend into a MeshStandardMaterial via onBeforeCompile.
+   * The uniform value-objects live on material.userData so recompiles (quality
+   * swap, wireframe restore) reuse the same refs and live recolors keep working. */
+  _wireTeamColor(mat, maskTex) {
+    let u = mat.userData.teamUniforms;
+    if (!u) {
+      u = {
+        uTeamColor: { value: this._teamColor.clone() },
+        uTeamMask: { value: maskTex },
+        uTeamMix: { value: 0 },
+      };
+      mat.userData.teamUniforms = u;
+      mat.userData.teamColorable = true;
+      const prevOBC = mat.onBeforeCompile;
+      mat.onBeforeCompile = (shader) => {
+        if (prevOBC) prevOBC(shader);
+        shader.uniforms.uTeamColor = u.uTeamColor;
+        shader.uniforms.uTeamMask = u.uTeamMask;
+        shader.uniforms.uTeamMix = u.uTeamMix;
+        shader.fragmentShader = TEAM_UNIFORM_DECL + shader.fragmentShader;
+        // Only blends when the material actually has a diffuse map (the include is
+        // present + vMapUv exists); otherwise this replace is a no-op.
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <map_fragment>', TEAM_MAP_FRAG_INJECT);
+      };
+      // Distinguish the compiled program from non-team materials in the cache.
+      mat.customProgramCacheKey = () => 'vt-team-color';
+      mat.needsUpdate = true;
+    } else {
+      u.uTeamMask.value = maskTex;
+    }
+    if (!this._teamColorMaterials.includes(mat)) this._teamColorMaterials.push(mat);
+  }
+
+  hasTeamColor() { return this._teamColorMaterials.length > 0; }
+
+  /* Apply a team color (hex string or number). Null/undefined clears it. */
+  setTeamColor(hex) {
+    if (hex == null) { this.clearTeamColor(); return; }
+    this._teamColor.set(hex);
+    this._teamColorMix = 1;
+    for (const mat of this._teamColorMaterials) {
+      const u = mat.userData.teamUniforms;
+      if (u) u.uTeamColor.value.copy(this._teamColor);
+    }
+    this._syncTeamColorUniforms();
+    this._markShadowDirty();
+  }
+
+  /* Revert to the original baked diffuse (keeps the chosen hue for next time). */
+  clearTeamColor() {
+    this._teamColorMix = 0;
+    this._syncTeamColorUniforms();
+    this._markShadowDirty();
+  }
+
+  /* The active team color as a hex string, or null when off. */
+  getTeamColor() {
+    return this._teamColorMix > 0 ? `#${this._teamColor.getHexString()}` : null;
+  }
+
+  /* Push the intended mix to every wired material, forced to 0 while wireframe is
+   * on (flat white lines must not be tinted). */
+  _syncTeamColorUniforms() {
+    const mix = this._wireframe ? 0 : this._teamColorMix;
+    for (const mat of this._teamColorMaterials) {
+      const u = mat.userData.teamUniforms;
+      if (u) u.uTeamMix.value = mix;
+    }
   }
 
   getQuality() { return this._quality; }
@@ -593,6 +737,7 @@ export class ObjectViewer {
       for (const m of this._materials) m.wireframe = false;
     }
     this._updateWirePixelRatio();
+    this._syncTeamColorUniforms();   // suppress tint while wireframe on, restore off
   }
 
   /* Opt-in "crisp" wireframe: supersamples the backing store so the
@@ -1101,6 +1246,7 @@ export class ObjectViewer {
     this._spinVel.y = 0;
     if (this._spin) this._spin.quaternion.identity();
     this.resetArticulation();
+    this.clearTeamColor();
     if (this._home) {
       this.camera.position.copy(this._home.pos);
       this.controls.target.copy(this._home.target);
@@ -1321,6 +1467,8 @@ export class ObjectViewer {
     this.controls.dispose();
     for (const t of this._texCache.values()) { if (t) t.dispose(); }
     this._texCache.clear();
+    for (const t of this._teamMaskCache.values()) { if (t) t.dispose(); }
+    this._teamMaskCache.clear();
     // Post-processing pipeline.
     if (this._composer) this._composer.dispose();
     if (this._ssaoPass && this._ssaoPass.dispose) this._ssaoPass.dispose();

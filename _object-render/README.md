@@ -61,6 +61,7 @@ data/models/                        (committed via git LFS)
   geometry/<stem>.glb               geometry + UVs + named materials, no tex
   textures/perf/<stem>.png          512px diffuse (perf)
   textures/hq/<stem>.dds            native 2048 diffuse (HQ, verbatim)
+  textures/teamcolor/<stem>.png     <=512px team-color mask (alpha=region, rgb=shading)
   thumbnails/<stem>.png             hero (~256px) for the directory cards
   shots/<stem>/<angle>.png          7-angle HQ gallery (~512px):
                                      hero/front/back/left/right/top/bottom
@@ -138,6 +139,7 @@ thumbnails + the multi-angle `shots/` gallery, ~1.7 GB total):
 data/models/geometry/<stem>.glb       committed
 data/models/textures/perf/<stem>.png  committed (512px, default)
 data/models/textures/hq/<stem>.dds    committed (native 2048, HQ toggle)
+data/models/textures/teamcolor/<stem>.png  committed (<=512px team-color mask)
 data/models/thumbnails/<stem>.png     committed
 data/models/shots/<stem>/*.png        committed (capture targets / future OG)
 data/models/index.json                committed
@@ -178,11 +180,52 @@ Each model's manifest entry carries a `parts` block
 which also drives the directory "Articulated" badge. The pipeline switch lives
 behind `ANIM_FORMAT_VERSION` (now 3; index `schema_version` 5).
 
+## Team colors (the `_c` mask)
+
+BZCC `.material` files declare `teamColor = <stem>_c.dds` -- a BC3 mask whose
+**alpha channel marks the colorizable region** and whose **RGB carries the
+shading detail / baked default tint**. The pipeline extracts these masks into a
+single perf-resolution set:
+
+```
+data/models/textures/teamcolor/<diffuse_stem>.png   (<=512px, RGBA preserved)
+```
+
+keyed by the **diffuse/material stem** so the viewer maps a material name
+straight to its mask (no `_c` suffix guessing -- the `teamColor` reference is
+read directly from the `.material`). Each manifest entry carries a
+`teamColorTextures` list of the stems that got a mask; this drives the directory
+"Team color" badge and the viewer's "Colors" button (both appear only for masked
+models, like the Parts button). ~200 of the ~700 models have masks (the canonical
+units/buildings); the rest fall through cleanly.
+
+The viewer composites in a GPU shader (per-material `onBeforeCompile`), blending
+before lighting so shadows/lighting still apply:
+
+```glsl
+// masked region = teamColor * mask-luminance * TEAM_GAIN, blended by coverage
+diffuseColor.rgb = mix( diffuseColor.rgb,
+                        uTeamColor * shade * TEAM_GAIN,
+                        coverage * uTeamMix );
+```
+
+Recoloring is just a uniform update (no texture reload), so presets + the
+freeform picker are instant. Default is **off** (`uTeamMix = 0`) -- the original
+baked diffuse shows until the user picks a color; wireframe suppresses the tint.
+The exact engine formula isn't published; `TEAM_GAIN` (in `js/models-viewer.js`)
+is the tuning knob if a unit reads too dark/bright. HQ has no separate mask set --
+coverage + shading needs no 2048 fidelity, and a single perf set keeps the repo
+from growing ~1 GB.
+
+The texture-set switch lives behind `TEXTURE_FORMAT_VERSION` (now 1; index
+`schema_version` 6). A bump forces a **texture-only** re-emit: otherwise-fresh
+models are reprocessed to emit the new masks, but the GLB write is guarded
+(skipped when fresh) so the ~700 deterministic geometry GLBs don't churn.
+
 ## Known limitations / future
 
-- Team-color compositing (the `_c` mask) and PBR (normal/spec/emissive) are
-  deferred to later passes; the baked diffuse already carries each unit's
-  canonical faction coloring.
+- PBR (normal / spec / emissive maps) is deferred to a later pass; the diffuse +
+  team-color composite already cover the common viewing case.
 - Recoil distance, tread scroll rate, and gun-elevation limits use tuned
   viewer-side constants rather than the exact per-weapon ODF values (a possible
   later refinement).
