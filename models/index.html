@@ -148,11 +148,13 @@
         <button id="light-btn" class="btn toggle" aria-expanded="false" title="Toggle the light panel">Light</button>
         <button id="scene-btn" class="btn toggle" aria-expanded="false" title="Choose a scene / background">Scene</button>
         <button id="anim-btn" class="btn toggle" aria-expanded="false" title="Play this model's baked animations" hidden>Animations</button>
+        <button id="parts-btn" class="btn toggle" aria-expanded="false" title="Aim the turret, fire the guns, and roll the treads" hidden>Parts</button>
         <button id="reset-btn" class="btn" title="Reset the camera, orientation, toggles, and sun light to defaults">Reset all</button>
         <button id="capture-btn" class="btn" title="Render the 7 canonical angles at HQ + supersampled and download them">Capture HQ</button>
       </div>
     </div>
     <div id="stage" class="stage">
+      <div id="controls-hint" class="controls-hint" aria-hidden="true" hidden></div>
       <div id="fps-counter" class="fps-counter" aria-hidden="true"></div>
       <div id="stage-loading" class="stage-loading" hidden>
         <div class="spinner-border" role="status" aria-hidden="true"></div>
@@ -190,6 +192,37 @@
           <input id="anim-slowmo" type="range" min="0" max="5" step="0.05" value="0" title="Stretch short clips up to this many seconds" />
           <span id="anim-slowmo-val" class="light-val">native</span>
         </label>
+      </div>
+      <div id="parts-panel" class="light-panel parts-panel" hidden>
+        <div class="light-row light-head"><span>Moveable parts</span></div>
+        <div id="parts-turret" class="parts-section" hidden>
+          <label class="light-row">
+            <span class="light-label">Turret</span>
+            <input id="parts-yaw" type="range" min="-180" max="180" step="1" value="0" title="Turret yaw" />
+            <span id="parts-yaw-val" class="light-val">0&deg;</span>
+          </label>
+          <label class="light-row" id="parts-pitch-row">
+            <span class="light-label">Pitch</span>
+            <input id="parts-pitch" type="range" min="-25" max="45" step="1" value="0" title="Gun elevation" />
+            <span id="parts-pitch-val" class="light-val">0&deg;</span>
+          </label>
+          <div class="parts-row">
+            <button id="parts-aim" class="btn toggle anim-mini" title="Move the cursor over the model to aim the turret (camera orbit pauses)">Aim at cursor</button>
+            <button id="parts-center" class="btn anim-mini" title="Recenter the turret">Center</button>
+          </div>
+        </div>
+        <div id="parts-fire-section" class="parts-section" hidden>
+          <div class="parts-row">
+            <button id="parts-fire" class="btn anim-mini parts-fire" title="Fire (recoil the guns)">Fire</button>
+          </div>
+        </div>
+        <div id="parts-drive-section" class="parts-section" hidden>
+          <label class="light-row">
+            <span class="light-label">Drive</span>
+            <input id="parts-drive" type="range" min="-1" max="1" step="0.05" value="0" title="Roll the treads (negative = reverse)" />
+            <span id="parts-drive-val" class="light-val">0</span>
+          </label>
+        </div>
       </div>
       <div id="scene-panel" class="light-panel scene-panel" hidden>
         <div class="scene-bg-block">

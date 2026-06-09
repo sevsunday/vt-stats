@@ -160,11 +160,32 @@ external host and point `TEX_BASE` (and the thumbnail/glb bases) at it.
 - Models render in their SYMMETRIC rest pose (inverse bind matrices), not a
   mid-animation pose. Format decode record: `spike/FORMAT.md`.
 
+## Interactive moveable parts (articulation)
+
+The published GLBs preserve the baked mesh-tree node hierarchy for every rigid
+multi-node model (not just the ~126 with baked clips), so named moveable parts
+survive into the viewer. The viewer detects them by the BZCC naming conventions
+(confirmed against the ODFs) and exposes a "Parts" panel:
+
+- `turret_y` / `turret_x` -> turret yaw / pitch (sliders + a click-drag
+  mouse-aim mode)
+- `recoil*` nodes -> a Fire button that pulses them back and springs them home
+- a `tread` / `fvtread` material -> a Drive slider that scrolls the tread UV
+  (and plays the body `forward` / `reverse` bank clip when the model has one)
+
+Each model's manifest entry carries a `parts` block
+(`{turret, pitch, recoil, treads, bankClips}`, null when nothing articulates)
+which also drives the directory "Articulated" badge. The pipeline switch lives
+behind `ANIM_FORMAT_VERSION` (now 3; index `schema_version` 5).
+
 ## Known limitations / future
 
-- Team-color compositing (the `_c` mask), PBR (normal/spec/emissive), and
-  animations are deferred to later passes; the baked diffuse already carries
-  each unit's canonical faction coloring.
+- Team-color compositing (the `_c` mask) and PBR (normal/spec/emissive) are
+  deferred to later passes; the baked diffuse already carries each unit's
+  canonical faction coloring.
+- Recoil distance, tread scroll rate, and gun-elevation limits use tuned
+  viewer-side constants rather than the exact per-weapon ODF values (a possible
+  later refinement).
 - ~34 meshes are unbaked map scenery / `.xsi` projectiles -- out of scope (would
   need other map mods or `game.bakeassets`).
 - The 10 generic texture-name collisions across packs (e.g. effect `phong1`)

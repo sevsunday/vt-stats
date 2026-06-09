@@ -72,7 +72,48 @@ const SPIN_MIN_VEL = 0.02;            // rad/sec below which we snap to a stop
 const SPIN_UP = new THREE.Vector3(0, 1, 0);
 const SPIN_RIGHT = new THREE.Vector3(1, 0, 0);
 
+// ---- Interactive articulation (moveable parts) ------------------------------
+// Named-node conventions baked into BZCC meshes (confirmed against the ODFs):
+//   turret_y = yaw node, turret_x = pitch node, recoil* = per-weapon recoil
+//   nodes, and a material named "tread"/"fvtread" on the (static) tread mesh
+//   whose UV scrolls to fake track motion.
+// Turret joints: `turret_y` / `turret_x`, optionally suffixed (`turret_y_1`,
+// and multi-barrel towers carry several pitch joints: `turret_x_1`,
+// `turret_x_2`, ...). All matching joints are driven together.
+const ART_TURRET_YAW_RE = /^turret_y(_\d+)?$/i;
+const ART_TURRET_PITCH_RE = /^turret_x(_\d+)?$/i;
+const ART_RECOIL_RE = /^recoil/i;
+const ART_TREAD_MAT_RE = /tread/i;
+const ART_BANK_CLIPS = ['forward', 'reverse', 'neutral'];
+
+// Pitch is clamped to a generous gun-elevation window (deg). A later refinement
+// could read the real limits from the ODF.
+const ART_PITCH_MIN = -25;
+const ART_PITCH_MAX = 45;
+const ART_YAW_MIN = -180;
+const ART_YAW_MAX = 180;
+
+// Recoil feel. Kick distance scales with the model radius (clamped); the barrel
+// snaps back over RECOIL_BACK_SEC then eases home over the remainder of
+// RECOIL_DUR_SEC. Sign is along the node's local Z toward the breech.
+const RECOIL_DUR_SEC = 0.38;
+const RECOIL_BACK_SEC = 0.05;
+const RECOIL_KICK_FRAC = 0.07;   // fraction of model radius
+const RECOIL_KICK_MIN = 0.12;
+const RECOIL_KICK_MAX = 0.6;
+// Recoil kicks the barrel INWARD (toward the breech). The mesh's barrel points
+// along the node's local Z after the Z-mirror, so a negative sign here pulls it
+// back into the turret rather than out the muzzle.
+const RECOIL_AXIS_SIGN = -1;
+
+// Tread scroll: texture-coordinate units advanced per second at full Drive.
+const TREAD_SCROLL_RATE = 0.9;
+const ART_LOCAL_Z = new THREE.Vector3(0, 0, 1);
+const ART_AXIS_Y = new THREE.Vector3(0, 1, 0);
+const ART_AXIS_X = new THREE.Vector3(1, 0, 0);
+
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 export class ObjectViewer {
   constructor(container, opts = {}) {
@@ -122,6 +163,22 @@ export class ObjectViewer {
     this._activeAction = null;
     this._animLoop = false;        // play-once + clamp by default
     this._animMinDuration = 0;     // slow-mo floor (seconds); 0 = native speed
+
+    // Interactive articulation state (populated by load() from named nodes).
+    this._artYawNodes = [];        // turret_y / turret_y_N nodes (yaw)
+    this._artPitchNodes = [];      // turret_x / turret_x_N nodes (pitch)
+    this._artRecoil = [];          // [{node, restPos, axis}] for recoil* nodes
+    this._artTreadMats = [];       // materials whose name matches /tread/i
+    this._turretYawDeg = 0;
+    this._turretPitchDeg = 0;
+    this._aimMode = false;
+    this._driveSpeed = 0;          // -1..1; scrolls treads (+ optional bank clip)
+    this._recoilClock = 0;         // seconds; advances while any recoil is active
+    this._treadOffset = 0;
+    this._raycaster = new THREE.Raycaster();   // point-to-aim cursor projection
+    // Fired callback ({yaw, pitch}) when mouse-aim drag moves the turret, so the
+    // UI sliders can follow.
+    this._onAim = typeof opts.onAim === 'function' ? opts.onAim : null;
 
     const w = container.clientWidth || 800;
     const h = container.clientHeight || 600;
@@ -247,6 +304,12 @@ export class ObjectViewer {
   }
 
   _onPointerDown(e) {
+    // Point-to-aim is hover-driven (no drag); the pointermove handler does the
+    // work. Just swallow the press so it doesn't start anything else.
+    if (this._aimMode && (this._artYawNodes.length || this._artPitchNodes.length)) {
+      this._aimAtPointer(e);
+      return;
+    }
     if (!this._freeSpin || e.button !== 0 || !this._spin) return;
     this._dragging = true;
     this._spinVel.x = 0;          // grab = catch the spinner (stop it)
@@ -258,6 +321,10 @@ export class ObjectViewer {
   }
 
   _onPointerMove(e) {
+    if (this._aimMode) {
+      this._aimAtPointer(e);
+      return;
+    }
     if (!this._dragging || !this._spin) return;
     const now = performance.now();
     const dx = e.clientX - this._lastPtr.x;
@@ -277,6 +344,7 @@ export class ObjectViewer {
   }
 
   _onPointerUp(e) {
+    if (this._aimMode) return;
     if (!this._dragging) return;
     this._dragging = false;
     try { this.renderer.domElement.releasePointerCapture(e.pointerId); } catch { /* noop */ }
@@ -327,6 +395,7 @@ export class ObjectViewer {
     }
 
     this._frame(model);   // builds the spin pivot, reparents model, adds to scene
+    this._detectArticulation(model);
     this.setWireframe(this._wireframe);
     await this._applyTextures();
     return gltf;
@@ -661,13 +730,246 @@ export class ObjectViewer {
     this._activeAction = null;
   }
 
+  /* ---- Interactive articulation (moveable parts) ----------------------- */
+
+  /* Locate the named moveable-part nodes/materials in a freshly loaded model
+   * and cache their rest transforms (for delta composition + reset). Resets any
+   * articulation state carried over from a prior model. */
+  _detectArticulation(model) {
+    this._artYawNodes = [];
+    this._artPitchNodes = [];
+    this._artRecoil = [];
+    model.traverse((o) => {
+      if (!o.name) return;
+      if (ART_TURRET_YAW_RE.test(o.name)) {
+        o.userData._restQuat = o.quaternion.clone();
+        this._artYawNodes.push(o);
+      } else if (ART_TURRET_PITCH_RE.test(o.name)) {
+        o.userData._restQuat = o.quaternion.clone();
+        this._artPitchNodes.push(o);
+      }
+      if (ART_RECOIL_RE.test(o.name)) {
+        // Recoil axis = the node's local Z expressed in its parent space.
+        const axis = ART_LOCAL_Z.clone().applyQuaternion(o.quaternion).normalize();
+        this._artRecoil.push({ node: o, restPos: o.position.clone(), axis });
+      }
+    });
+    this._artTreadMats = this._materials.filter(
+      (m) => m.name && ART_TREAD_MAT_RE.test(m.name));
+
+    // Reset live state for the new model.
+    this._turretYawDeg = 0;
+    this._turretPitchDeg = 0;
+    this._aimMode = false;
+    this._driveSpeed = 0;
+    this._recoilClock = 0;
+    this._treadOffset = 0;
+    for (const m of this._artTreadMats) {
+      if (m.map) m.map.offset.set(0, 0);
+    }
+  }
+
+  /* What this model can articulate (drives the UI control set). */
+  getArticulation() {
+    const bankClips = this._clips
+      .map((c) => c.name)
+      .filter((n) => ART_BANK_CLIPS.includes(String(n).toLowerCase()));
+    return {
+      turretYaw: this._artYawNodes.length > 0,
+      turretPitch: this._artPitchNodes.length > 0,
+      recoil: this._artRecoil.length,
+      treads: this._artTreadMats.length > 0,
+      bankClips,
+    };
+  }
+
+  hasArticulation() {
+    const a = this.getArticulation();
+    return a.turretYaw || a.turretPitch || a.recoil > 0 || a.treads;
+  }
+
+  setTurretYaw(deg) {
+    this._turretYawDeg = clamp(Number(deg) || 0, ART_YAW_MIN, ART_YAW_MAX);
+    this._applyTurret();
+  }
+
+  setTurretPitch(deg) {
+    this._turretPitchDeg = clamp(Number(deg) || 0, ART_PITCH_MIN, ART_PITCH_MAX);
+    this._applyTurret();
+  }
+
+  getTurret() { return { yaw: this._turretYawDeg, pitch: this._turretPitchDeg }; }
+
+  /* Compose the current yaw/pitch deltas onto each turret node's rest rotation.
+   * Yaw rotates turret_y about local Y; pitch rotates turret_x about local X. */
+  _applyTurret() {
+    if (this._artYawNodes.length) {
+      const q = new THREE.Quaternion().setFromAxisAngle(ART_AXIS_Y, this._turretYawDeg * DEG);
+      for (const n of this._artYawNodes) {
+        if (n.userData._restQuat) n.quaternion.copy(n.userData._restQuat).multiply(q);
+      }
+    }
+    if (this._artPitchNodes.length) {
+      const q = new THREE.Quaternion().setFromAxisAngle(ART_AXIS_X, this._turretPitchDeg * DEG);
+      for (const n of this._artPitchNodes) {
+        if (n.userData._restQuat) n.quaternion.copy(n.userData._restQuat).multiply(q);
+      }
+    }
+  }
+
+  /* Point-to-aim: the turret tracks the cursor. Yaw faces the cursor's point on
+   * the horizontal plane through the turret pivot (so it points where you point
+   * around the model); pitch follows the cursor's vertical screen position
+   * (top = max elevation, bottom = min). Frame-correct: yaw is the signed angle
+   * between the rest barrel-forward and the target, taken in the yaw node's
+   * parent space about the (rest-rotated) local-Y rotation axis. */
+  _aimAtPointer(e) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+    // Pitch: vertical cursor position -> elevation window (predictable).
+    if (this._artPitchNodes.length) {
+      const p = clamp((ndcY + 1) / 2, 0, 1);
+      this._turretPitchDeg = ART_PITCH_MIN + p * (ART_PITCH_MAX - ART_PITCH_MIN);
+    }
+
+    // Yaw: aim toward the cursor's point on the horizontal plane at pivot height.
+    const yawNode = this._artYawNodes[0];
+    if (yawNode) {
+      this._raycaster.setFromCamera({ x: ndcX, y: ndcY }, this.camera);
+      const pivotW = yawNode.getWorldPosition(new THREE.Vector3());
+      const plane = new THREE.Plane(ART_AXIS_Y.clone(), -pivotW.y);
+      const hit = this._raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+      if (hit) {
+        const parent = yawNode.parent;
+        const rest = yawNode.userData._restQuat || yawNode.quaternion;
+        // Yaw rotation axis + rest forward (muzzle = local -Z), in PARENT space.
+        const yawAxis = ART_AXIS_Y.clone().applyQuaternion(rest).normalize();
+        const fwd0 = new THREE.Vector3(0, 0, -1).applyQuaternion(rest).normalize();
+        // Target direction in parent space (translation handled by point diff).
+        const tgt = parent ? parent.worldToLocal(hit.clone()) : hit.clone();
+        const piv = parent ? parent.worldToLocal(pivotW.clone()) : pivotW.clone();
+        const dir = tgt.sub(piv);
+        // Project both onto the plane perpendicular to the yaw axis.
+        dir.addScaledVector(yawAxis, -dir.dot(yawAxis));
+        fwd0.addScaledVector(yawAxis, -fwd0.dot(yawAxis));
+        if (dir.lengthSq() > 1e-8 && fwd0.lengthSq() > 1e-8) {
+          dir.normalize();
+          fwd0.normalize();
+          const s = new THREE.Vector3().crossVectors(fwd0, dir).dot(yawAxis);
+          const c = fwd0.dot(dir);
+          this._turretYawDeg = clamp(Math.atan2(s, c) / DEG, ART_YAW_MIN, ART_YAW_MAX);
+        }
+      }
+    }
+
+    this._applyTurret();
+    if (this._onAim) this._onAim({ yaw: this._turretYawDeg, pitch: this._turretPitchDeg });
+  }
+
+  /* Fire: pulse every recoil node (kick back along its local axis, then ease
+   * home). Restarts the shared recoil clock from 0. */
+  fireRecoil() {
+    if (!this._artRecoil.length) return;
+    this._recoilClock = 1e-6;   // > 0 => active (see _updateRecoil)
+  }
+
+  _recoilKick() {
+    const r = this._radius || 1;
+    return clamp(r * RECOIL_KICK_FRAC, RECOIL_KICK_MIN, RECOIL_KICK_MAX);
+  }
+
+  /* Advance the recoil pulse. offset(t): linear kick out to RECOIL_BACK_SEC,
+   * then easeOutCubic back to rest by RECOIL_DUR_SEC. */
+  _updateRecoil(dt) {
+    if (this._recoilClock <= 0 || !this._artRecoil.length) return false;
+    this._recoilClock += dt;
+    const t = this._recoilClock;
+    const kick = this._recoilKick();
+    let mag;
+    if (t < RECOIL_BACK_SEC) {
+      mag = kick * (t / RECOIL_BACK_SEC);
+    } else if (t < RECOIL_DUR_SEC) {
+      const p = (t - RECOIL_BACK_SEC) / (RECOIL_DUR_SEC - RECOIL_BACK_SEC);
+      mag = kick * (1 - easeOutCubic(p));
+    } else {
+      mag = 0;
+      this._recoilClock = 0;   // done -> rest
+    }
+    const signed = mag * RECOIL_AXIS_SIGN;
+    for (const rec of this._artRecoil) {
+      rec.node.position.copy(rec.restPos).addScaledVector(rec.axis, -signed);
+    }
+    return true;
+  }
+
+  /* Drive: -1..1. Scrolls the tread material UV; if the model carries a
+   * forward/reverse bank clip, plays it (looped) in the matching direction. */
+  setDrive(speed) {
+    const s = clamp(Number(speed) || 0, -1, 1);
+    const prev = this._driveSpeed;
+    this._driveSpeed = s;
+    const bank = this.getArticulation().bankClips.map((n) => n.toLowerCase());
+    const dir = s > 0.001 ? 'forward' : s < -0.001 ? 'reverse' : null;
+    const prevDir = prev > 0.001 ? 'forward' : prev < -0.001 ? 'reverse' : null;
+    if (dir === prevDir) return;
+    if (!this._mixer) return;
+    if (dir && bank.includes(dir)) {
+      const name = this._clips.find((c) => c.name.toLowerCase() === dir)?.name;
+      if (name) { this.setAnimLoop(true); this.playClip(name); }
+    } else if (prevDir && bank.includes(prevDir)) {
+      // Returning to idle: prefer a "neutral" rest clip, else stop.
+      const neutral = this._clips.find((c) => c.name.toLowerCase() === 'neutral');
+      if (neutral) { this.playClip(neutral.name); } else { this.stopAnim(); }
+    }
+  }
+
+  _updateTreads(dt) {
+    if (!this._artTreadMats.length || this._driveSpeed === 0) return false;
+    this._treadOffset += this._driveSpeed * TREAD_SCROLL_RATE * dt;
+    for (const m of this._artTreadMats) {
+      if (m.map) m.map.offset.y = this._treadOffset;
+    }
+    return true;
+  }
+
+  /* Point-to-aim: the turret tracks the cursor (see _aimAtPointer) instead of
+   * the camera orbiting. Like free-spin, it locks camera rotation while active. */
+  setAimMode(on) {
+    this._aimMode = !!on && (this._artYawNodes.length > 0 || this._artPitchNodes.length > 0);
+    this.controls.enableRotate = !this._aimMode;
+    if (this._aimMode) {
+      this.controls.autoRotate = false;
+      this.setFreeSpin(false);
+    }
+  }
+
+  isAimMode() { return this._aimMode; }
+
+  /* Restore turret to rest, stop recoil + drive, reset tread scroll. */
+  resetArticulation() {
+    this._turretYawDeg = 0;
+    this._turretPitchDeg = 0;
+    this._applyTurret();
+    this._recoilClock = 0;
+    for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
+    this.setDrive(0);
+    this._treadOffset = 0;
+    for (const m of this._artTreadMats) { if (m.map) m.map.offset.set(0, 0); }
+    this.setAimMode(false);
+  }
+
   setAutoRotate(on) {
+    if (on && this._aimMode) this.setAimMode(false);
     this.controls.autoRotate = !!on;
   }
 
   /* Free spin: lock the camera (no rotate/pan; zoom still works) and let pointer
    * drags spin the model with momentum. Disabling restores camera orbit + pan. */
   setFreeSpin(on) {
+    if (on && this._aimMode) this._aimMode = false;
     this._freeSpin = !!on;
     this.controls.enableRotate = !on;
     this.controls.enablePan = !on;
@@ -798,6 +1100,7 @@ export class ObjectViewer {
     this._spinVel.x = 0;
     this._spinVel.y = 0;
     if (this._spin) this._spin.quaternion.identity();
+    this.resetArticulation();
     if (this._home) {
       this.camera.position.copy(this._home.pos);
       this.controls.target.copy(this._home.target);
@@ -833,6 +1136,13 @@ export class ObjectViewer {
       this._activeAction = null;
       this._mixer.setTime(0);
     }
+    // Articulation -> rest pose for reproducible captures, restored afterward.
+    const prevTurret = { yaw: this._turretYawDeg, pitch: this._turretPitchDeg };
+    const prevDrive = this._driveSpeed;
+    const prevAim = this._aimMode;
+    this._turretYawDeg = 0; this._turretPitchDeg = 0; this._applyTurret();
+    this._recoilClock = 0;
+    for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
 
     this.controls.autoRotate = false;
     this.setWireframe(false);
@@ -904,6 +1214,10 @@ export class ObjectViewer {
     this._spinVel.x = prevSpinVel.x;
     this._spinVel.y = prevSpinVel.y;
     if (prevActiveClip) this.playClip(prevActiveClip);
+    this._turretYawDeg = prevTurret.yaw; this._turretPitchDeg = prevTurret.pitch;
+    this._applyTurret();
+    this._aimMode = prevAim;
+    this.setDrive(prevDrive);
     await this.setQuality(prevQuality);
     return shots;
   }
@@ -945,6 +1259,11 @@ export class ObjectViewer {
       this._mixer.update(dt);
       if (this._activeAction && !this._activeAction.paused) moving = true;
     }
+    // Articulation runs AFTER the mixer so turret/recoil writes win over (and
+    // are re-asserted against) any playing bank clip that might touch them.
+    if (this._artYawNodes.length || this._artPitchNodes.length) this._applyTurret();
+    if (this._updateRecoil(dt)) moving = true;
+    if (this._updateTreads(dt)) moving = true;
     // Free-spin momentum: integrate angular velocity, then apply friction decay.
     if (this._freeSpin && !this._dragging && this._spin) {
       const v = this._spinVel;

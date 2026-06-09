@@ -65,6 +65,7 @@ const els = {
   stageLoading: document.getElementById('stage-loading'),
   stageLoadingLabel: document.getElementById('stage-loading-label'),
   fps: document.getElementById('fps-counter'),
+  controlsHint: document.getElementById('controls-hint'),
   spin: document.getElementById('spin-btn'),
   freespin: document.getElementById('freespin-btn'),
   reset: document.getElementById('reset-btn'),
@@ -87,6 +88,21 @@ const els = {
   animLoop: document.getElementById('anim-loop'),
   animSlowmo: document.getElementById('anim-slowmo'),
   animSlowmoVal: document.getElementById('anim-slowmo-val'),
+  partsBtn: document.getElementById('parts-btn'),
+  partsPanel: document.getElementById('parts-panel'),
+  partsTurret: document.getElementById('parts-turret'),
+  partsYaw: document.getElementById('parts-yaw'),
+  partsYawVal: document.getElementById('parts-yaw-val'),
+  partsPitchRow: document.getElementById('parts-pitch-row'),
+  partsPitch: document.getElementById('parts-pitch'),
+  partsPitchVal: document.getElementById('parts-pitch-val'),
+  partsAim: document.getElementById('parts-aim'),
+  partsCenter: document.getElementById('parts-center'),
+  partsFireSection: document.getElementById('parts-fire-section'),
+  partsFire: document.getElementById('parts-fire'),
+  partsDriveSection: document.getElementById('parts-drive-section'),
+  partsDrive: document.getElementById('parts-drive'),
+  partsDriveVal: document.getElementById('parts-drive-val'),
 };
 
 let manifest = [];
@@ -98,6 +114,13 @@ const filters = { q: '', faction: 'ISDF', category: new Set(['Building', 'Vehicl
 
 // HQ is the default; only an explicit 'perf' choice opts out (null/unset -> HQ).
 function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) !== 'perf'; }
+
+// True when a manifest entry exposes interactive moveable parts (turret / guns /
+// treads) -- drives the directory "Articulated" badge.
+function hasMoveableParts(m) {
+  const p = m && m.parts;
+  return !!(p && (p.turret || p.pitch || p.recoil > 0 || p.treads));
+}
 
 function lightPrefs() {
   const on = localStorage.getItem(LIGHT_ON_KEY);
@@ -242,6 +265,7 @@ function renderDirectory() {
       <div class="card-sub">
         <span class="chip" style="--c:${color}">${escapeHtml(m.factionName || '?')}</span>
         <span class="chip chip-ghost">${escapeHtml(m.category || '')}</span>
+        ${hasMoveableParts(m) ? '<span class="chip chip-parts" title="Has moveable parts (turret / guns / treads)">Articulated</span>' : ''}
       </div>
       <div class="card-stats">${m.triangles.toLocaleString()} tris &middot; ${m.groups} ${m.groups === 1 ? 'part' : 'parts'} &middot; ${(m.textures || []).length} tex</div>
       <div class="card-odf">${escapeHtml(m.primaryOdf || '')}</div>`;
@@ -270,11 +294,14 @@ function showViewer(entry) {
   activeViewer = new ObjectViewer(els.stage, {
     quality, light, bgMode: scene.bg,
     onFps: (fps) => { els.fps.textContent = `${Math.round(fps)} fps`; },
+    onAim: ({ yaw, pitch }) => syncTurretSliders(yaw, pitch),
   });
   activeViewer.load(MODELS_BASE + entry.glb)
     .then(() => {
       if (!activeViewer) return;
       setupAnimUI();
+      setupArticulationUI();
+      updateControlsHint();
       // Apply persisted display + Ultra prefs once the model exists.
       activeViewer.setBackgroundMode(scene.bg);
       activeViewer.setGridVisible(scene.grid);
@@ -321,6 +348,16 @@ function showViewer(entry) {
   els.animSlowmo.value = '0';
   els.animSlowmoVal.textContent = 'native';
 
+  // Parts (articulation) controls start hidden; setupArticulationUI() reveals
+  // them once the GLB resolves and reports moveable parts.
+  els.partsBtn.hidden = true;
+  els.partsBtn.classList.remove('on');
+  els.partsPanel.hidden = true;
+  els.partsAim.classList.remove('on');
+
+  // Controls legend repopulates once the model loads (updateControlsHint()).
+  els.controlsHint.hidden = true;
+
   els.qualitySeg.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.onclick = async () => {
       const q = btn.dataset.q;
@@ -340,22 +377,26 @@ function showViewer(entry) {
     const on = !els.spin.classList.contains('on');
     els.spin.classList.toggle('on', on);
     if (on) {
-      // Auto-rotate (camera) and Free spin (model) are mutually exclusive.
+      // Auto-rotate (camera) is mutually exclusive with Free spin + Aim.
       els.freespin.classList.remove('on');
+      els.partsAim.classList.remove('on');
       els.stage.classList.remove('grabbable');
       activeViewer.setFreeSpin(false);
     }
     activeViewer.setAutoRotate(on);
+    updateControlsHint();
   };
   els.freespin.onclick = () => {
     const on = !els.freespin.classList.contains('on');
     els.freespin.classList.toggle('on', on);
     if (on) {
       els.spin.classList.remove('on');
+      els.partsAim.classList.remove('on');
       activeViewer.setAutoRotate(false);
     }
     activeViewer.setFreeSpin(on);
     els.stage.classList.toggle('grabbable', on);
+    updateControlsHint();
   };
   els.reset.onclick = () => resetAllViewer();
   els.capture.onclick = () => doCapture(entry);
@@ -381,6 +422,47 @@ function showViewer(entry) {
     const v = parseFloat(e.target.value);
     els.animSlowmoVal.textContent = v <= 0 ? 'native' : `${v.toFixed(2)}s`;
     if (activeViewer) activeViewer.setAnimMinDuration(v);
+  };
+
+  // Parts (articulation): turret aim, fire/recoil, and drive/treads.
+  els.partsBtn.onclick = () => {
+    const show = els.partsPanel.hidden;
+    els.partsPanel.hidden = !show;
+    els.partsBtn.classList.toggle('on', show);
+  };
+  els.partsYaw.oninput = (e) => {
+    const v = parseFloat(e.target.value);
+    els.partsYawVal.textContent = `${Math.round(v)}\u00b0`;
+    if (activeViewer) activeViewer.setTurretYaw(v);
+  };
+  els.partsPitch.oninput = (e) => {
+    const v = parseFloat(e.target.value);
+    els.partsPitchVal.textContent = `${Math.round(v)}\u00b0`;
+    if (activeViewer) activeViewer.setTurretPitch(v);
+  };
+  els.partsAim.onclick = () => {
+    const on = !els.partsAim.classList.contains('on');
+    els.partsAim.classList.toggle('on', on);
+    if (on) {
+      // Aim-at-cursor is mutually exclusive with auto-rotate + free-spin.
+      els.spin.classList.remove('on');
+      els.freespin.classList.remove('on');
+      els.stage.classList.remove('grabbable');
+    }
+    if (activeViewer) activeViewer.setAimMode(on);
+    updateControlsHint();
+  };
+  els.partsCenter.onclick = () => {
+    if (!activeViewer) return;
+    activeViewer.setTurretYaw(0);
+    activeViewer.setTurretPitch(0);
+    syncTurretSliders(0, 0);
+  };
+  els.partsFire.onclick = () => { if (activeViewer) activeViewer.fireRecoil(); };
+  els.partsDrive.oninput = (e) => {
+    const v = parseFloat(e.target.value);
+    els.partsDriveVal.textContent = v.toFixed(2);
+    if (activeViewer) activeViewer.setDrive(v);
   };
 
   // Scene panel. The button toggles the floating panel; the controls drive the
@@ -488,6 +570,76 @@ function syncClipChips(name) {
   });
 }
 
+/* Mode-aware pointer-controls legend shown beside the fps counter. Reflects the
+ * active interaction mode (orbit / free-spin / aim-at-cursor) since each one
+ * remaps the mouse. */
+function updateControlsHint() {
+  if (!els.controlsHint) return;
+  if (!activeViewer) { els.controlsHint.hidden = true; return; }
+  const aim = !els.partsAim.hidden && els.partsAim.classList.contains('on');
+  const freespin = els.freespin.classList.contains('on');
+  const autorot = els.spin.classList.contains('on');
+  let items;
+  if (aim) {
+    items = [['Move', 'Aim turret'], ['Scroll', 'Zoom'], ['Right-drag', 'Pan']];
+  } else if (freespin) {
+    items = [['Drag', 'Spin model'], ['Scroll', 'Zoom']];
+  } else {
+    items = [['Drag', 'Orbit'], ['Scroll', 'Zoom'], ['Right-drag', 'Pan']];
+    if (autorot) items.push([null, 'auto-rotating']);
+  }
+  els.controlsHint.hidden = false;
+  els.controlsHint.innerHTML = items.map(([key, action]) => (
+    key
+      ? `<span class="ctl"><span class="ctl-key">${escapeHtml(key)}</span>${escapeHtml(action)}</span>`
+      : `<span class="ctl ctl-note">${escapeHtml(action)}</span>`
+  )).join('');
+}
+
+/* Reflect a turret yaw/pitch (deg) back onto the sliders + value labels (used
+ * by the Center button and by the point-to-aim cursor callback). */
+function syncTurretSliders(yaw, pitch) {
+  els.partsYaw.value = String(Math.round(yaw));
+  els.partsYawVal.textContent = `${Math.round(yaw)}\u00b0`;
+  els.partsPitch.value = String(Math.round(pitch));
+  els.partsPitchVal.textContent = `${Math.round(pitch)}\u00b0`;
+}
+
+/* Reveal the Parts button + only the relevant control sections when the loaded
+ * GLB exposes moveable parts (turret / recoil / treads). Mirrors setupAnimUI's
+ * graceful-degradation: nothing articulates -> button stays hidden. */
+function setupArticulationUI() {
+  if (!activeViewer) return;
+  const art = activeViewer.getArticulation();
+  const any = art.turretYaw || art.turretPitch || art.recoil > 0 || art.treads;
+  if (!any) {
+    els.partsBtn.hidden = true;
+    els.partsBtn.classList.remove('on');
+    els.partsPanel.hidden = true;
+    return;
+  }
+  els.partsBtn.hidden = false;
+
+  // Turret section (yaw always, pitch only if turret_x present).
+  els.partsTurret.hidden = !(art.turretYaw || art.turretPitch);
+  els.partsPitchRow.hidden = !art.turretPitch;
+  els.partsAim.hidden = !(art.turretYaw || art.turretPitch);
+  els.partsAim.classList.remove('on');
+  els.partsYaw.value = '0';
+  els.partsYawVal.textContent = '0\u00b0';
+  els.partsPitch.value = '0';
+  els.partsPitchVal.textContent = '0\u00b0';
+
+  // Fire section.
+  els.partsFireSection.hidden = art.recoil === 0;
+  els.partsFire.textContent = art.recoil > 1 ? `Fire (${art.recoil})` : 'Fire';
+
+  // Drive section.
+  els.partsDriveSection.hidden = !art.treads;
+  els.partsDrive.value = '0';
+  els.partsDriveVal.textContent = '0';
+}
+
 /* "Reset all": restore the entire viewer to defaults -- toggles off, quality
  * back to the global Prefer-HQ default, sun light back to default
  * on/intensity/azimuth/elevation (persisted + live + panel), and the camera /
@@ -516,6 +668,16 @@ function resetAllViewer() {
     els.animSlowmoVal.textContent = 'native';
     activeViewer.setAnimMinDuration(0);
   }
+
+  // Parts -> rest (turret centered, recoil/drive stopped, treads reset).
+  if (activeViewer.hasArticulation()) {
+    activeViewer.resetArticulation();
+    els.partsAim.classList.remove('on');
+    syncTurretSliders(0, 0);
+    els.partsDrive.value = '0';
+    els.partsDriveVal.textContent = '0';
+  }
+  updateControlsHint();
 
   // Quality -> the global default (honors the Prefer-HQ pref).
   const quality = preferHq() ? 'hq' : 'perf';

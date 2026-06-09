@@ -64,6 +64,24 @@ will still need heading alignment, but the object viewer is native-correct.
 
 Previews: `ivscout00.preview.png`, `ibrecy00.preview.png` (this folder).
 
+## Articulation node conventions (moveable parts)
+
+The mesh-tree node names follow BZCC conventions the engine drives at runtime
+(authoritatively declared in each unit's ODF, e.g. `turretName1`/`recoilName1`):
+
+- `turret_y` -- turret yaw node (rotate about local Y); `turret_x` -- pitch node
+  (rotate about local X, usually a child of `turret_y`).
+- `recoil*` (`recoil`, `recoil1`, `recoil_l`, ...) -- per-weapon recoil nodes
+  that translate back along the barrel axis on fire, then spring home.
+- treads are a STATIC mesh (`tread_l`/`tread_r`) whose `tread`/`fvtread` material
+  UV-scrolls (engine-coded, speed-proportional -- no scroll rate in the
+  `.material`); the viewer fakes track motion by offsetting that material's UV.
+- `hp_*` nodes are hardpoints (no geometry).
+
+The converter preserves this hierarchy for every rigid multi-node model so the
+viewer can drive the named nodes/materials interactively (see the project README
+"Interactive moveable parts").
+
 ## Render flags worth honoring
 
 `RS_HIDDEN = 0x400` (collision/helper geometry -- skip), `RS_2SIDED = 0x200`

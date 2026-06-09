@@ -161,6 +161,11 @@ body { overflow: hidden; }
   color: var(--kb-text-secondary);
   border: 1px solid var(--kb-border-default);
 }
+.chip-parts {
+  background: transparent;
+  color: var(--kb-primary);
+  border: 1px solid color-mix(in srgb, var(--kb-primary) 55%, transparent);
+}
 .card-stats { color: var(--kb-text-secondary); font-size: 0.78rem; }
 .card-odf {
   color: var(--kb-text-muted);
@@ -316,6 +321,31 @@ body { overflow: hidden; }
 .anim-transport { display: flex; flex-wrap: wrap; gap: 6px; }
 .btn.anim-mini { padding: 0.3rem 0.55rem; font-size: 0.78rem; }
 
+/* Parts (articulation) panel: mirrors .light-panel but anchored TOP-right so it
+   clears the bottom light/anim panels and the top-left scene panel. */
+.parts-panel {
+  left: auto;
+  right: 14px;
+  top: 14px;
+  bottom: auto;
+  width: 240px;
+  max-height: 76vh;
+  overflow-y: auto;
+}
+.parts-section { display: flex; flex-direction: column; gap: 8px; }
+.parts-section + .parts-section {
+  border-top: 1px solid var(--kb-border-default);
+  padding-top: 10px;
+}
+.parts-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn.parts-fire {
+  background: var(--kb-primary);
+  color: var(--kb-primary-fg);
+  border-color: var(--kb-primary);
+  font-weight: 650;
+}
+.btn.parts-fire:hover { filter: brightness(1.08); }
+
 /* Scene panel: mirrors .light-panel but anchored TOP-left so it clears the
    bottom light/anim panels. */
 .scene-panel {
@@ -356,6 +386,43 @@ body { overflow: hidden; }
 .btn.scene-ultra-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Tiny FPS readout, bottom-right of the viewport. */
+/* Mode-aware controls legend, stacked just above the fps counter (bottom-right)
+   so it sits with the fps readout and clears the bottom-left light panel. */
+.controls-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 34px;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 70%;
+  pointer-events: none;   /* never intercept canvas drags */
+}
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--kb-bg-card) 80%, transparent);
+  border: 1px solid var(--kb-border-default);
+  color: var(--kb-text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ctl-key {
+  font-family: var(--kb-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.ctl-note { font-style: italic; }
+
 .fps-counter {
   position: absolute;
   right: 10px;
@@ -402,6 +469,8 @@ body { overflow: hidden; }
 
 @media (max-width: 640px) {
   .directory { padding: 0.85rem; }
+  /* Pointer-control legend is desktop-only (no mouse on touch). */
+  .controls-hint { display: none; }
 
   /* Toolbar stacks; search takes the full width. */
   .toolbar { gap: 0.5rem; }
@@ -443,9 +512,10 @@ body { overflow: hidden; }
     width: auto;
     border-radius: 12px 12px 0 0;
   }
-  /* Scene panel docks as a TOP sheet so it clears the always-visible bottom
-     light panel + the bottom-right anim panel. */
-  .scene-panel {
+  /* Scene + Parts panels dock as TOP sheets so they clear the always-visible
+     bottom light panel + the bottom-right anim panel. */
+  .scene-panel,
+  .parts-panel {
     top: 0;
     bottom: auto;
     left: 0;

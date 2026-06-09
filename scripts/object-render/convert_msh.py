@@ -44,6 +44,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -81,7 +82,15 @@ DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gal
 # since only the export CODE changed, not the source mesh).
 #   v2: rigid weld key includes UV (fix texture seams); deploy+loop buildings bake
 #       the deployed pose as the node default (loop plays deployed, not folded).
-ANIM_FORMAT_VERSION = 2
+#   v3: emit a node-hierarchy GLB for EVERY rigid multi-node model (not just ones
+#       with baked clips) so named moveable parts (turret_y / turret_x / recoil*
+#       and the tread material) survive into the published GLB for the viewer's
+#       interactive articulation. Adds the per-model `parts` manifest block.
+ANIM_FORMAT_VERSION = 3
+
+# Render flags (mirror msh_parser): hidden/collision geometry is not drawable.
+RS_HIDDEN = 0x400
+RS_COLLIDABLE = 0x100
 
 FACTION_NAMES = {"i": "ISDF", "e": "Hadean", "f": "Scion", "c": "Cerberi"}
 
@@ -96,6 +105,56 @@ _G: dict | None = None
 
 def _stem(name: str) -> str:
     return Path(str(name)).stem.lower()
+
+
+def _renderable_node_count(full: dict) -> int:
+    """Count mesh-tree nodes that carry drawable geometry (have verts and are
+    not hidden/collision helpers). >1 => a real multi-part hierarchy worth
+    preserving instead of welding to a single mesh."""
+    n = 0
+    for nd in full.get("nodes", []):
+        if nd.get("verts") and not (nd.get("flags", 0) & (RS_HIDDEN | RS_COLLIDABLE)):
+            n += 1
+    return n
+
+
+def _classify_parts(full: dict, clip_names) -> dict | None:
+    """Derive the interactive-articulation `parts` block from a parse_msh_full()
+    result. Returns None when the model has no moveable parts (so plain
+    multi-part scenery doesn't carry an empty block). Detection is by the BZCC
+    node/material naming conventions (confirmed against the ODFs):
+      - turret_y / turret_x : turret yaw / pitch nodes
+      - recoil*             : per-weapon recoil nodes
+      - tread / tractor node, or a material whose diffuse stem contains 'tread'
+                              (e.g. tread / fvtread) : scrolling treads
+      - bankClips           : body steering clips (forward / reverse / neutral)
+    """
+    names = [(nd.get("name") or "").lower() for nd in full.get("nodes", [])]
+    # Turret joints may be suffixed (turret_y_1) and multi-barrel towers carry
+    # several pitch joints (turret_x_1, turret_x_2, ...).
+    turret = any(re.fullmatch(r"turret_y(_\d+)?", x) for x in names)
+    pitch = any(re.fullmatch(r"turret_x(_\d+)?", x) for x in names)
+    recoil = sum(1 for x in names if x.startswith("recoil"))
+    tread_node = any(x.startswith("tread") or x.startswith("tractor") for x in names)
+    tread_mat = False
+    for nd in full.get("nodes", []):
+        for grp in nd.get("groups", []):
+            # grp = (vert_count, index_count, material_name, texture_name)
+            for s in (grp[3], grp[2]):
+                if s and "tread" in str(s).lower():
+                    tread_mat = True
+    bank = sorted(c for c in (clip_names or [])
+                  if str(c).lower() in ("forward", "reverse", "neutral"))
+    parts = {
+        "turret": turret,
+        "pitch": pitch,
+        "recoil": recoil,
+        "treads": bool(tread_node or tread_mat),
+        "bankClips": bank,
+    }
+    if not (parts["turret"] or parts["pitch"] or parts["recoil"] or parts["treads"]):
+        return None
+    return parts
 
 
 def enumerate_targets(odf_filter=None):
@@ -438,11 +497,19 @@ def process_model(job: dict) -> dict:
         # Thumbnails + stats below still come from the welded `prims` (rest pose).
         clips = []
         animated = False
+        parts = None
         try:
             full = parse_msh_full(msh_path)
         except Exception:  # noqa: BLE001
             full = None
-        if full and full.get("clips"):
+        # Emit a node-hierarchy GLB (preserving named moveable parts: turret_y /
+        # turret_x / recoil* nodes + the tread material) whenever the mesh has
+        # baked clips OR is a rigid multi-part model. Welding is kept only for
+        # single-node rigid meshes and skinned meshes without clips (skinned
+        # needs the dedicated skin path, which is only built when clips exist).
+        rigid_multinode = bool(
+            full and not full.get("skinned") and _renderable_node_count(full) > 1)
+        if full and (full.get("clips") or rigid_multinode):
             def _resolve_tex_key(msh_dir, mat_name, tex_name):
                 diffuse = tex_name
                 if not diffuse and mat_name:
@@ -453,14 +520,14 @@ def process_model(job: dict) -> dict:
                 return _stem(diffuse) if diffuse else None
             try:
                 anim_bytes, clips = build_animated_glb(full, _resolve_tex_key)
-                if clips:
-                    glb_bytes = anim_bytes
-                    animated = True
+                glb_bytes = anim_bytes
+                animated = bool(clips)
             except Exception:  # noqa: BLE001 - fall back to the welded GLB
                 if cfg.get("verbose"):
-                    print(f"    [{stem}] animated GLB failed; using welded:\n"
+                    print(f"    [{stem}] node-hierarchy GLB failed; using welded:\n"
                           f"{traceback.format_exc(limit=2)}")
                 clips = []
+            parts = _classify_parts(full, clips)
 
         _atomic_write_bytes(GEO_DIR / f"{stem}.glb", glb_bytes)
 
@@ -499,6 +566,7 @@ def process_model(job: dict) -> dict:
             "bboxSize": [round(hi[i] - lo[i], 3) for i in range(3)],
             "animated": animated,
             "clips": clips,
+            "parts": parts,
             "_glb_bytes": len(glb_bytes),
         }
     except Exception as e:  # noqa: BLE001 - resilient over ~700 models
@@ -555,6 +623,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "bboxSize": p.get("bboxSize", [0, 0, 0]),
         "animated": p.get("animated", False),
         "clips": p.get("clips", []),
+        "parts": p.get("parts"),
     }
 
 
@@ -718,7 +787,7 @@ def main():
     }
     animated_count = sum(1 for m in manifest if m.get("animated"))
     idx_path.write_text(json.dumps({
-        "schema_version": 4,
+        "schema_version": 5,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "count": len(manifest),
