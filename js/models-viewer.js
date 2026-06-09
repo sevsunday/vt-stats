@@ -129,7 +129,13 @@ const TEAM_GAIN = 1.6;
 const TEAM_DEFAULT_HEX = 0xe23b3b;   // team-1 red, the in-game default
 const TEAM_UNIFORM_DECL =
   'uniform vec3 uTeamColor;\nuniform sampler2D uTeamMask;\nuniform float uTeamMix;\n';
+// The blend is guarded by USE_MAP because it samples vMapUv, a varying three.js
+// only declares when the material compiles with a diffuse map. Wireframe nulls
+// material.map (recompile without USE_MAP), and genuinely textureless materials
+// never have it -- in both cases the block must compile to nothing or the
+// program fails to link and the mesh stops drawing.
 const TEAM_MAP_FRAG_INJECT = `#include <map_fragment>
+  #ifdef USE_MAP
   {
     vec4 vtTeamMask = texture2D( uTeamMask, vMapUv );
     float vtTeamCov = vtTeamMask.a;
@@ -137,7 +143,8 @@ const TEAM_MAP_FRAG_INJECT = `#include <map_fragment>
     diffuseColor.rgb = mix( diffuseColor.rgb,
                             uTeamColor * vtTeamShade * ${TEAM_GAIN.toFixed(4)},
                             vtTeamCov * uTeamMix );
-  }`;
+  }
+  #endif`;
 
 export class ObjectViewer {
   constructor(container, opts = {}) {
@@ -201,6 +208,7 @@ export class ObjectViewer {
     this._artPitchNodes = [];      // turret_x / turret_x_N nodes (pitch)
     this._artRecoil = [];          // [{node, restPos, axis}] for recoil* nodes
     this._artTreadMats = [];       // materials whose name matches /tread/i
+    this._partGroups = [];         // [{id, label, meshes:[Mesh]}] built per load
     this._turretYawDeg = 0;
     this._turretPitchDeg = 0;
     this._aimMode = false;
@@ -430,6 +438,7 @@ export class ObjectViewer {
 
     this._frame(model);   // builds the spin pivot, reparents model, adds to scene
     this._detectArticulation(model);
+    this._buildPartGroups(model);
     this.setWireframe(this._wireframe);
     await this._applyTextures();
     await this._applyTeamMasks();
@@ -571,8 +580,9 @@ export class ObjectViewer {
         shader.uniforms.uTeamMask = u.uTeamMask;
         shader.uniforms.uTeamMix = u.uTeamMix;
         shader.fragmentShader = TEAM_UNIFORM_DECL + shader.fragmentShader;
-        // Only blends when the material actually has a diffuse map (the include is
-        // present + vMapUv exists); otherwise this replace is a no-op.
+        // The injected snippet is wrapped in #ifdef USE_MAP, so it blends only
+        // when the material compiles with a diffuse map (vMapUv exists) and is an
+        // inert no-op otherwise -- e.g. while wireframe has nulled material.map.
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <map_fragment>', TEAM_MAP_FRAG_INJECT);
       };
@@ -933,6 +943,89 @@ export class ObjectViewer {
     return a.turretYaw || a.turretPitch || a.recoil > 0 || a.treads;
   }
 
+  /* ---- Part visibility filter ------------------------------------------ */
+
+  /* Partition every mesh into exactly one named group so the UI can show/hide
+   * subsets. Precedence matters because the groups nest (recoil nodes live under
+   * the turret subtree, the turret under the hull): guns > turret > treads >
+   * hull. Detection reuses the articulation nodes/materials found just before.
+   * Visibility is pure mesh.visible toggling -- orthogonal to material overrides
+   * -- so it behaves identically in lit, wireframe, and team-color modes. */
+  _buildPartGroups(model) {
+    const claimed = new Set();
+    const gunMeshes = [];
+    const turretMeshes = [];
+    const treadMeshes = [];
+    const hullMeshes = [];
+
+    // Collect meshes under a set of subtree roots (the roots themselves may or
+    // may not be meshes; traverse handles both).
+    const collectUnder = (roots, out) => {
+      for (const root of roots) {
+        root.traverse((o) => {
+          if (o.isMesh && !claimed.has(o)) {
+            claimed.add(o);
+            out.push(o);
+          }
+        });
+      }
+    };
+
+    collectUnder(this._artRecoil.map((r) => r.node), gunMeshes);
+    collectUnder([...this._artYawNodes, ...this._artPitchNodes], turretMeshes);
+
+    model.traverse((o) => {
+      if (!o.isMesh || claimed.has(o)) return;
+      const mat = o.material;
+      if (mat && mat.name && ART_TREAD_MAT_RE.test(mat.name)) {
+        claimed.add(o);
+        treadMeshes.push(o);
+      }
+    });
+
+    model.traverse((o) => {
+      if (o.isMesh && !claimed.has(o)) {
+        claimed.add(o);
+        hullMeshes.push(o);
+      }
+    });
+
+    const groups = [
+      { id: 'hull', label: 'Hull', meshes: hullMeshes },
+      { id: 'turret', label: 'Turret', meshes: turretMeshes },
+      { id: 'guns', label: 'Guns', meshes: gunMeshes },
+      { id: 'treads', label: 'Treads', meshes: treadMeshes },
+    ];
+    this._partGroups = groups.filter((g) => g.meshes.length > 0);
+
+    // Fresh model opens fully visible.
+    for (const g of this._partGroups) {
+      for (const m of g.meshes) m.visible = true;
+    }
+  }
+
+  /* Public descriptor of the visibility groups (no Three refs leaked). */
+  getPartGroups() {
+    return this._partGroups.map((g) => ({
+      id: g.id, label: g.label, meshCount: g.meshes.length,
+    }));
+  }
+
+  setPartVisible(id, visible) {
+    const g = this._partGroups.find((x) => x.id === id);
+    if (!g) return;
+    const v = !!visible;
+    for (const m of g.meshes) m.visible = v;
+    this._markShadowDirty();
+  }
+
+  resetPartVisibility() {
+    for (const g of this._partGroups) {
+      for (const m of g.meshes) m.visible = true;
+    }
+    this._markShadowDirty();
+  }
+
   setTurretYaw(deg) {
     this._turretYawDeg = clamp(Number(deg) || 0, ART_YAW_MIN, ART_YAW_MAX);
     this._applyTurret();
@@ -1289,6 +1382,12 @@ export class ObjectViewer {
     this._turretYawDeg = 0; this._turretPitchDeg = 0; this._applyTurret();
     this._recoilClock = 0;
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
+    // Capture the whole model regardless of any hidden part groups; remember the
+    // current per-group visibility so the user's filter is restored afterward.
+    const prevPartVisible = this._partGroups.map((g) => ({
+      id: g.id, visible: g.meshes.length ? g.meshes[0].visible : true,
+    }));
+    this.resetPartVisibility();
 
     this.controls.autoRotate = false;
     this.setWireframe(false);
@@ -1364,6 +1463,7 @@ export class ObjectViewer {
     this._applyTurret();
     this._aimMode = prevAim;
     this.setDrive(prevDrive);
+    for (const p of prevPartVisible) this.setPartVisible(p.id, p.visible);
     await this.setQuality(prevQuality);
     return shots;
   }

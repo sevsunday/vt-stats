@@ -103,6 +103,8 @@ const els = {
   partsDriveSection: document.getElementById('parts-drive-section'),
   partsDrive: document.getElementById('parts-drive'),
   partsDriveVal: document.getElementById('parts-drive-val'),
+  partsVisibilitySection: document.getElementById('parts-visibility-section'),
+  partsVisibilityRows: document.getElementById('parts-visibility-rows'),
   colorsBtn: document.getElementById('colors-btn'),
   colorsPanel: document.getElementById('colors-panel'),
   colorSwatches: document.getElementById('color-swatches'),
@@ -710,6 +712,43 @@ function setupArticulationUI() {
   els.partsDriveSection.hidden = !art.treads;
   els.partsDrive.value = '0';
   els.partsDriveVal.textContent = '0';
+
+  // Visibility section. Only meaningful when 2+ groups exist (a hull-only model
+  // gains nothing from a filter that can only hide everything).
+  buildPartVisibilityRows();
+}
+
+/* (Re)build the per-part visibility checkbox rows for the loaded model. Hidden
+ * unless the viewer reports 2+ part groups; all boxes start checked. */
+function buildPartVisibilityRows() {
+  const section = els.partsVisibilitySection;
+  const rows = els.partsVisibilityRows;
+  if (!section || !rows) return;
+  rows.replaceChildren();
+  const groups = activeViewer ? activeViewer.getPartGroups() : [];
+  if (groups.length < 2) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  const frag = document.createDocumentFragment();
+  for (const g of groups) {
+    const label = document.createElement('label');
+    label.className = 'light-row scene-check parts-visibility-row';
+    const span = document.createElement('span');
+    span.className = 'light-label';
+    span.textContent = g.label;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.dataset.part = g.id;
+    cb.onchange = () => {
+      if (activeViewer) activeViewer.setPartVisible(g.id, cb.checked);
+    };
+    label.append(span, cb);
+    frag.appendChild(label);
+  }
+  rows.appendChild(frag);
 }
 
 /* Reveal + populate the Colors panel when the loaded model has team-colorable
@@ -802,6 +841,13 @@ function resetAllViewer() {
     syncTurretSliders(0, 0);
     els.partsDrive.value = '0';
     els.partsDriveVal.textContent = '0';
+  }
+
+  // Part visibility -> all visible; re-check every box.
+  activeViewer.resetPartVisibility();
+  if (els.partsVisibilityRows) {
+    els.partsVisibilityRows.querySelectorAll('input[type=checkbox]')
+      .forEach((cb) => { cb.checked = true; });
   }
 
   // Team color -> off (Original). Keeps the swatch row; just clears the tint.

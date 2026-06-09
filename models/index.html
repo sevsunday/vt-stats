@@ -148,7 +148,7 @@
         <button id="light-btn" class="btn toggle" aria-expanded="false" title="Toggle the light panel">Light</button>
         <button id="scene-btn" class="btn toggle" aria-expanded="false" title="Choose a scene / background">Scene</button>
         <button id="anim-btn" class="btn toggle" aria-expanded="false" title="Play this model's baked animations" hidden>Animations</button>
-        <button id="parts-btn" class="btn toggle" aria-expanded="false" title="Aim the turret, fire the guns, and roll the treads" hidden>Parts</button>
+        <button id="parts-btn" class="btn toggle" aria-expanded="false" title="Aim the turret, fire the guns, roll the treads, and show/hide parts" hidden>Parts</button>
         <button id="colors-btn" class="btn toggle" aria-expanded="false" title="Apply multiplayer team colors" hidden>Colors</button>
         <button id="reset-btn" class="btn" title="Reset the camera, orientation, toggles, and sun light to defaults">Reset all</button>
         <button id="capture-btn" class="btn" title="Render the 7 canonical angles at HQ + supersampled and download them">Capture HQ</button>
@@ -224,6 +224,10 @@
             <span id="parts-drive-val" class="light-val">0</span>
           </label>
         </div>
+        <div id="parts-visibility-section" class="parts-section" hidden>
+          <div class="light-row parts-subhead"><span>Show parts</span></div>
+          <div id="parts-visibility-rows"></div>
+        </div>
       </div>
       <div id="colors-panel" class="light-panel colors-panel" hidden>
         <div class="light-row light-head"><span>Team color</span></div>
@@ -236,6 +240,9 @@
         </label>
         <div class="parts-row">
           <button id="colors-off" class="btn anim-mini" title="Show the original baked colors">Original</button>
+        </div>
+        <div class="light-row colors-external-row">
+          <a href="https://f9bomber.com/teamcolors.html" target="_blank" rel="noopener" class="colors-external-link" title="Open F9's in-browser team color selector">F9bomber's Color Selector <i class="bi bi-box-arrow-up-right"></i></a>
         </div>
       </div>
       <div id="scene-panel" class="light-panel scene-panel" hidden>
