@@ -5,9 +5,9 @@
  * keyed reconciler into the /gw page:
  *
  *   - Awaits VTToolsResolver.ready + VTGwMaps.ready, then starts VTGwPoller.
- *   - On each snapshot: tags of-interest lobbies (known host), splits into
- *     of-interest (pinned, #gw-interest) vs the rest (#gw-all), stable-sorts
- *     each, and reconciles both lists in place (no flicker).
+ *   - On each snapshot: tags of-interest lobbies (known host), sorts them
+ *     first (border-distinguished) ahead of the rest, and reconciles the one
+ *     combined list into a single #gw-grid in place (no flicker).
  *   - Cards are built/patched by the dedicated VTGwCard renderer; cards enter
  *     once and are patched in place. Unchanged cards do ZERO DOM work; stat
  *     ticks patch K/D/S in place; roster/map changes re-render only the
@@ -22,20 +22,25 @@
 
   // ---------------------------------------------------------------- DOM refs
 
-  let interestSection = null;
-  let interestBody = null;
-  let allSection = null;
-  let allBody = null;
+  let gridEl = null;
   let emptyEl = null;
   let countEl = null;
   let updatedEl = null;
   let statusDotEl = null;
+  let ringFgEl = null;
 
   // ---------------------------------------------------------------- State
 
   let lastSnapshotAt = null;   // ms epoch of last successful snapshot
   let hasFirstSnapshot = false;
   let tickerTimerId = null;
+
+  // Next-update countdown ring.
+  const RING_RADIUS = 9;
+  const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+  let nextPollDueAt = null;    // ms epoch the next poll is scheduled for
+  let nextPollDelayMs = null;  // the scheduled interval (ring's full duration)
+  let ringRafId = null;
 
   // ---------------------------------------------------------------- Helpers
 
@@ -64,6 +69,8 @@
 
   function sortSessions(list) {
     return list.slice().sort((a, b) => {
+      // Of-interest (known-host) lobbies always sort first.
+      if (!!a.__ofInterest !== !!b.__ofInterest) return a.__ofInterest ? -1 : 1;
       const sr = stateRank(a) - stateRank(b);
       if (sr !== 0) return sr;
       const ac = Number.isFinite(a.playerCount) ? a.playerCount : 0;
@@ -96,8 +103,9 @@
     const list = Array.isArray(sessions) ? sessions : [];
     for (const s of list) s.__ofInterest = isOfInterest(s);
 
-    const interest = sortSessions(list.filter((s) => s.__ofInterest));
-    const rest = sortSessions(list.filter((s) => !s.__ofInterest));
+    // One unified grid: of-interest lobbies sort first (border-distinguished),
+    // everything else flows inline row-first in the same grid.
+    const ordered = sortSessions(list);
 
     const R = window.VTGwReconcile;
     const cardOpts = {
@@ -107,13 +115,7 @@
       exitFn: (el) => disposeCard(el),
     };
 
-    if (interestBody) R.reconcileList(interestBody, interest, cardOpts);
-    if (allBody) R.reconcileList(allBody, rest, cardOpts);
-
-    // Pinned of-interest section visibility.
-    if (interestSection) interestSection.hidden = interest.length === 0;
-    // "All lobbies" section hides when it has no cards (avoids a lone header).
-    if (allSection) allSection.hidden = rest.length === 0;
+    if (gridEl) R.reconcileList(gridEl, ordered, cardOpts);
 
     // Empty state (no lobbies anywhere).
     const total = list.length;
@@ -160,30 +162,97 @@
     }
     if (statusDotEl) statusDotEl.classList.remove('gw-dot--stale');
     const secs = Math.max(0, Math.round((Date.now() - lastSnapshotAt) / 1000));
+    // Polls land every ~5-12s, so within the STALE_AFTER window just read
+    // "updated just now" (steady -- no distracting per-second count-up). Only
+    // surface elapsed time once the feed is genuinely stale (poll stalled /
+    // error backoff), which is the case where staleness actually matters.
+    const STALE_AFTER = 15;
     let label;
-    if (secs < 5) label = 'updated just now';
-    else if (secs < 60) label = `updated ${secs}s ago`;
+    if (secs <= STALE_AFTER) label = 'updated just now';
+    else if (secs < 90) label = `updated ${secs}s ago`;
     else label = `updated ${Math.floor(secs / 60)}m ago`;
     updatedEl.textContent = label;
+
+    // Coarse ring step under reduced motion (rAF loop is disabled then);
+    // harmless redundant write while the rAF loop is active.
+    updateRing();
+  }
+
+  // ---------------------------------------------------------------- Countdown ring
+
+  function prefersReducedMotion() {
+    const R = window.VTGwReconcile;
+    if (R && R.prefersReducedMotion) return R.prefersReducedMotion();
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  function onSchedule(dueAtMs, delayMs) {
+    nextPollDueAt = dueAtMs;
+    nextPollDelayMs = delayMs;
+    updateRing();
+  }
+
+  function updateRing() {
+    if (!ringFgEl) return;
+    let progress = 0; // 0 = just polled (empty), 1 = due now (full)
+    if (!document.hidden && nextPollDueAt && nextPollDelayMs > 0) {
+      const remaining = Math.max(0, nextPollDueAt - Date.now());
+      progress = Math.min(1, Math.max(0, 1 - remaining / nextPollDelayMs));
+    }
+    ringFgEl.style.strokeDashoffset = String(RING_CIRCUMFERENCE * (1 - progress));
+  }
+
+  function ringLoop() {
+    updateRing();
+    ringRafId = requestAnimationFrame(ringLoop);
+  }
+
+  function startRingLoop() {
+    // Smooth rAF only when motion is allowed; otherwise the 1s ticker drives
+    // coarse updates.
+    if (prefersReducedMotion()) return;
+    if (ringRafId == null) ringRafId = requestAnimationFrame(ringLoop);
+  }
+
+  function stopRingLoop() {
+    if (ringRafId != null) {
+      cancelAnimationFrame(ringRafId);
+      ringRafId = null;
+    }
+  }
+
+  function onRingVisibilityChange() {
+    if (document.hidden) {
+      stopRingLoop();
+      updateRing(); // settle to paused/empty
+    } else {
+      startRingLoop();
+    }
   }
 
   // ---------------------------------------------------------------- Init
 
   async function init() {
-    interestSection = document.getElementById('gw-interest');
-    interestBody = document.getElementById('gw-interest-body');
-    allSection = document.getElementById('gw-all');
-    allBody = document.getElementById('gw-all-body');
+    gridEl = document.getElementById('gw-grid');
     emptyEl = document.getElementById('gw-empty');
     countEl = document.getElementById('gw-count');
     updatedEl = document.getElementById('gw-updated');
     statusDotEl = document.getElementById('gw-status-dot');
+    ringFgEl = document.querySelector('#gw-ring .gw-ring-fg');
+
+    if (ringFgEl) {
+      ringFgEl.style.strokeDasharray = String(RING_CIRCUMFERENCE);
+      ringFgEl.style.strokeDashoffset = String(RING_CIRCUMFERENCE); // empty
+    }
 
     updateCount(0);
     updateTicker();
 
-    // 1s ticker, decoupled from polling.
+    // 1s ticker, decoupled from polling (also drives the ring under reduced motion).
     tickerTimerId = setInterval(updateTicker, 1000);
+
+    document.addEventListener('visibilitychange', onRingVisibilityChange);
+    startRingLoop();
 
     const resolver = getResolver();
     const waits = [];
@@ -196,7 +265,7 @@
     if (resolver && resolver.loadCanonicalNames) resolver.loadCanonicalNames();
 
     if (window.VTGwPoller) {
-      window.VTGwPoller.init({ onSnapshot, onError, shouldPollFast });
+      window.VTGwPoller.init({ onSnapshot, onError, shouldPollFast, onSchedule });
     } else {
       console.error('[gw] VTGwPoller not available');
     }

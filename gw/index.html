@@ -106,24 +106,20 @@
         </div>
         <div class="vt-gw-header-meta">
           <span class="vt-gw-chip vt-mono" id="gw-count">Checking lobbies...</span>
+          <span class="gw-ring" id="gw-ring" title="Time until the next refresh" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <circle class="gw-ring-track" cx="12" cy="12" r="9"></circle>
+              <circle class="gw-ring-fg" cx="12" cy="12" r="9"></circle>
+            </svg>
+          </span>
           <span class="vt-gw-chip vt-mono" id="gw-updated">connecting...</span>
         </div>
       </header>
 
-      <!-- Pinned: known-host community lobbies, always first. -->
-      <section class="vt-gw-section vt-gw-section--interest" id="gw-interest" hidden aria-labelledby="gw-interest-title">
-        <h2 class="vt-gw-section-title" id="gw-interest-title">
-          <i class="bi bi-star-fill me-2"></i>Matches of interest
-        </h2>
-        <div class="vt-gw-grid vt-gw-grid--interest" id="gw-interest-body"></div>
-      </section>
-
-      <!-- Every other active lobby worldwide. -->
-      <section class="vt-gw-section" id="gw-all" aria-labelledby="gw-all-title">
-        <h2 class="vt-gw-section-title" id="gw-all-title">
-          <i class="bi bi-globe2 me-2"></i>All active lobbies
-        </h2>
-        <div class="vt-gw-grid" id="gw-all-body"></div>
+      <!-- All active lobbies in one grid. Of-interest (known-host) lobbies
+           are sorted first and distinguished by the accent border only. -->
+      <section class="vt-gw-section" aria-label="Active lobbies">
+        <div class="vt-gw-grid" id="gw-grid"></div>
       </section>
 
       <!-- Empty state: no lobbies anywhere. -->

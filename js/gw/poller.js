@@ -36,6 +36,7 @@
     onSnapshot: null,      // (sessions) -> void
     onError: null,         // (err) -> void
     shouldPollFast: null,  // (sessions) -> boolean
+    onSchedule: null,      // (dueAtMs|null, delayMs|null) -> void  (next-poll timing)
   };
 
   let inFlight = false;
@@ -110,8 +111,15 @@
       clearTimeout(pollTimerId);
       pollTimerId = null;
     }
-    if (document.hidden) return;
+    if (document.hidden) {
+      // Paused while backgrounded: no pending poll for the UI to count down to.
+      if (opts.onSchedule) { try { opts.onSchedule(null, null); } catch (_) { /* */ } }
+      return;
+    }
     pollTimerId = setTimeout(tick, nextDelayMs);
+    if (opts.onSchedule) {
+      try { opts.onSchedule(Date.now() + nextDelayMs, nextDelayMs); } catch (_) { /* */ }
+    }
   }
 
   function onVisibilityChange() {

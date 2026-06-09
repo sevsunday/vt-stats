@@ -26,12 +26,25 @@
   'use strict';
 
   const PLAYER_LINK_TARGET = '_blank';
+  // Terminal map-thumbnail fallback, kept alongside the local map images.
+  const NOMAP_IMG = '../data/maps/nomap.svg';
 
   // ---------------------------------------------------------------- Dependencies (late-bound)
 
   function lsc() { return window.VTLiveSessionCard || null; }
   function resolver() { return window.VTToolsResolver || null; }
   function bs() { return window.bootstrap || null; }
+
+  // BZ2API is a top-level `const` in js/bz2api.js -> a global lexical binding,
+  // NOT a property of window. Access it by bare name (mirrors the poller),
+  // falling back to window just in case.
+  function getBZ2API() {
+    try {
+      // eslint-disable-next-line no-undef
+      if (typeof BZ2API !== 'undefined' && BZ2API) return BZ2API;
+    } catch (_) { /* */ }
+    return (typeof window !== 'undefined' && window.BZ2API) || null;
+  }
 
   function escapeHtml(s) {
     const r = lsc();
@@ -115,6 +128,21 @@
     return mods.map((m) => m.id || m.name || '?').join(',');
   }
 
+  // Resolve a mod's display label locally. bz2api only names the stock mod;
+  // every other mod name (incl. VSR) otherwise comes from iondriver, which the
+  // /gw local-first flow skips for catalog-hit (local) maps -- so a VSR mod
+  // would show its raw id there. The session already carries gameBalanceName
+  // ("Vet Strat Recycler Variant") for VSR, so resolve that without a network
+  // round-trip. Other unnamed workshop mods fall back to their id.
+  function modLabel(mod, session) {
+    if (mod && mod.name) return mod.name;
+    const api = getBZ2API();
+    if (api && api.VSR_MOD_ID && mod && mod.id === api.VSR_MOD_ID && session && session.gameBalanceName) {
+      return session.gameBalanceName;
+    }
+    return (mod && mod.id) || 'Mod';
+  }
+
   function secondaryStatsRows(session) {
     return [
       ['TPS', Number.isFinite(session.tps) ? session.tps : '\u2014'],
@@ -134,21 +162,23 @@
     const vsrMap = r ? r.getVsrMapByFile() : null;
     const vsrEntry = (slug && vsrMap) ? vsrMap.get(slug) : null;
 
+    // Preference order: local PNG -> iondriver/remote (session.mapImageUrl on
+    // a catalog miss) -> vsrmaplist remote -> nomap.svg terminal fallback.
+    // nomap.svg lives alongside the local map images and never 404s, so an
+    // <img> is ALWAYS rendered (no empty/hidden thumb).
     const localImg = slug ? `../data/maps/${encodeURIComponent(slug)}.png` : '';
-    const vsrImg = (vsrEntry && vsrEntry.Image) ? vsrEntry.Image : '';
     const remoteImg = session.mapImageUrl || '';
-    const candidates = [localImg, vsrImg, remoteImg].filter((v, i, a) => v && a.indexOf(v) === i);
-    const primary = candidates[0] || '';
+    const vsrImg = (vsrEntry && vsrEntry.Image) ? vsrEntry.Image : '';
+    const candidates = [localImg, remoteImg, vsrImg, NOMAP_IMG]
+      .filter((v, i, a) => v && a.indexOf(v) === i);
+    const primary = candidates[0];
     const fallbacks = candidates.slice(1).join('|');
     const mapName = session.mapName || session.mapFile || 'Unknown map';
 
-    if (!primary) {
-      return '<div class="gw-thumb-placeholder"><i class="bi bi-map" aria-hidden="true"></i></div>';
-    }
     return `<img src="${escapeHtml(primary)}"
       data-fallbacks="${escapeHtml(fallbacks)}"
       alt="${escapeHtml(mapName)}" loading="lazy"
-      onerror="(function(el){var list=el.dataset.fallbacks?el.dataset.fallbacks.split('|').filter(Boolean):[];if(list.length===0){el.classList.add('gw-thumb-broken');return;}var next=list.shift();el.dataset.fallbacks=list.join('|');el.src=next;})(this)">`;
+      onerror="(function(el){var list=el.dataset.fallbacks?el.dataset.fallbacks.split('|').filter(Boolean):[];if(list.length===0){return;}var next=list.shift();el.dataset.fallbacks=list.join('|');el.src=next;})(this)">`;
   }
 
   // ---------------------------------------------------------------- Sub-render: bar
@@ -175,20 +205,11 @@
       <i class="bi bi-lock-fill" aria-hidden="true"></i><span>Locked</span></span>`;
   }
 
-  function hostSteamChipHtml(session) {
-    const host = session && session.players && session.players[0];
-    if (host && host.profileUrl) {
-      return `<a class="gw-steam" href="${escapeHtml(host.profileUrl)}" target="_blank" rel="noopener noreferrer"
-        title="Host Steam profile" aria-label="Host Steam profile"><i class="bi bi-steam" aria-hidden="true"></i></a>`;
-    }
-    return '';
-  }
-
-  function barRightHtml(session, ofInterest) {
+  function barRightHtml(session, _ofInterest) {
+    // Of-interest lobbies are distinguished by the card's accent border only
+    // (no badge); _ofInterest is retained for signature compatibility.
     return `
-      ${ofInterest ? '<span class="gw-interest-badge"><i class="bi bi-star-fill" aria-hidden="true"></i>Community</span>' : ''}
       <span class="gw-join-wrap" data-gw-field="join" data-gw-joinable="${session.steamJoinUrl ? '1' : '0'}">${joinHtml(session)}</span>
-      ${hostSteamChipHtml(session)}
     `;
   }
 
@@ -236,10 +257,12 @@
     const r = resolver();
     const res = (r && p.steamId) ? r.resolve(p.steamId, p.name) : null;
     const name = (res && res.displayName) || p.name || '(unnamed)';
-    const linkable = res && !res.isUnknown && res.vtstatsUrl;
 
-    const nameHtml = linkable
-      ? `<a class="gw-pname" href="${escapeHtml(res.vtstatsUrl)}" target="${PLAYER_LINK_TARGET}" rel="noopener">${escapeHtml(name)}</a>`
+    // Link the player name to their Steam (or GOG) profile -- p.profileUrl is
+    // built by bz2api.parsePlayer for any platform id. Display name still uses
+    // the resolver (canonical name when known). No profile id -> plain span.
+    const nameHtml = p.profileUrl
+      ? `<a class="gw-pname" href="${escapeHtml(p.profileUrl)}" target="${PLAYER_LINK_TARGET}" rel="noopener noreferrer" title="Open Steam profile">${escapeHtml(name)}</a>`
       : `<span class="gw-pname">${escapeHtml(name)}</span>`;
 
     const roleHtml = p.isCommander
@@ -311,7 +334,7 @@
       return '<span class="gw-mod gw-mod--stock">Stock</span>';
     }
     const primary = mods[0];
-    const label = primary.name || primary.id || 'Mod';
+    const label = modLabel(primary, session);
     const primaryChip = primary.workshopUrl
       ? `<a class="gw-mod" href="${escapeHtml(primary.workshopUrl)}" target="_blank" rel="noopener" title="${escapeHtml(label)}"><i class="bi bi-box-seam" aria-hidden="true"></i><span>${escapeHtml(label)}</span></a>`
       : `<span class="gw-mod gw-mod--static" title="${escapeHtml(label)}"><i class="bi bi-box-seam" aria-hidden="true"></i><span>${escapeHtml(label)}</span></span>`;
@@ -319,7 +342,7 @@
     let moreHtml = '';
     if (mods.length > 1) {
       const rest = mods.slice(1).map((m) => {
-        const ml = m.name || m.id || 'Mod';
+        const ml = modLabel(m, session);
         return m.workshopUrl
           ? `<a href="${escapeHtml(m.workshopUrl)}" target="_blank" rel="noopener" class="gw-pop-mod"><i class="bi bi-box-seam"></i>${escapeHtml(ml)}</a>`
           : `<span class="gw-pop-mod">${escapeHtml(ml)}</span>`;
