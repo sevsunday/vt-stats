@@ -28,7 +28,7 @@
  *   - canonicalNames: Map<steam64, string> | null
  *   - knownHostNames: Map<steam64, string>
  *   - vsrMapByFile:   Map<lowercased mapFile, vsrmaplist entry> | null
- *   - gameWatchUrl:   string (defaults to BZCC-Website GameWatch)
+ *   - gameWatchUrl:   string (defaults to VT Stats' own /gw/ Game Watch)
  *   - showFooterCloseBtn: boolean (default true)
  *   - footerExtras:   string of HTML appended after the standard footer actions
  *
@@ -38,7 +38,9 @@
 (function () {
   'use strict';
 
-  const DEFAULT_GAMEWATCH_URL = 'https://battlezonescrapfield.github.io/BZCC-Website/';
+  // Root-absolute so it resolves correctly from any page depth (e.g. the
+  // /tools lobby card). Points at VT Stats' own Game Watch page.
+  const DEFAULT_GAMEWATCH_URL = '/gw/';
 
   // ---------------------------------------------------------------- Utilities
 

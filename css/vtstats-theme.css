@@ -1096,6 +1096,20 @@ body::before {
    shown.bs.modal so a closed modal carries no per-session DOM cost.
    ============================================================================ */
 
+/* Game Watch modal (#gamewatch-modal): full-bleed iframe embedding the /gw
+   live grid. The iframe scrolls internally; the modal body does not. */
+.vt-gamewatch-frame {
+    display: block;
+    width: 100%;
+    height: 72vh;
+    border: 0;
+    background-color: var(--kb-bg-card);
+}
+
+#gamewatch-modal .modal-body {
+    overflow: hidden;
+}
+
 .vt-active-game-modal-title {
     display: inline-flex;
     align-items: center;

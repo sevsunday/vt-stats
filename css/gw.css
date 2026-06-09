@@ -23,6 +23,13 @@
   width: 100%;
 }
 
+/* Embedded mode: when /gw is iframed in the dashboard Game Watch modal
+   (?embed=1), hide the standalone navbar so only the live grid + header
+   strip show. The modal supplies its own chrome. */
+html.gw-embed .navbar {
+  display: none !important;
+}
+
 /* ----------------------------------------------------------------- Header strip */
 
 .vt-gw-header {

@@ -24,6 +24,13 @@
   <link rel="stylesheet" href="../css/layout.css">
   <link rel="stylesheet" href="../css/vtstats-theme.css">
   <link rel="stylesheet" href="../css/gw.css">
+
+  <!-- Embedded mode: when /gw is iframed (e.g. the dashboard Game Watch
+       modal) with ?embed=1, hide the standalone navbar so only the live
+       grid shows. Runs pre-paint to avoid a navbar flash. -->
+  <script>
+    try { if (new URLSearchParams(location.search).has('embed')) { document.documentElement.classList.add('gw-embed'); } } catch (e) { /* noop */ }
+  </script>
 </head>
 <body class="d-flex flex-column h-100">
 

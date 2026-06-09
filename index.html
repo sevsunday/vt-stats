@@ -30,27 +30,26 @@
       <!-- Active Game Indicator. Polls the live BZ2 lobby via window.BZ2API
            every 30s (paused while tab hidden) and surfaces a pulsing LIVE
            pill whenever a session hosted by an allowlisted Steam64 ID is
-           live. Click pill -> #active-game-modal (single match) or
-           dropdown -> modal (multiple matches). Always shows GameWatch
-           link. Self-bootstrapping; see js/active-game-indicator.js. -->
-      <div id="vt-active-game" class="vt-active-game dropdown" data-state="loading" aria-live="polite">
+           live. Clicking either the GameWatch button (no match) or the LIVE
+           pill (match found) opens #gamewatch-modal, which embeds the full
+           /gw page in an iframe. Self-bootstrapping; see
+           js/active-game-indicator.js. -->
+      <div id="vt-active-game" class="vt-active-game" data-state="loading" aria-live="polite">
         <button type="button"
                 class="vt-active-game-pill"
                 id="vt-active-game-pill"
                 hidden
                 disabled>
         </button>
-        <ul class="dropdown-menu vt-active-game-dropdown" id="vt-active-game-dropdown"
-            aria-labelledby="vt-active-game-pill"></ul>
         <a id="vt-active-game-join" class="vt-active-game-join" hidden href="#"
            rel="noopener noreferrer"
            title="Join via Steam" aria-label="Join via Steam">
           <i class="bi bi-play-fill me-1"></i><span class="vt-active-game-join-label">Join</span>
         </a>
         <a class="vt-active-game-gamewatch"
-           href="https://battlezonescrapfield.github.io/BZCC-Website/"
-           target="_blank" rel="noopener noreferrer"
-           title="Open BZCC GameWatch" aria-label="Open BZCC GameWatch">
+           href="gw/index.html"
+           data-bs-toggle="modal" data-bs-target="#gamewatch-modal"
+           title="Watch every active lobby" aria-label="Open Game Watch">
           <i class="bi bi-broadcast-pin"></i><span class="vt-active-game-gamewatch-label ms-1">GameWatch</span>
         </a>
       </div>
@@ -1531,24 +1530,32 @@
     </div>
   </div>
 
-  <!-- Active Game Modal. Skeleton populated by js/active-game-indicator.js
-       on Bootstrap's `shown.bs.modal` event so the closed modal stays
-       cheap. Body is a session card mirroring the bz2api.js demo. Footer
-       carries Join via Steam (or Locked chip), GameWatch, Close. -->
-  <div class="modal fade" id="active-game-modal" tabindex="-1"
-       aria-labelledby="active-game-modal-title" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+  <!-- Game Watch Modal. Opened from the topnav GameWatch button (no-match
+       state) and the green LIVE pill (game-of-interest state). Embeds the
+       full /gw page in an iframe (?embed=1 hides its navbar) so users see
+       every active lobby worldwide with community matches pinned first. The
+       iframe src is set lazily on show and torn down on hide by
+       js/active-game-indicator.js so the embedded poller stops while closed.
+       Footer GameWatch button opens the standalone /gw page. -->
+  <div class="modal fade" id="gamewatch-modal" tabindex="-1"
+       aria-labelledby="gamewatch-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header border-bottom">
-          <h5 class="modal-title vt-active-game-modal-title" id="active-game-modal-title">
-            <i class="bi bi-broadcast me-2"></i>Active Game
+          <h5 class="modal-title vt-active-game-modal-title" id="gamewatch-modal-title">
+            <i class="bi bi-broadcast-pin me-2"></i>Game Watch
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="modal-body" id="active-game-modal-body">
-          <div class="text-muted small">Loading session details...</div>
+        <div class="modal-body p-0">
+          <iframe id="gamewatch-modal-frame" class="vt-gamewatch-frame"
+                  title="Game Watch - all active lobbies" loading="lazy"
+                  referrerpolicy="no-referrer"></iframe>
         </div>
-        <div class="modal-footer border-top" id="active-game-modal-footer">
+        <div class="modal-footer border-top">
+          <a href="gw/index.html" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-broadcast-pin me-1"></i>GameWatch
+          </a>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
         </div>
       </div>

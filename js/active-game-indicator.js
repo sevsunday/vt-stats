@@ -9,11 +9,10 @@
  *    known-host VSR lobby is active.
  *
  *  - On pages that ALSO carry the full #vt-active-game widget markup
- *    (currently only index.html), renders a pulsing LIVE pill, a
- *    multi-match dropdown, a Join-via-Steam shortcut, and a
- *    click-through #active-game-modal mirroring the bz2api demo card.
- *    Body markup is rendered via VTLiveSessionCard (shared with the
- *    Tools page Lobby).
+ *    (currently only index.html), renders a pulsing LIVE pill and a
+ *    Join-via-Steam shortcut. Clicking the GameWatch button (no match) or
+ *    the LIVE pill (match found) opens #gamewatch-modal, which embeds the
+ *    full /gw page in an iframe (src set lazily on show, torn down on hide).
  *
  * Self-contained: bootstraps on DOMContentLoaded, exposes nothing on
  * window, has zero coupling to js/app.js.
@@ -43,8 +42,7 @@
 
   const KNOWN_HOSTS_URL_CANDIDATES = ['data/known-hosts.json', '../data/known-hosts.json'];
   const STEAM_ROSTER_URL_CANDIDATES = ['data/steamid_to_name.txt', '../data/steamid_to_name.txt'];
-  const VSR_MAP_LIST_URL_CANDIDATES = ['data/vsrmaplist.json', '../data/vsrmaplist.json'];
-  const GAMEWATCH_URL = 'https://battlezonescrapfield.github.io/BZCC-Website/';
+  const GAMEWATCH_FRAME_SRC = 'gw/index.html?embed=1';
 
   // ---------------------------------------------------------------- State
 
@@ -53,9 +51,6 @@
 
   /** @type {Array<object>} */
   let activeSessions = [];
-
-  /** @type {string|null} GUID (raw `id`) of the session the modal is rendering. */
-  let selectedSessionId = null;
 
   /** @type {Set<string>} Allowlisted host Steam64 IDs. */
   const knownHosts = new Set();
@@ -67,10 +62,6 @@
   let canonicalNames = null;
   let canonicalLoadPromise = null;
 
-  /** @type {Map<string,object>|null} lowercased mapFile -> vsrmaplist entry. */
-  let vsrMapByFile = null;
-  let vsrMapLoadPromise = null;
-
   let inFlight = false;
   let errorStreak = 0;
   let nextDelayMs = POLL_INTERVAL_MS;
@@ -80,9 +71,9 @@
 
   let widgetEl = null;
   let pillEl = null;
-  let dropdownMenuEl = null;
   let joinEl = null;
-  let modalEl = null;
+  let gwModalEl = null;
+  let gwFrameEl = null;
   let toolsLinkEls = [];
 
   // ---------------------------------------------------------------- Loaders
@@ -136,33 +127,6 @@
       canonicalNames = names;
     })();
     return canonicalLoadPromise;
-  }
-
-  function loadVsrMapList() {
-    if (vsrMapByFile !== null) return Promise.resolve();
-    if (vsrMapLoadPromise) return vsrMapLoadPromise;
-    vsrMapLoadPromise = (async () => {
-      const map = new Map();
-      const data = await fetchWithFallback(VSR_MAP_LIST_URL_CANDIDATES, (r) => r.json());
-      if (data) {
-        const entries = Array.isArray(data.Maps) ? data.Maps
-                      : Array.isArray(data) ? data
-                      : [];
-        for (const entry of entries) {
-          if (entry && typeof entry.File === 'string') {
-            map.set(entry.File.toLowerCase(), entry);
-          }
-        }
-      } else {
-        console.warn('[active-game] failed to load vsrmaplist.json');
-      }
-      vsrMapByFile = map;
-    })();
-    return vsrMapLoadPromise;
-  }
-
-  function loadResourcesOnce() {
-    return Promise.all([loadCanonicalNames(), loadVsrMapList()]);
   }
 
   // ---------------------------------------------------------------- Helpers
@@ -233,10 +197,8 @@
   function ensureDom() {
     if (!widgetEl) widgetEl = document.getElementById('vt-active-game');
     if (!pillEl) pillEl = document.getElementById('vt-active-game-pill');
-    if (!dropdownMenuEl) dropdownMenuEl = document.getElementById('vt-active-game-dropdown');
     if (!joinEl) joinEl = document.getElementById('vt-active-game-join');
-    if (!modalEl) modalEl = document.getElementById('active-game-modal');
-    return !!(widgetEl && pillEl && joinEl && modalEl);
+    return !!(widgetEl && pillEl && joinEl);
   }
 
   function setState(next) {
@@ -259,7 +221,6 @@
       <span class="vt-active-game-pill-loading-compact">Checking...</span>
     `;
     if (joinEl) joinEl.hidden = true;
-    if (dropdownMenuEl) dropdownMenuEl.innerHTML = '';
   }
 
   function renderNoMatch() {
@@ -271,28 +232,18 @@
       pillEl.innerHTML = '';
     }
     if (joinEl) joinEl.hidden = true;
-    if (dropdownMenuEl) dropdownMenuEl.innerHTML = '';
   }
 
   function renderMatchFound1(session) {
     setState('match-found-1');
-    selectedSessionId = session.id || null;
 
     if (pillEl) {
-      try {
-        const Dropdown = window.bootstrap && window.bootstrap.Dropdown;
-        if (Dropdown && Dropdown.getInstance) {
-          const inst = Dropdown.getInstance(pillEl);
-          if (inst) inst.dispose();
-        }
-      } catch (_) { /* best effort */ }
-
       pillEl.hidden = false;
       pillEl.disabled = false;
       pillEl.removeAttribute('aria-haspopup');
       pillEl.removeAttribute('aria-expanded');
       pillEl.setAttribute('data-bs-toggle', 'modal');
-      pillEl.setAttribute('data-bs-target', '#active-game-modal');
+      pillEl.setAttribute('data-bs-target', '#gamewatch-modal');
 
       const host = resolveHostLabel(session);
       const count = formatPlayerCount(session);
@@ -328,21 +279,18 @@
         joinEl.innerHTML = `<i class="bi bi-lock-fill me-1"></i><span class="vt-active-game-join-label">Locked</span>`;
       }
     }
-
-    if (dropdownMenuEl) dropdownMenuEl.innerHTML = '';
   }
 
   function renderMatchFoundN(sessions) {
     setState('match-found-n');
-    selectedSessionId = sessions[0] ? sessions[0].id : null;
 
     if (pillEl) {
       pillEl.hidden = false;
       pillEl.disabled = false;
-      pillEl.removeAttribute('data-bs-target');
-      pillEl.setAttribute('data-bs-toggle', 'dropdown');
-      pillEl.setAttribute('aria-haspopup', 'true');
-      pillEl.setAttribute('aria-expanded', 'false');
+      pillEl.removeAttribute('aria-haspopup');
+      pillEl.removeAttribute('aria-expanded');
+      pillEl.setAttribute('data-bs-toggle', 'modal');
+      pillEl.setAttribute('data-bs-target', '#gamewatch-modal');
       pillEl.setAttribute('aria-label', `${sessions.length} active lobbies`);
       pillEl.setAttribute('title', `${sessions.length} active lobbies`);
 
@@ -353,29 +301,12 @@
           <span class="vt-active-game-pill-multi-full">${sessions.length} lobbies</span>
           <span class="vt-active-game-pill-multi-compact">${sessions.length}</span>
         </span>
-        <i class="bi bi-chevron-down ms-1" aria-hidden="true"></i>
+        <i class="bi bi-chevron-right vt-active-game-pill-chevron" aria-hidden="true"></i>
       `;
     }
 
-    if (dropdownMenuEl) {
-      dropdownMenuEl.innerHTML = sessions.map((s) => {
-        const host = resolveHostLabel(s);
-        const map = s.mapName || s.mapFile || 'Unknown map';
-        const count = formatPlayerCount(s);
-        const isVsr = s.gameBalance === 'VSR';
-        return `
-          <li>
-            <button type="button" class="dropdown-item vt-active-game-dropdown-item" data-session-id="${escapeHtml(s.id || '')}">
-              <span class="vt-active-game-dropdown-host">${escapeHtml(host)}</span>
-              <span class="vt-active-game-dropdown-map">${escapeHtml(map)}</span>
-              <span class="vt-active-game-dropdown-count">${escapeHtml(count)}</span>
-              ${isVsr ? '<span class="vt-active-game-badge vt-active-game-badge--vsr">VSR</span>' : ''}
-            </button>
-          </li>
-        `;
-      }).join('');
-    }
-
+    // Multiple games of interest: the pill opens the Game Watch modal (which
+    // lists every active lobby) rather than a picker. No single Join target.
     if (joinEl) joinEl.hidden = true;
   }
 
@@ -390,62 +321,26 @@
     }
   }
 
-  // ---------------------------------------------------------------- Modal renderer
+  // ---------------------------------------------------------------- Game Watch modal
 
-  function findSessionById(sessionId) {
-    if (!sessionId) return activeSessions[0] || null;
-    return activeSessions.find((s) => s.id === sessionId) || activeSessions[0] || null;
-  }
+  /**
+   * Wires the #gamewatch-modal (index.html only). The iframe src is set
+   * lazily on first show so the closed modal stays cheap, and torn down on
+   * hide so the embedded /gw poller stops while the modal is closed.
+   */
+  function wireGamewatchModal() {
+    gwModalEl = document.getElementById('gamewatch-modal');
+    if (!gwModalEl) return;
+    gwFrameEl = document.getElementById('gamewatch-modal-frame');
+    if (!gwFrameEl) return;
 
-  function renderModal(session) {
-    if (!modalEl || !session) return;
-    const titleEl = modalEl.querySelector('#active-game-modal-title');
-    const bodyEl = modalEl.querySelector('#active-game-modal-body');
-    const footerEl = modalEl.querySelector('#active-game-modal-footer');
-    if (!titleEl || !bodyEl || !footerEl) return;
-
-    const renderer = window.VTLiveSessionCard;
-    if (!renderer) {
-      bodyEl.innerHTML = '<div class="text-muted small">Renderer not loaded.</div>';
-      return;
-    }
-
-    const renderOpts = {
-      canonicalNames: canonicalNames,
-      knownHostNames: knownHostNames,
-      vsrMapByFile: vsrMapByFile,
-      gameWatchUrl: GAMEWATCH_URL,
-    };
-
-    renderer.renderInto(session, { titleEl, bodyEl, footerEl, opts: renderOpts });
-  }
-
-  function wireModalEvents() {
-    if (!modalEl) return;
-    modalEl.addEventListener('shown.bs.modal', () => {
-      const session = findSessionById(selectedSessionId);
-      if (session) renderModal(session);
-    });
-    modalEl.addEventListener('vt:active-game-refresh', () => {
-      if (!modalEl.classList.contains('show')) return;
-      const session = findSessionById(selectedSessionId);
-      if (session) renderModal(session);
-    });
-  }
-
-  function wirePillAndDropdown() {
-    if (!widgetEl) return;
-    widgetEl.addEventListener('click', (e) => {
-      const item = e.target.closest('.vt-active-game-dropdown-item');
-      if (!item) return;
-      const id = item.getAttribute('data-session-id');
-      if (id) {
-        selectedSessionId = id;
-        const modal = window.bootstrap && window.bootstrap.Modal
-          ? window.bootstrap.Modal.getOrCreateInstance(modalEl)
-          : null;
-        if (modal) modal.show();
+    gwModalEl.addEventListener('show.bs.modal', () => {
+      if (gwFrameEl.getAttribute('src') !== GAMEWATCH_FRAME_SRC) {
+        gwFrameEl.setAttribute('src', GAMEWATCH_FRAME_SRC);
       }
+    });
+    gwModalEl.addEventListener('hidden.bs.modal', () => {
+      gwFrameEl.removeAttribute('src');
     });
   }
 
@@ -467,11 +362,10 @@
         enrichVsrMaps: false,
       });
       const filtered = filterAllowlisted(result && result.sessions);
-      // Map enrichment on survivors only when widget exists (modal needs it).
       const hasWidget = !!document.getElementById('vt-active-game');
+      // Resolve canonical host names for the pill label (widget pages only).
       if (hasWidget && filtered.length > 0) {
-        try { await api.enrichSessionsWithMapData(filtered); } catch (_) { /* non-fatal */ }
-        loadResourcesOnce();
+        loadCanonicalNames();
       }
       activeSessions = filtered;
       errorStreak = 0;
@@ -479,7 +373,6 @@
       setToolsLiveSignal(filtered.length > 0);
       if (hasWidget) {
         dispatchWidget();
-        if (modalEl) modalEl.dispatchEvent(new CustomEvent('vt:active-game-refresh'));
       }
     } catch (err) {
       errorStreak += 1;
@@ -520,9 +413,8 @@
     const hasWidget = ensureDom();
     if (hasWidget) {
       renderLoading();
-      wireModalEvents();
-      wirePillAndDropdown();
     }
+    wireGamewatchModal();
     document.addEventListener('visibilitychange', onVisibilityChange);
     await loadKnownHosts();
     if (knownHosts.size === 0) {
