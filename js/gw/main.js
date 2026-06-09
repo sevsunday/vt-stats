@@ -161,17 +161,17 @@
       return;
     }
     if (statusDotEl) statusDotEl.classList.remove('gw-dot--stale');
-    const secs = Math.max(0, Math.round((Date.now() - lastSnapshotAt) / 1000));
-    // Polls land every ~5-12s, so within the STALE_AFTER window just read
-    // "updated just now" (steady -- no distracting per-second count-up). Only
-    // surface elapsed time once the feed is genuinely stale (poll stalled /
-    // error backoff), which is the case where staleness actually matters.
-    const STALE_AFTER = 15;
-    let label;
-    if (secs <= STALE_AFTER) label = 'updated just now';
-    else if (secs < 90) label = `updated ${secs}s ago`;
-    else label = `updated ${Math.floor(secs / 60)}m ago`;
-    updatedEl.textContent = label;
+    // Live countdown to the next poll, matching the ring (which fills as the
+    // counter ticks toward 0). Reflects the adaptive cadence + error backoff
+    // automatically via nextPollDueAt.
+    if (document.hidden) {
+      updatedEl.textContent = 'paused';
+    } else if (!nextPollDueAt) {
+      updatedEl.textContent = 'updating\u2026';
+    } else {
+      const remaining = Math.max(0, Math.ceil((nextPollDueAt - Date.now()) / 1000));
+      updatedEl.textContent = `next in ${remaining}s`;
+    }
 
     // Coarse ring step under reduced motion (rAF loop is disabled then);
     // harmless redundant write while the rAF loop is active.
