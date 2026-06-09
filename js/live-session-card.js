@@ -223,7 +223,6 @@
     const stats = [
       ['Version', session.version || '-'],
       ['Game Mode', session.gameModeName || '-'],
-      ['Respawn', session.respawn || '-'],
       ['NAT Type', (session.nat && session.nat.name) || '-'],
       ['TPS', Number.isFinite(session.tps) ? session.tps : '-'],
       ['Max Ping', Number.isFinite(session.maxPing) ? `${session.maxPing}ms` : '-'],

@@ -116,11 +116,7 @@
   }
 
   function formatModeLine(session) {
-    const parts = [];
-    if (session.gameModeName) parts.push(session.gameModeName);
-    else if (session.gameTypeName) parts.push(session.gameTypeName);
-    if (session.respawn) parts.push(`Respawn ${session.respawn}`);
-    return parts.length ? parts.join(' \u00b7 ') : '\u2014';
+    return session.gameModeName || session.gameTypeName || '\u2014';
   }
 
   function modSig(session) {
