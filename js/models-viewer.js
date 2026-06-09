@@ -95,6 +95,10 @@ const ART_PITCH_MIN = -25;
 const ART_PITCH_MAX = 45;
 const ART_YAW_MIN = -180;
 const ART_YAW_MAX = 180;
+// Arrow-key turret slew: degrees/second applied per frame while a direction is
+// held (frame-rate independent). Per-frame application gives instant response
+// (no OS key-repeat delay) and supports simultaneous yaw + pitch.
+const KEY_SLEW_RATE = 60;
 
 // Recoil feel. Kick distance scales with the model radius (clamped); the barrel
 // snaps back over RECOIL_BACK_SEC then eases home over the remainder of
@@ -116,6 +120,10 @@ const ART_AXIS_Y = new THREE.Vector3(0, 1, 0);
 const ART_AXIS_X = new THREE.Vector3(1, 0, 0);
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+// Wrap a degree value into [-180, 180) so turret yaw rotates a continuous 360
+// (passing +180 rolls over to -180). Rotation about Y is periodic, so the model
+// never jumps -- only the displayed slider value snaps across the boundary.
+function wrapDeg(d) { return ((d + 180) % 360 + 360) % 360 - 180; }
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 // ---- Team color (BZCC `_c` mask compositing) --------------------------------
@@ -158,6 +166,7 @@ export class ObjectViewer {
     this._quality = opts.quality === 'hq' ? 'hq' : 'perf';
     this._textureNames = [];     // names this model's materials may need
     this._texCache = new Map();  // `${quality}:${name}` -> THREE.Texture
+    this._texLoadGen = 0;        // bumped each _applyTextures run; stale runs abort
     this._texLoader = new THREE.TextureLoader();
     this._ddsLoader = new DDSLoader();
 
@@ -211,6 +220,8 @@ export class ObjectViewer {
     this._partGroups = [];         // [{id, label, meshes:[Mesh]}] built per load
     this._turretYawDeg = 0;
     this._turretPitchDeg = 0;
+    this._keySlewYaw = 0;          // -1/0/+1 held arrow-key yaw direction
+    this._keySlewPitch = 0;        // -1/0/+1 held arrow-key pitch direction
     this._aimMode = false;
     this._driveSpeed = 0;          // -1..1; scrolls treads (+ optional bank clip)
     this._recoilClock = 0;         // seconds; advances while any recoil is active
@@ -447,13 +458,21 @@ export class ObjectViewer {
 
   /* Load + assign the diffuse map for every material from the active set.
    * Tolerates missing textures (textureless/solid materials keep baseColor). */
-  async _applyTextures() {
+  async _applyTextures(onProgress) {
     const q = this._quality;
     const wf = this._wireframe && this._wireSaved;
+    // Generation guard: a later quality switch bumps _texLoadGen so this run's
+    // in-flight loads abort before clobbering the newer quality's textures. Also
+    // drives the optional onProgress(loaded, total) reporting.
+    const gen = ++this._texLoadGen;
+    const total = this._materials.filter((m) => m.name).length;
+    let loaded = 0;
     await Promise.all(this._materials.map(async (mat, i) => {
       if (!mat.name) return;
       const tex = await this._loadTexture(q, mat.name);
-      if (this.disposed) return;
+      if (this.disposed || gen !== this._texLoadGen) return;
+      loaded++;
+      if (onProgress) onProgress(loaded, total);
       if (wf) {
         // Wireframe active: write into the restore stash instead of the live
         // material (which stays on the white override) so toggling wireframe off
@@ -477,6 +496,7 @@ export class ObjectViewer {
       }
       mat.needsUpdate = true;
     }));
+    if (gen !== this._texLoadGen) return;   // superseded mid-flight
     // Re-assert the white override on the live materials in case a quality swap
     // while wireframe is on touched anything; no-op when wireframe is off.
     if (this._wireframe && this._wireSaved) this._paintWireframeWhite();
@@ -515,11 +535,11 @@ export class ObjectViewer {
     });
   }
 
-  async setQuality(quality) {
+  async setQuality(quality, onProgress) {
     const q = quality === 'hq' ? 'hq' : 'perf';
     if (q === this._quality) return;
     this._quality = q;
-    if (this._model) await this._applyTextures();
+    if (this._model) await this._applyTextures(onProgress);
   }
 
   /* ---- Team color (BZCC `_c` mask) ------------------------------------- */
@@ -915,6 +935,8 @@ export class ObjectViewer {
     // Reset live state for the new model.
     this._turretYawDeg = 0;
     this._turretPitchDeg = 0;
+    this._keySlewYaw = 0;
+    this._keySlewPitch = 0;
     this._aimMode = false;
     this._driveSpeed = 0;
     this._recoilClock = 0;
@@ -1027,7 +1049,7 @@ export class ObjectViewer {
   }
 
   setTurretYaw(deg) {
-    this._turretYawDeg = clamp(Number(deg) || 0, ART_YAW_MIN, ART_YAW_MAX);
+    this._turretYawDeg = wrapDeg(Number(deg) || 0);   // free 360 (wrap, not clamp)
     this._applyTurret();
   }
 
@@ -1037,6 +1059,14 @@ export class ObjectViewer {
   }
 
   getTurret() { return { yaw: this._turretYawDeg, pitch: this._turretPitchDeg }; }
+
+  /* Set the held arrow-key slew direction (-1/0/+1 per axis). The frame loop
+   * integrates this at KEY_SLEW_RATE deg/sec, so holding two arrows slews yaw
+   * and pitch together. Pitch is ignored on models without a pitch joint. */
+  setTurretKeySlew(yawDir, pitchDir) {
+    this._keySlewYaw = Math.sign(yawDir || 0);
+    this._keySlewPitch = this._artPitchNodes.length ? Math.sign(pitchDir || 0) : 0;
+  }
 
   /* Compose the current yaw/pitch deltas onto each turret node's rest rotation.
    * Yaw rotates turret_y about local Y; pitch rotates turret_x about local X. */
@@ -1098,7 +1128,7 @@ export class ObjectViewer {
           fwd0.normalize();
           const s = new THREE.Vector3().crossVectors(fwd0, dir).dot(yawAxis);
           const c = fwd0.dot(dir);
-          this._turretYawDeg = clamp(Math.atan2(s, c) / DEG, ART_YAW_MIN, ART_YAW_MAX);
+          this._turretYawDeg = wrapDeg(Math.atan2(s, c) / DEG);
         }
       }
     }
@@ -1190,6 +1220,8 @@ export class ObjectViewer {
   resetArticulation() {
     this._turretYawDeg = 0;
     this._turretPitchDeg = 0;
+    this._keySlewYaw = 0;
+    this._keySlewPitch = 0;
     this._applyTurret();
     this._recoilClock = 0;
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
@@ -1504,6 +1536,20 @@ export class ObjectViewer {
     if (this._mixer) {
       this._mixer.update(dt);
       if (this._activeAction && !this._activeAction.paused) moving = true;
+    }
+    // Held arrow-key slew: integrate the current direction(s) into the turret
+    // angles before applying, so yaw + pitch can move simultaneously and held
+    // keys respond on the very next frame (no OS key-repeat delay).
+    if (this._keySlewYaw || this._keySlewPitch) {
+      if (this._keySlewYaw) {
+        this._turretYawDeg = wrapDeg(this._turretYawDeg + this._keySlewYaw * KEY_SLEW_RATE * dt);
+      }
+      if (this._keySlewPitch) {
+        this._turretPitchDeg = clamp(
+          this._turretPitchDeg + this._keySlewPitch * KEY_SLEW_RATE * dt, ART_PITCH_MIN, ART_PITCH_MAX);
+      }
+      if (this._onAim) this._onAim({ yaw: this._turretYawDeg, pitch: this._turretPitchDeg });
+      moving = true;
     }
     // Articulation runs AFTER the mixer so turret/recoil writes win over (and
     // are re-asserted against) any playing bank clip that might touch them.

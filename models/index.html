@@ -145,7 +145,7 @@
         <button id="wire-hq-btn" class="btn toggle" title="Supersampled hairline wireframe (higher quality, more GPU cost)" hidden>Crisp lines</button>
         <button id="spin-btn" class="btn toggle">Auto-rotate</button>
         <button id="freespin-btn" class="btn toggle" title="Lock the camera and click-drag (fling) to spin the model">Free spin</button>
-        <button id="light-btn" class="btn toggle" aria-expanded="false" title="Toggle the light panel">Light</button>
+        <button id="light-btn" class="btn toggle" aria-expanded="false" title="Show light settings">Light</button>
         <button id="scene-btn" class="btn toggle" aria-expanded="false" title="Choose a scene / background">Scene</button>
         <button id="anim-btn" class="btn toggle" aria-expanded="false" title="Play this model's baked animations" hidden>Animations</button>
         <button id="parts-btn" class="btn toggle" aria-expanded="false" title="Aim the turret, fire the guns, roll the treads, and show/hide parts" hidden>Parts</button>
@@ -160,9 +160,11 @@
       <div id="stage-loading" class="stage-loading" hidden>
         <div class="spinner-border" role="status" aria-hidden="true"></div>
         <span id="stage-loading-label">Loading&hellip;</span>
+        <div id="stage-progress" class="stage-progress" hidden><div id="stage-progress-fill" class="stage-progress-fill"></div></div>
       </div>
+      <div id="viewer-dock" class="viewer-dock">
       <div id="light-panel" class="light-panel">
-        <div class="light-row light-head"><span>Sun light</span></div>
+        <label class="light-row light-head"><span>Sun light</span><input id="light-on" type="checkbox" class="light-toggle" title="Toggle the sun key light" /></label>
         <label class="light-row">
           <span class="light-label">Intensity</span>
           <input id="light-intensity" type="range" min="0" max="6" step="0.1" />
@@ -209,6 +211,7 @@
           </label>
           <div class="parts-row">
             <button id="parts-aim" class="btn toggle anim-mini" title="Move the cursor over the model to aim the turret (camera orbit pauses)">Aim at cursor</button>
+            <button id="parts-keys" class="btn toggle anim-mini" title="Aim the turret with the arrow keys (Left/Right = yaw, Up/Down = pitch)">Arrow keys</button>
             <button id="parts-center" class="btn anim-mini" title="Recenter the turret">Center</button>
           </div>
         </div>
@@ -265,6 +268,7 @@
         <div class="scene-ultra">
           <button id="ultra-ao" class="btn toggle scene-ultra-btn" title="Screen-space ambient occlusion + sharper anti-aliasing (post-processing)">Ambient occlusion</button>
         </div>
+      </div>
       </div>
     </div>
   </section>

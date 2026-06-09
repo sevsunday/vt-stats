@@ -64,6 +64,8 @@ const els = {
   ultraAo: document.getElementById('ultra-ao'),
   stageLoading: document.getElementById('stage-loading'),
   stageLoadingLabel: document.getElementById('stage-loading-label'),
+  stageProgress: document.getElementById('stage-progress'),
+  stageProgressFill: document.getElementById('stage-progress-fill'),
   fps: document.getElementById('fps-counter'),
   controlsHint: document.getElementById('controls-hint'),
   spin: document.getElementById('spin-btn'),
@@ -73,6 +75,7 @@ const els = {
   qualitySeg: document.getElementById('quality-seg'),
   lightBtn: document.getElementById('light-btn'),
   lightPanel: document.getElementById('light-panel'),
+  lightOn: document.getElementById('light-on'),
   lightIntensity: document.getElementById('light-intensity'),
   lightIntensityVal: document.getElementById('light-intensity-val'),
   lightAz: document.getElementById('light-az'),
@@ -97,6 +100,7 @@ const els = {
   partsPitch: document.getElementById('parts-pitch'),
   partsPitchVal: document.getElementById('parts-pitch-val'),
   partsAim: document.getElementById('parts-aim'),
+  partsKeys: document.getElementById('parts-keys'),
   partsCenter: document.getElementById('parts-center'),
   partsFireSection: document.getElementById('parts-fire-section'),
   partsFire: document.getElementById('parts-fire'),
@@ -112,6 +116,54 @@ const els = {
   colorsCustom: document.getElementById('colors-custom'),
   colorsOff: document.getElementById('colors-off'),
 };
+
+/* ---- Settings-pane dock ------------------------------------------------- */
+/* Every toolbar settings button maps to one pane in the left dock. On desktop
+ * any number of panes can be open (stacked); on mobile only one is open at a
+ * time. A pane's button is `hidden` when the model lacks that feature (anim /
+ * parts / colors), so the dock only ever surfaces applicable panes. */
+const PANES = [
+  { id: 'light', btn: els.lightBtn, panel: els.lightPanel },
+  { id: 'anim', btn: els.animBtn, panel: els.animPanel },
+  { id: 'parts', btn: els.partsBtn, panel: els.partsPanel },
+  { id: 'colors', btn: els.colorsBtn, panel: els.colorsPanel },
+  { id: 'scene', btn: els.sceneBtn, panel: els.scenePanel },
+];
+const panesMql = window.matchMedia('(max-width: 640px)');
+function isMobilePanes() { return panesMql.matches; }
+
+function setPaneOpen(id, open) {
+  const p = PANES.find((x) => x.id === id);
+  if (!p) return;
+  p.panel.hidden = !open;
+  p.btn.classList.toggle('on', open);
+  p.btn.setAttribute('aria-expanded', String(open));
+}
+
+function togglePane(id) {
+  const p = PANES.find((x) => x.id === id);
+  if (!p) return;
+  const open = p.panel.hidden;  // about to open?
+  if (open && isMobilePanes()) {
+    // Single-open on mobile: collapse every other pane first.
+    for (const other of PANES) if (other.id !== id) setPaneOpen(other.id, false);
+  }
+  setPaneOpen(id, open);
+}
+
+/* Default open/closed state for the current viewport. Desktop opens every
+ * applicable pane (button visible) and stacks them; mobile starts all closed. */
+function applyDefaultPaneState() {
+  const mobile = isMobilePanes();
+  for (const p of PANES) {
+    const applicable = !p.btn.hidden;
+    setPaneOpen(p.id, applicable && !mobile);
+  }
+}
+
+// Crossing the mobile breakpoint re-applies the default layout: collapse to none
+// (mobile) or re-expand the applicable panes (desktop).
+panesMql.addEventListener('change', () => { if (activeViewer) applyDefaultPaneState(); });
 
 // In-game team-color palette presets (team 1 / team 2 plus common FFA hues).
 const TEAM_COLOR_PRESETS = [
@@ -343,6 +395,9 @@ function showViewer(entry) {
       setupAnimUI();
       setupArticulationUI();
       setupColorsUI();
+      // Now that each pane's applicability (button visibility) is known, lay out
+      // the dock: desktop opens every applicable pane, mobile starts collapsed.
+      applyDefaultPaneState();
       updateControlsHint();
       // Apply persisted display + Ultra prefs once the model exists.
       activeViewer.setBackgroundMode(scene.bg);
@@ -365,16 +420,14 @@ function showViewer(entry) {
   els.spin.classList.remove('on');
   els.freespin.classList.remove('on');
   els.stage.classList.remove('grabbable');
-  // The top "Light" button is the on/off toggle; the panel (intensity/angle
-  // sliders) is always visible while a model is open.
-  els.lightPanel.hidden = false;
-  els.lightBtn.disabled = false;   // never inherit a wireframe-locked state across opens
-  els.lightBtn.classList.toggle('on', light.on);
+  // All panes start collapsed; applyDefaultPaneState() lays out the dock once
+  // the model loads and each pane's applicability is known. The sun on/off now
+  // lives inside the Light pane (initLightPanel syncs the checkbox).
+  setPaneOpen('light', false);
+  els.lightBtn.hidden = false;     // Light pane is always applicable
 
-  // Scene panel starts closed; controls are synced by syncScenePanel() post-load.
-  els.scenePanel.hidden = true;
-  els.sceneBtn.classList.remove('on');
-  els.sceneBtn.setAttribute('aria-expanded', 'false');
+  els.sceneBtn.hidden = false;     // Scene pane is always applicable
+  setPaneOpen('scene', false);
   els.ultraAo.classList.toggle('on', ultraPrefs().ao);
   // New viewer instance -> the AO passes will need to compile again.
   aoCompiled = false;
@@ -384,8 +437,7 @@ function showViewer(entry) {
   // Animation controls start hidden; setupAnimUI() reveals them once the GLB
   // resolves and reports baked clips.
   els.animBtn.hidden = true;
-  els.animBtn.classList.remove('on');
-  els.animPanel.hidden = true;
+  setPaneOpen('anim', false);
   els.animLoop.classList.remove('on');
   els.animSlowmo.value = '0';
   els.animSlowmoVal.textContent = 'native';
@@ -393,15 +445,16 @@ function showViewer(entry) {
   // Parts (articulation) controls start hidden; setupArticulationUI() reveals
   // them once the GLB resolves and reports moveable parts.
   els.partsBtn.hidden = true;
-  els.partsBtn.classList.remove('on');
-  els.partsPanel.hidden = true;
+  setPaneOpen('parts', false);
   els.partsAim.classList.remove('on');
+  els.partsKeys.classList.remove('on');
+  keyAimOn = false;
+  clearTurretKeys();
 
   // Team-color controls start hidden; setupColorsUI() reveals them once the GLB
   // resolves and reports team-colorable materials. Each open starts uncolored.
   els.colorsBtn.hidden = true;
-  els.colorsBtn.classList.remove('on');
-  els.colorsPanel.hidden = true;
+  setPaneOpen('colors', false);
 
   // Controls legend repopulates once the model loads (updateControlsHint()).
   els.controlsHint.hidden = true;
@@ -410,7 +463,23 @@ function showViewer(entry) {
     btn.onclick = async () => {
       const q = btn.dataset.q;
       syncQualitySeg(q);
-      await activeViewer.setQuality(q);
+      if (q !== 'hq') { await activeViewer.setQuality(q); return; }
+      // HQ can take a while (large .dds over the network). Show a determinate
+      // progress bar, but only after a short delay so cached re-selects don't
+      // flash it. Disable the seg until the load settles.
+      const segBtns = els.qualitySeg.querySelectorAll('.seg-btn');
+      segBtns.forEach((b) => { b.disabled = true; });
+      let shown = false;
+      const showTimer = setTimeout(() => { shown = true; showStageProgress('Loading HQ textures\u2026'); }, 150);
+      try {
+        await activeViewer.setQuality('hq', (loaded, total) => {
+          if (shown) updateStageProgress(loaded, total);
+        });
+      } finally {
+        clearTimeout(showTimer);
+        hideStageLoading();
+        segBtns.forEach((b) => { b.disabled = false; });
+      }
     };
   });
   els.wire.onclick = () => {
@@ -448,16 +517,12 @@ function showViewer(entry) {
   };
   els.reset.onclick = () => resetAllViewer();
   els.capture.onclick = () => doCapture(entry);
-  els.lightBtn.onclick = () => setLightOn(!els.lightBtn.classList.contains('on'));
+  els.lightBtn.onclick = () => togglePane('light');
   els.back.onclick = (ev) => { ev.preventDefault(); goDirectory(); };
 
   // Animation controls. The "Animations" button toggles the clip panel; the
   // transport drives the viewer's playback API.
-  els.animBtn.onclick = () => {
-    const show = els.animPanel.hidden;
-    els.animPanel.hidden = !show;
-    els.animBtn.classList.toggle('on', show);
-  };
+  els.animBtn.onclick = () => togglePane('anim');
   els.animPlay.onclick = () => { if (activeViewer) activeViewer.resumeAnim(); };
   els.animPause.onclick = () => { if (activeViewer) activeViewer.pauseAnim(); };
   els.animStop.onclick = () => { if (activeViewer) { activeViewer.stopAnim(); syncClipChips(null); } };
@@ -473,16 +538,7 @@ function showViewer(entry) {
   };
 
   // Parts (articulation): turret aim, fire/recoil, and drive/treads.
-  els.partsBtn.onclick = () => {
-    const show = els.partsPanel.hidden;
-    els.partsPanel.hidden = !show;
-    els.partsBtn.classList.toggle('on', show);
-    if (show) {  // parts + colors share the top-right slot -> mutually exclusive
-      els.colorsPanel.hidden = true;
-      els.colorsBtn.classList.remove('on');
-      els.colorsBtn.setAttribute('aria-expanded', 'false');
-    }
-  };
+  els.partsBtn.onclick = () => togglePane('parts');
   els.partsYaw.oninput = (e) => {
     const v = parseFloat(e.target.value);
     els.partsYawVal.textContent = `${Math.round(v)}\u00b0`;
@@ -505,6 +561,12 @@ function showViewer(entry) {
     if (activeViewer) activeViewer.setAimMode(on);
     updateControlsHint();
   };
+  els.partsKeys.onclick = () => {
+    keyAimOn = !els.partsKeys.classList.contains('on');
+    els.partsKeys.classList.toggle('on', keyAimOn);
+    if (!keyAimOn) clearTurretKeys();
+    updateControlsHint();
+  };
   els.partsCenter.onclick = () => {
     if (!activeViewer) return;
     activeViewer.setTurretYaw(0);
@@ -520,16 +582,7 @@ function showViewer(entry) {
 
   // Team color: the button toggles the floating panel; swatches + the custom
   // picker apply a hue, Original reverts to the baked diffuse.
-  els.colorsBtn.onclick = () => {
-    const show = els.colorsPanel.hidden;
-    els.colorsPanel.hidden = !show;
-    els.colorsBtn.classList.toggle('on', show);
-    els.colorsBtn.setAttribute('aria-expanded', String(show));
-    if (show) {  // parts + colors share the top-right slot -> mutually exclusive
-      els.partsPanel.hidden = true;
-      els.partsBtn.classList.remove('on');
-    }
-  };
+  els.colorsBtn.onclick = () => togglePane('colors');
   els.colorsCustom.oninput = (e) => {
     if (activeViewer) activeViewer.setTeamColor(e.target.value);
     syncColorSwatches(e.target.value);
@@ -541,12 +594,7 @@ function showViewer(entry) {
 
   // Scene panel. The button toggles the floating panel; the controls drive the
   // viewer + persistence.
-  els.sceneBtn.onclick = () => {
-    const show = els.scenePanel.hidden;
-    els.scenePanel.hidden = !show;
-    els.sceneBtn.classList.toggle('on', show);
-    els.sceneBtn.setAttribute('aria-expanded', String(show));
-  };
+  els.sceneBtn.onclick = () => togglePane('scene');
   els.sceneBgSeg.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.onclick = () => {
       const bg = btn.dataset.bg === 'light' ? 'light' : 'dark';
@@ -588,11 +636,28 @@ function setUltraAO(on) {
 
 function showStageLoading(label) {
   els.stageLoadingLabel.textContent = label || 'Loading\u2026';
+  if (els.stageProgress) els.stageProgress.hidden = true;   // spinner mode
   els.stageLoading.hidden = false;
+}
+
+/* Determinate variant: shows the overlay with a progress bar (used for HQ
+ * texture loads). updateStageProgress() fills it as textures resolve. */
+function showStageProgress(label) {
+  els.stageLoadingLabel.textContent = label || 'Loading\u2026';
+  if (els.stageProgressFill) els.stageProgressFill.style.width = '0%';
+  if (els.stageProgress) els.stageProgress.hidden = false;
+  els.stageLoading.hidden = false;
+}
+
+function updateStageProgress(loaded, total) {
+  const pct = total > 0 ? Math.round((loaded / total) * 100) : 100;
+  if (els.stageProgressFill) els.stageProgressFill.style.width = `${pct}%`;
+  els.stageLoadingLabel.textContent = `Loading HQ textures\u2026 ${loaded} / ${total}`;
 }
 
 function hideStageLoading() {
   els.stageLoading.hidden = true;
+  if (els.stageProgress) els.stageProgress.hidden = true;
 }
 
 /* Reflect the viewer's current display state onto the panel controls. */
@@ -651,6 +716,7 @@ function updateControlsHint() {
   if (!els.controlsHint) return;
   if (!activeViewer) { els.controlsHint.hidden = true; return; }
   const aim = !els.partsAim.hidden && els.partsAim.classList.contains('on');
+  const keys = !els.partsKeys.hidden && els.partsKeys.classList.contains('on');
   const freespin = els.freespin.classList.contains('on');
   const autorot = els.spin.classList.contains('on');
   let items;
@@ -662,6 +728,7 @@ function updateControlsHint() {
     items = [['Drag', 'Orbit'], ['Scroll', 'Zoom'], ['Right-drag', 'Pan']];
     if (autorot) items.push([null, 'auto-rotating']);
   }
+  if (keys) items.push(['Arrows', 'Aim turret']);
   els.controlsHint.hidden = false;
   els.controlsHint.innerHTML = items.map(([key, action]) => (
     key
@@ -678,6 +745,56 @@ function syncTurretSliders(yaw, pitch) {
   els.partsPitch.value = String(Math.round(pitch));
   els.partsPitchVal.textContent = `${Math.round(pitch)}\u00b0`;
 }
+
+/* ---- Arrow-key turret aim ---------------------------------------------- */
+// Held arrow keys drive a per-frame slew in the viewer (see setTurretKeySlew),
+// so direction(s) apply on the next frame (instant, no OS key-repeat delay) and
+// yaw + pitch can move simultaneously. Additive with every other mode (coexists
+// with Aim-at-cursor / spin). The viewer's onAim callback keeps the sliders in
+// sync each slewing frame.
+const ARROW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+const heldArrowKeys = new Set();
+let keyAimOn = false;
+
+/* Push the current held-key direction to the viewer as signed yaw/pitch dirs.
+ * Opposite keys (Left+Right) cancel to 0. */
+function updateKeySlew() {
+  if (!activeViewer) return;
+  let yaw = 0;
+  let pitch = 0;
+  if (heldArrowKeys.has('ArrowLeft')) yaw -= 1;
+  if (heldArrowKeys.has('ArrowRight')) yaw += 1;
+  if (heldArrowKeys.has('ArrowUp')) pitch += 1;     // up raises the gun
+  if (heldArrowKeys.has('ArrowDown')) pitch -= 1;
+  activeViewer.setTurretKeySlew(yaw, pitch);
+}
+
+/* Drop all held keys + stop the slew (mode off, blur, reset, model swap). */
+function clearTurretKeys() {
+  if (!heldArrowKeys.size) return;
+  heldArrowKeys.clear();
+  if (activeViewer) activeViewer.setTurretKeySlew(0, 0);
+}
+
+function onTurretKeyDown(e) {
+  if (!keyAimOn || !activeViewer) return;
+  if (!ARROW_KEYS.has(e.key)) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  e.preventDefault();   // stop the page scrolling on every arrow keydown (incl. OS repeats)
+  if (e.repeat) return; // continuous motion is driven per-frame, not by OS key-repeat
+  heldArrowKeys.add(e.key);
+  updateKeySlew();
+}
+
+function onTurretKeyUp(e) {
+  if (!ARROW_KEYS.has(e.key)) return;
+  if (heldArrowKeys.delete(e.key)) updateKeySlew();
+}
+
+window.addEventListener('keydown', onTurretKeyDown);
+window.addEventListener('keyup', onTurretKeyUp);
+window.addEventListener('blur', clearTurretKeys);   // never let a key "stick"
 
 /* Reveal the Parts button + only the relevant control sections when the loaded
  * GLB exposes moveable parts (turret / recoil / treads). Mirrors setupAnimUI's
@@ -699,6 +816,10 @@ function setupArticulationUI() {
   els.partsPitchRow.hidden = !art.turretPitch;
   els.partsAim.hidden = !(art.turretYaw || art.turretPitch);
   els.partsAim.classList.remove('on');
+  els.partsKeys.hidden = !(art.turretYaw || art.turretPitch);
+  els.partsKeys.classList.remove('on');
+  keyAimOn = false;
+  clearTurretKeys();
   els.partsYaw.value = '0';
   els.partsYawVal.textContent = '0\u00b0';
   els.partsPitch.value = '0';
@@ -813,10 +934,9 @@ function syncColorSwatches(hex) {
 function resetAllViewer() {
   if (!activeViewer) return;
 
-  // Toggles -> off. Wireframe off also re-enables the Light button (the light
+  // Toggles -> off. Wireframe off re-enables the in-pane sun toggle (the light
   // itself is reset to default below via setLightOn).
   applyWireframe(false);
-  els.lightBtn.disabled = false;
   els.spin.classList.remove('on');
   activeViewer.setAutoRotate(false);
   els.freespin.classList.remove('on');
@@ -838,6 +958,9 @@ function resetAllViewer() {
   if (activeViewer.hasArticulation()) {
     activeViewer.resetArticulation();
     els.partsAim.classList.remove('on');
+    els.partsKeys.classList.remove('on');
+    keyAimOn = false;
+    clearTurretKeys();
     syncTurretSliders(0, 0);
     els.partsDrive.value = '0';
     els.partsDriveVal.textContent = '0';
@@ -869,19 +992,19 @@ function resetAllViewer() {
   activeViewer.setLightAngle(LIGHT_DEFAULT.az, LIGHT_DEFAULT.el);
   activeViewer.setLightIntensity(LIGHT_DEFAULT.intensity);
   initLightPanel({ ...LIGHT_DEFAULT });   // re-sync slider values + handlers
-  setLightOn(LIGHT_DEFAULT.on);           // button highlight + panel dim + viewer + persist
+  setLightOn(LIGHT_DEFAULT.on);           // panel dim + viewer + persist
 
   // Display -> dark background, grid + axes on.
   localStorage.setItem(SCENE_BG_KEY, 'dark');
   localStorage.setItem(GRID_KEY, '1');
   localStorage.setItem(AXES_KEY, '1');
-  els.scenePanel.hidden = true;
-  els.sceneBtn.classList.remove('on');
-  els.sceneBtn.setAttribute('aria-expanded', 'false');
   activeViewer.setBackgroundMode('dark');
   activeViewer.setGridVisible(true);
   activeViewer.setAxesVisible(true);
   syncScenePanel();
+
+  // Restore the default dock layout (desktop: all applicable panes open).
+  applyDefaultPaneState();
 
   // Ultra post-processing -> off.
   localStorage.setItem(ULTRA_AO_KEY, '0');
@@ -892,18 +1015,19 @@ function resetAllViewer() {
   activeViewer.resetView();
 }
 
-/* Single source of truth for the sun on/off state: drives the top button
- * highlight, the panel dim, the viewer, and localStorage. */
+/* Single source of truth for the sun on/off state: drives the in-pane checkbox,
+ * the panel dim, the viewer, and localStorage. (The Light *button* now only
+ * opens/closes the pane -- see togglePane.) */
 function setLightOn(on) {
-  els.lightBtn.classList.toggle('on', on);
+  if (els.lightOn) els.lightOn.checked = on;
   els.lightPanel.classList.toggle('off', !on);
   localStorage.setItem(LIGHT_ON_KEY, on ? '1' : '0');
   if (activeViewer) activeViewer.setLightEnabled(on);
 }
 
 /* Wireframe toggle. In wireframe mode the sun would cast the wireframe outline
- * as a shadow on the ground, so we also force the sun off and lock the Light
- * button while wireframe is active. The off-state is applied directly to the
+ * as a shadow on the ground, so we also force the sun off and disable the in-pane
+ * sun toggle while wireframe is active. The off-state is applied directly to the
  * viewer (NOT via setLightOn) so the user's persisted light preference is left
  * intact and restored when wireframe is turned back off. */
 function applyWireframe(on) {
@@ -914,15 +1038,14 @@ function applyWireframe(on) {
   els.wireHq.hidden = !on;
   if (on) {
     activeViewer.setLightEnabled(false);
-    els.lightBtn.classList.remove('on');
+    if (els.lightOn) { els.lightOn.checked = false; els.lightOn.disabled = true; }
     els.lightPanel.classList.add('off');
-    els.lightBtn.disabled = true;
   } else {
     // Drop crisp-lines supersampling when leaving wireframe so we never pay
     // the GPU cost in normal lit/textured viewing.
     els.wireHq.classList.remove('on');
     activeViewer.setWireHQ(false);
-    els.lightBtn.disabled = false;
+    if (els.lightOn) els.lightOn.disabled = false;
     setLightOn(lightPrefs().on);   // restore the persisted on/off preference
   }
 }
@@ -937,6 +1060,11 @@ function initLightPanel(light) {
   els.lightAzVal.textContent = `${Math.round(light.az)}\u00b0`;
   els.lightElVal.textContent = `${Math.round(light.el)}\u00b0`;
   els.lightPanel.classList.toggle('off', !light.on);
+  if (els.lightOn) {
+    els.lightOn.checked = light.on;
+    els.lightOn.disabled = false;
+    els.lightOn.onchange = () => setLightOn(els.lightOn.checked);
+  }
 
   els.lightIntensity.oninput = () => {
     const v = parseFloat(els.lightIntensity.value);
