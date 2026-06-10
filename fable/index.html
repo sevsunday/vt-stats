@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VTSR-T — The Definitive Analysis</title>
+<meta name="description" content="Independent expert analysis of the VTSR-T rating system: pipeline walk-through, methodology critique, and ranked improvements.">
+<link rel="stylesheet" href="vendor/bootstrap/css/bootstrap.min.css">
+<link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<link rel="stylesheet" href="css/fable.css">
+</head>
+<body>
+
+<nav class="fb-nav">
+  <div class="fb-nav-inner">
+    <span class="fb-nav-brand">FABLE <span class="fb-tag">/ VTSR-T ANALYSIS</span></span>
+    <div class="fb-nav-links" id="fb-nav-links">
+      <a href="#verdict">Verdict</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#critique">Critique</a>
+      <a href="#improvements">Improvements</a>
+      <a href="#feedback">Other feedback</a>
+      <a href="#appendix">Appendix</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ================================================================
+     HERO / VERDICT
+     ================================================================ -->
+<header class="fb-hero" id="verdict">
+  <div class="fb-wrap">
+    <div class="fb-kicker">Independent review &middot; incoming expert of record</div>
+    <h1>VTSR-T is a superb <span class="accent">measurement system</span> wearing the badge of a <span class="accent">rating system</span> it hasn't earned yet.</h1>
+    <div class="fb-hero-meta">
+      v2.10 &middot; ELO schema 10 &middot; corpus <span id="stat-corpus-inline">107 rated / 35 players</span> &middot; fresh validator run <span id="stat-val-date">2026-06-10</span> &middot; prior reviewer: critique/elo-analysis-v3.md
+    </div>
+
+    <div class="fb-verdict">
+      <p><strong>The good is genuinely excellent.</strong> The instrumentation layer — full-rate telemetry, weapon-normalized accuracy, assist-aware kill credit, pilot-victim and self-damage carve-outs, pure-omission gates — is more careful than most published academic work in this space. The composite it produces is demonstrably <em>real</em>: a player's first-half career performance predicts their second-half at Spearman &rho;&nbsp;=&nbsp;0.814. The validation culture (a nine-metric validator, decision memos, forensic alt-modes) is exemplary for a hobby project and better than many commercial ones.</p>
+      <p><strong>The uncomfortable finding is equally clear.</strong> On the freshest data, VTSR-T predicts <em>in-match relative performance</em> well (&rho;&nbsp;=&nbsp;0.445, calibration MAE 0.017) and <em>match outcomes</em> not at all: 37.5% accuracy on clean-win matches — below coin-flip — and the mid-gap bucket where rating differences <em>should</em> start mattering sits at 26.7%. Meanwhile the synthetic-winner proxy just hit 100% agreement, which I will argue is evidence of circularity, not validation. VTSR-T today is best described as a <em>well-built performance index with momentum</em>, not yet a predictive skill rating. The single highest-leverage fix is not in the math at all — it's recording the actual match outcome at the source.</p>
+    </div>
+
+    <div class="fb-grade-row">
+      <div class="fb-grade"><span class="label">Measurement layer</span><span class="value g-good">A</span></div>
+      <div class="fb-grade"><span class="label">Update machinery</span><span class="value g-warn">B&minus;</span></div>
+      <div class="fb-grade"><span class="label">Outcome validity</span><span class="value g-bad">Unproven</span></div>
+      <div class="fb-grade"><span class="label">Engineering</span><span class="value g-good">A</span></div>
+      <div class="fb-grade"><span class="label">Validation culture</span><span class="value g-good">A&minus;</span></div>
+      <div class="fb-grade"><span class="label">Complexity budget</span><span class="value g-warn">Overdrawn</span></div>
+    </div>
+
+    <div class="fb-statstrip">
+      <div class="fb-stat"><div class="v" id="stat-rated">107</div><div class="k">rated matches (125 recorded)</div></div>
+      <div class="fb-stat"><div class="v" id="stat-players">35</div><div class="k">rated players</div></div>
+      <div class="fb-stat"><div class="v good" id="stat-selfc">0.814</div><div class="k">self-consistency &rho; (skill is real)</div></div>
+      <div class="fb-stat"><div class="v" id="stat-spearman">0.445</div><div class="k">Spearman &rho;, R&rarr;P (was 0.462)</div></div>
+      <div class="fb-stat"><div class="v bad" id="stat-cleanwin">37.5%</div><div class="k">clean-win prediction (coin flip = 50%)</div></div>
+      <div class="fb-stat"><div class="v warn" id="stat-sigma">&plusmn;31.9</div><div class="k">bootstrap noise floor (ELO)</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ================================================================
+     PIPELINE WALK-THROUGH
+     ================================================================ -->
+<section class="fb-section" id="pipeline">
+  <div class="fb-wrap">
+    <div class="fb-kicker">Part 1</div>
+    <h2>The pipeline, end to end — with every magic number on trial</h2>
+    <p class="fb-section-sub">
+      Ten stages from a gzip-compressed protobuf on a player's disk to a four-digit number on the leaderboard.
+      Each stage card lists the embedded design decisions, what value was chosen, <em>why that value</em> — and a verdict:
+      <span class="fb-chip principled">principled</span> (derived from evidence or first principles),
+      <span class="fb-chip defensible">defensible</span> (arbitrary but reasonable; sensitivity unknown),
+      <span class="fb-chip questionable">questionable</span> (I would change it or demand a test).
+    </p>
+
+    <div class="fb-note info">
+      <strong>About that "one minute at a time" impression.</strong> It's actually three different cadences stacked, and none of them is a minute.
+      The in-game collector records <em>every lockstep tick</em> (20 per second — there is no collector-side decimation at all).
+      The Python pipeline then derives two coarser clocks from that stream: position trails are <strong>downsampled to 1&nbsp;Hz</strong>, and the damage
+      timeline is <strong>bucketed into 10-second bins</strong>. So a 15-minute match yields ~18,000 ticks &times; 10 players = ~180,000 PlayerState
+      samples on the wire, ~900 kept positioning samples per player, and ~90 timeline buckets. Details at stages 1 and 4.
+    </div>
+
+    <div class="fb-pipeline">
+
+      <!-- STAGE 1 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">1</div>
+        <h3>In-game collection — statsgate.dll</h3>
+        <div class="fb-stage-loc">statsgate/src/stat_client.cpp &middot; C++ DLL hooked into BZCC's mission interface</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>Live engine callbacks (Update, PreDamage, ObjectKilled, PreOrdnanceHit, PreSnipe, PrePickup)</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>In-memory <code>ClientStatSession</code> protobuf (header + flat event stream)</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>The collector is a passive observer wedged between the engine and the mission script. <code>record_update()</code> fires once per
+          lockstep turn and snapshots <em>every</em> rostered player's position, speed, health, ammo, current ODF, and T-key lock state.
+          Combat events are callback-driven — one protobuf message per engine event, no sampling, no aggregation. This is the right
+          architecture: collect at maximum fidelity, decimate downstream where the trade-offs are visible and reversible.</p>
+        </div>
+        <div class="fb-annos">
+          <div class="fb-anno">
+            <span class="const">UpdateTick @ every turn (20/s)<span class="fb-chip principled">principled</span></span>
+            <span class="why">The rate isn't chosen by statsgate at all — <code>GetLockstepTurn()</code> advances at the engine's TPS
+            (<code>exu2::GetTPS()</code>, observed 20 on every corpus match, stamped per-session as <code>header.tick_rate</code>).
+            Recording every turn costs little (protobuf + gzip-9 crushes the repetition) and means <strong>no information is destroyed at the
+            only stage where it would be unrecoverable</strong>. Any coarser cadence is a pipeline decision that can be revisited; this one can't be.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">DAMAGE_TYPE_COLLISION / UNKNOWN dropped<span class="fb-chip principled">principled</span></span>
+            <span class="why">Collision spam carries no combat meaning; UNKNOWN is the engine's force-kill pathway that emits the notorious
+            2<sup>28</sup> sentinel values. Filtering at source is correct — but note the pipeline keeps a belt-and-braces sentinel filter
+            anyway (stage 4) because older sessions in the corpus predate this collector filter.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">BulletHit: player-vs-player only<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">AI-vs-AI hits are dropped collector-side to bound file size. The cost: <code>thug_accuracy</code>'s PvE hit
+            counts must come from the damage stream instead, and shots-vs-AI accuracy is reconstructed rather than observed. Acceptable, but
+            it's a real asymmetry between the PvP and PvE legs of an axis that blends both.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">Roster frozen at first tick<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">The header's <code>s64_to_nick</code> map is built once; the source carries a literal
+            <code>// TODO: Rescan teamnums when players leave and join</code>. A mid-match joiner is <strong>invisible to the entire
+            downstream system</strong> — not low-rated, not excluded, simply absent. The pipeline's 75% presence gate (stage 5) handles the
+            leaver half of this problem; the joiner half is unfixable downstream and belongs on the collector roadmap.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">No match outcome recorded<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">The header records <code>shutdown_requested</code> but <strong>not who won</strong>. Everything painful about
+            validating this rating system (stage 10, and most of Part 2) traces back to this one missing field. The engine knows the
+            outcome; the DLL is already hooked into PostRun. This is the cheapest expensive omission in the whole stack.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 2 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">2</div>
+        <h3>Transport &amp; storage</h3>
+        <div class="fb-stage-loc">last_tick() &rarr; gzip level 9 &rarr; data/sessions/&lt;submitter&gt;/&lt;timestamp&gt;.binpb.gz &middot; git-synced</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>In-memory session protobuf</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>Immutable per-session archive file, organized by submitter</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>Sessions serialize once at mission end (gzip level 9, maximum compression — right call for write-once archives). Filenames are
+          wall-clock timestamps for uniqueness; the map name lives inside the protobuf where it belongs. The pipeline's sync step mirrors new
+          files additively — never deletes, never overwrites — which makes the raw corpus effectively append-only. This is archival discipline
+          most telemetry systems never bother with: <strong>the original evidence is always re-processable</strong>, which is exactly what made
+          five corpus-wide re-rates in ten weeks possible.</p>
+        </div>
+        <div class="fb-annos">
+          <div class="fb-anno">
+            <span class="const">One file per session, per submitter<span class="fb-chip principled">principled</span></span>
+            <span class="why">Multiple players can record the same match; submitter-foldering keeps provenance and lets the cache key
+            (<code>submitter, source_file, size</code>) deduplicate work. Duplicate-match reconciliation is handled at processing time rather
+            than at capture time — correct, since capture-time dedup would destroy evidence.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 3 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">3</div>
+        <h3>Decode &amp; schema normalization</h3>
+        <div class="fb-stage-loc">scripts/process_stats.py::load_session &middot; dual descriptor (statsgate.proto v2, statsgate_v1.proto frozen)</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>.binpb.gz (either proto schema vintage)</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>Typed event stream, normalized to one internal DamageEvent shape</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>The pipeline tries the current descriptor, falls back to the frozen v1 descriptor, and normalizes both into one internal shape so
+          every aggregator downstream is schema-blind. The detected schema is stamped as telemetry only — the UI never branches on it. Combined
+          with the byte-parity discipline for v1 sessions, this is textbook schema migration. Nothing to criticize here; this stage is a model
+          other projects should copy.</p>
+        </div>
+      </div>
+
+      <!-- STAGE 4 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">4</div>
+        <h3>Event aggregation — where the cadences are chosen</h3>
+        <div class="fb-stage-loc">scripts/process_stats.py::process_match &middot; one pass over the event stream</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>~10<sup>5</sup>&ndash;10<sup>6</sup> events per match</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>Per-match blocks: leaderboard, timeline, positioning, kills, weapon meta, highlights&hellip;</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>One chronological sweep turns the raw stream into every per-match block the site (and the rating) consumes. The three clocks the
+          user-visible data runs on are all set here, not in the game:</p>
+        </div>
+        <div class="fb-annos">
+          <div class="fb-anno">
+            <span class="const">POSITIONING_SAMPLE_RATE_HZ = 1<span class="fb-chip defensible">defensible</span></span>
+            <span class="why"><strong>Why 1 Hz and not 20, 10, or 0.5?</strong> Payload size is the binding constraint: trails ship to the
+            browser as JSON (<code>t/x/y/z/hp/ammo</code> arrays per player). At 1 Hz a 15-min 10-player match is ~9,000 samples (~250 KB
+            pretty-printed); at 20 Hz it's 180,000 (~5 MB) — unacceptable for a static site, and at 0.5 Hz the replay player's interpolation
+            would visibly cut corners. For the consumers that matter it's adequate: heatmaps (64&times;64 grid) and distance-from-spawn metrics
+            are insensitive to sub-second motion. The real casualty is <code>path_length</code>: BZ2 dogfighting is constant jinking, and
+            1 Hz chords systematically <em>under-measure</em> path length — by an amount that differs by playstyle (strafing brawler loses more
+            than a straight-line traveler). Since <code>path_length_per_sec</code> is 20% of <code>activity_score</code>, which is the
+            <code>mobility</code> axis, a measurement-bias gradient leaks into the rating. Small weight (0.08), real bias. Worth a one-off
+            sensitivity check: reprocess five matches at 4 Hz and compare activity scores.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">TIMELINE_BUCKET_SECONDS = 10<span class="fb-chip principled">principled</span></span>
+            <span class="why"><strong>Why 10 s?</strong> Pure UI artifact — it feeds the replay tab and momentum charts, never the rating.
+            10 s &times; 20 TPS = 200-tick bins, ~90 buckets per match: enough resolution to see a base trade, few enough datapoints that
+            Chart.js animates smoothly with 10 player series. At 1 s you'd have 900 points &times; 10 series and a janky scrubber; at 60 s
+            you'd erase the fight rhythm. Since no rating math touches it, the only criterion is legibility — and 10 s is right.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">SENTINEL_DAMAGE_THRESHOLD = 1e6<span class="fb-chip principled">principled</span></span>
+            <span class="why">Targets the engine's <code>DAMAGE_TYPE_UNKNOWN</code> force-kill events (amount = 2<sup>28</sup> = 268,435,456)
+            that legacy sessions still contain. Real per-event combat damage tops out in the low tens of thousands, so 1e6 sits ~100&times;
+            above the legitimate maximum and ~268&times; below the artifact — a wide, safe corridor. The evidence chain (Ghidra decompile,
+            struct layout, bit patterns) is documented in DATA_DICTIONARY §7. This is how magic numbers should be earned.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">EFFECTIVE_KILL_WINDOW_SEC = 10, FINISHER_FLOOR = 0.30<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">Kill credit is distributed by damage share over the 10 s before the kill, with 30% guaranteed to the finisher.
+            The <em>mechanism</em> is excellent (it de-noises kill-stealing at the source, and &Sigma; effective = &Sigma; raw keeps lobby totals invariant).
+            The <em>parameters</em> are gut-tuned: why 10 s and not a TTK-derived window? Why 30% and not 20%? Neither has been sensitivity-tested.
+            Fine to ship; should be on the sweep list since <code>thug_kill_rate</code> carries 0.20 weight.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">Pilot-victim &amp; self-damage carve-outs<span class="fb-chip principled">principled</span></span>
+            <span class="why">v2.9 stops kill/death credit for shooting ejected pilots (victim-only gate, so a pilot who kills a ship keeps
+            credit); v2.6 stops Blink self-splash from inflating PvP buckets. Both are anti-farming corrections with precise, documented
+            blast radii. This is the measurement layer earning its A.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">Spawn = median of first 3 samples<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">Robust to one teleport-y first frame; 3 is the smallest count where a median means anything. At 1 Hz this is a
+            3-second window — players rarely travel far in it. Cheap and adequate; 5 would be marginally safer for laggy starts.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">activity_score = 100&middot;(0.5&middot;(1&minus;base%) + 0.3&middot;max-dist + 0.2&middot;path-rate)<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">The weights (0.5/0.3/0.2) are unaudited, and the two distance terms are normalized by <em>match-relative p95</em>
+            — which means <code>mobility</code> is a relative score inside a relative score (z-scored again at stage 7). Double relativization
+            makes cross-match interpretation slippery, and the 1 Hz path-length bias above feeds the 0.2 term. The axis only carries 0.08
+            weight, so the damage is bounded — but this is the least-principled formula that touches the rating.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 5 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">5</div>
+        <h3>Row gates — who gets rated at all</h3>
+        <div class="fb-stage-loc">scripts/process_stats.py (flags) &rarr; scripts/elo.py (pure omission)</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>Per-player leaderboard rows</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>The rated lobby: rows minus campod / low-activity (15 + 7 rows excluded corpus-wide)</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>Excluded rows are <em>omitted</em>, not penalized — no delta, no matches-played bump, as if the match never happened for that
+          player. The philosophy is correct (the prior reviewer and I agree here; see Part 2). The implementation has a shape problem: both
+          gates are cliffs.</p>
+        </div>
+        <div class="fb-annos">
+          <div class="fb-anno">
+            <span class="const">CAMPOD_MAX_SHARE = 0.25<span class="fb-chip defensible">defensible</span></span>
+            <span class="why"><strong>Why 25%?</strong> No documented derivation — it's a "feels like spectating" threshold. The gate is
+            binary: 24% campod time = fully rated (including the idle quarter dragging your per-minute axes), 26% = invisible. A
+            proportional alternative — weight the row's lobby contribution by non-campod share — removes the cliff and the
+            incentive question ("I'm having a bad match; if I pod for 5 more minutes it never happened").</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">LOW_ACTIVITY_MIN_PRESENCE = 0.75<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">Presence window (first&rarr;last event tick) must cover 75% of the match. One clean window check catches both
+            late joins and mid-match DCs, and deliberately does <em>not</em> punish dead time — good design. Same cliff critique: a 74%
+            presence player is erased, a 76% one is fully scored against per-minute denominators they only partially played. The per-minute
+            axes use <em>match</em> minutes, not <em>present</em> minutes, so partial-presence players who clear the gate are mildly
+            under-measured — a second-order bug worth one line: use presence-window minutes in <code>thug_kill_rate</code>.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">ELO_MIN_PLAYER_COUNT = 6, MIN_DURATION = 240 s<span class="fb-chip principled">principled</span></span>
+            <span class="why">Below 3v3 the lobby z-score (stage 7) is statistically meaningless, and a sub-4-minute match is a remake.
+            13 + 5 matches excluded corpus-wide. Sensible floors; if anything, 6 is generous — z-scores on n=6 are still wild (see stage 7).</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 6 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">6</div>
+        <h3>The per-match row — ELO's input contract</h3>
+        <div class="fb-stage-loc">leaderboard[] rows in &lt;match-id&gt;.json &middot; match.schema_version 14</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>All stage-4 aggregates for one player</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div><code>personal.*</code> splits, <code>weapon_breakdown</code>, positioning metrics, flags</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>Each row carries the full attribution lattice: <code>dealt = pvp + pve + self</code> (invariant-checked), effective PvP kills,
+          per-weapon shots/hits with PvP splits, <code>activity_score</code>, <code>target_lock_pct</code>, <code>at_base_pilot_sec</code>,
+          and the three boolean gates. The rating reads <em>only</em> this contract — it never touches raw events. That separation is why the
+          ELO module can stay pure (no I/O) and why five re-rates were cheap. The Raw Data Browser's Reconcile view audits row aggregates
+          against tier-2 event sums — an honesty mechanism I want to call out as best-in-class.</p>
+        </div>
+      </div>
+
+      <!-- STAGE 7 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">7</div>
+        <h3>The eight-axis composite — P<sub>i</sub></h3>
+        <div class="fb-stage-loc">scripts/elo.py::compute_performance_index</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>Rated lobby rows</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>P<sub>i</sub> &isin; [&minus;1, +1] per player + per-axis attribution</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>Each axis produces one raw number per player, gets z-scored <em>within the lobby</em>, clipped to &plusmn;2&sigma;, divided by 2,
+          then weight-summed:</p>
+          <div class="fb-eq" data-tex="P_i = \sum_a w'_a \cdot \operatorname{clip}\!\left(\frac{x_{i,a} - \mu_a}{\sigma_a},\, -2,\, 2\right) \big/\, 2, \qquad w'_a = \frac{w_a}{\sum_{b\,\text{avail}} w_b}" data-display="1"></div>
+          <p>Missing axes (no positioning data, nobody sniped) self-omit and their weight redistributes pro-rata — graceful degradation done right.</p>
+        </div>
+        <div class="fb-annos">
+          <div class="fb-anno">
+            <span class="const">Lobby z-score on n = 6&ndash;10<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">This is the load-bearing statistical decision nobody has interrogated — every prior critique attacked the update
+            math instead. A population z-score over 8 observations is <em>extremely</em> noisy: &sigma; estimated from n=8 has a standard error
+            of ~25% of itself, one outlier owns the denominator, and clipping then bites on noise rather than on outliers. The same absolute
+            performance scores wildly differently depending on who else showed up — which is partially intended (relative-to-lobby is the point)
+            but the <em>noise</em> component isn't. Rank-based scoring (percentile within lobby, mapped to [&minus;1,1]) preserves the relative
+            framing with far better small-n behavior, kills the clip constant entirely, and is a one-afternoon forensic alt-mode. See
+            improvement #4.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">clip(z, &minus;2, +2) / 2<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">Outlier control plus range normalization in one move. ±2&sigma; would be a principled choice against a stable
+            &sigma;; against an n=8 sample &sigma; it's a damage limiter for the noise problem above. The /2 mapping to [&minus;1,1] is then
+            purely cosmetic (matches E<sub>i</sub>'s range). If the z-step were replaced by ranks, this constant evaporates — a sign it's
+            patching rather than designing.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">THUG_WEIGHTS (0.20/0.20/0.16/0.15/0.12/0.08/0.005/0.005)<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">Hand-tuned, but the Dirichlet perturbation test (&rho; 0.982 under jittered weights) proves the leaderboard isn't
+            knife-edged on them, and the v2.10 de-weight of the two "luxury" axes to 0.005 was correctly evidence-driven (ablation showed them
+            inert; z-scoring punished non-participation). Honest detail: the raw dict now sums to 0.92 and runtime renormalization silently
+            uplifts the six core axes ~8.7% — documented, slightly inelegant, harmless.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">ALPHA_PVE = 0.5<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">PvE work counts at exactly half a PvP equivalent in three axes. Why 0.5? Round-number prior, never swept. It
+            sits in the two heaviest axes (<code>thug_kill_rate</code>, <code>thug_efficiency</code>), so it shapes farm-vs-fight incentives
+            more than any other single scalar. A {0.25, 0.5, 0.75} forensic sweep is cheap and overdue.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">snipe cap: min(snipes/5, 1) pre-z<span class="fb-chip principled">principled</span></span>
+            <span class="why">Capping <em>before</em> the z-score so one 9-snipe outlier can't deform the lobby distribution is exactly the
+            right order of operations. (At 0.005 weight the axis barely matters now, but the technique deserves the nod.)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 8 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">8</div>
+        <h3>Role &amp; tier adjustments — the epicycle layer</h3>
+        <div class="fb-stage-loc">scripts/elo.py &middot; v2.4 commander shift + v2.8 low-tier lift</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>Post-clip per-axis z-scores</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>Shifted z-scores for commander rows + eligible low-tier rows</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>Two surgical fairness patches, both applied in post-clip space so non-targeted players are byte-identical. Commander rows get
+          per-axis shifts toward a "typical commander" baseline (audit-derived priors with shrinkage, two hand-locked); established low-tier
+          thugs get their kill rate recomputed over ship-available time. Individually each is careful. Collectively they are the visible part
+          of a complexity-budget problem (Part 2, finding 7).</p>
+        </div>
+        <div class="fb-annos">
+          <div class="fb-anno">
+            <span class="const">COMMANDER_BASELINE_SHRINKAGE = 30<span class="fb-chip principled">principled</span></span>
+            <span class="why">Standard pseudo-observation shrinkage. With 214 commander rows banked, live data now carries 214/(214+30) = 88%
+            of the blend — the seed priors have already gracefully retired for the four unlocked axes. The mechanism worked exactly as
+            designed; this is how to ship a prior.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">Locked pve_share prior = &minus;0.05 (reward)<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">Design intent: actively reward commanders for PvE work. But the empirical commander mean on this axis is
+            <strong>+0.0489</strong> — commanders <em>already</em> out-PvE the lobby naturally. The lock therefore grants a bonus on top of an
+            axis they already win: ~0.10 of post-clip z versus the descriptive baseline. The cost is tiny (the prior ablation measured
+            &le;3.9 ELO), so keep it if you want — but the documented rationale ("reward the work they should do") no longer matches what the
+            lock <em>does</em> ("double-pay work they demonstrably already do"). Re-justify or retire the rationale.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">Locked target_lock prior = &minus;0.10 vs empirical &minus;0.391<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">A deliberate partial pardon: cover ~25% of the real commander T-key shortfall, keep ~75% as pressure. That's a
+            coherent normative stance, clearly documented, with measured sub-noise cost. I disagree with critics who called this corruption —
+            and note the axis now carries 0.005 weight, so the whole debate is about &le;0.001 of P<sub>i</sub>. Functionally moot.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">LOWTIER_LIFT_CUTOFF = 1460, TAPER = 60<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">Two arbitrary constants defining who counts as "low-tier" — and at the current distribution they capture
+            <strong>10 of 35 players (29% of the league)</strong>, including everyone down to 29 points below the anchor. That's not a
+            low-tier safety net; that's a below-median adjustment program. The two-pass design (eligibility keyed on canonical no-lift
+            ratings) is genuinely clever — the gate can't self-sustain — but the population it covers says the cutoff drifted from intent.
+            Either drop the cutoff to ~1400 or rename what this is.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 9 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">9</div>
+        <h3>The ELO update — K, E, and the asymmetries</h3>
+        <div class="fb-stage-loc">scripts/elo.py::_rating_pass &middot; chronological, two-pass when the lift is active</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>P<sub>i</sub> + pre-match ratings</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>&Delta;R per player per match &rarr; new ratings</div>
+        </div>
+        <div class="fb-stage-body">
+          <div class="fb-eq" data-tex="E_i = \frac{2}{1 + 10^{(\bar R_{\text{opp}} - R_i)/800}} - 1, \qquad \Delta R = K_i \cdot 2.5 \cdot (P_i - E_i) \cdot \begin{cases}1 & \Delta R \ge 0\\ 0.85\,\phi(R_i) & \Delta R < 0\end{cases}" data-display="1"></div>
+          <p>Expected performance compares you to the <em>median</em> opponent; you gain when you beat expectation, lose (dampened) when you
+          miss it. Every constant below is doing something — and three of them quietly make the system non-zero-sum.</p>
+        </div>
+        <div class="fb-annos">
+          <div class="fb-anno">
+            <span class="const">median(opponents) reference<span class="fb-chip principled">principled</span></span>
+            <span class="why">The strongest empirical result in the project's record: the Phase 2C full re-rate under hard-MAX collapsed
+            predictive &rho; from 0.462 to 0.188 and inflated the mean rating +522 above anchor (E<sub>i</sub> saturates near &minus;1 for
+            every sub-max player, so average play prints rating forever). Median survived its trial by ordeal. I fully concur with the prior
+            reviewer here — and would add that the experiment design (forensic alt-mode, then decide) is the template for everything else
+            on my improvement list.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">ELO_LOGISTIC_SCALE = 800<span class="fb-chip defensible">defensible</span></span>
+            <span class="why"><strong>Why 800 when classic Elo uses 400?</strong> Doubling the scale halves the steepness: a +200 rating edge
+            expects only +0.28 composite (classic 400 would demand +0.52-equivalent). Deliberately flat for a small league where rating gaps
+            are noisy — defensible. But note what the fresh calibration table shows: residuals are near-zero across all ten gap buckets
+            (MAE 0.017), which mostly tells you the corpus only spans gaps of about &minus;176 to +254 with the bulk inside &plusmn;100. The curve
+            is calibrated <em>where there's data</em>; its steepness has never been tested where it would matter. 800 is a prior wearing a
+            calibration certificate.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">K: 40&middot;(1&minus;n/(n+10)) + 12, + inactivity boost<span class="fb-chip principled">principled</span></span>
+            <span class="why">Rookie K&asymp;52 &rarr; n=10 K=32 &rarr; settles at 12+. A clean hyperbolic decay with sane endpoints, plus the
+            Phase 2B additive boost (+0.05/day, cap +20) that buys most of Glicko-2's time-decay benefit at trivial cost (audit: max single-row
+            boost on this dense corpus was +1.3). I concur with shipping it and with deferring Glicko-2 — the corpus is too dense to need RD
+            machinery.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">ELO_RATING_SCALE = 2.5<span class="fb-chip defensible">defensible</span></span>
+            <span class="why">Pure unit conversion from composite-space to rating points: max theoretical swing K&middot;2.5&middot;2 = 260
+            for a rookie, ~15&ndash;40 typical. Any value works if everything downstream agrees; 2.5 produces a leaderboard spread (1416&ndash;1742)
+            that reads naturally against the 1500 anchor. Fine.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">Loss aversion 0.85 + floor 1000 / taper 150<span class="fb-chip questionable">questionable</span></span>
+            <span class="why">Every loss is multiplied by 0.85; losses near the floor approach zero. Result, measured on this corpus from
+            <code>elo_history.json</code>: <strong>+6,276 ELO granted, &minus;4,944 deducted — net +1,331 ELO created</strong> in 107 matches
+            (&asymp;+12.4/match; mean rating 1538 = anchor + exactly the created amount / 35 players). That's a 21% subsidy on the loss side
+            of the ledger, by design, for retention psychology. Defensible for a <em>display</em> rating; corrosive for anything downstream
+            that treats VTSR-T as a skill estimate (Team Balonce does). You don't need the &alpha;&gt;0 blend to measure this — the chart in
+            Part 2 is the measurement. The dual-track question (display vs pure) is real and currently unanswered.</span>
+          </div>
+          <div class="fb-anno">
+            <span class="const">Two-pass lift with canonical-anchored E<sub>i</sub><span class="fb-chip principled">principled</span></span>
+            <span class="why">Pass 1 computes no-lift ratings; pass 2 re-rates with the lift, anchoring opponent references to the canonical
+            snapshot so non-eligible players are <em>byte-identical</em> and eligible players self-damp. Whatever I think of the lift's
+            cutoff (stage 8), the isolation engineering is impeccable.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 10 -->
+      <div class="fb-stage">
+        <div class="fb-stage-num">10</div>
+        <h3>Outputs &amp; consumers</h3>
+        <div class="fb-stage-loc">elo_current.json / elo_history.json (+ 4 forensic alt pairs) &rarr; dashboard, player pages, Tools</div>
+        <div class="fb-stage-io">
+          <div class="io-cell"><div class="io-label">Input</div>Final ratings + full delta history</div>
+          <div class="io-arrow">&rarr;</div>
+          <div class="io-cell"><div class="io-label">Output</div>VTSR-T leaderboard, tier badges, player profiles, Team Balonce inputs</div>
+        </div>
+        <div class="fb-stage-body">
+          <p>The wire format is unusually honest: every constant that shaped the run is echoed into the JSON (weights, priors, gates, observed
+          commander baselines with lock flags), per-delta axis attributions make any rating change forensically decomposable, and alt-mode
+          pairs ship beside canonical. One omission: the bootstrap noise floor (&plusmn;32 ELO) is computed by the validator but <strong>never
+          shown to users</strong> — the leaderboard renders 1741.5 vs 1699.9 as if that 41.6-point gap were signal, when it's barely over one
+          noise-&sigma;. Surfacing uncertainty is a UI change, not a math change, and it's free (improvement #6).</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     CRITIQUE
+     ================================================================ -->
+<section class="fb-section" id="critique">
+  <div class="fb-wrap">
+    <div class="fb-kicker">Part 2</div>
+    <h2>The methodology critique</h2>
+    <p class="fb-section-sub">
+      Findings ordered by severity. Where the prior reviewer (the v3 retrospective and its decision memos) took a position, each card carries
+      an explicit <span class="fb-mono">CONCUR</span> / <span class="fb-mono">DISSENT</span> / <span class="fb-mono">EXTEND</span> strip.
+      Everything below cites either source code or the fresh validator run executed for this report (2026-06-10, 107 rated matches, schema 10).
+    </p>
+
+    <!-- F1 -->
+    <div class="fb-finding">
+      <span class="fb-sev fundamental">Fundamental</span>
+      <h3>1 &middot; VTSR-T does not predict match outcomes — and the trend is the wrong direction</h3>
+      <p>On the fresh run, the team with higher mean VTSR-T wins a clean-win match <strong>37.5%</strong> of the time (12/32, CI 22.9&ndash;54.7) —
+      below coin-flip, and <em>down</em> from 43.3% at n=30 and 45.2% at n=31. Even the best post-hoc aggregation (hard MAX) manages only 50.0%.
+      Log-loss (0.707) is worse than always guessing 50/50 (0.693).</p>
+      <p class="dim">The standard defense — "all clean-wins are tight-gap lobbies, the rating's ceiling is untestable" — is true but incomplete.
+      The fresh gap breakout undermines it: the small-gap bucket [0,25) predicts at 47.1% (fine — genuinely a coin flip), but the
+      <strong>mid-gap bucket [25,100), n=15, predicts at 26.7%</strong> — the rating is <em>inverted</em> exactly where its signal should begin
+      to emerge. n=15 is small and the CI is wide (10.9&ndash;52.0), so I won't claim the inversion is established. I will claim that "untested"
+      is no longer the honest summary; "untested, with the early returns pointing the wrong way" is.</p>
+      <div class="fb-prior">
+        <span class="stance extend">Extend</span>
+        <span class="body">Prior reviewer said the lopsided-prediction ceiling is <em>untestable on this corpus</em> (v3 §13.6) and parked it.
+        I concur it's untestable at the top end — but the mid-gap inversion is new signal from the fresh run that the v3 snapshot didn't have,
+        and it converts a passive "wait for data" item into an active "watch this number every run" item.</span>
+      </div>
+      <div class="fb-chart-grid2">
+        <div class="fb-chart-card">
+          <h4>Clean-win prediction accuracy by aggregation</h4>
+          <div class="cap">n=32 clean-win matches &middot; fresh validator run 2026-06-10 &middot; dashed line = coin flip</div>
+          <div class="fb-chart-box short"><canvas id="chart-cleanwin"></canvas></div>
+        </div>
+        <div class="fb-chart-card">
+          <h4>Accuracy by rating-gap bucket</h4>
+          <div class="cap">|team mean R difference| &middot; the [25,100) bucket should beat the [0,25) bucket — it doesn't</div>
+          <div class="fb-chart-box short"><canvas id="chart-gap"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- F2 -->
+    <div class="fb-finding">
+      <span class="fb-sev fundamental">Fundamental</span>
+      <h3>2 &middot; The synthetic-winner proxy at 100% is circularity, not validation</h3>
+      <p>The proxy declares the team with higher mean P<sub>i</sub> the winner and checks agreement with the kill-feed-inferred
+      <code>clean_win</code>. Fresh run: <strong>32/32 = 100% agreement</strong> (was 93.3%, then 90.3%). The prior reviewer celebrated crossing the 85% bar
+      as "the single most important methodological contribution of Phase 1&hellip; unlocks &alpha;&gt;0 validation."</p>
+      <p class="dim">Look at what both sides of the comparison are made of. A clean win means you razed the enemy base — recyclers and
+      factories destroyed. P<sub>i</sub>'s heaviest axes are net damage share, kill rate, and <em>PvE share — which is literally damage to
+      structures</em>. The winning team's players mechanically accumulate the quantities the proxy averages. Perfect agreement doesn't mean
+      P<sub>i</sub> independently identifies skill that wins matches; it means P<sub>i</sub> and the winner label are <em>two functions of the
+      same events</em>. And the trajectory — 93% &rarr; 90% &rarr; 100% as the corpus grew — is what convergence-to-determinism looks like,
+      not what independent-measurement noise looks like.</p>
+      <p class="dim">The consequence is serious: the planned &alpha;&gt;0 pilot (v3 §13.2) would blend "winner" outcomes that are a
+      deterministic echo of P<sub>i</sub> back into a P<sub>i</sub>-driven rating. That's not adding outcome information; it's re-weighting
+      the composite toward its own structure-damage axes and calling it win/loss data. The sweep would "work" — metrics would move smoothly —
+      and validate nothing.</p>
+      <div class="fb-prior">
+        <span class="stance dissent">Dissent</span>
+        <span class="body">Prior reviewer: the proxy "unlocks &alpha;&gt;0 validation against the full corpus" (v3 §5.5, F.1). <em>I dissent on
+        the inference, not the measurement.</em> The 85% threshold tested agreement, but agreement was never the risk — circularity was, and
+        100% agreement is the circularity diagnostic firing. &alpha;&gt;0 needs ground truth that is causally upstream of P<sub>i</sub>'s
+        inputs, i.e. the actual game result recorded by the engine. See improvements #1 and #3.</span>
+      </div>
+    </div>
+
+    <!-- F3 -->
+    <div class="fb-finding">
+      <span class="fb-sev needswork">Needs work</span>
+      <h3>3 &middot; Winner inference reaches 31% of the corpus; the fix is one proto field</h3>
+      <p>The toggle-model winner inference (recycler/factory destruction order) yields <code>clean_win</code> for 32 of 107 rated matches,
+      <code>contested</code> for 1, and <strong><code>unclear</code> for 74</strong>. Every outcome-anchored question this project wants to ask —
+      does rating predict winners, is the loss subsidy distorting, what should &alpha; be — is being answered on a 30% subsample that is
+      additionally biased toward decisive stomps (the matches where bases actually fell).</p>
+      <p class="dim">The engine knows who won. The collector is already hooked into <code>PostRun</code> and already writes
+      <code>shutdown_requested</code> into the header. A <code>winner_team</code> field (plus a <code>finished_normally</code> flag) is a
+      one-evening change to statsgate + proto + pipeline, and it converts every future session into ground truth. There is no analysis
+      investment anywhere in this system with remotely comparable return.</p>
+      <div class="fb-prior">
+        <span class="stance extend">Extend</span>
+        <span class="body">Prior reviewer listed "manual winner attestation" as the active option (v3 §13.6) and treated corpus growth as the
+        passive one. <em>Both are inferior to instrumenting the source</em> — attestation doesn't scale and decays in accuracy; corpus growth
+        without the field grows the unclear pile at the same 70% rate.</span>
+      </div>
+    </div>
+
+    <!-- F4 -->
+    <div class="fb-finding">
+      <span class="fb-sev needswork">Needs work</span>
+      <h3>4 &middot; Headline metrics are drifting down as the corpus grows — and nobody is watching</h3>
+      <p>Across the three validator runs on record: Spearman &rho; 0.462 &rarr; 0.468 &rarr; <strong>0.445</strong>; clean-win accuracy
+      43.3 &rarr; 45.2 &rarr; <strong>37.5%</strong>; bootstrap noise &sigma; 27.0 &rarr; 29.4 &rarr; <strong>31.9 ELO</strong>. The v3 doc's own
+      growth hypothesis (§13.3) predicted the opposite: "&rho; increases, &sigma; decreases" as data accumulates.</p>
+      <p class="dim">Three candidate explanations, none currently distinguishable: (a) sampling noise — plausible, the deltas are within
+      run-to-run wobble; (b) the v2.9/v2.10 re-rates genuinely traded predictive power for fairness — the pilot-kill exclusion and the
+      snipe/T-key de-weight both removed signal along with noise; (c) the league's composition is shifting (new players, role churn) faster
+      than the rating adapts. The fact that I can't tell you which is the finding: the validator runs ad-hoc, results aren't time-series'd,
+      and the v2.10 re-rate shipped without a before/after validator diff. The project has the best validation tooling in its class and uses
+      it episodically.</p>
+      <div class="fb-prior">
+        <span class="stance extend">Extend</span>
+        <span class="body">Prior reviewer proposed growth tracking as a "READY NOW, recurring, ~half day" item (v3 §13.3) but ranked it third
+        among next steps. <em>I promote it to the top of the do-now list</em> (after the winner field): the drift is already here, and every
+        future re-rate decision is unanchored without per-run metric history.</span>
+      </div>
+      <div class="fb-chart-card">
+        <h4>Validator headline metrics across the three runs on record</h4>
+        <div class="cap">Phase 1 (v3 doc, n=100) &middot; June 5 (schema 8, n=103) &middot; this report (schema 10, n=107). Sources: critique/elo-analysis-v3.md, _validation history, fresh run.</div>
+        <div class="fb-chart-box"><canvas id="chart-trend"></canvas></div>
+      </div>
+    </div>
+
+    <!-- F5 -->
+    <div class="fb-finding">
+      <span class="fb-sev needswork">Needs work</span>
+      <h3>5 &middot; Per-lobby z-scoring on 6&ndash;10 players is the unexamined statistical weak point</h3>
+      <p>Every axis is standardized against the lobby's own mean and standard deviation — estimated from as few as six observations, with
+      the rated player included in their own baseline. At n=8, the sample &sigma; carries ~25% relative error; a single outlier (one AFK-ish
+      row, one pop-off game) reshapes everyone's z-scores; the &plusmn;2&sigma; clip then triggers on estimation noise as often as on true
+      outliers. The downstream K-factor and logistic machinery is built on top of per-match scores whose noise floor is set here.</p>
+      <p class="dim">Rank-based scoring — map each player's within-lobby rank to a fixed grid on [&minus;1,1] (or normal scores) — keeps the
+      relative-to-lobby semantics, is distribution-free, immune to outliers, needs no clip constant, and behaves identically for n=6 and n=10.
+      The cost: it discards magnitude (a narrow win over the #2 player scores the same as a blowout). That trade should be tested, not
+      assumed either way — it's a textbook forensic alt-mode, and the validator can referee it with zero new metrics.</p>
+      <div class="fb-prior">
+        <span class="stance extend">Extend</span>
+        <span class="body">Neither the v1/v2 critiques nor v3 ever questioned the z-step — all artillery was aimed at the update rule
+        (median/MAX, K, priors). <em>This is the gap in the prior record:</em> the noisiest stage in the whole chain is the one that's never
+        had an experiment.</span>
+      </div>
+    </div>
+
+    <!-- F6 -->
+    <div class="fb-finding">
+      <span class="fb-sev minor">Minor</span>
+      <h3>6 &middot; The rating economy mints ~12 ELO per match by design — measured, not hypothesized</h3>
+      <p>Summing every delta in <code>elo_history.json</code>: +6,275.5 granted, &minus;4,944.2 deducted, <strong>net +1,331.3 ELO created</strong>
+      across 107 rated matches. Mean rating now 1538 — the anchor plus exactly the minted amount spread over 35 players. The sources are the
+      0.85 loss multiplier (a 15% rebate on every loss) and the floor taper (losses vanish entirely near 1000).</p>
+      <p class="dim">This is not a bug — it's documented retention psychology, and at +12.4/match the drift is gentle (compare hard-MAX's
+      +522 pathology). But two consumers currently treat VTSR-T as an unbiased skill estimate: Team Balonce and the tier badges. A
+      participation subsidy of ~38 ELO/player accumulated in 8 weeks will, over a year, move players a full tier on attendance alone. The
+      honest framing is CS2's: this is a <em>display rating</em>; a zero-sum shadow track is what balancing should read.</p>
+      <div class="fb-prior">
+        <span class="stance concur">Concur</span>
+        <span class="body">Prior reviewer: "mathematically real but empirically unmeasured&hellip; gated on &alpha;&gt;0" (v3 §C.3, F.2).
+        I concur the dual-track decision is open — but <em>the measurement itself was never gated</em>: the anchor-sum audit above took one
+        loop over the history file. The number is +12.4 ELO/match. It no longer needs to be called unmeasured.</span>
+      </div>
+      <div class="fb-chart-card">
+        <h4>Cumulative net ELO created (non-zero-sum drift)</h4>
+        <div class="cap">&Sigma; of all rating deltas per rated match, accumulated chronologically &middot; source: elo_history.json (canonical, v2.10)</div>
+        <div class="fb-chart-box"><canvas id="chart-economy"></canvas></div>
+      </div>
+    </div>
+
+    <!-- F7 -->
+    <div class="fb-finding">
+      <span class="fb-sev minor">Minor</span>
+      <h3>7 &middot; The complexity budget is overdrawn: six adjustment mechanisms, ~25 constants, zero outcome regularization</h3>
+      <p>Count the moving parts bolted onto the core update: commander axis-shift (6 priors + shrinkage + lock set), low-tier lift (4 constants,
+      two-pass), two exclusion gates (2 thresholds), loss aversion + floor taper (3 constants), inactivity K-boost (2), effective-kill
+      crediting (3), ALPHA_PVE, the &alpha;-blend stub. Each shipped with care, documentation, and usually an experiment. But they were each
+      validated <em>against the others held fixed</em>, on a corpus of ~100 matches, with no outcome ground truth to regularize against — the
+      classic recipe for a system that fits its designers' intuitions about fairness rather than a measurable target.</p>
+      <p class="dim">The tell: 10 of 35 players qualify for the "low-tier" lift, the commander baseline has live data 7&times; heavier than its
+      priors, two locked priors now contradict their own documented rationale (finding in stage 8), and the two de-weighted axes exist at 0.005
+      purely as UI preview. Pruning candidates are accumulating. A system this size needs a standing rule: <em>every mechanism must name the
+      validator metric that would justify its removal</em> — v3 §14 started this with re-tuning triggers; extend it to existence triggers.</p>
+      <div class="fb-prior">
+        <span class="stance extend">Extend</span>
+        <span class="body">v3 §14's calibration-protocol table is the right instinct (each lever has a revisit trigger). <em>Extension:</em>
+        triggers fire only if someone is watching — which loops back to finding 4's per-run tracking. A trigger table without a time-series is
+        a smoke alarm without a battery.</span>
+      </div>
+    </div>
+
+    <!-- F8 -->
+    <div class="fb-finding">
+      <span class="fb-sev solid">Solid</span>
+      <h3>8 &middot; What is right — and should be defended against future "improvements"</h3>
+      <ul class="fb-list">
+        <li><strong>The composite measures something real.</strong> Split-half self-consistency &rho; = 0.814 across 23 players. That is a
+        strong persistent-skill signal — the axes are not noise, and any future redesign must clear this bar, not just match it.</li>
+        <li><strong>Median opponent reference.</strong> Phase 2C's negative result is decisive and correctly interpreted. Anyone proposing
+        MAX/softmax for the <em>update rule</em> (as opposed to lobby-time team aggregation) should be pointed at the +522 drift and sent home.</li>
+        <li><strong>Pure-omission gates.</strong> Excluding campod/partial rows with zero penalty (rather than zero-scoring them) protects both
+        the excluded player and the lobby baseline. Right philosophy; only the cliff shape needs work (stage 5).</li>
+        <li><strong>Calibration where data exists.</strong> MAE 0.017 across ten gap buckets — within its observed range, the E-curve tracks
+        reality. The caveat (finding at stage 9) is about extrapolation, not about the fit.</li>
+        <li><strong>Forensic alt-mode culture.</strong> Every contested mechanism ships as a parallel JSON pair scored by the same validator.
+        This is the experimental pattern the improvements below all reuse — it's the project's best invention after the composite itself.</li>
+        <li><strong>Engineering honesty.</strong> Constants echoed into outputs, per-delta axis attribution, reconcile views, decision memos
+        with refuted hypotheses left visible. Rare and valuable.</li>
+      </ul>
+      <div class="fb-prior">
+        <span class="stance concur">Concur</span>
+        <span class="body">This list substantially matches the prior reviewer's F.1 ("where I am confident"). The agreement is genuine — where
+        the v3 author claims the data validates the design, the data does. Our divergence is almost entirely about what the synthetic-winner
+        proxy licenses (finding 2) and how alarming the outcome-prediction picture is (finding 1).</span>
+      </div>
+    </div>
+
+    <!-- charts row: weights + commander + distribution -->
+    <div class="fb-chart-grid2">
+      <div class="fb-chart-card">
+        <h4>Axis weights: v2.10 vs pre-v2.10</h4>
+        <div class="cap">snipe_bonus + target_lock_pct cut 10&times; to 0.005 &middot; raw dict now sums to 0.92, renormalized at runtime</div>
+        <div class="fb-chart-box"><canvas id="chart-weights"></canvas></div>
+      </div>
+      <div class="fb-chart-card">
+        <h4>Commander baseline: seed prior vs live empirical mean</h4>
+        <div class="cap">post-clip z units &middot; n=214 commander rows &middot; locked axes never track empirical (note pve_share's sign flip)</div>
+        <div class="fb-chart-box"><canvas id="chart-commander"></canvas></div>
+      </div>
+    </div>
+    <div class="fb-chart-card">
+      <h4>Current VTSR-T distribution, 35 rated players</h4>
+      <div class="cap">Anchor 1500 (dashed) &middot; shaded band = &plusmn;31.9 ELO bootstrap noise floor around each value &middot; provisional (&lt;10 matches) hatched in amber</div>
+      <div class="fb-chart-box tall"><canvas id="chart-dist"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     IMPROVEMENTS
+     ================================================================ -->
+<section class="fb-section" id="improvements">
+  <div class="fb-wrap">
+    <div class="fb-kicker">Part 3</div>
+    <h2>Ranked improvements</h2>
+    <p class="fb-section-sub">Ordered by information-per-effort. Items 1&ndash;3 are the spine; everything else is optional polish by comparison.</p>
+
+    <div class="fb-improve">
+      <div class="rank">1</div>
+      <div>
+        <h3>Record the real match outcome in the collector</h3>
+        <p>Add <code>winner_team</code> (and <code>finished_normally</code>) to <code>StatHeader</code>, populated at PostRun / game-over.
+        Regenerate descriptors, thread through the pipeline as <code>match.winner.decided_by = "recorded"</code> taking precedence over the
+        toggle model. Every session from that day forward is ground truth; the 70% <code>unclear</code> pile stops growing; findings 1, 2, 3
+        and the entire &alpha;&gt;0 program become tractable.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="hot">critical</span></span><span class="fb-pill">effort <span class="mid">medium</span> (C++ + proto + pipeline)</span><span class="fb-pill">risk <span class="low">low</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">2</div>
+      <div>
+        <h3>Run the validator on every pipeline run and keep the time-series</h3>
+        <p>Append headline metrics to a long-form JSON per run; fail loudly (or at least banner) when &rho; or clean-win accuracy drops more
+        than run-to-run noise. The drift in finding 4 was sitting in plain sight across three ad-hoc runs; per-run tracking makes every future
+        re-rate decision before/after-anchored by default. The prior reviewer scoped this at half a day (v3 §13.3) — correct estimate, wrong
+        priority slot.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="hot">high</span></span><span class="fb-pill">effort <span class="low">half day</span></span><span class="fb-pill">risk <span class="low">none</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">3</div>
+      <div>
+        <h3>Re-scope the &alpha;&gt;0 pilot: real winners only, synthetic proxy retired as ground truth</h3>
+        <p>Policy change, not code: the planned sweep (v3 §13.2) must not use synthetic winners as the blended outcome — finding 2 shows that's
+        blending the rating with a function of itself. Run the sweep when recorded winners (item 1) cover ~50 matches. Keep the proxy for what
+        it's still good at: flagging matches where P<sub>i</sub> and the recorded result <em>disagree</em> — those become the most informative
+        matches in the corpus.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="hot">high</span></span><span class="fb-pill">effort <span class="low">zero (policy)</span></span><span class="fb-pill">risk <span class="low">none</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">4</div>
+      <div>
+        <h3>Trial rank-based lobby scoring as a forensic alt-mode</h3>
+        <p>Replace z-clip-halve with within-lobby normal scores (or a fixed rank grid) behind a <code>lobby_score_mode</code> flag; emit
+        <code>elo_current_ranks.json</code>; score with the validator. Decision rule up front, in the project's own style: promote if
+        self-consistency and &rho; hold while bootstrap &sigma; drops; discard if magnitude loss hurts &rho;. Addresses the one statistical
+        stage that has never had its experiment (finding 5).</p>
+        <div class="meta"><span class="fb-pill">impact <span class="mid">medium-high</span></span><span class="fb-pill">effort <span class="mid">1&ndash;2 days</span></span><span class="fb-pill">risk <span class="low">low (alt-mode)</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">5</div>
+      <div>
+        <h3>Soften the two cliff gates into proportional weights</h3>
+        <p>Replace the binary campod/presence exclusions with a row weight <span class="fb-mono">w = f(non-campod share, presence share)</span>
+        applied to the row's delta (full omission below a hard floor, full weight above the current thresholds, linear between). Removes the
+        24%-vs-26% discontinuity and the strategic-podding edge case; also fix <code>thug_kill_rate</code>'s denominator to presence-window
+        minutes while in there.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="mid">medium</span></span><span class="fb-pill">effort <span class="low">low</span></span><span class="fb-pill">risk <span class="low">low</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">6</div>
+      <div>
+        <h3>Show the uncertainty you already compute</h3>
+        <p>The bootstrap gives a per-player &sigma; (median &plusmn;32 ELO). Render it: a band on the rating time-series, a "ratings within
+        ~30 of each other are tied" note on the leaderboard, wider bands for provisional players. Costs one UI pass; buys honest consumption
+        of the number by the community and dampens leaderboard-gap drama that the noise floor doesn't support.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="mid">medium</span></span><span class="fb-pill">effort <span class="low">low</span></span><span class="fb-pill">risk <span class="low">none</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">7</div>
+      <div>
+        <h3>Sweep ALPHA_PVE and the effective-kill constants</h3>
+        <p>Three forensic re-rates at ALPHA_PVE &isin; {0.25, 0.5, 0.75}; two at finisher floor {0.2, 0.4} and window {5 s, 15 s}. These scalars
+        sit inside the two heaviest axes and have never moved. Expect null results (Dirichlet robustness suggests insensitivity) — but
+        "expected null, confirmed null" is exactly what the alt-mode machinery is for.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="low">low-medium</span></span><span class="fb-pill">effort <span class="low">low</span></span><span class="fb-pill">risk <span class="low">none</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">8</div>
+      <div>
+        <h3>Re-scope or rename the low-tier lift; refresh the locked-prior rationales</h3>
+        <p>Either drop <code>LOWTIER_LIFT_CUTOFF</code> toward ~1400 so "low-tier" means low-tier (today 29% of the league qualifies), or
+        document it as the below-median assistance program it currently is. Separately, update the <code>pve_share</code> lock's comment: the
+        empirical mean flipped positive (+0.049), so the lock's effect is now "bonus on an axis commanders already win," not "protect the
+        reward from drift." Keep both mechanisms if desired — but make the documentation true again.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="low">low</span></span><span class="fb-pill">effort <span class="low">trivial</span></span><span class="fb-pill">risk <span class="low">none</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-improve">
+      <div class="rank">9</div>
+      <div>
+        <h3>Fix the validator's stale verdict copy</h3>
+        <p>The fresh report's §6.1 still prints "Strong empirical motivator for Phase 2C — promote MAX-weighted <code>expected_performance</code>"
+        — a recommendation Phase 2C decisively refuted months ago. Hardcoded interpretation strings rot; make verdict copy conditional on the
+        decision-memo record or delete it and let the numbers speak.</p>
+        <div class="meta"><span class="fb-pill">impact <span class="low">hygiene</span></span><span class="fb-pill">effort <span class="low">trivial</span></span><span class="fb-pill">risk <span class="low">none</span></span></div>
+      </div>
+    </div>
+
+    <div class="fb-dontdo">
+      <h4>Deliberately not recommended — concurring with the prior reviewer's negative results</h4>
+      <ul>
+        <li><strong>Glicko-2 migration</strong> — the K-boost audit shows zero rows near the cap; weeks of work for nothing on this corpus density.</li>
+        <li><strong>MAX / softmax opponent reference in the update rule</strong> — Phase 2C's +522 ELO drift is structural, not a sample-size artifact.</li>
+        <li><strong>Axis weight retune</strong> — Dirichlet &rho; 0.982 says there is no leverage in the weights; spend the effort on findings 1&ndash;5 instead.</li>
+        <li><strong>Locked-priors unlock</strong> — measured &le;3.9 ELO effect against a &plusmn;32 noise floor; a values question, settled adequately.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================
+     OTHER FEEDBACK
+     ================================================================ -->
+<section class="fb-section" id="feedback">
+  <div class="fb-wrap">
+    <div class="fb-kicker">Part 4</div>
+    <h2>Everything else I noticed</h2>
+    <p class="fb-section-sub">Observations that didn't fit the severity ladder — engineering, process, and a few footnotes for future maintainers.</p>
+
+    <ul class="fb-list">
+      <li><strong>The dual-descriptor decode is exemplary.</strong> Byte-parity discipline for v1 sessions, schema stamped as telemetry-only,
+      one normalized internal shape. When the winner field (improvement #1) bumps the proto, this machinery is why it'll be painless.</li>
+      <li><strong>The bootstrap &sigma; is a lower bound, not the truth.</strong> The resampling proxy (&Sigma; preserved deltas) skips the
+      sequential R<sub>before</sub> chain, so loss-aversion and floor-taper effects stay baked into each delta. True re-rating per resample
+      would widen the band. Treat &plusmn;32 as optimistic — which strengthens, not weakens, improvement #6.</li>
+      <li><strong>Ablation and Dirichlet rank by career-mean P<sub>i</sub>, not full re-rates.</strong> Documented Phase 1 shortcut, fine —
+      but worth promoting to true re-rates before any weight decision is ever made off them, since the proxy ignores path dependence entirely.</li>
+      <li><strong>peak_vtsr has been invalidated five times in ten weeks</strong> (v2.6, v2.8, schema-13, v2.9, v2.10). Internally fine — the
+      corpus re-rates cleanly — but the public leaderboard's "Peak" column silently changes meaning each time. Consider epoching: "peak (era 10)"
+      or a re-rate changelog link on the methodology modal.</li>
+      <li><strong>The K inactivity boost is well-built and currently decorative</strong> — max single-row effect +1.3 ELO on this dense corpus.
+      Good: it was shipped for the future, audited as null for the present, and documented as such. This is the right way to ship a dormant mechanism.</li>
+      <li><strong>statsgate's roster TODO matters more than it looks.</strong> "Rescan teamnums when players leave and join" — until fixed,
+      mid-match joiners are unrecorded entirely (not even excludable), and their damage <em>against</em> recorded players still flows into the
+      stream attributed to team-only context. Low frequency, but it quietly violates the "every player in the lobby is in the header" assumption
+      several aggregators make.</li>
+      <li><strong>Validator seed is fixed (12345).</strong> Good for reproducibility; bad if nobody ever varies it — bootstrap CI width itself has
+      run-to-run noise that a fixed seed hides. Vary the seed across the per-run time-series (improvement #2) for free.</li>
+      <li><strong>Documentation drift risk is real but managed.</strong> The rules files annotate every known duplication (title-resolver
+      quadruplication, tier-table mirrors). The ELO section of the always-applied rules is now ~40% of the file and growing per version; consider
+      moving the per-version changelog into DEVELOPER_GUIDE §13 and keeping only current-state in rules.</li>
+      <li><strong>This report's own provenance:</strong> the validator was re-run fresh for this analysis (2026-06-10) because the on-disk report
+      predated the v2.10 re-rate; all numbers cited here are from that run or computed directly from the canonical JSON outputs. The snapshot
+      baked into this page is reproducible via <code>fable/tools/build_report_data.py</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================================
+     APPENDIX
+     ================================================================ -->
+<section class="fb-section" id="appendix">
+  <div class="fb-wrap">
+    <div class="fb-kicker">Appendix</div>
+    <h2>Methodology &amp; provenance</h2>
+
+    <h4>Core equations (as implemented, scripts/elo.py)</h4>
+    <div class="fb-eq" data-tex="K_i = 40\left(1 - \frac{n_i}{n_i + 10}\right) + 12 + \min(20,\ 0.05\,d_i), \qquad \phi(R) = \operatorname{clip}\!\left(\frac{R - 1000}{150},\, 0,\, 1\right)" data-display="1"></div>
+    <div class="fb-eq" data-tex="E_i = \frac{2}{1 + 10^{(\operatorname{median}(R_{-i}) - R_i)/800}} - 1, \qquad \Delta R_i = K_i \cdot 2.5 \cdot (P_i - E_i) \cdot \big[\,1 \text{ if } \ge 0 \text{ else } 0.85\,\phi(R_i)\,\big]" data-display="1"></div>
+    <div class="fb-eq" data-tex="\text{commander shift: } z'_{i,a} = \operatorname{clip}\!\big(z_{i,a} - b_a,\, -1,\, 1\big), \quad b_a = \frac{n_a \bar z_a + 30\,\pi_a}{n_a + 30} \;\text{(locked axes: } b_a = \pi_a\text{)}" data-display="1"></div>
+    <div class="fb-eq" data-tex="\text{lift eligibility: } e_p = \operatorname{clip}\!\left(\frac{1460 - R_p^{\text{canonical}}}{60},\, 0,\, 1\right) \quad\text{(two-pass; commanders excluded)}" data-display="1"></div>
+
+    <h4 class="mt-4">Fresh validator run — headline table</h4>
+    <div class="fb-table-wrap">
+      <table class="fb-table" id="tbl-validator"><thead>
+        <tr><th>Metric</th><th>Phase 1 (n=100)</th><th>Jun 5 (n=103)</th><th>This run (n=107)</th><th>Direction</th></tr>
+      </thead><tbody></tbody></table>
+    </div>
+
+    <h4 class="mt-4">Single-axis ablation (fresh run)</h4>
+    <div class="fb-table-wrap">
+      <table class="fb-table" id="tbl-ablation"><thead>
+        <tr><th>Axis dropped</th><th>Weight</th><th>Spearman &rho; vs full</th><th>Top-20 Jaccard</th></tr>
+      </thead><tbody></tbody></table>
+    </div>
+
+    <h4 class="mt-4">Sources read for this analysis</h4>
+    <ul class="fb-list">
+      <li><code>scripts/elo.py</code> (full, 1,515 lines) — constants, composite, two-pass rating loop</li>
+      <li><code>scripts/process_stats.py</code> — constants block, positioning pass, UpdateTick handler, timeline bucketing, gates</li>
+      <li><code>statsgate/src/stat_client.cpp</code> (full) — collection cadence, event triggers, session lifecycle</li>
+      <li><code>critique/elo-analysis-v3.md</code> (full) + the three decision memos in <code>critique/decisions/</code> — the prior reviewer's record</li>
+      <li><code>scripts/validate_elo.py</code> output — fresh run 2026-06-10 (<code>_validation/report.{md,json}</code>)</li>
+      <li><code>data/processed/elo_current.json</code>, <code>elo_history.json</code>, <code>matches.json</code> — canonical v2.10 outputs</li>
+    </ul>
+
+    <h4 class="mt-4">Reproducibility</h4>
+    <p class="dim">All numbers on this page are baked into <code>fable/js/report-data.js</code>, generated by
+    <code>fable/tools/build_report_data.py</code> from the files above. Re-run the generator after any pipeline run to refresh the snapshot;
+    the prose verdicts are mine and date to the corpus state shown in the footer.</p>
+  </div>
+</section>
+
+<footer class="fb-footer">
+  <div class="fb-wrap">
+    <span>FABLE — VTSR-T Definitive Analysis &middot; corpus <span id="foot-corpus">2026-04-16 &rarr; 2026-06-07</span></span>
+    <span>snapshot built <span id="foot-built">—</span> &middot; fully self-contained: no network requests, all deps vendored</span>
+  </div>
+</footer>
+
+<script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="vendor/chartjs/chart.umd.min.js"></script>
+<script src="vendor/katex/katex.min.js"></script>
+<script src="js/report-data.js"></script>
+<script src="js/fable.js"></script>
+</body>
+</html>
