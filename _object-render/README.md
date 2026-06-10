@@ -62,6 +62,12 @@ data/models/                        (committed via git LFS)
   textures/perf/<stem>.png          512px diffuse (perf)
   textures/hq/<stem>.dds            native 2048 diffuse (HQ, verbatim)
   textures/teamcolor/<stem>.png     <=512px team-color mask (alpha=region, rgb=shading)
+  textures/emissive/<stem>.png      <=512px emissive glow map (windows / engines / lights)
+  textures/mods/<pack_id>/          workshop mod texture-set overrides, same keying:
+    perf/<stem>.png                   512px diffuse
+    hq/<stem>.dds                     native 2048 diffuse (verbatim)
+    teamcolor/<stem>.png              the pack's own _c mask (when shipped)
+    emissive/<stem>.png               the pack's own _e map (when shipped)
   thumbnails/<stem>.png             hero (~256px) for the directory cards
   shots/<stem>/<angle>.png          7-angle HQ gallery (~512px):
                                      hero/front/back/left/right/top/bottom
@@ -178,7 +184,7 @@ survive into the viewer. The viewer detects them by the BZCC naming conventions
 Each model's manifest entry carries a `parts` block
 (`{turret, pitch, recoil, treads, bankClips}`, null when nothing articulates)
 which also drives the directory "Articulated" badge. The pipeline switch lives
-behind `ANIM_FORMAT_VERSION` (now 3; index `schema_version` 5).
+behind `ANIM_FORMAT_VERSION` (now 4; index `schema_version` 8).
 
 ## Team colors (the `_c` mask)
 
@@ -217,15 +223,59 @@ is the tuning knob if a unit reads too dark/bright. HQ has no separate mask set 
 coverage + shading needs no 2048 fidelity, and a single perf set keeps the repo
 from growing ~1 GB.
 
-The texture-set switch lives behind `TEXTURE_FORMAT_VERSION` (now 1; index
-`schema_version` 6). A bump forces a **texture-only** re-emit: otherwise-fresh
+The texture-set switch lives behind `TEXTURE_FORMAT_VERSION` (now 2; index
+`schema_version` 8). A bump forces a **texture-only** re-emit: otherwise-fresh
 models are reprocessed to emit the new masks, but the GLB write is guarded
 (skipped when fresh) so the ~700 deterministic geometry GLBs don't churn.
 
+## Emissive glow maps (the `_e` map)
+
+BZCC `.material` files declare `emissive = <stem>_e.dds` -- a self-illumination
+map (cockpit windows, engine exhausts, building lights). The pipeline extracts
+these corpus-wide into `data/models/textures/emissive/<diffuse_stem>.png`
+(<=512px RGB, same diffuse-stem keying as the team-color masks; an `_e`
+filename-convention probe covers inline-material workshop models with no
+`.material`). The viewer assigns `material.emissiveMap` + a white `emissive`
+color per material -- glow regions stay lit regardless of the sun, which is
+exactly the in-game look. The wireframe override nulls the emissiveMap while
+painting its flat-white lines (solid white emissive IS the wireframe look) and
+restores it on exit. Each manifest entry carries an `emissiveTextures` stem
+list.
+
+## Mod texture sets (workshop re-texture packs)
+
+Three community texture-override mods are mirrored as switchable **texture
+sets** (the `MOD_TEXTURE_PACKS` registry in `convert_msh.py`):
+
+- `1554202061` Scion Stock-Enhanced Textures
+- `1581901346` ISDF Stock-Enhanced Textures
+- `3365986032` ISDF Redux Re-Texture
+
+These packs are pure DDS overlays keyed by the same stems the stock game uses,
+so detection is an exact stem intersection against each model's resolved
+diffuse stems. Per pack and per covered stem the pipeline emits a 512px perf
+PNG + the native 2048 HQ DDS (verbatim), plus the pack's own `_c` mask and
+`_e` glow map when shipped (matched via the `.material`-declared names with the
+`_d`-strip filename-convention fallback -- see `_aux_name_candidates`). Packs
+not installed on the build machine are soft-skipped with a console warning.
+
+Each manifest entry carries `textureSets` (packs covering >=1 of its stems,
+with per-pack `textures` / `teamColorTextures` / `emissiveTextures` stem
+lists); the top-level `texture_packs` block maps pack id -> `{label, url}` for
+the credit links. The viewer surfaces a **Textures** button (only for covered
+models) with Stock + one row per set showing material coverage and a Steam
+Workshop credit link-out; uncovered stems keep stock textures (partial
+coverage is expected and fine -- the packs derive from the stock art).
+Switching sets re-runs the texture assignment per material; team color +
+quality toggle compose with whichever set is active (the active set's own `_c`
+mask wins, stock mask fills).
+
 ## Known limitations / future
 
-- PBR (normal / spec / emissive maps) is deferred to a later pass; the diffuse +
-  team-color composite already cover the common viewing case.
+- Normal (`_n`) / specular (`_s`) maps are deferred; the full implementation
+  spec (tangent strategy, green-channel orientation check, spec->PBR roughness
+  conversion, payload estimates, acceptance checklists) lives at
+  [`models/model_render_improvements.txt`](../models/model_render_improvements.txt).
 - Recoil distance, tread scroll rate, and gun-elevation limits use tuned
   viewer-side constants rather than the exact per-weapon ODF values (a possible
   later refinement).

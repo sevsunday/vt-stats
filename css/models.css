@@ -173,6 +173,11 @@ body { overflow: hidden; }
   color: var(--kb-accent, var(--kb-secondary, var(--kb-primary)));
   border: 1px solid color-mix(in srgb, var(--kb-accent, var(--kb-secondary, var(--kb-primary))) 55%, transparent);
 }
+.chip-skins {
+  background: transparent;
+  color: var(--kb-secondary, var(--kb-primary));
+  border: 1px dashed color-mix(in srgb, var(--kb-secondary, var(--kb-primary)) 55%, transparent);
+}
 .card-stats { color: var(--kb-text-secondary); font-size: 0.78rem; }
 .card-odf {
   color: var(--kb-text-muted);
@@ -465,6 +470,72 @@ label.light-head { cursor: pointer; }
   text-decoration: underline;
 }
 .colors-external-link i { font-size: 10px; }
+
+/* Textures panel (mod texture sets): flows in the dock. One row per set --
+ * a full-width pick button (name + coverage) plus an optional Workshop credit
+ * link-out beside it. */
+.texset-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.texset-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.texset-pick {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.texset-pick:hover { border-color: var(--kb-text-secondary); }
+.texset-pick.on {
+  background: var(--kb-primary);
+  color: var(--kb-primary-fg);
+  border-color: var(--kb-primary);
+  font-weight: 650;
+}
+.texset-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.texset-cov {
+  flex: none;
+  font-size: 10px;
+  opacity: 0.75;
+}
+.texset-credit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  color: var(--kb-text-secondary);
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.texset-credit:hover {
+  color: var(--kb-primary);
+  border-color: var(--kb-primary);
+}
 
 /* Scene panel: flows in the dock. */
 /* Background: label stacked ABOVE a full-width Dark/Light segmented control. */

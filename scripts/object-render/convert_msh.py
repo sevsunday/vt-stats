@@ -74,10 +74,27 @@ GEO_DIR = OUT_DIR / "geometry"
 TEX_PERF_DIR = OUT_DIR / "textures" / "perf"
 TEX_HQ_DIR = OUT_DIR / "textures" / "hq"
 TEX_TEAMCOLOR_DIR = OUT_DIR / "textures" / "teamcolor"
+TEX_EMISSIVE_DIR = OUT_DIR / "textures" / "emissive"
+TEX_MODS_DIR = OUT_DIR / "textures" / "mods"
 
 PERF_MAX_DIM = 512       # performance PNG largest side
 TEAMCOLOR_MAX_DIM = 512  # team-color mask largest side (coverage+shading; no HQ set)
+EMISSIVE_MAX_DIM = 512   # emissive glow map largest side (no HQ set)
 DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gallery)
+
+# Workshop texture-override packs surfaced as alternate "texture sets" in the
+# Models Browser. Each pack is a pure DDS overlay keyed by the same texture
+# stems the stock game uses (diffuse + optional `_c` team mask + `_e` glow).
+# A pack whose workshop dir is not installed on this machine is soft-skipped
+# with a console warning. `label`/`url` feed the viewer's credit links.
+MOD_TEXTURE_PACKS = [
+    {"id": "1554202061", "label": "Scion Stock-Enhanced Textures",
+     "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=1554202061"},
+    {"id": "1581901346", "label": "ISDF Stock-Enhanced Textures",
+     "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=1581901346"},
+    {"id": "3365986032", "label": "ISDF Redux Re-Texture",
+     "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3365986032"},
+]
 
 # Bump when the animated-GLB emission shape changes; mismatch vs the prior
 # index.json forces a full regen (animated GLBs aren't invalidated by msh mtime
@@ -101,7 +118,11 @@ ANIM_FORMAT_VERSION = 4
 # when fresh) so this does NOT churn the ~700 geometry GLBs.
 #   v1: add the team-color mask set (textures/teamcolor/<stem>.png) + the per-model
 #       `teamColorTextures` manifest block.
-TEXTURE_FORMAT_VERSION = 1
+#   v2: add the emissive glow set (textures/emissive/<stem>.png) + per-model
+#       `emissiveTextures`, and the workshop mod texture-override sets
+#       (textures/mods/<pack_id>/{perf,hq,teamcolor,emissive}/) + per-model
+#       `textureSets` + top-level `texture_packs`.
+TEXTURE_FORMAT_VERSION = 2
 
 # Render flags (mirror msh_parser): hidden/collision geometry is not drawable.
 RS_HIDDEN = 0x400
@@ -402,15 +423,18 @@ def build_workshop_index(ws_dir, ext):
 
 
 def parse_material(msh_dir: Path, material_filename: str):
-    """Read the [solid] diffuse RGBA + [texture] diffuse/teamColor .dds names from
-    a sibling (or globally-indexed) `.material` file. Returns
-    (rgba, diffuse_dds|None, teamcolor_dds|None). `teamColor = <stem>_c.dds` marks
-    the team-colorable mask (BC3: alpha = colorizable region, RGB = shading)."""
+    """Read the [solid] diffuse RGBA + [texture] diffuse/teamColor/emissive .dds
+    names from a sibling (or globally-indexed) `.material` file. Returns
+    (rgba, diffuse_dds|None, teamcolor_dds|None, emissive_dds|None).
+    `teamColor = <stem>_c.dds` marks the team-colorable mask (BC3: alpha =
+    colorizable region, RGB = shading); `emissive = <stem>_e.dds` is the
+    self-illumination glow map."""
     rgba = (0.8, 0.8, 0.8, 1.0)
     diffuse_dds = None
     teamcolor_dds = None
+    emissive_dds = None
     if not material_filename:
-        return rgba, diffuse_dds, teamcolor_dds
+        return rgba, diffuse_dds, teamcolor_dds, emissive_dds
     p = msh_dir / material_filename
     if not p.is_file():
         p = msh_dir / "materials" / material_filename
@@ -421,11 +445,11 @@ def parse_material(msh_dir: Path, material_filename: str):
         # VSR-scoped match wins; full-workshop is last-resort fallback.
         p = mat_index.get(key) or mat_index_all.get(key)
     if not p or not Path(p).is_file():
-        return rgba, diffuse_dds, teamcolor_dds
+        return rgba, diffuse_dds, teamcolor_dds, emissive_dds
     try:
         text = Path(p).read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return rgba, diffuse_dds, teamcolor_dds
+        return rgba, diffuse_dds, teamcolor_dds, emissive_dds
     section = None
     for line in text.splitlines():
         s = line.strip()
@@ -448,7 +472,9 @@ def parse_material(msh_dir: Path, material_filename: str):
             diffuse_dds = val.strip()
         elif section == "texture" and kl == "teamcolor":
             teamcolor_dds = val.strip()
-    return rgba, diffuse_dds, teamcolor_dds
+        elif section == "texture" and kl == "emissive":
+            emissive_dds = val.strip()
+    return rgba, diffuse_dds, teamcolor_dds, emissive_dds
 
 
 def _atomic_write_bytes(path: Path, data: bytes):
@@ -557,6 +583,134 @@ def resolve_teammask(msh_dir: Path, mask_dds_name: str, out_key: str, cache: set
     return out_key
 
 
+def _aux_name_candidates(tex_key: str, declared: str | None, suffix: str):
+    """Candidate stems for an aux map (`_c` / `_e`) belonging to diffuse stem
+    `tex_key`. The `.material`-declared name wins; the filename convention
+    (trailing `_d` replaced by the suffix, e.g. fvtank00_d -> fvtank00_c, or
+    plainly appended, e.g. ibgtow00 -> ibgtow00_c) is the fallback for inline
+    materials with no `.material` file."""
+    cands = []
+    if declared:
+        cands.append(_stem(declared))
+    base = tex_key[:-2] if tex_key.endswith("_d") else tex_key
+    for c in (f"{base}{suffix}", f"{tex_key}{suffix}"):
+        if c not in cands:
+            cands.append(c)
+    return cands
+
+
+def resolve_emissive(msh_dir: Path, tex_key: str, declared_dds: str | None, cache: set):
+    """Resolve + emit an emissive glow map to textures/emissive/<tex_key>.png
+    (<=512px RGB). Keyed by the DIFFUSE stem so the viewer maps material name ->
+    emissive. Tries the `.material`-declared name first, then the `<stem>_e`
+    filename convention (covers inline-material workshop models). Idempotent +
+    atomic. Returns tex_key or None.
+
+    `cache` is a per-model set of already-emitted tex_keys."""
+    if not tex_key:
+        return None
+    if tex_key in cache:
+        return tex_key
+    src = None
+    for cand in _aux_name_candidates(tex_key, declared_dds, "_e"):
+        src = _find_diffuse_src(msh_dir, f"{cand}.dds")
+        if src is not None:
+            break
+    if src is None:
+        return None
+    src = Path(src)
+    try:
+        pil = decode_dds(src, max_dim=EMISSIVE_MAX_DIM).convert("RGB")
+    except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
+        if _G and _G.get("verbose"):
+            print(f"    emissive decode failed {tex_key}: {e}")
+        return None
+    w, h = pil.size
+    if max(w, h) > EMISSIVE_MAX_DIM:
+        scale = EMISSIVE_MAX_DIM / max(w, h)
+        pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.LANCZOS)
+    force = _G["force"] if _G else False
+    out_path = TEX_EMISSIVE_DIR / f"{tex_key}.png"
+    if force or not out_path.exists():
+        _atomic_write_bytes(out_path, _png_bytes(pil))
+    cache.add(tex_key)
+    return tex_key
+
+
+def _emit_mod_png(src: Path, out_path: Path, max_dim: int, mode: str) -> bool:
+    """Decode a mod-pack `.dds` and write it as a <=max_dim PNG (idempotent +
+    atomic). `mode` is the PIL conversion ('RGBA' for masks, 'RGB' otherwise)."""
+    force = _G["force"] if _G else False
+    if not force and out_path.exists():
+        return True
+    try:
+        pil = decode_dds(src, max_dim=max_dim).convert(mode)
+    except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
+        if _G and _G.get("verbose"):
+            print(f"    mod tex decode failed {src.name}: {e}")
+        return False
+    w, h = pil.size
+    if max(w, h) > max_dim:
+        scale = max_dim / max(w, h)
+        pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.LANCZOS)
+    _atomic_write_bytes(out_path, _png_bytes(pil))
+    return True
+
+
+def emit_mod_texture_sets(tex_keys: set, aux_names: dict) -> list:
+    """For every registered mod texture pack, intersect the pack's DDS index with
+    this model's resolved diffuse stems and emit the pack's overrides under
+    textures/mods/<pack_id>/: perf PNG + verbatim HQ DDS for the diffuse, plus
+    teamcolor / emissive PNGs when the pack carries them. Returns the model's
+    `textureSets` manifest block (packs with >=1 diffuse hit only).
+
+    `aux_names` maps tex_key -> (declared_teamcolor_dds, declared_emissive_dds)
+    from the stock `.material`, used to name-match the pack's aux maps."""
+    mod_indexes = (_G or {}).get("mod_indexes") or {}
+    if not mod_indexes or not tex_keys:
+        return []
+    force = _G["force"] if _G else False
+    sets = []
+    for pack_id, idx in mod_indexes.items():
+        hit_tex, hit_team, hit_emis = [], [], []
+        pack_dir = TEX_MODS_DIR / pack_id
+        for tex_key in sorted(tex_keys):
+            src_str = idx.get(tex_key)
+            if not src_str:
+                continue
+            src = Path(src_str)
+            if not _emit_mod_png(src, pack_dir / "perf" / f"{tex_key}.png",
+                                 PERF_MAX_DIM, "RGBA"):
+                continue
+            hq_path = pack_dir / "hq" / f"{tex_key}.dds"
+            if force or not hq_path.exists():
+                _atomic_write_bytes(hq_path, src.read_bytes())
+            hit_tex.append(tex_key)
+
+            team_decl, emis_decl = aux_names.get(tex_key, (None, None))
+            for cand in _aux_name_candidates(tex_key, team_decl, "_c"):
+                cand_src = idx.get(cand)
+                if cand_src and _emit_mod_png(
+                        Path(cand_src), pack_dir / "teamcolor" / f"{tex_key}.png",
+                        TEAMCOLOR_MAX_DIM, "RGBA"):
+                    hit_team.append(tex_key)
+                    break
+            for cand in _aux_name_candidates(tex_key, emis_decl, "_e"):
+                cand_src = idx.get(cand)
+                if cand_src and _emit_mod_png(
+                        Path(cand_src), pack_dir / "emissive" / f"{tex_key}.png",
+                        EMISSIVE_MAX_DIM, "RGB"):
+                    hit_emis.append(tex_key)
+                    break
+        if hit_tex:
+            sets.append({"id": pack_id, "textures": hit_tex,
+                         "teamColorTextures": hit_team,
+                         "emissiveTextures": hit_emis})
+    return sets
+
+
 def _png_bytes(img: Image.Image) -> bytes:
     import io
     bio = io.BytesIO()
@@ -571,22 +725,26 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
     """Weld each material group once into (positions, normals, uvs, indices) +
     resolve its material (name, base color, texture array). Returns the GLB
     builder, the rasterizer prim list, the set of textured material keys, the set
-    of texture keys that also emitted a team-color mask, and the set of texture
-    stems that were referenced but did NOT resolve to a `.dds` (missing-texture
-    report)."""
+    of texture keys that also emitted a team-color mask, the set that emitted an
+    emissive map, a dict of declared aux map names per texture key (for the mod
+    texture-set pass), and the set of texture stems that were referenced but did
+    NOT resolve to a `.dds` (missing-texture report)."""
     gb = GlbBuilder()
     prims = []
     tex_keys = set()
     teammask_keys = set()
+    emissive_keys = set()
+    aux_names: dict = {}
     unresolved = set()
     tex_cache: dict = {}
     teammask_cache: set = set()
+    emissive_cache: set = set()
     zf = -1.0 if handedness_fix else 1.0
 
     for gi, g in enumerate(mesh.groups):
         if g.hidden or not g.tris:
             continue
-        rgba, mat_diffuse, mat_teamcolor = parse_material(msh_dir, g.material)
+        rgba, mat_diffuse, mat_teamcolor, mat_emissive = parse_material(msh_dir, g.material)
         # The MSH-embedded diffuse name (g.texture) wins -- workshop models
         # (Cerberi etc.) use inline material names with no `.material` file but
         # carry the diffuse here; the `.material` [texture] diffuse is the
@@ -609,6 +767,12 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
         if tex_key and mat_teamcolor:
             if resolve_teammask(msh_dir, mat_teamcolor, tex_key, teammask_cache):
                 teammask_keys.add(tex_key)
+        # Emissive glow map: same diffuse-stem keying. Falls back to the `_e`
+        # filename convention when no `.material` declares one.
+        if tex_key:
+            aux_names[tex_key] = (mat_teamcolor, mat_emissive)
+            if resolve_emissive(msh_dir, tex_key, mat_emissive, emissive_cache):
+                emissive_keys.add(tex_key)
 
         weld = {}
         positions, normals, uvs, indices = [], [], [], []
@@ -650,7 +814,7 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
             "tex": tex_arr,
         })
 
-    return gb, prims, tex_keys, teammask_keys, unresolved
+    return gb, prims, tex_keys, teammask_keys, emissive_keys, aux_names, unresolved
 
 
 def process_model(job: dict) -> dict:
@@ -665,10 +829,14 @@ def process_model(job: dict) -> dict:
             return {"stem": stem, "error": "no blocks parsed"}
         mesh = meshes[0]
 
-        gb, prims, tex_keys, teammask_keys, unresolved = _build_groups(
-            mesh, msh_path.parent, cfg["handedness"])
+        gb, prims, tex_keys, teammask_keys, emissive_keys, aux_names, unresolved = \
+            _build_groups(mesh, msh_path.parent, cfg["handedness"])
         if not prims:
             return {"stem": stem, "error": "no renderable groups"}
+
+        # Workshop mod texture-override sets (diffuse + teamcolor + emissive),
+        # keyed by the same diffuse stems. Idempotent like the stock emits above.
+        texture_sets = emit_mod_texture_sets(tex_keys, aux_names)
 
         GEO_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -711,7 +879,7 @@ def process_model(job: dict) -> dict:
                     diffuse = tex_name
                     if not diffuse and mat_name:
                         try:
-                            _rgba, diffuse, _team = parse_material(Path(msh_dir), mat_name)
+                            _rgba, diffuse, _team, _emis = parse_material(Path(msh_dir), mat_name)
                         except Exception:  # noqa: BLE001
                             diffuse = None
                     return _stem(diffuse) if diffuse else None
@@ -759,6 +927,8 @@ def process_model(job: dict) -> dict:
             "groups": groups,
             "textures": sorted(tex_keys),
             "teamColorTextures": sorted(teammask_keys),
+            "emissiveTextures": sorted(emissive_keys),
+            "textureSets": texture_sets,
             "unresolvedTextures": sorted(unresolved - tex_keys),
             "radius": round(mesh.radius, 3),
             "bboxSize": [round(hi[i] - lo[i], 3) for i in range(3)],
@@ -817,6 +987,8 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "groups": p.get("groups", 0),
         "textures": p.get("textures", []),
         "teamColorTextures": p.get("teamColorTextures", []),
+        "emissiveTextures": p.get("emissiveTextures", []),
+        "textureSets": p.get("textureSets", []),
         "unresolvedTextures": p.get("unresolvedTextures", []),
         "radius": p.get("radius", 0),
         "bboxSize": p.get("bboxSize", [0, 0, 0]),
@@ -864,6 +1036,18 @@ def main():
     mat_index_all = build_workshop_index(ws_dir, "material")
     print(f"full-workshop fallback: {len(dds_index_all)} .dds, {len(mat_index_all)} .material ({ws_dir})")
 
+    # Mod texture packs: per-pack {stem: path} DDS index. Missing pack dirs are
+    # soft-skipped so the pipeline still runs on machines without them installed.
+    mod_indexes = {}
+    for pack in MOD_TEXTURE_PACKS:
+        pack_dir = Path(ws_dir) / pack["id"] if ws_dir else None
+        if not pack_dir or not pack_dir.is_dir():
+            print(f"mod pack NOT installed, skipped: {pack['label']} ({pack['id']})")
+            continue
+        idx = {p.stem.lower(): str(p) for p in pack_dir.rglob("*.dds")}
+        mod_indexes[pack["id"]] = idx
+        print(f"mod pack: {pack['label']} ({pack['id']}): {len(idx)} .dds")
+
     # Resolve each target to a baked .msh; record the misses.
     resolved = []
     missing = []
@@ -881,8 +1065,12 @@ def main():
         resolved = resolved[:args.limit]
         print(f"--limit: capped to {len(resolved)} models")
 
-    for d in (GEO_DIR, TEX_PERF_DIR, TEX_HQ_DIR, TEX_TEAMCOLOR_DIR, OUT_DIR / "thumbnails"):
+    for d in (GEO_DIR, TEX_PERF_DIR, TEX_HQ_DIR, TEX_TEAMCOLOR_DIR, TEX_EMISSIVE_DIR,
+              OUT_DIR / "thumbnails"):
         d.mkdir(parents=True, exist_ok=True)
+    for pack_id in mod_indexes:
+        for sub in ("perf", "hq", "teamcolor", "emissive"):
+            (TEX_MODS_DIR / pack_id / sub).mkdir(parents=True, exist_ok=True)
 
     # Prior manifest (for cache reuse of geometry stats). A change in
     # ANIM_FORMAT_VERSION forces a full regen (the GLB shape changed even though
@@ -925,6 +1113,7 @@ def main():
         "supersample": args.supersample,
         "force": args.force,
         "verbose": args.verbose,
+        "mod_indexes": mod_indexes,
     }
 
     # Partition into cache-hits (reuse prior entry) and jobs (process). When only
@@ -1007,14 +1196,20 @@ def main():
     }
     animated_count = sum(1 for m in manifest if m.get("animated"))
     teamcolor_count = sum(1 for m in manifest if m.get("teamColorTextures"))
+    emissive_count = sum(1 for m in manifest if m.get("emissiveTextures"))
+    modskin_count = sum(1 for m in manifest if m.get("textureSets"))
     idx_path.write_text(json.dumps({
-        "schema_version": 7,
+        "schema_version": 8,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "count": len(manifest),
         "animated_count": animated_count,
         "teamcolor_count": teamcolor_count,
+        "emissive_count": emissive_count,
+        "modskin_count": modskin_count,
+        "texture_packs": {p["id"]: {"label": p["label"], "url": p["url"]}
+                          for p in MOD_TEXTURE_PACKS},
         "texture_report": texture_report,
         "models": manifest,
         "odf_index": odf_index,
@@ -1023,7 +1218,8 @@ def main():
     dt = time.perf_counter() - t0
     print(f"\nwrote {idx_path} -- {len(manifest)} models "
           f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed, "
-          f"{animated_count} animated, {teamcolor_count} team-colorable)")
+          f"{animated_count} animated, {teamcolor_count} team-colorable, "
+          f"{emissive_count} emissive, {modskin_count} with mod skins)")
     print(f"textures: {texture_report['models_textured']} textured, "
           f"{texture_report['models_no_texture']} without "
           f"({texture_report['models_unresolved_refs']} have unresolved refs, "

@@ -36,6 +36,12 @@ const TEX_BASE = '../data/models/textures/';
 // Team-color masks live in a single perf-resolution set (no HQ variant); keyed by
 // the diffuse/material stem so a material name maps straight to its mask.
 const TEX_TEAMCOLOR_BASE = '../data/models/textures/teamcolor/';
+// Emissive glow maps (single perf-resolution set, keyed by diffuse stem).
+const TEX_EMISSIVE_BASE = '../data/models/textures/emissive/';
+// Workshop mod texture-override sets: textures/mods/<packId>/{perf,hq,teamcolor,
+// emissive}/<stem>.{png,dds}. Which stems each pack covers comes from the
+// manifest's per-model `textureSets` block (no 404 probing).
+const TEX_MODS_BASE = '../data/models/textures/mods/';
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -184,7 +190,16 @@ export class ObjectViewer {
     this._teamColor = new THREE.Color(TEAM_DEFAULT_HEX);
     this._teamColorMix = 0;
     this._teamColorMaterials = [];
-    this._teamMaskCache = new Map();  // `team:${name}` -> THREE.Texture | null
+    this._teamMaskCache = new Map();  // `${set}:team:${name}` -> THREE.Texture | null
+
+    // Texture-set state. `_textureSets` = this model's manifest `textureSets`
+    // descriptors (mod packs covering >=1 of its materials); `_textureSet` = the
+    // active pack id (null = stock). `_emissiveTextures` = stock emissive stems.
+    this._textureSet = null;
+    this._textureSets = [];
+    this._emissiveTextures = [];
+    this._emisCache = new Map();      // `${set}:emis:${name}` -> THREE.Texture | null
+    this._emisLoadGen = 0;            // bumped each _applyEmissive run; stale runs abort
 
     // Sun light state (persisted by the caller; see opts.light).
     const lopts = opts.light || {};
@@ -423,8 +438,13 @@ export class ObjectViewer {
     this._spinVel.y = clamp(this._spinVel.y * DRAG_SENS, -SPIN_MAX_VEL, SPIN_MAX_VEL);
   }
 
-  async load(url, hints = null) {
+  async load(url, hints = null, texInfo = null) {
     this._artHints = hints;   // index.json `parts` block (ODF-authoritative)
+    // index.json texture info: `sets` = mod texture-set descriptors for this
+    // model, `emissive` = stock emissive stems. Each model opens on stock.
+    this._textureSets = (texInfo && texInfo.sets) || [];
+    this._emissiveTextures = (texInfo && texInfo.emissive) || [];
+    this._textureSet = null;
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(url);
     if (this.disposed) return;
@@ -468,6 +488,7 @@ export class ObjectViewer {
     this.setWireframe(this._wireframe);
     await this._applyTextures();
     await this._applyTeamMasks();
+    await this._applyEmissive();
     return gltf;
   }
 
@@ -517,8 +538,20 @@ export class ObjectViewer {
     if (this._wireframe && this._wireSaved) this._paintWireframeWhite();
   }
 
+  /* The active mod texture-set descriptor, or null when on stock. */
+  _activeSetDescr() {
+    if (!this._textureSet) return null;
+    return this._textureSets.find((s) => s.id === this._textureSet) || null;
+  }
+
   _loadTexture(quality, name) {
-    const cacheKey = `${quality}:${name}`;
+    // Manifest-driven set routing: when the active mod set repaints this stem,
+    // load from its dir; uncovered stems fall through to the stock set.
+    const descr = this._activeSetDescr();
+    const fromSet = !!(descr && descr.textures && descr.textures.includes(name));
+    const base = fromSet ? `${TEX_MODS_BASE}${descr.id}/` : TEX_BASE;
+    const setKey = fromSet ? descr.id : 'stock';
+    const cacheKey = `${setKey}:${quality}:${name}`;
     if (this._texCache.has(cacheKey)) return Promise.resolve(this._texCache.get(cacheKey));
 
     const finish = (tex) => {
@@ -535,16 +568,16 @@ export class ObjectViewer {
     };
 
     if (quality === 'hq') {
-      const url = `${TEX_BASE}hq/${name}.dds`;
+      const url = `${base}hq/${name}.dds`;
       return new Promise((resolve) => {
         this._ddsLoader.load(url, (t) => resolve(finish(t)), undefined, () => {
           // HQ .dds not published (GitHub Pages perf-only) -> degrade to perf.
-          this._texLoader.load(`${TEX_BASE}perf/${name}.png`,
+          this._texLoader.load(`${base}perf/${name}.png`,
             (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
         });
       });
     }
-    const url = `${TEX_BASE}perf/${name}.png`;
+    const url = `${base}perf/${name}.png`;
     return new Promise((resolve) => {
       this._texLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
     });
@@ -575,7 +608,13 @@ export class ObjectViewer {
   }
 
   _loadTeamMask(name) {
-    const cacheKey = `team:${name}`;
+    // Prefer the active mod set's mask (aligned to its repaint); stems the set
+    // doesn't mask fall back to the stock mask (mods keep the stock UV layout).
+    const descr = this._activeSetDescr();
+    const fromSet = !!(descr && descr.teamColorTextures && descr.teamColorTextures.includes(name));
+    const base = fromSet ? `${TEX_MODS_BASE}${descr.id}/teamcolor/` : TEX_TEAMCOLOR_BASE;
+    const setKey = fromSet ? descr.id : 'stock';
+    const cacheKey = `${setKey}:team:${name}`;
     if (this._teamMaskCache.has(cacheKey)) return Promise.resolve(this._teamMaskCache.get(cacheKey));
     const finish = (tex) => {
       if (tex) {
@@ -589,11 +628,88 @@ export class ObjectViewer {
       this._teamMaskCache.set(cacheKey, tex || null);
       return tex || null;
     };
-    const url = `${TEX_TEAMCOLOR_BASE}${name}.png`;
+    const url = `${base}${name}.png`;
     return new Promise((resolve) => {
       this._texLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
     });
   }
+
+  /* ---- Emissive (BZCC `_e` glow map) ------------------------------------ */
+
+  /* Assign the self-illumination glow map for every material that has one in
+   * the active set (mod emissive wins, stock fills, none clears). Wireframe-
+   * aware: while the white override is on, writes route into the _wireSaved
+   * stash (same pattern as _applyTextures) so restore shows the right state. */
+  async _applyEmissive() {
+    const gen = ++this._emisLoadGen;
+    const descr = this._activeSetDescr();
+    const wf = this._wireframe && this._wireSaved;
+    await Promise.all(this._materials.map(async (mat, i) => {
+      if (!mat.name || !('emissive' in mat)) return;
+      const fromSet = !!(descr && descr.emissiveTextures && descr.emissiveTextures.includes(mat.name));
+      const fromStock = !fromSet && this._emissiveTextures.includes(mat.name);
+      const tex = (fromSet || fromStock)
+        ? await this._loadEmissive(fromSet ? descr.id : null, mat.name)
+        : null;
+      if (this.disposed || gen !== this._emisLoadGen) return;
+      if (wf) {
+        const saved = this._wireSaved[i];
+        if (saved) {
+          saved.emissiveMap = tex || null;
+          if (saved.emissive) saved.emissive.setRGB(tex ? 1 : 0, tex ? 1 : 0, tex ? 1 : 0);
+          else saved.emissive = new THREE.Color(tex ? 0xffffff : 0x000000);
+          saved.emissiveIntensity = 1;
+        }
+        return;
+      }
+      mat.emissiveMap = tex || null;
+      mat.emissive.setRGB(tex ? 1 : 0, tex ? 1 : 0, tex ? 1 : 0);
+      mat.emissiveIntensity = 1;
+      mat.needsUpdate = true;
+    }));
+  }
+
+  _loadEmissive(setId, name) {
+    const base = setId ? `${TEX_MODS_BASE}${setId}/emissive/` : TEX_EMISSIVE_BASE;
+    const cacheKey = `${setId || 'stock'}:emis:${name}`;
+    if (this._emisCache.has(cacheKey)) return Promise.resolve(this._emisCache.get(cacheKey));
+    const finish = (tex) => {
+      if (tex) {
+        tex.flipY = false;                       // GLB UVs authored flipY=false
+        tex.colorSpace = THREE.SRGBColorSpace;   // glow is color data
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+        tex.needsUpdate = true;
+      }
+      this._emisCache.set(cacheKey, tex || null);
+      return tex || null;
+    };
+    const url = `${base}${name}.png`;
+    return new Promise((resolve) => {
+      this._texLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
+    });
+  }
+
+  /* ---- Texture sets (workshop mod skins) -------------------------------- */
+
+  hasTextureSets() { return this._textureSets.length > 0; }
+
+  /* Switch the active texture set (pack id, or null for stock). Re-runs the
+   * full texture assignment; team-color hue/mix persist across the swap. */
+  async setTextureSet(idOrNull) {
+    const id = idOrNull && this._textureSets.some((s) => s.id === idOrNull) ? idOrNull : null;
+    if (id === this._textureSet) return;
+    this._textureSet = id;
+    if (!this._model) return;
+    await this._applyTextures();
+    await this._applyTeamMasks();
+    await this._applyEmissive();
+    this._markShadowDirty();
+  }
+
+  /* The active texture set id, or null when on stock. */
+  getTextureSet() { return this._textureSet; }
 
   /* Inject the team-color blend into a MeshStandardMaterial via onBeforeCompile.
    * The uniform value-objects live on material.userData so recompiles (quality
@@ -815,17 +931,21 @@ export class ObjectViewer {
         color: m.color ? m.color.clone() : null,
         emissive: m.emissive ? m.emissive.clone() : null,
         emissiveIntensity: m.emissiveIntensity,
+        emissiveMap: m.emissiveMap || null,
       }));
     }
     this._paintWireframeWhite();
   }
 
   /* Force every material to flat unlit white lines. Mutates the live materials
-   * only -- the restore values live in this._wireSaved. */
+   * only -- the restore values live in this._wireSaved. The emissiveMap is
+   * nulled too: the white-line look comes from a SOLID white emissive, which a
+   * lingering glow texture would pattern. */
   _paintWireframeWhite() {
     for (const m of this._materials) {
       m.wireframe = true;
       m.map = null;
+      if ('emissiveMap' in m) m.emissiveMap = null;
       if (m.color) m.color.setRGB(0, 0, 0);
       if (m.emissive) m.emissive.setRGB(1, 1, 1);
       if ('emissiveIntensity' in m) m.emissiveIntensity = 1;
@@ -839,6 +959,7 @@ export class ObjectViewer {
       const saved = this._wireSaved[i];
       if (!saved) return;
       m.map = saved.map;
+      if ('emissiveMap' in m) m.emissiveMap = saved.emissiveMap || null;
       if (m.color && saved.color) m.color.copy(saved.color);
       if (m.emissive && saved.emissive) m.emissive.copy(saved.emissive);
       if ('emissiveIntensity' in m && saved.emissiveIntensity !== undefined) {
@@ -1471,6 +1592,7 @@ export class ObjectViewer {
     if (this._spin) this._spin.quaternion.identity();
     this.resetArticulation();
     this.clearTeamColor();
+    this.setTextureSet(null);   // async texture swap; fire-and-forget
     if (this._home) {
       this.camera.position.copy(this._home.pos);
       this.controls.target.copy(this._home.target);
@@ -1711,6 +1833,8 @@ export class ObjectViewer {
     this._texCache.clear();
     for (const t of this._teamMaskCache.values()) { if (t) t.dispose(); }
     this._teamMaskCache.clear();
+    for (const t of this._emisCache.values()) { if (t) t.dispose(); }
+    this._emisCache.clear();
     // Post-processing pipeline.
     if (this._composer) this._composer.dispose();
     if (this._ssaoPass && this._ssaoPass.dispose) this._ssaoPass.dispose();

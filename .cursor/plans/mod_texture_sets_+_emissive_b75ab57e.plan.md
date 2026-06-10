@@ -4,25 +4,25 @@ overview: Add workshop texture-mod skin sets (diffuse + team-color mask, perf PN
 todos:
   - id: pipeline-emissive
     content: "convert_msh.py: parse_material captures emissive; resolve_emissive() emits textures/emissive/<stem>.png; emissiveTextures in manifest + _cached_entry"
-    status: pending
+    status: completed
   - id: pipeline-modsets
     content: "convert_msh.py: MOD_TEXTURE_PACKS registry, per-pack DDS index, emit mods/<id>/{perf,hq,teamcolor,emissive}, textureSets manifest block, texture_packs top-level, TEXTURE_FORMAT_VERSION 2 + schema_version 8"
-    status: pending
+    status: completed
   - id: viewer-engine
     content: "models-viewer.js: set-aware _loadTexture/_loadTeamMask, _applyEmissive, setTextureSet/getTextureSet API, wireframe emissive stash, reset + dispose wiring"
-    status: pending
+    status: completed
   - id: viewer-ui
     content: "index.html + models.js + models.css: Textures button + panel with Stock/set radios, coverage + workshop credit links, directory skins chip, resetAllViewer sync"
-    status: pending
+    status: completed
   - id: improvements-doc
     content: "Write models/model_render_improvements.txt: self-contained context preamble + detailed _n section + _s section"
-    status: pending
+    status: completed
   - id: regen-verify
     content: Run convert_msh.py --jobs 4 (texture-only re-emit), verify counts, no GLB churn, spot-check viewer scenarios
-    status: pending
+    status: completed
   - id: docs
     content: Update _object-render/README.md, AGENTS.md, project-overview.mdc for texture sets + emissive + version bumps
-    status: pending
+    status: completed
 isProject: false
 ---
 

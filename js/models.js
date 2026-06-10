@@ -117,6 +117,9 @@ const els = {
   colorSwatchesBold: document.getElementById('color-swatches-bold'),
   colorsCustom: document.getElementById('colors-custom'),
   colorsOff: document.getElementById('colors-off'),
+  texturesBtn: document.getElementById('textures-btn'),
+  texturesPanel: document.getElementById('textures-panel'),
+  texsetRows: document.getElementById('texset-rows'),
 };
 
 /* ---- Settings-pane dock ------------------------------------------------- */
@@ -129,6 +132,7 @@ const PANES = [
   { id: 'anim', btn: els.animBtn, panel: els.animPanel },
   { id: 'parts', btn: els.partsBtn, panel: els.partsPanel },
   { id: 'colors', btn: els.colorsBtn, panel: els.colorsPanel },
+  { id: 'textures', btn: els.texturesBtn, panel: els.texturesPanel },
   { id: 'scene', btn: els.sceneBtn, panel: els.scenePanel },
 ];
 const panesMql = window.matchMedia('(max-width: 640px)');
@@ -194,6 +198,9 @@ const BOLD_COLOR_PRESETS = [
 ];
 
 let manifest = [];
+// index.json top-level `texture_packs`: {packId: {label, url}} -- credit labels
+// + workshop links for the mod texture sets referenced by models' textureSets.
+let texturePacks = {};
 let activeViewer = null;
 let aoCompiled = false;   // per-viewer: whether the SSAO/SMAA shaders have compiled
 // faction: single-select string ('all' = no filter), default ISDF.
@@ -214,6 +221,12 @@ function hasMoveableParts(m) {
 // mask was emitted) -- drives the directory "Team color" badge + Colors button.
 function hasTeamColorMask(m) {
   return !!(m && Array.isArray(m.teamColorTextures) && m.teamColorTextures.length);
+}
+
+// Mod texture sets covering this manifest entry (workshop re-texture packs) --
+// drives the directory skins badge + the viewer Textures button/panel.
+function modTextureSets(m) {
+  return (m && Array.isArray(m.textureSets)) ? m.textureSets : [];
 }
 
 function lightPrefs() {
@@ -361,6 +374,7 @@ function renderDirectory() {
         <span class="chip chip-ghost">${escapeHtml(m.category || '')}</span>
         ${hasMoveableParts(m) ? '<span class="chip chip-parts" title="Has moveable parts (turret / guns / treads)">Articulated</span>' : ''}
         ${hasTeamColorMask(m) ? '<span class="chip chip-colors" title="Supports multiplayer team colors">Team color</span>' : ''}
+        ${modTextureSets(m).length ? `<span class="chip chip-skins" title="Has community re-texture mod skins">${modTextureSets(m).length} ${modTextureSets(m).length === 1 ? 'skin' : 'skins'}</span>` : ''}
       </div>
       <div class="card-stats">${m.triangles.toLocaleString()} tris &middot; ${m.groups} ${m.groups === 1 ? 'part' : 'parts'} &middot; ${(m.textures || []).length} tex</div>
       <div class="card-odf">${escapeHtml(m.primaryOdf || '')}</div>`;
@@ -391,12 +405,16 @@ function showViewer(entry) {
     onFps: (fps) => { els.fps.textContent = `${Math.round(fps)} fps`; },
     onAim: ({ yaw, pitch }) => syncTurretSliders(yaw, pitch),
   });
-  activeViewer.load(MODELS_BASE + entry.glb, entry.parts || null)
+  activeViewer.load(MODELS_BASE + entry.glb, entry.parts || null, {
+    sets: modTextureSets(entry),
+    emissive: entry.emissiveTextures || [],
+  })
     .then(() => {
       if (!activeViewer) return;
       setupAnimUI();
       setupArticulationUI();
       setupColorsUI();
+      setupTexturesUI(entry);
       // Now that each pane's applicability (button visibility) is known, lay out
       // the dock: desktop opens every applicable pane, mobile starts collapsed.
       applyDefaultPaneState();
@@ -457,6 +475,11 @@ function showViewer(entry) {
   // resolves and reports team-colorable materials. Each open starts uncolored.
   els.colorsBtn.hidden = true;
   setPaneOpen('colors', false);
+
+  // Texture-set controls start hidden; setupTexturesUI() reveals them when the
+  // manifest entry carries mod texture sets. Each open starts on Stock.
+  els.texturesBtn.hidden = true;
+  setPaneOpen('textures', false);
 
   // Controls legend repopulates once the model loads (updateControlsHint()).
   els.controlsHint.hidden = true;
@@ -598,6 +621,10 @@ function showViewer(entry) {
     if (activeViewer) activeViewer.clearTeamColor();
     syncColorSwatches(null);
   };
+
+  // Texture sets: the button toggles the floating panel; the rows themselves are
+  // (re)built per model by setupTexturesUI().
+  els.texturesBtn.onclick = () => togglePane('textures');
 
   // Scene panel. The button toggles the floating panel; the controls drive the
   // viewer + persistence.
@@ -928,6 +955,72 @@ function buildSwatchRow(container, presets) {
   container.appendChild(frag);
 }
 
+/* Reveal + populate the Textures panel when the manifest entry carries mod
+ * texture sets (workshop re-texture packs). Rows are rebuilt per model: Stock
+ * first, then one row per set with its material coverage and a credit link out
+ * to the pack's Steam Workshop page. Each open starts on Stock. */
+function setupTexturesUI(entry) {
+  const sets = modTextureSets(entry);
+  if (!activeViewer || !sets.length || !els.texsetRows) {
+    els.texturesBtn.hidden = true;
+    els.texturesBtn.classList.remove('on');
+    els.texturesPanel.hidden = true;
+    return;
+  }
+  els.texturesBtn.hidden = false;
+
+  const totalMats = (entry.textures || []).length || 1;
+  els.texsetRows.innerHTML = '';
+  const frag = document.createDocumentFragment();
+
+  const mkRow = (id, label, coverage, url) => {
+    const row = document.createElement('div');
+    row.className = 'texset-row';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'texset-pick';
+    b.dataset.set = id || '';
+    b.title = id ? `Apply this re-texture mod (uncovered materials keep stock)` : 'The original game textures';
+    b.innerHTML = `<span class="texset-name">${escapeHtml(label)}</span>` +
+      (coverage ? `<span class="texset-cov">${coverage}</span>` : '');
+    b.onclick = () => {
+      if (activeViewer) activeViewer.setTextureSet(id);
+      syncTexsetRows(id);
+    };
+    row.appendChild(b);
+    if (url) {
+      const a = document.createElement('a');
+      a.className = 'texset-credit';
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.title = `Open this mod's Steam Workshop page (full credit to its author)`;
+      a.setAttribute('aria-label', `Workshop page for ${label}`);
+      a.innerHTML = '<i class="bi bi-steam"></i>';
+      row.appendChild(a);
+    }
+    return row;
+  };
+
+  frag.appendChild(mkRow(null, 'Stock', '', null));
+  for (const s of sets) {
+    const pack = texturePacks[s.id] || {};
+    const label = pack.label || `Workshop ${s.id}`;
+    const cov = `${s.textures.length} of ${totalMats}`;
+    frag.appendChild(mkRow(s.id, label, cov, pack.url || null));
+  }
+  els.texsetRows.appendChild(frag);
+  syncTexsetRows(null);
+}
+
+/* Reflect the active texture set on the panel rows (null = Stock). */
+function syncTexsetRows(activeId) {
+  if (!els.texsetRows) return;
+  els.texsetRows.querySelectorAll('.texset-pick').forEach((b) => {
+    b.classList.toggle('on', (b.dataset.set || null) === (activeId || null));
+  });
+}
+
 /* Reflect the active team color on both swatch rows + the Original button.
  * `hex` null means uncolored (Original active). */
 function syncColorSwatches(hex) {
@@ -992,6 +1085,12 @@ function resetAllViewer() {
   if (activeViewer.hasTeamColor()) {
     activeViewer.clearTeamColor();
     syncColorSwatches(null);
+  }
+
+  // Texture set -> Stock.
+  if (activeViewer.hasTextureSets()) {
+    activeViewer.setTextureSet(null);
+    syncTexsetRows(null);
   }
   updateControlsHint();
 
@@ -1186,6 +1285,7 @@ async function boot() {
     const res = await fetch(MODELS_BASE + 'index.json');
     const data = await res.json();
     manifest = data.models || [];
+    texturePacks = data.texture_packs || {};
   } catch (e) {
     els.grid.innerHTML = `<div class="error">Could not load index.json. Run from a local static server (see README).</div>`;
     return;

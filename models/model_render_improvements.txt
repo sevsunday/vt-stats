@@ -1,0 +1,304 @@
+================================================================================
+MODEL RENDER IMPROVEMENTS -- future texture/material work for the Models Browser
+================================================================================
+
+This document is a self-contained implementation spec for two DEFERRED texture
+features of the VT Stats Models Browser: normal maps (`_n`) and specular maps
+(`_s`). It carries enough context to plan and build either feature in a fresh
+session with no prior conversation. Status at time of writing: diffuse,
+team-color masks (`_c`), emissive glow maps (`_e`), and workshop mod texture
+sets (diffuse + `_c` + `_e` overrides) are SHIPPED; `_n` and `_s` are NOT.
+
+--------------------------------------------------------------------------------
+1. CONTEXT: HOW THE MODELS BROWSER TEXTURE PIPELINE WORKS TODAY
+--------------------------------------------------------------------------------
+
+The Models Browser is a standalone three.js page (vendored three r170):
+
+  models/index.html        page shell (toolbar buttons + floating control panes)
+  js/models.js             directory grid + viewer UI wiring
+  js/models-viewer.js      ObjectViewer class (scene, orbit, lights, textures,
+                           team-color shader injection, emissive, texture sets,
+                           articulation, wireframe, HQ capture)
+  css/models.css           all styling
+  data/models/             the published asset corpus (committed to the repo)
+  scripts/object-render/   the OFFLINE conversion pipeline (not part of the
+                           match-stats pipeline):
+    convert_msh.py         orchestrator -- BZCC baked .msh -> .glb + textures +
+                           thumbnails + index.json manifest
+    msh_parser.py          .msh binary parser
+    glb_writer.py          GLB emitter (welded + node-hierarchy/animated paths)
+    dds_decode.py          stdlib BC1/BC2/BC3 DDS block decoder (handles the
+                           DX10 header; DXGI codes 70-78). Raises UnsupportedDDS
+                           on anything else (e.g. BC7 = DXGI 98/99).
+    msh_thumbnail.py       software rasterizer for thumbnails/gallery shots
+
+Run:  python scripts/object-render/convert_msh.py --jobs 4
+(There is no incremental flag needed -- it is mtime/version cached, idempotent,
+and atomic. --force rebuilds everything including geometry.)
+
+KEY CONTRACT -- "material name == diffuse stem":
+  GLB materials are NAMED by their lowercased diffuse texture stem (e.g.
+  "ivtank00", "fbextw04_d"). Textures are NOT embedded in the GLB. The viewer
+  assigns maps at runtime by material name:
+    textures/perf/<stem>.png        512px PNG (default)
+    textures/hq/<stem>.dds          native 2048px BC DDS, verbatim copy
+                                    (DDSLoader; degrades to perf PNG on 404)
+    textures/teamcolor/<stem>.png   team-color mask, keyed by DIFFUSE stem
+    textures/emissive/<stem>.png    emissive glow map, keyed by DIFFUSE stem
+    textures/mods/<pack_id>/{perf,hq,teamcolor,emissive}/<stem>.{png,dds}
+                                    workshop mod texture-set overrides
+  Any new map kind (normal, specular) MUST follow the same diffuse-stem keying
+  so the viewer can map material name -> file with zero lookups.
+
+SOURCE OF TEXTURE NAMES -- the BZCC `.material` file:
+  Each .msh group references a `.material` file (or carries an inline diffuse
+  name for some workshop models). The `.material` format is INI-like:
+
+    [solid]
+    diffuse = 0.8 0.8 0.8 1.0
+    specular = 0.5 0.5 0.5 1.0
+    specularPower = 20.0
+    emissive = 0.0 0.0 0.0 1.0
+    ambient = 0.15 0.23 0.26 1.0
+
+    [texture]
+    diffuse = fbextw04_d.dds
+    teamColor = fbextw04_c.dds
+    emissive = fbextw04_e.dds
+    normal = fbextw04_n.dds        <-- the _n feature reads this
+    specular = fbextw04_s.dds      <-- the _s feature reads this
+
+  parse_material() in convert_msh.py parses this (currently returns rgba +
+  diffuse + teamColor + emissive names). Extending it for normal/specular is a
+  one-line-per-key change in its [texture] section handling + widening its
+  return tuple (two call sites: _build_groups and _resolve_tex_key in
+  process_model).
+
+  NAMING CONVENTION FALLBACK: when no .material exists (inline materials), aux
+  maps follow a filename convention relative to the diffuse stem: a trailing
+  "_d" is REPLACED by the suffix, otherwise the suffix is appended.
+    fvtank00_d -> fvtank00_c / fvtank00_e / fvtank00_n / fvtank00_s
+    ibgtow00   -> ibgtow00_c / ibgtow00_e / ibgtow00_n / ibgtow00_s
+  See _aux_name_candidates() in convert_msh.py -- reuse it.
+
+  Stock coverage is broad: most vehicle/building stems ship _n/_s/_e siblings
+  in the base game (check: ls "C:\Program Files (x86)\Steam\steamapps\common\
+  BZ2R\...\ivtank00*.dds" shows .dds/_c/_e/_n/_s). The dds index built by
+  resolve_roots()/build_file_index() already indexes them all -- resolution is
+  _find_diffuse_src() (VSR-scoped index wins, full-workshop fallback).
+
+  DDS FORMATS: everything relevant is DX10-header BC1 (opaque, DXGI 71/72) or
+  BC3 (with alpha, DXGI 76-78), 2048x2048 with mips. Both dds_decode.py and the
+  vendored, patched DDSLoader.js support exactly these. If a mod ships BC7
+  (DXGI 98/99) it will fail decode -- dds_decode raises UnsupportedDDS and the
+  pipeline soft-skips that map with a verbose log line.
+
+VERSIONING KNOBS (in convert_msh.py):
+  TEXTURE_FORMAT_VERSION  bump when the emitted texture-set shape changes (new
+                          map kind / directory). Triggers a "texture-only
+                          re-emit": fresh models are reprocessed with
+                          glb_fresh=True so the geometry GLB write + thumbnail
+                          render are SKIPPED (no churn of ~700 GLBs). This is
+                          the knob normal/specular work would bump.
+  ANIM_FORMAT_VERSION     bump only when the GLB emission shape changes (forces
+                          a FULL regen incl. geometry). Not needed for _n/_s
+                          UNLESS tangents get baked into the GLB (see 2.3.A).
+  schema_version          top-level index.json version; bump on manifest shape
+                          changes (additive fields still bump it; the JS reader
+                          tolerates missing fields per-model).
+
+MANIFEST (data/models/index.json) -- per-model fields relevant here:
+  "textures":          [diffuse stems]          (= material names in the GLB)
+  "teamColorTextures": [stems with _c mask]
+  "emissiveTextures":  [stems with _e map]
+  "textureSets":       [{id, textures, teamColorTextures, emissiveTextures}]
+                       per workshop mod pack covering >=1 stem of this model
+  top-level "texture_packs": {pack_id: {label, url}} for credit links.
+  A normal/specular feature adds sibling lists ("normalTextures",
+  "specularTextures") + per-set lists inside textureSets, mirroring emissive.
+
+VIEWER ARCHITECTURE NOTES (js/models-viewer.js) -- what new map code must
+respect:
+  * Materials are MeshStandardMaterial (PBR, roughness/metalness workflow).
+  * _applyTextures()/_applyEmissive() assign maps per material by name; each
+    has a generation counter so a stale async run aborts cleanly. Mirror this.
+  * Texture sets: _activeSetDescr() returns the active mod pack descriptor;
+    per-stem routing prefers the set's dir and falls back to stock. New map
+    kinds must be set-aware the same way (the mod packs DO ship _n/_s files:
+    ISDF Redux carries 34 normal maps).
+  * TEAM-COLOR SHADER INJECTION: materials with a _c mask get an
+    onBeforeCompile that replaces `#include <map_fragment>` and adds uniforms
+    (uTeamColor/uTeamMask/uTeamMix), with customProgramCacheKey
+    'vt-team-color'. Normal/specular maps use DIFFERENT shader chunks
+    (normal_fragment_maps / roughnessmap_fragment) so there is NO direct
+    conflict -- but any change that toggles USE_NORMALMAP etc. recompiles the
+    program, which re-runs onBeforeCompile; the uniforms live on
+    material.userData precisely so recompiles keep working. Test team color +
+    new map together on e.g. ivtank00.
+  * WIREFRAME OVERRIDE: setWireframe(true) stashes per-material
+    {map, color, emissive, emissiveIntensity, emissiveMap} in _wireSaved,
+    paints flat white (solid white emissive, nulled maps), and restores on
+    exit. While wireframe is active, texture loaders write into the STASH, not
+    the live material (_applyTextures / _applyEmissive show the pattern). New
+    map kinds must join the stash (normalMap, roughnessMap, ...) or they will
+    leak into the white-lines look / get lost on restore.
+  * resetView()/setTextureSet(null) revert to stock; dispose() disposes every
+    texture cache. New caches must be disposed too.
+
+--------------------------------------------------------------------------------
+2. FEATURE SPEC: NORMAL MAPS (`_n`)
+--------------------------------------------------------------------------------
+
+WHAT IT IS: per-pixel surface detail (panel lines, rivets, armor plating) that
+reacts to the viewer's sun light. BZCC ships a `_n.dds` for most unit/building
+stems; ISDF Redux's "remastered" look depends heavily on its 34 normal maps.
+Without it, surfaces read as smooth plastic under the sun light.
+
+2.1 PIPELINE (convert_msh.py)
+  a. parse_material(): also capture `[texture] normal`. Widen the return tuple;
+     update both call sites.
+  b. New resolver mirroring resolve_emissive():
+       resolve_normal(msh_dir, tex_key, declared_dds, cache)
+       -> emit textures/normal/<diffuse_stem>.png
+     - Use _aux_name_candidates(tex_key, declared, "_n") for the lookup.
+     - Decode via decode_dds (they are plain BC1/BC3 tangent-space maps).
+     - IMPORTANT -- ENCODING: normal data is NOT color. Write the PNG from the
+       raw RGB bytes without any color management (PIL keeps bytes as-is, so
+       convert("RGB") is byte-preserving and fine; do NOT add an sRGB chunk or
+       run quantize/optimize passes that touch pixel values; the existing
+       _png_bytes(optimize=True) only recompresses losslessly -- safe).
+     - RESOLUTION: normal detail survives downscaling poorly. Prefer 1024px
+       (not the 512px used for _c/_e) -- i.e. NORMAL_MAX_DIM = 1024 -- and
+       accept the payload. Optionally also a native-DDS HQ tier under
+       textures/normal-hq/ if fidelity demands it (DDSLoader handles it).
+  c. _build_groups(): collect normal_keys + extend aux_names tuples.
+  d. emit_mod_texture_sets(): per pack, probe the pack index with
+     _aux_name_candidates(tex_key, declared_n, "_n"); emit under
+     textures/mods/<id>/normal/<stem>.png; add "normalTextures" to each set.
+  e. Manifest: per-model "normalTextures": [stems]; _cached_entry passthrough;
+     bump TEXTURE_FORMAT_VERSION and schema_version. mkdir textures/normal +
+     mods/<id>/normal in main().
+
+2.2 PAYLOAD ESTIMATE
+  ~475 stock stems x ~300-700 KB at 1024px PNG (normals compress worse than
+  color) => roughly 150-300 MB, plus mod-set normals (~100 stems). If that is
+  too heavy, fall back to 512px (~60-90 MB) and re-evaluate visually on
+  ivatnk00 / ibgtow00 (Redux) which have the crispest detail.
+
+2.3 VIEWER (js/models-viewer.js)
+  A. TANGENTS -- the central decision. Our GLBs carry POSITION/NORMAL/UV but NO
+     TANGENT attribute. Options:
+       (1) three.js derivative fallback (DO THIS FIRST): when a material has a
+           normalMap but the geometry lacks tangents, three computes
+           screen-space tangents via fragment derivatives automatically. Zero
+           pipeline work, good-enough quality for inspection viewing. Caveat:
+           slightly softer/occasionally seamy on mirrored UVs.
+       (2) BufferGeometryUtils.computeTangents(geometry) at load time in the
+           viewer (the addon IS vendored at vendor/three/addons/utils/
+           BufferGeometryUtils.js). Requires indexed geometry with uv+normal --
+           ours is. Adds CPU cost per load (~700 models corpus is irrelevant,
+           only the open model matters; <50ms for our tri counts).
+       (3) Bake TANGENT into the GLB in glb_writer.py (MikkTSpace-ish). Most
+           correct, but touches geometry => ANIM_FORMAT_VERSION bump => full
+           regen + GLB churn in git. NOT worth it unless (1)/(2) show artifacts.
+  B. GREEN CHANNEL ORIENTATION: BZCC is DirectX (Y-down green). three.js
+     expects OpenGL (Y-up). If lighting looks "inverted" on bumps (grooves pop
+     OUT), set material.normalScale.y = -1 (or flip G at pipeline encode time
+     -- prefer the viewer-side flip; it is reversible without re-emitting).
+     VERIFY EMPIRICALLY on ibgtow00 (gun tower has strong panel lines): light
+     from the left must brighten the left edge of a groove. Do not assume.
+  C. Loading: _applyNormals() mirroring _applyEmissive() (set-aware stem
+     routing, gen counter, wireframe-stash awareness, cache + dispose). Config:
+       tex.flipY = false; tex.colorSpace = THREE.NoColorSpace;   // data!
+       tex.wrapS/T = RepeatWrapping; mat.normalMap = tex;
+       mat.normalScale.set(1, -1)   // pending the B verification
+       mat.needsUpdate = true       // toggles USE_NORMALMAP -> recompile
+     The team-color onBeforeCompile must survive the recompile (it does -- the
+     uniforms live on userData -- but TEST the combination).
+  D. Wireframe stash: add normalMap (+ normalScale) to _wireSaved, null it in
+     _paintWireframeWhite(), restore in _restoreWireframeOverride().
+  E. UI: arguably none (normals are not a user choice -- always on when
+     available). Optionally a Scene-panel "Surface detail" checkbox for A/B.
+
+2.4 ACCEPTANCE CHECKLIST
+  [ ] ivtank00 / ibgtow00 / fvtank00 show plating detail under the sun light;
+      rotating the sun azimuth sweeps highlights across grooves correctly
+      (green-channel check, 2.3.B).
+  [ ] ISDF Redux set on ivatnk00: visibly crisper than stock, no seams.
+  [ ] Team color + normal map together: tint still applies, no shader errors.
+  [ ] Wireframe on/off round-trip: white lines stay flat; normals come back.
+  [ ] HQ <-> perf quality toggle keeps the normal map bound.
+  [ ] Texture set switch (stock <-> mod) swaps normals with the diffuse.
+  [ ] Reset all returns to stock-with-normals; dispose leaks nothing
+      (renderer.info.memory.textures returns to baseline).
+
+--------------------------------------------------------------------------------
+3. FEATURE SPEC: SPECULAR MAPS (`_s`) -- only if we ever go this far
+--------------------------------------------------------------------------------
+
+WHAT IT IS: a legacy specular-workflow gloss/reflectivity map (which parts are
+shiny metal vs matte rubber). BZCC's renderer is classic spec/gloss; our viewer
+is PBR metalness/roughness (MeshStandardMaterial). THERE IS NO EXACT
+CONVERSION -- this is why the feature is deferred and why it has the worst
+effort-to-visibility ratio of all the map kinds. Skipping it loses material
+contrast (glass vs steel vs treads) -- subtle under our single-sun setup.
+
+3.1 CANDIDATE APPROACHES, RANKED
+  A. RECOMMENDED: spec luminance -> roughnessMap approximation.
+     - Pipeline: decode `_s.dds`, take per-pixel luminance L (0..1), write
+       roughness = (1 - L) ^ k as a grayscale PNG under textures/specular/.
+       k is a tunable contrast exponent (start k = 0.6).
+     - Use `[solid] specularPower` (parse_material already sees the [solid]
+       section; capture it) as a per-material gloss hint: higher power =>
+       narrower highlights => bias roughness lower. E.g. final roughness =
+       clamp(base * (1 - 0.3 * log10(specularPower)/2), 0.05, 1).
+       specularPower observed range: 1..~50.
+     - Viewer: mat.roughnessMap = tex (NoColorSpace, flipY=false);
+       mat.roughness = 1.0 (the map multiplies); leave metalness alone
+       (default 0 from the GLB; optionally set a low metalnessMap from the
+       same luminance with a threshold for the chrome-iest pixels -- v2).
+     - Note three.js samples roughnessMap.g (green channel) -- write the
+       grayscale into all channels and it works regardless.
+  B. REJECTED: switch to MeshPhongMaterial (has a true specularMap slot).
+     Loses the PBR look everywhere else, breaks the team-color injection
+     (different shader chunks), double material codepaths. Do not.
+  C. REJECTED: KHR_materials_specular GLB extension route -- requires baking
+     into the GLB (full regen) and three support is partial for our use.
+
+3.2 PIPELINE SHAPE (mirrors _n exactly)
+  parse_material captures `[texture] specular` + `[solid] specularPower`;
+  resolve_specular() emits textures/specular/<stem>.png at 512px (gloss is
+  low-frequency; 512 is enough); _aux_name_candidates(..., "_s"); mod sets get
+  textures/mods/<id>/specular/; manifest gains "specularTextures";
+  TEXTURE_FORMAT_VERSION + schema_version bumps.
+
+3.3 QA-BY-EYE PROTOCOL (mandatory -- the conversion is invented)
+  Pick 6 reference models: ivtank00, ivatnk00, ibgtow00 (ISDF), fvtank00,
+  fvwalk00 (Scion), one Hadean (e.g. evtank00 if present). For each: stock
+  screenshot before/after at sun az 215 el 45 AND az 90 el 20. Things to
+  reject: uniformly "wet plastic" hulls (k too low / roughness too dark),
+  disappearing highlights (k too high), treads shinier than hull. Tune k and
+  the specularPower bias until all six read naturally. Budget half the
+  feature's time for this loop.
+
+3.4 ACCEPTANCE CHECKLIST
+  [ ] Material contrast visible: cockpit glass / gun metal vs hull vs treads.
+  [ ] No model looks wet-plastic at default sun.
+  [ ] Plays with normal maps (if shipped) -- highlights follow the bumps.
+  [ ] Team color + wireframe + quality-toggle + set-switch round-trips clean
+      (same matrix as 2.4).
+  [ ] roughnessMap joins the wireframe stash + dispose path.
+
+--------------------------------------------------------------------------------
+4. SHARED IMPLEMENTATION ORDER (whichever feature goes first)
+--------------------------------------------------------------------------------
+  1. parse_material + resolver + _build_groups + mod-set emission + manifest
+     (+ version bumps) in convert_msh.py; run the pipeline; verify counts in
+     index.json and spot-open a few PNGs.
+  2. Viewer _applyX() + wireframe stash + dispose + set-awareness.
+  3. Acceptance matrix on the reference models (ivtank00 / ivatnk00 / ibgtow00 /
+     fvtank00 / fbantm00-partial / one Redux + one Scion-SE skin).
+  4. Docs: _object-render/README.md "Texture sets" section, AGENTS.md +
+     .cursor/rules/project-overview.mdc Models Browser entries.
+================================================================================
