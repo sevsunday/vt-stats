@@ -99,6 +99,14 @@ const ART_YAW_MAX = 180;
 // held (frame-rate independent). Per-frame application gives instant response
 // (no OS key-repeat delay) and supports simultaneous yaw + pitch.
 const KEY_SLEW_RATE = 60;
+// Render layer used to hide a part group. BZCC mesh hierarchies are deeply
+// nested (the hull is an ANCESTOR of the turret, which is an ancestor of the
+// guns), so toggling Object3D.visible would skip the whole subtree -- hiding the
+// hull would hide everything beneath it. Layers are per-object and do NOT stop
+// child traversal, so moving just the group's own meshes off the camera's layer
+// hides them while their descendants keep rendering. Camera + lights render
+// layer 0 only (the three.js default).
+const PART_HIDDEN_LAYER = 1;
 
 // Recoil feel. Kick distance scales with the model radius (clamped); the barrel
 // snaps back over RECOIL_BACK_SEC then eases home over the remainder of
@@ -1033,8 +1041,10 @@ export class ObjectViewer {
    * subsets. Precedence matters because the groups nest (recoil nodes live under
    * the turret subtree, the turret under the hull): guns > turret > treads >
    * hull. Detection reuses the articulation nodes/materials found just before.
-   * Visibility is pure mesh.visible toggling -- orthogonal to material overrides
-   * -- so it behaves identically in lit, wireframe, and team-color modes. */
+   * Visibility is toggled per-mesh via render LAYERS (see setPartVisible) so a
+   * hull mesh that is an ancestor of the turret can hide without taking the
+   * turret with it; it is orthogonal to material overrides, so it behaves
+   * identically in lit, wireframe, and team-color modes. */
   _buildPartGroups(model) {
     const claimed = new Set();
     const gunMeshes = [];
@@ -1077,37 +1087,42 @@ export class ObjectViewer {
     });
 
     const groups = [
-      { id: 'hull', label: 'Hull', meshes: hullMeshes },
-      { id: 'turret', label: 'Turret', meshes: turretMeshes },
-      { id: 'guns', label: 'Guns', meshes: gunMeshes },
-      { id: 'treads', label: 'Treads', meshes: treadMeshes },
+      // A walker head occupies the "turret" group; label it accordingly.
+      { id: 'hull', label: 'Hull', meshes: hullMeshes, visible: true },
+      { id: 'turret', label: this._artHeadNode ? 'Head' : 'Turret', meshes: turretMeshes, visible: true },
+      { id: 'guns', label: 'Guns', meshes: gunMeshes, visible: true },
+      { id: 'treads', label: 'Treads', meshes: treadMeshes, visible: true },
     ];
     this._partGroups = groups.filter((g) => g.meshes.length > 0);
 
-    // Fresh model opens fully visible.
+    // Fresh model opens fully visible (all meshes on the camera's render layer).
     for (const g of this._partGroups) {
-      for (const m of g.meshes) m.visible = true;
+      for (const m of g.meshes) m.layers.set(0);
     }
   }
 
   /* Public descriptor of the visibility groups (no Three refs leaked). */
   getPartGroups() {
     return this._partGroups.map((g) => ({
-      id: g.id, label: g.label, meshCount: g.meshes.length,
+      id: g.id, label: g.label, meshCount: g.meshes.length, visible: g.visible,
     }));
   }
 
+  /* Show/hide one group via render layers (NOT Object3D.visible) so a hull mesh
+   * that is an ancestor of the turret can be hidden without hiding the turret. */
   setPartVisible(id, visible) {
     const g = this._partGroups.find((x) => x.id === id);
     if (!g) return;
     const v = !!visible;
-    for (const m of g.meshes) m.visible = v;
+    g.visible = v;
+    for (const m of g.meshes) m.layers.set(v ? 0 : PART_HIDDEN_LAYER);
     this._markShadowDirty();
   }
 
   resetPartVisibility() {
     for (const g of this._partGroups) {
-      for (const m of g.meshes) m.visible = true;
+      g.visible = true;
+      for (const m of g.meshes) m.layers.set(0);
     }
     this._markShadowDirty();
   }
@@ -1500,9 +1515,7 @@ export class ObjectViewer {
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
     // Capture the whole model regardless of any hidden part groups; remember the
     // current per-group visibility so the user's filter is restored afterward.
-    const prevPartVisible = this._partGroups.map((g) => ({
-      id: g.id, visible: g.meshes.length ? g.meshes[0].visible : true,
-    }));
+    const prevPartVisible = this._partGroups.map((g) => ({ id: g.id, visible: g.visible }));
     this.resetPartVisibility();
 
     this.controls.autoRotate = false;
