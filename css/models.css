@@ -369,6 +369,35 @@ label.light-head { cursor: pointer; }
   letter-spacing: 0.05em;
 }
 .parts-visibility-row { cursor: pointer; }
+/* Small inline "reset to 0" affordance at the end of a slider row (Drive). */
+.parts-mini-reset {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--kb-border-default);
+  border-radius: 6px;
+  background: var(--kb-bg-input);
+  color: var(--kb-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.parts-mini-reset:hover {
+  color: var(--kb-primary);
+  border-color: var(--kb-primary);
+}
+/* Drive: label on the left, value + reset hugging the right, slider full-width
+   on its own line below (so it isn't squeezed by the controls). */
+.parts-drive-head .light-val { margin-left: auto; }
+.parts-drive-slider {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--kb-primary);
+}
 
 /* Team-color panel: flows in the dock. */
 .color-swatches {

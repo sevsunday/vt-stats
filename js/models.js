@@ -108,6 +108,7 @@ const els = {
   partsDriveSection: document.getElementById('parts-drive-section'),
   partsDrive: document.getElementById('parts-drive'),
   partsDriveVal: document.getElementById('parts-drive-val'),
+  partsDriveReset: document.getElementById('parts-drive-reset'),
   partsVisibilitySection: document.getElementById('parts-visibility-section'),
   partsVisibilityRows: document.getElementById('parts-visibility-rows'),
   colorsBtn: document.getElementById('colors-btn'),
@@ -579,6 +580,11 @@ function showViewer(entry) {
     const v = parseFloat(e.target.value);
     els.partsDriveVal.textContent = v.toFixed(2);
     if (activeViewer) activeViewer.setDrive(v);
+  };
+  els.partsDriveReset.onclick = () => {
+    els.partsDrive.value = '0';
+    els.partsDriveVal.textContent = '0';
+    if (activeViewer) activeViewer.setDrive(0);
   };
 
   // Team color: the button toggles the floating panel; swatches + the custom
