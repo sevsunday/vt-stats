@@ -115,6 +115,7 @@ const els = {
   colorsPanel: document.getElementById('colors-panel'),
   colorSwatches: document.getElementById('color-swatches'),
   colorSwatchesBold: document.getElementById('color-swatches-bold'),
+  colorSwatchesMilitary: document.getElementById('color-swatches-military'),
   colorsCustom: document.getElementById('colors-custom'),
   colorsOff: document.getElementById('colors-off'),
   texturesBtn: document.getElementById('textures-btn'),
@@ -195,6 +196,19 @@ const BOLD_COLOR_PRESETS = [
   { hex: '#c9a86a', label: 'Champagne Gold' },
   { hex: '#1d4e5f', label: 'Deep Teal' },
   { hex: '#3a3d42', label: 'Graphite' },
+];
+
+// "Military inspired" -- army/camo greens through field browns to desert tans,
+// ordered dark -> light so the row reads as a gradient.
+const MILITARY_COLOR_PRESETS = [
+  { hex: '#4b5320', label: 'Army Green' },
+  { hex: '#667c3e', label: 'Camo Green' },
+  { hex: '#68643f', label: 'Olive Drab' },
+  { hex: '#63563b', label: 'Field Drab' },
+  { hex: '#81613c', label: 'Coyote Brown' },
+  { hex: '#a69273', label: 'Khaki' },
+  { hex: '#b69a7c', label: 'Desert Sand' },
+  { hex: '#958a68', label: 'Stone Grey' },
 ];
 
 let manifest = [];
@@ -930,6 +944,7 @@ function setupColorsUI() {
   // Build the preset swatch rows once (idempotent across opens).
   buildSwatchRow(els.colorSwatches, TEAM_COLOR_PRESETS);
   buildSwatchRow(els.colorSwatchesBold, BOLD_COLOR_PRESETS);
+  buildSwatchRow(els.colorSwatchesMilitary, MILITARY_COLOR_PRESETS);
   syncColorSwatches(null);
 }
 
@@ -1021,11 +1036,11 @@ function syncTexsetRows(activeId) {
   });
 }
 
-/* Reflect the active team color on both swatch rows + the Original button.
+/* Reflect the active team color on every swatch row + the Original button.
  * `hex` null means uncolored (Original active). */
 function syncColorSwatches(hex) {
   const norm = hex ? String(hex).toLowerCase() : null;
-  for (const row of [els.colorSwatches, els.colorSwatchesBold]) {
+  for (const row of [els.colorSwatches, els.colorSwatchesBold, els.colorSwatchesMilitary]) {
     if (!row) continue;
     row.querySelectorAll('.color-swatch').forEach((b) => {
       b.classList.toggle('on', norm !== null && b.dataset.hex.toLowerCase() === norm);
