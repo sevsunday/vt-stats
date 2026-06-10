@@ -216,8 +216,14 @@ export class ObjectViewer {
     this._artYawNodes = [];        // turret_y / turret_y_N nodes (yaw)
     this._artPitchNodes = [];      // turret_x / turret_x_N nodes (pitch)
     this._artRecoil = [];          // [{node, restPos, axis}] for recoil* nodes
+    this._artHeadNode = null;      // walker head joint (one node, yaw + pitch)
     this._artTreadMats = [];       // materials whose name matches /tread/i
     this._partGroups = [];         // [{id, label, meshes:[Mesh]}] built per load
+    // Per-model aim limits. Conventional tank turrets yaw freely (wrap 360);
+    // walker heads are clamped to their ODF min/max (no wrap). Set in
+    // _detectArticulation from the index.json `parts` hint.
+    this._yawLim = { min: ART_YAW_MIN, max: ART_YAW_MAX, wrap: true };
+    this._pitchLim = { min: ART_PITCH_MIN, max: ART_PITCH_MAX };
     this._turretYawDeg = 0;
     this._turretPitchDeg = 0;
     this._keySlewYaw = 0;          // -1/0/+1 held arrow-key yaw direction
@@ -357,7 +363,7 @@ export class ObjectViewer {
   _onPointerDown(e) {
     // Point-to-aim is hover-driven (no drag); the pointermove handler does the
     // work. Just swallow the press so it doesn't start anything else.
-    if (this._aimMode && (this._artYawNodes.length || this._artPitchNodes.length)) {
+    if (this._aimMode && (this._hasYaw() || this._hasPitch())) {
       this._aimAtPointer(e);
       return;
     }
@@ -409,7 +415,8 @@ export class ObjectViewer {
     this._spinVel.y = clamp(this._spinVel.y * DRAG_SENS, -SPIN_MAX_VEL, SPIN_MAX_VEL);
   }
 
-  async load(url) {
+  async load(url, hints = null) {
+    this._artHints = hints;   // index.json `parts` block (ODF-authoritative)
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(url);
     if (this.disposed) return;
@@ -448,7 +455,7 @@ export class ObjectViewer {
     }
 
     this._frame(model);   // builds the spin pivot, reparents model, adds to scene
-    this._detectArticulation(model);
+    this._detectArticulation(model, this._artHints);
     this._buildPartGroups(model);
     this.setWireframe(this._wireframe);
     await this._applyTextures();
@@ -909,26 +916,72 @@ export class ObjectViewer {
 
   /* Locate the named moveable-part nodes/materials in a freshly loaded model
    * and cache their rest transforms (for delta composition + reset). Resets any
-   * articulation state carried over from a prior model. */
-  _detectArticulation(model) {
+   * articulation state carried over from a prior model.
+   *
+   * Detection is ODF-authoritative: when the index.json `parts` hint carries
+   * resolved node-name lists (turretNodes / pitchNodes / recoilNodes / head),
+   * we bind those exact nodes -- this is what gives walkers their aimable head
+   * (named head/head2/midbody, which the regex conventions miss) and their guns
+   * (named lgun / cannon_recoil_*). When the hint is absent (stale index), we
+   * fall back to the legacy turret_y/turret_x/recoil* name conventions. */
+  _detectArticulation(model, hints) {
     this._artYawNodes = [];
     this._artPitchNodes = [];
     this._artRecoil = [];
-    model.traverse((o) => {
-      if (!o.name) return;
-      if (ART_TURRET_YAW_RE.test(o.name)) {
-        o.userData._restQuat = o.quaternion.clone();
-        this._artYawNodes.push(o);
-      } else if (ART_TURRET_PITCH_RE.test(o.name)) {
-        o.userData._restQuat = o.quaternion.clone();
-        this._artPitchNodes.push(o);
+    this._artHeadNode = null;
+    this._yawLim = { min: ART_YAW_MIN, max: ART_YAW_MAX, wrap: true };
+    this._pitchLim = { min: ART_PITCH_MIN, max: ART_PITCH_MAX };
+
+    // Case-insensitive node lookup by name.
+    const byName = new Map();
+    model.traverse((o) => { if (o.name) byName.set(o.name.toLowerCase(), o); });
+    const lookup = (nm) => byName.get(String(nm || '').toLowerCase()) || null;
+    const addRecoil = (node) => {
+      const axis = ART_LOCAL_Z.clone().applyQuaternion(node.quaternion).normalize();
+      this._artRecoil.push({ node, restPos: node.position.clone(), axis });
+    };
+
+    const haveHints = hints && (Array.isArray(hints.turretNodes)
+      || Array.isArray(hints.pitchNodes) || Array.isArray(hints.recoilNodes)
+      || hints.head);
+    if (haveHints) {
+      for (const nm of (hints.turretNodes || [])) {
+        const n = lookup(nm);
+        if (n) { n.userData._restQuat = n.quaternion.clone(); this._artYawNodes.push(n); }
       }
-      if (ART_RECOIL_RE.test(o.name)) {
-        // Recoil axis = the node's local Z expressed in its parent space.
-        const axis = ART_LOCAL_Z.clone().applyQuaternion(o.quaternion).normalize();
-        this._artRecoil.push({ node: o, restPos: o.position.clone(), axis });
+      for (const nm of (hints.pitchNodes || [])) {
+        const n = lookup(nm);
+        if (n) { n.userData._restQuat = n.quaternion.clone(); this._artPitchNodes.push(n); }
       }
-    });
+      for (const nm of (hints.recoilNodes || [])) {
+        const n = lookup(nm);
+        if (n) addRecoil(n);
+      }
+      if (hints.head) {
+        const n = lookup(hints.head.node);
+        if (n) {
+          n.userData._restQuat = n.quaternion.clone();
+          this._artHeadNode = n;
+          // Walker head: clamped to the ODF limits, never wraps.
+          this._yawLim = { min: hints.head.yawMin, max: hints.head.yawMax, wrap: false };
+          this._pitchLim = { min: hints.head.pitchMin, max: hints.head.pitchMax };
+        }
+      }
+    } else {
+      // Fallback: legacy node-name conventions.
+      model.traverse((o) => {
+        if (!o.name) return;
+        if (ART_TURRET_YAW_RE.test(o.name)) {
+          o.userData._restQuat = o.quaternion.clone();
+          this._artYawNodes.push(o);
+        } else if (ART_TURRET_PITCH_RE.test(o.name)) {
+          o.userData._restQuat = o.quaternion.clone();
+          this._artPitchNodes.push(o);
+        }
+        if (ART_RECOIL_RE.test(o.name)) addRecoil(o);
+      });
+    }
+
     this._artTreadMats = this._materials.filter(
       (m) => m.name && ART_TREAD_MAT_RE.test(m.name));
 
@@ -946,17 +999,26 @@ export class ObjectViewer {
     }
   }
 
-  /* What this model can articulate (drives the UI control set). */
+  // A model has an aimable joint if it has a turret yaw/pitch node OR a head.
+  _hasYaw() { return this._artYawNodes.length > 0 || !!this._artHeadNode; }
+  _hasPitch() { return this._artPitchNodes.length > 0 || !!this._artHeadNode; }
+
+  /* What this model can articulate (drives the UI control set). isHead marks the
+   * walker single-node head (yaw + pitch on one joint, clamped to ODF limits) so
+   * the UI can relabel "Turret" -> "Head" and bind slider ranges. */
   getArticulation() {
     const bankClips = this._clips
       .map((c) => c.name)
       .filter((n) => ART_BANK_CLIPS.includes(String(n).toLowerCase()));
     return {
-      turretYaw: this._artYawNodes.length > 0,
-      turretPitch: this._artPitchNodes.length > 0,
+      turretYaw: this._hasYaw(),
+      turretPitch: this._hasPitch(),
       recoil: this._artRecoil.length,
       treads: this._artTreadMats.length > 0,
       bankClips,
+      isHead: !!this._artHeadNode,
+      yawMin: this._yawLim.min, yawMax: this._yawLim.max, yawWrap: this._yawLim.wrap,
+      pitchMin: this._pitchLim.min, pitchMax: this._pitchLim.max,
     };
   }
 
@@ -994,7 +1056,9 @@ export class ObjectViewer {
     };
 
     collectUnder(this._artRecoil.map((r) => r.node), gunMeshes);
-    collectUnder([...this._artYawNodes, ...this._artPitchNodes], turretMeshes);
+    const turretRoots = [...this._artYawNodes, ...this._artPitchNodes];
+    if (this._artHeadNode) turretRoots.push(this._artHeadNode);
+    collectUnder(turretRoots, turretMeshes);
 
     model.traverse((o) => {
       if (!o.isMesh || claimed.has(o)) return;
@@ -1048,13 +1112,24 @@ export class ObjectViewer {
     this._markShadowDirty();
   }
 
+  /* Constrain a yaw value to the model's limits: wrap 360 for free turrets,
+   * clamp to [min,max] for walker heads. */
+  _clampYaw(deg) {
+    const v = Number(deg) || 0;
+    return this._yawLim.wrap ? wrapDeg(v) : clamp(v, this._yawLim.min, this._yawLim.max);
+  }
+
+  _clampPitch(deg) {
+    return clamp(Number(deg) || 0, this._pitchLim.min, this._pitchLim.max);
+  }
+
   setTurretYaw(deg) {
-    this._turretYawDeg = wrapDeg(Number(deg) || 0);   // free 360 (wrap, not clamp)
+    this._turretYawDeg = this._clampYaw(deg);
     this._applyTurret();
   }
 
   setTurretPitch(deg) {
-    this._turretPitchDeg = clamp(Number(deg) || 0, ART_PITCH_MIN, ART_PITCH_MAX);
+    this._turretPitchDeg = this._clampPitch(deg);
     this._applyTurret();
   }
 
@@ -1062,14 +1137,16 @@ export class ObjectViewer {
 
   /* Set the held arrow-key slew direction (-1/0/+1 per axis). The frame loop
    * integrates this at KEY_SLEW_RATE deg/sec, so holding two arrows slews yaw
-   * and pitch together. Pitch is ignored on models without a pitch joint. */
+   * and pitch together. Each axis is gated to a present joint (turret or head). */
   setTurretKeySlew(yawDir, pitchDir) {
-    this._keySlewYaw = Math.sign(yawDir || 0);
-    this._keySlewPitch = this._artPitchNodes.length ? Math.sign(pitchDir || 0) : 0;
+    this._keySlewYaw = this._hasYaw() ? Math.sign(yawDir || 0) : 0;
+    this._keySlewPitch = this._hasPitch() ? Math.sign(pitchDir || 0) : 0;
   }
 
-  /* Compose the current yaw/pitch deltas onto each turret node's rest rotation.
-   * Yaw rotates turret_y about local Y; pitch rotates turret_x about local X. */
+  /* Compose the current yaw/pitch deltas onto each articulated joint's rest
+   * rotation. Yaw rotates turret_y about local Y; pitch rotates turret_x about
+   * local X. The walker head is a SINGLE node aimed in both axes, so it gets
+   * rest * Ry(yaw) * Rx(pitch) composed in one write. */
   _applyTurret() {
     if (this._artYawNodes.length) {
       const q = new THREE.Quaternion().setFromAxisAngle(ART_AXIS_Y, this._turretYawDeg * DEG);
@@ -1082,6 +1159,11 @@ export class ObjectViewer {
       for (const n of this._artPitchNodes) {
         if (n.userData._restQuat) n.quaternion.copy(n.userData._restQuat).multiply(q);
       }
+    }
+    if (this._artHeadNode && this._artHeadNode.userData._restQuat) {
+      const qy = new THREE.Quaternion().setFromAxisAngle(ART_AXIS_Y, this._turretYawDeg * DEG);
+      const qx = new THREE.Quaternion().setFromAxisAngle(ART_AXIS_X, this._turretPitchDeg * DEG);
+      this._artHeadNode.quaternion.copy(this._artHeadNode.userData._restQuat).multiply(qy).multiply(qx);
     }
   }
 
@@ -1098,13 +1180,14 @@ export class ObjectViewer {
     const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
     // Pitch: vertical cursor position -> elevation window (predictable).
-    if (this._artPitchNodes.length) {
+    if (this._hasPitch()) {
       const p = clamp((ndcY + 1) / 2, 0, 1);
-      this._turretPitchDeg = ART_PITCH_MIN + p * (ART_PITCH_MAX - ART_PITCH_MIN);
+      this._turretPitchDeg = this._pitchLim.min + p * (this._pitchLim.max - this._pitchLim.min);
     }
 
     // Yaw: aim toward the cursor's point on the horizontal plane at pivot height.
-    const yawNode = this._artYawNodes[0];
+    // The walker head is the yaw joint when there's no dedicated turret_y node.
+    const yawNode = this._artYawNodes[0] || this._artHeadNode;
     if (yawNode) {
       this._raycaster.setFromCamera({ x: ndcX, y: ndcY }, this.camera);
       const pivotW = yawNode.getWorldPosition(new THREE.Vector3());
@@ -1128,7 +1211,8 @@ export class ObjectViewer {
           fwd0.normalize();
           const s = new THREE.Vector3().crossVectors(fwd0, dir).dot(yawAxis);
           const c = fwd0.dot(dir);
-          this._turretYawDeg = wrapDeg(Math.atan2(s, c) / DEG);
+          // Free turrets wrap; a limited walker head pins at its yaw limit.
+          this._turretYawDeg = this._clampYaw(Math.atan2(s, c) / DEG);
         }
       }
     }
@@ -1206,7 +1290,7 @@ export class ObjectViewer {
   /* Point-to-aim: the turret tracks the cursor (see _aimAtPointer) instead of
    * the camera orbiting. Like free-spin, it locks camera rotation while active. */
   setAimMode(on) {
-    this._aimMode = !!on && (this._artYawNodes.length > 0 || this._artPitchNodes.length > 0);
+    this._aimMode = !!on && (this._hasYaw() || this._hasPitch());
     this.controls.enableRotate = !this._aimMode;
     if (this._aimMode) {
       this.controls.autoRotate = false;
@@ -1542,18 +1626,17 @@ export class ObjectViewer {
     // keys respond on the very next frame (no OS key-repeat delay).
     if (this._keySlewYaw || this._keySlewPitch) {
       if (this._keySlewYaw) {
-        this._turretYawDeg = wrapDeg(this._turretYawDeg + this._keySlewYaw * KEY_SLEW_RATE * dt);
+        this._turretYawDeg = this._clampYaw(this._turretYawDeg + this._keySlewYaw * KEY_SLEW_RATE * dt);
       }
       if (this._keySlewPitch) {
-        this._turretPitchDeg = clamp(
-          this._turretPitchDeg + this._keySlewPitch * KEY_SLEW_RATE * dt, ART_PITCH_MIN, ART_PITCH_MAX);
+        this._turretPitchDeg = this._clampPitch(this._turretPitchDeg + this._keySlewPitch * KEY_SLEW_RATE * dt);
       }
       if (this._onAim) this._onAim({ yaw: this._turretYawDeg, pitch: this._turretPitchDeg });
       moving = true;
     }
     // Articulation runs AFTER the mixer so turret/recoil writes win over (and
     // are re-asserted against) any playing bank clip that might touch them.
-    if (this._artYawNodes.length || this._artPitchNodes.length) this._applyTurret();
+    if (this._artYawNodes.length || this._artPitchNodes.length || this._artHeadNode) this._applyTurret();
     if (this._updateRecoil(dt)) moving = true;
     if (this._updateTreads(dt)) moving = true;
     // Free-spin momentum: integrate angular velocity, then apply friction decay.

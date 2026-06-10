@@ -94,6 +94,7 @@ const els = {
   partsBtn: document.getElementById('parts-btn'),
   partsPanel: document.getElementById('parts-panel'),
   partsTurret: document.getElementById('parts-turret'),
+  partsYawLabel: document.getElementById('parts-yaw-label'),
   partsYaw: document.getElementById('parts-yaw'),
   partsYawVal: document.getElementById('parts-yaw-val'),
   partsPitchRow: document.getElementById('parts-pitch-row'),
@@ -389,7 +390,7 @@ function showViewer(entry) {
     onFps: (fps) => { els.fps.textContent = `${Math.round(fps)} fps`; },
     onAim: ({ yaw, pitch }) => syncTurretSliders(yaw, pitch),
   });
-  activeViewer.load(MODELS_BASE + entry.glb)
+  activeViewer.load(MODELS_BASE + entry.glb, entry.parts || null)
     .then(() => {
       if (!activeViewer) return;
       setupAnimUI();
@@ -811,9 +812,17 @@ function setupArticulationUI() {
   }
   els.partsBtn.hidden = false;
 
-  // Turret section (yaw always, pitch only if turret_x present).
+  // Turret/head section (yaw always, pitch only when a pitch joint exists). A
+  // walker head is a single joint aimed in both axes -> relabel "Turret" as
+  // "Head". Slider ranges come from the per-model limits (ODF head limits, or
+  // the conventional -180..180 yaw / -25..45 pitch for tank turrets).
   els.partsTurret.hidden = !(art.turretYaw || art.turretPitch);
   els.partsPitchRow.hidden = !art.turretPitch;
+  els.partsYawLabel.textContent = art.isHead ? 'Head' : 'Turret';
+  els.partsYaw.min = String(Math.round(art.yawMin));
+  els.partsYaw.max = String(Math.round(art.yawMax));
+  els.partsPitch.min = String(Math.round(art.pitchMin));
+  els.partsPitch.max = String(Math.round(art.pitchMax));
   els.partsAim.hidden = !(art.turretYaw || art.turretPitch);
   els.partsAim.classList.remove('on');
   els.partsKeys.hidden = !(art.turretYaw || art.turretPitch);

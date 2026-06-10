@@ -88,7 +88,12 @@ DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gal
 #       with baked clips) so named moveable parts (turret_y / turret_x / recoil*
 #       and the tread material) survive into the published GLB for the viewer's
 #       interactive articulation. Adds the per-model `parts` manifest block.
-ANIM_FORMAT_VERSION = 3
+#   v4: `parts` is now ODF-authoritative -- it carries resolved node-name lists
+#       (turretNodes / pitchNodes / recoilNodes) sourced from GameObjectClass
+#       turretName*/recoilName* and a walker `head` block (WalkerClass headpiece
+#       + per-model yaw/pitch limits), so walkers aim their head + fire their
+#       guns. Forces a full regen to recompute every parts block.
+ANIM_FORMAT_VERSION = 4
 
 # Bump when the emitted texture SET shape changes (new texture kind / dir layout)
 # without the GLB geometry changing. A mismatch vs the prior index.json forces a
@@ -128,26 +133,82 @@ def _renderable_node_count(full: dict) -> int:
     return n
 
 
-def _classify_parts(full: dict, clip_names) -> dict | None:
+def _classify_parts(full: dict, clip_names, odf_art=None) -> dict | None:
     """Derive the interactive-articulation `parts` block from a parse_msh_full()
     result. Returns None when the model has no moveable parts (so plain
-    multi-part scenery doesn't carry an empty block). Detection is by the BZCC
-    node/material naming conventions (confirmed against the ODFs):
-      - turret_y / turret_x : turret yaw / pitch nodes
-      - recoil*             : per-weapon recoil nodes
-      - tread / tractor node, or a material whose diffuse stem contains 'tread'
-                              (e.g. tread / fvtread) : scrolling treads
-      - bankClips           : body steering clips (forward / reverse / neutral)
-    """
-    names = [(nd.get("name") or "").lower() for nd in full.get("nodes", [])]
-    # Turret joints may be suffixed (turret_y_1) and multi-barrel towers carry
-    # several pitch joints (turret_x_1, turret_x_2, ...).
-    turret = any(re.fullmatch(r"turret_y(_\d+)?", x) for x in names)
-    pitch = any(re.fullmatch(r"turret_x(_\d+)?", x) for x in names)
-    recoil = sum(1 for x in names if x.startswith("recoil"))
-    tread_node = any(x.startswith("tread") or x.startswith("tractor") for x in names)
+    multi-part scenery doesn't carry an empty block).
+
+    Detection is ODF-authoritative with the BZCC naming conventions as fallback:
+      - turret yaw : ODF GameObjectClass.turretName* + convention turret_y(_N)
+      - turret pitch : convention turret_x(_N) (the ODF doesn't split yaw/pitch)
+      - recoil : ODF GameObjectClass.recoilName* + convention recoil* nodes
+      - head (walker) : WalkerClass.headpiece -> ONE node aimed in yaw AND pitch
+        within per-model limits (carried through so the viewer can clamp)
+      - tread / tractor node, or a 'tread' material : scrolling treads
+      - bankClips : body steering clips (forward / reverse / neutral)
+    All ODF-declared node names are validated against the actual mesh (only kept
+    when a node really exists, matched case-insensitively)."""
+    odf_art = odf_art or {}
+    nodes = full.get("nodes", [])
+    actual_names = [(nd.get("name") or "") for nd in nodes]
+    lower_to_actual = {}
+    for nm in actual_names:
+        if nm:
+            lower_to_actual.setdefault(nm.lower(), nm)
+
+    def resolve(decl):
+        """ODF-declared names -> existing actual node names (dedup, order-keep)."""
+        out = []
+        for dn in (decl or []):
+            actual = lower_to_actual.get(str(dn).lower())
+            if actual and actual not in out:
+                out.append(actual)
+        return out
+
+    def add_unique(dst, items):
+        for it in items:
+            if it not in dst:
+                dst.append(it)
+
+    # Turret nodes: gather candidates from convention turret_x/turret_y(_N) AND
+    # ODF turretName* (ODFs commonly declare turretName1=yaw base + turretName2=
+    # gun mantlet). The AXIS is decided by node-name convention -- turret_x* is a
+    # pitch joint, anything else (turret_y* or a custom base name) yaws -- so an
+    # ODF-declared pitch node never lands in the yaw bucket.
+    cand_turret = []
+    add_unique(cand_turret, [nm for nm in actual_names
+                             if re.fullmatch(r"turret_[xy](_\d+)?", nm.lower())])
+    add_unique(cand_turret, resolve(odf_art.get("turretNames")))
+    turret_nodes, pitch_nodes = [], []
+    for nm in cand_turret:
+        if re.fullmatch(r"turret_x(_\d+)?", nm.lower()):
+            if nm not in pitch_nodes:
+                pitch_nodes.append(nm)
+        elif nm not in turret_nodes:
+            turret_nodes.append(nm)
+
+    # Recoil: convention recoil* nodes + ODF recoilName* (walker guns name these
+    # lgun / cannon_recoil_* / etc., which the convention misses entirely).
+    recoil_nodes = []
+    add_unique(recoil_nodes, [nm for nm in actual_names if nm.lower().startswith("recoil")])
+    add_unique(recoil_nodes, resolve(odf_art.get("recoilNames")))
+
+    # Walker head: a single node aimed in both axes, with per-model limits.
+    head = None
+    ha = odf_art.get("head")
+    if ha:
+        node = lower_to_actual.get(str(ha.get("node", "")).lower())
+        if node:
+            head = {
+                "node": node,
+                "yawMin": ha["yawMin"], "yawMax": ha["yawMax"],
+                "pitchMin": ha["pitchMin"], "pitchMax": ha["pitchMax"],
+            }
+
+    tread_node = any(x.lower().startswith("tread") or x.lower().startswith("tractor")
+                     for x in actual_names)
     tread_mat = False
-    for nd in full.get("nodes", []):
+    for nd in nodes:
         for grp in nd.get("groups", []):
             # grp = (vert_count, index_count, material_name, texture_name)
             for s in (grp[3], grp[2]):
@@ -155,30 +216,76 @@ def _classify_parts(full: dict, clip_names) -> dict | None:
                     tread_mat = True
     bank = sorted(c for c in (clip_names or [])
                   if str(c).lower() in ("forward", "reverse", "neutral"))
+
+    # A resolved head implies an aimable joint (yaw + pitch) for the legacy flags
+    # so the directory badge + existing boolean readers keep working unchanged.
+    turret = bool(turret_nodes) or head is not None
+    pitch = bool(pitch_nodes) or head is not None
+    treads = bool(tread_node or tread_mat)
     parts = {
         "turret": turret,
         "pitch": pitch,
-        "recoil": recoil,
-        "treads": bool(tread_node or tread_mat),
+        "recoil": len(recoil_nodes),
+        "treads": treads,
         "bankClips": bank,
+        "turretNodes": turret_nodes,
+        "pitchNodes": pitch_nodes,
+        "recoilNodes": recoil_nodes,
+        "head": head,
     }
-    if not (parts["turret"] or parts["pitch"] or parts["recoil"] or parts["treads"]):
+    if not (turret or pitch or parts["recoil"] or treads):
         return None
     return parts
 
 
+def _extract_odf_art(blocks: dict) -> dict:
+    """Pull articulation declarations from one ODF entry's class blocks:
+      - GameObjectClass.turretName<N> -> yaw-turret node names
+      - GameObjectClass.recoilName<N> -> per-weapon recoil node names (the DB
+        also carries RecoilName<N> casing)
+      - WalkerClass.headpiece + min/maxHead{Yaw,Pitch} -> the walker head joint
+        (a single node aimed in BOTH yaw and pitch, with per-model limits)
+    Returns {turretNames, recoilNames, head|None}; node names are verified
+    against the real mesh later in _classify_parts."""
+    go = blocks.get("GameObjectClass", {}) or {}
+    turret, recoil = [], []
+    for k, v in go.items():
+        if not v or str(v).upper() == "NULL":
+            continue
+        kl = k.lower()
+        if re.fullmatch(r"turretname\d+", kl):
+            turret.append(str(v))
+        elif re.fullmatch(r"recoilname\d+", kl):
+            recoil.append(str(v))
+    head = None
+    wc = blocks.get("WalkerClass")
+    if isinstance(wc, dict) and wc.get("headpiece") and str(wc["headpiece"]).upper() != "NULL":
+        def f(key, default):
+            try:
+                return float(str(wc.get(key, default)).rstrip("fF"))
+            except (TypeError, ValueError):
+                return default
+        head = {
+            "node": str(wc["headpiece"]),
+            "yawMin": f("minHeadYaw", -90.0), "yawMax": f("maxHeadYaw", 90.0),
+            "pitchMin": f("minHeadPitch", -30.0), "pitchMax": f("maxHeadPitch", 30.0),
+        }
+    return {"turretNames": turret, "recoilNames": recoil, "head": head}
+
+
 def enumerate_targets(odf_filter=None):
     """Scan odf.min.json for every geometryName + shotGeometry. Returns a dict
-    stem -> {odfs, primaryOdf, unitName, category, factionCode, factionName}."""
+    stem -> {odfs, primaryOdf, unitName, category, factionCode, factionName,
+    odf_art}."""
     db = json.loads(ODF_DB.read_text(encoding="utf-8"))
     refs: dict[str, list[dict]] = {}
 
-    def add(stem, odf, unit, category, source):
+    def add(stem, odf, unit, category, source, blocks):
         if not stem or stem.upper() == "NULL":
             return
         refs.setdefault(stem, []).append({
             "odf": odf, "unitName": unit or "",
-            "category": category, "source": source,
+            "category": category, "source": source, "blocks": blocks,
         })
 
     for cat, entries in db.items():
@@ -189,13 +296,13 @@ def enumerate_targets(odf_filter=None):
             unit = go.get("unitName")
             geo = go.get("geometryName")
             if geo and str(geo).upper() != "NULL":
-                add(_stem(geo), name, unit, cat, "geometryName")
+                add(_stem(geo), name, unit, cat, "geometryName", blocks)
             # shotGeometry lives in nested *OrdnanceClass blocks (dotted keys)
             for bv in blocks.values():
                 if isinstance(bv, dict):
                     sg = bv.get("shotGeometry")
                     if sg and str(sg).upper() != "NULL":
-                        add(_stem(sg), name, unit, "Ordnance", "shotGeometry")
+                        add(_stem(sg), name, unit, "Ordnance", "shotGeometry", blocks)
 
     out = {}
     for stem, cands in refs.items():
@@ -213,6 +320,20 @@ def enumerate_targets(odf_filter=None):
         fcode = primary["odf"][0].lower()
         if fcode not in FACTION_NAMES:
             fcode = "_"
+        # Articulation: union turret/recoil declarations across all candidate
+        # ODFs (primary first), take the head from the first candidate declaring
+        # a WalkerClass. Node existence is validated against the mesh later.
+        art_turret, art_recoil, art_head = [], [], None
+        for c in cands_sorted:
+            a = _extract_odf_art(c["blocks"])
+            for t in a["turretNames"]:
+                if t not in art_turret:
+                    art_turret.append(t)
+            for r in a["recoilNames"]:
+                if r not in art_recoil:
+                    art_recoil.append(r)
+            if art_head is None and a["head"]:
+                art_head = a["head"]
         out[stem] = {
             "odfs": odfs,
             "primaryOdf": primary["odf"],
@@ -220,6 +341,8 @@ def enumerate_targets(odf_filter=None):
             "category": primary["category"],
             "factionCode": fcode,
             "factionName": FACTION_NAMES.get(fcode, "Other"),
+            "odf_art": {"turretNames": art_turret, "recoilNames": art_recoil,
+                        "head": art_head},
         }
     return out
 
@@ -601,7 +724,7 @@ def process_model(job: dict) -> dict:
                         print(f"    [{stem}] node-hierarchy GLB failed; using welded:\n"
                               f"{traceback.format_exc(limit=2)}")
                     clips = []
-                parts = _classify_parts(full, clips)
+                parts = _classify_parts(full, clips, job.get("odf_art"))
 
             _atomic_write_bytes(GEO_DIR / f"{stem}.glb", glb_bytes)
 
@@ -885,7 +1008,7 @@ def main():
     animated_count = sum(1 for m in manifest if m.get("animated"))
     teamcolor_count = sum(1 for m in manifest if m.get("teamColorTextures"))
     idx_path.write_text(json.dumps({
-        "schema_version": 6,
+        "schema_version": 7,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
