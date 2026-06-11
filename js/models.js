@@ -801,8 +801,13 @@ function updateControlsHint() {
   const autorot = els.spin.classList.contains('on');
   let items;
   if (driveModeOn) {
-    items = [['W/S', 'Throttle'], ['A/D', 'Steer'], ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
-    if (keys) items.push(['Arrows', 'Aim turret']);
+    if (driveUsesHoverScheme()) {
+      items = [['W/S', 'Throttle'], ['A/D', 'Strafe'], ['\u2190/\u2192', 'Turn'],
+        ['\u2191/\u2193', 'Aim'], ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
+    } else {
+      items = [['W/S', 'Throttle'], ['A/D', 'Steer'], ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
+      if (keys) items.push(['Arrows', 'Aim turret']);
+    }
     els.controlsHint.hidden = false;
     els.controlsHint.innerHTML = items.map(([key, action]) => (
       `<span class="ctl"><span class="ctl-key">${escapeHtml(key)}</span>${escapeHtml(action)}</span>`
@@ -867,6 +872,8 @@ function clearTurretKeys() {
 
 function onTurretKeyDown(e) {
   if (!keyAimOn || !activeViewer) return;
+  // Hover/morph drive mode owns the arrow keys (turn + hull aim pitch).
+  if (driveModeOn && driveUsesHoverScheme()) return;
   if (!ARROW_KEYS.has(e.key)) return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
@@ -886,12 +893,20 @@ window.addEventListener('keyup', onTurretKeyUp);
 window.addEventListener('blur', clearTurretKeys);   // never let a key "stick"
 
 /* ---- WASD Drive Mode ---------------------------------------------------- */
-// Held WASD keys feed a per-frame drive input in the viewer (same pattern as
-// the arrow-key turret slew above): W/S = throttle, A/D = steer. Drive mode
-// force-enables the arrow-key turret aim so users can drive the hull and aim
-// the guns simultaneously; Esc exits. Keyboard-driven, so the toggle is hidden
-// on touch-only devices (see driveInputCapable).
+// Held keys feed a per-frame drive input in the viewer (same pattern as the
+// arrow-key turret slew above). Two control schemes, picked by archetype:
+//   hover/morph (game-true): W/S throttle, A/D STRAFE, ArrowLeft/Right turn,
+//     ArrowUp/Down hull aim pitch (these craft have no turret -- the whole
+//     ship tilts to aim, and the chase cam follows).
+//   walker/tracked/pilot: W/S throttle, A/D steer; drive mode force-enables
+//     the arrow-key turret aim so users can drive the hull and aim the guns
+//     simultaneously.
+// Esc exits. Keyboard-driven, so the toggle is hidden on touch-only devices
+// (see driveInputCapable).
 const DRIVE_KEYS = new Set(['w', 'a', 's', 'd']);
+const HOVER_DRIVE_KEYS = new Set([
+  'w', 'a', 's', 'd', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown',
+]);
 const heldDriveKeys = new Set();
 let driveModeOn = false;
 let drivePrevKeyAim = null;   // keyAimOn before drive force-enabled it
@@ -900,30 +915,49 @@ function driveInputCapable() {
   return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 }
 
+/* Hover/morph craft strafe with A/D and turn/aim with the arrows. */
+function driveUsesHoverScheme() {
+  if (!activeViewer) return false;
+  const a = activeViewer.getDriveCaps().archetype;
+  return a === 'hover' || a === 'morph';
+}
+
 /* Push the held-key directions to the viewer (opposite keys cancel to 0). */
 function updateDriveInput() {
   if (!activeViewer) return;
   let fwd = 0;
   let turn = 0;
+  let strafe = 0;
+  let pitch = 0;
   if (heldDriveKeys.has('w')) fwd += 1;
   if (heldDriveKeys.has('s')) fwd -= 1;
-  if (heldDriveKeys.has('a')) turn += 1;   // left = +yaw about world Y
-  if (heldDriveKeys.has('d')) turn -= 1;
-  activeViewer.setDriveInput(fwd, turn);
+  if (driveUsesHoverScheme()) {
+    if (heldDriveKeys.has('a')) strafe -= 1;  // left
+    if (heldDriveKeys.has('d')) strafe += 1;  // right
+    if (heldDriveKeys.has('arrowleft')) turn += 1;   // left = +yaw about world Y
+    if (heldDriveKeys.has('arrowright')) turn -= 1;
+    if (heldDriveKeys.has('arrowup')) pitch += 1;    // up tilts the nose up
+    if (heldDriveKeys.has('arrowdown')) pitch -= 1;
+  } else {
+    if (heldDriveKeys.has('a')) turn += 1;   // left = +yaw about world Y
+    if (heldDriveKeys.has('d')) turn -= 1;
+  }
+  activeViewer.setDriveInput(fwd, turn, strafe, pitch);
 }
 
 /* Drop all held keys + stop the vehicle (mode off, blur, reset, model swap). */
 function clearDriveKeys() {
   if (!heldDriveKeys.size) return;
   heldDriveKeys.clear();
-  if (activeViewer) activeViewer.setDriveInput(0, 0);
+  if (activeViewer) activeViewer.setDriveInput(0, 0, 0, 0);
 }
 
 function onDriveKeyDown(e) {
   if (!driveModeOn || !activeViewer) return;
   if (e.key === 'Escape') { setDriveModeUI(false); return; }
   const k = e.key.toLowerCase();
-  if (!DRIVE_KEYS.has(k)) return;
+  const keySet = driveUsesHoverScheme() ? HOVER_DRIVE_KEYS : DRIVE_KEYS;
+  if (!keySet.has(k)) return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
   e.preventDefault();
@@ -960,15 +994,32 @@ function setDriveModeUI(on) {
     els.partsDrive.disabled = true;
     els.partsDriveReset.disabled = true;
     activeViewer.setDriveMode(true);
-    // Force-enable arrow-key turret aim so driving + aiming coexist.
+    // Force-enable arrow-key turret aim so driving + aiming coexist -- except
+    // on the hover scheme, where the arrows belong to hull turn/aim pitch.
     const art = activeViewer.getArticulation();
-    if (art.turretYaw || art.turretPitch) {
+    const hoverScheme = driveUsesHoverScheme();
+    if (!hoverScheme && (art.turretYaw || art.turretPitch)) {
       drivePrevKeyAim = keyAimOn;
       keyAimOn = true;
       els.partsKeys.classList.add('on');
     } else {
       drivePrevKeyAim = null;
     }
+    els.driveHud.innerHTML = hoverScheme
+      ? '<span class="drive-hud-key">W/S</span> throttle'
+        + '<span class="drive-hud-sep">&middot;</span>'
+        + '<span class="drive-hud-key">A/D</span> strafe'
+        + '<span class="drive-hud-sep">&middot;</span>'
+        + '<span class="drive-hud-key">&#8592;&#8594;</span> turn'
+        + '<span class="drive-hud-sep">&middot;</span>'
+        + '<span class="drive-hud-key">&#8593;&#8595;</span> aim'
+        + '<span class="drive-hud-sep">&middot;</span>'
+        + '<span class="drive-hud-key">Esc</span> exit'
+      : '<span class="drive-hud-key">WASD</span> drive'
+        + '<span class="drive-hud-sep">&middot;</span>'
+        + '<span class="drive-hud-key">&#8592;&#8593;&#8594;&#8595;</span> aim'
+        + '<span class="drive-hud-sep">&middot;</span>'
+        + '<span class="drive-hud-key">Esc</span> exit';
     els.driveHud.hidden = false;
   } else {
     clearDriveKeys();

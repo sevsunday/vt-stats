@@ -140,20 +140,40 @@ const ART_AXIS_X = new THREE.Vector3(1, 0, 0);
 // knobs are viewer-side tunables; the source carries no authored values for
 // camera framing or floor size.
 const DRIVE_SPEED_SCALE = 1.0;        // global multiplier on the ODF velocities
-const DRIVE_FALLBACK = { velocForward: 12, velocReverse: 6, omegaTurn: 1.5, omegaSpin: 2.2 };
-// Bank clips (forward/neutral/reverse) are AUTHORED POSES, not animations:
-// every one in the corpus is a 2-frame (0.067s) ramp from the bind pose to a
-// target stance. The engine never plays them on a timeline -- it WEIGHT-BLENDS
-// the three stances by the craft's velocity state (idle = 100% neutral stance,
-// full throttle = 100% forward stance). We mirror that: the three actions are
-// pinned at their final frame and their weights ride a smoothed throttle.
-// Craft whose three stances are identical (e.g. the ISDF Tank's tail fins)
-// correctly read as static. Walk/run/turn/idle ARE genuine cyclic gaits
-// (1.0-6.6s) and keep looped playback, crossfaded over DRIVE_GAIT_FADE.
+const DRIVE_FALLBACK = {
+  velocForward: 12, velocReverse: 6, velocStrafe: 8, omegaTurn: 1.5, omegaSpin: 2.2,
+};
+// Bank clips (forward/neutral/reverse) are AUTHORED POSE ARCS, not animations:
+// every one in the corpus is a 3-keyframe (0.067s) LATERAL arc -- frame 0 is
+// the full LEFT-bank extreme, the middle frame is the symmetric stance, the
+// last frame is the full RIGHT-bank extreme (left/right parts mirror). The
+// engine never plays them on a timeline: the clip CHOICE is weight-blended by
+// longitudinal velocity (idle = 100% neutral stance, full throttle = 100%
+// forward stance) while the TIME AXIS is scrubbed by the craft's lateral
+// state (strafe + turn slip). We mirror both: the three actions are pinned
+// paused, their weights ride a smoothed throttle, and their shared time rides
+// a smoothed lateral value centered on the middle frame. Craft whose three
+// stances are identical (e.g. the ISDF Tank's tail fins) correctly read as
+// static. Walk/run/turn/idle ARE genuine cyclic gaits (1.0-6.6s) and keep
+// looped playback, crossfaded over DRIVE_GAIT_FADE.
 const DRIVE_GAIT_FADE = 0.18;
 // Throttle ramp (1/s): the vehicle accelerates/brakes instead of snapping to
 // full speed; the bank-pose blend, tread scroll, and locomotion all ride it.
 const DRIVE_ACCEL = 2.8;
+// Lateral arc: strafe scrubs the bank-pose arc at full strength; turning
+// blends in the same arc at reduced strength (game-matched) -- opposite the
+// turn while moving forward (side-slip), with the turn when spinning in place
+// or reversing (nose sweep). DRIVE_ARC_SIGN maps lateral +1 (right) onto the
+// clip's END frame; flip to -1 if a future corpus bakes the arc mirrored.
+const DRIVE_LAT_ACCEL = 3.5;          // 1/s -- lateral arc ramp
+const DRIVE_TURN_ARC_GAIN = 0.6;      // turn's contribution vs full-strength strafe
+const DRIVE_ARC_SIGN = 1;             // +-1 arc handedness
+// Hull aim pitch (hover/morph): these craft have no turret -- the whole ship
+// tilts to aim vertically (Arrow Up/Down in Drive Mode). Cosmetic aim only;
+// locomotion stays planar. The chase camera follows it.
+const DRIVE_AIM_PITCH_RATE = 0.9;     // rad/s slew while a pitch key is held
+const DRIVE_AIM_PITCH_MAX_DEG = 15;   // hull tilt clamp (deg)
+const _DRIVE_PITCH_Q = new THREE.Quaternion();  // scratch (per-frame, no alloc)
 // Steer lean: the engine's real `steer` pose is declared only by ISDF-Scout-
 // class ODFs and baked into zero GLBs, so for craft with `drive.animSteer` we
 // substitute a smoothed procedural bank INTO the turn. All other craft keep
@@ -328,11 +348,15 @@ export class ObjectViewer {
     this._driveMode = false;
     this._driveProfile = null;     // manifest `drive` block (archetype + ODF speeds)
     this._driveCapsCache = null;   // memoized getDriveCaps() (invalidated per load)
-    this._driveInput = { fwd: 0, turn: 0 };  // held-key directions (-1/0/+1)
+    this._driveInput = { fwd: 0, turn: 0, strafe: 0, pitch: 0 };  // held-key dirs (-1/0/+1)
     this._driveYaw = 0;            // hull heading (rad, about world Y)
     this._driveLean = 0;           // smoothed hover bank-into-turn roll (rad)
     this._driveVel = 0;            // smoothed throttle (-1..1; ramps at DRIVE_ACCEL)
     this._driveTargetVel = 0;      // throttle target (drive input or Drive slider)
+    this._driveStrafeVel = 0;      // smoothed strafe throttle (-1 left .. +1 right)
+    this._driveLat = 0;            // smoothed lateral arc value (-1 left .. +1 right)
+    this._driveTargetLat = 0;      // lateral arc target (strafe + turn slip)
+    this._driveAimPitch = 0;       // hull aim pitch (rad; hover/morph vertical aim)
     this._bankActions = null;      // velocity-blended bank-pose set {sfx, fwd, neu, rev}
     this._driveDeployed = false;   // morph tanks: bank-2 mode after `deploy`
     this._driveTransition = 0;     // sec left in a deploy transition (gait held)
@@ -1256,10 +1280,16 @@ export class ObjectViewer {
     this._driveCapsCache = null;
     this._driveInput.fwd = 0;
     this._driveInput.turn = 0;
+    this._driveInput.strafe = 0;
+    this._driveInput.pitch = 0;
     this._driveYaw = 0;
     this._driveLean = 0;
     this._driveVel = 0;
     this._driveTargetVel = 0;
+    this._driveStrafeVel = 0;
+    this._driveLat = 0;
+    this._driveTargetLat = 0;
+    this._driveAimPitch = 0;
     this._bankActions = null;   // actions belong to the disposed prior mixer
     this._driveDeployed = false;
     this._driveTransition = 0;
@@ -1566,7 +1596,8 @@ export class ObjectViewer {
   /* ---- Velocity-blended bank poses (forward / neutral / reverse) -------- */
 
   /* Engage the bank-pose set for the given morph suffix ('' or '2'): pin each
-   * pose action at its final frame (the authored stance) and hand weight
+   * pose action paused at its MIDDLE frame (the symmetric authored stance --
+   * the arc's ends are the left/right bank extremes) and hand weight + time
    * control to _updateBankPoses. Idempotent per suffix. */
   _ensureBankPoses(sfx = '') {
     if (this._bankActions && this._bankActions.sfx === sfx) return;
@@ -1587,7 +1618,7 @@ export class ObjectViewer {
       a.clampWhenFinished = true;
       a.setEffectiveWeight(0);
       a.play();
-      a.time = a.getClip().duration;   // pin at the target stance
+      a.time = a.getClip().duration / 2;   // pin at the symmetric stance
       a.paused = true;
     }
     this._bankActions = set;
@@ -1606,11 +1637,20 @@ export class ObjectViewer {
   /* Weight the pinned stances by the smoothed throttle, mirroring the engine:
    * idle = 100% neutral stance, full forward = 100% forward stance, with the
    * blend tracking actual velocity in between. Weights always sum to 1 so the
-   * bind pose never bleeds through while engaged. */
+   * bind pose never bleeds through while engaged. The smoothed lateral value
+   * scrubs every action's time across the arc (0 = left extreme, mid =
+   * symmetric stance, end = right extreme) so strafing/turn-slip deflects the
+   * authored wing bank. */
   _updateBankPoses() {
     const b = this._bankActions;
     if (!b) return;
     const v = clamp(this._driveVel, -1, 1);
+    const lat = clamp(this._driveLat * DRIVE_ARC_SIGN, -1, 1);
+    const frac = 0.5 + lat * 0.5;
+    for (const k of ['fwd', 'neu', 'rev']) {
+      const a = b[k];
+      if (a) a.time = a.getClip().duration * frac;
+    }
     if (b.fwd) b.fwd.setEffectiveWeight(Math.max(v, 0));
     if (b.rev) b.rev.setEffectiveWeight(Math.max(-v, 0));
     if (b.neu) b.neu.setEffectiveWeight(1 - Math.abs(v));
@@ -1679,9 +1719,15 @@ export class ObjectViewer {
       this._driveLean = 0;
       this._driveVel = 0;
       this._driveTargetVel = 0;
+      this._driveStrafeVel = 0;
+      this._driveLat = 0;
+      this._driveTargetLat = 0;
+      this._driveAimPitch = 0;
       this._chaseYaw = 0;
       this._driveInput.fwd = 0;
       this._driveInput.turn = 0;
+      this._driveInput.strafe = 0;
+      this._driveInput.pitch = 0;
       this._driveGait = null;
       this._driveGaitDir = 0;
       this._driveDeployed = false;
@@ -1709,8 +1755,14 @@ export class ObjectViewer {
       this._driveSpeed = 0;
       this._driveVel = 0;
       this._driveTargetVel = 0;
+      this._driveStrafeVel = 0;
+      this._driveLat = 0;
+      this._driveTargetLat = 0;
+      this._driveAimPitch = 0;
       this._driveInput.fwd = 0;
       this._driveInput.turn = 0;
+      this._driveInput.strafe = 0;
+      this._driveInput.pitch = 0;
       this._driveTransition = 0;
       this._driveDeployed = false;
       this.scene.fog = null;
@@ -1733,12 +1785,17 @@ export class ObjectViewer {
 
   isDriveMode() { return this._driveMode; }
 
-  /* Held WASD direction (-1/0/+1 per axis): fwd = W minus S, turn = A minus D
-   * (left positive, matching +yaw about world Y). The throttle target feeds
-   * the smoothed ramp shared by locomotion, treads, and the bank-pose blend. */
-  setDriveInput(fwd, turn) {
+  /* Held key directions (-1/0/+1 per axis): fwd = forward minus reverse,
+   * turn = left minus right (left positive, matching +yaw about world Y),
+   * strafe = right minus left (right positive, matching the arc's end frame),
+   * pitch = up minus down (hover/morph hull aim). The throttle target feeds
+   * the smoothed ramp shared by locomotion, treads, and the bank-pose blend;
+   * strafe/pitch are routed only for hover/morph archetypes by the UI. */
+  setDriveInput(fwd, turn, strafe, pitch) {
     this._driveInput.fwd = Math.sign(fwd || 0);
     this._driveInput.turn = Math.sign(turn || 0);
+    this._driveInput.strafe = Math.sign(strafe || 0);
+    this._driveInput.pitch = Math.sign(pitch || 0);
     this._driveTargetVel = this._driveInput.fwd;
   }
 
@@ -1877,6 +1934,34 @@ export class ObjectViewer {
       this._spin.position.x += -Math.sin(this._driveYaw) * dist;
       this._spin.position.z += -Math.cos(this._driveYaw) * dist;
     }
+    // Strafe locomotion (hover/morph): its own smoothed ramp, translating
+    // along the hull right vector at the ODF strafe speed.
+    const dvs = clamp(this._driveInput.strafe - this._driveStrafeVel,
+      -DRIVE_ACCEL * dt, DRIVE_ACCEL * dt);
+    this._driveStrafeVel += dvs;
+    if (Math.abs(this._driveStrafeVel) > 1e-3) {
+      const sDist = this._driveStrafeVel
+        * (p.velocStrafe ?? DRIVE_FALLBACK.velocStrafe) * DRIVE_SPEED_SCALE * dt;
+      this._spin.position.x += Math.cos(this._driveYaw) * sDist;
+      this._spin.position.z += -Math.sin(this._driveYaw) * sDist;
+    }
+    // Lateral arc target for the bank-pose scrub (ramped in _animate at
+    // DRIVE_LAT_ACCEL): strafe at full strength + turn at reduced strength,
+    // signed by motion -- side-slip OPPOSITE the turn while moving forward,
+    // WITH the turn at standstill / reversing (nose sweep). Matches in-game
+    // observation: hard right turn while moving forward blends the strafe-
+    // left arc; spinning in place blends the arc toward the turn.
+    const slipSign = v > 0.05 ? 1 : -1;
+    this._driveTargetLat = clamp(
+      this._driveInput.strafe + turn * DRIVE_TURN_ARC_GAIN * slipSign, -1, 1);
+    // Hull aim pitch (hover/morph -- no turret, the whole ship tilts to aim):
+    // integrate the held pitch keys, clamped. Locomotion stays planar.
+    if (this._driveInput.pitch) {
+      const lim = DRIVE_AIM_PITCH_MAX_DEG * DEG;
+      this._driveAimPitch = clamp(
+        this._driveAimPitch + this._driveInput.pitch * DRIVE_AIM_PITCH_RATE * dt,
+        -lim, lim);
+    }
     // Steer lean: ONLY for craft whose ODF declares animSteer (the ISDF Scout
     // class) -- everyone else keeps a flat hull through turns, like the game.
     // The lean banks INTO the turn (about +Z, tipping the top toward the left
@@ -1888,6 +1973,10 @@ export class ObjectViewer {
     this._driveLean += (wantLean - this._driveLean)
       * Math.min(1, 1 - Math.exp(-DRIVE_LEAN_LERP * dt));
     this._spin.quaternion.setFromAxisAngle(ART_AXIS_Y, this._driveYaw);
+    if (Math.abs(this._driveAimPitch) > 1e-4) {
+      this._spin.quaternion.multiply(
+        _DRIVE_PITCH_Q.setFromAxisAngle(ART_AXIS_X, this._driveAimPitch));
+    }
     if (Math.abs(this._driveLean) > 1e-4) {
       this._spin.quaternion.multiply(
         _DRIVE_LEAN_Q.setFromAxisAngle(ART_LOCAL_Z, this._driveLean));
@@ -2019,9 +2108,10 @@ export class ObjectViewer {
     let d = aimYaw - this._chaseYaw;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     this._chaseYaw += d * kAim;
-    // Vertical aim follow (only when the model can pitch): trail the aim pitch,
-    // then drop/raise the camera against it and tilt the look target with it.
-    const aimPitch = this._hasPitch() ? this._turretPitchDeg * DEG : 0;
+    // Vertical aim follow: trail the aim pitch (turret/head joint when the
+    // model has one, else the hover/morph hull aim pitch), then drop/raise
+    // the camera against it and tilt the look target with it.
+    const aimPitch = this._hasPitch() ? this._turretPitchDeg * DEG : this._driveAimPitch;
     this._chasePitch += (aimPitch - this._chasePitch) * kAim;
     const r = this._radius || 1;
     const dist = this._chaseDist || r * CHASE_DIST_FACTOR;
@@ -2073,6 +2163,10 @@ export class ObjectViewer {
     this._driveSpeed = 0;
     this._driveVel = 0;
     this._driveTargetVel = 0;
+    this._driveStrafeVel = 0;
+    this._driveLat = 0;
+    this._driveTargetLat = 0;
+    this._driveAimPitch = 0;
     this._treadOffset = 0;
     for (const m of this._artTreadMats) { if (m.map) m.map.offset.set(0, 0); }
     this.setAimMode(false);
@@ -2272,6 +2366,10 @@ export class ObjectViewer {
     this._driveSpeed = 0;
     this._driveVel = 0;
     this._driveTargetVel = 0;
+    this._driveStrafeVel = 0;
+    this._driveLat = 0;
+    this._driveTargetLat = 0;
+    this._driveAimPitch = 0;
     this._turretYawDeg = 0; this._turretPitchDeg = 0; this._applyTurret();
     this._recoilClock = 0;
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
@@ -2412,14 +2510,19 @@ export class ObjectViewer {
     // Smoothed drive throttle (drive mode + the manual Drive slider): ramp
     // toward the target at DRIVE_ACCEL and feed the bank-pose blend. Tread
     // scroll rides it when bank poses are engaged (mutually exclusive with
-    // treads in the corpus, but harmless either way).
-    if (this._driveMode || this._bankActions || this._driveVel !== this._driveTargetVel) {
+    // treads in the corpus, but harmless either way). The lateral arc value
+    // ramps alongside it (drive-mode only; the slider keeps the arc centered).
+    if (this._driveMode || this._bankActions || this._driveVel !== this._driveTargetVel
+        || this._driveLat !== 0) {
       const dv = clamp(this._driveTargetVel - this._driveVel, -DRIVE_ACCEL * dt, DRIVE_ACCEL * dt);
       this._driveVel += dv;
+      const latTarget = this._driveMode ? this._driveTargetLat : 0;
+      const dl = clamp(latTarget - this._driveLat, -DRIVE_LAT_ACCEL * dt, DRIVE_LAT_ACCEL * dt);
+      this._driveLat += dl;
       if (this._bankActions) {
         this._updateBankPoses();
         this._driveSpeed = this._driveVel;
-        if (dv) moving = true;
+        if (dv || dl) moving = true;
       }
     }
     // WASD Drive Mode: gait selection + locomotion + floor recentering + chase

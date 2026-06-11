@@ -349,6 +349,7 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
         suffix = "Run" if archetype == "pilot" else ""
         fwd = _odf_float(props, f"velocForward{suffix}")
         rev = _odf_float(props, f"velocReverse{suffix}")
+        strafe = _odf_float(props, f"velocStrafe{suffix}")
         turn = _normalize_omega(_odf_float(props, f"omegaTurn{suffix}"))
         spin = _normalize_omega(_odf_float(props, f"omegaSpin{suffix}"))
         if fwd is None and rev is None and turn is None and spin is None:
@@ -358,6 +359,7 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
             "archetype": archetype,
             "velocForward": fwd,
             "velocReverse": rev,
+            "velocStrafe": strafe,
             "omegaTurn": turn,
             "omegaSpin": spin,
             "animSteer": bool(steer and str(steer).upper() != "NULL"),
@@ -1280,7 +1282,7 @@ def main():
     emissive_count = sum(1 for m in manifest if m.get("emissiveTextures"))
     modskin_count = sum(1 for m in manifest if m.get("textureSets"))
     idx_path.write_text(json.dumps({
-        "schema_version": 10,
+        "schema_version": 11,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
