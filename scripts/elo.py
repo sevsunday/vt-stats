@@ -141,11 +141,21 @@ COMMANDER_AXIS_PRIOR = {
     "target_lock_pct":  -0.10,
 
     # ---- Hand-tuned: PvE reward boost (LOCKED, no shrinkage).
-    # Audit said +0.111 (commanders naturally do more PvE). We invert the
-    # sign so this becomes a +0.05 reward shift on commander rows: hitting
-    # enemy assets is the work commanders SHOULD do, so we actively reward
-    # it instead of dampening it. Locked so the boost intent doesn't fade
-    # (and worse, silently flip into a dampener) as the running mean drifts.
+    # Seed-era audit said +0.111 (commanders naturally do more PvE). We
+    # invert the sign so this becomes a +0.05 reward shift on commander
+    # rows: hitting enemy assets is the work commanders SHOULD do.
+    #
+    # HONESTY NOTE (2026-06 fable analysis): the live empirical commander
+    # mean on this axis is +0.049 (n=214) -- commanders ALREADY out-PvE
+    # the lobby without help. The lock therefore no longer "protects a
+    # reward from drift"; it grants a bonus ON TOP of an axis commanders
+    # already lead (~0.10 post-clip z vs the descriptive baseline). We
+    # keep it as a deliberate double-reward: the Phase 2B priors ablation
+    # measured the total cost of both locks at <= 3.9 ELO per player vs a
+    # ~30 ELO bootstrap noise floor, and the normative intent (commanders
+    # should never be discouraged from PvE work) stands. Revisit if the
+    # commander cohort delta from the locks ever exceeds the noise floor
+    # (see critique/decisions/phase-2b-priors-ablation.md).
     "pve_share":        -0.05,
 
     # ---- Omitted (role-blind by design).
@@ -213,11 +223,47 @@ K_INACTIVITY_BOOST_MAX  = 20.0    # Hard cap on the inactivity addition.
 # only ever helps (additive, clipped to +1) and only the genuinely low-tier
 # (eligibility 0 for mid/high). Commanders are excluded (they build their own
 # ships). All four constants are tunable without a schema bump.
+#
+# SCOPE NOTE (2026-06 fable analysis): at the current rating distribution
+# the 1460/60 gate captures 10 of 35 rated players (~29% of the league) --
+# in practice a BELOW-MEDIAN assistance band, not a bottom-tier safety net.
+# That is broader than the original "established low-tier" intent but kept
+# as-is for now (the lift is small, self-closing, and feedback-proof via
+# the two-pass canonical gate). Revisit triggers: re-examine the cutoff
+# when the eligible share exceeds ~1/3 of rated players OR falls below
+# ~1/10 (either direction means the band has drifted from the population
+# it was tuned against).
 LOWTIER_LIFT_ENABLED      = True
 LOWTIER_LIFT_CUTOFF       = 1460.0   # eligibility hits 0 at/above this VTSR
 LOWTIER_LIFT_TAPER        = 60.0     # taper width below the cutoff
 LOWTIER_LIFT_AXIS         = "thug_kill_rate"
 LOWTIER_LIFT_MIN_SHIP_MIN = 2.0      # small-sample guard: require >= this in-ship minutes
+
+# Phase 3 (rank-scoring trial): per-axis lobby score modes. "zclip" is the
+# canonical z-score -> clip(+-2) -> /2 pipeline; "rank" replaces it with an
+# average-rank percentile mapping onto [-1, +1]:
+#
+#     score_i = 2 * (avg_rank_i - 0.5) / n - 1        (ties -> mean rank)
+#
+# Motivation (fable analysis, finding 5): a population z-score over a 6-10
+# player lobby is extremely noisy -- sigma estimated from n=8 carries ~25%
+# relative error, one outlier row owns the denominator, and the +-2-sigma
+# clip then triggers on estimation noise as often as on true outliers.
+# Rank scores keep the relative-to-lobby semantics, are distribution-free,
+# outlier-immune, need no clip constant, and behave identically at n=6 and
+# n=10. The trade-off: ranks discard MAGNITUDE (a narrow win over the #2
+# player scores the same as a blowout). Whether that magnitude was mostly
+# noise or mostly signal is an empirical question -- which is why this
+# ships as a FORENSIC ALT-MODE pair (elo_current_ranks.json) scored by the
+# validator, NOT a canonical swap. Decision rule + verdict live in
+# critique/decisions/phase-3-rank-scoring.md.
+#
+# Caveat: the v2.4 commander axis-shift priors and the v2.8 low-tier lift
+# were measured/tuned in post-clip z space. Rank scores share the same
+# [-1, +1] range so both adjustments apply unchanged as a trial
+# approximation, but their effective strength differs slightly in rank
+# space (documented in the decision memo).
+LOBBY_SCORE_MODES = ("zclip", "rank")
 
 # Bump if elo_current.json / elo_history.json shape changes (the JS
 # reader checks this). v7 = self-damage carve-out (match.schema_version 8):
@@ -442,6 +488,34 @@ def _zscore_axis(values: list[float]) -> list[float]:
     if sigma < 1e-9:
         return [0.0] * n
     return [(v - mu) / sigma for v in values]
+
+
+def _rank_scores(values: list[float]) -> list[float]:
+    """Average-rank percentile mapping onto ``[-1, +1]`` (rank lobby-score mode).
+
+    ``score_i = 2 * (avg_rank_i - 0.5) / n - 1`` with 1-based average ranks
+    (ties get the mean of the rank block they span). Best value in an n=8
+    lobby scores +0.875, worst -0.875; an all-tied lobby scores 0.0 for
+    everyone (mirrors ``_zscore_axis``'s sigma=0 behavior). Already bounded,
+    so no clip constant is needed downstream.
+    """
+    n = len(values)
+    if n == 0:
+        return []
+    if n == 1:
+        return [0.0]
+    order = sorted(range(n), key=lambda i: values[i])
+    ranks = [0.0] * n
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        avg_rank = (i + j) / 2.0 + 1.0  # 1-based average rank for the tie block
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg_rank
+        i = j + 1
+    return [2.0 * (r - 0.5) / n - 1.0 for r in ranks]
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -721,6 +795,7 @@ def compute_performance_index(
     commander_baseline_snapshot: dict[str, float] | None = None,
     exclude_commanders: bool = False,
     lowtier_eligibility: dict[str, float] | None = None,
+    lobby_score_mode: str = "zclip",
 ) -> tuple[
     list[float],
     list[str],
@@ -815,17 +890,29 @@ def compute_performance_index(
             [{} for _ in lobby],
         )
 
-    # Per-axis z-score, clip to [-2, +2], divide by 2 to land in [-1, +1].
-    # v2.4: for commander rows on shifted axes, additionally subtract the
-    # commander baseline (post-clip space) and re-clip to [-1, +1]. The
-    # forensic breakdown lands in axis_meta_by_player.
+    # Per-axis lobby score. Canonical "zclip": z-score, clip to [-2, +2],
+    # divide by 2 to land in [-1, +1]. Trial "rank": average-rank percentile
+    # mapping straight onto [-1, +1] (see LOBBY_SCORE_MODES). v2.4: for
+    # commander rows on shifted axes, additionally subtract the commander
+    # baseline (post-clip space) and re-clip to [-1, +1] -- applied
+    # identically in both modes (shared [-1, +1] range; trial approximation
+    # in rank mode). The forensic breakdown lands in axis_meta_by_player.
+    if lobby_score_mode not in LOBBY_SCORE_MODES:
+        raise ValueError(
+            f"unknown lobby_score_mode: {lobby_score_mode!r}; "
+            f"expected one of {LOBBY_SCORE_MODES}"
+        )
+    use_rank = lobby_score_mode == "rank"
     axis_meta_by_player: list[dict[str, dict[str, float]]] = [
         {} for _ in lobby
     ]
     z_by_axis: dict[str, list[float]] = {}
     for axis in available:
-        z = _zscore_axis(raw[axis])
-        clipped = [_clip(zi, -2.0, 2.0) / 2.0 for zi in z]
+        if use_rank:
+            clipped = _rank_scores(raw[axis])
+        else:
+            z = _zscore_axis(raw[axis])
+            clipped = [_clip(zi, -2.0, 2.0) / 2.0 for zi in z]
         if (
             commander_baseline_snapshot is not None
             and axis in commander_baseline_snapshot
@@ -864,7 +951,10 @@ def compute_performance_index(
             math.sqrt(sum((v - mu_kr) ** 2 for v in kr_full) / n_kr)
             if n_kr else 0.0
         )
-        if sd_kr > 1e-9:
+        # zclip mode needs a non-degenerate sigma to place kr_eff on the
+        # canonical lobby scale; rank mode re-ranks instead and has no
+        # such requirement.
+        if use_rank or sd_kr > 1e-9:
             clipped_kr = z_by_axis[LOWTIER_LIFT_AXIS]
             for i, p in enumerate(lobby):
                 if p.get("is_commander"):
@@ -885,7 +975,16 @@ def compute_performance_index(
                 else:
                     blended = p.get("kills", 0) or 0
                 kr_eff = blended / eff_min
-                z_eff = _clip((kr_eff - mu_kr) / sd_kr, -2.0, 2.0) / 2.0
+                if use_rank:
+                    # Re-rank this player's effective rate against everyone
+                    # else's canonical full-time rates (their own full-time
+                    # value swapped out), mirroring the zclip path's
+                    # "canonical lobby scale, only this row moves" property.
+                    alt_values = list(kr_full)
+                    alt_values[i] = kr_eff
+                    z_eff = _rank_scores(alt_values)[i]
+                else:
+                    z_eff = _clip((kr_eff - mu_kr) / sd_kr, -2.0, 2.0) / 2.0
                 z_full_i = clipped_kr[i]
                 clipped_kr[i] = max(-1.0, min(1.0, z_full_i + (z_eff - z_full_i) * factor))
 
@@ -932,6 +1031,7 @@ def _rating_pass(
     expected_performance_mode: str = "median",
     lowtier_eligibility: dict[str, float] | None = None,
     canonical_before_by_match: dict | None = None,
+    lobby_score_mode: str = "zclip",
 ) -> tuple[dict, dict, dict, dict]:
     """Walk ``all_match_data`` chronologically, applying the ELO update rule
     per match, and return ``(elo_current, elo_history, final_ratings_map)``
@@ -994,6 +1094,11 @@ def _rating_pass(
             f"unknown expected_performance_mode: "
             f"{expected_performance_mode!r}; "
             f"expected one of {EXPECTED_PERFORMANCE_MODES}"
+        )
+    if lobby_score_mode not in LOBBY_SCORE_MODES:
+        raise ValueError(
+            f"unknown lobby_score_mode: {lobby_score_mode!r}; "
+            f"expected one of {LOBBY_SCORE_MODES}"
         )
     matches = sorted(
         list(all_match_data),
@@ -1139,6 +1244,7 @@ def _rating_pass(
                 commander_baseline_snapshot=commander_baseline_snapshot,
                 exclude_commanders=exclude_commanders,
                 lowtier_eligibility=lowtier_eligibility,
+                lobby_score_mode=lobby_score_mode,
             )
         )
         if not perfs:
@@ -1362,6 +1468,12 @@ def _rating_pass(
         # against canonical to test the Dehpanah team-threat hypothesis.
         "expected_performance_mode": expected_performance_mode,
         "expected_performance_softmax_tau": ELO_SOFTMAX_TAU,
+        # Phase 3 rank-scoring trial: which per-axis lobby-score pipeline
+        # produced this file. "zclip" = canonical z-score/clip/halve;
+        # "rank" = average-rank percentile mapping (forensic alt pair
+        # elo_current_ranks.json). Additive sentinel -- JS readers never
+        # branch on it.
+        "lobby_score_mode":    lobby_score_mode,
         "alpha":               ALPHA,
         "alpha_pve":           ALPHA_PVE,
         "anchor":              ELO_ANCHOR,
@@ -1460,6 +1572,7 @@ def _rating_pass(
         "excludes_commanders":      bool(exclude_commanders),
         "excludes_locked_priors":   bool(exclude_locked_priors),
         "expected_performance_mode": expected_performance_mode,
+        "lobby_score_mode":    lobby_score_mode,
         "history":             history_entries,
     }
 
@@ -1472,6 +1585,7 @@ def compute_elo(
     exclude_locked_priors: bool = False,
     expected_performance_mode: str = "median",
     enable_lowtier_lift: bool = True,
+    lobby_score_mode: str = "zclip",
 ) -> tuple[dict, dict]:
     """Public entrypoint: two-pass VTSR-T with the v2.8 low-tier at-base lift.
 
@@ -1487,6 +1601,9 @@ def compute_elo(
     existing callers are unaffected. ``exclude_commanders`` /
     ``exclude_locked_priors`` / ``expected_performance_mode`` behave exactly as
     documented on ``_rating_pass``; the lift composes with all of them.
+    ``lobby_score_mode`` ("zclip" canonical / "rank" Phase 3 trial -- see
+    ``LOBBY_SCORE_MODES``) selects the per-axis lobby-score pipeline and is
+    threaded through both passes.
     """
     cur1, hist1, final1, canonical_before = _rating_pass(
         all_match_data,
@@ -1494,6 +1611,7 @@ def compute_elo(
         exclude_locked_priors=exclude_locked_priors,
         expected_performance_mode=expected_performance_mode,
         lowtier_eligibility=None,
+        lobby_score_mode=lobby_score_mode,
     )
     if not (LOWTIER_LIFT_ENABLED and enable_lowtier_lift):
         return cur1, hist1
@@ -1510,5 +1628,6 @@ def compute_elo(
         expected_performance_mode=expected_performance_mode,
         lowtier_eligibility=eligibility,
         canonical_before_by_match=canonical_before,
+        lobby_score_mode=lobby_score_mode,
     )
     return cur2, hist2

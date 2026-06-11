@@ -1617,7 +1617,9 @@ def load_cache_index():
             "elo_current_thugs_only.json", "elo_history_thugs_only.json",
             "elo_current_unlocked.json", "elo_history_unlocked.json",
             "elo_current_max.json", "elo_history_max.json",
-            "elo_current_softmax.json", "elo_history_softmax.json"}
+            "elo_current_softmax.json", "elo_history_softmax.json",
+            "elo_current_ranks.json", "elo_history_ranks.json",
+            "validation_summary.json"}
     for json_path in OUTPUT_DIR.glob("*.json"):
         if json_path.name in skip:
             continue
@@ -5963,6 +5965,33 @@ def main():
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T (softmax MAX) ({e}); skipping.")
 
+    # ----- VTSR-T forensic alt pair #5: rank-based lobby scoring (Phase 3) -----
+    # Replaces the per-axis z-score/clip/halve with an average-rank
+    # percentile mapping onto [-1, +1] (see LOBBY_SCORE_MODES in
+    # scripts/elo.py for the full motivation -- small-lobby z-scores are
+    # noise-dominated; ranks are distribution-free and outlier-immune at
+    # the cost of discarding magnitude). FORENSIC ONLY: not consumed by
+    # the dashboard; scored via `validate_elo.py --elo-mode ranks` against
+    # the pre-registered decision rule in
+    # critique/decisions/phase-3-rank-scoring.md.
+    try:
+        import elo as elo_module
+        elo_current_rk, elo_history_rk = elo_module.compute_elo(
+            all_match_data, lobby_score_mode="rank"
+        )
+        elo_current_rk_path = OUTPUT_DIR / "elo_current_ranks.json"
+        with open(elo_current_rk_path, "w", encoding="utf-8") as f:
+            json.dump(elo_current_rk, f, indent=2, ensure_ascii=False)
+        elo_history_rk_path = OUTPUT_DIR / "elo_history_ranks.json"
+        with open(elo_history_rk_path, "w", encoding="utf-8") as f:
+            json.dump(elo_history_rk, f, indent=2, ensure_ascii=False)
+        n_ratings_rk = len(elo_current_rk.get("ratings", []))
+        rated_rk = elo_current_rk.get("match_count", 0)
+        print(f"VTSR-T (rank lobby scoring): {elo_current_rk_path.name} "
+              f"({n_ratings_rk} players · {rated_rk} rated matches)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-T (rank lobby scoring) ({e}); skipping.")
+
     # ----- Player slug map + (Phase 3) per-player HTML stubs -----
     # Sticky map keyed by Steam64 -> {slug, name}. Drives `/player/<slug>/`
     # URLs across the dashboard, OG sharing for /player/<slug>/index.html,
@@ -6060,6 +6089,26 @@ def main():
         print(f"Proto docs: {proto_docs_path.name} ({len(docs)} entries)")
     except Exception as e:
         print(f"WARN: failed to extract proto docs ({e}); skipping.")
+
+    # ----- VTSR-T validator (every run; improvement #2 of the fable analysis) -----
+    # Scores the just-written canonical elo pair against the nine winner-free
+    # metrics, refreshes the committed data/processed/validation_summary.json
+    # (headline metrics + per-run history; powers the dashboard's noise-floor
+    # UI), and prints a drift WARNING when headline metrics fall vs the
+    # previous run. Full detail reports land in the gitignored _validation/.
+    # Soft-fails like every other post-processing step; ~20 s on the current
+    # corpus. NOT cache-invalidating (read-only consumer of pipeline outputs).
+    try:
+        import validate_elo
+        rc = validate_elo.main([
+            "--processed-dir", str(OUTPUT_DIR),
+            "--output-dir", str(PROJECT_ROOT / "_validation"),
+        ])
+        if rc != 0:
+            print(f"WARN: validator exited with code {rc}; "
+                  f"validation_summary.json may be stale.")
+    except Exception as e:
+        print(f"WARN: failed to run VTSR-T validator ({e}); skipping.")
 
     print(f"\nDone in {time.perf_counter() - t0:.1f}s "
           f"({n_cache_hit} cached, {n_processed} reprocessed)")

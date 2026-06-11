@@ -1768,32 +1768,36 @@ def render_markdown_report(
                 f"{_fmt_num(agg['log_loss_median'])} |"
             )
         lines.append("")
-        # Interpretation guide.
+        # Interpretation guide. NOTE: the update-rule question is SETTLED --
+        # Phase 2C's full corpus re-rate under hard MAX / softmax collapsed
+        # predictive Spearman rho (0.462 -> 0.188) and inflated mean rating
+        # +522 ELO above anchor. `compute_elo` keeps the median opponent
+        # reference regardless of what this post-hoc preview shows; see
+        # critique/decisions/phase-2c-max-vs-median.md. Any lift below is
+        # only actionable for LOBBY-TIME team aggregation (e.g. Tools'
+        # Team Balonce team-strength estimate), never for rating updates.
         canonical_acc = cwa["aggregations"]["mean"]["accuracy"] or 0.0
         best_acc = cwa["aggregations"][cwa["best_aggregation"]]["accuracy"] or 0.0
         lift = (best_acc - canonical_acc) * 100
-        if cwa["best_aggregation"] != "mean" and lift > 5:
+        if cwa["best_aggregation"] != "mean":
             verdict = (
                 f"> **Verdict:** `{cwa['best_aggregation']}` beats `mean` by "
-                f"{lift:.1f} percentage points. Strong empirical motivator for "
-                "Phase 2C — promote MAX-weighted `expected_performance` in "
-                "`scripts/elo.py`. Re-run validator after the swap to confirm "
-                "the lift propagates through full re-rating."
-            )
-        elif cwa["best_aggregation"] != "mean":
-            verdict = (
-                f"> **Verdict:** `{cwa['best_aggregation']}` edges out `mean` by "
-                f"{lift:.1f} percentage points but the gap is below the 5-point "
-                "threshold for action. Re-run with more clean_win matches "
-                "before changing `compute_elo`."
+                f"{lift:.1f} percentage points as a post-hoc team aggregation. "
+                "This is evidence for MAX-style aggregation **at lobby-formation "
+                "time only** (Tools Team Balonce, v3 §13.1). The update-rule "
+                "question is settled: Phase 2C's full re-rate refuted swapping "
+                "`compute_elo`'s median opponent reference (Spearman collapse + "
+                "rating inflation; see critique/decisions/phase-2c-max-vs-median.md)."
             )
         else:
             verdict = (
                 "> **Verdict:** mean R is at least as good as MAX-style "
-                "aggregations on this corpus. The 43% baseline finding is NOT "
-                "explained by Dehpanah's MAX-dominates result here. Look "
-                "elsewhere (commander dampening, rating spread, small-N) "
-                "before changing the team-aggregation math."
+                "aggregations on this corpus, so the Phase 2A directional "
+                "finding (hard MAX lift) is not reproducing here. No action: "
+                "the update rule keeps median regardless (Phase 2C, see "
+                "critique/decisions/phase-2c-max-vs-median.md); revisit the "
+                "Tools-page aggregation choice if this persists as the "
+                "clean_win corpus grows."
             )
         lines.append(verdict)
         lines.append("")
@@ -2045,6 +2049,161 @@ def render_bootstrap_artifact(bootstrap: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Committed validation summary (data/processed/validation_summary.json)
+# ---------------------------------------------------------------------------
+
+# Drift thresholds for the per-run warning. A drop bigger than these vs the
+# previous history entry prints a loud WARNING on the pipeline console.
+# Tunable without any schema bump.
+DRIFT_WARN_RHO_DROP = 0.03        # pooled Spearman rho
+DRIFT_WARN_CLEANWIN_DROP = 0.05   # clean_win mean-R accuracy (5pp)
+
+VALIDATION_SUMMARY_NAME = "validation_summary.json"
+VALIDATION_SUMMARY_SCHEMA_VERSION = 1
+VALIDATION_HISTORY_MAX_ENTRIES = 200
+
+
+def _summary_history_entry(results: dict) -> dict:
+    """One compact history row from a full validator ``results`` dict.
+
+    Floats are kept at full precision -- the dedupe rule below relies on
+    exact equality of deterministic outputs (same corpus + same seed =>
+    byte-identical metrics).
+    """
+    meta = results.get("meta") or {}
+    rank = results.get("rank_correlation") or {}
+    selfc = results.get("self_consistency") or {}
+    calib = results.get("calibration") or {}
+    boot = results.get("bootstrap") or {}
+    synth = results.get("synthetic_winner") or {}
+    cwa = results.get("clean_win_accuracy") or {}
+    aggs = cwa.get("aggregations") or {}
+
+    def _agg_acc(name: str):
+        a = aggs.get(name) or {}
+        return a.get("accuracy")
+
+    return {
+        "generated_at":               meta.get("generated_at"),
+        "elo_schema_version":         meta.get("elo_schema_version"),
+        "rated_match_count":          meta.get("rated_match_count"),
+        "players_total":              meta.get("players_total"),
+        "spearman_pooled_rho":        rank.get("pooled_rho"),
+        "per_match_rho_mean":         rank.get("per_match_rho_mean"),
+        "self_consistency_rho":       selfc.get("spearman_rho"),
+        "calibration_mae":            calib.get("calibration_mae"),
+        "bootstrap_proxy_std_median": boot.get("proxy_std_median"),
+        "bootstrap_jaccard_mean":     boot.get("jaccard_mean"),
+        "synthetic_winner_agreement": synth.get("agreement"),
+        "synthetic_winner_n":         synth.get("n_eligible"),
+        "clean_win_n":                cwa.get("n_eligible"),
+        "clean_win_accuracy_mean":    cwa.get("accuracy"),
+        "clean_win_accuracy_hard_max": _agg_acc("hard_max"),
+        "clean_win_accuracy_softmax":  _agg_acc("softmax_max"),
+        "log_loss_mean":              cwa.get("log_loss_mean"),
+    }
+
+
+def _same_corpus_state(a: dict, b: dict) -> bool:
+    """True when two history entries describe the same corpus + algorithm state.
+
+    ``elo_current.json``'s ``computed_at`` changes on every pipeline run even
+    with zero new matches (compute_elo always re-stamps), so dedupe keys on
+    substance instead: rated count, elo schema, and the (deterministic,
+    fixed-seed) pooled rho. Identical corpus + identical algorithm =>
+    identical metrics => replace-in-place rather than append.
+    """
+    return (
+        a.get("rated_match_count") == b.get("rated_match_count")
+        and a.get("elo_schema_version") == b.get("elo_schema_version")
+        and a.get("spearman_pooled_rho") == b.get("spearman_pooled_rho")
+    )
+
+
+def write_validation_summary(results: dict, processed_dir: Path) -> Path:
+    """Write/update the committed headline-metrics summary + history.
+
+    Unlike the gitignored ``_validation/`` artifacts, this file lives in
+    ``data/processed/`` and IS committed: it powers the dashboard's
+    noise-floor UI (bootstrap sigma) and gives every future re-rate
+    decision a per-run metric time-series to diff against (improvement #2
+    of the fable analysis). Default elo-mode only -- alt modes never touch
+    this file.
+
+    History contract: one entry per distinct corpus/algorithm state
+    (see ``_same_corpus_state``); re-runs without new matches replace the
+    last entry in place. Capped FIFO at VALIDATION_HISTORY_MAX_ENTRIES.
+    """
+    out_path = processed_dir / VALIDATION_SUMMARY_NAME
+
+    prev_history: list[dict] = []
+    if out_path.exists():
+        try:
+            prev = _load_json(out_path)
+            prev_history = list(prev.get("history") or [])
+        except Exception as exc:
+            print(f"[validate_elo] WARN: could not read existing "
+                  f"{VALIDATION_SUMMARY_NAME} ({exc}); starting fresh history")
+
+    entry = _summary_history_entry(results)
+
+    if prev_history and _same_corpus_state(prev_history[-1], entry):
+        prev_history[-1] = entry  # refresh in place (no-new-matches rerun)
+    else:
+        prev_history.append(entry)
+    if len(prev_history) > VALIDATION_HISTORY_MAX_ENTRIES:
+        prev_history = prev_history[-VALIDATION_HISTORY_MAX_ENTRIES:]
+
+    # Drift warning vs the previous DISTINCT state (the entry before the
+    # one we just wrote). Console-only -- visible in pipeline output.
+    if len(prev_history) >= 2:
+        prev_entry = prev_history[-2]
+        cur_rho = entry.get("spearman_pooled_rho")
+        old_rho = prev_entry.get("spearman_pooled_rho")
+        if cur_rho is not None and old_rho is not None:
+            if old_rho - cur_rho > DRIFT_WARN_RHO_DROP:
+                print(f"[validate_elo] WARNING: pooled Spearman rho dropped "
+                      f"{old_rho:.4f} -> {cur_rho:.4f} "
+                      f"(more than {DRIFT_WARN_RHO_DROP}) since the previous "
+                      f"validator run -- investigate before the next re-rate.")
+        cur_acc = entry.get("clean_win_accuracy_mean")
+        old_acc = prev_entry.get("clean_win_accuracy_mean")
+        if cur_acc is not None and old_acc is not None:
+            if old_acc - cur_acc > DRIFT_WARN_CLEANWIN_DROP:
+                print(f"[validate_elo] WARNING: clean_win accuracy (mean R) "
+                      f"dropped {old_acc:.3f} -> {cur_acc:.3f} "
+                      f"(more than {DRIFT_WARN_CLEANWIN_DROP:.0%}) since the "
+                      f"previous validator run.")
+
+    cwa = results.get("clean_win_accuracy") or {}
+    summary = {
+        "schema_version": VALIDATION_SUMMARY_SCHEMA_VERSION,
+        "generated_at":   (results.get("meta") or {}).get("generated_at"),
+        "latest":         entry,
+        # Richer latest-run detail the dashboard / future trend UI can use
+        # without parsing the gitignored full report.
+        "latest_detail": {
+            "winner_funnel":       results.get("winner_funnel") or {},
+            "rating_gap_breakout": cwa.get("rating_gap_breakout") or {},
+            "aggregations": {
+                name: {
+                    "accuracy":     (agg or {}).get("accuracy"),
+                    "accuracy_ci":  (agg or {}).get("accuracy_ci"),
+                    "log_loss_mean": (agg or {}).get("log_loss_mean"),
+                }
+                for name, agg in (cwa.get("aggregations") or {}).items()
+            },
+        },
+        "history": prev_history,
+    }
+    out_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=False, default=str),
+        encoding="utf-8",
+    )
+    return out_path
+
+
+# ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
@@ -2075,7 +2234,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--elo-mode",
-        choices=["default", "thugs_only", "unlocked", "max", "softmax"],
+        choices=["default", "thugs_only", "unlocked", "max", "softmax", "ranks"],
         default="default",
         help="Pick which canonical elo files to validate. 'default' reads "
              "elo_current.json + elo_history.json. 'thugs_only' reads "
@@ -2085,7 +2244,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "axes ride the shrunk rolling baseline). 'max' / 'softmax' read "
              "elo_current_max.json / elo_current_softmax.json respectively "
              "(Phase 2C team-threat aggregation -- E_i opponent reference "
-             "uses hard max / softmax-weighted mean instead of median).",
+             "uses hard max / softmax-weighted mean instead of median). "
+             "'ranks' reads elo_current_ranks.json / elo_history_ranks.json "
+             "(Phase 3 rank-based lobby scoring trial -- per-axis "
+             "average-rank percentile mapping instead of z-score/clip).",
     )
     parser.add_argument(
         "--bootstrap-runs",
@@ -2138,6 +2300,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.elo_mode == "softmax":
         elo_current_name = "elo_current_softmax.json"
         elo_history_name = "elo_history_softmax.json"
+    elif args.elo_mode == "ranks":
+        elo_current_name = "elo_current_ranks.json"
+        elo_history_name = "elo_history_ranks.json"
     else:
         print(f"ERROR: unhandled --elo-mode {args.elo_mode!r}")
         return 2
@@ -2287,6 +2452,12 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
     print(f"[validate_elo] wrote {output_dir / 'bootstrap.json'}")
+
+    # Committed summary + per-run metric history (default mode only --
+    # alt-mode runs are forensic and must never touch the published file).
+    if args.elo_mode == "default":
+        summary_path = write_validation_summary(results, processed_dir)
+        print(f"[validate_elo] wrote {summary_path}")
 
     # Print headline at the end so it's visible in CI logs / terminal.
     # ASCII-only on stdout so Windows cp1252 doesn't choke; Unicode lives

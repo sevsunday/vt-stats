@@ -2493,10 +2493,17 @@
     // `player/<slug>/` URLs from the first paint. Same graceful-404
     // pattern as elo: a missing file leaves the cache as `null`, the
     // helpers fall back to `?p=<steam64>`.
-    const [eloRes, histRes, slugRes] = await Promise.all([
+    // validation_summary.json (improvement #6 / fable analysis): tiny
+    // committed headline-metrics file written by scripts/validate_elo.py on
+    // every pipeline run. Supplies the bootstrap resampling noise floor
+    // (±σ ELO) that the VTSR-T leaderboard surfaces as tooltips + a
+    // "statistical tie" note. Same graceful-404 pattern: null hides all
+    // uncertainty UI.
+    const [eloRes, histRes, slugRes, valRes] = await Promise.all([
       fetch('data/processed/elo_current.json', { cache: 'no-store' }).catch(() => null),
       fetch('data/processed/elo_history.json', { cache: 'no-store' }).catch(() => null),
       fetch('data/processed/player_slugs.json', { cache: 'no-store' }).catch(() => null),
+      fetch('data/processed/validation_summary.json', { cache: 'no-store' }).catch(() => null),
     ]);
     try {
       window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
@@ -2507,6 +2514,20 @@
     try {
       window.__vtSlugMap = (slugRes && slugRes.ok) ? await slugRes.json() : null;
     } catch { window.__vtSlugMap = null; }
+    try {
+      window.__vtValidation = (valRes && valRes.ok) ? await valRes.json() : null;
+    } catch { window.__vtValidation = null; }
+  }
+
+  // Bootstrap resampling noise floor (±σ ELO, median across players) from
+  // validation_summary.json. Returns null when the file is missing/stale so
+  // every consumer can self-hide. Rounded to the nearest integer -- the UI
+  // never needs sub-ELO precision on a noise band.
+  function vtRatingNoiseSigma() {
+    const v = window.__vtValidation;
+    const sigma = v && v.latest && v.latest.bootstrap_proxy_std_median;
+    if (typeof sigma !== 'number' || !isFinite(sigma) || sigma <= 0) return null;
+    return Math.round(sigma);
   }
 
   // ----- VTSR-T elo-mode toggle (dashboard-page-wide) ----------------------
@@ -6247,6 +6268,27 @@
     }
     $card.classList.remove('d-none');
 
+    // Improvement #6 (fable analysis): surface the bootstrap resampling
+    // noise floor so leaderboard gaps smaller than the band read as the
+    // statistical ties they are. Sourced from validation_summary.json via
+    // vtRatingNoiseSigma(); the note self-removes when the file is absent.
+    const noiseSigma = vtRatingNoiseSigma();
+    let $noiseNote = $card.querySelector('#vtsr-noise-note');
+    if (noiseSigma != null) {
+      if (!$noiseNote) {
+        $noiseNote = document.createElement('div');
+        $noiseNote.id = 'vtsr-noise-note';
+        $noiseNote.className = 'vt-vtsr-noise-note';
+        const $body = $card.querySelector('.card-body');
+        if ($body) $body.insertBefore($noiseNote, $body.firstChild);
+      }
+      $noiseNote.innerHTML =
+        `<i class="bi bi-rulers me-1"></i>Ratings carry a \u00b1${noiseSigma} ELO ` +
+        `resampling noise band \u2014 gaps smaller than ~${noiseSigma} points are statistical ties.`;
+    } else if ($noiseNote) {
+      $noiseNote.remove();
+    }
+
     // v2.3: cache the careerStats reference for vtsrSort + the row
     // renderer to join Primary Class / PvP K/D from career_stats[]
     // by steam64-then-name without passing it through every helper.
@@ -6359,7 +6401,12 @@
         : 'No shots fired this career';
 
       // ----- VTSR-T cell tooltip (Thug ELO + Wins ELO + matches) -----
-      const vtsrTip = `${Math.round(r.vtsr)} VTSR-T \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
+      // Improvement #6: lead with the ±σ noise band when available so the
+      // headline number is always read alongside its uncertainty.
+      const vtsrValueStr = noiseSigma != null
+        ? `${Math.round(r.vtsr)} \u00b1 ${noiseSigma} VTSR-T (resampling \u03c3)`
+        : `${Math.round(r.vtsr)} VTSR-T`;
+      const vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
 
       // ----- Last cell tooltip (delta + match id) -----
       const lastTip = (r.last_match_id && lastDelta !== 0)
@@ -6448,7 +6495,23 @@
         if ($modalBody.dataset.vtPopulated) return;
         const html = buildVtsrTooltipHtml();
         if (html) {
-          $modalBody.innerHTML = html;
+          // Improvement #6: append a short uncertainty section when the
+          // validation summary supplied a noise band. Kept out of
+          // buildVtsrTooltipHtml() so the cached methodology HTML stays
+          // independent of the (optionally missing) validation file.
+          const sigma = vtRatingNoiseSigma();
+          const noiseSection = sigma != null
+            ? `<section class="vt-vtsr-doc-section">
+                 <h6><i class="bi bi-rulers me-2"></i>How precise is a rating?</h6>
+                 <p class="mb-0">Every VTSR-T value carries a resampling noise band of about
+                 <strong>\u00b1${sigma} ELO</strong> (median per-player spread when the rating is
+                 recomputed over 100 random 80% subsets of the corpus &mdash; see
+                 <code>validation_summary.json</code>). Two players within ~${sigma} points of each
+                 other are statistically tied; tier placement is meaningful, exact ranks inside a
+                 tier mostly are not. The band tightens as the corpus grows.</p>
+               </section>`
+            : '';
+          $modalBody.innerHTML = html + noiseSection;
           $modalBody.dataset.vtPopulated = '1';
         }
       });

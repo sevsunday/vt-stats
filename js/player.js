@@ -80,6 +80,7 @@
     elo:           null,    // parsed data/processed/elo_current.json
     eloHistory:    null,    // parsed data/processed/elo_history.json (lazy)
     slugMap:       null,    // parsed data/processed/player_slugs.json
+    validation:    null,    // parsed data/processed/validation_summary.json (404-safe)
     contributions: null,    // parsed data/processed/match_contributions.json (lazy)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
     careerStats:   null,    // result of VTAggregate.build(threshold=0).career_stats
@@ -1019,10 +1020,56 @@
       },
       plugins: [
         ratingTierBandPlugin(),
+        ratingNoiseBandPlugin(scatterData),
         ratingPeakPlugin(peak),
         ratingReferenceLinesPlugin(themeMuted, themeText),
       ],
     });
+  }
+
+  // Bootstrap resampling noise sigma (median per-player ±ELO) from
+  // validation_summary.json. null when the file is missing/stale so the
+  // band plugin self-disables.
+  function ratingNoiseSigma() {
+    const v = state.validation;
+    const sigma = v && v.latest && v.latest.bootstrap_proxy_std_median;
+    if (typeof sigma !== 'number' || !isFinite(sigma) || sigma <= 0) return null;
+    return sigma;
+  }
+
+  // Inline plugin: translucent ±σ uncertainty band hugging the rating
+  // line (improvement #6, fable analysis). Drawn before datasets so the
+  // line + points stay on top; sigma sourced from validation_summary.json
+  // (no-op when absent). Same hand-rolled approach as the tier bands --
+  // no annotation plugin dependency.
+  function ratingNoiseBandPlugin(scatterData) {
+    return {
+      id: 'vt-rating-noise-band',
+      beforeDatasetsDraw(chart) {
+        const sigma = ratingNoiseSigma();
+        if (sigma == null || !scatterData.length) return;
+        const { ctx, chartArea, scales } = chart;
+        if (!chartArea || !scales.x || !scales.y) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+        ctx.clip();
+        ctx.beginPath();
+        scatterData.forEach((p, i) => {
+          const x = scales.x.getPixelForValue(p.x);
+          const y = scales.y.getPixelForValue(p.y + sigma);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        for (let i = scatterData.length - 1; i >= 0; i--) {
+          const p = scatterData[i];
+          ctx.lineTo(scales.x.getPixelForValue(p.x), scales.y.getPixelForValue(p.y - sigma));
+        }
+        ctx.closePath();
+        ctx.fillStyle = colorMix(getCSSVar('--kb-primary') || '#36a2eb', 0.10);
+        ctx.fill();
+        ctx.restore();
+      },
+    };
   }
 
   // Inline plugin: paints 5 translucent tier bands as the y-axis
@@ -3324,12 +3371,16 @@
 
     state.dataPrefix = detectDataPrefix();
     try {
-      const [elo, slugMap] = await Promise.all([
+      const [elo, slugMap, validation] = await Promise.all([
         fetchJson(`${state.dataPrefix}data/processed/elo_current.json`).catch(() => null),
         fetchJson(`${state.dataPrefix}data/processed/player_slugs.json`).catch(() => null),
+        // Bootstrap noise band for the Rating chart (improvement #6,
+        // fable analysis). Graceful 404: null hides the band.
+        fetchJson(`${state.dataPrefix}data/processed/validation_summary.json`).catch(() => null),
       ]);
       state.elo = elo;
       state.slugMap = slugMap;
+      state.validation = validation;
     } catch (e) {
       console.error('player.js boot: failed to load corpus data', e);
     }
