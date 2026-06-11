@@ -149,6 +149,9 @@ const DRIVE_FALLBACK = {
 // back down on release, so heavy craft feel heavy. DRIVE_ALPHA_MIN keeps the
 // walker's authored 0.1 rad/s^2 (a 7s wind-up) keyboard-playable.
 const DRIVE_ALPHA_MIN = 0.8;
+// Default Turn-response multiplier (a held key is always full deflection, so
+// the engine-true rates run hot on keyboard; 45% played best).
+const DRIVE_TURN_SENS_DEFAULT = 0.45;
 // Bank clips (forward/neutral/reverse) are AUTHORED POSE ARCS, not animations:
 // every one in the corpus is a 3-keyframe (0.067s) LATERAL arc -- frame 0 is
 // the full LEFT-bank extreme, the middle frame is the symmetric stance, the
@@ -210,6 +213,13 @@ const CHASE_AIM_LERP = 7.0;           // 1/s -- aim-direction trailing rate
 const CHASE_PITCH_DROP = 0.35;        // camera y shift = -sin(pitch) * dist * this
 const CHASE_PITCH_LOOK = 0.55;        // look-target y rise = sin(pitch) * dist * this
 const CHASE_MIN_HEIGHT_RADII = 0.3;   // camera never sinks below radius * this
+// Right-drag free-look orbit while driving: offsets the chase camera around
+// the vehicle (yaw) and up/down a spherical arc (pitch, clamped). The offset
+// PERSISTS until Reset view / drive exit -- pure free look, no auto-recenter.
+const CHASE_ORBIT_YAW_SENS = 0.006;   // rad per px of horizontal drag
+const CHASE_ORBIT_PITCH_SENS = 0.004; // rad per px of vertical drag
+const CHASE_ORBIT_PITCH_MIN = -0.3;   // rad -- slightly below the stock height
+const CHASE_ORBIT_PITCH_MAX = 1.25;   // rad -- nearly overhead
 
 // Drive scenery: world-fixed low-poly pyramids scattered procedurally around
 // the drive area as a movement reference (true parallax -- they emerge from
@@ -364,7 +374,7 @@ export class ObjectViewer {
     this._driveTargetLat = 0;      // lateral arc target (strafe + turn slip)
     this._driveAimPitch = 0;       // hull aim pitch (rad; hover/morph vertical aim)
     this._driveOmega = 0;          // current yaw rate (rad/s; ramps at alphaSteer)
-    this._driveTurnSens = 1;       // user turn-response multiplier (persisted pref)
+    this._driveTurnSens = DRIVE_TURN_SENS_DEFAULT;  // user turn-response pref
     this._bankActions = null;      // velocity-blended bank-pose set {sfx, fwd, neu, rev}
     this._driveDeployed = false;   // morph tanks: bank-2 mode after `deploy`
     this._driveTransition = 0;     // sec left in a deploy transition (gait held)
@@ -374,6 +384,9 @@ export class ObjectViewer {
     this._chaseDist = 0;           // chase cam follow distance (wheel-zoomable)
     this._chaseYaw = 0;            // smoothed aim yaw the camera trails
     this._chasePitch = 0;          // smoothed aim pitch (rad) the camera trails
+    this._chaseOrbitYaw = 0;       // right-drag free-look yaw offset (rad)
+    this._chaseOrbitPitch = 0;     // right-drag free-look pitch offset (rad, clamped)
+    this._driveOrbitDrag = false;  // right-button drag in flight
     this._gridCell = 1;            // current grid cell size (whole-cell recentering)
     this._sceneryMesh = null;      // InstancedMesh of drive-scenery pyramids
     this._sceneryTile = null;      // tile coords the scenery was last built around
@@ -496,20 +509,33 @@ export class ObjectViewer {
     this._onPointerMove = this._onPointerMove.bind(this);
     this._onPointerUp = this._onPointerUp.bind(this);
     // Drive-mode wheel handler (chase-cam distance; OrbitControls is disabled
-    // while driving so its own wheel listener no-ops).
+    // while driving so its own wheel listener no-ops). The contextmenu handler
+    // keeps right-drag free-look from popping the browser menu while driving
+    // (OrbitControls' own suppression is off with controls.enabled = false).
     this._onWheel = this._onWheel.bind(this);
+    this._onContextMenu = this._onContextMenu.bind(this);
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', this._onPointerDown);
     el.addEventListener('pointermove', this._onPointerMove);
     el.addEventListener('pointerup', this._onPointerUp);
     el.addEventListener('pointercancel', this._onPointerUp);
     el.addEventListener('wheel', this._onWheel, { passive: false });
+    el.addEventListener('contextmenu', this._onContextMenu);
 
     this._animate = this._animate.bind(this);
     this.renderer.setAnimationLoop(this._animate);
   }
 
   _onPointerDown(e) {
+    // Drive-mode free look: right-drag orbits the chase camera around the
+    // vehicle. The offset persists until Reset view / drive exit.
+    if (this._driveMode && e.button === 2) {
+      this._driveOrbitDrag = true;
+      this._lastPtr.x = e.clientX;
+      this._lastPtr.y = e.clientY;
+      try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* noop */ }
+      return;
+    }
     // Point-to-aim is hover-driven (no drag); the pointermove handler does the
     // work. Just swallow the press so it doesn't start anything else.
     if (this._aimMode && (this._hasYaw() || this._hasPitch())) {
@@ -527,6 +553,17 @@ export class ObjectViewer {
   }
 
   _onPointerMove(e) {
+    if (this._driveOrbitDrag) {
+      const dx = e.clientX - this._lastPtr.x;
+      const dy = e.clientY - this._lastPtr.y;
+      this._chaseOrbitYaw += dx * CHASE_ORBIT_YAW_SENS;
+      this._chaseOrbitPitch = clamp(
+        this._chaseOrbitPitch - dy * CHASE_ORBIT_PITCH_SENS,
+        CHASE_ORBIT_PITCH_MIN, CHASE_ORBIT_PITCH_MAX);
+      this._lastPtr.x = e.clientX;
+      this._lastPtr.y = e.clientY;
+      return;
+    }
     if (this._aimMode) {
       this._aimAtPointer(e);
       return;
@@ -561,7 +598,17 @@ export class ObjectViewer {
       r * CHASE_MIN_DIST_FACTOR, r * CHASE_MAX_DIST_FACTOR);
   }
 
+  /* Suppress the browser context menu while driving (right-drag = free look). */
+  _onContextMenu(e) {
+    if (this._driveMode) e.preventDefault();
+  }
+
   _onPointerUp(e) {
+    if (this._driveOrbitDrag) {
+      this._driveOrbitDrag = false;
+      try { this.renderer.domElement.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      return;
+    }
     if (this._aimMode) return;
     if (!this._dragging) return;
     this._dragging = false;
@@ -1734,6 +1781,9 @@ export class ObjectViewer {
       this._driveAimPitch = 0;
       this._driveOmega = 0;
       this._chaseYaw = 0;
+      this._chaseOrbitYaw = 0;
+      this._chaseOrbitPitch = 0;
+      this._driveOrbitDrag = false;
       this._driveInput.fwd = 0;
       this._driveInput.turn = 0;
       this._driveInput.strafe = 0;
@@ -1774,6 +1824,9 @@ export class ObjectViewer {
       this._driveInput.turn = 0;
       this._driveInput.strafe = 0;
       this._driveInput.pitch = 0;
+      this._chaseOrbitYaw = 0;
+      this._chaseOrbitPitch = 0;
+      this._driveOrbitDrag = false;
       this._driveTransition = 0;
       this._driveDeployed = false;
       this.scene.fog = null;
@@ -1813,10 +1866,18 @@ export class ObjectViewer {
   /* User Turn-response preference (0.25..1): scales the commanded yaw rate.
    * A persisted preference, so it is NOT reset on model swap or drive exit. */
   setDriveTurnSens(mult) {
-    this._driveTurnSens = clamp(Number(mult) || 1, 0.25, 1);
+    this._driveTurnSens = clamp(Number(mult) || DRIVE_TURN_SENS_DEFAULT, 0.25, 1);
   }
 
   getDriveTurnSens() { return this._driveTurnSens; }
+
+  /* Reset the drive camera to the stock framing: behind the vehicle at the
+   * default follow distance (clears free-look offsets + wheel zoom). */
+  resetChaseView() {
+    this._chaseOrbitYaw = 0;
+    this._chaseOrbitPitch = 0;
+    this._chaseDist = (this._radius || 1) * CHASE_DIST_FACTOR;
+  }
 
   /* Morph tanks: toggle deployed mode. Plays the `deploy` transition clip
    * (reversed when un-deploying) and holds gait selection until it finishes;
@@ -2146,13 +2207,18 @@ export class ObjectViewer {
     this._chasePitch += (aimPitch - this._chasePitch) * kAim;
     const r = this._radius || 1;
     const dist = this._chaseDist || r * CHASE_DIST_FACTOR;
+    // Right-drag free look rides on top of the trailed aim yaw; the pitch
+    // offset swings the camera up a spherical arc around the vehicle.
+    const camYaw = this._chaseYaw + this._chaseOrbitYaw;
+    const horiz = dist * Math.cos(this._chaseOrbitPitch);
     const desired = new THREE.Vector3(
-      pos.x + Math.sin(this._chaseYaw) * dist,
+      pos.x + Math.sin(camYaw) * horiz,
       Math.max(
-        pos.y + r * CHASE_HEIGHT_FACTOR - Math.sin(this._chasePitch) * dist * CHASE_PITCH_DROP,
+        pos.y + r * CHASE_HEIGHT_FACTOR + Math.sin(this._chaseOrbitPitch) * dist
+          - Math.sin(this._chasePitch) * dist * CHASE_PITCH_DROP,
         r * CHASE_MIN_HEIGHT_RADII,
       ),
-      pos.z + Math.cos(this._chaseYaw) * dist,
+      pos.z + Math.cos(camYaw) * horiz,
     );
     const k = Math.min(1, 1 - Math.exp(-CHASE_POS_LERP * dt));
     this.camera.position.lerp(desired, k);
@@ -2621,6 +2687,7 @@ export class ObjectViewer {
     el.removeEventListener('pointerup', this._onPointerUp);
     el.removeEventListener('pointercancel', this._onPointerUp);
     el.removeEventListener('wheel', this._onWheel);
+    el.removeEventListener('contextmenu', this._onContextMenu);
     this.controls.dispose();
     for (const t of this._texCache.values()) { if (t) t.dispose(); }
     this._texCache.clear();

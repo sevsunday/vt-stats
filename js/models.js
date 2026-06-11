@@ -113,6 +113,7 @@ const els = {
   partsDriveReset: document.getElementById('parts-drive-reset'),
   partsDriveMode: document.getElementById('parts-drive-mode'),
   partsDeploy: document.getElementById('parts-deploy'),
+  partsDriveCamReset: document.getElementById('parts-drive-cam-reset'),
   partsTurnSensBlock: document.getElementById('parts-turnsens-block'),
   partsTurnSens: document.getElementById('parts-turnsens'),
   partsTurnSensVal: document.getElementById('parts-turnsens-val'),
@@ -507,6 +508,7 @@ function showViewer(entry) {
   clearDriveKeys();
   els.partsDriveMode.classList.remove('on');
   els.partsDeploy.classList.remove('on');
+  els.partsDriveCamReset.hidden = true;
   els.partsDrive.disabled = false;
   els.partsDriveReset.disabled = false;
   els.driveHud.hidden = true;
@@ -653,6 +655,7 @@ function showViewer(entry) {
     if (activeViewer) activeViewer.setDrive(0);
   };
   els.partsDriveMode.onclick = () => setDriveModeUI(!driveModeOn);
+  els.partsDriveCamReset.onclick = () => { if (activeViewer) activeViewer.resetChaseView(); };
   els.partsTurnSens.oninput = (e) => {
     const pct = parseInt(e.target.value, 10) || 100;
     els.partsTurnSensVal.textContent = `${pct}%`;
@@ -813,9 +816,10 @@ function updateControlsHint() {
   if (driveModeOn) {
     if (driveUsesHoverScheme()) {
       items = [['W/S', 'Throttle'], ['A/D', 'Strafe'], ['\u2190/\u2192', 'Turn'],
-        ['\u2191/\u2193', 'Aim'], ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
+        ['\u2191/\u2193', 'Aim'], ['Right-drag', 'Orbit'], ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
     } else {
-      items = [['W/S', 'Throttle'], ['A/D', 'Steer'], ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
+      items = [['W/S', 'Throttle'], ['A/D', 'Steer'], ['Right-drag', 'Orbit'],
+        ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
       if (keys) items.push(['Arrows', 'Aim turret']);
     }
     els.controlsHint.hidden = false;
@@ -925,11 +929,12 @@ function driveInputCapable() {
   return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 }
 
-/* Persisted Turn-response preference (25..100 %, default 100). */
+/* Persisted Turn-response preference (25..100 %, default 45 -- engine-true
+ * rates run hot on a binary keyboard). */
 function loadTurnSensPct() {
-  let pct = 100;
-  try { pct = parseInt(localStorage.getItem(TURN_SENS_KEY) || '100', 10); } catch { /* private mode */ }
-  if (!Number.isFinite(pct)) pct = 100;
+  let pct = 45;
+  try { pct = parseInt(localStorage.getItem(TURN_SENS_KEY) || '45', 10); } catch { /* private mode */ }
+  if (!Number.isFinite(pct)) pct = 45;
   return Math.min(100, Math.max(25, pct));
 }
 
@@ -1011,6 +1016,7 @@ function setDriveModeUI(on) {
     // WASD owns the treads/banks while driving; lock the manual slider.
     els.partsDrive.disabled = true;
     els.partsDriveReset.disabled = true;
+    els.partsDriveCamReset.hidden = false;
     activeViewer.setDriveMode(true);
     // Force-enable arrow-key turret aim so driving + aiming coexist -- except
     // on the hover scheme, where the arrows belong to hull turn/aim pitch.
@@ -1044,6 +1050,7 @@ function setDriveModeUI(on) {
     activeViewer.setDriveMode(false);
     els.partsDrive.disabled = false;
     els.partsDriveReset.disabled = false;
+    els.partsDriveCamReset.hidden = true;
     els.partsDrive.value = '0';
     els.partsDriveVal.textContent = '0';
     els.partsDeploy.classList.remove('on');
@@ -1116,6 +1123,7 @@ function setupArticulationUI() {
   els.partsDriveMode.classList.remove('on');
   els.partsDeploy.hidden = !drive.deployable;
   els.partsDeploy.classList.remove('on');
+  els.partsDriveCamReset.hidden = true;   // shown only while driving
   // Turn response: persisted user preference, shown alongside the Drive Mode
   // toggle (helps every archetype) and re-applied to each fresh viewer.
   els.partsTurnSensBlock.hidden = !canDriveMode;
