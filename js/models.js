@@ -25,6 +25,7 @@ const LIGHT_EL_KEY = 'vt.obj.light.el';
 const LIGHT_INTENSITY_KEY = 'vt.obj.light.intensity';
 const LIGHT_DEFAULT = { on: true, az: 215, el: 45, intensity: 2.6 };
 const SCENE_BG_KEY = 'vt.obj.scene.bg';   // 'dark' (default) | 'light'
+const TURN_SENS_KEY = 'vt.obj.drive.turnSens';   // Drive Mode turn response (25..100 %)
 const GRID_KEY = 'vt.obj.grid';
 const AXES_KEY = 'vt.obj.axes';
 const SCENE_BG_VALUES = ['dark', 'light'];
@@ -112,6 +113,9 @@ const els = {
   partsDriveReset: document.getElementById('parts-drive-reset'),
   partsDriveMode: document.getElementById('parts-drive-mode'),
   partsDeploy: document.getElementById('parts-deploy'),
+  partsTurnSensBlock: document.getElementById('parts-turnsens-block'),
+  partsTurnSens: document.getElementById('parts-turnsens'),
+  partsTurnSensVal: document.getElementById('parts-turnsens-val'),
   driveHud: document.getElementById('drive-hud'),
   partsVisibilitySection: document.getElementById('parts-visibility-section'),
   partsVisibilityRows: document.getElementById('parts-visibility-rows'),
@@ -649,6 +653,12 @@ function showViewer(entry) {
     if (activeViewer) activeViewer.setDrive(0);
   };
   els.partsDriveMode.onclick = () => setDriveModeUI(!driveModeOn);
+  els.partsTurnSens.oninput = (e) => {
+    const pct = parseInt(e.target.value, 10) || 100;
+    els.partsTurnSensVal.textContent = `${pct}%`;
+    try { localStorage.setItem(TURN_SENS_KEY, String(pct)); } catch { /* private mode */ }
+    if (activeViewer) activeViewer.setDriveTurnSens(pct / 100);
+  };
   els.partsDeploy.onclick = () => {
     if (!activeViewer) return;
     const on = !els.partsDeploy.classList.contains('on');
@@ -915,6 +925,14 @@ function driveInputCapable() {
   return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 }
 
+/* Persisted Turn-response preference (25..100 %, default 100). */
+function loadTurnSensPct() {
+  let pct = 100;
+  try { pct = parseInt(localStorage.getItem(TURN_SENS_KEY) || '100', 10); } catch { /* private mode */ }
+  if (!Number.isFinite(pct)) pct = 100;
+  return Math.min(100, Math.max(25, pct));
+}
+
 /* Hover/morph craft strafe with A/D and turn/aim with the arrows. */
 function driveUsesHoverScheme() {
   if (!activeViewer) return false;
@@ -1098,6 +1116,13 @@ function setupArticulationUI() {
   els.partsDriveMode.classList.remove('on');
   els.partsDeploy.hidden = !drive.deployable;
   els.partsDeploy.classList.remove('on');
+  // Turn response: persisted user preference, shown alongside the Drive Mode
+  // toggle (helps every archetype) and re-applied to each fresh viewer.
+  els.partsTurnSensBlock.hidden = !canDriveMode;
+  const sensPct = loadTurnSensPct();
+  els.partsTurnSens.value = String(sensPct);
+  els.partsTurnSensVal.textContent = `${sensPct}%`;
+  activeViewer.setDriveTurnSens(sensPct / 100);
   driveModeOn = false;
   drivePrevKeyAim = null;
   clearDriveKeys();

@@ -142,7 +142,13 @@ const ART_AXIS_X = new THREE.Vector3(1, 0, 0);
 const DRIVE_SPEED_SCALE = 1.0;        // global multiplier on the ODF velocities
 const DRIVE_FALLBACK = {
   velocForward: 12, velocReverse: 6, velocStrafe: 8, omegaTurn: 1.5, omegaSpin: 2.2,
+  alphaSteer: 3.0,
 };
+// Turn response: the engine never snaps to omegaTurn/omegaSpin -- the yaw rate
+// ramps toward the commanded rate at the ODF's alphaSteer (rad/s^2) and coasts
+// back down on release, so heavy craft feel heavy. DRIVE_ALPHA_MIN keeps the
+// walker's authored 0.1 rad/s^2 (a 7s wind-up) keyboard-playable.
+const DRIVE_ALPHA_MIN = 0.8;
 // Bank clips (forward/neutral/reverse) are AUTHORED POSE ARCS, not animations:
 // every one in the corpus is a 3-keyframe (0.067s) LATERAL arc -- frame 0 is
 // the full LEFT-bank extreme, the middle frame is the symmetric stance, the
@@ -357,6 +363,8 @@ export class ObjectViewer {
     this._driveLat = 0;            // smoothed lateral arc value (-1 left .. +1 right)
     this._driveTargetLat = 0;      // lateral arc target (strafe + turn slip)
     this._driveAimPitch = 0;       // hull aim pitch (rad; hover/morph vertical aim)
+    this._driveOmega = 0;          // current yaw rate (rad/s; ramps at alphaSteer)
+    this._driveTurnSens = 1;       // user turn-response multiplier (persisted pref)
     this._bankActions = null;      // velocity-blended bank-pose set {sfx, fwd, neu, rev}
     this._driveDeployed = false;   // morph tanks: bank-2 mode after `deploy`
     this._driveTransition = 0;     // sec left in a deploy transition (gait held)
@@ -1290,6 +1298,7 @@ export class ObjectViewer {
     this._driveLat = 0;
     this._driveTargetLat = 0;
     this._driveAimPitch = 0;
+    this._driveOmega = 0;
     this._bankActions = null;   // actions belong to the disposed prior mixer
     this._driveDeployed = false;
     this._driveTransition = 0;
@@ -1723,6 +1732,7 @@ export class ObjectViewer {
       this._driveLat = 0;
       this._driveTargetLat = 0;
       this._driveAimPitch = 0;
+      this._driveOmega = 0;
       this._chaseYaw = 0;
       this._driveInput.fwd = 0;
       this._driveInput.turn = 0;
@@ -1759,6 +1769,7 @@ export class ObjectViewer {
       this._driveLat = 0;
       this._driveTargetLat = 0;
       this._driveAimPitch = 0;
+      this._driveOmega = 0;
       this._driveInput.fwd = 0;
       this._driveInput.turn = 0;
       this._driveInput.strafe = 0;
@@ -1798,6 +1809,14 @@ export class ObjectViewer {
     this._driveInput.pitch = Math.sign(pitch || 0);
     this._driveTargetVel = this._driveInput.fwd;
   }
+
+  /* User Turn-response preference (0.25..1): scales the commanded yaw rate.
+   * A persisted preference, so it is NOT reset on model swap or drive exit. */
+  setDriveTurnSens(mult) {
+    this._driveTurnSens = clamp(Number(mult) || 1, 0.25, 1);
+  }
+
+  getDriveTurnSens() { return this._driveTurnSens; }
 
   /* Morph tanks: toggle deployed mode. Plays the `deploy` transition clip
    * (reversed when un-deploying) and holds gait selection until it finishes;
@@ -1917,11 +1936,23 @@ export class ObjectViewer {
     // Tier 2 locomotion: yaw about world Y, translate along the hull forward
     // (-Z rotated by the heading). Stationary input turns in place at the
     // (faster) omegaSpin; steering mirrors while reversing, like a car.
+    // Engine-true turn response: the yaw RATE ramps toward the commanded rate
+    // at the ODF's alphaSteer (floored for the walker's 0.1) and coasts back
+    // to zero on release -- never an instant snap to full omega. The user
+    // Turn-response preference scales the commanded rate (a held key is
+    // always full deflection; in-game the mouse is analog).
     const omegaTurn = p.omegaTurn ?? DRIVE_FALLBACK.omegaTurn;
     const omegaSpin = p.omegaSpin ?? omegaTurn;
     const omega = fwd ? omegaTurn : omegaSpin;
     const steer = (fwd < 0 ? -1 : 1) * turn;
-    if (steer) this._driveYaw += steer * omega * dt;
+    const alpha = Math.max(p.alphaSteer ?? DRIVE_FALLBACK.alphaSteer, DRIVE_ALPHA_MIN);
+    const omegaCap = omega * this._driveTurnSens;
+    const dOm = clamp(steer * omegaCap - this._driveOmega, -alpha * dt, alpha * dt);
+    this._driveOmega += dOm;
+    if (Math.abs(this._driveOmega) > 1e-4) this._driveYaw += this._driveOmega * dt;
+    // Fraction of the commanded rate actually reached -- the wing arc and the
+    // procedural lean build with the REAL turn, not the key edge.
+    const omegaFrac = omegaCap > 1e-6 ? clamp(this._driveOmega / omegaCap, -1, 1) : 0;
     // Locomotion rides the SMOOTHED throttle (ramped in _animate at
     // DRIVE_ACCEL), so the vehicle accelerates/brakes and the bank-pose blend
     // is physically synchronized with the actual motion.
@@ -1946,14 +1977,14 @@ export class ObjectViewer {
       this._spin.position.z += -Math.sin(this._driveYaw) * sDist;
     }
     // Lateral arc target for the bank-pose scrub (ramped in _animate at
-    // DRIVE_LAT_ACCEL): strafe at full strength + turn at reduced strength,
-    // signed by motion -- side-slip OPPOSITE the turn while moving forward,
-    // WITH the turn at standstill / reversing (nose sweep). Matches in-game
-    // observation: hard right turn while moving forward blends the strafe-
-    // left arc; spinning in place blends the arc toward the turn.
+    // DRIVE_LAT_ACCEL): strafe at full strength + the SMOOTHED yaw rate at
+    // reduced strength, signed by motion -- side-slip OPPOSITE the yaw while
+    // moving forward, WITH the yaw at standstill / reversing (nose sweep).
+    // Matches in-game observation: hard right turn while moving forward
+    // blends the strafe-left arc; spinning in place blends toward the turn.
     const slipSign = v > 0.05 ? 1 : -1;
     this._driveTargetLat = clamp(
-      this._driveInput.strafe + turn * DRIVE_TURN_ARC_GAIN * slipSign, -1, 1);
+      this._driveInput.strafe + omegaFrac * DRIVE_TURN_ARC_GAIN * slipSign, -1, 1);
     // Hull aim pitch (hover/morph -- no turret, the whole ship tilts to aim):
     // integrate the held pitch keys, clamped. Locomotion stays planar.
     if (this._driveInput.pitch) {
@@ -1969,7 +2000,7 @@ export class ObjectViewer {
     // baked into zero GLBs.
     const caps = this.getDriveCaps();
     const wantLean = ((caps.archetype === 'hover' || caps.archetype === 'morph') && p.animSteer)
-      ? steer * DRIVE_TURN_ROLL * DEG : 0;
+      ? omegaFrac * DRIVE_TURN_ROLL * DEG : 0;
     this._driveLean += (wantLean - this._driveLean)
       * Math.min(1, 1 - Math.exp(-DRIVE_LEAN_LERP * dt));
     this._spin.quaternion.setFromAxisAngle(ART_AXIS_Y, this._driveYaw);
@@ -2167,6 +2198,7 @@ export class ObjectViewer {
     this._driveLat = 0;
     this._driveTargetLat = 0;
     this._driveAimPitch = 0;
+    this._driveOmega = 0;
     this._treadOffset = 0;
     for (const m of this._artTreadMats) { if (m.map) m.map.offset.set(0, 0); }
     this.setAimMode(false);

@@ -354,6 +354,10 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
         spin = _normalize_omega(_odf_float(props, f"omegaSpin{suffix}"))
         if fwd is None and rev is None and turn is None and spin is None:
             continue   # class block present but speedless -> try the next class
+        # alphaSteer = angular acceleration toward the commanded turn rate
+        # (rad/s^2; 0.1-15 in the corpus -- no deg normalization needed). The
+        # viewer ramps its yaw rate at this, so heavy craft wind up/coast down.
+        alpha = _odf_float(props, f"alphaSteer{suffix}")
         steer = props.get("animSteer")
         return {
             "archetype": archetype,
@@ -362,6 +366,7 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
             "velocStrafe": strafe,
             "omegaTurn": turn,
             "omegaSpin": spin,
+            "alphaSteer": alpha,
             "animSteer": bool(steer and str(steer).upper() != "NULL"),
         }
     return None
@@ -1282,7 +1287,7 @@ def main():
     emissive_count = sum(1 for m in manifest if m.get("emissiveTextures"))
     modskin_count = sum(1 for m in manifest if m.get("textureSets"))
     idx_path.write_text(json.dumps({
-        "schema_version": 11,
+        "schema_version": 12,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
