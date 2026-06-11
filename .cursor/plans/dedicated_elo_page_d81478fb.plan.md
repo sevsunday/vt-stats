@@ -4,40 +4,40 @@ overview: Create a dedicated /elo/ standalone page (tenth shell) with five nav-p
 todos:
   - id: explainers-module
     content: "Create js/vtsr-explainers.js: generalize initVtsrEquationStage into VTSRExplain.initStage (steps+anchor injected), move VTSR_EQ_STEPS + buildVtsrTooltipHtml content builders out of app.js, add blend() (13.1 alpha-blend stage) and axesBoard() (mixing-board) builders; add new stage CSS next to .vt-eq-* in vtstats-theme.css"
-    status: pending
+    status: completed
   - id: dash-teaser
     content: "Dashboard: replace #section-vtsr table markup with teaser card (top-5 ranked, provisional chips excluded from top 5, View-full-leaderboard link), remove #vtsr-elo-mode-group, add renderVtsrTeaser() to app.js, delete moved leaderboard stack from app.js, rewire modal to VTSRExplain.methodologyModal() + footer link to elo/?tab=how, update rerenderEloDependentViews"
-    status: pending
+    status: completed
   - id: elo-shell
     content: "Create elo/index.html (models-shell pattern: head/OG/canonical, unified topnav with ELO active, 5 nav-pills + panes, Chart.js + KaTeX + vtsr-explainers.js + elo.js scripts) and css/elo.css"
-    status: pending
+    status: completed
   - id: elo-controller
     content: "Create js/elo.js: data loading (elo pair + slugs + validation + contributions, 404-safe, ../ prefix), lazy tab registry with ?tab= routing + deep-link boot, thug-only toggle on shared vt.elo_mode key with 404 revert"
-    status: pending
+    status: completed
   - id: elo-leaderboard
     content: Move full leaderboard stack (renderVtsrLeaderboard, vtsrSort, expand state, buildVtsrDetailPanel + 6 section renderers, VTSR_AXIS_META, noise note) from app.js into js/elo.js; corpus-wide careerStats join via VTAggregate.build; player links via ../player/<slug>/
-    status: pending
+    status: completed
   - id: tab-how
     content: "Build How it works tab: intro prose + deltaR stage + blend stage + tier ladder + worked example tied back to the steps"
-    status: pending
+    status: completed
   - id: tab-axes
     content: "Build The 8 axes tab: annotated mixing-board (segments sized by v2.10 weights, luxury-axes hairline treatment) + weights table + PvE caveat"
-    status: pending
+    status: completed
   - id: tab-fairness
     content: "Build Commanders & fairness tab: commander axis-shift explainer, exclusion gates (campod/partial/pilot-victim), thug-only mode, low-tier lift — layman card sections"
-    status: pending
+    status: completed
   - id: tab-validation
     content: "Build Does it work? tab from validation_summary.json: headline stat cards with layman captions, winner-funnel bars, gap-breakout table with honest framing, Chart.js history sparkline, friendly 404 empty state"
-    status: pending
+    status: completed
   - id: topnav-rollout
     content: Add ELO topnav link (bi-trophy, after Maps) to all 9 shells + both pre-gen templates; bump PLAYER_TEMPLATE_VERSION 9->10 and MAP_TEMPLATE_VERSION 4->5; regen stubs via process_stats.py --no-sync
-    status: pending
+    status: completed
   - id: docs-rules
     content: "Update AGENTS.md + .cursor/rules/project-overview.mdc: new ELO standalone page, teaser decision, toggle relocation, shared explainer module"
-    status: pending
+    status: completed
   - id: verify
     content: "Verify: dashboard teaser + modal + banner behavior, /elo/ all five tabs incl. deep links + thug-only toggle sync, sort/expand/detail panels on moved leaderboard, validation tab with and without summary file, nav link live on every shell + regenerated stubs, lints clean"
-    status: pending
+    status: completed
 isProject: false
 ---
 

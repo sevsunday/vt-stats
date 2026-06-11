@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ELO — VT Stats</title>
+  <meta name="description" content="The VTSR-T leaderboard, how the rating works in plain language, and how well it actually predicts matches.">
+
+  <link rel="canonical" href="https://vtstats.bz/elo/">
+
+  <!-- Open Graph. -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="VTSR-T ELO — VT Stats">
+  <meta property="og:description" content="The definitive VTSR-T leaderboard, the rating explained in plain language, and honest accuracy stats.">
+  <meta property="og:url" content="https://vtstats.bz/elo/">
+  <meta property="og:site_name" content="VT Stats">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/elo.css">
+
+  <!-- KaTeX (vendored): the How-it-works tab renders the annotated
+       equations via the shared js/vtsr-explainers.js module. -->
+  <link rel="stylesheet" href="../vendor/katex/katex.min.css">
+  <script defer src="../vendor/katex/katex.min.js"></script>
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar. Mirrors models/index.html navbar shape. The ELO link carries
+       `.active aria-current="page"` for "you are here" feedback. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="../docs.html" class="vt-nav-icon-btn"
+             title="Open the docs" aria-label="Docs">
+            <i class="bi bi-book me-1"></i>Docs
+          </a>
+          <a href="../raw.html" class="vt-nav-icon-btn"
+             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)"
+             aria-label="Raw data browser">
+            <i class="bi bi-code-square me-1"></i>Raw data
+          </a>
+          <a href="../odf/" class="vt-nav-icon-btn"
+             title="Browse the BZ2 Object Definition File (ODF) database"
+             aria-label="ODF browser">
+            <i class="bi bi-boxes me-1"></i>ODF
+          </a>
+          <a href="../models/" class="vt-nav-icon-btn"
+             title="Browse 3D unit & building models" aria-label="Models">
+            <i class="bi bi-box me-1"></i>Models
+          </a>
+          <a href="../player/" class="vt-nav-icon-btn"
+             title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
+          </a>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="./" class="vt-nav-icon-btn active" aria-current="page"
+             title="VTSR-T leaderboard, methodology & rating accuracy" aria-label="ELO">
+            <i class="bi bi-trophy me-1"></i>ELO
+          </a>
+          <a href="../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
+          </a>
+
+          <!-- Theme Dropdown. js/theme.js auto-binds and populates the
+               [data-theme-menu] ul on boot. -->
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="vt-elo-main container-fluid px-3 px-md-4 py-4 flex-grow-1">
+
+    <!-- Page header: title + the thug-only scope toggle (moved here from
+         the dashboard — this is the canonical home; the dashboard still
+         honors the persisted mode on its other elo surfaces). -->
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+      <div>
+        <h1 class="vt-elo-title mb-0"><i class="bi bi-trophy me-2"></i>VTSR-T</h1>
+        <div class="text-muted vt-elo-subtitle">VT Stats Rating &mdash; the community skill rating, explained like you&rsquo;re human.</div>
+      </div>
+      <div class="btn-group btn-group-sm" role="group" aria-label="VTSR-T scope" id="vtsr-elo-mode-group">
+        <button type="button" class="btn btn-outline-secondary active" data-elo-mode="default"
+                title="All rated matches (canonical VTSR-T)">All matches</button>
+        <button type="button" class="btn btn-outline-secondary" data-elo-mode="thugs_only"
+                title="Recompute VTSR-T using each player's thug appearances only (commander matches excluded)">
+          Thug-only
+          <span class="spinner-border spinner-border-sm ms-1 d-none" role="status" aria-hidden="true" id="vtsr-elo-mode-spinner"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Thug-only active banner (mirrors the dashboard banner copy). -->
+    <div class="alert alert-warning vt-elo-mode-banner d-none mb-3" id="vt-elo-mode-banner" role="status" aria-live="polite">
+      <div class="d-flex align-items-center gap-3">
+        <div class="flex-grow-1">
+          <i class="bi bi-exclamation-triangle-fill me-1"></i>
+          <strong>Thug-only mode active.</strong>
+          Every VTSR-T number on this page is recomputed using each player's thug appearances only. Commander appearances are omitted entirely (campod and partial-presence rows still excluded as usual).
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-warning flex-shrink-0" id="vt-elo-mode-banner-revert">
+          Switch back
+        </button>
+      </div>
+    </div>
+
+    <!-- Tab pills. URL-routed via ?tab= (see js/elo.js). -->
+    <div class="vt-tab-scroll-wrap mb-3">
+      <ul class="nav nav-pills vt-elo-tabs" id="elo-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="elo-tab-leaderboard-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-leaderboard" type="button" role="tab"
+                  aria-controls="elo-tab-leaderboard" aria-selected="true">
+            <i class="bi bi-list-ol me-1"></i>Leaderboard
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="elo-tab-how-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-how" type="button" role="tab"
+                  aria-controls="elo-tab-how" aria-selected="false">
+            <i class="bi bi-lightbulb me-1"></i>How it works
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="elo-tab-axes-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-axes" type="button" role="tab"
+                  aria-controls="elo-tab-axes" aria-selected="false">
+            <i class="bi bi-sliders me-1"></i>The 8 axes
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="elo-tab-fairness-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-fairness" type="button" role="tab"
+                  aria-controls="elo-tab-fairness" aria-selected="false">
+            <i class="bi bi-shield-check me-1"></i>Commanders &amp; fairness
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="elo-tab-accuracy-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-accuracy" type="button" role="tab"
+                  aria-controls="elo-tab-accuracy" aria-selected="false">
+            <i class="bi bi-clipboard-data me-1"></i>Does it work?
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <div class="tab-content" id="elo-tab-content">
+
+      <!-- Tab: Leaderboard (default, eager). The full 13-column sortable
+           table with expandable per-row detail panels — moved here from
+           the dashboard's All Matches view. -->
+      <div class="tab-pane fade show active" id="elo-tab-leaderboard" role="tabpanel"
+           aria-labelledby="elo-tab-leaderboard-btn">
+        <div class="card mb-4 d-none" id="section-vtsr">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
+            <button type="button" class="btn btn-sm vt-vtsr-info-btn" id="vtsr-how-link">
+              <i class="bi bi-info-circle me-1"></i>How It's Calculated
+            </button>
+          </div>
+          <div class="card-body table-responsive vt-sticky-thead-card">
+            <table id="vtsr-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
+              <thead>
+                <tr>
+                  <th data-bs-toggle="tooltip" data-bs-placement="top"
+                      title="Rank (1 = highest VTSR-T)."
+                  >#</th>
+                  <th class="vt-vtsr-expand-col"
+                      data-bs-toggle="tooltip" data-bs-placement="top"
+                      title="Click the chevron on any row to expand the per-axis breakdown, raw PvP/PvE counts, and ship + weapon distributions."
+                  ></th>
+                  <th class="text-center"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Tier</strong><br>Absolute thresholds: Tier 1 (&ge;1800), Tier 2 (1650-1799), Tier 3 (1500-1649), Tier 4 (1350-1499), Tier 5 (1000-1349). Players with fewer than 10 rated matches show <strong>Provisional</strong>."
+                  >Tier</th>
+                  <th data-sort="name"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Player</strong><br>Display name (most-recent canonical alias). Hover the cell to see Steam64 + in-game nick when they differ."
+                  >Player</th>
+                  <th data-sort="primary_ship" class="text-center"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Primary Ship</strong><br>Most-played ship ODF across the player's career (raw lowercased ODF stem -- e.g. <code>ivscout_vsr</code>, <code>fvtank_vsr</code>). Hover the cell for share + secondary ship + active hours."
+                  >Primary Ship</th>
+                  <th data-sort="vtsr" class="text-end sort-active"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>VTSR-T</strong><br>Published rating. <code>VTSR-T = &alpha;&middot;Wins ELO + (1-&alpha;)&middot;Thug ELO</code>. With &alpha; = 0 (current ship), VTSR-T equals Thug ELO. Anchored at 1500, soft floor at 1000."
+                  >VTSR-T</th>
+                  <th data-sort="pvp_kd" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>PvP K/D</strong><br>Career kills against human players &divide; deaths from human players. Click the row chevron for the raw PvP K + PvP D counts and the per-axis breakdown."
+                  >PvP K/D</th>
+                  <th data-sort="pve_kd" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>PvE K/D</strong><br>Career kills against AI / structures &divide; deaths from AI / world. Click the row chevron for the raw PvE K + PvE D counts."
+                  >PvE K/D</th>
+                  <th data-sort="accuracy" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Accuracy</strong><br>Career hits &divide; shots fired. Includes both PvP + PvE hits. Hover the cell for raw hits / shots."
+                  >Acc</th>
+                  <th data-sort="pvp_accuracy" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>PvP Accuracy</strong><br>Career PvP hits &divide; shots fired. The per-weapon-normalized variant (used by the <code>thug_accuracy</code> ELO axis) lives in the row's expand panel."
+                  >PvP Acc</th>
+                  <th data-sort="last_delta" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Last delta</strong><br>Most recent rated-match rating change (positive = gain, negative = loss). Click the row chevron for the per-axis breakdown of why the rating moved."
+                  >Last</th>
+                  <th data-sort="peak_vtsr" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Peak</strong><br>Highest published VTSR-T this player has ever held. Hover the cell to see when it was reached."
+                  >Peak</th>
+                  <th data-sort="matches_played" class="text-end"
+                      data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                      title="<strong>Matches</strong><br>Number of rated matches contributing to this rating. Excludes matches with player_count &lt; 6 OR duration &lt; 4 minutes."
+                  >Matches</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="vt-elo-empty card d-none" id="elo-leaderboard-empty">
+          <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-stars d-block mb-2" style="font-size: 1.6rem;"></i>
+            No ratings published yet &mdash; run the pipeline to generate <code>elo_current.json</code>.
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: How it works (lazy; rendered by js/elo.js from the shared
+           VTSRExplain module). -->
+      <div class="tab-pane fade" id="elo-tab-how" role="tabpanel" aria-labelledby="elo-tab-how-btn"></div>
+
+      <!-- Tab: The 8 axes (lazy). -->
+      <div class="tab-pane fade" id="elo-tab-axes" role="tabpanel" aria-labelledby="elo-tab-axes-btn"></div>
+
+      <!-- Tab: Commanders & fairness (lazy). -->
+      <div class="tab-pane fade" id="elo-tab-fairness" role="tabpanel" aria-labelledby="elo-tab-fairness-btn"></div>
+
+      <!-- Tab: Does it work? (lazy; rendered from validation_summary.json). -->
+      <div class="tab-pane fade" id="elo-tab-accuracy" role="tabpanel" aria-labelledby="elo-tab-accuracy-btn"></div>
+
+    </div>
+  </main>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <!-- Chart.js: the Does-it-work tab's metric history sparkline. -->
+  <script src="../vendor/chartjs/chart.umd.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <!-- Aggregator: builds the corpus-wide career_stats[] the leaderboard
+       joins its Primary Ship / K/D / accuracy columns from. -->
+  <script src="../js/all-matches-aggregator.js"></script>
+  <!-- Shared explainer content + annotated-stage engine (also loaded by
+       the dashboard for its methodology modal). -->
+  <script src="../js/vtsr-explainers.js"></script>
+  <script src="../js/elo.js"></script>
+
+  <!-- Tools-link live-pulse poller. See index.html for the same pattern. -->
+  <script src="../js/bz2api.js"></script>
+  <script src="../js/active-game-indicator.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+</body>
+</html>

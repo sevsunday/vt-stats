@@ -1,0 +1,191 @@
+/* =============================================================================
+   css/elo.css — dedicated ELO page (elo/index.html + js/elo.js)
+   Builds on css/vtstats-theme.css (which carries the shared .vt-eq-* annotated
+   stage, .vt-axesboard-*, the VTSR table/detail-panel styles, and all theme
+   tokens). This file adds only page-local chrome:
+     1. Page header + tab pills
+     2. Explainer tab sections (How / Axes / Fairness)
+     3. "Does it work?" stat cards + winner funnel + gap table + sparkline
+   All colors come from --kb-* / --vt-* custom properties.
+   ============================================================================= */
+
+/* ---- 1. Page header + pills ---------------------------------------------- */
+
+.vt-elo-main { max-width: 1400px; margin: 0 auto; }
+
+.vt-elo-title {
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+.vt-elo-title .bi { color: var(--kb-primary); }
+.vt-elo-subtitle { font-size: 0.9rem; }
+
+.vt-elo-tabs { flex-wrap: nowrap; white-space: nowrap; }
+
+/* ---- 2. Explainer tabs ---------------------------------------------------- */
+
+/* Reuse the methodology modal's section rhythm outside a modal. */
+.vt-elo-doc {
+    max-width: 980px;
+}
+.vt-elo-doc .vt-vtsr-doc-section {
+    padding: 1.1rem 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 18%, transparent);
+}
+.vt-elo-doc .vt-vtsr-doc-section:first-of-type { padding-top: 0.25rem; }
+.vt-elo-doc .vt-vtsr-doc-section:last-of-type { border-bottom: 0; }
+.vt-elo-doc .vt-vtsr-doc-section > h6 {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 0.85rem 0;
+}
+.vt-elo-doc table { width: 100%; font-size: 0.86rem; }
+.vt-elo-doc table th,
+.vt-elo-doc table td {
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 18%, transparent);
+}
+.vt-elo-doc table th { color: var(--kb-text-muted); font-weight: 600; text-align: left; }
+.vt-elo-doc .vt-katex-caveat {
+    color: var(--kb-text-muted);
+    font-size: 0.8rem;
+    margin: 0.45em 0;
+}
+
+/* Fairness tab: card grid of rule explainers. */
+.vt-elo-fairness-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 1rem;
+}
+.vt-elo-fairness-card {
+    border: 1px solid color-mix(in oklab, var(--kb-text-muted) 22%, transparent);
+    border-radius: 0.6rem;
+    background: color-mix(in srgb, var(--kb-bg-card, var(--kb-bg-secondary)) 60%, transparent);
+    padding: 0.9rem 1rem;
+}
+.vt-elo-fairness-card h6 {
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+.vt-elo-fairness-card h6 .bi { color: var(--kb-primary); margin-right: 0.4rem; }
+.vt-elo-fairness-card p,
+.vt-elo-fairness-card ul { font-size: 0.85rem; margin-bottom: 0.4rem; }
+.vt-elo-fairness-card .vt-elo-fairness-verdict {
+    font-size: 0.78rem;
+    color: var(--kb-text-muted);
+    border-top: 1px dashed color-mix(in oklab, var(--kb-text-muted) 28%, transparent);
+    padding-top: 0.45rem;
+    margin-top: 0.5rem;
+}
+
+/* ---- 3. "Does it work?" tab ----------------------------------------------- */
+
+.vt-elo-statgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+.vt-elo-statcard {
+    border: 1px solid color-mix(in oklab, var(--kb-text-muted) 22%, transparent);
+    border-radius: 0.6rem;
+    background: color-mix(in srgb, var(--kb-bg-card, var(--kb-bg-secondary)) 60%, transparent);
+    padding: 0.85rem 1rem;
+}
+.vt-elo-statcard .vt-elo-stat-value {
+    font-family: var(--vt-font-mono, monospace);
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.vt-elo-statcard .vt-elo-stat-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.25rem;
+}
+.vt-elo-statcard .vt-elo-stat-caption {
+    font-size: 0.78rem;
+    color: var(--kb-text-muted);
+    margin-top: 0.3rem;
+    line-height: 1.45;
+}
+
+/* Winner funnel: labeled horizontal bars scaled to the rated-match count. */
+.vt-elo-funnel { max-width: 720px; }
+.vt-elo-funnel-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 220px) 1fr 3.2rem;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 0.45rem;
+    font-size: 0.85rem;
+}
+.vt-elo-funnel-label { text-align: right; color: var(--kb-text-secondary, inherit); }
+.vt-elo-funnel-track {
+    height: 14px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--kb-text-muted) 10%, transparent);
+    overflow: hidden;
+}
+.vt-elo-funnel-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-primary) 70%, transparent);
+    min-width: 2px;
+}
+.vt-elo-funnel-row.is-muted .vt-elo-funnel-fill {
+    background: color-mix(in oklab, var(--kb-text-muted) 45%, transparent);
+}
+.vt-elo-funnel-count {
+    font-family: var(--vt-font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+/* History sparkline. */
+.vt-elo-history-wrap { position: relative; height: 220px; max-width: 860px; }
+
+/* Section spacing within the accuracy tab. */
+.vt-elo-acc-section { margin-bottom: 1.75rem; }
+.vt-elo-acc-section > h6 {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.7rem;
+}
+.vt-elo-acc-section .vt-elo-acc-blurb {
+    font-size: 0.88rem;
+    max-width: 860px;
+    margin-bottom: 0.85rem;
+}
+
+/* Gap-breakout table. */
+.vt-elo-gap-table { max-width: 720px; font-size: 0.86rem; width: 100%; }
+.vt-elo-gap-table th,
+.vt-elo-gap-table td {
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 18%, transparent);
+}
+.vt-elo-gap-table th {
+    color: var(--kb-text-muted);
+    font-weight: 600;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+@media (max-width: 620px) {
+    .vt-elo-funnel-row { grid-template-columns: minmax(110px, 140px) 1fr 2.6rem; }
+    .vt-elo-funnel-label { font-size: 0.78rem; }
+}

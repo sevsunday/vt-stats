@@ -1547,8 +1547,6 @@
   // on All Matches load, so the sort-active header highlight lands on a
   // visible column.
   let careerSortState = { key: 'total_dealt', asc: false };
-  // Dedicated VTSR-T table sort. Defaults to vtsr desc (highest rating at top).
-  let vtsrSortState = { key: 'vtsr', asc: false };
   // Currently selected pair for the compare-mode radar on the Rivalries tab.
   // Reset on match switch; reconciled against the filtered leaderboard on
   // filter change, falling back to the first visible top_rivalries entry.
@@ -2698,7 +2696,8 @@
   // Walks the elo-dependent surfaces in order:
   //   1. All Matches view (if loaded) -- re-aggregate from cached
   //      contributions with the active elo, then refresh:
-  //        a. VTSR-T leaderboard (rows + per-row expand panels)
+  //        a. VTSR-T teaser card (top-5 + provisional chips; the full
+  //           leaderboard lives on /elo/)
   //        b. Career Highlights (only `the_champion` changes)
   //        c. Career Leaderboard (Tier + VTSR-T cell joins)
   //        d. Commander Cohort (if its tab has been rendered)
@@ -2719,7 +2718,7 @@
       if (fileIds.length > 0) {
         const data = window.VTAggregate.build(window.__vtContributions, fileIds, getActiveElo());
         window.__vtAllMatchesData = data;
-        renderVtsrLeaderboard(getActiveElo(), data.career_stats);
+        renderVtsrTeaser(getActiveElo(), data.career_stats);
         renderHighlights(data.career_highlights, { id: 'all-matches' }, 'career');
         // Career Leaderboard renderer joins Tier + VTSR-T per row via
         // careerEloFor() (which now reads through getActiveElo), so a
@@ -2733,7 +2732,7 @@
         // Filtered subset is empty -- mirror the empty-state branch in
         // loadAllMatches: VTSR-T card hides itself, career table is
         // empty, no aggregator data to thread through.
-        renderVtsrLeaderboard(getActiveElo(), []);
+        renderVtsrTeaser(getActiveElo(), []);
       }
     }
 
@@ -2885,7 +2884,7 @@
       // Clear downstream renders by passing an empty career list. Preserve
       // the user's `mode` preference (Totals vs Per match) across resets.
       careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
-      renderVtsrLeaderboard(getActiveElo(), []);
+      renderVtsrTeaser(getActiveElo(), []);
       renderHighlights({ schema_version: 1, cards: [] }, { id: 'all-matches' }, 'career');
       renderCareerTable([]);
       renderCareerRadar({ career_stats: [] });
@@ -2930,7 +2929,7 @@
 
     renderAggMeta(data.meta);
     renderRecentMatches(fileIds);
-    renderVtsrLeaderboard(getActiveElo(), data.career_stats);
+    renderVtsrTeaser(getActiveElo(), data.career_stats);
     renderHighlights(data.career_highlights, { id: 'all-matches' }, 'career');
     initCareerColumnViewControls();
     renderCareerTable(data.career_stats);
@@ -5662,221 +5661,130 @@
     return '0.00';
   }
 
-  // HTML for the VTSR-T methodology modal. Built lazily on first
-  // modal open and cached as a module-local string. Each section is a
-  // `<section class="vt-vtsr-doc-section">` with an h6 title; matching
-  // CSS lives in css/vtstats-theme.css.
-  //
-  // v3 (modal slim-down): rewritten as a public-friendly 5-section
-  // reference -- TL;DR + 8 axes table + commander adjustment + tier
-  // ladder + worked example. Zero LaTeX (one inline plain-text "delta
-  // rating = K * (you - expected)" line is the only math gesture).
-  // The full math reference lives in DEVELOPER_GUIDE.md SS13, linked
-  // from the modal footer's "Read the full methodology" button.
-  let vtsrTooltipHtmlCache = null;
-  // Returns the rendered modal HTML, or ``null`` when KaTeX hasn't
-  // loaded yet. The KaTeX gate is preserved as cheap insurance even
-  // though the v3 body has zero equations -- if a future revision
-  // re-introduces math, the lazy show.bs.modal re-attempt logic at
-  // the caller will keep working without changes.
-  function buildVtsrTooltipHtml() {
-    if (vtsrTooltipHtmlCache) return vtsrTooltipHtmlCache;
-    const k = (window.katex && typeof window.katex.renderToString === 'function')
-      ? window.katex
-      : null;
-    if (!k) return null;
+  // ----- VTSR-T teaser card (dashboard) -----------------------------------
+  // The full sortable leaderboard + expandable detail panels moved to the
+  // dedicated /elo/ page (js/elo.js). The dashboard card is now a teaser:
+  // the top 5 NON-provisional players by VTSR-T plus a muted chip row of
+  // provisional players (visible, but never occupying a top-5 slot) and a
+  // "View full leaderboard" link. `careerStats` keeps the picker-filter
+  // roster contract the old full table had: only players present in the
+  // (possibly filtered) career_stats[] are shown.
+  function renderVtsrTeaser(elo, careerStats) {
+    const $card = document.getElementById('section-vtsr');
+    if (!$card) return;
 
-    // ---- 8-axis thug composite (v2.10 weights). Listed in weight order so
-    // the heaviest signals lead. v2.10 cut Snipe bonus + T-key usage to 0.005
-    // each, so the raw weights sum to ~0.92 (not 1.00) and are renormalized
-    // over the axes present in each lobby at runtime. The two luxury axes are
-    // kept for the dominance preview but contribute ~1% combined.
-    // Descriptions trimmed to public-friendly one-liners.
-    const weightsRows = [
-      ['Net damage share', '0.20',  'Damage you dealt minus took, vs the lobby total.'],
-      ['Thug kill rate',   '0.20',  'Kills per minute (PvE kills count for half).'],
-      ['Thug efficiency',  '0.16',  'What % of your non-base damage hit live targets.'],
-      ['Thug accuracy',    '0.15',  'Your hit-rate vs the lobby&rsquo;s, per weapon.'],
-      ['PvE share',        '0.12',  'Damage on enemy bases, scavs, AI tanks.'],
-      ['Mobility',         '0.08',  'How much of the map you covered.'],
-      ['Snipe bonus',      '0.005', 'Sniper rifle hits, capped. Luxury axis &mdash; barely moves your rating.'],
-      ['T-key usage',      '0.005', 'How often you held a target lock. Luxury axis &mdash; barely moves your rating.'],
-    ].map(([n, w, d]) => `<tr><td><strong>${n}</strong><br><small class="text-muted">${d}</small></td><td class="text-end align-top">${w}</td></tr>`).join('');
+    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
+      $card.classList.add('d-none');
+      return;
+    }
+    const careerNames    = new Set((careerStats || []).map(c => (c.name || '').toLowerCase()));
+    const careerSteam64s = new Set((careerStats || []).map(c => c.steam64).filter(Boolean));
+    const visible = elo.ratings.filter(r => {
+      if (r.steam64 && careerSteam64s.has(r.steam64)) return true;
+      if (r.name && careerNames.has(r.name.toLowerCase())) return true;
+      return false;
+    });
+    if (visible.length === 0) {
+      $card.classList.add('d-none');
+      return;
+    }
+    $card.classList.remove('d-none');
 
-    // ---- Tier ladder (unchanged from v2). ----
-    const tierRows = [
-      ['Tier 1', '&ge; 1800',     'top of the ladder'],
-      ['Tier 2', '1650 \u2013 1799', ''],
-      ['Tier 3', '1500 \u2013 1649', 'anchor band'],
-      ['Tier 4', '1350 \u2013 1499', ''],
-      ['Tier 5', '1000 \u2013 1349', 'wide band; soft floor at 1000'],
-    ].map(([n, r, note]) => `<tr><td><strong>${n}</strong></td><td class="text-end"><code>${r}</code></td><td class="text-muted"><small>${esc(note)}</small></td></tr>`).join('');
+    const ranked = visible
+      .filter(r => (r.matches_played || 0) >= ELO_PROVISIONAL_THRESHOLD)
+      .sort((a, b) => (b.vtsr || 0) - (a.vtsr || 0));
+    const provisional = visible
+      .filter(r => (r.matches_played || 0) < ELO_PROVISIONAL_THRESHOLD)
+      .sort((a, b) => (b.vtsr || 0) - (a.vtsr || 0));
+    const top = ranked.slice(0, 5);
 
-    // ---- Worked example: Domakus 2026-05-08T23-46-02 (v2.5).
-    // Real numbers from data/processed/elo_history.json:
-    //   before=1689.81, after=1706.70, delta=+16.89,
-    //   performance=+0.5665, expected=+0.2667.
-    // K_i back-solved from delta / (S_O * (P - E)) = 16.89 / (2.5 * 0.2998) = 22.53.
+    const noiseSigma = vtRatingNoiseSigma();
+    const $list = document.getElementById('vtsr-teaser-list');
+    if ($list) {
+      $list.innerHTML = top.map((r, i) => {
+        const tier = resolveTier(r.vtsr, r.matches_played);
+        const badge = tierBadgeHtml(tier, { title: `${tier.label} \u00b7 ${Math.round(r.vtsr)} VTSR-T` });
+        const lastDelta = r.last_delta || 0;
+        const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : 'text-muted';
+        const lastSign  = lastDelta > 0 ? '+' : '';
+        const vtsrTip = noiseSigma != null
+          ? `${Math.round(r.vtsr)} \u00b1 ${noiseSigma} VTSR-T (resampling \u03c3) \u00b7 ${r.matches_played} rated matches`
+          : `${Math.round(r.vtsr)} VTSR-T \u00b7 ${r.matches_played} rated matches`;
+        return `<div class="vt-vtsr-teaser-row">
+          <span class="vt-vtsr-teaser-rank">${i + 1}</span>
+          <span class="vt-vtsr-teaser-tier">${badge}</span>
+          <span class="vt-vtsr-teaser-name">${vtPlayerLinkHtml(r.name, r.steam64)}</span>
+          <span class="vt-vtsr-teaser-rating" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</span>
+          <span class="vt-vtsr-teaser-delta ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</span>
+        </div>`;
+      }).join('');
+    }
 
-    vtsrTooltipHtmlCache = `<div class="vt-katex-tooltip-body">
-
-      <section class="vt-vtsr-doc-section">
-        <h6>How it works</h6>
-        <p class="mb-2">Each match, we score you on <strong>8 things</strong> (kill rate, accuracy, damage share, etc.) compared to everyone else in the lobby. Those scores blend into one <strong>match performance</strong> number.</p>
-        <p class="mb-2">If you played <strong>better than expected</strong> for a player at your rating, your VTSR-T goes up. Worse, it goes down.</p>
-        <p class="mb-2"><code>&Delta; rating &nbsp;=&nbsp; K &times; (you &minus; expected)</code></p>
-        <p class="mb-0 text-muted small">New players move fast (we&rsquo;re still figuring you out). Veterans move slowly. Losses sting a bit less, and your rating won&rsquo;t fall below 1000.</p>
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>The 8 axes</h6>
-        <table class="vt-katex-weights">
-          <thead><tr><th>Axis</th><th class="text-end">Weight</th></tr></thead>
-          <tbody>${weightsRows}</tbody>
-        </table>
-        <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters.</div>
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>If you commanded the match</h6>
-        <p class="mb-2">Commanders naturally score lower on thug stats &mdash; less mobility, fewer kills, less direct combat. To stay fair, the bar adjusts per axis on commander matches:</p>
-        <ul class="mb-2">
-          <li><strong>Easier on 5 axes</strong> &middot; mobility, kill rate, damage share, efficiency, T-key &mdash; the role-driven shortfalls.</li>
-          <li><strong>Small bonus on PvE share</strong> &middot; commanders get rewarded slightly more for hitting enemy base / scavs.</li>
-          <li><strong>Unchanged on 2 axes</strong> &middot; accuracy and snipes are role-blind.</li>
-        </ul>
-        <p class="mb-0 text-muted small">Net effect: a typical commander match nets ~0 ELO &mdash; neither punished nor padded. A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
-        <table class="vt-katex-tiers">
-          <thead><tr><th>Tier</th><th class="text-end">VTSR-T range</th><th></th></tr></thead>
-          <tbody>${tierRows}</tbody>
-        </table>
-      </section>
-
-      <section class="vt-vtsr-doc-section">
-        <h6>Real example</h6>
-        <p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1689.8</strong> to <strong>1706.7</strong> (+16.9).</p>
-        <ul class="mb-2">
-          <li>Match performance: <strong>+0.57</strong> (top of the lobby)</li>
-          <li>Expected: <strong>+0.27</strong> (already a high-rated player &mdash; the bar was high)</li>
-          <li>K-factor: <strong>~22</strong> (settled veteran)</li>
-        </ul>
-        <p class="mb-0">He outperformed his expected score, so rating ticked up.</p>
-      </section>
-
-    </div>`;
-    return vtsrTooltipHtmlCache;
-  }
-
-  function vtsrSort(key, asc) {
-    return (a, b) => {
-      let va; let vb;
-      switch (key) {
-        case 'name':           va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
-        case 'last_delta':     va = a.last_delta || 0;            vb = b.last_delta || 0;            break;
-        case 'peak_vtsr':      va = a.peak_vtsr || 0;             vb = b.peak_vtsr || 0;             break;
-        case 'matches_played': va = a.matches_played || 0;        vb = b.matches_played || 0;        break;
-        case 'primary_ship': {
-          // v2.3: Primary ship name (resolved pipeline-side) lives on
-          // the joined careerStats row, not on `a` / `b` directly.
-          // Missing ship sorts last (\uffff sentinel) so "—" rows
-          // always cluster at the bottom of the column.
-          const ca = (vtsrCareerByName(a) || {}).career_loadout;
-          const cb = (vtsrCareerByName(b) || {}).career_loadout;
-          va = (ca && ca.primary_ship && ca.primary_ship.name) ? String(ca.primary_ship.name).toLowerCase() : '\uffff';
-          vb = (cb && cb.primary_ship && cb.primary_ship.name) ? String(cb.primary_ship.name).toLowerCase() : '\uffff';
-          break;
-        }
-        case 'pvp_kd': {
-          // v2.3: PvP K/D = total_pvp_kills / max(1, total_pvp_deaths).
-          // Same null-last sentinel for cells with no PvP data.
-          const ca = vtsrCareerByName(a);
-          const cb = vtsrCareerByName(b);
-          va = ca ? (ca.total_pvp_kills || 0) / Math.max(1, ca.total_pvp_deaths || 0) : -1;
-          vb = cb ? (cb.total_pvp_kills || 0) / Math.max(1, cb.total_pvp_deaths || 0) : -1;
-          break;
-        }
-        case 'pve_kd': {
-          // v2.3: PvE K/D = total_pve_kills / max(1, total_pve_deaths).
-          const ca = vtsrCareerByName(a);
-          const cb = vtsrCareerByName(b);
-          va = ca ? (ca.total_pve_kills || 0) / Math.max(1, ca.total_pve_deaths || 0) : -1;
-          vb = cb ? (cb.total_pve_kills || 0) / Math.max(1, cb.total_pve_deaths || 0) : -1;
-          break;
-        }
-        case 'accuracy': {
-          // v2.3: career overall accuracy (hits / shots, both PvP+PvE).
-          const ca = vtsrCareerByName(a);
-          const cb = vtsrCareerByName(b);
-          va = ca ? (ca.overall_accuracy || 0) : -1;
-          vb = cb ? (cb.overall_accuracy || 0) : -1;
-          break;
-        }
-        case 'pvp_accuracy': {
-          // v2.3: career PvP accuracy (pvp_hits / shots).
-          const ca = vtsrCareerByName(a);
-          const cb = vtsrCareerByName(b);
-          va = ca ? (ca.pvp_accuracy || 0) : -1;
-          vb = cb ? (cb.pvp_accuracy || 0) : -1;
-          break;
-        }
-        case 'vtsr':
-        default:               va = a.vtsr || 0;                  vb = b.vtsr || 0;                  break;
+    const $prov = document.getElementById('vtsr-teaser-provisional');
+    if ($prov) {
+      if (provisional.length) {
+        const chips = provisional.map(r =>
+          `<span class="vt-vtsr-teaser-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+             title="Provisional \u00b7 ${Math.round(r.vtsr)} VTSR-T \u00b7 ${r.matches_played} of ${ELO_PROVISIONAL_THRESHOLD} rated matches">
+             ${vtPlayerLinkHtml(r.name, r.steam64)}</span>`).join('');
+        $prov.innerHTML = `<span class="text-muted small me-1">Provisional (not ranked yet):</span>${chips}`;
+        $prov.classList.remove('d-none');
+      } else {
+        $prov.innerHTML = '';
+        $prov.classList.add('d-none');
       }
-      if (va < vb) return asc ? -1 : 1;
-      if (va > vb) return asc ? 1 : -1;
-      const na = (a.name || '').toLowerCase(), nb = (b.name || '').toLowerCase();
-      if (na < nb) return -1;
-      if (na > nb) return 1;
-      return 0;
-    };
-  }
-
-  // Lookup helper used by vtsrSort + the row renderer to join an ELO
-  // ratings row to its career_stats[] counterpart by steam64 (with name
-  // fallback). Reads from the module-local `_vtsrCareerStats` set by
-  // renderVtsrLeaderboard so the joins don't have to be passed through
-  // the sort comparator.
-  let _vtsrCareerStats = null;
-  function vtsrCareerByName(eloRow) {
-    if (!_vtsrCareerStats) return null;
-    if (eloRow.steam64) {
-      const r = _vtsrCareerStats.find(c => c.steam64 === eloRow.steam64);
-      if (r) return r;
     }
-    if (eloRow.name) {
-      const lower = eloRow.name.toLowerCase();
-      return _vtsrCareerStats.find(c => (c.name || '').toLowerCase() === lower) || null;
+
+    // Methodology modal (quick reference; the full explainer lives on
+    // /elo/). Body comes from the shared VTSRExplain module so the
+    // dashboard modal and the ELO page tell the same story. Populated
+    // lazily on first open (KaTeX gate: methodologyModal() returns null
+    // until katex.min.js has loaded, and we retry on the next open);
+    // the annotated stage initializes after the modal is fully visible
+    // so connector anchors are measured at their settled positions.
+    const $modal = document.getElementById('vtsr-methodology-modal');
+    const $modalBody = document.getElementById('vtsr-methodology-modal-body');
+    if ($modal && $modalBody && !$modal.dataset.vtListener && window.VTSRExplain) {
+      $modal.dataset.vtListener = '1';
+      $modal.addEventListener('show.bs.modal', () => {
+        if ($modalBody.dataset.vtPopulated) return;
+        const html = window.VTSRExplain.methodologyModal();
+        if (html) {
+          // Improvement #6: append a short uncertainty section when the
+          // validation summary supplied a noise band. Kept out of the
+          // shared module so the cached methodology HTML stays
+          // independent of the (optionally missing) validation file.
+          const sigma = vtRatingNoiseSigma();
+          const noiseSection = sigma != null
+            ? `<section class="vt-vtsr-doc-section">
+                 <h6><i class="bi bi-rulers me-2"></i>How precise is a rating?</h6>
+                 <p class="mb-0">Every VTSR-T value carries a resampling noise band of about
+                 <strong>\u00b1${sigma} ELO</strong> (median per-player spread when the rating is
+                 recomputed over 100 random 80% subsets of the corpus &mdash; see
+                 <code>validation_summary.json</code>). Two players within ~${sigma} points of each
+                 other are statistically tied; tier placement is meaningful, exact ranks inside a
+                 tier mostly are not. The band tightens as the corpus grows.</p>
+               </section>`
+            : '';
+          $modalBody.innerHTML = html + noiseSection;
+          $modalBody.dataset.vtPopulated = '1';
+        }
+      });
+      $modal.addEventListener('shown.bs.modal', () => {
+        window.VTSRExplain.initIn($modalBody);
+      });
     }
-    return null;
+
+    ensureTooltips($card);
   }
 
-  // v2.3 polish: module-local Set of expanded VTSR-T row keys
-  // (steam64 with name fallback, matches vtsrRowKey()). Survives sort
-  // + picker-filter re-renders so a player's expanded detail panel
-  // doesn't collapse when the user clicks a column header. Mutated
-  // by the shown.bs.collapse / hidden.bs.collapse event listeners
-  // delegated on tbody.
-  const expandedVtsrRows = new Set();
-
-  // Stable VTSR-T row identifier - steam64 when present, normalized
-  // name fallback for legacy ratings. Used for sparkline canvas ids,
-  // detail-row ids, and `expandedVtsrRows` membership.
-  function vtsrRowKey(r) {
-    const raw = r.steam64 || r.name || '';
-    return String(raw).replace(/[^A-Za-z0-9_-]/g, '_');
-  }
-
-  // v2.3 polish: per-axis metadata for the expand panel's hover
-  // tooltips. Each axis row in sections B + C surfaces a tooltip
-  // composed of label + formula + description, plus a per-row sigma
-  // interpretation that the axis-grid renderer appends. Keys mirror
-  // the axis-name keys in elo_current.json `weights` (and the same
-  // keys in `axis_means` / `axis_contributions`).
+  // Per-axis metadata: label + formula + description per ELO axis.
+  // Consumed by the per-match leaderboard's top-axis-contributor labels
+  // and the Commander Cohort table. (The VTSR-T leaderboard's expand
+  // panel, which also reads this catalog, now lives in js/elo.js on the
+  // dedicated /elo/ page with its own copy.) Keys mirror the axis-name
+  // keys in elo_current.json `weights` / `axis_means` / `axis_contributions`.
   const VTSR_AXIS_META = {
     net_damage_share: {
       label: 'Net damage share',
@@ -5920,605 +5828,9 @@
     },
   };
 
-  // Build the tooltip body string for one axis bar row. ``mode`` is
-  // 'career' (axis_means - long-run average) or 'last_match'
-  // (axis_contributions - per-match z). Phrasing differs slightly so
-  // the user understands whether the value is career-aggregate or
-  // single-match. Returns an HTML string suitable for a Bootstrap
-  // tooltip with ``data-bs-html="true"``.
-  function buildAxisTooltipHtml(axisName, z, mode) {
-    const meta = VTSR_AXIS_META[axisName] || {
-      label: axisName, formula: '', desc: '',
-    };
-    const zSign = z >= 0 ? '+' : '';
-    const zRounded = z.toFixed(2);
-    let interp;
-    const matchPhrase = mode === 'last_match' ? ' for that match' : '';
-    if (Math.abs(z) < 0.05) {
-      interp = `About average for the lobby${matchPhrase}.`;
-    } else if (z > 0) {
-      interp = `<span style="color:var(--kb-success);">Above lobby average${matchPhrase}.</span> Higher than peers.`;
-    } else {
-      interp = `<span style="color:var(--kb-danger);">Below lobby average${matchPhrase}.</span> Lower than peers.`;
-    }
-    const formulaLine = meta.formula
-      ? `<div style="margin-top:0.3rem;"><code style="font-size:0.75rem;">${esc(meta.formula)}</code></div>`
-      : '';
-    const descLine = meta.desc
-      ? `<div style="margin-top:0.3rem;">${esc(meta.desc)}</div>`
-      : '';
-    return `<div><strong>${esc(meta.label)}</strong> &middot; ${zSign}${zRounded}\u03c3</div>
-            ${formulaLine}
-            ${descLine}
-            <div style="margin-top:0.3rem;">${interp}</div>`;
-  }
 
-  // v2.3 polish: render one VTSR-T leaderboard row's expanded detail
-  // panel. Six sections in a 2-col responsive grid, all sourced from
-  // already-loaded data (`elo_current.json` for axis_means, lazy-loaded
-  // `elo_history.json` for last-match axis_contributions, `careerStats[]`
-  // for combat split + ship/weapon distribution).
-  //
-  //   A. Combat split        - PvP/PvE raw counts + total dmg + active time
-  //   B. Career axes         - 8-axis bar grid from axis_means
-  //   C. Last-match axes     - 8-axis bar grid + P/E/dR formula
-  //   D. Ship distribution   - top 5 ships by time (career)
-  //   E. Peak context        - peak rating + match id
-  //   F. Weapon distribution - top 5 weapons by damage (career)
-  function buildVtsrDetailPanel(eloRow, careerRow) {
-    const sectA = renderVtsrCombatSection(careerRow);
-    const sectB = renderVtsrAxisGrid(eloRow.axis_means || {}, 'career', null);
-    const sectC = renderVtsrLastMatchSection(eloRow);
-    const sectD = renderVtsrShipLoadoutSection(careerRow);
-    const sectE = renderVtsrPeakSection(eloRow);
-    const sectF = renderVtsrWeaponDistributionSection(careerRow);
-    return `<div class="vt-vtsr-detail-grid">
-      <div class="vt-vtsr-detail-col">
-        ${sectA}
-        ${sectD}
-        ${sectF}
-        ${sectE}
-      </div>
-      <div class="vt-vtsr-detail-col">
-        ${sectB}
-        ${sectC}
-      </div>
-    </div>`;
-  }
 
-  // Section A: raw PvP/PvE counts + total dmg + active hours.
-  function renderVtsrCombatSection(careerRow) {
-    if (!careerRow) {
-      return `<section class="vt-vtsr-detail-section">
-        <h6>Combat split</h6>
-        <div class="text-muted small">No career data for this player yet.</div>
-      </section>`;
-    }
-    const pvpK = careerRow.total_pvp_kills  || 0;
-    const pveK = careerRow.total_pve_kills  || 0;
-    const pvpD = careerRow.total_pvp_deaths || 0;
-    const pveD = careerRow.total_pve_deaths || 0;
-    const totalDealt = careerRow.total_dealt || 0;
-    const activeSec = (careerRow.career_loadout && careerRow.career_loadout.active_seconds) || 0;
-    const activeHrs = activeSec >= 3600
-      ? (activeSec / 3600).toFixed(1) + 'h'
-      : Math.round(activeSec / 60) + 'm';
-    return `<section class="vt-vtsr-detail-section">
-      <h6>Combat split</h6>
-      <div class="vt-vtsr-detail-stats">
-        <div><span class="vt-stat-label">PvP Kills</span><span class="vt-stat-value">${pvpK}</span></div>
-        <div><span class="vt-stat-label">PvE Kills</span><span class="vt-stat-value">${pveK}</span></div>
-        <div><span class="vt-stat-label">PvP Deaths</span><span class="vt-stat-value">${pvpD}</span></div>
-        <div><span class="vt-stat-label">PvE Deaths</span><span class="vt-stat-value">${pveD}</span></div>
-        <div><span class="vt-stat-label">Total Dmg</span><span class="vt-stat-value">${fmt(totalDealt)}</span></div>
-        <div><span class="vt-stat-label">Active</span><span class="vt-stat-value">${activeHrs}</span></div>
-      </div>
-    </section>`;
-  }
 
-  // Section B + C body builder: render an 8-axis horizontal bar grid.
-  // `axisMap` is `{axis_name: z_score}` where z is post-clip-and-divide-by-2
-  // (range [-1, +1]). When `weightsMap` is provided, render the
-  // weighted contribution (w * z) alongside each axis row. Title
-  // string varies by section.
-  function renderVtsrAxisGrid(axisMap, mode, weightsMap) {
-    const axes = Object.keys(axisMap || {});
-    if (!axes.length) {
-      return `<section class="vt-vtsr-detail-section">
-        <h6>${mode === 'career' ? 'Career axis profile' : 'Last-match axis breakdown'}</h6>
-        <div class="text-muted small">No per-axis data available.</div>
-      </section>`;
-    }
-    // Sort by absolute z desc (most-impactful axes lead).
-    const sorted = axes.slice().sort((a, b) =>
-      Math.abs(axisMap[b]) - Math.abs(axisMap[a])
-    );
-    const rows = sorted.map(a => {
-      const z = axisMap[a] || 0;
-      const cls = z > 0 ? 'is-positive' : z < 0 ? 'is-negative' : '';
-      const zSign = z >= 0 ? '+' : '';
-      // Bar fill width: |z| * 50% (z is in [-1, +1], bar half-width is 50%).
-      const widthPct = Math.min(100, Math.abs(z) * 50);
-      // Bar starts at center and extends right (positive) or left (negative).
-      const fillStyle = z >= 0
-        ? `left:50%; width:${widthPct.toFixed(2)}%;`
-        : `right:50%; width:${widthPct.toFixed(2)}%;`;
-      let weightedStr = '';
-      if (weightsMap && weightsMap[a] != null) {
-        const w = weightsMap[a];
-        const wc = z * w;
-        const wcSign = wc >= 0 ? '+' : '';
-        weightedStr = ` <span class="vt-axis-bar-weighted">w=${w.toFixed(2)} \u2192 ${wcSign}${wc.toFixed(3)}</span>`;
-      }
-      // v2.3 polish: per-axis hover tooltip (formula + description +
-      // sigma interpretation). The detail row is hidden inside a
-      // Bootstrap collapse, so tooltips on its descendants don't
-      // initialize until the panel is shown -- ensureTooltips() runs
-      // after the tbody rebuild and re-binds on every render.
-      const tipHtml = buildAxisTooltipHtml(a, z, mode);
-      return `<div class="vt-axis-bar-row ${cls}"
-                   data-bs-toggle="tooltip" data-bs-html="true"
-                   data-bs-placement="top"
-                   data-bs-custom-class="vt-axis-tooltip"
-                   title="${esc(tipHtml)}">
-        <span class="vt-axis-bar-name">${esc(a)}</span>
-        <span class="vt-axis-bar-track">
-          <span class="vt-axis-bar-center"></span>
-          <span class="vt-axis-bar-fill" style="${fillStyle}"></span>
-        </span>
-        <span class="vt-axis-bar-z">${zSign}${z.toFixed(2)}\u03c3${weightedStr}</span>
-      </div>`;
-    }).join('');
-    const heading = mode === 'career'
-      ? 'Career axis profile <span class="vt-vtsr-detail-sub text-muted">(z\u0304 across rated matches)</span>'
-      : 'Last-match axis breakdown';
-    return `<section class="vt-vtsr-detail-section">
-      <h6>${heading}</h6>
-      <div class="vt-axis-bar-grid">${rows}</div>
-    </section>`;
-  }
-
-  // Section C: last-match axis breakdown with P / E / dR formula
-  // header. Pulls from the active elo history (canonical or thug-only
-  // based on the elo-mode toggle) via getActiveEloHistory(). Falls
-  // back to an "unavailable" message only if the file is genuinely
-  // missing (404 / parse fail) or the player has no rated matches
-  // yet in the active dataset (thug-only mode: a player with zero
-  // thug appearances simply has no rated history).
-  function renderVtsrLastMatchSection(eloRow) {
-    const hist = getActiveEloHistory();
-    if (hist == null) {
-      return `<section class="vt-vtsr-detail-section">
-        <h6>Last-match axis breakdown</h6>
-        <div class="text-muted small">Axis breakdown unavailable (elo_history.json missing).</div>
-      </section>`;
-    }
-    const targetSteam64 = eloRow.steam64 || '';
-    const targetName = eloRow.name || '';
-    const history = (hist.history || []);
-    let lastDelta = null;
-    let lastEntry = null;
-    for (let i = history.length - 1; i >= 0 && !lastDelta; i--) {
-      const h = history[i];
-      if (h.match_excluded) continue;
-      const found = (h.deltas || []).find(d =>
-        (targetSteam64 && d.steam64 === targetSteam64) || d.name === targetName
-      );
-      if (found) { lastDelta = found; lastEntry = h; }
-    }
-    if (!lastDelta) {
-      return `<section class="vt-vtsr-detail-section">
-        <h6>Last-match axis breakdown</h6>
-        <div class="text-muted small">No rated match history for this player yet.</div>
-      </section>`;
-    }
-    const ac = lastDelta.axis_contributions || {};
-    const matchId = lastEntry.match_id || '';
-    const dr = (lastDelta.delta != null ? lastDelta.delta : 0).toFixed(2);
-    const drSign = lastDelta.delta > 0 ? '+' : '';
-    const perfStr = (lastDelta.performance != null ? lastDelta.performance : 0).toFixed(4);
-    const perfSign = lastDelta.performance > 0 ? '+' : '';
-    const expStr = (lastDelta.expected != null ? lastDelta.expected : 0).toFixed(4);
-    const expSign = lastDelta.expected > 0 ? '+' : '';
-
-    // Pro-rata redistribute weights over only the axes present
-    // (matches Python compute_performance_index() rule).
-    const activeElo = getActiveElo();
-    const weightsAll = (activeElo && activeElo.weights) || {};
-    const availableAxes = Object.keys(ac);
-    const totalWeight = availableAxes.reduce((s, a) => s + (weightsAll[a] || 0), 0);
-    const weightsRedistributed = {};
-    if (totalWeight > 0) {
-      for (const a of availableAxes) {
-        weightsRedistributed[a] = (weightsAll[a] || 0) / totalWeight;
-      }
-    }
-    // Render axis grid + formula header.
-    const grid = renderVtsrAxisGrid(ac, 'last_match', weightsRedistributed);
-    // Splice in the formula line right after the <h6>.
-    const formulaLine = `<div class="vt-vtsr-detail-formula"><strong>${esc(matchId)}</strong> &middot; P=${perfSign}${perfStr} \u00b7 E=${expSign}${expStr} \u00b7 \u0394R=<span class="${lastDelta.delta > 0 ? 'vt-vtsr-delta-positive' : lastDelta.delta < 0 ? 'vt-vtsr-delta-negative' : ''}">${drSign}${dr}</span></div>`;
-    return grid.replace('</h6>', `</h6>${formulaLine}`);
-  }
-
-  // Section D: top 5 ships by time, with per-ship K/D, time, dmg.
-  function renderVtsrShipLoadoutSection(careerRow) {
-    const list = (careerRow && careerRow.career_per_ship_combat) || [];
-    if (!list.length) {
-      return `<section class="vt-vtsr-detail-section">
-        <h6>Ship loadout</h6>
-        <div class="text-muted small">No ship-level data available.</div>
-      </section>`;
-    }
-    const top = list.slice(0, 5);
-    const totalActiveSec = (careerRow && careerRow.career_loadout && careerRow.career_loadout.active_seconds) || 0;
-    const rows = top.map(s => {
-      const share = totalActiveSec > 0 ? (s.time_seconds || 0) / totalActiveSec : 0;
-      const widthPct = (share * 100).toFixed(1);
-      const kd = s.kd != null ? s.kd.toFixed(2) : '\u2014';
-      const timeStr = (s.time_seconds || 0) >= 3600
-        ? ((s.time_seconds || 0) / 3600).toFixed(1) + 'h'
-        : Math.round((s.time_seconds || 0) / 60) + 'm';
-      return `<div class="vt-vtsr-detail-loadout-row">
-        <span class="vt-vtsr-detail-loadout-name">${esc(s.ship_name || s.ship)}</span>
-        <span class="vt-vtsr-detail-loadout-bar">
-          <span class="vt-vtsr-detail-loadout-bar-fill" style="width:${widthPct}%;"></span>
-        </span>
-        <span class="vt-vtsr-detail-loadout-share">${(share * 100).toFixed(1)}%</span>
-        <span class="vt-vtsr-detail-loadout-time">${timeStr}</span>
-        <span class="vt-vtsr-detail-loadout-kd">${kd} K/D</span>
-      </div>`;
-    }).join('');
-    const more = list.length > 5
-      ? `<div class="vt-vtsr-detail-loadout-more text-muted small">+ ${list.length - 5} more ${list.length - 5 === 1 ? 'ship' : 'ships'}</div>`
-      : '';
-    return `<section class="vt-vtsr-detail-section">
-      <h6>Ship distribution <span class="vt-vtsr-detail-sub text-muted">(top ${Math.min(5, list.length)} by time)</span></h6>
-      ${rows}
-      ${more}
-    </section>`;
-  }
-
-  // Section F: top 5 weapons by damage dealt (career-aggregated).
-  // Same visual aesthetic as the ship distribution section -- one row
-  // per weapon with name | bar | share% | total dmg | accuracy. Reads
-  // from career_stats[].weapon_breakdown which already carries
-  // {dealt, shots, hits, pvp_hits, accuracy, pvp_accuracy} per weapon.
-  function renderVtsrWeaponDistributionSection(careerRow) {
-    const wb = (careerRow && careerRow.weapon_breakdown) || {};
-    const list = Object.entries(wb)
-      .filter(([, w]) => (w && (w.dealt || 0) > 0))
-      .sort(([, a], [, b]) => (b.dealt || 0) - (a.dealt || 0));
-    if (!list.length) {
-      return `<section class="vt-vtsr-detail-section">
-        <h6>Weapon distribution</h6>
-        <div class="text-muted small">No weapon data available.</div>
-      </section>`;
-    }
-    const top = list.slice(0, 5);
-    const totalDealt = list.reduce((s, [, w]) => s + (w.dealt || 0), 0);
-    const rows = top.map(([wname, w]) => {
-      const share = totalDealt > 0 ? (w.dealt || 0) / totalDealt : 0;
-      const widthPct = (share * 100).toFixed(1);
-      const accStr = (w.shots || 0) > 0
-        ? ((w.accuracy || 0) * 100).toFixed(1) + '%'
-        : '\u2014';
-      return `<div class="vt-vtsr-detail-loadout-row">
-        <span class="vt-vtsr-detail-loadout-name">${esc(wname)}</span>
-        <span class="vt-vtsr-detail-loadout-bar">
-          <span class="vt-vtsr-detail-loadout-bar-fill" style="width:${widthPct}%;"></span>
-        </span>
-        <span class="vt-vtsr-detail-loadout-share">${(share * 100).toFixed(1)}%</span>
-        <span class="vt-vtsr-detail-loadout-time">${fmt(w.dealt || 0)}</span>
-        <span class="vt-vtsr-detail-loadout-kd">${accStr}</span>
-      </div>`;
-    }).join('');
-    const more = list.length > 5
-      ? `<div class="vt-vtsr-detail-loadout-more text-muted small">+ ${list.length - 5} more ${list.length - 5 === 1 ? 'weapon' : 'weapons'}</div>`
-      : '';
-    return `<section class="vt-vtsr-detail-section">
-      <h6>Weapon distribution <span class="vt-vtsr-detail-sub text-muted">(top ${Math.min(5, list.length)} by damage)</span></h6>
-      ${rows}
-      ${more}
-    </section>`;
-  }
-
-  // Section E: peak rating + match id.
-  function renderVtsrPeakSection(eloRow) {
-    const peak = Math.round(eloRow.peak_vtsr || eloRow.vtsr || 0);
-    const peakAt = eloRow.peak_at || '';
-    const peakStr = peakAt ? `Reached at <strong>${esc(peakAt)}</strong>` : '';
-    return `<section class="vt-vtsr-detail-section">
-      <h6>Peak</h6>
-      <div class="vt-vtsr-detail-peak">
-        <span class="vt-vtsr-detail-peak-value">${peak}</span>
-        <span class="vt-vtsr-detail-peak-label text-muted">${peakStr}</span>
-      </div>
-    </section>`;
-  }
-
-  // Renders the dedicated VTSR-T Leaderboard card. `elo` is the parsed
-  // elo_current.json payload (or null when the file is missing — in which
-  // case the card hides itself entirely). `careerStats` is the post-filter
-  // career_stats list emitted by the aggregator; we filter the displayed
-    // roster to players who appear there so the dedicated VTSR-T card never
-  // shows a player the Career Leaderboard hides.
-  function renderVtsrLeaderboard(elo, careerStats) {
-    const $card = document.getElementById('section-vtsr');
-    if (!$card) return;
-
-    if (!elo || !Array.isArray(elo.ratings) || elo.ratings.length === 0) {
-      $card.classList.add('d-none');
-      return;
-    }
-
-    // Cascade the career_stats filter set so the picker filter narrows
-    // the dedicated VTSR-T table the same way it narrows the Career table.
-    // (Ratings themselves are corpus-wide — only the displayed roster
-    // changes based on filter scope.)
-    const careerNames    = new Set((careerStats || []).map(c => (c.name || '').toLowerCase()));
-    const careerSteam64s = new Set((careerStats || []).map(c => c.steam64).filter(Boolean));
-    const visible = elo.ratings.filter(r => {
-      if (r.steam64 && careerSteam64s.has(r.steam64)) return true;
-      if (r.name && careerNames.has(r.name.toLowerCase())) return true;
-      return false;
-    });
-    if (visible.length === 0) {
-      $card.classList.add('d-none');
-      return;
-    }
-    $card.classList.remove('d-none');
-
-    // Improvement #6 (fable analysis): surface the bootstrap resampling
-    // noise floor so leaderboard gaps smaller than the band read as the
-    // statistical ties they are. Sourced from validation_summary.json via
-    // vtRatingNoiseSigma(); the note self-removes when the file is absent.
-    const noiseSigma = vtRatingNoiseSigma();
-    let $noiseNote = $card.querySelector('#vtsr-noise-note');
-    if (noiseSigma != null) {
-      if (!$noiseNote) {
-        $noiseNote = document.createElement('div');
-        $noiseNote.id = 'vtsr-noise-note';
-        $noiseNote.className = 'vt-vtsr-noise-note';
-        const $body = $card.querySelector('.card-body');
-        if ($body) $body.insertBefore($noiseNote, $body.firstChild);
-      }
-      $noiseNote.innerHTML =
-        `<i class="bi bi-rulers me-1"></i>Ratings carry a \u00b1${noiseSigma} ELO ` +
-        `resampling noise band \u2014 gaps smaller than ~${noiseSigma} points are statistical ties.`;
-    } else if ($noiseNote) {
-      $noiseNote.remove();
-    }
-
-    // v2.3: cache the careerStats reference for vtsrSort + the row
-    // renderer to join Primary Class / PvP K/D from career_stats[]
-    // by steam64-then-name without passing it through every helper.
-    _vtsrCareerStats = careerStats || [];
-
-    // elo_history.json is eagerly fetched alongside elo_current.json in
-    // loadAllMatches() so window.__vtEloHistory is guaranteed populated
-    // (or sentinel `null`) by the time we get here. The per-axis
-    // Last-Match Axis Breakdown panel reads it directly.
-
-    const sorted = visible.slice().sort(vtsrSort(vtsrSortState.key, vtsrSortState.asc));
-    const tbody = $card.querySelector('#vtsr-table tbody');
-    // v2.3 polish: 14-column primary row + paired collapse detail row
-    // (5-section panel). Detail-row state is preserved across sort /
-    // filter re-renders via `expandedVtsrRows` (module-local Set keyed
-    // on stable identity).
-    tbody.innerHTML = sorted.map((r, i) => {
-      const tier = resolveTier(r.vtsr, r.matches_played);
-      let tierTip;
-      if (tier.id === 0) {
-        tierTip = `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`;
-      } else if (tier.id === 1) {
-        tierTip = `${tier.label} · ${tier.min}+ VTSR-T · top of the ladder`;
-      } else if (tier.id === 5) {
-        const fromFloor = Math.max(0, Math.round(r.vtsr - 1000));
-        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${fromFloor} pts above floor`;
-      } else {
-        const prog = tierProgress(r.vtsr, tier);
-        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
-      }
-      const badge = tierBadgeHtml(tier, { title: tierTip });
-      const lastDelta = r.last_delta || 0;
-      const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : '';
-      const lastSign  = lastDelta > 0 ? '+' : '';
-      const rowKey = vtsrRowKey(r);
-      const detailId    = `vtsr-detail-${rowKey}`;
-      const expanded = expandedVtsrRows.has(rowKey);
-
-      const careerRow = vtsrCareerByName(r);
-      const cl = (careerRow && careerRow.career_loadout) || null;
-
-      // ----- Player cell tooltip: steam64 + in-game nick when they
-      //       differ from the canonical display name. Skip the
-      //       data-bs-toggle entirely when neither is informative
-      //       (avoid empty popovers).
-      let playerCellAttrs = '';
-      const playerTipParts = [];
-      if (r.steam64) playerTipParts.push(`Steam64: ${r.steam64}`);
-      // careerRow may carry an in_game_nick on legacy rows; check both
-      // sources without assuming presence.
-      const inGameNick = (careerRow && careerRow.in_game_nick) || null;
-      if (inGameNick && inGameNick.toLowerCase() !== (r.name || '').toLowerCase()) {
-        playerTipParts.push(`In-game nick: ${inGameNick}`);
-      }
-      if (playerTipParts.length) {
-        playerCellAttrs = ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(playerTipParts.join(' \u00b7 '))}"`;
-      }
-
-      // ----- Primary Ship cell (raw lowercased ODF stem) -----
-      let primaryShipCell = '<td class="text-center"><span style="color:var(--kb-text-muted);">&mdash;</span></td>';
-      if (cl && cl.primary_ship && cl.primary_ship.name) {
-        const psName = cl.primary_ship.name;
-        const psShare = cl.primary_ship.share != null ? (cl.primary_ship.share * 100).toFixed(1) + '%' : '';
-        const ss = cl.secondary_ship;
-        const ssPart = (ss && ss.name && ss.share != null)
-          ? ` \u00b7 secondary ${ss.name} (${(ss.share * 100).toFixed(1)}%)`
-          : '';
-        const diversity = cl.ship_diversity || 0;
-        const diversityPart = diversity > 0
-          ? ` \u00b7 ${diversity} distinct ${diversity === 1 ? 'ship' : 'ships'}`
-          : '';
-        const activeSec = cl.active_seconds || 0;
-        const activeStr = activeSec >= 3600
-          ? (activeSec / 3600).toFixed(1) + 'h active'
-          : Math.round(activeSec / 60) + 'm active';
-        const psTip = `${psName} \u00b7 ${psShare} of ${activeStr}${ssPart}${diversityPart}`;
-        primaryShipCell = `<td class="text-center" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(psTip)}"><span class="vt-vtsr-primary-class">${esc(psName)}</span></td>`;
-      }
-
-      // ----- PvP K/D + PvE K/D split cells -----
-      const pvpK = careerRow ? (careerRow.total_pvp_kills || 0) : 0;
-      const pvpD = careerRow ? (careerRow.total_pvp_deaths || 0) : 0;
-      const pveK = careerRow ? (careerRow.total_pve_kills || 0) : 0;
-      const pveD = careerRow ? (careerRow.total_pve_deaths || 0) : 0;
-      const fmtKd = (k, d) => {
-        if (d === 0 && k === 0) return '\u2014';
-        if (d === 0) return '\u221e';
-        return (k / d).toFixed(2);
-      };
-      const pvpKdStr = (pvpK + pvpD > 0) ? fmtKd(pvpK, pvpD) : '\u2014';
-      const pveKdStr = (pveK + pveD > 0) ? fmtKd(pveK, pveD) : '\u2014';
-      const pvpKdTip = (pvpK + pvpD > 0) ? `${pvpK} PvP kills / ${pvpD} PvP deaths` : 'No PvP combat';
-      const pveKdTip = (pveK + pveD > 0) ? `${pveK} PvE kills / ${pveD} PvE deaths` : 'No PvE combat';
-
-      // ----- Acc + PvP Acc -----
-      const totalShots = careerRow ? (careerRow.total_shots_fired || 0) : 0;
-      const totalHits  = careerRow ? (careerRow.total_shots_hit || 0) : 0;
-      const totalPvpHits = careerRow ? (careerRow.total_pvp_shots_hit || 0) : 0;
-      const accStr = careerRow
-        ? ((careerRow.overall_accuracy || 0) * 100).toFixed(1) + '%'
-        : '\u2014';
-      const pvpAccStr = careerRow
-        ? ((careerRow.pvp_accuracy || 0) * 100).toFixed(1) + '%'
-        : '\u2014';
-      const accTip = totalShots > 0
-        ? `${totalHits.toLocaleString()} hits / ${totalShots.toLocaleString()} shots = ${((careerRow.overall_accuracy || 0) * 100).toFixed(2)}%`
-        : 'No shots fired this career';
-      const pvpAccTip = totalShots > 0
-        ? `${totalPvpHits.toLocaleString()} PvP hits / ${totalShots.toLocaleString()} shots = ${((careerRow.pvp_accuracy || 0) * 100).toFixed(2)}%`
-        : 'No shots fired this career';
-
-      // ----- VTSR-T cell tooltip (Thug ELO + Wins ELO + matches) -----
-      // Improvement #6: lead with the ±σ noise band when available so the
-      // headline number is always read alongside its uncertainty.
-      const vtsrValueStr = noiseSigma != null
-        ? `${Math.round(r.vtsr)} \u00b1 ${noiseSigma} VTSR-T (resampling \u03c3)`
-        : `${Math.round(r.vtsr)} VTSR-T`;
-      const vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
-
-      // ----- Last cell tooltip (delta + match id) -----
-      const lastTip = (r.last_match_id && lastDelta !== 0)
-        ? `${lastSign}${lastDelta.toFixed(2)} from match ${r.last_match_id}`
-        : (r.last_match_id ? `No rating change from match ${r.last_match_id}` : 'No rated matches yet');
-
-      // ----- Peak cell tooltip (already had one; add match-id) -----
-      const peakAt = r.peak_at || '';
-      const peakTip = peakAt
-        ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} reached at ${peakAt}`
-        : `Peak rating: ${Math.round(r.peak_vtsr || r.vtsr)}`;
-
-      // ----- Matches cell tooltip -----
-      const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <5 min duration`;
-
-      const detailHtml = buildVtsrDetailPanel(r, careerRow);
-
-      return `<tr data-vtsr-name="${esc(r.name)}" data-vtsr-steam64="${esc(r.steam64 || '')}" data-vtsr-key="${esc(rowKey)}">
-        <td>${i + 1}</td>
-        <td class="vt-vtsr-expand-col">
-          <button type="button" class="vt-row-expand"
-                  data-bs-toggle="collapse" data-bs-target="#${detailId}"
-                  aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
-                  aria-label="Toggle row details">
-            <i class="bi bi-chevron-right"></i>
-          </button>
-        </td>
-        <td class="text-center">${badge}</td>
-        <td class="fw-semibold"${playerCellAttrs}>${vtPlayerLinkHtml(r.name, r.steam64)}</td>
-        ${primaryShipCell}
-        <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
-        <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pveKdTip)}">${pveKdStr}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(accTip)}">${accStr}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpAccTip)}">${pvpAccStr}</td>
-        <td class="text-end ${lastClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(lastTip)}">${lastSign}${lastDelta.toFixed(1)}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
-      </tr>
-      <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
-        <td colspan="13">${detailHtml}</td>
-      </tr>`;
-    }).join('');
-
-    // v2.3 polish: track expand/collapse on the chevron button. Bootstrap's
-    // Collapse component fires shown.bs.collapse / hidden.bs.collapse on
-    // the COLLAPSE element (not the trigger), so we delegate on tbody.
-    // The expanded set survives sort + picker-filter re-renders.
-    if (!tbody.dataset.vtCollapseListenersBound) {
-      tbody.dataset.vtCollapseListenersBound = '1';
-      tbody.addEventListener('shown.bs.collapse', (e) => {
-        const id = (e.target && e.target.id) || '';
-        if (id.startsWith('vtsr-detail-')) expandedVtsrRows.add(id.slice('vtsr-detail-'.length));
-      });
-      tbody.addEventListener('hidden.bs.collapse', (e) => {
-        const id = (e.target && e.target.id) || '';
-        if (id.startsWith('vtsr-detail-')) expandedVtsrRows.delete(id.slice('vtsr-detail-'.length));
-      });
-    }
-
-    // Wire sortable header cells.
-    document.querySelectorAll('#vtsr-table th[data-sort]').forEach(th => {
-      th.classList.toggle('sort-active', th.dataset.sort === vtsrSortState.key);
-      th.style.cursor = 'pointer';
-      th.onclick = () => {
-        if (vtsrSortState.key === th.dataset.sort) vtsrSortState.asc = !vtsrSortState.asc;
-        else { vtsrSortState.key = th.dataset.sort; vtsrSortState.asc = false; }
-        renderVtsrLeaderboard(elo, careerStats);
-      };
-    });
-
-    // Wire the VTSR-T methodology modal to lazy-populate its body the
-    // first time it opens. We deliberately do NOT populate on first
-    // VTSR-T render here — that races KaTeX's deferred load and would
-    // cache a fallback ``<code>`` rendering of every equation. By
-    // the time the user clicks "How It's Calculated", katex.min.js
-    // has long since loaded; rendering at modal-open time guarantees
-    // ``buildVtsrTooltipHtml()`` returns a real KaTeX-rendered body.
-    // The listener attaches once (idempotent via the data flag) so
-    // re-renders of the leaderboard don't pile up duplicate handlers.
-    const $modal = document.getElementById('vtsr-methodology-modal');
-    const $modalBody = document.getElementById('vtsr-methodology-modal-body');
-    if ($modal && $modalBody && !$modal.dataset.vtListener) {
-      $modal.dataset.vtListener = '1';
-      $modal.addEventListener('show.bs.modal', () => {
-        if ($modalBody.dataset.vtPopulated) return;
-        const html = buildVtsrTooltipHtml();
-        if (html) {
-          // Improvement #6: append a short uncertainty section when the
-          // validation summary supplied a noise band. Kept out of
-          // buildVtsrTooltipHtml() so the cached methodology HTML stays
-          // independent of the (optionally missing) validation file.
-          const sigma = vtRatingNoiseSigma();
-          const noiseSection = sigma != null
-            ? `<section class="vt-vtsr-doc-section">
-                 <h6><i class="bi bi-rulers me-2"></i>How precise is a rating?</h6>
-                 <p class="mb-0">Every VTSR-T value carries a resampling noise band of about
-                 <strong>\u00b1${sigma} ELO</strong> (median per-player spread when the rating is
-                 recomputed over 100 random 80% subsets of the corpus &mdash; see
-                 <code>validation_summary.json</code>). Two players within ~${sigma} points of each
-                 other are statistically tied; tier placement is meaningful, exact ranks inside a
-                 tier mostly are not. The band tightens as the corpus grows.</p>
-               </section>`
-            : '';
-          $modalBody.innerHTML = html + noiseSection;
-          $modalBody.dataset.vtPopulated = '1';
-        }
-      });
-    }
-
-    ensureTooltips($card);
-  }
 
   // -----------------------------------------------------------------------
   // Commander Cohort card (All Matches -> Commanders tab, top of pane).

@@ -5140,6 +5140,317 @@ td.vt-col-split {
    theme so equations stay legible in dark mode. */
 .katex { color: inherit; }
 
+/* ===== Annotated explainer stages (js/vtsr-explainers.js) ============
+   Free-form "chalk talk" blocks shared by the dashboard methodology
+   modal and the /elo/ page tabs: a centerpiece (KaTeX equation or the
+   8-axes mixing board) with callout cards absolutely positioned at
+   author-chosen % coordinates and SVG connectors measured from the
+   live DOM by the stage engine. Below 620px the free-form layer
+   collapses to the stacked .vt-eq-list (which doubles as the sr-only
+   canonical copy on desktop). */
+
+.vt-eq-stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 1;
+    min-height: 280px;
+    max-height: 460px;
+    margin: 0.4rem 0 0.5rem;
+}
+
+.vt-eq-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.vt-eq-center .katex { font-size: clamp(1.5rem, 3.2vw, 2.3rem); }
+.vt-eq-center .katex-display { margin: 0; }
+/* Beat the modal-scoped `.vt-katex-tooltip .katex-display` margin rule. */
+.modal-body.vt-katex-tooltip .vt-eq-center .katex-display { margin: 0; }
+
+/* Anchor elements (tagged glyphs / board segments): lit once their
+   callout is revealed, glowing while they are the current step.
+   eq-gap wraps eq-perf/eq-exp, so dimming is never used (it would
+   cascade into the nested terms). */
+.vt-eq-term {
+    border-radius: 4px;
+    transition: color 0.25s ease, text-shadow 0.25s ease;
+}
+.vt-eq-center .katex .vt-eq-term.is-lit { color: var(--kb-primary); }
+.vt-eq-term.is-current {
+    text-shadow: 0 0 16px color-mix(in oklab, var(--kb-primary) 60%, transparent);
+}
+
+.vt-eq-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+.vt-eq-connector {
+    fill: none;
+    stroke: color-mix(in oklab, var(--kb-primary) 55%, transparent);
+    stroke-width: 1.5;
+}
+.vt-eq-connector.is-current {
+    stroke: var(--kb-primary);
+    stroke-width: 1.8;
+}
+.vt-eq-anchor-dot { fill: var(--kb-primary); }
+.vt-eq-svg marker path { stroke: var(--kb-primary); stroke-width: 1.6; }
+
+.vt-eq-callout {
+    position: absolute;
+    width: clamp(170px, 27%, 250px);
+    padding: 0.55rem 0.7rem;
+    background: color-mix(in oklab, var(--kb-bg-secondary) 90%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-primary) 28%, transparent);
+    border-radius: 0.55rem;
+    backdrop-filter: blur(var(--vt-glass-blur, 10px));
+    box-shadow: var(--vt-shadow-elevation-1);
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+    transition: opacity 0.3s ease, transform 0.3s ease, border-color 0.3s ease;
+    pointer-events: none;
+    z-index: 2;
+}
+.vt-eq-callout.is-shown {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+}
+.vt-eq-callout.is-current {
+    border-color: color-mix(in oklab, var(--kb-primary) 60%, transparent);
+    box-shadow: var(--vt-shadow-elevation-2);
+}
+.vt-eq-callout-title {
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--kb-primary);
+    margin-bottom: 0.2rem;
+}
+.vt-eq-callout-body {
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--kb-text-secondary, inherit);
+}
+
+.vt-eq-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 4%;
+    transform: translateX(-50%);
+    font-size: 0.78rem;
+    color: var(--kb-text-muted);
+    white-space: nowrap;
+    transition: opacity 0.3s ease;
+}
+.vt-eq-hint.is-gone { opacity: 0; }
+
+.vt-eq-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-bottom: 0.25rem;
+}
+.vt-eq-dots { display: flex; gap: 0.35rem; }
+.vt-eq-dot {
+    width: 9px;
+    height: 9px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--kb-text-muted) 55%, transparent);
+    background: transparent;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+.vt-eq-dot.is-active {
+    background: var(--kb-primary);
+    border-color: var(--kb-primary);
+}
+
+/* Canonical callout copy. Desktop: sr-only (the floating cards are the
+   visual). Narrow: the visible stacked walkthrough. Items stay in the
+   DOM at every step (dimmed, not removed) so assistive tech can always
+   read the full content. */
+.vt-eq-list {
+    margin: 0.25rem 0 0.75rem;
+    padding-left: 1.25rem;
+    font-size: 0.88rem;
+}
+.vt-eq-list li {
+    margin-bottom: 0.45rem;
+    opacity: 0.38;
+    transition: opacity 0.25s ease;
+}
+.vt-eq-list li.is-shown { opacity: 1; }
+.vt-eq-list li.is-current strong { color: var(--kb-primary); }
+
+@media (min-width: 621px) {
+    .vt-eq-list {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border: 0;
+    }
+}
+
+@media (max-width: 620px) {
+    .vt-eq-stage {
+        aspect-ratio: auto;
+        min-height: 0;
+        max-height: none;
+        padding: 0.5rem 0;
+    }
+    .vt-eq-center { position: static; }
+    .vt-eq-center .katex { font-size: 1.35rem; }
+    .vt-eq-callout,
+    .vt-eq-svg,
+    .vt-eq-hint { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-eq-callout,
+    .vt-eq-term,
+    .vt-eq-hint,
+    .vt-eq-dot,
+    .vt-eq-list li { transition: none; }
+}
+
+/* The 8-axes mixing board: a horizontal stacked weight bar whose
+   segments are the stage anchors (solo mode). Luxury 0.005 axes render
+   as a hairline with a halo hit-area so they stay visible + clickable
+   despite their ~0.5% true width. */
+.vt-axesboard {
+    display: flex;
+    width: min(92%, 760px);
+    height: 56px;
+    border-radius: 0.6rem;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--kb-text-muted) 30%, transparent);
+}
+.vt-axesboard-seg {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    flex-grow: 0;
+    flex-shrink: 0;
+    background: color-mix(in oklab, var(--kb-primary) 14%, var(--kb-bg-secondary));
+    transition: background-color 0.25s ease, box-shadow 0.25s ease;
+}
+.vt-axesboard-seg + .vt-axesboard-seg {
+    border-left: 1px solid color-mix(in oklab, var(--kb-text-muted) 30%, transparent);
+}
+.vt-axesboard-seg:nth-child(even) {
+    background: color-mix(in oklab, var(--kb-primary) 24%, var(--kb-bg-secondary));
+}
+.vt-axesboard-seg.is-luxury {
+    min-width: 12px;
+    background: color-mix(in oklab, var(--kb-text-muted) 18%, var(--kb-bg-secondary));
+}
+.vt-axesboard-seg.is-lit {
+    background: color-mix(in oklab, var(--kb-primary) 45%, var(--kb-bg-secondary));
+}
+.vt-axesboard-seg.is-current {
+    background: var(--kb-primary);
+    box-shadow: 0 0 18px color-mix(in oklab, var(--kb-primary) 55%, transparent);
+    z-index: 1;
+}
+.vt-axesboard-seg-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--kb-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 0.35rem;
+    pointer-events: none;
+}
+.vt-axesboard-seg.is-current .vt-axesboard-seg-label {
+    color: var(--kb-bg-primary, var(--kb-bg-secondary));
+}
+
+@media (max-width: 620px) {
+    .vt-axesboard { width: 100%; height: 40px; }
+    .vt-axesboard-seg-label { display: none; }
+}
+
+/* ===== VTSR-T teaser card (dashboard) ================================
+   Compact top-5 list + provisional chip row + View-full-leaderboard
+   footer. The full sortable table lives on the /elo/ page. */
+.vt-vtsr-teaser-row {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.45rem 0.25rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-muted) 14%, transparent);
+}
+.vt-vtsr-teaser-row:last-child { border-bottom: 0; }
+.vt-vtsr-teaser-rank {
+    width: 1.4rem;
+    text-align: center;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--kb-text-muted);
+}
+.vt-vtsr-teaser-tier { width: 2rem; text-align: center; }
+.vt-vtsr-teaser-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.vt-vtsr-teaser-rating {
+    font-family: var(--vt-font-mono, monospace);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.vt-vtsr-teaser-delta {
+    width: 3.2rem;
+    text-align: right;
+    font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
+}
+.vt-vtsr-teaser-provisional {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.6rem;
+}
+.vt-vtsr-teaser-chip {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.78rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--kb-text-muted) 30%, transparent);
+    background: color-mix(in oklab, var(--kb-text-muted) 8%, transparent);
+}
+.vt-vtsr-teaser-footer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    margin-top: 0.85rem;
+}
+
 /* ===== VTSR-T v2.3 — Loadout Profile + Per-Class Combat + chips ===== */
 
 /* Compact PvP/PvE chip rendered next to the kills/deaths total in the
