@@ -7,19 +7,19 @@ todos:
     status: completed
   - id: viewer-drive-controller
     content: "Add DriveController to js/models-viewer.js: setDriveMode/setDriveInput, Tier 2 unbounded locomotion on _spin pivot with infinite-floor grid recentering, mode mutual exclusion, reset/capture integration"
-    status: in_progress
+    status: completed
   - id: viewer-tier1-anims
     content: "Archetype animation mapping: hover/morph bank clips + deploy toggle, walker run/walk/turn/idle gaits, pilot gaits, tracked tread scroll, graceful degradation"
-    status: pending
+    status: completed
   - id: viewer-chase-cam
     content: "Chase camera: behind+above along turret/hull aim direction, smoothed, zoom-as-distance, restore orbit state on exit"
-    status: pending
+    status: completed
   - id: ui-wasd
     content: "js/models.js + models/index.html: un-gate Drive section, Drive Mode toggle + Deploy toggle, WASD key handling, force-enable arrow-key aim, Esc exit, HUD hint, hide on touch-only"
-    status: pending
+    status: completed
   - id: docs
     content: Update project-overview.mdc + AGENTS.md Models Browser sections with drive block schema and new tunables
-    status: pending
+    status: completed
 isProject: false
 ---
 

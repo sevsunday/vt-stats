@@ -606,6 +606,36 @@ label.light-head { cursor: pointer; }
 }
 .ctl-note { font-style: italic; }
 
+/* WASD Drive Mode HUD: a single key-legend chip, top-center of the stage. */
+.drive-hud {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kb-bg-card) 85%, transparent);
+  border: 1px solid var(--kb-border-default);
+  color: var(--kb-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;   /* never intercept canvas interaction */
+}
+.drive-hud-key {
+  font-family: var(--kb-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-input);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.drive-hud-sep { opacity: 0.5; }
+
 .fps-counter {
   position: absolute;
   right: 10px;

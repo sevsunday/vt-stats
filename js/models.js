@@ -106,9 +106,13 @@ const els = {
   partsFireSection: document.getElementById('parts-fire-section'),
   partsFire: document.getElementById('parts-fire'),
   partsDriveSection: document.getElementById('parts-drive-section'),
+  partsDriveSliderBlock: document.getElementById('parts-drive-slider-block'),
   partsDrive: document.getElementById('parts-drive'),
   partsDriveVal: document.getElementById('parts-drive-val'),
   partsDriveReset: document.getElementById('parts-drive-reset'),
+  partsDriveMode: document.getElementById('parts-drive-mode'),
+  partsDeploy: document.getElementById('parts-deploy'),
+  driveHud: document.getElementById('drive-hud'),
   partsVisibilitySection: document.getElementById('parts-visibility-section'),
   partsVisibilityRows: document.getElementById('parts-visibility-rows'),
   colorsBtn: document.getElementById('colors-btn'),
@@ -419,12 +423,19 @@ function showViewer(entry) {
     onFps: (fps) => { els.fps.textContent = `${Math.round(fps)} fps`; },
     onAim: ({ yaw, pitch }) => syncTurretSliders(yaw, pitch),
   });
-  activeViewer.load(MODELS_BASE + entry.glb, entry.parts || null, {
+  // `parts` is ODF-authoritative (schema 10 / anim v5): a null block means the
+  // pipeline determined NOTHING articulates, so pass empty hints rather than
+  // null -- null would trip the viewer's legacy name-convention fallback and
+  // resurrect engine-fixed joints (e.g. the ISDF Tank's hull-fixed gun).
+  const partsHints = entry.parts
+    || { turretNodes: [], pitchNodes: [], recoilNodes: [], head: null };
+  activeViewer.load(MODELS_BASE + entry.glb, partsHints, {
     sets: modTextureSets(entry),
     emissive: entry.emissiveTextures || [],
   })
     .then(() => {
       if (!activeViewer) return;
+      activeViewer.setDriveProfile(entry.drive || null);
       setupAnimUI();
       setupArticulationUI();
       setupColorsUI();
@@ -485,6 +496,17 @@ function showViewer(entry) {
   keyAimOn = false;
   clearTurretKeys();
 
+  // Drive Mode state never carries across opens (the viewer exits it in load();
+  // this resets the UI side).
+  driveModeOn = false;
+  drivePrevKeyAim = null;
+  clearDriveKeys();
+  els.partsDriveMode.classList.remove('on');
+  els.partsDeploy.classList.remove('on');
+  els.partsDrive.disabled = false;
+  els.partsDriveReset.disabled = false;
+  els.driveHud.hidden = true;
+
   // Team-color controls start hidden; setupColorsUI() reveals them once the GLB
   // resolves and reports team-colorable materials. Each open starts uncolored.
   els.colorsBtn.hidden = true;
@@ -533,7 +555,8 @@ function showViewer(entry) {
     const on = !els.spin.classList.contains('on');
     els.spin.classList.toggle('on', on);
     if (on) {
-      // Auto-rotate (camera) is mutually exclusive with Free spin + Aim.
+      // Auto-rotate (camera) is mutually exclusive with Free spin + Aim + Drive.
+      setDriveModeUI(false);
       els.freespin.classList.remove('on');
       els.partsAim.classList.remove('on');
       els.stage.classList.remove('grabbable');
@@ -546,6 +569,7 @@ function showViewer(entry) {
     const on = !els.freespin.classList.contains('on');
     els.freespin.classList.toggle('on', on);
     if (on) {
+      setDriveModeUI(false);
       els.spin.classList.remove('on');
       els.partsAim.classList.remove('on');
       activeViewer.setAutoRotate(false);
@@ -592,7 +616,8 @@ function showViewer(entry) {
     const on = !els.partsAim.classList.contains('on');
     els.partsAim.classList.toggle('on', on);
     if (on) {
-      // Aim-at-cursor is mutually exclusive with auto-rotate + free-spin.
+      // Aim-at-cursor is mutually exclusive with auto-rotate + free-spin + drive.
+      setDriveModeUI(false);
       els.spin.classList.remove('on');
       els.freespin.classList.remove('on');
       els.stage.classList.remove('grabbable');
@@ -622,6 +647,13 @@ function showViewer(entry) {
     els.partsDrive.value = '0';
     els.partsDriveVal.textContent = '0';
     if (activeViewer) activeViewer.setDrive(0);
+  };
+  els.partsDriveMode.onclick = () => setDriveModeUI(!driveModeOn);
+  els.partsDeploy.onclick = () => {
+    if (!activeViewer) return;
+    const on = !els.partsDeploy.classList.contains('on');
+    els.partsDeploy.classList.toggle('on', on);
+    activeViewer.setDriveDeployed(on);
   };
 
   // Team color: the button toggles the floating panel; swatches + the custom
@@ -768,6 +800,15 @@ function updateControlsHint() {
   const freespin = els.freespin.classList.contains('on');
   const autorot = els.spin.classList.contains('on');
   let items;
+  if (driveModeOn) {
+    items = [['W/S', 'Throttle'], ['A/D', 'Steer'], ['Scroll', 'Zoom'], ['Esc', 'Exit drive']];
+    if (keys) items.push(['Arrows', 'Aim turret']);
+    els.controlsHint.hidden = false;
+    els.controlsHint.innerHTML = items.map(([key, action]) => (
+      `<span class="ctl"><span class="ctl-key">${escapeHtml(key)}</span>${escapeHtml(action)}</span>`
+    )).join('');
+    return;
+  }
   if (aim) {
     items = [['Move', 'Aim turret'], ['Scroll', 'Zoom'], ['Right-drag', 'Pan']];
   } else if (freespin) {
@@ -844,13 +885,120 @@ window.addEventListener('keydown', onTurretKeyDown);
 window.addEventListener('keyup', onTurretKeyUp);
 window.addEventListener('blur', clearTurretKeys);   // never let a key "stick"
 
+/* ---- WASD Drive Mode ---------------------------------------------------- */
+// Held WASD keys feed a per-frame drive input in the viewer (same pattern as
+// the arrow-key turret slew above): W/S = throttle, A/D = steer. Drive mode
+// force-enables the arrow-key turret aim so users can drive the hull and aim
+// the guns simultaneously; Esc exits. Keyboard-driven, so the toggle is hidden
+// on touch-only devices (see driveInputCapable).
+const DRIVE_KEYS = new Set(['w', 'a', 's', 'd']);
+const heldDriveKeys = new Set();
+let driveModeOn = false;
+let drivePrevKeyAim = null;   // keyAimOn before drive force-enabled it
+
+function driveInputCapable() {
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+
+/* Push the held-key directions to the viewer (opposite keys cancel to 0). */
+function updateDriveInput() {
+  if (!activeViewer) return;
+  let fwd = 0;
+  let turn = 0;
+  if (heldDriveKeys.has('w')) fwd += 1;
+  if (heldDriveKeys.has('s')) fwd -= 1;
+  if (heldDriveKeys.has('a')) turn += 1;   // left = +yaw about world Y
+  if (heldDriveKeys.has('d')) turn -= 1;
+  activeViewer.setDriveInput(fwd, turn);
+}
+
+/* Drop all held keys + stop the vehicle (mode off, blur, reset, model swap). */
+function clearDriveKeys() {
+  if (!heldDriveKeys.size) return;
+  heldDriveKeys.clear();
+  if (activeViewer) activeViewer.setDriveInput(0, 0);
+}
+
+function onDriveKeyDown(e) {
+  if (!driveModeOn || !activeViewer) return;
+  if (e.key === 'Escape') { setDriveModeUI(false); return; }
+  const k = e.key.toLowerCase();
+  if (!DRIVE_KEYS.has(k)) return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+  e.preventDefault();
+  if (e.repeat) return;   // continuous motion is per-frame, not OS key-repeat
+  heldDriveKeys.add(k);
+  updateDriveInput();
+}
+
+function onDriveKeyUp(e) {
+  const k = String(e.key || '').toLowerCase();
+  if (heldDriveKeys.delete(k)) updateDriveInput();
+}
+
+window.addEventListener('keydown', onDriveKeyDown);
+window.addEventListener('keyup', onDriveKeyUp);
+window.addEventListener('blur', clearDriveKeys);
+
+/* Single entry/exit point for Drive Mode: drives the viewer, the toggle
+ * button, the HUD, the slider lockout, and the arrow-key aim force-enable. */
+function setDriveModeUI(on) {
+  if (!activeViewer) return;
+  on = !!on && activeViewer.getDriveCaps().available;
+  if (on === driveModeOn) return;
+  driveModeOn = on;
+  els.partsDriveMode.classList.toggle('on', on);
+  if (on) {
+    // Mutually exclusive with auto-rotate / free-spin / aim-at-cursor (the
+    // viewer also clears them internally; this syncs the buttons).
+    els.spin.classList.remove('on');
+    els.freespin.classList.remove('on');
+    els.partsAim.classList.remove('on');
+    els.stage.classList.remove('grabbable');
+    // WASD owns the treads/banks while driving; lock the manual slider.
+    els.partsDrive.disabled = true;
+    els.partsDriveReset.disabled = true;
+    activeViewer.setDriveMode(true);
+    // Force-enable arrow-key turret aim so driving + aiming coexist.
+    const art = activeViewer.getArticulation();
+    if (art.turretYaw || art.turretPitch) {
+      drivePrevKeyAim = keyAimOn;
+      keyAimOn = true;
+      els.partsKeys.classList.add('on');
+    } else {
+      drivePrevKeyAim = null;
+    }
+    els.driveHud.hidden = false;
+  } else {
+    clearDriveKeys();
+    activeViewer.setDriveMode(false);
+    els.partsDrive.disabled = false;
+    els.partsDriveReset.disabled = false;
+    els.partsDrive.value = '0';
+    els.partsDriveVal.textContent = '0';
+    els.partsDeploy.classList.remove('on');
+    if (drivePrevKeyAim !== null) {
+      keyAimOn = drivePrevKeyAim;
+      els.partsKeys.classList.toggle('on', keyAimOn);
+      if (!keyAimOn) clearTurretKeys();
+      drivePrevKeyAim = null;
+    }
+    els.driveHud.hidden = true;
+  }
+  updateControlsHint();
+}
+
 /* Reveal the Parts button + only the relevant control sections when the loaded
  * GLB exposes moveable parts (turret / recoil / treads). Mirrors setupAnimUI's
  * graceful-degradation: nothing articulates -> button stays hidden. */
 function setupArticulationUI() {
   if (!activeViewer) return;
   const art = activeViewer.getArticulation();
-  const any = art.turretYaw || art.turretPitch || art.recoil > 0 || art.treads;
+  const drive = activeViewer.getDriveCaps();
+  const canDriveMode = drive.available && driveInputCapable();
+  const any = art.turretYaw || art.turretPitch || art.recoil > 0 || art.treads
+    || canDriveMode;
   if (!any) {
     els.partsBtn.hidden = true;
     els.partsBtn.classList.remove('on');
@@ -885,10 +1033,24 @@ function setupArticulationUI() {
   els.partsFireSection.hidden = art.recoil === 0;
   els.partsFire.textContent = art.recoil > 1 ? `Fire (${art.recoil})` : 'Fire';
 
-  // Drive section.
-  els.partsDriveSection.hidden = !art.treads;
+  // Drive section. The manual slider runs the treads / bank clips directly
+  // (so it needs one of those); the WASD Drive Mode toggle additionally covers
+  // walkers / pilots / profile-only models (locomotion without clips).
+  const showSlider = art.treads || art.bankClips.length > 0;
+  els.partsDriveSection.hidden = !(showSlider || canDriveMode);
+  els.partsDriveSliderBlock.hidden = !showSlider;
   els.partsDrive.value = '0';
   els.partsDriveVal.textContent = '0';
+  els.partsDrive.disabled = false;
+  els.partsDriveReset.disabled = false;
+  els.partsDriveMode.hidden = !canDriveMode;
+  els.partsDriveMode.classList.remove('on');
+  els.partsDeploy.hidden = !drive.deployable;
+  els.partsDeploy.classList.remove('on');
+  driveModeOn = false;
+  drivePrevKeyAim = null;
+  clearDriveKeys();
+  els.driveHud.hidden = true;
 
   // Visibility section. Only meaningful when 2+ groups exist (a hull-only model
   // gains nothing from a filter that can only hide everything).
@@ -1057,6 +1219,10 @@ function syncColorSwatches(hex) {
 function resetAllViewer() {
   if (!activeViewer) return;
 
+  // Drive Mode -> off first (snaps the vehicle home + restores camera/floor;
+  // also restores the slider lockout, HUD, and arrow-key aim state).
+  setDriveModeUI(false);
+
   // Toggles -> off. Wireframe off re-enables the in-pane sun toggle (the light
   // itself is reset to default below via setLightOn).
   applyWireframe(false);
@@ -1221,6 +1387,8 @@ function syncQualitySeg(q) {
 
 async function doCapture(entry) {
   if (!activeViewer) return;
+  // Capture renders from the home pose; exit Drive Mode (and sync its UI) first.
+  setDriveModeUI(false);
   const label = els.capture.textContent;
   els.capture.disabled = true;
   els.capture.textContent = 'Rendering...';
@@ -1245,6 +1413,10 @@ async function doCapture(entry) {
 
 function goDirectory() {
   if (activeViewer) { activeViewer.dispose(); activeViewer = null; }
+  driveModeOn = false;
+  drivePrevKeyAim = null;
+  heldDriveKeys.clear();
+  els.driveHud.hidden = true;
   hideStageLoading();
   els.fps.textContent = '';
   history.pushState({}, '', location.pathname);
@@ -1310,6 +1482,10 @@ async function boot() {
   route();
   window.addEventListener('popstate', () => {
     if (activeViewer) { activeViewer.dispose(); activeViewer = null; }
+    driveModeOn = false;
+    drivePrevKeyAim = null;
+    heldDriveKeys.clear();
+    if (els.driveHud) els.driveHud.hidden = true;
     route();
   });
 }

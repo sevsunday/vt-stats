@@ -133,6 +133,74 @@ const ART_LOCAL_Z = new THREE.Vector3(0, 0, 1);
 const ART_AXIS_Y = new THREE.Vector3(0, 1, 0);
 const ART_AXIS_X = new THREE.Vector3(1, 0, 0);
 
+// ---- WASD Drive Mode ---------------------------------------------------
+// Tier 2 locomotion runs on the _spin pivot at the ODF-authored speeds from
+// the manifest `drive` block (velocForward/velocReverse in m/s, omegaTurn/
+// omegaSpin in rad/s -- normalized at bake time by convert_msh.py). All feel
+// knobs are viewer-side tunables; the source carries no authored values for
+// camera framing or floor size.
+const DRIVE_SPEED_SCALE = 1.0;        // global multiplier on the ODF velocities
+const DRIVE_FALLBACK = { velocForward: 12, velocReverse: 6, omegaTurn: 1.5, omegaSpin: 2.2 };
+// Bank clips (forward/neutral/reverse) are AUTHORED POSES, not animations:
+// every one in the corpus is a 2-frame (0.067s) ramp from the bind pose to a
+// target stance. The engine never plays them on a timeline -- it WEIGHT-BLENDS
+// the three stances by the craft's velocity state (idle = 100% neutral stance,
+// full throttle = 100% forward stance). We mirror that: the three actions are
+// pinned at their final frame and their weights ride a smoothed throttle.
+// Craft whose three stances are identical (e.g. the ISDF Tank's tail fins)
+// correctly read as static. Walk/run/turn/idle ARE genuine cyclic gaits
+// (1.0-6.6s) and keep looped playback, crossfaded over DRIVE_GAIT_FADE.
+const DRIVE_GAIT_FADE = 0.18;
+// Throttle ramp (1/s): the vehicle accelerates/brakes instead of snapping to
+// full speed; the bank-pose blend, tread scroll, and locomotion all ride it.
+const DRIVE_ACCEL = 2.8;
+// Steer lean: the engine's real `steer` pose is declared only by ISDF-Scout-
+// class ODFs and baked into zero GLBs, so for craft with `drive.animSteer` we
+// substitute a smoothed procedural bank INTO the turn. All other craft keep
+// their hull flat through turns, true to the game.
+const DRIVE_TURN_ROLL = 7;            // deg of hull roll at full steer
+const DRIVE_LEAN_LERP = 6;            // 1/s -- roll smoothing rate
+const _DRIVE_LEAN_Q = new THREE.Quaternion();   // scratch (per-frame, no alloc)
+const DRIVE_GRID_FACTOR = 28;         // drive-floor footprint = radius * this
+const DRIVE_GRID_MIN = 240;           // floor never smaller than this while driving
+const BASE_GRID_DIVS = 60;            // grid line density target (normal viewing)
+const DRIVE_GRID_DIVS = 120;          // denser grid while driving (more lines at distance)
+// Drive-only fog hides the recentering floor's far edge. The band is recomputed
+// per frame from the camera-to-vehicle distance so the vehicle never fogs even
+// at max wheel-zoom: far sits just inside the floor edge, near sits past the
+// vehicle (whichever of the two bounds is farther).
+const DRIVE_FOG_EDGE_FRAC = 0.95;     // far = (floor half + cam dist) * this
+const DRIVE_FOG_NEAR_FRAC = 0.55;     // near >= far * this
+const DRIVE_FOG_NEAR_PAD_RADII = 2;   // near >= cam dist + radius * this
+const CHASE_DIST_FACTOR = 3.2;        // chase camera distance = radius * this
+const CHASE_HEIGHT_FACTOR = 1.35;     // chase camera height  = radius * this
+const CHASE_MIN_DIST_FACTOR = 1.4;    // wheel-zoom clamps (fractions of radius)
+const CHASE_MAX_DIST_FACTOR = 9;
+const CHASE_POS_LERP = 4.5;           // 1/s -- camera position smoothing rate
+const CHASE_AIM_LERP = 7.0;           // 1/s -- aim-direction trailing rate
+// Vertical aim follow: when the model can pitch (turret_x / walker head), the
+// chase cam trails the aim pitch -- aiming up drops the camera and tilts the
+// view skyward; aiming down raises it and tilts down.
+const CHASE_PITCH_DROP = 0.35;        // camera y shift = -sin(pitch) * dist * this
+const CHASE_PITCH_LOOK = 0.55;        // look-target y rise = sin(pitch) * dist * this
+const CHASE_MIN_HEIGHT_RADII = 0.3;   // camera never sinks below radius * this
+
+// Drive scenery: world-fixed low-poly pyramids scattered procedurally around
+// the drive area as a movement reference (true parallax -- they emerge from
+// the fog, slide past, recede). Deterministic per grid tile (hash-based), so
+// the "world" is stable: drive away and back and the same mountains are there.
+const DRIVE_SCENERY_TILE = 110;       // tile edge (world units)
+const DRIVE_SCENERY_RANGE = 3;        // tiles kept populated in each direction (7x7)
+const DRIVE_SCENERY_DENSITY = 0.45;   // chance of each feature slot per tile (x2 slots)
+const DRIVE_SCENERY_COLOR = 0x252b38; // dark silhouette tone (fades into the fog)
+const DRIVE_SCENERY_CLEAR_RADII = 6;  // keep radius*this around home clear
+
+/* Deterministic 2D hash -> [0,1): stable scenery placement per tile. */
+function hash2(ix, iz, salt) {
+  const s = Math.sin(ix * 127.1 + iz * 311.7 + salt * 74.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 // Wrap a degree value into [-180, 180) so turret yaw rotates a continuous 360
 // (passing +180 rolls over to -180). Rotation about Y is periodic, so the model
@@ -255,6 +323,28 @@ export class ObjectViewer {
     this._driveSpeed = 0;          // -1..1; scrolls treads (+ optional bank clip)
     this._recoilClock = 0;         // seconds; advances while any recoil is active
     this._treadOffset = 0;
+
+    // WASD Drive Mode state (see setDriveMode / _updateDrive).
+    this._driveMode = false;
+    this._driveProfile = null;     // manifest `drive` block (archetype + ODF speeds)
+    this._driveCapsCache = null;   // memoized getDriveCaps() (invalidated per load)
+    this._driveInput = { fwd: 0, turn: 0 };  // held-key directions (-1/0/+1)
+    this._driveYaw = 0;            // hull heading (rad, about world Y)
+    this._driveLean = 0;           // smoothed hover bank-into-turn roll (rad)
+    this._driveVel = 0;            // smoothed throttle (-1..1; ramps at DRIVE_ACCEL)
+    this._driveTargetVel = 0;      // throttle target (drive input or Drive slider)
+    this._bankActions = null;      // velocity-blended bank-pose set {sfx, fwd, neu, rev}
+    this._driveDeployed = false;   // morph tanks: bank-2 mode after `deploy`
+    this._driveTransition = 0;     // sec left in a deploy transition (gait held)
+    this._driveGait = null;        // active drive-managed clip name
+    this._driveGaitDir = 0;        // gait playback sign (+1 fwd / -1 reverse)
+    this._driveSaved = null;       // pre-drive snapshot for exit restore
+    this._chaseDist = 0;           // chase cam follow distance (wheel-zoomable)
+    this._chaseYaw = 0;            // smoothed aim yaw the camera trails
+    this._chasePitch = 0;          // smoothed aim pitch (rad) the camera trails
+    this._gridCell = 1;            // current grid cell size (whole-cell recentering)
+    this._sceneryMesh = null;      // InstancedMesh of drive-scenery pyramids
+    this._sceneryTile = null;      // tile coords the scenery was last built around
     this._raycaster = new THREE.Raycaster();   // point-to-aim cursor projection
     // Fired callback ({yaw, pitch}) when mouse-aim drag moves the turret, so the
     // UI sliders can follow.
@@ -373,11 +463,15 @@ export class ObjectViewer {
     this._onPointerDown = this._onPointerDown.bind(this);
     this._onPointerMove = this._onPointerMove.bind(this);
     this._onPointerUp = this._onPointerUp.bind(this);
+    // Drive-mode wheel handler (chase-cam distance; OrbitControls is disabled
+    // while driving so its own wheel listener no-ops).
+    this._onWheel = this._onWheel.bind(this);
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', this._onPointerDown);
     el.addEventListener('pointermove', this._onPointerMove);
     el.addEventListener('pointerup', this._onPointerUp);
     el.addEventListener('pointercancel', this._onPointerUp);
+    el.addEventListener('wheel', this._onWheel, { passive: false });
 
     this._animate = this._animate.bind(this);
     this.renderer.setAnimationLoop(this._animate);
@@ -423,6 +517,18 @@ export class ObjectViewer {
     this._lastMoveT = now;
   }
 
+  /* Drive mode: the wheel adjusts the chase-cam follow distance (exponential
+   * for consistent feel across model scales). Outside drive mode OrbitControls
+   * owns the wheel and this handler defers to it. */
+  _onWheel(e) {
+    if (!this._driveMode) return;
+    e.preventDefault();
+    const r = this._radius || 1;
+    this._chaseDist = clamp(
+      (this._chaseDist || r * CHASE_DIST_FACTOR) * Math.exp(e.deltaY * 0.0012),
+      r * CHASE_MIN_DIST_FACTOR, r * CHASE_MAX_DIST_FACTOR);
+  }
+
   _onPointerUp(e) {
     if (this._aimMode) return;
     if (!this._dragging) return;
@@ -439,6 +545,7 @@ export class ObjectViewer {
   }
 
   async load(url, hints = null, texInfo = null) {
+    this.setDriveMode(false);   // never carry drive mode across a model swap
     this._artHints = hints;   // index.json `parts` block (ODF-authoritative)
     // index.json texture info: `sets` = mod texture-set descriptors for this
     // model, `emissive` = stock emissive stems. Each model opens on stock.
@@ -817,21 +924,12 @@ export class ObjectViewer {
     this.camera.far = radius * 100;
     this.camera.updateProjectionMatrix();
 
-    // Scale the grid to the model footprint.
-    const gridSize = Math.max(10, Math.ceil(radius * 4));
-    this.scene.remove(this.grid);
-    this.grid = new THREE.GridHelper(gridSize, Math.min(gridSize, 60), 0x3a4150, 0x262b34);
-    this.grid.visible = this._gridVisible;   // honor the current scene toggle
-    this.scene.add(this.grid);
-    this.axes.visible = this._axesVisible;
-
-    // Match the shadow-catcher plane to the grid footprint (centered on x/z).
-    this.ground.geometry.dispose();
-    this.ground.geometry = new THREE.PlaneGeometry(gridSize, gridSize);
-    this.ground.position.set(center.x, -0.005, center.z);
-
     this._radius = radius;
     this._center = center.clone();
+
+    // Scale the grid + shadow-catcher plane to the model footprint.
+    this._buildFloor(this._baseGridSize());
+    this.axes.visible = this._axesVisible;
 
     this.controls.update();
     this._home = {
@@ -844,10 +942,39 @@ export class ObjectViewer {
     this._applyLightEnabled();
   }
 
-  /* Position the world sun from (azimuth, elevation) around the model center,
-   * and size its orthographic shadow frustum to the model footprint. */
-  _placeSun() {
+  _baseGridSize() { return Math.max(10, Math.ceil((this._radius || 1) * 4)); }
+  _driveGridSize() {
+    return Math.max(DRIVE_GRID_MIN, Math.ceil((this._radius || 1) * DRIVE_GRID_FACTOR));
+  }
+
+  /* (Re)build the ground grid + shadow plane at `gridSize`. The cell size is
+   * kept integral so drive mode can re-center the floor under the vehicle in
+   * whole-cell increments (the lines never visibly slide -- reads as endless). */
+  _buildFloor(gridSize, divTarget = BASE_GRID_DIVS) {
     const center = this._center || new THREE.Vector3();
+    const cell = Math.max(1, Math.round(gridSize / divTarget));
+    const divisions = Math.max(1, Math.round(gridSize / cell));
+    const size = divisions * cell;
+    if (this.grid) {
+      this.scene.remove(this.grid);
+      this.grid.geometry.dispose();
+      this.grid.material.dispose();
+    }
+    this.grid = new THREE.GridHelper(size, divisions, 0x3a4150, 0x262b34);
+    this.grid.visible = this._gridVisible;   // honor the current scene toggle
+    this.scene.add(this.grid);
+    this._gridCell = cell;
+    this.ground.geometry.dispose();
+    this.ground.geometry = new THREE.PlaneGeometry(size, size);
+    this.ground.position.set(center.x, -0.005, center.z);
+  }
+
+  /* Position the world sun from (azimuth, elevation) around `center` (defaults
+   * to the model's home center; drive mode passes the vehicle's live position
+   * so the shadow frustum follows it), and size its orthographic shadow frustum
+   * to the model footprint. */
+  _placeSun(center = null) {
+    center = center || this._center || new THREE.Vector3();
     const radius = this._radius || 1;
     const az = this._lightAz * DEG;
     const el = this._lightEl * DEG;
@@ -989,6 +1116,7 @@ export class ObjectViewer {
 
   playClip(name) {
     if (!this._mixer || !this._actions[name]) return;
+    this._stopBankPoses();   // a hand-picked clip preview takes the mixer over
     if (this._activeAction) this._activeAction.stop();
     const action = this._actions[name];
     this._activeAction = action;
@@ -1003,8 +1131,10 @@ export class ObjectViewer {
   pauseAnim() { if (this._activeAction) this._activeAction.paused = true; }
   resumeAnim() { if (this._activeAction) this._activeAction.paused = false; }
 
-  /* Return to the rest/bind pose (stop the active clip + rewind the mixer). */
+  /* Return to the rest/bind pose (stop the active clip + rewind the mixer).
+   * Also disengages the velocity-blended bank poses. */
   stopAnim() {
+    this._stopBankPoses();
     if (this._activeAction) { this._activeAction.stop(); this._activeAction = null; }
     if (this._mixer) this._mixer.setTime(0);
   }
@@ -1123,6 +1253,18 @@ export class ObjectViewer {
     this._driveSpeed = 0;
     this._recoilClock = 0;
     this._treadOffset = 0;
+    this._driveCapsCache = null;
+    this._driveInput.fwd = 0;
+    this._driveInput.turn = 0;
+    this._driveYaw = 0;
+    this._driveLean = 0;
+    this._driveVel = 0;
+    this._driveTargetVel = 0;
+    this._bankActions = null;   // actions belong to the disposed prior mixer
+    this._driveDeployed = false;
+    this._driveTransition = 0;
+    this._driveGait = null;
+    this._driveGaitDir = 0;
     for (const m of this._artTreadMats) {
       if (m.map) m.map.offset.set(0, 0);
     }
@@ -1393,24 +1535,22 @@ export class ObjectViewer {
     return true;
   }
 
-  /* Drive: -1..1. Scrolls the tread material UV; if the model carries a
-   * forward/reverse bank clip, plays it (looped) in the matching direction. */
+  /* Drive: -1..1 throttle. Tread scroll and the velocity-blended bank poses
+   * both ride the smoothed throttle (see the _animate ramp), so the slider is
+   * a direct, engine-true morph between the reverse / neutral / forward
+   * stances. Models with no bank poses (tracked) keep instant tread scroll. */
   setDrive(speed) {
     const s = clamp(Number(speed) || 0, -1, 1);
-    const prev = this._driveSpeed;
-    this._driveSpeed = s;
-    const bank = this.getArticulation().bankClips.map((n) => n.toLowerCase());
-    const dir = s > 0.001 ? 'forward' : s < -0.001 ? 'reverse' : null;
-    const prevDir = prev > 0.001 ? 'forward' : prev < -0.001 ? 'reverse' : null;
-    if (dir === prevDir) return;
-    if (!this._mixer) return;
-    if (dir && bank.includes(dir)) {
-      const name = this._clips.find((c) => c.name.toLowerCase() === dir)?.name;
-      if (name) { this.setAnimLoop(true); this.playClip(name); }
-    } else if (prevDir && bank.includes(prevDir)) {
-      // Returning to idle: prefer a "neutral" rest clip, else stop.
-      const neutral = this._clips.find((c) => c.name.toLowerCase() === 'neutral');
-      if (neutral) { this.playClip(neutral.name); } else { this.stopAnim(); }
+    this._driveTargetVel = s;
+    const hasBank = !!(this._findClip('forward') || this._findClip('reverse')
+      || this._findClip('neutral'));
+    if (hasBank && this._mixer && (s !== 0 || this._bankActions)) {
+      const sfx = (this.getDriveCaps().archetype === 'morph' && this._driveDeployed)
+        ? '2' : '';
+      this._ensureBankPoses(sfx);
+    } else if (!this._bankActions) {
+      this._driveSpeed = s;
+      this._driveVel = s;
     }
   }
 
@@ -1421,6 +1561,484 @@ export class ObjectViewer {
       if (m.map) m.map.offset.y = this._treadOffset;
     }
     return true;
+  }
+
+  /* ---- Velocity-blended bank poses (forward / neutral / reverse) -------- */
+
+  /* Engage the bank-pose set for the given morph suffix ('' or '2'): pin each
+   * pose action at its final frame (the authored stance) and hand weight
+   * control to _updateBankPoses. Idempotent per suffix. */
+  _ensureBankPoses(sfx = '') {
+    if (this._bankActions && this._bankActions.sfx === sfx) return;
+    this._stopBankPoses();
+    if (!this._mixer) return;
+    const pick = (base) => {
+      const name = this._findClip(`${base}${sfx}`) || this._findClip(base);
+      return name ? (this._actions[name] || null) : null;
+    };
+    const set = { sfx, fwd: pick('forward'), neu: pick('neutral'), rev: pick('reverse') };
+    if (!set.fwd && !set.neu && !set.rev) return;   // nothing to blend (tracked)
+    if (this._activeAction) { this._activeAction.stop(); this._activeAction = null; }
+    for (const k of ['fwd', 'neu', 'rev']) {
+      const a = set[k];
+      if (!a) continue;
+      a.reset();
+      a.setLoop(THREE.LoopOnce, 1);
+      a.clampWhenFinished = true;
+      a.setEffectiveWeight(0);
+      a.play();
+      a.time = a.getClip().duration;   // pin at the target stance
+      a.paused = true;
+    }
+    this._bankActions = set;
+    this._updateBankPoses();
+  }
+
+  _stopBankPoses() {
+    if (!this._bankActions) return;
+    for (const k of ['fwd', 'neu', 'rev']) {
+      const a = this._bankActions[k];
+      if (a) a.stop();
+    }
+    this._bankActions = null;
+  }
+
+  /* Weight the pinned stances by the smoothed throttle, mirroring the engine:
+   * idle = 100% neutral stance, full forward = 100% forward stance, with the
+   * blend tracking actual velocity in between. Weights always sum to 1 so the
+   * bind pose never bleeds through while engaged. */
+  _updateBankPoses() {
+    const b = this._bankActions;
+    if (!b) return;
+    const v = clamp(this._driveVel, -1, 1);
+    if (b.fwd) b.fwd.setEffectiveWeight(Math.max(v, 0));
+    if (b.rev) b.rev.setEffectiveWeight(Math.max(-v, 0));
+    if (b.neu) b.neu.setEffectiveWeight(1 - Math.abs(v));
+  }
+
+  /* ---- WASD Drive Mode --------------------------------------------------- */
+
+  /* Manifest `drive` block for the loaded model (archetype + ODF speeds).
+   * Called by the UI after load; null for non-driveable ODFs. */
+  setDriveProfile(profile) {
+    this._driveProfile = profile || null;
+    this._driveCapsCache = null;
+  }
+
+  _findClip(name) {
+    const n = String(name).toLowerCase();
+    const c = this._clips.find((cl) => cl.name.toLowerCase() === n);
+    return c ? c.name : null;
+  }
+
+  /* What Drive Mode can do with this model. `available` requires something to
+   * drive: an ODF movement profile, treads, bank clips, or a gait clip. The
+   * archetype falls back to clip/material inference when the ODF profile is
+   * missing (e.g. mesh-only manifest entries). */
+  getDriveCaps() {
+    if (this._driveCapsCache) return this._driveCapsCache;
+    const has = (n) => !!this._findClip(n);
+    const p = this._driveProfile;
+    let archetype = (p && p.archetype) || null;
+    if (!archetype) {
+      if (this._artTreadMats.length) archetype = 'tracked';
+      else if (has('forward') || has('reverse')) archetype = 'hover';
+      else if (has('walk') || has('run')) archetype = 'walker';
+    }
+    const deployable = archetype === 'morph' && has('deploy')
+      && (has('forward2') || has('neutral2'));
+    const available = !!(p || this._artTreadMats.length
+      || has('forward') || has('reverse') || has('walk') || has('run'));
+    this._driveCapsCache = { available, archetype, deployable };
+    return this._driveCapsCache;
+  }
+
+  /* Enter/exit WASD Drive Mode: chase camera + real locomotion on the _spin
+   * pivot + archetype gait animation, over an endlessly re-centering floor.
+   * Exit snaps the model home and restores the pre-drive camera + floor. */
+  setDriveMode(on) {
+    on = !!on && !!this._spin;
+    if (on === this._driveMode) return;
+    this._driveMode = on;
+    if (on) {
+      // Mutual exclusion with every other interaction mode; the chase cam owns
+      // the camera (OrbitControls disabled; wheel-zoom handled by _onWheel).
+      this.controls.autoRotate = false;
+      this.setFreeSpin(false);
+      this.setAimMode(false);
+      this.controls.enabled = false;
+      this._driveSaved = {
+        spinPos: this._spin.position.clone(),
+        spinQuat: this._spin.quaternion.clone(),
+        camPos: this.camera.position.clone(),
+        camTarget: this.controls.target.clone(),
+      };
+      // Start upright at the model's home spot, facing its rest heading.
+      this._spin.quaternion.identity();
+      this._driveYaw = 0;
+      this._driveLean = 0;
+      this._driveVel = 0;
+      this._driveTargetVel = 0;
+      this._chaseYaw = 0;
+      this._driveInput.fwd = 0;
+      this._driveInput.turn = 0;
+      this._driveGait = null;
+      this._driveGaitDir = 0;
+      this._driveDeployed = false;
+      this._driveTransition = 0;
+      this._chaseDist = (this._radius || 1) * CHASE_DIST_FACTOR;
+      this._chasePitch = 0;
+      // Infinite floor: a much larger, denser grid that recenters under the
+      // vehicle, with distance fog (toward the backdrop) hazing out its far
+      // edge like a horizon. The fog band is kept current per frame by
+      // _updateDrive. World-fixed scenery pyramids give parallax.
+      const driveSize = this._driveGridSize();
+      this._buildFloor(driveSize, DRIVE_GRID_DIVS);
+      this.scene.fog = new THREE.Fog(
+        this.scene.background.clone(), driveSize * 0.4, driveSize * 0.8);
+      this._ensureDriveScenery();
+      this._updateDriveScenery(this._spin.position, true);
+      // Snap straight to the chase pose (no first-frame swoop) and size the
+      // fog band to it.
+      this._updateChaseCamera(1e9);
+      this._updateDriveFog();
+    } else {
+      const s = this._driveSaved;
+      this._driveSaved = null;
+      this._setDriveGait(null);   // stop the drive-managed clip -> rest pose
+      this._driveSpeed = 0;
+      this._driveVel = 0;
+      this._driveTargetVel = 0;
+      this._driveInput.fwd = 0;
+      this._driveInput.turn = 0;
+      this._driveTransition = 0;
+      this._driveDeployed = false;
+      this.scene.fog = null;
+      this._disposeDriveScenery();
+      if (s && this._spin) {
+        this._spin.position.copy(s.spinPos);
+        this._spin.quaternion.copy(s.spinQuat);
+        this.camera.position.copy(s.camPos);
+        this.controls.target.copy(s.camTarget);
+      }
+      this.controls.enabled = true;
+      this.controls.enableRotate = true;
+      this.controls.enablePan = true;
+      this._buildFloor(this._baseGridSize());
+      this._placeSun();   // shadow frustum back onto the home center
+      this.controls.update();
+    }
+    this._markShadowDirty();
+  }
+
+  isDriveMode() { return this._driveMode; }
+
+  /* Held WASD direction (-1/0/+1 per axis): fwd = W minus S, turn = A minus D
+   * (left positive, matching +yaw about world Y). The throttle target feeds
+   * the smoothed ramp shared by locomotion, treads, and the bank-pose blend. */
+  setDriveInput(fwd, turn) {
+    this._driveInput.fwd = Math.sign(fwd || 0);
+    this._driveInput.turn = Math.sign(turn || 0);
+    this._driveTargetVel = this._driveInput.fwd;
+  }
+
+  /* Morph tanks: toggle deployed mode. Plays the `deploy` transition clip
+   * (reversed when un-deploying) and holds gait selection until it finishes;
+   * afterward the gait machinery switches to the forward2/neutral2/reverse2
+   * bank (deployed) or back to the base bank. */
+  setDriveDeployed(on) {
+    on = !!on;
+    if (on === this._driveDeployed) return;
+    this._driveDeployed = on;
+    const dep = this._findClip('deploy');
+    if (dep && this._mixer && this._actions[dep]) {
+      this._stopBankPoses();   // the transition owns the nodes; re-engaged after
+      if (this._activeAction) this._activeAction.stop();
+      const action = this._actions[dep];
+      this._activeAction = action;
+      action.reset();
+      action.setEffectiveWeight(1);   // may be 0 from an earlier gait crossfade
+      action.clampWhenFinished = true;
+      action.setLoop(THREE.LoopOnce, 1);
+      const clip = action.getClip();
+      action.timeScale = on ? 1 : -1;
+      if (!on) action.time = clip.duration;
+      action.play();
+      this._driveGait = dep;          // marks "transition in flight"
+      this._driveGaitDir = on ? 1 : -1;
+      this._driveTransition = clip.duration + 0.05;
+    } else {
+      this._driveGait = null;         // no transition clip: just swap banks
+    }
+  }
+
+  isDriveDeployed() { return this._driveDeployed; }
+
+  /* Play (or stop) the drive-managed clip. `loop = true` for cyclic gaits
+   * (walk / run / turn / idle); `loop = false` for POSE clips (the hover bank
+   * set) which play once and HOLD the final frame -- responsive lean, no
+   * strobing. Transitions crossfade so poses blend instead of snapping.
+   * `dir` = +1 forward / -1 reversed playback. No-op when clip + direction
+   * are already active; the active-action check re-asserts ownership if
+   * something else (e.g. the Animations panel) started a clip mid-drive. */
+  _setDriveGait(name, dir = 1, loop = true) {
+    const same = name === this._driveGait && dir === this._driveGaitDir;
+    const active = name
+      ? this._activeAction === (this._actions[name] || null)
+      : !this._activeAction;
+    if (same && active) return;
+    this._driveGait = name;
+    this._driveGaitDir = dir;
+    if (!this._mixer) return;
+    if (!name || !this._actions[name]) {
+      if (!name) this.stopAnim();
+      return;
+    }
+    const prev = this._activeAction;
+    const action = this._actions[name];
+    this._activeAction = action;
+    action.reset();
+    action.setEffectiveWeight(1);   // may be 0 from an earlier fade-out
+    action.clampWhenFinished = !loop;
+    action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+    const clip = action.getClip();
+    action.timeScale = dir * this._timeScaleFor(clip);
+    if (dir < 0) action.time = clip.duration;
+    action.play();
+    // Blend out the previous pose/gait instead of snapping to frame 0.
+    if (prev && prev !== action) prev.crossFadeTo(action, DRIVE_GAIT_FADE, false);
+  }
+
+  /* Choose the gait clip for the current input + archetype. Missing clips
+   * degrade gracefully: locomotion still runs, animation silently skips
+   * (e.g. the Assault Tank has treads but zero baked clips). */
+  _selectDriveGait() {
+    const caps = this.getDriveCaps();
+    const fwd = this._driveInput.fwd;
+    const turn = this._driveInput.turn;
+    if (caps.archetype === 'walker' || caps.archetype === 'pilot') {
+      if (fwd) {
+        const gait = this._findClip('run') || this._findClip('walk');
+        this._setDriveGait(gait, fwd >= 0 ? 1 : -1, true);
+      } else if (turn) {
+        // Authored turn gait when present (walkers); else hold idle while yawing.
+        const t = this._findClip('turn');
+        if (t) this._setDriveGait(t, turn >= 0 ? 1 : -1, true);
+        else this._setDriveGait(this._findClip('idle') || this._findClip('stand'), 1, true);
+      } else {
+        this._setDriveGait(this._findClip('idle') || this._findClip('stand'), 1, true);
+      }
+      return;
+    }
+    // Hover / morph / tracked: velocity-blended bank poses (engine-true --
+    // weights ride the smoothed throttle in _updateBankPoses; craft whose
+    // three stances are identical correctly read as static). Tread scroll
+    // rides the same throttle via _driveSpeed. Morph deployed mode swaps to
+    // the `2` bank, falling back per-pose to the base bank.
+    const sfx = (caps.archetype === 'morph' && this._driveDeployed) ? '2' : '';
+    this._ensureBankPoses(sfx);
+  }
+
+  /* Per-frame drive update: gait selection, Tier 2 locomotion (unbounded --
+   * the floor recenters under the vehicle), tread scroll feed, sun + shadow
+   * follow, and the chase camera. Returns true while driving so the caller
+   * keeps the shadow map refreshing. */
+  _updateDrive(dt) {
+    if (!this._driveMode || !this._spin) return false;
+    const p = this._driveProfile || {};
+    const fwd = this._driveInput.fwd;
+    const turn = this._driveInput.turn;
+
+    // A deploy/undeploy transition holds gait selection until it finishes.
+    if (this._driveTransition > 0) {
+      this._driveTransition -= dt;
+      if (this._driveTransition <= 0) { this._driveGait = null; this._driveGaitDir = 0; }
+    } else {
+      this._selectDriveGait();
+    }
+
+    // Tier 2 locomotion: yaw about world Y, translate along the hull forward
+    // (-Z rotated by the heading). Stationary input turns in place at the
+    // (faster) omegaSpin; steering mirrors while reversing, like a car.
+    const omegaTurn = p.omegaTurn ?? DRIVE_FALLBACK.omegaTurn;
+    const omegaSpin = p.omegaSpin ?? omegaTurn;
+    const omega = fwd ? omegaTurn : omegaSpin;
+    const steer = (fwd < 0 ? -1 : 1) * turn;
+    if (steer) this._driveYaw += steer * omega * dt;
+    // Locomotion rides the SMOOTHED throttle (ramped in _animate at
+    // DRIVE_ACCEL), so the vehicle accelerates/brakes and the bank-pose blend
+    // is physically synchronized with the actual motion.
+    const v = this._driveVel;
+    if (Math.abs(v) > 1e-3) {
+      const speed = v > 0
+        ? (p.velocForward ?? DRIVE_FALLBACK.velocForward)
+        : (p.velocReverse ?? DRIVE_FALLBACK.velocReverse);
+      const dist = v * speed * DRIVE_SPEED_SCALE * dt;
+      this._spin.position.x += -Math.sin(this._driveYaw) * dist;
+      this._spin.position.z += -Math.cos(this._driveYaw) * dist;
+    }
+    // Steer lean: ONLY for craft whose ODF declares animSteer (the ISDF Scout
+    // class) -- everyone else keeps a flat hull through turns, like the game.
+    // The lean banks INTO the turn (about +Z, tipping the top toward the left
+    // for a left turn -- forward is -Z), procedural since the steer pose is
+    // baked into zero GLBs.
+    const caps = this.getDriveCaps();
+    const wantLean = ((caps.archetype === 'hover' || caps.archetype === 'morph') && p.animSteer)
+      ? steer * DRIVE_TURN_ROLL * DEG : 0;
+    this._driveLean += (wantLean - this._driveLean)
+      * Math.min(1, 1 - Math.exp(-DRIVE_LEAN_LERP * dt));
+    this._spin.quaternion.setFromAxisAngle(ART_AXIS_Y, this._driveYaw);
+    if (Math.abs(this._driveLean) > 1e-4) {
+      this._spin.quaternion.multiply(
+        _DRIVE_LEAN_Q.setFromAxisAngle(ART_LOCAL_Z, this._driveLean));
+    }
+
+    // Treads scroll with the smoothed throttle too.
+    this._driveSpeed = v;
+
+    // Infinite floor: snap the grid under the vehicle in whole-cell increments
+    // (lines never visibly slide); the invisible shadow plane and the sun's
+    // shadow frustum follow continuously.
+    const pos = this._spin.position;
+    const cell = this._gridCell || 1;
+    this.grid.position.x = Math.round(pos.x / cell) * cell;
+    this.grid.position.z = Math.round(pos.z / cell) * cell;
+    this.ground.position.x = pos.x;
+    this.ground.position.z = pos.z;
+    this._placeSun(pos);
+    this._updateDriveScenery(pos);
+
+    this._updateChaseCamera(dt);
+    this._updateDriveFog();
+    return true;
+  }
+
+  /* ---- Drive scenery (world-fixed landmark pyramids) -------------------- */
+
+  /* One InstancedMesh of unit pyramids (4-sided cones), scaled/placed per
+   * instance by _updateDriveScenery. Built on drive entry, disposed on exit. */
+  _ensureDriveScenery() {
+    if (this._sceneryMesh) return;
+    const geo = new THREE.ConeGeometry(1, 1, 4, 1);
+    geo.translate(0, 0.5, 0);   // base sits on the floor (y = 0)
+    const mat = new THREE.MeshStandardMaterial({
+      color: DRIVE_SCENERY_COLOR, roughness: 1, metalness: 0, flatShading: true,
+    });
+    const count = (DRIVE_SCENERY_RANGE * 2 + 1) ** 2 * 2;   // 2 slots per tile
+    this._sceneryMesh = new THREE.InstancedMesh(geo, mat, count);
+    this._sceneryMesh.castShadow = false;
+    this._sceneryMesh.receiveShadow = false;
+    // Matrices are rewritten wholesale per tile crossing; skip per-frame culling
+    // math (the far ring hides in the fog anyway).
+    this._sceneryMesh.frustumCulled = false;
+    this.scene.add(this._sceneryMesh);
+    this._sceneryTile = null;
+  }
+
+  _disposeDriveScenery() {
+    if (!this._sceneryMesh) return;
+    this.scene.remove(this._sceneryMesh);
+    this._sceneryMesh.geometry.dispose();
+    this._sceneryMesh.material.dispose();
+    if (this._sceneryMesh.dispose) this._sceneryMesh.dispose();
+    this._sceneryMesh = null;
+    this._sceneryTile = null;
+  }
+
+  /* (Re)populate the scenery instances for the 7x7 tile neighborhood around
+   * the vehicle. Placement is a pure function of tile coords (hash2), so
+   * features are WORLD-FIXED: driving past them yields true parallax, and
+   * returning to an area shows the same mountains. Runs only on tile
+   * crossings (and on entry with force=true). */
+  _updateDriveScenery(pos, force = false) {
+    if (!this._sceneryMesh) return;
+    const tile = DRIVE_SCENERY_TILE;
+    const ix = Math.floor(pos.x / tile);
+    const iz = Math.floor(pos.z / tile);
+    if (!force && this._sceneryTile
+        && this._sceneryTile.ix === ix && this._sceneryTile.iz === iz) return;
+    this._sceneryTile = { ix, iz };
+
+    const r = this._radius || 1;
+    const sizeScale = clamp(r / 5, 1, 6);   // landmarks keep scale vs the model
+    const home = this._center || new THREE.Vector3();
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const v = new THREE.Vector3();
+    const s = new THREE.Vector3();
+    let n = 0;
+    for (let dx = -DRIVE_SCENERY_RANGE; dx <= DRIVE_SCENERY_RANGE; dx++) {
+      for (let dz = -DRIVE_SCENERY_RANGE; dz <= DRIVE_SCENERY_RANGE; dz++) {
+        const tx = ix + dx;
+        const tz = iz + dz;
+        for (let k = 0; k < 2 && n < this._sceneryMesh.count; k++) {
+          const salt = k * 13;
+          if (hash2(tx, tz, 1 + salt) > DRIVE_SCENERY_DENSITY) continue;
+          const px = (tx + hash2(tx, tz, 2 + salt)) * tile;
+          const pz = (tz + hash2(tx, tz, 3 + salt)) * tile;
+          // Keep the model's home spot clear so entering drive mode is clean.
+          if (Math.hypot(px - home.x, pz - home.z) < r * DRIVE_SCENERY_CLEAR_RADII) continue;
+          const h = (12 + hash2(tx, tz, 4 + salt) * 38) * sizeScale;
+          const br = h * (0.7 + hash2(tx, tz, 5 + salt) * 0.5);
+          q.setFromAxisAngle(ART_AXIS_Y, hash2(tx, tz, 6 + salt) * Math.PI * 2);
+          m.compose(v.set(px, 0, pz), q, s.set(br, h, br));
+          this._sceneryMesh.setMatrixAt(n++, m);
+        }
+      }
+    }
+    // Park unused instance slots at zero scale.
+    m.makeScale(0, 0, 0);
+    for (let i = n; i < this._sceneryMesh.count; i++) this._sceneryMesh.setMatrixAt(i, m);
+    this._sceneryMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /* Size the drive fog band from the live camera-to-vehicle distance: far just
+   * inside the floor's edge, near safely past the vehicle. Keeps the floor
+   * edge faded at every wheel-zoom level without ever fogging the model. */
+  _updateDriveFog() {
+    if (!this.scene.fog || !this._spin) return;
+    const r = this._radius || 1;
+    const camDist = this.camera.position.distanceTo(this._spin.position);
+    const edge = this._driveGridSize() / 2 + camDist;
+    this.scene.fog.far = edge * DRIVE_FOG_EDGE_FRAC;
+    this.scene.fog.near = Math.max(
+      camDist + r * DRIVE_FOG_NEAR_PAD_RADII,
+      this.scene.fog.far * DRIVE_FOG_NEAR_FRAC,
+    );
+  }
+
+  /* Third-person chase camera: behind + above the vehicle, looking along the
+   * aim direction -- the turret's world yaw when the model has one, else the
+   * hull heading -- so the camera frames what the guns are pointing at. The
+   * yaw is trailed with an exponential lerp (shortest arc) so turret flicks
+   * swing the camera smoothly; wheel zoom adjusts the follow distance. */
+  _updateChaseCamera(dt) {
+    const pos = this._spin.position;
+    const kAim = Math.min(1, 1 - Math.exp(-CHASE_AIM_LERP * dt));
+    const aimYaw = this._driveYaw + (this._hasYaw() ? this._turretYawDeg * DEG : 0);
+    let d = aimYaw - this._chaseYaw;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    this._chaseYaw += d * kAim;
+    // Vertical aim follow (only when the model can pitch): trail the aim pitch,
+    // then drop/raise the camera against it and tilt the look target with it.
+    const aimPitch = this._hasPitch() ? this._turretPitchDeg * DEG : 0;
+    this._chasePitch += (aimPitch - this._chasePitch) * kAim;
+    const r = this._radius || 1;
+    const dist = this._chaseDist || r * CHASE_DIST_FACTOR;
+    const desired = new THREE.Vector3(
+      pos.x + Math.sin(this._chaseYaw) * dist,
+      Math.max(
+        pos.y + r * CHASE_HEIGHT_FACTOR - Math.sin(this._chasePitch) * dist * CHASE_PITCH_DROP,
+        r * CHASE_MIN_HEIGHT_RADII,
+      ),
+      pos.z + Math.cos(this._chaseYaw) * dist,
+    );
+    const k = Math.min(1, 1 - Math.exp(-CHASE_POS_LERP * dt));
+    this.camera.position.lerp(desired, k);
+    this.controls.target.copy(pos);   // keeps the orbit target sane on exit
+    const look = desired.copy(pos);   // reuse the scratch vector
+    look.y += Math.sin(this._chasePitch) * dist * CHASE_PITCH_LOOK;
+    this.camera.lookAt(look);
   }
 
   /* Point-to-aim: the turret tracks the cursor (see _aimAtPointer) instead of
@@ -1436,8 +2054,10 @@ export class ObjectViewer {
 
   isAimMode() { return this._aimMode; }
 
-  /* Restore turret to rest, stop recoil + drive, reset tread scroll. */
+  /* Restore turret to rest, stop recoil + drive, reset tread scroll. Also
+   * exits Drive Mode (snap home + restore camera/floor) when active. */
   resetArticulation() {
+    this.setDriveMode(false);
     this._turretYawDeg = 0;
     this._turretPitchDeg = 0;
     this._keySlewYaw = 0;
@@ -1446,6 +2066,13 @@ export class ObjectViewer {
     this._recoilClock = 0;
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
     this.setDrive(0);
+    // Disengage the bank-pose blend entirely -> true bind pose (a released
+    // slider otherwise settles into the neutral STANCE, which is correct for
+    // idling but not for a full reset).
+    this._stopBankPoses();
+    this._driveSpeed = 0;
+    this._driveVel = 0;
+    this._driveTargetVel = 0;
     this._treadOffset = 0;
     for (const m of this._artTreadMats) { if (m.map) m.map.offset.set(0, 0); }
     this.setAimMode(false);
@@ -1526,6 +2153,8 @@ export class ObjectViewer {
   _applySceneBg() {
     this.scene.background = new THREE.Color(SCENE_BG[this._bgMode] ?? SCENE_BG.dark);
     this.scene.backgroundBlurriness = 0;
+    // Drive-mode fog blends toward the backdrop; keep it in sync on bg swaps.
+    if (this.scene.fog) this.scene.fog.color.copy(this.scene.background);
   }
 
   /* ---- Ultra post-processing (EffectComposer) -------------------------- */
@@ -1586,7 +2215,9 @@ export class ObjectViewer {
   }
 
   resetView() {
-    // Stop any free spin and return the model to its canonical orientation.
+    // Exit drive mode first (snaps the model home + restores the floor), then
+    // stop any free spin and return the model to its canonical orientation.
+    this.setDriveMode(false);
     this._spinVel.x = 0;
     this._spinVel.y = 0;
     if (this._spin) this._spin.quaternion.identity();
@@ -1606,6 +2237,9 @@ export class ObjectViewer {
    * of the user's light slider state), then restores the prior state. */
   async captureGallery({ size = 1024, supersample = 2 } = {}) {
     if (!this._model) return [];
+    // Drive mode would leave the vehicle off-center with a chase camera; exit
+    // first (snap home + restore floor) so captures stay reproducible.
+    this.setDriveMode(false);
     const prevQuality = this._quality;
     const prevSize = this.renderer.getSize(new THREE.Vector2());
     const prevPixelRatio = this.renderer.getPixelRatio();
@@ -1632,6 +2266,12 @@ export class ObjectViewer {
     const prevTurret = { yaw: this._turretYawDeg, pitch: this._turretPitchDeg };
     const prevDrive = this._driveSpeed;
     const prevAim = this._aimMode;
+    // Bank poses -> bind pose for the capture (the slider restore below
+    // re-engages the blend only if the user actually had it driving).
+    this._stopBankPoses();
+    this._driveSpeed = 0;
+    this._driveVel = 0;
+    this._driveTargetVel = 0;
     this._turretYawDeg = 0; this._turretPitchDeg = 0; this._applyTurret();
     this._recoilClock = 0;
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
@@ -1769,6 +2409,23 @@ export class ObjectViewer {
       if (this._onAim) this._onAim({ yaw: this._turretYawDeg, pitch: this._turretPitchDeg });
       moving = true;
     }
+    // Smoothed drive throttle (drive mode + the manual Drive slider): ramp
+    // toward the target at DRIVE_ACCEL and feed the bank-pose blend. Tread
+    // scroll rides it when bank poses are engaged (mutually exclusive with
+    // treads in the corpus, but harmless either way).
+    if (this._driveMode || this._bankActions || this._driveVel !== this._driveTargetVel) {
+      const dv = clamp(this._driveTargetVel - this._driveVel, -DRIVE_ACCEL * dt, DRIVE_ACCEL * dt);
+      this._driveVel += dv;
+      if (this._bankActions) {
+        this._updateBankPoses();
+        this._driveSpeed = this._driveVel;
+        if (dv) moving = true;
+      }
+    }
+    // WASD Drive Mode: gait selection + locomotion + floor recentering + chase
+    // camera. Runs before _applyTurret so turret writes still win over any
+    // gait clip the drive machinery starts this frame.
+    if (this._updateDrive(dt)) moving = true;
     // Articulation runs AFTER the mixer so turret/recoil writes win over (and
     // are re-asserted against) any playing bank clip that might touch them.
     if (this._artYawNodes.length || this._artPitchNodes.length || this._artHeadNode) this._applyTurret();
@@ -1828,6 +2485,7 @@ export class ObjectViewer {
     el.removeEventListener('pointermove', this._onPointerMove);
     el.removeEventListener('pointerup', this._onPointerUp);
     el.removeEventListener('pointercancel', this._onPointerUp);
+    el.removeEventListener('wheel', this._onWheel);
     this.controls.dispose();
     for (const t of this._texCache.values()) { if (t) t.dispose(); }
     this._texCache.clear();

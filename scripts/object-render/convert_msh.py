@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -110,7 +111,12 @@ MOD_TEXTURE_PACKS = [
 #       turretName*/recoilName* and a walker `head` block (WalkerClass headpiece
 #       + per-model yaw/pitch limits), so walkers aim their head + fire their
 #       guns. Forces a full regen to recompute every parts block.
-ANIM_FORMAT_VERSION = 4
+#   v5: turret yaw/pitch detection is ODF-declared ONLY (the turret_y/turret_x
+#       naming-convention fallback produced false aimables -- the engine never
+#       aims an undeclared joint: ivtank / ivmisl guns are hull-fixed in game).
+#       Recoil keeps the declared+convention union. Parts-only change; GLB
+#       bytes are unchanged by the regen.
+ANIM_FORMAT_VERSION = 5
 
 # Bump when the emitted texture SET shape changes (new texture kind / dir layout)
 # without the GLB geometry changing. A mismatch vs the prior index.json forces a
@@ -159,10 +165,16 @@ def _classify_parts(full: dict, clip_names, odf_art=None) -> dict | None:
     result. Returns None when the model has no moveable parts (so plain
     multi-part scenery doesn't carry an empty block).
 
-    Detection is ODF-authoritative with the BZCC naming conventions as fallback:
-      - turret yaw : ODF GameObjectClass.turretName* + convention turret_y(_N)
-      - turret pitch : convention turret_x(_N) (the ODF doesn't split yaw/pitch)
+    Detection is ODF-authoritative:
+      - turret yaw/pitch : ODF GameObjectClass.turretName* ONLY -- the engine
+        aims a joint only when it is declared, so convention-named turret_y /
+        turret_x nodes WITHOUT a declaration stay fixed (e.g. the ISDF Tank's
+        gun is hull-fixed in game despite its mesh carrying both nodes). The
+        AXIS of a declared node is decided by name convention (turret_x* =
+        pitch, anything else yaws) since the ODF doesn't split yaw/pitch.
       - recoil : ODF GameObjectClass.recoilName* + convention recoil* nodes
+        (kept as a union -- Fire is an explicit viewer action and the engine
+        evidence for convention-only recoil is ambiguous)
       - head (walker) : WalkerClass.headpiece -> ONE node aimed in yaw AND pitch
         within per-model limits (carried through so the viewer can clamp)
       - tread / tractor node, or a 'tread' material : scrolling treads
@@ -191,15 +203,14 @@ def _classify_parts(full: dict, clip_names, odf_art=None) -> dict | None:
             if it not in dst:
                 dst.append(it)
 
-    # Turret nodes: gather candidates from convention turret_x/turret_y(_N) AND
-    # ODF turretName* (ODFs commonly declare turretName1=yaw base + turretName2=
-    # gun mantlet). The AXIS is decided by node-name convention -- turret_x* is a
-    # pitch joint, anything else (turret_y* or a custom base name) yaws -- so an
-    # ODF-declared pitch node never lands in the yaw bucket.
-    cand_turret = []
-    add_unique(cand_turret, [nm for nm in actual_names
-                             if re.fullmatch(r"turret_[xy](_\d+)?", nm.lower())])
-    add_unique(cand_turret, resolve(odf_art.get("turretNames")))
+    # Turret nodes: ODF turretName* declarations ONLY (ODFs commonly declare
+    # turretName1=yaw base + turretName2=gun mantlet). The engine aims a joint
+    # only when declared -- convention-named turret_y/turret_x nodes without a
+    # declaration are fixed in game (ivtank, ivmisl). The AXIS is decided by
+    # node-name convention -- turret_x* is a pitch joint, anything else
+    # (turret_y* or a custom base name) yaws -- so an ODF-declared pitch node
+    # never lands in the yaw bucket.
+    cand_turret = resolve(odf_art.get("turretNames"))
     turret_nodes, pitch_nodes = [], []
     for nm in cand_turret:
         if re.fullmatch(r"turret_x(_\d+)?", nm.lower()):
@@ -294,6 +305,66 @@ def _extract_odf_art(blocks: dict) -> dict:
     return {"turretNames": turret, "recoilNames": recoil, "head": head}
 
 
+# Movement archetypes for the viewer's WASD Drive Mode, in priority order (a
+# walker ODF also carries CraftClass etc., so the most specific class wins).
+DRIVE_CLASS_ARCHETYPES = [
+    ("WalkerClass", "walker"),
+    ("MorphTankClass", "morph"),
+    ("TrackedVehicleClass", "tracked"),
+    ("HoverCraftClass", "hover"),
+    ("PersonClass", "pilot"),
+]
+
+
+def _odf_float(props: dict, key: str):
+    v = props.get(key)
+    if v is None or str(v).upper() == "NULL":
+        return None
+    try:
+        return float(str(v).rstrip("fF"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_omega(val):
+    """omegaTurn/omegaSpin are rad/s in vehicle ODFs (0.5 .. 3.5) but deg/s in
+    walker ODFs (e.g. 40.0). No real turn rate exceeds 10 rad/s (~570 deg/s),
+    so values above 10 are degrees -> convert to rad/s."""
+    if val is None:
+        return None
+    return round(math.radians(val), 4) if val > 10.0 else val
+
+
+def _extract_odf_drive(blocks: dict) -> dict | None:
+    """Movement profile for the viewer's WASD Drive Mode: archetype + the
+    ODF-authored speeds (m/s, rad/s). Pilots (PersonClass) read the Run-stance
+    variants (velocForwardRun etc.). `animSteer` flags craft whose ODF declares
+    a steer animation (the steer pose is baked into zero GLBs corpus-wide, so
+    the viewer substitutes a procedural turn-lean -- ONLY for these craft).
+    Returns None for non-driveable ODFs."""
+    for cls, archetype in DRIVE_CLASS_ARCHETYPES:
+        props = blocks.get(cls)
+        if not isinstance(props, dict):
+            continue
+        suffix = "Run" if archetype == "pilot" else ""
+        fwd = _odf_float(props, f"velocForward{suffix}")
+        rev = _odf_float(props, f"velocReverse{suffix}")
+        turn = _normalize_omega(_odf_float(props, f"omegaTurn{suffix}"))
+        spin = _normalize_omega(_odf_float(props, f"omegaSpin{suffix}"))
+        if fwd is None and rev is None and turn is None and spin is None:
+            continue   # class block present but speedless -> try the next class
+        steer = props.get("animSteer")
+        return {
+            "archetype": archetype,
+            "velocForward": fwd,
+            "velocReverse": rev,
+            "omegaTurn": turn,
+            "omegaSpin": spin,
+            "animSteer": bool(steer and str(steer).upper() != "NULL"),
+        }
+    return None
+
+
 def enumerate_targets(odf_filter=None):
     """Scan odf.min.json for every geometryName + shotGeometry. Returns a dict
     stem -> {odfs, primaryOdf, unitName, category, factionCode, factionName,
@@ -355,6 +426,13 @@ def enumerate_targets(odf_filter=None):
                     art_recoil.append(r)
             if art_head is None and a["head"]:
                 art_head = a["head"]
+        # Drive profile: first candidate (primary first) declaring a movement
+        # class with speeds wins.
+        drive = None
+        for c in cands_sorted:
+            drive = _extract_odf_drive(c["blocks"])
+            if drive:
+                break
         out[stem] = {
             "odfs": odfs,
             "primaryOdf": primary["odf"],
@@ -364,6 +442,7 @@ def enumerate_targets(odf_filter=None):
             "factionName": FACTION_NAMES.get(fcode, "Other"),
             "odf_art": {"turretNames": art_turret, "recoilNames": art_recoil,
                         "head": art_head},
+            "drive": drive,
         }
     return out
 
@@ -935,6 +1014,7 @@ def process_model(job: dict) -> dict:
             "animated": animated,
             "clips": clips,
             "parts": parts,
+            "drive": job.get("drive"),
             "_glb_bytes": len(glb_bytes),
         }
     except Exception as e:  # noqa: BLE001 - resilient over ~700 models
@@ -995,6 +1075,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "animated": p.get("animated", False),
         "clips": p.get("clips", []),
         "parts": p.get("parts"),
+        "drive": meta.get("drive"),
     }
 
 
@@ -1199,7 +1280,7 @@ def main():
     emissive_count = sum(1 for m in manifest if m.get("emissiveTextures"))
     modskin_count = sum(1 for m in manifest if m.get("textureSets"))
     idx_path.write_text(json.dumps({
-        "schema_version": 8,
+        "schema_version": 10,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),

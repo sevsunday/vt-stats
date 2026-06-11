@@ -158,6 +158,13 @@
     <div id="stage" class="stage">
       <div id="controls-hint" class="controls-hint" aria-hidden="true" hidden></div>
       <div id="fps-counter" class="fps-counter" aria-hidden="true"></div>
+      <div id="drive-hud" class="drive-hud" aria-hidden="true" hidden>
+        <span class="drive-hud-key">WASD</span> drive
+        <span class="drive-hud-sep">&middot;</span>
+        <span class="drive-hud-key">&#8592;&#8593;&#8594;&#8595;</span> aim
+        <span class="drive-hud-sep">&middot;</span>
+        <span class="drive-hud-key">Esc</span> exit
+      </div>
       <div id="stage-loading" class="stage-loading" hidden>
         <div class="spinner-border" role="status" aria-hidden="true"></div>
         <span id="stage-loading-label">Loading&hellip;</span>
@@ -222,12 +229,18 @@
           </div>
         </div>
         <div id="parts-drive-section" class="parts-section" hidden>
-          <div class="light-row parts-drive-head">
-            <span class="light-label">Drive</span>
-            <span id="parts-drive-val" class="light-val">0</span>
-            <button id="parts-drive-reset" class="parts-mini-reset" title="Stop (reset drive to 0)" aria-label="Reset drive to 0"><i class="bi bi-arrow-counterclockwise"></i></button>
+          <div id="parts-drive-slider-block">
+            <div class="light-row parts-drive-head">
+              <span class="light-label">Drive</span>
+              <span id="parts-drive-val" class="light-val">0</span>
+              <button id="parts-drive-reset" class="parts-mini-reset" title="Stop (reset drive to 0)" aria-label="Reset drive to 0"><i class="bi bi-arrow-counterclockwise"></i></button>
+            </div>
+            <input id="parts-drive" type="range" min="-1" max="1" step="0.05" value="0" class="parts-drive-slider" title="Roll the treads (negative = reverse)" />
           </div>
-          <input id="parts-drive" type="range" min="-1" max="1" step="0.05" value="0" class="parts-drive-slider" title="Roll the treads (negative = reverse)" />
+          <div class="parts-row">
+            <button id="parts-drive-mode" class="btn toggle anim-mini" title="Drive with WASD: W/S throttle, A/D steer, scroll zooms the chase camera, arrow keys still aim the turret, Esc exits" hidden><i class="bi bi-joystick"></i> Drive &middot; WASD</button>
+            <button id="parts-deploy" class="btn toggle anim-mini" title="Morph between travel and deployed modes" hidden>Deploy</button>
+          </div>
         </div>
         <div id="parts-visibility-section" class="parts-section" hidden>
           <div class="light-row parts-subhead"><span>Show parts</span></div>
