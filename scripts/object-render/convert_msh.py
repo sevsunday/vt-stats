@@ -78,6 +78,7 @@ TEX_TEAMCOLOR_DIR = OUT_DIR / "textures" / "teamcolor"
 TEX_EMISSIVE_DIR = OUT_DIR / "textures" / "emissive"
 TEX_NORMAL_DIR = OUT_DIR / "textures" / "normal"
 TEX_SPECULAR_DIR = OUT_DIR / "textures" / "specular"
+TEX_SPECULAR_TRUE_DIR = OUT_DIR / "textures" / "specular_true"
 TEX_MODS_DIR = OUT_DIR / "textures" / "mods"
 
 PERF_MAX_DIM = 512       # performance PNG largest side
@@ -147,7 +148,25 @@ ANIM_FORMAT_VERSION = 5
 #       grayscale, luminance-converted from the `_s.dds` sources) + per-model
 #       `specularTextures`; both mirrored into the mod texture sets
 #       (textures/mods/<pack_id>/{normal,specular}/).
-TEXTURE_FORMAT_VERSION = 3
+#   v4: specular gloss source corrected from RGB luminance to the ALPHA channel
+#       (community-confirmed BZCC convention: spec RGB = specular tint, A =
+#       gloss; 547/660 stock `_s.dds` are BC3 with an authored alpha, and the
+#       two channels are essentially uncorrelated -- several unit spec maps
+#       carry FLAT RGB with all their gloss detail in alpha). Luminance remains
+#       the fallback for BC1 sources / flat-255 alpha. Same roughness LUT.
+#       NOTE: a v4 regen needs the stale specular PNGs deleted first
+#       (textures/specular/ + textures/mods/*/specular/) -- emits are
+#       skipped when the output file already exists.
+#   v5: DUAL specular sets. textures/specular/ reverts to the v3 RGB-luminance
+#       conversion (the stylized glossier look, restored as the viewer
+#       DEFAULT per user preference); the v4 alpha/game-true conversion moves
+#       to textures/specular_true/ (+ mods/<id>/specular_true/), consumed by
+#       the viewer's opt-in "True lighting" toggle. Decode once, emit both.
+#       Same stems in both sets, so the manifest shape is unchanged.
+#       NOTE: a v5 regen needs textures/specular/ + textures/mods/*/specular/
+#       purged first (on-disk v4 files are alpha-based and must revert to
+#       luminance; emits skip existing files).
+TEXTURE_FORMAT_VERSION = 5
 
 # Render flags (mirror msh_parser): hidden/collision geometry is not drawable.
 RS_HIDDEN = 0x400
@@ -1039,14 +1058,47 @@ def _roughness_lut(specular_power: float | None):
     return lut
 
 
+def _spec_gloss_band(img):
+    """Pick the GAME-TRUE gloss channel from a decoded spec map (texture
+    format v4+). BZCC convention: spec RGB = specular tint, ALPHA = gloss
+    (high alpha = glossier). Use alpha whenever it carries authored data; fall
+    back to RGB luminance for BC1 sources (the decoder emits flat 255 alpha)
+    and for flat-255 BC3 alpha (ambiguous -- luminance is the safer read)."""
+    rgba = img.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    lo, hi = alpha.getextrema()
+    if hi - lo == 0 and hi >= 250:
+        return rgba.convert("L")
+    return alpha
+
+
+def _spec_band_to_roughness(band, lut):
+    """Resize a gloss band to the spec budget and run it through the LUT."""
+    w, h = band.size
+    if max(w, h) > SPECULAR_MAX_DIM:
+        scale = SPECULAR_MAX_DIM / max(w, h)
+        band = band.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                           Image.LANCZOS)
+    return band.point(lut)
+
+
 def resolve_specular(msh_dir: Path, tex_key: str, declared_dds: str | None,
                      specular_power: float | None, cache: set):
-    """Resolve a legacy spec/gloss map and emit its ROUGHNESS conversion to
-    textures/specular/<tex_key>.png (<=512px grayscale; three.js samples the
-    green channel and browsers decode gray PNGs to replicated RGB, so L mode
-    works). Keyed by the DIFFUSE stem. Tries the `.material`-declared name
-    first, then the `<stem>_s` filename convention. Idempotent + atomic.
-    Returns tex_key or None.
+    """Resolve a legacy spec/gloss map and emit BOTH roughness conversions
+    (<=512px grayscale; three.js samples the green channel and browsers decode
+    gray PNGs to replicated RGB, so L mode works):
+
+      textures/specular/<tex_key>.png       RGB-luminance gloss -- the v3
+                                            "stylized glossy" look, the
+                                            viewer DEFAULT
+      textures/specular_true/<tex_key>.png  ALPHA gloss channel (BZCC's
+                                            authored convention) -- the
+                                            viewer's opt-in True lighting
+
+    Keyed by the DIFFUSE stem. Tries the `.material`-declared name first,
+    then the `<stem>_s` filename convention. Decode once, emit twice; each
+    write keeps its own exists-skip. Idempotent + atomic. Returns tex_key or
+    None.
 
     `cache` is a per-model set of already-emitted tex_keys."""
     if not tex_key:
@@ -1062,30 +1114,29 @@ def resolve_specular(msh_dir: Path, tex_key: str, declared_dds: str | None,
         return None
     src = Path(src)
     try:
-        pil = decode_dds(src, max_dim=SPECULAR_MAX_DIM).convert("L")
+        decoded = decode_dds(src, max_dim=SPECULAR_MAX_DIM)
     except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
         if _G and _G.get("verbose"):
             print(f"    specular decode failed {tex_key}: {e}")
         return None
-    w, h = pil.size
-    if max(w, h) > SPECULAR_MAX_DIM:
-        scale = SPECULAR_MAX_DIM / max(w, h)
-        pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
-                         Image.LANCZOS)
-    pil = pil.point(_roughness_lut(specular_power))
+    lut = _roughness_lut(specular_power)
     force = _G["force"] if _G else False
-    out_path = TEX_SPECULAR_DIR / f"{tex_key}.png"
-    if force or not out_path.exists():
-        _atomic_write_bytes(out_path, _png_bytes(pil))
+    for out_dir, band in (
+        (TEX_SPECULAR_DIR, decoded.convert("L")),
+        (TEX_SPECULAR_TRUE_DIR, _spec_gloss_band(decoded)),
+    ):
+        out_path = out_dir / f"{tex_key}.png"
+        if force or not out_path.exists():
+            _atomic_write_bytes(out_path,
+                                _png_bytes(_spec_band_to_roughness(band, lut)))
     cache.add(tex_key)
     return tex_key
 
 
-def _emit_mod_png(src: Path, out_path: Path, max_dim: int, mode: str,
-                  point_lut: list | None = None) -> bool:
+def _emit_mod_png(src: Path, out_path: Path, max_dim: int, mode: str) -> bool:
     """Decode a mod-pack `.dds` and write it as a <=max_dim PNG (idempotent +
-    atomic). `mode` is the PIL conversion ('RGBA' for masks, 'RGB' otherwise,
-    'L' + `point_lut` for the specular->roughness conversion)."""
+    atomic). `mode` is the PIL conversion ('RGBA' for masks, 'RGB' otherwise;
+    specular goes through _emit_mod_spec instead)."""
     force = _G["force"] if _G else False
     if not force and out_path.exists():
         return True
@@ -1100,9 +1151,33 @@ def _emit_mod_png(src: Path, out_path: Path, max_dim: int, mode: str,
         scale = max_dim / max(w, h)
         pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
                          Image.LANCZOS)
-    if point_lut is not None:
-        pil = pil.point(point_lut)
     _atomic_write_bytes(out_path, _png_bytes(pil))
+    return True
+
+
+def _emit_mod_spec(src: Path, pack_dir: Path, tex_key: str, lut: list) -> bool:
+    """Mod-pack counterpart of resolve_specular's dual emit: decode the pack's
+    `_s.dds` once and write both roughness variants -- specular/ (luminance,
+    viewer default) + specular_true/ (alpha gloss channel, True lighting).
+    Idempotent + atomic per output."""
+    force = _G["force"] if _G else False
+    out_def = pack_dir / "specular" / f"{tex_key}.png"
+    out_true = pack_dir / "specular_true" / f"{tex_key}.png"
+    if not force and out_def.exists() and out_true.exists():
+        return True
+    try:
+        decoded = decode_dds(src, max_dim=SPECULAR_MAX_DIM)
+    except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
+        if _G and _G.get("verbose"):
+            print(f"    mod spec decode failed {src.name}: {e}")
+        return False
+    for out_path, band in (
+        (out_def, decoded.convert("L")),
+        (out_true, _spec_gloss_band(decoded)),
+    ):
+        if force or not out_path.exists():
+            _atomic_write_bytes(out_path,
+                                _png_bytes(_spec_band_to_roughness(band, lut)))
     return True
 
 
@@ -1165,10 +1240,9 @@ def emit_mod_texture_sets(tex_keys: set, aux_names: dict) -> list:
                     break
             for cand in _aux_name_candidates(tex_key, spec_decl, "_s"):
                 cand_src = idx.get(cand)
-                if cand_src and _emit_mod_png(
-                        Path(cand_src), pack_dir / "specular" / f"{tex_key}.png",
-                        SPECULAR_MAX_DIM, "L",
-                        point_lut=_roughness_lut(spec_power)):
+                if cand_src and _emit_mod_spec(
+                        Path(cand_src), pack_dir, tex_key,
+                        _roughness_lut(spec_power)):
                     hit_spec.append(tex_key)
                     break
         if hit_tex:
@@ -1562,10 +1636,12 @@ def main():
         print(f"--limit: capped to {len(resolved)} models")
 
     for d in (GEO_DIR, TEX_PERF_DIR, TEX_HQ_DIR, TEX_TEAMCOLOR_DIR, TEX_EMISSIVE_DIR,
-              TEX_NORMAL_DIR, TEX_SPECULAR_DIR, OUT_DIR / "thumbnails"):
+              TEX_NORMAL_DIR, TEX_SPECULAR_DIR, TEX_SPECULAR_TRUE_DIR,
+              OUT_DIR / "thumbnails"):
         d.mkdir(parents=True, exist_ok=True)
     for pack_id in mod_indexes:
-        for sub in ("perf", "hq", "teamcolor", "emissive", "normal", "specular"):
+        for sub in ("perf", "hq", "teamcolor", "emissive", "normal",
+                    "specular", "specular_true"):
             (TEX_MODS_DIR / pack_id / sub).mkdir(parents=True, exist_ok=True)
 
     # Prior manifest (for cache reuse of geometry stats). A change in

@@ -133,6 +133,8 @@ const els = {
   texsetRows: document.getElementById('texset-rows'),
   shiplightsRow: document.getElementById('shiplights-row'),
   shiplightsOn: document.getElementById('shiplights-on'),
+  truelightRow: document.getElementById('truelight-row'),
+  truelightOn: document.getElementById('truelight-on'),
   loadoutPanel: document.getElementById('loadout-panel'),
   loadoutHead: document.getElementById('loadout-head'),
   loadoutChevron: document.getElementById('loadout-chevron'),
@@ -472,6 +474,7 @@ function showViewer(entry) {
       setupColorsUI();
       setupTexturesUI(entry);
       setupShipLightsUI();
+      setupTrueLightingUI();
       // Fly toggle: only for craft with an ODF flightAltitude ceiling.
       els.fly.hidden = !activeViewer.hasFlightMode();
       // Now that each pane's applicability (button visibility) is known, lay out
@@ -560,10 +563,12 @@ function showViewer(entry) {
   els.texturesBtn.hidden = true;
   setPaneOpen('textures', false);
 
-  // Ship-lights toggle starts hidden; setupShipLightsUI() reveals it once the
-  // GLB resolves and reports authored hardpoint lights. The loadout overlay is
-  // manifest-driven, so it can render immediately.
+  // Ship-lights + True-lighting toggles start hidden; their setup fns reveal
+  // them once the GLB resolves. The loadout overlay is manifest-driven, so it
+  // can render immediately.
   els.shiplightsRow.hidden = true;
+  els.truelightRow.hidden = true;
+  els.truelightOn.checked = false;
   setupLoadoutUI(entry);
 
   // Controls legend repopulates once the model loads (updateControlsHint()).
@@ -1450,6 +1455,19 @@ function setupShipLightsUI() {
   };
 }
 
+/* Reveal the True-lighting toggle when the model has any spec/roughness
+ * coverage. Each open starts OFF: the default gloss is VT Stats' stylized
+ * (luminance) look; ON swaps to the game-authored alpha-gloss conversion. */
+function setupTrueLightingUI() {
+  const has = !!(activeViewer && activeViewer.hasSpecular());
+  els.truelightRow.hidden = !has;
+  if (!has) return;
+  els.truelightOn.checked = activeViewer.getTrueLighting();
+  els.truelightOn.onchange = () => {
+    if (activeViewer) activeViewer.setTrueLighting(els.truelightOn.checked);
+  };
+}
+
 /* Reflect the active team color on every swatch row + the Original button.
  * `hex` null means uncolored (Original active). */
 function syncColorSwatches(hex) {
@@ -1529,11 +1547,14 @@ function resetAllViewer() {
   }
 
   // Ship lights -> ON (resetView below also re-asserts this viewer-side);
-  // loadout overlay -> default variant + default collapsed state.
+  // True lighting -> OFF (stylized default gloss); loadout overlay -> default
+  // variant + default collapsed state.
   if (activeViewer.hasShipLights()) {
     activeViewer.setShipLights(true);
     els.shiplightsOn.checked = true;
   }
+  els.truelightOn.checked = false;
+  activeViewer.setTrueLighting(false);
   if (loadoutEntry && loadoutEntry.loadouts) setupLoadoutUI(loadoutEntry);
   updateControlsHint();
 

@@ -41,9 +41,12 @@ const TEX_EMISSIVE_BASE = '../data/models/textures/emissive/';
 // Tangent-space normal maps (single 1024px set, keyed by diffuse stem; decoded
 // from the BC5S `_n.dds` sources by the pipeline).
 const TEX_NORMAL_BASE = '../data/models/textures/normal/';
-// Specular->roughness maps (single 512px grayscale set, keyed by diffuse stem;
-// luminance-converted from the legacy spec/gloss `_s.dds` sources).
+// Specular->roughness maps (512px grayscale, keyed by diffuse stem; converted
+// from the legacy spec/gloss `_s.dds` sources). TWO parallel sets: the default
+// stylized luminance conversion + the game-authored alpha-gloss conversion
+// behind the Light pane's "True lighting" toggle.
 const TEX_SPECULAR_BASE = '../data/models/textures/specular/';
+const TEX_SPECULAR_TRUE_BASE = '../data/models/textures/specular_true/';
 // Workshop mod texture-override sets: textures/mods/<packId>/{perf,hq,teamcolor,
 // emissive,normal,specular}/<stem>.{png,dds}. Which stems each pack covers comes
 // from the manifest's per-model `textureSets` block (no 404 probing).
@@ -393,6 +396,7 @@ export class ObjectViewer {
     this._specularTextures = [];
     this._specCache = new Map();      // `${set}:spec:${name}` -> THREE.Texture | null
     this._specLoadGen = 0;            // bumped each _applySpecular run; stale runs abort
+    this._trueLighting = false;       // OFF = stylized gloss (default); ON = game-true alpha gloss
 
     // Sun light state (persisted by the caller; see opts.light).
     const lopts = opts.light || {};
@@ -739,6 +743,7 @@ export class ObjectViewer {
     // its lights ON (they're authored equipment, not an effect).
     this._shipLightDefs = (texInfo && texInfo.lights) || [];
     this._shipLightsOn = true;
+    this._trueLighting = false;   // each model opens on the stylized default
     // Hover lift (ODF setAltitude, hover/morph archetypes only) + flight
     // ceiling (ODF flightAltitude; APC/Bomber/SAV). Fly always starts OFF.
     this._hoverAltitude =
@@ -1098,8 +1103,13 @@ export class ObjectViewer {
   }
 
   _loadSpecular(setId, name) {
-    const base = setId ? `${TEX_MODS_BASE}${setId}/specular/` : TEX_SPECULAR_BASE;
-    const cacheKey = `${setId || 'stock'}:spec:${name}`;
+    // Variant routing: default = the stylized luminance-gloss set; True
+    // lighting = the game-authored alpha-gloss set (specular_true/).
+    const dir = this._trueLighting ? 'specular_true' : 'specular';
+    const base = setId
+      ? `${TEX_MODS_BASE}${setId}/${dir}/`
+      : (this._trueLighting ? TEX_SPECULAR_TRUE_BASE : TEX_SPECULAR_BASE);
+    const cacheKey = `${dir}:${setId || 'stock'}:spec:${name}`;
     if (this._specCache.has(cacheKey)) return Promise.resolve(this._specCache.get(cacheKey));
     const finish = (tex) => {
       if (tex) {
@@ -1117,6 +1127,28 @@ export class ObjectViewer {
     return new Promise((resolve) => {
       this._texLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
     });
+  }
+
+  /* ---- True lighting (game-authored alpha-gloss roughness variant) ------- */
+
+  /* Whether the loaded model has any spec/roughness coverage (stock or any
+   * mod set) -- gates the Light pane's True lighting row. */
+  hasSpecular() {
+    if (this._specularTextures.length) return true;
+    return this._textureSets.some(
+      (s) => s.specularTextures && s.specularTextures.length);
+  }
+
+  getTrueLighting() { return this._trueLighting; }
+
+  /* Swap between the stylized default gloss (off) and BZCC's authored
+   * alpha-channel gloss (on). Cached per variant, so repeat toggles re-bind
+   * without re-downloading. */
+  async setTrueLighting(on) {
+    const want = !!on;
+    if (want === this._trueLighting) return;
+    this._trueLighting = want;
+    if (this._model) await this._applySpecular();
   }
 
   /* ---- Texture sets (workshop mod skins) -------------------------------- */
@@ -3005,6 +3037,7 @@ export class ObjectViewer {
     this.setShipLights(true);   // authored lights default ON
     this.highlightHardpoints(null);
     this._snapFlightGrounded(); // Fly -> off, instant (camera snaps home below)
+    this.setTrueLighting(false);   // back to the stylized default gloss (async)
     this.setTextureSet(null);   // async texture swap; fire-and-forget
     if (this._home) {
       this.camera.position.copy(this._home.pos);

@@ -14,8 +14,22 @@ retained as the historical design record. Key learnings from the build:
     impossible without patching the vendored DDSLoader (no BC5/RGTC support)
     -- normals ship PNG-only.
   * Resolution decision: 1024px flat (NORMAL_MAX_DIM), ~379 MB measured.
-  * `_s` shipped via approach 3.1.A exactly (luminance -> roughness with the
+  * `_s` shipped via approach 3.1.A (luminance -> roughness with the
     specularPower bias, SPEC_ROUGHNESS_K = 0.6, grayscale L-mode PNG @512).
+    CHANNEL CORRECTION (texture format v4): the gloss source was later fixed
+    from RGB luminance to the ALPHA channel -- community-confirmed BZCC
+    convention is spec RGB = specular tint, A = gloss. Probing showed 547/660
+    stock `_s.dds` are BC3 with authored alpha, lum-vs-alpha correlation only
+    ~0.13, and several unit maps (cvrbomb02, evdrop00, hbport00, ...) carry
+    FLAT RGB with all gloss detail in alpha (their v3 roughness maps were
+    featureless). `_spec_gloss_band()` in convert_msh.py picks alpha, falling
+    back to luminance for BC1 sources / flat-255 alpha; same LUT otherwise.
+    DUAL-SET DECISION (texture format v5): the alpha conversion proved
+    game-accurate but visually DULLER -- the v3 luminance look was preferred
+    aesthetically. Both now ship: textures/specular/ = luminance (the viewer
+    default) + textures/specular_true/ = alpha (opt-in "True lighting"
+    checkbox in the Light pane). Decode once, emit both; mod packs mirror
+    the pair under mods/<id>/{specular,specular_true}/.
   * Viewer: derivative-tangent fallback (2.3.A option 1); DirectX green flip
     as normalScale.set(1, -1) behind the NORMAL_FLIP_G tunable (2.3.B).
 
