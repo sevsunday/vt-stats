@@ -378,6 +378,40 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
         # viewer ramps its yaw rate at this, so heavy craft wind up/coast down.
         alpha = _odf_float(props, f"alphaSteer{suffix}")
         steer = props.get("animSteer")
+        # setAltitude (hover/morph only): "Height above Ground that it tries
+        # to maintain" (linear meters, per the vendored ODF guide) -- measured
+        # at the craft's physics ORIGIN, which is why a shallow-hulled APC at
+        # 1.5 reads much higher than a scout at 1.0. Corpus range: 0 (ivcons,
+        # grounded) .. 75 (FE flying artillery). Morph ODFs usually carry it on
+        # MorphTankClass; fall back to a sibling HoverCraftClass block.
+        altitude = None
+        if archetype in ("hover", "morph"):
+            props_l = {str(k).lower(): v for k, v in props.items()}
+            altitude = _light_float(props_l, "setaltitude", None) \
+                if "setaltitude" in props_l else None
+            if altitude is None:
+                hc = blocks.get("HoverCraftClass")
+                if isinstance(hc, dict):
+                    hcl = {str(k).lower(): v for k, v in hc.items()}
+                    if "setaltitude" in hcl:
+                        altitude = _light_float(hcl, "setaltitude", None)
+            if altitude is None:
+                altitude = 1.0   # engine default per the guide
+        # flightAltitude (APCClass / BomberClass / SavClass, incl. nested
+        # `Bomber.BomberClass`): the craft's FLYING ceiling -- "How high above
+        # ground it flies" (APC 75, bombers 85, SAV 150; linear meters). Only
+        # emitted when authored; powers the viewer's Fly toggle.
+        flight = None
+        for bk, bv in blocks.items():
+            if not isinstance(bv, dict):
+                continue
+            if str(bk).lower().split(".")[-1] not in ("apcclass", "bomberclass", "savclass"):
+                continue
+            bl = {str(k).lower(): v for k, v in bv.items()}
+            if "flightaltitude" in bl:
+                flight = _light_float(bl, "flightaltitude", None)
+                if flight is not None:
+                    break
         return {
             "archetype": archetype,
             "velocForward": fwd,
@@ -387,8 +421,144 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
             "omegaSpin": spin,
             "alphaSteer": alpha,
             "animSteer": bool(steer and str(steer).upper() != "NULL"),
+            "setAltitude": altitude,
+            "flightAltitude": flight,
         }
     return None
+
+
+# The 8 valid weapon-hardpoint categories (per GenBlackDragon's ODF guide,
+# vendored at docs/reference/odf-properties-guide.md): a hardpoint node name
+# must START with one of these, with or without the traditional HP_ prefix
+# (HP_GUN_1, hp_cannon_2, HP_SHIELD, ...). Same-type hardpoints fire together
+# when that weapon slot is selected in-game.
+WEAPON_HARD_CATEGORIES = ("GUN", "CANN", "MORT", "ROCK", "SPEC", "SHIE", "HAND", "PACK")
+
+
+def _hardpoint_type(hard: str) -> str | None:
+    """Map a hardpoint node name (HP_GUN_1 / hp_cannon_2 / HP_SHIELD) to its
+    weapon category code, or None when the name matches no category."""
+    h = str(hard).strip().upper()
+    if h.startswith("HP_"):
+        h = h[3:]
+    for cat in WEAPON_HARD_CATEGORIES:
+        if h.startswith(cat):
+            return cat
+    return None
+
+
+def _odf_strv(props_lower: dict, key_lower: str) -> str | None:
+    """Read a string prop from a lowercase-keyed block; '', 'NULL' -> None."""
+    v = props_lower.get(key_lower)
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s and s.upper() != "NULL" else None
+
+
+def _lookup_weapon(weapon_db: dict, odf_stem: str):
+    """Resolve (wpnName, wpnCategory) for a weapon ODF stem from the Weapon
+    category of odf.min.json. The DB pre-flattens most inheritance, but we
+    still follow inheritanceChain as a fallback (e.g. variants that only
+    override firing props)."""
+    seen = set()
+    key = str(odf_stem).strip().lower().removesuffix(".odf")
+    while key and key not in seen:
+        seen.add(key)
+        entry = weapon_db.get(key + ".odf")
+        if not isinstance(entry, dict):
+            return None, None
+        name = cat = None
+        for bk, bv in entry.items():
+            if isinstance(bv, dict) and "." not in bk:
+                name = name or bv.get("wpnName")
+                cat = cat or bv.get("wpnCategory")
+        if name or cat:
+            return (str(name).strip() if name else None,
+                    str(cat).strip().upper() if cat else None)
+        chain = entry.get("inheritanceChain") or []
+        key = str(chain[0]).strip().lower() if chain else None
+    return None, None
+
+
+def _extract_odf_loadout(blocks: dict, weapon_db: dict) -> list | None:
+    """Default weapon loadout from one ODF entry's GameObjectClass:
+    weaponHard1..5 (hardpoint node name) + weaponName1..5 (weapon ODF) +
+    weaponAssault1..5. Slot type comes from the hardpoint name prefix with
+    the weapon's own wpnCategory as fallback. A declared hardpoint with no
+    weapon is kept as an empty slot. Returns None when no slots exist."""
+    go = blocks.get("GameObjectClass", {}) or {}
+    gol = {str(k).lower(): v for k, v in go.items()}
+    slots = []
+    for i in range(1, 6):
+        hard = _odf_strv(gol, f"weaponhard{i}")
+        wname = _odf_strv(gol, f"weaponname{i}")
+        if not hard and not wname:
+            continue
+        weapon_odf = wname.lower().removesuffix(".odf") if wname else None
+        wpn_name, wpn_cat = _lookup_weapon(weapon_db, weapon_odf) if weapon_odf else (None, None)
+        stype = (_hardpoint_type(hard) if hard else None) or wpn_cat
+        assault = str(gol.get(f"weaponassault{i}", "")).strip().lower() in ("1", "true")
+        slots.append({
+            "hard": hard,
+            "type": stype,
+            "weaponOdf": weapon_odf,
+            "weaponName": wpn_name,
+            "assault": assault,
+        })
+    return slots or None
+
+
+def _light_float(props_lower: dict, key_lower: str, default: float) -> float:
+    v = props_lower.get(key_lower)
+    if v is None:
+        return default
+    try:
+        return float(str(v).rstrip("fF"))
+    except (TypeError, ValueError):
+        return default
+
+
+def _extract_odf_lights(blocks: dict, effect_db: dict) -> list | None:
+    """Authored ship lights from one ODF entry's GameObjectClass:
+    lightHard1..8 (hardpoint node name) + lightName1..8 (LightClass ODF in the
+    Effect category). Each resolved light carries the authored color / range /
+    attenuation / spot cone so the viewer can build a real THREE light.
+    Slots with an empty lightName or an unresolvable light ODF are skipped.
+    Returns None when nothing resolves."""
+    go = blocks.get("GameObjectClass", {}) or {}
+    gol = {str(k).lower(): v for k, v in go.items()}
+    only_piloted = str(gol.get("lightsonlywhenpiloted", "")).strip().lower() in ("1", "true")
+    out = []
+    for i in range(1, 9):
+        hard = _odf_strv(gol, f"lighthard{i}")
+        name = _odf_strv(gol, f"lightname{i}")
+        if not hard or not name:
+            continue
+        entry = effect_db.get(name.lower().removesuffix(".odf") + ".odf")
+        lc = entry.get("LightClass") if isinstance(entry, dict) else None
+        if not isinstance(lc, dict):
+            continue
+        lcl = {str(k).lower(): v for k, v in lc.items()}
+        kind = "spot" if str(lcl.get("classlabel", "")).strip().lower() == "spotlight" else "point"
+        light = {
+            "hard": hard,
+            "lightOdf": name.lower().removesuffix(".odf"),
+            "kind": kind,
+            "color": [round(_light_float(lcl, f"lightcolor.{c}", 1.0), 4) for c in "rgb"],
+            "range": _light_float(lcl, "lightrange", 20.0),
+            "attenuation": [
+                _light_float(lcl, "attenuateconstant", 1.0),
+                _light_float(lcl, "attenuatelinear", 0.0),
+                _light_float(lcl, "attenuatequadratic", 15.0),
+            ],
+            "onlyWhenPiloted": only_piloted,
+        }
+        if kind == "spot":
+            light["coneInner"] = _light_float(lcl, "coneanginner", 0.5)
+            light["coneOuter"] = _light_float(lcl, "coneangouter", 2.0)
+        out.append(light)
+    return out or None
 
 
 def enumerate_targets(odf_filter=None):
@@ -421,6 +591,9 @@ def enumerate_targets(odf_filter=None):
                     sg = bv.get("shotGeometry")
                     if sg and str(sg).upper() != "NULL":
                         add(_stem(sg), name, unit, "Ordnance", "shotGeometry", blocks)
+
+    weapon_db = db.get("Weapon", {}) or {}
+    effect_db = db.get("Effect", {}) or {}
 
     out = {}
     for stem, cands in refs.items():
@@ -459,6 +632,50 @@ def enumerate_targets(odf_filter=None):
             drive = _extract_odf_drive(c["blocks"])
             if drive:
                 break
+        # Weapon loadouts: one entry per candidate ODF declaring >= 1 weapon
+        # slot (virtual_class_* stubs skipped) -- powers the viewer's variant
+        # dropdown. Default variant prefers _vsr (this is a VSR stats site),
+        # then the primary ODF. Ship lights come from the first VSR-preferred
+        # candidate that declares any (lights rarely vary across variants).
+        uniq_cands, seen_odfs = [], set()
+        for c in cands_sorted:
+            o = c["odf"]
+            if o in seen_odfs or o.startswith("virtual_class_"):
+                continue
+            seen_odfs.add(o)
+            uniq_cands.append(c)
+        loadouts = []
+        for c in uniq_cands:
+            slots = _extract_odf_loadout(c["blocks"], weapon_db)
+            if slots:
+                # `unit` = the source ODF's own unitName so the viewer can flag
+                # variants that belong to a DIFFERENT unit sharing this mesh
+                # (e.g. ivapc00's only armed variants are the holiday-mod
+                # ivsnowplow ODFs -- the stock APC has no weapon hardpoints).
+                loadouts.append({"odf": c["odf"], "unit": c["unitName"] or None,
+                                 "slots": slots})
+        # Default variant: VSR first, then stock (the primary ODF or any
+        # candidate whose unitName matches this unit). When ONLY foreign-unit
+        # variants are armed (e.g. ivapc00's holiday-mod Snowplow ODFs), the
+        # default stays None -- the stock unit genuinely has no hardpoints and
+        # the viewer renders a "None" state with the variants as opt-in.
+        default_loadout_odf = None
+        if loadouts:
+            base_unit = (primary["unitName"] or "").strip().lower()
+            vsr = [lo["odf"] for lo in loadouts if lo["odf"].endswith("_vsr.odf")]
+            stock = [lo["odf"] for lo in loadouts
+                     if lo["odf"] == primary["odf"]
+                     or (base_unit and (lo["unit"] or "").strip().lower() == base_unit)]
+            if vsr:
+                default_loadout_odf = min(vsr, key=lambda o: (len(o), o))
+            elif stock:
+                default_loadout_odf = stock[0]
+        lights = None
+        for c in sorted(uniq_cands,
+                        key=lambda c: 0 if c["odf"].endswith("_vsr.odf") else 1):
+            lights = _extract_odf_lights(c["blocks"], effect_db)
+            if lights:
+                break
         out[stem] = {
             "odfs": odfs,
             "primaryOdf": primary["odf"],
@@ -469,6 +686,9 @@ def enumerate_targets(odf_filter=None):
             "odf_art": {"turretNames": art_turret, "recoilNames": art_recoil,
                         "head": art_head},
             "drive": drive,
+            "loadouts": loadouts or None,
+            "defaultLoadoutOdf": default_loadout_odf,
+            "lights": lights,
         }
     return out
 
@@ -1202,6 +1422,9 @@ def process_model(job: dict) -> dict:
             "clips": clips,
             "parts": parts,
             "drive": job.get("drive"),
+            "loadouts": job.get("loadouts"),
+            "defaultLoadoutOdf": job.get("defaultLoadoutOdf"),
+            "lights": job.get("lights"),
             "_glb_bytes": len(glb_bytes),
         }
     except Exception as e:  # noqa: BLE001 - resilient over ~700 models
@@ -1265,6 +1488,9 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "clips": p.get("clips", []),
         "parts": p.get("parts"),
         "drive": meta.get("drive"),
+        "loadouts": meta.get("loadouts"),
+        "defaultLoadoutOdf": meta.get("defaultLoadoutOdf"),
+        "lights": meta.get("lights"),
     }
 
 
@@ -1470,8 +1696,10 @@ def main():
     normal_count = sum(1 for m in manifest if m.get("normalTextures"))
     specular_count = sum(1 for m in manifest if m.get("specularTextures"))
     modskin_count = sum(1 for m in manifest if m.get("textureSets"))
+    loadout_count = sum(1 for m in manifest if m.get("loadouts"))
+    lights_count = sum(1 for m in manifest if m.get("lights"))
     idx_path.write_text(json.dumps({
-        "schema_version": 13,
+        "schema_version": 16,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1482,6 +1710,8 @@ def main():
         "normal_count": normal_count,
         "specular_count": specular_count,
         "modskin_count": modskin_count,
+        "loadout_count": loadout_count,
+        "lights_count": lights_count,
         "texture_packs": {p["id"]: {"label": p["label"], "url": p["url"]}
                           for p in MOD_TEXTURE_PACKS},
         "texture_report": texture_report,
@@ -1494,7 +1724,8 @@ def main():
           f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed, "
           f"{animated_count} animated, {teamcolor_count} team-colorable, "
           f"{emissive_count} emissive, {normal_count} normal-mapped, "
-          f"{specular_count} roughness-mapped, {modskin_count} with mod skins)")
+          f"{specular_count} roughness-mapped, {modskin_count} with mod skins, "
+          f"{loadout_count} with loadouts, {lights_count} with lights)")
     print(f"textures: {texture_report['models_textured']} textured, "
           f"{texture_report['models_no_texture']} without "
           f"({texture_report['models_unresolved_refs']} have unresolved refs, "

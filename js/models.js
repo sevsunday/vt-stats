@@ -71,6 +71,7 @@ const els = {
   controlsHint: document.getElementById('controls-hint'),
   spin: document.getElementById('spin-btn'),
   freespin: document.getElementById('freespin-btn'),
+  fly: document.getElementById('fly-btn'),
   reset: document.getElementById('reset-btn'),
   capture: document.getElementById('capture-btn'),
   qualitySeg: document.getElementById('quality-seg'),
@@ -130,6 +131,21 @@ const els = {
   texturesBtn: document.getElementById('textures-btn'),
   texturesPanel: document.getElementById('textures-panel'),
   texsetRows: document.getElementById('texset-rows'),
+  shiplightsRow: document.getElementById('shiplights-row'),
+  shiplightsOn: document.getElementById('shiplights-on'),
+  loadoutPanel: document.getElementById('loadout-panel'),
+  loadoutHead: document.getElementById('loadout-head'),
+  loadoutChevron: document.getElementById('loadout-chevron'),
+  loadoutBody: document.getElementById('loadout-body'),
+  loadoutVariant: document.getElementById('loadout-variant'),
+  loadoutRows: document.getElementById('loadout-rows'),
+};
+
+// Weapon hardpoint category codes -> display labels (per the vendored ODF
+// guide: docs/reference/odf-properties-guide.md, "Weapon Settings").
+const SLOT_LABELS = {
+  GUN: 'Gun', CANN: 'Cannon', MORT: 'Mortar', ROCK: 'Rocket',
+  SPEC: 'Special', SHIE: 'Shield', HAND: 'Hand', PACK: 'Pack',
 };
 
 /* ---- Settings-pane dock ------------------------------------------------- */
@@ -225,6 +241,7 @@ let manifest = [];
 // + workshop links for the mod texture sets referenced by models' textureSets.
 let texturePacks = {};
 let activeViewer = null;
+let loadoutEntry = null;   // manifest entry whose loadout panel is on screen
 let aoCompiled = false;   // per-viewer: whether the SSAO/SMAA shaders have compiled
 // faction: single-select string ('all' = no filter), default ISDF.
 // category: multi-select Set (empty = no filter / "All"), default Building+Vehicle.
@@ -439,6 +456,13 @@ function showViewer(entry) {
     emissive: entry.emissiveTextures || [],
     normal: entry.normalTextures || [],
     specular: entry.specularTextures || [],
+    lights: entry.lights || [],
+    // Hover/morph craft float at their ODF setAltitude (linear meters);
+    // APC/Bomber/SAV additionally expose the Fly toggle via flightAltitude.
+    hoverAltitude: (entry.drive
+      && (entry.drive.archetype === 'hover' || entry.drive.archetype === 'morph'))
+      ? (entry.drive.setAltitude || 0) : 0,
+    flightAltitude: entry.drive ? (entry.drive.flightAltitude || 0) : 0,
   })
     .then(() => {
       if (!activeViewer) return;
@@ -447,6 +471,9 @@ function showViewer(entry) {
       setupArticulationUI();
       setupColorsUI();
       setupTexturesUI(entry);
+      setupShipLightsUI();
+      // Fly toggle: only for craft with an ODF flightAltitude ceiling.
+      els.fly.hidden = !activeViewer.hasFlightMode();
       // Now that each pane's applicability (button visibility) is known, lay out
       // the dock: desktop opens every applicable pane, mobile starts collapsed.
       applyDefaultPaneState();
@@ -472,6 +499,14 @@ function showViewer(entry) {
   els.spin.classList.remove('on');
   els.freespin.classList.remove('on');
   els.stage.classList.remove('grabbable');
+  els.fly.hidden = true;
+  els.fly.classList.remove('on');
+  els.fly.onclick = () => {
+    if (!activeViewer) return;
+    const on = !els.fly.classList.contains('on');
+    els.fly.classList.toggle('on', on);
+    activeViewer.setFlightMode(on);
+  };
   // All panes start collapsed; applyDefaultPaneState() lays out the dock once
   // the model loads and each pane's applicability is known. The sun on/off now
   // lives inside the Light pane (initLightPanel syncs the checkbox).
@@ -524,6 +559,12 @@ function showViewer(entry) {
   // manifest entry carries mod texture sets. Each open starts on Stock.
   els.texturesBtn.hidden = true;
   setPaneOpen('textures', false);
+
+  // Ship-lights toggle starts hidden; setupShipLightsUI() reveals it once the
+  // GLB resolves and reports authored hardpoint lights. The loadout overlay is
+  // manifest-driven, so it can render immediately.
+  els.shiplightsRow.hidden = true;
+  setupLoadoutUI(entry);
 
   // Controls legend repopulates once the model loads (updateControlsHint()).
   els.controlsHint.hidden = true;
@@ -1284,6 +1325,131 @@ function syncTexsetRows(activeId) {
   });
 }
 
+/* ---- Weapon loadout overlay (top-right) ---------------------------------- */
+
+/* Reveal + populate the loadout panel when the manifest entry carries weapon
+ * loadouts. The variant <select> lists every ODF declaring weapon slots
+ * (default = the VSR-preferred `defaultLoadoutOdf`); rows group same-type
+ * hardpoints (they fire together in-game) with a multiplicity marker, link
+ * each weapon to the ODF Browser, and highlight the physical hardpoint nodes
+ * on hover. Starts collapsed on mobile. */
+function setupLoadoutUI(entry) {
+  loadoutEntry = entry;
+  const loadouts = (entry && entry.loadouts) || [];
+  els.loadoutPanel.hidden = !loadouts.length;
+  if (!loadouts.length) return;
+
+  // A variant whose unitName differs from the model's is a DIFFERENT unit
+  // sharing this mesh (e.g. the holiday-mod Snowplow APC arming the stock
+  // APC hull) -- label it so the provenance is obvious.
+  const baseUnit = (entry.unitName || '').trim().toLowerCase();
+  const differs = (lo) =>
+    !!(lo.unit && lo.unit.trim() && lo.unit.trim().toLowerCase() !== baseUnit);
+  els.loadoutVariant.innerHTML = '';
+  // No stock/VSR variant is armed (defaultLoadoutOdf null) -> the unit itself
+  // has no hardpoints. Default to an explicit "None" entry; the foreign-unit
+  // variants stay listed as opt-in.
+  const noneDefault = !entry.defaultLoadoutOdf;
+  if (noneDefault) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = `None \u2014 ${entry.unitName || 'stock'} has no hardpoints`;
+    els.loadoutVariant.appendChild(opt);
+  }
+  for (const lo of loadouts) {
+    const opt = document.createElement('option');
+    opt.value = lo.odf;
+    const stem = lo.odf.replace(/\.odf$/i, '');
+    opt.textContent = differs(lo) ? `${stem} \u2014 ${lo.unit.trim()}` : stem;
+    els.loadoutVariant.appendChild(opt);
+  }
+  const def = noneDefault ? '' : entry.defaultLoadoutOdf;
+  els.loadoutVariant.value = def;
+  els.loadoutVariant.onchange = () => renderLoadoutRows(els.loadoutVariant.value);
+  // Hide the dropdown chrome only when there's nothing to choose between AND
+  // the lone variant really belongs to this unit (a foreign-unit loadout or a
+  // None default must keep the selector on screen).
+  els.loadoutVariant.hidden = !noneDefault && loadouts.length < 2 && !differs(loadouts[0]);
+
+  els.loadoutHead.onclick = () => setLoadoutOpen(els.loadoutBody.hidden);
+  setLoadoutOpen(!isMobilePanes());
+  renderLoadoutRows(def);
+}
+
+function setLoadoutOpen(open) {
+  els.loadoutBody.hidden = !open;
+  els.loadoutHead.setAttribute('aria-expanded', String(open));
+  els.loadoutChevron.className = `bi bi-chevron-${open ? 'up' : 'down'}`;
+}
+
+function renderLoadoutRows(odf) {
+  const lo = ((loadoutEntry && loadoutEntry.loadouts) || [])
+    .find((l) => l.odf === odf);
+  els.loadoutRows.innerHTML = '';
+  if (activeViewer) activeViewer.highlightHardpoints(null);
+  if (!lo) {
+    // "None" selection: the stock unit carries no weapon hardpoints.
+    const row = document.createElement('div');
+    row.className = 'loadout-row';
+    row.innerHTML = '<span class="loadout-empty">No weapon hardpoints</span>';
+    els.loadoutRows.appendChild(row);
+    return;
+  }
+
+  // Group same-type+same-weapon slots: both GUN hardpoints firing gminigun_c
+  // collapse to one "Gun -- Minigun x2" row (they fire together in-game).
+  const groups = [];
+  for (const slot of lo.slots) {
+    const key = `${slot.type || '?'}|${slot.weaponOdf || ''}|${slot.assault ? 1 : 0}`;
+    let g = groups.find((x) => x.key === key);
+    if (!g) {
+      g = { key, type: slot.type, weaponOdf: slot.weaponOdf,
+            weaponName: slot.weaponName, assault: slot.assault, hards: [] };
+      groups.push(g);
+    }
+    if (slot.hard) g.hards.push(slot.hard);
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const g of groups) {
+    const row = document.createElement('div');
+    row.className = 'loadout-row';
+    const label = SLOT_LABELS[g.type] || g.type || 'Other';
+    const count = g.hards.length > 1 ? ` <span class="loadout-count">\u00d7${g.hards.length}</span>` : '';
+    let weaponHtml;
+    if (g.weaponOdf) {
+      const display = g.weaponName || g.weaponOdf;
+      weaponHtml =
+        `<a class="loadout-weapon" href="../odf/index.html?odf=${encodeURIComponent(g.weaponOdf)}"` +
+        ` target="_blank" rel="noopener" title="Open ${escapeHtml(g.weaponOdf)}.odf in the ODF Browser">` +
+        `${escapeHtml(display)}</a>` +
+        `<span class="loadout-odf">${escapeHtml(g.weaponOdf)}</span>${count}`;
+    } else {
+      weaponHtml = '<span class="loadout-empty">\u2014 empty</span>';
+    }
+    row.innerHTML =
+      `<span class="loadout-slot"${g.assault ? ' title="Assault hardpoint"' : ''}>` +
+      `${escapeHtml(label)}${g.assault ? '<i class="bi bi-shield-fill loadout-assault" aria-hidden="true"></i>' : ''}</span>` +
+      `<span class="loadout-value">${weaponHtml}</span>`;
+    row.onmouseenter = () => { if (activeViewer) activeViewer.highlightHardpoints(g.hards); };
+    row.onmouseleave = () => { if (activeViewer) activeViewer.highlightHardpoints(null); };
+    frag.appendChild(row);
+  }
+  els.loadoutRows.appendChild(frag);
+}
+
+/* Reveal the Ship-lights toggle when the loaded GLB resolved any authored
+ * hardpoint lights; each open starts ON (the viewer's load() default). */
+function setupShipLightsUI() {
+  const has = !!(activeViewer && activeViewer.hasShipLights());
+  els.shiplightsRow.hidden = !has;
+  if (!has) return;
+  els.shiplightsOn.checked = activeViewer.getShipLightsOn();
+  els.shiplightsOn.onchange = () => {
+    if (activeViewer) activeViewer.setShipLights(els.shiplightsOn.checked);
+  };
+}
+
 /* Reflect the active team color on every swatch row + the Original button.
  * `hex` null means uncolored (Original active). */
 function syncColorSwatches(hex) {
@@ -1317,6 +1483,8 @@ function resetAllViewer() {
   els.freespin.classList.remove('on');
   els.stage.classList.remove('grabbable');
   activeViewer.setFreeSpin(false);
+  // Fly -> off (resetView() below grounds the model instantly).
+  els.fly.classList.remove('on');
 
   // Animation -> rest pose, loop off, native speed (panel visibility untouched).
   if (activeViewer.hasAnimations()) {
@@ -1359,6 +1527,14 @@ function resetAllViewer() {
     activeViewer.setTextureSet(null);
     syncTexsetRows(null);
   }
+
+  // Ship lights -> ON (resetView below also re-asserts this viewer-side);
+  // loadout overlay -> default variant + default collapsed state.
+  if (activeViewer.hasShipLights()) {
+    activeViewer.setShipLights(true);
+    els.shiplightsOn.checked = true;
+  }
+  if (loadoutEntry && loadoutEntry.loadouts) setupLoadoutUI(loadoutEntry);
   updateControlsHint();
 
   // Quality -> the global default (honors the Prefer-HQ pref).

@@ -53,6 +53,74 @@ const TEX_MODS_BASE = '../data/models/textures/mods/';
 // to false if grooves read inverted under a sweeping sun (verify on ibgtow00:
 // light from the left must brighten the LEFT edge of a groove).
 const NORMAL_FLIP_G = true;
+// ---- Ship lights (ODF lightHard/lightName hardpoint lights) ----------------
+// The manifest `lights` block carries the authored LightClass params (color /
+// range / attenuation / spot cones); intensities are viewer-tuned because the
+// engine's attenuation model doesn't map 1:1 onto three.js physical lights
+// (same precedent as RECOIL_* / TREAD_SCROLL_RATE).
+const SHIPLIGHT_POINT_INTENSITY = 15;  // candela-ish; scaled by authored color magnitude
+const SHIPLIGHT_SPOT_INTENSITY = 80;   // spots spread over a cone + longer ranges
+const SHIPLIGHT_DECAY = 2;             // physical inverse-square falloff
+// Spot aim axis in glTF node space after the pipeline's Z-mirror. MEASURED on
+// ivscout00/ivtank00: hp_light nodes sit on the nose (world -Z) with identity
+// rotation, so node-local +Z points at the TAIL -- forward is -Z.
+const SHIPLIGHT_FORWARD_SIGN = -1;
+const SHIPLIGHT_BULB_FRAC = 0.045;     // bulb sprite size as fraction of model radius
+const SHIPLIGHT_BULB_MIN = 0.1;
+const SHIPLIGHT_BULB_MAX = 0.6;
+// Visible headlight rendering for spotlights. The ground plane is a
+// ShadowMaterial (invisible to real lights), so the classic "pool of light on
+// the ground ahead" is painted as an additive decal at the beam/ground
+// intersection, recomputed per frame; the beam itself is a faded additive
+// cone parented to the hardpoint node.
+const SHIPLIGHT_BEAM_RADII = 2.2;       // beam length as a fraction of model radius
+const SHIPLIGHT_BEAM_MIN = 2.5;         // beam length clamp (m)
+const SHIPLIGHT_BEAM_MAX = 16;
+const SHIPLIGHT_BEAM_HALF_ANGLE = 0.3;  // outermost visual cone half-angle (rad)
+// The beam is 3 nested additive shells (inner bright + narrow, outer faint +
+// wide) so the edge falls off softly instead of reading as a hard solid cone.
+// Each entry is [halfAngleFraction, opacityFraction-of-SHIPLIGHT_BEAM_OPACITY].
+const SHIPLIGHT_BEAM_SHELLS = [[0.5, 1.0], [0.78, 0.6], [1.0, 0.38]];
+const SHIPLIGHT_BEAM_OPACITY = 0.085;   // innermost shell peak opacity
+// Ground pool: in-game the engine spotlight cone is huge (coneAngOuter ~2 rad)
+// so the splash on the terrain is a WIDE oval, much wider than the visible
+// beam. SPREAD = lateral half-width vs t*tan(halfAngle); ASPECT = along-beam
+// depth as a fraction of the width.
+const SHIPLIGHT_POOL_OPACITY = 0.5;
+const SHIPLIGHT_POOL_SPREAD = 3.2;
+const SHIPLIGHT_POOL_ASPECT = 0.55;
+// Headlight down-tilt (rad). hp_light nodes aim dead level; without a tilt a
+// level ship's beam axis never meets the floor, so the pool would only show
+// in-game-style on slopes. ~8 deg matches the car-headlight look.
+const SHIPLIGHT_AIM_DOWN = 0.14;
+// Hover altitude: hover/morph craft float with the hull bottom at the ODF's
+// authored `setAltitude` ("Height above Ground that it tries to maintain",
+// linear meters per the vendored ODF guide -- scout 1.0, APC 1.5, tug 2.0,
+// bomber 6, drop carrier 30, FE artillery 75). <= 0 stays grounded (ivcons).
+// SCALE is a global eye-tuning multiplier on the authored value.
+const HOVER_LIFT_SCALE = 1.0;
+// Flight mode (Fly toggle): APC/Bomber/SAV craft climb to their ODF
+// `flightAltitude` ceiling (75/85/150 m). The lift eases exponentially at
+// FLIGHT_EASE (1/s) and the camera + orbit target ride the same per-frame
+// delta so the framing follows the ship up.
+const FLIGHT_EASE = 1.6;
+// The authored ceilings are tuned for in-game terrain context; on the empty
+// viewer grid the full 75 m reads absurdly high, so the displayed altitude is
+// scaled down (eye-tuned -- "fairly close, not exact").
+const FLIGHT_ALT_SCALE = 2 / 9;
+const _SL_POS = new THREE.Vector3();    // per-frame scratch (no alloc)
+const _SL_DIR = new THREE.Vector3();
+const _SL_Q = new THREE.Quaternion();
+const _SL_EULER = new THREE.Euler();
+// Hardpoint highlight markers (loadout-panel row hover): bright core + ring
+// texture, sized generously and pulsed in the render loop so they read
+// instantly even on busy hulls.
+const HP_MARKER_COLOR = 0xffc94d;
+const HP_MARKER_FRAC = 0.14;
+const HP_MARKER_MIN = 0.45;
+const HP_MARKER_MAX = 1.8;
+const HP_MARKER_PULSE_HZ = 1.1;     // pulses per second
+const HP_MARKER_PULSE_AMP = 0.22;   // +- scale fraction
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -381,6 +449,18 @@ export class ObjectViewer {
     this._recoilClock = 0;         // seconds; advances while any recoil is active
     this._treadOffset = 0;
 
+    // Ship lights (manifest `lights` block) + hardpoint highlight markers.
+    this._shipLightDefs = [];      // authored light defs for the loaded model
+    this._shipLights = [];         // [{light, bulb}] live objects parented to hp nodes
+    this._shipLightsOn = true;     // default ON when the model has authored lights
+    this._hoverAltitude = 0;       // ODF setAltitude lift applied by _frame()
+    this._flightAltitude = 0;      // ODF flightAltitude ceiling (Fly toggle)
+    this._flightMode = false;      // Fly toggle state
+    this._altCur = 0;              // current extra lift above the hover pose (m)
+    this._hpMarkers = [];          // loadout-hover marker sprites
+    this._nodeByLower = new Map(); // lowercased node name -> Object3D (per load)
+    this._glowTexture = null;      // shared radial sprite texture (lazy-built)
+
     // WASD Drive Mode state (see setDriveMode / _updateDrive).
     this._driveMode = false;
     this._driveProfile = null;     // manifest `drive` block (archetype + ODF speeds)
@@ -655,6 +735,18 @@ export class ObjectViewer {
     this._normalTextures = (texInfo && texInfo.normal) || [];
     this._specularTextures = (texInfo && texInfo.specular) || [];
     this._textureSet = null;
+    // Authored ship lights (manifest `lights` block); each model opens with
+    // its lights ON (they're authored equipment, not an effect).
+    this._shipLightDefs = (texInfo && texInfo.lights) || [];
+    this._shipLightsOn = true;
+    // Hover lift (ODF setAltitude, hover/morph archetypes only) + flight
+    // ceiling (ODF flightAltitude; APC/Bomber/SAV). Fly always starts OFF.
+    this._hoverAltitude =
+      Math.max(0, Number(texInfo && texInfo.hoverAltitude) || 0) * HOVER_LIFT_SCALE;
+    this._flightAltitude =
+      Math.max(0, Number(texInfo && texInfo.flightAltitude) || 0) * FLIGHT_ALT_SCALE;
+    this._flightMode = false;
+    this._altCur = 0;
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(url);
     if (this.disposed) return;
@@ -662,6 +754,11 @@ export class ObjectViewer {
     if (this._spin) {
       this.scene.remove(this._spin);   // pivot holds the model (see _frame)
     }
+    // Old ship lights / markers left the graph with the old pivot; drop the
+    // references + dispose their sprite materials (the glow texture is shared).
+    this._clearShipLights();
+    this.highlightHardpoints(null);
+    this._nodeByLower = new Map();
     this._materials = [];
     this._wireSaved = null;  // drop any stale stash from a prior model
     this._teamColorMaterials = [];
@@ -698,8 +795,10 @@ export class ObjectViewer {
     }
 
     this._frame(model);   // builds the spin pivot, reparents model, adds to scene
+    model.traverse((o) => { if (o.name) this._nodeByLower.set(o.name.toLowerCase(), o); });
     this._detectArticulation(model, this._artHints);
     this._buildPartGroups(model);
+    this._applyShipLights();
     this.setWireframe(this._wireframe);
     await this._applyTextures();
     await this._applyTeamMasks();
@@ -1104,6 +1203,326 @@ export class ObjectViewer {
     return this._teamColorMix > 0 ? `#${this._teamColor.getHexString()}` : null;
   }
 
+  /* ---- Ship lights (authored lightHard/lightName hardpoint lights) -------- */
+
+  /* Shared soft radial glow texture for bulb sprites + hardpoint markers. */
+  _glowTex() {
+    if (this._glowTexture) return this._glowTexture;
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+    this._glowTexture = new THREE.CanvasTexture(c);
+    return this._glowTexture;
+  }
+
+  /* Case-insensitive named-node lookup against the loaded model. */
+  _findNode(name) {
+    return name ? (this._nodeByLower.get(String(name).toLowerCase()) || null) : null;
+  }
+
+  /* Beam-cone gradient: bright at the apex (uv.y = 1, canvas top), fading to
+   * nothing at the far end. Additive blending makes brightness the fade. */
+  _beamTex() {
+    if (this._beamTexture) return this._beamTexture;
+    const c = document.createElement('canvas');
+    c.width = 16; c.height = 128;
+    const ctx = c.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, 0, 128);
+    g.addColorStop(0, 'rgba(255,255,255,0.85)');
+    g.addColorStop(0.25, 'rgba(255,255,255,0.32)');
+    g.addColorStop(0.6, 'rgba(255,255,255,0.09)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 16, 128);
+    this._beamTexture = new THREE.CanvasTexture(c);
+    return this._beamTexture;
+  }
+
+  /* Marker texture: solid bright core + thin ring + soft halo (white; the
+   * sprite material colorizes it). Distinct from the plain bulb glow so
+   * hardpoint markers read as a deliberate UI callout. */
+  _markerTex() {
+    if (this._markerTexture) return this._markerTexture;
+    const c = document.createElement('canvas');
+    c.width = 96; c.height = 96;
+    const ctx = c.getContext('2d');
+    const halo = ctx.createRadialGradient(48, 48, 0, 48, 48, 48);
+    halo.addColorStop(0, 'rgba(255,255,255,0.9)');
+    halo.addColorStop(0.22, 'rgba(255,255,255,0.5)');
+    halo.addColorStop(0.55, 'rgba(255,255,255,0.12)');
+    halo.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, 96, 96);
+    ctx.fillStyle = 'rgba(255,255,255,1)';
+    ctx.beginPath();
+    ctx.arc(48, 48, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.arc(48, 48, 30, 0, Math.PI * 2);
+    ctx.stroke();
+    this._markerTexture = new THREE.CanvasTexture(c);
+    return this._markerTexture;
+  }
+
+  /* Build a real THREE light (+ bulb sprite) for every authored light def whose
+   * hardpoint node exists in the loaded GLB. Lights are PARENTED to their hp
+   * node, so turret-mounted lights track articulation/animation for free.
+   * Authored color components can exceed 1 (e.g. spothadean b=1.55): the excess
+   * is normalized into the intensity. */
+  _applyShipLights() {
+    this._clearShipLights();
+    if (!this._model || !this._shipLightDefs.length) return;
+    const bulbScale = clamp((this._radius || 1) * SHIPLIGHT_BULB_FRAC,
+                            SHIPLIGHT_BULB_MIN, SHIPLIGHT_BULB_MAX);
+    for (const def of this._shipLightDefs) {
+      const node = this._findNode(def.hard);
+      if (!node) continue;   // ODF declares a light the mesh doesn't carry
+      const c = Array.isArray(def.color) ? def.color : [1, 1, 1];
+      const mag = Math.max(c[0] || 0, c[1] || 0, c[2] || 0, 1);
+      const color = new THREE.Color(
+        (c[0] || 0) / mag, (c[1] || 0) / mag, (c[2] || 0) / mag);
+      const range = Math.max(1, Number(def.range) || 20);
+      let light = null;
+      let beam = null;
+      let pool = null;
+      if (def.kind === 'spot') {
+        light = new THREE.SpotLight(
+          color, SHIPLIGHT_SPOT_INTENSITY * mag, range,
+          clamp(Number(def.coneOuter) || 2.0, 0.1, 1.1),
+          clamp(1 - (Number(def.coneInner) || 0.5) / (Number(def.coneOuter) || 2.0), 0, 1),
+          SHIPLIGHT_DECAY);
+        // Aim along the hardpoint's forward axis with a slight down-tilt
+        // (SHIPLIGHT_AIM_DOWN): the target rides the node so the beam follows
+        // turret yaw / animation.
+        const aimLen = Math.max(2, range * 0.5);
+        light.target.position.set(
+          0,
+          -Math.sin(SHIPLIGHT_AIM_DOWN) * aimLen,
+          SHIPLIGHT_FORWARD_SIGN * Math.cos(SHIPLIGHT_AIM_DOWN) * aimLen);
+        node.add(light.target);
+        // Visible beam: 3 nested faded cones (apex at the hardpoint, opening
+        // along forward) -- the stacked soft shells diffuse the edge so it
+        // doesn't read as one rigid solid cone.
+        const beamLen = clamp((this._radius || 1) * SHIPLIGHT_BEAM_RADII,
+                              SHIPLIGHT_BEAM_MIN, SHIPLIGHT_BEAM_MAX);
+        const rTip = Math.max(0.03, bulbScale * 0.35);
+        beam = new THREE.Group();
+        for (const [angFrac, opFrac] of SHIPLIGHT_BEAM_SHELLS) {
+          const half = SHIPLIGHT_BEAM_HALF_ANGLE * angFrac;
+          const rEnd = rTip + Math.tan(half) * beamLen;
+          const geo = new THREE.CylinderGeometry(rTip, rEnd, beamLen, 24, 1, true);
+          geo.translate(0, -beamLen / 2, 0);                    // apex at the node origin
+          geo.rotateX(-SHIPLIGHT_FORWARD_SIGN * Math.PI / 2);   // -Y -> forward axis
+          geo.rotateX(SHIPLIGHT_FORWARD_SIGN * SHIPLIGHT_AIM_DOWN);  // down-tilt
+          const shell = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+            map: this._beamTex(), color, transparent: true,
+            opacity: SHIPLIGHT_BEAM_OPACITY * opFrac, blending: THREE.AdditiveBlending,
+            depthWrite: false, side: THREE.DoubleSide, fog: false,
+          }));
+          shell.renderOrder = 5;
+          beam.add(shell);
+        }
+        node.add(beam);
+        // Ground-pool decal, scene-rooted; placed each frame at the
+        // beam/ground intersection (see _updateShipLights).
+        pool = new THREE.Mesh(
+          new THREE.CircleGeometry(1, 32),
+          new THREE.MeshBasicMaterial({
+            map: this._glowTex(), color, transparent: true,
+            opacity: SHIPLIGHT_POOL_OPACITY, blending: THREE.AdditiveBlending,
+            depthWrite: false, fog: false,
+          }));
+        pool.rotation.x = -Math.PI / 2;
+        pool.renderOrder = 4;
+        pool.visible = false;
+        this.scene.add(pool);
+      } else {
+        light = new THREE.PointLight(color, SHIPLIGHT_POINT_INTENSITY * mag, range, SHIPLIGHT_DECAY);
+      }
+      light.castShadow = false;
+      node.add(light);
+      const bulb = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this._glowTex(), color, transparent: true, opacity: 0.85,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      bulb.scale.set(bulbScale, bulbScale, 1);
+      node.add(bulb);
+      this._shipLights.push({ light, bulb, beam, pool, node, range });
+    }
+    this._applyShipLightsOn();
+  }
+
+  _clearShipLights() {
+    for (const { light, bulb, beam, pool } of this._shipLights) {
+      if (light.target && light.target.parent) light.target.parent.remove(light.target);
+      if (light.parent) light.parent.remove(light);
+      if (light.dispose) light.dispose();
+      if (bulb.parent) bulb.parent.remove(bulb);
+      bulb.material.dispose();
+      if (beam) {
+        if (beam.parent) beam.parent.remove(beam);
+        beam.traverse((o) => {
+          if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); }
+        });
+      }
+      if (pool) {
+        this.scene.remove(pool);
+        pool.geometry.dispose();
+        pool.material.dispose();
+      }
+    }
+    this._shipLights = [];
+  }
+
+  /* Per-frame: place each spot's ground-pool decal at the beam/ground
+   * intersection (the model can spin / drive / animate, so this tracks the
+   * node's live world transform). Hidden when the beam misses the floor. */
+  _updateShipLights() {
+    if (!this._shipLights.length || !this._shipLightsOn) return;
+    for (const e of this._shipLights) {
+      if (!e.pool) continue;
+      e.node.getWorldPosition(_SL_POS);
+      e.node.getWorldQuaternion(_SL_Q);
+      _SL_DIR.set(
+        0,
+        -Math.sin(SHIPLIGHT_AIM_DOWN),
+        SHIPLIGHT_FORWARD_SIGN * Math.cos(SHIPLIGHT_AIM_DOWN)).applyQuaternion(_SL_Q);
+      if (_SL_DIR.y > -0.04 || _SL_POS.y <= 0) { e.pool.visible = false; continue; }
+      const t = -_SL_POS.y / _SL_DIR.y;       // ground plane at y = 0
+      if (!(t > 0) || t > e.range) { e.pool.visible = false; continue; }
+      e.pool.visible = true;
+      e.pool.position.set(_SL_POS.x + _SL_DIR.x * t, 0.02, _SL_POS.z + _SL_DIR.z * t);
+      // Wide oval splash aligned to the beam heading: in-game the engine cone
+      // is far wider than the visible beam, so the pool spreads laterally.
+      const w = Math.max(1.0, t * Math.tan(SHIPLIGHT_BEAM_HALF_ANGLE) * SHIPLIGHT_POOL_SPREAD);
+      const d = Math.max(0.8, w * SHIPLIGHT_POOL_ASPECT);
+      const yaw = Math.atan2(_SL_DIR.x, _SL_DIR.z);
+      e.pool.quaternion.setFromEuler(_SL_EULER.set(-Math.PI / 2, yaw, 0, 'YXZ'));
+      e.pool.scale.set(w, d, 1);
+      e.pool.material.opacity =
+        SHIPLIGHT_POOL_OPACITY * clamp(1 - t / e.range, 0.2, 1);
+    }
+  }
+
+  hasShipLights() { return this._shipLights.length > 0; }
+
+  getShipLightsOn() { return this._shipLightsOn; }
+
+  setShipLights(on) {
+    this._shipLightsOn = !!on;
+    this._applyShipLightsOn();
+  }
+
+  _applyShipLightsOn() {
+    for (const { light, bulb, beam, pool } of this._shipLights) {
+      light.visible = this._shipLightsOn;
+      bulb.visible = this._shipLightsOn;
+      if (beam) beam.visible = this._shipLightsOn;
+      // Pools re-show themselves per frame in _updateShipLights when ON.
+      if (pool && !this._shipLightsOn) pool.visible = false;
+    }
+  }
+
+  /* ---- Flight mode (ODF flightAltitude -- APC / Bomber / SAV) ------------- */
+
+  hasFlightMode() { return this._flightAltitude > this._hoverAltitude + 0.5; }
+
+  getFlightMode() { return this._flightMode; }
+
+  /* Toggle the climb to the ODF flight ceiling. The actual motion is animated
+   * per frame by _updateFlight(); the camera + orbit target ride along. */
+  setFlightMode(on) {
+    this._flightMode = !!on && this.hasFlightMode();
+  }
+
+  _flightLiftTarget() {
+    return this._flightMode
+      ? Math.max(0, this._flightAltitude - this._hoverAltitude) : 0;
+  }
+
+  /* Ease the extra lift toward the target; move the spin pivot, the camera,
+   * the orbit target, and _center by the same delta so the view tracks the
+   * ship. Returns true while moving (drives the shadow re-render). */
+  _updateFlight(dt) {
+    const target = this._flightLiftTarget();
+    if (!this._spin || Math.abs(target - this._altCur) < 1e-3) return false;
+    const k = 1 - Math.exp(-FLIGHT_EASE * dt);
+    let delta = (target - this._altCur) * k;
+    if (Math.abs(target - (this._altCur + delta)) < 0.02) {
+      delta = target - this._altCur;   // snap the last step
+    }
+    this._altCur += delta;
+    this._spin.position.y += delta;
+    this.camera.position.y += delta;
+    this.controls.target.y += delta;
+    if (this._center) this._center.y += delta;
+    this._placeSun();   // shadow frustum follows the ship up/down
+    return true;
+  }
+
+  /* Instant grounding for resetView(): the camera has just been snapped to the
+   * ground-based home pose, so only the model (+ _center) comes back down. */
+  _snapFlightGrounded() {
+    this._flightMode = false;
+    if (this._altCur) {
+      if (this._spin) this._spin.position.y -= this._altCur;
+      if (this._center) this._center.y -= this._altCur;
+      this._altCur = 0;
+      this._placeSun();
+    }
+  }
+
+  /* ---- Hardpoint highlight markers (loadout-panel row hover) -------------- */
+
+  /* Show pulsing-free additive markers at the named hardpoint nodes; pass
+   * null/[] to clear. Markers render through geometry (depthTest off) so
+   * hull-flush hardpoints stay visible. */
+  highlightHardpoints(names) {
+    for (const m of this._hpMarkers) {
+      if (m.parent) m.parent.remove(m);
+      m.material.dispose();
+    }
+    this._hpMarkers = [];
+    if (!names || !names.length || !this._model) return;
+    const s = clamp((this._radius || 1) * HP_MARKER_FRAC, HP_MARKER_MIN, HP_MARKER_MAX);
+    for (const name of names) {
+      const node = this._findNode(name);
+      if (!node) continue;
+      const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this._markerTex(), color: HP_MARKER_COLOR, transparent: true,
+        opacity: 1, blending: THREE.AdditiveBlending,
+        depthWrite: false, depthTest: false,
+      }));
+      spr.renderOrder = 999;
+      spr.scale.set(s, s, 1);
+      spr.userData.vtBaseScale = s;
+      node.add(spr);
+      this._hpMarkers.push(spr);
+    }
+  }
+
+  /* Per-frame marker pulse (scale + opacity breathe together). */
+  _updateHpMarkers() {
+    if (!this._hpMarkers.length) return;
+    const t = this._clock.elapsedTime;
+    const wave = Math.sin(t * HP_MARKER_PULSE_HZ * Math.PI * 2);
+    const k = 1 + HP_MARKER_PULSE_AMP * wave;
+    const op = 0.75 + 0.25 * (0.5 + 0.5 * wave);
+    for (const m of this._hpMarkers) {
+      const base = m.userData.vtBaseScale || 1;
+      m.scale.set(base * k, base * k, 1);
+      m.material.opacity = op;
+    }
+  }
+
   /* Push the intended mix to every wired material, forced to 0 while wireframe is
    * on (flat white lines must not be tinted). */
   _syncTeamColorUniforms() {
@@ -1122,9 +1541,16 @@ export class ObjectViewer {
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
 
-    // Sit the model on the grid (bottom at y=0) and pivot on its center.
+    // Sit the model on the grid (bottom at y=0) and pivot on its center, then
+    // float hover/morph craft up to their authored setAltitude (hull bottom at
+    // the hover height). The lifted center feeds controls.target + the home
+    // pose below, so the camera frames the ship at altitude, not the ground.
     model.position.y -= box.min.y;
     center.y -= box.min.y;
+    if (this._hoverAltitude > 0) {
+      model.position.y += this._hoverAltitude;
+      center.y += this._hoverAltitude;
+    }
 
     // Wrap the model in a pivot group centered on its (grid-sat) bbox center so
     // free-spin rotates the model about its visual center, not its local origin.
@@ -1213,7 +1639,9 @@ export class ObjectViewer {
     const s = radius * 1.6;
     const cam = this.sun.shadow.camera;
     cam.left = -s; cam.right = s; cam.top = s; cam.bottom = -s;
-    cam.near = 0.1; cam.far = d * 2;
+    // Far plane reaches the floor even when the craft is at flight altitude
+    // (center.y carries the hover + flight lift).
+    cam.near = 0.1; cam.far = d * 2 + Math.max(0, center.y || 0);
     cam.updateProjectionMatrix();
     this._markShadowDirty();
   }
@@ -2574,6 +3002,9 @@ export class ObjectViewer {
     if (this._spin) this._spin.quaternion.identity();
     this.resetArticulation();
     this.clearTeamColor();
+    this.setShipLights(true);   // authored lights default ON
+    this.highlightHardpoints(null);
+    this._snapFlightGrounded(); // Fly -> off, instant (camera snaps home below)
     this.setTextureSet(null);   // async texture swap; fire-and-forget
     if (this._home) {
       this.camera.position.copy(this._home.pos);
@@ -2791,6 +3222,9 @@ export class ObjectViewer {
     if (this._artYawNodes.length || this._artPitchNodes.length || this._artHeadNode) this._applyTurret();
     if (this._updateRecoil(dt)) moving = true;
     if (this._updateTreads(dt)) moving = true;
+    this._updateHpMarkers();   // hover-marker pulse (additive sprites; no shadows)
+    this._updateShipLights();  // headlight ground-pool tracking
+    if (this._updateFlight(dt)) moving = true;   // Fly toggle climb/descent
     // Free-spin momentum: integrate angular velocity, then apply friction decay.
     if (this._freeSpin && !this._dragging && this._spin) {
       const v = this._spinVel;
@@ -2858,6 +3292,11 @@ export class ObjectViewer {
     this._normCache.clear();
     for (const t of this._specCache.values()) { if (t) t.dispose(); }
     this._specCache.clear();
+    this._clearShipLights();
+    this.highlightHardpoints(null);
+    if (this._glowTexture) { this._glowTexture.dispose(); this._glowTexture = null; }
+    if (this._markerTexture) { this._markerTexture.dispose(); this._markerTexture = null; }
+    if (this._beamTexture) { this._beamTexture.dispose(); this._beamTexture = null; }
     // Post-processing pipeline.
     if (this._composer) this._composer.dispose();
     if (this._ssaoPass && this._ssaoPass.dispose) this._ssaoPass.dispose();

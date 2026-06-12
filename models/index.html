@@ -149,6 +149,7 @@
         <button id="wire-hq-btn" class="btn toggle" title="Supersampled hairline wireframe (higher quality, more GPU cost)" hidden>Crisp lines</button>
         <button id="spin-btn" class="btn toggle">Auto-rotate</button>
         <button id="freespin-btn" class="btn toggle" title="Lock the camera and click-drag (fling) to spin the model">Free spin</button>
+        <button id="fly-btn" class="btn toggle" title="Climb to this craft's ODF flightAltitude (the APC / Bomber / SAV flying ceiling) -- the camera follows it up" hidden>Fly</button>
         <button id="light-btn" class="btn toggle" aria-expanded="false" title="Show light settings">Light</button>
         <button id="scene-btn" class="btn toggle" aria-expanded="false" title="Choose a scene / background">Scene</button>
         <button id="anim-btn" class="btn toggle" aria-expanded="false" title="Play this model's baked animations" hidden>Animations</button>
@@ -174,9 +175,26 @@
         <span id="stage-loading-label">Loading&hellip;</span>
         <div id="stage-progress" class="stage-progress" hidden><div id="stage-progress-fill" class="stage-progress-fill"></div></div>
       </div>
+      <!-- Weapon loadout overlay (top-right): hardpoint slots + default weapons
+           from the manifest `loadouts` block, with an ODF-variant selector. -->
+      <div id="loadout-panel" class="loadout-panel" hidden>
+        <button id="loadout-head" class="loadout-head" type="button" aria-expanded="true" title="Collapse / expand the loadout panel">
+          <i class="bi bi-crosshair" aria-hidden="true"></i>
+          <span class="loadout-title">Loadout</span>
+          <i id="loadout-chevron" class="bi bi-chevron-up" aria-hidden="true"></i>
+        </button>
+        <div id="loadout-body" class="loadout-body">
+          <select id="loadout-variant" class="loadout-variant" title="Show the default loadout of this ODF variant"></select>
+          <div id="loadout-rows" class="loadout-rows"></div>
+        </div>
+      </div>
       <div id="viewer-dock" class="viewer-dock">
       <div id="light-panel" class="light-panel">
         <label class="light-row light-head"><span>Sun light</span><input id="light-on" type="checkbox" class="light-toggle" title="Toggle the sun key light" /></label>
+        <label class="light-row shiplights-row" id="shiplights-row" hidden>
+          <span class="light-label">Ship lights</span>
+          <input id="shiplights-on" type="checkbox" class="light-toggle" title="Toggle the ship's authored hardpoint lights (headlights, running lights)" />
+        </label>
         <label class="light-row">
           <span class="light-label">Intensity</span>
           <input id="light-intensity" type="range" min="0" max="6" step="0.1" />

@@ -322,6 +322,111 @@ label.light-head { cursor: pointer; }
 }
 /* Disabled (sun off) -> dim the angle sliders. */
 .light-panel.off .light-row:not(.light-head) { opacity: 0.45; }
+/* Ship lights are independent of the sun -- don't dim their row with it. */
+.light-panel.off .shiplights-row { opacity: 1; }
+
+/* ---- Weapon loadout overlay (top-right of the stage) -------------------- */
+.loadout-panel {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 5;
+  width: 230px;
+  max-width: calc(100% - 28px);
+  background: color-mix(in srgb, var(--kb-bg-card) 92%, transparent);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.loadout-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--kb-text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.loadout-head .bi-crosshair { color: var(--kb-primary); }
+.loadout-head #loadout-chevron {
+  margin-left: auto;
+  color: var(--kb-text-secondary);
+}
+.loadout-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+.loadout-variant {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-family: var(--kb-font-mono, monospace);
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-elevated, var(--kb-bg-card));
+  border: 1px solid var(--kb-border-default);
+  border-radius: 6px;
+}
+.loadout-rows {
+  display: flex;
+  flex-direction: column;
+}
+.loadout-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 6px;
+  margin: 0 -6px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.loadout-row:hover { background: color-mix(in srgb, var(--kb-primary) 12%, transparent); }
+.loadout-slot {
+  flex: 0 0 64px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--kb-text-secondary);
+}
+.loadout-assault {
+  font-size: 9px;
+  color: var(--kb-warning, var(--kb-text-secondary));
+}
+.loadout-value {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 7px;
+}
+.loadout-weapon {
+  color: var(--kb-text-primary);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--kb-primary) 55%, transparent);
+}
+.loadout-weapon:hover { color: var(--kb-primary); }
+.loadout-odf {
+  font-family: var(--kb-font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--kb-text-secondary);
+  word-break: break-all;
+}
+.loadout-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--kb-primary);
+}
+.loadout-empty { color: var(--kb-text-secondary); opacity: 0.7; }
 
 /* Animation panel: flows in the dock. */
 .anim-clips {
@@ -746,6 +851,15 @@ label.light-head { cursor: pointer; }
   .light-panel {
     width: 100%;
     border-radius: 0 0 12px 12px;
+  }
+  /* Loadout overlay shrinks to a corner chip under the dock sheet; the body
+     starts collapsed on mobile (setupLoadoutUI) and expands over the canvas. */
+  .loadout-panel {
+    top: auto;
+    bottom: 14px;
+    right: 10px;
+    width: 210px;
+    z-index: 6;
   }
 }
 
