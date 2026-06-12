@@ -76,12 +76,25 @@ TEX_PERF_DIR = OUT_DIR / "textures" / "perf"
 TEX_HQ_DIR = OUT_DIR / "textures" / "hq"
 TEX_TEAMCOLOR_DIR = OUT_DIR / "textures" / "teamcolor"
 TEX_EMISSIVE_DIR = OUT_DIR / "textures" / "emissive"
+TEX_NORMAL_DIR = OUT_DIR / "textures" / "normal"
+TEX_SPECULAR_DIR = OUT_DIR / "textures" / "specular"
 TEX_MODS_DIR = OUT_DIR / "textures" / "mods"
 
 PERF_MAX_DIM = 512       # performance PNG largest side
 TEAMCOLOR_MAX_DIM = 512  # team-color mask largest side (coverage+shading; no HQ set)
 EMISSIVE_MAX_DIM = 512   # emissive glow map largest side (no HQ set)
+NORMAL_MAX_DIM = 1024    # tangent-space normal map largest side (detail survives
+                         # downscaling poorly -- 1024 locked per payload review)
+SPECULAR_MAX_DIM = 512   # specular->roughness map largest side (gloss is low-freq)
 DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gallery)
+
+# Specular -> roughness conversion (BZCC is legacy spec/gloss; the viewer is PBR
+# metalness/roughness -- there is no exact conversion, these are the tuned knobs):
+#   roughness = clamp((1 - L)^K * (1 - 0.3 * log10(specularPower) / 2), MIN, 1)
+# where L is the spec map's per-pixel luminance and specularPower comes from the
+# `.material` [solid] section (observed range 1..~50; no bias when undeclared).
+SPEC_ROUGHNESS_K = 0.6   # contrast exponent (lower = shinier overall)
+SPEC_ROUGHNESS_MIN = 0.05
 
 # Workshop texture-override packs surfaced as alternate "texture sets" in the
 # Models Browser. Each pack is a pure DDS overlay keyed by the same texture
@@ -128,7 +141,13 @@ ANIM_FORMAT_VERSION = 5
 #       `emissiveTextures`, and the workshop mod texture-override sets
 #       (textures/mods/<pack_id>/{perf,hq,teamcolor,emissive}/) + per-model
 #       `textureSets` + top-level `texture_packs`.
-TEXTURE_FORMAT_VERSION = 2
+#   v3: add the tangent-space normal map set (textures/normal/<stem>.png, 1024px,
+#       decoded from the BC5-SNORM `_n.dds` sources) + per-model `normalTextures`,
+#       and the specular->roughness set (textures/specular/<stem>.png, 512px
+#       grayscale, luminance-converted from the `_s.dds` sources) + per-model
+#       `specularTextures`; both mirrored into the mod texture sets
+#       (textures/mods/<pack_id>/{normal,specular}/).
+TEXTURE_FORMAT_VERSION = 3
 
 # Render flags (mirror msh_parser): hidden/collision geometry is not drawable.
 RS_HIDDEN = 0x400
@@ -509,18 +528,27 @@ def build_workshop_index(ws_dir, ext):
 
 
 def parse_material(msh_dir: Path, material_filename: str):
-    """Read the [solid] diffuse RGBA + [texture] diffuse/teamColor/emissive .dds
-    names from a sibling (or globally-indexed) `.material` file. Returns
-    (rgba, diffuse_dds|None, teamcolor_dds|None, emissive_dds|None).
+    """Read the [solid] diffuse RGBA + specularPower and the [texture]
+    diffuse/teamColor/emissive/normal/specular .dds names from a sibling (or
+    globally-indexed) `.material` file. Returns
+    (rgba, diffuse_dds|None, teamcolor_dds|None, emissive_dds|None,
+     normal_dds|None, specular_dds|None, specular_power|None).
     `teamColor = <stem>_c.dds` marks the team-colorable mask (BC3: alpha =
     colorizable region, RGB = shading); `emissive = <stem>_e.dds` is the
-    self-illumination glow map."""
+    self-illumination glow map; `normal = <stem>_n.dds` is the tangent-space
+    normal map (BC5S); `specular = <stem>_s.dds` is the legacy spec/gloss map
+    converted to roughness with `specularPower` as a per-material gloss hint."""
     rgba = (0.8, 0.8, 0.8, 1.0)
     diffuse_dds = None
     teamcolor_dds = None
     emissive_dds = None
+    normal_dds = None
+    specular_dds = None
+    specular_power = None
+    empty = (rgba, diffuse_dds, teamcolor_dds, emissive_dds,
+             normal_dds, specular_dds, specular_power)
     if not material_filename:
-        return rgba, diffuse_dds, teamcolor_dds, emissive_dds
+        return empty
     p = msh_dir / material_filename
     if not p.is_file():
         p = msh_dir / "materials" / material_filename
@@ -531,11 +559,11 @@ def parse_material(msh_dir: Path, material_filename: str):
         # VSR-scoped match wins; full-workshop is last-resort fallback.
         p = mat_index.get(key) or mat_index_all.get(key)
     if not p or not Path(p).is_file():
-        return rgba, diffuse_dds, teamcolor_dds, emissive_dds
+        return empty
     try:
         text = Path(p).read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return rgba, diffuse_dds, teamcolor_dds, emissive_dds
+        return empty
     section = None
     for line in text.splitlines():
         s = line.strip()
@@ -554,13 +582,23 @@ def parse_material(msh_dir: Path, material_filename: str):
                 rgba = tuple(vals[:4])
             except ValueError:
                 pass
+        elif section == "solid" and kl == "specularpower":
+            try:
+                specular_power = float(val.split()[0])
+            except (ValueError, IndexError):
+                pass
         elif section == "texture" and kl == "diffuse":
             diffuse_dds = val.strip()
         elif section == "texture" and kl == "teamcolor":
             teamcolor_dds = val.strip()
         elif section == "texture" and kl == "emissive":
             emissive_dds = val.strip()
-    return rgba, diffuse_dds, teamcolor_dds, emissive_dds
+        elif section == "texture" and kl == "normal":
+            normal_dds = val.strip()
+        elif section == "texture" and kl == "specular":
+            specular_dds = val.strip()
+    return (rgba, diffuse_dds, teamcolor_dds, emissive_dds,
+            normal_dds, specular_dds, specular_power)
 
 
 def _atomic_write_bytes(path: Path, data: bytes):
@@ -724,9 +762,110 @@ def resolve_emissive(msh_dir: Path, tex_key: str, declared_dds: str | None, cach
     return tex_key
 
 
-def _emit_mod_png(src: Path, out_path: Path, max_dim: int, mode: str) -> bool:
+def resolve_normal(msh_dir: Path, tex_key: str, declared_dds: str | None, cache: set):
+    """Resolve + emit a tangent-space normal map to textures/normal/<tex_key>.png
+    (<=1024px RGB, standard [0,1] encoding with reconstructed Z -- the BC5S
+    sources are decoded by dds_decode's BC5 path). Keyed by the DIFFUSE stem so
+    the viewer maps material name -> normal map. Tries the `.material`-declared
+    name first, then the `<stem>_n` filename convention. The PNG carries raw
+    data bytes (no color management); _png_bytes recompresses losslessly.
+    Idempotent + atomic. Returns tex_key or None.
+
+    `cache` is a per-model set of already-emitted tex_keys."""
+    if not tex_key:
+        return None
+    if tex_key in cache:
+        return tex_key
+    src = None
+    for cand in _aux_name_candidates(tex_key, declared_dds, "_n"):
+        src = _find_diffuse_src(msh_dir, f"{cand}.dds")
+        if src is not None:
+            break
+    if src is None:
+        return None
+    src = Path(src)
+    try:
+        pil = decode_dds(src, max_dim=NORMAL_MAX_DIM).convert("RGB")
+    except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
+        if _G and _G.get("verbose"):
+            print(f"    normal decode failed {tex_key}: {e}")
+        return None
+    w, h = pil.size
+    if max(w, h) > NORMAL_MAX_DIM:
+        scale = NORMAL_MAX_DIM / max(w, h)
+        pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.LANCZOS)
+    force = _G["force"] if _G else False
+    out_path = TEX_NORMAL_DIR / f"{tex_key}.png"
+    if force or not out_path.exists():
+        _atomic_write_bytes(out_path, _png_bytes(pil))
+    cache.add(tex_key)
+    return tex_key
+
+
+def _roughness_lut(specular_power: float | None):
+    """256-entry luminance -> roughness LUT implementing
+    roughness = clamp((1 - L)^K * powerBias, MIN, 1). Higher specularPower =>
+    narrower engine highlights => bias roughness lower."""
+    bias = 1.0
+    if specular_power and specular_power > 0:
+        bias = 1.0 - 0.3 * math.log10(specular_power) / 2.0
+    lut = []
+    for v in range(256):
+        lum = v / 255.0
+        rough = ((1.0 - lum) ** SPEC_ROUGHNESS_K) * bias
+        rough = min(1.0, max(SPEC_ROUGHNESS_MIN, rough))
+        lut.append(min(255, max(0, round(rough * 255.0))))
+    return lut
+
+
+def resolve_specular(msh_dir: Path, tex_key: str, declared_dds: str | None,
+                     specular_power: float | None, cache: set):
+    """Resolve a legacy spec/gloss map and emit its ROUGHNESS conversion to
+    textures/specular/<tex_key>.png (<=512px grayscale; three.js samples the
+    green channel and browsers decode gray PNGs to replicated RGB, so L mode
+    works). Keyed by the DIFFUSE stem. Tries the `.material`-declared name
+    first, then the `<stem>_s` filename convention. Idempotent + atomic.
+    Returns tex_key or None.
+
+    `cache` is a per-model set of already-emitted tex_keys."""
+    if not tex_key:
+        return None
+    if tex_key in cache:
+        return tex_key
+    src = None
+    for cand in _aux_name_candidates(tex_key, declared_dds, "_s"):
+        src = _find_diffuse_src(msh_dir, f"{cand}.dds")
+        if src is not None:
+            break
+    if src is None:
+        return None
+    src = Path(src)
+    try:
+        pil = decode_dds(src, max_dim=SPECULAR_MAX_DIM).convert("L")
+    except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
+        if _G and _G.get("verbose"):
+            print(f"    specular decode failed {tex_key}: {e}")
+        return None
+    w, h = pil.size
+    if max(w, h) > SPECULAR_MAX_DIM:
+        scale = SPECULAR_MAX_DIM / max(w, h)
+        pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
+                         Image.LANCZOS)
+    pil = pil.point(_roughness_lut(specular_power))
+    force = _G["force"] if _G else False
+    out_path = TEX_SPECULAR_DIR / f"{tex_key}.png"
+    if force or not out_path.exists():
+        _atomic_write_bytes(out_path, _png_bytes(pil))
+    cache.add(tex_key)
+    return tex_key
+
+
+def _emit_mod_png(src: Path, out_path: Path, max_dim: int, mode: str,
+                  point_lut: list | None = None) -> bool:
     """Decode a mod-pack `.dds` and write it as a <=max_dim PNG (idempotent +
-    atomic). `mode` is the PIL conversion ('RGBA' for masks, 'RGB' otherwise)."""
+    atomic). `mode` is the PIL conversion ('RGBA' for masks, 'RGB' otherwise,
+    'L' + `point_lut` for the specular->roughness conversion)."""
     force = _G["force"] if _G else False
     if not force and out_path.exists():
         return True
@@ -741,6 +880,8 @@ def _emit_mod_png(src: Path, out_path: Path, max_dim: int, mode: str) -> bool:
         scale = max_dim / max(w, h)
         pil = pil.resize((max(1, round(w * scale)), max(1, round(h * scale))),
                          Image.LANCZOS)
+    if point_lut is not None:
+        pil = pil.point(point_lut)
     _atomic_write_bytes(out_path, _png_bytes(pil))
     return True
 
@@ -749,11 +890,14 @@ def emit_mod_texture_sets(tex_keys: set, aux_names: dict) -> list:
     """For every registered mod texture pack, intersect the pack's DDS index with
     this model's resolved diffuse stems and emit the pack's overrides under
     textures/mods/<pack_id>/: perf PNG + verbatim HQ DDS for the diffuse, plus
-    teamcolor / emissive PNGs when the pack carries them. Returns the model's
-    `textureSets` manifest block (packs with >=1 diffuse hit only).
+    teamcolor / emissive / normal / specular PNGs when the pack carries them.
+    Returns the model's `textureSets` manifest block (packs with >=1 diffuse hit
+    only).
 
-    `aux_names` maps tex_key -> (declared_teamcolor_dds, declared_emissive_dds)
-    from the stock `.material`, used to name-match the pack's aux maps."""
+    `aux_names` maps tex_key -> (declared_teamcolor_dds, declared_emissive_dds,
+    declared_normal_dds, declared_specular_dds, specular_power) from the stock
+    `.material`, used to name-match the pack's aux maps (and convert the pack's
+    spec map with the same gloss hint as stock)."""
     mod_indexes = (_G or {}).get("mod_indexes") or {}
     if not mod_indexes or not tex_keys:
         return []
@@ -761,6 +905,7 @@ def emit_mod_texture_sets(tex_keys: set, aux_names: dict) -> list:
     sets = []
     for pack_id, idx in mod_indexes.items():
         hit_tex, hit_team, hit_emis = [], [], []
+        hit_norm, hit_spec = [], []
         pack_dir = TEX_MODS_DIR / pack_id
         for tex_key in sorted(tex_keys):
             src_str = idx.get(tex_key)
@@ -775,7 +920,8 @@ def emit_mod_texture_sets(tex_keys: set, aux_names: dict) -> list:
                 _atomic_write_bytes(hq_path, src.read_bytes())
             hit_tex.append(tex_key)
 
-            team_decl, emis_decl = aux_names.get(tex_key, (None, None))
+            team_decl, emis_decl, norm_decl, spec_decl, spec_power = \
+                aux_names.get(tex_key, (None, None, None, None, None))
             for cand in _aux_name_candidates(tex_key, team_decl, "_c"):
                 cand_src = idx.get(cand)
                 if cand_src and _emit_mod_png(
@@ -790,10 +936,27 @@ def emit_mod_texture_sets(tex_keys: set, aux_names: dict) -> list:
                         EMISSIVE_MAX_DIM, "RGB"):
                     hit_emis.append(tex_key)
                     break
+            for cand in _aux_name_candidates(tex_key, norm_decl, "_n"):
+                cand_src = idx.get(cand)
+                if cand_src and _emit_mod_png(
+                        Path(cand_src), pack_dir / "normal" / f"{tex_key}.png",
+                        NORMAL_MAX_DIM, "RGB"):
+                    hit_norm.append(tex_key)
+                    break
+            for cand in _aux_name_candidates(tex_key, spec_decl, "_s"):
+                cand_src = idx.get(cand)
+                if cand_src and _emit_mod_png(
+                        Path(cand_src), pack_dir / "specular" / f"{tex_key}.png",
+                        SPECULAR_MAX_DIM, "L",
+                        point_lut=_roughness_lut(spec_power)):
+                    hit_spec.append(tex_key)
+                    break
         if hit_tex:
             sets.append({"id": pack_id, "textures": hit_tex,
                          "teamColorTextures": hit_team,
-                         "emissiveTextures": hit_emis})
+                         "emissiveTextures": hit_emis,
+                         "normalTextures": hit_norm,
+                         "specularTextures": hit_spec})
     return sets
 
 
@@ -810,27 +973,33 @@ def _png_bytes(img: Image.Image) -> bytes:
 def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
     """Weld each material group once into (positions, normals, uvs, indices) +
     resolve its material (name, base color, texture array). Returns the GLB
-    builder, the rasterizer prim list, the set of textured material keys, the set
-    of texture keys that also emitted a team-color mask, the set that emitted an
-    emissive map, a dict of declared aux map names per texture key (for the mod
-    texture-set pass), and the set of texture stems that were referenced but did
-    NOT resolve to a `.dds` (missing-texture report)."""
+    builder, the rasterizer prim list, the set of textured material keys, the
+    sets of texture keys that also emitted a team-color mask / emissive map /
+    normal map / specular(roughness) map, a dict of declared aux map names per
+    texture key (for the mod texture-set pass), and the set of texture stems
+    that were referenced but did NOT resolve to a `.dds` (missing-texture
+    report)."""
     gb = GlbBuilder()
     prims = []
     tex_keys = set()
     teammask_keys = set()
     emissive_keys = set()
+    normal_keys = set()
+    specular_keys = set()
     aux_names: dict = {}
     unresolved = set()
     tex_cache: dict = {}
     teammask_cache: set = set()
     emissive_cache: set = set()
+    normal_cache: set = set()
+    specular_cache: set = set()
     zf = -1.0 if handedness_fix else 1.0
 
     for gi, g in enumerate(mesh.groups):
         if g.hidden or not g.tris:
             continue
-        rgba, mat_diffuse, mat_teamcolor, mat_emissive = parse_material(msh_dir, g.material)
+        (rgba, mat_diffuse, mat_teamcolor, mat_emissive,
+         mat_normal, mat_specular, mat_spec_power) = parse_material(msh_dir, g.material)
         # The MSH-embedded diffuse name (g.texture) wins -- workshop models
         # (Cerberi etc.) use inline material names with no `.material` file but
         # carry the diffuse here; the `.material` [texture] diffuse is the
@@ -853,12 +1022,19 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
         if tex_key and mat_teamcolor:
             if resolve_teammask(msh_dir, mat_teamcolor, tex_key, teammask_cache):
                 teammask_keys.add(tex_key)
-        # Emissive glow map: same diffuse-stem keying. Falls back to the `_e`
-        # filename convention when no `.material` declares one.
+        # Emissive / normal / specular maps: same diffuse-stem keying. Each
+        # falls back to its filename convention (`_e` / `_n` / `_s`) when no
+        # `.material` declares one (covers inline-material workshop models).
         if tex_key:
-            aux_names[tex_key] = (mat_teamcolor, mat_emissive)
+            aux_names[tex_key] = (mat_teamcolor, mat_emissive,
+                                  mat_normal, mat_specular, mat_spec_power)
             if resolve_emissive(msh_dir, tex_key, mat_emissive, emissive_cache):
                 emissive_keys.add(tex_key)
+            if resolve_normal(msh_dir, tex_key, mat_normal, normal_cache):
+                normal_keys.add(tex_key)
+            if resolve_specular(msh_dir, tex_key, mat_specular, mat_spec_power,
+                                specular_cache):
+                specular_keys.add(tex_key)
 
         weld = {}
         positions, normals, uvs, indices = [], [], [], []
@@ -900,7 +1076,8 @@ def _build_groups(mesh, msh_dir: Path, handedness_fix: bool):
             "tex": tex_arr,
         })
 
-    return gb, prims, tex_keys, teammask_keys, emissive_keys, aux_names, unresolved
+    return (gb, prims, tex_keys, teammask_keys, emissive_keys,
+            normal_keys, specular_keys, aux_names, unresolved)
 
 
 def process_model(job: dict) -> dict:
@@ -915,7 +1092,8 @@ def process_model(job: dict) -> dict:
             return {"stem": stem, "error": "no blocks parsed"}
         mesh = meshes[0]
 
-        gb, prims, tex_keys, teammask_keys, emissive_keys, aux_names, unresolved = \
+        (gb, prims, tex_keys, teammask_keys, emissive_keys,
+         normal_keys, specular_keys, aux_names, unresolved) = \
             _build_groups(mesh, msh_path.parent, cfg["handedness"])
         if not prims:
             return {"stem": stem, "error": "no renderable groups"}
@@ -965,7 +1143,7 @@ def process_model(job: dict) -> dict:
                     diffuse = tex_name
                     if not diffuse and mat_name:
                         try:
-                            _rgba, diffuse, _team, _emis = parse_material(Path(msh_dir), mat_name)
+                            diffuse = parse_material(Path(msh_dir), mat_name)[1]
                         except Exception:  # noqa: BLE001
                             diffuse = None
                     return _stem(diffuse) if diffuse else None
@@ -1014,6 +1192,8 @@ def process_model(job: dict) -> dict:
             "textures": sorted(tex_keys),
             "teamColorTextures": sorted(teammask_keys),
             "emissiveTextures": sorted(emissive_keys),
+            "normalTextures": sorted(normal_keys),
+            "specularTextures": sorted(specular_keys),
             "textureSets": texture_sets,
             "unresolvedTextures": sorted(unresolved - tex_keys),
             "radius": round(mesh.radius, 3),
@@ -1075,6 +1255,8 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "textures": p.get("textures", []),
         "teamColorTextures": p.get("teamColorTextures", []),
         "emissiveTextures": p.get("emissiveTextures", []),
+        "normalTextures": p.get("normalTextures", []),
+        "specularTextures": p.get("specularTextures", []),
         "textureSets": p.get("textureSets", []),
         "unresolvedTextures": p.get("unresolvedTextures", []),
         "radius": p.get("radius", 0),
@@ -1154,10 +1336,10 @@ def main():
         print(f"--limit: capped to {len(resolved)} models")
 
     for d in (GEO_DIR, TEX_PERF_DIR, TEX_HQ_DIR, TEX_TEAMCOLOR_DIR, TEX_EMISSIVE_DIR,
-              OUT_DIR / "thumbnails"):
+              TEX_NORMAL_DIR, TEX_SPECULAR_DIR, OUT_DIR / "thumbnails"):
         d.mkdir(parents=True, exist_ok=True)
     for pack_id in mod_indexes:
-        for sub in ("perf", "hq", "teamcolor", "emissive"):
+        for sub in ("perf", "hq", "teamcolor", "emissive", "normal", "specular"):
             (TEX_MODS_DIR / pack_id / sub).mkdir(parents=True, exist_ok=True)
 
     # Prior manifest (for cache reuse of geometry stats). A change in
@@ -1285,9 +1467,11 @@ def main():
     animated_count = sum(1 for m in manifest if m.get("animated"))
     teamcolor_count = sum(1 for m in manifest if m.get("teamColorTextures"))
     emissive_count = sum(1 for m in manifest if m.get("emissiveTextures"))
+    normal_count = sum(1 for m in manifest if m.get("normalTextures"))
+    specular_count = sum(1 for m in manifest if m.get("specularTextures"))
     modskin_count = sum(1 for m in manifest if m.get("textureSets"))
     idx_path.write_text(json.dumps({
-        "schema_version": 12,
+        "schema_version": 13,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1295,6 +1479,8 @@ def main():
         "animated_count": animated_count,
         "teamcolor_count": teamcolor_count,
         "emissive_count": emissive_count,
+        "normal_count": normal_count,
+        "specular_count": specular_count,
         "modskin_count": modskin_count,
         "texture_packs": {p["id"]: {"label": p["label"], "url": p["url"]}
                           for p in MOD_TEXTURE_PACKS},
@@ -1307,7 +1493,8 @@ def main():
     print(f"\nwrote {idx_path} -- {len(manifest)} models "
           f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed, "
           f"{animated_count} animated, {teamcolor_count} team-colorable, "
-          f"{emissive_count} emissive, {modskin_count} with mod skins)")
+          f"{emissive_count} emissive, {normal_count} normal-mapped, "
+          f"{specular_count} roughness-mapped, {modskin_count} with mod skins)")
     print(f"textures: {texture_report['models_textured']} textured, "
           f"{texture_report['models_no_texture']} without "
           f"({texture_report['models_unresolved_refs']} have unresolved refs, "

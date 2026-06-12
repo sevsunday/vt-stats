@@ -254,15 +254,16 @@ sets** (the `MOD_TEXTURE_PACKS` registry in `convert_msh.py`):
 These packs are pure DDS overlays keyed by the same stems the stock game uses,
 so detection is an exact stem intersection against each model's resolved
 diffuse stems. Per pack and per covered stem the pipeline emits a 512px perf
-PNG + the native 2048 HQ DDS (verbatim), plus the pack's own `_c` mask and
-`_e` glow map when shipped (matched via the `.material`-declared names with the
-`_d`-strip filename-convention fallback -- see `_aux_name_candidates`). Packs
-not installed on the build machine are soft-skipped with a console warning.
+PNG + the native 2048 HQ DDS (verbatim), plus the pack's own `_c` mask, `_e`
+glow map, `_n` normal map, and `_s` spec map (converted to roughness) when
+shipped (matched via the `.material`-declared names with the `_d`-strip
+filename-convention fallback -- see `_aux_name_candidates`). Packs not
+installed on the build machine are soft-skipped with a console warning.
 
 Each manifest entry carries `textureSets` (packs covering >=1 of its stems,
-with per-pack `textures` / `teamColorTextures` / `emissiveTextures` stem
-lists); the top-level `texture_packs` block maps pack id -> `{label, url}` for
-the credit links. The viewer surfaces a **Textures** button (only for covered
+with per-pack `textures` / `teamColorTextures` / `emissiveTextures` /
+`normalTextures` / `specularTextures` stem lists); the top-level
+`texture_packs` block maps pack id -> `{label, url}` for the credit links. The viewer surfaces a **Textures** button (only for covered
 models) with Stock + one row per set showing material coverage and a Steam
 Workshop credit link-out; uncovered stems keep stock textures (partial
 coverage is expected and fine -- the packs derive from the stock art).
@@ -270,12 +271,30 @@ Switching sets re-runs the texture assignment per material; team color +
 quality toggle compose with whichever set is active (the active set's own `_c`
 mask wins, stock mask fills).
 
+## Normal + specular maps (`_n` / `_s`)
+
+Both SHIPPED (texture format v3). Stock `_n.dds` sources are legacy-fourcc
+**BC5-SNORM** -- `dds_decode.py`'s BC5 branch decodes the two signed BC4
+channels, reconstructs Z (`sqrt(1 - x^2 - y^2)`), and emits a
+standard-encoding RGB PNG at <=1024px (`NORMAL_MAX_DIM`) under
+`textures/normal/<diffuse_stem>.png`. The viewer binds `material.normalMap`
+with `normalScale.set(1, -1)` (`NORMAL_FLIP_G` -- DirectX green-channel flip);
+the GLBs carry no TANGENT attribute, so three.js's screen-space derivative
+tangents apply. No HQ DDS tier (the vendored DDSLoader has no BC5/RGTC
+support). `_s.dds` spec/gloss maps (plain BC1/BC3) are converted to roughness
+at pipeline time -- `roughness = clamp((1 - L)^SPEC_ROUGHNESS_K * (1 - 0.3 *
+log10(specularPower) / 2), SPEC_ROUGHNESS_MIN, 1)` with the per-material
+`specularPower` captured from the `.material` `[solid]` section -- and emitted
+as <=512px grayscale `textures/specular/<diffuse_stem>.png`; the viewer binds
+`material.roughnessMap` with `roughness = 1.0` while mapped (the baked 0.65
+factor would otherwise dim the map). Manifest entries carry `normalTextures` /
+`specularTextures`; both kinds are mod-set-aware and join the wireframe stash
++ dispose paths. The original implementation spec (including the BC5S format
+correction) is preserved at
+[`models/model_render_improvements.txt`](../models/model_render_improvements.txt).
+
 ## Known limitations / future
 
-- Normal (`_n`) / specular (`_s`) maps are deferred; the full implementation
-  spec (tangent strategy, green-channel orientation check, spec->PBR roughness
-  conversion, payload estimates, acceptance checklists) lives at
-  [`models/model_render_improvements.txt`](../models/model_render_improvements.txt).
 - Recoil distance, tread scroll rate, and gun-elevation limits use tuned
   viewer-side constants rather than the exact per-weapon ODF values (a possible
   later refinement).
@@ -289,7 +308,7 @@ mask wins, stock mask fills).
 ## Files
 
 - `scripts/object-render/msh_parser.py` -- DOCB `.msh` geometry parser (stdlib)
-- `scripts/object-render/dds_decode.py` -- BC1/BC3 `.dds` decoder, mip-level (stdlib + Pillow)
+- `scripts/object-render/dds_decode.py` -- BC1/BC3/BC5 `.dds` decoder, mip-level (stdlib + Pillow)
 - `scripts/object-render/glb_writer.py` -- minimal glTF 2.0 `.glb` writer (stdlib)
 - `scripts/object-render/msh_thumbnail.py` -- per-pixel numpy rasterizer (hero + gallery)
 - `scripts/object-render/convert_msh.py` -- orchestrator -> `data/models/`

@@ -1,13 +1,27 @@
 ================================================================================
-MODEL RENDER IMPROVEMENTS -- future texture/material work for the Models Browser
+MODEL RENDER IMPROVEMENTS -- texture/material work for the Models Browser
 ================================================================================
 
-This document is a self-contained implementation spec for two DEFERRED texture
-features of the VT Stats Models Browser: normal maps (`_n`) and specular maps
-(`_s`). It carries enough context to plan and build either feature in a fresh
-session with no prior conversation. Status at time of writing: diffuse,
-team-color masks (`_c`), emissive glow maps (`_e`), and workshop mod texture
-sets (diffuse + `_c` + `_e` overrides) are SHIPPED; `_n` and `_s` are NOT.
+STATUS: BOTH FEATURES SHIPPED (texture format v3). This document was the
+implementation spec for normal maps (`_n`) and specular maps (`_s`); it is
+retained as the historical design record. Key learnings from the build:
+
+  * FORMAT CORRECTION -- section 1's claim "everything relevant is BC1/BC3"
+    was WRONG for normal maps: ALL 401 stock `_n.dds` (and ISDF Redux's 34)
+    are legacy-fourcc BC5-SNORM (`BC5S`). dds_decode.py grew a BC5 branch
+    (two signed BC4 channels -> X/Y, Z reconstructed as sqrt(1 - x^2 - y^2),
+    standard [0,1] PNG encoding). The optional native-DDS HQ tier (2.1.b) is
+    impossible without patching the vendored DDSLoader (no BC5/RGTC support)
+    -- normals ship PNG-only.
+  * Resolution decision: 1024px flat (NORMAL_MAX_DIM), ~379 MB measured.
+  * `_s` shipped via approach 3.1.A exactly (luminance -> roughness with the
+    specularPower bias, SPEC_ROUGHNESS_K = 0.6, grayscale L-mode PNG @512).
+  * Viewer: derivative-tangent fallback (2.3.A option 1); DirectX green flip
+    as normalScale.set(1, -1) behind the NORMAL_FLIP_G tunable (2.3.B).
+
+Original spec follows. Status at time of writing: diffuse, team-color masks
+(`_c`), emissive glow maps (`_e`), and workshop mod texture sets (diffuse +
+`_c` + `_e` overrides) were SHIPPED; `_n` and `_s` were NOT.
 
 --------------------------------------------------------------------------------
 1. CONTEXT: HOW THE MODELS BROWSER TEXTURE PIPELINE WORKS TODAY

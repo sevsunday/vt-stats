@@ -437,6 +437,8 @@ function showViewer(entry) {
   activeViewer.load(MODELS_BASE + entry.glb, partsHints, {
     sets: modTextureSets(entry),
     emissive: entry.emissiveTextures || [],
+    normal: entry.normalTextures || [],
+    specular: entry.specularTextures || [],
   })
     .then(() => {
       if (!activeViewer) return;

@@ -38,10 +38,21 @@ const TEX_BASE = '../data/models/textures/';
 const TEX_TEAMCOLOR_BASE = '../data/models/textures/teamcolor/';
 // Emissive glow maps (single perf-resolution set, keyed by diffuse stem).
 const TEX_EMISSIVE_BASE = '../data/models/textures/emissive/';
+// Tangent-space normal maps (single 1024px set, keyed by diffuse stem; decoded
+// from the BC5S `_n.dds` sources by the pipeline).
+const TEX_NORMAL_BASE = '../data/models/textures/normal/';
+// Specular->roughness maps (single 512px grayscale set, keyed by diffuse stem;
+// luminance-converted from the legacy spec/gloss `_s.dds` sources).
+const TEX_SPECULAR_BASE = '../data/models/textures/specular/';
 // Workshop mod texture-override sets: textures/mods/<packId>/{perf,hq,teamcolor,
-// emissive}/<stem>.{png,dds}. Which stems each pack covers comes from the
-// manifest's per-model `textureSets` block (no 404 probing).
+// emissive,normal,specular}/<stem>.{png,dds}. Which stems each pack covers comes
+// from the manifest's per-model `textureSets` block (no 404 probing).
 const TEX_MODS_BASE = '../data/models/textures/mods/';
+// BZCC normal maps are DirectX-convention (green = Y-down); three.js expects
+// OpenGL (Y-up), so the green channel is flipped via normalScale.y. Flip this
+// to false if grooves read inverted under a sweeping sun (verify on ibgtow00:
+// light from the left must brighten the LEFT edge of a groove).
+const NORMAL_FLIP_G = true;
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -304,6 +315,16 @@ export class ObjectViewer {
     this._emissiveTextures = [];
     this._emisCache = new Map();      // `${set}:emis:${name}` -> THREE.Texture | null
     this._emisLoadGen = 0;            // bumped each _applyEmissive run; stale runs abort
+
+    // Normal / roughness map state (stock stem lists from the manifest; mod
+    // sets carry their own lists on each descriptor). Data textures, perf-PNG
+    // only -- the vendored DDSLoader has no BC5/RGTC support for an HQ tier.
+    this._normalTextures = [];
+    this._normCache = new Map();      // `${set}:norm:${name}` -> THREE.Texture | null
+    this._normLoadGen = 0;            // bumped each _applyNormals run; stale runs abort
+    this._specularTextures = [];
+    this._specCache = new Map();      // `${set}:spec:${name}` -> THREE.Texture | null
+    this._specLoadGen = 0;            // bumped each _applySpecular run; stale runs abort
 
     // Sun light state (persisted by the caller; see opts.light).
     const lopts = opts.light || {};
@@ -627,9 +648,12 @@ export class ObjectViewer {
     this.setDriveMode(false);   // never carry drive mode across a model swap
     this._artHints = hints;   // index.json `parts` block (ODF-authoritative)
     // index.json texture info: `sets` = mod texture-set descriptors for this
-    // model, `emissive` = stock emissive stems. Each model opens on stock.
+    // model, `emissive`/`normal`/`specular` = stock aux-map stems. Each model
+    // opens on stock.
     this._textureSets = (texInfo && texInfo.sets) || [];
     this._emissiveTextures = (texInfo && texInfo.emissive) || [];
+    this._normalTextures = (texInfo && texInfo.normal) || [];
+    this._specularTextures = (texInfo && texInfo.specular) || [];
     this._textureSet = null;
     const loader = new GLTFLoader();
     const gltf = await loader.loadAsync(url);
@@ -649,6 +673,11 @@ export class ObjectViewer {
         o.material.side = o.material.side ?? THREE.FrontSide;
         o.castShadow = true;
         o.receiveShadow = true;
+        // Baked GLB roughnessFactor (0.65) -- the restore value when a material
+        // has no roughness map (a bound map multiplies, so it gets 1.0 instead).
+        if (o.material.userData.vtBaseRoughness === undefined) {
+          o.material.userData.vtBaseRoughness = o.material.roughness;
+        }
         this._materials.push(o.material);
         if (o.material.name) names.add(o.material.name);
       }
@@ -675,6 +704,8 @@ export class ObjectViewer {
     await this._applyTextures();
     await this._applyTeamMasks();
     await this._applyEmissive();
+    await this._applyNormals();
+    await this._applySpecular();
     return gltf;
   }
 
@@ -877,6 +908,118 @@ export class ObjectViewer {
     });
   }
 
+  /* ---- Normal maps (BZCC `_n`, BC5S -> standard-encoding PNG) ------------ */
+
+  /* Assign the tangent-space normal map for every material that has one in the
+   * active set (mod normal wins, stock fills, none clears). The GLBs carry no
+   * TANGENT attribute -- three.js falls back to screen-space derivative
+   * tangents automatically. Wireframe-aware: while the white override is on,
+   * writes route into the _wireSaved stash (same pattern as _applyEmissive). */
+  async _applyNormals() {
+    const gen = ++this._normLoadGen;
+    const descr = this._activeSetDescr();
+    const wf = this._wireframe && this._wireSaved;
+    const gy = NORMAL_FLIP_G ? -1 : 1;
+    await Promise.all(this._materials.map(async (mat, i) => {
+      if (!mat.name || !('normalMap' in mat)) return;
+      const fromSet = !!(descr && descr.normalTextures && descr.normalTextures.includes(mat.name));
+      const fromStock = !fromSet && this._normalTextures.includes(mat.name);
+      const tex = (fromSet || fromStock)
+        ? await this._loadNormal(fromSet ? descr.id : null, mat.name)
+        : null;
+      if (this.disposed || gen !== this._normLoadGen) return;
+      if (wf) {
+        const saved = this._wireSaved[i];
+        if (saved) {
+          saved.normalMap = tex || null;
+          if (saved.normalScale) saved.normalScale.set(1, gy);
+          else saved.normalScale = new THREE.Vector2(1, gy);
+        }
+        return;
+      }
+      mat.normalMap = tex || null;
+      if (tex) mat.normalScale.set(1, gy);
+      mat.needsUpdate = true;   // toggles USE_NORMALMAP -> recompile
+    }));
+  }
+
+  _loadNormal(setId, name) {
+    const base = setId ? `${TEX_MODS_BASE}${setId}/normal/` : TEX_NORMAL_BASE;
+    const cacheKey = `${setId || 'stock'}:norm:${name}`;
+    if (this._normCache.has(cacheKey)) return Promise.resolve(this._normCache.get(cacheKey));
+    const finish = (tex) => {
+      if (tex) {
+        tex.flipY = false;                       // GLB UVs authored flipY=false
+        tex.colorSpace = THREE.NoColorSpace;     // normals are data, not color
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+        tex.needsUpdate = true;
+      }
+      this._normCache.set(cacheKey, tex || null);
+      return tex || null;
+    };
+    const url = `${base}${name}.png`;
+    return new Promise((resolve) => {
+      this._texLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
+    });
+  }
+
+  /* ---- Roughness maps (BZCC `_s` spec/gloss, converted by the pipeline) -- */
+
+  /* Assign the roughness map for every material that has one in the active set
+   * (mod wins, stock fills, none clears). A bound map MULTIPLIES the scalar, so
+   * roughness goes to 1.0 while mapped and back to the baked GLB value (0.65)
+   * when not. Metalness is left alone. Wireframe-aware like the others. */
+  async _applySpecular() {
+    const gen = ++this._specLoadGen;
+    const descr = this._activeSetDescr();
+    const wf = this._wireframe && this._wireSaved;
+    await Promise.all(this._materials.map(async (mat, i) => {
+      if (!mat.name || !('roughnessMap' in mat)) return;
+      const fromSet = !!(descr && descr.specularTextures && descr.specularTextures.includes(mat.name));
+      const fromStock = !fromSet && this._specularTextures.includes(mat.name);
+      const tex = (fromSet || fromStock)
+        ? await this._loadSpecular(fromSet ? descr.id : null, mat.name)
+        : null;
+      if (this.disposed || gen !== this._specLoadGen) return;
+      const base = mat.userData.vtBaseRoughness ?? mat.roughness;
+      if (wf) {
+        const saved = this._wireSaved[i];
+        if (saved) {
+          saved.roughnessMap = tex || null;
+          saved.roughness = tex ? 1.0 : base;
+        }
+        return;
+      }
+      mat.roughnessMap = tex || null;
+      mat.roughness = tex ? 1.0 : base;
+      mat.needsUpdate = true;   // toggles USE_ROUGHNESSMAP -> recompile
+    }));
+  }
+
+  _loadSpecular(setId, name) {
+    const base = setId ? `${TEX_MODS_BASE}${setId}/specular/` : TEX_SPECULAR_BASE;
+    const cacheKey = `${setId || 'stock'}:spec:${name}`;
+    if (this._specCache.has(cacheKey)) return Promise.resolve(this._specCache.get(cacheKey));
+    const finish = (tex) => {
+      if (tex) {
+        tex.flipY = false;                       // GLB UVs authored flipY=false
+        tex.colorSpace = THREE.NoColorSpace;     // roughness is data, not color
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+        tex.needsUpdate = true;
+      }
+      this._specCache.set(cacheKey, tex || null);
+      return tex || null;
+    };
+    const url = `${base}${name}.png`;
+    return new Promise((resolve) => {
+      this._texLoader.load(url, (t) => resolve(finish(t)), undefined, () => resolve(finish(null)));
+    });
+  }
+
   /* ---- Texture sets (workshop mod skins) -------------------------------- */
 
   hasTextureSets() { return this._textureSets.length > 0; }
@@ -891,6 +1034,8 @@ export class ObjectViewer {
     await this._applyTextures();
     await this._applyTeamMasks();
     await this._applyEmissive();
+    await this._applyNormals();
+    await this._applySpecular();
     this._markShadowDirty();
   }
 
@@ -1138,6 +1283,10 @@ export class ObjectViewer {
         emissive: m.emissive ? m.emissive.clone() : null,
         emissiveIntensity: m.emissiveIntensity,
         emissiveMap: m.emissiveMap || null,
+        normalMap: m.normalMap || null,
+        normalScale: m.normalScale ? m.normalScale.clone() : null,
+        roughnessMap: m.roughnessMap || null,
+        roughness: m.roughness,
       }));
     }
     this._paintWireframeWhite();
@@ -1152,6 +1301,8 @@ export class ObjectViewer {
       m.wireframe = true;
       m.map = null;
       if ('emissiveMap' in m) m.emissiveMap = null;
+      if ('normalMap' in m) m.normalMap = null;       // bumps would shade the lines
+      if ('roughnessMap' in m) m.roughnessMap = null;
       if (m.color) m.color.setRGB(0, 0, 0);
       if (m.emissive) m.emissive.setRGB(1, 1, 1);
       if ('emissiveIntensity' in m) m.emissiveIntensity = 1;
@@ -1166,6 +1317,14 @@ export class ObjectViewer {
       if (!saved) return;
       m.map = saved.map;
       if ('emissiveMap' in m) m.emissiveMap = saved.emissiveMap || null;
+      if ('normalMap' in m) {
+        m.normalMap = saved.normalMap || null;
+        if (m.normalScale && saved.normalScale) m.normalScale.copy(saved.normalScale);
+      }
+      if ('roughnessMap' in m) {
+        m.roughnessMap = saved.roughnessMap || null;
+        if (saved.roughness !== undefined) m.roughness = saved.roughness;
+      }
       if (m.color && saved.color) m.color.copy(saved.color);
       if (m.emissive && saved.emissive) m.emissive.copy(saved.emissive);
       if ('emissiveIntensity' in m && saved.emissiveIntensity !== undefined) {
@@ -2695,6 +2854,10 @@ export class ObjectViewer {
     this._teamMaskCache.clear();
     for (const t of this._emisCache.values()) { if (t) t.dispose(); }
     this._emisCache.clear();
+    for (const t of this._normCache.values()) { if (t) t.dispose(); }
+    this._normCache.clear();
+    for (const t of this._specCache.values()) { if (t) t.dispose(); }
+    this._specCache.clear();
     // Post-processing pipeline.
     if (this._composer) this._composer.dispose();
     if (this._ssaoPass && this._ssaoPass.dispose) this._ssaoPass.dispose();
