@@ -324,6 +324,12 @@ label.light-head { cursor: pointer; }
 .light-panel.off .light-row:not(.light-head) { opacity: 0.45; }
 /* Ship lights are independent of the sun -- don't dim their row with it. */
 .light-panel.off .shiplights-row { opacity: 1; }
+/* Mood presets retint the fill + backdrop even with the sun off -- keep live. */
+.light-panel.off .light-preset-row { opacity: 1; }
+
+/* Lighting mood preset segment (Noon | Sunset | Overcast). */
+.light-preset-seg { display: flex; width: 100%; }
+.light-preset-seg .seg-btn { flex: 1; }
 
 /* ---- Weapon loadout overlay (top-right of the stage) -------------------- */
 .loadout-panel {

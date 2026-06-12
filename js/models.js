@@ -15,7 +15,7 @@
  * static server; see README).
  */
 
-import { ObjectViewer } from './models-viewer.js';
+import { ObjectViewer, LIGHT_PRESETS } from './models-viewer.js';
 
 const MODELS_BASE = '../data/models/';
 const QUALITY_KEY = 'vt.obj.quality';
@@ -23,13 +23,15 @@ const LIGHT_ON_KEY = 'vt.obj.light.on';
 const LIGHT_AZ_KEY = 'vt.obj.light.az';
 const LIGHT_EL_KEY = 'vt.obj.light.el';
 const LIGHT_INTENSITY_KEY = 'vt.obj.light.intensity';
-const LIGHT_DEFAULT = { on: true, az: 215, el: 45, intensity: 2.6 };
+const LIGHT_PRESET_KEY = 'vt.obj.light.preset';   // 'noon' | 'sunset' | 'overcast'
+const LIGHT_DEFAULT = { on: true, az: 215, el: 45, intensity: 2.6, preset: 'noon' };
 const SCENE_BG_KEY = 'vt.obj.scene.bg';   // 'dark' (default) | 'light'
 const TURN_SENS_KEY = 'vt.obj.drive.turnSens';   // Drive Mode turn response (25..100 %)
 const GRID_KEY = 'vt.obj.grid';
 const AXES_KEY = 'vt.obj.axes';
 const SCENE_BG_VALUES = ['dark', 'light'];
-const ULTRA_AO_KEY = 'vt.obj.ultra.ao';
+const ULTRA_KEY = 'vt.obj.ultra';          // single Ultra-rendering toggle
+const ULTRA_AO_KEY = 'vt.obj.ultra.ao';    // legacy AO-only key (migration source)
 // The full asset set (incl. the native HQ .dds textures) is published as plain
 // git blobs and served by GitHub Pages, so the HQ toggle + Prefer-HQ control +
 // Capture are enabled. Set to false to force perf-only (e.g. if HQ is dropped
@@ -62,7 +64,7 @@ const els = {
   sceneBgSeg: document.querySelector('#scene-panel .scene-bg-seg'),
   sceneGrid: document.getElementById('scene-grid'),
   sceneAxes: document.getElementById('scene-axes'),
-  ultraAo: document.getElementById('ultra-ao'),
+  ultraToggle: document.getElementById('ultra-toggle'),
   stageLoading: document.getElementById('stage-loading'),
   stageLoadingLabel: document.getElementById('stage-loading-label'),
   stageProgress: document.getElementById('stage-progress'),
@@ -78,6 +80,7 @@ const els = {
   lightBtn: document.getElementById('light-btn'),
   lightPanel: document.getElementById('light-panel'),
   lightOn: document.getElementById('light-on'),
+  lightPresetSeg: document.getElementById('light-preset-seg'),
   lightIntensity: document.getElementById('light-intensity'),
   lightIntensityVal: document.getElementById('light-intensity-val'),
   lightAz: document.getElementById('light-az'),
@@ -244,7 +247,7 @@ let manifest = [];
 let texturePacks = {};
 let activeViewer = null;
 let loadoutEntry = null;   // manifest entry whose loadout panel is on screen
-let aoCompiled = false;   // per-viewer: whether the SSAO/SMAA shaders have compiled
+let ultraCompiled = false;   // per-viewer: whether the Ultra pass chain has compiled
 // faction: single-select string ('all' = no filter), default ISDF.
 // category: multi-select Set (empty = no filter / "All"), default Building+Vehicle.
 const filters = { q: '', faction: 'ISDF', category: new Set(['Building', 'Vehicle']), sort: 'name' };
@@ -276,11 +279,13 @@ function lightPrefs() {
   const az = parseFloat(localStorage.getItem(LIGHT_AZ_KEY));
   const el = parseFloat(localStorage.getItem(LIGHT_EL_KEY));
   const intensity = parseFloat(localStorage.getItem(LIGHT_INTENSITY_KEY));
+  const preset = localStorage.getItem(LIGHT_PRESET_KEY);
   return {
     on: on === null ? LIGHT_DEFAULT.on : on === '1',
     az: Number.isFinite(az) ? az : LIGHT_DEFAULT.az,
     el: Number.isFinite(el) ? el : LIGHT_DEFAULT.el,
     intensity: Number.isFinite(intensity) ? intensity : LIGHT_DEFAULT.intensity,
+    preset: LIGHT_PRESETS[preset] ? preset : LIGHT_DEFAULT.preset,
   };
 }
 
@@ -297,9 +302,19 @@ function scenePrefs() {
   };
 }
 
-// Ultra post-processing is opt-in (off by default; it carries a GPU cost).
+// Ultra rendering is opt-in (off by default; it carries a real GPU cost).
+// One-shot migration: users who had the old AO-only checkbox on get Ultra on.
 function ultraPrefs() {
-  return { ao: localStorage.getItem(ULTRA_AO_KEY) === '1' };
+  let v = localStorage.getItem(ULTRA_KEY);
+  if (v === null) {
+    const legacy = localStorage.getItem(ULTRA_AO_KEY);
+    if (legacy !== null) {
+      v = legacy;
+      localStorage.setItem(ULTRA_KEY, v);
+      localStorage.removeItem(ULTRA_AO_KEY);
+    }
+  }
+  return { on: v === '1' };
 }
 
 // ---------------- directory ----------------
@@ -485,7 +500,7 @@ function showViewer(entry) {
       activeViewer.setBackgroundMode(scene.bg);
       activeViewer.setGridVisible(scene.grid);
       activeViewer.setAxesVisible(scene.axes);
-      if (ultraPrefs().ao) setUltraAO(true);
+      if (ultraPrefs().on) setUltra(true);
       syncScenePanel();
     })
     .catch((e) => {
@@ -518,9 +533,9 @@ function showViewer(entry) {
 
   els.sceneBtn.hidden = false;     // Scene pane is always applicable
   setPaneOpen('scene', false);
-  els.ultraAo.classList.toggle('on', ultraPrefs().ao);
-  // New viewer instance -> the AO passes will need to compile again.
-  aoCompiled = false;
+  els.ultraToggle.classList.toggle('on', ultraPrefs().on);
+  // New viewer instance -> the Ultra passes will need to compile again.
+  ultraCompiled = false;
   hideStageLoading();
   els.fps.textContent = '\u2014 fps';
 
@@ -752,26 +767,27 @@ function showViewer(entry) {
     localStorage.setItem(AXES_KEY, els.sceneAxes.checked ? '1' : '0');
     if (activeViewer) activeViewer.setAxesVisible(els.sceneAxes.checked);
   };
-  els.ultraAo.onclick = () => {
-    const on = !els.ultraAo.classList.contains('on');
-    els.ultraAo.classList.toggle('on', on);
-    localStorage.setItem(ULTRA_AO_KEY, on ? '1' : '0');
-    setUltraAO(on);
+  els.ultraToggle.onclick = () => {
+    const on = !els.ultraToggle.classList.contains('on');
+    els.ultraToggle.classList.toggle('on', on);
+    localStorage.setItem(ULTRA_KEY, on ? '1' : '0');
+    setUltra(on);
   };
 }
 
-/* Enable/disable Ambient occlusion. The first enable compiles the SSAO/SMAA
- * shaders, which briefly stalls the main thread -- show a loading overlay that
- * paints BEFORE the stall and clears once the first post-processed frame lands. */
-function setUltraAO(on) {
+/* Enable/disable Ultra rendering. The first enable compiles the GTAO / bloom /
+ * SMAA pass shaders plus the env-mapped material variants, which briefly
+ * stalls the main thread -- show a loading overlay that paints BEFORE the
+ * stall and clears once the first post-processed frame lands. */
+function setUltra(on) {
   if (!activeViewer) return;
-  if (!on) { activeViewer.setUltraAO(false); hideStageLoading(); return; }
-  if (aoCompiled) { activeViewer.setUltraAO(true); return; }
-  showStageLoading('Loading ambient occlusion\u2026');
+  if (!on) { activeViewer.setUltra(false); hideStageLoading(); return; }
+  if (ultraCompiled) { activeViewer.setUltra(true); return; }
+  showStageLoading('Compiling ultra rendering\u2026');
   // Defer two frames so the overlay is actually painted before the compile stall.
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (!activeViewer) { hideStageLoading(); return; }
-    activeViewer.setUltraAO(true, () => { aoCompiled = true; hideStageLoading(); });
+    activeViewer.setUltra(true, () => { ultraCompiled = true; hideStageLoading(); });
   }));
 }
 
@@ -1567,8 +1583,10 @@ function resetAllViewer() {
   localStorage.setItem(LIGHT_AZ_KEY, String(LIGHT_DEFAULT.az));
   localStorage.setItem(LIGHT_EL_KEY, String(LIGHT_DEFAULT.el));
   localStorage.setItem(LIGHT_INTENSITY_KEY, String(LIGHT_DEFAULT.intensity));
+  localStorage.setItem(LIGHT_PRESET_KEY, LIGHT_DEFAULT.preset);
   activeViewer.setLightAngle(LIGHT_DEFAULT.az, LIGHT_DEFAULT.el);
   activeViewer.setLightIntensity(LIGHT_DEFAULT.intensity);
+  activeViewer.setLightPreset(LIGHT_DEFAULT.preset);
   initLightPanel({ ...LIGHT_DEFAULT });   // re-sync slider values + handlers
   setLightOn(LIGHT_DEFAULT.on);           // panel dim + viewer + persist
 
@@ -1584,10 +1602,10 @@ function resetAllViewer() {
   // Restore the default dock layout (desktop: all applicable panes open).
   applyDefaultPaneState();
 
-  // Ultra post-processing -> off.
-  localStorage.setItem(ULTRA_AO_KEY, '0');
-  els.ultraAo.classList.remove('on');
-  setUltraAO(false);
+  // Ultra rendering -> off.
+  localStorage.setItem(ULTRA_KEY, '0');
+  els.ultraToggle.classList.remove('on');
+  setUltra(false);
 
   // Camera, model orientation, and any free-spin momentum.
   activeViewer.resetView();
@@ -1661,6 +1679,31 @@ function initLightPanel(light) {
   };
   els.lightAz.oninput = onAngle;
   els.lightEl.oninput = onAngle;
+
+  // Lighting mood presets (Noon / Sunset / Overcast). A preset retints the
+  // whole rig + backdrop AND moves the elevation slider to its suggested sun
+  // angle (sunset = low raking light); the sliders stay adjustable on top.
+  syncLightPresetSeg(light.preset);
+  els.lightPresetSeg.querySelectorAll('.seg-btn').forEach((b) => {
+    b.onclick = () => {
+      const id = b.dataset.preset;
+      syncLightPresetSeg(id);
+      localStorage.setItem(LIGHT_PRESET_KEY, id);
+      if (activeViewer) activeViewer.setLightPreset(id);
+      const el = LIGHT_PRESETS[id] ? LIGHT_PRESETS[id].el : NaN;
+      if (Number.isFinite(el)) {
+        els.lightEl.value = String(el);
+        els.lightElVal.textContent = `${el}\u00b0`;
+        localStorage.setItem(LIGHT_EL_KEY, String(el));
+        if (activeViewer) activeViewer.setLightAngle(NaN, el);   // az untouched
+      }
+    };
+  });
+}
+
+function syncLightPresetSeg(id) {
+  els.lightPresetSeg.querySelectorAll('.seg-btn').forEach((b) =>
+    b.classList.toggle('on', b.dataset.preset === id));
 }
 
 function syncQualitySeg(q) {

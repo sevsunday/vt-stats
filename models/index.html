@@ -191,6 +191,13 @@
       <div id="viewer-dock" class="viewer-dock">
       <div id="light-panel" class="light-panel">
         <label class="light-row light-head"><span>Sun light</span><input id="light-on" type="checkbox" class="light-toggle" title="Toggle the sun key light" /></label>
+        <div class="light-row light-preset-row" id="light-preset-row">
+          <div class="seg light-preset-seg" id="light-preset-seg" title="Lighting mood: Noon = neutral white key, Sunset = low amber raking light, Overcast = dim diffuse grey with washed-out shadows">
+            <button class="seg-btn" data-preset="noon">Noon</button>
+            <button class="seg-btn" data-preset="sunset">Sunset</button>
+            <button class="seg-btn" data-preset="overcast">Overcast</button>
+          </div>
+        </div>
         <label class="light-row shiplights-row" id="shiplights-row" hidden>
           <span class="light-label">Ship lights</span>
           <input id="shiplights-on" type="checkbox" class="light-toggle" title="Toggle the ship's authored hardpoint lights (headlights, running lights)" />
@@ -321,7 +328,7 @@
         </label>
         <div class="light-row scene-ultra-head"><span>Ultra quality</span></div>
         <div class="scene-ultra">
-          <button id="ultra-ao" class="btn toggle scene-ultra-btn" title="Screen-space ambient occlusion + sharper anti-aliasing (post-processing)">Ambient occlusion</button>
+          <button id="ultra-toggle" class="btn toggle scene-ultra-btn" title="Maximum-quality rendering: ground-truth ambient occlusion (GTAO), bloom on glowing parts, temporal supersampling when the camera is still, 4K soft shadows, and native-resolution rendering. Same lighting as normal -- just cleaner. Heavy on the GPU by design.">Ultra rendering</button>
         </div>
       </div>
       </div>

@@ -27,8 +27,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { TAARenderPass } from 'three/addons/postprocessing/TAARenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
@@ -71,6 +72,11 @@ const SHIPLIGHT_FORWARD_SIGN = -1;
 const SHIPLIGHT_BULB_FRAC = 0.045;     // bulb sprite size as fraction of model radius
 const SHIPLIGHT_BULB_MIN = 0.1;
 const SHIPLIGHT_BULB_MAX = 0.6;
+// Source burst: a hot-white core sprite (tight center + subtle 4-point flare)
+// layered over the colored glow at the hardpoint, so the origin reads as an
+// unmistakably lit bulb rather than a faint haze.
+const SHIPLIGHT_BURST_SCALE = 2.4;     // burst sprite size vs the glow bulb (in-game starburst is large)
+const SHIPLIGHT_BURST_OPACITY = 1.0;
 // Visible headlight rendering for spotlights. The ground plane is a
 // ShadowMaterial (invisible to real lights), so the classic "pool of light on
 // the ground ahead" is painted as an additive decal at the beam/ground
@@ -79,12 +85,14 @@ const SHIPLIGHT_BULB_MAX = 0.6;
 const SHIPLIGHT_BEAM_RADII = 2.2;       // beam length as a fraction of model radius
 const SHIPLIGHT_BEAM_MIN = 2.5;         // beam length clamp (m)
 const SHIPLIGHT_BEAM_MAX = 16;
-const SHIPLIGHT_BEAM_HALF_ANGLE = 0.3;  // outermost visual cone half-angle (rad)
-// The beam is 3 nested additive shells (inner bright + narrow, outer faint +
-// wide) so the edge falls off softly instead of reading as a hard solid cone.
-// Each entry is [halfAngleFraction, opacityFraction-of-SHIPLIGHT_BEAM_OPACITY].
-const SHIPLIGHT_BEAM_SHELLS = [[0.5, 1.0], [0.78, 0.6], [1.0, 0.38]];
-const SHIPLIGHT_BEAM_OPACITY = 0.085;   // innermost shell peak opacity
+const SHIPLIGHT_BEAM_HALF_ANGLE = 0.3;  // visual cone half-angle (rad)
+// The beam is ONE cone with a custom shader: opacity = apex-to-tip axial
+// falloff x a fresnel term that fades the surface out where it curves away
+// from the camera -- the silhouette dissolves, so no cone outline is ever
+// visible (the old 3-nested-shell approach showed each shell's hard edge).
+const SHIPLIGHT_BEAM_OPACITY = 0.32;    // peak (apex, facing camera) opacity
+const SHIPLIGHT_BEAM_AXIAL_POW = 1.35;  // apex->tip falloff curve exponent (lower = carries further)
+const SHIPLIGHT_BEAM_FRESNEL_POW = 1.6; // silhouette fade exponent (higher = softer rim)
 // Ground pool: in-game the engine spotlight cone is huge (coneAngOuter ~2 rad)
 // so the splash on the terrain is a WIDE oval, much wider than the visible
 // beam. SPREAD = lateral half-width vs t*tan(halfAngle); ASPECT = along-beam
@@ -92,6 +100,10 @@ const SHIPLIGHT_BEAM_OPACITY = 0.085;   // innermost shell peak opacity
 const SHIPLIGHT_POOL_OPACITY = 0.5;
 const SHIPLIGHT_POOL_SPREAD = 3.2;
 const SHIPLIGHT_POOL_ASPECT = 0.55;
+// Pool falloff curve: alpha = (1 - r^2)^POW -- value AND slope hit zero at the
+// rim, so there is no visible boundary (a plain radial gradient still reads
+// as a hard oval edge via the Mach-band effect). Higher = tighter hot core.
+const SHIPLIGHT_POOL_FALLOFF_POW = 2.5;
 // Headlight down-tilt (rad). hp_light nodes aim dead level; without a tilt a
 // level ship's beam axis never meets the floor, so the pool would only show
 // in-game-style on slopes. ~8 deg matches the car-headlight look.
@@ -146,6 +158,65 @@ const LIGHT_CAPTURE_INTENSITY = 2.6;
 // Flat viewer background colors. Dark is the default; the user can switch to a
 // light backdrop (choice persisted by the caller). No environment / tone mapping.
 const SCENE_BG = { light: 0xf4f5f7, dark: 0x14171c };
+
+// Stock base-fill intensities (hemisphere / ambient). Presets scale these.
+const FILL_HEMI_BASE = 0.85;
+const FILL_AMB_BASE = 0.25;
+
+// ---- Ultra rendering (single max-quality toggle) -------------------------
+// Pass chain: TAA (render + idle accumulation) -> GTAO -> Bloom -> Output
+// (sRGB) -> SMAA. Plus scene-level upgrades applied on enable: 4096px shadow
+// map and an uncapped device pixel ratio. Quality-only by design: the
+// lighting model itself (sun/hemi/ambient rig, no tone mapping, no IBL) is
+// IDENTICAL to the default path -- an earlier AgX + RoomEnvironment variant
+// muddled the hand-tuned rig and was deliberately dropped.
+const ULTRA_SHADOW_MAP = 4096;     // sun shadow map while Ultra is on
+const BASE_SHADOW_MAP = 2048;      // stock sun shadow map
+const ULTRA_MAX_DPR = 3;           // ultra renders at min(devicePixelRatio, this)
+const ULTRA_GTAO_RADIUS = 48;      // screen-space AO radius in px (scale-free)
+const ULTRA_GTAO_BLEND = 1.0;      // AO blend intensity
+const ULTRA_BLOOM_THRESHOLD = 0.85; // luminance gate: emissives + lights only
+// The light backdrop (~0.89 linear luminance) would itself cross the 0.85
+// gate and glow wall-to-wall; raise the gate above it in light-bg mode.
+const ULTRA_BLOOM_THRESHOLD_LIGHT_BG = 0.95;
+const ULTRA_BLOOM_STRENGTH = 0.35;
+const ULTRA_BLOOM_RADIUS = 0.4;
+
+// Lighting mood presets. Each is a full recipe: sun tint + intensity scale
+// (multiplies the user's Intensity slider), hemisphere sky/ground fill tint +
+// scale, ambient tint + scale, ground-shadow opacity, a suggested sun
+// elevation (the UI moves the slider to it -- sunset reads as long raking
+// light), and an optional per-bg-mode background tint (null = stock SCENE_BG).
+// Exported so the UI can read labels + the suggested elevation.
+export const LIGHT_PRESETS = {
+  noon: {
+    label: 'Noon',
+    sun: 0xffffff, sunScale: 1.0,
+    hemiSky: 0xbfd4ff, hemiGround: 0x202833, hemiScale: 1.0,
+    ambient: 0xffffff, ambScale: 1.0,
+    el: 45,
+    shadowOpacity: 0.35,
+    bg: null,
+  },
+  sunset: {
+    label: 'Sunset',
+    sun: 0xff9c44, sunScale: 1.15,        // deep amber key, slightly hotter
+    hemiSky: 0xe5a875, hemiGround: 0x2e1f18, hemiScale: 0.7,
+    ambient: 0xffd5a6, ambScale: 0.8,
+    el: 12,                               // low, raking golden-hour angle
+    shadowOpacity: 0.45,                  // long hard shadows
+    bg: { dark: 0x1c1410, light: 0xf4e5d3 },
+  },
+  overcast: {
+    label: 'Overcast',
+    sun: 0xe2e7ed, sunScale: 0.3,         // weak desaturated key
+    hemiSky: 0xc6cdd6, hemiGround: 0x505862, hemiScale: 1.75,
+    ambient: 0xdce1e7, ambScale: 1.65,    // diffuse skylight does the work
+    el: 58,
+    shadowOpacity: 0.12,                  // shadows nearly washed out
+    bg: { dark: 0x171b20, light: 0xe6e9ec },
+  },
+};
 
 // Free-spin feel (all tunable). DRAG_SENS is radians of model rotation per pixel
 // of drag; momentum velocity (rad/sec) = pixel velocity (px/sec) * DRAG_SENS.
@@ -404,6 +475,7 @@ export class ObjectViewer {
     this._lightAz = Number.isFinite(lopts.az) ? lopts.az : LIGHT_DEFAULT_AZ;
     this._lightEl = Number.isFinite(lopts.el) ? lopts.el : LIGHT_DEFAULT_EL;
     this._lightIntensity = Number.isFinite(lopts.intensity) ? lopts.intensity : LIGHT_DEFAULT_INTENSITY;
+    this._lightPreset = LIGHT_PRESETS[lopts.preset] ? lopts.preset : 'noon';
 
     // Free-spin state.
     this._freeSpin = false;
@@ -464,6 +536,7 @@ export class ObjectViewer {
     this._hpMarkers = [];          // loadout-hover marker sprites
     this._nodeByLower = new Map(); // lowercased node name -> Object3D (per load)
     this._glowTexture = null;      // shared radial sprite texture (lazy-built)
+    this._burstTexture = null;     // shared hot-core + flare sprite texture (lazy-built)
 
     // WASD Drive Mode state (see setDriveMode / _updateDrive).
     this._driveMode = false;
@@ -539,8 +612,8 @@ export class ObjectViewer {
     // so it stays fixed and rakes across the model as you orbit, revealing form.
     // Base-fill intensities are stored so setLightEnabled() can boost them when
     // the sun is off (model stays evenly visible, just flat).
-    this._hemiBase = 0.85;
-    this._ambBase = 0.25;
+    this._hemiBase = FILL_HEMI_BASE;
+    this._ambBase = FILL_AMB_BASE;
     this._hemiOff = 1.5;
     this._ambOff = 0.7;
     this.hemi = new THREE.HemisphereLight(0xbfd4ff, 0x202833, this._hemiBase);
@@ -550,7 +623,7 @@ export class ObjectViewer {
 
     this.sun = new THREE.DirectionalLight(0xffffff, this._lightIntensity);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(BASE_SHADOW_MAP, BASE_SHADOW_MAP);
     this.sun.shadow.bias = -0.0005;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
@@ -579,17 +652,23 @@ export class ObjectViewer {
     this._axesVisible = true;
     this._applySceneBg();
 
-    // Ultra post-processing state (EffectComposer pipeline, built lazily).
-    // Ambient occlusion (SSAO) + SMAA anti-aliasing + higher-res shadows.
-    this._ultraAO = false;
+    // Ultra rendering state (EffectComposer pipeline, built lazily).
+    // TAA -> GTAO -> Bloom -> Output (sRGB) -> SMAA, plus 4096 shadows and
+    // uncapped DPR -- all scoped to the single toggle.
+    this._ultraOn = false;
     this._composer = null;
-    this._renderPass = null;
-    this._ssaoPass = null;
+    this._taaPass = null;
+    this._gtaoPass = null;
+    this._bloomPass = null;
     this._smaaPass = null;
     this._outputPass = null;
+    this._taaYawPrev = 0;          // turret-angle change tracking for stillness
+    this._taaPitchPrev = 0;
+    this._camPrev = null;          // last-frame camera matrix for stillness
     this._ultraReadyCb = null;     // fired after the first post-processed frame
     this._ultraReadyFrames = 0;
 
+    this.setLightPreset(this._lightPreset);   // tints + fill scales + bg, then:
     this._placeSun();
     this._applyLightEnabled();
 
@@ -1253,27 +1332,121 @@ export class ObjectViewer {
     return this._glowTexture;
   }
 
+  /* Burst texture: blown-out white core with a fast falloff plus a subtle
+   * 4-point lens-flare cross. Drawn white; layered additively over the
+   * colored glow bulb so the hardpoint reads as a lit light source. */
+  _burstTex() {
+    if (this._burstTexture) return this._burstTexture;
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const ctx = c.getContext('2d');
+    const core = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    core.addColorStop(0, 'rgba(255,255,255,1)');
+    core.addColorStop(0.14, 'rgba(255,255,255,0.95)');
+    core.addColorStop(0.3, 'rgba(255,255,255,0.32)');
+    core.addColorStop(0.55, 'rgba(255,255,255,0.07)');
+    core.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = core;
+    ctx.fillRect(0, 0, 128, 128);
+    // Flare streaks: thin horizontal + vertical bars fading out from center.
+    ctx.globalCompositeOperation = 'lighter';
+    const h = ctx.createLinearGradient(0, 0, 128, 0);
+    h.addColorStop(0, 'rgba(255,255,255,0)');
+    h.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+    h.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = h;
+    ctx.fillRect(0, 61.5, 128, 5);
+    const v = ctx.createLinearGradient(0, 0, 0, 128);
+    v.addColorStop(0, 'rgba(255,255,255,0)');
+    v.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+    v.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = v;
+    ctx.fillRect(61.5, 0, 5, 128);
+    this._burstTexture = new THREE.CanvasTexture(c);
+    return this._burstTexture;
+  }
+
   /* Case-insensitive named-node lookup against the loaded model. */
   _findNode(name) {
     return name ? (this._nodeByLower.get(String(name).toLowerCase()) || null) : null;
   }
 
-  /* Beam-cone gradient: bright at the apex (uv.y = 1, canvas top), fading to
-   * nothing at the far end. Additive blending makes brightness the fade. */
-  _beamTex() {
-    if (this._beamTexture) return this._beamTexture;
-    const c = document.createElement('canvas');
-    c.width = 16; c.height = 128;
-    const ctx = c.getContext('2d');
-    const g = ctx.createLinearGradient(0, 0, 0, 128);
-    g.addColorStop(0, 'rgba(255,255,255,0.85)');
-    g.addColorStop(0.25, 'rgba(255,255,255,0.32)');
-    g.addColorStop(0.6, 'rgba(255,255,255,0.09)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, 16, 128);
-    this._beamTexture = new THREE.CanvasTexture(c);
-    return this._beamTexture;
+  /* Volumetric-look beam material: additive ShaderMaterial whose opacity is
+   * (axial apex->tip falloff) x (fresnel silhouette fade). The fresnel term
+   * sends opacity to zero exactly where the cone surface curves away from the
+   * camera, so the geometry's outline dissolves instead of reading as a hard
+   * edge -- one cone, no visible shells, from any angle. */
+  _beamMaterial(color) {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: color.clone() },
+        uOpacity: { value: SHIPLIGHT_BEAM_OPACITY },
+      },
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        varying vec3 vNormalW;
+        varying vec3 vPosW;
+        void main() {
+          vUv = uv;
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          vPosW = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position = projectionMatrix * viewMatrix * vec4(vPosW, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        varying vec2 vUv;
+        varying vec3 vNormalW;
+        varying vec3 vPosW;
+        void main() {
+          // uv.y = 1 at the apex (cylinder top), 0 at the far end.
+          float axial = pow(clamp(vUv.y, 0.0, 1.0), ${SHIPLIGHT_BEAM_AXIAL_POW.toFixed(2)});
+          vec3 V = normalize(cameraPosition - vPosW);
+          float rim = pow(abs(dot(normalize(vNormalW), V)), ${SHIPLIGHT_BEAM_FRESNEL_POW.toFixed(2)});
+          float a = uOpacity * axial * rim;
+          gl_FragColor = vec4(uColor * a, a);
+        }`,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+  }
+
+  /* Ground-pool splash material: additive ShaderMaterial with a bell-curve
+   * radial falloff -- (1 - r^2)^pow reaches zero value AND zero slope exactly
+   * at the geometry rim, so the splash dissolves into the floor with no
+   * perceivable oval boundary. Opacity is driven per-frame via uniform. */
+  _poolMaterial(color) {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: color.clone() },
+        uOpacity: { value: SHIPLIGHT_POOL_OPACITY },
+      },
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        varying vec2 vUv;
+        void main() {
+          float r = length(vUv - 0.5) * 2.0;   // 0 center -> 1 rim
+          float bell = pow(clamp(1.0 - r * r, 0.0, 1.0),
+                           ${SHIPLIGHT_POOL_FALLOFF_POW.toFixed(2)});
+          float a = uOpacity * bell;
+          gl_FragColor = vec4(uColor * a, a);
+        }`,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
   }
 
   /* Marker texture: solid bright core + thin ring + soft halo (white; the
@@ -1340,38 +1513,25 @@ export class ObjectViewer {
           -Math.sin(SHIPLIGHT_AIM_DOWN) * aimLen,
           SHIPLIGHT_FORWARD_SIGN * Math.cos(SHIPLIGHT_AIM_DOWN) * aimLen);
         node.add(light.target);
-        // Visible beam: 3 nested faded cones (apex at the hardpoint, opening
-        // along forward) -- the stacked soft shells diffuse the edge so it
-        // doesn't read as one rigid solid cone.
+        // Visible beam: ONE cone with the fresnel-faded volumetric shader
+        // (apex at the hardpoint, opening along forward). The silhouette
+        // fades itself out, so no cone outline is visible from any angle.
         const beamLen = clamp((this._radius || 1) * SHIPLIGHT_BEAM_RADII,
                               SHIPLIGHT_BEAM_MIN, SHIPLIGHT_BEAM_MAX);
         const rTip = Math.max(0.03, bulbScale * 0.35);
-        beam = new THREE.Group();
-        for (const [angFrac, opFrac] of SHIPLIGHT_BEAM_SHELLS) {
-          const half = SHIPLIGHT_BEAM_HALF_ANGLE * angFrac;
-          const rEnd = rTip + Math.tan(half) * beamLen;
-          const geo = new THREE.CylinderGeometry(rTip, rEnd, beamLen, 24, 1, true);
-          geo.translate(0, -beamLen / 2, 0);                    // apex at the node origin
-          geo.rotateX(-SHIPLIGHT_FORWARD_SIGN * Math.PI / 2);   // -Y -> forward axis
-          geo.rotateX(SHIPLIGHT_FORWARD_SIGN * SHIPLIGHT_AIM_DOWN);  // down-tilt
-          const shell = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-            map: this._beamTex(), color, transparent: true,
-            opacity: SHIPLIGHT_BEAM_OPACITY * opFrac, blending: THREE.AdditiveBlending,
-            depthWrite: false, side: THREE.DoubleSide, fog: false,
-          }));
-          shell.renderOrder = 5;
-          beam.add(shell);
-        }
+        const rEnd = rTip + Math.tan(SHIPLIGHT_BEAM_HALF_ANGLE) * beamLen;
+        const geo = new THREE.CylinderGeometry(rTip, rEnd, beamLen, 48, 1, true);
+        geo.translate(0, -beamLen / 2, 0);                    // apex at the node origin
+        geo.rotateX(-SHIPLIGHT_FORWARD_SIGN * Math.PI / 2);   // -Y -> forward axis
+        geo.rotateX(SHIPLIGHT_FORWARD_SIGN * SHIPLIGHT_AIM_DOWN);  // down-tilt
+        beam = new THREE.Mesh(geo, this._beamMaterial(color));
+        beam.renderOrder = 5;
         node.add(beam);
         // Ground-pool decal, scene-rooted; placed each frame at the
-        // beam/ground intersection (see _updateShipLights).
+        // beam/ground intersection (see _updateShipLights). Bell-curve shader
+        // so the splash has no perceivable oval boundary.
         pool = new THREE.Mesh(
-          new THREE.CircleGeometry(1, 32),
-          new THREE.MeshBasicMaterial({
-            map: this._glowTex(), color, transparent: true,
-            opacity: SHIPLIGHT_POOL_OPACITY, blending: THREE.AdditiveBlending,
-            depthWrite: false, fog: false,
-          }));
+          new THREE.CircleGeometry(1, 48), this._poolMaterial(color));
         pool.rotation.x = -Math.PI / 2;
         pool.renderOrder = 4;
         pool.visible = false;
@@ -1387,18 +1547,33 @@ export class ObjectViewer {
       }));
       bulb.scale.set(bulbScale, bulbScale, 1);
       node.add(bulb);
-      this._shipLights.push({ light, bulb, beam, pool, node, range });
+      // Hot-white burst core over the colored glow: makes the source itself
+      // read as ON, independent of beam/pool visibility from this angle.
+      const burst = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this._burstTex(), color: 0xffffff, transparent: true,
+        opacity: SHIPLIGHT_BURST_OPACITY,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      const bs = bulbScale * SHIPLIGHT_BURST_SCALE;
+      burst.scale.set(bs, bs, 1);
+      burst.renderOrder = 6;   // over the beam cone
+      node.add(burst);
+      this._shipLights.push({ light, bulb, burst, beam, pool, node, range });
     }
     this._applyShipLightsOn();
   }
 
   _clearShipLights() {
-    for (const { light, bulb, beam, pool } of this._shipLights) {
+    for (const { light, bulb, burst, beam, pool } of this._shipLights) {
       if (light.target && light.target.parent) light.target.parent.remove(light.target);
       if (light.parent) light.parent.remove(light);
       if (light.dispose) light.dispose();
       if (bulb.parent) bulb.parent.remove(bulb);
       bulb.material.dispose();
+      if (burst) {
+        if (burst.parent) burst.parent.remove(burst);
+        burst.material.dispose();
+      }
       if (beam) {
         if (beam.parent) beam.parent.remove(beam);
         beam.traverse((o) => {
@@ -1439,7 +1614,7 @@ export class ObjectViewer {
       const yaw = Math.atan2(_SL_DIR.x, _SL_DIR.z);
       e.pool.quaternion.setFromEuler(_SL_EULER.set(-Math.PI / 2, yaw, 0, 'YXZ'));
       e.pool.scale.set(w, d, 1);
-      e.pool.material.opacity =
+      e.pool.material.uniforms.uOpacity.value =
         SHIPLIGHT_POOL_OPACITY * clamp(1 - t / e.range, 0.2, 1);
     }
   }
@@ -1454,9 +1629,10 @@ export class ObjectViewer {
   }
 
   _applyShipLightsOn() {
-    for (const { light, bulb, beam, pool } of this._shipLights) {
+    for (const { light, bulb, burst, beam, pool } of this._shipLights) {
       light.visible = this._shipLightsOn;
       bulb.visible = this._shipLightsOn;
+      if (burst) burst.visible = this._shipLightsOn;
       if (beam) beam.visible = this._shipLightsOn;
       // Pools re-show themselves per frame in _updateShipLights when ON.
       if (pool && !this._shipLightsOn) pool.visible = false;
@@ -1708,6 +1884,9 @@ export class ObjectViewer {
       this._wireframe = false;
       for (const m of this._materials) m.wireframe = false;
     }
+    // Wireframe suspends the Ultra scene state (stock shadow map) and the
+    // composer path (_ultraActive() is false -- no AO/bloom on the lines).
+    this._applyUltraSceneState();
     this._updateWirePixelRatio();
     this._syncTeamColorUniforms();   // suppress tint while wireframe on, restore off
   }
@@ -1720,17 +1899,22 @@ export class ObjectViewer {
     this._updateWirePixelRatio();
   }
 
-  /* Drive the renderer pixel ratio from the wireframe + crisp-lines state.
-   * Supersamples only while BOTH are on; otherwise restores the base ratio. */
+  /* Drive the renderer pixel ratio from the wireframe + crisp-lines + Ultra
+   * state. Wireframe-HQ supersampling wins; otherwise Ultra uncaps to the
+   * native device ratio (clamped at ULTRA_MAX_DPR); otherwise the base ratio. */
   _updateWirePixelRatio() {
     if (!this.renderer || !this.container) return;
     const hq = this._wireframe && this._wireHQ;
-    const target = hq ? Math.max(this._basePixelRatio, WIRE_PIXEL_RATIO) : this._basePixelRatio;
+    const target = hq ? Math.max(this._basePixelRatio, WIRE_PIXEL_RATIO)
+      : this._ultraActive() ? Math.max(this._basePixelRatio,
+          Math.min(window.devicePixelRatio || 1, ULTRA_MAX_DPR))
+      : this._basePixelRatio;
     if (this.renderer.getPixelRatio() === target) return;
     this.renderer.setPixelRatio(target);
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     if (w && h) this.renderer.setSize(w, h);
+    this.resize();   // keep the composer + pass targets in step with the ratio
   }
 
   _applyWireframeOverride() {
@@ -2926,13 +3110,36 @@ export class ObjectViewer {
   setLightIntensity(v) {
     if (!Number.isFinite(v)) return;
     this._lightIntensity = v;
-    this.sun.intensity = v;
+    const p = LIGHT_PRESETS[this._lightPreset] || LIGHT_PRESETS.noon;
+    this.sun.intensity = v * p.sunScale;
   }
+
+  /* Apply a lighting mood preset (see LIGHT_PRESETS): retint sun + hemisphere
+   * + ambient, rescale the fill bases and the effective sun intensity (the
+   * user's Intensity slider value stays untouched -- the preset multiplies
+   * it), set the ground-shadow opacity, and re-resolve the background tint. */
+  setLightPreset(id) {
+    const key = LIGHT_PRESETS[id] ? id : 'noon';
+    this._lightPreset = key;
+    const p = LIGHT_PRESETS[key];
+    this.sun.color.setHex(p.sun);
+    this.hemi.color.setHex(p.hemiSky);
+    this.hemi.groundColor.setHex(p.hemiGround);
+    this.ambient.color.setHex(p.ambient);
+    this._hemiBase = FILL_HEMI_BASE * p.hemiScale;
+    this._ambBase = FILL_AMB_BASE * p.ambScale;
+    this.sun.intensity = this._lightIntensity * p.sunScale;
+    if (this.ground) this.ground.material.opacity = p.shadowOpacity;
+    this._applyLightEnabled();   // pushes the rescaled fill bases + shadow dirty
+    this._applySceneBg();        // preset may tint the backdrop
+  }
+
+  getLightPreset() { return this._lightPreset; }
 
   getLightState() {
     return {
       on: this._lightOn, az: this._lightAz, el: this._lightEl,
-      intensity: this._lightIntensity,
+      intensity: this._lightIntensity, preset: this._lightPreset,
     };
   }
 
@@ -2962,40 +3169,73 @@ export class ObjectViewer {
   }
 
   _applySceneBg() {
-    this.scene.background = new THREE.Color(SCENE_BG[this._bgMode] ?? SCENE_BG.dark);
+    // Lighting presets may carry a subtle per-bg-mode backdrop tint (warm-dark
+    // for sunset, grey for overcast); fall through to the stock flat colors.
+    const preset = LIGHT_PRESETS[this._lightPreset] || LIGHT_PRESETS.noon;
+    const hex = (preset.bg && preset.bg[this._bgMode] != null)
+      ? preset.bg[this._bgMode]
+      : (SCENE_BG[this._bgMode] ?? SCENE_BG.dark);
+    this.scene.background = new THREE.Color(hex);
     this.scene.backgroundBlurriness = 0;
     // Drive-mode fog blends toward the backdrop; keep it in sync on bg swaps.
     if (this.scene.fog) this.scene.fog.color.copy(this.scene.background);
+    this._updateBloomThreshold();   // bloom gate tracks the backdrop brightness
   }
 
-  /* ---- Ultra post-processing (EffectComposer) -------------------------- */
-  /* Ambient occlusion (SSAO) + SMAA anti-aliasing + higher-res soft shadows. */
+  /* ---- Ultra rendering (single max-quality toggle) ---------------------- */
+  /* TAA (render + idle accumulation) -> GTAO -> Bloom -> Output (sRGB)
+   * -> SMAA, plus 4096 shadows and uncapped DPR. Quality-only: the lighting
+   * model is identical to the default path. */
 
-  /* Enable/disable SSAO. `onReady` (optional) fires once the first post-processed
-   * frame has rendered -- i.e. after the one-time shader compile that briefly
-   * stalls the main thread -- so the UI can show/hide a loading indicator. */
-  setUltraAO(on, onReady = null) {
-    this._ultraAO = !!on;
+  /* Enable/disable Ultra rendering. `onReady` (optional) fires once the first
+   * post-processed frame has rendered -- i.e. after the one-time shader
+   * compile (GTAO/bloom/SMAA passes) that briefly stalls the main thread --
+   * so the UI can show a loading overlay. */
+  setUltra(on, onReady = null) {
+    this._ultraOn = !!on;
     this._applyUltra();
-    if (this._ultraAO && this._composer) {
+    if (this._ultraActive() && this._composer) {
       this._ultraReadyCb = typeof onReady === 'function' ? onReady : null;
-      this._ultraReadyFrames = 2;   // let the SSAO + SMAA passes compile + settle
+      this._ultraReadyFrames = 3;   // let the heavier pass chain compile + settle
     } else {
       this._ultraReadyCb = null;
       if (typeof onReady === 'function') onReady();
     }
   }
 
-  getUltraState() { return { ao: this._ultraAO }; }
+  getUltraState() { return { on: this._ultraOn }; }
 
-  _ultraActive() { return this._ultraAO; }
+  /* Wireframe bypasses the composer + scene upgrades (unlit white lines must
+   * not pick up AO or bloom). */
+  _ultraActive() { return this._ultraOn && !this._wireframe; }
 
   _applyUltra() {
     if (this._ultraActive()) {
       this._ensureComposer();
       this._updateComposerPasses();
+    } else if (this._taaPass) {
+      this._taaPass.accumulate = false;   // drop stale accumulation on disable
     }
+    this._applyUltraSceneState();
+    this._updateWirePixelRatio();   // ultra uncaps DPR; off restores the base
     this._markShadowDirty();
+  }
+
+  /* Scene-level half of Ultra: the 4096px shadow map -- applied on enable,
+   * reverted on disable (and while wireframe is active). Deliberately does
+   * NOT touch tone mapping or scene.environment: an earlier AgX + IBL
+   * variant fought the hand-tuned sun/hemi/ambient rig and read as muddled,
+   * so Ultra is quality-only -- the lighting model never changes. */
+  _applyUltraSceneState() {
+    const px = this._ultraActive() ? ULTRA_SHADOW_MAP : BASE_SHADOW_MAP;
+    if (this.sun.shadow.mapSize.x !== px) {
+      this.sun.shadow.mapSize.set(px, px);
+      if (this.sun.shadow.map) {
+        this.sun.shadow.map.dispose();
+        this.sun.shadow.map = null;   // forces reallocation at the new size
+      }
+      this._markShadowDirty();
+    }
   }
 
   _ensureComposer() {
@@ -3005,24 +3245,79 @@ export class ObjectViewer {
     this._composer = new EffectComposer(this.renderer);
     this._composer.setPixelRatio(dpr);
     this._composer.setSize(sz.x, sz.y);
-    this._renderPass = new RenderPass(this.scene, this.camera);
-    // kernelSize 16 (vs the default 32) roughly halves the AO sample loop.
-    this._ssaoPass = new SSAOPass(this.scene, this.camera, sz.x, sz.y, 16);
-    this._ssaoPass.kernelRadius = 8;
-    this._ssaoPass.minDistance = 0.0015;
-    this._ssaoPass.maxDistance = 0.08;
+    // TAA doubles as the scene render pass: per-frame render while anything
+    // moves, 32-sample jittered accumulation once the scene goes still.
+    this._taaPass = new TAARenderPass(this.scene, this.camera);
+    this._taaPass.sampleLevel = 0;        // 1 sample/frame; accumulation does the rest
+    this._taaPass.unbiased = true;
+    // Ground-truth AO with Poisson denoise. Screen-space radius keeps the
+    // effect scale-free across the corpus (model radii span ~1..50 units).
+    this._gtaoPass = new GTAOPass(this.scene, this.camera, sz.x * dpr, sz.y * dpr);
+    this._gtaoPass.output = GTAOPass.OUTPUT.Default;
+    this._gtaoPass.blendIntensity = ULTRA_GTAO_BLEND;
+    this._gtaoPass.updateGtaoMaterial({
+      radius: ULTRA_GTAO_RADIUS,
+      screenSpaceRadius: true,
+    });
+    // Threshold-gated bloom: only emissive glow maps + ship lights exceed the
+    // luminance gate; hulls and diffuse surfaces stay clean.
+    this._bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(sz.x * dpr, sz.y * dpr),
+      ULTRA_BLOOM_STRENGTH, ULTRA_BLOOM_RADIUS, ULTRA_BLOOM_THRESHOLD,
+    );
     this._outputPass = new OutputPass();
     this._smaaPass = new SMAAPass(sz.x * dpr, sz.y * dpr);
+    this._updateBloomThreshold();
   }
 
-  /* Order: Render -> SSAO -> Output (sRGB) -> SMAA. */
+  /* Keep the bloom gate above the backdrop's luminance so the background
+   * itself never glows (the light backdrop sits at ~0.89 linear). */
+  _updateBloomThreshold() {
+    if (!this._bloomPass) return;
+    this._bloomPass.threshold = this._bgMode === 'light'
+      ? ULTRA_BLOOM_THRESHOLD_LIGHT_BG : ULTRA_BLOOM_THRESHOLD;
+  }
+
+  /* Order: TAA -> GTAO -> Bloom -> Output (sRGB) -> SMAA. */
   _updateComposerPasses() {
     if (!this._composer) return;
     this._composer.passes.length = 0;
-    this._composer.addPass(this._renderPass);
-    this._composer.addPass(this._ssaoPass);
+    this._composer.addPass(this._taaPass);
+    this._composer.addPass(this._gtaoPass);
+    this._composer.addPass(this._bloomPass);
     this._composer.addPass(this._outputPass);
     this._composer.addPass(this._smaaPass);
+  }
+
+  /* True when nothing that affects the rendered image moved this frame --
+   * the gate for TAA accumulation. `modelMoving` is the _animate() motion
+   * flag (mixer, drive, recoil, treads, flight, free spin, drag, key slew);
+   * on top of that we track camera motion (orbit damping, auto-rotate, pan,
+   * zoom) and turret angle changes (aim mode + sliders bypass the flag). */
+  _isSceneStill(modelMoving) {
+    if (modelMoving || this.controls.autoRotate || this._driveMode
+        || this._dragging || this._hpMarkers.length) {
+      this._camPrev = null;   // motion invalidates the camera baseline too
+      return false;
+    }
+    const turretMoved = this._turretYawDeg !== this._taaYawPrev
+      || this._turretPitchDeg !== this._taaPitchPrev;
+    this._taaYawPrev = this._turretYawDeg;
+    this._taaPitchPrev = this._turretPitchDeg;
+    if (turretMoved) { this._camPrev = null; return false; }
+    // Camera baseline: matrixWorld is current because controls.update() ran
+    // earlier this frame.
+    const m = this.camera.matrixWorld.elements;
+    if (!this._camPrev) {
+      this._camPrev = Array.from(m);
+      return false;   // need one stable frame to establish the baseline
+    }
+    let still = true;
+    for (let i = 0; i < 16; i++) {
+      if (Math.abs(m[i] - this._camPrev[i]) > 1e-6) { still = false; }
+      this._camPrev[i] = m[i];
+    }
+    return still;
   }
 
   resetView() {
@@ -3115,6 +3410,12 @@ export class ObjectViewer {
     this._lightOn = true;
     this.setLightAngle(LIGHT_CAPTURE_AZ, LIGHT_CAPTURE_EL);
     this.setLightIntensity(LIGHT_CAPTURE_INTENSITY);
+    this.setLightPreset('noon');   // canonical neutral mood for reproducibility
+    // Suspend Ultra scene state (4096 shadows) -- the capture renders on the
+    // plain renderer and must stay canonical.
+    const prevUltra = this._ultraOn;
+    this._ultraOn = false;
+    this._applyUltraSceneState();
     this._applyLightEnabled();
     await this.setQuality('hq');
 
@@ -3159,11 +3460,14 @@ export class ObjectViewer {
     this._lightOn = prevLight.on;
     this.setLightAngle(prevLight.az, prevLight.el);
     this.setLightIntensity(prevLight.intensity);
+    this.setLightPreset(prevLight.preset);
     this.setBackgroundMode(prevBgMode);
     this.setGridVisible(gridVisible);
     this.setAxesVisible(axesVisible);
     this.setWireframe(prevWire);
     this.controls.autoRotate = prevAuto;
+    this._ultraOn = prevUltra;
+    this._applyUltraSceneState();
     this._applyLightEnabled();
     if (prevSpinQuat && this._spin) this._spin.quaternion.copy(prevSpinQuat);
     this._spinVel.x = prevSpinVel.x;
@@ -3188,10 +3492,19 @@ export class ObjectViewer {
     this.renderer.setSize(w, h);
     if (this._composer) {
       const dpr = this.renderer.getPixelRatio();
+      // setSize propagates the effective (physical) dims to every pass.
       this._composer.setPixelRatio(dpr);
       this._composer.setSize(w, h);
-      if (this._ssaoPass) this._ssaoPass.setSize(w, h);
-      if (this._smaaPass) this._smaaPass.setSize(w * dpr, h * dpr);
+      if (this._taaPass) {
+        // TAA's hold target is lazily created and never resized by setSize;
+        // drop accumulation and re-size it so a resize can't smear stale
+        // pixels into the next accumulated still.
+        this._taaPass.accumulate = false;
+        if (this._taaPass.holdRenderTarget) {
+          this._taaPass.holdRenderTarget.setSize(w * dpr, h * dpr);
+        }
+      }
+      this._camPrev = null;   // viewport change invalidates the stillness baseline
     }
   }
 
@@ -3288,9 +3601,24 @@ export class ObjectViewer {
     }
 
     if (this._composer && this._ultraActive()) {
+      // Idle-time temporal supersampling: once the scene is verifiably still,
+      // restart TAA accumulation (32 jittered samples converge over ~32
+      // frames into an effectively supersampled still). Any motion drops
+      // straight back to per-frame render + SMAA.
+      if (this._taaPass) {
+        if (this._isSceneStill(moving)) {
+          if (!this._taaPass.accumulate) {
+            this._taaPass.accumulate = true;
+            this._taaPass.accumulateIndex = -1;
+          }
+        } else {
+          this._taaPass.accumulate = false;
+        }
+      }
       this._composer.render();
-      // The first render after enabling AO compiles the SSAO/SMAA shaders (the
-      // stall). Once a couple frames are through, notify the readiness callback.
+      // The first render after enabling Ultra compiles the GTAO/bloom/SMAA
+      // shaders (the stall). Once a few frames are through, notify the
+      // readiness callback.
       if (this._ultraReadyCb && --this._ultraReadyFrames <= 0) {
         const cb = this._ultraReadyCb;
         this._ultraReadyCb = null;
@@ -3328,11 +3656,13 @@ export class ObjectViewer {
     this._clearShipLights();
     this.highlightHardpoints(null);
     if (this._glowTexture) { this._glowTexture.dispose(); this._glowTexture = null; }
+    if (this._burstTexture) { this._burstTexture.dispose(); this._burstTexture = null; }
     if (this._markerTexture) { this._markerTexture.dispose(); this._markerTexture = null; }
-    if (this._beamTexture) { this._beamTexture.dispose(); this._beamTexture = null; }
     // Post-processing pipeline.
     if (this._composer) this._composer.dispose();
-    if (this._ssaoPass && this._ssaoPass.dispose) this._ssaoPass.dispose();
+    if (this._taaPass && this._taaPass.dispose) this._taaPass.dispose();
+    if (this._gtaoPass && this._gtaoPass.dispose) this._gtaoPass.dispose();
+    if (this._bloomPass && this._bloomPass.dispose) this._bloomPass.dispose();
     if (this._smaaPass && this._smaaPass.dispose) this._smaaPass.dispose();
     this.scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();

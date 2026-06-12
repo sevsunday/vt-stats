@@ -33,6 +33,28 @@ retained as the historical design record. Key learnings from the build:
   * Viewer: derivative-tangent fallback (2.3.A option 1); DirectX green flip
     as normalScale.set(1, -1) behind the NORMAL_FLIP_G tunable (2.3.B).
 
+ADDENDUM -- ULTRA RENDERING TOGGLE (viewer-only; no pipeline change). The old
+Scene-pane "Ambient occlusion" checkbox (SSAOPass + SMAAPass) was replaced by
+a single "Ultra rendering" toggle (persisted vt.obj.ultra, one-shot migration
+from vt.obj.ultra.ao). Composer chain: TAARenderPass (per-frame render while
+anything moves; 32-sample jittered temporal supersampling once _isSceneStill()
+verifies camera/model/turret/marker stillness) -> GTAOPass (ground-truth AO,
+screenSpaceRadius so it is scale-free across the corpus, Poisson denoise) ->
+UnrealBloomPass (threshold 0.85, raised to 0.95 in light-bg mode so the
+backdrop never glows -- only `_e` emissives + ship lights bloom) ->
+OutputPass (sRGB) -> SMAAPass. Scene-level upgrades applied on enable and
+reverted on disable: 4096px sun shadow map + DPR uncapped to
+min(devicePixelRatio, 3). LESSON LEARNED -- the first cut also applied
+AgXToneMapping + a PMREM RoomEnvironment IBL on scene.environment; that
+combination fought the hand-tuned sun/hemi/ambient rig (calibrated for raw
+linear output) and read as flat/muddled, so both were dropped and
+RoomEnvironment was un-vendored. Ultra is QUALITY-ONLY by contract: identical
+lighting model, better sampling. Do not reintroduce look-changing passes
+under this toggle. Wireframe bypasses the stack; HQ Capture suspends it
+(canonical thumbnails). Knobs: ULTRA_* constants in js/models-viewer.js. New
+vendored r170 addons: GTAOPass/GTAOShader/PoissonDenoiseShader,
+UnrealBloomPass/LuminosityHighPassShader, TAARenderPass/SSAARenderPass.
+
 Original spec follows. Status at time of writing: diffuse, team-color masks
 (`_c`), emissive glow maps (`_e`), and workshop mod texture sets (diffuse +
 `_c` + `_e` overrides) were SHIPPED; `_n` and `_s` were NOT.
