@@ -362,7 +362,7 @@
     },
   };
 
-  function buildAxisTooltipHtml(axisName, z, mode) {
+  function buildAxisTooltipHtml(axisName, z, mode, weight) {
     const meta = VTSR_AXIS_META[axisName] || { label: axisName, formula: '', desc: '' };
     const zSign = z >= 0 ? '+' : '';
     const zRounded = z.toFixed(2);
@@ -381,9 +381,16 @@
     const descLine = meta.desc
       ? `<div style="margin-top:0.3rem;">${esc(meta.desc)}</div>`
       : '';
+    let weightLine = '';
+    if (weight != null) {
+      const wc = z * weight;
+      const wcSign = wc >= 0 ? '+' : '';
+      weightLine = `<div style="margin-top:0.3rem;">Weight ${weight.toFixed(2)} \u2192 contribution ${wcSign}${wc.toFixed(3)}</div>`;
+    }
     return `<div><strong>${esc(meta.label)}</strong> &middot; ${zSign}${zRounded}\u03c3</div>
             ${formulaLine}
             ${descLine}
+            ${weightLine}
             <div style="margin-top:0.3rem;">${interp}</div>`;
   }
 
@@ -401,34 +408,29 @@
     const rows = sorted.map(a => {
       const z = axisMap[a] || 0;
       const cls = z > 0 ? 'is-positive' : z < 0 ? 'is-negative' : '';
-      const zSign = z >= 0 ? '+' : '';
       const widthPct = Math.min(100, Math.abs(z) * 50);
       const fillStyle = z >= 0
         ? `left:50%; width:${widthPct.toFixed(2)}%;`
         : `right:50%; width:${widthPct.toFixed(2)}%;`;
-      let weightedStr = '';
-      if (weightsMap && weightsMap[a] != null) {
-        const w = weightsMap[a];
-        const wc = z * w;
-        const wcSign = wc >= 0 ? '+' : '';
-        weightedStr = ` <span class="vt-axis-bar-weighted">w=${w.toFixed(2)} \u2192 ${wcSign}${wc.toFixed(3)}</span>`;
-      }
-      const tipHtml = buildAxisTooltipHtml(a, z, mode);
+      const label = (VTSR_AXIS_META[a] && VTSR_AXIS_META[a].label) || a;
+      const reading = Math.abs(z) < 0.05 ? 'Average' : (z > 0 ? 'Above avg' : 'Below avg');
+      const weight = (weightsMap && weightsMap[a] != null) ? weightsMap[a] : null;
+      const tipHtml = buildAxisTooltipHtml(a, z, mode, weight);
       return `<div class="vt-axis-bar-row ${cls}"
                    data-bs-toggle="tooltip" data-bs-html="true"
                    data-bs-placement="top"
                    data-bs-custom-class="vt-axis-tooltip"
                    title="${esc(tipHtml)}">
-        <span class="vt-axis-bar-name">${esc(a)}</span>
+        <span class="vt-axis-bar-name">${esc(label)}</span>
         <span class="vt-axis-bar-track">
           <span class="vt-axis-bar-center"></span>
           <span class="vt-axis-bar-fill" style="${fillStyle}"></span>
         </span>
-        <span class="vt-axis-bar-z">${zSign}${z.toFixed(2)}\u03c3${weightedStr}</span>
+        <span class="vt-axis-bar-z">${reading}</span>
       </div>`;
     }).join('');
     const heading = mode === 'career'
-      ? 'Career axis profile <span class="vt-vtsr-detail-sub text-muted">(z\u0304 across rated matches)</span>'
+      ? 'Career axis profile <span class="vt-vtsr-detail-sub text-muted">(typical showing across rated matches)</span>'
       : 'Last-match axis breakdown';
     return `<section class="vt-vtsr-detail-section">
       <h6>${heading}</h6>
@@ -465,11 +467,11 @@
     }
     const ac = lastDelta.axis_contributions || {};
     const matchId = lastEntry.match_id || '';
-    const dr = (lastDelta.delta != null ? lastDelta.delta : 0).toFixed(2);
+    const dr = (lastDelta.delta != null ? lastDelta.delta : 0).toFixed(1);
     const drSign = lastDelta.delta > 0 ? '+' : '';
-    const perfStr = (lastDelta.performance != null ? lastDelta.performance : 0).toFixed(4);
+    const perfStr = (lastDelta.performance != null ? lastDelta.performance : 0).toFixed(2);
     const perfSign = lastDelta.performance > 0 ? '+' : '';
-    const expStr = (lastDelta.expected != null ? lastDelta.expected : 0).toFixed(4);
+    const expStr = (lastDelta.expected != null ? lastDelta.expected : 0).toFixed(2);
     const expSign = lastDelta.expected > 0 ? '+' : '';
 
     // Pro-rata redistribute weights over only the axes present
@@ -485,7 +487,7 @@
       }
     }
     const grid = renderVtsrAxisGrid(ac, 'last_match', weightsRedistributed);
-    const formulaLine = `<div class="vt-vtsr-detail-formula"><strong>${esc(matchId)}</strong> &middot; P=${perfSign}${perfStr} \u00b7 E=${expSign}${expStr} \u00b7 \u0394R=<span class="${lastDelta.delta > 0 ? 'vt-vtsr-delta-positive' : lastDelta.delta < 0 ? 'vt-vtsr-delta-negative' : ''}">${drSign}${dr}</span></div>`;
+    const formulaLine = `<div class="vt-vtsr-detail-formula"><strong>${esc(matchId)}</strong> &middot; Scored ${perfSign}${perfStr} vs ${expSign}${expStr} expected \u2192 <span class="${lastDelta.delta > 0 ? 'vt-vtsr-delta-positive' : lastDelta.delta < 0 ? 'vt-vtsr-delta-negative' : ''}">${drSign}${dr}</span></div>`;
     return grid.replace('</h6>', `</h6>${formulaLine}`);
   }
 
@@ -642,24 +644,9 @@
     if ($empty) $empty.classList.add('d-none');
     $card.classList.remove('d-none');
 
-    // Bootstrap resampling noise floor so leaderboard gaps smaller than
-    // the band read as the statistical ties they are.
+    // Rating uncertainty (plain words in the rating tooltip; the rigorous
+    // treatment lives on the How / Does-it-work tabs).
     const noiseSigma = ratingNoiseSigma();
-    let $noiseNote = $card.querySelector('#vtsr-noise-note');
-    if (noiseSigma != null) {
-      if (!$noiseNote) {
-        $noiseNote = document.createElement('div');
-        $noiseNote.id = 'vtsr-noise-note';
-        $noiseNote.className = 'vt-vtsr-noise-note';
-        const $body = $card.querySelector('.card-body');
-        if ($body) $body.insertBefore($noiseNote, $body.firstChild);
-      }
-      $noiseNote.innerHTML =
-        `<i class="bi bi-rulers me-1"></i>Ratings carry a \u00b1${noiseSigma} ELO ` +
-        `resampling noise band \u2014 gaps smaller than ~${noiseSigma} points are statistical ties.`;
-    } else if ($noiseNote) {
-      $noiseNote.remove();
-    }
 
     _vtsrCareerStats = state.careerStats || [];
 
@@ -752,7 +739,7 @@
         : 'No shots fired this career';
 
       const vtsrValueStr = noiseSigma != null
-        ? `${Math.round(r.vtsr)} \u00b1 ${noiseSigma} VTSR-T (resampling \u03c3)`
+        ? `${Math.round(r.vtsr)} VTSR-T (give or take ~${noiseSigma})`
         : `${Math.round(r.vtsr)} VTSR-T`;
       const vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
 
@@ -765,7 +752,7 @@
         ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} reached at ${peakAt}`
         : `Peak rating: ${Math.round(r.peak_vtsr || r.vtsr)}`;
 
-      const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <5 min duration`;
+      const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <4 min duration`;
 
       const detailHtml = buildVtsrDetailPanel(r, careerRow);
 
@@ -892,14 +879,13 @@
     const sigma = ratingNoiseSigma();
     const noiseSection = sigma != null
       ? `<section class="vt-vtsr-doc-section">
-           <h6>How precise is a rating?</h6>
-           <p class="mb-0">Every VTSR-T value carries a resampling noise band of about
-           <strong>\u00b1${sigma} ELO</strong> (median per-player spread when the rating is
-           recomputed over 100 random 80% subsets of the corpus). Two players within
-           ~${sigma} points of each other are statistically tied; tier placement is
-           meaningful, exact ranks inside a tier mostly are not. The band tightens as
-           the corpus grows. The full numbers live on the
-           <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
+           <h6>How close is too close to call?</h6>
+           <p class="mb-0">Two players within roughly <strong>${sigma} points</strong> of each
+           other are basically tied &mdash; tier placement is meaningful, exact rank inside
+           a tier mostly isn&rsquo;t. The gap that matters shrinks as more matches get recorded.
+           <span class="text-muted small">(That figure comes from recomputing every rating on
+           random subsets of the matches and measuring the wobble &mdash; the full numbers live
+           on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.)</span></p>
          </section>`
       : '';
     pane.innerHTML = `<div class="vt-elo-doc">
@@ -1044,28 +1030,37 @@
 
     const pct = (x, digits = 0) => (x == null || !isFinite(x)) ? '\u2014' : (x * 100).toFixed(digits) + '%';
 
-    // ---- Headline stat cards (layman captions). ----
+    // ---- Headline stat cards (layman captions; exact methods live in the
+    // per-card "Technical definition" disclosure). ----
     const cards = [
       {
         label: 'Rated matches', value: String(L.rated_match_count ?? '\u2014'),
         caption: `Across ${L.players_total ?? '?'} players. Every number below comes from re-checking the rating against this corpus on each pipeline run.`,
+        tech: 'Corpus gates: a match is rated only when it has \u22656 players and runs \u22654 minutes.',
       },
       {
         label: 'Self-consistency', value: (L.self_consistency_rho != null) ? L.self_consistency_rho.toFixed(2) : '\u2014',
-        caption: 'Split each player\u2019s games in half at random \u2014 do the two halves agree on how good they are? 1.00 = perfectly. Ours is strong: the rating measures something real and repeatable.',
+        caption: 'Split each player\u2019s games in half at random \u2014 do the two halves agree on how good they are? 1.00 = the two halves agree perfectly.',
+        tech: 'Spearman \u03c1 between random split-halves of each player\u2019s matches.',
       },
       {
         label: 'Noise band', value: sigma != null ? `\u00b1${sigma}` : '\u2014',
-        caption: 'Recompute every rating on 100 random 80% slices of the matches and see how much it wobbles. Players within this band of each other are statistically tied.',
+        caption: 'How much a rating wobbles when the match list is reshuffled. Players within this band of each other are basically tied.',
+        tech: 'Median per-player \u03c3 over 100 bootstrap resamples of 80% of matches.',
       },
       {
         label: 'Winner prediction', value: pct(L.clean_win_accuracy_hard_max),
         caption: `Of the ${L.clean_win_n ?? 0} matches with a provable winner, how often did the team with the highest-rated player win? (Coin flip = 50%.) Read the caveats below before judging this one.`,
+        tech: 'Hard-MAX team aggregation, clean-win subset only, scored against a log-loss baseline.',
       },
     ].map(c => `<div class="vt-elo-statcard">
         <div class="vt-elo-stat-label">${c.label}</div>
         <div class="vt-elo-stat-value">${c.value}</div>
         <div class="vt-elo-stat-caption">${c.caption}</div>
+        <details class="vt-elo-stat-tech">
+          <summary>Technical definition</summary>
+          <div class="vt-elo-stat-tech-body">${c.tech}</div>
+        </details>
       </div>`).join('');
 
     // ---- Winner funnel. ----
@@ -1151,7 +1146,7 @@
             labels,
             datasets: [
               {
-                label: 'Winner prediction (best aggregation)',
+                label: 'Winner prediction (%)',
                 data: hist.map(h => h.clean_win_accuracy_hard_max != null ? h.clean_win_accuracy_hard_max * 100 : null),
                 borderColor: primary,
                 backgroundColor: 'transparent',
@@ -1159,7 +1154,7 @@
                 pointRadius: 3,
               },
               {
-                label: 'Rating \u2194 performance agreement (\u03c1 \u00d7 100)',
+                label: 'Rating \u2194 performance agreement (%)',
                 data: hist.map(h => h.spearman_pooled_rho != null ? h.spearman_pooled_rho * 100 : null),
                 borderColor: muted,
                 backgroundColor: 'transparent',

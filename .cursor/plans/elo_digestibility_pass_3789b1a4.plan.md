@@ -4,19 +4,19 @@ overview: "Copy-and-presentation pass over the ELO page: keep the Leaderboard ca
 todos:
   - id: leaderboard
     content: "Leaderboard: remove noise banner, plain-words rating tooltip, 4-min fix, orphan CSS cleanup"
-    status: pending
+    status: completed
   - id: expand-panel
     content: "Expand panel: friendly axis labels + plain chips, math to hover, reword z̄ heading + P/E line"
-    status: pending
+    status: completed
   - id: how-tab
     content: "How tab: reframe precision section around meaning"
-    status: pending
+    status: completed
   - id: accuracy-tab
     content: "Does-it-work: per-card technical disclosures, neutral captions, legend de-jargon, CSS"
-    status: pending
+    status: completed
   - id: static-copy
     content: "Static copy: meta tags, thug-only banner trim, PvP Acc header tooltip"
-    status: pending
+    status: completed
 isProject: false
 ---
 

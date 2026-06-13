@@ -119,6 +119,29 @@
     line-height: 1.45;
 }
 
+/* Per-card "Technical definition" disclosure: muted summary, mono-ish body,
+   no layout shift when collapsed. */
+.vt-elo-stat-tech {
+    margin-top: 0.45rem;
+}
+.vt-elo-stat-tech > summary {
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+    cursor: pointer;
+    user-select: none;
+    list-style-position: inside;
+}
+.vt-elo-stat-tech > summary:hover {
+    color: var(--kb-text-secondary, inherit);
+}
+.vt-elo-stat-tech .vt-elo-stat-tech-body {
+    font-family: var(--vt-font-mono, monospace);
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    padding: 0.35rem 0 0.1rem;
+    line-height: 1.5;
+}
+
 /* Winner funnel: labeled horizontal bars scaled to the rated-match count. */
 .vt-elo-funnel { max-width: 720px; }
 .vt-elo-funnel-row {
