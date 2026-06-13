@@ -5261,6 +5261,32 @@ td.vt-col-split {
     gap: 0.6rem;
     margin-bottom: 0.25rem;
 }
+.vt-eq-btn {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    padding: 0.15rem 0.4rem;
+    font-weight: 600;
+    color: var(--kb-text-muted);
+    transition: color 0.2s ease, opacity 0.2s ease;
+}
+.vt-eq-btn:hover:not(:disabled),
+.vt-eq-btn:focus-visible:not(:disabled) {
+    background: transparent;
+    box-shadow: none;
+    color: var(--kb-text-primary);
+}
+.vt-eq-btn-primary { color: var(--kb-primary); }
+.vt-eq-btn-primary:hover:not(:disabled),
+.vt-eq-btn-primary:focus-visible:not(:disabled) {
+    color: color-mix(in oklab, var(--kb-primary) 80%, var(--kb-text-primary));
+}
+.vt-eq-btn:disabled {
+    background: transparent;
+    box-shadow: none;
+    opacity: 0.4;
+}
+
 .vt-eq-dots { display: flex; gap: 0.35rem; }
 .vt-eq-dot {
     width: 9px;
@@ -5348,7 +5374,7 @@ td.vt-col-split {
     justify-content: center;
     min-width: 0;
     flex-grow: 0;
-    flex-shrink: 0;
+    flex-shrink: 1;
     background: color-mix(in oklab, var(--kb-primary) 14%, var(--kb-bg-secondary));
     transition: background-color 0.25s ease, box-shadow 0.25s ease;
 }
@@ -5359,7 +5385,8 @@ td.vt-col-split {
     background: color-mix(in oklab, var(--kb-primary) 24%, var(--kb-bg-secondary));
 }
 .vt-axesboard-seg.is-luxury {
-    min-width: 12px;
+    min-width: 14px;
+    flex-shrink: 0;
     background: color-mix(in oklab, var(--kb-text-muted) 18%, var(--kb-bg-secondary));
 }
 .vt-axesboard-seg.is-lit {

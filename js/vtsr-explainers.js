@@ -160,10 +160,10 @@
       </div>
       <ol class="vt-eq-list">${list}</ol>
       <div class="vt-eq-controls">
-        <button type="button" class="btn btn-sm btn-outline-secondary vt-eq-prev" aria-label="Previous step"><i class="bi bi-chevron-left"></i></button>
+        <button type="button" class="btn btn-sm vt-eq-btn vt-eq-prev" aria-label="Previous step"><i class="bi bi-chevron-left"></i></button>
         <div class="vt-eq-dots">${dots}</div>
-        <button type="button" class="btn btn-sm btn-outline-secondary vt-eq-next">Next<i class="bi bi-chevron-right ms-1"></i></button>
-        <button type="button" class="btn btn-sm btn-outline-primary vt-eq-all">Show all</button>
+        <button type="button" class="btn btn-sm vt-eq-btn vt-eq-next">Next<i class="bi bi-chevron-right ms-1"></i></button>
+        <button type="button" class="btn btn-sm vt-eq-btn vt-eq-btn-primary vt-eq-all">Show all</button>
       </div>
     </div>`;
   }
