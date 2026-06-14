@@ -961,9 +961,9 @@
         verdict: '',
       },
       {
-        icon: 'bi-camera-video', title: 'Camera pods don\u2019t count',
-        body: `<p>Spent more than a quarter of the match spectating from a camera pod? That match simply <strong>isn\u2019t rated for you</strong> &mdash; no penalty, no gain, pure omission.</p>`,
-        verdict: 'On the per-match dashboard these rows stay visible with a "Campod" badge for transparency.',
+        icon: 'bi-camera-video', title: 'Campods don\u2019t count (usually)',
+        body: `<p>If you spend more than a quarter of the entire match in a campod, that game doesn\u2019t count for you.</p>`,
+        verdict: '',
       },
       {
         icon: 'bi-hourglass-split', title: 'Late joins &amp; disconnects don\u2019t count',
@@ -971,15 +971,14 @@
         verdict: 'Shown with a "Partial" badge on the per-match leaderboard.',
       },
       {
-        icon: 'bi-person-x', title: 'Pilot farming earns nothing',
-        body: `<p>Mowing down ejected pilots on foot doesn\u2019t add kills, and dying as a pilot doesn\u2019t add deaths. <strong>Only vehicle combat counts</strong> toward K/D and the kill-rate axis.</p>
-               <p class="mb-0">A pilot who destroys a <em>ship</em> still gets full credit &mdash; and damage dealt to or by pilots always counts.</p>`,
-        verdict: '',
+        icon: 'bi-person-x', title: 'Pilot kills don\u2019t count',
+        body: `<p>Pilot farm doesn\u2019t count towards kills, and dying as a pilot doesn\u2019t add deaths. <strong>Only vehicle combat counts</strong> toward K/D and the kill-rate axis.</p>`,
+        verdict: 'A pilot who destroys a <em>ship</em> still gets full credit &mdash; and damage dealt to or by pilots always counts.',
       },
       {
         icon: 'bi-life-preserver', title: 'Stranded at base? Not your fault',
         body: `<p>Lower-rated players sometimes spend long stretches shipless at base waiting on a rebuild. For established low-tier players that <strong>waiting time is excluded</strong> from the kill-rate clock, so the rating measures what you did with a ship, not how long you went without one.</p>`,
-        verdict: 'The buffer fades out automatically as a player climbs out of the low band.',
+        verdict: 'Caveat: for low-tier players, time spent outside of base as a pilot still counts against you like normal.',
       },
       {
         icon: 'bi-toggles', title: 'Thug-only mode',
@@ -1032,29 +1031,60 @@
 
     // ---- Headline stat cards (layman captions; exact methods live in the
     // per-card "Technical definition" disclosure). ----
+    // Qualitative badge per metric. Tones: good / ok / bad / info. Thresholds
+    // are deliberately simple so the badges auto-upgrade as the corpus grows.
+    const badge = (kind, val) => {
+      if (val == null || !isFinite(val)) return null;
+      switch (kind) {
+        case 'sample':
+          return val >= 400 ? { label: 'Solid sample', tone: 'good' }
+            : val >= 150 ? { label: 'Growing', tone: 'info' }
+            : { label: 'Small sample', tone: 'ok' };
+        case 'rho':
+          return val >= 0.75 ? { label: 'Strong', tone: 'good' }
+            : val >= 0.55 ? { label: 'Fair', tone: 'ok' }
+            : { label: 'Weak', tone: 'bad' };
+        case 'sigma':
+          return val <= 25 ? { label: 'Tight', tone: 'good' }
+            : val <= 55 ? { label: 'Moderate', tone: 'ok' }
+            : { label: 'Noisy', tone: 'bad' };
+        case 'accuracy':
+          return val >= 0.65 ? { label: 'Strong', tone: 'good' }
+            : val >= 0.57 ? { label: 'Fair', tone: 'ok' }
+            : { label: 'Coin-flip', tone: 'bad' };
+        default: return null;
+      }
+    };
     const cards = [
       {
         label: 'Rated matches', value: String(L.rated_match_count ?? '\u2014'),
+        badge: badge('sample', L.rated_match_count),
         caption: `Across ${L.players_total ?? '?'} players. Every number below comes from re-checking the rating against this corpus on each pipeline run.`,
         tech: 'Corpus gates: a match is rated only when it has \u22656 players and runs \u22654 minutes.',
       },
       {
         label: 'Self-consistency', value: (L.self_consistency_rho != null) ? L.self_consistency_rho.toFixed(2) : '\u2014',
+        badge: badge('rho', L.self_consistency_rho),
         caption: 'Split each player\u2019s games in half at random \u2014 do the two halves agree on how good they are? 1.00 = the two halves agree perfectly.',
         tech: 'Spearman \u03c1 between random split-halves of each player\u2019s matches.',
       },
       {
         label: 'Noise band', value: sigma != null ? `\u00b1${sigma}` : '\u2014',
+        badge: badge('sigma', sigma),
         caption: 'How much a rating wobbles when the match list is reshuffled. Players within this band of each other are basically tied.',
         tech: 'Median per-player \u03c3 over 100 bootstrap resamples of 80% of matches.',
       },
       {
         label: 'Winner prediction', value: pct(L.clean_win_accuracy_hard_max),
+        badge: badge('accuracy', L.clean_win_accuracy_hard_max),
         caption: `Of the ${L.clean_win_n ?? 0} matches with a provable winner, how often did the team with the highest-rated player win? (Coin flip = 50%.) Read the caveats below before judging this one.`,
         tech: 'Hard-MAX team aggregation, clean-win subset only, scored against a log-loss baseline.',
       },
     ].map(c => `<div class="vt-elo-statcard">
-        <div class="vt-elo-stat-label">${c.label}</div>
+        <div class="vt-elo-stat-head">
+          <span class="vt-elo-stat-label">${c.label}</span>
+          ${c.badge ? `<span class="vt-elo-badge is-${c.badge.tone}">${c.badge.label}</span>` : ''}
+        </div>
         <div class="vt-elo-stat-value">${c.value}</div>
         <div class="vt-elo-stat-caption">${c.caption}</div>
         <details class="vt-elo-stat-tech">
@@ -1067,14 +1097,17 @@
     let funnelHtml = '';
     if (funnel) {
       const total = funnel.rated_history_entries || 0;
+      // Contested matches (both bases fell) are a legitimate but rare outcome
+      // that isn't usable as "provable winner" data, so they're grouped under
+      // unprovable for this chart.
+      const unprovable = (funnel.decided_by_unclear || 0) + (funnel.decided_by_contested || 0);
       const rows = [
-        ['All rated matches', total, false],
-        ['Provable winner (clean win)', funnel.decided_by_clean_win || 0, false],
-        ['Contested (both bases fell)', funnel.decided_by_contested || 0, true],
-        ['Winner unprovable from the data', funnel.decided_by_unclear || 0, true],
-      ].map(([label, n, muted]) => {
+        ['All rated matches', total, 'total'],
+        ['Provable winner (clean win)', funnel.decided_by_clean_win || 0, 'provable'],
+        ['Winner unprovable from the data', unprovable, 'unprovable'],
+      ].map(([label, n, kind]) => {
         const w = total > 0 ? Math.max(0.8, (n / total) * 100) : 0;
-        return `<div class="vt-elo-funnel-row${muted ? ' is-muted' : ''}">
+        return `<div class="vt-elo-funnel-row is-${kind}">
           <span class="vt-elo-funnel-label">${label}</span>
           <span class="vt-elo-funnel-track"><span class="vt-elo-funnel-fill" style="width:${w.toFixed(1)}%;"></span></span>
           <span class="vt-elo-funnel-count">${n}</span>
@@ -1125,7 +1158,7 @@
     </div>`;
 
     pane.innerHTML = `<div class="vt-elo-doc" style="max-width: 1100px;">
-      <p class="mb-3">We don&rsquo;t ask you to trust the rating &mdash; we <strong>test it on every pipeline run</strong> and publish the results, good and bad. Here&rsquo;s the honest scorecard.</p>
+      <p class="mb-3">Every ELO update, we <strong>re-validate</strong> the results to give you the latest effectiveness and prediction accuracy.</p>
       <div class="vt-elo-statgrid">${cards}</div>
       ${funnelHtml}
       ${gapHtml}

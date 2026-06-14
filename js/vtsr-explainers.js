@@ -416,11 +416,10 @@
 
   // Shared prose sections (modal + How tab reuse these verbatim).
   function commanderSectionHtml() {
-    return `<p class="mb-2">Commanders naturally score lower on thug stats &mdash; less mobility, fewer kills, less direct combat. To stay fair, the bar adjusts per axis on commander matches:</p>
+    return `<p class="mb-2">Commanders typically score lower on thug stats &mdash; less mobility, fewer kills, less direct combat. To offset this, the bar adjusts slightly per axis on commander matches:</p>
       <ul class="mb-2">
-        <li><strong>Easier on 5 axes</strong> &middot; mobility, kill rate, damage share, efficiency, T-key &mdash; the role-driven shortfalls.</li>
+        <li><strong>Easier on 4 axes</strong> &middot; mobility, kill rate, damage share, efficiency &mdash; the role-driven shortfalls.</li>
         <li><strong>Small bonus on PvE share</strong> &middot; commanders get rewarded slightly more for hitting enemy base / scavs.</li>
-        <li><strong>Unchanged on 2 axes</strong> &middot; accuracy and snipes are role-blind.</li>
       </ul>
       <p class="mb-0 text-muted small">Net effect: a typical commander match nets ~0 ELO &mdash; neither punished nor padded. A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>`;
   }

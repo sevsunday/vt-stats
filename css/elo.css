@@ -104,13 +104,50 @@
     font-weight: 700;
     line-height: 1.2;
 }
+.vt-elo-stat-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
 .vt-elo-statcard .vt-elo-stat-label {
     font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--kb-text-muted);
-    margin-bottom: 0.25rem;
+}
+.vt-elo-badge {
+    flex: none;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.vt-elo-badge.is-good {
+    color: var(--kb-success);
+    background: color-mix(in oklab, var(--kb-success) 16%, transparent);
+    border-color: color-mix(in oklab, var(--kb-success) 38%, transparent);
+}
+.vt-elo-badge.is-ok {
+    color: var(--kb-warning);
+    background: color-mix(in oklab, var(--kb-warning) 16%, transparent);
+    border-color: color-mix(in oklab, var(--kb-warning) 38%, transparent);
+}
+.vt-elo-badge.is-bad {
+    color: var(--kb-danger);
+    background: color-mix(in oklab, var(--kb-danger) 16%, transparent);
+    border-color: color-mix(in oklab, var(--kb-danger) 38%, transparent);
+}
+.vt-elo-badge.is-info {
+    color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 16%, transparent);
+    border-color: color-mix(in oklab, var(--kb-primary) 38%, transparent);
 }
 .vt-elo-statcard .vt-elo-stat-caption {
     font-size: 0.78rem;
@@ -154,19 +191,26 @@
 }
 .vt-elo-funnel-label { text-align: right; color: var(--kb-text-secondary, inherit); }
 .vt-elo-funnel-track {
-    height: 14px;
+    height: 16px;
     border-radius: 999px;
-    background: color-mix(in srgb, var(--kb-text-muted) 10%, transparent);
+    background: color-mix(in srgb, var(--kb-text-muted) 16%, transparent);
     overflow: hidden;
 }
 .vt-elo-funnel-fill {
+    display: block;
     height: 100%;
     border-radius: 999px;
-    background: color-mix(in oklab, var(--kb-primary) 70%, transparent);
+    background: var(--kb-primary);
     min-width: 2px;
 }
-.vt-elo-funnel-row.is-muted .vt-elo-funnel-fill {
-    background: color-mix(in oklab, var(--kb-text-muted) 45%, transparent);
+.vt-elo-funnel-row.is-total .vt-elo-funnel-fill {
+    background: var(--kb-primary);
+}
+.vt-elo-funnel-row.is-provable .vt-elo-funnel-fill {
+    background: var(--kb-success);
+}
+.vt-elo-funnel-row.is-unprovable .vt-elo-funnel-fill {
+    background: var(--kb-warning);
 }
 .vt-elo-funnel-count {
     font-family: var(--vt-font-mono, monospace);
