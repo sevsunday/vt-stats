@@ -154,10 +154,11 @@ const SNIPE_COCKPIT_INTENSITY = 0.8;
 // is detected; ships without one keep the orb at the true node.
 const SNIPE_COCKPIT_BLEND = 0.5;
 // Final calibration nudge (fractions of model radius), applied after the blend:
-// a small downward settle toward the gun. The eyepoint already sits directly
-// above the gun horizontally, so no Z (forward/back) nudge is needed.
-const SNIPE_EXTRA_DOWN_FRAC = 0.01;
-const SNIPE_EXTRA_IN_FRAC = 0.0;
+// down settles toward the gun; inward moves toward the cockpit interior (+Z,
+// toward the canopy front where the pilot sits -- the direction that reads as
+// "into the cockpit" rather than out toward the tail/wings).
+const SNIPE_EXTRA_DOWN_FRAC = 0.02;
+const SNIPE_EXTRA_IN_FRAC = 0.01;
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -1737,11 +1738,12 @@ export class ObjectViewer {
       }
       if (any) world.lerp(box.getCenter(new THREE.Vector3()), SNIPE_COCKPIT_BLEND);
     }
-    // Calibration nudge in model axes (upright at load): down + inward (-Z) so
-    // the orb sits just above the protruding gun like the in-game dot.
+    // Calibration nudge in model axes (upright at load): down toward the gun +
+    // inward (+Z, into the cockpit toward the canopy) so the orb sits like the
+    // in-game dot rather than out toward the tail/wings.
     const r = this._radius || 1;
     world.y -= SNIPE_EXTRA_DOWN_FRAC * r;
-    world.z -= SNIPE_EXTRA_IN_FRAC * r;
+    world.z += SNIPE_EXTRA_IN_FRAC * r;
     node.worldToLocal(world);   // -> node-local offset (tracks the node)
     group.position.copy(world);
   }
