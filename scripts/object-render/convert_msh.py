@@ -465,6 +465,16 @@ def _extract_odf_snipe(blocks: dict) -> dict:
             "cockpitSniperRadius": _odf_float(go_l, "cockpitsniperradius")}
 
 
+def _extract_odf_collision(blocks: dict):
+    """Authored collisionRadius from GameObjectClass (the AI-avoidance / path-
+    planning footprint, per docs/reference/odf-properties-guide.md). Returns the
+    explicit float when declared, else None -- the viewer derives the engine
+    default (boundingSphere * 0.75) from the already-shipped `radius`."""
+    go = blocks.get("GameObjectClass", {}) or {}
+    go_l = {str(k).lower(): v for k, v in go.items()}
+    return _odf_float(go_l, "collisionradius")
+
+
 # The 8 valid weapon-hardpoint categories (per GenBlackDragon's ODF guide,
 # vendored at docs/reference/odf-properties-guide.md): a hardpoint node name
 # must START with one of these, with or without the traditional HP_ prefix
@@ -718,6 +728,15 @@ def enumerate_targets(odf_filter=None):
         # the eyepoint orb unless canSnipe is explicitly false (matches the
         # in-game rule that support units / assault tanks aren't snipeable).
         snipe = _extract_odf_snipe(primary["blocks"])
+        # Collision radius (AI-avoidance footprint): sparse per-ODF map of the
+        # ODFs that explicitly declare one. The viewer follows the loadout
+        # variant select and falls back to boundingSphere * 0.75 (the engine
+        # default) from the shipped `radius` for any ODF not in this map.
+        collision = {}
+        for c in uniq_cands:
+            cr = _extract_odf_collision(c["blocks"])
+            if cr is not None:
+                collision[c["odf"]] = round(cr, 3)
         out[stem] = {
             "odfs": odfs,
             "primaryOdf": primary["odf"],
@@ -732,6 +751,7 @@ def enumerate_targets(odf_filter=None):
             "defaultLoadoutOdf": default_loadout_odf,
             "lights": lights,
             "snipe": snipe,
+            "collisionRadiiByOdf": collision or None,
         }
     return out
 
@@ -1524,6 +1544,7 @@ def process_model(job: dict) -> dict:
             "defaultLoadoutOdf": job.get("defaultLoadoutOdf"),
             "lights": job.get("lights"),
             "snipe": job.get("snipe"),
+            "collisionRadiiByOdf": job.get("collisionRadiiByOdf"),
             "_glb_bytes": len(glb_bytes),
         }
     except Exception as e:  # noqa: BLE001 - resilient over ~700 models
@@ -1591,6 +1612,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "defaultLoadoutOdf": meta.get("defaultLoadoutOdf"),
         "lights": meta.get("lights"),
         "snipe": meta.get("snipe"),
+        "collisionRadiiByOdf": meta.get("collisionRadiiByOdf"),
     }
 
 
@@ -1801,8 +1823,9 @@ def main():
     loadout_count = sum(1 for m in manifest if m.get("loadouts"))
     lights_count = sum(1 for m in manifest if m.get("lights"))
     snipe_count = sum(1 for m in manifest if (m.get("snipe") or {}).get("canSnipe"))
+    collision_count = sum(1 for m in manifest if m.get("collisionRadiiByOdf"))
     idx_path.write_text(json.dumps({
-        "schema_version": 17,
+        "schema_version": 18,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1816,6 +1839,7 @@ def main():
         "loadout_count": loadout_count,
         "lights_count": lights_count,
         "snipe_count": snipe_count,
+        "collision_count": collision_count,
         "texture_packs": {p["id"]: {"label": p["label"], "url": p["url"]}
                           for p in MOD_TEXTURE_PACKS},
         "texture_report": texture_report,
@@ -1829,7 +1853,8 @@ def main():
           f"{animated_count} animated, {teamcolor_count} team-colorable, "
           f"{emissive_count} emissive, {normal_count} normal-mapped, "
           f"{specular_count} roughness-mapped, {modskin_count} with mod skins, "
-          f"{loadout_count} with loadouts, {lights_count} with lights)")
+          f"{loadout_count} with loadouts, {lights_count} with lights, "
+          f"{collision_count} with collision radii)")
     print(f"textures: {texture_report['models_textured']} textured, "
           f"{texture_report['models_no_texture']} without "
           f"({texture_report['models_unresolved_refs']} have unresolved refs, "

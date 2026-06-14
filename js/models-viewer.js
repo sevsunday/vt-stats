@@ -140,6 +140,18 @@ const HP_MARKER_PULSE_AMP = 0.22;   // +- scale fraction
 // drawn depth-test-free so it reads through the hull at every angle (matching
 // the in-game dot). Sized off the model radius like the ship-light bulbs.
 const SNIPE_COLOR = 0xff2a2a;
+// Collision-radius overlay (AI-avoidance volume). The engine collisionRadius is
+// a single scalar -> a SPHERE, so we draw a 3D great-circle wireframe sphere
+// centered on the model body, plus a flat ground footprint circle for spatial
+// reference. Sized in world meters from the ODF collisionRadius.
+const COLLISION_COLOR = 0x4fd6ff;
+const COLLISION_FILL_OPACITY = 0.10;
+const COLLISION_RING_OPACITY = 0.7;
+const COLLISION_RING_FRAC = 0.012;   // ring band thickness as fraction of radius
+const COLLISION_RING_MIN = 0.06;     // floor band thickness (m)
+const COLLISION_SPHERE_OPACITY = 0.4;   // great-circle wireframe lines
+const COLLISION_SPHERE_FILL_OPACITY = 0.05;   // faint translucent volume
+const COLLISION_SPHERE_SEGMENTS = 96;   // points per great circle
 const SNIPE_FRAC = 0.11;             // orb size as fraction of model radius
 const SNIPE_MIN = 0.24;
 const SNIPE_MAX = 1.35;
@@ -566,6 +578,17 @@ export class ObjectViewer {
     this._glowTexture = null;      // shared radial sprite texture (lazy-built)
     this._burstTexture = null;     // shared hot-core + flare sprite texture (lazy-built)
 
+    // Collision radius (manifest `collisionRadiiByOdf` block): a 3D wireframe
+    // sphere (centered on the model body) + a y=0 ground footprint circle,
+    // sized in world meters and following the loadout-variant select. OFF by
+    // default; the engine default (boundingSphere * 0.75) is derived from the
+    // shipped `radius` for any ODF without an explicit value.
+    this._collisionMap = null;     // {odf: meters} sparse explicit overrides or null
+    this._collisionSphere = 0;     // shipped bounding-sphere radius (fallback base)
+    this._collisionRing = null;    // Object3D overlay group (scene-rooted)
+    this._collisionVisible = false;
+    this._collisionWorldR = 0;     // current radius (m)
+
     // WASD Drive Mode state (see setDriveMode / _updateDrive).
     this._driveMode = false;
     this._driveProfile = null;     // manifest `drive` block (archetype + ODF speeds)
@@ -874,6 +897,7 @@ export class ObjectViewer {
     // references + dispose their sprite materials (the glow texture is shared).
     this._clearShipLights();
     this._clearSnipeMarker();
+    this._clearCollisionRing();
     this._cockpitMeshes = [];
     this.highlightHardpoints(null);
     this._nodeByLower = new Map();
@@ -1755,6 +1779,117 @@ export class ObjectViewer {
         if (o.isSprite && o.material) o.material.dispose();
       });
       this._snipeMarker = null;
+    }
+  }
+
+  /* ---- Collision radius ground ring -------------------------------------- */
+
+  /* Provide the model's collision data on load: `map` is the sparse per-ODF
+   * explicit-override dict (manifest collisionRadiiByOdf, may be null) and
+   * `boundingSphere` is the shipped `radius` used to derive the engine default
+   * (boundingSphere * 0.75) for any ODF not in the map. */
+  setCollisionData(map, boundingSphere) {
+    this._collisionMap = map || null;
+    this._collisionSphere = Math.max(0, Number(boundingSphere) || 0);
+  }
+
+  /* Resolve + (re)draw the ring for the given ODF (loadout-variant select value
+   * with the `.odf` suffix, e.g. "ibgtow_vsr.odf"). Falls back to the engine
+   * default when the ODF has no explicit collisionRadius. */
+  setCollisionRadiusForOdf(odf) {
+    let r = (odf && this._collisionMap && this._collisionMap[odf]);
+    if (!(r > 0)) r = this._collisionSphere * 0.75;   // engine default
+    this._collisionWorldR = r > 0 ? r : 0;
+    this._buildCollisionRing(this._collisionWorldR);
+  }
+
+  setCollisionVisible(on) {
+    this._collisionVisible = !!on;
+    if (this._collisionRing) this._collisionRing.visible = this._collisionVisible;
+  }
+
+  getCollisionVisible() { return this._collisionVisible; }
+
+  /* A flat circle (LineLoop) of `radius` in the local XY plane. Caller rotates
+   * it into the wanted plane. Fresh material each call (disposed on clear). */
+  _collisionCircleLine(radius, opacity) {
+    const pts = [];
+    const n = COLLISION_SPHERE_SEGMENTS;
+    for (let i = 0; i <= n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(t) * radius, Math.sin(t) * radius, 0));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({
+      color: COLLISION_COLOR, transparent: true, opacity, depthWrite: false,
+    });
+    return new THREE.LineLoop(geo, mat);
+  }
+
+  /* Build the scene-rooted collision overlay: a 3D wireframe sphere (three
+   * great circles + a faint translucent shell) centered on the model body, plus
+   * a flat y=0 ground footprint circle. Scene-rooted (not under the spin pivot)
+   * so the footprint stays flat on the floor regardless of free-spin. */
+  _buildCollisionRing(worldR) {
+    this._clearCollisionRing();
+    if (!(worldR > 0)) return;
+    const group = new THREE.Group();
+    const c = this._center || new THREE.Vector3();
+
+    // 3D sphere: three great circles (XY / XZ / YZ planes) + a faint shell,
+    // centered on the model body (so it correctly pokes below the floor / above
+    // the hull -- the engine sphere is body-centered, not ground-anchored).
+    const sphere = new THREE.Group();
+    const gcXY = this._collisionCircleLine(worldR, COLLISION_SPHERE_OPACITY);
+    const gcXZ = this._collisionCircleLine(worldR, COLLISION_SPHERE_OPACITY);
+    gcXZ.rotation.x = Math.PI / 2;
+    const gcYZ = this._collisionCircleLine(worldR, COLLISION_SPHERE_OPACITY);
+    gcYZ.rotation.y = Math.PI / 2;
+    const shellGeo = new THREE.SphereGeometry(worldR, 48, 32);
+    const shellMat = new THREE.MeshBasicMaterial({
+      color: COLLISION_COLOR, transparent: true,
+      opacity: COLLISION_SPHERE_FILL_OPACITY, depthWrite: false,
+      side: THREE.BackSide,
+    });
+    const shell = new THREE.Mesh(shellGeo, shellMat);
+    sphere.add(gcXY, gcXZ, gcYZ, shell);
+    sphere.position.copy(c);
+    group.add(sphere);
+
+    // Ground footprint circle (fill disc + outline) at y=0.
+    const footprint = new THREE.Group();
+    const band = Math.max(COLLISION_RING_MIN, worldR * COLLISION_RING_FRAC);
+    const fillGeo = new THREE.CircleGeometry(worldR, COLLISION_SPHERE_SEGMENTS);
+    const fillMat = new THREE.MeshBasicMaterial({
+      color: COLLISION_COLOR, transparent: true, opacity: COLLISION_FILL_OPACITY,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const fill = new THREE.Mesh(fillGeo, fillMat);
+    const ringGeo = new THREE.RingGeometry(
+      Math.max(0, worldR - band), worldR, COLLISION_SPHERE_SEGMENTS);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: COLLISION_COLOR, transparent: true, opacity: COLLISION_RING_OPACITY,
+      depthWrite: false, side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    footprint.add(fill, ring);
+    footprint.rotation.x = -Math.PI / 2;   // lay flat on the y=0 plane
+    footprint.position.set(c.x, 0.01, c.z);   // just above the grid (avoid z-fight)
+    group.add(footprint);
+
+    group.visible = this._collisionVisible;
+    this.scene.add(group);
+    this._collisionRing = group;
+  }
+
+  _clearCollisionRing() {
+    if (this._collisionRing) {
+      this.scene.remove(this._collisionRing);
+      this._collisionRing.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+      });
+      this._collisionRing = null;
     }
   }
 
@@ -2747,6 +2882,9 @@ export class ObjectViewer {
       this.setFreeSpin(false);
       this.setAimMode(false);
       this.controls.enabled = false;
+      // Collision ring is a static home-spot footprint; hide it while the
+      // vehicle roams (the user's toggle is restored on exit).
+      if (this._collisionRing) this._collisionRing.visible = false;
       this._driveSaved = {
         spinPos: this._spin.position.clone(),
         spinQuat: this._spin.quaternion.clone(),
@@ -2826,6 +2964,7 @@ export class ObjectViewer {
       this.controls.enablePan = true;
       this._buildFloor(this._baseGridSize());
       this._placeSun();   // shadow frustum back onto the home center
+      if (this._collisionRing) this._collisionRing.visible = this._collisionVisible;
       this.controls.update();
     }
     this._markShadowDirty();
@@ -3575,6 +3714,9 @@ export class ObjectViewer {
     const prevSnipe = this._snipeOn;
     this._snipeOn = false;
     this._applySnipeOn();
+    // Collision-radius ground ring -> hidden for canonical thumbnails.
+    const prevCollision = this._collisionVisible;
+    if (this._collisionRing) this._collisionRing.visible = false;
     // Capture the whole model regardless of any hidden part groups; remember the
     // current per-group visibility so the user's filter is restored afterward.
     const prevPartVisible = this._partGroups.map((g) => ({ id: g.id, visible: g.visible }));
@@ -3665,6 +3807,7 @@ export class ObjectViewer {
     this.setDrive(prevDrive);
     this._snipeOn = prevSnipe;
     this._applySnipeOn();
+    if (this._collisionRing) this._collisionRing.visible = prevCollision;
     for (const p of prevPartVisible) this.setPartVisible(p.id, p.visible);
     await this.setQuality(prevQuality);
     return shots;
@@ -3843,6 +3986,7 @@ export class ObjectViewer {
     for (const t of this._specCache.values()) { if (t) t.dispose(); }
     this._specCache.clear();
     this._clearShipLights();
+    this._clearCollisionRing();
     this.highlightHardpoints(null);
     if (this._glowTexture) { this._glowTexture.dispose(); this._glowTexture = null; }
     if (this._burstTexture) { this._burstTexture.dispose(); this._burstTexture = null; }

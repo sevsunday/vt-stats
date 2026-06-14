@@ -29,6 +29,7 @@ const SCENE_BG_KEY = 'vt.obj.scene.bg';   // 'dark' (default) | 'light'
 const TURN_SENS_KEY = 'vt.obj.drive.turnSens';   // Drive Mode turn response (25..100 %)
 const GRID_KEY = 'vt.obj.grid';
 const AXES_KEY = 'vt.obj.axes';
+const COLLISION_KEY = 'vt.obj.collision';   // collision-radius ring (off default)
 const SCENE_BG_VALUES = ['dark', 'light'];
 const ULTRA_KEY = 'vt.obj.ultra';          // single Ultra-rendering toggle
 const ULTRA_AO_KEY = 'vt.obj.ultra.ao';    // legacy AO-only key (migration source)
@@ -64,6 +65,7 @@ const els = {
   sceneBgSeg: document.querySelector('#scene-panel .scene-bg-seg'),
   sceneGrid: document.getElementById('scene-grid'),
   sceneAxes: document.getElementById('scene-axes'),
+  sceneCollision: document.getElementById('scene-collision'),
   ultraToggle: document.getElementById('ultra-toggle'),
   stageLoading: document.getElementById('stage-loading'),
   stageLoadingLabel: document.getElementById('stage-loading-label'),
@@ -295,12 +297,15 @@ function scenePrefs() {
   const bg = localStorage.getItem(SCENE_BG_KEY);
   const grid = localStorage.getItem(GRID_KEY);
   const axes = localStorage.getItem(AXES_KEY);
+  const collision = localStorage.getItem(COLLISION_KEY);
   return {
     // Dark background is the default; light only when the user opts in.
     bg: SCENE_BG_VALUES.includes(bg) ? bg : 'dark',
     // Grid/axes default ON when unset.
     grid: grid === null ? true : grid === '1',
     axes: axes === null ? true : axes === '1',
+    // Collision ring is opt-in (off by default).
+    collision: collision === '1',
   };
 }
 
@@ -494,6 +499,11 @@ function showViewer(entry) {
       setupShipLightsUI();
       setupTrueLightingUI();
       setupSnipeUI();
+      // Collision-radius ground ring: data + initial size from the default
+      // loadout variant (or the primary ODF when unarmed), visibility from pref.
+      activeViewer.setCollisionData(entry.collisionRadiiByOdf || null, entry.radius);
+      activeViewer.setCollisionRadiusForOdf(entry.defaultLoadoutOdf || entry.primaryOdf);
+      activeViewer.setCollisionVisible(scene.collision);
       // Fly toggle: only for craft with an ODF flightAltitude ceiling.
       els.fly.hidden = !activeViewer.hasFlightMode();
       // Now that each pane's applicability (button visibility) is known, lay out
@@ -773,6 +783,10 @@ function showViewer(entry) {
     localStorage.setItem(AXES_KEY, els.sceneAxes.checked ? '1' : '0');
     if (activeViewer) activeViewer.setAxesVisible(els.sceneAxes.checked);
   };
+  els.sceneCollision.onchange = () => {
+    localStorage.setItem(COLLISION_KEY, els.sceneCollision.checked ? '1' : '0');
+    if (activeViewer) activeViewer.setCollisionVisible(els.sceneCollision.checked);
+  };
   els.ultraToggle.onclick = () => {
     const on = !els.ultraToggle.classList.contains('on');
     els.ultraToggle.classList.toggle('on', on);
@@ -830,6 +844,7 @@ function syncScenePanel() {
   syncSceneBgSeg(st.bgMode);
   els.sceneGrid.checked = st.grid;
   els.sceneAxes.checked = st.axes;
+  els.sceneCollision.checked = activeViewer.getCollisionVisible();
 }
 
 function syncSceneBgSeg(bg) {
@@ -1392,7 +1407,12 @@ function setupLoadoutUI(entry) {
   }
   const def = noneDefault ? '' : entry.defaultLoadoutOdf;
   els.loadoutVariant.value = def;
-  els.loadoutVariant.onchange = () => renderLoadoutRows(els.loadoutVariant.value);
+  els.loadoutVariant.onchange = () => {
+    renderLoadoutRows(els.loadoutVariant.value);
+    if (activeViewer) {
+      activeViewer.setCollisionRadiusForOdf(els.loadoutVariant.value || entry.primaryOdf);
+    }
+  };
   // Hide the dropdown chrome only when there's nothing to choose between AND
   // the lone variant really belongs to this unit (a foreign-unit loadout or a
   // None default must keep the selector on screen).
@@ -1612,13 +1632,18 @@ function resetAllViewer() {
   initLightPanel({ ...LIGHT_DEFAULT });   // re-sync slider values + handlers
   setLightOn(LIGHT_DEFAULT.on);           // panel dim + viewer + persist
 
-  // Display -> dark background, grid + axes on.
+  // Display -> dark background, grid + axes on, collision ring off + re-sized
+  // to the default variant.
   localStorage.setItem(SCENE_BG_KEY, 'dark');
   localStorage.setItem(GRID_KEY, '1');
   localStorage.setItem(AXES_KEY, '1');
+  localStorage.setItem(COLLISION_KEY, '0');
   activeViewer.setBackgroundMode('dark');
   activeViewer.setGridVisible(true);
   activeViewer.setAxesVisible(true);
+  activeViewer.setCollisionRadiusForOdf(
+    (loadoutEntry && loadoutEntry.defaultLoadoutOdf) || (loadoutEntry && loadoutEntry.primaryOdf));
+  activeViewer.setCollisionVisible(false);
   syncScenePanel();
 
   // Restore the default dock layout (desktop: all applicable panes open).
