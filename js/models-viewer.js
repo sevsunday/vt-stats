@@ -144,6 +144,9 @@ const SNIPE_FRAC = 0.11;             // orb size as fraction of model radius
 const SNIPE_MIN = 0.24;
 const SNIPE_MAX = 1.35;
 const SNIPE_CORE_SCALE = 0.45;       // hot white core over the red glow
+// Cockpit-window tint shown alongside the orb (in-game the canopy glass glows
+// red for an enemy). Applied as an additive emissive on the glass material.
+const SNIPE_COCKPIT_INTENSITY = 0.8;
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -545,6 +548,7 @@ export class ObjectViewer {
     // Snipe point (manifest `snipe` block): a red eyepoint orb, OFF by default.
     this._snipeDef = null;         // {canSnipe, cockpitSniperRadius} or null
     this._snipeMarker = null;      // Object3D parented to the hp_eyepoint node
+    this._cockpitMeshes = [];      // glass meshes tinted alongside the orb
     this._snipeOn = false;
     this._nodeByLower = new Map(); // lowercased node name -> Object3D (per load)
     this._glowTexture = null;      // shared radial sprite texture (lazy-built)
@@ -858,6 +862,7 @@ export class ObjectViewer {
     // references + dispose their sprite materials (the glow texture is shared).
     this._clearShipLights();
     this._clearSnipeMarker();
+    this._cockpitMeshes = [];
     this.highlightHardpoints(null);
     this._nodeByLower = new Map();
     this._materials = [];
@@ -900,6 +905,7 @@ export class ObjectViewer {
     this._detectArticulation(model, this._artHints);
     this._buildPartGroups(model);
     this._applyShipLights();
+    this._cockpitMeshes = this._collectCockpitMeshes(model);
     this._applySnipeMarker();
     this.setWireframe(this._wireframe);
     await this._applyTextures();
@@ -1711,8 +1717,55 @@ export class ObjectViewer {
     }
   }
 
+  /* The cockpit window glass is a mesh under a node named `cockpit` (ISDF
+   * `glarenew` / Hadean `glasscpit_d`) or any mesh whose material reads as glass.
+   * The `cockpit_frame` / `canopy` siblings use the body material, so node-name
+   * `cockpit` (not a prefix) plus the glass-material fallback hit only the pane. */
+  _collectCockpitMeshes(model) {
+    const out = [];
+    const GLASS = ['glare', 'glass', 'cpit'];
+    const underCockpit = (o) => {
+      for (let p = o; p; p = p.parent) {
+        if (p.name && p.name.toLowerCase() === 'cockpit') return true;
+      }
+      return false;
+    };
+    model.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const mn = (o.material.name || '').toLowerCase();
+      if (underCockpit(o) || GLASS.some((k) => mn.includes(k))) out.push(o);
+    });
+    return out;
+  }
+
+  _applyCockpitTint(on) {
+    for (const m of this._cockpitMeshes) {
+      const mat = m.material;
+      if (!mat || !mat.emissive) continue;
+      if (on) {
+        if (!mat.userData.vtCockpitTinted) {
+          mat.userData.vtCockpitTinted = true;
+          mat.userData.vtCockpitEmissive = mat.emissive.clone();
+          mat.userData.vtCockpitEmissiveIntensity = mat.emissiveIntensity;
+          mat.userData.vtCockpitEmissiveMap = mat.emissiveMap || null;
+        }
+        mat.emissive.setHex(SNIPE_COLOR);
+        mat.emissiveIntensity = SNIPE_COCKPIT_INTENSITY;
+        mat.emissiveMap = null;
+        mat.needsUpdate = true;
+      } else if (mat.userData.vtCockpitTinted) {
+        mat.emissive.copy(mat.userData.vtCockpitEmissive);
+        mat.emissiveIntensity = mat.userData.vtCockpitEmissiveIntensity ?? 1;
+        mat.emissiveMap = mat.userData.vtCockpitEmissiveMap || null;
+        mat.userData.vtCockpitTinted = false;
+        mat.needsUpdate = true;
+      }
+    }
+  }
+
   _applySnipeOn() {
     if (this._snipeMarker) this._snipeMarker.visible = this._snipeOn;
+    this._applyCockpitTint(this._snipeOn);
   }
 
   hasSnipePoint() {
@@ -3477,9 +3530,10 @@ export class ObjectViewer {
     this._turretYawDeg = 0; this._turretPitchDeg = 0; this._applyTurret();
     this._recoilClock = 0;
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
-    // Snipe-point overlay -> hidden for canonical thumbnails (restored below).
+    // Snipe-point overlay (orb + cockpit tint) -> off for canonical thumbnails.
     const prevSnipe = this._snipeOn;
-    if (this._snipeMarker) this._snipeMarker.visible = false;
+    this._snipeOn = false;
+    this._applySnipeOn();
     // Capture the whole model regardless of any hidden part groups; remember the
     // current per-group visibility so the user's filter is restored afterward.
     const prevPartVisible = this._partGroups.map((g) => ({ id: g.id, visible: g.visible }));
