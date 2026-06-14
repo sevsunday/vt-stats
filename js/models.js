@@ -136,6 +136,8 @@ const els = {
   texsetRows: document.getElementById('texset-rows'),
   shiplightsRow: document.getElementById('shiplights-row'),
   shiplightsOn: document.getElementById('shiplights-on'),
+  snipeRow: document.getElementById('snipe-row'),
+  snipeOn: document.getElementById('snipe-on'),
   truelightRow: document.getElementById('truelight-row'),
   truelightOn: document.getElementById('truelight-on'),
   loadoutPanel: document.getElementById('loadout-panel'),
@@ -474,6 +476,7 @@ function showViewer(entry) {
     normal: entry.normalTextures || [],
     specular: entry.specularTextures || [],
     lights: entry.lights || [],
+    snipe: entry.snipe || null,
     // Hover/morph craft float at their ODF setAltitude (linear meters);
     // APC/Bomber/SAV additionally expose the Fly toggle via flightAltitude.
     hoverAltitude: (entry.drive
@@ -490,6 +493,7 @@ function showViewer(entry) {
       setupTexturesUI(entry);
       setupShipLightsUI();
       setupTrueLightingUI();
+      setupSnipeUI();
       // Fly toggle: only for craft with an ODF flightAltitude ceiling.
       els.fly.hidden = !activeViewer.hasFlightMode();
       // Now that each pane's applicability (button visibility) is known, lay out
@@ -582,6 +586,8 @@ function showViewer(entry) {
   // them once the GLB resolves. The loadout overlay is manifest-driven, so it
   // can render immediately.
   els.shiplightsRow.hidden = true;
+  els.snipeRow.hidden = true;
+  els.snipeOn.checked = false;
   els.truelightRow.hidden = true;
   els.truelightOn.checked = false;
   setupLoadoutUI(entry);
@@ -1471,6 +1477,19 @@ function setupShipLightsUI() {
   };
 }
 
+/* Reveal the Snipe-point toggle when the model is snipeable (ODF canSnipe not
+ * explicitly false) AND carries an hp_eyepoint node. Each open starts OFF --
+ * it's an analysis overlay, not authored equipment. */
+function setupSnipeUI() {
+  const has = !!(activeViewer && activeViewer.hasSnipePoint());
+  els.snipeRow.hidden = !has;
+  if (!has) return;
+  els.snipeOn.checked = activeViewer.getSnipePointOn();
+  els.snipeOn.onchange = () => {
+    if (activeViewer) activeViewer.setSnipePoint(els.snipeOn.checked);
+  };
+}
+
 /* Reveal the True-lighting toggle when the model has any spec/roughness
  * coverage. Each open starts OFF: the default gloss is VT Stats' stylized
  * (luminance) look; ON swaps to the game-authored alpha-gloss conversion. */
@@ -1569,6 +1588,9 @@ function resetAllViewer() {
     activeViewer.setShipLights(true);
     els.shiplightsOn.checked = true;
   }
+  // Snipe point -> OFF (analysis overlay; resetView re-asserts viewer-side).
+  activeViewer.setSnipePoint(false);
+  els.snipeOn.checked = false;
   els.truelightOn.checked = false;
   activeViewer.setTrueLighting(false);
   if (loadoutEntry && loadoutEntry.loadouts) setupLoadoutUI(loadoutEntry);

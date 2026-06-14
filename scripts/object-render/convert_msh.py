@@ -446,6 +446,25 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
     return None
 
 
+def _extract_odf_snipe(blocks: dict) -> dict:
+    """Snipe-point eligibility from GameObjectClass.canSnipe. In odf.min.json
+    canSnipe is almost only written to turn it OFF (support units, assault
+    tanks); the snipeable default-true lives in the absent base craft class
+    (wingman). So treat a craft as snipeable UNLESS canSnipe is explicitly
+    0/false. cockpitSniperRadius (the engine's snipe-dot radius) is captured
+    for orb sizing when present. The eyepoint POSITION is not baked here -- the
+    viewer locates the mesh's hp_eyepoint node at runtime.
+    Returns {canSnipe: bool, cockpitSniperRadius: float|None}."""
+    go = blocks.get("GameObjectClass", {}) or {}
+    go_l = {str(k).lower(): v for k, v in go.items()}
+    can = True
+    raw = go_l.get("cansnipe")
+    if raw is not None and str(raw).strip().lower() in ("0", "false"):
+        can = False
+    return {"canSnipe": can,
+            "cockpitSniperRadius": _odf_float(go_l, "cockpitsniperradius")}
+
+
 # The 8 valid weapon-hardpoint categories (per GenBlackDragon's ODF guide,
 # vendored at docs/reference/odf-properties-guide.md): a hardpoint node name
 # must START with one of these, with or without the traditional HP_ prefix
@@ -695,6 +714,10 @@ def enumerate_targets(odf_filter=None):
             lights = _extract_odf_lights(c["blocks"], effect_db)
             if lights:
                 break
+        # Snipe-point eligibility from the primary (representative) ODF: show
+        # the eyepoint orb unless canSnipe is explicitly false (matches the
+        # in-game rule that support units / assault tanks aren't snipeable).
+        snipe = _extract_odf_snipe(primary["blocks"])
         out[stem] = {
             "odfs": odfs,
             "primaryOdf": primary["odf"],
@@ -708,6 +731,7 @@ def enumerate_targets(odf_filter=None):
             "loadouts": loadouts or None,
             "defaultLoadoutOdf": default_loadout_odf,
             "lights": lights,
+            "snipe": snipe,
         }
     return out
 
@@ -1499,6 +1523,7 @@ def process_model(job: dict) -> dict:
             "loadouts": job.get("loadouts"),
             "defaultLoadoutOdf": job.get("defaultLoadoutOdf"),
             "lights": job.get("lights"),
+            "snipe": job.get("snipe"),
             "_glb_bytes": len(glb_bytes),
         }
     except Exception as e:  # noqa: BLE001 - resilient over ~700 models
@@ -1565,6 +1590,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "loadouts": meta.get("loadouts"),
         "defaultLoadoutOdf": meta.get("defaultLoadoutOdf"),
         "lights": meta.get("lights"),
+        "snipe": meta.get("snipe"),
     }
 
 
@@ -1774,8 +1800,9 @@ def main():
     modskin_count = sum(1 for m in manifest if m.get("textureSets"))
     loadout_count = sum(1 for m in manifest if m.get("loadouts"))
     lights_count = sum(1 for m in manifest if m.get("lights"))
+    snipe_count = sum(1 for m in manifest if (m.get("snipe") or {}).get("canSnipe"))
     idx_path.write_text(json.dumps({
-        "schema_version": 16,
+        "schema_version": 17,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1788,6 +1815,7 @@ def main():
         "modskin_count": modskin_count,
         "loadout_count": loadout_count,
         "lights_count": lights_count,
+        "snipe_count": snipe_count,
         "texture_packs": {p["id"]: {"label": p["label"], "url": p["url"]}
                           for p in MOD_TEXTURE_PACKS},
         "texture_report": texture_report,

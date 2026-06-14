@@ -136,6 +136,14 @@ const HP_MARKER_MIN = 0.45;
 const HP_MARKER_MAX = 1.8;
 const HP_MARKER_PULSE_HZ = 1.1;     // pulses per second
 const HP_MARKER_PULSE_AMP = 0.22;   // +- scale fraction
+// Snipe point (hp_eyepoint): a red orb at the ship's vulnerable eyepoint node,
+// drawn depth-test-free so it reads through the hull at every angle (matching
+// the in-game dot). Sized off the model radius like the ship-light bulbs.
+const SNIPE_COLOR = 0xff2a2a;
+const SNIPE_FRAC = 0.11;             // orb size as fraction of model radius
+const SNIPE_MIN = 0.24;
+const SNIPE_MAX = 1.35;
+const SNIPE_CORE_SCALE = 0.45;       // hot white core over the red glow
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -534,6 +542,10 @@ export class ObjectViewer {
     this._flightMode = false;      // Fly toggle state
     this._altCur = 0;              // current extra lift above the hover pose (m)
     this._hpMarkers = [];          // loadout-hover marker sprites
+    // Snipe point (manifest `snipe` block): a red eyepoint orb, OFF by default.
+    this._snipeDef = null;         // {canSnipe, cockpitSniperRadius} or null
+    this._snipeMarker = null;      // Object3D parented to the hp_eyepoint node
+    this._snipeOn = false;
     this._nodeByLower = new Map(); // lowercased node name -> Object3D (per load)
     this._glowTexture = null;      // shared radial sprite texture (lazy-built)
     this._burstTexture = null;     // shared hot-core + flare sprite texture (lazy-built)
@@ -822,6 +834,10 @@ export class ObjectViewer {
     // its lights ON (they're authored equipment, not an effect).
     this._shipLightDefs = (texInfo && texInfo.lights) || [];
     this._shipLightsOn = true;
+    // Snipe point (manifest `snipe` block). The orb is built on load but starts
+    // hidden -- it's an analysis overlay, not authored equipment.
+    this._snipeDef = (texInfo && texInfo.snipe) || null;
+    this._snipeOn = false;
     this._trueLighting = false;   // each model opens on the stylized default
     // Hover lift (ODF setAltitude, hover/morph archetypes only) + flight
     // ceiling (ODF flightAltitude; APC/Bomber/SAV). Fly always starts OFF.
@@ -841,6 +857,7 @@ export class ObjectViewer {
     // Old ship lights / markers left the graph with the old pivot; drop the
     // references + dispose their sprite materials (the glow texture is shared).
     this._clearShipLights();
+    this._clearSnipeMarker();
     this.highlightHardpoints(null);
     this._nodeByLower = new Map();
     this._materials = [];
@@ -883,6 +900,7 @@ export class ObjectViewer {
     this._detectArticulation(model, this._artHints);
     this._buildPartGroups(model);
     this._applyShipLights();
+    this._applySnipeMarker();
     this.setWireframe(this._wireframe);
     await this._applyTextures();
     await this._applyTeamMasks();
@@ -1637,6 +1655,75 @@ export class ObjectViewer {
       // Pools re-show themselves per frame in _updateShipLights when ON.
       if (pool && !this._shipLightsOn) pool.visible = false;
     }
+  }
+
+  /* ---- Snipe point (hp_eyepoint) ----------------------------------------- */
+
+  /* The eyepoint node carries no geometry, so its name survives into the GLB.
+   * Match hp_eyepoint / hp_eyepoint_1 / HP_EYEPOINT etc., but NOT organic
+   * skeleton bones (eyelid / eyeball / eyebone). */
+  _findEyepointNode() {
+    if (!this._nodeByLower) return null;
+    for (const [name, obj] of this._nodeByLower) {
+      if (name.startsWith('hp_eyepoint')) return obj;
+    }
+    return null;
+  }
+
+  /* Build the red orb parented to the eyepoint node (so it tracks turret yaw /
+   * animation). depthTest off + high renderOrder -> visible through the hull at
+   * every angle, matching the in-game dot. Only built for snipeable craft. */
+  _applySnipeMarker() {
+    this._clearSnipeMarker();
+    if (!this._model || !this._snipeDef || !this._snipeDef.canSnipe) return;
+    const node = this._findEyepointNode();
+    if (!node) return;
+    const scale = clamp((this._radius || 1) * SNIPE_FRAC, SNIPE_MIN, SNIPE_MAX);
+    const color = new THREE.Color(SNIPE_COLOR);
+    const group = new THREE.Group();
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._glowTex(), color, transparent: true, opacity: 0.95,
+      depthTest: false, depthWrite: false,
+    }));
+    glow.scale.set(scale, scale, 1);
+    glow.renderOrder = 7;
+    group.add(glow);
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this._glowTex(), color: 0xffffff, transparent: true, opacity: 0.9,
+      depthTest: false, depthWrite: false,
+    }));
+    const cs = scale * SNIPE_CORE_SCALE;
+    core.scale.set(cs, cs, 1);
+    core.renderOrder = 8;
+    group.add(core);
+    node.add(group);
+    this._snipeMarker = group;
+    this._applySnipeOn();
+  }
+
+  _clearSnipeMarker() {
+    if (this._snipeMarker) {
+      if (this._snipeMarker.parent) this._snipeMarker.parent.remove(this._snipeMarker);
+      this._snipeMarker.traverse((o) => {
+        if (o.isSprite && o.material) o.material.dispose();
+      });
+      this._snipeMarker = null;
+    }
+  }
+
+  _applySnipeOn() {
+    if (this._snipeMarker) this._snipeMarker.visible = this._snipeOn;
+  }
+
+  hasSnipePoint() {
+    return !!(this._snipeDef && this._snipeDef.canSnipe && this._findEyepointNode());
+  }
+
+  getSnipePointOn() { return this._snipeOn; }
+
+  setSnipePoint(on) {
+    this._snipeOn = !!on;
+    this._applySnipeOn();
   }
 
   /* ---- Flight mode (ODF flightAltitude -- APC / Bomber / SAV) ------------- */
@@ -3330,6 +3417,7 @@ export class ObjectViewer {
     this.resetArticulation();
     this.clearTeamColor();
     this.setShipLights(true);   // authored lights default ON
+    this.setSnipePoint(false);  // analysis overlay -> off
     this.highlightHardpoints(null);
     this._snapFlightGrounded(); // Fly -> off, instant (camera snaps home below)
     this.setTrueLighting(false);   // back to the stylized default gloss (async)
@@ -3389,6 +3477,9 @@ export class ObjectViewer {
     this._turretYawDeg = 0; this._turretPitchDeg = 0; this._applyTurret();
     this._recoilClock = 0;
     for (const rec of this._artRecoil) rec.node.position.copy(rec.restPos);
+    // Snipe-point overlay -> hidden for canonical thumbnails (restored below).
+    const prevSnipe = this._snipeOn;
+    if (this._snipeMarker) this._snipeMarker.visible = false;
     // Capture the whole model regardless of any hidden part groups; remember the
     // current per-group visibility so the user's filter is restored afterward.
     const prevPartVisible = this._partGroups.map((g) => ({ id: g.id, visible: g.visible }));
@@ -3477,6 +3568,8 @@ export class ObjectViewer {
     this._applyTurret();
     this._aimMode = prevAim;
     this.setDrive(prevDrive);
+    this._snipeOn = prevSnipe;
+    this._applySnipeOn();
     for (const p of prevPartVisible) this.setPartVisible(p.id, p.visible);
     await this.setQuality(prevQuality);
     return shots;
@@ -3631,6 +3724,7 @@ export class ObjectViewer {
 
   dispose() {
     this.disposed = true;
+    this._clearSnipeMarker();
     this._disposeMixer();
     this.renderer.setAnimationLoop(null);
     window.removeEventListener('resize', this._onResize);
