@@ -147,6 +147,17 @@ const SNIPE_CORE_SCALE = 0.45;       // hot white core over the red glow
 // Cockpit-window tint shown alongside the orb (in-game the canopy glass glows
 // red for an enemy). Applied as an additive emissive on the glass material.
 const SNIPE_COCKPIT_INTENSITY = 0.8;
+// The hp_eyepoint helper node sits at the pilot's head (slightly above + behind
+// the canopy glass), but the in-game snipe dot reads on the cockpit SURFACE.
+// Blend the orb from the eyepoint toward the cockpit-glass centroid so it lands
+// where players expect (0 = raw node, 1 = glass centroid). Only when a cockpit
+// is detected; ships without one keep the orb at the true node.
+const SNIPE_COCKPIT_BLEND = 0.5;
+// Final calibration nudge (fractions of model radius), applied after the blend:
+// a small downward settle toward the gun. The eyepoint already sits directly
+// above the gun horizontally, so no Z (forward/back) nudge is needed.
+const SNIPE_EXTRA_DOWN_FRAC = 0.01;
+const SNIPE_EXTRA_IN_FRAC = 0.0;
 const DEG = Math.PI / 180;
 const CANONICAL_ANGLES = [
   // [name, azimuthDeg, elevationDeg] -- mirrors scripts/object-render/msh_thumbnail.ANGLES
@@ -1704,7 +1715,35 @@ export class ObjectViewer {
     group.add(core);
     node.add(group);
     this._snipeMarker = group;
+    this._positionSnipeMarker(node, group);
     this._applySnipeOn();
+  }
+
+  /* The eyepoint node is at the pilot's head; nudge the orb toward the cockpit
+   * glass centroid so it reads on the canopy SURFACE like the in-game dot. The
+   * offset is stored in the node's local frame, so it tracks the node. Ships
+   * with no detected cockpit keep the orb on the raw node. */
+  _positionSnipeMarker(node, group) {
+    group.position.set(0, 0, 0);
+    this.scene.updateMatrixWorld(true);
+    const world = node.getWorldPosition(new THREE.Vector3());
+    // Blend down toward the canopy-glass centroid (when a cockpit is detected).
+    if (this._cockpitMeshes.length && SNIPE_COCKPIT_BLEND > 0) {
+      const box = new THREE.Box3();
+      let any = false;
+      for (const m of this._cockpitMeshes) {
+        const b = new THREE.Box3().setFromObject(m);
+        if (!b.isEmpty()) { box.union(b); any = true; }
+      }
+      if (any) world.lerp(box.getCenter(new THREE.Vector3()), SNIPE_COCKPIT_BLEND);
+    }
+    // Calibration nudge in model axes (upright at load): down + inward (-Z) so
+    // the orb sits just above the protruding gun like the in-game dot.
+    const r = this._radius || 1;
+    world.y -= SNIPE_EXTRA_DOWN_FRAC * r;
+    world.z -= SNIPE_EXTRA_IN_FRAC * r;
+    node.worldToLocal(world);   // -> node-local offset (tracks the node)
+    group.position.copy(world);
   }
 
   _clearSnipeMarker() {
