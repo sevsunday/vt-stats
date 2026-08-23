@@ -91,8 +91,13 @@ The map registry is built at the end of every pipeline run. It's idempotent: per
 | `--no-sync` | Skip git pull + mirror; process only what's already in `data/sessions/`. Use offline. |
 | `--sync-only` | Sync then exit; don't process. |
 | `--force` | Ignore the per-match cache; reprocess every match. Composes with sync flags. |
+| `--no-prompt` | Skip the outcome-review prompts (automation/CI). Unreviewed matches publish with their interim resolution and prompt on the next interactive run. |
+| `--force-prompt` | Prompt even without a TTY (testing aid: answers read from piped stdin; EOF defers the rest). Mutually exclusive with `--no-prompt`. |
+| `--adjudicate-all` | Widen outcome review to the pre-v3 legacy corpus (optional winner backfill; default reviews proto v3+ matches only). |
 
 `--no-sync` and `--sync-only` are mutually exclusive. Missing `statsgate/` is a soft-skip (supports the manual-drop-only workflow without `--no-sync`); failed `git pull` is a hard-fail with a `--no-sync` hint. Sync is strictly additive — never deletes from `data/sessions/`, never overwrites existing files (size-mismatch warns), so local-only submitter folders are preserved.
+
+**The pipeline is interactive by default for new data** (v16): every proto v3+ match not yet in `data/match_outcome_adjudications.json` prompts once for a human outcome sign-off (see the Match Winner section + `scripts/adjudication.py`). Any automation invoking the pipeline must pass `--no-prompt` or it will appear to hang waiting on stdin when new matches arrive.
 
 The cache key is `(match.submitter, match.source_file, match.source_size_bytes)` plus a top-level `PIPELINE_VERSION` constant (currently `1`). **Bump `PIPELINE_VERSION` whenever `process_match()` or any helper it transitively calls (positioning, highlights, weapon meta, rivalry matrices, `_extract_contribution`, etc.) changes output semantics.** Stale cache entries are reprocessed automatically. The version is orthogonal to `match.schema_version`: that one is a frontend contract (read by `js/app.js` to gate rendering); `pipeline_version` is an internal cache invalidator. If you ever forget to bump and notice stale data in the dashboard, run with `--force` once to rebuild from scratch.
 
@@ -100,16 +105,17 @@ The cache key is `(match.submitter, match.source_file, match.source_size_bytes)`
 
 ## 2. Data Schema — Protobuf
 
-The raw match data uses Protocol Buffers (protobuf). Two schema versions are supported simultaneously:
+The raw match data uses Protocol Buffers (protobuf). Three schema versions are supported simultaneously:
 
-- **v2 (current)** — `scripts/statsgate.proto`. The definitive reference for new code. Unified `DamageDealt` (carries both sides on one event), new `Race` enum on `StatHeader`, `shutdown_requested` / `team1_race` / `team2_race` header fields, `BulletHit.distance_to_target`.
-- **v1 (legacy)** — `scripts/statsgate_v1.proto`. Frozen verbatim snapshot of the pre-Nomad schema. Used only by the dual-descriptor fallback path so pre-Nomad sessions still decode byte-identically.
+- **v3 (current)** — `scripts/statsgate.proto`. The definitive reference for new code. Replaces the v2 header identity maps (fields 6/7/9/10, now `reserved`) with `repeated PlayerInfo players = 22` — a roster the collector accumulates by scanning all 10 slots **every tick** (fixes the host-not-detecting-players bug; captures late joiners). Adds `Outcome game_outcome = 21` (host-attested end-of-game dialog result) and the `PlayerInfo` message. Event messages unchanged from v2.
+- **v2 (frozen, 2026-04..08 era)** — `scripts/statsgate_v2.proto` (package `statsgate_v2`). Unified `DamageDealt` (carries both sides on one event), `Race` enum on `StatHeader`, `shutdown_requested` / `team1_race` / `team2_race` header fields, `BulletHit.distance_to_target`, and the header identity maps. Frozen snapshot used by the fallback decode path so the v2-era corpus keeps its identity maps readable (the v3 descriptor drops them as reserved fields).
+- **v1 (legacy)** — `scripts/statsgate_v1.proto` (package `statsgate_v1`). Frozen verbatim snapshot of the pre-Nomad schema (separate `DamageDealt`/`DamageReceived` pairs). Used only by the fallback path so pre-Nomad sessions still decode byte-identically.
 
-Decode-time discrimination:
-- **Python** (`scripts/process_stats.py::load_session`) parses with v2 first, then checks `header.team1_race != 0 || team2_race != 0` (v2-only signal) or scans for any `WhichOneof('event_type') is None` event (v1's `damage_received` lands here under v2's `reserved 4`). v1 detection re-parses with the v1 descriptor.
-- **JS** (`js/raw-browser.js::fetchAndDecodeBinpb`) tries v2 first; protobufjs throws on the wire-type collision, so a simple try/catch falls back to v1.
+Decode-time discrimination (**v2-vs-v3 has no wire-type conflicts in either direction, so parse success proves nothing — presence checks are mandatory**):
+- **Python** (`scripts/process_stats.py::load_session`) parses with v3 first; `header.players` non-empty → v3. Otherwise re-parses with the frozen v2 descriptor and runs the pre-existing dance: `header.team1_race != 0 || team2_race != 0` (v2-only signal) → v2, or any `WhichOneof('event_type') is None` event (v1's `damage_received` under `reserved 4`) → re-parse with the v1 descriptor.
+- **JS** (`js/raw-browser.js::fetchAndDecodeBinpb`) tries v3 first; protobufjs throws on the v1 wire-type collision, so try/catch handles v1. On success, `header.players` non-empty → v3, else lazy-load the frozen v2 descriptor and re-decode → v2 (accepted cost: one extra decode per legacy v2 match view).
 
-Detected schema is stamped onto every output as `match.proto_schema_version` (`"v1"` | `"v2"`). The pipeline normalizes both schemas to a single internal `DamageEvent` shape so downstream aggregators are schema-agnostic. UI never branches on the schema label.
+Detected schema is stamped onto every output as `match.proto_schema_version` (`"v1"` | `"v2"` | `"v3"`). The pipeline normalizes all three schemas to a single internal shape — the `DamageEvent` adapter for the v1/v2 damage layouts, and the `_build_identity_maps()` shim for the v2-maps-vs-v3-roster identity split — so downstream aggregators are schema-agnostic. UI never branches on the schema label.
 
 ### Top-Level Message: `ClientStatSession`
 
@@ -124,14 +130,14 @@ Detected schema is stamped onto every output as `match.proto_schema_version` (`"
 |---|---|---|---|
 | 1 | `map` | `string` | Map filename (e.g. `havenvsr.bzn`) |
 | 2 | `start_time` | `google.protobuf.Timestamp` | Match start time (UTC) |
-| 3 | `author_nickname` | `string` | Recording player's name |
+| 3 | `author_nickname` | `string` | Recording player's name. **v3 note:** set at last-tick and currently resolves to `'Unknown'` (upstream nit); the pipeline derives submitter identity from the sessions folder name instead. |
 | 4 | `author_steam64` | `uint64` | Recording player's Steam64 ID |
 | 5 | `tick_rate` | `uint32` | Simulation tick rate (typically 20) |
-| 6 | `s64_to_nick` | `map<uint64, string>` | Steam64 → Nickname |
-| 7 | `teamnum_to_s64` | `map<int32, uint64>` | Slot (1-10) → Steam64 |
+| 6 | `s64_to_nick` | `map<uint64, string>` | **v1/v2 only — `reserved` in v3.** Steam64 → Nickname |
+| 7 | `teamnum_to_s64` | `map<int32, uint64>` | **v1/v2 only — `reserved` in v3.** Slot (1-10) → Steam64 |
 | 8 | `active_config_mod` | `string` | Server configuration mod identifier |
-| 9 | `s64_to_teamnum` | `map<uint64, int32>` | Steam64 → Slot (reverse of field 7) |
-| 10 | `player_count` | `uint32` | Number of players in the match |
+| 9 | `s64_to_teamnum` | `map<uint64, int32>` | **v1/v2 only — `reserved` in v3.** Steam64 → Slot (reverse of field 7) |
+| 10 | `player_count` | `uint32` | **v1/v2 only — `reserved` in v3.** Number of players in the match |
 | 11 | `last_tick` | `uint32` | Final game tick (0 if not populated by collector) |
 | 12 | `terrain_min_x` | `float` | World-space minimum X (west edge). Axis convention: +X East, +Y Up, +Z North |
 | 13 | `terrain_max_x` | `float` | World-space maximum X (east edge) |
@@ -139,11 +145,13 @@ Detected schema is stamped onto every output as `match.proto_schema_version` (`"
 | 15 | `terrain_max_y` | `float` | World-space maximum Y (highest elevation) |
 | 16 | `terrain_min_z` | `float` | World-space minimum Z (south edge) |
 | 17 | `terrain_max_z` | `float` | World-space maximum Z (north edge) |
-| 18 | `shutdown_requested` | `bool` | **v2-only.** `true` when the stat session was cancelled mid-game via mission script or console command; `false` for normal end. v1 sessions emit default `false`. |
-| 19 | `team1_race` | `Race` enum | **v2-only.** Team 1's faction (`RACE_UNSPECIFIED` / `RACE_ISDF` / `RACE_SCION` / `RACE_HADEAN`). Authoritative when set; v1 always reports `RACE_UNSPECIFIED`. |
-| 20 | `team2_race` | `Race` enum | **v2-only.** Team 2's faction. Same semantic as team1_race. |
+| 18 | `shutdown_requested` | `bool` | **v2+.** `true` when the stat session was cancelled mid-game via mission script or console command; `false` for normal end. v1 sessions emit default `false`. |
+| 19 | `team1_race` | `Race` enum | **v2+.** Team 1's faction (`RACE_UNSPECIFIED` / `RACE_ISDF` / `RACE_SCION` / `RACE_HADEAN`). Authoritative when set; v1 always reports `RACE_UNSPECIFIED`. |
+| 20 | `team2_race` | `Race` enum | **v2+.** Team 2's faction. Same semantic as team1_race. |
+| 21 | `game_outcome` | `Outcome` enum | **v3-only.** Host-attested outcome from the end-of-game dialog: `OUTCOME_UNSPECIFIED = 0` (no answer), `TEAM1_WIN = 1000`, `TEAM2_WIN = 1001`, `DRAW = 1002`, `GAME_CANCELLED = 1003` (1000-series values double as Win32 TaskDialog button IDs upstream). Out-of-enum values possible (e.g. `IDCANCEL = 2` if the host ESCs the dialog) — treated as unattested. Combined with kill-feed inference via `resolve_match_outcome()`'s evidence-first trust ladder. |
+| 22 | `players` | `repeated PlayerInfo` | **v3-only.** Per-tick-accumulated roster: `{steam64, teamnum, nickname}` per player observed in any slot at any tick (replaces the identity maps; captures late joiners; nickname = first-recorded). Hash-ordered on the wire (NOT first-seen order). May contain garbage entries with invalid Steam64s from EMPTY slots (collector scans without a player-handle guard) — the pipeline's `_valid_steam64` gate drops them. |
 
-All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions, edition-2023 implicit field presence). The pipeline treats all-zero as "unset" and falls back to observed player extents for `map_bounds`. The v2-only fields (#18-20) emit defaults on v1 sessions because the field numbers don't exist in `statsgate_v1.proto` (protobuf returns the type default after a v1 decode).
+All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions, edition-2023 implicit field presence). The pipeline treats all-zero as "unset" and falls back to observed player extents for `map_bounds`. The v2+ fields (#18-20) emit defaults on v1 sessions and the v3-only fields (#21-22) emit defaults on v1/v2 sessions because those field numbers don't exist in the earlier descriptors (protobuf returns the type default after decode; Python code accesses `game_outcome` via `getattr(header, "game_outcome", 0)` since the v1/v2 descriptor classes lack the attribute entirely).
 
 Team convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
 
@@ -303,18 +311,19 @@ The raw data is produced by [statsgate](https://github.com/VTrider/statsgate), a
 - **Collision damage excluded**: `DAMAGE_TYPE_COLLISION` events are filtered at the source — they never appear in the data.
 - **Identical amounts**: `DamageDealt.amount` and `DamageReceived.amount` are always the same value (`dmg.value` in the engine).
 - **Nullable ordnance_odf**: `ordnance_odf` can be null for water damage and other environmental effects.
-- **Player-only bullet events**: `BulletInit` and `BulletHit` are only recorded for recognized players (those in `s64_to_nick`). AI/structure shots are not tracked.
-- **Header snapshot**: The header is captured at `first_tick` — player joins/leaves after that point are NOT reflected in team lists. This is a known limitation.
+- **Player-only bullet events**: `BulletInit` and `BulletHit` are only recorded for recognized players. v1/v2 gated on first-tick `s64_to_nick` membership; v3 gates on a non-zero Steam64 (late joiners' shots now record). AI/structure shots are not tracked.
+- **Header roster snapshot (v1/v2 only)**: the v1/v2 header identity maps were captured at `first_tick` — player joins/leaves after that point are NOT reflected, and players the host's first-tick scan missed are permanently absent (the bug v3's per-tick scan fixes). v3's `players` roster accumulates across the whole match.
+- **v3 collector data gaps (first batch, upstream exu2 hook regression)**: zero `BulletHit` events (bullets fire via `BulletInit` but no hits land on the wire — accuracy/range/structure-FIFO data unavailable; see `match.has_bullet_hit_data`), zero `pickup_powerup` events, and `unit_sniped` events with every field blank except `tick`. The pipeline degrades gracefully via availability flags; upstream has been notified.
 - **File format**: Data is saved as `.binpb.gz` (gzip-compressed protobuf).
 
 ### Player Identity
 
-Players are identified by `uint64` Steam64 IDs. The header provides three maps:
-- `s64_to_nick` (Steam64 → nickname)
-- `teamnum_to_s64` (slot → Steam64)
-- `s64_to_teamnum` (Steam64 → slot, reverse of above)
+Players are identified by `uint64` Steam64 IDs. The identity source depends on schema:
 
-The pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick`.
+- **v1/v2**: the header provides three maps — `s64_to_nick` (Steam64 → nickname), `teamnum_to_s64` (slot → Steam64), `s64_to_teamnum` (reverse).
+- **v3**: the maps are `reserved`; identity comes from the `header.players` PlayerInfo roster via `_build_identity_maps()` in [scripts/process_stats.py](scripts/process_stats.py), which (a) drops entries failing the `_valid_steam64` gate (`(s64 >> 32) == 0x01100001` — the v3 collector emits garbage Steam64s for EMPTY slots because it scans without a player-handle guard), and (b) resolves slot conflicts (two valid Steam64s claiming one `teamnum` via leave/rejoin churn) by earliest first-appearance in the UpdateTick stream, recording displaced claimants in `match.roster_conflicts`. The raw roster (including invalid entries, flagged `valid: false`) is preserved on `match.roster` for provenance.
+
+Either way the shim yields the same three working dicts, and the pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick` — everything downstream is schema-blind.
 
 **Account reroutes (shared-PC handling).** A module-level `ACCOUNT_REROUTES` table in [scripts/process_stats.py](scripts/process_stats.py) maps "owner" Steam64s to nick-pattern rules that rewrite the slot's identity to a target Steam64 at the top of `process_match()` (when a different real player borrows someone's Steam account). The rewrite touches the three local identity dicts above AND every player-id field across the proto event stream BEFORE any aggregator runs, so the per-match leaderboard, ELO, positioning, highlights, kill feed, contributions extractor, and career rollup all attribute to the rerouted player without per-consumer changes. Surfaced on the dashboard as a small `via dd` chip on the leaderboard row and as a provenance banner on the Raw Data Browser's processed tier (tiers 1 and 2 remain byte-accurate to the source recording). Full mechanism, regex semantics, schema, and corpus audit in [§10.3 of DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#103-account-reroutes-matchschema_version-7). Bumps `match.schema_version` to 7 and `PIPELINE_VERSION` to 17.
 
@@ -330,21 +339,22 @@ Every dashboard card has an expand button (`data-expand="section-id"`) that open
 
 ### When the Schema Changes
 
-1. Replace `scripts/statsgate.proto` with the new version
-2. Recompile **both** Python descriptors:
-   - `python -m grpc_tools.protoc --proto_path=scripts --python_out=scripts scripts/statsgate.proto`
-   - The legacy descriptor (`scripts/statsgate_v1.proto` + `scripts/statsgate_v1_pb2.py`) is normally frozen — only regenerate if you're backporting a bugfix to the v1 corpus
-3. Regenerate **both** protobufjs descriptors:
-   - `npx pbjs -t json scripts/statsgate.proto -o vendor/protobufjs/statsgate.proto.json`
-   - `npx pbjs -t json scripts/statsgate_v1.proto -o vendor/protobufjs/statsgate_v1.proto.json` (only when v1 changes)
+0. **If the new schema removes/reshapes fields the existing corpus depends on** (the v3 precedent), FIRST freeze the outgoing schema: copy it to `scripts/statsgate_vN.proto` with the package renamed to `statsgate_vN` (avoids descriptor-pool symbol collisions), generate `statsgate_vN_pb2.py` + `vendor/protobufjs/statsgate_vN.proto.json`, and extend the decode chains in `load_session()` / `js/raw-browser.js`.
+1. Replace `scripts/statsgate.proto` with the new version (verbatim upstream mirror)
+2. Recompile the **current** Python descriptor:
+   - `python -m grpc_tools.protoc --proto_path=scripts --python_out=scripts statsgate.proto`
+   - The frozen descriptors (`statsgate_v1.proto` / `statsgate_v1_pb2.py`, `statsgate_v2.proto` / `statsgate_v2_pb2.py`) only regenerate if you're backporting a bugfix to the legacy corpus
+3. Regenerate the **current** protobufjs descriptor:
+   - `npx -y -p protobufjs-cli pbjs -t json scripts/statsgate.proto > vendor/protobufjs/statsgate.proto.json` (invoke `protobufjs-cli` explicitly — a bare `npx pbjs` can resolve to an unrelated npm package; on PowerShell, run the redirect through `cmd /c` so the JSON isn't written as UTF-16)
+   - Frozen JSONs (`statsgate_v1.proto.json`, `statsgate_v2.proto.json`) only when the corresponding frozen proto changes
 4. Follow `.cursor/rules/schema-migration.mdc` checklist
 5. Update `process_stats.py` to handle new/changed event types
 6. Update `js/raw-browser.js` to handle new event arms (chips, Reconcile, etc.)
-7. Re-run `scripts/verify_proto_decode.mjs` on one v1 file AND one v2 file to confirm dual-decode still agrees with the Python pipeline
-8. Re-run the pipeline and verify output (parity on v1 corpus, first-process on v2)
+7. Re-run `scripts/verify_proto_decode.mjs` on one v1 file, one v2 file, AND one v3 file to confirm the triple-decode still agrees with the Python pipeline
+8. Re-run the pipeline and verify output (byte-parity on the v1/v2 corpus, first-process on v3)
 9. Update this document and `.cursor/rules/data-schema.mdc`
 
-The dual-descriptor strategy means every v1 session must continue to decode and produce byte-identical processed JSON. Add a parity test to your migration plan: copy a representative v1 processed JSON to `_before.json`, reprocess after the schema change, and diff — the only differences must be the version bumps and any new optional fields you're intentionally adding.
+The triple-descriptor strategy means every v1/v2 session must continue to decode and produce byte-identical processed JSON. Add a parity test to your migration plan: reprocess the corpus after the schema change (`--force`) and `git diff data/processed` — the only differences must be the version bumps and any new optional fields you're intentionally adding. Remember detection ordering: parse-failure only identifies v1; v2-vs-v3 requires the `header.players` presence check (no wire conflicts in either direction).
 
 ### Future Schema Considerations
 
@@ -476,12 +486,22 @@ Same-name collisions inside a match — including `_vsr` siblings of stock units
 
 `has_pickup_data` (Phase 3) is `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. Mirrored on `match`, `meta`, and the manifest entry.
 
-`schema_version` (Phase 3) is the per-match output schema version. `1` = Phase 3 baseline; `2` adds the top-level `highlights` block (see "Match Highlights" below); `3` adds `match.team_factions` and `match.winner` (per-team faction labels + match outcome inference — see [§9 Team Faction Detection in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#9-team-faction-detection)); `4` adds the v2.3 PvP/PvE leaderboard fields and per-ship combat blocks; `5` adds the proto v2 capture fields (`proto_schema_version`, `shutdown_requested`, `bullet_hit_distance`). Absence means legacy data (anything written before this PR). Bump when an output-shape-breaking change ships.
+`schema_version` (Phase 3) is the per-match output schema version. `1` = Phase 3 baseline; `2` adds the top-level `highlights` block (see "Match Highlights" below); `3` adds `match.team_factions` and `match.winner` (per-team faction labels + match outcome inference — see [§9 Team Faction Detection in docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md#9-team-faction-detection)); `4` adds the v2.3 PvP/PvE leaderboard fields and per-ship combat blocks; `5` adds the proto v2 capture fields (`proto_schema_version`, `shutdown_requested`, `bullet_hit_distance`); versions 6–14 are documented at their feature sections (exclusion flags, reroutes, self-damage carve-out, at-base lift, hp/ammo trails, range histograms, effective kills, pilot-victim exclusion); **`15` is the proto v3 migration** — extended `winner` shape (attestation fields + `attested`/`draw`/`cancelled` decided_by values), new `game_outcome` / `roster` / `roster_conflicts` / `has_bullet_hit_data` fields. Absence means legacy data. Bump when an output-shape-breaking change ships.
 
 The schema_version=5 fields are capture-only — UI never branches on them:
-- **`proto_schema_version`** — debugging telemetry, `"v1"` or `"v2"`, detected by `load_session()`. Stamped here so the Raw Browser / verify scripts can cross-reference which descriptor was used.
+- **`proto_schema_version`** — debugging telemetry, `"v1"` / `"v2"` / `"v3"`, detected by `load_session()`. Stamped here so the Raw Browser / verify scripts can cross-reference which descriptor was used.
 - **`shutdown_requested`** — `true` when the match ended because the stat session was cancelled mid-game. v1 sessions always report `false` (the proto field doesn't exist).
-- **`bullet_hit_distance`** — per-match summary of v2's `BulletHit.distance_to_target` (in world units). `count` is total BulletHits seen; `with_distance` is the subset with `distance_to_target > 0`; `mean`/`max` are `null` on v1 sessions (no distance data on the wire). See `distance_to_target.txt` at the repo root for planned future uses.
+- **`bullet_hit_distance`** — per-match summary of v2+'s `BulletHit.distance_to_target` (in world units). `count` is total BulletHits seen; `with_distance` is the subset with `distance_to_target > 0`; `mean`/`max` are `null` on v1 sessions (no distance data on the wire). See `distance_to_target.txt` at the repo root for planned future uses.
+
+The schema_version=16 fields (human outcome adjudication):
+- **`winner.adjudicated`** — `true` once the pipeline operator signed off on this match's outcome via the console review prompt (every proto v3+ match prompts once; answers persist in the committed `data/match_outcome_adjudications.json`, keyed by match id). Confirming the current resolution keeps its `decided_by`; overriding or supplying one sets the fourth team-win value **`decided_by: "adjudicated"`**; draws/cancellations reuse the v15 values + the flag; `u` (Unknown) signs off while leaving the block `unclear`. Application/reconciliation are pure winner-block rewrites in `scripts/adjudication.py` — provenance fields are never touched. Manifest mirror: `winner_adjudicated`.
+
+The schema_version=15 fields (proto v3 migration):
+- **`winner`** (extended) — now resolved by `resolve_match_outcome()`, which combines the v3 host attestation with the kill-feed inference through an **evidence-first trust ladder**: attested `GAME_CANCELLED` always wins (validity statement; ELO-excluded) → a `clean_win` inference beats a contradicting attestation (`disputed: true`, `agreement: false`, warning glyph in the UI) → attested team wins / draws resolve contested/unclear inferences → no usable attestation (pre-v3, `UNSPECIFIED`, out-of-enum like ESC's `IDCANCEL=2`) passes the inference through verbatim. `decided_by` ∈ `attested` / `clean_win` / `contested` / `unclear` / `draw` / `cancelled`; new sibling fields `attested` / `disputed` / `agreement` / `inferred` (raw inference preserved whenever an attestation existed). `team`/`loser` are `null` for unclear/draw/cancelled so no-winner outcomes naturally stay out of win-rate denominators.
+- **`game_outcome`** — raw attestation telemetry (Outcome enum name string or `null`). The interpreted result lives on `winner`; the UI reads this only for the disputed-badge tooltip.
+- **`roster`** — raw v3 PlayerInfo passthrough `[{steam64, slot, nickname, valid}]` including invalid empty-slot garbage entries (`valid: false`) for wire-accurate provenance; pre-`ACCOUNT_REROUTES`; `null` on v1/v2 matches.
+- **`roster_conflicts`** — displaced valid claimants from slot-churn tie-breaks (`[]` normally).
+- **`has_bullet_hit_data`** — collector-gap availability flag (`false` when the v3 collector recorded zero BulletHit events). Drives em-dash accuracy rendering, the Sharpshooter gate, aggregator accuracy-sum skips, and the ELO `thug_accuracy` axis availability. Mirrored on manifest entries + contributions.
 
 `team_leaders` is `{ "1": { name, s64 }, "2": { name, s64 } }` capturing the slot-1 / slot-6 commander identities. Drives the picker's Commander/Thug Role facet and the faction scoreboard's `<h6>` headers. Match-global, always-unfiltered.
 
@@ -1418,7 +1438,7 @@ Tier 2 does not exist as an on-disk artifact — it is materialized on demand in
 
 1. `fetch('data/sessions/<submitter>/<basename>.binpb.gz')` — the binpb is served statically, same as the processed JSON.
 2. Gunzip via the native `DecompressionStream('gzip')` API (no vendored lib).
-3. **Dual-descriptor decode.** Try v2 first (`vendor/protobufjs/statsgate.proto.json` → `statsgate.ClientStatSession.decode(bytes)`); on a wire-type error from protobufjs (which is strict), fall back to v1 (`vendor/protobufjs/statsgate_v1.proto.json` → `statsgate_v1.ClientStatSession.decode(bytes)`). The detected schema is stamped on `state.protoSchemaVersion` (`"v1"` | `"v2"`).
+3. **Triple-descriptor decode.** Try the current v3 descriptor first (`vendor/protobufjs/statsgate.proto.json` → `statsgate.ClientStatSession.decode(bytes)`); on a wire-type error from protobufjs (which is strict), fall back to v1 (`vendor/protobufjs/statsgate_v1.proto.json` → `statsgate_v1.ClientStatSession.decode(bytes)`). On success, check `header.players`: non-empty → v3; empty → lazy-load the frozen v2 descriptor (`vendor/protobufjs/statsgate_v2.proto.json` → `statsgate_v2.ClientStatSession`) and re-decode so the identity maps (reserved under v3) are readable. The detected schema is stamped on `state.protoSchemaVersion` (`"v1"` | `"v2"` | `"v3"`). The Steam64 resolver builds from `header.s64ToNick` (v1/v2) or `header.players[]` (v3).
 4. `ClientStatSession.toObject(msg, { longs: String, defaults: false, oneofs: true, bytes: String, enums: String })` → plain JS object suitable for the tree renderer.
    - `longs: String` preserves 64-bit values losslessly (Steam64 IDs).
    - `defaults: false` omits zero-valued scalars — matches the Edition 2023 implicit-presence wire format and the proto's `// undefined if not a player` comment semantics.

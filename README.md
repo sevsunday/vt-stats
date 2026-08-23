@@ -34,6 +34,8 @@ python process_stats.py
 
 This reads every `.binpb.gz` file across all user folders, aggregates per-match statistics, fetches map metadata + top-down images via `scripts/build_map_registry.py`, extracts proto-comment tooltips for the Raw Data Browser, and writes pre-computed JSON + slim per-match contributions to `data/processed/`.
 
+New (proto v3+) matches prompt once in the console for a human **outcome review** (confirm or correct the winner the host selected in-game; answers persist in `data/match_outcome_adjudications.json` and never re-prompt). Pass `--no-prompt` when running unattended — otherwise the pipeline waits on stdin whenever unreviewed matches exist.
+
 ### 3. View the Dashboard
 
 From the **project root** (where `index.html` lives), serve locally:

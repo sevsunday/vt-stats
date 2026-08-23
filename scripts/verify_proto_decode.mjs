@@ -5,16 +5,19 @@
  * header + per-oneof event counts. Compare against the Python pipeline's
  * printed event count for the same file (`python scripts/process_stats.py`).
  *
- * Dual-descriptor strategy: tries the v2 (current) descriptor first, then
- * falls back to v1 (legacy) on a wire-type error. Mirrors the same
- * detection scheme used at runtime in `js/raw-browser.js`. The output
- * includes the detected `schema` field so it's obvious which path
- * succeeded.
+ * Triple-descriptor strategy (mirrors `js/raw-browser.js`):
+ *   1. Try the current (v3) descriptor. protobufjs is strict about
+ *      wire-type collisions, so a v1 file reliably throws -> v1 fallback.
+ *   2. On success, check `header.players`: non-empty -> v3; empty ->
+ *      re-decode with the frozen v2 descriptor so the header identity
+ *      maps (reserved under v3) are readable.
+ * The output includes the detected `schema` field so it's obvious which
+ * path succeeded.
  *
  * Use this whenever `scripts/statsgate.proto` changes: after regenerating
  * the descriptors (see `.cursor/rules/schema-migration.mdc`), run this on
- * both a v1 file and a v2 file to confirm the Node/browser decode path
- * still agrees with the Python pipeline before shipping the new schema.
+ * one file per schema era (v1 / v2 / v3) to confirm the Node/browser
+ * decode path still agrees with the Python pipeline before shipping.
  *
  * One-off setup (not persisted in repo):
  *   npm install --no-save protobufjs@7
@@ -37,27 +40,38 @@ const PROJECT_ROOT = resolve(__dirname, '..');
 
 const target = process.argv[2] || 'data/sessions/VTrider/2026-04-16-01-27-48.binpb.gz';
 const binpbPath = resolve(PROJECT_ROOT, target);
-const descV2Path = resolve(PROJECT_ROOT, 'vendor/protobufjs/statsgate.proto.json');
+const descV3Path = resolve(PROJECT_ROOT, 'vendor/protobufjs/statsgate.proto.json');
+const descV2Path = resolve(PROJECT_ROOT, 'vendor/protobufjs/statsgate_v2.proto.json');
 const descV1Path = resolve(PROJECT_ROOT, 'vendor/protobufjs/statsgate_v1.proto.json');
 
+const descV3 = JSON.parse(readFileSync(descV3Path, 'utf8'));
 const descV2 = JSON.parse(readFileSync(descV2Path, 'utf8'));
 const descV1 = JSON.parse(readFileSync(descV1Path, 'utf8'));
-const TypeV2 = protobuf.Root.fromJSON(descV2).lookupType('statsgate.ClientStatSession');
+const TypeV3 = protobuf.Root.fromJSON(descV3).lookupType('statsgate.ClientStatSession');
+const TypeV2 = protobuf.Root.fromJSON(descV2).lookupType('statsgate_v2.ClientStatSession');
 const TypeV1 = protobuf.Root.fromJSON(descV1).lookupType('statsgate_v1.ClientStatSession');
 
 const gzBytes = readFileSync(binpbPath);
 const rawBytes = gunzipSync(gzBytes);
 
 const t0 = Date.now();
-let schema = 'v2';
-let decodeType = TypeV2;
+let schema = 'v3';
+let decodeType = TypeV3;
 let msg = null;
 try {
-  msg = TypeV2.decode(rawBytes);
+  msg = TypeV3.decode(rawBytes);
 } catch (e) {
   schema = 'v1';
   decodeType = TypeV1;
   msg = TypeV1.decode(rawBytes);
+}
+if (schema === 'v3' && !(msg.header && msg.header.players && msg.header.players.length > 0)) {
+  // v2-vs-v3 presence check: no wire conflicts in either direction, so a
+  // legacy v2 file decodes "cleanly" under v3 with its identity maps
+  // dropped as reserved fields. Re-decode with the frozen v2 descriptor.
+  schema = 'v2';
+  decodeType = TypeV2;
+  msg = TypeV2.decode(rawBytes);
 }
 // Mirror the raw-browser.js conversion options so this test validates the
 // exact shape the browser produces.
@@ -123,10 +137,16 @@ const headerSummary = {
   terrain_max_y: header.terrainMaxY,
   terrain_min_z: header.terrainMinZ,
   terrain_max_z: header.terrainMaxZ,
-  // v2-only header fields. v1 sessions emit defaults (unset / 0 / false).
+  // v2+ header fields. v1 sessions emit defaults (unset / 0 / false).
   shutdown_requested: !!header.shutdownRequested,
   team1_race: header.team1Race || 'RACE_UNSPECIFIED',
   team2_race: header.team2Race || 'RACE_UNSPECIFIED',
+  // v3-only header fields. Defaults on v1/v2 sessions.
+  game_outcome: header.gameOutcome || null,
+  players_count: Array.isArray(header.players) ? header.players.length : 0,
+  players_sample: Array.isArray(header.players) && header.players.length
+    ? header.players.slice(0, 2).map(p => ({ steam64: p.steam64, teamnum: p.teamnum, nickname: p.nickname }))
+    : null,
 };
 
 console.log(JSON.stringify({

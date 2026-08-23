@@ -867,12 +867,21 @@ def compute_performance_index(
     has_target_lock = bool(
         (match_data.get("match") or {}).get("has_target_lock_data")
     )
+    # v15 collector-gap gate: the first v3-collector batch records zero
+    # BulletHit events (upstream exu2 hook regression), so every player's
+    # accuracy is a degenerate 0 -- z-scoring that is meaningless. Treat
+    # the axis as unavailable (None -> weight redistribution), exactly
+    # like target_lock_pct on pre-target-lock sessions. Defaults True so
+    # pre-v15 match JSONs (field absent) keep their accuracy axis.
+    has_bullet_hit = bool(
+        (match_data.get("match") or {}).get("has_bullet_hit_data", True)
+    )
 
     # Per-axis raw values keyed by axis name; None entries trigger weight redistribution.
     raw: dict[str, list[float] | None] = {
         "net_damage_share": _net_damage_share_lobby(lobby),
         "thug_kill_rate":   _thug_kill_rate_lobby(lobby, minutes),
-        "thug_accuracy":    _thug_accuracy_lobby(lobby),
+        "thug_accuracy":    _thug_accuracy_lobby(lobby) if has_bullet_hit else None,
         "thug_efficiency":  _thug_efficiency_lobby(lobby),
         "pve_share":        _pve_share_lobby(lobby),
         "mobility":         _mobility_lobby(lobby, pos_players),
@@ -1154,6 +1163,10 @@ def _rating_pass(
     excluded_low_player_count = 0
     excluded_short_duration   = 0
     excluded_no_winner        = 0  # reserved (alpha-blend slot); always 0 in v1
+    # v15: host-attested GAME_CANCELLED matches (early RE / crash / restart
+    # per the collector's outcome dialog). Real combat may have occurred,
+    # so the match stays visible everywhere else -- but it doesn't rate.
+    excluded_cancelled        = 0
     # v2.5: per-row exclusion counters (independent of match-level
     # exclusions above). A row hitting both flags is counted in both
     # counters but excluded once from the rated lobby either way.
@@ -1203,24 +1216,26 @@ def _rating_pass(
             and not (exclude_commanders and p.get("is_commander"))
         ]
 
-        # Player count < 6 OR duration < 240s → emit excluded history row, no rating change.
-        excluded = False
+        # Match-level gates: player count < 6, duration < 240s, or a
+        # host-attested cancellation (v15 winner.decided_by == "cancelled")
+        # → emit excluded history row, no rating change.
+        exclusion_reason = None
         if (m.get("player_count", 0) or 0) < ELO_MIN_PLAYER_COUNT:
             excluded_low_player_count += 1
-            excluded = True
+            exclusion_reason = "low_player_count"
         elif (m.get("duration_sec", 0) or 0) < ELO_MIN_DURATION_SEC:
             excluded_short_duration += 1
-            excluded = True
+            exclusion_reason = "short_duration"
+        elif ((m.get("winner") or {}).get("decided_by")) == "cancelled":
+            excluded_cancelled += 1
+            exclusion_reason = "cancelled"
 
-        if excluded:
+        if exclusion_reason is not None:
             history_entries.append({
                 "match_id":        match_id,
                 "match_date":      match_date,
                 "match_excluded":  True,
-                "exclusion_reason": (
-                    "low_player_count" if (m.get("player_count", 0) or 0) < ELO_MIN_PLAYER_COUNT
-                    else "short_duration"
-                ),
+                "exclusion_reason": exclusion_reason,
                 "deltas": [],
             })
             continue
@@ -1499,6 +1514,9 @@ def _rating_pass(
         "matches_excluded_low_player_count": excluded_low_player_count,
         "matches_excluded_short_duration":   excluded_short_duration,
         "matches_excluded_no_winner":        excluded_no_winner,
+        # v15: host-attested GAME_CANCELLED matches (see the match-level
+        # gate above). 0 for the entire pre-v3 corpus.
+        "matches_excluded_cancelled":        excluded_cancelled,
         # v2.5: row-level (not match-level) exclusion counters. A row
         # hitting both flags is counted in both keys. Key naming
         # diverges from matches_excluded_* intentionally so consumers

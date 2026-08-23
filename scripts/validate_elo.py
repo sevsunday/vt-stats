@@ -844,7 +844,14 @@ def _gather_clean_win_matches(
         winner_block = (match_data.get("match") or {}).get("winner") or {}
         decided_by = winner_block.get("decided_by")
         winner_team = winner_block.get("team")
-        if decided_by != "clean_win":
+        # v15: host-attested team wins ("attested") join the eligibility set
+        # alongside clean_win inference -- real ground-truth labels from the
+        # proto v3 outcome dialog. Contested/unclear/draw stay out; disputed
+        # clean_wins stay IN (physical evidence overrode a contradicting
+        # attestation, so the inference is the trusted label). v16 adds
+        # "adjudicated" -- reviewer-confirmed team wins from the pipeline's
+        # outcome-review prompt, the strongest label of all.
+        if decided_by not in ("clean_win", "attested", "adjudicated"):
             continue
         if winner_team not in (1, 2):
             continue
@@ -901,6 +908,9 @@ def _gather_clean_win_matches(
             "match_id":        match_id,
             "winner_team":     winner_team,
             "loser_team":      3 - winner_team,
+            # v15: label provenance ("clean_win" inference vs "attested"
+            # host confirmation) so reports can split cohorts.
+            "decided_by":      decided_by,
             "team_R_values":   {1: list(team_R[1]), 2: list(team_R[2])},
             "team_R_mean":     {1: mean(team_R[1]), 2: mean(team_R[2])},
             "team_R_max":      {1: max(team_R[1]), 2: max(team_R[2])},
@@ -1185,8 +1195,24 @@ def count_winner_funnel(
         "missing_per_match_file": 0,
         "winner_block_missing":   0,
         "decided_by_clean_win":   0,
+        # v15: host-attested team wins from the proto v3 outcome dialog.
+        # Ground-truth labels; pooled with clean_win in the winner-anchored
+        # metrics' eligibility set.
+        "decided_by_attested":    0,
+        # v16: reviewer-confirmed team wins from the pipeline's
+        # outcome-review prompt (operator overrode / supplied the outcome).
+        # Also pooled into the eligibility set.
+        "decided_by_adjudicated": 0,
         "decided_by_contested":   0,
         "decided_by_unclear":     0,
+        # v15: attested no-winner outcomes. Never eligible for the
+        # winner-anchored metrics (no winner to predict).
+        "decided_by_draw":        0,
+        # Note: rated history never contains cancelled matches (the ELO
+        # pass excludes them), so no cancelled counter here.
+        # v15: attestation contradicted a clean_win inference (kept as
+        # clean_win with disputed=true). Subset of decided_by_clean_win.
+        "disputed_outcomes":      0,
         "skipped_no_team_split":  0,
     }
     for match_id, _, deltas in iter_rated_history(history):
@@ -1202,10 +1228,18 @@ def count_winner_funnel(
             continue
         if decided_by == "clean_win":
             funnel["decided_by_clean_win"] += 1
+            if winner_block.get("disputed"):
+                funnel["disputed_outcomes"] += 1
+        elif decided_by == "attested":
+            funnel["decided_by_attested"] += 1
+        elif decided_by == "adjudicated":
+            funnel["decided_by_adjudicated"] += 1
         elif decided_by == "contested":
             funnel["decided_by_contested"] += 1
         elif decided_by == "unclear":
             funnel["decided_by_unclear"] += 1
+        elif decided_by == "draw":
+            funnel["decided_by_draw"] += 1
     return funnel
 
 

@@ -2231,12 +2231,45 @@ body::before {
     color: var(--kb-success);
 }
 
+/* v15: host-attested team win (proto v3 game_outcome dialog). Success tone
+   like clean, with the help cursor because the badge carries a provenance
+   tooltip. */
+.vt-winner-badge[data-decided-by="attested"] {
+    color: var(--kb-success);
+    cursor: help;
+}
+
+/* v16: reviewer-decided team win (pipeline outcome-review prompt overrode
+   or supplied the outcome). Same success tone; provenance in the tooltip.
+   The reviewer check-mark suffix rides on data-adjudicated regardless of
+   which decided_by branch rendered the badge. */
+.vt-winner-badge[data-decided-by="adjudicated"] {
+    color: var(--kb-success);
+    cursor: help;
+}
+
+.vt-winner-badge[data-adjudicated="1"] {
+    cursor: help;
+}
+
 .vt-winner-badge[data-decided-by="contested"] {
     color: var(--kb-info);
     cursor: help;
 }
 
 .vt-winner-badge[data-decided-by="unclear"] {
+    color: var(--kb-text-muted);
+    cursor: help;
+}
+
+/* v15: host-attested no-winner outcomes. Draw = neutral info tone;
+   cancelled = muted (the match doesn't count toward ratings). */
+.vt-winner-badge[data-decided-by="draw"] {
+    color: var(--kb-info);
+    cursor: help;
+}
+
+.vt-winner-badge[data-decided-by="cancelled"] {
     color: var(--kb-text-muted);
     cursor: help;
 }

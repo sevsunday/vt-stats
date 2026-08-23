@@ -728,12 +728,24 @@
   function renderWinnerChip(m) {
     const decided = m.winner_decided_by || 'unclear';
     const team = m.winner_team;
-    if (decided === 'clean_win' && (team === 1 || team === 2)) {
+    // v15: "attested" = host-confirmed team win from the proto v3
+    // end-of-game dialog. v16: "adjudicated" = reviewer-confirmed via the
+    // pipeline's outcome-review prompt. Same visual weight as a clean win.
+    if ((decided === 'clean_win' || decided === 'attested' || decided === 'adjudicated') && (team === 1 || team === 2)) {
       const cls = team === 1 ? 'vt-map-winner-t1' : 'vt-map-winner-t2';
-      return `<span class="vt-map-winner-chip ${cls}">Team ${team}</span>`;
+      const title = decided === 'attested' ? ' title="Host-attested outcome"'
+        : decided === 'adjudicated' ? ' title="Reviewer-confirmed outcome"' : '';
+      return `<span class="vt-map-winner-chip ${cls}"${title}>Team ${team}</span>`;
     }
     if (decided === 'contested') {
       return `<span class="vt-map-winner-chip vt-map-winner-contested" title="Both teams collapsed">Contested</span>`;
+    }
+    // v15: attested no-winner outcomes.
+    if (decided === 'draw') {
+      return `<span class="vt-map-winner-chip vt-map-winner-unclear" title="Host-attested draw">Draw</span>`;
+    }
+    if (decided === 'cancelled') {
+      return `<span class="vt-map-winner-chip vt-map-winner-unclear" title="Host marked this game cancelled">Cancelled</span>`;
     }
     return `<span class="vt-map-winner-chip vt-map-winner-unclear" title="Winner could not be inferred">\u2014</span>`;
   }

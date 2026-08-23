@@ -390,10 +390,10 @@ function renderRivalryDoughnut(container, rivalry) {
 
 // --- Horizontal Bar: Weapon Accuracy Ranking ---
 
-function renderWeaponAccuracy(canvasId, weaponMeta) {
+function renderWeaponAccuracy(canvasId, weaponMeta, emptyMsg) {
   const container = document.getElementById(canvasId)?.parentElement?.parentElement;
   if (!weaponMeta || weaponMeta.length === 0) {
-    if (container) container.innerHTML = '<p style="color:var(--kb-text-muted)">No weapon data for selection.</p>';
+    if (container) container.innerHTML = `<p style="color:var(--kb-text-muted)">${emptyMsg || 'No weapon data for selection.'}</p>`;
     return null;
   }
   applyThemeDefaults();

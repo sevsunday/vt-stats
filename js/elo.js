@@ -1099,11 +1099,20 @@
       const total = funnel.rated_history_entries || 0;
       // Contested matches (both bases fell) are a legitimate but rare outcome
       // that isn't usable as "provable winner" data, so they're grouped under
-      // unprovable for this chart.
-      const unprovable = (funnel.decided_by_unclear || 0) + (funnel.decided_by_contested || 0);
+      // unprovable for this chart. Draws (v15 attested) have no winner to
+      // predict, so they group there too.
+      const unprovable = (funnel.decided_by_unclear || 0) + (funnel.decided_by_contested || 0)
+        + (funnel.decided_by_draw || 0);
+      const attested = funnel.decided_by_attested || 0;
+      const adjudicated = funnel.decided_by_adjudicated || 0;
       const rows = [
         ['All rated matches', total, 'total'],
         ['Provable winner (clean win)', funnel.decided_by_clean_win || 0, 'provable'],
+        // v15: host-attested wins (proto v3 outcome dialog). Only shown once
+        // any exist so the pre-v3 funnel keeps its familiar three rows.
+        ...(attested > 0 ? [['Host-attested winner', attested, 'provable']] : []),
+        // v16: reviewer-confirmed wins (pipeline outcome-review prompt).
+        ...(adjudicated > 0 ? [['Reviewer-confirmed winner', adjudicated, 'provable']] : []),
         ['Winner unprovable from the data', unprovable, 'unprovable'],
       ].map(([label, n, kind]) => {
         const w = total > 0 ? Math.max(0.8, (n / total) * 100) : 0;

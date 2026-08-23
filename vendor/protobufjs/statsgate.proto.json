@@ -28,6 +28,33 @@
             "RACE_HADEAN": 3
           }
         },
+        "Outcome": {
+          "edition": "2023",
+          "values": {
+            "OUTCOME_UNSPECIFIED": 0,
+            "OUTCOME_TEAM1_WIN": 1000,
+            "OUTCOME_TEAM2_WIN": 1001,
+            "OUTCOME_DRAW": 1002,
+            "OUTCOME_GAME_CANCELLED": 1003
+          }
+        },
+        "PlayerInfo": {
+          "edition": "2023",
+          "fields": {
+            "steam64": {
+              "type": "uint64",
+              "id": 1
+            },
+            "teamnum": {
+              "type": "uint32",
+              "id": 2
+            },
+            "nickname": {
+              "type": "string",
+              "id": 3
+            }
+          }
+        },
         "StatHeader": {
           "edition": "2023",
           "fields": {
@@ -37,84 +64,108 @@
             },
             "startTime": {
               "type": "google.protobuf.Timestamp",
-              "id": 2
+              "id": 2,
+              "protoName": "start_time"
             },
             "authorNickname": {
               "type": "string",
-              "id": 3
+              "id": 3,
+              "protoName": "author_nickname"
             },
             "authorSteam64": {
               "type": "uint64",
-              "id": 4
+              "id": 4,
+              "protoName": "author_steam64"
             },
             "tickRate": {
               "type": "uint32",
-              "id": 5
-            },
-            "s64ToNick": {
-              "keyType": "uint64",
-              "type": "string",
-              "id": 6
-            },
-            "teamnumToS64": {
-              "keyType": "int32",
-              "type": "uint64",
-              "id": 7
+              "id": 5,
+              "protoName": "tick_rate"
             },
             "activeConfigMod": {
               "type": "string",
-              "id": 8
-            },
-            "s64ToTeamnum": {
-              "keyType": "uint64",
-              "type": "int32",
-              "id": 9
-            },
-            "playerCount": {
-              "type": "uint32",
-              "id": 10
+              "id": 8,
+              "protoName": "active_config_mod"
             },
             "lastTick": {
               "type": "uint32",
-              "id": 11
+              "id": 11,
+              "protoName": "last_tick"
             },
             "terrainMinX": {
               "type": "float",
-              "id": 12
+              "id": 12,
+              "protoName": "terrain_min_x"
             },
             "terrainMaxX": {
               "type": "float",
-              "id": 13
+              "id": 13,
+              "protoName": "terrain_max_x"
             },
             "terrainMinY": {
               "type": "float",
-              "id": 14
+              "id": 14,
+              "protoName": "terrain_min_y"
             },
             "terrainMaxY": {
               "type": "float",
-              "id": 15
+              "id": 15,
+              "protoName": "terrain_max_y"
             },
             "terrainMinZ": {
               "type": "float",
-              "id": 16
+              "id": 16,
+              "protoName": "terrain_min_z"
             },
             "terrainMaxZ": {
               "type": "float",
-              "id": 17
+              "id": 17,
+              "protoName": "terrain_max_z"
             },
             "shutdownRequested": {
               "type": "bool",
-              "id": 18
+              "id": 18,
+              "protoName": "shutdown_requested"
             },
             "team1Race": {
               "type": "Race",
-              "id": 19
+              "id": 19,
+              "protoName": "team1_race"
             },
             "team2Race": {
               "type": "Race",
-              "id": 20
+              "id": 20,
+              "protoName": "team2_race"
+            },
+            "gameOutcome": {
+              "type": "Outcome",
+              "id": 21,
+              "protoName": "game_outcome"
+            },
+            "players": {
+              "rule": "repeated",
+              "type": "PlayerInfo",
+              "id": 22
             }
-          }
+          },
+          "reserved": [
+            [
+              6,
+              6
+            ],
+            [
+              7,
+              7
+            ],
+            [
+              9,
+              9
+            ],
+            [
+              10,
+              10
+            ]
+          ]
         },
         "BulletInit": {
           "edition": "2023",
@@ -129,7 +180,8 @@
             },
             "ordnanceOdf": {
               "type": "string",
-              "id": 3
+              "id": 3,
+              "protoName": "ordnance_odf"
             }
           }
         },
@@ -146,7 +198,8 @@
             },
             "ordnanceOdf": {
               "type": "string",
-              "id": 3
+              "id": 3,
+              "protoName": "ordnance_odf"
             },
             "victim": {
               "type": "uint64",
@@ -154,15 +207,18 @@
             },
             "victimOdf": {
               "type": "string",
-              "id": 5
+              "id": 5,
+              "protoName": "victim_odf"
             },
             "shooterOdf": {
               "type": "string",
-              "id": 6
+              "id": 6,
+              "protoName": "shooter_odf"
             },
             "distanceToTarget": {
               "type": "float",
-              "id": 7
+              "id": 7,
+              "protoName": "distance_to_target"
             }
           }
         },
@@ -179,11 +235,13 @@
             },
             "shooterTeam": {
               "type": "int32",
-              "id": 3
+              "id": 3,
+              "protoName": "shooter_team"
             },
             "shooterOdf": {
               "type": "string",
-              "id": 4
+              "id": 4,
+              "protoName": "shooter_odf"
             },
             "victim": {
               "type": "uint64",
@@ -191,15 +249,18 @@
             },
             "victimTeam": {
               "type": "int32",
-              "id": 6
+              "id": 6,
+              "protoName": "victim_team"
             },
             "victimOdf": {
               "type": "string",
-              "id": 7
+              "id": 7,
+              "protoName": "victim_odf"
             },
             "ordnanceOdf": {
               "type": "string",
-              "id": 8
+              "id": 8,
+              "protoName": "ordnance_odf"
             },
             "amount": {
               "type": "float",
@@ -236,7 +297,8 @@
             },
             "hasTarget": {
               "type": "bool",
-              "id": 7
+              "id": 7,
+              "protoName": "has_target"
             }
           }
         },
@@ -267,11 +329,13 @@
             },
             "killerTeam": {
               "type": "uint32",
-              "id": 3
+              "id": 3,
+              "protoName": "killer_team"
             },
             "killerOdf": {
               "type": "string",
-              "id": 4
+              "id": 4,
+              "protoName": "killer_odf"
             },
             "victim": {
               "type": "uint64",
@@ -279,11 +343,13 @@
             },
             "victimTeam": {
               "type": "uint32",
-              "id": 6
+              "id": 6,
+              "protoName": "victim_team"
             },
             "victimOdf": {
               "type": "string",
-              "id": 7
+              "id": 7,
+              "protoName": "victim_odf"
             }
           }
         },
@@ -300,11 +366,13 @@
             },
             "shooterTeam": {
               "type": "uint32",
-              "id": 3
+              "id": 3,
+              "protoName": "shooter_team"
             },
             "shooterOdf": {
               "type": "string",
-              "id": 4
+              "id": 4,
+              "protoName": "shooter_odf"
             },
             "victim": {
               "type": "uint64",
@@ -312,11 +380,13 @@
             },
             "victimTeam": {
               "type": "uint32",
-              "id": 6
+              "id": 6,
+              "protoName": "victim_team"
             },
             "victimOdf": {
               "type": "string",
-              "id": 7
+              "id": 7,
+              "protoName": "victim_odf"
             }
           }
         },
@@ -333,19 +403,23 @@
             },
             "pickerTeam": {
               "type": "uint32",
-              "id": 3
+              "id": 3,
+              "protoName": "picker_team"
             },
             "pickerOdf": {
               "type": "string",
-              "id": 4
+              "id": 4,
+              "protoName": "picker_odf"
             },
             "powerupTeam": {
               "type": "uint32",
-              "id": 5
+              "id": 5,
+              "protoName": "powerup_team"
             },
             "powerupOdf": {
               "type": "string",
-              "id": 6
+              "id": 6,
+              "protoName": "powerup_odf"
             }
           }
         },
@@ -367,31 +441,38 @@
           "fields": {
             "bulletInit": {
               "type": "BulletInit",
-              "id": 1
+              "id": 1,
+              "protoName": "bullet_init"
             },
             "bulletHit": {
               "type": "BulletHit",
-              "id": 2
+              "id": 2,
+              "protoName": "bullet_hit"
             },
             "damageDealt": {
               "type": "DamageDealt",
-              "id": 3
+              "id": 3,
+              "protoName": "damage_dealt"
             },
             "updateTick": {
               "type": "UpdateTick",
-              "id": 5
+              "id": 5,
+              "protoName": "update_tick"
             },
             "unitDestroyed": {
               "type": "UnitDestroyed",
-              "id": 6
+              "id": 6,
+              "protoName": "unit_destroyed"
             },
             "unitSniped": {
               "type": "UnitSniped",
-              "id": 7
+              "id": 7,
+              "protoName": "unit_sniped"
             },
             "pickupPowerup": {
               "type": "PickupPowerup",
-              "id": 8
+              "id": 8,
+              "protoName": "pickup_powerup"
             }
           },
           "reserved": [
@@ -411,7 +492,8 @@
             "eventStream": {
               "rule": "repeated",
               "type": "StatEvent",
-              "id": 2
+              "id": 2,
+              "protoName": "event_stream"
             }
           }
         }

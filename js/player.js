@@ -856,6 +856,10 @@
         kills: lbRow.kills, deaths: lbRow.deaths,
         dealt: lbRow.dealt, received: lbRow.received,
         shots: lbRow.shots_fired, hits: lbRow.shots_hit,
+        // v15 collector-gap flag (absent on legacy contributions = true).
+        // Gates the accuracy cell so hit-less v3-gap matches show an
+        // em-dash instead of a misleading 0.0%.
+        has_bullet_hit: m.has_bullet_hit_data !== false,
         delta: deltaData ? deltaData.delta.delta : null,
         before: deltaData ? deltaData.delta.before : null,
         after:  deltaData ? deltaData.delta.after  : null,
@@ -1351,7 +1355,7 @@
         ? `<span class="vt-result vt-result-loss">Loss</span>`
         : `<span class="vt-result vt-result-na">—</span>`;
     const kd = r.deaths > 0 ? (r.kills / r.deaths).toFixed(2) : (r.kills > 0 ? '\u221E' : '0.00');
-    const acc = r.shots > 0 ? ((r.hits / r.shots) * 100).toFixed(1) + '%' : '—';
+    const acc = (r.has_bullet_hit !== false && r.shots > 0) ? ((r.hits / r.shots) * 100).toFixed(1) + '%' : '—';
     const deltaCell = Number.isFinite(r.delta)
       ? `<span class="${r.delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">${r.delta >= 0 ? '+' : ''}${r.delta.toFixed(1)}</span>`
       : (r.is_campod ? '<span class="vt-campod-badge" title="> 25% in camera-pod ship; excluded from rating">Campod</span>'
@@ -3001,9 +3005,12 @@
     const matchSids = found.map(f => f.rating.steam64).join(',');
     const bodyHtml = rows.map(r => {
       const dateStr = r.date ? new Date(r.date).toLocaleDateString() : '—';
+      // v15: friendly labels for the no-winner decided_by values (draw /
+      // cancelled are host-attested; unclear is the legacy inference tier).
+      const noWinnerLabel = { draw: 'Draw', cancelled: 'Cancelled', unclear: 'unclear' }[r.decided_by] || r.decided_by;
       const winnerBadge = r.winnerTeam
         ? `<span class="badge bg-success-subtle text-success-emphasis">Team ${r.winnerTeam}</span>`
-        : `<span class="badge bg-secondary-subtle text-secondary">${escapeHtml(r.decided_by)}</span>`;
+        : `<span class="badge bg-secondary-subtle text-secondary">${escapeHtml(noWinnerLabel)}</span>`;
       const cells = r.perPlayer.map((pp) => {
         const delta = pp.delta;
         const teamBadge = pp.team ? `<span class="text-secondary small me-1">T${pp.team}</span>` : '';

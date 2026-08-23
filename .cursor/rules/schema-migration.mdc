@@ -18,12 +18,16 @@ Before doing anything else, compare the new proto against the current `scripts/s
 
 ## Step 1: Update and Recompile
 
-1. Replace `scripts/statsgate.proto` with the new version
-2. Recompile Python: `python -m grpc_tools.protoc --proto_path=. --python_out=. statsgate.proto`
+0. **If the new schema REMOVES or reshapes fields the old corpus depends on** (the v3 precedent: `StatHeader`'s identity maps became `reserved`), freeze the outgoing schema FIRST, before overwriting: copy `scripts/statsgate.proto` to `scripts/statsgate_vN.proto`, rename its package to `statsgate_vN` (descriptor-pool symbol collisions otherwise — see `statsgate_v1.proto` / `statsgate_v2.proto`), and generate its pair: `python -m grpc_tools.protoc --proto_path=scripts --python_out=scripts statsgate_vN.proto` + `npx -y -p protobufjs-cli pbjs -t json scripts/statsgate_vN.proto > vendor/protobufjs/statsgate_vN.proto.json`. Then extend the decode chains in `load_session()` and `js/raw-browser.js::fetchAndDecodeBinpb`.
+1. Replace `scripts/statsgate.proto` with the new version (verbatim upstream mirror)
+2. Recompile Python: `python -m grpc_tools.protoc --proto_path=scripts --python_out=scripts statsgate.proto`
 3. Regenerate the protobufjs descriptor used by the Raw Data Browser:
-   `npx pbjs -t json scripts/statsgate.proto > vendor/protobufjs/statsgate.proto.json`
+   `npx -y -p protobufjs-cli pbjs -t json scripts/statsgate.proto > vendor/protobufjs/statsgate.proto.json`
+   (invoke `protobufjs-cli` explicitly — a bare `npx pbjs` can resolve to an unrelated npm package; on PowerShell run the redirect through `cmd /c` so the JSON isn't written as UTF-16)
 4. Verify browser decode still agrees with Python via `scripts/verify_proto_decode.mjs` (see the script header for setup). Total event count and per-oneof counts must match the Python pipeline's output for the same file.
 5. Run the pipeline against existing data to check for breakage
+
+**Detection caveat learned from the v3 migration:** additive-only schema changes can be detected by field presence, and wire-type collisions by parse failure — but two schemas that differ only by removed/added fields (v2 vs v3) parse cleanly under EACH OTHER's descriptor with data silently dropped. Detection MUST be field-presence-based in that case (`header.players` non-empty → v3; identity maps non-empty → v2), never try/except. The v1 layer keeps its original signals (races fingerprint in Python, decode-throw in protobufjs).
 
 ## Step 2: Fix Pipeline Breakage
 

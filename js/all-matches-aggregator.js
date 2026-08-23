@@ -62,6 +62,11 @@
       // v2.3: PvP-only hit counter (subset of total_shots_hit). Drives
       // career-level pvp_accuracy display.
       total_pvp_shots_hit: 0,
+      // v15: denominator transparency for the accuracy sums above --
+      // number of this player's matches that carried BulletHit data
+      // (mirrors matches_with_target_lock_data). Accuracy-bearing sums
+      // skip matches where the v3 collector recorded no hits.
+      matches_with_bullet_hit_data: 0,
       total_kills: 0,
       total_deaths: 0,
       // v2.3: PvP/PvE kill+death split. Drives the Career Leaderboard's
@@ -337,6 +342,12 @@
 
     let matchesWithPositioning = 0;
     let matchesWithTargetLock = 0;
+    // v15: matches that actually carry BulletHit data. The first
+    // v3-collector batch records zero hits (upstream hook regression), so
+    // accuracy-bearing sums are skipped for those matches to keep career
+    // accuracy honest. Legacy contributions omit the flag -> counted as
+    // having hit data (pre-v15 behavior preserved byte-identically).
+    let matchesWithBulletHit = 0;
     let totalSentinelDamageDropped = 0;
     const matchesWithSentinel = [];
 
@@ -374,6 +385,9 @@
       if (m.submitter) submittersSet.add(m.submitter);
       if (m.has_position_data) matchesWithPositioning++;
       if (m.has_target_lock_data) matchesWithTargetLock++;
+      // v15 collector-gap flag: absent (legacy) means true.
+      const hasBulletHit = m.has_bullet_hit_data !== false;
+      if (hasBulletHit) matchesWithBulletHit++;
 
       const sCount = m.sentinel_damage_count || 0;
       totalSentinelDamageDropped += sCount;
@@ -412,6 +426,10 @@
       else if (decidedBy === 'contested') mr.contested += 1;
       else if (winningTeam === 1)       mr.wins_t1  += 1;
       else if (winningTeam === 2)       mr.wins_t2  += 1;
+      // v15: draw / cancelled (attested, team null) fold into the
+      // unclear bucket so the documented invariant
+      // `count == wins_t1 + wins_t2 + contested + unclear` keeps holding.
+      else                              mr.unclear  += 1;
 
       // Duration / player-count / submitter / over-time histograms.
       durationBands[durationBand(m.duration_sec)] += 1;
@@ -512,10 +530,18 @@
         c.total_pvp_received   += p.pvp_received   || 0;
         c.total_pve_received   += p.pve_received   || 0;
         c.total_asset_dealt    += p.asset_dealt    || 0;
-        c.total_shots_fired    += p.shots_fired    || 0;
-        c.total_shots_hit      += p.shots_hit      || 0;
-        // v2.3 fields (legacy contributions default to 0 here).
-        c.total_pvp_shots_hit  += p.pvp_shots_hit  || 0;
+        // v15: accuracy-bearing sums only accumulate from matches that
+        // actually carry BulletHit data. Skipping BOTH sides of the ratio
+        // (shots fired AND hits) keeps career accuracy = hits/shots
+        // consistent instead of letting hit-less v3-gap matches dilute
+        // the v2-era career accuracy toward zero.
+        if (hasBulletHit) {
+          c.total_shots_fired    += p.shots_fired    || 0;
+          c.total_shots_hit      += p.shots_hit      || 0;
+          // v2.3 fields (legacy contributions default to 0 here).
+          c.total_pvp_shots_hit  += p.pvp_shots_hit  || 0;
+          c.matches_with_bullet_hit_data += 1;
+        }
         c.total_pvp_kills      += p.pvp_kills      || 0;
         c.total_pve_kills      += p.pve_kills      || 0;
         c.total_pvp_deaths     += p.pvp_deaths     || 0;
@@ -651,7 +677,16 @@
         }
 
         const wb = p.weapon_breakdown || {};
-        for (const wname in wb) bumpWeapon(c.weapon_totals, wname, wb[wname]);
+        for (const wname in wb) {
+          // v15: on hit-less collector-gap matches, accumulate only the
+          // damage side of each weapon row -- shots/hits stay out so the
+          // per-weapon career accuracy (hits/shots) keeps both sides of
+          // the ratio consistent, mirroring the player-level skip above.
+          bumpWeapon(
+            c.weapon_totals, wname,
+            hasBulletHit ? wb[wname] : { dealt: (wb[wname] || {}).dealt || 0 }
+          );
+        }
         c.weapons_used_per_match.push(Object.keys(wb).length);
 
         if (c.best_match == null || (p.dealt || 0) > c.best_match.dealt) {
@@ -866,6 +901,9 @@
         overall_accuracy:    r3(acc),
         total_shots_fired:   c.total_shots_fired,
         total_shots_hit:     c.total_shots_hit,
+        // v15: how many of this player's matches carried BulletHit data
+        // (the denominator behind the accuracy sums above).
+        matches_with_bullet_hit_data: c.matches_with_bullet_hit_data,
         // v2.3: PvP-only career accuracy. Drives the Career Leaderboard's
         // PvP Acc display where surfaced.
         total_pvp_shots_hit: c.total_pvp_shots_hit,
@@ -1103,6 +1141,7 @@
         submitters:                    Array.from(submittersSet).sort(),
         matches_with_positioning:      matchesWithPositioning,
         matches_with_target_lock_data: matchesWithTargetLock,
+        matches_with_bullet_hit_data:  matchesWithBulletHit,
         total_sentinel_damage_dropped: totalSentinelDamageDropped,
         matches_with_sentinel_damage:  matchesWithSentinel,
         min_career_matches:            minMatchesThreshold,

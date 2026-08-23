@@ -53,13 +53,20 @@
   const DESCRIPTOR_URL = 'vendor/protobufjs/statsgate.proto.json';
   const DESCRIPTOR_URL_V1 = 'vendor/protobufjs/statsgate_v1.proto.json';
   const ROOT_MESSAGE_V1 = 'statsgate_v1.ClientStatSession';
+  // Frozen v2 descriptor (identity maps readable). The primary descriptor
+  // is now v3, which RESERVES the map fields 6/7/9/10 -- a v2 file decoded
+  // under it silently loses s64ToNick / teamnumToS64 / s64ToTeamnum, so
+  // legacy files re-decode through this one. Lazy-loaded on first need.
+  const DESCRIPTOR_URL_V2 = 'vendor/protobufjs/statsgate_v2.proto.json';
+  const ROOT_MESSAGE_V2 = 'statsgate_v2.ClientStatSession';
 
   // Schema labels mirrored from scripts/process_stats.py (PROTO_SCHEMA_V1
-  // / PROTO_SCHEMA_V2). Stamped on `state.protoSchemaVersion` so the
-  // events table + Reconcile view can branch on which descriptor
-  // succeeded for the current match.
+  // / PROTO_SCHEMA_V2 / PROTO_SCHEMA_V3). Stamped on
+  // `state.protoSchemaVersion` so the events table + Reconcile view can
+  // branch on which descriptor succeeded for the current match.
   const PROTO_SCHEMA_V1 = 'v1';
   const PROTO_SCHEMA_V2 = 'v2';
+  const PROTO_SCHEMA_V3 = 'v3';
   const ROOT_MESSAGE = 'statsgate.ClientStatSession';
   const PROTO_DOCS_URL = 'data/proto-docs.json';
   const FIELD_DOCS_MANUAL_URL = 'data/field-docs-manual.json';
@@ -95,6 +102,8 @@
     'eventStream.*.unitDestroyed': 'UnitDestroyed',
     'eventStream.*.unitSniped': 'UnitSniped',
     'eventStream.*.pickupPowerup': 'PickupPowerup',
+    // v3: per-tick-accumulated roster entries on the header.
+    'header.players.*': 'PlayerInfo',
   };
 
   // StatEvent oneof arms in declaration order. EVENT_ARMS_ALL is the
@@ -108,11 +117,14 @@
     'bulletInit', 'bulletHit', 'damageDealt', 'damageReceived',
     'updateTick', 'unitDestroyed', 'unitSniped', 'pickupPowerup',
   ];
-  // Per-schema chip set. v2 reserves `damage_received` (field 4) on
-  // StatEvent so the arm never appears in modern matches.
+  // Per-schema chip set. v2/v3 reserve `damage_received` (field 4) on
+  // StatEvent so the arm never appears in modern matches. v3's event
+  // stream is shape-identical to v2 (the schema change is header-only:
+  // players roster + game_outcome).
   const EVENT_ARMS_BY_SCHEMA = {
     v1: EVENT_ARMS_ALL,
     v2: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
+    v3: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
   };
   // Back-compat alias: many existing call sites read `EVENT_ARMS`
   // directly. Re-exposed as a getter so reads always reflect the
@@ -177,10 +189,13 @@
     // fails (typically once per page load, then cached).
     protoRootV1: null,
     rootMessageTypeV1: null,
-    // 'v1' | 'v2' -- detected per match by fetchAndDecodeBinpb() based
-    // on which descriptor's decode() succeeded. Drives EVENT_ARMS chip
-    // filtering and Reconcile view computations downstream.
-    protoSchemaVersion: PROTO_SCHEMA_V2,
+    // Frozen v2 descriptor pair (lazy, mirrors the v1 pair above).
+    protoRootV2: null,
+    rootMessageTypeV2: null,
+    // 'v1' | 'v2' | 'v3' -- detected per match by fetchAndDecodeBinpb()
+    // (v1 via decode throw, v2-vs-v3 via header.players presence). Drives
+    // EVENT_ARMS chip filtering and Reconcile view computations downstream.
+    protoSchemaVersion: PROTO_SCHEMA_V3,
     // resolvers (match-specific)
     s64ToNick: null,       // Map<string, string>
     odfMap: null,          // { raw_odf -> pretty }
@@ -463,11 +478,24 @@
     return state.protoRootV1;
   }
 
+  // Lazy-load the frozen v2 descriptor. Invoked the first time a legacy
+  // (2026-04..08 era) session decodes empty-players under the v3 root,
+  // then cached for subsequent v2 matches.
+  async function loadProtoRootV2() {
+    if (state.protoRootV2) return state.protoRootV2;
+    const res = await fetch(DESCRIPTOR_URL_V2);
+    if (!res.ok) throw new Error(`Failed to load v2 proto descriptor (${res.status})`);
+    const desc = await res.json();
+    state.protoRootV2 = window.protobuf.Root.fromJSON(desc);
+    state.rootMessageTypeV2 = state.protoRootV2.lookupType(ROOT_MESSAGE_V2);
+    return state.protoRootV2;
+  }
+
   // --- Decode pipeline ---
 
   async function fetchAndDecodeBinpb(rawUrl) {
     await loadProtoRoot();
-    const typeV2 = state.rootMessageType;
+    const typeV3 = state.rootMessageType;
 
     const res = await fetch(rawUrl);
     if (!res.ok) throw new Error(`Failed to fetch ${rawUrl} (HTTP ${res.status})`);
@@ -478,27 +506,46 @@
     const rawStream = new Blob([gzBytes]).stream().pipeThrough(ds);
     const rawBytes = new Uint8Array(await new Response(rawStream).arrayBuffer());
 
-    // Schema discrimination: try v2 first. protobufjs is strict about
-    // wire-type collisions, so a v1 file (whose DamageDealt field 5 is
-    // fixed32 `amount` where v2 expects varint `victim`) reliably throws
-    // during decode. On error, fall back to the v1 descriptor.
+    // Schema discrimination, triple-descriptor edition:
+    //   1. Try the current (v3) descriptor. protobufjs is strict about
+    //      wire-type collisions, so a v1 file (whose DamageDealt field 5
+    //      is fixed32 `amount` where v2/v3 expect varint `victim`)
+    //      reliably throws during decode -> v1 fallback, unchanged.
+    //   2. v2-vs-v3 can NEVER be told apart by parse failure (no wire
+    //      conflicts in either direction), so it's a field-presence
+    //      check: genuine v3 files carry header.players; a v2 file
+    //      decodes "cleanly" under v3 but with its identity maps dropped
+    //      as reserved fields -> re-decode with the frozen v2 descriptor
+    //      so s64ToNick / teamnumToS64 / s64ToTeamnum are readable.
+    //      (Accepted cost: one extra decode per legacy v2 match view;
+    //      the v2 corpus is frozen while all future files are v3.)
     //
-    // Why protobufjs is strict here while the Python pipeline's
+    // Why protobufjs try/catch works for v1 while the Python pipeline's
     // `load_session()` uses a header-fingerprint discriminator instead:
     // Python's protobuf parser silently stashes wire-type mismatches
     // into unknown_fields without raising, so we can't use try/catch
     // there. protobufjs raises, so we can.
     const t0 = performance.now();
     let msg = null;
-    let schema = PROTO_SCHEMA_V2;
+    let schema = PROTO_SCHEMA_V3;
     try {
-      msg = typeV2.decode(rawBytes);
+      msg = typeV3.decode(rawBytes);
     } catch (e) {
       await loadProtoRootV1();
       msg = state.rootMessageTypeV1.decode(rawBytes);
       schema = PROTO_SCHEMA_V1;
     }
-    const decodeType = schema === PROTO_SCHEMA_V2 ? typeV2 : state.rootMessageTypeV1;
+    if (schema === PROTO_SCHEMA_V3) {
+      const players = msg.header && msg.header.players;
+      if (!players || players.length === 0) {
+        await loadProtoRootV2();
+        msg = state.rootMessageTypeV2.decode(rawBytes);
+        schema = PROTO_SCHEMA_V2;
+      }
+    }
+    const decodeType = schema === PROTO_SCHEMA_V3 ? typeV3
+      : schema === PROTO_SCHEMA_V2 ? state.rootMessageTypeV2
+      : state.rootMessageTypeV1;
     // toObject flattens protobufjs runtime wrappers to plain JS. `longs:
     // String` preserves 64-bit values losslessly (Steam64 IDs, etc).
     // `defaults: false` omits zero-valued scalars (implicit presence in
@@ -658,10 +705,21 @@
 
   function buildResolvers() {
     state.s64ToNick = new Map();
-    const m = state.decoded && state.decoded.header && state.decoded.header.s64ToNick;
+    const hdr = state.decoded && state.decoded.header;
+    const m = hdr && hdr.s64ToNick;
     if (m && typeof m === 'object') {
       for (const [k, v] of Object.entries(m)) {
         state.s64ToNick.set(String(k), String(v));
+      }
+    } else if (hdr && Array.isArray(hdr.players)) {
+      // v3: identity maps were replaced by the per-tick-accumulated
+      // PlayerInfo roster. Includes invalid/garbage entries (empty-slot
+      // collector artifacts) -- harmless here, they just resolve their
+      // own bogus Steam64 to 'Unknown' like the wire says.
+      for (const p of hdr.players) {
+        if (p && p.steam64 != null) {
+          state.s64ToNick.set(String(p.steam64), String(p.nickname || ''));
+        }
       }
     }
     state.odfMap = state.processed && state.processed.odf_map ? state.processed.odf_map : {};
@@ -2628,7 +2686,9 @@
 
   function computePersonalReceived(s64) {
     const entry = findLeaderboardEntry(s64);
-    const isV2 = state.protoSchemaVersion === PROTO_SCHEMA_V2;
+    // v3 reconciles identically to v2 (unified DamageDealt); only the
+    // true-v1 layout needs the paired damageReceived path.
+    const isV2 = state.protoSchemaVersion !== PROTO_SCHEMA_V1;
     // v1: read the separate `damageReceived` rows -- they carry the
     //     victim-side amount directly (dr.victim / dr.team / dr.amount).
     // v2: the unified `damageDealt` row carries the victim on the same
@@ -2659,7 +2719,9 @@
 
   function computePersonalPvpDealt(s64) {
     const entry = findLeaderboardEntry(s64);
-    const isV2 = state.protoSchemaVersion === PROTO_SCHEMA_V2;
+    // v3 reconciles identically to v2 (unified DamageDealt); only the
+    // true-v1 layout needs the paired damageReceived path.
+    const isV2 = state.protoSchemaVersion !== PROTO_SCHEMA_V1;
     const rows = state.events.rows;
     const pairIdx = state.events.pairIdx;
     let sum = 0;
@@ -2709,7 +2771,9 @@
   // ±0.1 rounding) for any user inspecting raw data.
   function computePersonalSelfDealt(s64) {
     const entry = findLeaderboardEntry(s64);
-    const isV2 = state.protoSchemaVersion === PROTO_SCHEMA_V2;
+    // v3 reconciles identically to v2 (unified DamageDealt); only the
+    // true-v1 layout needs the paired damageReceived path.
+    const isV2 = state.protoSchemaVersion !== PROTO_SCHEMA_V1;
     const rows = state.events.rows;
     const pairIdx = state.events.pairIdx;
     let sum = 0;

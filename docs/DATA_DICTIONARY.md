@@ -65,20 +65,22 @@ The top-level container for one match recording.
 
 ### StatHeader
 
-Metadata captured at the start of the match.
+Match metadata. Most fields are captured at match start; in proto v3 the
+`players` roster accumulates across the whole match and `game_outcome` /
+`author_*` are written at the final tick.
 
 | Field # | Field | Type | Description |
 |---|---|---|---|
 | 1 | `map` | `string` | Map filename (e.g. `havenvsr.bzn`) |
 | 2 | `start_time` | `Timestamp` | Match start time (UTC) |
-| 3 | `author_nickname` | `string` | Recording player's nickname |
+| 3 | `author_nickname` | `string` | Recording player's nickname (v3 note: written at last tick; currently resolves to `'Unknown'` — the pipeline uses the sessions folder name for submitter identity) |
 | 4 | `author_steam64` | `uint64` | Recording player's Steam64 ID |
 | 5 | `tick_rate` | `uint32` | Simulation tick rate (typically 20 ticks/second) |
-| 6 | `s64_to_nick` | `map<uint64, string>` | Steam64 ID → Nickname lookup |
-| 7 | `teamnum_to_s64` | `map<int32, uint64>` | Slot number (1-10) → Steam64 ID |
+| 6 | `s64_to_nick` | `map<uint64, string>` | **v1/v2 only — `reserved` in v3.** Steam64 ID → Nickname lookup |
+| 7 | `teamnum_to_s64` | `map<int32, uint64>` | **v1/v2 only — `reserved` in v3.** Slot number (1-10) → Steam64 ID |
 | 8 | `active_config_mod` | `string` | Server configuration mod identifier |
-| 9 | `s64_to_teamnum` | `map<uint64, int32>` | Steam64 ID → Slot number (reverse of field 7) |
-| 10 | `player_count` | `uint32` | Number of players in the match |
+| 9 | `s64_to_teamnum` | `map<uint64, int32>` | **v1/v2 only — `reserved` in v3.** Steam64 ID → Slot number (reverse of field 7) |
+| 10 | `player_count` | `uint32` | **v1/v2 only — `reserved` in v3.** Number of players in the match |
 | 11 | `last_tick` | `uint32` | Final game tick (0 if not populated by collector) |
 | 12 | `terrain_min_x` | `float` | World-space minimum X (west edge). Axis convention: +X East, +Y Up, +Z North |
 | 13 | `terrain_max_x` | `float` | World-space maximum X (east edge) |
@@ -86,6 +88,11 @@ Metadata captured at the start of the match.
 | 15 | `terrain_max_y` | `float` | World-space maximum Y (highest elevation) |
 | 16 | `terrain_min_z` | `float` | World-space minimum Z (south edge) |
 | 17 | `terrain_max_z` | `float` | World-space maximum Z (north edge) |
+| 18 | `shutdown_requested` | `bool` | **v2+.** Stat session cancelled mid-game via mission script / console command |
+| 19 | `team1_race` | `Race` | **v2+.** Team 1's faction (authoritative when non-zero) |
+| 20 | `team2_race` | `Race` | **v2+.** Team 2's faction |
+| 21 | `game_outcome` | `Outcome` | **v3-only.** Host-attested outcome from the end-of-game dialog: `0` UNSPECIFIED, `1000` TEAM1_WIN, `1001` TEAM2_WIN, `1002` DRAW, `1003` GAME_CANCELLED (1000-series values double as Win32 TaskDialog button IDs upstream; out-of-enum values like `IDCANCEL = 2` are possible when the host ESCs the dialog and are treated as unattested). See [§10 Match Winner Resolution](#10-match-winner-resolution-inference--v15-attestation). |
+| 22 | `players` | `repeated PlayerInfo` | **v3-only.** Per-tick-accumulated roster (replaces fields 6/7/9/10): `{steam64, teamnum, nickname}` per player observed in any slot at any tick — captures late joiners; `nickname` is first-recorded. Hash-ordered on the wire (NOT first-seen). May carry garbage entries with invalid Steam64s from EMPTY slots (the collector scans without a player-handle guard); the pipeline's `_valid_steam64` gate (`(s64 >> 32) == 0x01100001`) drops them from the working identity while `match.roster` preserves them flagged `valid: false`. |
 
 All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions). The pipeline treats all-zero as "unset" and falls back to observed player extents for `positioning.map_bounds`; the source choice is surfaced via `positioning.map_bounds_source` (`"terrain"` vs `"observed"`).
 
@@ -261,6 +268,8 @@ Players are identified by `uint64` Steam64 IDs. The header provides three lookup
 
 The pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick`.
 
+**Proto v3:** the three maps are `reserved`; identity comes from the `header.players` PlayerInfo roster instead (see the StatHeader table above), normalized into the same three working dicts by `_build_identity_maps()` in `scripts/process_stats.py` — invalid Steam64s (empty-slot collector garbage) are dropped via the `_valid_steam64` gate, and slot conflicts (two valid Steam64s claiming one slot via leave/rejoin churn) tie-break to the earliest UpdateTick appearance, with displaced claimants recorded on `match.roster_conflicts`. The raw roster survives verbatim on `match.roster` (`[{steam64, slot, nickname, valid}]`, pre-`ACCOUNT_REROUTES`).
+
 ### Faction Resolution
 
 Teams (factions) are determined by player slot convention: slots 1-5 = Team 1, slots 6-10 = Team 2.
@@ -270,8 +279,9 @@ Teams (factions) are determined by player slot convention: slots 1-5 = Team 1, s
 These are applied by the statsgate collector before data reaches the pipeline:
 
 - **Collision damage** (`DAMAGE_TYPE_COLLISION`) is excluded at source — never appears in the data
-- **Bullet events** are only recorded for recognized players (those in `s64_to_nick`)
-- **Header snapshot timing:** The header is captured at the first tick — players who join/leave after that point are not reflected in team lists
+- **Bullet events** are only recorded for recognized players (v1/v2: those in the first-tick `s64_to_nick`; v3: any non-zero Steam64 — late joiners' shots now record)
+- **Header snapshot timing (v1/v2 only):** the identity maps were captured at the first tick — players who joined/left after that point are not reflected, and players the host's first-tick scan missed are permanently absent (the bug v3's per-tick roster scan fixes)
+- **v3 collector data gaps (first batch; upstream exu2 hook regression):** zero `BulletHit` events (bullets fire via `BulletInit` but no hits land on the wire → `match.has_bullet_hit_data: false`, accuracy/range surfaces degrade to em-dash), zero `PickupPowerup` events (`has_pickup_data: false` handles it), and `UnitSniped` events with every field blank except `tick` (snipes fall back to tick-only rows). Upstream has been notified; the flags auto-heal when fixed collector builds ship.
 
 ---
 
@@ -304,10 +314,10 @@ When multiple ODF strings resolve to the same display name, the raw ODF is appen
 
 ### Step 4: Header / Roster Setup
 
-The pipeline reads identity maps from the header:
-- Builds `nick_map` (slot → nickname) by joining `teamnum_to_s64` with `s64_to_nick`
-- Builds `slot_to_s64` directly from `header.teamnum_to_s64`
-- Builds `s64_to_slot` directly from `header.s64_to_teamnum`
+The pipeline normalizes identity through `_build_identity_maps(header, schema, events)`:
+- **v1/v2**: `slot_to_s64` / `s64_to_slot` / `s64_to_nick` copied directly from `header.teamnum_to_s64` / `header.s64_to_teamnum` / `header.s64_to_nick`
+- **v3**: the same three dicts derived from `header.players` — entries failing the `_valid_steam64` gate are dropped (empty-slot collector garbage), and slot conflicts tie-break to the earliest UpdateTick appearance (displaced claimants → `match.roster_conflicts`)
+- Builds `nick_map` (slot → nickname) by joining `slot_to_s64` with `s64_to_nick`
 - Faction is determined by slot convention (1-5 = Team 1, 6-10 = Team 2)
 
 ### Step 5: Single-Pass Event Processing
@@ -2176,15 +2186,81 @@ For each team (1: slots 1-5; 2: slots 6-10):
 - `css/vtstats-theme.css`: `.vt-faction-badge[data-faction-code]` color
   variants (`i` → `--kb-primary`, `e` → `--kb-warning`, `f` → `--kb-accent`).
 
-## 10. Match Winner Inference
+## 10. Match Winner Resolution (inference + v15 attestation)
 
-The proto schema has no explicit "MatchEnded" event with an end-reason
-enum, so the pipeline infers each match's winner from the cleaned
-`kill_feed[]` using a conservative toggle model on recycler/factory
-destruction events. The result is emitted as `match.winner` and is
-**match-global, always-unfiltered** — the renderer reads the block
-directly from `currentData.match.winner` and never from the (possibly
-narrowed) `data.kills.feed`, so a player filter that hides the loser's
+Two complementary sources determine each match's winner:
+
+1. **Kill-feed inference** (all schemas): the proto has no explicit
+   "MatchEnded" event, so the pipeline infers the winner from the cleaned
+   `kill_feed[]` using a conservative toggle model on recycler/factory
+   destruction events (`compute_match_winner()`).
+2. **Host attestation** (proto v3+, `match.schema_version` 15): the v3
+   collector shows the host an end-of-game dialog ("Team 1 Win / Team 2
+   Win / Draw / Game Cancelled") and records the click as
+   `StatHeader.game_outcome`.
+
+`resolve_match_outcome()` combines them through an **evidence-first
+trust ladder** (the first real v3 batch proved attestation is noisy
+human input — 1 of 3 outcomes contradicted overwhelming physical
+evidence, a mis-clicked "Team 2 Win" in a match Team 1 won 115–59 on
+kills while razing Team 2's entire base):
+
+| Inference | Attestation | Result |
+|---|---|---|
+| any | `GAME_CANCELLED` | `decided_by: "cancelled"`, team null — validity statement, always wins; ELO-excluded (`matches_excluded_cancelled`) |
+| `clean_win` T=x | team win T=x | `decided_by: "attested"`, `agreement: true` |
+| `clean_win` T=x | team win T=y / draw | **inference wins**: `decided_by: "clean_win"`, `disputed: true`, `agreement: false`, WARN + UI warning glyph |
+| `clean_win` T=x | absent / `UNSPECIFIED` / out-of-enum | `decided_by: "clean_win"` (pre-v15 behavior verbatim) |
+| `contested` / `unclear` | team win T=y | `decided_by: "attested"`, team = y (borrows the inference tick only when the contested guess agrees) |
+| `contested` / `unclear` | `DRAW` | `decided_by: "draw"`, team null |
+| `contested` / `unclear` | absent / `UNSPECIFIED` / out-of-enum | unchanged legacy behavior |
+
+Out-of-enum values are real: ESCing the TaskDialog yields `IDCANCEL = 2`.
+Python must access the field via `getattr(header, "game_outcome", 0)` —
+the v1/v2 descriptor classes lack the attribute entirely.
+
+### Human adjudication (v16 — precedence level 0)
+
+Above the entire ladder sits the **pipeline operator's sign-off**: every
+proto v3+ match prompts once in `python scripts/process_stats.py` for
+outcome confirmation (console prompt showing both teams with canonical
+Steam names + leaders, the host's dialog choice, the kill-feed evidence,
+the current resolution, and duration/top-kills memory joggers). Options
+mirror the collector dialog — `1: Team 1`, `2: Team 2`, `3: Draw`,
+`4: Cancelled` — plus `Enter` (confirm current), `u` (Unknown: sign off
+as permanently unclear), `d` (defer: publish with the interim ladder
+resolution and re-prompt next run).
+
+Answers persist in **`data/match_outcome_adjudications.json`**
+(committed; keyed by match id so dual recordings of one game share one
+answer; flushed after every prompt so Ctrl+C keeps progress). Application
+is a pure winner-block rewrite by `scripts/adjudication.py::apply_outcome`:
+
+- **Confirmed** the current resolution → `decided_by` unchanged
+  (`attested` / `clean_win` / `contested` stay meaningful for the
+  source-accuracy funnel), `adjudicated: true` added.
+- **Overrode / supplied** a team win → `decided_by: "adjudicated"`,
+  `decided_at_tick` kept only when the kill-feed inference agrees on the
+  same team.
+- **Draw / Cancelled** → reuse the existing `"draw"` / `"cancelled"`
+  values + the flag (the ELO cancelled-exclusion needs no changes).
+- **Unknown** → flag only; the block stays `unclear` (the UI badge
+  distinguishes reviewer-confirmed-unknown from not-yet-reviewed).
+- Provenance fields (`attested`, `disputed`, `agreement`, `inferred`,
+  `evidence`) are **never rewritten**.
+
+A reconciliation pass re-applies every entry each run (idempotent), so
+hand-editing the adjudications file — fixing an answer, or deleting an
+entry to force a re-prompt — takes effect on the next run without
+`--force`. Pipeline flags: `--no-prompt` (automation: skip prompting,
+warn, publish interim resolutions), `--force-prompt` (prompt from piped
+stdin — testing), `--adjudicate-all` (optional pre-v3 legacy backfill).
+Manifest mirror: `winner_adjudicated: bool`.
+
+The result is emitted as `match.winner` and is **match-global,
+always-unfiltered** — the renderer reads the block directly from
+`currentData.match.winner` and never from the (possibly narrowed)
+`data.kills.feed`, so a player filter that hides the loser's
 recycler/factory destruction events cannot corrupt the result.
 
 ### Output: `match.winner`
@@ -2195,7 +2271,11 @@ recycler/factory destruction events cannot corrupt the result.
     "team": 2,
     "loser": 1,
     "decided_at_tick": 47823,
-    "decided_by": "clean_win",
+    "decided_by": "attested",
+    "attested": true,
+    "disputed": false,
+    "agreement": true,
+    "inferred": { "team": 2, "loser": 1, "decided_by": "clean_win", "decided_at_tick": 47823 },
     "evidence": {
       "rec_dest_count": {"1": 1, "2": 0},
       "fac_dest_count": {"1": 1, "2": 0},
@@ -2208,9 +2288,18 @@ recycler/factory destruction events cannot corrupt the result.
 }
 ```
 
-Schema v3+. Always emitted. `team` and `loser` are `null` for `unclear`
-outcomes; the rest of the block (including `evidence`) is always present
-so renderers can read it without absence-checking each field.
+Schema v3+ (attestation fields at v15; on pre-v15 output they're simply
+absent and consumers default them off). Always emitted. `team` and
+`loser` are `null` for `unclear` / `draw` / `cancelled` outcomes — which
+is what keeps no-winner outcomes out of every win-rate denominator (the
+aggregator's determined check requires `team === 1|2`); the aggregator's
+per-map rollup folds draw/cancelled into its `unclear` bucket to keep
+`count == wins_t1 + wins_t2 + contested + unclear` holding. The rest of
+the block (including `evidence`, always inference-derived) is always
+present so renderers can read it without absence-checking each field.
+`inferred` preserves the raw inference verbatim whenever an attestation
+was present alongside it (agreeing, resolving, or disputed); `null`
+otherwise.
 
 ### Toggle model
 
@@ -2623,6 +2712,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "matches_excluded_low_player_count": 4,
   "matches_excluded_short_duration": 4,
   "matches_excluded_no_winner": 0,
+  "matches_excluded_cancelled": 0,       // v15: host-attested GAME_CANCELLED matches (visible on the dashboard, never rated)
   "rows_excluded_campod": 13,            // v2.5: leaderboard rows skipped for is_campod (>25% match in camera-pod)
   "rows_excluded_low_activity": 0,       // v2.5: leaderboard rows skipped for is_low_activity (presence < 75% of match)
   "weights": { "net_damage_share": 0.20, "thug_kill_rate": 0.20, "thug_efficiency": 0.16,
@@ -2750,7 +2840,7 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 | `history[].deltas[].axis_contributions` | object | **v2.3** — per-axis z-score after clip-and-divide-by-2 (range $[-1, +1]$ per axis), keyed by axis name. Audit invariant: $\sum_a z_a \cdot w'_a \approx \text{performance}$ where $w'_a$ is the redistributed weight (axes absent from this dict had their weight redistributed to the available axes). When an axis was unavailable for the lobby (e.g. no positioning data → no `mobility` key, no PvE damage in the lobby → no `pve_share` key, etc.), the axis is OMITTED from the dict. Powers the VTSR-T leaderboard's per-axis breakdown popover on the Last-delta cell. **v2.4**: shape unchanged. For commander rows, each value is `z_post_shift` (i.e. what fed into `performance`); for thug rows the value is the un-shifted post-clip z. The flat shape lets existing JS rendering work without changes. |
 | `history[].deltas[].axis_contributions_meta` | object \| absent | **v2.4** — optional sibling block, present ONLY on commander rows (`is_commander: true` on the source leaderboard row) AND only for axes that were both available for the lobby AND listed in `commander_axis_prior`. Shape: `{axis_name: {z_pre_shift, shift, z_post_shift}}` where `z_pre_shift` is the value before the v2.4 commander shift (post-clip space, range $[-1, +1]$), `shift = -baseline[axis]` (where `baseline` is `commander_shrunk_baseline()` evaluated at the start of this match — frozen at the prior for locked axes), and `z_post_shift` is the final value after re-clipping to $[-1, +1]$. **Audit invariant**: for each shifted axis $a$ on a commander row, `axis_contributions[a] == axis_contributions_meta[a].z_post_shift` exactly (because the post-shift value IS what feeds the rating math). For thug rows, this block is OMITTED entirely. Forensics-only for now; not consumed by the dashboard renderer. |
 
-Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`.
+Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"cancelled"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`. The `"cancelled"` reason (v15) fires when `match.winner.decided_by == "cancelled"` — the host attested `GAME_CANCELLED` on the v3 end-of-game dialog (early RE / crash / restart); real combat may have occurred, so the match stays fully visible on the dashboard but never rates.
 
 ## 12. Aggregator output keys (Phase 3 + 6)
 

@@ -45,6 +45,8 @@
   const $resultCount        = document.getElementById('match-picker-result-count');
   const $clearBtn           = document.getElementById('match-picker-clear');
   const $facetDuration      = $filtersBody && $filtersBody.querySelector('[data-facet="duration"]');
+  // v15: outcome-provenance facet (Any / Winner known / Attested only).
+  const $facetOutcome       = $filtersBody && $filtersBody.querySelector('[data-facet="outcome"]');
   // `$facetPlayerCounts` is the multi-select chipset for `manifest[].player_count`.
   // (Was named `$facetPlayers` in v1; renamed for symmetry with the v2
   // state shape — `pickerState.playerCounts` — and to free up the
@@ -88,6 +90,10 @@
   const DEFAULT_PICKER_STATE = () => ({
     query: '',
     duration: 'any',                // 'any' | 'short' (<10m) | 'medium' (10-20m) | 'long' (>=20m)
+    // v15: outcome provenance facet reading manifest[].winner_decided_by.
+    //   'winner'   -> a winner is known (attested / clean_win / contested)
+    //   'attested' -> host confirmed the outcome at game end (proto v3+)
+    outcome: 'any',                 // 'any' | 'winner' | 'attested'
     playerCounts: [],               // array of player_count numbers; empty = any
     submitters: [],                 // array of submitter strings; empty = any
     players: [],                    // array of nickname strings (full roster); empty = any
@@ -163,6 +169,7 @@
       picker: {
         q:      p.get('q'),
         dur:    p.get('dur'),
+        outcome: p.get('outcome'),
         cnt:    (p.get('cnt') || '').split(',').map(s => s.trim()).filter(Boolean),
         sub:    (p.get('sub') || '').split(',').map(s => s.trim()).filter(Boolean),
         roster: (p.get('roster') || '').split(',').map(s => s.trim()).filter(Boolean),
@@ -286,6 +293,7 @@
     const ps = pickerState;
     if (ps.query)                                 params.set('q', ps.query);
     if (ps.duration && ps.duration !== 'any')     params.set('dur', ps.duration);
+    if (ps.outcome && ps.outcome !== 'any')       params.set('outcome', ps.outcome);
     if (ps.playerCounts.length)                   params.set('cnt', ps.playerCounts.join(','));
     if (ps.submitters.length)                     params.set('sub', ps.submitters.join(','));
     if (ps.players.length)                        params.set('roster', ps.players.join(','));
@@ -306,10 +314,10 @@
     history.replaceState(null, '', buildShareUrl());
   }
 
-  // The eight picker query keys, in the order buildShareUrl() emits them.
+  // The nine picker query keys, in the order buildShareUrl() emits them.
   // Single source of truth for `syncPickerUrl()` and any future helper
   // that needs to know what counts as "picker state" on the URL.
-  const PICKER_URL_KEYS = ['q', 'dur', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort'];
+  const PICKER_URL_KEYS = ['q', 'dur', 'outcome', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort'];
 
   // Picker-only URL writer — always fires (unlike `syncUrl()`), but only
   // touches the eight picker keys. Existing non-picker params (match,
@@ -327,6 +335,7 @@
     const ps = pickerState;
     if (ps.query)                                 cur.set('q', ps.query);
     if (ps.duration && ps.duration !== 'any')     cur.set('dur', ps.duration);
+    if (ps.outcome && ps.outcome !== 'any')       cur.set('outcome', ps.outcome);
     if (ps.playerCounts.length)                   cur.set('cnt', ps.playerCounts.join(','));
     if (ps.submitters.length)                     cur.set('sub', ps.submitters.join(','));
     if (ps.players.length)                        cur.set('roster', ps.players.join(','));
@@ -874,6 +883,17 @@
       if (d < bucket.min || d >= bucket.max) return false;
     }
 
+    // Outcome provenance (v15; 'adjudicated' added at v16). Reads
+    // manifest[].winner_decided_by:
+    //   'winner'   -> adjudicated / attested / clean_win / contested
+    //                 (a winner exists)
+    //   'attested' -> host-confirmed outcomes only (proto v3+ sessions)
+    if (state.outcome && state.outcome !== 'any') {
+      const db = entry.winner_decided_by || 'unclear';
+      if (state.outcome === 'winner' && !['adjudicated', 'attested', 'clean_win', 'contested'].includes(db)) return false;
+      if (state.outcome === 'attested' && db !== 'attested') return false;
+    }
+
     // Player count (multi-select: match any selected count).
     if (state.playerCounts.length && !state.playerCounts.includes(entry.player_count)) return false;
 
@@ -950,6 +970,7 @@
   function activeFilterCount(state) {
     let n = 0;
     if (state.duration && state.duration !== 'any') n++;
+    if (state.outcome && state.outcome !== 'any') n++;
     if (state.playerCounts.length) n++;
     if (state.submitters.length) n++;
     if (state.players.length) n++;
@@ -1105,6 +1126,8 @@
     pickerState = {
       query:        typeof saved.query === 'string' ? saved.query : d.query,
       duration:     ['any', 'short', 'medium', 'long'].includes(saved.duration) ? saved.duration : d.duration,
+      // v15 optional key — absent on pre-v15 saved states, defaults 'any'.
+      outcome:      ['any', 'winner', 'attested'].includes(saved.outcome) ? saved.outcome : d.outcome,
       playerCounts: Array.isArray(saved.playerCounts) ? saved.playerCounts.filter(n => Number.isFinite(n)) : d.playerCounts,
       submitters:   Array.isArray(saved.submitters) ? saved.submitters.filter(s => typeof s === 'string') : d.submitters,
       players:      Array.isArray(saved.players) ? saved.players.filter(s => typeof s === 'string') : d.players,
@@ -1134,6 +1157,9 @@
     }
     if (['short', 'medium', 'long', 'any'].includes(u.dur)) {
       pickerState.duration = u.dur;
+    }
+    if (['any', 'winner', 'attested'].includes(u.outcome)) {
+      pickerState.outcome = u.outcome;
     }
     if (Array.isArray(u.cnt) && u.cnt.length) {
       const allowed = new Set(pickerFacets.playerCounts);
@@ -1172,6 +1198,13 @@
     if ($facetDuration) {
       $facetDuration.querySelectorAll('.vt-match-picker-chip').forEach(c => {
         const active = c.dataset.value === pickerState.duration;
+        c.classList.toggle('is-active', active);
+        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
+    }
+    if ($facetOutcome) {
+      $facetOutcome.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = c.dataset.value === pickerState.outcome;
         c.classList.toggle('is-active', active);
         c.setAttribute('aria-checked', active ? 'true' : 'false');
       });
@@ -1246,6 +1279,17 @@
       const chip = e.target.closest('.vt-match-picker-chip');
       if (!chip) return;
       pickerState.duration = chip.dataset.value || 'any';
+      applyPickerStateToUI();
+      applyPickerFilters();
+    });
+  }
+
+  // Outcome is single-select (radiogroup) — mirrors the duration wiring.
+  if ($facetOutcome) {
+    $facetOutcome.addEventListener('click', (e) => {
+      const chip = e.target.closest('.vt-match-picker-chip');
+      if (!chip) return;
+      pickerState.outcome = chip.dataset.value || 'any';
       applyPickerStateToUI();
       applyPickerFilters();
     });
@@ -2282,7 +2326,13 @@
       weaponsTabLeaderboard = data.leaderboard;
       renderPlayerWeapons('player-weapons-chart', data.leaderboard, data.weapon_meta);
       renderAccuracyTable(data.leaderboard, weaponRangeChannel);
-      renderWeaponAccuracy('weapon-accuracy-chart', data.weapon_meta);
+      // v15: on collector-gap matches every weapon accuracy is a
+      // meaningless 0 -- show the explanatory empty state instead.
+      renderWeaponAccuracy(
+        'weapon-accuracy-chart',
+        matchHasBulletHitData() ? data.weapon_meta : [],
+        matchHasBulletHitData() ? undefined : ACC_GAP_TITLE + '.'
+      );
       // Weapon Engagement Range card (match.schema_version 11/12). Self-hides
       // on v1 / no-distance matches; otherwise render the strip for the
       // active PvP/PvE/Both channel + Meters|% unit. The "% of max" unit
@@ -4205,7 +4255,7 @@
           <div class="stat-card"><div class="stat-value">${fmt(ps.dealt)}</div><div class="stat-label">Dealt</div></div>
           <div class="stat-card"><div class="stat-value">${fmt(ps.received)}</div><div class="stat-label">Received</div></div>
           <div class="stat-card"><div class="stat-value">${ratioStr}</div><div class="stat-label">Ratio</div></div>
-          <div class="stat-card"><div class="stat-value">${(ps.accuracy * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
+          <div class="stat-card"><div class="stat-value">${fmtAccPct(ps.accuracy)}</div><div class="stat-label">Accuracy</div></div>
           <div class="stat-card"><div class="stat-value">${player.kills || 0}${killsChip}</div><div class="stat-label">Kills <span class="text-muted">(PvP/PvE)</span></div></div>
           <div class="stat-card"><div class="stat-value">${player.deaths || 0}${deathsChip}</div><div class="stat-label">Deaths <span class="text-muted">(PvP/PvE)</span></div></div>
           <div class="stat-card"><div class="stat-value">${kdStr}</div><div class="stat-label">K/D</div></div>
@@ -4336,8 +4386,10 @@
   function renderPerShipCombatTable(rows) {
     if (!Array.isArray(rows) || rows.length === 0) return '';
     const body = rows.map(r => {
-      const accStr    = r.accuracy != null ? (r.accuracy * 100).toFixed(1) + '%' : '—';
-      const pvpAccStr = r.pvp_accuracy != null ? (r.pvp_accuracy * 100).toFixed(1) + '%' : '—';
+      // v15: per-ship accuracy honors the collector-gap flag too.
+      const gap = !matchHasBulletHitData();
+      const accStr    = (!gap && r.accuracy != null) ? (r.accuracy * 100).toFixed(1) + '%' : '—';
+      const pvpAccStr = (!gap && r.pvp_accuracy != null) ? (r.pvp_accuracy * 100).toFixed(1) + '%' : '—';
       const dpmStr    = r.dpm != null ? fmt(r.dpm) : '—';
       return `<tr>
         <td>${esc(r.ship_name || r.ship)}</td>
@@ -4388,21 +4440,25 @@
       if (da !== db) return da - db;
       return wa.toLowerCase().localeCompare(wb.toLowerCase());
     });
+    // v15: on collector-gap matches, hits were never recorded -- em-dash
+    // the hit-derived columns instead of implying a genuine 0.
+    const gapDash = `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
+    const hasHitsData = matchHasBulletHitData();
     const body = entries.map(([wname, w]) => {
       const shots = w.shots || 0;
       const hits = w.hits || 0;
       const pvpHits = w.pvp_hits || 0;
-      const acc = shots > 0 ? (hits / shots * 100).toFixed(1) + '%' : '—';
+      const acc = (hasHitsData && shots > 0) ? (hits / shots * 100).toFixed(1) + '%' : '—';
       // PvP Acc = pvp_hits / shots (matches the thug_accuracy axis math
       // at the per-weapon level, NOT pvp_hits / hits which would always
       // be ≤100% and conflate weapon-mix with on-target rate).
-      const pvpAcc = shots > 0 ? (pvpHits / shots * 100).toFixed(1) + '%' : '—';
+      const pvpAcc = (hasHitsData && shots > 0) ? (pvpHits / shots * 100).toFixed(1) + '%' : '—';
       return `<tr>
         <td>${esc(wname)}</td>
         <td class="text-end">${fmt(w.dealt || 0)}</td>
         <td class="text-end">${shots}</td>
-        <td class="text-end">${hits}</td>
-        <td class="text-end" data-bs-toggle="tooltip" title="Hits that landed on a human player (subset of Hits).">${pvpHits}</td>
+        <td class="text-end">${hasHitsData ? hits : gapDash}</td>
+        <td class="text-end" data-bs-toggle="tooltip" title="Hits that landed on a human player (subset of Hits).">${hasHitsData ? pvpHits : gapDash}</td>
         <td class="text-end">${acc}</td>
         <td class="text-end" data-bs-toggle="tooltip" title="pvp_hits ÷ shots — the per-weapon ratio used by the thug_accuracy ELO axis.">${pvpAcc}</td>
       </tr>`;
@@ -4523,7 +4579,7 @@
     // Unclear outcomes get no highlight (the kill-feed badge already
     // surfaces the ambiguity).
     const matchWinner = (currentData && currentData.match && currentData.match.winner) || null;
-    const winnerTeam = (matchWinner && (matchWinner.decided_by === 'clean_win' || matchWinner.decided_by === 'contested'))
+    const winnerTeam = (matchWinner && (matchWinner.decided_by === 'adjudicated' || matchWinner.decided_by === 'attested' || matchWinner.decided_by === 'clean_win' || matchWinner.decided_by === 'contested'))
       ? matchWinner.team
       : null;
     const t1Winner = winnerTeam === 1 ? ' vt-faction-panel--winner' : '';
@@ -4543,7 +4599,7 @@
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
-            <div class="stat-card"><div class="stat-value">${((f1.accuracy || 0) * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
+            <div class="stat-card"><div class="stat-value">${fmtAccPct(f1.accuracy)}</div><div class="stat-label">Accuracy</div></div>
           </div>
           <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f1.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f1.pvp_dealt || 0)} · PvE ${fmt(f1.pve_dealt || 0)})</span> | Assets: ${fmt(f1.asset_dealt || 0)}</div>
           <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['1'])}</div>
@@ -4555,7 +4611,7 @@
           <div class="d-flex flex-wrap gap-4 mb-3">
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
-            <div class="stat-card"><div class="stat-value">${((f2.accuracy || 0) * 100).toFixed(1)}%</div><div class="stat-label">Accuracy</div></div>
+            <div class="stat-card"><div class="stat-value">${fmtAccPct(f2.accuracy)}</div><div class="stat-label">Accuracy</div></div>
           </div>
           <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f2.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f2.pvp_dealt || 0)} · PvE ${fmt(f2.pve_dealt || 0)})</span> | Assets: ${fmt(f2.asset_dealt || 0)}</div>
           <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['2'])}</div>
@@ -4572,7 +4628,10 @@
     // mirroring the kill-feed unclear badge.
     const factionOutcomeBadge = document.getElementById('faction-outcome-badge');
     if (factionOutcomeBadge) {
-      const winnerForOutcome = (matchWinner && matchWinner.decided_by === 'unclear')
+      // Show the outcome badge on the faction section whenever there's
+      // no winning panel to trophy: unclear (inference failed) plus the
+      // v15 attested no-winner outcomes (draw / cancelled).
+      const winnerForOutcome = (matchWinner && (matchWinner.decided_by === 'unclear' || matchWinner.decided_by === 'draw' || matchWinner.decided_by === 'cancelled'))
         ? matchWinner
         : null;
       applyWinnerBadge(factionOutcomeBadge, winnerForOutcome, teamFactions);
@@ -4780,7 +4839,7 @@
         <td class="text-end">${fmt(ps.received)}</td>
         <td class="text-end" style="${netClass}">${ps.net > 0 ? '+' : ''}${fmt(ps.net)}</td>
         <td class="text-end">${ratioStr}</td>
-        <td class="text-end">${(ps.accuracy * 100).toFixed(1)}%</td>
+        <td class="text-end">${fmtAccPct(ps.accuracy)}</td>
         ${kCell}
         ${dCell}
         <!-- VTSR-T per-match column hidden; restore the eloCell here (see comment above) -->
@@ -5099,11 +5158,31 @@
       + `</span>`;
   }
 
+  // v15 collector-gap guard. False only on v3 matches where the collector
+  // recorded zero BulletHit events (upstream hook regression) -- shots were
+  // fired but no hits exist on the wire, so every accuracy would render as
+  // a misleading 0.0%. Legacy matches (field absent) count as having data.
+  function matchHasBulletHitData() {
+    return !(currentData && currentData.match && currentData.match.has_bullet_hit_data === false);
+  }
+
+  const ACC_GAP_TITLE = 'No hit data — the collector recorded no bullet hits for this match';
+
+  // Accuracy formatter honoring the collector-gap flag: em-dash (with an
+  // explanatory title on the wrapping span) instead of 0.0% on gap matches.
+  function fmtAccPct(acc) {
+    if (!matchHasBulletHitData()) {
+      return `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
+    }
+    return ((acc || 0) * 100).toFixed(1) + '%';
+  }
+
   function renderAccuracyTable(leaderboard, channel) {
     const tbody = document.querySelector('#accuracy-table tbody');
     const pctEdges = currentData && currentData.match && currentData.match.distance_pct_bin_edges;
     const envOf = (p) => (typeof weaponEnvelopePct === 'function'
       ? weaponEnvelopePct(p.weapon_breakdown, channel, pctEdges) : null);
+    const hasHits = matchHasBulletHitData();
     // Sort by engagement envelope (mean % of weapon max range) desc; players
     // with no %-of-max data sort last.
     const rows = leaderboard.map(p => ({ p, env: envOf(p) }));
@@ -5111,11 +5190,19 @@
     tbody.innerHTML = rows.map(({ p, env }) => {
       const ps = p.personal;
       const accColor = ps.accuracy >= 0.7 ? 'var(--kb-success)' : ps.accuracy >= 0.4 ? 'var(--kb-warning)' : 'var(--kb-danger)';
+      // v15: on collector-gap matches shots-fired stays real (BulletInit is
+      // healthy) but hits/accuracy are unrecorded -- em-dash, not 0.
+      const hitsCell = hasHits
+        ? ps.shots_hit.toLocaleString()
+        : `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
+      const accCell = hasHits
+        ? `<span class="fw-bold" style="color:${accColor}">${(ps.accuracy * 100).toFixed(1)}%</span>`
+        : `<span style="color:var(--kb-text-muted)" title="${ACC_GAP_TITLE}">—</span>`;
       return `<tr>
         <td class="fw-semibold">${esc(p.name)}</td>
         <td class="text-end">${ps.shots_fired.toLocaleString()}</td>
-        <td class="text-end">${ps.shots_hit.toLocaleString()}</td>
-        <td class="text-end fw-bold" style="color:${accColor}">${(ps.accuracy * 100).toFixed(1)}%</td>
+        <td class="text-end">${hitsCell}</td>
+        <td class="text-end">${accCell}</td>
         <td class="text-end">${rangeFingerprintHtml(ps.distance_buckets, channel)}</td>
         <td class="text-end">${rangeEnvelopeHtml(env)}</td>
       </tr>`;
@@ -5133,6 +5220,7 @@
   function applyWinnerBadge(badgeEl, winner, factions) {
     if (!badgeEl) return;
     badgeEl.removeAttribute('data-decided-by');
+    badgeEl.removeAttribute('data-adjudicated');
     badgeEl.removeAttribute('data-bs-toggle');
     badgeEl.removeAttribute('data-bs-placement');
     badgeEl.removeAttribute('title');
@@ -5151,10 +5239,58 @@
       const fac = factions && factions[String(team)];
       return (fac && fac.name) ? fac.name : `Team ${team}`;
     };
+    // v16: reviewer sign-off — a human confirmed (or supplied) this
+    // outcome via the pipeline's adjudication prompt. Every branch gets
+    // the check-mark suffix + a tooltip note so confirmed-but-unchanged
+    // provenance (attested / clean_win / contested) stays visible.
+    const adjudicated = !!winner.adjudicated;
+    if (adjudicated) badgeEl.setAttribute('data-adjudicated', '1');
+    const adjMark = adjudicated
+      ? ` <i class="bi bi-check2-circle ms-1" aria-label="Reviewer-confirmed"></i>`
+      : '';
+    const adjTip = adjudicated ? ' Reviewed and signed off by a human.' : '';
+    const setTip = (text) => {
+      badgeEl.setAttribute('data-bs-toggle', 'tooltip');
+      badgeEl.setAttribute('data-bs-placement', 'bottom');
+      badgeEl.setAttribute('title', text);
+    };
+    // v16: reviewer-decided team win — the operator overrode (or supplied
+    // where sources were inconclusive) the outcome during pipeline review.
+    if (decidedBy === 'adjudicated' && winner.team) {
+      const label = factionLabelFor(winner.team);
+      badgeEl.setAttribute('data-decided-by', 'adjudicated');
+      setTip('Outcome confirmed by a human reviewer (the recorded sources disagreed or were inconclusive).');
+      badgeEl.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${esc(label)} wins${adjMark}`;
+      return;
+    }
+    // v15: host-attested team win (proto v3 game_outcome). Solid trophy;
+    // tooltip carries the provenance so users know a human confirmed it.
+    if (decidedBy === 'attested' && winner.team) {
+      const label = factionLabelFor(winner.team);
+      badgeEl.setAttribute('data-decided-by', 'attested');
+      setTip('Outcome attested by the match host at game end.' + adjTip);
+      badgeEl.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${esc(label)} wins${adjMark}`;
+      return;
+    }
     if (decidedBy === 'clean_win' && winner.team) {
       const label = factionLabelFor(winner.team);
       badgeEl.setAttribute('data-decided-by', 'clean');
-      badgeEl.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${esc(label)} wins`;
+      // v15: disputed marker — the host attested a DIFFERENT outcome, but
+      // the kill-feed evidence (one base fully dead, other untouched) is
+      // near-incontrovertible, so the inference wins and the conflict is
+      // surfaced instead of swallowed.
+      if (winner.disputed) {
+        const rawOutcome = (currentData && currentData.match && currentData.match.game_outcome) || null;
+        const claim = rawOutcome === 'OUTCOME_TEAM1_WIN' ? 'a Team 1 win'
+          : rawOutcome === 'OUTCOME_TEAM2_WIN' ? 'a Team 2 win'
+          : rawOutcome === 'OUTCOME_DRAW' ? 'a draw'
+          : 'a different outcome';
+        setTip(`Host attested ${claim} — physical evidence (recycler + factory destruction) overrode it.` + adjTip);
+        badgeEl.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${esc(label)} wins <i class="bi bi-exclamation-triangle-fill ms-1" style="color:var(--kb-warning)"></i>${adjMark}`;
+        return;
+      }
+      if (adjudicated) setTip('Outcome determined by kill-feed evidence.' + adjTip);
+      badgeEl.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${esc(label)} wins${adjMark}`;
       return;
     }
     if (decidedBy === 'contested' && winner.team) {
@@ -5168,19 +5304,35 @@
         `Team 2: ${recCount['2'] || 0} rec / ${facCount['2'] || 0} fac destructions.`,
       ].join(' ');
       badgeEl.setAttribute('data-decided-by', 'contested');
-      badgeEl.setAttribute('data-bs-toggle', 'tooltip');
-      badgeEl.setAttribute('data-bs-placement', 'bottom');
-      badgeEl.setAttribute('title', tooltip);
-      badgeEl.innerHTML = `<i class="bi bi-trophy me-1"></i>${esc(label)} wins (contested)`;
+      setTip(tooltip + adjTip);
+      badgeEl.innerHTML = `<i class="bi bi-trophy me-1"></i>${esc(label)} wins (contested)${adjMark}`;
       return;
     }
-    // unclear (or any other unhandled state)
-    const tooltip = 'Match outcome could not be determined from the kill feed. The game may have ended via host quit, timeout, or commander self-demolition of recycler/factory. Future stat collection will close these gaps.';
+    // v15: host-attested draw (no winner; excluded from win rates).
+    if (decidedBy === 'draw') {
+      badgeEl.setAttribute('data-decided-by', 'draw');
+      setTip('The match host attested a draw at game end.' + adjTip);
+      badgeEl.innerHTML = `<i class="bi bi-circle-half me-1"></i>Draw (attested)${adjMark}`;
+      return;
+    }
+    // v15: host-attested cancellation (early RE / crash / restart).
+    // Visible everywhere, excluded from VTSR-T rating.
+    if (decidedBy === 'cancelled') {
+      badgeEl.setAttribute('data-decided-by', 'cancelled');
+      setTip('The match host marked this game cancelled (early RE, crash, or restart). Excluded from VTSR-T rating.' + adjTip);
+      badgeEl.innerHTML = `<i class="bi bi-slash-circle me-1"></i>Game cancelled${adjMark}`;
+      return;
+    }
+    // unclear (or any other unhandled state). With `adjudicated` set, a
+    // reviewer explicitly marked the outcome Unknown (signed off as
+    // permanently unclear) — the check-mark distinguishes that from
+    // not-yet-reviewed matches.
+    const tooltip = adjudicated
+      ? 'A human reviewer marked this outcome as unknown — it cannot be determined.'
+      : 'Match outcome could not be determined from the kill feed. The game may have ended via host quit, timeout, or commander self-demolition of recycler/factory. Newer matches carry a host-attested outcome that closes these gaps.';
     badgeEl.setAttribute('data-decided-by', 'unclear');
-    badgeEl.setAttribute('data-bs-toggle', 'tooltip');
-    badgeEl.setAttribute('data-bs-placement', 'bottom');
-    badgeEl.setAttribute('title', tooltip);
-    badgeEl.innerHTML = `<i class="bi bi-question-circle me-1"></i>Outcome unclear`;
+    setTip(tooltip);
+    badgeEl.innerHTML = `<i class="bi bi-question-circle me-1"></i>Outcome unclear${adjMark}`;
   }
 
   function renderKillFeed(kills, tickRate, minTick) {
@@ -5221,7 +5373,7 @@
     // "unclear" matches get no marker (the header badge tells the story).
     const winner = currentData && currentData.match && currentData.match.winner;
     const factions = currentData && currentData.match && currentData.match.team_factions;
-    const milestoneTick = (winner && (winner.decided_by === 'clean_win' || winner.decided_by === 'contested') && typeof winner.decided_at_tick === 'number')
+    const milestoneTick = (winner && (winner.decided_by === 'adjudicated' || winner.decided_by === 'attested' || winner.decided_by === 'clean_win' || winner.decided_by === 'contested') && typeof winner.decided_at_tick === 'number')
       ? winner.decided_at_tick
       : null;
     const milestoneFor = (winner && winner.team)
@@ -7011,7 +7163,12 @@
       return renderPlayerWeapons(canvasId, data.leaderboard, data.weapon_meta);
     });
     registerChartRenderer('section-weapon-accuracy', (canvasId) => {
-      return renderWeaponAccuracy(canvasId, data.weapon_meta);
+      // v15: collector-gap matches get the explanatory empty state.
+      return renderWeaponAccuracy(
+        canvasId,
+        matchHasBulletHitData() ? data.weapon_meta : [],
+        matchHasBulletHitData() ? undefined : ACC_GAP_TITLE + '.'
+      );
     });
     registerChartRenderer('section-weapon-range', (canvasId) => {
       const edges = currentData && currentData.match && currentData.match.distance_bin_edges;

@@ -4,49 +4,49 @@ overview: Adopt the upstream statsgate v3 schema (per-tick player roster + host-
 todos:
   - id: freeze-v2-descriptors
     content: "Freeze v2: statsgate_v2.proto (package rename) + statsgate_v2_pb2.py + vendor/protobufjs/statsgate_v2.proto.json"
-    status: pending
+    status: completed
   - id: adopt-v3-descriptors
     content: Adopt upstream v3 proto verbatim; regenerate statsgate_pb2.py + vendor/protobufjs/statsgate.proto.json
-    status: pending
+    status: completed
   - id: load-session-v3
     content: Three-way schema detection in load_session() with presence-based v3 check + PROTO_SCHEMA_V3 label
-    status: pending
+    status: completed
   - id: identity-shim
     content: "_build_identity_maps() shim: roster from header.players, Steam64 validity gate (phantom filter), UpdateTick tie-break, roster_conflicts audit"
-    status: pending
+    status: completed
   - id: match-fields
     content: "New match fields: roster (with valid flags), roster_conflicts, game_outcome; stamp proto_schema_version v3"
-    status: pending
+    status: completed
   - id: outcome-resolver
     content: "resolve_match_outcome(): evidence-first trust ladder (clean_win beats bad attestation), disputed/agreement telemetry, draw/cancelled"
-    status: pending
+    status: completed
   - id: data-gaps
     content: "has_bullet_hit_data flag: em-dash accuracy UI, Sharpshooter/Gunner gates, aggregator skip-sums, elo thug_accuracy availability"
-    status: pending
+    status: completed
   - id: elo-cancelled
     content: ELO match-level cancelled exclusion + matches_excluded_cancelled counter
-    status: pending
+    status: completed
   - id: aggregator-fold
     content: Aggregator maps-rollup else-fold for draw/cancelled (preserve count invariant)
-    status: pending
+    status: completed
   - id: dashboard-ui
     content: applyWinnerBadge attested/draw/cancelled branches + faction-panel/milestone gates + CSS variants + maps.js chip labels + player.js winner-badge label maps
-    status: pending
+    status: completed
   - id: raw-browser
     content: Raw browser triple-descriptor chain, players[] resolver, PROTO_TYPE_MAP/EVENT_ARMS/Reconcile updates, manual field docs
-    status: pending
+    status: completed
   - id: versions-docs
     content: PIPELINE_VERSION 27, match.schema_version 15, update data-schema.mdc / schema-migration.mdc / filter-contract.mdc / DEVELOPER_GUIDE / DATA_DICTIONARY / project-overview / AGENTS / README
-    status: pending
+    status: completed
   - id: verification
     content: Real-v3-file acceptance criteria, --force byte-parity audit, verify_proto_decode.mjs run, fixture for draw/cancelled/conflict edge cases, upstream bug report
-    status: pending
+    status: completed
   - id: final-ingest
     content: "Final ingest run: process + publish the three 08-23 v3 matches (manifest, ELO, contributions, map stats, player stubs); leave for user commit"
-    status: pending
+    status: completed
   - id: extras
     content: Picker Outcome facet + validate_elo attested ground-truth cohort
-    status: pending
+    status: completed
 isProject: false
 ---
 

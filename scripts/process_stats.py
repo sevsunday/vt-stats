@@ -20,7 +20,8 @@ from collections import Counter, defaultdict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 
-import statsgate_pb2          # v2 (current schema)
+import statsgate_pb2          # v3 (current schema: header.players roster + game_outcome)
+import statsgate_v2_pb2       # v2 (frozen schema, retained for the 2026-04..08 corpus)
 import statsgate_v1_pb2       # v1 (legacy schema, retained for pre-Nomad sessions)
 from google.protobuf.message import DecodeError
 
@@ -30,6 +31,7 @@ from google.protobuf.message import DecodeError
 # contract -- this is debugging telemetry only; UI never reads it.
 PROTO_SCHEMA_V1 = "v1"
 PROTO_SCHEMA_V2 = "v2"
+PROTO_SCHEMA_V3 = "v3"
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -53,7 +55,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 26
+PIPELINE_VERSION = 27
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -411,6 +413,29 @@ RACE_TO_FACTION_CODE = {
     statsgate_pb2.RACE_SCION: "f",
     statsgate_pb2.RACE_HADEAN: "e",
 }
+
+# Maps v3's StatHeader.game_outcome enum (statsgate_pb2.Outcome) to the raw
+# name string captured on match.game_outcome (telemetry, mirrors the
+# shutdown_requested precedent). The 1000-series values are intentional
+# upstream (they double as Win32 TaskDialog button IDs). Values OUTSIDE this
+# map -- including 0 (UNSPECIFIED) and stray dialog codes like IDCANCEL=2
+# when the host ESCs the outcome prompt -- are treated as "no attestation"
+# by resolve_match_outcome() and fall back to kill-feed inference.
+OUTCOME_NAMES = {
+    statsgate_pb2.OUTCOME_TEAM1_WIN:      "OUTCOME_TEAM1_WIN",       # 1000
+    statsgate_pb2.OUTCOME_TEAM2_WIN:      "OUTCOME_TEAM2_WIN",       # 1001
+    statsgate_pb2.OUTCOME_DRAW:           "OUTCOME_DRAW",            # 1002
+    statsgate_pb2.OUTCOME_GAME_CANCELLED: "OUTCOME_GAME_CANCELLED",  # 1003
+}
+
+# Steam64 validity gate for v3 roster entries. The v3 collector scans all 10
+# team slots every tick WITHOUT the old GetPlayerHandle() guard, so empty
+# slots can emit garbage Steam64s into header.players (observed in the first
+# real v3 batch: 8029124719555444850 and 30064771072 on an empty slot 10,
+# nick 'Unknown', parked at position (0,0) in every UpdateTick). Real
+# individual Steam accounts are universe 1 / type 1: high dword 0x01100001.
+def _valid_steam64(s64):
+    return (s64 >> 32) == 0x01100001
 
 # Canonical set of the three base faction pilot ODFs (player on foot).
 # Kept for reference / documentation; runtime pilot detection goes through
@@ -960,6 +985,14 @@ def compute_highlights(match_data):
         }
         emit(hustler)
 
+    # v15: collector-gap availability flag. The first v3-collector batch
+    # records BulletInit but zero BulletHit events (upstream exu2 hook
+    # regression), so every accuracy is a degenerate 0. Sharpshooter ranks
+    # ON accuracy -> gate the whole card; Gunner ranks on shots_fired
+    # (BulletInit-derived, healthy) -> keep the card but drop its accuracy
+    # breakdown so it doesn't caption a misleading 0.0%.
+    has_bullet_hit = (match_data.get("match") or {}).get("has_bullet_hit_data", True)
+
     # ---- Sharpshooter: max accuracy; breakdown = shots_hit / shots_fired.
     sharp = _player_card(
         "sharpshooter", leaderboard,
@@ -971,7 +1004,7 @@ def compute_highlights(match_data):
         ),
         value_format="accuracy",
         round_value=3,
-    )
+    ) if has_bullet_hit else None
     if sharp is not None:
         winner_p = (leaderboard_by_name.get(sharp["winner"]["name"]) or {}).get("personal") or {}
         sharp["value_breakdown"] = {
@@ -993,9 +1026,10 @@ def compute_highlights(match_data):
     )
     if gunner is not None:
         winner_p = (leaderboard_by_name.get(gunner["winner"]["name"]) or {}).get("personal") or {}
-        gunner["value_breakdown"] = {
-            "accuracy": round(winner_p.get("accuracy", 0), 3),
-        }
+        gunner["value_breakdown"] = (
+            {"accuracy": round(winner_p.get("accuracy", 0), 3)}
+            if has_bullet_hit else {}
+        )
         emit(gunner)
 
     # ---- Puppeteer: max assets.dealt; breakdown = personal_dealt for contrast.
@@ -1548,36 +1582,64 @@ def sync_upstream():
 def load_session(path):
     """Load and parse a .binpb.gz session file.
 
-    Returns `(session, schema)` where `schema` is `PROTO_SCHEMA_V1` or
-    `PROTO_SCHEMA_V2`. The pipeline supports both the legacy schema
-    (separate DamageDealt/DamageReceived events) and the current schema
-    (unified DamageDealt) by dispatching on the returned label downstream.
+    Returns `(session, schema)` where `schema` is `PROTO_SCHEMA_V1`,
+    `PROTO_SCHEMA_V2`, or `PROTO_SCHEMA_V3`. The pipeline supports all
+    three on-the-wire formats simultaneously: v1 (separate DamageDealt/
+    DamageReceived events), v2 (unified DamageDealt + header identity
+    maps), and v3 (header maps replaced by the `players` PlayerInfo list
+    + `game_outcome`).
 
     Discrimination strategy:
-      1. Parse with the v2 descriptor (always works structurally because
-         v1's removed `damage_received` payloads land in `reserved 4` and
-         the lenient Python protobuf parser silently keeps walking).
-      2. If `header.team1_race` / `team2_race` are set, it's a v2 file --
-         the v1 collector cannot populate these fields.
-      3. Otherwise, scan the event stream once for `WhichOneof('event_type')
-         is None`. v1 emits `damage_received` as oneof field 4, which the
-         v2 parser reports as an unidentifiable oneof arm. Even ONE such
-         event proves v1.
+      1. Parse with the v3 descriptor (the current `statsgate_pb2`).
+         Structurally this accepts v1/v2 files too -- the lenient Python
+         parser skips unknown/reserved fields -- so success alone proves
+         nothing.
+      2. If `header.players` is non-empty, it's a v3 file. This is the
+         ONLY reliable v2-vs-v3 signal: there are no wire-type conflicts
+         in either direction, so parse failure can never distinguish
+         them. (v2 files decode "fine" under v3 but with the identity
+         maps dropped as reserved fields; v3 files decode "fine" under
+         v2 with `players`/`game_outcome` dropped as unknown fields.)
+      3. Otherwise re-parse with the FROZEN v2 descriptor
+         (`statsgate_v2_pb2`) so the identity map fields are readable
+         again, then run the pre-existing v2/v1 discrimination:
+         a. If `header.team1_race` / `team2_race` are set, it's v2 --
+            the v1 collector cannot populate these fields.
+         b. Otherwise, scan the event stream once for
+            `WhichOneof('event_type') is None`. v1 emits
+            `damage_received` as oneof field 4, which the v2/v3 parsers
+            report as an unidentifiable oneof arm. Even ONE such event
+            proves v1.
       4. On a v1 detection, re-parse from scratch with the v1 descriptor
          so DamageDealt fields land in the correct semantic slots and
          DamageReceived events are first-class again.
+
+    Degenerate edge: a v3 file whose `players` list is somehow empty
+    (e.g. instant-crash session with zero update ticks) classifies as v2
+    via the races check -- harmless, since its identity maps are empty
+    either way and the event stream reads identically under both
+    descriptors.
     """
     with gzip.open(path, "rb") as f:
         data = f.read()
 
-    session_v2 = statsgate_pb2.ClientStatSession()
+    session_v3 = statsgate_pb2.ClientStatSession()
     try:
-        session_v2.ParseFromString(data)
+        session_v3.ParseFromString(data)
     except DecodeError:
-        # Extremely defensive -- if even the v2 parse blows up, surface v1.
+        # Extremely defensive -- if even the v3 parse blows up, surface v1.
         session_v1 = statsgate_v1_pb2.ClientStatSession()
         session_v1.ParseFromString(data)
         return session_v1, PROTO_SCHEMA_V1
+
+    if len(session_v3.header.players) > 0:
+        return session_v3, PROTO_SCHEMA_V3
+
+    # Legacy path: re-parse with the frozen v2 descriptor so the reserved
+    # identity-map fields (6/7/9/10) are readable, then discriminate v2/v1
+    # exactly as the dual-descriptor era did.
+    session_v2 = statsgate_v2_pb2.ClientStatSession()
+    session_v2.ParseFromString(data)
 
     hdr = session_v2.header
     if hdr.team1_race != 0 or hdr.team2_race != 0:
@@ -1776,6 +1838,150 @@ def compute_match_winner(kill_feed):
         "decided_by": "unclear",
         "evidence": _evidence(loser=None),
     }
+
+
+def resolve_match_outcome(raw_game_outcome, kill_feed):
+    """Combine the host-attested v3 `game_outcome` with the kill-feed
+    toggle-model inference into the final `match.winner` block.
+
+    The inference (`compute_match_winner`) ALWAYS runs -- it supplies the
+    `evidence` block, the milestone `decided_at_tick`, and (crucially) an
+    integrity check on the attestation. The first real v3 batch proved the
+    attestation is noisy human input: 1 of 3 outcomes contradicted
+    overwhelming physical evidence (host clicked "Team 2 Win" while Team 2's
+    factory AND recycler fell to a Team 1 steamroll). Hence the
+    evidence-first trust ladder:
+
+      1. Attested GAME_CANCELLED always wins -- it's a validity statement
+         ("this game doesn't count": early RE, crash, restart), not an
+         outcome claim. scripts/elo.py excludes these matches from rating.
+      2. A `clean_win` inference (one team's rec+fac fully dead, the other
+         side untouched) is near-incontrovertible physical evidence and
+         BEATS a contradicting attested team win or draw. The conflict is
+         preserved (`disputed: true`, `agreement: false`, WARN) instead of
+         silently swallowed.
+      3. Everything weaker (contested/unclear inference) defers to an
+         attested team win or draw.
+      4. No usable attestation (pre-v3 sessions, UNSPECIFIED, or
+         out-of-enum values like IDCANCEL=2 from ESCing the dialog) means
+         the inference result passes through verbatim -- the pre-v15
+         behavior, byte-identical for the legacy corpus.
+
+    decided_by taxonomy on the emitted block:
+      "attested"  -- attestation drove a team win (agreeing clean_win, or
+                     resolving a contested/unclear inference)
+      "clean_win" -- inference drove it (no attestation, or attestation
+                     contradicted -> `disputed: true`)
+      "contested" / "unclear" -- inference tiers, unchanged
+      "draw"      -- attested draw (team/loser null)
+      "cancelled" -- attested cancellation (team/loser null)
+
+    New fields vs the pre-v15 shape (all additive):
+      attested   -- bool, attestation drove the outcome
+      disputed   -- bool, attestation contradicted a clean_win inference
+      agreement  -- bool | None, attested team == inferred team (None when
+                    either side is undetermined / no attestation)
+      inferred   -- {team, loser, decided_by, decided_at_tick} | None,
+                    the raw inference result, preserved whenever an
+                    attestation was present alongside it
+    """
+    inferred = compute_match_winner(kill_feed)
+
+    def _with_defaults(block, attested=False, disputed=False, agreement=None, keep_inferred=False):
+        out = dict(block)
+        out["attested"] = attested
+        out["disputed"] = disputed
+        out["agreement"] = agreement
+        # v16: human sign-off flag. Always False on fresh processing --
+        # flipped by the pipeline's adjudication pass (scripts/adjudication.py)
+        # once the operator confirms/overrides the outcome.
+        out["adjudicated"] = False
+        out["inferred"] = (
+            {
+                "team": inferred["team"],
+                "loser": inferred["loser"],
+                "decided_by": inferred["decided_by"],
+                "decided_at_tick": inferred["decided_at_tick"],
+            }
+            if keep_inferred else None
+        )
+        return out
+
+    attested_team = None
+    if raw_game_outcome == statsgate_pb2.OUTCOME_TEAM1_WIN:
+        attested_team = 1
+    elif raw_game_outcome == statsgate_pb2.OUTCOME_TEAM2_WIN:
+        attested_team = 2
+
+    # --- 1. Cancellation: validity override, beats everything.
+    if raw_game_outcome == statsgate_pb2.OUTCOME_GAME_CANCELLED:
+        return _with_defaults(
+            {
+                "team": None,
+                "loser": None,
+                "decided_at_tick": None,
+                "decided_by": "cancelled",
+                "evidence": inferred["evidence"],
+            },
+            attested=True, keep_inferred=True,
+        )
+
+    # --- 4. No usable attestation: inference verbatim (pre-v15 behavior).
+    if attested_team is None and raw_game_outcome != statsgate_pb2.OUTCOME_DRAW:
+        if raw_game_outcome not in (0, statsgate_pb2.OUTCOME_TEAM1_WIN,
+                                    statsgate_pb2.OUTCOME_TEAM2_WIN,
+                                    statsgate_pb2.OUTCOME_DRAW,
+                                    statsgate_pb2.OUTCOME_GAME_CANCELLED):
+            print(f"  WARN: out-of-enum game_outcome {raw_game_outcome} -- treating as unattested")
+        return _with_defaults(inferred)
+
+    # --- 2. Clean-win inference: physical evidence outranks the dialog.
+    if inferred["decided_by"] == "clean_win":
+        if attested_team == inferred["team"]:
+            return _with_defaults(
+                {**inferred, "decided_by": "attested"},
+                attested=True, agreement=True, keep_inferred=True,
+            )
+        # Contradiction (other team, or a draw claim against a clean win):
+        # keep the inferred winner, surface the dispute loudly.
+        claim = f"team {attested_team}" if attested_team else "a draw"
+        print(
+            f"  WARN: attested outcome ({claim}) contradicts clean_win "
+            f"inference (team {inferred['team']}) -- keeping inference, "
+            f"flagging disputed"
+        )
+        return _with_defaults(
+            inferred, disputed=True, agreement=False, keep_inferred=True,
+        )
+
+    # --- 3. Contested/unclear inference: attestation resolves it.
+    if raw_game_outcome == statsgate_pb2.OUTCOME_DRAW:
+        return _with_defaults(
+            {
+                "team": None,
+                "loser": None,
+                "decided_at_tick": None,
+                "decided_by": "draw",
+                "evidence": inferred["evidence"],
+            },
+            attested=True, keep_inferred=True,
+        )
+
+    agreement = (inferred["team"] == attested_team) if inferred["team"] is not None else None
+    return _with_defaults(
+        {
+            "team": attested_team,
+            "loser": 3 - attested_team,
+            # Milestone tick only when the (weaker) inference agrees on
+            # the same team -- otherwise there's no trustworthy tick.
+            "decided_at_tick": (
+                inferred["decided_at_tick"] if inferred["team"] == attested_team else None
+            ),
+            "decided_by": "attested",
+            "evidence": inferred["evidence"],
+        },
+        attested=True, agreement=agreement, keep_inferred=True,
+    )
 
 
 def detect_team_factions(slot_first_odf, slot_faction_votes):
@@ -2662,6 +2868,111 @@ def _apply_account_reroutes_to_events(events, reroute_map):
             if x.picker and g(x.picker): x.picker = g(x.picker)
 
 
+def _build_identity_maps(header, schema, events):
+    """Build the three working identity dicts for process_match().
+
+    v1/v2: direct copies of the header maps (unchanged legacy behavior).
+
+    v3: derived from `header.players` (PlayerInfo entries accumulated by
+    the collector's per-tick slot scan). Two data-quality realities are
+    handled here so everything downstream stays identity-blind:
+
+      * Garbage entries -- the v3 collector dropped the old
+        GetPlayerHandle() guard, so EMPTY slots can emit invalid Steam64s
+        (observed: 8029124719555444850 / 30064771072 on empty slot 10,
+        nick 'Unknown', parked at (0,0) every tick). The `_valid_steam64`
+        gate drops them from the working dicts, which automatically keeps
+        their ghost trails out of positioning (the UpdateTick consumer
+        gates on `s64 in s64_to_nick`) and denies them leaderboard rows.
+      * Slot conflicts -- two VALID Steam64s claiming the same teamnum
+        (leave + rejoin churn). `players[]` is unordered_map hash order
+        on the wire, so list position is meaningless; the slot is awarded
+        to the Steam64 that appears EARLIEST in the update_tick stream
+        (true first-seen; cheap pre-scan that only runs when a conflict
+        actually exists). Displaced claimants are dropped from the
+        working dicts -- v2-identical semantics, one identity per slot --
+        and recorded in `roster_conflicts` for the audit trail.
+
+    Returns `(slot_to_s64, s64_to_slot, s64_to_nick, roster,
+    roster_conflicts)` where `roster` is the RAW PlayerInfo passthrough
+    (list of {steam64, slot, nickname, valid} dicts; None for v1/v2 --
+    pre-ACCOUNT_REROUTES identity, wire-accurate provenance) and
+    `roster_conflicts` lists displaced valid claimants (always a list).
+    """
+    if schema != PROTO_SCHEMA_V3:
+        return (
+            dict(header.teamnum_to_s64),
+            dict(header.s64_to_teamnum),
+            dict(header.s64_to_nick),
+            None,
+            [],
+        )
+
+    roster = [
+        {
+            "steam64": str(p.steam64),
+            "slot": int(p.teamnum),
+            "nickname": p.nickname or "",
+            "valid": _valid_steam64(p.steam64),
+        }
+        for p in header.players
+    ]
+
+    valid_entries = [p for p in header.players if _valid_steam64(p.steam64)]
+    invalid_count = len(header.players) - len(valid_entries)
+    if invalid_count:
+        print(
+            f"  WARN: v3 roster: dropped {invalid_count} invalid-Steam64 "
+            f"entr{'y' if invalid_count == 1 else 'ies'} (empty-slot collector garbage)"
+        )
+
+    # Group valid claimants by slot to detect churn conflicts.
+    by_slot = {}
+    for p in valid_entries:
+        by_slot.setdefault(int(p.teamnum), []).append(p)
+
+    # Conflict tie-break: earliest first appearance in the UpdateTick
+    # stream. Single cheap pre-scan, gated so conflict-free matches (the
+    # overwhelmingly common case) never pay for it.
+    first_seen = {}
+    if any(len(v) > 1 for v in by_slot.values()):
+        contested = {p.steam64 for v in by_slot.values() if len(v) > 1 for p in v}
+        for evt in events:
+            if evt.WhichOneof("event_type") != "update_tick":
+                continue
+            ut = evt.update_tick
+            for ps in ut.players:
+                if ps.player in contested and ps.player not in first_seen:
+                    first_seen[ps.player] = ut.tick
+            if len(first_seen) == len(contested):
+                break
+
+    slot_to_s64 = {}
+    s64_to_slot = {}
+    s64_to_nick = {}
+    roster_conflicts = []
+    for slot, claimants in sorted(by_slot.items()):
+        claimants = sorted(claimants, key=lambda p: first_seen.get(p.steam64, float("inf")))
+        winner = claimants[0]
+        slot_to_s64[slot] = winner.steam64
+        s64_to_slot[winner.steam64] = slot
+        s64_to_nick[winner.steam64] = winner.nickname
+        for loser in claimants[1:]:
+            print(
+                f"  WARN: v3 roster: slot {slot} contested -- "
+                f"{loser.steam64} ({loser.nickname!r}) displaced by "
+                f"{winner.steam64} ({winner.nickname!r})"
+            )
+            roster_conflicts.append({
+                "slot": slot,
+                "steam64": str(loser.steam64),
+                "nickname": loser.nickname or "",
+                "kept_steam64": str(winner.steam64),
+            })
+
+    return slot_to_s64, s64_to_slot, s64_to_nick, roster, roster_conflicts
+
+
 def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None):
     """Process a single match session into pre-computed stats.
 
@@ -2670,13 +2981,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     `match.source_size_bytes` field so subsequent runs can use it as the
     incremental cache key (see load_cache_index() and the `--force` flag).
 
-    `schema` is `PROTO_SCHEMA_V1` or `PROTO_SCHEMA_V2`, returned by
-    `load_session`. It controls the damage-event normalization branch
-    (see `_normalize_damage_events`), the faction resolution (v2's
-    `team1_race`/`team2_race` header fields are authoritative when set,
-    algo inference is the fallback), and the per-ship combat ODF
-    attribution (v2 uses event-time `DamageDealt.shooter_odf` when
+    `schema` is `PROTO_SCHEMA_V1`, `PROTO_SCHEMA_V2`, or `PROTO_SCHEMA_V3`,
+    returned by `load_session`. Event-layout branches split v1 vs modern
+    (`schema != PROTO_SCHEMA_V1` -- v2 and v3 share the unified event
+    stream): the damage-event normalization, the faction resolution
+    (v2+'s `team1_race`/`team2_race` header fields are authoritative when
+    set, algo inference is the fallback), and the per-ship combat ODF
+    attribution (v2+ uses event-time `DamageDealt.shooter_odf` when
     present; v1 unchanged via the existing `_ship_key()` UpdateTick map).
+    Identity branches split v3 vs earlier (`_build_identity_maps`).
     """
     header = session.header
     events = session.event_stream
@@ -2714,10 +3027,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # mirrored onto the top-level `match` object below.
     terrain_bounds = _extract_terrain_bounds(header)
 
-    # Build identity maps from new header fields
-    slot_to_s64 = dict(header.teamnum_to_s64)
-    s64_to_slot = dict(header.s64_to_teamnum)
-    s64_to_nick = dict(header.s64_to_nick)
+    # Build the working identity dicts. v1/v2 read the header maps
+    # directly; v3 derives them from header.players via the validity-gated,
+    # conflict-resolved shim. Everything downstream (reroutes, nick_map,
+    # team_leaders, positioning gate, leaderboard, ELO) consumes only these
+    # three dicts, so the schema difference ends here.
+    slot_to_s64, s64_to_slot, s64_to_nick, match_roster, roster_conflicts = \
+        _build_identity_maps(header, schema, events)
 
     if known_players is None:
         known_players = {}
@@ -3153,7 +3469,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # legacy proto -- protobuf returns default), so the `>0` gate
             # naturally distinguishes "no data" from "real distance".
             bullet_hit_distance_count += 1
-            if schema == PROTO_SCHEMA_V2:
+            if schema != PROTO_SCHEMA_V1:
                 _dt = bh.distance_to_target
                 if _dt > 0:
                     bullet_hit_distance_with += 1
@@ -3271,7 +3587,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             #     "paired DR" view from the unified event so the
             #     receiving/rivalry/asset code below works unchanged.
             dd = evt.damage_dealt
-            if schema == PROTO_SCHEMA_V2:
+            if schema != PROTO_SCHEMA_V1:
                 de_tick = dd.tick
                 de_shooter = dd.shooter
                 de_shooter_team = dd.shooter_team
@@ -3400,7 +3716,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     #     environmental) -- those are conservatively
                     #     uncounted. Same honesty contract as `pve_dealt`.
                     v_odf = ""
-                    if schema == PROTO_SCHEMA_V2:
+                    if schema != PROTO_SCHEMA_V1:
                         v_odf = de_victim_odf_event.lower() if de_victim_odf_event else ""
                     else:
                         queue = bh_pending.get((de_tick, shooter, (odf or "").lower())) if odf else None
@@ -3921,7 +4237,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Schema-aware shooter-team extraction: v1's `team` was the
             # shooter's team; v2 renamed to `shooter_team`. Same wire
             # field id (3) and same semantic.
-            dd_shooter_team = dd.shooter_team if schema == PROTO_SCHEMA_V2 else dd.team
+            dd_shooter_team = dd.shooter_team if schema != PROTO_SCHEMA_V1 else dd.team
             if _is_sentinel_damage(dd.amount):
                 continue
             if dd_shooter_team == 0 or dd.amount == 0.0:
@@ -4081,7 +4397,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # Algorithm B votes are still computed regardless: they are still the
     # *only* signal for v1 sessions and serve as a sanity log on v2
     # sessions (mismatches log at INFO level; never block).
-    if schema == PROTO_SCHEMA_V2:
+    if schema != PROTO_SCHEMA_V1:
         for team_num, race_value in ((1, header.team1_race), (2, header.team2_race)):
             if race_value not in RACE_TO_FACTION_CODE:
                 continue
@@ -4749,12 +5065,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         "2": _team_factions.get(2),
     }
 
-    # Infer the match outcome from the (already-cleaned) kill_feed via the
-    # toggle model on recycler/factory destructions. Always emitted; the
-    # renderer reads this directly from currentData.match.winner and never
-    # from the (filterable) kills.feed -- a player filter could otherwise
-    # hide loser destruction events and corrupt the in-feed milestone.
-    match_winner = compute_match_winner(kill_feed)
+    # Resolve the match outcome: host-attested v3 game_outcome combined
+    # with the kill-feed toggle-model inference through the evidence-first
+    # trust ladder (see resolve_match_outcome). getattr() because only the
+    # v3 descriptor has the field -- v1/v2 headers return the default 0
+    # (UNSPECIFIED), which routes to pure inference, byte-identical to the
+    # pre-v15 behavior. Always emitted; the renderer reads this directly
+    # from currentData.match.winner and never from the (filterable)
+    # kills.feed -- a player filter could otherwise hide loser destruction
+    # events and corrupt the in-feed milestone.
+    raw_game_outcome = getattr(header, "game_outcome", 0)
+    match_winner = resolve_match_outcome(raw_game_outcome, kill_feed)
 
     match_data = {
         "match": {
@@ -4780,7 +5101,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "duration_sec": round(duration_sec, 1),
             "tick_range": [min_tick if min_tick != float("inf") else 0, max_tick],
             "tick_rate": tick_rate,
-            "player_count": header.player_count or len(nick_map),
+            # getattr: field 10 is `reserved` in v3 (no attribute on the
+            # descriptor); v3 falls through to the shim-built roster size
+            # (= valid occupied slots).
+            "player_count": getattr(header, "player_count", 0) or len(nick_map),
             "config_mod": header.active_config_mod,
             "snipe_count": snipe_count,
             "teams": teams,
@@ -4790,12 +5114,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Each value is either {"code": "i" | "e" | "f", "name": ...}
             # or null for inconclusive teams. See detect_team_factions().
             "team_factions": team_factions,
-            # Inferred match outcome from the kill_feed toggle model on
-            # recycler/factory destructions. decided_by is one of
-            # "clean_win" / "contested" / "unclear"; team and loser are
-            # null for unclear. Always emitted. Match-global, always
+            # Resolved match outcome: kill-feed toggle-model inference
+            # combined with the v3 host attestation through the
+            # evidence-first trust ladder. decided_by is one of
+            # "attested" / "clean_win" / "contested" / "unclear" /
+            # "draw" / "cancelled"; team and loser are null for
+            # unclear/draw/cancelled. v15 adds `attested` / `disputed` /
+            # `agreement` / `inferred` sibling fields (all default-off on
+            # pre-v3 sessions). Always emitted. Match-global, always
             # full-match (the renderer reads this block, never the
-            # filtered kills.feed). See compute_match_winner().
+            # filtered kills.feed). See resolve_match_outcome() +
+            # compute_match_winner().
             "winner": match_winner,
             # v7: identity-reroute audit log. Non-empty when one or more
             # slots were rewritten at the top of process_match via
@@ -4823,6 +5152,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # the dashboard can badge legacy matches without loading the
             # full per-match JSON.
             "has_pickup_data": match_has_pickup_data,
+            # v15: True when the match contains at least one BulletHit
+            # event. False on the first v3-collector batch (upstream exu2
+            # hook regression: bullets fire via BulletInit but no hits are
+            # recorded), which would otherwise surface as a misleading
+            # 0.0% accuracy for every player. Consumers: leaderboard Acc /
+            # PvP Acc render em-dash when false, Sharpshooter self-omits,
+            # Gunner drops its accuracy breakdown, the client aggregator
+            # skips shots/hits career sums, and scripts/elo.py treats the
+            # thug_accuracy axis as unavailable (weight redistributed).
+            # Mirrored on manifest entries + match_contributions.
+            "has_bullet_hit_data": bullet_hit_distance_count > 0,
             # Per-match schema version. v1 = pre-highlights; v2 added the
             # top-level `highlights` block; v3 added `match.team_factions`
             # and `match.winner`; v4 added the v2.3 leaderboard fields
@@ -4901,13 +5241,31 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # destroys a ship still gets full credit. Pilot-victim rows stay
             # in `kill_feed` flagged with `is_pilot_victim: true`. Pre-v14
             # consumers default that flag to False.
-            "schema_version": 14,
+            # v15 is the proto v3 migration: the winner block gains the
+            # attestation fields (`attested`, `disputed`, `agreement`,
+            # `inferred`) and three new decided_by values ("attested" /
+            # "draw" / "cancelled") from the host's end-of-game outcome
+            # dialog; new top-level `game_outcome` (raw Outcome enum name,
+            # null pre-v3), `roster` (raw PlayerInfo passthrough with
+            # per-entry validity, null pre-v3), `roster_conflicts`
+            # (slot-churn audit, [] normally), and `has_bullet_hit_data`
+            # (collector-gap availability flag). Pre-v15 consumers see
+            # absent fields and default them off. v16 (this version) adds
+            # human outcome adjudication: `winner.adjudicated` (operator
+            # sign-off flag; every proto v3+ match prompts once in the
+            # pipeline), a fourth team-win decided_by value
+            # ("adjudicated" -- operator overrode/supplied the outcome;
+            # confirmations keep the original decided_by), and the
+            # manifest mirror `winner_adjudicated`. Answers persist in
+            # data/match_outcome_adjudications.json (committed).
+            "schema_version": 16,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
-            # (separate DamageDealt/DamageReceived); "v2" = current
-            # (unified DamageDealt). UI never reads this; aggregators
-            # never branch on it -- the pipeline already normalized the
-            # output to a single shape.
+            # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
+            # era (unified DamageDealt + header identity maps); "v3" =
+            # current (header.players roster + game_outcome). UI never
+            # reads this; aggregators never branch on it -- the pipeline
+            # already normalized the output to a single shape.
             "proto_schema_version": schema,
             # True when the match ended because the stat session was
             # cancelled mid-game via mission script or console command.
@@ -4917,6 +5275,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # consumer yet; surfaced for future filtering (e.g. exclude
             # mid-game-quit matches from career ratings).
             "shutdown_requested": bool(getattr(header, "shutdown_requested", False)),
+            # v15: raw host-attested outcome from the v3 collector's
+            # end-of-game dialog, as the Outcome enum name string
+            # ("OUTCOME_TEAM1_WIN" | "OUTCOME_TEAM2_WIN" | "OUTCOME_DRAW"
+            # | "OUTCOME_GAME_CANCELLED"). None on pre-v3 sessions, when
+            # the host didn't answer (UNSPECIFIED), or for out-of-enum
+            # values (e.g. IDCANCEL=2 from ESCing the dialog). Telemetry
+            # mirror -- the interpreted result lives on `winner`.
+            "game_outcome": OUTCOME_NAMES.get(raw_game_outcome),
+            # v15: raw v3 roster passthrough -- one entry per PlayerInfo
+            # the collector accumulated, INCLUDING invalid/garbage entries
+            # (valid: false) for wire-accurate provenance. Pre-reroute
+            # identity (mirrors the tiers-1/2 philosophy; the reroute
+            # rewrite applies to the working dicts only). None on v1/v2.
+            "roster": match_roster,
+            # v15: slot-churn audit -- valid Steam64s displaced from a
+            # contested slot by the earliest-first-appearance tie-break.
+            # Always a list; empty when no genuine conflict occurred.
+            "roster_conflicts": roster_conflicts,
             # BulletHit distance-to-target summary (v2-only). v1 matches
             # emit count=N total but with_distance=0 and mean/max=null
             # because the proto field doesn't exist. The dashboard's
@@ -5243,6 +5619,10 @@ def _extract_contribution(match_data):
         "has_position_data":    m.get("has_position_data", False),
         "has_target_lock_data": m.get("has_target_lock_data", False),
         "has_pickup_data":      m.get("has_pickup_data", False),
+        # v15: collector-gap flag. The aggregator skips shots/hits career
+        # sums for matches where this is False (default True so the
+        # pre-v15 corpus keeps its accuracy contributions).
+        "has_bullet_hit_data":  m.get("has_bullet_hit_data", True),
         "sentinel_damage_count": (m.get("sentinel_damage") or {}).get("count", 0),
         "team_leaders":  m.get("team_leaders") or {},
         "team_factions": m.get("team_factions") or {},
@@ -5604,6 +5984,34 @@ def _parse_args():
         action="store_true",
         help="Ignore the per-match cache and reprocess every match (composes with sync flags)",
     )
+    # --- Outcome adjudication flags (match.schema_version 16) ---
+    # New (proto v3+) matches prompt once for a human outcome sign-off.
+    prompt_group = parser.add_mutually_exclusive_group()
+    prompt_group.add_argument(
+        "--no-prompt",
+        action="store_true",
+        help=(
+            "Never prompt for outcome review (automation/CI). Unreviewed "
+            "matches publish with their interim resolution and prompt on "
+            "the next interactive run."
+        ),
+    )
+    prompt_group.add_argument(
+        "--force-prompt",
+        action="store_true",
+        help=(
+            "Prompt even when stdin is not a TTY (testing aid: answers are "
+            "read from piped stdin; EOF defers the remaining matches)."
+        ),
+    )
+    parser.add_argument(
+        "--adjudicate-all",
+        action="store_true",
+        help=(
+            "Widen outcome review to the pre-v3 legacy corpus (optional "
+            "winner backfill; default reviews only proto v3+ matches)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -5765,6 +6173,84 @@ def main():
         print(f"WARN: 3D-extract step failed ({e}); skipping. "
               f"Dashboard Replay tabs may show empty state for affected matches.")
 
+    # --- Human outcome adjudication (match.schema_version 16) ---
+    # Every proto v3+ match gets a one-time console sign-off: the operator
+    # confirms (or overrides) the outcome the host attested / the kill feed
+    # inferred. Answers persist in data/match_outcome_adjudications.json
+    # (committed; keyed by match id, so dual recordings of one game share a
+    # single answer) and the match never prompts again. Deferred matches
+    # publish with their interim trust-ladder resolution and re-prompt next
+    # interactive run. Positioned AFTER the registry build (prompt shows
+    # resolved map titles) and BEFORE every aggregate emit (manifest /
+    # contributions / ELO / map stats all rebuild from the mutated
+    # all_match_data below, so a corrected winner propagates everywhere in
+    # the same run). See scripts/adjudication.py for the full contract.
+    import adjudication as adjudication_module
+    adj_store = adjudication_module.load_adjudications()
+    interactive = (sys.stdin.isatty() and not args.no_prompt) or args.force_prompt
+
+    # Dedupe prompt candidates by match id (dual recordings appear twice in
+    # all_match_data); reconciliation below still touches every dict.
+    candidates = []
+    seen_candidate_ids = set()
+    for md in all_match_data:
+        mid = md["match"].get("id")
+        if mid in seen_candidate_ids:
+            continue
+        if adjudication_module.is_candidate(md, adj_store, args.adjudicate_all):
+            candidates.append(md)
+            seen_candidate_ids.add(mid)
+    candidates.sort(key=lambda md: md["match"].get("date") or "")
+
+    if candidates and not interactive:
+        print(
+            f"\n{len(candidates)} match(es) awaiting outcome review -- "
+            f"run interactively (or with --force-prompt) to adjudicate; "
+            f"publishing with interim resolutions for now."
+        )
+    elif candidates:
+        print(f"\n=== Outcome review: {len(candidates)} match(es) awaiting sign-off ===")
+        for i, md in enumerate(candidates, 1):
+            display = resolve_match_name(md["match"]["map"], registry)
+            outcome = adjudication_module.prompt_for_outcome(md, display, i, len(candidates))
+            if outcome is None:
+                print("   deferred -- will ask again next run")
+                continue
+            adj_store[md["match"]["id"]] = adjudication_module.make_entry(md, outcome)
+            # Flush after every answer so Ctrl+C keeps prior progress.
+            adjudication_module.save_adjudications(adj_store)
+            print(f"   recorded: {outcome}")
+
+    # Reconciliation: apply every adjudication entry to its match's winner
+    # block -- covers freshly answered prompts AND manual edits to the
+    # adjudications file (idempotent; no --force needed). On change, the
+    # in-memory dict mutates (downstream consumers see it this run) and the
+    # per-match JSON is rewritten (durable for future cached runs).
+    n_adj_applied = 0
+    rewritten_adj_paths = set()
+    for md in all_match_data:
+        mid = md["match"].get("id")
+        entry = adj_store.get(mid)
+        if not entry:
+            continue
+        try:
+            new_winner, changed = adjudication_module.apply_outcome(
+                md["match"].get("winner") or {}, entry.get("outcome")
+            )
+        except ValueError as e:
+            print(f"  WARN: {mid}: bad adjudication entry ({e}); ignoring")
+            continue
+        if changed:
+            md["match"]["winner"] = new_winner
+            out_path = OUTPUT_DIR / f"{mid}.json"
+            if out_path not in rewritten_adj_paths:
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(md, f, indent=2, ensure_ascii=False)
+                rewritten_adj_paths.add(out_path)
+            n_adj_applied += 1
+    if rewritten_adj_paths:
+        print(f"  Adjudicated outcomes applied to {len(rewritten_adj_paths)} match JSON(s)")
+
     # Build manifest using registry-resolved names (with filename fallback
     # for any map the registry couldn't satisfy).
     manifest = []
@@ -5793,10 +6279,14 @@ def main():
             # without hydrating per-match JSON.
             "team_factions": match_data["match"].get("team_factions", {}),
             "winner_decided_by": (match_data["match"].get("winner") or {}).get("decided_by", "unclear"),
+            # v16: true once a human signed off on this match's outcome
+            # (adjudication pass). Powers reviewer-confirmed UI states.
+            "winner_adjudicated": bool((match_data["match"].get("winner") or {}).get("adjudicated", False)),
             "players": manifest_players,
             "has_position_data": match_data["match"].get("has_position_data", False),
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),
             "has_pickup_data": match_data["match"].get("has_pickup_data", False),
+            "has_bullet_hit_data": match_data["match"].get("has_bullet_hit_data", True),
         })
 
     manifest.sort(key=lambda m: m["date"])
