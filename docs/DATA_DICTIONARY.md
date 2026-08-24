@@ -268,7 +268,7 @@ Players are identified by `uint64` Steam64 IDs. The header provides three lookup
 
 The pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick`.
 
-**Proto v3:** the three maps are `reserved`; identity comes from the `header.players` PlayerInfo roster instead (see the StatHeader table above), normalized into the same three working dicts by `_build_identity_maps()` in `scripts/process_stats.py` — invalid Steam64s (empty-slot collector garbage) are dropped via the `_valid_steam64` gate, and slot conflicts (multiple valid Steam64s claiming one slot) resolve to the claimant with the **most UpdateTick presence** (dominant occupant; `PlayerInfo.teamnum` only records the FIRST slot seen, so first-appearance is not trustworthy). Displaced claimants with `presence_share >= 0.25` overflow to the lowest free slot on their team side (they were genuinely playing — e.g. a 5v4's fifth player who transited another slot pre-game); low-presence losers drop. Every resolution lands on `match.roster_conflicts` (`resolution: "reassigned" | "dropped"`, `assigned_slot`, `presence_share`). The raw roster survives verbatim on `match.roster` (`[{steam64, slot, nickname, valid}]`, pre-`ACCOUNT_REROUTES`).
+**Proto v3:** the three maps are `reserved`; identity comes from the `header.players` PlayerInfo roster instead (see the StatHeader table above), normalized into the same three working dicts by `_build_identity_maps()` in `scripts/process_stats.py` — **evidence-first**. Invalid Steam64s (empty-slot collector garbage) are dropped via the `_valid_steam64` gate. Active players are placed at the **majority-vote slot from the engine's event attributions** (every `team` field on `DamageDealt` / `UnitDestroyed` / `UnitSniped` / `PickupPowerup` is the actor's team slot 1-10 at that moment) — `PlayerInfo.teamnum` only records the FIRST slot seen, which pre-game lobby shuffles corrupt both loudly (contested slots between full-match players) and silently (wrong-side placements that fire no conflict). No-evidence players (spectators, cameos, phantoms) keep their roster-hint slot when free; when taken, `presence_share >= 0.25` overflows to the lowest free same-side slot (campod spectators keep a visible-but-never-rated row) and lower presence drops. Every resolution lands on `match.roster_conflicts` (`resolution: "evidence" | "reassigned" | "dropped"`, `assigned_slot`, `presence_share`, `evidence_events`). The raw roster survives verbatim on `match.roster` (`[{steam64, slot, nickname, valid}]`, pre-`ACCOUNT_REROUTES`).
 
 ### Faction Resolution
 
@@ -316,7 +316,7 @@ When multiple ODF strings resolve to the same display name, the raw ODF is appen
 
 The pipeline normalizes identity through `_build_identity_maps(header, schema, events)`:
 - **v1/v2**: `slot_to_s64` / `s64_to_slot` / `s64_to_nick` copied directly from `header.teamnum_to_s64` / `header.s64_to_teamnum` / `header.s64_to_nick`
-- **v3**: the same three dicts derived from `header.players` — entries failing the `_valid_steam64` gate are dropped (empty-slot collector garbage), and slot conflicts resolve to the most-UpdateTick-presence claimant with substantial-presence losers overflowing to a free same-team slot (all resolutions → `match.roster_conflicts`)
+- **v3**: the same three dicts derived from `header.players` — entries failing the `_valid_steam64` gate are dropped (empty-slot collector garbage); active players sit at their engine-event-evidence majority slot (the roster's first-seen `teamnum` is only a hint), no-evidence spectators keep/overflow-within their hinted side by presence (all resolutions → `match.roster_conflicts`)
 - Builds `nick_map` (slot → nickname) by joining `slot_to_s64` with `s64_to_nick`
 - Faction is determined by slot convention (1-5 = Team 1, 6-10 = Team 2)
 
@@ -2893,12 +2893,12 @@ Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_
     "decided_by": "attested", "adjudicated": true,
     "outcome": "team2",
     "commanders": {
-      "1": { "steam64": "...", "name": "muerte.", "before": 1535.57, "after": 1515.36,
-             "delta": -20.22, "expected": 0.722, "k": 28.0, "score": 0.0 },
-      "2": { "steam64": "...", "name": "F9bomber", "before": 1442.33, "after": 1456.77,
-             "delta": 14.44, "expected": 0.278, "k": 20.0, "score": 1.0 }
+      "1": { "steam64": "...", "name": "F9bomber", "before": 1457.60, "after": 1447.02,
+             "delta": -10.58, "expected": 0.5292, "k": 20.0, "score": 0.0 },
+      "2": { "steam64": "...", "name": "muerte.", "before": 1510.99, "after": 1525.81,
+             "delta": 14.82, "expected": 0.4708, "k": 28.0, "score": 1.0 }
     },
-    "team_handicap": { "t1_thug_mean": 1564.22, "t2_thug_mean": 1491.65, "diff": 72.57, "lambda": 1.0 }
+    "team_handicap": { "t1_thug_mean": 1565.0, "t2_thug_mean": 1491.32, "diff": 73.68, "lambda": 1.0 }
   }]
 }
 ```
