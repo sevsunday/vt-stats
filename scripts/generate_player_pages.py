@@ -49,7 +49,9 @@ SITE_URL = "https://vtstats.bz"
 # v8 threads the site-wide custom-cursor + Settings gear script
 # (js/cursor-settings.js) through every player stub.
 # v10 adds the ELO topnav link (dedicated /elo/ page) after Maps.
-PLAYER_TEMPLATE_VERSION = 10
+# v11 reorders the topnav: Players moves after Maps so it sits
+# immediately left of ELO (Models · Maps · Players · ELO · Tools).
+PLAYER_TEMPLATE_VERSION = 11
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,
