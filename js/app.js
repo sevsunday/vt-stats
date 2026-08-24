@@ -6135,6 +6135,51 @@
     return { contribs, sum };
   }
 
+  // Lazy one-shot fetch of the experimental VTSR-C commander ladder
+  // (elo_commander_current.json). Graceful 404: sentinel null keeps the
+  // cohort card exactly as it was pre-VTSR-C (no strip). Cached on
+  // window so the ELO-page convention (__vtCmdrElo) carries over.
+  let _cmdrEloFetchPromise = null;
+  function ensureCommanderEloLoaded() {
+    if (window.__vtCmdrElo !== undefined) return Promise.resolve(window.__vtCmdrElo);
+    if (!_cmdrEloFetchPromise) {
+      _cmdrEloFetchPromise = fetch('data/processed/elo_commander_current.json', { cache: 'no-store' })
+        .then(res => (res && res.ok) ? res.json() : null)
+        .catch(() => null)
+        .then(json => { window.__vtCmdrElo = json; return json; });
+    }
+    return _cmdrEloFetchPromise;
+  }
+
+  // Compact top-5 VTSR-C strip prepended above the cohort grid. Rank,
+  // player-linked name, rating, W-L-D record, provisional chip, plus a
+  // link to the full ladder on the ELO page. Empty string while the
+  // ladder file is absent/unloaded (the cohort renders unchanged).
+  function _cohortVtsrCStripHtml() {
+    const c = window.__vtCmdrElo;
+    const ratings = (c && Array.isArray(c.ratings)) ? c.ratings : [];
+    if (!ratings.length) return '';
+    const rows = ratings.slice(0, 5).map((r, i) => {
+      const prov = r.provisional
+        ? `<span class="vt-cohort-prov" title="Provisional \u2014 fewer than ${c.provisional_threshold ?? 5} rated commander games">Prov</span>`
+        : '';
+      return `<div class="vt-cohort-vtsrc-row">
+        <span class="vt-cohort-vtsrc-rank">${i + 1}</span>
+        <span class="vt-cohort-vtsrc-name">${vtPlayerLinkHtml(r.name, r.steam64)} ${prov}</span>
+        <span class="vt-cohort-vtsrc-rating">${Math.round(r.vtsr_c)}</span>
+        <span class="vt-cohort-vtsrc-record" title="Wins-Losses-Draws in rated commander duels">${r.wins}-${r.losses}-${r.draws}</span>
+      </div>`;
+    }).join('');
+    return `<div class="vt-cohort-vtsrc-strip mb-2">
+      <div class="vt-cohort-vtsrc-strip-head">
+        <span class="vt-cohort-vtsrc-strip-title"><i class="bi bi-trophy me-1"></i>VTSR-C ladder \u2014 top 5</span>
+        <span class="vt-cohort-vtsrc-strip-sub">win/loss rating over ${c.rated_match_count} verified duels \u00b7 experimental</span>
+        <a class="vt-cohort-vtsrc-strip-link" href="elo/?tab=leaderboard">View full commander ladder <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+      <div class="vt-cohort-vtsrc-rows">${rows}</div>
+    </div>`;
+  }
+
   // Main renderer. `elo` is window.__vtElo (already loaded by
   // ensureEloLoaded). When elo is missing / has no ratings, the card
   // hides itself entirely.
@@ -6150,6 +6195,17 @@
       return;
     }
     $card.classList.remove('d-none');
+
+    // Kick off the lazy VTSR-C ladder fetch on first render; when it
+    // lands, re-render once so the top-5 strip appears. 404 caches null
+    // and this render path never re-enters.
+    if (window.__vtCmdrElo === undefined) {
+      ensureCommanderEloLoaded().then(json => {
+        if (json && document.getElementById('commander-cohort-container')) {
+          renderCommanderCohort(getActiveElo());
+        }
+      });
+    }
 
     // Reflect current toggle state in the header controls.
     document.querySelectorAll('#commander-cohort-view-toggle [data-cohort-view]').forEach(btn => {
@@ -6320,11 +6376,12 @@
     const callout = `
       <div class="vt-cohort-callout small mb-2">
         <i class="bi bi-flask vt-cohort-callout-icon"></i>
-        <span><strong>VTSR-C preview.</strong> Measures each commander's thug-axis performance over <em>only the matches they commanded</em>, with the v2.4 role-fairness cushion reversed so true commander-vs-commander gaps surface. A future VTSR-C rating will layer wins and commander-specific signals (economy, build tempo) on top &mdash; those aren't collected upstream yet, so this preview is thug-performance only.</span>
+        <span><strong>Thug-axis comparison.</strong> Measures each commander's thug-axis performance over <em>only the matches they commanded</em>, with the v2.4 role-fairness cushion reversed so true commander-vs-commander gaps surface. The experimental <strong>VTSR-C ladder</strong> above rates wins and losses; commander-specific signals (economy, build tempo) join it once the collector records them &mdash; until then this grid is thug-performance only.</span>
       </div>
     `;
 
     container.innerHTML = `
+      ${_cohortVtsrCStripHtml()}
       ${callout}
       <div class="vt-cohort-subtitle text-muted small mb-2">${sourceNote}</div>
       <div class="vt-cohort-table-wrap">

@@ -82,6 +82,7 @@
     slugMap:       null,    // parsed data/processed/player_slugs.json
     validation:    null,    // parsed data/processed/validation_summary.json (404-safe)
     contributions: null,    // parsed data/processed/match_contributions.json (lazy)
+    cmdrElo:       undefined, // parsed elo_commander_current.json (lazy; undefined = unfetched, null = 404)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
     careerStats:   null,    // result of VTAggregate.build(threshold=0).career_stats
     // Directory UI state
@@ -1753,11 +1754,42 @@
 
   // ---- Phase 6c: Rivals tab (incl. Most-commanded-against panel) -------
 
+  // Lazy one-shot fetch of the experimental VTSR-C commander ladder.
+  // Graceful 404: null caches and every VTSR-C surface renders em-dash
+  // fallbacks. undefined = not yet fetched.
+  let _cmdrEloFetchPromise = null;
+  function ensureCmdrEloLoaded() {
+    if (state.cmdrElo !== undefined) return Promise.resolve(state.cmdrElo);
+    if (!_cmdrEloFetchPromise) {
+      _cmdrEloFetchPromise = fetchJson(`${state.dataPrefix}data/processed/elo_commander_current.json`)
+        .catch(() => null)
+        .then(json => { state.cmdrElo = json || null; return state.cmdrElo; });
+    }
+    return _cmdrEloFetchPromise;
+  }
+
+  function cmdrLadderRowFor(steam64) {
+    const ratings = (state.cmdrElo && state.cmdrElo.ratings) || [];
+    const sid = String(steam64 || '');
+    const idx = ratings.findIndex(r => String(r.steam64 || '') === sid);
+    return idx >= 0 ? { row: ratings[idx], rank: idx + 1, total: ratings.length } : null;
+  }
+
   function renderRivalsTab(rating) {
     const pane = $('vt-player-tab-rivals');
     if (!state.contributions) {
       pane.innerHTML = phasePlaceholder('Rivals', 'Match contributions are still loading.');
       return;
+    }
+    // Kick the VTSR-C ladder fetch on first entry; re-render once when it
+    // lands so the Commander Rivalries headline fills in. 404 caches null
+    // and this path never re-enters.
+    if (state.cmdrElo === undefined) {
+      ensureCmdrEloLoaded().then(json => {
+        if (json && document.getElementById('vt-player-tab-rivals')) {
+          renderRivalsTab(rating);
+        }
+      });
     }
     const sid = String(rating.steam64 || '');
     const name = rating.name;
@@ -1806,7 +1838,10 @@
     const showCommanderPanel = shouldShowCommanderPanel(rating);
     const commanderRows = showCommanderPanel ? buildOpposingCommanderTop5(rating, sid) : [];
 
+    const cmdrRivHtml = renderCommanderRivalriesPanel(rating, sid);
+
     pane.innerHTML = `
+      ${cmdrRivHtml}
       <div class="row g-3">
         <div class="col-12 ${showCommanderPanel ? 'col-xl-7' : ''}">
           <div class="card h-100">
@@ -1832,7 +1867,7 @@
                 </h2>
                 <p class="text-secondary small mb-3">
                   When ${escapeHtml(name)} is the commander, these opposing commanders show
-                  up most often.
+                  up most often <span class="text-secondary">(as a thug, facing them across the field)</span>.
                 </p>
                 ${commanderRows.length ? renderCommanderH2HTable(commanderRows, rating) :
                   '<p class="text-secondary mb-0">No qualifying commander matchups recorded yet.</p>'}
@@ -1841,6 +1876,191 @@
           </div>
         ` : ''}
       </div>`;
+  }
+
+  // ---- Commander Rivalries panel (VTSR-C) -------------------------------
+  // Duel-lens on the player's commander career: every corpus match where
+  // they led a team, keyed by the OPPOSING commander. Head-to-head W/L/D
+  // only counts matches with a verified outcome (adjudicated / attested /
+  // clean_win / contested; draws count as D); undetermined meetings still
+  // count as "faced". VTSR-C numbers join from the experimental ladder
+  // (elo_commander_current.json, 404-safe -> em-dashes).
+
+  const CMDR_DETERMINED_DECIDED_BY = new Set(['adjudicated', 'attested', 'clean_win', 'contested']);
+
+  function buildCommanderRivalries(sid) {
+    const opponents = new Map(); // opp_steam64 -> tally
+    let commandedTotal = 0;
+    let wins = 0, losses = 0, draws = 0;
+    if (!state.contributions) {
+      return { commandedTotal, wins, losses, draws, opponents: [] };
+    }
+    for (const key in state.contributions) {
+      const m = state.contributions[key];
+      const lb = m.leaderboard || [];
+      const myRow = lb.find(p => String(p.steam64 || '') === sid && p.is_commander);
+      if (!myRow) continue;
+      commandedTotal += 1;
+      const oppRow = lb.find(p => p.is_commander && String(p.steam64 || '') !== sid);
+      if (!oppRow) continue;
+      const oid = String(oppRow.steam64 || '');
+      if (!opponents.has(oid)) {
+        opponents.set(oid, {
+          steam64: oid, name: oppRow.name || oid,
+          faced: 0, wins: 0, losses: 0, draws: 0, lastDate: '',
+        });
+      }
+      const t = opponents.get(oid);
+      t.faced += 1;
+      const date = m.date || '';
+      if (date > t.lastDate) { t.lastDate = date; t.name = oppRow.name || t.name; }
+
+      const w = m.winner || {};
+      const decidedBy = w.decided_by || 'unclear';
+      if (decidedBy === 'draw') {
+        t.draws += 1; draws += 1;
+      } else if (CMDR_DETERMINED_DECIDED_BY.has(decidedBy) && Number.isFinite(w.team)) {
+        if (w.team === myRow.team) { t.wins += 1; wins += 1; }
+        else { t.losses += 1; losses += 1; }
+      }
+    }
+    const oppArr = Array.from(opponents.values())
+      .sort((a, b) => b.faced - a.faced || (b.lastDate > a.lastDate ? 1 : -1));
+    return { commandedTotal, wins, losses, draws, opponents: oppArr };
+  }
+
+  function renderCommanderRivalriesPanel(rating, sid) {
+    const riv = buildCommanderRivalries(sid);
+    if (riv.commandedTotal < 1) return '';
+
+    const name = rating.name;
+    const ladder = cmdrLadderRowFor(sid);
+    const c = state.cmdrElo;
+
+    // Headline strip chips. Em-dash fallbacks when the ladder file is
+    // missing (state.cmdrElo null/undefined) or the player is unrated.
+    const provChip = ladder && ladder.row.provisional
+      ? `<span class="vt-cmdr-riv-prov" title="Provisional \u2014 fewer than ${(c && c.provisional_threshold) ?? 5} rated commander games">Provisional</span>`
+      : '';
+    const headline = `<div class="vt-cmdr-riv-headline">
+      <div class="vt-cmdr-riv-stat">
+        <span class="vt-cmdr-riv-stat-value">${ladder ? Math.round(ladder.row.vtsr_c) : '\u2014'}</span>
+        <span class="vt-cmdr-riv-stat-label">VTSR-C ${provChip}</span>
+      </div>
+      <div class="vt-cmdr-riv-stat">
+        <span class="vt-cmdr-riv-stat-value">${ladder ? `#${ladder.rank}` : '\u2014'}</span>
+        <span class="vt-cmdr-riv-stat-label">${ladder ? `of ${ladder.total} on the ladder` : 'ladder rank'}</span>
+      </div>
+      <div class="vt-cmdr-riv-stat">
+        <span class="vt-cmdr-riv-stat-value">${riv.wins}-${riv.losses}-${riv.draws}</span>
+        <span class="vt-cmdr-riv-stat-label">record (W-L-D, verified outcomes)</span>
+      </div>
+      <div class="vt-cmdr-riv-stat">
+        <span class="vt-cmdr-riv-stat-value">${riv.commandedTotal}</span>
+        <span class="vt-cmdr-riv-stat-label">matches commanded</span>
+      </div>
+    </div>`;
+
+    // Top opponent callout (most-faced enemy commander).
+    const oppVtsrC = (oid) => {
+      const l = cmdrLadderRowFor(oid);
+      return l ? Math.round(l.row.vtsr_c) : null;
+    };
+    let topOppHtml = '';
+    const top = riv.opponents[0];
+    if (top) {
+      const tv = oppVtsrC(top.steam64);
+      topOppHtml = `<div class="vt-cmdr-riv-topopp">
+        <i class="bi bi-crosshair vt-cmdr-riv-topopp-icon"></i>
+        <div>
+          <div class="vt-cmdr-riv-topopp-title">Top opponent:
+            <a href="${playerHref(top.steam64)}">${escapeHtml(top.name)}</a></div>
+          <div class="vt-cmdr-riv-topopp-detail">
+            Faced <strong>${top.faced}</strong> time${top.faced === 1 ? '' : 's'} as opposing commander
+            &middot; head-to-head <strong>${top.wins}-${top.losses}-${top.draws}</strong>
+            ${tv != null ? `&middot; their VTSR-C <strong>${tv}</strong>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // Top-5 enemies table.
+    const top5 = riv.opponents.slice(0, 5);
+    const tableHtml = top5.length ? `<div class="table-responsive">
+      <table class="table table-sm align-middle mb-2">
+        <thead><tr>
+          <th>Opposing commander</th>
+          <th class="text-end">Faced</th>
+          <th class="text-end" title="Head-to-head record in matches with a verified outcome">W-L-D</th>
+          <th class="text-end">Their VTSR-C</th>
+        </tr></thead>
+        <tbody>
+          ${top5.map(o => {
+            const det = o.wins + o.losses + o.draws;
+            const recCls = det === 0 ? 'text-secondary'
+              : o.wins > o.losses ? 'vt-vtsr-delta-positive'
+              : o.wins < o.losses ? 'vt-vtsr-delta-negative' : '';
+            const tv = oppVtsrC(o.steam64);
+            return `<tr>
+              <td><a href="${playerHref(o.steam64)}"><strong>${escapeHtml(o.name)}</strong></a></td>
+              <td class="text-end vt-matchlog-num">${o.faced}</td>
+              <td class="text-end vt-matchlog-num ${recCls}">${det ? `${o.wins}-${o.losses}-${o.draws}` : '\u2014'}</td>
+              <td class="text-end vt-matchlog-num">${tv != null ? tv : '\u2014'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : '';
+
+    // Nemesis / Best matchup chips: worst / best verified head-to-head,
+    // minimum 2 determined meetings; omitted below the floor. When only
+    // one opponent qualifies, show whichever chip its record earns.
+    const qualified = riv.opponents.filter(o => (o.wins + o.losses + o.draws) >= 2);
+    let chipsHtml = '';
+    if (qualified.length) {
+      const ratio = o => o.wins / (o.wins + o.losses + o.draws);
+      const sortedByRatio = qualified.slice().sort((a, b) =>
+        ratio(a) - ratio(b) || (b.wins + b.losses + b.draws) - (a.wins + a.losses + a.draws));
+      const worst = sortedByRatio[0];
+      const best = sortedByRatio[sortedByRatio.length - 1];
+      const chips = [];
+      if (qualified.length === 1) {
+        const only = qualified[0];
+        const kind = ratio(only) >= 0.5 ? 'best' : 'nemesis';
+        chips.push([kind, only]);
+      } else {
+        if (ratio(worst) < 0.5) chips.push(['nemesis', worst]);
+        if (ratio(best) >= 0.5 && best !== worst) chips.push(['best', best]);
+      }
+      chipsHtml = chips.length ? `<div class="vt-cmdr-riv-chips">
+        ${chips.map(([kind, o]) => `<span class="vt-cmdr-riv-chip is-${kind}"
+            title="${kind === 'nemesis' ? 'Worst' : 'Best'} verified head-to-head (minimum 2 decided meetings)">
+          <i class="bi ${kind === 'nemesis' ? 'bi-emoji-dizzy' : 'bi-emoji-sunglasses'}"></i>
+          ${kind === 'nemesis' ? 'Nemesis' : 'Best matchup'}:
+          <a href="${playerHref(o.steam64)}">${escapeHtml(o.name)}</a>
+          <span class="vt-cmdr-riv-chip-rec">${o.wins}-${o.losses}-${o.draws}</span>
+        </span>`).join('')}
+      </div>` : '';
+    }
+
+    return `<div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+          <i class="bi bi-person-badge me-1"></i>Commander rivalries
+          <span class="vt-cmdr-riv-tag">VTSR-C &middot; experimental</span>
+        </h2>
+        <p class="text-secondary small mb-3">
+          ${escapeHtml(name)}&rsquo;s record <strong>as a commander</strong>, duel by duel against
+          the opposing commander. Only matches with a verified outcome count toward records;
+          ratings come from the experimental
+          <a href="${state.dataPrefix}elo/?tab=leaderboard">VTSR-C ladder</a>.
+        </p>
+        ${headline}
+        ${topOppHtml}
+        ${tableHtml}
+        ${chipsHtml}
+      </div>
+    </div>`;
   }
 
   function renderRivalsTable(rivals) {

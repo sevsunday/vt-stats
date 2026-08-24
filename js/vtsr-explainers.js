@@ -439,6 +439,26 @@
   }
 
   // ------------------------------------------------------------------
+  // The commander ladder (VTSR-C) — static section for the ELO page's
+  // How-it-works tab. Deliberately NOT an annotated stage (scope
+  // control): a plain pre-rendered KaTeX handicap formula + the
+  // mirror-blend story + a worked example with real corpus numbers.
+  // Returns '' while KaTeX is still loading (callers render it after
+  // deltaRBlockHtml succeeded, so in practice KaTeX is present).
+  // ------------------------------------------------------------------
+  function commanderLadderHtml() {
+    const eq = renderEq(
+      'E_A \\;=\\; \\frac{1}{1 + 10^{-\\left(\\left(R_A - R_B\\right)'
+      + ' + \\lambda\\,\\left(T_A - T_B\\right)\\right) / 400}}'
+    ) || '';
+    return `<p class="mb-2">Commanders get a <strong>second, separate rating</strong>: VTSR-C. It&rsquo;s the mirror image of the thug rating &mdash; VTSR-T is <em>all performance, no wins</em> (the Wins dial idles at zero until outcomes are trustworthy); VTSR-C is <em>all wins, no performance</em> (commander telemetry like resource handling and build orders isn&rsquo;t recorded yet). Both converge on the same blend architecture, from opposite ends.</p>
+      <p class="mb-2">Every match with a <strong>verified outcome</strong> is a 1v1 duel between the two commanders &mdash; classic chess ELO: beat the expectation, gain points; fall short, lose them. One twist keeps it honest &mdash; <strong>the expected score knows which side had the stronger thugs</strong>:</p>
+      ${eq ? `<div class="text-center my-2" style="overflow-x: auto;">${eq}</div>` : ''}
+      <p class="mb-2"><em>R</em> is each commander&rsquo;s rating; <em>T</em> is each team&rsquo;s average thug rating (their pre-match VTSR-T); <em>&lambda;</em> converts a thug-team edge into rating points (currently 1:1 &mdash; a 100-point average-thug advantage counts like 100 rating points). Winning with the weaker roster pays big; losing with it barely costs.</p>
+      <p class="mb-0 text-muted small">Real example: in a recent Oldboy match the Team 1 commander held <strong>both</strong> edges &mdash; higher VTSR-C and a +73 stronger thug team &mdash; so the formula expected him to win 72% of the time. His opponent won anyway: <strong>+14.4</strong> for the underdog, <strong>&minus;20.2</strong> for the favorite. New commanders move fast (K decays 40 &rarr; 20 over the first 5 duels) and stay <strong>provisional</strong> below 5 rated games.</p>`;
+  }
+
+  // ------------------------------------------------------------------
   // Dashboard methodology modal body (quick reference). Preserves the
   // v3 5-section structure but the "How it works" section is now the
   // annotated deltaR stage. Cached after first successful build; null
@@ -493,6 +513,7 @@
     weightsTableHtml,
     tierTableHtml,
     commanderSectionHtml,
+    commanderLadderHtml,
     workedExampleHtml,
     methodologyModal,
   };

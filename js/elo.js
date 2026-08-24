@@ -101,6 +101,7 @@
     eloHistory: null,
     eloThugs: undefined,  // lazy thugs_only pair (undefined = not fetched)
     eloHistThugs: undefined,
+    cmdrElo: null,        // elo_commander_current.json (null on 404 — VTSR-C card hides)
     slugMap: null,
     validation: null,
     careerStats: [],      // corpus-wide aggregate join source
@@ -811,6 +812,85 @@
   }
 
   // ----------------------------------------------------------------------
+  // VTSR-C commander ladder (experimental). Separate ladder from VTSR-T:
+  // outcome-pure win/loss ELO between the two commanders of every
+  // determined match, with a team-strength handicap in the expected
+  // score. 404-safe (card hidden when elo_commander_current.json is
+  // absent); the thug-only toggle deliberately does NOT apply.
+  // ----------------------------------------------------------------------
+
+  function renderCommanderLadder() {
+    const card = document.getElementById('section-vtsr-c');
+    const body = document.getElementById('vtsr-c-body');
+    if (!card || !body) return;
+    const c = state.cmdrElo;
+    const ratings = (c && Array.isArray(c.ratings)) ? c.ratings : [];
+    if (!ratings.length) { card.classList.add('d-none'); return; }
+    card.classList.remove('d-none');
+
+    const banner = `<div class="alert alert-secondary py-2 px-3 mb-3" style="font-size: 0.82rem;">
+      <i class="bi bi-flask me-1"></i>
+      <strong>Experimental, outcome-pure v1.</strong>
+      This ladder rates commanders purely on <strong>wins and losses</strong> from the
+      ${fmt(c.rated_match_count)} matches with a verified outcome &mdash; no performance axes yet.
+      The expected score already accounts for <strong>which side had the stronger thug team</strong>,
+      so winning with a weaker roster pays more than winning with a stacked one.
+      Commander telemetry (resource handling, build orders) joins the formula as the collector
+      starts capturing it. Ratings below ${c.provisional_threshold ?? 5} rated games are provisional.
+    </div>`;
+
+    const rows = ratings.map((r, i) => {
+      const prov = r.provisional
+        ? ` <span class="vt-vtsr-provisional" data-bs-toggle="tooltip" data-bs-placement="top"
+              title="Provisional — fewer than ${c.provisional_threshold ?? 5} rated commander games.">?</span>`
+        : '';
+      const record = `${r.wins}-${r.losses}-${r.draws}`;
+      const lastDelta = r.last_delta || 0;
+      const lastClass = lastDelta > 0 ? 'text-success' : (lastDelta < 0 ? 'text-danger' : 'text-muted');
+      const lastSign = lastDelta > 0 ? '+' : '';
+      const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
+      return `<tr>
+        <td class="text-muted">${i + 1}</td>
+        <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}</td>
+        <td class="text-end vt-vtsr-rating">${Math.round(r.vtsr_c)}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="Wins-Losses-Draws across rated commander games.">${record}</td>
+        <td class="text-end">${((r.win_pct || 0) * 100).toFixed(0)}%</td>
+        <td class="text-end">${r.matches_commanded_rated}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</td>
+        <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
+      </tr>`;
+    }).join('');
+
+    body.innerHTML = `${banner}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Commander</th>
+              <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                  title="<strong>VTSR-C</strong><br>Commander rating. Classic win/loss ELO (anchor 1500, scale 400, symmetric K 40&rarr;20) with a team-strength handicap in the expected score.">VTSR-C</th>
+              <th class="text-end">Record</th>
+              <th class="text-end">Win %</th>
+              <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+                  title="Rated commander games (matches with a verified outcome where this player led a team).">Games</th>
+              <th class="text-end">Peak</th>
+              <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+                  title="Most recent rated-duel rating change.">Last</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="text-muted small mb-0">
+        ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
+        The thug-only toggle doesn&rsquo;t apply here &mdash; VTSR-C is a separate ladder built only from commander duels.
+      </p>`;
+    ensureTooltips(card);
+  }
+
+  // ----------------------------------------------------------------------
   // Tab routing (?tab=) + lazy renderers.
   // ----------------------------------------------------------------------
 
@@ -904,6 +984,11 @@
       </section>
 
       <section class="vt-vtsr-doc-section">
+        <h6>The commander ladder (VTSR-C)</h6>
+        ${E.commanderLadderHtml()}
+      </section>
+
+      <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
         <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
         ${E.tierTableHtml()}
@@ -942,8 +1027,15 @@
         <div class="vt-katex-caveat">PvE work (kills, hits, damage to AI) counts at half-weight in the three &ldquo;thug&rdquo; axes &mdash; role players still get credit without crowding out pure dogfighters.</div>
         <p class="mb-0 text-muted small mt-2">The two hairline sliders &mdash; <strong>Snipe bonus</strong> and <strong>T-key usage</strong> &mdash; are deliberately set to ~0.5% each. They stay on the board as bragging-rights stats, but skipping them costs a strong no-frills thug essentially nothing.</p>
       </section>
+
+      <section class="vt-vtsr-doc-section">
+        <h6>What about VTSR-C?</h6>
+        <p class="mb-1">These 8 axes power <strong>VTSR-T only</strong>. The commander ladder (VTSR-C) carries <strong>no axes yet</strong> &mdash; it&rsquo;s pure win/loss until the collector starts recording commander telemetry (resource handling, build orders), which will join it through the same weighted-composite architecture.</p>
+        <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
+      </section>
     </div>`;
     E.initIn(pane);
+    wireTabLinks(pane);
   }
 
   // ----------------------------------------------------------------------
@@ -981,9 +1073,19 @@
         verdict: 'Caveat: for low-tier players, time spent outside of base as a pilot still counts against you like normal.',
       },
       {
+        icon: 'bi-person-badge-fill', title: 'The commander ladder (VTSR-C)',
+        body: `<p>Commanders now have a <strong>separate rating built purely on wins and losses</strong> &mdash; every match with a verified outcome is a 1v1 duel between the two commanders. Outcomes only count when they\u2019re <strong>proven</strong>: host-attested, reviewer-confirmed, or physically evident from the recording (base destroyed). Unverifiable matches simply don\u2019t move it.</p>`,
+        verdict: 'Experimental v1 \u2014 outcome-pure, no performance axes yet. Full ladder on the Leaderboard tab.',
+      },
+      {
+        icon: 'bi-people', title: 'Stacked thugs don\u2019t inflate your commander rating',
+        body: `<p>VTSR-C\u2019s expected score already knows <strong>which side had the stronger thug team</strong> (each team\u2019s average pre-match VTSR-T feeds the formula). Win with a stacked roster and you were <em>supposed</em> to win \u2014 small gain. Win with the weaker one and the ladder pays out properly; lose with it and the penalty is tiny.</p>`,
+        verdict: 'Commanding the underdog team is never a rating trap.',
+      },
+      {
         icon: 'bi-toggles', title: 'Thug-only mode',
         body: `<p>The toggle at the top of this page recomputes every rating using <strong>thug appearances only</strong> &mdash; commander matches dropped entirely. It\u2019s a second lens, not a second ladder: the canonical rating includes commander games (with the fairness adjustment above).</p>`,
-        verdict: 'Your choice follows you between this page and the dashboard.',
+        verdict: 'Your choice follows you between this page and the dashboard. VTSR-C is unaffected either way.',
       },
       {
         icon: 'bi-arrow-down-circle', title: 'Losses sting less, and there\u2019s a floor',
@@ -996,7 +1098,7 @@
         ${c.verdict ? `<div class="vt-elo-fairness-verdict">${c.verdict}</div>` : ''}
       </div>`).join('');
     pane.innerHTML = `<div class="vt-elo-doc" style="max-width: 1200px;">
-      <p class="mb-3">A skill rating is only as good as its blind spots. These are the rules that keep VTSR-T from punishing people for things that aren&rsquo;t skill &mdash; each one is a <strong>pure omission</strong> (the affected match simply doesn&rsquo;t move the rating) or a measured adjustment, never a bonus pool.</p>
+      <p class="mb-3">A skill rating is only as good as its blind spots. These are the rules that keep the <strong>two ladders</strong> &mdash; VTSR-T for thug play, VTSR-C for commanding &mdash; from punishing people for things that aren&rsquo;t skill. Each one is a <strong>pure omission</strong> (the affected match simply doesn&rsquo;t move the rating) or a measured adjustment, never a bonus pool.</p>
       <div class="vt-elo-fairness-grid">${cards}</div>
     </div>`;
   }
@@ -1157,6 +1259,69 @@
       </div>`;
     }
 
+    // ---- VTSR-C commander-ladder accuracy (v1.2; absent-safe). ----
+    const vc = (v.latest_detail && v.latest_detail.vtsr_c) || null;
+    let cmdrAccHtml = '';
+    if (vc && vc.available) {
+      const lamRows = (vc.per_lambda || []).map(row => {
+        const mark = row.canonical ? ' <span class="badge text-bg-secondary" style="font-size:0.6rem;">current</span>' : '';
+        return `<tr${row.canonical ? ' class="fw-semibold"' : ''}>
+          <td>\u03bb = ${row.lambda}${mark}</td>
+          <td class="text-end">${pct(row.accuracy)}</td>
+          <td class="text-end">${row.log_loss != null ? row.log_loss.toFixed(3) : '\u2014'}</td>
+        </tr>`;
+      }).join('');
+      cmdrAccHtml = `<div class="vt-elo-acc-section">
+        <h6>Commander ladder accuracy (VTSR-C)</h6>
+        <p class="vt-elo-acc-blurb">Replaying the commander ladder match-by-match: knowing only the two commanders\u2019 pre-match ratings and their teams\u2019 thug strength, how often did it pick the actual winner of the ${vc.n_scored ?? 0} verified duels? (Coin flip = 50%. The ladder is <strong>experimental</strong> and the sample is small \u2014 expect this number to move.)</p>
+        <div class="vt-elo-statgrid" style="margin-bottom: 0.85rem;">
+          <div class="vt-elo-statcard">
+            <div class="vt-elo-stat-head">
+              <span class="vt-elo-stat-label">Duel prediction</span>
+              ${(() => { const b = badge('accuracy', vc.accuracy); return b ? `<span class="vt-elo-badge is-${b.tone}">${b.label}</span>` : ''; })()}
+            </div>
+            <div class="vt-elo-stat-value">${pct(vc.accuracy)}</div>
+            <div class="vt-elo-stat-caption">Of ${vc.n_scored ?? 0} verified commander duels, how often the pre-match favorite (rating + team-strength handicap) actually won.</div>
+            <details class="vt-elo-stat-tech">
+              <summary>Technical definition</summary>
+              <div class="vt-elo-stat-tech-body">Chronological replay from elo_commander_history.json; draws excluded from the denominator; log-loss ${vc.log_loss != null ? vc.log_loss.toFixed(3) : '\u2014'}.</div>
+            </details>
+          </div>
+        </div>
+        <p class="vt-elo-acc-blurb mb-2">The <strong>\u03bb dial</strong> controls how much the thug-team strength gap counts in the expected score. The validator re-scores every duel at each setting \u2014 as the corpus grows, this table picks the dial empirically:</p>
+        <table class="vt-elo-gap-table">
+          <thead><tr><th>Handicap weight</th><th class="text-end">Prediction accuracy</th><th class="text-end">Log-loss</th></tr></thead>
+          <tbody>${lamRows}</tbody>
+        </table>
+      </div>`;
+    }
+
+    // ---- Axis-vs-outcome study (v1.2; absent-safe). ----
+    const ao = (v.latest_detail && v.latest_detail.axis_outcome) || null;
+    let axisOutcomeHtml = '';
+    if (ao && ao.available && Array.isArray(ao.axes) && ao.axes.length) {
+      const axisLabel = (key) => (VTSR_AXIS_META[key] && VTSR_AXIS_META[key].label) || key;
+      const rows = ao.axes.map(r => {
+        const agree = r.sign_agreement;
+        const tone = agree == null ? 'is-total'
+          : agree >= 0.65 ? 'is-provable'
+          : agree >= 0.45 ? 'is-total'
+          : 'is-unprovable';
+        const w = agree != null ? Math.max(1.5, agree * 100) : 0;
+        return `<div class="vt-elo-funnel-row ${tone}">
+          <span class="vt-elo-funnel-label" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="n = ${r.n} determined matches">${esc(axisLabel(r.axis))}</span>
+          <span class="vt-elo-funnel-track"><span class="vt-elo-funnel-fill" style="width:${w.toFixed(1)}%;"></span></span>
+          <span class="vt-elo-funnel-count">${pct(agree)}</span>
+        </div>`;
+      }).join('');
+      axisOutcomeHtml = `<div class="vt-elo-acc-section">
+        <h6>Which axes actually win games?</h6>
+        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? This is the <strong>empirical check on the axis weights</strong> \u2014 the honest ranking of what actually predicts victory, updated every pipeline run. (50% = the axis says nothing about winning; low n on self-omitting axes like Snipe bonus means treat with care.)</p>
+        <div class="vt-elo-funnel">${rows}</div>
+      </div>`;
+    }
+
     // ---- History sparkline. ----
     const hist = Array.isArray(v.history) ? v.history : [];
     const histSection = `<div class="vt-elo-acc-section">
@@ -1171,9 +1336,13 @@
       <div class="vt-elo-statgrid">${cards}</div>
       ${funnelHtml}
       ${gapHtml}
+      ${cmdrAccHtml}
+      ${axisOutcomeHtml}
       ${histSection}
       <p class="text-muted small mb-0">Source: <code>data/processed/validation_summary.json</code>, generated ${esc(L.generated_at || v.generated_at || '')} by <code>scripts/validate_elo.py</code>.</p>
     </div>`;
+
+    ensureTooltips(pane);
 
     if (hist.length > 1 && window.Chart) {
       const ctx = document.getElementById('elo-history-chart');
@@ -1249,6 +1418,13 @@
         if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
       });
     }
+    const cmdrHowLink = document.getElementById('vtsr-c-how-link');
+    if (cmdrHowLink) {
+      cmdrHowLink.addEventListener('click', () => {
+        const btn = document.querySelector('#elo-tabs [data-bs-target="#elo-tab-how"]');
+        if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+      });
+    }
 
     // Tab change -> lazy render + URL sync.
     const tabsEl = document.getElementById('elo-tabs');
@@ -1263,17 +1439,19 @@
     }
 
     // Core data, all in parallel + 404-safe.
-    const [elo, eloHistory, slugMap, validation, contributions] = await Promise.all([
+    const [elo, eloHistory, slugMap, validation, contributions, cmdrElo] = await Promise.all([
       fetchJson(`${DATA}elo_current.json`),
       fetchJson(`${DATA}elo_history.json`),
       fetchJson(`${DATA}player_slugs.json`),
       fetchJson(`${DATA}validation_summary.json`),
       fetchJson(`${DATA}match_contributions.json`),
+      fetchJson(`${DATA}elo_commander_current.json`),
     ]);
     state.elo = elo;
     state.eloHistory = eloHistory;
     state.slugMap = slugMap;
     state.validation = validation;
+    state.cmdrElo = cmdrElo;
 
     // Corpus-wide career join source (Primary Ship / K/D / Acc columns +
     // detail panels). Threshold 0 so even fresh players get a join row —
@@ -1302,6 +1480,7 @@
     }
 
     renderLeaderboard();
+    renderCommanderLadder();
     tabRendered['#elo-tab-leaderboard'] = true;
 
     // Deep links (?tab=...) boot straight into the right pane; the

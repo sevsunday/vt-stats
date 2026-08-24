@@ -268,7 +268,7 @@ Players are identified by `uint64` Steam64 IDs. The header provides three lookup
 
 The pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick`.
 
-**Proto v3:** the three maps are `reserved`; identity comes from the `header.players` PlayerInfo roster instead (see the StatHeader table above), normalized into the same three working dicts by `_build_identity_maps()` in `scripts/process_stats.py` — invalid Steam64s (empty-slot collector garbage) are dropped via the `_valid_steam64` gate, and slot conflicts (two valid Steam64s claiming one slot via leave/rejoin churn) tie-break to the earliest UpdateTick appearance, with displaced claimants recorded on `match.roster_conflicts`. The raw roster survives verbatim on `match.roster` (`[{steam64, slot, nickname, valid}]`, pre-`ACCOUNT_REROUTES`).
+**Proto v3:** the three maps are `reserved`; identity comes from the `header.players` PlayerInfo roster instead (see the StatHeader table above), normalized into the same three working dicts by `_build_identity_maps()` in `scripts/process_stats.py` — invalid Steam64s (empty-slot collector garbage) are dropped via the `_valid_steam64` gate, and slot conflicts (multiple valid Steam64s claiming one slot) resolve to the claimant with the **most UpdateTick presence** (dominant occupant; `PlayerInfo.teamnum` only records the FIRST slot seen, so first-appearance is not trustworthy). Displaced claimants with `presence_share >= 0.25` overflow to the lowest free slot on their team side (they were genuinely playing — e.g. a 5v4's fifth player who transited another slot pre-game); low-presence losers drop. Every resolution lands on `match.roster_conflicts` (`resolution: "reassigned" | "dropped"`, `assigned_slot`, `presence_share`). The raw roster survives verbatim on `match.roster` (`[{steam64, slot, nickname, valid}]`, pre-`ACCOUNT_REROUTES`).
 
 ### Faction Resolution
 
@@ -316,7 +316,7 @@ When multiple ODF strings resolve to the same display name, the raw ODF is appen
 
 The pipeline normalizes identity through `_build_identity_maps(header, schema, events)`:
 - **v1/v2**: `slot_to_s64` / `s64_to_slot` / `s64_to_nick` copied directly from `header.teamnum_to_s64` / `header.s64_to_teamnum` / `header.s64_to_nick`
-- **v3**: the same three dicts derived from `header.players` — entries failing the `_valid_steam64` gate are dropped (empty-slot collector garbage), and slot conflicts tie-break to the earliest UpdateTick appearance (displaced claimants → `match.roster_conflicts`)
+- **v3**: the same three dicts derived from `header.players` — entries failing the `_valid_steam64` gate are dropped (empty-slot collector garbage), and slot conflicts resolve to the most-UpdateTick-presence claimant with substantial-presence losers overflowing to a free same-team slot (all resolutions → `match.roster_conflicts`)
 - Builds `nick_map` (slot → nickname) by joining `slot_to_s64` with `s64_to_nick`
 - Faction is determined by slot convention (1-5 = Team 1, 6-10 = Team 2)
 
@@ -2841,6 +2841,77 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 | `history[].deltas[].axis_contributions_meta` | object \| absent | **v2.4** — optional sibling block, present ONLY on commander rows (`is_commander: true` on the source leaderboard row) AND only for axes that were both available for the lobby AND listed in `commander_axis_prior`. Shape: `{axis_name: {z_pre_shift, shift, z_post_shift}}` where `z_pre_shift` is the value before the v2.4 commander shift (post-clip space, range $[-1, +1]$), `shift = -baseline[axis]` (where `baseline` is `commander_shrunk_baseline()` evaluated at the start of this match — frozen at the prior for locked axes), and `z_post_shift` is the final value after re-clipping to $[-1, +1]$. **Audit invariant**: for each shifted axis $a$ on a commander row, `axis_contributions[a] == axis_contributions_meta[a].z_post_shift` exactly (because the post-shift value IS what feeds the rating math). For thug rows, this block is OMITTED entirely. Forensics-only for now; not consumed by the dashboard renderer. |
 
 Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"cancelled"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`. The `"cancelled"` reason (v15) fires when `match.winner.decided_by == "cancelled"` — the host attested `GAME_CANCELLED` on the v3 end-of-game dialog (early RE / crash / restart); real combat may have occurred, so the match stays fully visible on the dashboard but never rates.
+
+### `data/processed/elo_commander_current.json` + `elo_commander_history.json` — VTSR-C v1 (experimental)
+
+Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_version: 1`, separate from `ELO_SCHEMA_VERSION`) right after the canonical VTSR-T pair. **Outcome-pure win/loss commander ELO with a team-strength handicap** — full derivation in [DEVELOPER_GUIDE.md §13.12](../DEVELOPER_GUIDE.md). Corpus-wide, picker-unaware, NOT in the pipeline cache key (both filenames in the `load_cache_index()` skip set); the dashboard thug-only toggle does not apply. All UI consumers are 404-safe.
+
+`elo_commander_current.json` top-level shape:
+
+```json
+{
+  "schema_version": 1,
+  "anchor": 1500.0,
+  "k_base": 40.0, "k_floor": 20.0,
+  "logistic_scale": 400.0,
+  "lambda_team_handicap": 1.0,
+  "provisional_prior": 5.0,
+  "provisional_threshold": 5,
+  "computed_at": "2026-08-24T02:00:00Z",
+  "rated_match_count": 37,
+  "matches_skipped_undetermined": 74,
+  "matches_skipped_missing_commander": 0,
+  "ratings": [
+    { "name": "blue", "steam64": "7656119...", "vtsr_c": 1562.8,
+      "matches_commanded_rated": 4, "wins": 4, "losses": 0, "draws": 0,
+      "win_pct": 1.0, "peak_vtsr_c": 1562.8, "peak_at": "2026-07-01T02-11-40",
+      "peak_date": "2026-07-01T02:11:40+00:00",
+      "last_match_id": "2026-07-01T02-11-40", "last_delta": 12.4,
+      "provisional": true }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `rated_match_count` | int | Determined rated duels walked (adjudicated / attested / clean_win / contested team wins + attested draws). |
+| `matches_skipped_undetermined` | int | Rated VTSR-T matches whose outcome is unverifiable (`unclear`, or no winner team) — skipped, zero rating effect. |
+| `matches_skipped_missing_commander` | int | Rated determined matches where either team's commander couldn't be identified (leaderboard `is_commander` + `team_leaders` fallback both failed) or the history entry didn't join back to the corpus. |
+| `ratings[].vtsr_c` | float | Commander rating. Anchor 1500; no floor. Sorted desc. |
+| `ratings[].matches_commanded_rated` | int | Rated duels for this commander. `wins + losses + draws` always equals it. |
+| `ratings[].win_pct` | float | `wins / matches_commanded_rated` (draws count in the denominator). |
+| `ratings[].provisional` | bool | `matches_commanded_rated < provisional_threshold` — UI renders the badge. |
+| `ratings[].peak_at` / `peak_date` | string | Match id / match date where `peak_vtsr_c` was reached. |
+
+`elo_commander_history.json`: same header constants + `duels[]` (chronological, one entry per rated duel):
+
+```json
+{
+  "duels": [{
+    "match_id": "2026-08-23T03-25-36",
+    "date": "2026-08-23T03:25:36.018223+00:00",
+    "decided_by": "attested", "adjudicated": true,
+    "outcome": "team2",
+    "commanders": {
+      "1": { "steam64": "...", "name": "muerte.", "before": 1535.57, "after": 1515.36,
+             "delta": -20.22, "expected": 0.722, "k": 28.0, "score": 0.0 },
+      "2": { "steam64": "...", "name": "F9bomber", "before": 1442.33, "after": 1456.77,
+             "delta": 14.44, "expected": 0.278, "k": 20.0, "score": 1.0 }
+    },
+    "team_handicap": { "t1_thug_mean": 1564.22, "t2_thug_mean": 1491.65, "diff": 72.57, "lambda": 1.0 }
+  }]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `duels[].outcome` | string | `"team1"` / `"team2"` / `"draw"` (draws score 0.5 for both). |
+| `duels[].commanders.{1,2}.expected` | float | Handicap-aware expected score. The two values always sum to 1. |
+| `duels[].commanders.{1,2}.k` | float | Effective K after provisional decay (40 → 20 over the first 5 duels). |
+| `duels[].team_handicap.t{1,2}_thug_mean` | float \| null | Mean pre-match VTSR-T of the team's non-commander rated rows (from the canonical `elo_history` deltas' `before` values — zero leakage). `null` when the side has no joinable thug rows (handicap term becomes 0). |
+| `duels[].team_handicap.diff` | float | `t1_thug_mean − t2_thug_mean` (0.0 when either side is null). |
+
+**`validation_summary.json` additions (validator v1.2, additive):** `latest.vtsr_c_n` / `latest.vtsr_c_accuracy` / `latest.vtsr_c_log_loss` headline-trend fields, plus two `latest_detail` blocks — `vtsr_c` (`{available, n_duels, n_scored, n_draws, lambda_canonical, accuracy, accuracy_ci, log_loss, replay_max_abs_diff, per_lambda: [{lambda, canonical, n, accuracy, accuracy_ci, log_loss}]}`) and `axis_outcome` (`{available, n_matches_determined, axes: [{axis, n, sign_agreement, sign_agreement_ci, mean_winner_minus_loser}]}`). Both `{available: false, skipped_reason}` when the commander history is absent; the ELO page's Does-it-work tab self-hides those sections.
 
 ## 12. Aggregator output keys (Phase 3 + 6)
 

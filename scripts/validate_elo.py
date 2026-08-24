@@ -1,4 +1,4 @@
-"""VTSR-T predictive validator (v1.1, Phase 2A).
+"""VTSR-T predictive validator (v1.2 -- Phase 2A + VTSR-C sections).
 
 Read-only validator that scores the canonical VTSR-T ratings against the
 empirical record. Pure consumer of ``data/processed/*.json`` artifacts;
@@ -49,6 +49,18 @@ v1.1 additions (Phase 2A — diagnostic deepening, NO compute_elo changes):
          each. Sanity check: rating IS meaningful when large-gap
          matches predict notably better than small-gap matches.
 
+v1.2 additions (VTSR-C -- commander ladder proof sections):
+    10. VTSR-C duel prediction: chronological replay of the commander
+        ladder (from elo_commander_history.json alone) predicting each
+        duel's winner from pre-match state; accuracy + log-loss, plus a
+        lambda ablation over the team-strength handicap weight
+        (lambda in {0, 0.5, 1.0, 1.5} + canonical). Replay is
+        cross-checked against the emitted ratings (integrity ~0 diff).
+    11. Axis-vs-outcome sign agreement: per-axis team-mean
+        axis_contributions difference (winner minus loser) across all
+        determined rated matches -- the empirical ranking of which axes
+        actually predict winning (the honest check on THUG_WEIGHTS).
+
 Explicit non-goals (Phase 1 + 2A):
     - No changes to ``scripts/elo.py``.
     - No new fields on existing JSON outputs.
@@ -78,7 +90,7 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = 2  # v1.1 (Phase 2A): MAX-vs-median preview + commander-presence + rating-gap breakouts
+VALIDATOR_VERSION = 3  # v1.2 (VTSR-C): commander-ladder prediction + lambda ablation + axis-vs-outcome study
 
 DEFAULT_PROCESSED_DIR = Path("data") / "processed"
 DEFAULT_OUTPUT_DIR = Path("_validation")
@@ -136,6 +148,27 @@ RATING_GAP_BUCKETS = [
     ("mid",    25.0,   100.0),
     ("large",  100.0,  float("inf")),
 ]
+
+# v1.2 (VTSR-C) constants.
+# Lambda values for the team-strength-handicap ablation. The canonical
+# lambda from elo_commander_history.json is merged in if absent, so the
+# emitted ladder's setting is always scored alongside the alternatives.
+CMDR_LAMBDA_ABLATION = [0.0, 0.5, 1.0, 1.5]
+
+# Fallbacks mirroring scripts/elo_commander.py constants -- used only when
+# the history JSON predates a field (keeps the validator a pure consumer
+# of emitted JSON, no Python-import coupling).
+CMDR_ANCHOR_FALLBACK = 1500.0
+CMDR_K_BASE_FALLBACK = 40.0
+CMDR_K_FLOOR_FALLBACK = 20.0
+CMDR_PROVISIONAL_PRIOR_FALLBACK = 5.0
+CMDR_LOGISTIC_SCALE_FALLBACK = 400.0
+CMDR_LAMBDA_FALLBACK = 1.0
+
+# decided_by values whose matches count as DETERMINED for the
+# axis-vs-outcome study (winner.team in (1, 2)). Draws carry no winner
+# and are excluded by construction.
+AXIS_OUTCOME_DECIDED_BY = ("clean_win", "attested", "adjudicated", "contested")
 
 
 # ---------------------------------------------------------------------------
@@ -1244,6 +1277,224 @@ def count_winner_funnel(
 
 
 # ---------------------------------------------------------------------------
+# Metric #10 (v1.2): VTSR-C commander-ladder prediction + lambda ablation
+# ---------------------------------------------------------------------------
+
+
+def _cmdr_duel_key(commander: dict[str, Any]) -> str:
+    """Stable per-commander key mirroring elo_commander.py's convention."""
+    s64 = commander.get("steam64")
+    if s64:
+        return str(s64)
+    return f"name:{commander.get('name') or ''}"
+
+
+def metric_vtsr_c(cmdr_history: dict[str, Any] | None) -> dict[str, Any]:
+    """Chronological replay of the VTSR-C ladder predicting each duel's
+    winner from PRE-match state, at each lambda in CMDR_LAMBDA_ABLATION
+    (plus the canonical lambda).
+
+    Everything needed lives in ``elo_commander_history.json``: each duel
+    carries both commanders' identities, the team thug means feeding the
+    handicap term, and the outcome. The replay at the canonical lambda is
+    cross-checked against the emitted ``after`` ratings
+    (``replay_max_abs_diff`` should be ~0) -- a free integrity check that
+    this replay implements exactly what the pipeline shipped.
+
+    Scoring: draws are excluded from the accuracy denominator (nothing to
+    predict); an exact E = 0.5 coin-flip earns half credit. Log-loss over
+    the same non-draw set.
+    """
+    if not cmdr_history or not (cmdr_history.get("duels") or []):
+        return {
+            "available": False,
+            "skipped_reason": "elo_commander_history.json missing or empty",
+        }
+
+    duels = cmdr_history["duels"]
+    anchor = float(cmdr_history.get("anchor", CMDR_ANCHOR_FALLBACK))
+    k_base = float(cmdr_history.get("k_base", CMDR_K_BASE_FALLBACK))
+    k_floor = float(cmdr_history.get("k_floor", CMDR_K_FLOOR_FALLBACK))
+    prior = float(cmdr_history.get("provisional_prior",
+                                   CMDR_PROVISIONAL_PRIOR_FALLBACK))
+    scale = float(cmdr_history.get("logistic_scale",
+                                   CMDR_LOGISTIC_SCALE_FALLBACK))
+    lam_canonical = float(cmdr_history.get("lambda_team_handicap",
+                                           CMDR_LAMBDA_FALLBACK))
+
+    lambdas = sorted(set(CMDR_LAMBDA_ABLATION) | {lam_canonical})
+
+    def replay(lam: float) -> dict[str, Any]:
+        rating: dict[str, float] = {}
+        games: dict[str, int] = {}
+        correct = 0.0
+        scored = 0
+        draws = 0
+        ll_sum = 0.0
+        max_abs_diff = 0.0
+        for duel in duels:
+            c1 = duel["commanders"]["1"]
+            c2 = duel["commanders"]["2"]
+            key1, key2 = _cmdr_duel_key(c1), _cmdr_duel_key(c2)
+            r1 = rating.get(key1, anchor)
+            r2 = rating.get(key2, anchor)
+            th = duel.get("team_handicap") or {}
+            t1, t2 = th.get("t1_thug_mean"), th.get("t2_thug_mean")
+            handicap = lam * (t1 - t2) if (t1 is not None and t2 is not None) else 0.0
+            e1 = 1.0 / (1.0 + 10.0 ** (-((r1 - r2) + handicap) / scale))
+
+            outcome = duel.get("outcome")
+            if outcome == "draw":
+                s1 = 0.5
+                draws += 1
+            else:
+                s1 = 1.0 if outcome == "team1" else 0.0
+                scored += 1
+                if e1 == 0.5:
+                    correct += 0.5
+                elif (e1 > 0.5) == (s1 == 1.0):
+                    correct += 1.0
+                e_realized = e1 if s1 == 1.0 else 1.0 - e1
+                ll_sum += -math.log(max(1e-9, e_realized))
+
+            g1, g2 = games.get(key1, 0), games.get(key2, 0)
+            k1 = k_floor + (k_base - k_floor) * max(0.0, 1.0 - g1 / prior)
+            k2 = k_floor + (k_base - k_floor) * max(0.0, 1.0 - g2 / prior)
+            nr1 = r1 + k1 * (s1 - e1)
+            nr2 = r2 + k2 * ((1.0 - s1) - (1.0 - e1))
+            rating[key1], rating[key2] = nr1, nr2
+            games[key1], games[key2] = g1 + 1, g2 + 1
+
+            if lam == lam_canonical:
+                a1, a2 = c1.get("after"), c2.get("after")
+                if isinstance(a1, (int, float)):
+                    max_abs_diff = max(max_abs_diff, abs(nr1 - a1))
+                if isinstance(a2, (int, float)):
+                    max_abs_diff = max(max_abs_diff, abs(nr2 - a2))
+
+        accuracy = (correct / scored) if scored else None
+        ci = list(wilson_ci(int(round(correct)), scored)) if scored else None
+        return {
+            "lambda": lam,
+            "canonical": lam == lam_canonical,
+            "n": scored,
+            "n_draws": draws,
+            "accuracy": accuracy,
+            "accuracy_ci": ci,
+            "log_loss": (ll_sum / scored) if scored else None,
+            "replay_max_abs_diff": (
+                round(max_abs_diff, 4) if lam == lam_canonical else None
+            ),
+        }
+
+    per_lambda = [replay(lam) for lam in lambdas]
+    canonical_row = next(r for r in per_lambda if r["canonical"])
+    return {
+        "available": True,
+        "n_duels": len(duels),
+        "n_scored": canonical_row["n"],
+        "n_draws": canonical_row["n_draws"],
+        "lambda_canonical": lam_canonical,
+        "accuracy": canonical_row["accuracy"],
+        "accuracy_ci": canonical_row["accuracy_ci"],
+        "log_loss": canonical_row["log_loss"],
+        "replay_max_abs_diff": canonical_row["replay_max_abs_diff"],
+        "per_lambda": per_lambda,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Metric #11 (v1.2): axis-vs-outcome sign agreement
+# ---------------------------------------------------------------------------
+
+
+def metric_axis_outcome(
+    history: dict[str, Any], per_match: dict[str, Any]
+) -> dict[str, Any]:
+    """The "damage over tactics" question made falsifiable: for each
+    DETERMINED rated match and each axis, compute the team-mean
+    ``axis_contributions`` difference (winner team minus loser team) from
+    the elo_history deltas, then report the per-axis SIGN-AGREEMENT rate:
+    when team A out-scored team B on this axis, team A won X% of the time.
+
+    Includes all rated rows (commanders carry their post-shift
+    contributions -- exactly what fed P_i). Exact ties (rare with float
+    z-scores) earn half credit. Emits the honest ranking of which axes
+    actually predict winning -- the empirical check on THUG_WEIGHTS.
+    """
+    per_axis: dict[str, dict[str, Any]] = {}
+    n_determined = 0
+    for match_id, _, deltas in iter_rated_history(history):
+        match_data = per_match.get(match_id)
+        if not match_data:
+            continue
+        winner_block = (match_data.get("match") or {}).get("winner") or {}
+        if winner_block.get("decided_by") not in AXIS_OUTCOME_DECIDED_BY:
+            continue
+        winner_team = winner_block.get("team")
+        if winner_team not in (1, 2):
+            continue
+
+        lookup = faction_lookup_for_match(match_data)
+        sums: dict[int, dict[str, float]] = {1: defaultdict(float), 2: defaultdict(float)}
+        counts: dict[int, dict[str, int]] = {1: defaultdict(int), 2: defaultdict(int)}
+        for d in deltas:
+            faction = lookup.get(player_key_for_delta(d))
+            if faction not in (1, 2):
+                faction = lookup.get(str(d.get("name") or ""))
+            if faction not in (1, 2):
+                continue
+            for axis, z in (d.get("axis_contributions") or {}).items():
+                if isinstance(z, (int, float)):
+                    sums[faction][axis] += float(z)
+                    counts[faction][axis] += 1
+
+        loser_team = 3 - winner_team
+        axes_present = set(counts[1]) & set(counts[2])
+        if not axes_present:
+            continue
+        n_determined += 1
+        for axis in axes_present:
+            w_mean = sums[winner_team][axis] / counts[winner_team][axis]
+            l_mean = sums[loser_team][axis] / counts[loser_team][axis]
+            rec = per_axis.setdefault(axis, {"n": 0, "credit": 0.0, "diffs": []})
+            rec["n"] += 1
+            diff = w_mean - l_mean
+            rec["diffs"].append(diff)
+            if diff > 0:
+                rec["credit"] += 1.0
+            elif diff == 0:
+                rec["credit"] += 0.5
+
+    rows = []
+    for axis, rec in per_axis.items():
+        n = rec["n"]
+        agreement = (rec["credit"] / n) if n else None
+        ci = list(wilson_ci(int(round(rec["credit"])), n)) if n else None
+        rows.append({
+            "axis": axis,
+            "n": n,
+            "sign_agreement": agreement,
+            "sign_agreement_ci": ci,
+            "mean_winner_minus_loser": (
+                mean(rec["diffs"]) if rec["diffs"] else None
+            ),
+        })
+    rows.sort(key=lambda r: -(r["sign_agreement"] or 0.0))
+
+    if not rows:
+        return {
+            "available": False,
+            "skipped_reason": "no determined rated matches with axis contributions",
+        }
+    return {
+        "available": True,
+        "n_matches_determined": n_determined,
+        "axes": rows,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Metrics #8/#9: Axis ablation + Dirichlet perturbation
 # ---------------------------------------------------------------------------
 
@@ -2022,6 +2273,72 @@ def render_markdown_report(
         lines.append("- " + (dir_p.get("skipped_reason") or "no usable runs"))
     lines.append("")
 
+    # §10 — VTSR-C commander-ladder prediction (v1.2).
+    vtsr_c = results.get("vtsr_c") or {}
+    lines.append("## §10 — VTSR-C commander-ladder prediction + λ ablation")
+    lines.append("")
+    if vtsr_c.get("available"):
+        lines.append(
+            "Chronological replay of the VTSR-C ladder predicting each duel's "
+            "winner from pre-match state (draws excluded from the accuracy "
+            "denominator; E = 0.5 coin-flips earn half credit). The λ ablation "
+            "reruns the replay at each handicap weight — the empirical dial "
+            "for the team-strength term as the labeled corpus grows.")
+        lines.append("")
+        lines.append(f"- **Duels:** {_fmt_int(vtsr_c.get('n_duels'))} "
+                     f"(scored {_fmt_int(vtsr_c.get('n_scored'))}, "
+                     f"draws {_fmt_int(vtsr_c.get('n_draws'))})")
+        ci = vtsr_c.get("accuracy_ci") or [None, None]
+        lines.append(f"- **Prediction accuracy (canonical λ = "
+                     f"{vtsr_c.get('lambda_canonical')}):** "
+                     f"{_fmt_pct(vtsr_c.get('accuracy'))} "
+                     f"({_fmt_pair(ci[0], ci[1])}), "
+                     f"log-loss {_fmt_num(vtsr_c.get('log_loss'))}")
+        lines.append(f"- **Replay integrity (max |replay − emitted|):** "
+                     f"{_fmt_num(vtsr_c.get('replay_max_abs_diff'), decimals=4)} ELO")
+        lines.append("")
+        lines.append("| λ | accuracy | 95% CI | log-loss | n |")
+        lines.append("|---|---|---|---|---|")
+        for row in vtsr_c.get("per_lambda") or []:
+            ci_r = row.get("accuracy_ci") or [None, None]
+            mark = " **(canonical)**" if row.get("canonical") else ""
+            lines.append(f"| {row.get('lambda')}{mark} "
+                         f"| {_fmt_pct(row.get('accuracy'))} "
+                         f"| {_fmt_pair(ci_r[0], ci_r[1])} "
+                         f"| {_fmt_num(row.get('log_loss'))} "
+                         f"| {_fmt_int(row.get('n'))} |")
+    else:
+        lines.append("- " + (vtsr_c.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
+    # §11 — Axis-vs-outcome sign agreement (v1.2).
+    axis_outcome = results.get("axis_outcome") or {}
+    lines.append("## §11 — Axis-vs-outcome sign agreement")
+    lines.append("")
+    if axis_outcome.get("available"):
+        lines.append(
+            "For each determined rated match and each axis: team-mean "
+            "`axis_contributions` difference (winner minus loser). "
+            "Sign agreement = share of matches the axis-leading team won. "
+            "This is the empirical check on the THUG_WEIGHTS — the honest "
+            "ranking of which axes actually predict winning.")
+        lines.append("")
+        lines.append(f"- **Determined matches:** "
+                     f"{_fmt_int(axis_outcome.get('n_matches_determined'))}")
+        lines.append("")
+        lines.append("| axis | sign agreement | 95% CI | mean W−L diff | n |")
+        lines.append("|---|---|---|---|---|")
+        for row in axis_outcome.get("axes") or []:
+            ci_r = row.get("sign_agreement_ci") or [None, None]
+            lines.append(f"| `{row.get('axis')}` "
+                         f"| {_fmt_pct(row.get('sign_agreement'))} "
+                         f"| {_fmt_pair(ci_r[0], ci_r[1])} "
+                         f"| {_fmt_num(row.get('mean_winner_minus_loser'), decimals=4)} "
+                         f"| {_fmt_int(row.get('n'))} |")
+    else:
+        lines.append("- " + (axis_outcome.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
     # Active weights footer.
     lines.append("## Active weights")
     lines.append("")
@@ -2053,11 +2370,13 @@ def render_json_report(
     schema_version 2 (v1.1, Phase 2A): adds ``aggregations`` /
     ``best_aggregation`` / ``softmax_tau`` / ``commander_breakout`` /
     ``rating_gap_breakout`` sub-blocks under ``clean_win_accuracy``.
-    Strictly additive; existing v1 readers see the legacy fields
-    unchanged.
+    schema_version 3 (v1.2, VTSR-C): adds top-level ``vtsr_c``
+    (commander-ladder prediction + lambda ablation) and ``axis_outcome``
+    (per-axis sign-agreement study) blocks. Strictly additive; existing
+    v1/v2 readers see the legacy fields unchanged.
     """
     return {
-        "schema_version":   2,
+        "schema_version":   3,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -2135,6 +2454,10 @@ def _summary_history_entry(results: dict) -> dict:
         "clean_win_accuracy_hard_max": _agg_acc("hard_max"),
         "clean_win_accuracy_softmax":  _agg_acc("softmax_max"),
         "log_loss_mean":              cwa.get("log_loss_mean"),
+        # v1.2: VTSR-C headline trend (canonical lambda).
+        "vtsr_c_n":                   (results.get("vtsr_c") or {}).get("n_scored"),
+        "vtsr_c_accuracy":            (results.get("vtsr_c") or {}).get("accuracy"),
+        "vtsr_c_log_loss":            (results.get("vtsr_c") or {}).get("log_loss"),
     }
 
 
@@ -2227,6 +2550,11 @@ def write_validation_summary(results: dict, processed_dir: Path) -> Path:
                 }
                 for name, agg in (cwa.get("aggregations") or {}).items()
             },
+            # v1.2: commander-ladder accuracy + lambda ablation and the
+            # axis-vs-outcome study, surfaced for the ELO page's
+            # Does-it-work tab (absent-safe: {} when unavailable).
+            "vtsr_c":       results.get("vtsr_c") or {},
+            "axis_outcome": results.get("axis_outcome") or {},
         },
         "history": prev_history,
     }
@@ -2390,32 +2718,47 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[validate_elo] rated history entries: {n_total} "
           f"(per-match files loaded: {n_loaded}, missing: {n_missing})")
 
+    # v1.2: the commander-ladder history (canonical, mode-independent --
+    # the thug-only toggle never applies to VTSR-C). Absent-safe: the
+    # metric reports available=false and the report sections self-omit.
+    cmdr_history_path = processed_dir / "elo_commander_history.json"
+    cmdr_history = None
+    if cmdr_history_path.exists():
+        try:
+            cmdr_history = _load_json(cmdr_history_path)
+        except Exception as exc:
+            print(f"  WARN: failed to load {cmdr_history_path}: {exc}")
+
     # Run metrics.
-    print("[validate_elo] [1/9] rank correlation ...")
+    print("[validate_elo] [1/11] rank correlation ...")
     rank_correlation = metric_rank_correlation(history)
-    print("[validate_elo] [2/9] calibration ...")
+    print("[validate_elo] [2/11] calibration ...")
     calibration = metric_calibration(history)
-    print("[validate_elo] [3/9] self-consistency ...")
+    print("[validate_elo] [3/11] self-consistency ...")
     self_consistency = metric_self_consistency(history)
-    print(f"[validate_elo] [4/9] bootstrap stability ({args.bootstrap_runs} runs) ...")
+    print(f"[validate_elo] [4/11] bootstrap stability ({args.bootstrap_runs} runs) ...")
     bootstrap = metric_bootstrap_stability(
         history, current,
         runs=args.bootstrap_runs,
         seed=args.seed,
     )
-    print("[validate_elo] [5/9] synthetic-winner proxy ...")
+    print("[validate_elo] [5/11] synthetic-winner proxy ...")
     synthetic_winner = metric_synthetic_winner(history, per_match)
-    print("[validate_elo] [6+7/9] clean_win prediction + log-loss ...")
+    print("[validate_elo] [6+7/11] clean_win prediction + log-loss ...")
     clean_win_accuracy = metric_clean_win_accuracy(history, per_match)
-    print("[validate_elo] [8/9] single-axis ablation ...")
+    print("[validate_elo] [8/11] single-axis ablation ...")
     axis_ablation = metric_axis_ablation(history, current, weights)
-    print(f"[validate_elo] [9/9] Dirichlet perturbation ({args.dirichlet_runs} runs) ...")
+    print(f"[validate_elo] [9/11] Dirichlet perturbation ({args.dirichlet_runs} runs) ...")
     dirichlet_perturbation = metric_dirichlet_perturbation(
         history, weights,
         runs=args.dirichlet_runs,
         concentration=args.dirichlet_concentration,
         seed=args.seed + 1,
     )
+    print("[validate_elo] [10/11] VTSR-C prediction + lambda ablation ...")
+    vtsr_c = metric_vtsr_c(cmdr_history)
+    print("[validate_elo] [11/11] axis-vs-outcome sign agreement ...")
+    axis_outcome = metric_axis_outcome(history, per_match)
     winner_funnel = count_winner_funnel(history, per_match)
 
     # Player count totals (corpus-wide, for the report header).
@@ -2465,6 +2808,8 @@ def main(argv: list[str] | None = None) -> int:
         "clean_win_accuracy":     clean_win_accuracy,
         "axis_ablation":          axis_ablation,
         "dirichlet_perturbation": dirichlet_perturbation,
+        "vtsr_c":                 vtsr_c,
+        "axis_outcome":           axis_outcome,
         "winner_funnel":          winner_funnel,
     }
 
@@ -2530,6 +2875,17 @@ def main(argv: list[str] | None = None) -> int:
           f"{_fmt_num(bootstrap.get('jaccard_mean'))} "
           f"(min {_fmt_num(bootstrap.get('jaccard_min'))})")
     print(f"  Bootstrap rating-proxy std:   median {_fmt_num(bootstrap.get('proxy_std_median'), decimals=1)} ELO")
+    if vtsr_c.get("available"):
+        ci_c = vtsr_c.get("accuracy_ci") or [None, None]
+        print(f"  VTSR-C duel prediction:       {_fmt_pct(vtsr_c.get('accuracy'))} "
+              f"({_fmt_pair(ci_c[0], ci_c[1])})  log-loss {_fmt_num(vtsr_c.get('log_loss'))}  "
+              f"n={vtsr_c.get('n_scored')}  lambda={vtsr_c.get('lambda_canonical')}")
+    if axis_outcome.get("available"):
+        top_axes = (axis_outcome.get("axes") or [])[:3]
+        tops = ", ".join(
+            f"{r['axis']} {_fmt_pct(r['sign_agreement'])}" for r in top_axes
+        )
+        print(f"  Axis-vs-outcome top 3:        {tops}")
     print("==================================================")
     return 0
 

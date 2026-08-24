@@ -321,7 +321,7 @@ The raw data is produced by [statsgate](https://github.com/VTrider/statsgate), a
 Players are identified by `uint64` Steam64 IDs. The identity source depends on schema:
 
 - **v1/v2**: the header provides three maps — `s64_to_nick` (Steam64 → nickname), `teamnum_to_s64` (slot → Steam64), `s64_to_teamnum` (reverse).
-- **v3**: the maps are `reserved`; identity comes from the `header.players` PlayerInfo roster via `_build_identity_maps()` in [scripts/process_stats.py](scripts/process_stats.py), which (a) drops entries failing the `_valid_steam64` gate (`(s64 >> 32) == 0x01100001` — the v3 collector emits garbage Steam64s for EMPTY slots because it scans without a player-handle guard), and (b) resolves slot conflicts (two valid Steam64s claiming one `teamnum` via leave/rejoin churn) by earliest first-appearance in the UpdateTick stream, recording displaced claimants in `match.roster_conflicts`. The raw roster (including invalid entries, flagged `valid: false`) is preserved on `match.roster` for provenance.
+- **v3**: the maps are `reserved`; identity comes from the `header.players` PlayerInfo roster via `_build_identity_maps()` in [scripts/process_stats.py](scripts/process_stats.py), which (a) drops entries failing the `_valid_steam64` gate (`(s64 >> 32) == 0x01100001` — the v3 collector emits garbage Steam64s for EMPTY slots because it scans without a player-handle guard), and (b) resolves slot conflicts (multiple valid Steam64s claiming one `teamnum`) by **most UpdateTick presence** — `PlayerInfo.teamnum` records only the FIRST slot a Steam64 was seen in, so pre-game lobby shuffles can file full-match players under slots they held for seconds; the dominant occupant wins (earliest appearance breaks ties), and displaced claimants with substantial presence (`>= ROSTER_OVERFLOW_MIN_SHARE = 0.25` of ticks) overflow to the lowest free slot on the same team side rather than vanishing (low-presence cameos/artifacts drop). Every resolution is recorded in `match.roster_conflicts` (`resolution: "reassigned" | "dropped"`, `assigned_slot`, `presence_share`). The raw roster (including invalid entries, flagged `valid: false`) is preserved on `match.roster` for provenance.
 
 Either way the shim yields the same three working dicts, and the pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick` — everything downstream is schema-blind.
 
@@ -2245,6 +2245,41 @@ ODFs the DB does not recognize (no `unitName` and not in any other resolver) fal
 All numeric fields are tick-joined to the player's active ship at event time via the running `s64_to_current_odf` map. Edge case: events that fire before the player's first `update_tick` (typically the first 1–2 events) bucket to ship `"unknown"`. At 20 Hz this is negligible noise; the `unknown` row renders explicitly so any user audit can see the magnitude.
 
 **Career rollup** (in `js/all-matches-aggregator.js`): `career_loadout` and `career_per_ship_combat` blocks on each `career_stats[]` row, summed across the picker-filtered match subset. Primary/secondary ship is rederived from summed `ship_seconds` (cached via `ship_seconds[odf]` in the per-player accumulator) to avoid double-rounding from per-match strings. Ship pretty names are cached on first encounter from the per-match `loadout.ships[odf].name` so the rollup emits names without re-resolving.
+
+### 13.12 VTSR-C — Commander Rating v1 (experimental)
+
+**Module:** `scripts/elo_commander.py` (pure, no I/O — mirrors the `elo.py` contract). `compute_commander_elo(all_match_data, elo_history) -> (current, history)`, wired into `scripts/process_stats.py` immediately after the canonical VTSR-T emit. **Outputs:** `data/processed/elo_commander_current.json` + `elo_commander_history.json` (`schema_version: 1`; both in the `load_cache_index()` skip set). **Corpus-wide, picker-unaware, NOT in the pipeline cache key; the dashboard thug-only toggle does not apply** (separate ladder). No `PIPELINE_VERSION` / `ELO_SCHEMA_VERSION` / `match.schema_version` interaction — VTSR-C recomputes every run from in-memory data, exactly like VTSR-T.
+
+**Design (locked, v1):** outcome-pure (`α_c = 1`) — the mirror image of VTSR-T (`α = 0`, performance-pure). A verified match outcome is a clean 1v1 label between exactly two commanders. Future commander telemetry (resource handling, build orders) slots in later as a `COMMANDER_WEIGHTS` performance composite blended through the same α architecture, no rework.
+
+**Rated set:** canonical rated matches that are **determined** — present in `elo_history` with non-empty deltas (inherits the ≥6-player / ≥240 s / non-cancelled gates for free), `winner.team ∈ {1, 2}` via `decided_by ∈ {adjudicated, attested, clean_win, contested}`, both commanders identified from `leaderboard[].is_commander` (fallback `match.team_leaders`). Attested/adjudicated **draws** (`decided_by == "draw"`) score S = 0.5 for both. Undetermined matches skip and are counted (`matches_skipped_undetermined`; `matches_skipped_missing_commander` covers roster gaps + join failures).
+
+**Update rule** (classic chess constants — W/L semantics differ from VTSR-T's performance semantics):
+
+$$E_A = \frac{1}{1 + 10^{-\left((R_A - R_B) + \lambda\,(T_A - T_B)\right)/400}} \qquad \Delta R_A = K_A\,(S_A - E_A)$$
+
+- \(T\) = mean **pre-match VTSR-T** of each team's non-commander rated rows, read from the canonical `elo_history` deltas' `before` values (historically accurate at that point in the walk — zero leakage). Either side with zero joinable thug rows → handicap term 0 (defensive).
+- \(\lambda\) = `CMDR_LAMBDA_TEAM_HANDICAP = 1.0` — a 100-point average-thug advantage counts like 100 rating points. Validator-ablated over {0, 0.5, 1.0, 1.5} so the dial becomes empirical as the labeled corpus grows.
+- Logistic scale **400** (not VTSR-T's 800 — that scale is tuned for lobby-median performance expectations; head-to-head win probability is the textbook regime).
+- **Symmetric K** (no loss aversion — duels are zero-sum; asymmetry would inflate the pool), **no rating floor** (tiny pool, no ladder-flight psychology to manage). `K = K_FLOOR + (K_BASE − K_FLOOR) · max(0, 1 − games/PRIOR)` with `CMDR_K_BASE = 40`, `CMDR_K_FLOOR = 20`, `CMDR_PROVISIONAL_PRIOR = 5.0`. Anchor `CMDR_ELO_ANCHOR = 1500`. Provisional badge below `CMDR_PROVISIONAL_THRESHOLD = 5` rated games.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `CMDR_ELO_ANCHOR` | 1500.0 | Debut rating |
+| `CMDR_K_BASE` / `CMDR_K_FLOOR` | 40.0 / 20.0 | K decay endpoints |
+| `CMDR_PROVISIONAL_PRIOR` | 5.0 | K decay horizon (games) |
+| `CMDR_PROVISIONAL_THRESHOLD` | 5 | Provisional badge floor |
+| `CMDR_LOGISTIC_SCALE` | 400.0 | Expected-score logistic scale |
+| `CMDR_LAMBDA_TEAM_HANDICAP` | 1.0 | Thug-strength handicap weight |
+| `DETERMINED_DECIDED_BY` | adjudicated · attested · clean_win · contested | Rated-outcome gate |
+
+**Output shapes.** `elo_commander_current.json`: top-level constants + `computed_at` + `rated_match_count` + skip counters + `ratings[]` (`{name, steam64, vtsr_c, matches_commanded_rated, wins, losses, draws, win_pct, peak_vtsr_c, peak_at, peak_date, last_match_id, last_delta, provisional}`, sorted `vtsr_c` desc). `elo_commander_history.json`: same header + `duels[]` — per rated duel `{match_id, date, decided_by, adjudicated, outcome, commanders: {"1": {steam64, name, before, after, delta, expected, k, score}, "2": {…}}, team_handicap: {t1_thug_mean, t2_thug_mean, diff, lambda}}` (full audit transparency, same spirit as `axis_contributions`; the two `expected` values always sum to 1).
+
+**Validator sections** (`scripts/validate_elo.py` v1.2, report schema 2 → 3, strictly additive): §10 replays the ladder chronologically from `elo_commander_history.json` alone (prediction accuracy + log-loss; draws excluded from the accuracy denominator; replay cross-checked against emitted ratings) and ablates λ over {0, 0.5, 1.0, 1.5}; §11 is the **axis-vs-outcome sign-agreement study** — per-axis team-mean `axis_contributions` difference (winner − loser) across all determined rated matches, the empirical check on `THUG_WEIGHTS`. Both blocks land in `report.md` / `report.json` / the committed `validation_summary.json` (`latest_detail.vtsr_c` + `latest_detail.axis_outcome`; absent-safe for UI readers).
+
+**Consumers:** ELO page Leaderboard pill (`#section-vtsr-c` ladder card), How-it-works (`commanderLadderHtml()` in `js/vtsr-explainers.js`), Commanders & fairness (two cards), Does-it-work (accuracy cards + λ table + axis-outcome bar list); dashboard Commander Cohort card (top-5 VTSR-C strip via lazy `ensureCommanderEloLoaded()`); player page Rivals tab (**Commander Rivalries** panel — headline strip, top opponent, top-5 enemies, nemesis/best chips; opponent tallies computed client-side in `js/player.js` from the contributions walk because the aggregator's `head_to_head` is capped at top-10 globally). All consumers are 404-safe (missing files → surfaces hide / em-dash).
+
+**Roadmap:** performance-axis enrichment via `α_c` once the collector records commander telemetry; empirical λ fitting when the validator's ablation separates from noise; relationship to the future team Wins-ELO (`ALPHA > 0`) — separate project gated on ~100 labeled matches (watch `clean_win_n` + the funnel on the Does-it-work tab).
 
 ## 14. Player Profile Pages (`player/`)
 

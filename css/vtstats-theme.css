@@ -6013,6 +6013,68 @@ td.vt-col-split {
     vertical-align: middle;
 }
 
+/* VTSR-C top-5 ladder strip (experimental commander rating) prepended
+   above the cohort grid. Compact glass band: header line with title +
+   sub + full-ladder link, then one row per top-5 commander. */
+.vt-cohort-vtsrc-strip {
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--kb-primary) 7%, transparent);
+    border: 1px solid color-mix(in srgb, var(--kb-primary) 18%, transparent);
+}
+.vt-cohort-vtsrc-strip-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.75rem;
+    margin-bottom: 0.45rem;
+}
+.vt-cohort-vtsrc-strip-title {
+    font-weight: 700;
+    font-size: 0.8rem;
+    color: var(--kb-text-primary);
+}
+.vt-cohort-vtsrc-strip-sub {
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+}
+.vt-cohort-vtsrc-strip-link {
+    margin-left: auto;
+    font-size: 0.76rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+.vt-cohort-vtsrc-strip-link:hover { text-decoration: underline; }
+.vt-cohort-vtsrc-rows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.4rem;
+}
+.vt-cohort-vtsrc-row {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-size: 0.82rem;
+}
+.vt-cohort-vtsrc-rank {
+    color: var(--kb-text-muted);
+    font-family: var(--vt-font-mono, monospace);
+    font-size: 0.72rem;
+}
+.vt-cohort-vtsrc-name { font-weight: 600; }
+.vt-cohort-vtsrc-rating {
+    font-family: var(--vt-font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: var(--kb-primary);
+}
+.vt-cohort-vtsrc-record {
+    font-family: var(--vt-font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--kb-text-muted);
+    font-size: 0.76rem;
+}
+
 /* Preview-status callout banner inside the card body. Compact, low-key,
    uses muted-text and a tinted accent strip on the left so it reads as
    informational rather than alarmist. */

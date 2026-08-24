@@ -1,32 +1,35 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-23T22:50:14Z",
+  "generated_at": "2026-08-24T02:56:34Z",
   "latest": {
-    "generated_at": "2026-08-23T22:50:14Z",
+    "generated_at": "2026-08-24T02:56:34Z",
     "elo_schema_version": 10,
-    "rated_match_count": 110,
+    "rated_match_count": 111,
     "players_total": 37,
-    "spearman_pooled_rho": 0.44419302138466626,
-    "per_match_rho_mean": 0.4125706338798009,
-    "self_consistency_rho": 0.8310276679841897,
-    "calibration_mae": 0.013436998377436926,
-    "bootstrap_proxy_std_median": 29.93340522626853,
-    "bootstrap_jaccard_mean": 0.818042537172972,
+    "spearman_pooled_rho": 0.4465163383886645,
+    "per_match_rho_mean": 0.4140954738472848,
+    "self_consistency_rho": 0.8241106719367589,
+    "calibration_mae": 0.012359781006110966,
+    "bootstrap_proxy_std_median": 31.690871426800506,
+    "bootstrap_jaccard_mean": 0.8246053077357425,
     "synthetic_winner_agreement": 1.0,
-    "synthetic_winner_n": 35,
-    "clean_win_n": 35,
-    "clean_win_accuracy_mean": 0.42857142857142855,
-    "clean_win_accuracy_hard_max": 0.5428571428571428,
-    "clean_win_accuracy_softmax": 0.45714285714285713,
-    "log_loss_mean": 0.7010184191805677
+    "synthetic_winner_n": 36,
+    "clean_win_n": 36,
+    "clean_win_accuracy_mean": 0.4166666666666667,
+    "clean_win_accuracy_hard_max": 0.5277777777777778,
+    "clean_win_accuracy_softmax": 0.4444444444444444,
+    "log_loss_mean": 0.7024603371351408,
+    "vtsr_c_n": 37,
+    "vtsr_c_accuracy": 0.5675675675675675,
+    "vtsr_c_log_loss": 0.7132227051647793
   },
   "latest_detail": {
     "winner_funnel": {
-      "rated_history_entries": 110,
+      "rated_history_entries": 111,
       "missing_per_match_file": 0,
       "winner_block_missing": 0,
       "decided_by_clean_win": 33,
-      "decided_by_attested": 2,
+      "decided_by_attested": 3,
       "decided_by_adjudicated": 0,
       "decided_by_contested": 1,
       "decided_by_unclear": 74,
@@ -49,28 +52,28 @@
               0.2903070395897999,
               0.7096929604102
             ],
-            "log_loss_mean": 0.6913144248556413,
-            "log_loss_median": 0.6929573979841432
+            "log_loss_mean": 0.6911862471055875,
+            "log_loss_median": 0.6929231206526053
           },
-          "mean_gap_in_bucket": 12.45119444444448
+          "mean_gap_in_bucket": 12.580027777777723
         },
         {
           "bucket": "mid",
           "gap_min": 25.0,
           "gap_max": 100.0,
-          "n": 17,
+          "n": 18,
           "score": {
-            "n_eligible": 17,
+            "n_eligible": 18,
             "n_correct": 6,
-            "accuracy": 0.35294117647058826,
+            "accuracy": 0.3333333333333333,
             "accuracy_ci": [
-              0.17309486143904904,
-              0.5870003327878818
+              0.1627855436366286,
+              0.5625093065574964
             ],
-            "log_loss_mean": 0.7112932367010781,
-            "log_loss_median": 0.7405800742342897
+            "log_loss_mean": 0.7137344271646939,
+            "log_loss_median": 0.7408237073990838
           },
-          "mean_gap_in_bucket": 47.010990196078396
+          "mean_gap_in_bucket": 46.953462962962945
         },
         {
           "bucket": "large",
@@ -94,29 +97,183 @@
     },
     "aggregations": {
       "mean": {
-        "accuracy": 0.42857142857142855,
+        "accuracy": 0.4166666666666667,
         "accuracy_ci": [
-          0.27984333081678914,
-          0.5914287074102662
+          0.2714033350508729,
+          0.5780003033572231
         ],
-        "log_loss_mean": 0.7010184191805677
+        "log_loss_mean": 0.7024603371351408
       },
       "hard_max": {
-        "accuracy": 0.5428571428571428,
+        "accuracy": 0.5277777777777778,
         "accuracy_ci": [
-          0.38189451340137515,
-          0.6953422636623914
+          0.3700567162693947,
+          0.6801420709279067
         ],
-        "log_loss_mean": 0.7088041246219425
+        "log_loss_mean": 0.7168643270231928
       },
       "softmax_max": {
-        "accuracy": 0.45714285714285713,
+        "accuracy": 0.4444444444444444,
         "accuracy_ci": [
-          0.3046577363376085,
-          0.6181054865986247
+          0.2954102987654314,
+          0.6041921268399659
         ],
-        "log_loss_mean": 0.7038694730797999
+        "log_loss_mean": 0.7088047142687084
       }
+    },
+    "vtsr_c": {
+      "available": true,
+      "n_duels": 37,
+      "n_scored": 37,
+      "n_draws": 0,
+      "lambda_canonical": 1.0,
+      "accuracy": 0.5675675675675675,
+      "accuracy_ci": [
+        0.40913906334200717,
+        0.713285131596487
+      ],
+      "log_loss": 0.7132227051647793,
+      "replay_max_abs_diff": 0.005,
+      "per_lambda": [
+        {
+          "lambda": 0.0,
+          "canonical": false,
+          "n": 37,
+          "n_draws": 0,
+          "accuracy": 0.6351351351351351,
+          "accuracy_ci": [
+            0.48758729517569566,
+            0.7817459336889914
+          ],
+          "log_loss": 0.6725334063682403,
+          "replay_max_abs_diff": null
+        },
+        {
+          "lambda": 0.5,
+          "canonical": false,
+          "n": 37,
+          "n_draws": 0,
+          "accuracy": 0.5405405405405406,
+          "accuracy_ci": [
+            0.38383779524767364,
+            0.6896167217154228
+          ],
+          "log_loss": 0.6905328104746841,
+          "replay_max_abs_diff": null
+        },
+        {
+          "lambda": 1.0,
+          "canonical": true,
+          "n": 37,
+          "n_draws": 0,
+          "accuracy": 0.5675675675675675,
+          "accuracy_ci": [
+            0.40913906334200717,
+            0.713285131596487
+          ],
+          "log_loss": 0.7132227051647793,
+          "replay_max_abs_diff": 0.005
+        },
+        {
+          "lambda": 1.5,
+          "canonical": false,
+          "n": 37,
+          "n_draws": 0,
+          "accuracy": 0.5675675675675675,
+          "accuracy_ci": [
+            0.40913906334200717,
+            0.713285131596487
+          ],
+          "log_loss": 0.7404432814415125,
+          "replay_max_abs_diff": null
+        }
+      ]
+    },
+    "axis_outcome": {
+      "available": true,
+      "n_matches_determined": 37,
+      "axes": [
+        {
+          "axis": "net_damage_share",
+          "n": 37,
+          "sign_agreement": 0.9459459459459459,
+          "sign_agreement_ci": [
+            0.822950349364601,
+            0.9850493372294601
+          ],
+          "mean_winner_minus_loser": 0.5075561261261261
+        },
+        {
+          "axis": "mobility",
+          "n": 37,
+          "sign_agreement": 0.8648648648648649,
+          "sign_agreement_ci": [
+            0.7202227252929444,
+            0.9408679273749238
+          ],
+          "mean_winner_minus_loser": 0.4522378378378379
+        },
+        {
+          "axis": "thug_kill_rate",
+          "n": 37,
+          "sign_agreement": 0.8108108108108109,
+          "sign_agreement_ci": [
+            0.6579498842904441,
+            0.9052014124266288
+          ],
+          "mean_winner_minus_loser": 0.3777236036036036
+        },
+        {
+          "axis": "pve_share",
+          "n": 37,
+          "sign_agreement": 0.7567567567567568,
+          "sign_agreement_ci": [
+            0.5988239750929105,
+            0.8663879656733671
+          ],
+          "mean_winner_minus_loser": 0.13489914414414414
+        },
+        {
+          "axis": "target_lock_pct",
+          "n": 36,
+          "sign_agreement": 0.5,
+          "sign_agreement_ci": [
+            0.34474067624730526,
+            0.6552593237526947
+          ],
+          "mean_winner_minus_loser": -0.024811342592592593
+        },
+        {
+          "axis": "thug_efficiency",
+          "n": 37,
+          "sign_agreement": 0.4594594594594595,
+          "sign_agreement_ci": [
+            0.31038327828457724,
+            0.6161622047523264
+          ],
+          "mean_winner_minus_loser": -0.006661846846846844
+        },
+        {
+          "axis": "thug_accuracy",
+          "n": 33,
+          "sign_agreement": 0.3333333333333333,
+          "sign_agreement_ci": [
+            0.19750029467803698,
+            0.5039241820005003
+          ],
+          "mean_winner_minus_loser": -0.12425636363636364
+        },
+        {
+          "axis": "snipe_bonus",
+          "n": 11,
+          "sign_agreement": 0.09090909090909091,
+          "sign_agreement_ci": [
+            0.01623175226282597,
+            0.3773646254862038
+          ],
+          "mean_winner_minus_loser": -0.2935733333333333
+        }
+      ]
     }
   },
   "history": [
@@ -214,6 +371,47 @@
       "clean_win_accuracy_hard_max": 0.5428571428571428,
       "clean_win_accuracy_softmax": 0.45714285714285713,
       "log_loss_mean": 0.7010184191805677
+    },
+    {
+      "generated_at": "2026-08-24T02:23:40Z",
+      "elo_schema_version": 10,
+      "rated_match_count": 111,
+      "players_total": 37,
+      "spearman_pooled_rho": 0.44622225158415085,
+      "per_match_rho_mean": 0.41420369895550996,
+      "self_consistency_rho": 0.8290513833992095,
+      "calibration_mae": 0.014189322460319214,
+      "bootstrap_proxy_std_median": 31.690871426800506,
+      "bootstrap_jaccard_mean": 0.824746470920384,
+      "synthetic_winner_agreement": 1.0,
+      "synthetic_winner_n": 36,
+      "clean_win_n": 36,
+      "clean_win_accuracy_mean": 0.4166666666666667,
+      "clean_win_accuracy_hard_max": 0.5277777777777778,
+      "clean_win_accuracy_softmax": 0.4444444444444444,
+      "log_loss_mean": 0.704044759265177
+    },
+    {
+      "generated_at": "2026-08-24T02:56:34Z",
+      "elo_schema_version": 10,
+      "rated_match_count": 111,
+      "players_total": 37,
+      "spearman_pooled_rho": 0.4465163383886645,
+      "per_match_rho_mean": 0.4140954738472848,
+      "self_consistency_rho": 0.8241106719367589,
+      "calibration_mae": 0.012359781006110966,
+      "bootstrap_proxy_std_median": 31.690871426800506,
+      "bootstrap_jaccard_mean": 0.8246053077357425,
+      "synthetic_winner_agreement": 1.0,
+      "synthetic_winner_n": 36,
+      "clean_win_n": 36,
+      "clean_win_accuracy_mean": 0.4166666666666667,
+      "clean_win_accuracy_hard_max": 0.5277777777777778,
+      "clean_win_accuracy_softmax": 0.4444444444444444,
+      "log_loss_mean": 0.7024603371351408,
+      "vtsr_c_n": 37,
+      "vtsr_c_accuracy": 0.5675675675675675,
+      "vtsr_c_log_loss": 0.7132227051647793
     }
   ]
 }

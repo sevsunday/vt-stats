@@ -55,7 +55,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 27
+PIPELINE_VERSION = 28
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -436,6 +436,18 @@ OUTCOME_NAMES = {
 # individual Steam accounts are universe 1 / type 1: high dword 0x01100001.
 def _valid_steam64(s64):
     return (s64 >> 32) == 0x01100001
+
+
+# Minimum share of the match's UpdateTicks a displaced slot-conflict
+# claimant must have been present for to be REASSIGNED to a free slot on
+# their team side instead of dropped. The first real churn case (Oldboy,
+# 2026-08-23) proved `PlayerInfo.teamnum` only records the FIRST slot a
+# Steam64 was seen in: a full-match player transited slot 2 during the
+# pre-game shuffle before settling into never-recorded slot 3, while the
+# genuine 5-minute slot-2 occupant left early. Presence share separates
+# real players (reassign) from cameos and stale-scan artifacts (drop).
+# Tunable without a schema bump (bump PIPELINE_VERSION on change).
+ROSTER_OVERFLOW_MIN_SHARE = 0.25
 
 # Canonical set of the three base faction pilot ODFs (player on foot).
 # Kept for reference / documentation; runtime pilot detection goes through
@@ -1676,6 +1688,7 @@ def load_cache_index():
         return index
     skip = {"matches.json", "match_contributions.json", "all_matches.json",
             "elo_current.json", "elo_history.json",
+            "elo_commander_current.json", "elo_commander_history.json",
             "elo_current_thugs_only.json", "elo_history_thugs_only.json",
             "elo_current_unlocked.json", "elo_history_unlocked.json",
             "elo_current_max.json", "elo_history_max.json",
@@ -2874,7 +2887,7 @@ def _build_identity_maps(header, schema, events):
     v1/v2: direct copies of the header maps (unchanged legacy behavior).
 
     v3: derived from `header.players` (PlayerInfo entries accumulated by
-    the collector's per-tick slot scan). Two data-quality realities are
+    the collector's per-tick slot scan). Three data-quality realities are
     handled here so everything downstream stays identity-blind:
 
       * Garbage entries -- the v3 collector dropped the old
@@ -2884,20 +2897,33 @@ def _build_identity_maps(header, schema, events):
         gate drops them from the working dicts, which automatically keeps
         their ghost trails out of positioning (the UpdateTick consumer
         gates on `s64 in s64_to_nick`) and denies them leaderboard rows.
-      * Slot conflicts -- two VALID Steam64s claiming the same teamnum
-        (leave + rejoin churn). `players[]` is unordered_map hash order
-        on the wire, so list position is meaningless; the slot is awarded
-        to the Steam64 that appears EARLIEST in the update_tick stream
-        (true first-seen; cheap pre-scan that only runs when a conflict
-        actually exists). Displaced claimants are dropped from the
-        working dicts -- v2-identical semantics, one identity per slot --
-        and recorded in `roster_conflicts` for the audit trail.
+      * Slot conflicts -- multiple VALID Steam64s claiming the same
+        teamnum. `players[]` is unordered_map hash order on the wire and
+        `PlayerInfo.teamnum` is only the FIRST slot each Steam64 was seen
+        in, so neither list position nor first-appearance identifies the
+        real occupant (the first real churn case proved it: pre-game
+        lobby shuffles register full-match players under slots they held
+        for seconds). The slot is awarded to the claimant with the MOST
+        UpdateTick presence (dominant occupant; earliest first-appearance
+        breaks ties). Single pre-scan, gated so conflict-free matches
+        (the overwhelmingly common case) never pay for it.
+      * Displaced-but-real players -- a displaced claimant who was
+        present for a substantial share of the match
+        (>= ROSTER_OVERFLOW_MIN_SHARE of ticks) is NOT dropped: they were
+        genuinely playing, just mis-filed by the collector's first-seen
+        slot capture (e.g. a 5v4 whose fifth player transited slot 2
+        before settling into never-recorded slot 3). They overflow to the
+        lowest FREE slot on the same team side (1-5 / 6-10), keeping the
+        one-identity-per-slot invariant and team attribution intact.
+        Low-presence losers (brief cameos, stale-scan artifacts) are
+        dropped. Both outcomes are recorded in `roster_conflicts` with
+        `resolution: "reassigned" | "dropped"` (+ `assigned_slot`).
 
     Returns `(slot_to_s64, s64_to_slot, s64_to_nick, roster,
     roster_conflicts)` where `roster` is the RAW PlayerInfo passthrough
     (list of {steam64, slot, nickname, valid} dicts; None for v1/v2 --
     pre-ACCOUNT_REROUTES identity, wire-accurate provenance) and
-    `roster_conflicts` lists displaced valid claimants (always a list).
+    `roster_conflicts` lists conflict resolutions (always a list).
     """
     if schema != PROTO_SCHEMA_V3:
         return (
@@ -2931,43 +2957,82 @@ def _build_identity_maps(header, schema, events):
     for p in valid_entries:
         by_slot.setdefault(int(p.teamnum), []).append(p)
 
-    # Conflict tie-break: earliest first appearance in the UpdateTick
-    # stream. Single cheap pre-scan, gated so conflict-free matches (the
-    # overwhelmingly common case) never pay for it.
+    # Conflict pre-scan: UpdateTick presence (sample count) + first
+    # appearance per contested Steam64. Gated on a conflict existing.
+    samples = {}
     first_seen = {}
+    total_ticks = 0
     if any(len(v) > 1 for v in by_slot.values()):
         contested = {p.steam64 for v in by_slot.values() if len(v) > 1 for p in v}
         for evt in events:
             if evt.WhichOneof("event_type") != "update_tick":
                 continue
             ut = evt.update_tick
+            total_ticks += 1
             for ps in ut.players:
-                if ps.player in contested and ps.player not in first_seen:
-                    first_seen[ps.player] = ut.tick
-            if len(first_seen) == len(contested):
-                break
+                if ps.player in contested:
+                    samples[ps.player] = samples.get(ps.player, 0) + 1
+                    if ps.player not in first_seen:
+                        first_seen[ps.player] = ut.tick
 
     slot_to_s64 = {}
     s64_to_slot = {}
     s64_to_nick = {}
     roster_conflicts = []
+    overflow_queue = []  # (loser PlayerInfo, contested_slot, presence_share)
     for slot, claimants in sorted(by_slot.items()):
-        claimants = sorted(claimants, key=lambda p: first_seen.get(p.steam64, float("inf")))
+        # Dominant occupant wins: most UpdateTick presence, earliest
+        # appearance as tiebreak, wire order as final tiebreak.
+        claimants = sorted(
+            claimants,
+            key=lambda p: (-samples.get(p.steam64, 0), first_seen.get(p.steam64, float("inf"))),
+        )
         winner = claimants[0]
         slot_to_s64[slot] = winner.steam64
         s64_to_slot[winner.steam64] = slot
         s64_to_nick[winner.steam64] = winner.nickname
         for loser in claimants[1:]:
+            share = (samples.get(loser.steam64, 0) / total_ticks) if total_ticks else 0.0
+            overflow_queue.append((loser, slot, share))
+
+    # Second pass: substantial-presence losers overflow to a free slot on
+    # their team side; the rest drop (audit-recorded either way).
+    for loser, contested_slot, share in overflow_queue:
+        team_range = range(1, 6) if 1 <= contested_slot <= 5 else range(6, 11)
+        free_slot = next((s for s in team_range if s not in slot_to_s64), None)
+        if share >= ROSTER_OVERFLOW_MIN_SHARE and free_slot is not None:
+            slot_to_s64[free_slot] = loser.steam64
+            s64_to_slot[loser.steam64] = free_slot
+            s64_to_nick[loser.steam64] = loser.nickname
             print(
-                f"  WARN: v3 roster: slot {slot} contested -- "
-                f"{loser.steam64} ({loser.nickname!r}) displaced by "
-                f"{winner.steam64} ({winner.nickname!r})"
+                f"  WARN: v3 roster: slot {contested_slot} contested -- "
+                f"{loser.steam64} ({loser.nickname!r}, {share:.0%} presence) "
+                f"reassigned to free slot {free_slot}"
             )
             roster_conflicts.append({
-                "slot": slot,
+                "slot": contested_slot,
                 "steam64": str(loser.steam64),
                 "nickname": loser.nickname or "",
-                "kept_steam64": str(winner.steam64),
+                "kept_steam64": str(slot_to_s64[contested_slot]),
+                "resolution": "reassigned",
+                "assigned_slot": free_slot,
+                "presence_share": round(share, 3),
+            })
+        else:
+            reason = "low presence" if share < ROSTER_OVERFLOW_MIN_SHARE else "no free team slot"
+            print(
+                f"  WARN: v3 roster: slot {contested_slot} contested -- "
+                f"{loser.steam64} ({loser.nickname!r}, {share:.0%} presence) "
+                f"dropped ({reason})"
+            )
+            roster_conflicts.append({
+                "slot": contested_slot,
+                "steam64": str(loser.steam64),
+                "nickname": loser.nickname or "",
+                "kept_steam64": str(slot_to_s64[contested_slot]),
+                "resolution": "dropped",
+                "assigned_slot": None,
+                "presence_share": round(share, 3),
             })
 
     return slot_to_s64, s64_to_slot, s64_to_nick, roster, roster_conflicts
@@ -6333,6 +6398,7 @@ def main():
     #     dashboard's "Exclude commander matches" toggle on the
     #     VTSR-T Leaderboard card.
     elo_current = None
+    elo_history = None
     try:
         import elo as elo_module
         elo_current, elo_history = elo_module.compute_elo(all_match_data)
@@ -6351,6 +6417,36 @@ def main():
               f"{excl_dur} excluded short-duration)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T ({e}); skipping.")
+
+    # ----- VTSR-C (commander rating, v1 -- experimental) -----
+    # Win/loss ELO between the two commanders of every DETERMINED rated
+    # match (adjudicated / attested / clean_win / contested; draws score
+    # 0.5), with a team-strength handicap in the expected score built
+    # from the canonical elo_history deltas' pre-match `before` values.
+    # Outcome-pure (alpha_c = 1) v1; separate ladder, separate files --
+    # zero risk to compute_elo and zero changes to VTSR-T consumers.
+    # Corpus-wide, picker-unaware; the thug-only toggle does not apply.
+    # Soft-fails so a hiccup here never blocks the rest of the pipeline.
+    try:
+        if elo_history is None:
+            raise RuntimeError("canonical VTSR-T history unavailable")
+        import elo_commander as elo_commander_module
+        cmdr_current, cmdr_history = elo_commander_module.compute_commander_elo(
+            all_match_data, elo_history
+        )
+        cmdr_current_path = OUTPUT_DIR / "elo_commander_current.json"
+        with open(cmdr_current_path, "w", encoding="utf-8") as f:
+            json.dump(cmdr_current, f, indent=2, ensure_ascii=False)
+        cmdr_history_path = OUTPUT_DIR / "elo_commander_history.json"
+        with open(cmdr_history_path, "w", encoding="utf-8") as f:
+            json.dump(cmdr_history, f, indent=2, ensure_ascii=False)
+        print(f"VTSR-C: {cmdr_current_path.name} "
+              f"({len(cmdr_current.get('ratings', []))} commanders · "
+              f"{cmdr_current.get('rated_match_count', 0)} rated duels · "
+              f"{cmdr_current.get('matches_skipped_undetermined', 0)} skipped undetermined · "
+              f"{cmdr_current.get('matches_skipped_missing_commander', 0)} skipped missing-commander)")
+    except Exception as e:
+        print(f"WARN: failed to compute VTSR-C ({e}); skipping.")
 
     # ----- VTSR-T (thug-only mode) -----
     # Re-runs the rating loop with `exclude_commanders=True`. Drops every

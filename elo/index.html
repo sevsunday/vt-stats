@@ -252,6 +252,23 @@
             </table>
           </div>
         </div>
+        <!-- VTSR-C commander ladder (experimental; 404-safe — the card
+             stays hidden when elo_commander_current.json is absent).
+             Separate ladder from VTSR-T: outcome-pure win/loss ELO between
+             the two commanders of every determined match, with a
+             team-strength handicap. The thug-only toggle does NOT apply. -->
+        <div class="card mb-4 d-none" id="section-vtsr-c">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">
+              <i class="bi bi-person-badge me-2"></i>Commander Ratings &mdash; VTSR-C
+              <span class="badge text-bg-warning ms-2" style="font-size: 0.62rem; vertical-align: middle;">experimental</span>
+            </h5>
+            <button type="button" class="btn btn-sm vt-vtsr-info-btn" id="vtsr-c-how-link">
+              <i class="bi bi-info-circle me-1"></i>How It's Calculated
+            </button>
+          </div>
+          <div class="card-body" id="vtsr-c-body"></div>
+        </div>
         <div class="vt-elo-empty card d-none" id="elo-leaderboard-empty">
           <div class="card-body text-center text-muted py-5">
             <i class="bi bi-stars d-block mb-2" style="font-size: 1.6rem;"></i>
