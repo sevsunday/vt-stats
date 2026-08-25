@@ -33,6 +33,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+import identity_aliases  # silent Steam64 alias table (alias_of stamping + trampolines)
+
 # Production host. Used to build absolute URLs (og:url, twitter:url,
 # canonical) so embedded link previews resolve even when shared without
 # the host prefix. CNAME in repo root is the source of truth.
@@ -274,6 +276,10 @@ def load_slug_map(path: Path) -> dict:
             str(sid): {
                 "slug": (entry or {}).get("slug", ""),
                 "name": (entry or {}).get("name", ""),
+                # Silent-alias marker (optional): this sid's gameplay is
+                # attributed to `alias_of`'s profile; consumers redirect.
+                **({"alias_of": str((entry or {}).get("alias_of"))}
+                   if (entry or {}).get("alias_of") else {}),
             }
             for sid, entry in slugs.items()
             if (entry or {}).get("slug")
@@ -430,6 +436,20 @@ def run(
             "matches_played": 0,
         }
 
+    # Silent-alias stamping (scripts/identity_aliases.py is the single
+    # source of truth). Alias-SOURCE sids get `alias_of: <target sid>` so
+    # JS consumers (player.js dispatch, tools resolver) can redirect
+    # silently; the stamp is re-derived every run, so removing an alias
+    # from the table (undo) automatically drops the marker here while the
+    # sticky slug itself survives — the old URL becomes a real profile
+    # again on the next generator pass.
+    for sid, entry in rebuilt_slugs.items():
+        target = identity_aliases.STEAM64_ALIASES_STR.get(sid)
+        if target:
+            entry["alias_of"] = target
+        else:
+            entry.pop("alias_of", None)
+
     slug_map["slugs"] = dict(sorted(rebuilt_slugs.items(), key=lambda kv: kv[0]))
     summary["n_total"] = len(rebuilt_slugs)
     summary["n_new"] = max(0, len(claimed_by_id) - n_reused_pre)
@@ -461,6 +481,21 @@ def run(
                     print(f"Player stubs: no change ({n_eligible} stubs up to date).")
         except Exception as e:
             print(f"WARN: failed to render player stubs ({e}); continuing.")
+
+        # Silent-alias trampolines: replace each alias-source slug's stub
+        # with a bare redirect to the target profile. Rendered AFTER the
+        # regular stubs so a stale full profile (from before the alias
+        # landed) is always overwritten. Alias sources have no rating row,
+        # so _render_player_stubs never re-creates the full stub.
+        try:
+            n_tramp = _render_alias_trampolines(
+                slug_map=slug_map,
+                project_root=project_root,
+            )
+            if n_tramp:
+                print(f"Player stubs: wrote {n_tramp} alias trampoline(s).")
+        except Exception as e:
+            print(f"WARN: failed to render alias trampolines ({e}); continuing.")
 
     return summary
 
@@ -663,6 +698,66 @@ def _render_player_stubs(
         n_written += 1
 
     return (n_written, n_skipped, n_eligible)
+
+
+# Minimal, silent redirect page for alias-source slugs. Deliberately
+# carries NO player names and no explanation — the merge must never be
+# visible. `location.replace` keeps the back button clean; the meta
+# refresh covers no-JS crawlers; the canonical tag points social
+# unfurlers at the target profile.
+_TRAMPOLINE_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <link rel="canonical" href="{canonical_url}">
+  <meta http-equiv="refresh" content="0; url=../{target_slug}/">
+  <script>location.replace('../{target_slug}/' + location.search + location.hash);</script>
+  <title>VT Stats</title>
+</head>
+<body></body>
+</html>
+"""
+
+
+def _render_alias_trampolines(*, slug_map: dict, project_root: Path) -> int:
+    """Write `player/<source-slug>/index.html` redirect stubs for every
+    alias-source entry in the slug map (`alias_of` marker). Idempotent —
+    only writes when the rendered content differs. Returns the number of
+    files actually written.
+    """
+    slugs = slug_map.get("slugs", {}) or {}
+    stubs_root = project_root / PLAYER_STUBS_DIR
+    site_url = slug_map.get("site_url") or SITE_URL
+    n_written = 0
+
+    for sid, entry in slugs.items():
+        target_sid = str((entry or {}).get("alias_of") or "")
+        if not target_sid:
+            continue
+        src_slug = (entry or {}).get("slug", "")
+        target_slug = ((slugs.get(target_sid) or {}).get("slug", ""))
+        if not src_slug or not target_slug or src_slug == target_slug:
+            continue
+
+        rendered = _TRAMPOLINE_TEMPLATE.format(
+            canonical_url=f"{site_url}/player/{target_slug}/",
+            target_slug=target_slug,
+        )
+        stub_dir = stubs_root / src_slug
+        stub_dir.mkdir(parents=True, exist_ok=True)
+        stub_path = stub_dir / "index.html"
+        if stub_path.exists():
+            try:
+                if stub_path.read_text(encoding="utf-8") == rendered:
+                    continue
+            except OSError:
+                pass
+        stub_path.write_text(rendered, encoding="utf-8")
+        n_written += 1
+
+    return n_written
 
 
 def _find_unsubstituted(rendered: str) -> str:

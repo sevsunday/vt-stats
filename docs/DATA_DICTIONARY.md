@@ -2660,6 +2660,132 @@ matches cached from a prior run will retain their old attribution.
   threshold and appears in `career_stats[]` and the VTSR-T leaderboard
   for the first time.
 
+## 10.4 Silent Identity Aliases (`scripts/identity_aliases.py`)
+
+Pipeline-side Steam64 merge for the two-accounts-one-person case. An
+alias rewrites the **source** Steam64 to the **target** Steam64 at
+ingest (same identity-dict + event-stream rewrite as Account Reroutes,
+§10.3), so every Steam64-keyed surface — VTSR-T, VTSR-C, career
+rollups, player profile links, Tools resolution — attributes the source
+account's gameplay to the target. The defining property is **zero
+visual provenance**: nothing in the UI ever hints that the two accounts
+are connected.
+
+### Silent alias vs. Account Reroutes (§10.3)
+
+| | Account Reroutes | Silent Aliases |
+|---|---|---|
+| Declared in | `ACCOUNT_REROUTES` in [scripts/process_stats.py](../scripts/process_stats.py) | `STEAM64_ALIASES` in [scripts/identity_aliases.py](../scripts/identity_aliases.py) |
+| Match trigger | in-game **nick pattern** on a specific owner account | **Steam64** of the source account (unconditional) |
+| Per-match display name | target's canonical name (row is "MAX") | **source's name is preserved** (row stays "aggressor") |
+| Provenance fields | `leaderboard[].rerouted_from` + `match.account_reroutes[]` | **none emitted** |
+| UI surface | `via dd` chip + raw-browser banner | **nothing** |
+| Both accounts in one lobby | reroute skipped with a warning (soft) | **hard stop** (see below) |
+
+### Mechanism
+
+In `process_match()`, immediately after the `ACCOUNT_REROUTES` block,
+`identity_aliases.resolve_silent_aliases()` finds every slot owned by an
+alias-source Steam64. For each:
+
+1. The identity dicts (`slot_to_s64`, `s64_to_slot`, `s64_to_nick`) are
+   rewritten to the target Steam64 and the full event stream is
+   rewritten via the shared `_apply_account_reroutes_to_events()`.
+2. A **display-name override** pins the per-match name to the *source's*
+   registered name (or raw nick) so `nick_map` / `nick_for_s64` don't
+   resolve the rewritten Steam64 through `known_players` and paint the
+   row with the target's canonical name. The per-match JSON therefore
+   keeps saying "aggressor" while carrying the target's `steam64`.
+
+Career/aggregate surfaces pin names the other way — to the **target's**
+canonical name (`ALIAS_TARGET_NAMES`) — so a source-account appearance
+never renames the merged row. Pinning sites: `_extract_contribution()`
+(contribution leaderboard rows, `player_id`, rivalry-matrix keys,
+`team_leaders`, snipes/powerup-destruction maps),
+[scripts/elo.py](../scripts/elo.py) (`display_name` for ratings +
+history deltas), [scripts/elo_commander.py](../scripts/elo_commander.py)
+(ladder display names), and
+[scripts/generate_map_pages.py](../scripts/generate_map_pages.py)
+(map-stats Top Commanders; recent-matches chronology deliberately keeps
+per-match names).
+
+Raw-browser tiers 1 (binpb) and 2 (decoded) remain **source-accurate**
+(the live account's Steam64 and nick), as does the raw
+`match.roster` passthrough. Unlike reroutes, tier 3 shows **no banner**.
+
+### Dual-presence hard stop
+
+If both the source and target Steam64s appear in the same lobby, the
+merge premise ("one person, two accounts") is broken and the pipeline
+refuses to guess:
+
+- **Interactive run**: a loud checkpoint prints team/account context and
+  asks `accept match? (y/n)`. `y` processes the match with the two
+  identities kept **separate** (no alias applied to that match only);
+  `n` aborts the whole pipeline.
+- **`--no-prompt` / non-interactive stdin**: the pipeline **always
+  aborts** with a clear error. Never a silent skip — this is stricter
+  than outcome adjudication's defer-and-continue posture, because the
+  expected response to a genuine dual-presence match is undoing the
+  alias entirely.
+
+### JSON / frontend surfaces
+
+- `elo_current.json` + `elo_history.json` (both mode pairs) carry a
+  silent lookup block — debugging/undo forensics only, no UI reads it:
+
+  ```json
+  "steam64_aliases": { "76561199317457354": "76561199066952713" }
+  ```
+
+- `data/processed/player_slugs.json` alias-source entries carry
+  `"alias_of": "<target steam64>"`. The sticky slug itself is never
+  deleted (URL stability contract).
+- `player/<source-slug>/index.html` is replaced by a silent trampoline
+  (meta refresh + `location.replace`) to the target profile
+  ([scripts/generate_player_pages.py](../scripts/generate_player_pages.py)).
+- [js/player.js](../js/player.js) resolves `?p=` / `?slug=` /
+  `?compare=` alias-source references to the target and canonicalizes
+  the URL via `history.replaceState`. The directory is ratings-driven,
+  so no alias-source card exists.
+- [js/app.js](../js/app.js) `vtPlayerHref()` alias-resolves through the
+  slug map; `vtSteam64FromName()` resolves per-match display names
+  through `match.teams[]` roster rows (which carry the post-alias
+  Steam64), so clicking "aggressor" in a kill feed lands on the target
+  profile.
+- [js/tools/player-resolver.js](../js/tools/player-resolver.js): a live
+  lobby appearance on the source account takes ELO / slug / VTstats URL
+  from the **target** while the display name stays the lobby nick and
+  the Steam community URL stays the **live** account; alias-source ids
+  are dropped from manual search so no ghost provisional row appears.
+
+### Undo recipe (re-separate the accounts)
+
+1. Delete the entry from `STEAM64_ALIASES` (and its
+   `ALIAS_TARGET_NAMES` entry if the target has no other aliases).
+2. Bump `PIPELINE_VERSION` in [scripts/process_stats.py](../scripts/process_stats.py).
+3. Re-run `python scripts/process_stats.py` (full reprocess; ELO
+   recomputes unconditionally every run).
+
+The source's sticky slug was never deleted, so its old
+`/player/<slug>/` URL becomes a real profile again on the next
+generator pass (the `alias_of` marker and the trampoline are re-derived
+from the table each run and disappear with the entry — note the stale
+trampoline HTML is overwritten by the regular stub renderer once the
+source has a rating row again).
+
+### Cache invalidation
+
+Adding, removing, or editing an alias requires bumping
+`PIPELINE_VERSION` (same contract as `ACCOUNT_REROUTES`). ELO output
+needs no version bump — it recomputes every run.
+
+### Current table
+
+| Source | Target | Since |
+|---|---|---|
+| `76561199317457354` (aggressor) | `76561199066952713` (Nomad) | PIPELINE_VERSION 30 |
+
 ## 11. VTSR / VTSR-T Outputs (`elo_current.json` + `elo_history.json`)
 
 Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `process_stats.py` run. **VTSR-T** (VT Stats Rating — Thug) is the thug-focused rating; the JSON field `vtsr` is the published headline number ($\mathrm{VTSR\text{-}T} = \alpha R^W + (1-\alpha) R^T$ — equal to **thug_elo** when $\alpha=0$). Full algorithm and constants are in [§13 of DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md#vtsr-methodology).

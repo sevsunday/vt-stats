@@ -1857,15 +1857,34 @@
     if (filter.mode === 'all') return data;
 
     let allowedNames;
+    let playerNames = filter.players;
     if (filter.mode === 'team') {
       const teamRoster = data.match.teams[filter.team] || [];
       allowedNames = new Set(teamRoster.map(p => p.name));
     } else {
       if (filter.players.length === 0) return data;
-      allowedNames = new Set(filter.players);
+      // Tokens are usually names (picker UI), but cross-links may pass
+      // Steam64 IDs (player-page match log "view match"). Translate
+      // Steam64-looking tokens to this match's display names so the
+      // downstream name-keyed filtering (rivalries, positioning, feeds)
+      // works unchanged. A silent-alias appearance (row named
+      // "aggressor" with the target's Steam64) scopes correctly because
+      // the leaderboard row carries the post-alias Steam64.
+      const names = [];
+      for (const token of filter.players) {
+        if (/^\d{16,}$/.test(token)) {
+          for (const p of data.leaderboard) {
+            if (String(p.steam64) === token && !names.includes(p.name)) names.push(p.name);
+          }
+        } else if (!names.includes(token)) {
+          names.push(token);
+        }
+      }
+      playerNames = names;
+      allowedNames = new Set(names);
     }
 
-    const isSingle = filter.mode === 'player' && filter.players.length === 1;
+    const isSingle = filter.mode === 'player' && playerNames.length === 1;
     const allNames = data.leaderboard.map(p => p.name);
 
     const leaderboard = data.leaderboard.filter(p => allowedNames.has(p.name));
@@ -1874,7 +1893,7 @@
     let rivalry_matrix;
     if (isSingle) {
       rivalry_matrix = {};
-      const name = filter.players[0];
+      const name = playerNames[0];
       if (data.rivalry_matrix[name]) rivalry_matrix[name] = data.rivalry_matrix[name];
     } else {
       rivalry_matrix = {};
@@ -1893,7 +1912,7 @@
     // Top rivalries
     let top_rivalries;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = playerNames[0];
       top_rivalries = data.top_rivalries.filter(r => r.a === name || r.b === name);
     } else {
       top_rivalries = data.top_rivalries.filter(r => allowedNames.has(r.a) && allowedNames.has(r.b));
@@ -1902,7 +1921,7 @@
     // Kills
     let kills_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = playerNames[0];
       kills_feed = (data.kills.feed || []).filter(e => e.killer === name || e.victim === name);
     } else {
       kills_feed = (data.kills.feed || []).filter(e => allowedNames.has(e.killer) || allowedNames.has(e.victim));
@@ -1911,7 +1930,7 @@
     let kill_rivalry_matrix;
     if (isSingle) {
       kill_rivalry_matrix = {};
-      const name = filter.players[0];
+      const name = playerNames[0];
       if (data.kills.kill_rivalry_matrix[name]) kill_rivalry_matrix[name] = data.kills.kill_rivalry_matrix[name];
     } else {
       kill_rivalry_matrix = {};
@@ -2007,7 +2026,7 @@
     const pickupsBlock = data.pickups || {};
     let pickups_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = playerNames[0];
       pickups_feed = (pickupsBlock.feed || []).filter(e => e.picker === name);
     } else {
       pickups_feed = (pickupsBlock.feed || []).filter(e => allowedNames.has(e.picker));
@@ -2023,7 +2042,7 @@
     const destructionsBlock = data.powerup_destructions || {};
     let destructions_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = playerNames[0];
       destructions_feed = (destructionsBlock.feed || []).filter(e => e.killer === name);
     } else {
       destructions_feed = (destructionsBlock.feed || []).filter(e => allowedNames.has(e.killer));
@@ -2047,7 +2066,7 @@
     const snipesBlock = data.snipes || {};
     let snipes_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = playerNames[0];
       snipes_feed = (snipesBlock.feed || []).filter(e => e.sniper === name || e.victim === name);
     } else {
       snipes_feed = (snipesBlock.feed || []).filter(e => allowedNames.has(e.sniper) || allowedNames.has(e.victim));
@@ -2809,10 +2828,16 @@
   // returns *something* (escaped fallback span when steam64 is empty)
   // so callers can dump its result directly into innerHTML.
   function vtPlayerHref(steam64) {
-    const sid = String(steam64 || '').trim();
+    let sid = String(steam64 || '').trim();
     if (!sid) return null;
     const slugs = (window.__vtSlugMap && window.__vtSlugMap.slugs) || null;
-    const entry = slugs ? slugs[sid] : null;
+    let entry = slugs ? slugs[sid] : null;
+    // Silent identity alias (scripts/identity_aliases.py): an alias-source
+    // sid resolves straight to its target's profile — no visible notice.
+    if (entry && entry.alias_of && slugs) {
+      sid = String(entry.alias_of);
+      entry = slugs[sid] || null;
+    }
     if (entry && entry.slug) return `player/${entry.slug}/`;
     return `player/index.html?p=${encodeURIComponent(sid)}`;
   }
@@ -2833,18 +2858,36 @@
 
   // Name -> Steam64 reverse-lookup, scoped to the current match. The
   // kill_feed / snipe_feed entries carry display names (resolved via
-  // the pipeline's nick_for_s64) but not the raw Steam64, so we rebuild
-  // the inverse of header.s64_to_nick at render time. Cached on the
+  // the pipeline's nick_for_s64) but not the raw Steam64. The processed
+  // JSON has no header block, so the inverse map is rebuilt from
+  // match.teams[] (each roster row carries {name, steam64}) with the
+  // leaderboard as a belt-and-braces second pass; a legacy header
+  // block, when present, still wins. Because roster rows carry the
+  // post-alias Steam64 (silent identity aliases are rewritten at
+  // ingest), alias-source names resolve to the target's Steam64 — and
+  // therefore to the target's profile — automatically. Cached on the
   // currentData object itself so flipping between tabs is O(1) after
   // the first call. Returns null when the name doesn't resolve.
   function vtSteam64FromName(name) {
     if (!name) return null;
     const cd = currentData;
-    if (!cd || !cd.header) return null;
+    if (!cd) return null;
     const cache = cd.__nickToS64Cache || (cd.__nickToS64Cache = (() => {
       const out = {};
-      const map = cd.header.s64_to_nick || {};
-      for (const sid in map) out[String(map[sid] || '').trim().toLowerCase()] = sid;
+      const put = (nm, sid) => {
+        const k = String(nm || '').trim().toLowerCase();
+        if (k && sid && !(k in out)) out[k] = String(sid);
+      };
+      const teams = (cd.match && cd.match.teams) || {};
+      for (const tk in teams) {
+        for (const row of (teams[tk] || [])) put(row.name, row.steam64);
+      }
+      for (const p of (cd.leaderboard || [])) put(p.name, p.steam64);
+      const map = (cd.header && cd.header.s64_to_nick) || {};
+      for (const sid in map) {
+        const k = String(map[sid] || '').trim().toLowerCase();
+        if (k) out[k] = sid;
+      }
       return out;
     })());
     return cache[String(name).trim().toLowerCase()] || null;

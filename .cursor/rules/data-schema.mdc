@@ -239,6 +239,10 @@ Two new schema fields surface the provenance:
 
 Tier 1 (binpb download) and Tier 2 (decoded JSON) remain byte-accurate to the source recording; the rewrite is processed-tier only. Bumps `match.schema_version` 6 → 7 and `PIPELINE_VERSION` 16 → 17 (full corpus reprocess on next run). Pre-v7 rows have no `rerouted_from` field; consumers default to `null` via `.get("rerouted_from")`. Full mechanism, regex semantics, and corpus audit in `docs/DATA_DICTIONARY.md` §10.3.
 
+### Silent identity aliases — `scripts/identity_aliases.py` (no schema fields)
+
+Steam64-keyed sibling of `ACCOUNT_REROUTES` for the two-accounts-one-person case (aggressor → Nomad). Same ingest-time identity-dict + event-stream rewrite, but deliberately **silent**: per-match surfaces keep the SOURCE display name (a `nick_map` / `nick_for_s64` override prevents the target's `known_players` name taking over), and NO provenance fields are emitted — no `rerouted_from`, no `match.account_reroutes` entry, no UI chip or banner. Career/aggregate surfaces pin names the other way, to the TARGET's canonical name (`ALIAS_TARGET_NAMES`): `_extract_contribution` (rows, `player_id`, rivalry keys, `team_leaders`, snipes/powerup maps), `scripts/elo.py` + `scripts/elo_commander.py` display names, and map-stats top-commanders. `elo_current.json` / `elo_history.json` gain an additive `steam64_aliases` lookup block (forensics only); `player_slugs.json` alias-source entries gain `alias_of` (consumed by `js/player.js` dispatch, `js/app.js` `vtPlayerHref`, `js/tools/player-resolver.js`, and the trampoline renderer in `scripts/generate_player_pages.py`). Dual-presence of source+target in one lobby is a **hard stop**: interactive `accept match? (y/n)` (y = process with identities kept separate, n = abort); `--no-prompt` ALWAYS aborts. No `match.schema_version` / `ELO_SCHEMA_VERSION` bump (additive sentinels only); alias table changes require a `PIPELINE_VERSION` bump (29 → 30 shipped the mechanism). Undo recipe + full reference: `docs/DATA_DICTIONARY.md` §10.4.
+
 ### Source-Level Filters
 
 These are applied by the statsgate collector before data reaches us:

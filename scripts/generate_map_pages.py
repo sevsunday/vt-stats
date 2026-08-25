@@ -39,6 +39,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+import identity_aliases  # silent Steam64 alias table (name pinning)
+
 # Production host. Used to build absolute URLs (og:url, twitter:url,
 # canonical) so embedded link previews resolve even when shared without
 # the host prefix. CNAME in repo root is the source of truth. Mirrors
@@ -261,6 +263,11 @@ def _build_map_entry(slug: str, bucket: list[dict]) -> dict:
             name = (p.get("name") or "").strip()
             if not sid or not name:
                 continue
+            # Silent-alias name pin (mirrors scripts/elo.py): commander
+            # appearances on an alias-source account keep the source name
+            # per-match, but this career tally must carry the target's
+            # canonical name.
+            name = identity_aliases.ALIAS_TARGET_NAMES_STR.get(sid, name)
             row = cmdr_counts.get(sid)
             if row is None:
                 row = {

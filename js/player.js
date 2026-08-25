@@ -136,6 +136,31 @@
     return entry && entry.slug ? entry.slug : null;
   }
 
+  /** Silent identity alias: a slug-map entry carrying `alias_of` means
+      this Steam64's gameplay is attributed to another account's profile
+      (see scripts/identity_aliases.py). Resolve to the target sid so
+      old links land on the merged profile without any visible notice. */
+  function aliasResolveSid(steam64) {
+    const sid = String(steam64 || '');
+    const slugs = (state.slugMap && state.slugMap.slugs) || {};
+    const entry = slugs[sid];
+    return (entry && entry.alias_of) ? String(entry.alias_of) : sid;
+  }
+
+  /** Same resolution keyed by slug: an alias-source slug resolves to the
+      target's slug (falls back to the input when unmapped). */
+  function aliasResolveSlug(slug) {
+    const slugs = (state.slugMap && state.slugMap.slugs) || {};
+    for (const sid of Object.keys(slugs)) {
+      const entry = slugs[sid];
+      if (entry && entry.slug === slug && entry.alias_of) {
+        const target = slugs[String(entry.alias_of)];
+        if (target && target.slug) return target.slug;
+      }
+    }
+    return slug;
+  }
+
   /** Build the canonical /player/<slug>/ URL. When the slug map hasn't
       loaded or the player is unknown, falls back to ?p=<steam64> so
       the link still resolves. Path-aware:
@@ -3456,8 +3481,20 @@
     const bootSteam64 = (window.__vtPlayerBoot && window.__vtPlayerBoot.steam64) || null;
 
     if (compare) {
-      const slugs = compare.split(',').map(s => s.trim()).filter(Boolean).slice(0, COMPARE_MAX);
+      let slugs = compare.split(',').map(s => s.trim()).filter(Boolean).slice(0, COMPARE_MAX);
       if (!slugs.length) { showSection('directory'); renderDirectoryGrid(); return; }
+      // Silent alias: resolve alias-source slugs to their target, dedupe,
+      // and canonicalize the URL when anything changed.
+      const resolved = [];
+      for (const s of slugs.map(aliasResolveSlug)) {
+        if (!resolved.includes(s)) resolved.push(s);
+      }
+      if (resolved.join(',') !== slugs.join(',')) {
+        slugs = resolved;
+        const u = new URL(window.location.href);
+        u.searchParams.set('compare', slugs.join(','));
+        history.replaceState(null, '', u.toString());
+      }
       showSection('compare');
       renderCompare(slugs);
       return;
@@ -3465,13 +3502,25 @@
 
     let rating = null;
     if (steam64) {
-      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === String(steam64));
+      const sid = aliasResolveSid(steam64);
+      if (sid !== String(steam64)) {
+        const u = new URL(window.location.href);
+        u.searchParams.set('p', sid);
+        history.replaceState(null, '', u.toString());
+      }
+      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === sid);
     } else if (slug) {
+      const targetSlug = aliasResolveSlug(slug);
+      if (targetSlug !== slug) {
+        const u = new URL(window.location.href);
+        u.searchParams.set('slug', targetSlug);
+        history.replaceState(null, '', u.toString());
+      }
       const sid = Object.keys((state.slugMap && state.slugMap.slugs) || {})
-        .find(k => state.slugMap.slugs[k].slug === slug);
+        .find(k => state.slugMap.slugs[k].slug === targetSlug);
       if (sid) rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === sid);
     } else if (bootSteam64) {
-      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === String(bootSteam64));
+      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === aliasResolveSid(bootSteam64));
     }
 
     if (rating) {
