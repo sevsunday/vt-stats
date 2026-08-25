@@ -61,8 +61,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import identity_aliases  # silent Steam64 alias table (name pinning)
-
 # ---------------------------------------------------------------------------
 # Constants (all tunable; no schema bump needed to retune)
 # ---------------------------------------------------------------------------
@@ -292,13 +290,7 @@ def compute_commander_elo(all_match_data: list[dict],
                 rating[k] = CMDR_ELO_ANCHOR
                 games[k] = wins[k] = losses[k] = draws[k] = 0
                 peak[k] = CMDR_ELO_ANCHOR
-            # Silent-alias name pin (mirrors scripts/elo.py): a commander
-            # appearance on an alias-source account carries the source
-            # display name per-match, but the ladder row must keep the
-            # alias target's canonical name.
-            display_name[k] = (identity_aliases.ALIAS_TARGET_NAMES_STR.get(k)
-                               or commanders[t].get("name")
-                               or display_name.get(k, ""))
+            display_name[k] = commanders[t].get("name") or display_name.get(k, "")
             if not steam64_out.get(k):
                 s64 = commanders[t].get("steam64")
                 steam64_out[k] = str(s64) if s64 else None

@@ -102,17 +102,6 @@
   /** @type {Map<string,object>} steam64 -> player_slugs entry {slug, name, matches_played} */
   const playerSlugs = new Map();
 
-  /**
-   * @type {Map<string,string>} alias-source steam64 -> target steam64.
-   * Silent identity aliases (scripts/identity_aliases.py): a live lobby
-   * appearance on the SOURCE account resolves its ELO / slug / VTstats
-   * URL from the TARGET, while the display name stays the lobby nick and
-   * the Steam community URL stays the live account. Populated from
-   * elo_current.json's `steam64_aliases` block and player_slugs.json's
-   * per-entry `alias_of` markers (either alone is sufficient).
-   */
-  const steamAliases = new Map();
-
   /** @type {Map<string,string> | null} steam64 -> canonical name from steamid_to_name.txt */
   let canonicalNames = null;
   let canonicalLoadPromise = null;
@@ -172,11 +161,6 @@
         eloRatings.set(r.steam64, r);
       }
     }
-    if (data.steam64_aliases && typeof data.steam64_aliases === 'object') {
-      for (const [src, dst] of Object.entries(data.steam64_aliases)) {
-        if (src && dst) steamAliases.set(String(src), String(dst));
-      }
-    }
   }
 
   async function loadPlayerSlugs() {
@@ -188,7 +172,6 @@
     for (const [steam64, entry] of Object.entries(data.slugs)) {
       if (entry && typeof entry.slug === 'string') {
         playerSlugs.set(steam64, entry);
-        if (entry.alias_of) steamAliases.set(String(steam64), String(entry.alias_of));
       }
     }
   }
@@ -281,32 +264,16 @@
     lobbyNick = lobbyNick || null;
     const id = steam64 ? String(steam64) : null;
 
-    // Silent identity alias: ELO / slug / VTstats URL come from the alias
-    // TARGET, but the display name deliberately stays source-side (lobby
-    // nick, else the source's registered name) and the Steam community
-    // URL stays the live account — the merge is never surfaced.
-    const aliasTarget = id ? steamAliases.get(id) || null : null;
-    const dataId = aliasTarget || id;
-
-    const slugEntry = dataId ? playerSlugs.get(dataId) || null : null;
-    const eloEntry = dataId ? eloRatings.get(dataId) || null : null;
+    const slugEntry = id ? playerSlugs.get(id) || null : null;
+    const eloEntry = id ? eloRatings.get(id) || null : null;
     const canonicalName = id && canonicalNames ? canonicalNames.get(id) || null : null;
 
-    let displayName;
-    if (aliasTarget) {
-      const srcSlugEntry = playerSlugs.get(id) || null;
-      displayName = lobbyNick
-        || (srcSlugEntry && srcSlugEntry.name)
-        || canonicalName
-        || 'Unknown player';
-    } else {
-      // Display name priority: player_slugs.name -> elo.name -> canonical -> lobbyNick
-      displayName = (slugEntry && slugEntry.name)
-        || (eloEntry && eloEntry.name)
-        || canonicalName
-        || lobbyNick
-        || 'Unknown player';
-    }
+    // Display name priority: player_slugs.name -> elo.name -> canonical -> lobbyNick
+    const displayName = (slugEntry && slugEntry.name)
+      || (eloEntry && eloEntry.name)
+      || canonicalName
+      || lobbyNick
+      || 'Unknown player';
 
     const slug = slugEntry ? slugEntry.slug : null;
     const isUnknown = !slugEntry && !eloEntry && !canonicalName;
@@ -332,7 +299,7 @@
       lobbyNick: (lobbyNick && lobbyNick.toLowerCase() !== displayName.toLowerCase()) ? lobbyNick : null,
       slug,
       steamProfileUrl: buildSteamProfileUrl(id),
-      vtstatsUrl: buildVtstatsUrl(dataId, slug),
+      vtstatsUrl: buildVtstatsUrl(id, slug),
       vtsr,
       thugElo: eloEntry && Number.isFinite(eloEntry.thug_elo) ? eloEntry.thug_elo : null,
       winsElo: eloEntry && Number.isFinite(eloEntry.wins_elo) ? eloEntry.wins_elo : null,
@@ -384,11 +351,6 @@
     const list = [];
     const add = (steam64, name) => {
       if (!steam64 || !name || seen.has(steam64)) return;
-      // Silent identity alias: alias-source accounts never appear in the
-      // manual-search directory — their gameplay lives on the target's
-      // entry, and surfacing both would leak the pairing (or show a
-      // ghost provisional row anchored at 1500).
-      if (steamAliases.has(String(steam64))) return;
       seen.add(steam64);
       list.push({ steam64, name, lowername: name.toLowerCase() });
     };

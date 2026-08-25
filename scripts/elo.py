@@ -56,8 +56,6 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-import identity_aliases  # silent Steam64 alias table (name pinning + lookup emit)
-
 
 # ---------------------------------------------------------------------------
 # Locked constants
@@ -1353,15 +1351,7 @@ def _rating_pass(
             # appearance's days_inactive computation. We only record on
             # rated rows so excluded matches don't reset the clock.
             last_match_dt[key] = current_match_dt
-            # Silent-alias name pin: rows played on an alias-source account
-            # carry the SOURCE display name in the per-match leaderboard
-            # (deliberate — the per-match UI keeps showing it) but their
-            # steam64 (== key) is the alias TARGET. Freeze the rating /
-            # delta display name to the target's canonical name so a
-            # source-account appearance never renames the merged row.
-            display_name[key] = (identity_aliases.ALIAS_TARGET_NAMES_STR.get(key)
-                                 or lobby[i].get("name")
-                                 or display_name.get(key, ""))
+            display_name[key] = lobby[i].get("name") or display_name.get(key, "")
             if not steam64_for_key.get(key):
                 steam64_for_key[key] = lobby[i].get("steam64")
             if r_after > peak_vtsr[key]:
@@ -1592,10 +1582,6 @@ def _rating_pass(
             }
             for a in COMMANDER_AXIS_PRIOR
         },
-        # Silent-alias lookup table (source steam64 -> target steam64).
-        # Debugging / undo forensics only — no UI reads it. See
-        # scripts/identity_aliases.py for semantics + the undo recipe.
-        "steam64_aliases":    dict(identity_aliases.STEAM64_ALIASES_STR),
         "ratings":            ratings,
     }
 
@@ -1605,7 +1591,6 @@ def _rating_pass(
         "excludes_locked_priors":   bool(exclude_locked_priors),
         "expected_performance_mode": expected_performance_mode,
         "lobby_score_mode":    lobby_score_mode,
-        "steam64_aliases":     dict(identity_aliases.STEAM64_ALIASES_STR),
         "history":             history_entries,
     }
 

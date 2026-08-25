@@ -25,8 +25,6 @@ import statsgate_v2_pb2       # v2 (frozen schema, retained for the 2026-04..08 
 import statsgate_v1_pb2       # v1 (legacy schema, retained for pre-Nomad sessions)
 from google.protobuf.message import DecodeError
 
-import identity_aliases       # silent Steam64 alias table (aggressor -> Nomad)
-
 # Internal schema labels stamped onto each match_data["match"]["proto_schema_version"].
 # Used by the damage-event adapter (`_normalize_damage_events`) and the
 # faction resolver to branch on layout-dependent fields. NOT a frontend
@@ -57,7 +55,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 30
+PIPELINE_VERSION = 29
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3126,7 +3124,7 @@ def _build_identity_maps(header, schema, events):
     return slot_to_s64, s64_to_slot, s64_to_nick, roster, roster_conflicts
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, no_prompt=False):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -3218,47 +3216,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         for r in match_reroutes:
             r["from_name"] = known_players.get(r["from_s64"]) or f"acct {r['from_s64']}"
 
-    # Silent identity alias (scripts/identity_aliases.py): attribute an
-    # alias-source account's gameplay to its target Steam64 with ZERO
-    # visual provenance. Same identity-dict + event-stream rewrite as
-    # ACCOUNT_REROUTES above, but (a) keyed on Steam64 (not nick pattern),
-    # (b) the per-match display name stays the SOURCE's (e.g. "aggressor"
-    # rows keep saying "aggressor" while their steam64 becomes Nomad's),
-    # and (c) no `rerouted_from` / `match.account_reroutes` fields are
-    # emitted. resolve_silent_aliases() enforces the dual-presence hard
-    # stop (both accounts in one lobby -> y/n checkpoint, abort under
-    # --no-prompt). See docs/DATA_DICTIONARY.md §10.4.
-    alias_display_override = {}  # target_s64 -> per-match display name
-    silent_aliases = identity_aliases.resolve_silent_aliases(
-        slot_to_s64,
-        match_label=f"{submitter}/{source_file}",
-        no_prompt=no_prompt,
-    )
-    if silent_aliases:
-        alias_map = {src: dst for (src, dst) in silent_aliases.values()}
-        for slot, (src, dst) in silent_aliases.items():
-            slot_to_s64[slot] = dst
-            s64_to_slot.pop(src, None)
-            s64_to_slot[dst] = slot
-            nick = s64_to_nick.pop(src, None)
-            if nick is not None:
-                s64_to_nick[dst] = nick
-            # Preserve the SOURCE's display name: without this override,
-            # nick_map / nick_for_s64 would resolve the rewritten Steam64
-            # through known_players and paint the row with the TARGET's
-            # canonical name, leaking the merge. The dual-presence gate
-            # above guarantees the real target isn't also in this match,
-            # so the override can't mislabel a genuine target appearance.
-            alias_display_override[dst] = (
-                known_players.get(src) or nick or f"Player {slot}"
-            )
-        _apply_account_reroutes_to_events(events, alias_map)
-
     nick_map = {}  # slot -> display name
     for slot, s64 in slot_to_s64.items():
-        nick_map[slot] = (alias_display_override.get(s64)
-                          or known_players.get(s64)
-                          or s64_to_nick.get(s64, f"Player {slot}"))
+        nick_map[slot] = known_players.get(s64) or s64_to_nick.get(s64, f"Player {slot}")
 
     all_slots = set(nick_map.keys())
 
@@ -3274,8 +3234,6 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             }
 
     def nick_for_s64(s64):
-        if s64 in alias_display_override:
-            return alias_display_override[s64]
         return known_players.get(s64) or s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
 
     def in_game_nick_for(s64, resolved_name):
@@ -5618,25 +5576,6 @@ def _extract_contribution(match_data):
     positioning = match_data.get("positioning") or {}
     pos_players = positioning.get("players") or {}
 
-    # Silent-alias name pinning (scripts/identity_aliases.py): a row whose
-    # Steam64 was alias-rewritten at ingest keeps the SOURCE display name
-    # in the per-match JSON (e.g. "aggressor"), but career surfaces must
-    # aggregate under the TARGET's canonical name — the JS aggregator
-    # refreshes each career bucket's name from the most recent contribution
-    # row, so an unpinned source-name appearance would rename the target's
-    # career row. Detect pinning-needed rows by (steam64 is an alias
-    # target) AND (name differs from the target's canonical name); remap
-    # every name-keyed structure in the contribution accordingly.
-    name_remap = {}
-    for p in match_data.get("leaderboard") or []:
-        sid = str(p.get("steam64") or "")
-        canon = identity_aliases.ALIAS_TARGET_NAMES_STR.get(sid)
-        if canon and p.get("name") and p["name"] != canon:
-            name_remap[p["name"]] = canon
-
-    def _pin(name):
-        return name_remap.get(name, name)
-
     pickups_by_name = {
         row["name"]: row["count"]
         for row in (match_data.get("pickups", {}).get("by_player") or [])
@@ -5692,8 +5631,8 @@ def _extract_contribution(match_data):
             for row in (p.get("per_ship_combat") or [])
         ]
         leaderboard.append({
-            "player_id": _pin(p.get("player_id", "")),
-            "name": _pin(p.get("name", "")),
+            "player_id": p.get("player_id", ""),
+            "name": p.get("name", ""),
             "steam64":        p.get("steam64"),
             # Slot 1 = Team 1 commander, slot 6 = Team 2 commander.
             # Carried onto contributions so the JS aggregator can split
@@ -5788,11 +5727,8 @@ def _extract_contribution(match_data):
 
     # Round rivalry damages to keep the JSON tight; aggregation tolerates
     # the half-cent floor since match-level rivalries are already rounded.
-    # Both key levels go through the alias name pin; the dual-presence
-    # gate at ingest guarantees source/target never co-occur, so the
-    # remap can't collide two existing keys.
     rivalry_matrix = {
-        _pin(shooter): {_pin(victim): round(dmg, 1) for victim, dmg in victims.items()}
+        shooter: {victim: round(dmg, 1) for victim, dmg in victims.items()}
         for shooter, victims in (match_data.get("rivalry_matrix") or {}).items()
     }
 
@@ -5807,7 +5743,7 @@ def _extract_contribution(match_data):
             continue
         c = int(row.get("count", 0) or 0)
         if c > 0:
-            snipes_by_player[_pin(name)] = c
+            snipes_by_player[name] = c
 
     # Same shape for powerup destructions (used by Pod Goblin career card).
     powerup_destructions_by_player = {}
@@ -5817,7 +5753,7 @@ def _extract_contribution(match_data):
             continue
         c = int(row.get("count", 0) or 0)
         if c > 0:
-            powerup_destructions_by_player[_pin(name)] = c
+            powerup_destructions_by_player[name] = c
 
     # Match-level commander/faction/winner tuple. All three are
     # match-global, always-unfiltered passthrough fields per the project
@@ -5839,12 +5775,7 @@ def _extract_contribution(match_data):
         # pre-v15 corpus keeps its accuracy contributions).
         "has_bullet_hit_data":  m.get("has_bullet_hit_data", True),
         "sentinel_damage_count": (m.get("sentinel_damage") or {}).get("count", 0),
-        # team_leaders names feed the aggregator's commander_stats (pair
-        # keys are names), so they go through the alias name pin too.
-        "team_leaders": {
-            tk: {**tl, "name": _pin(tl.get("name"))}
-            for tk, tl in (m.get("team_leaders") or {}).items()
-        },
+        "team_leaders":  m.get("team_leaders") or {},
         "team_factions": m.get("team_factions") or {},
         "winner": {
             "team":       winner.get("team"),
@@ -6322,7 +6253,6 @@ def main():
                 schema=schema,
                 ship_caps=ship_caps,
                 ordnance_ranges=ordnance_ranges,
-                no_prompt=args.no_prompt,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"
