@@ -272,8 +272,8 @@
     career_the_locksmith:    ['The Locksmith',           'bi-lock-fill'],
     // v17 (proto v4) commander-economy siblings — flag-gated (only appear
     // once >= 3 commander matches carry the telemetry).
-    career_tycoon:           ['The Tycoon',              'bi-cash-stack'],
-    career_war_machine:      ['War Machine',             'bi-gear-wide-connected'],
+    career_tycoon:           ['Elon Musk',               'bi-cash-stack'],
+    career_war_machine:      ['Conveyor Belt',           'bi-gear-wide-connected'],
     // Flavor B — cross-match-only originals (no per-match sibling).
     the_champion:            ['The Champion',            'bi-stars'],
     the_veteran:             ['The Veteran',             'bi-clock-history'],
@@ -1438,7 +1438,7 @@
         { value: c => c.mean_target_lock_pct, format: 'percent' }));
     }
 
-    // The Tycoon (career) — most scrap generated across commanded matches
+    // Elon Musk (career) — most scrap generated across commanded matches
     // (v4 resource telemetry; gate: >= 3 commander matches with data so a
     // single hot match can't take the career crown).
     const tycoonCandidates = (commanderRowsKept || [])
@@ -1459,7 +1459,7 @@
         }));
     }
 
-    // War Machine (career) — most scrap value fielded as combat ships
+    // Conveyor Belt (career) — most scrap value fielded as combat ships
     // across commanded matches (v4 build telemetry; same >= 3 gate).
     const warMachineCandidates = (commanderRowsKept || [])
       .filter(r => (r.build_matches || 0) >= 3 && r.total_combat_ship_value != null)

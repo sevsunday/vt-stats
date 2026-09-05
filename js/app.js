@@ -4076,12 +4076,12 @@
       clear: [
         '{name} led scrap generation at {value}.',
         '{name} won the economy war — {value} scrap generated.',
-        '{name} kept the pools flowing at {value} scrap.',
+        '{name} kept the scrap flowing at {value}.',
       ],
       close: [
         '{name} edged the economy race at {value} scrap.',
         '{name} narrowly out-earned the enemy commander.',
-        '{name} squeaked the tycoon title.',
+        '{name} squeaked the Elon Musk title.',
       ],
     },
     war_machine: {
@@ -4092,13 +4092,30 @@
       ],
       clear: [
         '{name} led combat production — {ships_built} ships, {value} scrap fielded.',
-        '{name} kept the war machine turning at {value} scrap of ships.',
+        '{name} kept the conveyor belt turning at {value} scrap of ships.',
         '{name} won the production race.',
       ],
       close: [
         '{name} edged combat production at {value} scrap.',
         '{name} narrowly out-produced the enemy commander.',
-        '{name} squeaked the war-machine crown.',
+        '{name} squeaked the conveyor-belt crown.',
+      ],
+    },
+    first_upgrade: {
+      dominant: [
+        '{name} dropped the first upgraded pool at {value}.',
+        '{name} had a {upgrade_name} up at {value} — the other side was still planting.',
+        '{name} won the upgrade race by a mile.',
+      ],
+      clear: [
+        '{name} won the upgrade race at {value}.',
+        '{name} got the first upgraded pool live at {value}.',
+        '{name} beat the other commander to the first {upgrade_name}.',
+      ],
+      close: [
+        '{name} nipped the first upgrade at {value}.',
+        '{name} won the upgrade race by a few seconds.',
+        '{name} squeaked the first-upgrade crown.',
       ],
     },
   };
@@ -4123,6 +4140,10 @@
       case 'count':    return Math.round(value).toLocaleString();
       case 'score':    return Math.round(value).toLocaleString();
       case 'scrap':    return Math.round(value).toLocaleString();
+      case 'duration': {
+        const s = Math.max(0, Math.round(Number(value) || 0));
+        return `${Math.floor(s / 60)}m:${s % 60}s`;
+      }
       case 'ratio':    return Number(value).toFixed(2);
       case 'kd':       return Number(value).toFixed(2);
       case 'percent':
@@ -4153,6 +4174,7 @@
     // v17 (proto v4) commander-economy cards.
     the_tycoon:       'scrap',
     war_machine:      'scrap',
+    first_upgrade:    'upgrade',
   };
 
   // Presentation-only overrides for the tile heading. The pipeline emits a
@@ -4160,6 +4182,8 @@
   // in the UI without rewriting historical processed JSON.
   const HIGHLIGHT_LABEL_OVERRIDES = {
     gunner: 'Trigger Happy',
+    the_tycoon: 'Elon Musk',
+    war_machine: 'Conveyor Belt',
   };
 
   // ---- Career Highlights (built client-side by the aggregator) ----
@@ -4242,13 +4266,13 @@
     },
     career_tycoon: {
       dominant: ['{name} has generated {value} scrap commanding — a lifetime printing press.', '{name} runs the corpus economy: {value} scrap over {econ_matches} commands.', '{name} out-earns every commander by a mile.'],
-      clear:    ['{name} leads career scrap generation at {value}.',                            '{name} tops lifetime commander income ({avg_income_per_min}/min).',          '{name} holds the all-time tycoon crown.'],
-      close:    ['{name} edges career scrap generation at {value}.',                            '{name} narrowly leads lifetime commander income.',                           '{name} squeaks the tycoon crown.'],
+      clear:    ['{name} leads career scrap generation at {value}.',                            '{name} tops lifetime commander income ({avg_income_per_min}/min).',          '{name} holds the all-time Elon Musk crown.'],
+      close:    ['{name} edges career scrap generation at {value}.',                            '{name} narrowly leads lifetime commander income.',                           '{name} squeaks the Elon Musk crown.'],
     },
     career_war_machine: {
       dominant: ['{name} has fielded {value} scrap of combat ships — a career assembly line.', '{name} built {ships_built} warships across {build_matches} commands.', '{name} out-produces every commander by a mile.'],
-      clear:    ['{name} leads career combat production at {value} scrap.',                     '{name} tops lifetime warship output — {ships_built} ships.',           '{name} holds the all-time war-machine crown.'],
-      close:    ['{name} edges career combat production at {value} scrap.',                     '{name} narrowly leads lifetime warship output.',                       '{name} squeaks the war-machine crown.'],
+      clear:    ['{name} leads career combat production at {value} scrap.',                     '{name} tops lifetime warship output — {ships_built} ships.',           '{name} holds the all-time conveyor-belt crown.'],
+      close:    ['{name} edges career combat production at {value} scrap.',                     '{name} narrowly leads lifetime warship output.',                       '{name} squeaks the conveyor-belt crown.'],
     },
     the_champion: {
       dominant: ['{name} sits at {value} VTSR-T with {matches_played} rated matches.', '{name} owns the league. {value} VTSR-T.',          '{name} is the corpus champion at {value}.'],
@@ -4431,11 +4455,11 @@
       case 'map_master':
         if (!b.map_name) return '';
         return `${esc(b.map_name)} (${b.kills}-${b.deaths})`;
-      // v17 commander-economy cards (The Tycoon / War Machine).
+      // v17 commander-economy cards (Elon Musk / Conveyor Belt / First Upgrade).
       case 'the_tycoon': {
         if (b.income_regen == null && b.income_loose == null) return '';
         const parts = [];
-        if (b.income_regen != null) parts.push(`${fmt(b.income_regen)} pools`);
+        if (b.income_regen != null) parts.push(`${fmt(b.income_regen)} scrap`);
         // Amount-first loose display ("N loose" = scrap amount, per the
         // player-terminology contract).
         if (b.income_loose != null) parts.push(`${fmt(b.income_loose)} loose`);
@@ -4444,6 +4468,8 @@
       case 'war_machine':
         if (b.ships_built == null) return '';
         return `${fmt(b.ships_built)} combat ships${b.builds_per_min != null ? ` · ${b.builds_per_min}/min` : ''}`;
+      case 'first_upgrade':
+        return b.upgrade_name ? esc(b.upgrade_name) : '';
       // v17 career commander-economy siblings.
       case 'career_tycoon': {
         if (b.econ_matches == null) return '';
@@ -4580,7 +4606,7 @@
         peak_vtsr:      breakdown.peak_vtsr != null ? Math.round(breakdown.peak_vtsr) : '',
         map_name:       breakdown.map_name || '',
         matches_with_positioning: breakdown.matches_with_positioning != null ? breakdown.matches_with_positioning : '',
-        // v17 commander-economy tokens (The Tycoon / War Machine + career siblings).
+        // v17 commander-economy tokens (Elon Musk / Conveyor Belt / First Upgrade + career siblings).
         // Amount-first loose contract: {income_loose} is the scrap amount.
         income_loose: breakdown.income_loose != null ? fmt(breakdown.income_loose) : '',
         loose_share:  breakdown.loose_share != null ? (Number(breakdown.loose_share) * 100).toFixed(0) + '%' : '',
@@ -4588,6 +4614,7 @@
         econ_matches:  breakdown.econ_matches != null ? fmt(breakdown.econ_matches) : '',
         build_matches: breakdown.build_matches != null ? fmt(breakdown.build_matches) : '',
         avg_income_per_min: breakdown.avg_income_per_min != null ? fmt(breakdown.avg_income_per_min) + ' scrap' : '',
+        upgrade_name: breakdown.upgrade_name || '',
       };
       const flavor = _hlInterp(_hlPickCopy(c.category, c.narrative, matchId, ctx, copyTable), ctx);
       const breakdownLine = formatHighlightBreakdown(c);
@@ -5378,6 +5405,20 @@
     const t2Muted = !bothActive && !active.has('2');
     const mutedNote = '<span class="vt-faction-muted-badge" title="Not included in current filter"><i class="bi bi-eye-slash me-1"></i>Filtered out</span>';
 
+    // Economy stats are match-global / always-unfiltered (same passthrough
+    // as highlights). Combat Dealt/Received/Acc still follow the player
+    // filter. Pre-v4 matches omit the row rather than inventing zeros.
+    const econStatRow = (side) => {
+      if (typeof matchHasResourceData !== 'function' || !matchHasResourceData()) return '';
+      const E = ((currentData && currentData.economy && currentData.economy.teams) || {})[side] || {};
+      return `
+          <div class="d-flex flex-wrap gap-4 mb-3">
+            <div class="stat-card" data-bs-toggle="tooltip" data-bs-placement="top" title="Scrap generated. Every point of scrap that arrived in the bank all match."><div class="stat-value">${fmtScrap(E.scrap_income)}</div><div class="stat-label">Scrap</div></div>
+            <div class="stat-card" data-bs-toggle="tooltip" data-bs-placement="top" title="Scrap spent. Every point of scrap that left the bank."><div class="stat-value">${fmtScrap(E.scrap_outflow_gross)}</div><div class="stat-label">Spent</div></div>
+            <div class="stat-card" data-bs-toggle="tooltip" data-bs-placement="top" title="Loose collected. Scrap hauled in from the field by scavengers."><div class="stat-value">${fmtScrap(E.income_loose)}</div><div class="stat-label">Loose</div></div>
+          </div>`;
+    };
+
     container.innerHTML = `
       <div class="col-md-6">
         <div class="vt-faction-panel ${t1Muted ? 'vt-faction-panel--muted' : ''}${t1Winner}" style="border-left-color:var(--kb-primary);">
@@ -5387,6 +5428,7 @@
             <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
             <div class="stat-card"><div class="stat-value">${fmtAccPct(f1.accuracy)}</div><div class="stat-label">Accuracy</div></div>
           </div>
+          ${econStatRow('1')}
           <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f1.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f1.pvp_dealt || 0)} · PvE ${fmt(f1.pve_dealt || 0)})</span> | Assets: ${fmt(f1.asset_dealt || 0)}</div>
           <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['1'])}</div>
         </div>
@@ -5399,6 +5441,7 @@
             <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
             <div class="stat-card"><div class="stat-value">${fmtAccPct(f2.accuracy)}</div><div class="stat-label">Accuracy</div></div>
           </div>
+          ${econStatRow('2')}
           <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f2.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f2.pvp_dealt || 0)} · PvE ${fmt(f2.pve_dealt || 0)})</span> | Assets: ${fmt(f2.asset_dealt || 0)}</div>
           <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['2'])}</div>
         </div>
@@ -5607,12 +5650,8 @@
         assists: ps.pvp_assists,
       });
       const dCell = killsDeathsChipCell(r.deaths || 0, ps.pvp_deaths, ps.pve_deaths, 'deaths');
-      // VTSR-T per-match column hidden to de-emphasize ratings. To restore:
-      // uncomment the two lines below, re-add the `${eloCell}` cell to the row
-      // template (between dCell and the Unit Dmg cell), and uncomment the
-      // matching <th data-sort="elo_delta"> in index.html.
-      // const eloIdx  = getEloDeltaIndexForCurrentMatch();
-      // const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
+      const eloIdx  = getEloDeltaIndexForCurrentMatch();
+      const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
       return `<tr class="${rowClass}">
         <td>${i + 1}</td>
         <td class="fw-semibold">${vtPlayerLinkHtml(r.name, r.steam64)}${nickSub}${campodBadge}${partialBadge}${rerouteBadge}</td>
@@ -5628,7 +5667,7 @@
         <td class="text-end">${fmtAccPct(ps.accuracy)}</td>
         ${kCell}
         ${dCell}
-        <!-- VTSR-T per-match column hidden; restore the eloCell here (see comment above) -->
+        ${eloCell}
         <td class="text-end">${fmt(r.assets.dealt)}</td>
         <td>${moveCell}</td>
         <td><span class="badge bg-secondary">${esc(ps.fav_weapon)}</span></td>

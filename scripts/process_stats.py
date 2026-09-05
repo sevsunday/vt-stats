@@ -74,7 +74,10 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 35 -> 36: every builds.feed row carries the economic context of its own
 # tick (scrap_at_event / max_scrap_at_event / pool_count_at_event) so the
 # Build Order Log can show "he ordered this at 64 of 80 with 2 pools".
-PIPELINE_VERSION = 36
+# 36 -> 37: First Upgrade highlight card (commander race on
+# time_to_first_upgrade_sec, lower-is-better) + Elon Musk / Conveyor Belt
+# display renames of the_tycoon / war_machine. Category keys unchanged.
+PIPELINE_VERSION = 37
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -798,10 +801,12 @@ HIGHLIGHTS_RENDER_ORDER = [
     "crate_pod_goblin",
     "chris_kyle",
     "the_locksmith",
-    # v17 (proto v4) commander-economy cards -- flag-gated (slate 12 -> 14;
-    # pre-v4 matches render the classic 12).
+    # v17 (proto v4) commander-economy cards -- flag-gated (slate 12 -> 14
+    # pre-v37; 15 once First Upgrade lands). Pre-v4 matches render the
+    # classic 12.
     "the_tycoon",
     "war_machine",
+    "first_upgrade",
 ]
 
 HIGHLIGHTS_LABELS = {
@@ -817,8 +822,9 @@ HIGHLIGHTS_LABELS = {
     "crate_pod_goblin": ("Pod Goblin",       "bi-box-seam"),
     "chris_kyle":       ("Chris Kyle",       "bi-crosshair"),
     "the_locksmith":    ("The Locksmith",    "bi-lock-fill"),
-    "the_tycoon":       ("The Tycoon",       "bi-cash-stack"),
-    "war_machine":      ("War Machine",      "bi-gear-wide-connected"),
+    "the_tycoon":       ("Elon Musk",         "bi-cash-stack"),
+    "war_machine":      ("Conveyor Belt",     "bi-gear-wide-connected"),
+    "first_upgrade":    ("First Upgrade",     "bi-arrow-up-circle"),
 }
 
 
@@ -926,8 +932,8 @@ def _top_kv(d, key=lambda v: v):
 
 def compute_highlights(match_data):
     """Build the per-match Highlights block (12-card always-on catalog;
-    14 on proto-v4 matches -- The Tycoon / War Machine are flag-gated on
-    has_resource_data / has_build_data).
+    15 on proto-v4 matches -- Elon Musk / Conveyor Belt / First Upgrade
+    are flag-gated on has_resource_data / has_build_data).
 
     Each card emits when its data gates pass; missing data means the card is
     omitted (the UI grid reflows around the gap). All values are sourced from
@@ -1368,16 +1374,17 @@ def compute_highlights(match_data):
                 "narrative": _narrative_bucket(delta),
             })
 
-    # ---- v17 commander-economy cards (slate 12 -> 14), flag-gated so the
+    # ---- v17 commander-economy cards (slate 12 -> 15), flag-gated so the
     # pre-v4 corpus keeps the classic 12. Winner type stays "player" (the
     # team's commander) so existing player cross-links work unchanged; the
     # extra `team` field lets the renderer badge the side.
     _match_meta = match_data.get("match") or {}
     _econ_teams_hl = (match_data.get("economy") or {}).get("teams") or {}
     _build_teams_hl = (match_data.get("builds") or {}).get("teams") or {}
+    _build_feed_hl = (match_data.get("builds") or {}).get("feed") or []
 
     def _commander_card(category, teams, value_key, value_format,
-                        round_value, breakdown_fn):
+                        round_value, breakdown_fn, *, lower_is_better=False):
         rows = []
         for _side in ("1", "2"):
             _t = teams.get(_side) or {}
@@ -1387,9 +1394,13 @@ def compute_highlights(match_data):
             rows.append((_v, _side, _t.get("commander") or {}, _t))
         if not rows:
             return None
-        rows.sort(key=lambda r: (-r[0], r[1]))
+        if lower_is_better:
+            rows.sort(key=lambda r: (r[0], r[1]))
+        else:
+            rows.sort(key=lambda r: (-r[0], r[1]))
         _wv, _wside, _wcmdr, _wt = rows[0]
         runner = None
+        _rv = None
         if len(rows) > 1:
             _rv, _rside, _rcmdr, _rt = rows[1]
             runner = {
@@ -1397,7 +1408,19 @@ def compute_highlights(match_data):
                 "value": _round_value(_rv, round_value),
             }
         label, icon = HIGHLIGHTS_LABELS[category]
-        delta = _delta_pct(_wv, runner["value"] if runner else None)
+        if lower_is_better:
+            # Mirror of _delta_pct: fraction by which the winner is faster
+            # than the runner, using the runner's time as the denominator.
+            try:
+                delta = (
+                    round((float(_rv) - float(_wv)) / float(_rv), 3)
+                    if runner is not None and _rv and float(_rv) > 0
+                    else None
+                )
+            except (TypeError, ValueError):
+                delta = None
+        else:
+            delta = _delta_pct(_wv, runner["value"] if runner else None)
         return {
             "category": category,
             "label": label,
@@ -1410,19 +1433,20 @@ def compute_highlights(match_data):
             },
             "value": _round_value(_wv, round_value),
             "value_format": value_format,
-            "value_breakdown": breakdown_fn(_wt),
+            "value_breakdown": breakdown_fn(_wt, _wside),
             "runner_up": runner,
             "delta_pct": delta,
             "narrative": _narrative_bucket(delta),
         }
 
     if _match_meta.get("has_resource_data"):
-        # The Tycoon: scrap GENERATED (Σ positive full-rate bank deltas)
-        # -- economic throughput, deliberately NOT bank holdings (sitting
-        # on a full bank is the SLOWEST regen zone). LOCKED 2026-09-03.
+        # Elon Musk (the_tycoon): scrap GENERATED (Σ positive full-rate
+        # bank deltas) -- economic throughput, deliberately NOT bank
+        # holdings (sitting on a full bank is the SLOWEST regen zone).
+        # LOCKED 2026-09-03; display rename 2026-09-05.
         emit(_commander_card(
             "the_tycoon", _econ_teams_hl, "scrap_income", "scrap", 0,
-            lambda t: {
+            lambda t, _side: {
                 "income_regen": t.get("income_regen"),
                 # Loose terminology contract: income_loose (the AMOUNT) is
                 # the player-facing number; loose_collections (pieces) is
@@ -1435,13 +1459,38 @@ def compute_highlights(match_data):
                 ),
             },
         ))
+        # First Upgrade: race to the first live upgraded pool
+        # (upgrade_count >= 1 → Refinery+ / Extractor+ producing). Lower
+        # time wins. Self-omits when neither side ever upgraded.
+        _scup_first = {}
+        for _row in _build_feed_hl:
+            _odf = (_row.get("odf") or "").lower()
+            if "scup" not in _odf:
+                continue
+            _side = str(_row.get("team") or "")
+            if _side not in ("1", "2"):
+                continue
+            _tick = _row.get("tick")
+            if _tick is None:
+                continue
+            _prev = _scup_first.get(_side)
+            if _prev is None or _tick < _prev[0]:
+                _scup_first[_side] = (_tick, _row.get("name"))
+        emit(_commander_card(
+            "first_upgrade", _econ_teams_hl, "time_to_first_upgrade_sec",
+            "duration", 1,
+            lambda t, side: {
+                "upgrade_name": (_scup_first.get(side) or (None, None))[1],
+            },
+            lower_is_better=True,
+        ))
     if _match_meta.get("has_build_data"):
-        # War Machine: production value converted into combat units
-        # (Σ scrapCost over combat-ship BUILD completions -- B7/B12
-        # taxonomy; scavs/pods/structures excluded).
+        # Conveyor Belt (war_machine): production value converted into
+        # combat units (Σ scrapCost over combat-ship BUILD completions --
+        # B7/B12 taxonomy; scavs/pods/structures excluded).
         emit(_commander_card(
             "war_machine", _build_teams_hl, "combat_ship_value", "scrap", 0,
-            lambda t: {
+            lambda t, _side: {
                 "ships_built": t.get("ships_built"),
                 "units_built": t.get("units_built"),
                 "builds_per_min": t.get("builds_per_min"),
@@ -6822,7 +6871,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         thug_supply_block[str(_side)] = _entry
     match_data["thug_supply"] = thug_supply_block
 
-    # Match Highlights — fixed-slate award catalog (12 cards, always-on).
+    # Match Highlights — fixed-slate award catalog (12 always-on cards;
+    # 15 on proto-v4 matches with Elon Musk / Conveyor Belt / First Upgrade).
     # Each card emits when its data gates pass, otherwise it's omitted.
     # Match-global + always-unfiltered (read directly from currentData by the UI).
     match_data["highlights"] = compute_highlights(match_data)
