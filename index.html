@@ -772,19 +772,6 @@
            scrap chart + production economy rows need has_resource_data,
            build log + production build rows need has_build_data.) -->
       <div class="tab-pane fade" id="tab-economy" role="tabpanel" aria-labelledby="tab-economy-btn">
-        <div class="card mb-4 d-none" id="section-economy-scrap">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Team Scrap Over Time</h5>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary" id="economy-zoom-reset" type="button"
-                      title="Reset zoom" aria-label="Reset zoom">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-              <button class="btn btn-sm" data-expand="section-economy-scrap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="economy-scrap-chart"></canvas></div></div>
-        </div>
         <div class="row g-4 mb-4 d-none" id="section-economy-production">
           <div class="col-lg-6"><div class="card h-100" id="economy-production-t1"></div></div>
           <div class="col-lg-6"><div class="card h-100" id="economy-production-t2"></div></div>
@@ -800,6 +787,27 @@
             </div>
           </div>
           <div class="card-body" id="economy-buildlog-content"></div>
+        </div>
+
+        <!-- SHELVED: Team Scrap Over Time. Two ~3400-point series over a full
+             match render as an unreadable tangle, so the card is parked at the
+             bottom of the tab, kept permanently `d-none`, and its Chart.js
+             instance is never built (see ECONOMY_SCRAP_CHART_ENABLED in
+             js/app.js -- flip the constant to restore it for good, or append
+             ?scrapchart=1 to peek at it once). Kept in the DOM so restoring is
+             a one-line change; display:none costs no layout or paint. -->
+        <div class="card mb-4 d-none" id="section-economy-scrap">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Team Scrap Over Time</h5>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary" id="economy-zoom-reset" type="button"
+                      title="Reset zoom" aria-label="Reset zoom">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <button class="btn btn-sm" data-expand="section-economy-scrap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="economy-scrap-chart"></canvas></div></div>
         </div>
       </div>
 

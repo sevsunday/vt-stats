@@ -3135,17 +3135,31 @@
   let buildlogWired = false;
   let econHoverWired = false;          // delegated cross-card row highlight
 
+  // The Team Scrap Over Time card is SHELVED, not deleted: two ~3400-point
+  // series over a full match read as an unusable tangle. Its markup sits at the
+  // bottom of #tab-economy permanently `d-none`, and this flag also suppresses
+  // the Chart.js build, so the tab costs nothing for a card nobody sees. Flip
+  // the default to true to restore it, or load once with ?scrapchart=1 to peek.
+  // Read at module init because syncUrl() rewrites the query string from a
+  // fresh URLSearchParams -- the peek has to survive the first match switch.
+  const ECONOMY_SCRAP_CHART_DEFAULT = false;
+  const ECONOMY_SCRAP_CHART_ENABLED = (() => {
+    const v = new URLSearchParams(window.location.search).get('scrapchart');
+    if (v === null) return ECONOMY_SCRAP_CHART_DEFAULT;
+    return v !== '0' && v !== 'false';
+  })();
+
   function renderEconomyTab() {
     const econ = currentData && currentData.economy;
     const builds = currentData && currentData.builds;
     const scrapCard = document.getElementById('section-economy-scrap');
     const prodRow = document.getElementById('section-economy-production');
     const logCard = document.getElementById('section-economy-buildlog');
-    if (scrapCard) scrapCard.classList.toggle('d-none', !econ);
+    if (scrapCard) scrapCard.classList.toggle('d-none', !econ || !ECONOMY_SCRAP_CHART_ENABLED);
     if (prodRow) prodRow.classList.toggle('d-none', !econ && !builds);
     if (logCard) logCard.classList.toggle('d-none', !builds);
 
-    if (econ) {
+    if (econ && ECONOMY_SCRAP_CHART_ENABLED) {
       const canvas = document.getElementById('economy-scrap-chart');
       const existing = activeCharts.find(c => c && c.canvas === canvas);
       if (existing) {
@@ -7945,6 +7959,10 @@
     registerChartRenderer('section-weapon-meta', (canvasId) => {
       return renderWeaponMeta(canvasId, data.weapon_meta);
     });
+    // Registered unconditionally even though the card is shelved: this is an
+    // inert dictionary entry until the (hidden) expand button is clicked, so
+    // gating it would buy nothing and would make restoring the card a two-line
+    // change instead of one. Same reasoning for the #economy-zoom-reset wiring.
     registerChartRenderer('section-economy-scrap', (canvasId) => {
       const econ = currentData && currentData.economy;
       if (!econ) return null;
