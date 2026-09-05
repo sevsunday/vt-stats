@@ -779,11 +779,25 @@
         <div class="card mb-4 d-none" id="section-economy-buildlog">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0">Build Order Log</h5>
-            <div class="btn-group btn-group-sm" id="economy-buildlog-filter" role="group" aria-label="Build log filter">
-              <button class="btn btn-outline-secondary active" data-buildlog-filter="builds" type="button">Builds</button>
-              <button class="btn btn-outline-secondary" data-buildlog-filter="cancels" type="button">Cancels</button>
-              <button class="btn btn-outline-secondary" data-buildlog-filter="structures" type="button">Structures</button>
-              <button class="btn btn-outline-secondary" data-buildlog-filter="all" type="button">All events</button>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <!-- Commander scope. Button labels are rewritten per match from
+                   builds.teams{n}.commander.name in renderBuildLog(); picking a
+                   single commander renders that log full width. -->
+              <div class="btn-group btn-group-sm" id="economy-buildlog-scope" role="group" aria-label="Build log commander scope">
+                <button class="btn btn-outline-secondary active" data-buildlog-scope="both" type="button">Both</button>
+                <button class="btn btn-outline-secondary" data-buildlog-scope="1" type="button">Team 1</button>
+                <button class="btn btn-outline-secondary" data-buildlog-scope="2" type="button">Team 2</button>
+              </div>
+              <div class="btn-group btn-group-sm" id="economy-buildlog-filter" role="group" aria-label="Build log filter">
+                <button class="btn btn-outline-secondary active" data-buildlog-filter="builds" type="button">Builds</button>
+                <button class="btn btn-outline-secondary" data-buildlog-filter="cancels" type="button">Cancels</button>
+                <button class="btn btn-outline-secondary" data-buildlog-filter="structures" type="button">Structures</button>
+                <button class="btn btn-outline-secondary" data-buildlog-filter="all" type="button">All events</button>
+              </div>
+              <input type="search" id="economy-buildlog-search"
+                     class="form-control form-control-sm vt-econ-log-search"
+                     placeholder="Type to filter..." aria-label="Filter build log by unit or producer"
+                     autocomplete="off">
             </div>
           </div>
           <div class="card-body" id="economy-buildlog-content"></div>

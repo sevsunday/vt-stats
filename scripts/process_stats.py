@@ -71,7 +71,10 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # instead of the whole stack; pending-at-end likewise costs only the
 # in-progress unit. Adds the orders_backed_out / orders_trimmed split and
 # outflow_clamped_cost.
-PIPELINE_VERSION = 35
+# 35 -> 36: every builds.feed row carries the economic context of its own
+# tick (scrap_at_event / max_scrap_at_event / pool_count_at_event) so the
+# Build Order Log can show "he ordered this at 64 of 80 with 2 pools".
+PIPELINE_VERSION = 36
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3994,7 +3997,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # below the current bank. Real gross outflow with no order
             # behind it -- named so the residual stops absorbing it.
             "prev_max_scrap": None, "clamped": 0,
-            "cur_status": 0,  # latest wire ScrapStatus (for the build join)
+            # Latest wire values, carried for the build-event join (v21).
+            # `cur_status` came first; the other three let every feed row
+            # report the bank / storage cap / pool count as of its own tick.
+            "cur_status": 0,
+            "cur_bank": None, "cur_cap": None, "cur_pools": None,
         }
 
     econ_state = {1: _new_econ_side(), 2: _new_econ_side()}
@@ -4895,6 +4902,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         st["peak_max_scrap"] = max(st["peak_max_scrap"], _cap)
                         st["status_ticks"][_status] += 1
                         st["cur_status"] = _status
+                        st["cur_bank"] = _bank
+                        st["cur_cap"] = _cap
+                        st["cur_pools"] = _pools
                         if st["prev_pools"] is not None and _pools < st["prev_pools"]:
                             st["pools_lost"] += st["prev_pools"] - _pools
                         st["prev_pools"] = _pools
@@ -5060,7 +5070,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     _bc["producer_unresolved"] += 1
             _cost = scrap_costs.get(_stem)
             _cost_i = _cost if _cost is not None else 0
-            _status_now = econ_state[_side]["cur_status"]
+            _est = econ_state[_side]
+            _status_now = _est["cur_status"]
             _is_struct = (_producer == "constructor")
             _ukey = (_side, _stem)
 
@@ -5076,6 +5087,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "scrap_cost": _cost,
                 "scrap_status_at_queue": None,
                 "scrap_status_at_build": None,
+                # v21 economic context, read off the most recent resource
+                # tick at or before this event (UpdateTick carries resources
+                # every tick, so this is exact to 0.05 s). The engine debits
+                # the bank on the tick AFTER a QUEUE, so a queue row reports
+                # the PRE-purchase bank -- what the commander had to spend.
+                # All three stay null on a build-data-only session and on
+                # events preceding the first resource tick.
+                "scrap_at_event": _est["cur_bank"],
+                "max_scrap_at_event": _est["cur_cap"],
+                "pool_count_at_event": _est["cur_pools"],
             }
 
             if _etype == "queue":
@@ -6536,7 +6557,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # addition: `thug_ships_lost` / `thug_ship_value_lost` now
             # count human-piloted losses only (see the thug_supply build
             # site), so their values move on existing matches.
-            "schema_version": 20,
+            # v21 (this version) stamps each `builds.feed[]` row with the
+            # economic context of its own tick: `scrap_at_event` /
+            # `max_scrap_at_event` / `pool_count_at_event`, read off the
+            # most recent resource tick at or before the event. Purely
+            # additive display telemetry (the Build Order Log badge);
+            # null on build-data-only sessions and pre-first-tick events.
+            "schema_version": 21,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08

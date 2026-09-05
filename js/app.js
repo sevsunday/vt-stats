@@ -3133,6 +3133,12 @@
   let buildlogShown = 0;               // pagination cursor per filter view
   const BUILDLOG_PAGE = 250;           // rows added per "Show more" click
   let buildlogWired = false;
+  // Find-bar state. Both reset on every match switch (unlike buildlogFilter,
+  // which is a durable lens): a typed unit name and a commander scope are
+  // meaningful only for the match that was on screen when they were chosen.
+  let buildlogQuery = '';
+  let buildlogScope = 'both';          // 'both' | '1' | '2'
+  let buildlogSearchTimer = null;
   let econHoverWired = false;          // delegated cross-card row highlight
 
   // The Team Scrap Over Time card is SHELVED, not deleted: two ~3400-point
@@ -3174,6 +3180,7 @@
     }
     if (builds) {
       buildlogShown = BUILDLOG_PAGE;
+      resetBuildLogFindState();
       renderBuildLog();
       wireBuildLogControls();
     }
@@ -3191,13 +3198,21 @@
     return (v === null || v === undefined) ? '—' : Math.round(v).toLocaleString();
   }
 
+  // The name a build-log row actually SHOWS. Shared with the find bar so
+  // typing what you see always matches -- rows whose pipeline `name` is null
+  // display the odf_map fallback, and filtering on `name` alone would miss
+  // them.
+  function econRowDisplayName(odf, name) {
+    return name || (currentData && currentData.odf_map && currentData.odf_map[odf]) || odf || '';
+  }
+
   function econOdfChip(odf, name) {
     // Unit NAME leads; the ODF stem rides as a mono chip cross-linking the
     // ODF Browser (kill-feed convention).
-    const display = name || (currentData && currentData.odf_map && currentData.odf_map[odf]) || odf;
+    const display = econRowDisplayName(odf, name);
     const base = (odf || '').toLowerCase();
     const chip = base
-      ? `<a href="odf/index.html?odf=${encodeURIComponent(base)}" target="_blank" rel="noopener" class="vt-odf-link" title="View ${esc(display)} in ODF Browser">(${esc(base)})</a>`
+      ? `<a href="odf/index.html?odf=${encodeURIComponent(base)}" target="_blank" rel="noopener" class="vt-odf-link vt-econ-log-odf" title="View ${esc(display)} in ODF Browser">(${esc(base)})</a>`
       : '';
     return `<span class="fw-semibold">${esc(display)}</span>${chip}`;
   }
@@ -3561,6 +3576,48 @@
     }
   }
 
+  // Free-text find bar. Matches the DISPLAYED unit name, the ODF stem, and
+  // the resolved producer lane (so "recycler" narrows to recycler-lane
+  // orders). Event type is deliberately excluded -- the filter pills own it.
+  function buildlogQueryFn(row) {
+    if (!buildlogQuery) return true;
+    const q = buildlogQuery;
+    return econRowDisplayName(row.odf, row.name).toLowerCase().includes(q)
+        || (row.odf || '').toLowerCase().includes(q)
+        || (row.producer_resolved || row.producer || '').toLowerCase().includes(q);
+  }
+
+  // Context badge: `cost | bank | cap | pools`, all read at the row's own
+  // tick (match.schema_version 21). The three context fields are null on
+  // build-data-only sessions and on events preceding the first resource
+  // tick, in which case the badge degrades to the bare cost it showed
+  // before. Tooltip copy must stay free of double quotes -- esc() escapes
+  // & < > but NOT ", which would terminate the title attribute early.
+  function econBuildChip(r) {
+    const cost = (r.scrap_cost === null || r.scrap_cost === undefined) ? null : r.scrap_cost;
+    const bank = r.scrap_at_event;
+    const cap = r.max_scrap_at_event;
+    const pools = r.pool_count_at_event;
+    const hasCtx = bank !== null && bank !== undefined;
+    if (cost === null && !hasCtx) return '';
+
+    const segs = [cost === null ? '—' : String(cost)];
+    let tip = cost === null ? 'Cost unknown' : `Cost ${cost} scrap`;
+    if (hasCtx) {
+      segs.push(String(bank));
+      segs.push((cap === null || cap === undefined) ? '—' : String(cap));
+      segs.push((pools === null || pools === undefined) ? '—' : String(pools));
+      // A queue row reads PRE-purchase (the engine debits on the following
+      // tick), so this is genuinely what the commander had to spend.
+      tip += ` · bank ${bank} of ${cap === null || cap === undefined ? '?' : cap} max`
+           + ` · ${pools === null || pools === undefined ? '?' : pools} pools`;
+    }
+    const inner = segs
+      .map(s => `<span class="vt-econ-chip-seg">${esc(s)}</span>`)
+      .join('<span class="vt-econ-chip-sep">|</span>');
+    return `<span class="vt-econ-cost-chip" title="${esc(tip)}">${inner}</span>`;
+  }
+
   function renderBuildLog() {
     const container = document.getElementById('economy-buildlog-content');
     if (!container) return;
@@ -3568,9 +3625,10 @@
     const tickRate = currentData.match.tick_rate || 20;
     const minTick = (currentData.match.tick_range && currentData.match.tick_range[0]) || 0;
 
-    const filtered = feed.filter(buildlogFilterFn);
+    const filtered = feed.filter(r => buildlogFilterFn(r) && buildlogQueryFn(r));
     const byTeam = { 1: [], 2: [] };
     filtered.forEach(r => { if (byTeam[r.team]) byTeam[r.team].push(r); });
+    syncBuildLogScopeLabels();
 
     const typeIcon = {
       queue:  '<i class="bi bi-plus-circle" style="color:var(--kb-text-muted)" title="Queued"></i>',
@@ -3592,8 +3650,7 @@
         const producerIcon = r.producer_resolved || r.producer
           ? `<i class="bi ${ECON_PRODUCER_ICON[r.producer_resolved || r.producer] || 'bi-question-circle'}" style="color:var(--kb-text-muted)" title="${esc(r.producer_resolved || r.producer || '?')}"></i>`
           : '';
-        const cost = (r.scrap_cost !== null && r.scrap_cost !== undefined)
-          ? `<span class="vt-econ-cost-chip">${r.scrap_cost}</span>` : '';
+        const cost = econBuildChip(r);
         const dupBadge = r.dedup_folded
           ? '<span class="badge vt-econ-inferred-badge" title="Duplicate wire event — counted once">dup</span>' : '';
         const struck = r.type === 'cancel' ? ' vt-econ-row-cancel' : '';
@@ -3620,10 +3677,30 @@
         Team ${side}${c ? ' — ' + esc(c.name) : ''} <span class="text-muted">(${byTeam[side].length})</span></div>`;
     };
 
-    container.innerHTML = `<div class="row g-3">
-      <div class="col-md-6">${teamHead(1)}<div class="vt-econ-log-col">${renderCol(1)}</div></div>
-      <div class="col-md-6">${teamHead(2)}<div class="vt-econ-log-col">${renderCol(2)}</div></div>
-    </div>`;
+    // A single-commander scope drops the other column entirely and gives the
+    // survivor the full card width -- the point of scoping is more reading
+    // room for the log you care about.
+    const sides = buildlogScope === 'both' ? [1, 2] : [Number(buildlogScope)];
+    const colClass = sides.length === 2 ? 'col-md-6' : 'col-12';
+    container.innerHTML = `<div class="row g-3">${sides.map(side =>
+      `<div class="${colClass}">${teamHead(side)}<div class="vt-econ-log-col">${renderCol(side)}</div></div>`
+    ).join('')}</div>`;
+  }
+
+  // Label the scope buttons with the actual commanders. Runs on every render
+  // because the names change with the match, and the markup can only ship a
+  // neutral "Team N" placeholder.
+  function syncBuildLogScopeLabels() {
+    const group = document.getElementById('economy-buildlog-scope');
+    if (!group) return;
+    const teams = ((currentData.builds || {}).teams) || {};
+    group.querySelectorAll('[data-buildlog-scope]').forEach(btn => {
+      const side = btn.dataset.buildlogScope;
+      if (side === 'both') return;
+      const c = (teams[side] || {}).commander;
+      btn.textContent = (c && c.name) ? c.name : `Team ${side}`;
+      btn.title = `Show only team ${side}'s build log`;
+    });
   }
 
   function wireBuildLogControls() {
@@ -3640,12 +3717,60 @@
         renderBuildLog();
       });
     }
+    const scope = document.getElementById('economy-buildlog-scope');
+    if (scope) {
+      scope.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-buildlog-scope]');
+        if (!btn) return;
+        buildlogScope = btn.dataset.buildlogScope;
+        scope.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+        buildlogShown = BUILDLOG_PAGE;
+        renderBuildLog();
+      });
+    }
+    const search = document.getElementById('economy-buildlog-search');
+    if (search) {
+      // The input lives in the card HEADER, not in #economy-buildlog-content,
+      // so re-rendering the log never steals focus mid-typing.
+      search.addEventListener('input', () => {
+        clearTimeout(buildlogSearchTimer);
+        buildlogSearchTimer = setTimeout(() => {
+          buildlogQuery = search.value.trim().toLowerCase();
+          buildlogShown = BUILDLOG_PAGE;
+          renderBuildLog();
+        }, 120);
+      });
+      search.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || !search.value) return;
+        search.value = '';
+        clearTimeout(buildlogSearchTimer);
+        buildlogQuery = '';
+        buildlogShown = BUILDLOG_PAGE;
+        renderBuildLog();
+      });
+    }
     const content = document.getElementById('economy-buildlog-content');
     if (content) {
       content.addEventListener('click', (e) => {
         if (!e.target.closest('[data-buildlog-more]')) return;
         buildlogShown += BUILDLOG_PAGE;
         renderBuildLog();
+      });
+    }
+  }
+
+  // Match switch: drop the typed query and the commander scope (both are
+  // about the match that just left the screen) and re-sync the two controls.
+  function resetBuildLogFindState() {
+    buildlogQuery = '';
+    buildlogScope = 'both';
+    clearTimeout(buildlogSearchTimer);
+    const search = document.getElementById('economy-buildlog-search');
+    if (search) search.value = '';
+    const scope = document.getElementById('economy-buildlog-scope');
+    if (scope) {
+      scope.querySelectorAll('[data-buildlog-scope]').forEach(b => {
+        b.classList.toggle('active', b.dataset.buildlogScope === 'both');
       });
     }
   }

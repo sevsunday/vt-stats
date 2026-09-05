@@ -120,6 +120,16 @@ The build ledger assumed scrap is deducted at QUEUE. **The engine charges each u
 - **Card**: the single `Cancelled orders` row is replaced by `Orders backed out` (real sunk cost) and `Queue trimmed` (explicitly free). Both self-omit at zero.
 - **Structure/constructor lane deliberately UNCHANGED** — zero cancels and zero BUILD events corpus-wide, and multiple constructors can exist so one-order-per-producer does not hold there.
 
+## Build-feed economic context (match.schema_version 21, PIPELINE_VERSION 36)
+
+Every `builds.feed[]` row now carries the state of its team's economy at its own tick: `scrap_at_event` / `max_scrap_at_event` / `pool_count_at_event`. Purely additive display telemetry powering the Build Order Log's four-segment badge (`cost | bank | cap | pools`); already covered as rating-inert because `_investigation/golden_builds_inert.py` blanks the entire feed.
+
+- **Same join the scrap-status stamp uses.** `econ_state[side]` gained `cur_bank` / `cur_cap` / `cur_pools` alongside the existing `cur_status`, written on every full-rate resource tick and read when the BuildEvent row is constructed. Do NOT reach for `prev_bank` / `prev_max_scrap` / `prev_pools` instead — those names belong to the income classifier's per-tick delta logic and overloading them invites a subtle reordering bug.
+- **A queue row reports the PRE-purchase bank.** The engine debits on the tick *after* a QUEUE (measured: `t=3515` QUEUE → `t=3516` bank 80 → 60), so the queue row's `scrap_at_event` is what the commander actually had to spend, while a build row reports the bank at completion. Verified end to end against the wire by `_investigation/probe_feed_context.py` (62 rows sampled across the reference match, zero mismatches).
+- **All three are `null`** on a build-data-but-no-resource-data session and on any event preceding the first resource tick. `econBuildChip()` in `js/app.js` degrades to the bare cost it showed before — never render a `0` for missing context. No corpus match exercises that branch, so it is unit-gated by `_investigation/check_build_chip.mjs` (also asserts the tooltip stays free of double quotes).
+- `max_scrap_at_event` is the wire's own cap, so it already encodes the `40·recycler_alive + 20·pools` model; do not recompute it from `pool_count_at_event`.
+- **Build Order Log controls.** Three header controls compose: the commander-scope group (`#economy-buildlog-scope`, labels rewritten per match from `builds.teams{n}.commander.name` by `syncBuildLogScopeLabels()` — a single commander renders that log at `col-12`), the durable type-filter pills, and the find bar (`#economy-buildlog-search`, 120 ms debounce, matches the DISPLAYED name via the shared `econRowDisplayName()` plus ODF stem and producer lane, `Esc` clears). Scope + query reset on every match switch via `resetBuildLogFindState()`; the type filter deliberately persists as a durable lens. The input lives in the card HEADER, so re-rendering `#economy-buildlog-content` cannot steal focus mid-typing. Any new build-log helper must be defined **at or after** `buildlogFilterFn` — `_investigation/check_econ_tooltips.mjs` slices `js/app.js` from `renderEconomyProductionCard` to that marker.
+
 ## Protobuf Events (v2/v3/v4 current layout)
 
 Event types in `StatEvent.event_type` oneof:

@@ -6381,8 +6381,18 @@ html.vt-cursor-active * {
     margin-bottom: 0.4rem;
 }
 
+/* Card-header find bar. Capped so it can't crowd out the filter pills, and
+   allowed to shrink before the pills wrap on narrow viewports. */
+.vt-econ-log-search {
+    max-width: 220px;
+    min-width: 130px;
+}
+
+/* Tall enough to read a real build order without constant scrolling, but
+   viewport-relative so the card never outgrows the screen it renders on.
+   The floor keeps short laptop viewports usable. */
 .vt-econ-log-col {
-    max-height: 420px;
+    max-height: clamp(360px, 68vh, 820px);
     overflow-y: auto;
     padding-right: 0.35rem;
 }
@@ -6413,6 +6423,14 @@ html.vt-cursor-active * {
     min-width: 0;
 }
 
+/* The ODF stem sits flush against the unit name because econOdfChip()
+   concatenates the two with no separator. The margin has to be scoped to the
+   build log -- .vt-odf-link is shared with the kill feed, where the
+   surrounding template already supplies whitespace. */
+.vt-econ-log-odf {
+    margin-left: 0.3em;
+}
+
 .vt-econ-cost-chip {
     font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
     font-size: 0.72rem;
@@ -6420,6 +6438,14 @@ html.vt-cursor-active * {
     border-radius: 999px;
     background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
     color: var(--kb-primary);
+    white-space: nowrap;
+}
+
+/* Four-segment context badge: cost | bank | cap | pools. The dividers are
+   muted so the eye reads four numbers rather than one long string. */
+.vt-econ-chip-sep {
+    opacity: 0.4;
+    margin: 0 0.28em;
 }
 
 .vt-econ-status-dot {
