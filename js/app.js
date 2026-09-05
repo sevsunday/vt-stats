@@ -3569,6 +3569,7 @@
 
   function buildlogFilterFn(row) {
     switch (buildlogFilter) {
+      case 'queues':     return row.type === 'queue';
       case 'builds':     return row.type === 'build';
       case 'cancels':    return row.type === 'cancel';
       case 'structures': return row.producer === 'constructor';
