@@ -3133,6 +3133,7 @@
   let buildlogShown = 0;               // pagination cursor per filter view
   const BUILDLOG_PAGE = 250;           // rows added per "Show more" click
   let buildlogWired = false;
+  let econHoverWired = false;          // delegated cross-card row highlight
 
   function renderEconomyTab() {
     const econ = currentData && currentData.economy;
@@ -3154,8 +3155,7 @@
       renderEconomyScrapChart('economy-scrap-chart', econ, currentData.match);
     }
     if (econ || builds) {
-      renderEconomyProductionCard('economy-production-t1', '1');
-      renderEconomyProductionCard('economy-production-t2', '2');
+      renderEconomyProductionCards();
       ensureTooltips(document.getElementById('section-economy-production'));
     }
     if (builds) {
@@ -3188,7 +3188,303 @@
     return `<span class="fw-semibold">${esc(display)}</span>${chip}`;
   }
 
-  function renderEconomyProductionCard(cardId, side) {
+  // The two production cards render as a matched PAIR. Both specs come from
+  // the same ordered key spine, so row N on the left is always row N on the
+  // right -- the scrap-status bar used to float a line up or down depending
+  // on which side happened to have an "other" income row. ADD NEW ROWS WITH
+  // A `present` FLAG, never behind a bare `if`: the unconditional slot is
+  // what keeps the two cards in lockstep.
+  function renderEconomyProductionCards() {
+    const eteams = ((currentData.economy || {}).teams) || {};
+    const bteams = ((currentData.builds || {}).teams) || {};
+    const tsups = currentData.thug_supply || {};
+    // Union block presence and per-thug list lengths across both sides up
+    // front so the two specs carry an IDENTICAL key sequence -- alignment
+    // then reduces to a lockstep filter.
+    const l1 = econThugLists(tsups['1']);
+    const l2 = econThugLists(tsups['2']);
+    const shape = {
+      econ: !!(eteams['1'] || eteams['2']),
+      builds: !!(bteams['1'] || bteams['2']),
+      thugs: !!(tsups['1'] || tsups['2']),
+      lost: Math.max(l1.lost.length, l2.lost.length),
+      foot: Math.max(l1.foot.length, l2.foot.length),
+    };
+    const s1 = buildEconomyRowSpec('1', shape);
+    const s2 = buildEconomyRowSpec('2', shape);
+    alignEconomyRowSpecs(s1, s2);
+    renderEconomyCard('economy-production-t1', '1', s1);
+    renderEconomyCard('economy-production-t2', '2', s2);
+    wireEconomyRowHover();
+  }
+
+  // Per-thug sub-row sources. The two lists filter independently -- a thug
+  // can lose ships without ever walking, and walk without losing a ship.
+  function econThugLists(ts) {
+    const thugs = (ts && Array.isArray(ts.thugs)) ? ts.thugs : [];
+    return {
+      lost: thugs.filter(t => t.ships_lost),
+      foot: thugs.filter(t => t.pilot_sec),
+    };
+  }
+
+  function buildEconomyRowSpec(side, shape) {
+    const spec = [];
+    const et = ((currentData.economy || {}).teams || {})[side] || null;
+    const bt = ((currentData.builds || {}).teams || {})[side] || null;
+
+    // Row descriptor factories. `present` defaults to true; pass false for
+    // a row this side has nothing to say about -- it holds its slot in the
+    // spine and survives only if the OTHER side wants it shown. A kept row
+    // shows its real value, so a measured 0 reads as "0" while a genuinely
+    // absent measurement stays an em-dash.
+    const statRow = (label, valueHtml, tip, key, present) => {
+      spec.push({
+        kind: 'stat', key, label, value: valueHtml, tip: tip || null,
+        present: present === undefined ? true : !!present,
+      });
+    };
+    const divider = (key, present) => spec.push({ kind: 'divider', key, present: !!present });
+    const subhead = (label, key, present) => spec.push({ kind: 'subhead', key, label, present: !!present });
+    const spacer = (key) => spec.push({ kind: 'spacer', key, present: false });
+
+    if (shape.econ) {
+      const E = et || {};
+      const has = !!et;
+      // Terminology contract: "collected" (never "salvaged"), "loose"
+      // (never "lumps"), and the SCRAP AMOUNT of loose is the headline
+      // number — players say "I got 25 loose" meaning 25 scrap, so the
+      // piece count stays out of the primary copy (tooltip-only).
+      const loosePct = E.scrap_income > 0
+        ? Math.round((E.income_loose / E.scrap_income) * 100) : 0;
+      statRow('Scrap generated', fmtScrap(E.scrap_income),
+        'Every point of scrap that arrived in the bank all match. Three sources add up to this: pools regenerating, loose collected in the field, and refunds from cancelled orders.',
+        'scrap-income', has);
+      statRow('&nbsp;&nbsp;from pools', fmtScrap(E.income_regen),
+        'Scrap that regenerated on its own from the extractors this team controlled. The steady background income — no scavenger required.',
+        'income-regen', has);
+      statRow('&nbsp;&nbsp;loose collected', `${fmtScrap(E.income_loose)} <span class="text-muted">(${loosePct}% of income)</span>`,
+        `Loose scrap hauled in from the field by scavengers — the part of the income the team had to go out and earn. Every pickup is worth 5, so this is ${fmtScrap(E.loose_collections)} pickups. When the bank is nearly full only the part that fits is credited and the rest is held until there is room again, so a single pickup can land in two installments.`,
+        'income-loose', has);
+      statRow('&nbsp;&nbsp;from refunds', fmtScrap(E.income_refund),
+        'Scrap handed back when an order was cancelled. Cancels refund roughly half of what was already deducted, and armory orders refund nothing at all.',
+        'income-refund', has && !!E.income_refund);
+      statRow('&nbsp;&nbsp;other', fmtScrap(E.income_unclassified),
+        'Income that could not be tied to pools, loose or refunds. Expected to be zero or close to it, so anything sizeable here is worth a look — it means scrap arrived in a pattern the game is not known to produce.',
+        'income-other', has && !!E.income_unclassified);
+      statRow('Scrap spent', fmtScrap(E.scrap_outflow_gross),
+        'Every point of scrap that left the bank — units, structures, upgrades and the unrefunded half of cancelled orders combined.',
+        'scrap-outflow', has);
+
+      // Peaks and averages over finals: where the bank ENDED is an
+      // accident of when the game stopped, but the highest it ever
+      // reached (against the cap it could have reached) is a real
+      // statement about how the commander rode their economy.
+      const capTxt = E.peak_max_scrap
+        ? ` <span class="text-muted">of ${fmtScrap(E.peak_max_scrap)} cap</span>` : '';
+      statRow('Peak bank', `${fmtScrap(E.peak_scrap)}${capTxt}`,
+        'The fullest the scrap bank ever got, next to the largest storage this team ever had. Storage is 40 for a live recycler plus 20 per pool, so the cap grows as they take pools.',
+        'peak-bank', has);
+      const floatPct = E.mean_float_ratio !== null && E.mean_float_ratio !== undefined
+        ? ` <span class="text-muted">(${Math.round(E.mean_float_ratio * 100)}% full)</span>` : '';
+      statRow('Average bank', `${fmtScrap(E.mean_scrap)}${floatPct}`,
+        'The typical amount sitting in the bank across the whole match. A low average usually means the commander kept spending instead of hoarding. The percentage is average fullness measured against the storage cap at the time, and the cap grows as the team takes pools — so it will not match the average divided by the peak cap above.',
+        'average-bank', has);
+
+      statRow('Pools', `<span class="text-muted">peak</span> ${fmtScrap(E.peak_pools)} <span class="text-muted">· lost</span> ${fmtScrap(E.pools_lost)}`,
+        'The most extractors this team held at once, and how many they lost over the match in total. A high loss count means pools kept getting taken and retaken.',
+        'pools', has);
+      const tempo = [];
+      [3, 5, 7].forEach((n) => {
+        const t = E[`time_to_${n}_pools_sec`];
+        if (t !== null && t !== undefined) tempo.push(`${n} @ ${fmtDurationCompact(t)}`);
+      });
+      statRow('&nbsp;&nbsp;pool tempo', tempo.length
+        ? `<span class="text-muted">${tempo.join(' · ')}</span>` : '—',
+        'How early the team reached 3, 5 and 7 pools. Earlier is a faster economic opening.',
+        'pool-tempo', has && tempo.length > 0);
+
+      const firstUpg = E.time_to_first_upgrade_sec;
+      const upgTxt = (firstUpg !== null && firstUpg !== undefined)
+        ? ` <span class="text-muted">· first @ ${fmtDurationCompact(firstUpg)}</span>` : '';
+      statRow('Upgrades built', `${fmtScrap(E.upgrades_built)}${upgTxt}`,
+        `Extractor upgrades built across the match, and when the first one went up. Upgraded extractors regenerate faster. ${fmtScrap(E.upgrades_final)} were still standing at the end.`,
+        'upgrades-built', has);
+
+      // Scrap-status bar. Read every band DIRECTLY from its own field --
+      // the old code derived red as 100 - green - yellow, which silently
+      // absorbed the rounding error from the other two bands.
+      const g = Math.round((E.green_share || 0) * 100);
+      const y = Math.round((E.yellow_share || 0) * 100);
+      const r = Math.round((E.red_share || 0) * 100);
+      const gT = fmtDurationCompact(E.green_sec);
+      const yT = fmtDurationCompact(E.yellow_sec);
+      const rT = fmtDurationCompact(E.red_sec);
+      // Reconciled regen story. The engine's traffic-light naming reads
+      // backwards to newcomers: RED is the BOTTOM of the bank and the
+      // FASTEST regen band, so time in red is usually a commander
+      // spending at full tempo, not one going broke.
+      const bandTip = 'How long the bank sat in each regeneration band. '
+        + 'Scrap regenerates fastest when the bank is low, so time in red usually means the commander '
+        + 'was spending as fast as scrap came in — efficient, but with no reserve for a big order. '
+        + 'Time in green means a full bank that is topping up slowly.'
+        + `<br><br>green ${g}% · ${gT}<br>yellow ${y}% · ${yT}<br>red ${r}% · ${rT}`;
+      // Bar geometry reads the UNROUNDED shares and grows in proportion.
+      // The legend's integers are each rounded independently (the right
+      // call — deriving red from the other two absorbed their rounding
+      // error), so their sum can land on 99% and leave a sliver of empty
+      // track showing at the end of the bar. Proportional flex-grow fills
+      // the track exactly whatever the decimals do.
+      const grow = (share) => ((share || 0) * 100).toFixed(2);
+      spec.push({
+        kind: 'bands', key: 'scrap-bands', present: has,
+        html: `<div class="vt-econ-status-bar mt-2 mb-1" data-bs-toggle="tooltip" data-bs-html="true"
+        title="${esc(bandTip)}">
+        <div style="flex:${grow(E.green_share)} 1 0;background:var(--kb-success)"></div>
+        <div style="flex:${grow(E.yellow_share)} 1 0;background:var(--kb-warning)"></div>
+        <div style="flex:${grow(E.red_share)} 1 0;background:var(--kb-danger)"></div>
+      </div>
+      <div class="d-flex justify-content-between vt-econ-band-legend">
+        <span>green ${g}%<br><span class="vt-econ-band-time">${gT}</span></span>
+        <span class="text-center">yellow ${y}%<br><span class="vt-econ-band-time">${yT}</span></span>
+        <span class="text-end">red ${r}%<br><span class="vt-econ-band-time">${rT}</span></span>
+      </div>`,
+      });
+    }
+    if (shape.builds) {
+      const B = bt || {};
+      const hasB = !!bt;
+      const srcBadge = B.structures_completion_source === 'inferred'
+        ? ` <span class="badge vt-econ-inferred-badge" data-bs-toggle="tooltip"
+              title="Structure completions inferred as queued − cancelled (this session's collector predates constructor BUILD events).">inferred</span>`
+        : '';
+      divider('div-builds', hasB);
+      statRow('Units built', `${fmtScrap(B.units_built)} <span class="text-muted">(${fmtScrap(B.builds_per_min)} /min)</span>`,
+        'Everything the recycler, factory and armory finished building — vehicles and armory items alike. The per-minute figure is the commander\'s production tempo.',
+        'units-built', hasB);
+      statRow('&nbsp;&nbsp;combat ships', `${fmtScrap(B.ships_built)} <span class="text-muted">(${fmtScrap(B.combat_ship_value)} scrap)</span>`,
+        'Just the fighting vehicles, and what they cost in total. Scavengers, tugs, service pods and camera pods are not counted here.',
+        'ships-built', hasB);
+      statRow('Structures built', `${fmtScrap(B.structures_built)}${srcBadge}`,
+        'Buildings the constructor completed — pools, gun towers, factories and the rest of the base.',
+        'structures-built', hasB);
+      // v20: the old single "Cancelled orders" row blended two different
+      // behaviours and attached a scrap figure that was ~70% fiction. A
+      // producer builds one unit at a time and only charges each unit when
+      // IT starts, so cancelling a stack costs one unit and frees the rest.
+      const backedOut = (B.orders_backed_out || 0) + (B.structures_cancelled || 0);
+      statRow('Orders backed out', `${fmtScrap(backedOut)} <span class="text-muted">(${fmtScrap(B.cancel_sunk_cost)} scrap sunk)</span>`,
+        'Times the commander cancelled something already being built. Only the unit actually in production had been paid for, and cancelling it refunds about half, so the rest is scrap that bought nothing.',
+        'orders-backed-out', hasB && !!backedOut);
+      statRow('Queue trimmed', `${fmtScrap(B.orders_trimmed)} <span class="text-muted">(free)</span>`,
+        'Units that were queued up behind the one being built and got cancelled before they ever started. These cost nothing at all — the scrap is only taken when a unit begins building — so this is a measure of how much the commander over-queued and then changed their mind.',
+        'orders-trimmed', hasB && !!B.orders_trimmed);
+    }
+
+    // --- Thug supply (match.schema_version 18) ---
+    // How hard this commander's thugs were to keep in ships. Replaces the
+    // retired "median rebuild latency" row, which timed the commander's
+    // next build ORDER after a loss — that order was never attributable
+    // to the thug who died, and it missed commanders who re-ship instantly
+    // from pre-built stock. These rows measure the outcome instead.
+    const ts = ((currentData.thug_supply || {})[side]) || null;
+    if (shape.thugs) {
+      const T = ts || {};
+      const hasT = !!ts;
+      // v19: per-thug sub-rows behind each team total. `thugs` is sorted
+      // pipeline-side (heaviest attrition first), so render order is not
+      // this renderer's business. Absent on pre-v19 matches. Each list is
+      // padded to the longer side's length so the rows BELOW the block
+      // stay aligned when one team fielded more thugs than the other.
+      const lists = econThugLists(ts);
+      const subRow = (t, valueHtml, key) => statRow(
+        `&nbsp;&nbsp;${vtPlayerLinkHtml(t.name, t.steam64)}`, valueHtml, null, key
+      );
+
+      divider('div-thugs', hasT);
+      subhead('Thug supply', 'head-thugs', hasT);
+      statRow('Thug ships lost', `${fmtScrap(T.thug_ships_lost)} <span class="text-muted">(${fmtScrap(T.thug_ship_value_lost)} scrap)</span>`,
+        'Fighting vehicles this commander\'s thugs lost, and what they were worth. Counts human-piloted losses only, so AI craft the commander built are not in here. Compare against combat ships built above: that is the commander\'s attrition bill.',
+        'thug-ships-lost', hasT);
+      for (let i = 0; i < shape.lost; i++) {
+        const t = lists.lost[i];
+        if (t) subRow(t, `${fmtScrap(t.ships_lost)} <span class="text-muted">(${fmtScrap(t.ship_value_lost)} scrap)</span>`, `thug-lost-${i}`);
+        else spacer(`thug-lost-${i}`);
+      }
+
+      const footSec = T.thug_pilot_sec;
+      const hasFoot = hasT && footSec !== null && footSec !== undefined;
+      const atBase = (T.thug_at_base_pilot_sec !== null && T.thug_at_base_pilot_sec !== undefined)
+        ? ` <span class="text-muted">(${fmtDurationCompact(T.thug_at_base_pilot_sec)} at base)</span>` : '';
+      statRow('Thug time on foot', hasFoot ? `${fmtDurationCompact(footSec)}${atBase}` : '—',
+        'Total time this commander\'s thugs spent out of a ship, added together across all of them. The at-base figure is the part of that spent standing in their own base waiting on a new ship — thugs the commander had not re-shipped yet.',
+        'thug-time-on-foot', hasFoot);
+      for (let i = 0; i < shape.foot; i++) {
+        const t = hasFoot ? lists.foot[i] : null;
+        if (t) {
+          const tAtBase = (t.at_base_pilot_sec !== null && t.at_base_pilot_sec !== undefined)
+            ? ` <span class="text-muted">(${fmtDurationCompact(t.at_base_pilot_sec)} at base)</span>` : '';
+          subRow(t, `${fmtDurationCompact(t.pilot_sec)}${tAtBase}`, `thug-foot-${i}`);
+        } else {
+          spacer(`thug-foot-${i}`);
+        }
+      }
+
+      const reship = T.reship_median_sec;
+      const hasReship = hasT && reship !== null && reship !== undefined;
+      statRow('Median re-ship time', hasReship
+        ? `${reship}s <span class="text-muted">(${fmtScrap(T.reship_spells)} times)</span>` : '—',
+        'Typical wait between a thug losing their ship and being back in one. Measured from the thugs themselves, so it counts however they got the ship — freshly built or taken from stock.',
+        'reship-median', hasReship);
+    }
+    return spec;
+  }
+
+  // Lockstep filter. Both specs come out of the same builder with the same
+  // shape hints, so their key sequences are identical by construction and
+  // aligning is just "drop the slots NEITHER side wants". If that invariant
+  // ever breaks, keep every row rather than silently mis-pairing them.
+  function alignEconomyRowSpecs(a, b) {
+    const paired = a.length === b.length && a.every((r, i) => r.key === b[i].key);
+    if (!paired) {
+      console.warn('[vt] economy row specs diverged — skipping pair alignment');
+      return;
+    }
+    const keep = [];
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].present || b[i].present) keep.push(i);
+    }
+    const pick = (arr) => keep.map(i => arr[i]);
+    const ka = pick(a);
+    const kb = pick(b);
+    a.length = 0; a.push(...ka);
+    b.length = 0; b.push(...kb);
+  }
+
+  function econRowHtml(r) {
+    const key = r.key ? ` data-econ-row="${esc(r.key)}"` : '';
+    switch (r.kind) {
+      case 'divider':
+        return '<hr class="my-2 vt-econ-divider">';
+      case 'subhead':
+        return `<div class="vt-econ-subhead"${key}>${r.label}</div>`;
+      case 'bands':
+        return `<div class="vt-econ-bands"${key}>${r.html}</div>`;
+      case 'spacer':
+        // Holds a slot so the rows below stay aligned with the other card.
+        return '<div class="vt-econ-stat-row vt-econ-row-spacer" aria-hidden="true"></div>';
+      default: {
+        const info = r.tip
+          ? `<i class="bi bi-info-circle vt-col-info" data-bs-toggle="tooltip" data-bs-html="true" title="${esc(r.tip)}"></i>`
+          : '';
+        return `<div class="d-flex justify-content-between align-items-baseline vt-econ-stat-row"${key}>
+        <span class="vt-econ-stat-label"><span class="vt-econ-stat-label-text">${r.label}</span>${info}</span>
+        <span class="vt-econ-stat-val">${r.value}</span></div>`;
+      }
+    }
+  }
+
+  function renderEconomyCard(cardId, side, spec) {
     const el = document.getElementById(cardId);
     if (!el) return;
     const et = ((currentData.economy || {}).teams || {})[side] || null;
@@ -3199,177 +3495,47 @@
       ? vtPlayerLinkHtml(commander.name, commander.s64)
       : '<span class="text-muted">Unknown commander</span>';
     const teamColor = side === '1' ? 'var(--kb-primary)' : 'var(--kb-success)';
-
-    let rows = '';
-    const statRow = (label, valueHtml, tip) => {
-      const info = tip
-        ? ` <i class="bi bi-info-circle vt-col-info" data-bs-toggle="tooltip" data-bs-html="true" title="${esc(tip)}"></i>`
-        : '';
-      return `<div class="d-flex justify-content-between align-items-baseline vt-econ-stat-row">
-        <span style="color:var(--kb-text-muted)">${label}${info}</span>
-        <span class="vt-econ-stat-val">${valueHtml}</span></div>`;
-    };
-
-    if (et) {
-      // Terminology contract: "collected" (never "salvaged"), "loose"
-      // (never "lumps"), and the SCRAP AMOUNT of loose is the headline
-      // number — players say "I got 25 loose" meaning 25 scrap, so the
-      // piece count stays out of the primary copy (tooltip-only).
-      const loosePct = et.scrap_income > 0
-        ? Math.round((et.income_loose / et.scrap_income) * 100) : 0;
-      rows += statRow('Scrap generated', fmtScrap(et.scrap_income),
-        'Every point of scrap that arrived in the bank all match. Three sources add up to this: pools regenerating, loose collected in the field, and refunds from cancelled orders.');
-      rows += statRow('&nbsp;&nbsp;from pools', fmtScrap(et.income_regen),
-        'Scrap that regenerated on its own from the extractors this team controlled. The steady background income — no scavenger required.');
-      rows += statRow('&nbsp;&nbsp;loose collected', `${fmtScrap(et.income_loose)} <span class="text-muted">(${loosePct}% of income)</span>`,
-        `Loose scrap hauled in from the field by scavengers — the part of the income the team had to go out and earn. Every pickup is worth 5, so this is ${fmtScrap(et.loose_collections)} pickups. When the bank is nearly full only the part that fits is credited and the rest is held until there is room again, so a single pickup can land in two installments.`);
-      if (et.income_refund) {
-        rows += statRow('&nbsp;&nbsp;from refunds', fmtScrap(et.income_refund),
-          'Scrap handed back when an order was cancelled. Cancels refund roughly half of what was already deducted, and armory orders refund nothing at all.');
-      }
-      if (et.income_unclassified) {
-        rows += statRow('&nbsp;&nbsp;other', fmtScrap(et.income_unclassified),
-          'Income that could not be tied to pools, loose or refunds. Expected to be zero or close to it, so anything sizeable here is worth a look — it means scrap arrived in a pattern the game is not known to produce.');
-      }
-      rows += statRow('Scrap spent', fmtScrap(et.scrap_outflow_gross),
-        'Every point of scrap that left the bank — units, structures, upgrades and the unrefunded half of cancelled orders combined.');
-
-      // Peaks and averages over finals: where the bank ENDED is an
-      // accident of when the game stopped, but the highest it ever
-      // reached (against the cap it could have reached) is a real
-      // statement about how the commander rode their economy.
-      const capTxt = et.peak_max_scrap
-        ? ` <span class="text-muted">of ${fmtScrap(et.peak_max_scrap)} cap</span>` : '';
-      rows += statRow('Peak bank', `${fmtScrap(et.peak_scrap)}${capTxt}`,
-        'The fullest the scrap bank ever got, next to the largest storage this team ever had. Storage is 40 for a live recycler plus 20 per pool, so the cap grows as they take pools.');
-      const floatPct = et.mean_float_ratio !== null && et.mean_float_ratio !== undefined
-        ? ` <span class="text-muted">(${Math.round(et.mean_float_ratio * 100)}% full)</span>` : '';
-      rows += statRow('Average bank', `${fmtScrap(et.mean_scrap)}${floatPct}`,
-        'The typical amount sitting in the bank across the whole match. A low average usually means the commander kept spending instead of hoarding. The percentage is average fullness measured against the storage cap at the time, and the cap grows as the team takes pools — so it will not match the average divided by the peak cap above.');
-
-      rows += statRow('Pools', `<span class="text-muted">peak</span> ${fmtScrap(et.peak_pools)} <span class="text-muted">· lost</span> ${fmtScrap(et.pools_lost)}`,
-        'The most extractors this team held at once, and how many they lost over the match in total. A high loss count means pools kept getting taken and retaken.');
-      const tempo = [];
-      [3, 5, 7].forEach((n) => {
-        const t = et[`time_to_${n}_pools_sec`];
-        if (t !== null && t !== undefined) tempo.push(`${n} @ ${fmtDurationCompact(t)}`);
-      });
-      if (tempo.length) {
-        rows += statRow('&nbsp;&nbsp;pool tempo', `<span class="text-muted">${tempo.join(' · ')}</span>`,
-          'How early the team reached 3, 5 and 7 pools. Earlier is a faster economic opening.');
-      }
-
-      const firstUpg = et.time_to_first_upgrade_sec;
-      const upgTxt = (firstUpg !== null && firstUpg !== undefined)
-        ? ` <span class="text-muted">· first @ ${fmtDurationCompact(firstUpg)}</span>` : '';
-      rows += statRow('Upgrades built', `${fmtScrap(et.upgrades_built)}${upgTxt}`,
-        `Extractor upgrades built across the match, and when the first one went up. Upgraded extractors regenerate faster. ${fmtScrap(et.upgrades_final)} were still standing at the end.`);
-
-      // Scrap-status bar. Read every band DIRECTLY from its own field --
-      // the old code derived red as 100 - green - yellow, which silently
-      // absorbed the rounding error from the other two bands.
-      const g = Math.round((et.green_share || 0) * 100);
-      const y = Math.round((et.yellow_share || 0) * 100);
-      const r = Math.round((et.red_share || 0) * 100);
-      const gT = fmtDurationCompact(et.green_sec);
-      const yT = fmtDurationCompact(et.yellow_sec);
-      const rT = fmtDurationCompact(et.red_sec);
-      // Reconciled regen story. The engine's traffic-light naming reads
-      // backwards to newcomers: RED is the BOTTOM of the bank and the
-      // FASTEST regen band, so time in red is usually a commander
-      // spending at full tempo, not one going broke.
-      const bandTip = 'How long the bank sat in each regeneration band. '
-        + 'Scrap regenerates fastest when the bank is low, so time in red usually means the commander '
-        + 'was spending as fast as scrap came in — efficient, but with no reserve for a big order. '
-        + 'Time in green means a full bank that is topping up slowly.'
-        + `<br><br>green ${g}% · ${gT}<br>yellow ${y}% · ${yT}<br>red ${r}% · ${rT}`;
-      rows += `<div class="vt-econ-status-bar mt-2 mb-1" data-bs-toggle="tooltip" data-bs-html="true"
-        title="${esc(bandTip)}">
-        <div style="width:${g}%;background:var(--kb-success)"></div>
-        <div style="width:${y}%;background:var(--kb-warning)"></div>
-        <div style="width:${r}%;background:var(--kb-danger)"></div>
-      </div>
-      <div class="d-flex justify-content-between vt-econ-band-legend">
-        <span>green ${g}%<br><span class="vt-econ-band-time">${gT}</span></span>
-        <span class="text-center">yellow ${y}%<br><span class="vt-econ-band-time">${yT}</span></span>
-        <span class="text-end">red ${r}%<br><span class="vt-econ-band-time">${rT}</span></span>
-      </div>`;
-    }
-    if (bt) {
-      const srcBadge = bt.structures_completion_source === 'inferred'
-        ? ` <span class="badge vt-econ-inferred-badge" data-bs-toggle="tooltip"
-              title="Structure completions inferred as queued − cancelled (this session's collector predates constructor BUILD events).">inferred</span>`
-        : '';
-      rows += `<hr class="my-2" style="border-color:var(--kb-border-subtle)">`;
-      rows += statRow('Units built', `${fmtScrap(bt.units_built)} <span class="text-muted">(${fmtScrap(bt.builds_per_min)} /min)</span>`,
-        'Everything the recycler, factory and armory finished building — vehicles and armory items alike. The per-minute figure is the commander\'s production tempo.');
-      rows += statRow('&nbsp;&nbsp;combat ships', `${fmtScrap(bt.ships_built)} <span class="text-muted">(${fmtScrap(bt.combat_ship_value)} scrap)</span>`,
-        'Just the fighting vehicles, and what they cost in total. Scavengers, tugs, service pods and camera pods are not counted here.');
-      rows += statRow('Structures built', `${fmtScrap(bt.structures_built)}${srcBadge}`,
-        'Buildings the constructor completed — pools, gun towers, factories and the rest of the base.');
-      // v20: the old single "Cancelled orders" row blended two different
-      // behaviours and attached a scrap figure that was ~70% fiction. A
-      // producer builds one unit at a time and only charges each unit when
-      // IT starts, so cancelling a stack costs one unit and frees the rest.
-      const backedOut = (bt.orders_backed_out || 0) + (bt.structures_cancelled || 0);
-      if (backedOut) {
-        rows += statRow('Orders backed out', `${fmtScrap(backedOut)} <span class="text-muted">(${fmtScrap(bt.cancel_sunk_cost)} scrap sunk)</span>`,
-          'Times the commander cancelled something already being built. Only the unit actually in production had been paid for, and cancelling it refunds about half, so the rest is scrap that bought nothing.');
-      }
-      if (bt.orders_trimmed) {
-        rows += statRow('Queue trimmed', `${fmtScrap(bt.orders_trimmed)} <span class="text-muted">(free)</span>`,
-          'Units that were queued up behind the one being built and got cancelled before they ever started. These cost nothing at all — the scrap is only taken when a unit begins building — so this is a measure of how much the commander over-queued and then changed their mind.');
-      }
-    }
-
-    // --- Thug supply (match.schema_version 18) ---
-    // How hard this commander's thugs were to keep in ships. Replaces the
-    // retired "median rebuild latency" row, which timed the commander's
-    // next build ORDER after a loss — that order was never attributable
-    // to the thug who died, and it missed commanders who re-ship instantly
-    // from pre-built stock. These rows measure the outcome instead.
-    const ts = ((currentData.thug_supply || {})[side]) || null;
-    if (ts) {
-      rows += `<hr class="my-2" style="border-color:var(--kb-border-subtle)">`;
-      rows += `<div class="vt-econ-subhead">Thug supply</div>`;
-      // v19: per-thug sub-rows behind each team total. `thugs` is sorted
-      // pipeline-side (heaviest attrition first), so render order is not
-      // this renderer's business. Absent on pre-v19 matches.
-      const thugRows = Array.isArray(ts.thugs) ? ts.thugs : [];
-      const subRow = (t, valueHtml) => statRow(
-        `&nbsp;&nbsp;${vtPlayerLinkHtml(t.name, t.steam64)}`, valueHtml
-      );
-
-      rows += statRow('Thug ships lost', `${fmtScrap(ts.thug_ships_lost)} <span class="text-muted">(${fmtScrap(ts.thug_ship_value_lost)} scrap)</span>`,
-        'Fighting vehicles this commander\'s thugs lost, and what they were worth. Counts human-piloted losses only, so AI craft the commander built are not in here. Compare against combat ships built above: that is the commander\'s attrition bill.');
-      thugRows.forEach(t => {
-        if (!t.ships_lost) return;
-        rows += subRow(t, `${fmtScrap(t.ships_lost)} <span class="text-muted">(${fmtScrap(t.ship_value_lost)} scrap)</span>`);
-      });
-
-      if (ts.thug_pilot_sec !== null && ts.thug_pilot_sec !== undefined) {
-        const atBase = (ts.thug_at_base_pilot_sec !== null && ts.thug_at_base_pilot_sec !== undefined)
-          ? ` <span class="text-muted">(${fmtDurationCompact(ts.thug_at_base_pilot_sec)} at base)</span>` : '';
-        rows += statRow('Thug time on foot', `${fmtDurationCompact(ts.thug_pilot_sec)}${atBase}`,
-          'Total time this commander\'s thugs spent out of a ship, added together across all of them. The at-base figure is the part of that spent standing in their own base waiting on a new ship — thugs the commander had not re-shipped yet.');
-        thugRows.forEach(t => {
-          if (t.pilot_sec === null || t.pilot_sec === undefined || !t.pilot_sec) return;
-          const tAtBase = (t.at_base_pilot_sec !== null && t.at_base_pilot_sec !== undefined)
-            ? ` <span class="text-muted">(${fmtDurationCompact(t.at_base_pilot_sec)} at base)</span>` : '';
-          rows += subRow(t, `${fmtDurationCompact(t.pilot_sec)}${tAtBase}`);
-        });
-      }
-      if (ts.reship_median_sec !== null && ts.reship_median_sec !== undefined) {
-        rows += statRow('Median re-ship time', `${ts.reship_median_sec}s <span class="text-muted">(${fmtScrap(ts.reship_spells)} times)</span>`,
-          'Typical wait between a thug losing their ship and being back in one. Measured from the thugs themselves, so it counts however they got the ship — freshly built or taken from stock.');
-      }
-    }
+    const rows = spec.map(econRowHtml).join('');
 
     el.innerHTML = `
       <div class="card-header d-flex align-items-center justify-content-between">
         <h5 class="mb-0"><span class="vt-econ-team-dot" style="background:${teamColor}"></span>Team ${esc(side)} — ${cmdrHtml}</h5>
       </div>
       <div class="card-body">${rows || '<p class="text-muted mb-0">No data.</p>'}</div>`;
+  }
+
+  // Cross-card row highlight. Delegated on the persistent section wrapper
+  // (the cards themselves get their innerHTML replaced on every render, so
+  // per-row listeners would leak). Mirrors the raw browser's paired
+  // DamageDealt/Received highlight.
+  function wireEconomyRowHover() {
+    if (econHoverWired) return;
+    const host = document.getElementById('section-economy-production');
+    if (!host) return;
+    host.addEventListener('mouseover', onEconomyRowHover);
+    host.addEventListener('mouseleave', clearEconomyRowHighlight);
+    econHoverWired = true;
+  }
+
+  function clearEconomyRowHighlight() {
+    const host = document.getElementById('section-economy-production');
+    if (!host) return;
+    host.querySelectorAll('.vt-econ-row-hl').forEach(el => {
+      el.classList.remove('vt-econ-row-hl', 'vt-econ-row-hl--origin');
+    });
+  }
+
+  function onEconomyRowHover(evt) {
+    const host = document.getElementById('section-economy-production');
+    if (!host) return;
+    clearEconomyRowHighlight();
+    const row = evt.target.closest('[data-econ-row]');
+    if (!row || !host.contains(row)) return;
+    const key = row.dataset.econRow;
+    host.querySelectorAll(`[data-econ-row="${key}"]`).forEach(el => {
+      el.classList.add('vt-econ-row-hl');
+    });
+    row.classList.add('vt-econ-row-hl--origin');
   }
 
   function buildlogFilterFn(row) {

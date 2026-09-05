@@ -6258,8 +6258,15 @@ html.vt-cursor-active * {
     vertical-align: baseline;
 }
 
+/* The two production cards render as a matched pair (row N on the left is
+   row N on the right), so a row must be EXACTLY one line tall on both
+   cards. Locking line-height + min-height and forbidding wrap means a long
+   label or value can never push one card's rows out of step with the
+   other's. See renderEconomyProductionCards() in js/app.js. */
 .vt-econ-stat-row {
     font-size: 0.85rem;
+    line-height: 1.35;
+    min-height: calc(1.35em + 0.36rem);
     padding: 0.18rem 0;
     border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) 5%, transparent);
 }
@@ -6268,9 +6275,42 @@ html.vt-cursor-active * {
     border-bottom: none;
 }
 
+/* Label column. The text ellipsizes rather than wrapping; the info icon
+   sits outside the ellipsing span so it is never what gets clipped. */
+.vt-econ-stat-label {
+    display: flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    min-width: 0;
+    color: var(--kb-text-muted);
+}
+
+.vt-econ-stat-label-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-econ-stat-label .vt-col-info {
+    flex: 0 0 auto;
+}
+
 .vt-econ-stat-val {
+    flex: 0 0 auto;
     font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
     font-weight: 600;
+    white-space: nowrap;
+}
+
+/* Inert slot padding the shorter per-thug list, so the rows beneath it stay
+   level with the other card. Borderless — an empty ruled row reads as a bug. */
+.vt-econ-row-spacer {
+    border-bottom-color: transparent;
+}
+
+.vt-econ-divider {
+    border-color: var(--kb-border-subtle);
 }
 
 /* Scrap-status share bar: green / yellow / red segments over match time. */
@@ -6312,6 +6352,26 @@ html.vt-cursor-active * {
     font-size: 0.65rem;
     font-weight: 600;
     vertical-align: middle;
+}
+
+/* Cross-card row highlight: hovering a row lights the SAME row on the other
+   commander card so the two sides can be read against each other. Mirrors
+   the raw browser's paired DamageDealt/Received highlight. The negative
+   inline margin cancels the added padding, so the highlight bleeds past the
+   text without nudging any content sideways -- which is also why these
+   rules must stay BELOW every .vt-econ-* rule that sets a margin shorthand
+   (.vt-econ-subhead), since they share single-class specificity. */
+.vt-econ-row-hl {
+    background: color-mix(in oklab, var(--kb-accent) 14%, transparent);
+    outline: 1px solid color-mix(in oklab, var(--kb-accent) 55%, transparent);
+    outline-offset: -1px;
+    border-radius: 4px;
+    margin-inline: -0.4rem;
+    padding-inline: 0.4rem;
+}
+
+.vt-econ-row-hl--origin {
+    background: color-mix(in oklab, var(--kb-accent) 22%, transparent);
 }
 
 /* Build Order Log — two team columns of compact event rows. */
