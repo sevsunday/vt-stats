@@ -787,7 +787,7 @@ Match-global, always-unfiltered (highlights passthrough contract). Present only 
 | `teams{n}.income_regen` / `income_loose` / `income_refund` / `income_unclassified` | `number` | Full-rate delta classifier, in order: (1) **refund-first**, but only for expected refunds `>= ECON_REFUND_MIN_MATCH` (= 5); (2) **cap-clamp** — a delta that lands the bank AT `max_scrap` whose remainder is neither 1 nor a 5-multiple is a loose delivery truncated to the free room, so all of it books to loose and `5 - rem % 5` is carried as withheld overflow; (3) remaining 5k = loose collected by scavengers; (4) a sub-cap 2/3/4 remainder draws down withheld overflow into loose (the tail of an already-counted pickup); (5) a leftover +1 = regen; (6) anything still left = unclassified. **The four are a partition of `scrap_income`** — they sum to it exactly (gated). **Terminology contract**: players say "collected" (never "salvaged") and count loose by SCRAP AMOUNT — "I got 25 loose" means 25 scrap — so `income_loose` (the amount) is the headline number on every display surface. |
 | `teams{n}.loose_collections` | `number` | Count of individual loose pickups (secondary telemetry — never the headline copy; see the terminology contract above). A cap-clamped pickup is counted once, when its first installment lands — the later flush of its withheld part adds scrap to `income_loose` but does NOT bump this |
 | `teams{n}.scrap_outflow_gross` | `number` | Σ negative full-rate deltas |
-| `teams{n}.outflow_built_cost` / `outflow_cancelled_cost` / `outflow_pending_at_end_cost` / `outflow_structure_orders` | `number` | Outflow ledger components (deduction is at QUEUE time — measured; pending-at-end = FIFO remainder deducted but never built, NAMED so it's never misread as an anomaly) |
+| `teams{n}.outflow_built_cost` / `outflow_cancelled_cost` / `outflow_pending_at_end_cost` / `outflow_structure_orders` / `outflow_clamped_cost` | `number` | Outflow ledger components. **Scrap is charged at build-START, not at QUEUE** (v20 — see the bulk-cancel section below): `outflow_cancelled_cost` books ONE unit per bulk cancel (the unit in production), and `outflow_pending_at_end_cost` books only the in-progress unit per producer, not the whole voided queue. `outflow_clamped_cost` (v20) is scrap destroyed when a dying pool drops `max_scrap` below the bank — real gross outflow with no order behind it. **These six plus `scrap_outflow_unaccounted` sum to `scrap_outflow_gross` exactly** (gated in `run_all_gates.py`) |
 | `teams{n}.scrap_outflow_unaccounted` | `number` | Residual sink — EXPECTED ≈ 0 (repairs/clamps only); a large value is an engine-anomaly detector |
 | `teams{n}.final_scrap` / `peak_scrap` / `mean_scrap` | `number` | Bank summary. `final_scrap` is an artifact of when the game stopped and is NOT displayed on the Economy card (v18 dropped it in favour of peaks / averages / cumulatives) |
 | `teams{n}.peak_max_scrap` | `number` | **v18.** Largest storage cap observed (`40·recycler + 20·pools`) — the denominator that makes `peak_scrap` readable |
@@ -829,6 +829,47 @@ Before `PIPELINE_VERSION` 34 both halves of a split pickup fell through to
 match); the cap-clamp rule books them to `income_loose` where they belong,
 leaving `income_unclassified` as a genuine anomaly detector near zero.
 
+##### Scrap is charged at build-START, and a bulk cancel clears the queue
+
+The other half of the same misconception, fixed at `PIPELINE_VERSION` 35.
+
+Each producer (recycler / factory / armory — all one-per-team, and a faction
+factory upgrade REPLACES its predecessor) holds **one order at a time**, and
+that order may stack N units of the same ODF. **Each unit is charged when IT
+starts building, not when the order is queued.** For an idle producer the two
+coincide, which is why the original audit — isolated queues, 92-96% showing
+the cost at the queue tick — could not tell them apart.
+
+Consequences, all measured on the first v4 match:
+
+- A **bulk cancel clears the entire queue** and fires one CANCEL per queued
+  unit, but only the unit in production was ever paid for. Burst size equals
+  tracked depth in every clean case (Harvesters 3=3, 2=2, 1=1, 1=1; artillery
+  3=3; the other team's Harvesters 4=4; armory 1=1), and a 3-Harvester stack
+  cancel returned ~10 scrap, not 30.
+- Production really is strictly sequential: `t=117781..117800` queues 5
+  Harvesters, `t=118005..118805` builds them **exactly 200 ticks apart**, then
+  7 Service Pods queue and build **exactly 71 ticks apart**, with no overlap.
+- Only **205 of 784** Service Pod QUEUE ticks (26%) show the charge at the
+  queue tick. Charge-at-queue predicts ~100%.
+- **The collector caps bulk-cancel emission at 10 CANCEL events.** Every case
+  where depth exceeds burst has burst == exactly 10, and all are pure Service
+  Pod queues (which are the only orders that exceed the engine's 10-slot
+  queue; no non-pod queue in the corpus passes 7). Depth reached 30, 36 and
+  39. So `orders_trimmed` MUST come from the tracked depth, never the burst
+  size. Quantified in `cancel_events_truncated`.
+- Because a bulk cancel clears everything, **resetting the tracked queue to
+  empty on every burst is both correct and self-healing** — it resyncs the
+  bookkeeping against those missing events, which otherwise accumulate as a
+  monotone offset (54 units over the match) that looks like a standing
+  backlog but is not one.
+
+Effect on the first v4 match: `outflow_cancelled_cost` 749 → 319 and
+`outflow_pending_at_end_cost` 186 → 20 on one side, 106 → 44 and 0 → 0 on the
+other, collapsing `scrap_outflow_unaccounted` from **-552 to +24** and from
+**-72 to -64**. The remaining gap is the inferred-mode constructor lane
+(structure orders with zero BUILD events), which is deliberately untouched.
+
 #### `builds` (proto v4 — `match.schema_version` 17)
 
 Match-global, always-unfiltered. Present only when `has_build_data`.
@@ -837,7 +878,12 @@ Match-global, always-unfiltered. Present only when `has_build_data`.
 |---|---|---|
 | `has_build_data` | `boolean` | Always `true` when the block exists |
 | `feed[]` | `object[]` | Every BuildEvent: `{tick, type, producer, producer_resolved, team, odf, name, scrap_cost, scrap_status_at_queue, scrap_status_at_build}`. `producer_resolved` ∈ `"recycler"\|"factory"\|null` (reverse-map over odf.min.json producer menus, `cpu`/`insane` + `virtual_class_*` excluded — menus verified disjoint); `name` = unit display name via `prettify_odf()`; both scrap-status stamps recorded, skill summaries key on the QUEUE tick (deduction timing — measured) |
-| `teams{n}.units_queued` / `units_cancelled` / `units_built` | `number` | Unit-lane counts (factory + recycler + armory) |
+| `teams{n}.units_queued` / `units_cancelled` / `units_built` | `number` | Unit-lane counts (factory + recycler + armory). `units_cancelled` is the RAW CANCEL event count, kept for tier-2 reconcile — for display use the v20 split below, since a bulk cancel fires one event per queued unit and this number blends "backed out of a build" with "trimmed an over-long queue" |
+| `teams{n}.orders_backed_out` | `number` | **v20.** Bulk cancels that hit a live order, i.e. the commander cancelled something already building. This is the reaction/mistake metric and the count `cancel_sunk_cost` belongs to |
+| `teams{n}.orders_trimmed` | `number` | **v20.** Units that were queued behind the one in production and cancelled before starting. **Free** — the engine never charged them. The over-queueing / churn metric. Derived from the tracked queue depth, never from the burst size (see `cancel_events_truncated`) |
+| `teams{n}.cancels_unmatched` | `number` | **v20.** Bulk cancels with no tracked open order, i.e. the QUEUE event was dropped rather than the CANCEL invented. All 5 in the first v4 corpus are armory-lane (one ODF has 2 cancels and 0 queues at all). These still charge one unit, treating the CANCEL as evidence the order existed |
+| `teams{n}.cancel_events_truncated` | `number` | **v20.** Collector gap: Σ `max(0, tracked_depth − cancel_events)`. A bulk cancel of a queue deeper than 10 emits only 10 CANCEL events, so deep Service Pod stacks under-report. 54 on mort in the first v4 match, 0 elsewhere |
+| `teams{n}.orders_open_at_end` | `number` | **v20.** Orders still queued when the stream stopped (e.g. voided by the producer dying). Counted, never costed beyond the in-progress head unit |
 | `teams{n}.ships_built` | `number` | Combat vehicles only — classLabel chains + producer resolution, NEVER the ODF DB top-level category (service pods land in `Effect`) |
 | `teams{n}.combat_ship_value` | `number` | Σ scrapCost over combat-ship BUILDs — the War Machine basis |
 | `teams{n}.scrap_spent_units` | `number` | Σ scrapCost of unit BUILDs ("value fielded" — deduction-timing-agnostic display measure) |

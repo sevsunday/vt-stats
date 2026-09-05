@@ -66,7 +66,12 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 33 -> 34: income classifier corrections (refund-match floor +
 # cap-clamped loose attribution, see ECON_REFUND_MIN_MATCH below) and
 # thug_supply losses restricted to human-piloted ships + per-thug rows.
-PIPELINE_VERSION = 34
+# 34 -> 35: build-ledger cancel rework. Scrap is charged at build-START,
+# not at QUEUE, so a bulk cancel costs ONE unit (the one in production)
+# instead of the whole stack; pending-at-end likewise costs only the
+# in-progress unit. Adds the orders_backed_out / orders_trimmed split and
+# outflow_clamped_cost.
+PIPELINE_VERSION = 35
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3985,6 +3990,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Loose scrap the storage cap withheld, waiting on headroom.
             # See the cap-clamp rule in the income classifier below.
             "pending_overflow": 0,
+            # v20: scrap DESTROYED when a pool dies and max_scrap drops
+            # below the current bank. Real gross outflow with no order
+            # behind it -- named so the residual stops absorbing it.
+            "prev_max_scrap": None, "clamped": 0,
             "cur_status": 0,  # latest wire ScrapStatus (for the build join)
         }
 
@@ -4001,12 +4010,30 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "structures_built_events": 0, "scrap_spent_structures": 0,
             "dedup_folded_queues": 0, "producer_unresolved": 0,
             "cancel_sunk_cost": 0,
+            # v20 bulk-cancel split. A bulk cancel clears the producer's
+            # WHOLE queue but the engine only ever charged the unit actually
+            # in production, so the two halves are different behaviours:
+            #   orders_backed_out -- bursts that hit a live order (cost real
+            #                        scrap; the reaction/mistake metric)
+            #   orders_trimmed    -- units behind it, never charged, free
+            #                        (the over-queueing / churn metric)
+            "orders_backed_out": 0, "orders_trimmed": 0,
+            # CANCEL with no tracked open order -- the QUEUE event was
+            # dropped (all 5 in the first v4 corpus are armory-lane).
+            "cancels_unmatched": 0,
+            # Collector gap: a bulk cancel of a queue deeper than 10 emits
+            # only 10 CANCEL events. Σ max(0, tracked_depth - events).
+            "cancel_events_truncated": 0,
+            # Orders still queued at match end (voided, e.g. by the
+            # producer dying). Counted, never costed.
+            "orders_open_at_end": 0,
             # per-resolved-producer {lane: {"queued": n, "cancelled": n, "built": n}}
             "by_producer": defaultdict(lambda: defaultdict(int)),
             # per-unit cancel tallies (stack-cancels fire one CANCEL per unit)
             "cancel_counts": defaultdict(int),
             # QUEUE decisions by the team's scrap status at the queue tick
-            # (deduction is empirically AT QUEUE -- the skill-relevant tick)
+            # (the queue tick is the purchase DECISION; the deduction itself
+            # lands when the unit starts building -- see the cancel branch)
             "orders_by_status": defaultdict(lambda: {"count": 0, "scrap": 0}),
             "first_builds": [],       # first 10 BUILD completions {tick, odf}
             "combat_queue_ticks": [],  # combat-ship QUEUE ticks (rebuild latency)
@@ -4017,7 +4044,21 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     build_seen_queue_tuples = set()  # (tick, teamnum, producer, odf) dedup key
     # FIFO of open unit orders per (side, stem): (cost, status_at_queue_int).
     # Mirrors the fixture ledger contract exactly (make_v4_fixture.py).
+    # BUILD/CANCEL events carry the ODF, so per-stem is the right key for
+    # matching an event back to its order.
     build_open_units = {}
+    # Mirror of the real producer queue, per (side, lane): entries are
+    # (stem, cost, status_at_queue_int). The PRODUCER is what holds one
+    # order at a time (recycler / factory / armory are one-per-team; a
+    # faction factory upgrade REPLACES its predecessor), so this is the
+    # structure that knows which unit is actually in production -- and
+    # therefore which single unit a bulk cancel can charge.
+    build_lane_queue = {}
+    # Bulk-cancel bursts keyed (side, lane, tick). `depth` is the queue we
+    # had tracked, `events` counts the CANCEL events that actually arrived
+    # (the collector caps emission at 10), `statuses` hands the cleared
+    # orders' scrap-status stamps out to the feed rows in order.
+    build_cancel_bursts = {}
     # Structure-order FIFO per (side, stem) for the status join on
     # CANCEL/BUILD rows (ledger books structures at QUEUE time).
     build_open_structs = {}
@@ -4829,6 +4870,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                                 st["unclassified"] += _rem
                             elif _d < 0:
                                 st["outflow_gross"] += -_d
+                        # v20 storage-cap clamp: a dying pool drops max_scrap,
+                        # and anything the bank was holding above the new cap
+                        # is destroyed. It lands in outflow_gross as a plain
+                        # negative delta, so name it or the ledger residual
+                        # silently absorbs it (20 scrap / 1 event on mort,
+                        # 54 / 5 on Domakus in the first v4 match).
+                        if (st["prev_max_scrap"] is not None
+                                and _cap < st["prev_max_scrap"]
+                                and _prev is not None and _prev > _cap):
+                            st["clamped"] += _prev - _cap
+                        st["prev_max_scrap"] = _cap
                         st["prev_bank"] = _bank
 
                         # Full-rate summary accumulators.
@@ -5052,30 +5104,86 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 else:
                     _bc["units_queued"] += 1
                     build_open_units.setdefault(_ukey, []).append((_cost_i, _status_now))
+                    build_lane_queue.setdefault((_side, _lane), []).append(
+                        (_stem, _cost_i, _status_now))
                     if _stem in combat_ship_odfs:
                         _bc["combat_queue_ticks"].append(int(be.tick))
 
             elif _etype == "cancel":
-                # Refund expectation feeds the income classifier: factory/
-                # recycler/constructor lanes refund ~50% of cost, armory 0
-                # (measured on the real v4 session; small-n audit item).
-                _refund = 0 if _producer == "armory" else _cost_i // 2
-                econ_state[_side]["cancel_refunds"].append((int(be.tick), _refund))
-                _bc["cancel_sunk_cost"] += _cost_i - _refund
                 if _lane:
                     _bc["by_producer"][_lane]["cancelled"] += 1
                 if _is_struct:
+                    # Structure lane untouched (v20): zero cancels and zero
+                    # BUILD events corpus-wide, and multiple constructors can
+                    # exist so one-order-per-producer does not hold here.
+                    _refund = _cost_i // 2
+                    econ_state[_side]["cancel_refunds"].append((int(be.tick), _refund))
+                    _bc["cancel_sunk_cost"] += _cost_i - _refund
                     _lst = build_open_structs.get(_ukey)
                     if _lst:
                         _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_lst.pop(0)[1])
                     _bc["structures_cancelled"] += 1
                 else:
-                    _lst = build_open_units.get(_ukey)
-                    if _lst:
-                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_lst.pop(0)[1])
-                    # Mirrors the fixture ledger: cancelled cost books
-                    # unconditionally (the deduction happened at queue).
-                    build_ledger[_side]["cancelled"] += _cost_i
+                    # v20 bulk-cancel accounting. A bulk cancel clears the
+                    # producer's ENTIRE queue and fires one CANCEL per
+                    # queued unit, but the engine charges each unit when IT
+                    # STARTS building -- so exactly ONE unit (the one in
+                    # production) was ever paid for, and it is the only one
+                    # that refunds. Everything behind it was free.
+                    #
+                    # Verified on the wire: burst size == tracked depth on
+                    # every clean case (Harvesters 3=3/2=2/1=1, artillery
+                    # 3=3, Domakus 4=4/2=2/1=1, armory 1=1), and a 3-unit
+                    # Harvester stack cancel returned ~10 scrap, not 30.
+                    _bkey = (_side, _lane, int(be.tick))
+                    _burst = build_cancel_bursts.get(_bkey)
+                    if _burst is None:
+                        _lq = build_lane_queue.get((_side, _lane)) or []
+                        _depth = len(_lq)
+                        _burst = {
+                            "depth": _depth,
+                            "events": 0,
+                            "statuses": deque(_s for _st, _c, _s in _lq),
+                        }
+                        build_cancel_bursts[_bkey] = _burst
+                        if _depth:
+                            _charge = _lq[0][1]
+                            _bc["orders_backed_out"] += 1
+                            # Derived from the TRACKED depth, never the burst
+                            # size: the collector caps CANCEL emission at 10,
+                            # so burst size under-reports deep pod stacks.
+                            _bc["orders_trimmed"] += _depth - 1
+                        else:
+                            # No tracked open order -- the QUEUE event was
+                            # dropped rather than the CANCEL invented (all 5
+                            # in the first v4 corpus are armory, one ODF with
+                            # 2 cancels and 0 queues at all). Treat the
+                            # CANCEL as evidence the order existed.
+                            _charge = _cost_i
+                            _bc["cancels_unmatched"] += 1
+                        # Refund policy: factory/recycler lanes refund ~50%
+                        # of the charged unit, armory refunds nothing. The
+                        # income classifier only books it if the bank
+                        # actually moved that far, so a wrong expectation
+                        # self-corrects to zero.
+                        _refund = 0 if _producer == "armory" else _charge // 2
+                        build_ledger[_side]["cancelled"] += _charge
+                        _bc["cancel_sunk_cost"] += _charge - _refund
+                        if _refund > 0:
+                            econ_state[_side]["cancel_refunds"].append(
+                                (int(be.tick), _refund))
+                        # Clear the whole queue. This is both the correct
+                        # mechanic and what resyncs the bookkeeping against
+                        # the collector's 10-event emission cap.
+                        for _cs, _cc, _css in _lq:
+                            _slst = build_open_units.get((_side, _cs))
+                            if _slst:
+                                _slst.pop(0)
+                        build_lane_queue[(_side, _lane)] = []
+                    _burst["events"] += 1
+                    if _burst["statuses"]:
+                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(
+                            _burst["statuses"].popleft())
                     _bc["units_cancelled"] += 1
                     _bc["cancel_counts"][_stem] += 1
 
@@ -5098,6 +5206,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         # when a matching open order exists (an orphan
                         # BUILD's deduction never happened on this wire).
                         build_ledger[_side]["built"] += _entry[0]
+                    # Advance the producer's queue. Match by stem rather than
+                    # popping blindly, so a desync can never mis-attribute.
+                    _lq = build_lane_queue.get((_side, _lane))
+                    if _lq:
+                        for _idx, _lqe in enumerate(_lq):
+                            if _lqe[0] == _stem:
+                                _lq.pop(_idx)
+                                break
                     _bc["units_built"] += 1
                     _bc["scrap_spent_units"] += _cost_i
                     if _stem in combat_ship_odfs:
@@ -5986,17 +6102,35 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         for _row in build_feed:
             _row["name"] = prettify_odf(_row["odf"] + ".odf") if _row["odf"] else None
 
+    # v20 post-loop build reconciliation. Two things the event loop cannot
+    # know until the stream ends:
+    #   1. How many CANCEL events a burst actually emitted, so the
+    #      collector's 10-event cap can be quantified.
+    #   2. Which order was still in production when the stream stopped.
+    for (_bside, _blane, _btick), _burst in build_cancel_bursts.items():
+        build_counts[_bside]["cancel_events_truncated"] += max(
+            0, _burst["depth"] - _burst["events"])
+    for (_lside, _llane), _lq in build_lane_queue.items():
+        build_counts[_lside]["orders_open_at_end"] += len(_lq)
+
     if match_has_resource_data:
+        # Pending at end is the IN-PROGRESS unit per producer, not every
+        # open order: under charge-at-start only the unit actually building
+        # was ever paid for. Everything queued behind it is free, so a
+        # voided backlog (mort's recycler died at 100:11 with a deep pod
+        # stack) costs the head unit and nothing more.
         _pending_costs = {1: 0, 2: 0}
-        for (_side, _stem), _lst in build_open_units.items():
-            _pending_costs[_side] += sum(_c for _c, _s in _lst)
+        for (_side, _lane), _lq in build_lane_queue.items():
+            if _lq:
+                _pending_costs[_side] += _lq[0][1]
         _econ_teams = {}
         for _side in (1, 2):
             st = econ_state[_side]
             _led = build_ledger[_side]
             _n = st["samples"]
             _outflow_accounted = (_led["built"] + _led["cancelled"]
-                                  + _pending_costs[_side] + _led["structures"])
+                                  + _pending_costs[_side] + _led["structures"]
+                                  + st["clamped"])
             # Advantage integrals are signed from team 1's perspective in
             # the accumulators; each team's block carries its own sign.
             _sign = 1 if _side == 1 else -1
@@ -6017,10 +6151,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "scrap_outflow_gross": st["outflow_gross"],
                 "outflow_built_cost": _led["built"],
                 "outflow_cancelled_cost": _led["cancelled"],
+                # v20: the in-progress unit per producer, NOT every open
+                # order (charge-at-start means the queue behind it was free).
                 "outflow_pending_at_end_cost": _pending_costs[_side],
                 "outflow_structure_orders": _led["structures"],
-                # Residual sink -- EXPECTED ~0 (repairs / clamps only);
-                # a large value is an engine-anomaly detector.
+                # v20: scrap destroyed by a storage-cap drop when a pool died.
+                "outflow_clamped_cost": st["clamped"],
+                # Residual sink -- EXPECTED ~0; a large value is an
+                # engine-anomaly detector. The six components above plus
+                # this one sum to scrap_outflow_gross by construction
+                # (gated in _investigation/run_all_gates.py).
                 "scrap_outflow_unaccounted": st["outflow_gross"] - _outflow_accounted,
                 "final_scrap": st["final_scrap"],
                 "peak_scrap": st["peak_scrap"],
@@ -6108,7 +6248,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             _builds_teams[str(_side)] = {
                 "commander": team_leaders.get(str(_side)),
                 "units_queued": _bc["units_queued"],
+                # Raw CANCEL event count (kept for tier-2 reconcile). For
+                # display use the v20 split below: a bulk cancel fires one
+                # event per queued unit, so this number blends "backed out
+                # of a build" with "trimmed an over-long queue".
                 "units_cancelled": _bc["units_cancelled"],
+                # v20 bulk-cancel split -- see _new_builds_side().
+                "orders_backed_out": _bc["orders_backed_out"],
+                "orders_trimmed": _bc["orders_trimmed"],
+                "cancels_unmatched": _bc["cancels_unmatched"],
+                "cancel_events_truncated": _bc["cancel_events_truncated"],
+                "orders_open_at_end": _bc["orders_open_at_end"],
                 "units_built": _bc["units_built"],
                 "ships_built": _bc["ships_built"],
                 "combat_ship_value": _bc["combat_ship_value"],
@@ -6365,7 +6515,19 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # Additive: no field removed, no semantics changed. The
             # builds block's `median_rebuild_latency_sec` is still emitted
             # but is no longer shown on the per-match Economy card.
-            # v19 (this version) adds `thug_supply.teams[n].thugs[]` -- the
+            # v20 (this version) reworks the build ledger's cancel and
+            # pending-at-end accounting. Scrap is charged at build-START,
+            # not at QUEUE: a bulk cancel clears the producer's whole queue
+            # but only the unit actually in production was ever paid for, so
+            # `outflow_cancelled_cost` and `outflow_pending_at_end_cost`
+            # MOVED (they previously booked the entire stack). New
+            # `economy.teams{n}.outflow_clamped_cost` (scrap destroyed when a
+            # dying pool drops max_scrap below the bank) plus new
+            # `builds.teams{n}` fields `orders_backed_out` / `orders_trimmed`
+            # / `cancels_unmatched` / `cancel_events_truncated` /
+            # `orders_open_at_end`. The seven outflow components now sum to
+            # `scrap_outflow_gross` exactly.
+            # v19 adds `thug_supply.teams[n].thugs[]` -- the
             # per-thug breakdown behind each team total (name, steam64,
             # slot, ships_lost, ship_value_lost, and that thug's own
             # pilot_sec / at_base_pilot_sec / reship_median_sec /
@@ -6374,7 +6536,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # addition: `thug_ships_lost` / `thug_ship_value_lost` now
             # count human-piloted losses only (see the thug_supply build
             # site), so their values move on existing matches.
-            "schema_version": 19,
+            "schema_version": 20,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08

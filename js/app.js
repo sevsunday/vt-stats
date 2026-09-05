@@ -3307,8 +3307,19 @@
         'Just the fighting vehicles, and what they cost in total. Scavengers, tugs, service pods and camera pods are not counted here.');
       rows += statRow('Structures built', `${fmtScrap(bt.structures_built)}${srcBadge}`,
         'Buildings the constructor completed — pools, gun towers, factories and the rest of the base.');
-      rows += statRow('Cancelled orders', `${fmtScrap(bt.units_cancelled + bt.structures_cancelled)} <span class="text-muted">(${fmtScrap(bt.cancel_sunk_cost)} scrap sunk)</span>`,
-        'Orders the commander backed out of. Cancelling refunds only about half the cost, so the rest is scrap that bought nothing.');
+      // v20: the old single "Cancelled orders" row blended two different
+      // behaviours and attached a scrap figure that was ~70% fiction. A
+      // producer builds one unit at a time and only charges each unit when
+      // IT starts, so cancelling a stack costs one unit and frees the rest.
+      const backedOut = (bt.orders_backed_out || 0) + (bt.structures_cancelled || 0);
+      if (backedOut) {
+        rows += statRow('Orders backed out', `${fmtScrap(backedOut)} <span class="text-muted">(${fmtScrap(bt.cancel_sunk_cost)} scrap sunk)</span>`,
+          'Times the commander cancelled something already being built. Only the unit actually in production had been paid for, and cancelling it refunds about half, so the rest is scrap that bought nothing.');
+      }
+      if (bt.orders_trimmed) {
+        rows += statRow('Queue trimmed', `${fmtScrap(bt.orders_trimmed)} <span class="text-muted">(free)</span>`,
+          'Units that were queued up behind the one being built and got cancelled before they ever started. These cost nothing at all — the scrap is only taken when a unit begins building — so this is a measure of how much the commander over-queued and then changed their mind.');
+      }
     }
 
     // --- Thug supply (match.schema_version 18) ---
