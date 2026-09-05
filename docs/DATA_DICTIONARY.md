@@ -106,10 +106,34 @@ A wrapper that holds exactly one event type via a `oneof`:
 | 2 | `BulletHit` | A projectile connects with a target |
 | 3 | `DamageDealt` | Damage source side of a damage event |
 | 4 | `DamageReceived` | Damage target side of a damage event |
-| 5 | `UpdateTick` | Per-tick snapshot of all player states |
+| 5 | `UpdateTick` | Per-tick snapshot of all player states (**v4**: + per-team `ResourceState`) |
 | 6 | `UnitDestroyed` | A unit was destroyed |
 | 7 | `UnitSniped` | A snipe event occurred |
 | 8 | `PickupPowerup` | A player picked up a crate / pod (Phase 3 — new-schema only) |
+| 9 | `BuildEvent` | **v4-only.** A producer order changed state (QUEUE / CANCEL / BUILD) |
+
+### ResourceState (v4)
+
+Carried on every `UpdateTick` as `team1_resources` / `team2_resources`
+(fields 3/4) — the collector samples both team banks on every tick.
+
+| Field # | Field | Type | Description |
+|---|---|---|---|
+| 1 | `current_scrap` | `uint32` | Team scrap bank at this tick |
+| 2 | `max_scrap` | `uint32` | Storage cap = `(recycler alive ? 40 : 0) + 20 × pool_count` (verified model) |
+| 3 | `scrap_status` | `ScrapStatus` | `1` GREEN / `2` YELLOW / `3` RED / `4` PARALLEL (unused) — DERIVED display enum: which storage segment the current level sits in, which is also the team's current regen rate (red 2/s, yellow 1/s, green ⅓/s). Never a rating input. |
+| 4 | `pool_count` | `uint32` | Live extractor census (net control, includes upgraded) |
+| 5 | `upgrade_count` | `uint32` | Upgraded extractors only (`scrapDelay == 0.5` heuristic — stock/VSR reliable) |
+
+### BuildEvent (v4)
+
+| Field # | Field | Type | Description |
+|---|---|---|---|
+| 1 | `tick` | `uint32` | Game tick |
+| 2 | `type` | `BuildEventType` | `1` QUEUE (order placed — **scrap is deducted here**, measured), `2` CANCEL (one event per unit on stack-cancels; factory-lane refunds ≈ 50%, armory 0% — measured, small n), `3` BUILD (completion) |
+| 3 | `producer` | `ProducerType` | `1` FACTORY (recycler builds ALSO arrive as FACTORY — the pipeline's producer reverse-map disambiguates via odf.min.json menus), `2` CONSTRUCTOR (hover rigs; QUEUE-only before EXU2 1.6.3 — the pipeline's dual-mode `structures_completion_source` handles both eras), `3` ARMORY |
+| 4 | `teamnum` | `uint32` | Producer's team slot (observed values 1 / 6) |
+| 5 | `build_odf` | `string` | Ordered item's ODF — **inconsistently `.odf`-suffixed on the wire** (armory items); the pipeline normalizes via `_norm_build_odf()` before any FIFO/dedup/counting |
 
 ### BulletInit
 
@@ -743,8 +767,150 @@ Each match file has these top-level keys:
 | `terrain_bounds` | `object \| null` | Full 3D `{min:{x,y,z}, max:{x,y,z}}` from `StatHeader.terrain_*` (+X East, +Y Up, +Z North). Mirrored from `positioning.terrain_bounds`. `null` for pre-schema sessions. Match-global, always-unfiltered. |
 | `base_to_base_distance` | `number \| null` | Raw horizontal distance (units) between Team 1 and Team 2 spawn centroids — no floor applied. `null` when either team has zero players. Mirrored from `positioning.base_to_base_distance`. Distinct from `positioning.base_separation` which is a floored internal scaling value. Match-global, always-unfiltered. |
 | `sentinel_damage` | `object` | Per-match telemetry for engine sentinels dropped by the `> 1e6` filter: `{ count, total_amount, first_tick, last_tick }`. `count` is DD+DR pair count (one pair = 1); `total_amount` is the sum of DD-side amounts. `first_tick` / `last_tick` are `null` on clean matches. Always present (zeros when clean). Match-global, always-unfiltered. See [§7](#7-sentinel-damage-filter). |
+| `has_resource_data` | `boolean` | **`match.schema_version` 17 (proto v4).** `true` iff the session carried per-tick `ResourceState` telemetry. **Absent = `false`** (inverse of the `has_bullet_hit_data` default — the legacy corpus lacks the data). Gates the `economy` block + every economy UI surface. Mirrored on manifest entries + contributions. |
+| `has_build_data` | `boolean` | **`match.schema_version` 17 (proto v4).** `true` iff the session carried `BuildEvent` telemetry. Absent = `false`. Gates the `builds` block. Mirrored on manifest entries + contributions. |
 
 Each roster entry: `{ slot, player_id, name, steam64 }`
+
+#### `economy` (proto v4 — `match.schema_version` 17)
+
+Match-global, always-unfiltered (highlights passthrough contract). Present only when `has_resource_data`.
+
+| Field | Type | Description |
+|---|---|---|
+| `has_resource_data` | `boolean` | Always `true` when the block exists |
+| `sample_rate_hz` | `number` | Stored-series downsample rate (`ECON_SAMPLE_RATE_HZ` = 1; summary scalars are computed at FULL tick rate pre-downsample) |
+| `ticks[]` | `number[]` | Shared tick axis for the per-team series |
+| `teams{1,2}.scrap[]` / `max_scrap[]` / `pool_count[]` / `upgrade_count[]` | `number[]` | 1 Hz series (chart source) |
+| `teams{n}.commander` | `object` | `{name, s64}` from `team_leaders` |
+| `teams{n}.scrap_income` | `number` | **Σ positive FULL-RATE per-tick bank deltas** — the flow-complete income measure; the Tycoon basis (spend+Δbank reconstruction undercounts up to 33%) |
+| `teams{n}.income_regen` / `income_loose` / `income_refund` / `income_unclassified` | `number` | Full-rate delta classifier, in order: (1) **refund-first**, but only for expected refunds `>= ECON_REFUND_MIN_MATCH` (= 5); (2) **cap-clamp** — a delta that lands the bank AT `max_scrap` whose remainder is neither 1 nor a 5-multiple is a loose delivery truncated to the free room, so all of it books to loose and `5 - rem % 5` is carried as withheld overflow; (3) remaining 5k = loose collected by scavengers; (4) a sub-cap 2/3/4 remainder draws down withheld overflow into loose (the tail of an already-counted pickup); (5) a leftover +1 = regen; (6) anything still left = unclassified. **The four are a partition of `scrap_income`** — they sum to it exactly (gated). **Terminology contract**: players say "collected" (never "salvaged") and count loose by SCRAP AMOUNT — "I got 25 loose" means 25 scrap — so `income_loose` (the amount) is the headline number on every display surface. |
+| `teams{n}.loose_collections` | `number` | Count of individual loose pickups (secondary telemetry — never the headline copy; see the terminology contract above). A cap-clamped pickup is counted once, when its first installment lands — the later flush of its withheld part adds scrap to `income_loose` but does NOT bump this |
+| `teams{n}.scrap_outflow_gross` | `number` | Σ negative full-rate deltas |
+| `teams{n}.outflow_built_cost` / `outflow_cancelled_cost` / `outflow_pending_at_end_cost` / `outflow_structure_orders` | `number` | Outflow ledger components (deduction is at QUEUE time — measured; pending-at-end = FIFO remainder deducted but never built, NAMED so it's never misread as an anomaly) |
+| `teams{n}.scrap_outflow_unaccounted` | `number` | Residual sink — EXPECTED ≈ 0 (repairs/clamps only); a large value is an engine-anomaly detector |
+| `teams{n}.final_scrap` / `peak_scrap` / `mean_scrap` | `number` | Bank summary. `final_scrap` is an artifact of when the game stopped and is NOT displayed on the Economy card (v18 dropped it in favour of peaks / averages / cumulatives) |
+| `teams{n}.peak_max_scrap` | `number` | **v18.** Largest storage cap observed (`40·recycler + 20·pools`) — the denominator that makes `peak_scrap` readable |
+| `teams{n}.mean_float_ratio` | `number` | Mean bank/max_scrap ratio — LOW = building in the fast-regen zone (verified regen-segment model) = skilled |
+| `teams{n}.green_share` / `yellow_share` / `red_share` | `number` | Time-share in each regen segment (tallied from the wire enum) |
+| `teams{n}.green_sec` / `yellow_sec` / `red_sec` | `number` | **v18.** The same tallies as absolute seconds (`status_ticks / tick_rate`). Emitted rather than derived UI-side as `share × duration_sec`: the full-rate sample count is not otherwise published, and a match whose resource ticks don't span the whole game would silently stretch a duration-based estimate. Renderers MUST read `red_sec` / `red_share` directly — deriving red as `100 − green − yellow` absorbs the other two bands' rounding error |
+| `teams{n}.peak_pools` / `final_pools` / `pools_lost` / `upgrades_final` | `number` | Extractor summary |
+| `teams{n}.upgrades_built` | `number` | **v18.** Cumulative upgrades built (Σ positive `upgrade_count` deltas). `>= upgrades_final`, which is a final snapshot and loses upgraded pools that died — the real v4 match has a side at 5 built / 1 final |
+| `teams{n}.time_to_3_pools_sec` / `..5..` / `..7..` / `time_to_first_upgrade_sec` | `number\|null` | Tempo markers |
+| `teams{n}.scrap_advantage_integral` / `pool_advantage_integral` | `number` | Signed Σ(own − opponent) over full-rate ticks / tick_rate (scrap·sec / pool·sec; own-perspective, so team 2's values are the negation of team 1's) |
+
+##### Withheld loose overflow (the mechanic behind the cap-clamp rule)
+
+A loose pickup is worth `ECON_LOOSE_SIZE` (5) scrap, but if the bank has
+less than 5 free the engine credits only what fits and **holds** the rest —
+it is not destroyed. The withheld part is credited on the first later tick
+the bank has headroom.
+
+All of this is measured on the wire, not assumed (probes in
+`_investigation/probe_income_unclassified*.py`, full dumps under
+`_investigation/output/`):
+
+- The clamped delta is visible directly, e.g. bank `77 → 80` at cap 80 = +3.
+- The withheld part typically lands **one tick (0.05 s) after a purchase**
+  frees room — far too fast for a scavenger to fly back and unload, so
+  whatever holds it is already at the recycler or is an engine-side pending
+  buffer. 14 of 16 such deltas on the first v4 match landed at exactly
+  spend+1 tick.
+- **The release trigger is headroom, not planting a scav.** Of 62 pool
+  plants across both teams, 61 moved the bank by 0 or +1 (nothing), and the
+  lone exception was a plant that raised the cap 60 → 80 while the bank was
+  pinned at 60. Raising the cap is simply another way to create headroom.
+- Consequence: loose collected while the bank stays pinned at cap is
+  invisible (delta 0) and never counts as income. Anything still withheld
+  at match end is never observed at all.
+
+Before `PIPELINE_VERSION` 34 both halves of a split pickup fell through to
+`income_unclassified` (127 of that bucket's 151 scrap on the first v4
+match); the cap-clamp rule books them to `income_loose` where they belong,
+leaving `income_unclassified` as a genuine anomaly detector near zero.
+
+#### `builds` (proto v4 — `match.schema_version` 17)
+
+Match-global, always-unfiltered. Present only when `has_build_data`.
+
+| Field | Type | Description |
+|---|---|---|
+| `has_build_data` | `boolean` | Always `true` when the block exists |
+| `feed[]` | `object[]` | Every BuildEvent: `{tick, type, producer, producer_resolved, team, odf, name, scrap_cost, scrap_status_at_queue, scrap_status_at_build}`. `producer_resolved` ∈ `"recycler"\|"factory"\|null` (reverse-map over odf.min.json producer menus, `cpu`/`insane` + `virtual_class_*` excluded — menus verified disjoint); `name` = unit display name via `prettify_odf()`; both scrap-status stamps recorded, skill summaries key on the QUEUE tick (deduction timing — measured) |
+| `teams{n}.units_queued` / `units_cancelled` / `units_built` | `number` | Unit-lane counts (factory + recycler + armory) |
+| `teams{n}.ships_built` | `number` | Combat vehicles only — classLabel chains + producer resolution, NEVER the ODF DB top-level category (service pods land in `Effect`) |
+| `teams{n}.combat_ship_value` | `number` | Σ scrapCost over combat-ship BUILDs — the War Machine basis |
+| `teams{n}.scrap_spent_units` | `number` | Σ scrapCost of unit BUILDs ("value fielded" — deduction-timing-agnostic display measure) |
+| `teams{n}.structures_queued` / `structures_cancelled` / `structures_built_events` | `number` | Constructor lane raw counts |
+| `teams{n}.structures_completion_source` | `string` | **Dual-mode (era-scoped):** `"events"` when real CONSTRUCTOR BUILDs exist (EXU2 ≥ 1.6.3), else `"inferred"` |
+| `teams{n}.structures_built` | `number` | Real completions in events mode; dev-endorsed inference `queued − cancelled` in inferred mode |
+| `teams{n}.scrap_spent_structures` | `number\|null` | Σ structure costs (events mode only; `null` when inferred) |
+| `teams{n}.builds_per_min` | `number\|null` | `units_built / minutes` |
+| `teams{n}.dedup_folded_queues` | `number` | Defensive same-tick QUEUE dedup counter (protects the inference arithmetic; interim-era world-dup insurance) |
+| `teams{n}.producer_unresolved_count` | `number` | FACTORY-producer events the reverse-map could not resolve |
+| `teams{n}.cancel_sunk_cost` | `number` | Queue deduction − observed refund (descriptive) |
+| `teams{n}.by_producer` | `object` | Per-resolved-lane `{queued, cancelled, built}` counts |
+| `teams{n}.orders_by_status` | `object` | Builds-by-scrap-status splits (counts + scrap value), keyed to the QUEUE tick |
+| `teams{n}.cancel_counts[]` | `object[]` | Per-unit cancel tallies `{odf, name, count}` (stack-cancels fire per unit — verified) |
+| `teams{n}.median_rebuild_latency_sec` | `number\|null` | Median delay from each combat-ship loss (kill feed, pilot victims excluded) to the same side's next combat-ship QUEUE. **Still emitted, but RETIRED from the per-match Economy card at v18** — the next order after a loss is not attributable to the thug who died, it misses commanders who re-ship from pre-built stock (no queue fires), and the implementation does not consume matched queues so a cluster of deaths all resolve to one order. `thug_supply.reship_median_sec` measures the outcome instead. Career surfaces (Economy Leaders, player page) still read this field; their migration is a follow-up |
+| `teams{n}.first_builds[]` | `object[]` | First 10 build orders (opening telemetry) |
+
+#### `thug_supply` (`match.schema_version` 19)
+
+Match-global, always-unfiltered. **ALWAYS present** — unlike `economy` /
+`builds` this is corpus-wide, because it is built from the per-player
+combat rows, the ODF cost DB and positioning, none of which need proto v4.
+
+How hard the commander's thugs were to keep in ships. This is the metric
+that replaced `median_rebuild_latency_sec` on the Economy card: rather
+than timing the commander's next build ORDER after a loss (unattributable,
+and blind to a commander who re-ships from pre-built stock), it measures
+the outcome — ships actually lost, and time actually spent on foot.
+
+Thugs are every non-commander slot (2-5 / 7-10). There is deliberately NO
+campod / low-activity exclusion: this is display telemetry about what the
+commander had to cope with, not a rating input, and a thug who spent the
+match in a camera pod IS part of that story. Nothing here feeds any rating
+ladder — proven by two gates: `_investigation/golden_v18_no_drift.py`
+strips every v18 field, and `_investigation/golden_income_thug_inert.py`
+*perturbs* every income / thug_supply value (value-insensitivity, which is
+what a value correction needs); both require byte-identical VTSR-T and
+VTSR-C output.
+
+The two halves gate independently and null out honestly (an em-dash beats
+a fake zero): the loss half needs only the per-player combat rows, the
+time half needs positioning.
+
+**Human-piloted losses only (v19 correction).** Through v18 the loss half
+scanned the kill feed gated only on `victim_team` landing in a thug slot,
+which silently counted AI-piloted craft owned by that slot — most often an
+empty ship left behind after an eject. Those rows carry a victim Steam64 of
+0 (`kills.feed[].victim` renders them as the literal `"Team 1"` /
+`"Team 2"`), and corpus-wide 659 of them sat at thug slots: **46% of team
+1's figure on the first v4 match** (54 losses → 29). v19 derives the losses
+from each player's own `leaderboard[].per_ship_combat[]` rows instead,
+which is human-only by construction — no fragile victim-label matching —
+and inherits the v2.9 pilot-victim exclusion for free. `thug_ships_lost`
+and `thug_ship_value_lost` therefore MOVED on existing matches; this is the
+one non-additive part of v19.
+
+| Field | Type | Description |
+|---|---|---|
+| `{n}.commander` | `object\|null` | `{name, s64}` mirror of `team_leaders` |
+| `{n}.thug_count` | `number` | Non-commander slots on this side |
+| `{n}.thug_ships_lost` | `number` | **Human-piloted** combat vehicles lost by thugs: Σ `per_ship_combat[].deaths` over ODFs in the `combat_ship_odfs` terminal set (the same set `ships_built` uses). Sourcing from the player's own row is what makes it human-only; pilot victims are already excluded upstream by v2.9 |
+| `{n}.thug_ship_value_lost` | `number` | Σ `deaths × GameObjectClass.scrapCost` of those losses. ODFs missing a cost still count toward the *count* but add 0 here — the count is the reliable half |
+| `{n}.thug_pilot_sec` | `number\|null` | Σ per-player `pilot_sec` over thugs — total time out of a ship, at base AND walking back. `null` without positioning |
+| `{n}.thug_at_base_pilot_sec` | `number\|null` | Σ per-player `at_base_pilot_sec` — the ship-denied subset (on foot INSIDE their own base radius). The "commander hasn't re-shipped me" signal |
+| `{n}.reship_median_sec` | `number\|null` | Median shipless-spell length, **pooled across the side's thugs** (a median of per-player medians is not a median). `null` when no spell qualified. Deliberately NOT reconstructable from `thugs[]` |
+| `{n}.reship_spells` | `number\|null` | Qualifying spells in that pool |
+| `{n}.thugs[]` | `object[]` | **v19.** Per-thug breakdown behind the totals, one entry per non-commander slot, sorted by `ships_lost` DESC then `pilot_sec` DESC then name — the order the Economy card renders its sub-rows in |
+| `{n}.thugs[].name` / `.steam64` / `.slot` | `string` / `string` / `number` | Identity; `steam64` powers the card's `player/<slug>/` cross-link |
+| `{n}.thugs[].ships_lost` / `.ship_value_lost` | `number` | This thug's share. **Σ over `thugs[]` equals the team total exactly** (gated in `run_all_gates.py`) |
+| `{n}.thugs[].pilot_sec` / `.at_base_pilot_sec` | `number\|null` | This thug's own positioning metrics; Σ equals the team total. `null` without positioning |
+| `{n}.thugs[].reship_median_sec` / `.reship_spells` | `number\|null` | This thug's own re-ship profile (mirror of `positioning.players[name].metrics`). The team `reship_median_sec` is a pooled median and will NOT equal any aggregate of these |
+
+**Spell definition** (`_reship_spells()` in [scripts/process_stats.py](../scripts/process_stats.py)): a maximal run of consecutive on-foot samples in the 1 Hz pilot series. Three runs are deliberately excluded — a run still open at the last sample (censored: the match ended before the re-ship was observed, so counting the observed prefix would fake a fast time), the run starting at index 0 (every match opens with players on foot at the recycler — opening build order, not a re-ship), and runs shorter than `RESHIP_MIN_SPELL_SEC = 10` (voluntary hops: powerup grabs, ground snipes, ship swaps at base). Because it reads the pilot series rather than correlating deaths to build orders, it captures deaths, snipes and ejects alike and cannot be fooled by re-shipping from stock. `RESHIP_MIN_SPELL_SEC` is tunable without a schema bump.
 
 #### `leaderboard[]`
 
@@ -1031,6 +1197,9 @@ All distances computed on the `(x, z)` horizontal plane against the player's per
 | `target_lock_pct` | `number` | 0–1 ratio: fraction of this player's kept 1 Hz samples where `PlayerState.has_target=true` (T-key held). Absolute value — directly comparable across matches, unlike `activity_score`. See T-Key Usage subsection below. 0.0 when `has_target_lock_data=false` at the top level; use the flag to distinguish "no data" from "0% lock" |
 | `at_base_pilot_sec` | `number` | **v2.8 (match.schema_version 9)** — seconds this player spent **on foot (pilot ODF) AND within `personal_base_radius` of spawn** = "ship-denied" time (positioned to be rebuilt a ship but still shipless). On-foot time *out in the field* (walking back from a death) is NOT counted. `count(samples where is_pilot AND dist < personal_base_radius) / POSITIONING_SAMPLE_RATE_HZ`. Read by [scripts/elo.py](../scripts/elo.py)'s low-tier at-base lift (§13.7.3). 0.0 on pre-v9 / no-positioning matches. |
 | `at_base_pilot_share` | `number` | **v2.8** — `at_base_pilot_sec` as a share of this player's kept samples (0–1). Diagnostic / tooltip companion to `at_base_pilot_sec`; the lift itself uses the absolute seconds. |
+| `pilot_sec` | `number` | **v18** — TOTAL seconds on foot, wherever the player was. Superset of `at_base_pilot_sec` (which is only the in-base subset): this one also counts walking back from a death out in the field. Rolled up per team into `thug_supply.thug_pilot_sec`. |
+| `reship_median_sec` | `number\|null` | **v18** — median length of this player's qualifying shipless spells (see the `thug_supply` spell definition). `null` when none qualified. Note the per-team figure pools raw spells rather than averaging these. |
+| `reship_spells` | `number` | **v18** — how many spells that median is over. `0` is normal for a player who never lost a ship. |
 
 ##### Per-player `trail`
 
@@ -2781,7 +2950,15 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].steam64` | string \| null | Stable identity. Null for legacy rows missing steam64. |
 | `ratings[].vtsr` | float | Published headline rating (= **VTSR-T** when $\alpha=0$). Rounded to 1 decimal. |
 | `ratings[].thug_elo` | float | **v2.3** — pure Thug-ELO component (was `combat_elo` pre-v2.3). |
-| `ratings[].wins_elo` | float | Wins-ELO component. v1: stubbed at the anchor for everyone (1500.0). |
+| `ratings[].wins_elo` | float | Wins-ELO component ($R^W$). **Stage E (proto v4 overhaul): REAL ladder values** — updated on every rated match with a determined outcome (see the `wins_*` top-level constants below); anchor 1500 for players with zero wins-rated games. Consequence-free while `alpha = 0.0` (the published `vtsr` is bit-identical to `thug_elo`), but visible: the ELO-page rating tooltip and the Tools resolver read it. Pre-Stage-E files carried a flat 1500.0 stub. |
+| `ratings[].wins_games` | int | **Stage E** — count of wins-rated rows for this player (determined-outcome matches only; always ≤ `matches_played`). |
+| `ratings[].wins_record` | object | **Stage E** — `{w, l, d}` tallies over the wins-rated rows (draws = attested/adjudicated `decided_by == "draw"`). |
+| `wins_k_base` / `wins_k_floor` / `wins_provisional_prior` / `wins_logistic_scale` | float | **Stage E** — wins-ladder constants: symmetric K decaying 24 → 12 over the first 10 wins-rated games; classic chess logistic scale 400; team-MEAN reference (Phase 2C rejected MAX/softmax for update rules); no loss aversion, no floor, no inactivity boost. |
+| `wins_matches_rated` | int | **Stage E** — rated matches that scored the wins ladder (determined team win or draw, both sides represented). |
+| `wins_matches_skipped_undetermined` | int | **Stage E** — rated matches whose outcome was unverifiable → wins ladder skipped, thug side still rated in full (`matches_excluded_no_winner` stays 0 by design). |
+| `wins_matches_skipped_one_sided` | int | **Stage E** — defensive counter: rated matches where every rated row landed on one side (no duel structure). |
+| `alpha` | float | The EFFECTIVE blend weight this file was computed with (`vtsr = alpha·wins_elo + (1−alpha)·thug_elo`). Canonical: the module `ALPHA` (0.0). |
+| `alpha_overridden` | bool | **Stage E** — `true` only on the forensic `elo_current_alpha{10,25,50}.json` pairs (emitted via `compute_elo(alpha_override=…)`, scored by `validate_elo.py --elo-mode alpha{10,25,50}` against the pre-registered promote rule in `critique/decisions/phase-5-wins-blend.md`). On those pairs the published `vtsr` is the real blend and `peak_vtsr` tracks the blended value per match. |
 | `ratings[].matches_played` | int | Number of rated matches contributing to this rating. Excluded matches don't count. |
 | `lowtier_lift` | object | **v2.8** — metadata for the low-tier at-base lift (§13.7.3). Keys: `enabled` (bool — `true` on the published canonical file when the lift fired; `false` when disabled / nobody eligible), `cutoff` (float, default 1460), `taper` (float, default 60), `axis` (string, `"thug_kill_rate"`), `min_ship_minutes` (float, small-sample guard, default 2.0), `eligible_count` (int — players with eligibility > 0). The lift recomputes `thug_kill_rate` over effective (non-at-base) time for eligible low-tier thug rows and applies the gain as an additive post-clip z-shift on that row only; eligibility is keyed on the canonical (no-lift) rating so the gate can't self-sustain. |
 | `ratings[].lowtier_lift_factor` | float | **v2.8** — eligibility factor `clip((cutoff − canonical_vtsr) / taper, 0, 1)` applied to this player's thug rows. `0.0` for mid/high players (never eligible) and when the lift is off. Tapers to 0 as the player's canonical skill climbs out of the low band — the self-closing escape hatch. |
@@ -2839,12 +3016,15 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 | `history[].deltas[].expected` | float | **v2+** — the opponent-strength-weighted expected performance $E_i$ (median-of-opponents reference, logistic with $S_R = 800$ as of v2.1). Range $[-1, +1]$. |
 | `history[].deltas[].axis_contributions` | object | **v2.3** — per-axis z-score after clip-and-divide-by-2 (range $[-1, +1]$ per axis), keyed by axis name. Audit invariant: $\sum_a z_a \cdot w'_a \approx \text{performance}$ where $w'_a$ is the redistributed weight (axes absent from this dict had their weight redistributed to the available axes). When an axis was unavailable for the lobby (e.g. no positioning data → no `mobility` key, no PvE damage in the lobby → no `pve_share` key, etc.), the axis is OMITTED from the dict. Powers the VTSR-T leaderboard's per-axis breakdown popover on the Last-delta cell. **v2.4**: shape unchanged. For commander rows, each value is `z_post_shift` (i.e. what fed into `performance`); for thug rows the value is the un-shifted post-clip z. The flat shape lets existing JS rendering work without changes. |
 | `history[].deltas[].axis_contributions_meta` | object \| absent | **v2.4** — optional sibling block, present ONLY on commander rows (`is_commander: true` on the source leaderboard row) AND only for axes that were both available for the lobby AND listed in `commander_axis_prior`. Shape: `{axis_name: {z_pre_shift, shift, z_post_shift}}` where `z_pre_shift` is the value before the v2.4 commander shift (post-clip space, range $[-1, +1]$), `shift = -baseline[axis]` (where `baseline` is `commander_shrunk_baseline()` evaluated at the start of this match — frozen at the prior for locked axes), and `z_post_shift` is the final value after re-clipping to $[-1, +1]$. **Audit invariant**: for each shifted axis $a$ on a commander row, `axis_contributions[a] == axis_contributions_meta[a].z_post_shift` exactly (because the post-shift value IS what feeds the rating math). For thug rows, this block is OMITTED entirely. Forensics-only for now; not consumed by the dashboard renderer. |
+| `history[].deltas[].wins` | object \| absent | **Stage E** — per-row wins-ladder audit block, present only on rows of matches that scored the wins ladder: `{before, after, delta, s, e}` where `s` is the raw outcome score (1 / 0 / 0.5) and `e` the side-level expected score from the team-mean $R^W$ logistic. Absent on rows of undetermined / one-sided matches (the wins ladder didn't move). Top-level `alpha` / `alpha_overridden` mirror the current-file fields. |
 
 Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"cancelled"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`. The `"cancelled"` reason (v15) fires when `match.winner.decided_by == "cancelled"` — the host attested `GAME_CANCELLED` on the v3 end-of-game dialog (early RE / crash / restart); real combat may have occurred, so the match stays fully visible on the dashboard but never rates.
 
-### `data/processed/elo_commander_current.json` + `elo_commander_history.json` — VTSR-C v1 (experimental)
+### `data/processed/elo_commander_current.json` + `elo_commander_history.json` — VTSR-C v2 (experimental)
 
-Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_version: 1`, separate from `ELO_SCHEMA_VERSION`) right after the canonical VTSR-T pair. **Outcome-pure win/loss commander ELO with a team-strength handicap** — full derivation in [DEVELOPER_GUIDE.md §13.12](../DEVELOPER_GUIDE.md). Corpus-wide, picker-unaware, NOT in the pipeline cache key (both filenames in the `load_cache_index()` skip set); the dashboard thug-only toggle does not apply. All UI consumers are 404-safe.
+Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_version: 2`, separate from `ELO_SCHEMA_VERSION`) right after the canonical VTSR-T pair. **Outcome-pure win/loss commander ELO with a team-strength handicap** — full derivation in [DEVELOPER_GUIDE.md §13.12](../DEVELOPER_GUIDE.md). Corpus-wide, picker-unaware, NOT in the pipeline cache key (both filenames in the `load_cache_index()` skip set); the dashboard thug-only toggle does not apply. All UI consumers are 404-safe.
+
+**v2 (proto v4 overhaul) adds an economy-performance composite, structurally INERT behind `alpha_c = 1.0`** — formulas frozen in [critique/decisions/vtsr-c-v2-composite.md](../critique/decisions/vtsr-c-v2-composite.md) BEFORE any telemetry corpus accumulated. Five axes per telemetry duel (both `has_resource_data` AND `has_build_data` required): `pool_tempo` (pool_advantage_integral / duration), `production_output` (scrap_spent_units / min), `thug_supply` (min(3, ships_built / team deaths)), `econ_efficiency` (1 − mean_float_ratio), `upgrade_investment` (upgrades_final / peak_pools). Normalization is the **within-match differential** (n=2 makes lobby z-scores degenerate): `z = clip(diff / shrunk_std(axis), −2, 2) / 2` with a rolling per-axis RMS (seed prior + shrinkage 10 pseudo-duels, snapshot-before-duel / update-after); `P₁ = Σw·z / Σw`, `P₂ = −P₁`. Blend `S' = alpha_c·S + (1−alpha_c)·(P+1)/2` applies only on telemetry duels — the code branches on `alpha_c < 1.0` so the inert path never routes through blend arithmetic (golden byte-identity gate: `_investigation/golden_vtsrc_v2.py`). Duels without telemetry score outcome-pure S at ANY alpha_c (ratified fallback policy). W/L/D records always tally the RAW outcome. New v2 fields: top-level `alpha_c`, `econ_weights`, `econ_std_prior`, `econ_std_shrinkage`, `thug_supply_cap`, `econ_std_observed {axis: {count, std}}`; per-rating `duels_with_telemetry`; per-duel `performance {available, p, axes{axis: {diff, std, z}}}` (team-1 perspective; side 2 = negation) + per-side `score_blend {alpha_c, s_raw, s_blended}`. Pre-registered promote rule (the only path below 1.0): ≥ 25 telemetry duels AND ≥ 3 axes sign-agreement > 0.55 with none < 0.35 AND the validator alpha_c ablation improves-or-holds accuracy while improving log-loss; axis discard at < 0.40 with n ≥ 40.
 
 `elo_commander_current.json` top-level shape:
 
@@ -2912,6 +3092,8 @@ Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_
 | `duels[].team_handicap.diff` | float | `t1_thug_mean − t2_thug_mean` (0.0 when either side is null). |
 
 **`validation_summary.json` additions (validator v1.2, additive):** `latest.vtsr_c_n` / `latest.vtsr_c_accuracy` / `latest.vtsr_c_log_loss` headline-trend fields, plus two `latest_detail` blocks — `vtsr_c` (`{available, n_duels, n_scored, n_draws, lambda_canonical, accuracy, accuracy_ci, log_loss, replay_max_abs_diff, per_lambda: [{lambda, canonical, n, accuracy, accuracy_ci, log_loss}]}`) and `axis_outcome` (`{available, n_matches_determined, axes: [{axis, n, sign_agreement, sign_agreement_ci, mean_winner_minus_loser}]}`). Both `{available: false, skipped_reason}` when the commander history is absent; the ELO page's Does-it-work tab self-hides those sections.
+
+**`validation_summary.json` additions (validator v1.3 / `report.json` schema 4, additive):** `latest_detail.vtsr_c_perf` — the VTSR-C v2 proof sections. `econ_axes` (`{available, n_telemetry_duels, n_scored, axes: [{axis, n, sign_agreement, sign_agreement_ci, mean_winner_minus_loser}]}` — metric #12, THE promote-rule gate) and `alpha_ablation` (`{available, n_duels, n_telemetry_duels, n_telemetry_scored, replay_max_abs_diff, per_alpha: [{alpha_c, canonical, n_telemetry_scored, accuracy, accuracy_ci, log_loss}]}` — metric #13; the walk covers every duel but accuracy counts only telemetry duels so fallback rows never dilute the gate; the `alpha_c = 1.0` row doubles as a replay-integrity check). Both absent-safe; consumed by the ELO page's Does-it-work tab.
 
 ## 12. Aggregator output keys (Phase 3 + 6)
 

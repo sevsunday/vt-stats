@@ -132,3 +132,64 @@ python scripts/validate_elo.py --elo-mode ranks --output-dir _validation/ranks
 Comparison sources: `_validation/report.json` (canonical, 2026-06-10) vs
 `_validation/ranks/report.json` (same seed). Leaderboard comparison computed
 directly from `elo_current.json` vs `elo_current_ranks.json`.
+
+## 7. Re-evaluation (2026-09-04 — trigger #3 fired) — SUPERSEDED
+
+> **This run was scored on a contaminated corpus.** Two synthetic
+> proto-v4 fixtures (`2099-01-01T00-00-01` / `-02`, from
+> `scripts/make_v4_fixture.py`) were still on disk; being clones of a
+> real v3 session they carried a real roster and a determined outcome,
+> so the pipeline rated them like genuine matches. Kept verbatim as the
+> historical record. The binding result is §8. The verdict is unchanged.
+
+Recorded outcomes landed (proto v3/v4 attestation + human adjudication; the
+Stage E wins ladder consumes them), so per trigger #3 the ranks pair was
+re-scored on the determined-outcome prediction set (validator v1.3, 115
+rated matches, n = 40 determined rows, seed 12345):
+
+| Metric | Canonical (zclip) | Ranks | Delta | Reading |
+|---|---|---|---|---|
+| Spearman rho (R_pre -> P_i) | 0.452 | 0.444 | -0.008 | holds (within -0.01 band) |
+| Self-consistency rho | 0.821 | 0.829 | +0.008 | improves (smaller lead than 2026-06's +0.027) |
+| Determined-outcome accuracy (team mean R) | 42.5% | **50.0%** | **+7.5pp** | improves directionally on REAL outcomes; CIs overlap (28.5-57.8 vs 35.2-64.8) |
+| log-loss (mean R) | 0.699 | 0.699 | 0 | flat |
+| Calibration MAE | 0.0108 | **0.0249** | **+0.0141** | WORSE — new negative this run |
+| Bootstrap rating-proxy sigma (median ELO) | 29.1 | 36.6 | +7.5 | worse; scale confound (§4.2) still unresolved |
+
+**Verdict: HOLD again.** The promote condition still fails on bootstrap
+sigma (the §4.2 scale confound remains the blocker — trigger #2 is now the
+critical path), and the calibration MAE degradation is a new mark against.
+The determined-outcome accuracy lift (+7.5pp on real outcomes, up from
++6.3pp on inferred clean_wins) keeps ranks the most promising
+non-canonical mode. Next action unchanged: normalize the sigma comparison
+(validator delta-magnitude normalization or rank-mode `ELO_RATING_SCALE`
+~2.0 re-calibration) before any promote decision.
+
+## 8. Corrected re-evaluation (2026-09-04, post fixture purge) — BINDING
+
+The two synthetic v4 fixtures were deleted and every validator mode
+re-scored on the clean corpus. The §2 pre-registered rule is applied
+unchanged.
+
+Clean corpus: validator v4, **113 rated matches, n = 38 determined
+rows**, seed 12345.
+
+| Metric | Canonical (zclip) | Ranks | Delta | Reading |
+|---|---|---|---|---|
+| Spearman rho (R_pre -> P_i) | 0.447 | 0.438 | -0.009 | holds (inside the -0.01 band, but only just) |
+| Self-consistency rho | 0.829 | **0.849** | **+0.020** | improves (between 2026-06's +0.027 and the contaminated run's +0.008) |
+| Determined-outcome accuracy (team mean R) | 39.5% (15/38) | **47.4%** (18/38) | **+7.9pp** | improves directionally on REAL outcomes; CIs overlap (25.6-55.3 vs 32.5-62.7) |
+| log-loss (mean R) | 0.7040 | 0.7031 | -0.0009 | flat/marginally better |
+| Calibration MAE | 0.0134 | **0.0238** | **+0.0104** | WORSE — confirms the contaminated run's new negative |
+| Bootstrap rating-proxy sigma (median ELO) | 29.3 | 37.1 | +7.8 | worse; §4.2 scale confound still unresolved |
+| Mean rating | 1537.3 | 1555.6 | +18.3 | consistent with §4.1 (+17.5) |
+
+**Verdict: HOLD again.** Promote condition fails on bootstrap sigma
+(29.3 -> 37.1, worse); discard condition (rho drop > 0.03) does not fire
+(-0.009). Every directional finding from §7 survives decontamination:
+ranks leads on self-consistency and determined-outcome accuracy, trails
+on sigma and calibration MAE. Trigger #2 (remove the sigma scale
+confound) remains the critical path to any promote decision.
+
+Repro: `python _investigation/sweep_table2.py` after the five validator
+modes in §6.

@@ -434,8 +434,9 @@ body::before {
     box-shadow: 0 2px 8px color-mix(in oklab, var(--kb-primary), transparent 60%);
 }
 
-/* TEMP: vt-tab-new-badge - remove this whole block when the Replay tab is no
-   longer "new". Paired with the inline <span> on #tab-replay-btn in index.html.
+/* TEMP: vt-tab-new-badge - remove this whole block when the Economy tab is no
+   longer "new". Paired with the inline <span> on #tab-economy-btn in index.html
+   (the Replay pill carried one too until 3D Replay stopped being new).
    Single rule + .active override so the pill stays readable on both inactive
    (primary-tinted) and active (primary-bg) tab states. */
 .vt-tab-new-badge {
@@ -4962,6 +4963,20 @@ td.vt-col-split {
     user-select: none;
 }
 
+/* VTSR-C v4-telemetry chip (ladder rows + duel-log entries) */
+.vt-cmdr-telem-chip {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 0.1rem 0.35rem;
+    border-radius: 999px;
+    color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-primary) 25%, transparent);
+    vertical-align: middle;
+    cursor: default;
+}
+
 .vt-vtsr-delta-positive { color: var(--kb-success); }
 .vt-vtsr-delta-negative { color: var(--kb-danger); }
 
@@ -6229,3 +6244,175 @@ html.vt-cursor-active * {
     border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
 }
 
+
+/* ============================================================================
+   ECONOMY TAB (proto v4 commander telemetry) — production cards + build log
+   ============================================================================ */
+
+.vt-econ-team-dot {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 50%;
+    margin-right: 0.45rem;
+    vertical-align: baseline;
+}
+
+.vt-econ-stat-row {
+    font-size: 0.85rem;
+    padding: 0.18rem 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) 5%, transparent);
+}
+
+.vt-econ-stat-row:last-child {
+    border-bottom: none;
+}
+
+.vt-econ-stat-val {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-weight: 600;
+}
+
+/* Scrap-status share bar: green / yellow / red segments over match time. */
+.vt-econ-status-bar {
+    display: flex;
+    height: 0.55rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+
+/* Band legend under the status bar: percentage on top, absolute time
+   beneath it. Three columns pinned left / center / right by the flex
+   parent's justify-content: space-between. */
+.vt-econ-band-legend {
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    line-height: 1.25;
+}
+
+.vt-econ-band-time {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    opacity: 0.75;
+}
+
+/* Sub-section heading inside a production card (e.g. "Thug supply"). */
+.vt-econ-subhead {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+    margin: 0.1rem 0 0.25rem;
+}
+
+.vt-econ-inferred-badge {
+    background: color-mix(in oklab, var(--kb-warning) 22%, transparent);
+    color: var(--kb-warning);
+    font-size: 0.65rem;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
+/* Build Order Log — two team columns of compact event rows. */
+.vt-econ-log-head {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.4rem;
+}
+
+.vt-econ-log-col {
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: 0.35rem;
+}
+
+.vt-econ-log-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.16rem 0;
+    font-size: 0.82rem;
+    border-bottom: 1px solid var(--kb-border-subtle, color-mix(in oklab, var(--kb-text-primary) 6%, transparent));
+    flex-wrap: wrap;
+}
+
+.vt-econ-log-row.vt-econ-row-cancel .vt-econ-log-name {
+    text-decoration: line-through;
+    opacity: 0.65;
+}
+
+.vt-econ-log-ts {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    color: var(--kb-text-muted);
+    min-width: 3.2em;
+    font-size: 0.76rem;
+}
+
+.vt-econ-log-name {
+    min-width: 0;
+}
+
+.vt-econ-cost-chip {
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    padding: 0.02rem 0.35rem;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    color: var(--kb-primary);
+}
+
+.vt-econ-status-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+
+.vt-econ-status-dot[data-status="green"]    { background: var(--kb-success); }
+.vt-econ-status-dot[data-status="yellow"]   { background: var(--kb-warning); }
+.vt-econ-status-dot[data-status="red"]      { background: var(--kb-danger); }
+.vt-econ-status-dot[data-status="parallel"] { background: var(--kb-info, var(--kb-secondary)); }
+
+/* Economy Leaders tiles (All Matches → Commanders tab, v4 telemetry) */
+.vt-econ-leader-tile {
+    height: 100%;
+    padding: 0.85rem 1rem;
+    border-radius: var(--kb-radius, 0.5rem);
+    background: color-mix(in oklab, var(--kb-text-muted) 7%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-econ-leader-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.35rem;
+}
+
+.vt-econ-leader-name {
+    font-weight: 700;
+    margin-bottom: 0.1rem;
+}
+
+.vt-econ-leader-value {
+    font-family: var(--vt-font-mono, monospace);
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--kb-text);
+}
+
+.vt-econ-leader-unit {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--kb-text-muted);
+}
+
+.vt-econ-leader-sub {
+    font-size: 0.75rem;
+    color: var(--kb-text-secondary);
+    margin-top: 0.15rem;
+}

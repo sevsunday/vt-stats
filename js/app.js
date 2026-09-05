@@ -109,6 +109,7 @@
     rivalries:   'tab-rivalries-btn',
     weapons:     'tab-weapons-btn',
     assets:      'tab-assets-btn',
+    economy:     'tab-economy-btn',
     positioning: 'tab-positioning-btn',
     replay:      'tab-replay-btn',
   };
@@ -479,7 +480,13 @@
   function activateTabFromSlug(slug, slugMap) {
     if (slug && slugMap[slug]) {
       const btn = document.getElementById(slugMap[slug]);
-      if (btn) { bootstrap.Tab.getOrCreateInstance(btn).show(); return true; }
+      // Skip buttons whose <li> is hidden (e.g. ?tab=economy deep-linked
+      // onto a pre-v4 match with no economy/builds telemetry) so the boot
+      // falls through to the default tab instead of an empty orphan pane.
+      if (btn && !(btn.closest('li') && btn.closest('li').classList.contains('d-none'))) {
+        bootstrap.Tab.getOrCreateInstance(btn).show();
+        return true;
+      }
     }
     return false;
   }
@@ -1852,6 +1859,17 @@
     });
   }
 
+  // Economy scrap chart: same Reset Zoom pattern as the combat timeline.
+  const economyZoomResetBtn = document.getElementById('economy-zoom-reset');
+  if (economyZoomResetBtn) {
+    economyZoomResetBtn.addEventListener('click', () => {
+      const canvas = document.getElementById('economy-scrap-chart');
+      if (!canvas) return;
+      const chart = activeCharts.find(c => c && c.canvas === canvas);
+      if (chart && typeof chart.resetZoom === 'function') chart.resetZoom();
+    });
+  }
+
   // --- Core Filter Logic ---
   function getFilteredData(data, filter) {
     if (filter.mode === 'all') return data;
@@ -2366,6 +2384,28 @@
     registerTabRenderer('#tab-assets', () => {
       renderAssetDamage(data.asset_damage, data.faction_totals);
     });
+
+    // Economy tab (proto v4): the nav button only exists for matches
+    // carrying resource or build telemetry. When the previous match had
+    // the tab active and the new one lacks the data, bounce to Overview
+    // before hiding so the view never strands on an orphaned pane.
+    const econLi = document.getElementById('tab-economy-li');
+    const econAvailable = matchHasResourceData() || matchHasBuildData();
+    if (econLi) {
+      if (!econAvailable) {
+        const econBtn = document.getElementById('tab-economy-btn');
+        if (econBtn && econBtn.classList.contains('active')) {
+          const overviewBtn = document.getElementById('tab-overview-btn');
+          if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
+        }
+      }
+      econLi.classList.toggle('d-none', !econAvailable);
+    }
+    if (econAvailable) {
+      registerTabRenderer('#tab-economy', () => {
+        renderEconomyTab();
+      });
+    }
 
     registerTabRenderer('#tab-positioning', () => {
       renderPositioningTab(data);
@@ -2987,12 +3027,6 @@
     applyRadarInfoTooltips(document.getElementById('section-career-radar'));
     tabRendered['#all-tab-overview'] = true;
 
-    const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
-    if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
-      const allOverviewBtn = document.getElementById('all-tab-overview-btn');
-      if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
-    }
-
     if (window.VTFx) {
       const allOverviewPane = document.getElementById('all-tab-overview');
       const heroCard = document.querySelector('#all-matches-view > .vt-all-hero');
@@ -3032,6 +3066,7 @@
       renderCommanderLeaderboard(cs.rows);
       renderCommanderH2H(cs.head_to_head);
       renderCommanderFactionPicks('commander-faction-picks-canvas', cs.rows);
+      renderCommanderEconomyLeaders(cs.rows);
     });
 
     registerTabRenderer('#all-tab-meta', () => {
@@ -3062,6 +3097,18 @@
 
     registerAllMatchesCharts(data);
 
+    // Deep-link tab activation MUST come after every registerTabRenderer
+    // above: bootstrap's shown.bs.tab -> renderTabIfNeeded fires
+    // synchronously on .show(), and a renderer registered after the
+    // activation would never run (tabRendered stays false, but nothing
+    // re-triggers the check for an already-active pane). This ordering
+    // bug made ?match=all&tab=commanders land on unrendered panes.
+    const tabSlug = urlState ? urlState.tab : getActiveTabSlug();
+    if (!activateTabFromSlug(tabSlug, ALL_TAB_SLUGS)) {
+      const allOverviewBtn = document.getElementById('all-tab-overview-btn');
+      if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
+    }
+
     syncUrl();
   }
 
@@ -3074,6 +3121,342 @@
     }
     const allNames = data._allNames || data.leaderboard.map(p => p.name);
     renderTimeline('timeline-chart', data.timeline, allNames, timelineMode);
+  }
+
+  // --- Economy Tab (proto v4 commander telemetry) ---
+  // Match-global + always-unfiltered: reads currentData.economy /
+  // currentData.builds directly (highlights/kill-feed-winner passthrough
+  // contract) -- the blocks have no per-player dimension for the filter
+  // to narrow. Sections self-hide when their half of the data is absent
+  // (economy-only or builds-only sessions degrade gracefully).
+  let buildlogFilter = 'builds';
+  let buildlogShown = 0;               // pagination cursor per filter view
+  const BUILDLOG_PAGE = 250;           // rows added per "Show more" click
+  let buildlogWired = false;
+
+  function renderEconomyTab() {
+    const econ = currentData && currentData.economy;
+    const builds = currentData && currentData.builds;
+    const scrapCard = document.getElementById('section-economy-scrap');
+    const prodRow = document.getElementById('section-economy-production');
+    const logCard = document.getElementById('section-economy-buildlog');
+    if (scrapCard) scrapCard.classList.toggle('d-none', !econ);
+    if (prodRow) prodRow.classList.toggle('d-none', !econ && !builds);
+    if (logCard) logCard.classList.toggle('d-none', !builds);
+
+    if (econ) {
+      const canvas = document.getElementById('economy-scrap-chart');
+      const existing = activeCharts.find(c => c && c.canvas === canvas);
+      if (existing) {
+        existing.destroy();
+        activeCharts = activeCharts.filter(c => c !== existing);
+      }
+      renderEconomyScrapChart('economy-scrap-chart', econ, currentData.match);
+    }
+    if (econ || builds) {
+      renderEconomyProductionCard('economy-production-t1', '1');
+      renderEconomyProductionCard('economy-production-t2', '2');
+      ensureTooltips(document.getElementById('section-economy-production'));
+    }
+    if (builds) {
+      buildlogShown = BUILDLOG_PAGE;
+      renderBuildLog();
+      wireBuildLogControls();
+    }
+  }
+
+  const ECON_STATUS_LABEL = { green: 'green', yellow: 'yellow', red: 'RED', parallel: 'parallel' };
+  const ECON_PRODUCER_ICON = {
+    recycler: 'bi-recycle',
+    factory: 'bi-gear-wide-connected',
+    constructor: 'bi-cone-striped',
+    armory: 'bi-box2',
+  };
+
+  function fmtScrap(v) {
+    return (v === null || v === undefined) ? '—' : Math.round(v).toLocaleString();
+  }
+
+  function econOdfChip(odf, name) {
+    // Unit NAME leads; the ODF stem rides as a mono chip cross-linking the
+    // ODF Browser (kill-feed convention).
+    const display = name || (currentData && currentData.odf_map && currentData.odf_map[odf]) || odf;
+    const base = (odf || '').toLowerCase();
+    const chip = base
+      ? `<a href="odf/index.html?odf=${encodeURIComponent(base)}" target="_blank" rel="noopener" class="vt-odf-link" title="View ${esc(display)} in ODF Browser">(${esc(base)})</a>`
+      : '';
+    return `<span class="fw-semibold">${esc(display)}</span>${chip}`;
+  }
+
+  function renderEconomyProductionCard(cardId, side) {
+    const el = document.getElementById(cardId);
+    if (!el) return;
+    const et = ((currentData.economy || {}).teams || {})[side] || null;
+    const bt = ((currentData.builds || {}).teams || {})[side] || null;
+    const commander = (et && et.commander) || (bt && bt.commander)
+      || ((currentData.match.team_leaders || {})[side]) || null;
+    const cmdrHtml = commander
+      ? vtPlayerLinkHtml(commander.name, commander.s64)
+      : '<span class="text-muted">Unknown commander</span>';
+    const teamColor = side === '1' ? 'var(--kb-primary)' : 'var(--kb-success)';
+
+    let rows = '';
+    const statRow = (label, valueHtml, tip) => {
+      const info = tip
+        ? ` <i class="bi bi-info-circle vt-col-info" data-bs-toggle="tooltip" data-bs-html="true" title="${esc(tip)}"></i>`
+        : '';
+      return `<div class="d-flex justify-content-between align-items-baseline vt-econ-stat-row">
+        <span style="color:var(--kb-text-muted)">${label}${info}</span>
+        <span class="vt-econ-stat-val">${valueHtml}</span></div>`;
+    };
+
+    if (et) {
+      // Terminology contract: "collected" (never "salvaged"), "loose"
+      // (never "lumps"), and the SCRAP AMOUNT of loose is the headline
+      // number — players say "I got 25 loose" meaning 25 scrap, so the
+      // piece count stays out of the primary copy (tooltip-only).
+      const loosePct = et.scrap_income > 0
+        ? Math.round((et.income_loose / et.scrap_income) * 100) : 0;
+      rows += statRow('Scrap generated', fmtScrap(et.scrap_income),
+        'Every point of scrap that arrived in the bank all match. Three sources add up to this: pools regenerating, loose collected in the field, and refunds from cancelled orders.');
+      rows += statRow('&nbsp;&nbsp;from pools', fmtScrap(et.income_regen),
+        'Scrap that regenerated on its own from the extractors this team controlled. The steady background income — no scavenger required.');
+      rows += statRow('&nbsp;&nbsp;loose collected', `${fmtScrap(et.income_loose)} <span class="text-muted">(${loosePct}% of income)</span>`,
+        `Loose scrap hauled in from the field by scavengers — the part of the income the team had to go out and earn. Every pickup is worth 5, so this is ${fmtScrap(et.loose_collections)} pickups. When the bank is nearly full only the part that fits is credited and the rest is held until there is room again, so a single pickup can land in two installments.`);
+      if (et.income_refund) {
+        rows += statRow('&nbsp;&nbsp;from refunds', fmtScrap(et.income_refund),
+          'Scrap handed back when an order was cancelled. Cancels refund roughly half of what was already deducted, and armory orders refund nothing at all.');
+      }
+      if (et.income_unclassified) {
+        rows += statRow('&nbsp;&nbsp;other', fmtScrap(et.income_unclassified),
+          'Income that could not be tied to pools, loose or refunds. Expected to be zero or close to it, so anything sizeable here is worth a look — it means scrap arrived in a pattern the game is not known to produce.');
+      }
+      rows += statRow('Scrap spent', fmtScrap(et.scrap_outflow_gross),
+        'Every point of scrap that left the bank — units, structures, upgrades and the unrefunded half of cancelled orders combined.');
+
+      // Peaks and averages over finals: where the bank ENDED is an
+      // accident of when the game stopped, but the highest it ever
+      // reached (against the cap it could have reached) is a real
+      // statement about how the commander rode their economy.
+      const capTxt = et.peak_max_scrap
+        ? ` <span class="text-muted">of ${fmtScrap(et.peak_max_scrap)} cap</span>` : '';
+      rows += statRow('Peak bank', `${fmtScrap(et.peak_scrap)}${capTxt}`,
+        'The fullest the scrap bank ever got, next to the largest storage this team ever had. Storage is 40 for a live recycler plus 20 per pool, so the cap grows as they take pools.');
+      const floatPct = et.mean_float_ratio !== null && et.mean_float_ratio !== undefined
+        ? ` <span class="text-muted">(${Math.round(et.mean_float_ratio * 100)}% full)</span>` : '';
+      rows += statRow('Average bank', `${fmtScrap(et.mean_scrap)}${floatPct}`,
+        'The typical amount sitting in the bank across the whole match. A low average usually means the commander kept spending instead of hoarding. The percentage is average fullness measured against the storage cap at the time, and the cap grows as the team takes pools — so it will not match the average divided by the peak cap above.');
+
+      rows += statRow('Pools', `<span class="text-muted">peak</span> ${fmtScrap(et.peak_pools)} <span class="text-muted">· lost</span> ${fmtScrap(et.pools_lost)}`,
+        'The most extractors this team held at once, and how many they lost over the match in total. A high loss count means pools kept getting taken and retaken.');
+      const tempo = [];
+      [3, 5, 7].forEach((n) => {
+        const t = et[`time_to_${n}_pools_sec`];
+        if (t !== null && t !== undefined) tempo.push(`${n} @ ${fmtDurationCompact(t)}`);
+      });
+      if (tempo.length) {
+        rows += statRow('&nbsp;&nbsp;pool tempo', `<span class="text-muted">${tempo.join(' · ')}</span>`,
+          'How early the team reached 3, 5 and 7 pools. Earlier is a faster economic opening.');
+      }
+
+      const firstUpg = et.time_to_first_upgrade_sec;
+      const upgTxt = (firstUpg !== null && firstUpg !== undefined)
+        ? ` <span class="text-muted">· first @ ${fmtDurationCompact(firstUpg)}</span>` : '';
+      rows += statRow('Upgrades built', `${fmtScrap(et.upgrades_built)}${upgTxt}`,
+        `Extractor upgrades built across the match, and when the first one went up. Upgraded extractors regenerate faster. ${fmtScrap(et.upgrades_final)} were still standing at the end.`);
+
+      // Scrap-status bar. Read every band DIRECTLY from its own field --
+      // the old code derived red as 100 - green - yellow, which silently
+      // absorbed the rounding error from the other two bands.
+      const g = Math.round((et.green_share || 0) * 100);
+      const y = Math.round((et.yellow_share || 0) * 100);
+      const r = Math.round((et.red_share || 0) * 100);
+      const gT = fmtDurationCompact(et.green_sec);
+      const yT = fmtDurationCompact(et.yellow_sec);
+      const rT = fmtDurationCompact(et.red_sec);
+      // Reconciled regen story. The engine's traffic-light naming reads
+      // backwards to newcomers: RED is the BOTTOM of the bank and the
+      // FASTEST regen band, so time in red is usually a commander
+      // spending at full tempo, not one going broke.
+      const bandTip = 'How long the bank sat in each regeneration band. '
+        + 'Scrap regenerates fastest when the bank is low, so time in red usually means the commander '
+        + 'was spending as fast as scrap came in — efficient, but with no reserve for a big order. '
+        + 'Time in green means a full bank that is topping up slowly.'
+        + `<br><br>green ${g}% · ${gT}<br>yellow ${y}% · ${yT}<br>red ${r}% · ${rT}`;
+      rows += `<div class="vt-econ-status-bar mt-2 mb-1" data-bs-toggle="tooltip" data-bs-html="true"
+        title="${esc(bandTip)}">
+        <div style="width:${g}%;background:var(--kb-success)"></div>
+        <div style="width:${y}%;background:var(--kb-warning)"></div>
+        <div style="width:${r}%;background:var(--kb-danger)"></div>
+      </div>
+      <div class="d-flex justify-content-between vt-econ-band-legend">
+        <span>green ${g}%<br><span class="vt-econ-band-time">${gT}</span></span>
+        <span class="text-center">yellow ${y}%<br><span class="vt-econ-band-time">${yT}</span></span>
+        <span class="text-end">red ${r}%<br><span class="vt-econ-band-time">${rT}</span></span>
+      </div>`;
+    }
+    if (bt) {
+      const srcBadge = bt.structures_completion_source === 'inferred'
+        ? ` <span class="badge vt-econ-inferred-badge" data-bs-toggle="tooltip"
+              title="Structure completions inferred as queued − cancelled (this session's collector predates constructor BUILD events).">inferred</span>`
+        : '';
+      rows += `<hr class="my-2" style="border-color:var(--kb-border-subtle)">`;
+      rows += statRow('Units built', `${fmtScrap(bt.units_built)} <span class="text-muted">(${fmtScrap(bt.builds_per_min)} /min)</span>`,
+        'Everything the recycler, factory and armory finished building — vehicles and armory items alike. The per-minute figure is the commander\'s production tempo.');
+      rows += statRow('&nbsp;&nbsp;combat ships', `${fmtScrap(bt.ships_built)} <span class="text-muted">(${fmtScrap(bt.combat_ship_value)} scrap)</span>`,
+        'Just the fighting vehicles, and what they cost in total. Scavengers, tugs, service pods and camera pods are not counted here.');
+      rows += statRow('Structures built', `${fmtScrap(bt.structures_built)}${srcBadge}`,
+        'Buildings the constructor completed — pools, gun towers, factories and the rest of the base.');
+      rows += statRow('Cancelled orders', `${fmtScrap(bt.units_cancelled + bt.structures_cancelled)} <span class="text-muted">(${fmtScrap(bt.cancel_sunk_cost)} scrap sunk)</span>`,
+        'Orders the commander backed out of. Cancelling refunds only about half the cost, so the rest is scrap that bought nothing.');
+    }
+
+    // --- Thug supply (match.schema_version 18) ---
+    // How hard this commander's thugs were to keep in ships. Replaces the
+    // retired "median rebuild latency" row, which timed the commander's
+    // next build ORDER after a loss — that order was never attributable
+    // to the thug who died, and it missed commanders who re-ship instantly
+    // from pre-built stock. These rows measure the outcome instead.
+    const ts = ((currentData.thug_supply || {})[side]) || null;
+    if (ts) {
+      rows += `<hr class="my-2" style="border-color:var(--kb-border-subtle)">`;
+      rows += `<div class="vt-econ-subhead">Thug supply</div>`;
+      // v19: per-thug sub-rows behind each team total. `thugs` is sorted
+      // pipeline-side (heaviest attrition first), so render order is not
+      // this renderer's business. Absent on pre-v19 matches.
+      const thugRows = Array.isArray(ts.thugs) ? ts.thugs : [];
+      const subRow = (t, valueHtml) => statRow(
+        `&nbsp;&nbsp;${vtPlayerLinkHtml(t.name, t.steam64)}`, valueHtml
+      );
+
+      rows += statRow('Thug ships lost', `${fmtScrap(ts.thug_ships_lost)} <span class="text-muted">(${fmtScrap(ts.thug_ship_value_lost)} scrap)</span>`,
+        'Fighting vehicles this commander\'s thugs lost, and what they were worth. Counts human-piloted losses only, so AI craft the commander built are not in here. Compare against combat ships built above: that is the commander\'s attrition bill.');
+      thugRows.forEach(t => {
+        if (!t.ships_lost) return;
+        rows += subRow(t, `${fmtScrap(t.ships_lost)} <span class="text-muted">(${fmtScrap(t.ship_value_lost)} scrap)</span>`);
+      });
+
+      if (ts.thug_pilot_sec !== null && ts.thug_pilot_sec !== undefined) {
+        const atBase = (ts.thug_at_base_pilot_sec !== null && ts.thug_at_base_pilot_sec !== undefined)
+          ? ` <span class="text-muted">(${fmtDurationCompact(ts.thug_at_base_pilot_sec)} at base)</span>` : '';
+        rows += statRow('Thug time on foot', `${fmtDurationCompact(ts.thug_pilot_sec)}${atBase}`,
+          'Total time this commander\'s thugs spent out of a ship, added together across all of them. The at-base figure is the part of that spent standing in their own base waiting on a new ship — thugs the commander had not re-shipped yet.');
+        thugRows.forEach(t => {
+          if (t.pilot_sec === null || t.pilot_sec === undefined || !t.pilot_sec) return;
+          const tAtBase = (t.at_base_pilot_sec !== null && t.at_base_pilot_sec !== undefined)
+            ? ` <span class="text-muted">(${fmtDurationCompact(t.at_base_pilot_sec)} at base)</span>` : '';
+          rows += subRow(t, `${fmtDurationCompact(t.pilot_sec)}${tAtBase}`);
+        });
+      }
+      if (ts.reship_median_sec !== null && ts.reship_median_sec !== undefined) {
+        rows += statRow('Median re-ship time', `${ts.reship_median_sec}s <span class="text-muted">(${fmtScrap(ts.reship_spells)} times)</span>`,
+          'Typical wait between a thug losing their ship and being back in one. Measured from the thugs themselves, so it counts however they got the ship — freshly built or taken from stock.');
+      }
+    }
+
+    el.innerHTML = `
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0"><span class="vt-econ-team-dot" style="background:${teamColor}"></span>Team ${esc(side)} — ${cmdrHtml}</h5>
+      </div>
+      <div class="card-body">${rows || '<p class="text-muted mb-0">No data.</p>'}</div>`;
+  }
+
+  function buildlogFilterFn(row) {
+    switch (buildlogFilter) {
+      case 'builds':     return row.type === 'build';
+      case 'cancels':    return row.type === 'cancel';
+      case 'structures': return row.producer === 'constructor';
+      default:           return true;
+    }
+  }
+
+  function renderBuildLog() {
+    const container = document.getElementById('economy-buildlog-content');
+    if (!container) return;
+    const feed = ((currentData.builds || {}).feed) || [];
+    const tickRate = currentData.match.tick_rate || 20;
+    const minTick = (currentData.match.tick_range && currentData.match.tick_range[0]) || 0;
+
+    const filtered = feed.filter(buildlogFilterFn);
+    const byTeam = { 1: [], 2: [] };
+    filtered.forEach(r => { if (byTeam[r.team]) byTeam[r.team].push(r); });
+
+    const typeIcon = {
+      queue:  '<i class="bi bi-plus-circle" style="color:var(--kb-text-muted)" title="Queued"></i>',
+      build:  '<i class="bi bi-check-circle-fill" style="color:var(--kb-success)" title="Built"></i>',
+      cancel: '<i class="bi bi-x-circle" style="color:var(--kb-danger)" title="Cancelled"></i>',
+    };
+
+    const renderCol = (side) => {
+      const rows = byTeam[side].slice(0, buildlogShown);
+      const more = byTeam[side].length - rows.length;
+      let html = '';
+      rows.forEach(r => {
+        const sec = Math.max(0, (r.tick - minTick) / tickRate);
+        const ts = `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+        const status = r.scrap_status_at_queue || r.scrap_status_at_build;
+        const statusDot = status
+          ? `<span class="vt-econ-status-dot" data-status="${esc(status)}" title="Scrap status: ${esc(ECON_STATUS_LABEL[status] || status)}"></span>`
+          : '';
+        const producerIcon = r.producer_resolved || r.producer
+          ? `<i class="bi ${ECON_PRODUCER_ICON[r.producer_resolved || r.producer] || 'bi-question-circle'}" style="color:var(--kb-text-muted)" title="${esc(r.producer_resolved || r.producer || '?')}"></i>`
+          : '';
+        const cost = (r.scrap_cost !== null && r.scrap_cost !== undefined)
+          ? `<span class="vt-econ-cost-chip">${r.scrap_cost}</span>` : '';
+        const dupBadge = r.dedup_folded
+          ? '<span class="badge vt-econ-inferred-badge" title="Duplicate wire event — counted once">dup</span>' : '';
+        const struck = r.type === 'cancel' ? ' vt-econ-row-cancel' : '';
+        html += `<div class="vt-econ-log-row${struck}">
+          <span class="vt-econ-log-ts">${ts}</span>
+          ${typeIcon[r.type] || ''}
+          ${producerIcon}
+          <span class="vt-econ-log-name">${econOdfChip(r.odf, r.name)}</span>
+          ${cost}${statusDot}${dupBadge}
+        </div>`;
+      });
+      if (!rows.length) html = '<p class="text-muted" style="font-size:0.85rem">No matching events.</p>';
+      if (more > 0) {
+        html += `<button class="btn btn-sm btn-outline-secondary w-100 mt-2" data-buildlog-more type="button">Show ${Math.min(more, BUILDLOG_PAGE)} more (${more} hidden)</button>`;
+      }
+      return html;
+    };
+
+    const teamHead = (side) => {
+      const bt = ((currentData.builds || {}).teams || {})[String(side)] || {};
+      const c = bt.commander;
+      const teamColor = side === 1 ? 'var(--kb-primary)' : 'var(--kb-success)';
+      return `<div class="vt-econ-log-head"><span class="vt-econ-team-dot" style="background:${teamColor}"></span>
+        Team ${side}${c ? ' — ' + esc(c.name) : ''} <span class="text-muted">(${byTeam[side].length})</span></div>`;
+    };
+
+    container.innerHTML = `<div class="row g-3">
+      <div class="col-md-6">${teamHead(1)}<div class="vt-econ-log-col">${renderCol(1)}</div></div>
+      <div class="col-md-6">${teamHead(2)}<div class="vt-econ-log-col">${renderCol(2)}</div></div>
+    </div>`;
+  }
+
+  function wireBuildLogControls() {
+    if (buildlogWired) return;
+    buildlogWired = true;
+    const group = document.getElementById('economy-buildlog-filter');
+    if (group) {
+      group.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-buildlog-filter]');
+        if (!btn) return;
+        buildlogFilter = btn.dataset.buildlogFilter;
+        group.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+        buildlogShown = BUILDLOG_PAGE;
+        renderBuildLog();
+      });
+    }
+    const content = document.getElementById('economy-buildlog-content');
+    if (content) {
+      content.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-buildlog-more]')) return;
+        buildlogShown += BUILDLOG_PAGE;
+        renderBuildLog();
+      });
+    }
   }
 
   // --- Positioning Tab ---
@@ -3367,6 +3750,40 @@
         '{name} barely led on T-key usage.',
       ],
     },
+    the_tycoon: {
+      dominant: [
+        '{name} generated {value} scrap — the enemy economy never stood a chance.',
+        '{name} ran a printing press: {value} scrap, {income_loose} collected as loose.',
+        '{name} out-earned the other commander by a mile.',
+      ],
+      clear: [
+        '{name} led scrap generation at {value}.',
+        '{name} won the economy war — {value} scrap generated.',
+        '{name} kept the pools flowing at {value} scrap.',
+      ],
+      close: [
+        '{name} edged the economy race at {value} scrap.',
+        '{name} narrowly out-earned the enemy commander.',
+        '{name} squeaked the tycoon title.',
+      ],
+    },
+    war_machine: {
+      dominant: [
+        '{name} fielded {value} scrap of combat ships — an assembly line at war.',
+        '{name} converted the bank into {ships_built} warships.',
+        '{name} out-produced the enemy line by a mile.',
+      ],
+      clear: [
+        '{name} led combat production — {ships_built} ships, {value} scrap fielded.',
+        '{name} kept the war machine turning at {value} scrap of ships.',
+        '{name} won the production race.',
+      ],
+      close: [
+        '{name} edged combat production at {value} scrap.',
+        '{name} narrowly out-produced the enemy commander.',
+        '{name} squeaked the war-machine crown.',
+      ],
+    },
   };
 
   // Soft FNV-1a-ish hash — small, deterministic, no need for crypto.
@@ -3388,6 +3805,7 @@
       case 'distance': return Math.round(value).toLocaleString();
       case 'count':    return Math.round(value).toLocaleString();
       case 'score':    return Math.round(value).toLocaleString();
+      case 'scrap':    return Math.round(value).toLocaleString();
       case 'ratio':    return Number(value).toFixed(2);
       case 'kd':       return Number(value).toFixed(2);
       case 'percent':
@@ -3415,6 +3833,9 @@
     crate_pod_goblin: '',
     chris_kyle:       'snipes',
     the_locksmith:    '',
+    // v17 (proto v4) commander-economy cards.
+    the_tycoon:       'scrap',
+    war_machine:      'scrap',
   };
 
   // Presentation-only overrides for the tile heading. The pipeline emits a
@@ -3502,6 +3923,16 @@
       clear:    ['{name} averages {value} target lock across rated matches.',            '{name} leads career T-key usage at {value}.',          '{name} tops the all-time locksmith column.'],
       close:    ['{name} edges career T-key usage at {value}.',                          '{name} narrowly leads lifetime target lock.',          '{name} squeaks the long-run locksmith crown.'],
     },
+    career_tycoon: {
+      dominant: ['{name} has generated {value} scrap commanding — a lifetime printing press.', '{name} runs the corpus economy: {value} scrap over {econ_matches} commands.', '{name} out-earns every commander by a mile.'],
+      clear:    ['{name} leads career scrap generation at {value}.',                            '{name} tops lifetime commander income ({avg_income_per_min}/min).',          '{name} holds the all-time tycoon crown.'],
+      close:    ['{name} edges career scrap generation at {value}.',                            '{name} narrowly leads lifetime commander income.',                           '{name} squeaks the tycoon crown.'],
+    },
+    career_war_machine: {
+      dominant: ['{name} has fielded {value} scrap of combat ships — a career assembly line.', '{name} built {ships_built} warships across {build_matches} commands.', '{name} out-produces every commander by a mile.'],
+      clear:    ['{name} leads career combat production at {value} scrap.',                     '{name} tops lifetime warship output — {ships_built} ships.',           '{name} holds the all-time war-machine crown.'],
+      close:    ['{name} edges career combat production at {value} scrap.',                     '{name} narrowly leads lifetime warship output.',                       '{name} squeaks the war-machine crown.'],
+    },
     the_champion: {
       dominant: ['{name} sits at {value} VTSR-T with {matches_played} rated matches.', '{name} owns the league. {value} VTSR-T.',          '{name} is the corpus champion at {value}.'],
       clear:    ['{name} tops the VTSR-T ladder at {value}.',                          '{name} holds the highest VTSR-T — {value}.',        '{name} leads the league rating column.'],
@@ -3577,6 +4008,8 @@
     career_pod_goblin:       '',
     career_chris_kyle:       'snipes',
     career_the_locksmith:    '',
+    career_tycoon:           'scrap',
+    career_war_machine:      'scrap',
     the_champion:            'VTSR-T',
     the_veteran:             'matches',
     the_workhorse:           'commands',
@@ -3681,6 +4114,34 @@
       case 'map_master':
         if (!b.map_name) return '';
         return `${esc(b.map_name)} (${b.kills}-${b.deaths})`;
+      // v17 commander-economy cards (The Tycoon / War Machine).
+      case 'the_tycoon': {
+        if (b.income_regen == null && b.income_loose == null) return '';
+        const parts = [];
+        if (b.income_regen != null) parts.push(`${fmt(b.income_regen)} pools`);
+        // Amount-first loose display ("N loose" = scrap amount, per the
+        // player-terminology contract).
+        if (b.income_loose != null) parts.push(`${fmt(b.income_loose)} loose`);
+        return parts.join(' · ');
+      }
+      case 'war_machine':
+        if (b.ships_built == null) return '';
+        return `${fmt(b.ships_built)} combat ships${b.builds_per_min != null ? ` · ${b.builds_per_min}/min` : ''}`;
+      // v17 career commander-economy siblings.
+      case 'career_tycoon': {
+        if (b.econ_matches == null) return '';
+        const parts = [`${fmt(b.econ_matches)} commands`];
+        if (b.avg_income_per_min != null) parts.push(`${fmt(b.avg_income_per_min)}/min`);
+        if (b.income_loose != null) parts.push(`${fmt(b.income_loose)} loose`);
+        return parts.join(' · ');
+      }
+      case 'career_war_machine': {
+        if (b.ships_built == null) return '';
+        const parts = [`${fmt(b.ships_built)} combat ships`];
+        if (b.build_matches != null) parts.push(`${fmt(b.build_matches)} commands`);
+        if (b.avg_ships_per_min != null) parts.push(`${b.avg_ships_per_min}/min`);
+        return parts.join(' · ');
+      }
       default:
         return '';
     }
@@ -3802,6 +4263,14 @@
         peak_vtsr:      breakdown.peak_vtsr != null ? Math.round(breakdown.peak_vtsr) : '',
         map_name:       breakdown.map_name || '',
         matches_with_positioning: breakdown.matches_with_positioning != null ? breakdown.matches_with_positioning : '',
+        // v17 commander-economy tokens (The Tycoon / War Machine + career siblings).
+        // Amount-first loose contract: {income_loose} is the scrap amount.
+        income_loose: breakdown.income_loose != null ? fmt(breakdown.income_loose) : '',
+        loose_share:  breakdown.loose_share != null ? (Number(breakdown.loose_share) * 100).toFixed(0) + '%' : '',
+        ships_built:   breakdown.ships_built != null ? fmt(breakdown.ships_built) : '',
+        econ_matches:  breakdown.econ_matches != null ? fmt(breakdown.econ_matches) : '',
+        build_matches: breakdown.build_matches != null ? fmt(breakdown.build_matches) : '',
+        avg_income_per_min: breakdown.avg_income_per_min != null ? fmt(breakdown.avg_income_per_min) + ' scrap' : '',
       };
       const flavor = _hlInterp(_hlPickCopy(c.category, c.narrative, matchId, ctx, copyTable), ctx);
       const breakdownLine = formatHighlightBreakdown(c);
@@ -5164,6 +5633,16 @@
   // a misleading 0.0%. Legacy matches (field absent) count as having data.
   function matchHasBulletHitData() {
     return !(currentData && currentData.match && currentData.match.has_bullet_hit_data === false);
+  }
+
+  // v17 (proto v4): economy/builds availability. INVERSE default of the
+  // bullet flag -- absent means False (the pre-v4 corpus has no resource /
+  // build telemetry), so these read the flag truthily rather than !== false.
+  function matchHasResourceData() {
+    return !!(currentData && currentData.match && currentData.match.has_resource_data);
+  }
+  function matchHasBuildData() {
+    return !!(currentData && currentData.match && currentData.match.has_build_data);
   }
 
   const ACC_GAP_TITLE = 'No hit data — the collector recorded no bullet hits for this match';
@@ -6969,6 +7448,79 @@
     ensureTooltips(document.getElementById('commander-table'));
   }
 
+  // v17: Economy Leaders card on the All Matches → Commanders tab.
+  // Six leader tiles built from the aggregator's commander-economy row
+  // fields (v4 telemetry only). The card hides entirely when no commander
+  // in the current scope has any telemetry; individual tiles self-omit
+  // below the per-metric denominator floor so a single hot match can't
+  // claim a career-flavored crown.
+  const ECON_LEADER_MIN_MATCHES = 2;
+
+  function renderCommanderEconomyLeaders(rows) {
+    const card = document.getElementById('section-commander-economy');
+    const grid = document.getElementById('commander-economy-tiles');
+    if (!card || !grid) return;
+
+    const anyTelemetry = (rows || []).some(r =>
+      (r.econ_matches || 0) > 0 || (r.build_matches || 0) > 0);
+    if (!anyTelemetry) {
+      card.classList.add('d-none');
+      grid.innerHTML = '';
+      return;
+    }
+    card.classList.remove('d-none');
+
+    const econRows  = (rows || []).filter(r => (r.econ_matches  || 0) >= ECON_LEADER_MIN_MATCHES);
+    const buildRows = (rows || []).filter(r => (r.build_matches || 0) >= ECON_LEADER_MIN_MATCHES);
+
+    // [label, icon, candidateRows, valueField, better, formatFn, subFn]
+    const METRICS = [
+      ['Top earner', 'bi-graph-up-arrow', econRows, 'avg_income_per_min', 'high',
+        v => `${fmt(v)} <span class="vt-econ-leader-unit">scrap/min</span>`,
+        r => `${r.econ_matches} telemetry matches`],
+      // Amount-first loose contract: rank + display by the scrap AMOUNT
+      // collected as loose ("N loose"), never the piece count.
+      ['Loose collector', 'bi-magnet', econRows.filter(r => r.total_income_loose != null), 'total_income_loose', 'high',
+        v => `${fmt(v)} <span class="vt-econ-leader-unit">loose</span>`,
+        r => `${r.loose_share != null ? (r.loose_share * 100).toFixed(0) + '% of income · ' : ''}${r.econ_matches} telemetry matches`],
+      ['Shipwright', 'bi-wrench-adjustable', buildRows.filter(r => r.avg_ships_per_min != null), 'avg_ships_per_min', 'high',
+        v => `${v} <span class="vt-econ-leader-unit">ships/min</span>`,
+        r => `${fmt(r.total_ships_built)} combat ships total`],
+      ['War chest', 'bi-gear-wide-connected', buildRows.filter(r => r.total_combat_ship_value != null), 'total_combat_ship_value', 'high',
+        v => `${fmt(v)} <span class="vt-econ-leader-unit">scrap fielded</span>`,
+        r => `${r.build_matches} telemetry matches`],
+      ['Leanest bank', 'bi-speedometer2', econRows.filter(r => r.avg_float_ratio != null), 'avg_float_ratio', 'low',
+        v => `${(v * 100).toFixed(0)}% <span class="vt-econ-leader-unit">avg float</span>`,
+        () => 'low float = building in the fast-regen zone'],
+      ['Fastest rebuilds', 'bi-arrow-repeat', buildRows.filter(r => r.avg_rebuild_latency_sec != null), 'avg_rebuild_latency_sec', 'low',
+        v => `${v}s <span class="vt-econ-leader-unit">median latency</span>`,
+        r => `${r.build_matches} telemetry matches`],
+    ];
+
+    const tiles = [];
+    for (const [label, icon, candidates, field, better, fmtFn, subFn] of METRICS) {
+      const sorted = [...candidates]
+        .filter(r => r[field] != null)
+        .sort((a, b) => better === 'high' ? b[field] - a[field] : a[field] - b[field]);
+      const leader = sorted[0];
+      const body = leader
+        ? `<div class="vt-econ-leader-name">${vtPlayerLinkHtml(leader.name, leader.steam64)}</div>
+           <div class="vt-econ-leader-value">${fmtFn(leader[field])}</div>
+           <div class="vt-econ-leader-sub">${esc(String(subFn(leader)))}</div>`
+        : `<div class="vt-econ-leader-value" style="color:var(--kb-text-muted);">—</div>
+           <div class="vt-econ-leader-sub">needs ${ECON_LEADER_MIN_MATCHES}+ telemetry matches</div>`;
+      tiles.push(`
+        <div class="col-md-6 col-xl-4">
+          <div class="vt-econ-leader-tile">
+            <div class="vt-econ-leader-label"><i class="bi ${icon} me-2"></i>${label}</div>
+            ${body}
+          </div>
+        </div>`);
+    }
+    grid.innerHTML = tiles.join('');
+    ensureTooltips(card);
+  }
+
   function renderCommanderH2H(pairs) {
     const container = document.getElementById('commander-h2h-container');
     if (!container) return;
@@ -7215,6 +7767,11 @@
     });
     registerChartRenderer('section-weapon-meta', (canvasId) => {
       return renderWeaponMeta(canvasId, data.weapon_meta);
+    });
+    registerChartRenderer('section-economy-scrap', (canvasId) => {
+      const econ = currentData && currentData.economy;
+      if (!econ) return null;
+      return renderEconomyScrapChart(canvasId, econ, currentData.match);
     });
     registerChartRenderer('section-player-weapons', (canvasId) => {
       return renderPlayerWeapons(canvasId, data.leaderboard, data.weapon_meta);

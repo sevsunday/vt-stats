@@ -115,7 +115,28 @@ THUG_WEIGHTS = {
     "target_lock_pct":   0.005,  # v2.10: luxury/preview axis (was 0.04); ~0.5% effective
 }
 
-ALPHA = 0.0   # Wins-ELO blend weight. Stubbed at 0 until winner data lands.
+ALPHA = 0.0   # Wins-ELO blend weight. Stays 0 until the pre-registered
+              # promote rule (critique/decisions/phase-5-wins-blend.md)
+              # clears an alpha on validator evidence.
+
+# ---- Stage E: R^W wins ladder (real machinery, INERT while ALPHA = 0) ----
+# A second per-player ladder updated ONLY on rated matches with a
+# DETERMINED outcome (host-attested, human-adjudicated, physically
+# evident clean_win, or contested-with-team). Team-mean reference (the
+# Phase 2C decisive negative result rejected MAX/softmax for the UPDATE
+# rule; those live in the validator only), classic chess logistic scale
+# 400, symmetric K (no loss aversion -- W/L is zero-sum), no floor, no
+# inactivity boost (thug-calibrated; revisit if ALPHA ever ships > 0).
+# K decays WINS_K_BASE -> WINS_K_FLOOR over the first
+# WINS_PROVISIONAL_PRIOR wins-rated games.
+WINS_K_BASE = 24.0
+WINS_K_FLOOR = 12.0
+WINS_PROVISIONAL_PRIOR = 10.0
+WINS_LOGISTIC_SCALE = 400.0
+# decided_by values that make a match outcome DETERMINED for the wins
+# ladder (winner.team in (1, 2)). Draws (decided_by == "draw") score
+# S = 0.5 for every rated row. Mirrors elo_commander.DETERMINED_DECIDED_BY.
+WINS_DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested")
 
 # v2.4: per-match commander role adjustment. For each commander row and
 # each axis listed in COMMANDER_AXIS_PRIOR, the post-clip z-score is
@@ -339,6 +360,22 @@ def floor_taper(rating: float) -> float:
     if span >= 1.0:
         return 1.0
     return span
+
+
+def wins_k_factor(wins_games: int) -> float:
+    """Stage E: symmetric wins-ladder K with linear provisional decay
+    (WINS_K_BASE -> WINS_K_FLOOR over the first WINS_PROVISIONAL_PRIOR
+    wins-rated games). No loss aversion, no inactivity boost -- W/L
+    duels are zero-sum and the ladder is deliberately spartan until
+    ALPHA ships > 0."""
+    frac = max(0.0, 1.0 - max(0, int(wins_games)) / WINS_PROVISIONAL_PRIOR)
+    return WINS_K_FLOOR + (WINS_K_BASE - WINS_K_FLOOR) * frac
+
+
+def wins_expected_side(mean_own: float, mean_opp: float) -> float:
+    """Stage E: side-level expected score from team-mean R^W difference
+    (classic logistic, scale WINS_LOGISTIC_SCALE)."""
+    return 1.0 / (1.0 + 10.0 ** (-(mean_own - mean_opp) / WINS_LOGISTIC_SCALE))
 
 
 def expected_performance(r_i: float, r_opponents_ref: float) -> float:
@@ -1041,6 +1078,7 @@ def _rating_pass(
     lowtier_eligibility: dict[str, float] | None = None,
     canonical_before_by_match: dict | None = None,
     lobby_score_mode: str = "zclip",
+    alpha_override: float | None = None,
 ) -> tuple[dict, dict, dict, dict]:
     """Walk ``all_match_data`` chronologically, applying the ELO update rule
     per match, and return ``(elo_current, elo_history, final_ratings_map)``
@@ -1109,6 +1147,12 @@ def _rating_pass(
             f"unknown lobby_score_mode: {lobby_score_mode!r}; "
             f"expected one of {LOBBY_SCORE_MODES}"
         )
+    # Stage E forensic alpha sweep: alpha_override replaces the module
+    # ALPHA for THIS pass only (alt JSON pairs elo_current_alpha*.json).
+    # None = canonical (module ALPHA = 0.0). With any alpha > 0 the
+    # published vtsr becomes the real blend and peak_vtsr tracks the
+    # BLENDED value per match inside the walk (both ladders in scope).
+    effective_alpha = ALPHA if alpha_override is None else float(alpha_override)
     matches = sorted(
         list(all_match_data),
         key=lambda md: (
@@ -1128,6 +1172,17 @@ def _rating_pass(
 
     thug_elo: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
     matches_played: dict[str, int] = defaultdict(int)
+    # Stage E: R^W wins-ladder state. CRITICAL: initialized INSIDE
+    # _rating_pass -- the v2.8 lowtier two-pass structure re-runs this
+    # function, and module/closure-leaked state would silently double
+    # every wins delta while the vtsr byte-identity gate (blind to wins
+    # at ALPHA = 0) kept passing. The ladder depends only on outcomes +
+    # its own state, so pass 1 and pass 2 produce identical wins values.
+    wins_elo_map: dict[str, float] = defaultdict(lambda: ELO_ANCHOR)
+    wins_games: dict[str, int] = defaultdict(int)
+    wins_w: dict[str, int] = defaultdict(int)
+    wins_l: dict[str, int] = defaultdict(int)
+    wins_d: dict[str, int] = defaultdict(int)
     display_name: dict[str, str] = {}
     steam64_for_key: dict[str, str | None] = {}
     last_match_id: dict[str, str] = {}
@@ -1179,6 +1234,15 @@ def _rating_pass(
     # across the full corpus (mirrors the campod / low-activity
     # counters' contract). Always 0 in canonical mode.
     excluded_commander_rows    = 0
+    # Stage E: wins-ladder match counters. A RATED match either scores
+    # the wins ladder (determined outcome / draw), skips as undetermined
+    # (unclear / missing team), or skips because every rated row landed
+    # on one side (no duel structure -- defensive, e.g. heavy exclusions).
+    # matches_excluded_no_winner stays 0: undetermined matches still rate
+    # the thug side in full.
+    wins_matches_rated        = 0
+    wins_skipped_undetermined = 0
+    wins_skipped_one_sided    = 0
 
     for md in matches:
         m = md.get("match") or {}
@@ -1285,6 +1349,47 @@ def _rating_pass(
             keys[j]: ratings_before[j] for j in range(n_lobby)
         }
 
+        # ---- Stage E: resolve this match's wins-ladder outcome ----------
+        # Runs on RATED matches only (match-level gates already applied).
+        # Determined team win -> S = 1/0 by side; draw -> S = 0.5 for all
+        # rated rows; anything else skips the wins update entirely (the
+        # thug side still rates -- matches_excluded_no_winner stays 0).
+        winner_block = (m.get("winner") or {})
+        wins_decided_by = winner_block.get("decided_by")
+        wins_winner_team = winner_block.get("team")
+        wins_row_team: dict[int, int | None] = {}
+        for j in range(n_lobby):
+            t = lobby[j].get("team")
+            if t not in (1, 2):
+                slot = lobby[j].get("slot") or 0
+                t = 1 if 1 <= slot <= 5 else (2 if 6 <= slot <= 10 else None)
+            wins_row_team[j] = t
+        wins_s_by_team: dict[int, float] | None = None
+        if wins_decided_by == "draw":
+            wins_s_by_team = {1: 0.5, 2: 0.5}
+        elif (wins_decided_by in WINS_DETERMINED_DECIDED_BY
+              and wins_winner_team in (1, 2)):
+            wins_s_by_team = {wins_winner_team: 1.0, 3 - wins_winner_team: 0.0}
+        else:
+            wins_skipped_undetermined += 1
+        wins_e_by_team: dict[int, float] = {}
+        # Pre-match wins snapshot (order-independence, mirrors ratings_before).
+        wins_before = [wins_elo_map[k] for k in keys]
+        if wins_s_by_team is not None:
+            t1_rows = [j for j in range(n_lobby) if wins_row_team[j] == 1]
+            t2_rows = [j for j in range(n_lobby) if wins_row_team[j] == 2]
+            if not t1_rows or not t2_rows:
+                wins_s_by_team = None
+                wins_skipped_one_sided += 1
+            else:
+                # Team-MEAN R^W reference (Phase 2C: mean, never MAX/softmax
+                # in the update rule; those live in the validator only).
+                mean1 = sum(wins_before[j] for j in t1_rows) / len(t1_rows)
+                mean2 = sum(wins_before[j] for j in t2_rows) / len(t2_rows)
+                e1 = wins_expected_side(mean1, mean2)
+                wins_e_by_team = {1: e1, 2: 1.0 - e1}
+                wins_matches_rated += 1
+
         match_deltas = []
         for i, key in enumerate(keys):
             n_before = matches_played[key]
@@ -1354,11 +1459,6 @@ def _rating_pass(
             display_name[key] = lobby[i].get("name") or display_name.get(key, "")
             if not steam64_for_key.get(key):
                 steam64_for_key[key] = lobby[i].get("steam64")
-            if r_after > peak_vtsr[key]:
-                peak_vtsr[key] = r_after
-                peak_at[key] = match_id
-            elif key not in peak_at:
-                peak_at[key] = match_id
             wh = win_history[key]
             wh.append(round(dr, 2))
             if len(wh) > 10:
@@ -1397,6 +1497,49 @@ def _rating_pass(
             # axis_contributions[axis] == z_post_shift on each shifted axis.
             if row_axis_meta:
                 delta_entry["axis_contributions_meta"] = dict(row_axis_meta)
+
+            # ---- Stage E: per-row wins-ladder update (role-blind:
+            # commanders included; campod / low-activity rows already
+            # filtered by the shared lobby predicate; thug-only mode
+            # inherits its row filter for free). Symmetric K, no loss
+            # aversion, no floor. Additive `wins` audit block per delta;
+            # absent on rows of undetermined / one-sided matches.
+            if wins_s_by_team is not None and wins_row_team.get(i) in (1, 2):
+                side = wins_row_team[i]
+                w_before = wins_before[i]
+                kw = wins_k_factor(wins_games[key])
+                s_row = wins_s_by_team[side]
+                e_row = wins_e_by_team[side]
+                dw = kw * (s_row - e_row)
+                w_after = w_before + dw
+                wins_elo_map[key] = w_after
+                wins_games[key] += 1
+                if s_row == 1.0:
+                    wins_w[key] += 1
+                elif s_row == 0.0:
+                    wins_l[key] += 1
+                else:
+                    wins_d[key] += 1
+                delta_entry["wins"] = {
+                    "before": round(w_before, 2),
+                    "after":  round(w_after, 2),
+                    "delta":  round(dw, 2),
+                    "s":      s_row,
+                    "e":      round(e_row, 4),
+                }
+
+            # Peak tracking runs AFTER the wins update so forensic
+            # alpha-override passes track the BLENDED published value per
+            # match (both ladders in scope). At the canonical ALPHA = 0
+            # the blend is exactly r_after (0.0 * w + 1.0 * r), so the
+            # canonical peak behavior is bit-identical to pre-Stage-E.
+            blended_after = (effective_alpha * wins_elo_map.get(key, ELO_ANCHOR)
+                             + (1.0 - effective_alpha) * r_after)
+            if blended_after > peak_vtsr[key]:
+                peak_vtsr[key] = blended_after
+                peak_at[key] = match_id
+            elif key not in peak_at:
+                peak_at[key] = match_id
             match_deltas.append(delta_entry)
 
         # v2.4: AFTER the per-row loop, accumulate this match's commander
@@ -1424,9 +1567,13 @@ def _rating_pass(
     for key in thug_elo:
         t_elo = thug_elo[key]
         n     = matches_played[key]
-        # Final VTSR-T = blend(R^W, R^T). R^W stubbed at anchor in v1.
-        wins_elo = ELO_ANCHOR
-        vtsr = ALPHA * wins_elo + (1.0 - ALPHA) * t_elo
+        # Final VTSR-T = blend(R^W, R^T). Stage E: R^W is the real wins
+        # ladder (anchor for players with zero wins-rated games). ALPHA
+        # stays 0.0 canonically, so vtsr == thug_elo bit-for-bit (0.0 * w
+        # is exactly 0.0 for any finite w) -- the byte-identity gate's
+        # guarantee. Forensic alpha-override passes publish the real blend.
+        wins_elo = wins_elo_map.get(key, ELO_ANCHOR)
+        vtsr = effective_alpha * wins_elo + (1.0 - effective_alpha) * t_elo
         final_map[key] = round(vtsr, 1)
         # Per-axis career means; each axis's denominator is the number
         # of rated matches where that axis was available for the lobby.
@@ -1451,6 +1598,16 @@ def _rating_pass(
             "matches_as_commander": n_cmdr,
             "matches_as_thug":  n - n_cmdr,
             "matches_provisional": n < ELO_PROVISIONAL_THRESHOLD,
+            # Stage E: wins-ladder career fields (additive). wins_games
+            # counts only wins-rated rows (determined-outcome matches),
+            # so it is <= matches_played; record keys w/l/d mirror the
+            # per-delta `wins.s` tallies.
+            "wins_games":       wins_games.get(key, 0),
+            "wins_record": {
+                "w": wins_w.get(key, 0),
+                "l": wins_l.get(key, 0),
+                "d": wins_d.get(key, 0),
+            },
             "last_match_id":    last_match_id.get(key, ""),
             "last_delta":       round(last_delta.get(key, 0.0), 2),
             "peak_vtsr":        round(peak_vtsr.get(key, ELO_ANCHOR), 1),
@@ -1489,8 +1646,23 @@ def _rating_pass(
         # elo_current_ranks.json). Additive sentinel -- JS readers never
         # branch on it.
         "lobby_score_mode":    lobby_score_mode,
-        "alpha":               ALPHA,
+        # Stage E: `alpha` reports the EFFECTIVE blend weight this file
+        # was computed with (module ALPHA canonically; the override on
+        # forensic elo_current_alpha*.json pairs). `alpha_overridden`
+        # is the sentinel separating the two.
+        "alpha":               effective_alpha,
+        "alpha_overridden":    alpha_override is not None,
         "alpha_pve":           ALPHA_PVE,
+        # Stage E: wins-ladder constants + match counters (additive
+        # sentinels; ELO_SCHEMA_VERSION deliberately NOT bumped while
+        # ALPHA = 0 -- kboost precedent, published vtsr unchanged).
+        "wins_k_base":            WINS_K_BASE,
+        "wins_k_floor":           WINS_K_FLOOR,
+        "wins_provisional_prior": WINS_PROVISIONAL_PRIOR,
+        "wins_logistic_scale":    WINS_LOGISTIC_SCALE,
+        "wins_matches_rated":     wins_matches_rated,
+        "wins_matches_skipped_undetermined": wins_skipped_undetermined,
+        "wins_matches_skipped_one_sided":    wins_skipped_one_sided,
         "anchor":              ELO_ANCHOR,
         "rating_scale":        ELO_RATING_SCALE,
         "expected_score_logistic_scale": ELO_LOGISTIC_SCALE,
@@ -1591,6 +1763,8 @@ def _rating_pass(
         "excludes_locked_priors":   bool(exclude_locked_priors),
         "expected_performance_mode": expected_performance_mode,
         "lobby_score_mode":    lobby_score_mode,
+        "alpha":               effective_alpha,
+        "alpha_overridden":    alpha_override is not None,
         "history":             history_entries,
     }
 
@@ -1604,6 +1778,7 @@ def compute_elo(
     expected_performance_mode: str = "median",
     enable_lowtier_lift: bool = True,
     lobby_score_mode: str = "zclip",
+    alpha_override: float | None = None,
 ) -> tuple[dict, dict]:
     """Public entrypoint: two-pass VTSR-T with the v2.8 low-tier at-base lift.
 
@@ -1622,6 +1797,11 @@ def compute_elo(
     ``lobby_score_mode`` ("zclip" canonical / "rank" Phase 3 trial -- see
     ``LOBBY_SCORE_MODES``) selects the per-axis lobby-score pipeline and is
     threaded through both passes.
+
+    Stage E: ``alpha_override`` (forensic elo_current_alpha*.json pairs)
+    replaces the module ALPHA for both passes. Note the v2.8 lowtier
+    eligibility then keys on the BLENDED pass-1 vtsr (documented forensic
+    deviation -- the alt pairs mirror canonical settings except alpha).
     """
     cur1, hist1, final1, canonical_before = _rating_pass(
         all_match_data,
@@ -1630,6 +1810,7 @@ def compute_elo(
         expected_performance_mode=expected_performance_mode,
         lowtier_eligibility=None,
         lobby_score_mode=lobby_score_mode,
+        alpha_override=alpha_override,
     )
     if not (LOWTIER_LIFT_ENABLED and enable_lowtier_lift):
         return cur1, hist1
@@ -1647,5 +1828,6 @@ def compute_elo(
         lowtier_eligibility=eligibility,
         canonical_before_by_match=canonical_before,
         lobby_score_mode=lobby_score_mode,
+        alpha_override=alpha_override,
     )
     return cur2, hist2

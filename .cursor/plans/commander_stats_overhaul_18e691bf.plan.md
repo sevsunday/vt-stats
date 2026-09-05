@@ -4,58 +4,58 @@ overview: Adopt the additive proto v4 (per-tick team resources + build events), 
 todos:
   - id: a1-proto-swap
     content: "Stage A: replace statsgate.proto verbatim, regen pb2 + protobufjs descriptor, extend verify_proto_decode.mjs oneof arms"
-    status: pending
+    status: completed
   - id: a2-v4-detection
     content: "Stage A: presence-based v4 stamps in load_session() + raw-browser fetchAndDecodeBinpb()"
-    status: pending
+    status: completed
   - id: a3-fixture
     content: "Stage A: synthetic v4 fixture generator + decode-parity run (fixture + one file per era)"
-    status: pending
+    status: completed
   - id: b1-handlers
     content: "Stage B: update_tick resource capture (FULL-RATE income classifier + 1 Hz stored series) + build_event arm + producer reverse-map + odf_map registration"
-    status: pending
+    status: completed
   - id: b2-blocks
     content: "Stage B: economy/builds block builders + commander_economy contribution slice + has_resource_data/has_build_data on match/manifest/contribution + bump PIPELINE 29→30, match.schema 16→17"
-    status: pending
+    status: completed
   - id: b3-highlights
     content: "Stage B: The Tycoon + War Machine pipeline highlight cards (flag-gated, slate 12→14)"
-    status: pending
+    status: completed
   - id: b4-economy-tab
     content: "Stage B: Economy tab (nav+pane, renderEconomyTab, scrap chart + build timeline + production cards, fullscreen, hide-when-absent)"
-    status: pending
+    status: completed
   - id: b5-raw-browser
     content: "Stage B: raw browser EVENT_ARMS/PROTO_TYPE_MAP/labels + v4 stamp + builds/economy reconcile rows"
-    status: pending
+    status: completed
   - id: c1-aggregator
     content: "Stage C: aggregator career econ rollup (consumes Stage B slice) + 2 career highlight cards + copy/unit tables"
-    status: pending
+    status: completed
   - id: c2-commanders-tab
     content: "Stage C: All Matches Commanders tab economy columns/card with denominator floors"
-    status: pending
+    status: completed
   - id: c3-player-page
     content: "Stage C: player-page VTSR-C rating time-series (quick win) + career econ block"
-    status: pending
+    status: completed
   - id: d1-vtsrc-axes
     content: "Stage D: VTSR-C econ axes + differential shrunk-std normalization + S' blend at alpha_c=1 + duel audit blocks + CMDR schema 1→2"
-    status: pending
+    status: completed
   - id: d2-vtsrc-validator
     content: "Stage D: validator §12 axis-vs-outcome + §13 alpha_c ablation + validation_summary/report schema updates"
-    status: pending
+    status: completed
   - id: d3-elo-page
     content: "Stage D: ELO page ladder detail panel + explainer (commanderLadderHtml) + Does-it-work additions (absent-safe)"
-    status: pending
+    status: completed
   - id: e1-wins-elo
     content: "Stage E: R^W wins ladder in _rating_pass (inert ALPHA=0), additive history/current fields, byte-identity golden test"
-    status: pending
+    status: completed
   - id: e2-alpha-sweep
     content: "Stage E: alpha{10,25,50} forensic pairs + validator modes + pre-registered promote rules + ranks-mode re-evaluation + decision memos"
-    status: pending
+    status: completed
   - id: f1-regression
     content: "Gates: corpus reprocess diff audit, validator drift table, browser QA checklist, first-batch audit runbook script"
-    status: pending
+    status: completed
   - id: f2-docs
     content: "Docs: data-schema.mdc, project-overview.mdc, AGENTS.md, DEVELOPER_GUIDE, DATA_DICTIONARY, filter-contract, README + upstream asks"
-    status: pending
+    status: completed
 isProject: false
 ---
 

@@ -157,6 +157,30 @@
       // Win/loss split, both overall and by role.
       wins:   { as_commander: 0, as_thug: 0, total: 0 },
       losses: { as_commander: 0, as_thug: 0, total: 0 },
+
+      // ---- v17: commander economy career rollup (v4 telemetry only) ----
+      // Fed from the per-match `commander_economy` contribution slice.
+      // Two separate denominators mirror the matches_with_bullet_hit_data
+      // pattern: a session can carry resources without builds (or vice
+      // versa), and each half's fields only accumulate under its own flag
+      // so averages stay honest.
+      econ_matches: 0,             // commander matches with resource data
+      build_matches: 0,            // commander matches with build data
+      econ_duration_sec: 0,        // Σ match duration over econ_matches
+      build_duration_sec: 0,       // Σ match duration over build_matches
+      econ_scrap_income: 0,
+      econ_income_loose: 0,
+      econ_loose_collections: 0,
+      econ_scrap_spent_units: 0,
+      econ_ships_built: 0,
+      econ_combat_ship_value: 0,
+      econ_builds_total: 0,
+      econ_cancels: 0,
+      econ_float_sum: 0,           // Σ mean_float_ratio (averaged at emit)
+      econ_peak_pools: 0,          // career max
+      econ_upgrades: 0,
+      econ_rebuild_latency_sum: 0, // Σ per-match median latencies
+      econ_rebuild_latency_n: 0,
     };
   }
 
@@ -246,6 +270,10 @@
     career_pod_goblin:       ['The Pod Goblin',          'bi-box-seam'],
     career_chris_kyle:       ['Chris Kyle',              'bi-crosshair'],
     career_the_locksmith:    ['The Locksmith',           'bi-lock-fill'],
+    // v17 (proto v4) commander-economy siblings — flag-gated (only appear
+    // once >= 3 commander matches carry the telemetry).
+    career_tycoon:           ['The Tycoon',              'bi-cash-stack'],
+    career_war_machine:      ['War Machine',             'bi-gear-wide-connected'],
     // Flavor B — cross-match-only originals (no per-match sibling).
     the_champion:            ['The Champion',            'bi-stars'],
     the_veteran:             ['The Veteran',             'bi-clock-history'],
@@ -694,6 +722,52 @@
         }
       }
 
+      // ---- v17: commander economy career rollup ----
+      // Fold this match's commander_economy slice (v4 telemetry) into each
+      // commander's career bucket, keyed by the slice's Steam64. Skipped
+      // when the commander's own leaderboard row was excluded this match
+      // (campod / low-activity) so the econ denominators mirror the
+      // career-row exclusion contract above. Per-half accumulation:
+      // resource fields under has_resource_data, build fields under
+      // has_build_data (the slice emits null for an absent half).
+      const ce = m.commander_economy;
+      if (ce) {
+        for (const sideKey of ['1', '2']) {
+          const slice = ce[sideKey];
+          if (!slice || !slice.steam64) continue;
+          const s64 = String(slice.steam64);
+          const lbRow = lb.find(p => p && String(p.steam64 || '') === s64);
+          if (!lbRow || lbRow.is_campod || lbRow.is_low_activity) continue;
+          const cb = career.get(`s64:${s64}`);
+          if (!cb) continue;
+          if (m.has_resource_data) {
+            cb.econ_matches += 1;
+            cb.econ_duration_sec      += m.duration_sec || 0;
+            cb.econ_scrap_income      += slice.scrap_income      || 0;
+            cb.econ_income_loose      += slice.income_loose      || 0;
+            cb.econ_loose_collections += slice.loose_collections || 0;
+            cb.econ_upgrades          += slice.upgrades_final    || 0;
+            if (slice.mean_float_ratio != null) cb.econ_float_sum += slice.mean_float_ratio;
+            if ((slice.peak_pool_count || 0) > cb.econ_peak_pools) {
+              cb.econ_peak_pools = slice.peak_pool_count;
+            }
+          }
+          if (m.has_build_data) {
+            cb.build_matches += 1;
+            cb.build_duration_sec      += m.duration_sec            || 0;
+            cb.econ_scrap_spent_units  += slice.scrap_spent_units   || 0;
+            cb.econ_ships_built        += slice.ships_built         || 0;
+            cb.econ_combat_ship_value  += slice.combat_ship_value   || 0;
+            cb.econ_builds_total       += slice.builds_total        || 0;
+            cb.econ_cancels            += slice.cancels             || 0;
+            if (slice.median_rebuild_latency_sec != null) {
+              cb.econ_rebuild_latency_sum += slice.median_rebuild_latency_sec;
+              cb.econ_rebuild_latency_n += 1;
+            }
+          }
+        }
+      }
+
       for (const wm of (m.weapon_meta || [])) {
         let g = globalWeapon.get(wm.weapon);
         if (!g) { g = { total_damage: 0, total_shots: 0, total_hits: 0 }; globalWeapon.set(wm.weapon, g); }
@@ -1067,6 +1141,31 @@
         avg_kills_as_thug:      avgKillsThug,
         faction_distribution: { i: fdist.i, e: fdist.e, f: fdist.f },
         favored_faction: favoredFaction,
+        // v17: career commander-economy averages (v4 telemetry only).
+        // Fields are null below their per-half data denominators so the
+        // Commanders tab can em-dash honestly. Rates are duration-
+        // normalized over ONLY the matches that carried the data.
+        econ_matches:  c.econ_matches,
+        build_matches: c.build_matches,
+      avg_income_per_min: c.econ_duration_sec > 0
+        ? r1(c.econ_scrap_income / (c.econ_duration_sec / 60)) : null,
+      total_scrap_income: c.econ_matches > 0 ? c.econ_scrap_income : null,
+      // Loose terminology contract: players count loose by SCRAP AMOUNT
+      // ("I got 25 loose" = 25 scrap), so the amount is the headline
+      // number everywhere; the share is supporting context.
+      total_income_loose: c.econ_matches > 0 ? c.econ_income_loose : null,
+      loose_share: c.econ_scrap_income > 0
+        ? r3(c.econ_income_loose / c.econ_scrap_income) : null,
+        avg_ships_per_min: c.build_duration_sec > 0
+          ? r2(c.econ_ships_built / (c.build_duration_sec / 60)) : null,
+        total_ships_built:      c.build_matches > 0 ? c.econ_ships_built : null,
+        total_combat_ship_value: c.build_matches > 0 ? c.econ_combat_ship_value : null,
+        total_scrap_spent:      c.build_matches > 0 ? c.econ_scrap_spent_units : null,
+        avg_float_ratio: c.econ_matches > 0
+          ? r3(c.econ_float_sum / c.econ_matches) : null,
+        peak_pools: c.econ_matches > 0 ? c.econ_peak_pools : null,
+        avg_rebuild_latency_sec: c.econ_rebuild_latency_n > 0
+          ? r1(c.econ_rebuild_latency_sum / c.econ_rebuild_latency_n) : null,
       });
     }
     // Cascade keptNames (5-match minimum) so commander rows mirror the
@@ -1337,6 +1436,46 @@
       cards.push(makeCard('career_the_locksmith',
         lockCandidates,
         { value: c => c.mean_target_lock_pct, format: 'percent' }));
+    }
+
+    // The Tycoon (career) — most scrap generated across commanded matches
+    // (v4 resource telemetry; gate: >= 3 commander matches with data so a
+    // single hot match can't take the career crown).
+    const tycoonCandidates = (commanderRowsKept || [])
+      .filter(r => (r.econ_matches || 0) >= 3 && r.total_scrap_income != null)
+      .sort((a, b) => (b.total_scrap_income || 0) - (a.total_scrap_income || 0));
+    if (tycoonCandidates.length) {
+      cards.push(makeCard('career_tycoon',
+        tycoonCandidates,
+        {
+          value: r => r.total_scrap_income,
+          format: 'scrap',
+          breakdown: r => ({
+            econ_matches: r.econ_matches,
+            avg_income_per_min: r.avg_income_per_min,
+            income_loose: r.total_income_loose,
+            loose_share: r.loose_share,
+          }),
+        }));
+    }
+
+    // War Machine (career) — most scrap value fielded as combat ships
+    // across commanded matches (v4 build telemetry; same >= 3 gate).
+    const warMachineCandidates = (commanderRowsKept || [])
+      .filter(r => (r.build_matches || 0) >= 3 && r.total_combat_ship_value != null)
+      .sort((a, b) => (b.total_combat_ship_value || 0) - (a.total_combat_ship_value || 0));
+    if (warMachineCandidates.length) {
+      cards.push(makeCard('career_war_machine',
+        warMachineCandidates,
+        {
+          value: r => r.total_combat_ship_value,
+          format: 'scrap',
+          breakdown: r => ({
+            build_matches: r.build_matches,
+            ships_built: r.total_ships_built,
+            avg_ships_per_min: r.avg_ships_per_min,
+          }),
+        }));
     }
 
     // ---------- Flavor B: cross-match-only (12) ----------

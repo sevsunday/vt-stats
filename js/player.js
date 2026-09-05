@@ -83,6 +83,8 @@
     validation:    null,    // parsed data/processed/validation_summary.json (404-safe)
     contributions: null,    // parsed data/processed/match_contributions.json (lazy)
     cmdrElo:       undefined, // parsed elo_commander_current.json (lazy; undefined = unfetched, null = 404)
+    cmdrEloHistory: undefined, // parsed elo_commander_history.json (lazy; undefined = unfetched, null = 404)
+    cmdrRatingChart: null,   // Chart.js instance for the VTSR-C time-series (Rivals tab)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
     careerStats:   null,    // result of VTAggregate.build(threshold=0).career_stats
     // Directory UI state
@@ -1768,6 +1770,45 @@
     return _cmdrEloFetchPromise;
   }
 
+  // Lazy one-shot fetch of the VTSR-C duel history (elo_commander_history.json)
+  // powering the commander rating time-series. Same 404 contract as
+  // ensureCmdrEloLoaded: null caches and the chart section self-omits.
+  let _cmdrEloHistFetchPromise = null;
+  function ensureCmdrEloHistoryLoaded() {
+    if (state.cmdrEloHistory !== undefined) return Promise.resolve(state.cmdrEloHistory);
+    if (!_cmdrEloHistFetchPromise) {
+      _cmdrEloHistFetchPromise = fetchJson(`${state.dataPrefix}data/processed/elo_commander_history.json`)
+        .catch(() => null)
+        .then(json => { state.cmdrEloHistory = json || null; return state.cmdrEloHistory; });
+    }
+    return _cmdrEloHistFetchPromise;
+  }
+
+  /** Chronological VTSR-C points for one commander: every duel in
+      elo_commander_history.json where they sat on either side. */
+  function buildCmdrRatingSeries(sid) {
+    const duels = (state.cmdrEloHistory && state.cmdrEloHistory.duels) || [];
+    const out = [];
+    for (const duel of duels) {
+      const sides = duel.commanders || {};
+      for (const sideKey of ['1', '2']) {
+        const side = sides[sideKey];
+        if (!side || String(side.steam64 || '') !== sid) continue;
+        const opp = sides[sideKey === '1' ? '2' : '1'] || {};
+        out.push({
+          match_id: duel.match_id,
+          date:     duel.date || '',
+          after:    side.after,
+          delta:    side.delta,
+          score:    side.score,
+          opponent: opp.name || '',
+        });
+      }
+    }
+    out.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return out;
+  }
+
   function cmdrLadderRowFor(steam64) {
     const ratings = (state.cmdrElo && state.cmdrElo.ratings) || [];
     const sid = String(steam64 || '');
@@ -1781,13 +1822,23 @@
       pane.innerHTML = phasePlaceholder('Rivals', 'Match contributions are still loading.');
       return;
     }
-    // Kick the VTSR-C ladder fetch on first entry; re-render once when it
-    // lands so the Commander Rivalries headline fills in. 404 caches null
-    // and this path never re-enters.
-    if (state.cmdrElo === undefined) {
-      ensureCmdrEloLoaded().then(json => {
-        if (json && document.getElementById('vt-player-tab-rivals')) {
+    // Kick the VTSR-C ladder + duel-history fetches on first entry;
+    // re-render once when they land so the Commander Rivalries headline
+    // and rating time-series fill in. 404s cache null and this path
+    // never re-enters (state moves undefined -> null|object). If the
+    // user tabbed away during the fetch, defer the re-render to the
+    // next tab show — Chart.js can't size a canvas in a hidden pane.
+    if (state.cmdrElo === undefined || state.cmdrEloHistory === undefined) {
+      Promise.all([ensureCmdrEloLoaded(), ensureCmdrEloHistoryLoaded()]).then(([cur, hist]) => {
+        const paneEl = document.getElementById('vt-player-tab-rivals');
+        if (!(cur || hist) || !paneEl) return;
+        if (paneEl.offsetParent !== null) {
           renderRivalsTab(rating);
+        } else {
+          const tabBtn = document.querySelector('[data-bs-target="#vt-player-tab-rivals"]');
+          if (tabBtn) {
+            tabBtn.addEventListener('shown.bs.tab', () => renderRivalsTab(rating), { once: true });
+          }
         }
       });
     }
@@ -1876,6 +1927,9 @@
           </div>
         ` : ''}
       </div>`;
+
+    // Chart.js mounts only after the canvas exists in the DOM.
+    drawCmdrRatingChart(rating, sid);
   }
 
   // ---- Commander Rivalries panel (VTSR-C) -------------------------------
@@ -2043,6 +2097,21 @@
       </div>` : '';
     }
 
+    // VTSR-C rating time-series (c3 quick win): only when the duel
+    // history is loaded and this commander has >= 2 rated duels (a
+    // one-point line reads as a floating dot). The canvas is drawn by
+    // drawCmdrRatingChart() after the panel lands in the DOM.
+    const cmdrSeries = buildCmdrRatingSeries(sid);
+    const chartHtml = cmdrSeries.length >= 2 ? `
+      <div class="vt-cmdr-riv-chart-block">
+        <h3 class="vt-cmdr-riv-subhead"><i class="bi bi-graph-up me-1"></i>VTSR-C over time</h3>
+        <div class="vt-cmdr-riv-chart-wrap">
+          <canvas id="vt-cmdr-rating-chart" aria-label="VTSR-C rating time-series"></canvas>
+        </div>
+      </div>` : '';
+
+    const econHtml = renderCmdrEconBlockHtml(sid);
+
     return `<div class="card mb-3">
       <div class="card-body">
         <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
@@ -2056,11 +2125,158 @@
           <a href="${state.dataPrefix}elo/?tab=leaderboard">VTSR-C ladder</a>.
         </p>
         ${headline}
+        ${chartHtml}
+        ${econHtml}
         ${topOppHtml}
         ${tableHtml}
         ${chipsHtml}
       </div>
     </div>`;
+  }
+
+  /** Career commander-economy stat block (proto v4 telemetry). Reads the
+      aggregator's commander_stats row for this player; self-omits when
+      the corpus has no economy/build telemetry for them (every pre-v4
+      career). Per-half denominators mirror the aggregator: resource
+      stats gate on econ_matches, build stats on build_matches. */
+  function renderCmdrEconBlockHtml(sid) {
+    const rows = (state.aggregate && state.aggregate.commander_stats &&
+                  state.aggregate.commander_stats.rows) || [];
+    const r = rows.find(x => String(x.steam64 || '') === sid);
+    if (!r) return '';
+    const econN = r.econ_matches || 0;
+    const buildN = r.build_matches || 0;
+    if (econN <= 0 && buildN <= 0) return '';
+
+    const dash = '\u2014';
+    const fmtNum = v => (v == null ? dash : formatNumber(Math.round(v)));
+    const fmtR = (v, digits = 1) => (v == null ? dash : (+v).toFixed(digits));
+    const fmtPct = v => (v == null ? dash : `${Math.round(v * 100)}%`);
+    const tile = (label, value, sub) => `
+      <div class="vt-cmdr-econ-tile">
+        <div class="vt-cmdr-riv-stat-value">${value}</div>
+        <div class="vt-cmdr-riv-stat-label">${label}</div>
+        ${sub ? `<div class="vt-cmdr-econ-sub">${sub}</div>` : ''}
+      </div>`;
+
+    const denomCaption = econN === buildN
+      ? `${econN} commanded match${econN === 1 ? '' : 'es'} with telemetry`
+      : `${econN} econ / ${buildN} build telemetry matches`;
+
+    return `<div class="vt-cmdr-econ-block">
+      <h3 class="vt-cmdr-riv-subhead">
+        <i class="bi bi-cash-stack me-1"></i>Commander economy
+        <span class="vt-cmdr-econ-badge" title="Built from proto v4 resource/build telemetry \u2014 only matches recorded with the new collector count toward these stats.">v4 telemetry &middot; ${denomCaption}</span>
+      </h3>
+      <div class="vt-cmdr-econ-grid">
+        ${tile('Income / min', fmtR(r.avg_income_per_min), 'scrap generated per minute')}
+        ${tile('Total income', fmtNum(r.total_scrap_income), 'scrap generated')}
+        ${tile('Loose collected', fmtNum(r.total_income_loose),
+               r.loose_share != null ? `${Math.round(r.loose_share * 100)}% of income` : 'scrap collected as loose')}
+        ${tile('Ships built', fmtNum(r.total_ships_built), `${fmtR(r.avg_ships_per_min, 2)} / min`)}
+        ${tile('Combat ship value', fmtNum(r.total_combat_ship_value), 'scrap fielded as warships')}
+        ${tile('Avg float', fmtPct(r.avg_float_ratio), 'bank level vs storage cap')}
+        ${tile('Peak pools', r.peak_pools == null ? dash : r.peak_pools, 'best extractor count')}
+        ${tile('Rebuild latency', r.avg_rebuild_latency_sec == null ? dash : `${fmtR(r.avg_rebuild_latency_sec)}s`, 'median queue\u2192build wait')}
+      </div>
+    </div>`;
+  }
+
+  /** Draw the VTSR-C time-series into #vt-cmdr-rating-chart (if present).
+      Mirrors the Rating tab's renderRatingChart visual language: theme
+      line, delta-tinted points, linear-ms x-axis (no date adapter). */
+  function drawCmdrRatingChart(rating, sid) {
+    const canvas = document.getElementById('vt-cmdr-rating-chart');
+    if (!canvas || !window.Chart) return;
+    if (state.cmdrRatingChart) {
+      try { state.cmdrRatingChart.destroy(); } catch (_) {}
+      state.cmdrRatingChart = null;
+    }
+    const points = buildCmdrRatingSeries(sid).filter(p => Number.isFinite(p.after));
+    if (points.length < 2) return;
+
+    const themePrimary = getCSSVar('--kb-primary') || '#36a2eb';
+    const themeMuted   = getCSSVar('--kb-text-muted') || '#888';
+    const themeText    = getCSSVar('--kb-text-primary') || '#e5e5e5';
+    const themeSuccess = getCSSVar('--kb-success') || '#2ecc71';
+    const themeDanger  = getCSSVar('--kb-danger')  || '#e74c3c';
+    const pointColors = points.map(p =>
+      (Number.isFinite(p.delta) && p.delta < 0) ? themeDanger : themeSuccess);
+    const data = points.map(p => ({ x: new Date(p.date).getTime(), y: p.after }));
+
+    state.cmdrRatingChart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        datasets: [{
+          label: 'VTSR-C',
+          data,
+          parsing: false,
+          borderColor: themePrimary,
+          borderWidth: 2,
+          tension: 0.18,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          pointBackgroundColor: pointColors,
+          pointBorderColor: pointColors,
+          fill: false,
+          spanGaps: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                if (!items.length) return '';
+                const p = points[items[0].dataIndex];
+                return new Date(p.date).toLocaleString();
+              },
+              label: (item) => {
+                const p = points[item.dataIndex];
+                const dStr = Number.isFinite(p.delta)
+                  ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)}` : '\u2014';
+                const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
+                return [
+                  `VTSR-C: ${p.after.toFixed(0)} (${dStr})`,
+                  `${res} vs ${p.opponent || 'unknown'}`,
+                ];
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            min: data[0].x,
+            max: data[data.length - 1].x,
+            ticks: {
+              color: themeMuted,
+              autoSkip: true,
+              maxTicksLimit: 8,
+              callback: (val) => {
+                const d = new Date(val);
+                if (Number.isNaN(d.getTime())) return '';
+                const opts = (data[data.length - 1].x - data[0].x) > 90 * 86400000
+                  ? { month: 'short', year: '2-digit' }
+                  : { month: 'short', day: 'numeric' };
+                return d.toLocaleDateString(undefined, opts);
+              },
+            },
+            grid: { color: 'rgba(255,255,255,0.04)' },
+          },
+          y: {
+            beginAtZero: false,
+            ticks: { color: themeMuted, maxTicksLimit: 6 },
+            grid:  { color: 'rgba(255,255,255,0.05)' },
+            title: { display: true, text: 'VTSR-C', color: themeText },
+          },
+        },
+      },
+    });
   }
 
   function renderRivalsTable(rivals) {

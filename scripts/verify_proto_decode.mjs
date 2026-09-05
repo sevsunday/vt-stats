@@ -6,17 +6,20 @@
  * printed event count for the same file (`python scripts/process_stats.py`).
  *
  * Triple-descriptor strategy (mirrors `js/raw-browser.js`):
- *   1. Try the current (v3) descriptor. protobufjs is strict about
+ *   1. Try the current (v4) descriptor. protobufjs is strict about
  *      wire-type collisions, so a v1 file reliably throws -> v1 fallback.
- *   2. On success, check `header.players`: non-empty -> v3; empty ->
+ *   2. On success, check `header.players`: non-empty -> v3+; empty ->
  *      re-decode with the frozen v2 descriptor so the header identity
- *      maps (reserved under v3) are readable.
+ *      maps (reserved under v3+) are readable.
+ *   3. v4-vs-v3 is a payload presence check (v4 is purely additive over
+ *      v3, so decode success proves nothing): any `buildEvent` arm or any
+ *      `updateTick` carrying per-team ResourceState stamps the file v4.
  * The output includes the detected `schema` field so it's obvious which
  * path succeeded.
  *
  * Use this whenever `scripts/statsgate.proto` changes: after regenerating
  * the descriptors (see `.cursor/rules/schema-migration.mdc`), run this on
- * one file per schema era (v1 / v2 / v3) to confirm the Node/browser
+ * one file per schema era (v1 / v2 / v3 / v4) to confirm the Node/browser
  * decode path still agrees with the Python pipeline before shipping.
  *
  * One-off setup (not persisted in repo):
@@ -65,6 +68,24 @@ try {
   decodeType = TypeV1;
   msg = TypeV1.decode(rawBytes);
 }
+if (schema === 'v3') {
+  // v4 payload presence scan FIRST, before the header.players branch (a
+  // degenerate v4 file with an empty roster must not fall through to the
+  // v2 re-decode). v4 is purely additive over v3, so decode success
+  // proves nothing: any buildEvent arm or any updateTick carrying
+  // per-team ResourceState stamps the file v4.
+  for (const evt of msg.eventStream || []) {
+    if (
+      evt.buildEvent != null ||
+      (evt.updateTick &&
+        (evt.updateTick.team1Resources != null ||
+          evt.updateTick.team2Resources != null))
+    ) {
+      schema = 'v4';
+      break;
+    }
+  }
+}
 if (schema === 'v3' && !(msg.header && msg.header.players && msg.header.players.length > 0)) {
   // v2-vs-v3 presence check: no wire conflicts in either direction, so a
   // legacy v2 file decodes "cleanly" under v3 with its identity maps
@@ -96,6 +117,7 @@ const counts = {
   unit_destroyed: 0,
   unit_sniped: 0,
   pickup_powerup: 0,
+  build_event: 0,
 };
 
 const camelToSnake = {
@@ -107,6 +129,7 @@ const camelToSnake = {
   unitDestroyed: 'unit_destroyed',
   unitSniped: 'unit_sniped',
   pickupPowerup: 'pickup_powerup',
+  buildEvent: 'build_event',
 };
 
 const stream = obj.eventStream || [];

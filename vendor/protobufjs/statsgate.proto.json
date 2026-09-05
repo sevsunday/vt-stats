@@ -302,6 +302,46 @@
             }
           }
         },
+        "ScrapStatus": {
+          "edition": "2023",
+          "values": {
+            "SCRAP_STATUS_UNSPECIFIED": 0,
+            "SCRAP_STATUS_GREEN": 1,
+            "SCRAP_STATUS_YELLOW": 2,
+            "SCRAP_STATUS_RED": 3,
+            "SCRAP_STATUS_PARALLEL": 4
+          }
+        },
+        "ResourceState": {
+          "edition": "2023",
+          "fields": {
+            "currentScrap": {
+              "type": "uint32",
+              "id": 1,
+              "protoName": "current_scrap"
+            },
+            "maxScrap": {
+              "type": "uint32",
+              "id": 2,
+              "protoName": "max_scrap"
+            },
+            "scrapStatus": {
+              "type": "ScrapStatus",
+              "id": 3,
+              "protoName": "scrap_status"
+            },
+            "poolCount": {
+              "type": "uint32",
+              "id": 4,
+              "protoName": "pool_count"
+            },
+            "upgradeCount": {
+              "type": "uint32",
+              "id": 5,
+              "protoName": "upgrade_count"
+            }
+          }
+        },
         "UpdateTick": {
           "edition": "2023",
           "fields": {
@@ -313,6 +353,16 @@
               "rule": "repeated",
               "type": "PlayerState",
               "id": 2
+            },
+            "team1Resources": {
+              "type": "ResourceState",
+              "id": 3,
+              "protoName": "team1_resources"
+            },
+            "team2Resources": {
+              "type": "ResourceState",
+              "id": 4,
+              "protoName": "team2_resources"
             }
           }
         },
@@ -423,6 +473,50 @@
             }
           }
         },
+        "BuildEventType": {
+          "edition": "2023",
+          "values": {
+            "BUILD_EVENT_TYPE_UNSPECIFIED": 0,
+            "BUILD_EVENT_TYPE_QUEUE": 1,
+            "BUILD_EVENT_TYPE_CANCEL": 2,
+            "BUILD_EVENT_TYPE_BUILD": 3
+          }
+        },
+        "ProducerType": {
+          "edition": "2023",
+          "values": {
+            "PRODUCER_TYPE_UNSPECIFIED": 0,
+            "PRODUCER_TYPE_FACTORY": 1,
+            "PRODUCER_TYPE_CONSTRUCTOR": 2,
+            "PRODUCER_TYPE_ARMORY": 3
+          }
+        },
+        "BuildEvent": {
+          "edition": "2023",
+          "fields": {
+            "tick": {
+              "type": "uint32",
+              "id": 1
+            },
+            "type": {
+              "type": "BuildEventType",
+              "id": 2
+            },
+            "producer": {
+              "type": "ProducerType",
+              "id": 3
+            },
+            "teamnum": {
+              "type": "uint32",
+              "id": 4
+            },
+            "buildOdf": {
+              "type": "string",
+              "id": 5,
+              "protoName": "build_odf"
+            }
+          }
+        },
         "StatEvent": {
           "edition": "2023",
           "oneofs": {
@@ -434,7 +528,8 @@
                 "updateTick",
                 "unitDestroyed",
                 "unitSniped",
-                "pickupPowerup"
+                "pickupPowerup",
+                "buildEvent"
               ]
             }
           },
@@ -473,6 +568,11 @@
               "type": "PickupPowerup",
               "id": 8,
               "protoName": "pickup_powerup"
+            },
+            "buildEvent": {
+              "type": "BuildEvent",
+              "id": 9,
+              "protoName": "build_event"
             }
           },
           "reserved": [

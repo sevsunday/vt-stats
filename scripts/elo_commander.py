@@ -1,10 +1,71 @@
-"""VTSR-C -- Commander Rating v1 (win/loss ELO with a team-strength handicap).
+"""VTSR-C -- Commander Rating v2 (win/loss ELO with a team-strength handicap
+plus an INERT economy-performance composite behind CMDR_ALPHA_C = 1.0).
 
 Pure module, no I/O -- mirrors the `scripts/elo.py` contract.
 `compute_commander_elo(all_match_data, elo_history)` returns
 `(elo_commander_current, elo_commander_history)` dicts ready for `json.dump`.
 
-Design (locked, v1):
+v2 additions (consequence-free while CMDR_ALPHA_C == 1.0):
+
+  * FIVE ECONOMY AXES computed per duel from the proto-v4 `economy` +
+    `builds` match blocks (constructor-free by design -- era-mixed
+    structure-completion quality must never feed a rating axis):
+
+        pool_tempo         time-weighted pool-count advantage
+                           (pool_advantage_integral / duration_sec)
+        production_output  scrap_spent_units per minute (value fielded)
+        thug_supply        ships_built per team ship-loss, capped at
+                           THUG_SUPPLY_CAP (losses = sum of the side's
+                           leaderboard deaths; pilot deaths already
+                           excluded by the v2.9 pipeline gate)
+        econ_efficiency    1 - mean_float_ratio (low bank float = building
+                           in the fast-regen zone = good, per the
+                           verified regen-segment model)
+        upgrade_investment upgrades_final / max(1, peak_pools)
+
+    Exact formulas frozen in critique/decisions/vtsr-c-v2-composite.md
+    BEFORE any telemetry corpus accumulates (pre-registration integrity).
+
+  * WITHIN-MATCH DIFFERENTIAL NORMALIZATION (n=2 makes lobby z-scores
+    degenerate; the opponent diff controls for map/patch/lobby size):
+
+        d    = v_own - v_opp                    (signed, per axis)
+        z    = clip(d / shrunk_std(axis), -2, 2) / 2      in [-1, 1]
+        P_1  = sum(w * z) / sum(w)  over available axes;  P_2 = -P_1
+
+    `shrunk_std` is a rolling RMS of the team-1-perspective diffs with a
+    seed prior + shrinkage (mirrors elo.py's commander_shrunk_baseline
+    snapshot-before-duel / update-after mechanics): the seed dominates
+    the empty corpus and live telemetry takes over as duels accumulate.
+
+  * SCORE-LEVEL BLEND, structurally inert at ship:
+
+        S' = CMDR_ALPHA_C * S + (1 - CMDR_ALPHA_C) * (P + 1) / 2
+
+    applied ONLY when the match carries BOTH has_resource_data and
+    has_build_data. The code branches on `CMDR_ALPHA_C < 1.0` so the
+    inert path never routes through blend arithmetic at all (structural
+    exactness on top of the golden byte-identity test). Duels without
+    telemetry (all pre-v4 matches forever) score outcome-pure S at ANY
+    alpha_c -- a determined outcome is always a valid duel signal;
+    exclusion would starve the pool and couple coverage to collector
+    uptime (RATIFIED 2026-09-03). W/L/D records always tally the RAW
+    outcome, never the blended score.
+
+  * AUDIT FIELDS (additive, schema 1 -> 2): per-duel `performance`
+    {available, p (team-1 perspective), axes{axis: {diff, std, z}}};
+    per-commander-side `score_blend` {alpha_c, s_raw, s_blended};
+    per-rating `duels_with_telemetry`; top-level `alpha_c`,
+    `econ_weights`, `econ_std_prior`, `econ_std_shrinkage`,
+    `econ_std_observed`.
+
+  * PRE-REGISTERED PROMOTE RULE (decision memo): flip alpha_c below 1.0
+    only when >= 25 telemetry duels AND >= 3 axes show sign-agreement
+    > 0.55 with none < 0.35 AND the validator alpha_c ablation improves
+    (or holds within CI) accuracy while improving log-loss. Discard an
+    axis at sign-agreement < 0.40 with n >= 40. Otherwise HOLD.
+
+Design (locked, v1 -- all still true):
 
   * OUTCOME-PURE (alpha_c = 1) -- the mirror image of VTSR-T (alpha = 0,
     performance-pure). A match outcome is a clean 1v1 label between exactly
@@ -58,6 +119,7 @@ docs/DATA_DICTIONARY.md section 11.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -96,7 +158,50 @@ CMDR_LAMBDA_TEAM_HANDICAP = 1.0
 # (decided_by == "draw" -> S = 0.5 both sides).
 DETERMINED_DECIDED_BY = ("adjudicated", "attested", "clean_win", "contested")
 
-CMDR_ELO_SCHEMA_VERSION = 1
+# ---- v2: economy-performance composite (INERT at alpha_c = 1.0) ----------
+
+# Score-level blend weight: S' = alpha_c * S + (1 - alpha_c) * (P+1)/2.
+# 1.0 = outcome-pure (the shipped state). The promote rule that may lower
+# this lives in critique/decisions/vtsr-c-v2-composite.md and requires
+# validator evidence (>= 25 telemetry duels, per-axis sign-agreement,
+# alpha_c ablation) before any flip.
+CMDR_ALPHA_C = 1.0
+
+# Per-axis prior weights (plan-registered; renormalized over available
+# axes at runtime). Validator-gated before they ever matter.
+COMMANDER_ECON_WEIGHTS = {
+    "pool_tempo": 0.30,
+    "production_output": 0.25,
+    "thug_supply": 0.20,
+    "econ_efficiency": 0.15,
+    "upgrade_investment": 0.10,
+}
+
+# Seed prior for each axis's DIFFERENTIAL std (team-1-perspective
+# v_own - v_opp spread). Magnitudes sanity-anchored on the first real v4
+# session (2026-09-03 Wasteland: pool_tempo d=3.30, production d=1.4,
+# thug_supply d=0.69, econ_efficiency d=0.075, upgrade d=0.60) so seed
+# z-scores land mid-range rather than saturating the clip.
+CMDR_ECON_STD_PRIOR = {
+    "pool_tempo": 2.0,          # mean-pool-advantage diff (pools)
+    "production_output": 25.0,  # scrap/min diff
+    "thug_supply": 1.0,         # ships-per-loss diff
+    "econ_efficiency": 0.15,    # (1 - float) diff
+    "upgrade_investment": 0.35, # upgrade-share diff
+}
+
+# Shrinkage weight (pseudo-observations) for the rolling differential
+# std: shrunk_var = (SHRINK * prior^2 + sum(d^2)) / (SHRINK + n).
+# 10 pseudo-duels: the seed dominates the tiny early corpus, live
+# telemetry takes over after ~10 telemetry duels. Tunable without a
+# schema bump.
+CMDR_ECON_STD_SHRINKAGE = 10.0
+
+# thug_supply cap: ships-built-per-loss is unbounded when a team barely
+# loses ships; the cap keeps one lopsided stomp from defining the axis.
+THUG_SUPPLY_CAP = 3.0
+
+CMDR_ELO_SCHEMA_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +310,82 @@ def _team_thug_means(deltas: list[dict], md: dict) -> dict[int, float | None]:
     }
 
 
+def _econ_axis_values(md: dict) -> dict[int, dict[str, float | None]] | None:
+    """Per-side raw economy-axis values for one match, or None when the
+    match lacks full v4 telemetry (either flag false / block missing).
+
+    Axis formulas are FROZEN in critique/decisions/vtsr-c-v2-composite.md;
+    change them only through that memo's amendment protocol. Individual
+    axes may be None (unavailable) -- e.g. upgrade_investment on a
+    zero-pool side; the differential layer drops an axis unless BOTH
+    sides carry a numeric value.
+    """
+    econ = md.get("economy") or {}
+    builds = md.get("builds") or {}
+    if not (econ.get("has_resource_data") and builds.get("has_build_data")):
+        return None
+    econ_teams = econ.get("teams") or {}
+    build_teams = builds.get("teams") or {}
+    if not (econ_teams.get("1") and econ_teams.get("2")
+            and build_teams.get("1") and build_teams.get("2")):
+        return None
+
+    duration_sec = (md.get("match") or {}).get("duration_sec") or 0
+    if duration_sec <= 0:
+        return None
+    minutes = duration_sec / 60.0
+
+    lobby = md.get("leaderboard") or []
+    team_deaths = {1: 0, 2: 0}
+    for row in lobby:
+        team = _slot_team(row.get("slot"))
+        if team is None:
+            continue
+        try:
+            team_deaths[team] += int(row.get("deaths") or 0)
+        except (TypeError, ValueError):
+            pass
+
+    out: dict[int, dict[str, float | None]] = {}
+    for side in (1, 2):
+        et = econ_teams[str(side)]
+        bt = build_teams[str(side)]
+
+        pool_adv = et.get("pool_advantage_integral")
+        pool_tempo = (pool_adv / duration_sec) if isinstance(
+            pool_adv, (int, float)) else None
+
+        spent = bt.get("scrap_spent_units")
+        production = (spent / minutes) if isinstance(
+            spent, (int, float)) else None
+
+        ships = bt.get("ships_built")
+        thug_supply = None
+        if isinstance(ships, (int, float)):
+            thug_supply = min(
+                THUG_SUPPLY_CAP, ships / max(1, team_deaths[side]))
+
+        mean_float = et.get("mean_float_ratio")
+        econ_eff = (1.0 - mean_float) if isinstance(
+            mean_float, (int, float)) else None
+
+        upgrades = et.get("upgrades_final")
+        peak_pools = et.get("peak_pools")
+        upgrade_share = None
+        if isinstance(upgrades, (int, float)) and isinstance(
+                peak_pools, (int, float)) and peak_pools >= 1:
+            upgrade_share = min(1.0, upgrades / peak_pools)
+
+        out[side] = {
+            "pool_tempo": pool_tempo,
+            "production_output": production,
+            "thug_supply": thug_supply,
+            "econ_efficiency": econ_eff,
+            "upgrade_investment": upgrade_share,
+        }
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Main entrypoint
 # ---------------------------------------------------------------------------
@@ -248,6 +429,20 @@ def compute_commander_elo(all_match_data: list[dict],
     rated_match_count = 0
     skipped_undetermined = 0
     skipped_missing_commander = 0
+
+    # v2: rolling per-axis differential-std state (team-1-perspective
+    # diffs; mean-zero by construction so the estimator is a shrunk RMS).
+    # Snapshot BEFORE each duel scores; update AFTER -- mirrors elo.py's
+    # commander_shrunk_baseline walk mechanics.
+    std_sum_sq: dict[str, float] = {a: 0.0 for a in COMMANDER_ECON_WEIGHTS}
+    std_count: dict[str, int] = {a: 0 for a in COMMANDER_ECON_WEIGHTS}
+    duels_with_telemetry: dict[str, int] = {}
+
+    def _shrunk_std(axis: str) -> float:
+        prior = CMDR_ECON_STD_PRIOR[axis]
+        var = ((CMDR_ECON_STD_SHRINKAGE * prior * prior + std_sum_sq[axis])
+               / (CMDR_ECON_STD_SHRINKAGE + std_count[axis]))
+        return math.sqrt(var) if var > 0 else prior
 
     for entry in (elo_history.get("history") or []):
         if entry.get("match_excluded"):
@@ -301,14 +496,73 @@ def compute_commander_elo(all_match_data: list[dict],
         )
         expected = {1: e1, 2: 1.0 - e1}
 
+        # ---- v2: economy-performance composite (inert at alpha_c = 1) ----
+        # Snapshot the differential stds BEFORE this duel scores; fold the
+        # duel's diffs into the rolling state only AFTER -- a duel must
+        # never normalize against itself (commander_shrunk_baseline
+        # mechanics).
+        axis_vals = _econ_axis_values(md)
+        perf_block: dict[str, Any] = {"available": False}
+        s_eff = {t: scores[t] for t in (1, 2)}
+        if axis_vals is not None:
+            axes_audit: dict[str, dict] = {}
+            raw_diffs: dict[str, float] = {}
+            num = 0.0
+            wsum = 0.0
+            for axis, w in COMMANDER_ECON_WEIGHTS.items():
+                v_1 = axis_vals[1].get(axis)
+                v_2 = axis_vals[2].get(axis)
+                if not (isinstance(v_1, (int, float))
+                        and isinstance(v_2, (int, float))):
+                    continue
+                d = float(v_1) - float(v_2)
+                std = _shrunk_std(axis)
+                z = max(-2.0, min(2.0, d / std)) / 2.0
+                raw_diffs[axis] = d
+                axes_audit[axis] = {
+                    "diff": round(d, 4),
+                    "std": round(std, 4),
+                    "z": round(z, 4),
+                }
+                num += w * z
+                wsum += w
+            if axes_audit and wsum > 0:
+                p1 = num / wsum
+                p_by_team = {1: p1, 2: -p1}
+                perf_block = {
+                    "available": True,
+                    "p": round(p1, 4),
+                    "axes": axes_audit,
+                }
+                for t in (1, 2):
+                    duels_with_telemetry[keys[t]] = (
+                        duels_with_telemetry.get(keys[t], 0) + 1)
+                # Structural-exactness guard: at CMDR_ALPHA_C == 1.0 the
+                # blend arithmetic is never executed, so the inert path
+                # is provably identical by inspection (not just by IEEE
+                # coincidence).
+                if CMDR_ALPHA_C < 1.0:
+                    for t in (1, 2):
+                        s_eff[t] = (
+                            CMDR_ALPHA_C * scores[t]
+                            + (1.0 - CMDR_ALPHA_C)
+                            * (p_by_team[t] + 1.0) / 2.0)
+                # Rolling-std update (post-snapshot, RAW diffs -- the
+                # rounded audit values must not degrade the estimator).
+                for axis, d in raw_diffs.items():
+                    std_sum_sq[axis] += d * d
+                    std_count[axis] += 1
+
         duel_commanders = {}
         for t in (1, 2):
             k = keys[t]
             ki = k_factor(games[k])
-            dr = ki * (scores[t] - expected[t])
+            dr = ki * (s_eff[t] - expected[t])
             r_after = r_before[t] + dr
             rating[k] = r_after
             games[k] += 1
+            # W/L/D records always tally the RAW outcome, never the
+            # blended score -- the record is a fact, the blend a model.
             if scores[t] == 1.0:
                 wins[k] += 1
             elif scores[t] == 0.0:
@@ -333,6 +587,11 @@ def compute_commander_elo(all_match_data: list[dict],
                 "expected": round(expected[t], 4),
                 "k": round(ki, 2),
                 "score": scores[t],
+                "score_blend": {
+                    "alpha_c": CMDR_ALPHA_C,
+                    "s_raw": scores[t],
+                    "s_blended": round(s_eff[t], 4),
+                },
             }
 
         t1m, t2m = thug_means[1], thug_means[2]
@@ -352,6 +611,10 @@ def compute_commander_elo(all_match_data: list[dict],
                 ),
                 "lambda": CMDR_LAMBDA_TEAM_HANDICAP,
             },
+            # v2 audit: economy-performance composite (team-1 perspective;
+            # side 2's P is the negation). available=false on every
+            # pre-v4 / telemetry-gap duel.
+            "performance": perf_block,
         })
         rated_match_count += 1
 
@@ -373,6 +636,9 @@ def compute_commander_elo(all_match_data: list[dict],
             "last_match_id": last_match.get(k, ""),
             "last_delta": round(last_delta.get(k, 0.0), 2),
             "provisional": g < CMDR_PROVISIONAL_THRESHOLD,
+            # v2: duels where the economy composite had telemetry (both
+            # v4 flags true). 0 for every pre-v4-era commander.
+            "duels_with_telemetry": duels_with_telemetry.get(k, 0),
         })
     ratings_out.sort(key=lambda r: (-r["vtsr_c"], r["name"].lower()))
 
@@ -390,6 +656,20 @@ def compute_commander_elo(all_match_data: list[dict],
         "rated_match_count": rated_match_count,
         "matches_skipped_undetermined": skipped_undetermined,
         "matches_skipped_missing_commander": skipped_missing_commander,
+        # v2: economy-performance composite constants + rolling-std
+        # telemetry (inert at alpha_c = 1.0; see the decision memo).
+        "alpha_c": CMDR_ALPHA_C,
+        "econ_weights": dict(COMMANDER_ECON_WEIGHTS),
+        "econ_std_prior": dict(CMDR_ECON_STD_PRIOR),
+        "econ_std_shrinkage": CMDR_ECON_STD_SHRINKAGE,
+        "thug_supply_cap": THUG_SUPPLY_CAP,
+        "econ_std_observed": {
+            axis: {
+                "count": std_count[axis],
+                "std": round(_shrunk_std(axis), 4),
+            }
+            for axis in COMMANDER_ECON_WEIGHTS
+        },
     }
 
     current = dict(common)

@@ -32,6 +32,7 @@ from google.protobuf.message import DecodeError
 PROTO_SCHEMA_V1 = "v1"
 PROTO_SCHEMA_V2 = "v2"
 PROTO_SCHEMA_V3 = "v3"
+PROTO_SCHEMA_V4 = "v4"
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -55,9 +56,56 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # raw .binpb.gz on the next run. Orthogonal to match.schema_version: that
 # one is a frontend contract (the JS reads it to decide rendering);
 # pipeline_version is an internal cache invalidator only.
-PIPELINE_VERSION = 29
+# 31 -> 32: the_tycoon highlight breakdown key rename salvage_share ->
+# loose_share (player-terminology contract: "collected"/"loose", amount-
+# first display).
+# 32 -> 33: Economy card v2 telemetry -- per-player pilot_sec /
+# reship_median_sec / reship_spells on positioning metrics, the new
+# top-level `thug_supply` block, and economy.teams gains peak_max_scrap /
+# green_sec / yellow_sec / red_sec / upgrades_built.
+# 33 -> 34: income classifier corrections (refund-match floor +
+# cap-clamped loose attribution, see ECON_REFUND_MIN_MATCH below) and
+# thug_supply losses restricted to human-piloted ships + per-thug rows.
+PIPELINE_VERSION = 34
 
 TIMELINE_BUCKET_SECONDS = 10
+
+# --- v4 economy / builds capture constants (match.schema_version 17) ---
+# The proto v4 collector samples per-team ResourceState on EVERY UpdateTick.
+# Income/outflow accounting runs at that FULL rate (Σ positive per-tick bank
+# deltas is the flow-complete economy measure -- BUILD-cost reconstruction
+# was measured to undercount true outflow by up to 33%); the stored series
+# is downsampled to ECON_SAMPLE_RATE_HZ via a match-level gate (NOT the
+# per-player positioning gate). Tunable without a schema bump.
+ECON_SAMPLE_RATE_HZ = 1
+# Income-delta classifier: a positive bank delta arriving within this many
+# ticks of a CANCEL build event is matched against the cancel's expected
+# refund FIRST (refunds are frequently multiples of 5, so the refund rule
+# must precede the loose-scrap rule) -- subject to the ECON_REFUND_MIN_MATCH
+# floor below. Measured refund policy: FACTORY-lane (recycler/factory) and
+# CONSTRUCTOR-lane cancels refund ~50% of cost; armory cancels refund
+# nothing (small-n measurement -- audit item).
+ECON_REFUND_WINDOW_TICKS = 40
+ECON_CANCEL_REFUND_FRACTION = 0.5
+# Loose piece size: scavengers collect field scrap as immediate +5 bank
+# jumps independent of regen (user-verified mechanic; +5-multiple deltas
+# decompose unambiguously on real data -- a coincident regen +1 in a 5k+1
+# jump books to income_regen, the 5k to income_loose). Terminology note:
+# players say "collected" (never "salvaged") and count loose by SCRAP
+# AMOUNT, not pieces -- "I got 25 loose" means 25 scrap (5 pieces).
+# Display surfaces lead with income_loose (the amount); the piece count
+# (loose_collections) is secondary telemetry.
+ECON_LOOSE_SIZE = 5
+# Refund-match floor. A cancel's expected refund must be at least this
+# large to be claimed off a positive bank delta. MEASURED on the real v4
+# session: every legitimate refund is >= 5 (Harvester 20 -> 10, Artillery
+# 65 -> 32), but Service Pod costs 2, so cost // 2 = 1 -- and a 1-scrap
+# expectation matches almost any delta. That fabricated 74 of team 1's
+# 114 "refund" scrap (claiming plain +1 regen ticks) and clipped 1 off
+# six clean +5 loose deliveries, stranding the leftover 4 in
+# income_unclassified. Tied to the loose size because a sub-piece refund
+# is exactly what cannot be told apart from regen.
+ECON_REFUND_MIN_MATCH = ECON_LOOSE_SIZE
 
 # --- Positioning (player movement) constants ---
 # Axis convention: +X East, +Y Up, +Z North (developer-confirmed for Z).
@@ -84,6 +132,14 @@ POSITIONING_RETURN_MIN_OUT_SEC = 5  # must be sustained outside this many second
 POSITIONING_HEATMAP_GRID_SIZE = 64
 POSITIONING_POLAR_ANGULAR_BINS = 16
 POSITIONING_POLAR_RADIAL_BINS = 8
+
+# Re-ship spell floor (match.schema_version 18). A "shipless spell" is a
+# maximal run of on-foot (pilot ODF) samples that ENDS with the player back
+# in a ship. Spells shorter than this are voluntary hops -- ejecting to grab
+# a powerup, sniping from the ground, swapping ships at the base -- not the
+# "my ship died and I waited for a new one" event the metric is about.
+# 10s at the 1 Hz sample rate is 10 samples. Tunable without a schema bump.
+RESHIP_MIN_SPELL_SEC = 10
 
 # Sentinel damage filter. The BZCC engine's DAMAGE_TYPE_UNKNOWN force-kill
 # pathway emits DamageDealt/DamageReceived pairs with amount = 2^28
@@ -734,6 +790,10 @@ HIGHLIGHTS_RENDER_ORDER = [
     "crate_pod_goblin",
     "chris_kyle",
     "the_locksmith",
+    # v17 (proto v4) commander-economy cards -- flag-gated (slate 12 -> 14;
+    # pre-v4 matches render the classic 12).
+    "the_tycoon",
+    "war_machine",
 ]
 
 HIGHLIGHTS_LABELS = {
@@ -749,6 +809,8 @@ HIGHLIGHTS_LABELS = {
     "crate_pod_goblin": ("Pod Goblin",       "bi-box-seam"),
     "chris_kyle":       ("Chris Kyle",       "bi-crosshair"),
     "the_locksmith":    ("The Locksmith",    "bi-lock-fill"),
+    "the_tycoon":       ("The Tycoon",       "bi-cash-stack"),
+    "war_machine":      ("War Machine",      "bi-gear-wide-connected"),
 }
 
 
@@ -855,7 +917,9 @@ def _top_kv(d, key=lambda v: v):
 
 
 def compute_highlights(match_data):
-    """Build the per-match Highlights block (12-card always-on catalog).
+    """Build the per-match Highlights block (12-card always-on catalog;
+    14 on proto-v4 matches -- The Tycoon / War Machine are flag-gated on
+    has_resource_data / has_build_data).
 
     Each card emits when its data gates pass; missing data means the card is
     omitted (the UI grid reflows around the gap). All values are sourced from
@@ -1296,6 +1360,86 @@ def compute_highlights(match_data):
                 "narrative": _narrative_bucket(delta),
             })
 
+    # ---- v17 commander-economy cards (slate 12 -> 14), flag-gated so the
+    # pre-v4 corpus keeps the classic 12. Winner type stays "player" (the
+    # team's commander) so existing player cross-links work unchanged; the
+    # extra `team` field lets the renderer badge the side.
+    _match_meta = match_data.get("match") or {}
+    _econ_teams_hl = (match_data.get("economy") or {}).get("teams") or {}
+    _build_teams_hl = (match_data.get("builds") or {}).get("teams") or {}
+
+    def _commander_card(category, teams, value_key, value_format,
+                        round_value, breakdown_fn):
+        rows = []
+        for _side in ("1", "2"):
+            _t = teams.get(_side) or {}
+            _v = _t.get(value_key)
+            if _v is None:
+                continue
+            rows.append((_v, _side, _t.get("commander") or {}, _t))
+        if not rows:
+            return None
+        rows.sort(key=lambda r: (-r[0], r[1]))
+        _wv, _wside, _wcmdr, _wt = rows[0]
+        runner = None
+        if len(rows) > 1:
+            _rv, _rside, _rcmdr, _rt = rows[1]
+            runner = {
+                "name": _rcmdr.get("name") or f"Team {_rside}",
+                "value": _round_value(_rv, round_value),
+            }
+        label, icon = HIGHLIGHTS_LABELS[category]
+        delta = _delta_pct(_wv, runner["value"] if runner else None)
+        return {
+            "category": category,
+            "label": label,
+            "icon": icon,
+            "winner": {
+                "type": "player",
+                "name": _wcmdr.get("name") or f"Team {_wside}",
+                "steam64": _wcmdr.get("s64"),
+                "team": int(_wside),
+            },
+            "value": _round_value(_wv, round_value),
+            "value_format": value_format,
+            "value_breakdown": breakdown_fn(_wt),
+            "runner_up": runner,
+            "delta_pct": delta,
+            "narrative": _narrative_bucket(delta),
+        }
+
+    if _match_meta.get("has_resource_data"):
+        # The Tycoon: scrap GENERATED (Σ positive full-rate bank deltas)
+        # -- economic throughput, deliberately NOT bank holdings (sitting
+        # on a full bank is the SLOWEST regen zone). LOCKED 2026-09-03.
+        emit(_commander_card(
+            "the_tycoon", _econ_teams_hl, "scrap_income", "scrap", 0,
+            lambda t: {
+                "income_regen": t.get("income_regen"),
+                # Loose terminology contract: income_loose (the AMOUNT) is
+                # the player-facing number; loose_collections (pieces) is
+                # secondary telemetry the UI keeps out of headline copy.
+                "income_loose": t.get("income_loose"),
+                "loose_collections": t.get("loose_collections"),
+                "loose_share": (
+                    round(t["income_loose"] / t["scrap_income"], 3)
+                    if t.get("scrap_income") else None
+                ),
+            },
+        ))
+    if _match_meta.get("has_build_data"):
+        # War Machine: production value converted into combat units
+        # (Σ scrapCost over combat-ship BUILD completions -- B7/B12
+        # taxonomy; scavs/pods/structures excluded).
+        emit(_commander_card(
+            "war_machine", _build_teams_hl, "combat_ship_value", "scrap", 0,
+            lambda t: {
+                "ships_built": t.get("ships_built"),
+                "units_built": t.get("units_built"),
+                "builds_per_min": t.get("builds_per_min"),
+            },
+        ))
+
     # Stable canonical render order. (The append order above already matches,
     # but sort defensively so a future refactor cannot reorder cards.)
     order = {cat: i for i, cat in enumerate(HIGHLIGHTS_RENDER_ORDER)}
@@ -1459,6 +1603,134 @@ def build_ship_caps_resolver(odf_db):
     return caps
 
 
+# --- v4 economy / builds builders (match.schema_version 17) ---
+
+# Wire-enum -> string maps for the proto v4 BuildEvent / ResourceState
+# payloads. Values mirror scripts/statsgate.proto (BuildEventType,
+# ProducerType, ScrapStatus). 0/unspecified maps to None via .get().
+BUILD_EVENT_TYPE_NAMES = {1: "queue", 2: "cancel", 3: "build"}
+PRODUCER_TYPE_NAMES = {1: "factory", 2: "constructor", 3: "armory"}
+SCRAP_STATUS_NAMES = {1: "green", 2: "yellow", 3: "red", 4: "parallel"}
+
+# Combat-ship classification (B7/B12 contract): a built unit counts toward
+# `ships_built` / combat-production metrics only when its ODF's
+# inheritanceChain TERMINAL is in this set. Utility/economy terminals are
+# deliberately absent: scavenger/scavengerH (+ faction collector/harvester
+# names -- same class), tug, constructionrig, recyclervehicle, service/
+# serviceH (service pods/trucks), person (pilots), animal, boid, torpedo
+# (weapon-spawned), commvehicleH (comm tower utility). The exact resolved
+# ODF list rides the B7 user sign-off (generated by the audit runbook).
+COMBAT_SHIP_TERMINALS = {
+    "wingman", "assaulttank", "morphtank", "turrettank", "turret",
+    "artillery", "minelayer", "bomber", "apc", "sav", "assaulthover",
+    "iv_walker", "fv_walker", "aircraft",
+}
+
+
+def _norm_build_odf(odf):
+    """Normalize a wire BuildEvent.build_odf to a lowercase stem.
+
+    Armory items arrive with INCONSISTENT `.odf` suffixing on the real
+    wire (`apeburst` vs `apeburst.odf` observed in the first v4 session)
+    -- every FIFO/dedup/cost/classification consumer must key on the
+    normalized stem or the lanes silently fragment.
+    """
+    s = (odf or "").strip().lower()
+    return s[:-4] if s.endswith(".odf") else s
+
+
+def build_producer_lane_map(odf_db):
+    """Reverse map {buildable item stem -> "recycler"|"factory"} for
+    disambiguating PRODUCER_TYPE_FACTORY build events (the collector tags
+    Recycler-lane builds as FACTORY too).
+
+    Scans every ODF whose inheritanceChain TERMINAL is `recycler` or
+    `factory` (covers Scion forge/kiln -- both terminate at `factory`),
+    excluding `virtual_class_*` and AI `cpu`/`insane` variants (verified:
+    human menus are then disjoint -- 0 ambiguous items on the live DB).
+    An item appearing in both lanes is mapped to None (ambiguous) so the
+    consumer records it as unresolved rather than guessing.
+    """
+    lanes = {}
+    ambiguous = set()
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            stem = _norm_build_odf(odf_key)
+            if stem.startswith("virtual_class") or "cpu" in stem or "insane" in stem:
+                continue
+            chain = (entry or {}).get("inheritanceChain") or []
+            terminal = chain[-1] if chain else None
+            if terminal == "recycler":
+                lane = "recycler"
+            elif terminal == "factory":
+                lane = "factory"
+            else:
+                continue
+            for cls in entry.values():
+                if not isinstance(cls, dict):
+                    continue
+                for prop, val in cls.items():
+                    if not prop.lower().startswith("builditem"):
+                        continue
+                    if not isinstance(val, str) or not val.strip():
+                        continue
+                    item = _norm_build_odf(val)
+                    if item in lanes and lanes[item] != lane:
+                        ambiguous.add(item)
+                    else:
+                        lanes[item] = lane
+    for item in ambiguous:
+        lanes[item] = None
+    return lanes
+
+
+def build_scrap_cost_resolver(odf_db):
+    """Map every ODF stem to its `GameObjectClass.scrapCost` (int scrap).
+
+    Bucket-agnostic scan (armory items live in Weapon/Powerup, service
+    pods in Effect -- the top-level category is NOT a usable taxonomy).
+    Non-numeric / missing costs are simply absent; zero costs are kept
+    (deploy-form recyclers legitimately cost 0). First writer wins on the
+    (unlikely) cross-bucket stem collision.
+    """
+    costs = {}
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            stem = _norm_build_odf(odf_key)
+            if stem in costs:
+                continue
+            goc = (entry or {}).get("GameObjectClass", {}) or {}
+            raw = goc.get("scrapCost")
+            try:
+                costs[stem] = int(round(float(raw)))
+            except (TypeError, ValueError):
+                continue
+    return costs
+
+
+def build_combat_ship_odfs(odf_db):
+    """Set of ODF stems classified as combat ships (B7/B12 contract).
+
+    classLabel-chain based, NOT category based: an ODF is a combat ship
+    when its inheritanceChain terminal is in COMBAT_SHIP_TERMINALS.
+    Scavengers/tugs/constructors/service pods/pilots are excluded by
+    terminal; armory weapon items never match (no vehicle chain).
+    """
+    ships = set()
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            chain = (entry or {}).get("inheritanceChain") or []
+            if chain and chain[-1] in COMBAT_SHIP_TERMINALS:
+                ships.add(_norm_build_odf(odf_key))
+    return ships
+
+
 def disambiguate_names(odf_set, resolve_fn):
     """When multiple ODF strings resolve to the same display name, append the raw ODF stem.
 
@@ -1597,24 +1869,36 @@ def load_session(path):
     """Load and parse a .binpb.gz session file.
 
     Returns `(session, schema)` where `schema` is `PROTO_SCHEMA_V1`,
-    `PROTO_SCHEMA_V2`, or `PROTO_SCHEMA_V3`. The pipeline supports all
-    three on-the-wire formats simultaneously: v1 (separate DamageDealt/
-    DamageReceived events), v2 (unified DamageDealt + header identity
-    maps), and v3 (header maps replaced by the `players` PlayerInfo list
-    + `game_outcome`).
+    `PROTO_SCHEMA_V2`, `PROTO_SCHEMA_V3`, or `PROTO_SCHEMA_V4`. The
+    pipeline supports all four on-the-wire formats simultaneously: v1
+    (separate DamageDealt/DamageReceived events), v2 (unified DamageDealt
+    + header identity maps), v3 (header maps replaced by the `players`
+    PlayerInfo list + `game_outcome`), and v4 (purely additive over v3:
+    per-team ResourceState on UpdateTick + the BuildEvent oneof arm).
 
     Discrimination strategy:
       1. Parse with the v3 descriptor (the current `statsgate_pb2`).
          Structurally this accepts v1/v2 files too -- the lenient Python
          parser skips unknown/reserved fields -- so success alone proves
          nothing.
-      2. If `header.players` is non-empty, it's a v3 file. This is the
+      2. Scan for v4 payloads FIRST (before the header.players branch,
+         so a degenerate v4 file with an empty roster cannot fall
+         through to the frozen-v2 re-parse and silently lose its
+         resource/build data): v4 is purely additive over v3, so decode
+         success proves nothing -- any `build_event` oneof arm, or any
+         `update_tick` carrying a per-team ResourceState, stamps the
+         file v4. No legacy writer can populate those fields, so a hit
+         is proof. A degenerate v4 session that never emitted either
+         payload classifies as v3 -- harmless, since without those
+         payloads the two schemas are byte-identical and no v4-only
+         aggregation could run anyway.
+      3. If `header.players` is non-empty, it's a v3 file. This is the
          ONLY reliable v2-vs-v3 signal: there are no wire-type conflicts
          in either direction, so parse failure can never distinguish
          them. (v2 files decode "fine" under v3 but with the identity
          maps dropped as reserved fields; v3 files decode "fine" under
          v2 with `players`/`game_outcome` dropped as unknown fields.)
-      3. Otherwise re-parse with the FROZEN v2 descriptor
+      4. Otherwise re-parse with the FROZEN v2 descriptor
          (`statsgate_v2_pb2`) so the identity map fields are readable
          again, then run the pre-existing v2/v1 discrimination:
          a. If `header.team1_race` / `team2_race` are set, it's v2 --
@@ -1624,7 +1908,7 @@ def load_session(path):
             `damage_received` as oneof field 4, which the v2/v3 parsers
             report as an unidentifiable oneof arm. Even ONE such event
             proves v1.
-      4. On a v1 detection, re-parse from scratch with the v1 descriptor
+      5. On a v1 detection, re-parse from scratch with the v1 descriptor
          so DamageDealt fields land in the correct semantic slots and
          DamageReceived events are first-class again.
 
@@ -1645,6 +1929,25 @@ def load_session(path):
         session_v1 = statsgate_v1_pb2.ClientStatSession()
         session_v1.ParseFromString(data)
         return session_v1, PROTO_SCHEMA_V1
+
+    # v4 payload presence scan FIRST, before the header.players branch
+    # (review fix): a degenerate v4 file with an empty roster must not
+    # fall through to the frozen-v2 re-parse, which would silently drop
+    # its resource/build data. v4 is purely additive, so the only signal
+    # is an actual v4 payload in the stream. Short-circuits on the first
+    # hit (genuine v4 files carry ResourceState on the very first
+    # UpdateTick); genuine v1/v2/v3 files pay one full linear scan (the
+    # new fields 3/4 on UpdateTick and oneof arm 9 cannot be populated by
+    # any legacy writer, so a hit is proof of v4).
+    for evt in session_v3.event_stream:
+        arm = evt.WhichOneof("event_type")
+        if arm == "build_event":
+            return session_v3, PROTO_SCHEMA_V4
+        if arm == "update_tick" and (
+            evt.update_tick.HasField("team1_resources")
+            or evt.update_tick.HasField("team2_resources")
+        ):
+            return session_v3, PROTO_SCHEMA_V4
 
     if len(session_v3.header.players) > 0:
         return session_v3, PROTO_SCHEMA_V3
@@ -1696,6 +1999,9 @@ def load_cache_index():
             "elo_current_max.json", "elo_history_max.json",
             "elo_current_softmax.json", "elo_history_softmax.json",
             "elo_current_ranks.json", "elo_history_ranks.json",
+            "elo_current_alpha10.json", "elo_history_alpha10.json",
+            "elo_current_alpha25.json", "elo_history_alpha25.json",
+            "elo_current_alpha50.json", "elo_history_alpha50.json",
             "validation_summary.json"}
     for json_path in OUTPUT_DIR.glob("*.json"):
         if json_path.name in skip:
@@ -2096,6 +2402,43 @@ def _percentile(sorted_values, p):
     return sorted_values[lo] * (1 - frac) + sorted_values[hi] * frac
 
 
+def _reship_spells(pilot_flags, sample_rate_hz=POSITIONING_SAMPLE_RATE_HZ):
+    """Durations (sec) of every qualifying "shipless spell" in a pilot series.
+
+    A spell is a maximal run of consecutive on-foot samples. Three runs are
+    deliberately NOT counted:
+
+    * A run still open at the last sample -- the match ended before we saw
+      the player get back in a ship, so its true length is unknown
+      (censored). Counting the observed prefix would fake a fast re-ship.
+    * The run starting at index 0 -- every match opens with players on foot
+      at the recycler. That is opening build order, not a re-ship.
+    * Runs shorter than ``RESHIP_MIN_SPELL_SEC`` -- voluntary hops (powerup
+      grabs, ground snipes, ship swaps at base).
+
+    Measuring spells directly from the pilot series (rather than pairing
+    kill-feed deaths to build orders) is what makes this "time until the
+    thug is actually back in a ship": it captures deaths, snipes and ejects
+    alike, and it cannot be fooled by a commander who re-ships from a
+    pre-built stock without queueing anything.
+
+    Returns a list of float seconds in chronological order.
+    """
+    spells = []
+    run_start = None
+    for i, on_foot in enumerate(pilot_flags):
+        if on_foot:
+            if run_start is None:
+                run_start = i
+        elif run_start is not None:
+            if run_start > 0:
+                duration = (i - run_start) / sample_rate_hz
+                if duration >= RESHIP_MIN_SPELL_SEC:
+                    spells.append(duration)
+            run_start = None
+    return spells
+
+
 def _convex_hull_area_xz(points):
     """Andrew's monotone chain convex hull + shoelace area.
 
@@ -2465,6 +2808,11 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
 
     # --- Per-player metrics ---
     players_out = {}
+    # Raw re-ship spell durations per player name. Rides out on the private
+    # `_reship_spells_by_name` key so process_match can pool them into the
+    # per-team medians in `thug_supply` (a median of medians is not a median);
+    # popped off before the positioning block is serialized.
+    reship_spells_by_name = {}
     match_sample_count = max(tr["last_seen"] for tr in trails.values()) + 1 if trails else 0
 
     for s64, tr in trails.items():
@@ -2516,6 +2864,16 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         at_base_pilot_share = (
             at_base_pilot_samples / sample_count if sample_count else 0.0
         )
+
+        # Total on-foot time + re-ship spells (match.schema_version 18).
+        # `pilot_sec` is the whole-match figure (at-base AND field walk-backs),
+        # the superset of at_base_pilot_sec. The spell list feeds both this
+        # player's own median and the pooled per-team median in `thug_supply`
+        # (medians don't pool, so process_match needs the raw durations --
+        # they ride out on the private `_reship_spells_by_name` key and are
+        # popped before the block is written to JSON).
+        pilot_sec = sum(1 for f in pilot_flags if f) / POSITIONING_SAMPLE_RATE_HZ
+        reship_spell_secs = _reship_spells(pilot_flags)
         time_to_first_leave = None
         for idx, d in enumerate(dists):
             if d > personal_base_radius:
@@ -2556,6 +2914,7 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         heatmap_polar = _build_polar_heatmap(tr, sx, sz, p95_dist or 1.0)
 
         name = nick_for_s64(s64)
+        reship_spells_by_name[name] = reship_spell_secs
         players_out[name] = {
             "spawn": {"x": round(sx, 2), "y": round(sy, 2), "z": round(sz, 2)},
             "personal_base_radius": round(personal_base_radius, 2),
@@ -2584,6 +2943,17 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                 # scripts/elo.py to compute the gated thug_kill_rate lift.
                 "at_base_pilot_sec": round(at_base_pilot_sec, 1),
                 "at_base_pilot_share": round(at_base_pilot_share, 3),
+                # match.schema_version 18: total on-foot seconds (superset of
+                # at_base_pilot_sec -- includes field walk-backs) and the
+                # player's own re-ship profile. `reship_median_sec` is null
+                # when no spell qualified (never lost a ship, or every spell
+                # was a sub-threshold hop / censored by match end).
+                "pilot_sec": round(pilot_sec, 1),
+                "reship_median_sec": (
+                    round(_median(reship_spell_secs), 1)
+                    if reship_spell_secs else None
+                ),
+                "reship_spells": len(reship_spell_secs),
             },
             "trail": {
                 "t": tr["t"],
@@ -2656,6 +3026,7 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         "teleport_threshold": round(teleport_threshold, 2),
         "team_base": team_base_out,
         "players": players_out,
+        "_reship_spells_by_name": reship_spells_by_name,
     }
 
 
@@ -2938,7 +3309,7 @@ def _build_identity_maps(header, schema, events):
     pre-ACCOUNT_REROUTES identity, wire-accurate provenance) and
     `roster_conflicts` lists conflict resolutions (always a list).
     """
-    if schema != PROTO_SCHEMA_V3:
+    if schema not in (PROTO_SCHEMA_V3, PROTO_SCHEMA_V4):
         return (
             dict(header.teamnum_to_s64),
             dict(header.s64_to_teamnum),
@@ -3124,7 +3495,7 @@ def _build_identity_maps(header, schema, events):
     return slot_to_s64, s64_to_slot, s64_to_nick, roster, roster_conflicts
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -3132,15 +3503,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     `match.source_size_bytes` field so subsequent runs can use it as the
     incremental cache key (see load_cache_index() and the `--force` flag).
 
-    `schema` is `PROTO_SCHEMA_V1`, `PROTO_SCHEMA_V2`, or `PROTO_SCHEMA_V3`,
-    returned by `load_session`. Event-layout branches split v1 vs modern
-    (`schema != PROTO_SCHEMA_V1` -- v2 and v3 share the unified event
-    stream): the damage-event normalization, the faction resolution
+    `schema` is `PROTO_SCHEMA_V1`, `PROTO_SCHEMA_V2`, `PROTO_SCHEMA_V3`,
+    or `PROTO_SCHEMA_V4`, returned by `load_session`. Event-layout
+    branches split v1 vs modern (`schema != PROTO_SCHEMA_V1` -- v2/v3/v4
+    share the unified event stream): the damage-event normalization, the
+    faction resolution
     (v2+'s `team1_race`/`team2_race` header fields are authoritative when
-    set, algo inference is the fallback), and the per-ship combat ODF
+    set, algo inference is the fallback), and the     per-ship combat ODF
     attribution (v2+ uses event-time `DamageDealt.shooter_odf` when
     present; v1 unchanged via the existing `_ship_key()` UpdateTick map).
     Identity branches split v3 vs earlier (`_build_identity_maps`).
+
+    v4 additionally carries per-team ResourceState on UpdateTicks and a
+    `build_event` oneof arm; `producer_lanes` / `scrap_costs` /
+    `combat_ship_odfs` (from build_producer_lane_map /
+    build_scrap_cost_resolver / build_combat_ship_odfs over the ODF DB)
+    power the `economy` + `builds` blocks. All three default to empty so
+    a missing ODF DB degrades to unresolved lanes / null costs / zero
+    ships_built rather than crashing.
     """
     header = session.header
     events = session.event_stream
@@ -3569,6 +3949,82 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # collector behavior model.
     PICKUP_DEDUP_GAP_TICKS = 60  # 3 seconds at 20 Hz tick rate
     pickup_last_kept_tick = {}  # (picker, powerup_odf_lower, powerup_team) -> last kept tick
+
+    # --- v4 economy / builds capture state (match.schema_version 17) ---
+    # Income/outflow accounting runs at FULL rate (every resource-bearing
+    # UpdateTick -- Σ positive per-tick bank deltas is the flow-complete
+    # economy measure); only the STORED series is downsampled through the
+    # match-level econ gate (NOT the per-player positioning gate).
+    producer_lanes = producer_lanes or {}
+    scrap_costs = scrap_costs or {}
+    combat_ship_odfs = combat_ship_odfs or set()
+
+    match_has_resource_data = False
+    match_has_build_data = False
+    econ_stride = max(1, int(round(tick_rate / ECON_SAMPLE_RATE_HZ)))
+    econ_last_kept_tick = None  # match-level downsample gate
+    econ_ticks = []  # shared downsampled tick axis (both teams)
+
+    def _new_econ_side():
+        return {
+            "series": {"scrap": [], "max_scrap": [], "pool_count": [], "upgrade_count": []},
+            "prev_bank": None,
+            "income": 0, "regen": 0, "loose": 0, "refund": 0,
+            "unclassified": 0, "loose_collections": 0, "outflow_gross": 0,
+            "peak_scrap": 0, "peak_max_scrap": 0,
+            "scrap_sum": 0, "float_sum": 0.0, "samples": 0,
+            "status_ticks": defaultdict(int),
+            "prev_upgrades": None, "upgrades_built": 0,
+            "prev_pools": None, "pools_lost": 0, "peak_pools": 0,
+            "final_pools": None, "final_scrap": None, "final_upgrades": None,
+            "first_upgrade_tick": None,
+            "pool_first_at": {3: None, 5: None, 7: None},
+            # (tick, expected_refund) ring for the income classifier's
+            # refund-first rule (pruned past ECON_REFUND_WINDOW_TICKS).
+            "cancel_refunds": deque(),
+            # Loose scrap the storage cap withheld, waiting on headroom.
+            # See the cap-clamp rule in the income classifier below.
+            "pending_overflow": 0,
+            "cur_status": 0,  # latest wire ScrapStatus (for the build join)
+        }
+
+    econ_state = {1: _new_econ_side(), 2: _new_econ_side()}
+    econ_adv_scrap_sum = 0  # Σ (T1 scrap - T2 scrap) over full-rate ticks
+    econ_adv_pool_sum = 0   # Σ (T1 pools - T2 pools) over full-rate ticks
+    econ_adv_samples = 0
+
+    def _new_builds_side():
+        return {
+            "units_queued": 0, "units_cancelled": 0, "units_built": 0,
+            "ships_built": 0, "combat_ship_value": 0, "scrap_spent_units": 0,
+            "structures_queued": 0, "structures_cancelled": 0,
+            "structures_built_events": 0, "scrap_spent_structures": 0,
+            "dedup_folded_queues": 0, "producer_unresolved": 0,
+            "cancel_sunk_cost": 0,
+            # per-resolved-producer {lane: {"queued": n, "cancelled": n, "built": n}}
+            "by_producer": defaultdict(lambda: defaultdict(int)),
+            # per-unit cancel tallies (stack-cancels fire one CANCEL per unit)
+            "cancel_counts": defaultdict(int),
+            # QUEUE decisions by the team's scrap status at the queue tick
+            # (deduction is empirically AT QUEUE -- the skill-relevant tick)
+            "orders_by_status": defaultdict(lambda: {"count": 0, "scrap": 0}),
+            "first_builds": [],       # first 10 BUILD completions {tick, odf}
+            "combat_queue_ticks": [],  # combat-ship QUEUE ticks (rebuild latency)
+        }
+
+    build_feed = []  # every build event verbatim (dedup-folded rows flagged)
+    build_counts = {1: _new_builds_side(), 2: _new_builds_side()}
+    build_seen_queue_tuples = set()  # (tick, teamnum, producer, odf) dedup key
+    # FIFO of open unit orders per (side, stem): (cost, status_at_queue_int).
+    # Mirrors the fixture ledger contract exactly (make_v4_fixture.py).
+    build_open_units = {}
+    # Structure-order FIFO per (side, stem) for the status join on
+    # CANCEL/BUILD rows (ledger books structures at QUEUE time).
+    build_open_structs = {}
+    build_ledger = {
+        1: {"built": 0, "cancelled": 0, "structures": 0},
+        2: {"built": 0, "cancelled": 0, "structures": 0},
+    }
 
     i = 0
     n = len(events)
@@ -4272,6 +4728,153 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 max_tick = tick
             if tick < min_tick:
                 min_tick = tick
+
+            # --- v4 per-team resource capture (economy block) ---
+            # FULL-RATE income/outflow accounting (every resource-bearing
+            # tick); the stored series rides the match-level econ gate.
+            # Guarded on the v4 stamp so the v1-v3 corpus never pays the
+            # HasField cost.
+            if schema == PROTO_SCHEMA_V4:
+                _has1 = ut.HasField("team1_resources")
+                _has2 = ut.HasField("team2_resources")
+                if _has1 or _has2:
+                    match_has_resource_data = True
+                    _keep_econ = (econ_last_kept_tick is None
+                                  or (tick - econ_last_kept_tick) >= econ_stride)
+                    if _keep_econ:
+                        econ_last_kept_tick = tick
+                        econ_ticks.append(tick)
+                    for _side, _has, _rs in ((1, _has1, ut.team1_resources),
+                                             (2, _has2, ut.team2_resources)):
+                        st = econ_state[_side]
+                        if not _has:
+                            if _keep_econ:
+                                for _k in ("scrap", "max_scrap", "pool_count", "upgrade_count"):
+                                    st["series"][_k].append(None)
+                            continue
+                        _bank = int(_rs.current_scrap)
+                        _cap = int(_rs.max_scrap)
+                        _pools = int(_rs.pool_count)
+                        _upg = int(_rs.upgrade_count)
+                        _status = int(_rs.scrap_status)
+
+                        # Income classifier (fixture-contract order):
+                        # refund-first -> cap-clamped loose -> 5k loose ->
+                        # withheld-overflow flush -> +1 regen ->
+                        # unclassified remainder. Refund candidates are
+                        # cancel events within ECON_REFUND_WINDOW_TICKS.
+                        _prev = st["prev_bank"]
+                        if _prev is not None:
+                            _d = _bank - _prev
+                            if _d > 0:
+                                st["income"] += _d
+                                _rem = _d
+                                _cr = st["cancel_refunds"]
+                                while _cr and _cr[0][0] < tick - ECON_REFUND_WINDOW_TICKS:
+                                    _cr.popleft()
+                                for _ct, _r in _cr:
+                                    if (_r >= ECON_REFUND_MIN_MATCH
+                                            and 0 <= tick - _ct <= ECON_REFUND_WINDOW_TICKS
+                                            and _rem >= _r):
+                                        st["refund"] += _r
+                                        _rem -= _r
+                                        break
+                                # Cap-clamp rule. A loose delivery arriving
+                                # with under ECON_LOOSE_SIZE of headroom is
+                                # truncated to the free room, so the delta
+                                # is no longer a 5-multiple and the old
+                                # code stranded it in `unclassified`.
+                                # MEASURED on the wire: the withheld part
+                                # is HELD, not destroyed, and flushes on
+                                # the first later tick with headroom
+                                # (typically the tick after a purchase --
+                                # 0.05 s, far too fast for a scav round
+                                # trip). Release tracks headroom, NOT
+                                # planting: 61 of 62 pool plants moved the
+                                # bank by 0 or +1, and the lone exception
+                                # was a plant that raised the cap while the
+                                # bank was pinned. So book the part that
+                                # fitted as loose now and carry the rest.
+                                # Regen keeps priority via the _rem > 1
+                                # guard (a lone +1 into a full bank is a
+                                # regen tick, not a clamped delivery).
+                                if _bank >= _cap and _rem > 1 and (_rem % ECON_LOOSE_SIZE):
+                                    st["loose"] += _rem
+                                    st["loose_collections"] += _rem // ECON_LOOSE_SIZE + 1
+                                    st["pending_overflow"] += (
+                                        ECON_LOOSE_SIZE - _rem % ECON_LOOSE_SIZE
+                                    ) % ECON_LOOSE_SIZE
+                                    _rem = 0
+                                else:
+                                    if _rem >= ECON_LOOSE_SIZE:
+                                        _k5 = (_rem // ECON_LOOSE_SIZE) * ECON_LOOSE_SIZE
+                                        st["loose"] += _k5
+                                        st["loose_collections"] += _rem // ECON_LOOSE_SIZE
+                                        _rem -= _k5
+                                    # Withheld-overflow flush. Only regen
+                                    # (+1), loose (+5) and refunds create
+                                    # scrap, so a sub-cap 2/3/4 remainder
+                                    # can only be the tail of an earlier
+                                    # clamped delivery. No piece-count bump
+                                    # -- the pickup was counted when its
+                                    # first installment landed.
+                                    if _rem > 1 and st["pending_overflow"] > 0:
+                                        _take = min(_rem, st["pending_overflow"])
+                                        st["loose"] += _take
+                                        st["pending_overflow"] -= _take
+                                        _rem -= _take
+                                    if _rem == 1:
+                                        st["regen"] += 1
+                                        _rem = 0
+                                st["unclassified"] += _rem
+                            elif _d < 0:
+                                st["outflow_gross"] += -_d
+                        st["prev_bank"] = _bank
+
+                        # Full-rate summary accumulators.
+                        st["samples"] += 1
+                        st["scrap_sum"] += _bank
+                        if _cap > 0:
+                            st["float_sum"] += _bank / _cap
+                        st["peak_scrap"] = max(st["peak_scrap"], _bank)
+                        # v18: largest storage the team ever had. Gives the
+                        # peak-bank figure its denominator (a peak of 130 is
+                        # near-full at cap 140, unremarkable at cap 240).
+                        st["peak_max_scrap"] = max(st["peak_max_scrap"], _cap)
+                        st["status_ticks"][_status] += 1
+                        st["cur_status"] = _status
+                        if st["prev_pools"] is not None and _pools < st["prev_pools"]:
+                            st["pools_lost"] += st["prev_pools"] - _pools
+                        st["prev_pools"] = _pools
+                        st["peak_pools"] = max(st["peak_pools"], _pools)
+                        # v18: cumulative upgrades BUILT (sum of positive
+                        # upgrade-count deltas), as opposed to the
+                        # final-snapshot `upgrades_final` -- upgraded pools
+                        # get killed, so the snapshot undercounts the work.
+                        if st["prev_upgrades"] is not None and _upg > st["prev_upgrades"]:
+                            st["upgrades_built"] += _upg - st["prev_upgrades"]
+                        st["prev_upgrades"] = _upg
+                        for _n_pools in (3, 5, 7):
+                            if st["pool_first_at"][_n_pools] is None and _pools >= _n_pools:
+                                st["pool_first_at"][_n_pools] = tick
+                        if st["first_upgrade_tick"] is None and _upg >= 1:
+                            st["first_upgrade_tick"] = tick
+                        st["final_scrap"] = _bank
+                        st["final_pools"] = _pools
+                        st["final_upgrades"] = _upg
+
+                        if _keep_econ:
+                            st["series"]["scrap"].append(_bank)
+                            st["series"]["max_scrap"].append(_cap)
+                            st["series"]["pool_count"].append(_pools)
+                            st["series"]["upgrade_count"].append(_upg)
+                    if _has1 and _has2:
+                        econ_adv_scrap_sum += (int(ut.team1_resources.current_scrap)
+                                               - int(ut.team2_resources.current_scrap))
+                        econ_adv_pool_sum += (int(ut.team1_resources.pool_count)
+                                              - int(ut.team2_resources.pool_count))
+                        econ_adv_samples += 1
+
             # Downsample to POSITIONING_SAMPLE_RATE_HZ per player. Use per-player
             # "last kept tick" so gaps don't drift the cadence.
             for ps in ut.players:
@@ -4371,6 +4974,140 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     hp_ratio,
                     ammo_ratio,
                 ))
+            i += 1
+
+        elif event_type == "build_event":
+            # --- v4 build telemetry (builds block) ---
+            # Commander-only production (B4): every event attributes to
+            # the producing side's commander. Deliberately does NOT touch
+            # min/max_tick -- the match window stays bracketed by combat/
+            # presence events, and UpdateTicks bracket everything anyway.
+            be = evt.build_event
+            match_has_build_data = True
+            _stem = _norm_build_odf(be.build_odf)
+            if _stem:
+                # odf_map registration: register the CANONICAL `.odf`-suffixed
+                # form so it merges with the UpdateTick-registered key for the
+                # same unit (registering the bare stem creates a same-name
+                # sibling entry and falsely triggers the disambiguation
+                # suffix -- observed as "Collector (evscav_vsr)" on the first
+                # real v4 render). prettify_odf() then gives it a display
+                # name in the match's odf_map.
+                all_unit_odfs.add(_stem + ".odf")
+            _side = 1 if 1 <= be.teamnum <= 5 else 2
+            _etype = BUILD_EVENT_TYPE_NAMES.get(int(be.type))
+            _producer = PRODUCER_TYPE_NAMES.get(int(be.producer))
+            # Producer resolution: the collector tags Recycler-lane builds
+            # as PRODUCER_TYPE_FACTORY too; the offline menu reverse-map
+            # splits them. Non-factory producers resolve to themselves.
+            _lane = _producer
+            _bc = build_counts[_side]
+            if _producer == "factory":
+                _lane = producer_lanes.get(_stem)
+                if _lane is None:
+                    _bc["producer_unresolved"] += 1
+            _cost = scrap_costs.get(_stem)
+            _cost_i = _cost if _cost is not None else 0
+            _status_now = econ_state[_side]["cur_status"]
+            _is_struct = (_producer == "constructor")
+            _ukey = (_side, _stem)
+
+            _row = {
+                "tick": int(be.tick),
+                "type": _etype,
+                "producer": _producer,
+                "producer_resolved": _lane,
+                "team": _side,
+                "teamnum": int(be.teamnum),
+                "odf": _stem,
+                "name": None,  # resolved post-loop once unit_name_map exists
+                "scrap_cost": _cost,
+                "scrap_status_at_queue": None,
+                "scrap_status_at_build": None,
+            }
+
+            if _etype == "queue":
+                _tup = (int(be.tick), int(be.teamnum), int(be.producer), _stem)
+                if _tup in build_seen_queue_tuples:
+                    # Defensive same-tick QUEUE dedup (world-duplication
+                    # window 1ce54c0..53d659f): the row stays in the feed
+                    # for tier-2 reconcile, but ALL arithmetic skips it --
+                    # the engine deducted the bank exactly once.
+                    _row["dedup_folded"] = True
+                    _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_status_now)
+                    _bc["dedup_folded_queues"] += 1
+                    build_feed.append(_row)
+                    i += 1
+                    continue
+                build_seen_queue_tuples.add(_tup)
+                _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_status_now)
+                _bc["orders_by_status"][SCRAP_STATUS_NAMES.get(_status_now) or "unknown"]["count"] += 1
+                _bc["orders_by_status"][SCRAP_STATUS_NAMES.get(_status_now) or "unknown"]["scrap"] += _cost_i
+                if _lane:
+                    _bc["by_producer"][_lane]["queued"] += 1
+                if _is_struct:
+                    _bc["structures_queued"] += 1
+                    build_ledger[_side]["structures"] += _cost_i
+                    build_open_structs.setdefault(_ukey, []).append((_cost_i, _status_now))
+                else:
+                    _bc["units_queued"] += 1
+                    build_open_units.setdefault(_ukey, []).append((_cost_i, _status_now))
+                    if _stem in combat_ship_odfs:
+                        _bc["combat_queue_ticks"].append(int(be.tick))
+
+            elif _etype == "cancel":
+                # Refund expectation feeds the income classifier: factory/
+                # recycler/constructor lanes refund ~50% of cost, armory 0
+                # (measured on the real v4 session; small-n audit item).
+                _refund = 0 if _producer == "armory" else _cost_i // 2
+                econ_state[_side]["cancel_refunds"].append((int(be.tick), _refund))
+                _bc["cancel_sunk_cost"] += _cost_i - _refund
+                if _lane:
+                    _bc["by_producer"][_lane]["cancelled"] += 1
+                if _is_struct:
+                    _lst = build_open_structs.get(_ukey)
+                    if _lst:
+                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_lst.pop(0)[1])
+                    _bc["structures_cancelled"] += 1
+                else:
+                    _lst = build_open_units.get(_ukey)
+                    if _lst:
+                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_lst.pop(0)[1])
+                    # Mirrors the fixture ledger: cancelled cost books
+                    # unconditionally (the deduction happened at queue).
+                    build_ledger[_side]["cancelled"] += _cost_i
+                    _bc["units_cancelled"] += 1
+                    _bc["cancel_counts"][_stem] += 1
+
+            elif _etype == "build":
+                _row["scrap_status_at_build"] = SCRAP_STATUS_NAMES.get(_status_now)
+                if _lane:
+                    _bc["by_producer"][_lane]["built"] += 1
+                if _is_struct:
+                    _lst = build_open_structs.get(_ukey)
+                    if _lst:
+                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_lst.pop(0)[1])
+                    _bc["structures_built_events"] += 1
+                    _bc["scrap_spent_structures"] += _cost_i
+                else:
+                    _lst = build_open_units.get(_ukey)
+                    if _lst:
+                        _entry = _lst.pop(0)
+                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_entry[1])
+                        # Mirrors the fixture ledger: built cost books only
+                        # when a matching open order exists (an orphan
+                        # BUILD's deduction never happened on this wire).
+                        build_ledger[_side]["built"] += _entry[0]
+                    _bc["units_built"] += 1
+                    _bc["scrap_spent_units"] += _cost_i
+                    if _stem in combat_ship_odfs:
+                        _bc["ships_built"] += 1
+                        # War Machine basis: scrap value fielded as combat units.
+                        _bc["combat_ship_value"] += _cost_i
+                if len(_bc["first_builds"]) < 10:
+                    _bc["first_builds"].append({"tick": int(be.tick), "odf": _stem})
+
+            build_feed.append(_row)
             i += 1
 
         else:
@@ -5174,6 +5911,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         match_has_target_lock_data=match_has_target_lock_data,
         terrain_bounds=terrain_bounds,
     )
+    # Private side-channel (never serialized): {player name -> [spell secs]}.
+    # Pooled into the per-team `thug_supply` medians further down.
+    reship_spells_by_name = positioning_block.pop("_reship_spells_by_name", {})
 
     # Kills section
     kills_leaderboard = []
@@ -5227,6 +5967,195 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # events and corrupt the in-feed milestone.
     raw_game_outcome = getattr(header, "game_outcome", 0)
     match_winner = resolve_match_outcome(raw_game_outcome, kill_feed)
+
+    # --- v4 economy / builds blocks (match.schema_version 17) ---
+    # Match-global, always-unfiltered (highlights passthrough contract).
+    # Blocks are attached only when their flag is true -- pre-v4 matches
+    # simply have no block, mirroring the pre-v2 highlights precedent.
+    economy_block = None
+    builds_block = None
+
+    if match_has_build_data:
+        # Resolve display names now that unit_name_map exists: every feed
+        # row / summary surface leads with the unit's NAME (e.g.
+        # "Scavenger"), keeping the ODF stem as secondary metadata for
+        # ODF-browser chips (kill-feed convention). Resolution goes through
+        # the canonical `.odf`-suffixed key (same form the arm registered)
+        # so genuine same-name collisions pick up the disambiguation suffix
+        # consistently with the rest of the odf_map.
+        for _row in build_feed:
+            _row["name"] = prettify_odf(_row["odf"] + ".odf") if _row["odf"] else None
+
+    if match_has_resource_data:
+        _pending_costs = {1: 0, 2: 0}
+        for (_side, _stem), _lst in build_open_units.items():
+            _pending_costs[_side] += sum(_c for _c, _s in _lst)
+        _econ_teams = {}
+        for _side in (1, 2):
+            st = econ_state[_side]
+            _led = build_ledger[_side]
+            _n = st["samples"]
+            _outflow_accounted = (_led["built"] + _led["cancelled"]
+                                  + _pending_costs[_side] + _led["structures"])
+            # Advantage integrals are signed from team 1's perspective in
+            # the accumulators; each team's block carries its own sign.
+            _sign = 1 if _side == 1 else -1
+            _econ_teams[str(_side)] = {
+                "commander": team_leaders.get(str(_side)),
+                "scrap": st["series"]["scrap"],
+                "max_scrap": st["series"]["max_scrap"],
+                "pool_count": st["series"]["pool_count"],
+                "upgrade_count": st["series"]["upgrade_count"],
+                # Flow-complete income measure: Σ positive FULL-RATE bank
+                # deltas (computed pre-downsample). The Tycoon basis.
+                "scrap_income": st["income"],
+                "income_regen": st["regen"],
+                "income_loose": st["loose"],
+                "income_refund": st["refund"],
+                "income_unclassified": st["unclassified"],
+                "loose_collections": st["loose_collections"],
+                "scrap_outflow_gross": st["outflow_gross"],
+                "outflow_built_cost": _led["built"],
+                "outflow_cancelled_cost": _led["cancelled"],
+                "outflow_pending_at_end_cost": _pending_costs[_side],
+                "outflow_structure_orders": _led["structures"],
+                # Residual sink -- EXPECTED ~0 (repairs / clamps only);
+                # a large value is an engine-anomaly detector.
+                "scrap_outflow_unaccounted": st["outflow_gross"] - _outflow_accounted,
+                "final_scrap": st["final_scrap"],
+                "peak_scrap": st["peak_scrap"],
+                # v18: peak storage cap, the denominator for peak_scrap.
+                "peak_max_scrap": st["peak_max_scrap"],
+                "mean_scrap": round(st["scrap_sum"] / max(1, _n), 3),
+                # Mean bank/max_scrap ratio -- the "float" a commander sits
+                # on (low = building in the fast-regen zone).
+                "mean_float_ratio": round(st["float_sum"] / max(1, _n), 4),
+                "green_share": round(st["status_ticks"].get(1, 0) / max(1, _n), 4),
+                "yellow_share": round(st["status_ticks"].get(2, 0) / max(1, _n), 4),
+                "red_share": round(st["status_ticks"].get(3, 0) / max(1, _n), 4),
+                # v18: the same three tallies as ABSOLUTE seconds. Emitted
+                # rather than derived UI-side from share * duration_sec:
+                # the sample count is full-rate and not otherwise published,
+                # and a match whose resource ticks don't span the whole game
+                # would silently stretch a duration-based estimate.
+                "green_sec": round(st["status_ticks"].get(1, 0) / tick_rate, 1),
+                "yellow_sec": round(st["status_ticks"].get(2, 0) / tick_rate, 1),
+                "red_sec": round(st["status_ticks"].get(3, 0) / tick_rate, 1),
+                "peak_pools": st["peak_pools"],
+                "final_pools": st["final_pools"],
+                "pools_lost": st["pools_lost"],
+                "upgrades_final": st["final_upgrades"],
+                # v18: cumulative upgrades built (>= upgrades_final, which
+                # is a final snapshot and loses upgraded pools that died).
+                "upgrades_built": st["upgrades_built"],
+                "time_to_3_pools_sec": (st["pool_first_at"][3] / tick_rate) if st["pool_first_at"][3] else None,
+                "time_to_5_pools_sec": (st["pool_first_at"][5] / tick_rate) if st["pool_first_at"][5] else None,
+                "time_to_7_pools_sec": (st["pool_first_at"][7] / tick_rate) if st["pool_first_at"][7] else None,
+                "time_to_first_upgrade_sec": (st["first_upgrade_tick"] / tick_rate) if st["first_upgrade_tick"] else None,
+                # Signed Σ(own − opponent) over full-rate ticks, in
+                # scrap·sec / pool·sec (divide by duration for means).
+                "scrap_advantage_integral": round(_sign * econ_adv_scrap_sum / tick_rate, 1),
+                "pool_advantage_integral": round(_sign * econ_adv_pool_sum / tick_rate, 1),
+            }
+        economy_block = {
+            "has_resource_data": True,
+            "sample_rate_hz": ECON_SAMPLE_RATE_HZ,
+            "ticks": econ_ticks,
+            "teams": _econ_teams,
+        }
+
+    if match_has_build_data:
+        # Rebuild latency: for every combat-ship loss (kill feed, pilot
+        # victims excluded), the delay until the SAME side's next
+        # combat-ship QUEUE. Median over matched losses.
+        _loss_ticks = {1: [], 2: []}
+        for _kf in kill_feed:
+            if _kf.get("is_pilot_victim"):
+                continue
+            _vslot = _kf.get("victim_team") or 0
+            if not (1 <= _vslot <= 10):
+                continue
+            if _norm_build_odf(_kf.get("victim_odf") or "") not in combat_ship_odfs:
+                continue
+            _loss_ticks[1 if _vslot <= 5 else 2].append(_kf["tick"])
+
+        def _median_or_none(vals):
+            """Median, or None for an empty list.
+
+            Named distinctly from the module-level ``_median`` on purpose:
+            a bare ``def _median`` here would bind the name LOCALLY for the
+            whole of process_match and shadow the module function -- and
+            because this def sits behind ``if match_has_build_data`` that
+            shadow would be UNBOUND on every pre-v4 match.
+            """
+            if not vals:
+                return None
+            _v = sorted(vals)
+            _m = len(_v) // 2
+            return _v[_m] if len(_v) % 2 else (_v[_m - 1] + _v[_m]) / 2.0
+
+        _builds_teams = {}
+        for _side in (1, 2):
+            _bc = build_counts[_side]
+            _queue_ticks = sorted(_bc["combat_queue_ticks"])
+            _latencies = []
+            for _lt in sorted(_loss_ticks[_side]):
+                _next_q = next((_q for _q in _queue_ticks if _q > _lt), None)
+                if _next_q is not None:
+                    _latencies.append((_next_q - _lt) / tick_rate)
+            _med = _median_or_none(_latencies)
+            _src = "events" if _bc["structures_built_events"] > 0 else "inferred"
+            _builds_teams[str(_side)] = {
+                "commander": team_leaders.get(str(_side)),
+                "units_queued": _bc["units_queued"],
+                "units_cancelled": _bc["units_cancelled"],
+                "units_built": _bc["units_built"],
+                "ships_built": _bc["ships_built"],
+                "combat_ship_value": _bc["combat_ship_value"],
+                "scrap_spent_units": _bc["scrap_spent_units"],
+                "structures_queued": _bc["structures_queued"],
+                "structures_cancelled": _bc["structures_cancelled"],
+                "structures_built_events": _bc["structures_built_events"],
+                # Dual-mode (era-scoped): real CONSTRUCTOR BUILD events when
+                # present (EXU2 >= 1.6.3), else the dev-endorsed inference
+                # queued - cancelled (QUEUE-only era).
+                "structures_completion_source": _src,
+                "structures_built": (
+                    _bc["structures_built_events"] if _src == "events"
+                    else _bc["structures_queued"] - _bc["structures_cancelled"]
+                ),
+                "scrap_spent_structures": _bc["scrap_spent_structures"] if _src == "events" else None,
+                "builds_per_min": (
+                    round(_bc["units_built"] / (duration_sec / 60.0), 2)
+                    if duration_sec > 0 else None
+                ),
+                "dedup_folded_queues": _bc["dedup_folded_queues"],
+                "producer_unresolved_count": _bc["producer_unresolved"],
+                "cancel_sunk_cost": _bc["cancel_sunk_cost"],
+                "by_producer": {
+                    _lane: dict(_cnts)
+                    for _lane, _cnts in sorted(_bc["by_producer"].items())
+                },
+                "orders_by_status": {
+                    _s: dict(_v) for _s, _v in sorted(_bc["orders_by_status"].items())
+                },
+                "cancel_counts": [
+                    {"odf": _o, "name": prettify_odf(_o + ".odf"), "count": _c}
+                    for _o, _c in sorted(_bc["cancel_counts"].items(),
+                                         key=lambda kv: (-kv[1], kv[0]))
+                ],
+                "first_builds": [
+                    {"tick": _fb["tick"], "odf": _fb["odf"],
+                     "name": prettify_odf(_fb["odf"] + ".odf")}
+                    for _fb in _bc["first_builds"]
+                ],
+                "median_rebuild_latency_sec": round(_med, 1) if _med is not None else None,
+            }
+        builds_block = {
+            "has_build_data": True,
+            "feed": build_feed,
+            "teams": _builds_teams,
+        }
 
     match_data = {
         "match": {
@@ -5314,6 +6243,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # thug_accuracy axis as unavailable (weight redistributed).
             # Mirrored on manifest entries + match_contributions.
             "has_bullet_hit_data": bullet_hit_distance_count > 0,
+            # v17 (proto v4): True when the match carries per-team
+            # ResourceState samples / build_event telemetry. INVERSE
+            # default of the bullet pattern -- absent = False (the legacy
+            # corpus lacks the data; has_bullet_hit_data defaults True
+            # because legacy HAS it). Mirrored on manifest entries +
+            # match_contributions.
+            "has_resource_data": bool(match_has_resource_data),
+            "has_build_data": bool(match_has_build_data),
             # Per-match schema version. v1 = pre-highlights; v2 added the
             # top-level `highlights` block; v3 added `match.team_factions`
             # and `match.winner`; v4 added the v2.3 leaderboard fields
@@ -5409,7 +6346,35 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # confirmations keep the original decided_by), and the
             # manifest mirror `winner_adjudicated`. Answers persist in
             # data/match_outcome_adjudications.json (committed).
-            "schema_version": 16,
+            # v17 adds the commander-economy telemetry: top-level
+            # `economy` (per-team ResourceState series + full-rate
+            # income/outflow ledger) and `builds` (build-event feed +
+            # per-team production summaries) blocks -- both match-global/
+            # always-unfiltered (highlights passthrough contract), both
+            # absent on pre-v4 matches -- plus the `has_resource_data` /
+            # `has_build_data` flags (absent = False) mirrored on
+            # manifest + contributions.
+            # v18 adds the thug-supply telemetry: the new top-level
+            # `thug_supply` block (per-team thug ships/value lost +
+            # on-foot time + pooled median re-ship time; ALWAYS present,
+            # corpus-wide -- it needs only per-player combat rows and
+            # positioning, not proto v4), three per-player positioning
+            # metrics (`pilot_sec`, `reship_median_sec`, `reship_spells`),
+            # and five economy.teams fields (`peak_max_scrap`,
+            # `green_sec` / `yellow_sec` / `red_sec`, `upgrades_built`).
+            # Additive: no field removed, no semantics changed. The
+            # builds block's `median_rebuild_latency_sec` is still emitted
+            # but is no longer shown on the per-match Economy card.
+            # v19 (this version) adds `thug_supply.teams[n].thugs[]` -- the
+            # per-thug breakdown behind each team total (name, steam64,
+            # slot, ships_lost, ship_value_lost, and that thug's own
+            # pilot_sec / at_base_pilot_sec / reship_median_sec /
+            # reship_spells). Rendered as indented sub-rows on the Economy
+            # card. It ships alongside a CORRECTION rather than a pure
+            # addition: `thug_ships_lost` / `thug_ship_value_lost` now
+            # count human-piloted losses only (see the thug_supply build
+            # site), so their values move on existing matches.
+            "schema_version": 19,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -5545,6 +6510,128 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         ),
         "positioning": positioning_block,
     }
+
+    # v17: economy / builds blocks attach only when their data exists --
+    # pre-v4 matches have no key at all (pre-v2 highlights precedent).
+    if economy_block is not None:
+        match_data["economy"] = economy_block
+    if builds_block is not None:
+        match_data["builds"] = builds_block
+
+    # --- Thug supply (match.schema_version 19) -------------------------
+    # How hard the commander's thugs were to keep in ships. Answers the
+    # question the retired median-rebuild-latency metric only gestured at:
+    # that one timed the commander's next combat-ship ORDER after a loss,
+    # which is neither attributable to the dead thug nor sensitive to a
+    # commander who re-ships from pre-built stock. These fields measure the
+    # outcome instead -- ships actually lost, and time actually spent on
+    # foot.
+    #
+    # Corpus-wide by construction: the loss half needs only the per-player
+    # combat rows and the ODF cost DB, the time half only positioning. The
+    # two halves gate independently and null out honestly (an em-dash in
+    # the UI beats a fake zero). Match-global and always-unfiltered, like
+    # `economy` / `builds` / `highlights`.
+    #
+    # Thugs = every non-commander slot (2-5 / 7-10). Deliberately NO
+    # campod / low-activity exclusion: this is display telemetry about what
+    # the commander had to cope with, not a rating input, and a thug who
+    # spent the match in a camera pod IS part of that story.
+    #
+    # HUMAN-PILOTED LOSSES ONLY (v19 correction). The loss half used to
+    # scan the kill feed gated only on victim_team landing in a thug slot,
+    # which silently counted AI-piloted craft owned by that slot -- most
+    # often an empty ship left behind after an eject. Those rows carry a
+    # victim Steam64 of 0 (the feed renders them as the literal "Team 1" /
+    # "Team 2"), and corpus-wide 659 of them sat at thug slots: 46% of
+    # team 1's figure on the first v4 match, 54 losses -> 29. Deriving the
+    # losses from each player's own per_ship_combat rows is human-only by
+    # construction, so no fragile victim-label string matching is needed,
+    # and it inherits the v2.9 pilot-victim exclusion for free.
+    _thug_rows = {1: [], 2: []}
+    for _row in leaderboard:
+        _slot = _row.get("slot")
+        if not isinstance(_slot, int) or not (1 <= _slot <= 10):
+            continue
+        if _row.get("is_commander"):
+            continue
+        _thug_rows[1 if _slot <= 5 else 2].append(_row)
+
+    _pos_players = positioning_block.get("players") or {}
+    _has_pos = bool(positioning_block.get("has_position_data")) and bool(_pos_players)
+
+    thug_supply_block = {}
+    for _side in (1, 2):
+        _thugs = []
+        _pooled = []
+        _pilot_sum = 0.0
+        _at_base_sum = 0.0
+        _seen_pos = False
+        for _row in _thug_rows[_side]:
+            _lost = 0
+            _value = 0
+            for _psc in (_row.get("per_ship_combat") or []):
+                _stem = _norm_build_odf(_psc.get("ship") or "")
+                if _stem not in combat_ship_odfs:
+                    continue
+                _deaths = int(_psc.get("deaths") or 0)
+                if _deaths <= 0:
+                    continue
+                _lost += _deaths
+                # Unpriced ODFs still count as losses but add 0 scrap (the
+                # count is the reliable half; the value is best-effort).
+                _value += _deaths * int(scrap_costs.get(_stem, 0) or 0)
+            _nm = _row.get("name")
+            _pm = ((_pos_players.get(_nm) or {}).get("metrics") or {}) if _has_pos else {}
+            if _pm:
+                _seen_pos = True
+                _pilot_sum += _pm.get("pilot_sec") or 0.0
+                _at_base_sum += _pm.get("at_base_pilot_sec") or 0.0
+                _pooled.extend(reship_spells_by_name.get(_nm) or [])
+            _thugs.append({
+                "name": _nm,
+                "steam64": _row.get("steam64"),
+                "slot": _row.get("slot"),
+                "ships_lost": _lost,
+                "ship_value_lost": _value,
+                "pilot_sec": _pm.get("pilot_sec") if _pm else None,
+                "at_base_pilot_sec": _pm.get("at_base_pilot_sec") if _pm else None,
+                "reship_median_sec": _pm.get("reship_median_sec") if _pm else None,
+                "reship_spells": _pm.get("reship_spells") if _pm else None,
+            })
+        # Heaviest attrition first, then longest on foot, then name -- the
+        # order the Economy card renders the per-thug sub-rows in.
+        _thugs.sort(key=lambda t: (
+            -(t["ships_lost"] or 0),
+            -(t["pilot_sec"] or 0.0),
+            (t["name"] or ""),
+        ))
+
+        _entry = {
+            "commander": team_leaders.get(str(_side)),
+            "thug_count": len(_thug_rows[_side]),
+            # Team totals are Σ over thugs[] by construction -- the two
+            # must reconcile exactly (gated in run_all_gates.py).
+            "thug_ships_lost": sum(t["ships_lost"] for t in _thugs),
+            "thug_ship_value_lost": sum(t["ship_value_lost"] for t in _thugs),
+            "thug_pilot_sec": None,
+            "thug_at_base_pilot_sec": None,
+            "reship_median_sec": None,
+            "reship_spells": None,
+            "thugs": _thugs,
+        }
+        if _seen_pos:
+            _entry["thug_pilot_sec"] = round(_pilot_sum, 1)
+            _entry["thug_at_base_pilot_sec"] = round(_at_base_sum, 1)
+            # Pooled across the team's thugs -- a median of per-player
+            # medians is not a median. Deliberately NOT the sum or mean of
+            # the per-thug reship_median_sec values in thugs[].
+            _entry["reship_spells"] = len(_pooled)
+            _entry["reship_median_sec"] = (
+                round(_median(_pooled), 1) if _pooled else None
+            )
+        thug_supply_block[str(_side)] = _entry
+    match_data["thug_supply"] = thug_supply_block
 
     # Match Highlights — fixed-slate award catalog (12 cards, always-on).
     # Each card emits when its data gates pass, otherwise it's omitted.
@@ -5760,6 +6847,45 @@ def _extract_contribution(match_data):
     # rule (read directly by aggregator and renderers; never narrowed by
     # the per-match player filter).
     winner = m.get("winner") or {}
+
+    # v17: flat per-commander economy slice for the career rollup
+    # (aggregator style -- numeric fields only, keyed by side). None when
+    # the match carries neither economy nor builds telemetry (the whole
+    # pre-v4 corpus). Fields from an absent half (economy-only or
+    # builds-only session) emit as None so the aggregator's per-field
+    # denominators stay honest.
+    commander_economy = None
+    econ_teams = (match_data.get("economy") or {}).get("teams") or {}
+    build_teams = (match_data.get("builds") or {}).get("teams") or {}
+    if econ_teams or build_teams:
+        commander_economy = {}
+        for side_key in ("1", "2"):
+            et = econ_teams.get(side_key) or {}
+            bt = build_teams.get(side_key) or {}
+            commander = (m.get("team_leaders") or {}).get(side_key) or {}
+            _bt_total = None
+            if bt:
+                _bt_total = (bt.get("units_built") or 0) + (bt.get("structures_built") or 0)
+            commander_economy[side_key] = {
+                "steam64": commander.get("s64"),
+                "scrap_income": et.get("scrap_income"),
+                "income_loose": et.get("income_loose"),
+                "loose_collections": et.get("loose_collections"),
+                "scrap_spent_units": bt.get("scrap_spent_units"),
+                "ships_built": bt.get("ships_built"),
+                # War Machine basis (career sibling): Σ scrapCost over
+                # combat-ship BUILD completions this match.
+                "combat_ship_value": bt.get("combat_ship_value"),
+                "builds_total": _bt_total,
+                "cancels": ((bt.get("units_cancelled") or 0)
+                            + (bt.get("structures_cancelled") or 0)) if bt else None,
+                "mean_float_ratio": et.get("mean_float_ratio"),
+                "peak_pool_count": et.get("peak_pools"),
+                "pool_advantage_integral": et.get("pool_advantage_integral"),
+                "upgrades_final": et.get("upgrades_final"),
+                "median_rebuild_latency_sec": bt.get("median_rebuild_latency_sec"),
+            }
+
     return {
         "id":           m["id"],
         "map":          m["map"],
@@ -5774,6 +6900,12 @@ def _extract_contribution(match_data):
         # sums for matches where this is False (default True so the
         # pre-v15 corpus keeps its accuracy contributions).
         "has_bullet_hit_data":  m.get("has_bullet_hit_data", True),
+        # v17: economy/builds availability (absent = False -- inverse of
+        # the bullet default; legacy lacks the data). The aggregator uses
+        # these as the econ_matches denominators.
+        "has_resource_data":    m.get("has_resource_data", False),
+        "has_build_data":       m.get("has_build_data", False),
+        "commander_economy":    commander_economy,
         "sentinel_damage_count": (m.get("sentinel_damage") or {}).get("count", 0),
         "team_leaders":  m.get("team_leaders") or {},
         "team_factions": m.get("team_factions") or {},
@@ -6208,6 +7340,14 @@ def main():
     print(f"  Powerup classification set: {len(known_powerup_odfs)} ODFs (DB Powerup bucket + VSR variants)")
     building_odfs = _load_building_odfs(odf_db)
     print(f"  Building classification set: {len(building_odfs)} ODFs (DB Building bucket + VSR variants)")
+    # v17 (proto v4): economy/builds resolvers. Built once per run from the
+    # same ODF DB; empty on a missing DB (blocks degrade, never crash).
+    producer_lanes = build_producer_lane_map(odf_db)
+    print(f"  Producer lane map: {len(producer_lanes)} buildable items (recycler/factory disambiguation)")
+    scrap_costs = build_scrap_cost_resolver(odf_db)
+    print(f"  Scrap cost set: {len(scrap_costs)} ODF stems with GameObjectClass.scrapCost")
+    combat_ship_odfs = build_combat_ship_odfs(odf_db)
+    print(f"  Combat-ship set: {len(combat_ship_odfs)} ODF stems (B7 terminal-chain classification)")
 
     # Load canonical player names
     known_players = load_known_players()
@@ -6253,6 +7393,9 @@ def main():
                 schema=schema,
                 ship_caps=ship_caps,
                 ordnance_ranges=ordnance_ranges,
+                producer_lanes=producer_lanes,
+                scrap_costs=scrap_costs,
+                combat_ship_odfs=combat_ship_odfs,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"
@@ -6438,6 +7581,10 @@ def main():
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),
             "has_pickup_data": match_data["match"].get("has_pickup_data", False),
             "has_bullet_hit_data": match_data["match"].get("has_bullet_hit_data", True),
+            # v17: economy/builds availability (absent = False -- inverse
+            # of the bullet default; legacy lacks this data).
+            "has_resource_data": match_data["match"].get("has_resource_data", False),
+            "has_build_data": match_data["match"].get("has_build_data", False),
         })
 
     manifest.sort(key=lambda m: m["date"])
@@ -6663,6 +7810,36 @@ def main():
               f"({n_ratings_rk} players · {rated_rk} rated matches)")
     except Exception as e:
         print(f"WARN: failed to compute VTSR-T (rank lobby scoring) ({e}); skipping.")
+
+    # ----- VTSR-T forensic alt pairs #6-8: Stage E ALPHA sweep -----
+    # Re-runs the rating loop with alpha_override in {0.10, 0.25, 0.50}
+    # so the published vtsr becomes the real R^W/R^T blend at each
+    # setting. FORENSIC ONLY: never consumed by the dashboard; scored
+    # via `validate_elo.py --elo-mode alpha{10,25,50}` against the
+    # pre-registered promote rule in
+    # critique/decisions/phase-5-wins-blend.md (accuracy >= +5pp AND
+    # log-loss improves AND Spearman within -0.01 AND calibration MAE
+    # within +0.005 AND mean drift < 50; discard on Spearman drop
+    # > 0.03; else HOLD). Soft-fails per pair.
+    for _alpha_pct, _alpha_val in ((10, 0.10), (25, 0.25), (50, 0.50)):
+        try:
+            import elo as elo_module
+            _cur_a, _hist_a = elo_module.compute_elo(
+                all_match_data, alpha_override=_alpha_val
+            )
+            _cur_a_path = OUTPUT_DIR / f"elo_current_alpha{_alpha_pct}.json"
+            with open(_cur_a_path, "w", encoding="utf-8") as f:
+                json.dump(_cur_a, f, indent=2, ensure_ascii=False)
+            _hist_a_path = OUTPUT_DIR / f"elo_history_alpha{_alpha_pct}.json"
+            with open(_hist_a_path, "w", encoding="utf-8") as f:
+                json.dump(_hist_a, f, indent=2, ensure_ascii=False)
+            print(f"VTSR-T (alpha={_alpha_val:.2f} wins blend): "
+                  f"{_cur_a_path.name} "
+                  f"({len(_cur_a.get('ratings', []))} players · "
+                  f"{_cur_a.get('wins_matches_rated', 0)} wins-rated matches)")
+        except Exception as e:
+            print(f"WARN: failed to compute VTSR-T (alpha={_alpha_val}) "
+                  f"({e}); skipping.")
 
     # ----- Player slug map + (Phase 3) per-player HTML stubs -----
     # Sticky map keyed by Steam64 -> {slug, name}. Drives `/player/<slug>/`

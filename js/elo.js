@@ -102,6 +102,7 @@
     eloThugs: undefined,  // lazy thugs_only pair (undefined = not fetched)
     eloHistThugs: undefined,
     cmdrElo: null,        // elo_commander_current.json (null on 404 — VTSR-C card hides)
+    cmdrHistory: null,    // elo_commander_history.json (null on 404 — detail panels degrade)
     slugMap: null,
     validation: null,
     careerStats: [],      // corpus-wide aggregate join source
@@ -819,6 +820,137 @@
   // absent); the thug-only toggle deliberately does NOT apply.
   // ----------------------------------------------------------------------
 
+  // Friendly labels for the VTSR-C v2 economy axes (mirror of the frozen
+  // formulas in critique/decisions/vtsr-c-v2-composite.md).
+  const CMDR_ECON_AXIS_META = {
+    pool_tempo:         { label: 'Pool tempo',        desc: 'Time-weighted extractor-count advantage over the opposing commander.' },
+    production_output:  { label: 'Production output', desc: 'Scrap value fielded as units per minute.' },
+    thug_supply:        { label: 'Thug supply',       desc: 'Ships built per team ship-loss (prompt rebuilds).' },
+    econ_efficiency:    { label: 'Econ efficiency',   desc: 'Low bank float — building in the fast-regen zone instead of sitting on scrap.' },
+    upgrade_investment: { label: 'Upgrade investment', desc: 'Share of extractors upgraded (long-game investment).' },
+  };
+
+  /** All duels involving one commander, newest first, each tagged with
+      their side. Empty when elo_commander_history.json is absent. */
+  function cmdrDuelsFor(r) {
+    const duels = (state.cmdrHistory && state.cmdrHistory.duels) || [];
+    const sid = String(r.steam64 || '');
+    const out = [];
+    for (const duel of duels) {
+      const sides = duel.commanders || {};
+      for (const sideKey of ['1', '2']) {
+        const side = sides[sideKey];
+        if (!side) continue;
+        const match = sid
+          ? String(side.steam64 || '') === sid
+          : (side.name || '') === (r.name || '');
+        if (match) out.push({ duel, side: Number(sideKey) });
+      }
+    }
+    out.reverse(); // history is chronological; newest first for display
+    return out;
+  }
+
+  /** Expandable detail panel for one VTSR-C ladder row: duel log (last 5)
+      + the most recent telemetry duel's econ-axis breakdown (v2). */
+  function renderCmdrDetail(r) {
+    const entries = cmdrDuelsFor(r);
+    if (!entries.length) {
+      return `<div class="text-muted small p-2">
+        Duel-by-duel detail unavailable (elo_commander_history.json missing).
+      </div>`;
+    }
+
+    const duelRows = entries.slice(0, 5).map(({ duel, side }) => {
+      const me = duel.commanders[String(side)] || {};
+      const opp = duel.commanders[String(3 - side)] || {};
+      const res = me.score === 1 ? 'W' : me.score === 0 ? 'L' : 'D';
+      const resCls = me.score === 1 ? 'vt-vtsr-delta-positive'
+        : me.score === 0 ? 'vt-vtsr-delta-negative' : 'text-muted';
+      const d = me.delta || 0;
+      const dCls = d > 0 ? 'vt-vtsr-delta-positive' : d < 0 ? 'vt-vtsr-delta-negative' : 'text-muted';
+      const th = duel.team_handicap || {};
+      const myThugDiff = (th.diff != null) ? (side === 1 ? th.diff : -th.diff) : null;
+      const thugTip = myThugDiff == null ? ''
+        : `Their thug team averaged ${myThugDiff >= 0 ? '+' : ''}${Math.round(myThugDiff)} VTSR-T vs the opponent's — the expected score already discounts/credits this.`;
+      const telem = (duel.performance || {}).available
+        ? `<span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+             title="This duel carried proto v4 economy telemetry — its econ composite is recorded (inert while \u03b1_c = 1).">v4</span>`
+        : '';
+      return `<tr>
+        <td class="text-muted">${esc(String(duel.date || '').slice(0, 10))}</td>
+        <td>vs ${playerLinkHtml(opp.name || '?', opp.steam64)} ${telem}</td>
+        <td class="text-center ${resCls} fw-semibold">${res}</td>
+        <td class="text-end ${dCls}">${d > 0 ? '+' : ''}${(d || 0).toFixed(1)}</td>
+        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="Pre-duel win probability from rating + team-strength handicap.">${((me.expected || 0) * 100).toFixed(0)}%</td>
+        <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${esc(thugTip)}">${myThugDiff == null ? '\u2014' : `${myThugDiff >= 0 ? '+' : ''}${Math.round(myThugDiff)}`}</td>
+      </tr>`;
+    }).join('');
+
+    // Most recent telemetry duel involving this commander -> axis bars.
+    let econHtml = '';
+    const telemEntry = entries.find(e => (e.duel.performance || {}).available);
+    if (telemEntry) {
+      const perf = telemEntry.duel.performance;
+      const sign = telemEntry.side === 1 ? 1 : -1;
+      const axisRows = Object.entries(perf.axes || {}).map(([axis, a]) => {
+        const z = sign * (a.z || 0);
+        const cls = z > 0 ? 'is-positive' : z < 0 ? 'is-negative' : '';
+        const widthPct = Math.min(100, Math.abs(z) * 100);
+        const fillStyle = z >= 0
+          ? `left:50%; width:${(widthPct / 2).toFixed(2)}%;`
+          : `right:50%; width:${(widthPct / 2).toFixed(2)}%;`;
+        const meta = CMDR_ECON_AXIS_META[axis] || { label: axis, desc: '' };
+        return `<div class="vt-axis-bar-row ${cls}"
+                     data-bs-toggle="tooltip" data-bs-placement="top"
+                     title="${esc(meta.desc)} Differential z vs the opposing commander: ${z >= 0 ? '+' : ''}${z.toFixed(2)}">
+          <span class="vt-axis-bar-name">${esc(meta.label)}</span>
+          <span class="vt-axis-bar-track">
+            <span class="vt-axis-bar-center"></span>
+            <span class="vt-axis-bar-fill" style="${fillStyle}"></span>
+          </span>
+          <span class="vt-axis-bar-z">${z >= 0 ? '+' : ''}${z.toFixed(2)}</span>
+        </div>`;
+      }).join('');
+      const p = sign * (perf.p || 0);
+      econHtml = `<section class="vt-vtsr-detail-section">
+        <h6>Latest econ telemetry <span class="vt-vtsr-detail-sub text-muted">(${esc(String(telemEntry.duel.date || '').slice(0, 10))} &middot; composite P = ${p >= 0 ? '+' : ''}${p.toFixed(2)} &middot; recorded, not yet scored — \u03b1_c = 1)</span></h6>
+        <div class="vt-axis-bar-grid">${axisRows}</div>
+      </section>`;
+    }
+
+    const telemCount = r.duels_with_telemetry || 0;
+    const statsHtml = `<section class="vt-vtsr-detail-section">
+      <h6>Commander record</h6>
+      <div class="vt-vtsr-detail-stats">
+        <div><span class="vt-stat-label">Record</span><span class="vt-stat-value">${r.wins}-${r.losses}-${r.draws}</span></div>
+        <div><span class="vt-stat-label">Peak</span><span class="vt-stat-value">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</span></div>
+        <div><span class="vt-stat-label">Rated games</span><span class="vt-stat-value">${r.matches_commanded_rated}</span></div>
+        <div><span class="vt-stat-label">v4 telemetry</span><span class="vt-stat-value">${telemCount} duel${telemCount === 1 ? '' : 's'}</span></div>
+      </div>
+    </section>`;
+
+    const logHtml = `<section class="vt-vtsr-detail-section">
+      <h6>Duel log <span class="vt-vtsr-detail-sub text-muted">(most recent ${Math.min(5, entries.length)})</span></h6>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0" style="font-size: 0.8rem;">
+          <thead><tr>
+            <th>Date</th><th>Opponent</th><th class="text-center">Result</th>
+            <th class="text-end">\u0394</th>
+            <th class="text-end">Expected</th>
+            <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="Their thug team's mean VTSR-T advantage in that duel (the handicap input).">Thug \u0394</th>
+          </tr></thead>
+          <tbody>${duelRows}</tbody>
+        </table>
+      </div>
+    </section>`;
+
+    return `<div class="vt-vtsr-detail-body">${statsHtml}${econHtml}${logHtml}</div>`;
+  }
+
   function renderCommanderLadder() {
     const card = document.getElementById('section-vtsr-c');
     const body = document.getElementById('vtsr-c-body');
@@ -828,15 +960,27 @@
     if (!ratings.length) { card.classList.add('d-none'); return; }
     card.classList.remove('d-none');
 
+    // v2 banner: economy composite recorded but inert (alpha_c = 1).
+    const isV2 = (c.schema_version || 1) >= 2;
+    const telemTotal = isV2
+      ? ratings.reduce((s, r) => s + (r.duels_with_telemetry || 0), 0) / 2
+      : 0;
+    const v2Line = isV2
+      ? ` Since proto v4, each duel also records a five-axis <strong>economy composite</strong>
+          (pool tempo, production, thug supply, efficiency, upgrades) — currently
+          <strong>recorded but not scored</strong> (\u03b1<sub>c</sub> = 1): it starts counting only
+          after the validator proves the axes predict duel outcomes${telemTotal >= 1
+            ? ` (${fmt(Math.round(telemTotal))} telemetry duel${telemTotal === 1 ? '' : 's'} so far)` : ''}.`
+      : ` Commander telemetry (resource handling, build orders) joins the formula as the collector
+          starts capturing it.`;
     const banner = `<div class="alert alert-secondary py-2 px-3 mb-3" style="font-size: 0.82rem;">
       <i class="bi bi-flask me-1"></i>
-      <strong>Experimental, outcome-pure v1.</strong>
+      <strong>Experimental, outcome-pure.</strong>
       This ladder rates commanders purely on <strong>wins and losses</strong> from the
-      ${fmt(c.rated_match_count)} matches with a verified outcome &mdash; no performance axes yet.
+      ${fmt(c.rated_match_count)} matches with a verified outcome.
       The expected score already accounts for <strong>which side had the stronger thug team</strong>,
-      so winning with a weaker roster pays more than winning with a stacked one.
-      Commander telemetry (resource handling, build orders) joins the formula as the collector
-      starts capturing it. Ratings below ${c.provisional_threshold ?? 5} rated games are provisional.
+      so winning with a weaker roster pays more than winning with a stacked one.${v2Line}
+      Ratings below ${c.provisional_threshold ?? 5} rated games are provisional.
     </div>`;
 
     const rows = ratings.map((r, i) => {
@@ -849,9 +993,22 @@
       const lastClass = lastDelta > 0 ? 'text-success' : (lastDelta < 0 ? 'text-danger' : 'text-muted');
       const lastSign = lastDelta > 0 ? '+' : '';
       const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
+      const detailId = `vtsr-c-detail-${i}`;
+      const telemChip = (r.duels_with_telemetry || 0) > 0
+        ? ` <span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+              title="${r.duels_with_telemetry} duel${r.duels_with_telemetry === 1 ? '' : 's'} with proto v4 economy telemetry.">v4\u00d7${r.duels_with_telemetry}</span>`
+        : '';
       return `<tr>
+        <td class="vt-vtsr-expand-col">
+          <button type="button" class="vt-row-expand"
+                  data-bs-toggle="collapse" data-bs-target="#${detailId}"
+                  aria-expanded="false" aria-controls="${detailId}"
+                  aria-label="Toggle commander details">
+            <i class="bi bi-chevron-right"></i>
+          </button>
+        </td>
         <td class="text-muted">${i + 1}</td>
-        <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}</td>
+        <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}${telemChip}</td>
         <td class="text-end vt-vtsr-rating">${Math.round(r.vtsr_c)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
             title="Wins-Losses-Draws across rated commander games.">${record}</td>
@@ -859,6 +1016,9 @@
         <td class="text-end">${r.matches_commanded_rated}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</td>
         <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
+      </tr>
+      <tr id="${detailId}" class="collapse vt-vtsr-detail">
+        <td colspan="9">${renderCmdrDetail(r)}</td>
       </tr>`;
     }).join('');
 
@@ -867,6 +1027,7 @@
         <table class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
           <thead>
             <tr>
+              <th class="vt-vtsr-expand-col"></th>
               <th>#</th>
               <th>Commander</th>
               <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
@@ -880,13 +1041,26 @@
                   title="Most recent rated-duel rating change.">Last</th>
             </tr>
           </thead>
-          <tbody>${rows}</tbody>
+          <tbody id="vtsr-c-tbody">${rows}</tbody>
         </table>
       </div>
       <p class="text-muted small mb-0">
         ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
         The thug-only toggle doesn&rsquo;t apply here &mdash; VTSR-C is a separate ladder built only from commander duels.
       </p>`;
+
+    // Chevron rotation on expand/collapse (mirrors the VTSR-T table).
+    const tbody = document.getElementById('vtsr-c-tbody');
+    if (tbody && !tbody.dataset.vtCollapseListenersBound) {
+      tbody.dataset.vtCollapseListenersBound = '1';
+      const syncChevron = (e, expanded) => {
+        const id = (e.target && e.target.id) || '';
+        const btn = tbody.querySelector(`[data-bs-target="#${id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      };
+      tbody.addEventListener('shown.bs.collapse', (e) => syncChevron(e, true));
+      tbody.addEventListener('hidden.bs.collapse', (e) => syncChevron(e, false));
+    }
     ensureTooltips(card);
   }
 
@@ -1075,7 +1249,12 @@
       {
         icon: 'bi-person-badge-fill', title: 'The commander ladder (VTSR-C)',
         body: `<p>Commanders now have a <strong>separate rating built purely on wins and losses</strong> &mdash; every match with a verified outcome is a 1v1 duel between the two commanders. Outcomes only count when they\u2019re <strong>proven</strong>: host-attested, reviewer-confirmed, or physically evident from the recording (base destroyed). Unverifiable matches simply don\u2019t move it.</p>`,
-        verdict: 'Experimental v1 \u2014 outcome-pure, no performance axes yet. Full ladder on the Leaderboard tab.',
+        verdict: 'Experimental \u2014 outcome-pure. Full ladder on the Leaderboard tab.',
+      },
+      {
+        icon: 'bi-cash-stack', title: 'Economy is recorded, not yet scored',
+        body: `<p>Matches recorded with the new collector carry the commander\u2019s <strong>full economy telemetry</strong> \u2014 pool tempo, production, thug supply, efficiency, upgrades \u2014 measured head-to-head against the opposing commander. None of it moves the rating yet: the blend dial sits at <strong>outcome-pure</strong> until the validator proves those axes predict duel outcomes on a real sample (a pre-registered rule &mdash; the formula can\u2019t be tuned to fit the data that judges it).</p>`,
+        verdict: 'The first telemetry match is the cautionary tale: the commander who out-earned his opponent by 33% still lost.',
       },
       {
         icon: 'bi-people', title: 'Stacked thugs don\u2019t inflate your commander rating',
@@ -1322,6 +1501,55 @@
       </div>`;
     }
 
+    // ---- VTSR-C v2 economy composite proof sections (v1.3; absent-safe). ----
+    const vcp = (v.latest_detail && v.latest_detail.vtsr_c_perf) || null;
+    let cmdrEconHtml = '';
+    if (vcp && vcp.econ_axes && vcp.econ_axes.available
+        && Array.isArray(vcp.econ_axes.axes) && vcp.econ_axes.axes.length) {
+      const ea = vcp.econ_axes;
+      const econLabel = (key) =>
+        (CMDR_ECON_AXIS_META[key] && CMDR_ECON_AXIS_META[key].label) || key;
+      const rows = ea.axes.map(r => {
+        const agree = r.sign_agreement;
+        const tone = agree == null ? 'is-total'
+          : agree >= 0.65 ? 'is-provable'
+          : agree >= 0.45 ? 'is-total'
+          : 'is-unprovable';
+        const w = agree != null ? Math.max(1.5, agree * 100) : 0;
+        return `<div class="vt-elo-funnel-row ${tone}">
+          <span class="vt-elo-funnel-label" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="n = ${r.n} telemetry duels">${esc(econLabel(r.axis))}</span>
+          <span class="vt-elo-funnel-track"><span class="vt-elo-funnel-fill" style="width:${w.toFixed(1)}%;"></span></span>
+          <span class="vt-elo-funnel-count">${pct(agree)}</span>
+        </div>`;
+      }).join('');
+      cmdrEconHtml += `<div class="vt-elo-acc-section">
+        <h6>Do the commander economy axes predict duels?</h6>
+        <p class="vt-elo-acc-blurb">Across the ${ea.n_scored ?? 0} verified duels with proto v4 telemetry: when one commander led an economy axis, how often did they win? This is <strong>the gate</strong> for the inert v2 composite \u2014 \u03b1<sub>c</sub> drops below 1 only when \u2265 3 axes clear 55% at \u2265 25 telemetry duels (pre-registered rule; sample is tiny early, expect wide swings).</p>
+        <div class="vt-elo-funnel">${rows}</div>
+      </div>`;
+    }
+    if (vcp && vcp.alpha_ablation && vcp.alpha_ablation.available
+        && Array.isArray(vcp.alpha_ablation.per_alpha)) {
+      const ab = vcp.alpha_ablation;
+      const abRows = ab.per_alpha.map(row => {
+        const mark = row.canonical ? ' <span class="badge text-bg-secondary" style="font-size:0.6rem;">current</span>' : '';
+        return `<tr${row.canonical ? ' class="fw-semibold"' : ''}>
+          <td>\u03b1<sub>c</sub> = ${row.alpha_c}${mark}</td>
+          <td class="text-end">${pct(row.accuracy)}</td>
+          <td class="text-end">${row.log_loss != null ? row.log_loss.toFixed(3) : '\u2014'}</td>
+        </tr>`;
+      }).join('');
+      cmdrEconHtml += `<div class="vt-elo-acc-section">
+        <h6>The \u03b1<sub>c</sub> dial (economy blend ablation)</h6>
+        <p class="vt-elo-acc-blurb">What would happen if the economy composite started counting? The validator replays the ladder at each blend weight, scoring only the ${ab.n_telemetry_scored ?? 0} telemetry duel${(ab.n_telemetry_scored || 0) === 1 ? '' : 's'} so fallback (outcome-pure) duels never dilute the comparison. \u03b1<sub>c</sub> = 1 is the shipped, outcome-pure setting.</p>
+        <table class="vt-elo-gap-table">
+          <thead><tr><th>Blend weight</th><th class="text-end">Duel accuracy</th><th class="text-end">Log-loss</th></tr></thead>
+          <tbody>${abRows}</tbody>
+        </table>
+      </div>`;
+    }
+
     // ---- History sparkline. ----
     const hist = Array.isArray(v.history) ? v.history : [];
     const histSection = `<div class="vt-elo-acc-section">
@@ -1337,6 +1565,7 @@
       ${funnelHtml}
       ${gapHtml}
       ${cmdrAccHtml}
+      ${cmdrEconHtml}
       ${axisOutcomeHtml}
       ${histSection}
       <p class="text-muted small mb-0">Source: <code>data/processed/validation_summary.json</code>, generated ${esc(L.generated_at || v.generated_at || '')} by <code>scripts/validate_elo.py</code>.</p>
@@ -1439,19 +1668,21 @@
     }
 
     // Core data, all in parallel + 404-safe.
-    const [elo, eloHistory, slugMap, validation, contributions, cmdrElo] = await Promise.all([
+    const [elo, eloHistory, slugMap, validation, contributions, cmdrElo, cmdrHistory] = await Promise.all([
       fetchJson(`${DATA}elo_current.json`),
       fetchJson(`${DATA}elo_history.json`),
       fetchJson(`${DATA}player_slugs.json`),
       fetchJson(`${DATA}validation_summary.json`),
       fetchJson(`${DATA}match_contributions.json`),
       fetchJson(`${DATA}elo_commander_current.json`),
+      fetchJson(`${DATA}elo_commander_history.json`),
     ]);
     state.elo = elo;
     state.eloHistory = eloHistory;
     state.slugMap = slugMap;
     state.validation = validation;
     state.cmdrElo = cmdrElo;
+    state.cmdrHistory = cmdrHistory;
 
     // Corpus-wide career join source (Primary Ship / K/D / Acc columns +
     // detail panels). Threshold 0 so even fresh players get a join row —

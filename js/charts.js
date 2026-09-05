@@ -234,6 +234,118 @@ function renderTimeline(canvasId, timeline, allNames, mode) {
   return chart;
 }
 
+// --- Line: Team Scrap Over Time (Economy tab, proto v4 matches only) ---
+// Renders the per-team scrap bank series (left axis) + stepped pool-count
+// series (right axis) from the match-global `economy` block. `matchMeta`
+// supplies tick_rate + tick_range for mm:ss x-labels. Match-global and
+// always unfiltered (the economy block has no per-player dimension).
+function renderEconomyScrapChart(canvasId, economy, matchMeta) {
+  applyThemeDefaults();
+  const t = getThemeColors();
+  const ctx = document.getElementById(canvasId).getContext('2d');
+
+  const tickRate = (matchMeta && matchMeta.tick_rate) || 20;
+  const minTick = (matchMeta && matchMeta.tick_range && matchMeta.tick_range[0]) || 0;
+  const labels = (economy.ticks || []).map(tk => {
+    const sec = Math.max(0, (tk - minTick) / tickRate);
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  });
+
+  const teamColors = { '1': t.primary, '2': t.success };
+  const datasets = [];
+  for (const side of ['1', '2']) {
+    const team = (economy.teams || {})[side];
+    if (!team) continue;
+    const cmdr = (team.commander && team.commander.name) ? ` (${team.commander.name})` : '';
+    datasets.push({
+      label: `Team ${side}${cmdr} scrap`,
+      data: team.scrap || [],
+      borderColor: teamColors[side],
+      backgroundColor: teamColors[side] + '22',
+      borderWidth: 2,
+      fill: true,
+      tension: 0.25,
+      pointRadius: 0,
+      spanGaps: true,
+      yAxisID: 'y',
+    });
+    datasets.push({
+      label: `Team ${side} pools`,
+      data: team.pool_count || [],
+      borderColor: teamColors[side] + '99',
+      borderWidth: 1.5,
+      borderDash: [5, 4],
+      stepped: true,
+      fill: false,
+      pointRadius: 0,
+      spanGaps: true,
+      yAxisID: 'y1',
+    });
+  }
+
+  // Same x-only zoom recipe as the damage timeline (drag select / wheel /
+  // shift+drag pan) -- see renderTimeline() for the rationale.
+  const zoomEnabled = typeof window !== 'undefined'
+    && (window.ChartZoom || window['chartjs-plugin-zoom']);
+  const zoomPluginConfig = zoomEnabled ? {
+    zoom: {
+      pan: { enabled: true, mode: 'x', modifierKey: 'shift' },
+      zoom: {
+        wheel: { enabled: true, speed: 0.08 },
+        drag: {
+          enabled: true,
+          backgroundColor: 'rgba(99, 102, 241, 0.18)',
+          borderColor: 'rgba(99, 102, 241, 0.55)',
+          borderWidth: 1,
+          threshold: 5,
+        },
+        pinch: { enabled: false },
+        mode: 'x',
+      },
+      limits: { x: { min: 'original', max: 'original' } },
+    },
+  } : {};
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            label: (item) => {
+              const v = item.raw;
+              if (v === null || v === undefined) return null;
+              return `${item.dataset.label}: ${Math.round(v).toLocaleString()}`;
+            },
+          },
+        },
+        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } },
+        ...zoomPluginConfig,
+      },
+      scales: {
+        x: { title: { display: true, text: 'Match Time' }, ticks: { maxTicksLimit: 20 } },
+        y: { title: { display: true, text: 'Scrap in bank' }, beginAtZero: true },
+        y1: {
+          position: 'right',
+          title: { display: true, text: 'Scrap pools' },
+          beginAtZero: true,
+          grid: { drawOnChartArea: false },
+          ticks: { stepSize: 1, precision: 0 },
+        },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  return chart;
+}
+
 // --- Horizontal Bar: Weapon Meta ---
 
 function renderWeaponMeta(canvasId, weaponMeta, limit) {

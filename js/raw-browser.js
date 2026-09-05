@@ -61,12 +61,13 @@
   const ROOT_MESSAGE_V2 = 'statsgate_v2.ClientStatSession';
 
   // Schema labels mirrored from scripts/process_stats.py (PROTO_SCHEMA_V1
-  // / PROTO_SCHEMA_V2 / PROTO_SCHEMA_V3). Stamped on
+  // / PROTO_SCHEMA_V2 / PROTO_SCHEMA_V3 / PROTO_SCHEMA_V4). Stamped on
   // `state.protoSchemaVersion` so the events table + Reconcile view can
   // branch on which descriptor succeeded for the current match.
   const PROTO_SCHEMA_V1 = 'v1';
   const PROTO_SCHEMA_V2 = 'v2';
   const PROTO_SCHEMA_V3 = 'v3';
+  const PROTO_SCHEMA_V4 = 'v4';
   const ROOT_MESSAGE = 'statsgate.ClientStatSession';
   const PROTO_DOCS_URL = 'data/proto-docs.json';
   const FIELD_DOCS_MANUAL_URL = 'data/field-docs-manual.json';
@@ -102,6 +103,10 @@
     'eventStream.*.unitDestroyed': 'UnitDestroyed',
     'eventStream.*.unitSniped': 'UnitSniped',
     'eventStream.*.pickupPowerup': 'PickupPowerup',
+    // v4: commander economy + build telemetry.
+    'eventStream.*.buildEvent': 'BuildEvent',
+    'eventStream.*.updateTick.team1Resources': 'ResourceState',
+    'eventStream.*.updateTick.team2Resources': 'ResourceState',
     // v3: per-tick-accumulated roster entries on the header.
     'header.players.*': 'PlayerInfo',
   };
@@ -116,15 +121,19 @@
   const EVENT_ARMS_ALL = [
     'bulletInit', 'bulletHit', 'damageDealt', 'damageReceived',
     'updateTick', 'unitDestroyed', 'unitSniped', 'pickupPowerup',
+    'buildEvent',
   ];
   // Per-schema chip set. v2/v3 reserve `damage_received` (field 4) on
   // StatEvent so the arm never appears in modern matches. v3's event
   // stream is shape-identical to v2 (the schema change is header-only:
-  // players roster + game_outcome).
+  // players roster + game_outcome). v4 adds the `build_event` arm
+  // (field 9) plus per-team ResourceState on UpdateTick; only v4
+  // sessions can carry buildEvent rows.
   const EVENT_ARMS_BY_SCHEMA = {
-    v1: EVENT_ARMS_ALL,
-    v2: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
-    v3: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
+    v1: EVENT_ARMS_ALL.filter(a => a !== 'buildEvent'),
+    v2: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived' && a !== 'buildEvent'),
+    v3: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived' && a !== 'buildEvent'),
+    v4: EVENT_ARMS_ALL.filter(a => a !== 'damageReceived'),
   };
   // Back-compat alias: many existing call sites read `EVENT_ARMS`
   // directly. Re-exposed as a getter so reads always reflect the
@@ -141,6 +150,7 @@
     unitDestroyed: 'UnitDestroyed',
     unitSniped: 'UnitSniped',
     pickupPowerup: 'PickupPowerup',
+    buildEvent: 'BuildEvent',
   };
 
   // --- DOM handles (populated after DOMContentLoaded) ---
@@ -192,8 +202,9 @@
     // Frozen v2 descriptor pair (lazy, mirrors the v1 pair above).
     protoRootV2: null,
     rootMessageTypeV2: null,
-    // 'v1' | 'v2' | 'v3' -- detected per match by fetchAndDecodeBinpb()
-    // (v1 via decode throw, v2-vs-v3 via header.players presence). Drives
+    // 'v1' | 'v2' | 'v3' | 'v4' -- detected per match by
+    // fetchAndDecodeBinpb() (v1 via decode throw, v2-vs-v3 via
+    // header.players presence, v3-vs-v4 via v4 payload presence). Drives
     // EVENT_ARMS chip filtering and Reconcile view computations downstream.
     protoSchemaVersion: PROTO_SCHEMA_V3,
     // resolvers (match-specific)
@@ -507,7 +518,7 @@
     const rawBytes = new Uint8Array(await new Response(rawStream).arrayBuffer());
 
     // Schema discrimination, triple-descriptor edition:
-    //   1. Try the current (v3) descriptor. protobufjs is strict about
+    //   1. Try the current (v4) descriptor. protobufjs is strict about
     //      wire-type collisions, so a v1 file (whose DamageDealt field 5
     //      is fixed32 `amount` where v2/v3 expect varint `victim`)
     //      reliably throws during decode -> v1 fallback, unchanged.
@@ -518,7 +529,12 @@
     //      as reserved fields -> re-decode with the frozen v2 descriptor
     //      so s64ToNick / teamnumToS64 / s64ToTeamnum are readable.
     //      (Accepted cost: one extra decode per legacy v2 match view;
-    //      the v2 corpus is frozen while all future files are v3.)
+    //      the v2 corpus is frozen while all future files are v3+.)
+    //   3. v3-vs-v4 is a payload presence check after toObject (v4 is
+    //      purely additive over v3, so decode success proves nothing):
+    //      any buildEvent arm, or any updateTick carrying per-team
+    //      ResourceState, stamps the file v4. Mirrors
+    //      scripts/process_stats.py::load_session().
     //
     // Why protobufjs try/catch works for v1 while the Python pipeline's
     // `load_session()` uses a header-fingerprint discriminator instead:
@@ -536,6 +552,25 @@
       schema = PROTO_SCHEMA_V1;
     }
     if (schema === PROTO_SCHEMA_V3) {
+      // v4 payload presence scan FIRST, before the header.players branch
+      // (a degenerate v4 file with an empty roster must not fall through
+      // to the frozen-v2 re-parse, which would silently drop its
+      // resource/build data). Short-circuits on the first v4 payload;
+      // genuine v4 files carry ResourceState on the very first UpdateTick.
+      const es = msg.eventStream || [];
+      for (const evt of es) {
+        if (
+          evt.buildEvent != null ||
+          (evt.updateTick &&
+            (evt.updateTick.team1Resources != null ||
+              evt.updateTick.team2Resources != null))
+        ) {
+          schema = PROTO_SCHEMA_V4;
+          break;
+        }
+      }
+    }
+    if (schema === PROTO_SCHEMA_V3) {
       const players = msg.header && msg.header.players;
       if (!players || players.length === 0) {
         await loadProtoRootV2();
@@ -543,7 +578,7 @@
         schema = PROTO_SCHEMA_V2;
       }
     }
-    const decodeType = schema === PROTO_SCHEMA_V3 ? typeV3
+    const decodeType = (schema === PROTO_SCHEMA_V3 || schema === PROTO_SCHEMA_V4) ? typeV3
       : schema === PROTO_SCHEMA_V2 ? state.rootMessageTypeV2
       : state.rootMessageTypeV1;
     // toObject flattens protobufjs runtime wrappers to plain JS. `longs:
@@ -2228,7 +2263,7 @@
       const evt = stream[i];
       const arm = evt && evt.eventType;
       const payload = arm ? evt[arm] : null;
-      let tick = null, shooter = '', victim = '', ordnance = '', amount = null, team = null;
+      let tick = null, shooter = '', victim = '', ordnance = '', amount = null, team = null, sub = '';
       if (payload) {
         tick = typeof payload.tick === 'number' ? payload.tick : Number(payload.tick || 0);
         if (payload.shooter != null) shooter = String(payload.shooter);
@@ -2251,8 +2286,20 @@
         // rows would have team=null, breaking the Reconcile view's
         // `r.team > 0` skip-shooter gate.
         if (payload.shooterTeam != null && team == null) team = payload.shooterTeam;
+        // v4 BuildEvent: build_odf goes in ordnance (resolves to the
+        // unit's display name via odf_map like every other ODF cell);
+        // teamnum attributes the row; the type/producer enum pair
+        // renders as a compact suffix on the type tag (decoded with
+        // enums: String, e.g. "BUILD_EVENT_TYPE_QUEUE").
+        if (arm === 'buildEvent') {
+          if (payload.buildOdf) ordnance = payload.buildOdf;
+          if (payload.teamnum != null) team = payload.teamnum;
+          const t = String(payload.type || '').replace('BUILD_EVENT_TYPE_', '');
+          const p = String(payload.producer || '').replace('PRODUCER_TYPE_', '');
+          sub = [t, p].filter(Boolean).map(s => s.charAt(0) + s.slice(1).toLowerCase()).join(' · ');
+        }
       }
-      rows[i] = { i, arm, tick, shooter, victim, ordnance, amount, team };
+      rows[i] = { i, arm, tick, shooter, victim, ordnance, amount, team, sub };
       if (arm && totalByType[arm] != null) totalByType[arm]++;
       if (tick != null && !isNaN(tick)) {
         if (tick < tickMin) tickMin = tick;
@@ -2438,7 +2485,7 @@
         <div class="vt-raw-events-cell vt-raw-events-col-tick">${r.tick != null ? r.tick : ''}</div>
         <div class="vt-raw-events-cell vt-raw-events-col-time">${sec ? sec + 's' : ''}</div>
         <div class="vt-raw-events-cell vt-raw-events-col-type">
-          <span class="vt-raw-events-type-tag vt-raw-events-type--${r.arm || 'unknown'}"${typeTitle}>${escapeHtml(typeLabel)}</span>
+          <span class="vt-raw-events-type-tag vt-raw-events-type--${r.arm || 'unknown'}"${typeTitle}>${escapeHtml(typeLabel)}</span>${r.sub ? ` <span class="vt-raw-events-type-sub">${escapeHtml(r.sub)}</span>` : ''}
         </div>
         <div class="vt-raw-events-cell vt-raw-events-col-shooter">${shooterCell}</div>
         <div class="vt-raw-events-cell vt-raw-events-col-victim">${victimCell}</div>
@@ -2597,6 +2644,15 @@
     renderReconcileSentinelBadge(computeSentinelSummary());
     const rows = [];
     rows.push(renderReconcileRow(computeSnipes()));
+    // v4 builds/economy match-level reconcile rows. Blocks are attached
+    // only on matches carrying the data (pre-v4 matches have no block),
+    // so gate on presence rather than schema stamp.
+    if (state.processed.builds && state.processed.builds.has_build_data) {
+      rows.push(renderReconcileRow(computeBuildFeedCount()));
+    }
+    if (state.processed.economy && state.processed.economy.has_resource_data) {
+      rows.push(renderReconcileRow(computeEconomyTicks()));
+    }
     const s64 = $reconcilePlayer.value;
     if (s64) {
       const name = state.s64ToNick && state.s64ToNick.get(s64);
@@ -2655,6 +2711,57 @@
       processed: processed == null ? 0 : Number(processed),
       computed: count,
       rule: 'count(unitSniped)',
+      kind: 'int',
+    };
+  }
+
+  // v4: builds.feed carries EVERY BuildEvent verbatim (dedup-folded
+  // same-tick QUEUE duplicates stay in the feed flagged `dedup_folded`,
+  // only the arithmetic skips them), so tier-3 feed length must equal
+  // the tier-2 buildEvent count exactly.
+  function computeBuildFeedCount() {
+    const feed = (state.processed.builds && state.processed.builds.feed) || [];
+    let count = 0;
+    for (const r of state.events.rows) {
+      if (r.arm === 'buildEvent') count++;
+    }
+    return {
+      label: 'builds.feed.length',
+      processed: feed.length,
+      computed: count,
+      rule: 'count(buildEvent) — feed keeps dedup-folded rows verbatim',
+      kind: 'int',
+    };
+  }
+
+  // v4: economy.ticks is the pipeline's match-level 1 Hz downsample of
+  // resource-bearing UpdateTicks. Replicate the exact gate (keep when
+  // tick − last_kept ≥ stride, stride = round(tick_rate / sample_rate_hz))
+  // over the tier-2 stream in order and compare counts.
+  function computeEconomyTicks() {
+    const econ = state.processed.economy || {};
+    const processedTicks = (econ.ticks || []).length;
+    const rateHz = econ.sample_rate_hz || 1;
+    const tickRate = (state.processed.match && state.processed.match.tick_rate) || 20;
+    const stride = Math.max(1, Math.round(tickRate / rateHz));
+    let lastKept = null;
+    let count = 0;
+    const stream = (state.decoded && state.decoded.eventStream) || [];
+    for (const evt of stream) {
+      if (!evt || evt.eventType !== 'updateTick') continue;
+      const ut = evt.updateTick;
+      if (!ut || (ut.team1Resources == null && ut.team2Resources == null)) continue;
+      const tick = Number(ut.tick || 0);
+      if (lastKept === null || tick - lastKept >= stride) {
+        lastKept = tick;
+        count++;
+      }
+    }
+    return {
+      label: 'economy.ticks.length',
+      processed: processedTicks,
+      computed: count,
+      rule: `count(updateTick with team*Resources) @ ${rateHz} Hz gate (stride ${stride} ticks)`,
       kind: 'int',
     };
   }

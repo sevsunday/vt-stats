@@ -359,12 +359,17 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-assets-btn" data-bs-toggle="pill" data-bs-target="#tab-assets" type="button" role="tab" aria-controls="tab-assets" aria-selected="false">Assets</button>
         </li>
+        <!-- Economy tab (proto v4 commander telemetry). The whole <li> is
+             hidden by renderMatchData() when the match carries neither
+             economy nor builds data (the entire pre-v4 corpus). -->
+        <li class="nav-item d-none" role="presentation" id="tab-economy-li">
+          <button class="nav-link" id="tab-economy-btn" data-bs-toggle="pill" data-bs-target="#tab-economy" type="button" role="tab" aria-controls="tab-economy" aria-selected="false">Economy <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
+        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-positioning-btn" data-bs-toggle="pill" data-bs-target="#tab-positioning" type="button" role="tab" aria-controls="tab-positioning" aria-selected="false">Movemint</button>
         </li>
         <li class="nav-item" role="presentation">
-          <!-- TEMP: vt-tab-new-badge - remove the <span> when the Replay feature is no longer "new". Paired with the .vt-tab-new-badge CSS block in css/vtstats-theme.css. -->
-          <button class="nav-link" id="tab-replay-btn" data-bs-toggle="pill" data-bs-target="#tab-replay" type="button" role="tab" aria-controls="tab-replay" aria-selected="false">3D Replay <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
+          <button class="nav-link" id="tab-replay-btn" data-bs-toggle="pill" data-bs-target="#tab-replay" type="button" role="tab" aria-controls="tab-replay" aria-selected="false">3D Replay</button>
         </li>
       </ul>
     </div>
@@ -758,6 +763,43 @@
             <button class="btn btn-sm" data-expand="section-asset-damage" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body" id="asset-damage-content"></div>
+        </div>
+      </div>
+
+      <!-- Tab: Economy (proto v4 commander telemetry; match-global, always
+           unfiltered — same passthrough contract as highlights/kill-feed
+           winner. Sections self-hide when their half of the data is absent:
+           scrap chart + production economy rows need has_resource_data,
+           build log + production build rows need has_build_data.) -->
+      <div class="tab-pane fade" id="tab-economy" role="tabpanel" aria-labelledby="tab-economy-btn">
+        <div class="card mb-4 d-none" id="section-economy-scrap">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Team Scrap Over Time</h5>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary" id="economy-zoom-reset" type="button"
+                      title="Reset zoom" aria-label="Reset zoom">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <button class="btn btn-sm" data-expand="section-economy-scrap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="economy-scrap-chart"></canvas></div></div>
+        </div>
+        <div class="row g-4 mb-4 d-none" id="section-economy-production">
+          <div class="col-lg-6"><div class="card h-100" id="economy-production-t1"></div></div>
+          <div class="col-lg-6"><div class="card h-100" id="economy-production-t2"></div></div>
+        </div>
+        <div class="card mb-4 d-none" id="section-economy-buildlog">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">Build Order Log</h5>
+            <div class="btn-group btn-group-sm" id="economy-buildlog-filter" role="group" aria-label="Build log filter">
+              <button class="btn btn-outline-secondary active" data-buildlog-filter="builds" type="button">Builds</button>
+              <button class="btn btn-outline-secondary" data-buildlog-filter="cancels" type="button">Cancels</button>
+              <button class="btn btn-outline-secondary" data-buildlog-filter="structures" type="button">Structures</button>
+              <button class="btn btn-outline-secondary" data-buildlog-filter="all" type="button">All events</button>
+            </div>
+          </div>
+          <div class="card-body" id="economy-buildlog-content"></div>
         </div>
       </div>
 
@@ -1314,6 +1356,19 @@
               </div>
               <div class="card-body"><div class="chart-container"><canvas id="commander-faction-picks-canvas"></canvas></div></div>
             </div>
+          </div>
+        </div>
+
+        <!-- Economy Leaders (proto v4 telemetry; hidden until any commander
+             has economy/build data in the current scope) -->
+        <div class="card mb-4 d-none" id="section-commander-economy">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-cash-stack me-2"></i>Economy Leaders</h5>
+            <span class="badge vt-econ-inferred-badge" data-bs-toggle="tooltip"
+                  title="Built from proto v4 resource/build telemetry — only matches recorded with the new collector count toward these leaders.">v4 telemetry</span>
+          </div>
+          <div class="card-body">
+            <div class="row g-3" id="commander-economy-tiles"></div>
           </div>
         </div>
       </div>
