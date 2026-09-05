@@ -273,6 +273,7 @@
     // v17 (proto v4) commander-economy siblings — flag-gated (only appear
     // once >= 3 commander matches carry the telemetry).
     career_tycoon:           ['Elon Musk',               'bi-cash-stack'],
+    career_loose_collector:  ['Loose Collector',         'bi-box-arrow-in-down'],
     career_war_machine:      ['Conveyor Belt',           'bi-gear-wide-connected'],
     // Flavor B — cross-match-only originals (no per-match sibling).
     the_champion:            ['The Champion',            'bi-stars'],
@@ -1454,6 +1455,24 @@
             econ_matches: r.econ_matches,
             avg_income_per_min: r.avg_income_per_min,
             income_loose: r.total_income_loose,
+            loose_share: r.loose_share,
+          }),
+        }));
+    }
+
+    // Loose Collector (career) — most loose scrap collected across
+    // commanded matches (v4 resource telemetry; same >= 3 gate).
+    const looseCandidates = (commanderRowsKept || [])
+      .filter(r => (r.econ_matches || 0) >= 3 && (r.total_income_loose || 0) > 0)
+      .sort((a, b) => (b.total_income_loose || 0) - (a.total_income_loose || 0));
+    if (looseCandidates.length) {
+      cards.push(makeCard('career_loose_collector',
+        looseCandidates,
+        {
+          value: r => r.total_income_loose,
+          format: 'scrap',
+          breakdown: r => ({
+            econ_matches: r.econ_matches,
             loose_share: r.loose_share,
           }),
         }));

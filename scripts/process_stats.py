@@ -77,7 +77,9 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 36 -> 37: First Upgrade highlight card (commander race on
 # time_to_first_upgrade_sec, lower-is-better) + Elon Musk / Conveyor Belt
 # display renames of the_tycoon / war_machine. Category keys unchanged.
-PIPELINE_VERSION = 37
+# 37 -> 38: Loose Collector highlight card (commander race on
+# income_loose, higher-is-better) slotted immediately after Elon Musk.
+PIPELINE_VERSION = 38
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -801,10 +803,10 @@ HIGHLIGHTS_RENDER_ORDER = [
     "crate_pod_goblin",
     "chris_kyle",
     "the_locksmith",
-    # v17 (proto v4) commander-economy cards -- flag-gated (slate 12 -> 14
-    # pre-v37; 15 once First Upgrade lands). Pre-v4 matches render the
-    # classic 12.
+    # v17 (proto v4) commander-economy cards -- flag-gated (slate 12 -> 16
+    # once Loose Collector lands). Pre-v4 matches render the classic 12.
     "the_tycoon",
+    "loose_collector",
     "war_machine",
     "first_upgrade",
 ]
@@ -823,6 +825,7 @@ HIGHLIGHTS_LABELS = {
     "chris_kyle":       ("Chris Kyle",       "bi-crosshair"),
     "the_locksmith":    ("The Locksmith",    "bi-lock-fill"),
     "the_tycoon":       ("Elon Musk",         "bi-cash-stack"),
+    "loose_collector":  ("Loose Collector",   "bi-box-arrow-in-down"),
     "war_machine":      ("Conveyor Belt",     "bi-gear-wide-connected"),
     "first_upgrade":    ("First Upgrade",     "bi-arrow-up-circle"),
 }
@@ -932,8 +935,8 @@ def _top_kv(d, key=lambda v: v):
 
 def compute_highlights(match_data):
     """Build the per-match Highlights block (12-card always-on catalog;
-    15 on proto-v4 matches -- Elon Musk / Conveyor Belt / First Upgrade
-    are flag-gated on has_resource_data / has_build_data).
+    16 on proto-v4 matches -- Elon Musk / Loose Collector / Conveyor Belt
+    / First Upgrade are flag-gated on has_resource_data / has_build_data).
 
     Each card emits when its data gates pass; missing data means the card is
     omitted (the UI grid reflows around the gap). All values are sourced from
@@ -1374,7 +1377,7 @@ def compute_highlights(match_data):
                 "narrative": _narrative_bucket(delta),
             })
 
-    # ---- v17 commander-economy cards (slate 12 -> 15), flag-gated so the
+    # ---- v17 commander-economy cards (slate 12 -> 16), flag-gated so the
     # pre-v4 corpus keeps the classic 12. Winner type stays "player" (the
     # team's commander) so existing player cross-links work unchanged; the
     # extra `team` field lets the renderer badge the side.
@@ -1459,6 +1462,15 @@ def compute_highlights(match_data):
                 ),
             },
         ))
+        # Loose Collector: scav haul into the team bank (income_loose is
+        # the scrap AMOUNT, per the player-terminology contract). Higher
+        # wins. Self-omits when neither side collected any loose.
+        _loose_card = _commander_card(
+            "loose_collector", _econ_teams_hl, "income_loose", "scrap", 0,
+            lambda t, _side: {},
+        )
+        if _loose_card and (_loose_card.get("value") or 0) > 0:
+            emit(_loose_card)
         # First Upgrade: race to the first live upgraded pool
         # (upgrade_count >= 1 → Refinery+ / Extractor+ producing). Lower
         # time wins. Self-omits when neither side ever upgraded.
@@ -6872,7 +6884,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     match_data["thug_supply"] = thug_supply_block
 
     # Match Highlights — fixed-slate award catalog (12 always-on cards;
-    # 15 on proto-v4 matches with Elon Musk / Conveyor Belt / First Upgrade).
+    # 16 on proto-v4 matches with Elon Musk / Loose Collector /
+    # Conveyor Belt / First Upgrade).
     # Each card emits when its data gates pass, otherwise it's omitted.
     # Match-global + always-unfiltered (read directly from currentData by the UI).
     match_data["highlights"] = compute_highlights(match_data)

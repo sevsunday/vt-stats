@@ -4084,6 +4084,23 @@
         '{name} squeaked the Elon Musk title.',
       ],
     },
+    loose_collector: {
+      dominant: [
+        '{name} hauled in {value} loose — the field was stripped clean.',
+        '{name} vacuumed the map: {value} loose collected.',
+        '{name} out-scavenged the other commander by a mile.',
+      ],
+      clear: [
+        '{name} won the loose race at {value}.',
+        '{name} led loose collection at {value}.',
+        '{name} hauled the most loose off the field.',
+      ],
+      close: [
+        '{name} edged the loose race at {value}.',
+        '{name} narrowly out-collected the enemy scavs.',
+        '{name} squeaked the Loose Collector title.',
+      ],
+    },
     war_machine: {
       dominant: [
         '{name} fielded {value} scrap of combat ships — an assembly line at war.',
@@ -4173,6 +4190,7 @@
     the_locksmith:    '',
     // v17 (proto v4) commander-economy cards.
     the_tycoon:       'scrap',
+    loose_collector:  'loose',
     war_machine:      'scrap',
     first_upgrade:    'upgrade',
   };
@@ -4269,6 +4287,11 @@
       clear:    ['{name} leads career scrap generation at {value}.',                            '{name} tops lifetime commander income ({avg_income_per_min}/min).',          '{name} holds the all-time Elon Musk crown.'],
       close:    ['{name} edges career scrap generation at {value}.',                            '{name} narrowly leads lifetime commander income.',                           '{name} squeaks the Elon Musk crown.'],
     },
+    career_loose_collector: {
+      dominant: ['{name} has hauled in {value} loose commanding — a career scavenger.', '{name} stripped the corpus of loose: {value} over {econ_matches} commands.', '{name} out-collects every commander by a mile.'],
+      clear:    ['{name} leads career loose collection at {value}.',                    '{name} tops lifetime loose hauled off the field.',                            '{name} holds the all-time Loose Collector crown.'],
+      close:    ['{name} edges career loose collection at {value}.',                    '{name} narrowly leads lifetime loose collected.',                             '{name} squeaks the Loose Collector crown.'],
+    },
     career_war_machine: {
       dominant: ['{name} has fielded {value} scrap of combat ships — a career assembly line.', '{name} built {ships_built} warships across {build_matches} commands.', '{name} out-produces every commander by a mile.'],
       clear:    ['{name} leads career combat production at {value} scrap.',                     '{name} tops lifetime warship output — {ships_built} ships.',           '{name} holds the all-time conveyor-belt crown.'],
@@ -4350,6 +4373,7 @@
     career_chris_kyle:       'snipes',
     career_the_locksmith:    '',
     career_tycoon:           'scrap',
+    career_loose_collector:  'loose',
     career_war_machine:      'scrap',
     the_champion:            'VTSR-T',
     the_veteran:             'matches',
@@ -4455,7 +4479,7 @@
       case 'map_master':
         if (!b.map_name) return '';
         return `${esc(b.map_name)} (${b.kills}-${b.deaths})`;
-      // v17 commander-economy cards (Elon Musk / Conveyor Belt / First Upgrade).
+      // v17 commander-economy cards (Elon Musk / Loose Collector / Conveyor Belt / First Upgrade).
       case 'the_tycoon': {
         if (b.income_regen == null && b.income_loose == null) return '';
         const parts = [];
@@ -4476,6 +4500,12 @@
         const parts = [`${fmt(b.econ_matches)} commands`];
         if (b.avg_income_per_min != null) parts.push(`${fmt(b.avg_income_per_min)}/min`);
         if (b.income_loose != null) parts.push(`${fmt(b.income_loose)} loose`);
+        return parts.join(' · ');
+      }
+      case 'career_loose_collector': {
+        if (b.econ_matches == null) return '';
+        const parts = [`${fmt(b.econ_matches)} commands`];
+        if (b.loose_share != null) parts.push(`${(Number(b.loose_share) * 100).toFixed(0)}% of income`);
         return parts.join(' · ');
       }
       case 'career_war_machine': {
@@ -4606,7 +4636,7 @@
         peak_vtsr:      breakdown.peak_vtsr != null ? Math.round(breakdown.peak_vtsr) : '',
         map_name:       breakdown.map_name || '',
         matches_with_positioning: breakdown.matches_with_positioning != null ? breakdown.matches_with_positioning : '',
-        // v17 commander-economy tokens (Elon Musk / Conveyor Belt / First Upgrade + career siblings).
+        // v17 commander-economy tokens (Elon Musk / Loose Collector / Conveyor Belt / First Upgrade + career siblings).
         // Amount-first loose contract: {income_loose} is the scrap amount.
         income_loose: breakdown.income_loose != null ? fmt(breakdown.income_loose) : '',
         loose_share:  breakdown.loose_share != null ? (Number(breakdown.loose_share) * 100).toFixed(0) + '%' : '',
