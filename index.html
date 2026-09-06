@@ -764,12 +764,32 @@
       <!-- Tab: Economy (proto v4 commander telemetry; match-global, always
            unfiltered — same passthrough contract as highlights/kill-feed
            winner. Sections self-hide when their half of the data is absent:
-           scrap chart + production economy rows need has_resource_data,
+           scrap chart + pools chart + production economy rows need has_resource_data,
            build log + production build rows need has_build_data.) -->
       <div class="tab-pane fade" id="tab-economy" role="tabpanel" aria-labelledby="tab-economy-btn">
         <div class="row g-4 mb-4 d-none" id="section-economy-production">
           <div class="col-lg-6"><div class="card h-100" id="economy-production-t1"></div></div>
           <div class="col-lg-6"><div class="card h-100" id="economy-production-t2"></div></div>
+        </div>
+        <div class="card mb-4 d-none" id="section-economy-pools">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Scrap Pools Over Time</h5>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary" id="economy-pools-zoom-reset" type="button"
+                      title="Reset zoom" aria-label="Reset zoom">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <button class="btn btn-sm" data-expand="section-economy-pools" title="Fullscreen">
+                <i class="bi bi-arrows-fullscreen"></i>
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="vt-econ-pools-lanes">
+              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t1"></canvas></div>
+              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t2"></canvas></div>
+            </div>
+          </div>
         </div>
         <div class="card mb-4 d-none" id="section-economy-buildlog">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">

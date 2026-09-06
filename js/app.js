@@ -1870,6 +1870,20 @@
     });
   }
 
+  // Pools pair: reset BOTH lanes. A one-sided reset would desync the
+  // linked x-window; do not rely on the zoom-plugin sync callback here.
+  const economyPoolsZoomResetBtn = document.getElementById('economy-pools-zoom-reset');
+  if (economyPoolsZoomResetBtn) {
+    economyPoolsZoomResetBtn.addEventListener('click', () => {
+      for (const id of ['economy-pools-t1', 'economy-pools-t2']) {
+        const canvas = document.getElementById(id);
+        if (!canvas) continue;
+        const chart = activeCharts.find(c => c && c.canvas === canvas);
+        if (chart && typeof chart.resetZoom === 'function') chart.resetZoom();
+      }
+    });
+  }
+
   // --- Core Filter Logic ---
   function getFilteredData(data, filter) {
     if (filter.mode === 'all') return data;
@@ -3155,24 +3169,42 @@
     return v !== '0' && v !== 'false';
   })();
 
+  function destroyChartOnCanvas(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const existing = activeCharts.find(c => c && c.canvas === canvas);
+    if (!existing) return;
+    existing.destroy();
+    activeCharts = activeCharts.filter(c => c !== existing);
+  }
+
   function renderEconomyTab() {
     const econ = currentData && currentData.economy;
     const builds = currentData && currentData.builds;
     const scrapCard = document.getElementById('section-economy-scrap');
+    const poolsCard = document.getElementById('section-economy-pools');
     const prodRow = document.getElementById('section-economy-production');
     const logCard = document.getElementById('section-economy-buildlog');
     if (scrapCard) scrapCard.classList.toggle('d-none', !econ || !ECONOMY_SCRAP_CHART_ENABLED);
+    if (poolsCard) poolsCard.classList.toggle('d-none', !econ);
     if (prodRow) prodRow.classList.toggle('d-none', !econ && !builds);
     if (logCard) logCard.classList.toggle('d-none', !builds);
 
     if (econ && ECONOMY_SCRAP_CHART_ENABLED) {
-      const canvas = document.getElementById('economy-scrap-chart');
-      const existing = activeCharts.find(c => c && c.canvas === canvas);
-      if (existing) {
-        existing.destroy();
-        activeCharts = activeCharts.filter(c => c !== existing);
-      }
+      destroyChartOnCanvas('economy-scrap-chart');
       renderEconomyScrapChart('economy-scrap-chart', econ, currentData.match);
+    }
+    if (econ) {
+      destroyChartOnCanvas('economy-pools-t1');
+      destroyChartOnCanvas('economy-pools-t2');
+      const peak = economyPoolPeak(econ);
+      const link = { charts: [], syncing: false };
+      renderEconomyPoolsChart('economy-pools-t1', econ, currentData.match, {
+        side: '1', peak, showX: false, link,
+      });
+      renderEconomyPoolsChart('economy-pools-t2', econ, currentData.match, {
+        side: '2', peak, showX: true, link,
+      });
     }
     if (econ || builds) {
       renderEconomyProductionCards();
@@ -8162,6 +8194,42 @@
       const econ = currentData && currentData.economy;
       if (!econ) return null;
       return renderEconomyScrapChart(canvasId, econ, currentData.match);
+    });
+    // Two canvases, so the single-canvas chart renderer cannot rebuild the
+    // pair. Own link object: zooming the card must not move the modal.
+    registerDomRenderer('section-economy-pools', (body) => {
+      const econ = currentData && currentData.economy;
+      if (!econ) return { destroy() {} };
+      const peak = economyPoolPeak(econ);
+      const link = { charts: [], syncing: false };
+      const wrap = document.createElement('div');
+      wrap.className = 'vt-econ-pools-lanes';
+      const makeLane = (id) => {
+        const lane = document.createElement('div');
+        lane.className = 'vt-econ-pools-lane';
+        const canvas = document.createElement('canvas');
+        canvas.id = id;
+        lane.appendChild(canvas);
+        wrap.appendChild(lane);
+      };
+      makeLane('modal-economy-pools-t1');
+      makeLane('modal-economy-pools-t2');
+      body.appendChild(wrap);
+      const c1 = renderEconomyPoolsChart('modal-economy-pools-t1', econ, currentData.match, {
+        side: '1', peak, showX: false, link,
+      });
+      const c2 = renderEconomyPoolsChart('modal-economy-pools-t2', econ, currentData.match, {
+        side: '2', peak, showX: true, link,
+      });
+      return {
+        destroy() {
+          for (const c of [c1, c2]) {
+            if (!c) continue;
+            activeCharts = activeCharts.filter(x => x !== c);
+            try { c.destroy(); } catch (_) { /* already torn down */ }
+          }
+        },
+      };
     });
     registerChartRenderer('section-player-weapons', (canvasId) => {
       return renderPlayerWeapons(canvasId, data.leaderboard, data.weapon_meta);

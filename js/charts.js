@@ -346,6 +346,187 @@ function renderEconomyScrapChart(canvasId, economy, matchMeta) {
   return chart;
 }
 
+// Shared integer y-max for the P-D pools pair so both lanes pin to the
+// higher team's peak (hard min/max, not suggestedMax — Chart.js otherwise
+// shrinks a lane whose series never reaches the other team's peak).
+function economyPoolPeak(economy) {
+  let peak = 0;
+  for (const side of ['1', '2']) {
+    const team = (economy && economy.teams) ? economy.teams[side] : null;
+    if (!team) continue;
+    if (team.peak_pools != null) peak = Math.max(peak, team.peak_pools);
+    for (const v of (team.pool_count || [])) peak = Math.max(peak, v || 0);
+    for (const v of (team.upgrade_count || [])) peak = Math.max(peak, v || 0);
+  }
+  return Math.max(1, Math.round(peak));
+}
+
+function fmtMatchClock(sec) {
+  const s = Math.max(0, sec || 0);
+  const m = Math.floor(s / 60);
+  const r = Math.floor(s % 60);
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+// --- Line: Scrap Pools Over Time (Economy tab, proto v4 matches only) ---
+// P-D small multiples: one stacked [upgraded, un-upgraded] lane per team.
+// `opts.side` is '1' | '2'; `opts.peak` is the shared hard y-max from
+// economyPoolPeak(); `opts.showX` keeps x ticks on the bottom lane only;
+// `opts.link` is `{ charts, syncing }` shared by the pair so x-only zoom
+// on one lane copies onto the other via zoomScale. Match-global and
+// always unfiltered (the economy block has no per-player dimension).
+function renderEconomyPoolsChart(canvasId, economy, matchMeta, opts) {
+  applyThemeDefaults();
+  const t = getThemeColors();
+  const el = document.getElementById(canvasId);
+  if (!el) return null;
+  const ctx = el.getContext('2d');
+
+  const side = (opts && opts.side) || '1';
+  const peak = (opts && opts.peak) || economyPoolPeak(economy);
+  const showX = !!(opts && opts.showX);
+  const link = (opts && opts.link) || null;
+  const team = ((economy && economy.teams) || {})[side] || {};
+  const teamColor = side === '2' ? t.success : t.primary;
+  const cmdr = (team.commander && team.commander.name) ? team.commander.name : `Team ${side}`;
+
+  const tickRate = (matchMeta && matchMeta.tick_rate) || 20;
+  const minTick = (matchMeta && matchMeta.tick_range && matchMeta.tick_range[0]) || 0;
+  const ticks = economy.ticks || [];
+  const pools = team.pool_count || [];
+  const upg = team.upgrade_count || [];
+  const upgraded = [];
+  const unupgraded = [];
+  for (let i = 0; i < ticks.length; i++) {
+    const x = Math.max(0, (ticks[i] - minTick) / tickRate);
+    const p = pools[i] || 0;
+    const u = upg[i] || 0;
+    upgraded.push({ x, y: u });
+    unupgraded.push({ x, y: Math.max(0, p - u) });
+  }
+
+  const syncPoolZoom = ({ chart }) => {
+    if (!link || link.syncing) return;
+    const x = chart.scales.x;
+    if (!x) return;
+    link.syncing = true;
+    for (const other of link.charts) {
+      if (other !== chart && other && typeof other.zoomScale === 'function') {
+        other.zoomScale('x', { min: x.min, max: x.max }, 'none');
+      }
+    }
+    link.syncing = false;
+  };
+
+  const zoomEnabled = typeof window !== 'undefined'
+    && (window.ChartZoom || window['chartjs-plugin-zoom']);
+  const zoomPluginConfig = zoomEnabled ? {
+    zoom: {
+      pan: {
+        enabled: true,
+        mode: 'x',
+        modifierKey: 'shift',
+        onPan: syncPoolZoom,
+        onPanComplete: syncPoolZoom,
+      },
+      zoom: {
+        wheel: { enabled: true, speed: 0.08 },
+        drag: {
+          enabled: true,
+          backgroundColor: 'rgba(99, 102, 241, 0.18)',
+          borderColor: 'rgba(99, 102, 241, 0.55)',
+          borderWidth: 1,
+          threshold: 5,
+        },
+        pinch: { enabled: false },
+        mode: 'x',
+        onZoom: syncPoolZoom,
+        onZoomComplete: syncPoolZoom,
+      },
+      limits: { x: { min: 'original', max: 'original' } },
+    },
+  } : {};
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Upgraded',
+          data: upgraded,
+          borderWidth: 0,
+          pointRadius: 0,
+          stepped: true,
+          fill: true,
+          backgroundColor: teamColor + '99',
+        },
+        {
+          label: 'Un-upgraded',
+          data: unupgraded,
+          borderColor: teamColor,
+          borderWidth: 1.5,
+          pointRadius: 0,
+          stepped: true,
+          fill: true,
+          backgroundColor: teamColor + '28',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      parsing: false,
+      normalized: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        decimation: { enabled: false },
+        tooltip: {
+          ...glassTooltipConfig,
+          callbacks: {
+            title: (items) => {
+              const raw = items && items[0] && items[0].raw;
+              if (!raw || raw.x == null) return '';
+              return fmtMatchClock(raw.x);
+            },
+            label: (item) => {
+              const v = item.raw && item.raw.y;
+              if (v === null || v === undefined) return null;
+              return `${item.dataset.label}: ${Math.round(v)}`;
+            },
+          },
+        },
+        ...zoomPluginConfig,
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: showX, text: 'Match Time' },
+          ticks: {
+            display: showX,
+            callback: (v) => fmtMatchClock(v),
+            maxTicksLimit: 14,
+          },
+          grid: { display: showX, drawTicks: showX },
+        },
+        y: {
+          stacked: true,
+          min: 0,
+          max: peak,
+          beginAtZero: true,
+          ticks: { stepSize: 1, precision: 0, autoSkip: false },
+          afterFit: (s) => { s.width = 34; },
+          title: { display: true, text: cmdr, color: teamColor },
+        },
+      },
+    },
+  });
+  activeCharts.push(chart);
+  if (link && Array.isArray(link.charts)) link.charts.push(chart);
+  return chart;
+}
+
 // --- Horizontal Bar: Weapon Meta ---
 
 function renderWeaponMeta(canvasId, weaponMeta, limit) {

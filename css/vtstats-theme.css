@@ -119,6 +119,31 @@ code, pre, .font-monospace {
     min-height: 200px;
 }
 
+/* Economy tab: P-D small-multiples pools chart. Two stacked lanes share a
+   hard 0..peak y-scale; height is fixed so Chart.js (maintainAspectRatio:
+   false) gets a definite box. Taller than the 115px preview so 1-count
+   ticks have room; not chart-container-sm's 200px x 2. */
+.vt-econ-pools-lanes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.vt-econ-pools-lane {
+    position: relative;
+    height: 160px;
+}
+
+#fullscreen-modal-body .vt-econ-pools-lanes {
+    height: calc(100vh - 120px);
+}
+
+#fullscreen-modal-body .vt-econ-pools-lane {
+    flex: 1 1 0;
+    height: auto;
+    min-height: 0;
+}
+
 .heatmap-cell {
     font-size: 0.75rem;
     min-width: 60px;
