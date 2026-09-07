@@ -10,6 +10,7 @@ data/processed/ for browser consumption.
 import argparse
 import gzip
 import json
+import math
 import os
 import re
 import shutil
@@ -79,7 +80,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # display renames of the_tycoon / war_machine. Category keys unchanged.
 # 37 -> 38: Loose Collector highlight card (commander race on
 # income_loose, higher-is-better) slotted immediately after Elon Musk.
-PIPELINE_VERSION = 38
+# 38 -> 39: Storyline block (match.schema_version 22) -- bucketed lanes +
+# curated beats + typed facts + archetype on every v4 match (needs BOTH
+# economy and builds telemetry). Bands segment the wire's own per-tick
+# scrap_status enum captured alongside the stored economy series.
+PIPELINE_VERSION = 39
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -3564,7 +3569,756 @@ def _build_identity_maps(header, schema, events):
     return slot_to_s64, s64_to_slot, s64_to_nick, roster, roster_conflicts
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None):
+# --- Storyline block (match.schema_version 22) ---------------------------
+# Bird's-eye per-match narrative telemetry: bucketed lanes + curated beats
+# + typed facts + an archetype tag, rendered by js/storyline.js as the
+# Storyline tab. Emitted only when the match carries BOTH v4 halves
+# (economy + builds); match-global, always-unfiltered (highlights
+# passthrough contract). Rating-inert by construction -- nothing in
+# scripts/elo.py or scripts/elo_commander.py reads it (gated by
+# _investigation/golden_storyline_inert.py).
+
+STORYLINE_SCHEMA_VERSION = 1
+STORYLINE_BUCKET_SEC = 30  # lane bucket width (display resolution only)
+
+# Kill-burst detector: >= MIN kills inside WINDOW seconds, non-overlapping
+# scan. Tuned on the first v4 match, then calibrated corpus-wide (the kill
+# feed exists for the whole corpus). Tunable without a schema bump.
+STORY_BURST_MIN_KILLS = 5
+STORY_BURST_WINDOW_SEC = 60
+STORY_BURST_TOP_N = 3              # biggest bursts kept as beats
+STORY_BURST_NEAR_DECISIVE_SEC = 120  # + any burst this close to a decisive kill
+STORY_BURST_EVENTS_CAP = 20        # constituent kills carried per burst beat
+
+# Tide-turn: largest swing of the cumulative net-combat-value lane over a
+# sliding window, one beat per sign, suppressed under the scrap floor so a
+# quiet match doesn't get a fake "turning point".
+STORY_TIDE_WINDOW_SEC = 300
+STORY_TIDE_MIN_SCRAP = 300
+
+STORY_SNIPE_BEAT_CAP = 5           # defensive cap; observed rate is ~2/match
+STORY_RUSH_CONTEXT_SEC = 180       # decisive-kill lead-up window (intruder peak)
+STORY_OPENING_BUILDS = 3           # distinct builds quoted in facts.opening
+
+# Base perimeter for the intruder lane: the positioning pass's own
+# R_base convention (0.15 x base_separation) with the same [100, 400]
+# clip personal_base_radius uses.
+STORY_BASE_RADIUS_FACTOR = 0.15
+STORY_BASE_RADIUS_MIN = 100.0
+STORY_BASE_RADIUS_MAX = 400.0
+
+# Archetype decision-tree thresholds. Only `divergence` and the generic
+# fallback are testable on the current one-match v4 corpus -- everything
+# fails safe to "even" (js STORY_COPY renders a neutral paragraph).
+STORY_ARCH_COMEBACK_BEHIND_SHARE = 0.5   # winner trailed the value lane this long
+STORY_ARCH_STOMP_INCOME_RATIO = 1.3      # income dominance AND ...
+STORY_ARCH_STOMP_LOST_RATIO = 1.3        # ... loser bled this much more materiel
+STORY_ARCH_GRIND_MIN_SEC = 2700          # 45 min+
+STORY_ARCH_GRIND_INCOME_RATIO = 1.15     # near-parity economies
+
+
+def build_extractor_odfs(odf_db):
+    """Set of ODF stems whose inheritanceChain terminal is `extractor`.
+
+    The extractor-war classification set: deployed scavengers (ibscav /
+    ebscav / fbscav) AND the pool-upgrade structures (ibscup / ebscup /
+    fbscup) share the terminal. Data-verified on the first v4 match --
+    all 9 upgrade_count upticks across both teams correlate with an
+    *bscup constructor QUEUE 12-120 s prior, while the Dower
+    (terminal `supplydepot`) correlates with none. Chain-based like
+    build_combat_ship_odfs; NEVER display-name substrings.
+    """
+    out = set()
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            chain = (entry or {}).get("inheritanceChain") or []
+            if chain and chain[-1] == "extractor":
+                out.add(_norm_build_odf(odf_key))
+    return out
+
+
+def _slot_side(slot):
+    """Team side (1/2) for a raw slot int, 0 for world/invalid."""
+    if 1 <= (slot or 0) <= 5:
+        return 1
+    if 6 <= (slot or 0) <= 10:
+        return 2
+    return 0
+
+
+def _storyline_display_name(odf, odf_map):
+    """Resolve an ODF display name through the match's own odf_map.
+
+    odf_map is prettify_odf output for every ODF the match touched, so
+    this is the same resolution chain every other surface uses. The
+    title-cased-stem fallback mirrors prettify_odf's own last resort for
+    the (rare) ODF that never entered the map.
+    """
+    if not odf:
+        return "Unknown"
+    hit = (odf_map or {}).get(odf)
+    if hit:
+        return hit
+    stem = re.sub(r"\.odf$", "", odf, flags=re.IGNORECASE)
+    return stem.replace("_", " ").title()
+
+
+def _storyline_archetype(winner_team, facts, net_diff, duration_sec):
+    """Classify the match's story shape. Decision tree over typed facts.
+
+    Order matters: `divergence` (econ leader lost -- the reference
+    Wasteland match) outranks `comeback` (value-lane deficit reversed),
+    which outranks the margin-based `stomp` / `attrition_grind` labels.
+    Returns a key into js/storyline.js's STORY_COPY table; unknown keys
+    render the generic paragraph, so adding archetypes is forward-safe.
+    """
+    if winner_team not in (1, 2):
+        return "unclear"
+    inc1 = (facts.get("income") or {}).get("1") or 0
+    inc2 = (facts.get("income") or {}).get("2") or 0
+    econ_leader = 1 if inc1 > inc2 else (2 if inc2 > inc1 else 0)
+    if econ_leader and econ_leader != winner_team:
+        return "divergence"
+    sign = 1 if winner_team == 1 else -1
+    nonzero = [v for v in (net_diff or []) if v]
+    if nonzero:
+        behind = sum(1 for v in nonzero if v * sign < 0)
+        if behind / len(nonzero) >= STORY_ARCH_COMEBACK_BEHIND_SHARE:
+            return "comeback"
+    loser = 2 if winner_team == 1 else 1
+    lost = facts.get("materiel_lost") or {}
+    lost_w = lost.get(str(winner_team)) or 0
+    lost_l = lost.get(str(loser)) or 0
+    hi, lo = max(inc1, inc2), min(inc1, inc2)
+    if lo > 0 and hi / lo >= STORY_ARCH_STOMP_INCOME_RATIO \
+            and lost_l >= STORY_ARCH_STOMP_LOST_RATIO * max(1, lost_w):
+        return "stomp"
+    if duration_sec >= STORY_ARCH_GRIND_MIN_SEC and lo > 0 \
+            and hi / lo <= STORY_ARCH_GRIND_INCOME_RATIO:
+        return "attrition_grind"
+    return "even"
+
+
+def _storyline_result_beat(match, duration_sec, tick_rate):
+    """The closing `result` beat. Factored out so the adjudication
+    reconciliation path can rebuild it after a winner rewrite."""
+    winner = match.get("winner") or {}
+    team = winner.get("team")
+    leaders = match.get("team_leaders") or {}
+    leader = ((leaders.get(str(team)) or {}).get("name")) if team else None
+    tick = winner.get("decided_at_tick")
+    sec = (tick / tick_rate) if isinstance(tick, (int, float)) and tick else duration_sec
+    return {
+        "sec": int(round(sec)),
+        "tick": int(tick) if isinstance(tick, (int, float)) and tick else int(round(duration_sec * tick_rate)),
+        "kind": "result",
+        "team": team,
+        "weight": 5,
+        "args": {"team": team, "decided_by": winner.get("decided_by"), "leader": leader},
+    }
+
+
+def _storyline_beat_sort(beats):
+    beats.sort(key=lambda b: (b["sec"], -b["weight"], b["kind"]))
+    return beats
+
+
+def compute_storyline(match_data, status_series=None, scrap_costs=None,
+                      combat_ship_odfs=None, extractor_odfs=None):
+    """Build the Storyline block from the ASSEMBLED match dict.
+
+    Pure over match_data plus two kinds of processing-time extras that
+    only winner-INDEPENDENT outputs consume:
+
+      - `status_series`: per-team 1 Hz wire `scrap_status` enums captured
+        alongside the stored economy series (the band strips segment the
+        wire's own enum -- its documented display purpose -- instead of
+        re-deriving the regen-segment model). Falls back to the VERIFIED
+        model derivation when absent.
+      - `scrap_costs` / `combat_ship_odfs` / `extractor_odfs`: the ODF DB
+        classification sets already built for the builds block.
+
+    Winner-DEPENDENT outputs (facts.winner, facts.archetype, the result
+    beat) are restamped by restamp_storyline_outcome() when the
+    adjudication pass rewrites a winner -- that path needs none of the
+    extras, which is what keeps a cached match restampable.
+
+    Returns None unless the match carries BOTH v4 halves (economy AND
+    builds) -- the momentum lane needs build costs, the band strips need
+    resource ticks. Positioning-dependent lanes null out gracefully.
+    """
+    match = match_data.get("match") or {}
+    econ = match_data.get("economy") or {}
+    builds = match_data.get("builds") or {}
+    if not (econ.get("has_resource_data") and builds.get("has_build_data")):
+        return None
+
+    tick_rate = match.get("tick_rate") or 20
+    duration_sec = match.get("duration_sec") or 0
+    econ_ticks = econ.get("ticks") or []
+    if duration_sec <= 0 and econ_ticks:
+        duration_sec = econ_ticks[-1] / tick_rate
+    if duration_sec <= 0:
+        return None
+
+    scrap_costs = scrap_costs or {}
+    combat_ship_odfs = combat_ship_odfs or set()
+    extractor_odfs = extractor_odfs or set()
+
+    B = STORYLINE_BUCKET_SEC
+    n_b = max(1, int(math.ceil(duration_sec / B)))
+    leaders = match.get("team_leaders") or {}
+    odf_map = match_data.get("odf_map") or {}
+    kill_feed = (match_data.get("kills") or {}).get("feed") or []
+    leaderboard = match_data.get("leaderboard") or []
+
+    def bucket_of(sec):
+        return min(n_b - 1, max(0, int(sec // B)))
+
+    def leader_name(side):
+        return ((leaders.get(str(side)) or {}).get("name")) or f"Team {side}"
+
+    # ---- roster: name -> (side, steam64) ------------------------------
+    name_side = {}
+    name_s64 = {}
+    for row in leaderboard:
+        nm = row.get("name")
+        if not nm:
+            continue
+        name_side[nm] = _slot_side(row.get("slot"))
+        name_s64[nm] = row.get("steam64")
+
+    # ---- economy lanes -------------------------------------------------
+    eteams = econ.get("teams") or {}
+    e1 = eteams.get("1") or {}
+    e2 = eteams.get("2") or {}
+
+    def series_sec(i):
+        # Sample i's second. econ ticks are wire ticks at ~1 Hz from ~0,
+        # so index==second in practice; the tick conversion keeps segment
+        # boundaries exact if the cadence ever drifts.
+        if i < len(econ_ticks):
+            return int(round(econ_ticks[i] / tick_rate))
+        return i
+
+    pool_diff = []
+    p1 = e1.get("pool_count") or []
+    p2 = e2.get("pool_count") or []
+    n_samples = min(len(p1), len(p2))
+    for bi in range(n_b):
+        idx = min(bi * B, n_samples - 1) if n_samples else -1
+        pool_diff.append((p1[idx] - p2[idx]) if idx >= 0 else 0)
+
+    # Band strips: segment the wire's own scrap_status enum. Fallback
+    # (status series unavailable, e.g. a hypothetical restamp-era rebuild):
+    # derive from the stored series via the VERIFIED regen-segment model
+    # (red = below 20 x upgraded, yellow = below 20 x pools, else green) --
+    # the 1 Hz derivation matched the emitted full-rate shares to 3
+    # decimals on the reference match.
+    def band_segments(side, team):
+        sts = (status_series or {}).get(side)
+        names = []
+        if sts:
+            prev = None
+            for v in sts:
+                nm = SCRAP_STATUS_NAMES.get(v)
+                if nm is None:
+                    nm = prev  # carry-forward unknown/0 samples
+                names.append(nm)
+                prev = nm
+            # leading unknowns inherit the first known band
+            first_known = next((x for x in names if x), "green")
+            names = [x or first_known for x in names]
+        else:
+            scrap = team.get("scrap") or []
+            pools = team.get("pool_count") or []
+            ups = team.get("upgrade_count") or []
+            for i in range(min(len(scrap), len(pools), len(ups))):
+                if scrap[i] < 20 * ups[i]:
+                    names.append("red")
+                elif scrap[i] < 20 * pools[i]:
+                    names.append("yellow")
+                else:
+                    names.append("green")
+        segs = []
+        start = 0
+        for i in range(1, len(names) + 1):
+            if i == len(names) or names[i] != names[start]:
+                end_sec = series_sec(i) if i < len(names) else int(round(duration_sec))
+                segs.append([series_sec(start), end_sec, names[start]])
+                start = i
+        return segs
+
+    bands = {"1": band_segments(1, e1), "2": band_segments(2, e2)}
+
+    # ---- war-machine lanes (fielded / lost cumulative, net diff) -------
+    fielded_b = {1: [0] * n_b, 2: [0] * n_b}
+    lost_b = {1: [0] * n_b, 2: [0] * n_b}
+    for r in (builds.get("feed") or []):
+        if r.get("type") != "build":
+            continue
+        stem = _norm_build_odf(r.get("odf") or "")
+        if stem not in combat_ship_odfs:
+            continue
+        cost = r.get("scrap_cost") or scrap_costs.get(stem) or 0
+        side = r.get("team")
+        if side in (1, 2) and cost:
+            fielded_b[side][bucket_of(r["tick"] / tick_rate)] += cost
+    for r in kill_feed:
+        stem = _norm_build_odf(r.get("victim_odf") or "")
+        if stem not in combat_ship_odfs:
+            continue
+        side = _slot_side(r.get("victim_team"))
+        if not side:
+            continue
+        cost = scrap_costs.get(stem) or 0
+        if cost:
+            lost_b[side][bucket_of(r["tick"] / tick_rate)] += cost
+
+    def cum(a):
+        out, s = [], 0
+        for v in a:
+            s += v
+            out.append(int(round(s)))
+        return out
+
+    fielded_cum = {"1": cum(fielded_b[1]), "2": cum(fielded_b[2])}
+    lost_cum = {"1": cum(lost_b[1]), "2": cum(lost_b[2])}
+    net_diff = [
+        (fielded_cum["1"][i] - lost_cum["1"][i])
+        - (fielded_cum["2"][i] - lost_cum["2"][i])
+        for i in range(n_b)
+    ]
+
+    # ---- combat-intensity lane (timeline damage per bucket) ------------
+    tl = match_data.get("timeline") or {}
+    tl_bucket = tl.get("bucket_seconds") or 10
+    intensity = [0.0] * n_b
+    for fac in ("1", "2"):
+        for i, v in enumerate((tl.get("by_faction") or {}).get(fac) or []):
+            intensity[bucket_of(i * tl_bucket)] += v or 0
+    intensity = [int(round(v)) for v in intensity]
+
+    # ---- positioning lanes (front line + base intruders) ---------------
+    pos = match_data.get("positioning") or {}
+    team_base = pos.get("team_base") or {}
+    tb1 = team_base.get("1") or {}
+    tb2 = team_base.get("2") or {}
+    has_pos = bool(pos.get("has_position_data")) and bool(pos.get("players")) \
+        and tb1.get("centroid") and tb2.get("centroid")
+
+    front = {"1": None, "2": None}
+    base_intruders = {"1": None, "2": None}
+    base_radius_m = None
+    sec_team_pts = None  # sec -> {1: [(x,z)...], 2: [...]} for decisive context
+    if has_pos:
+        b1 = (tb1["centroid"]["x"], tb1["centroid"]["z"])
+        b2 = (tb2["centroid"]["x"], tb2["centroid"]["z"])
+        axv = (b2[0] - b1[0], b2[1] - b1[1])
+        axlen2 = axv[0] ** 2 + axv[1] ** 2
+        base_radius_m = min(
+            STORY_BASE_RADIUS_MAX,
+            max(STORY_BASE_RADIUS_MIN,
+                STORY_BASE_RADIUS_FACTOR * (pos.get("base_separation") or 0)),
+        )
+        sec_team_pts = defaultdict(lambda: {1: [], 2: []})
+        for nm, p in (pos.get("players") or {}).items():
+            side = name_side.get(nm)
+            if side not in (1, 2):
+                continue
+            tr = p.get("trail") or {}
+            ts, xs, zs = tr.get("t") or [], tr.get("x") or [], tr.get("z") or []
+            for i in range(min(len(ts), len(xs), len(zs))):
+                sec_team_pts[int(ts[i])][side].append((xs[i], zs[i]))
+
+        if axlen2 > 0:
+            fsum = {1: [0.0] * n_b, 2: [0.0] * n_b}
+            fcnt = {1: [0] * n_b, 2: [0] * n_b}
+            isum = {1: [0.0] * n_b, 2: [0.0] * n_b}
+            icnt = [0] * n_b
+            for sec, sides in sec_team_pts.items():
+                bi = bucket_of(sec)
+                icnt[bi] += 1
+                for side in (1, 2):
+                    pts = sides[side]
+                    if pts:
+                        proj = sum(((x - b1[0]) * axv[0] + (z - b1[1]) * axv[1]) / axlen2
+                                   for x, z in pts) / len(pts)
+                        fsum[side][bi] += proj
+                        fcnt[side][bi] += 1
+                    # enemies inside the OTHER side's base perimeter
+                    own_base = b1 if side == 2 else b2  # side's ENEMY base
+                    enemy_base = b1 if side == 2 else b2
+                    for x, z in pts:
+                        if math.hypot(x - enemy_base[0], z - enemy_base[1]) <= base_radius_m:
+                            isum[1 if side == 2 else 2][bi] += 1
+            front = {
+                str(side): [
+                    round(fsum[side][bi] / fcnt[side][bi], 3) if fcnt[side][bi] else None
+                    for bi in range(n_b)
+                ] for side in (1, 2)
+            }
+            base_intruders = {
+                str(side): [
+                    round(isum[side][bi] / icnt[bi], 2) if icnt[bi] else 0.0
+                    for bi in range(n_b)
+                ] for side in (1, 2)
+            }
+
+    # ---- extractor war --------------------------------------------------
+    ex_war = {1: 0, 2: 0}
+    ex_by_killer = defaultdict(int)
+    for r in kill_feed:
+        stem = _norm_build_odf(r.get("victim_odf") or "")
+        if stem not in extractor_odfs:
+            continue
+        kt = _slot_side(r.get("killer_team"))
+        vt = _slot_side(r.get("victim_team"))
+        if kt and vt and kt != vt:
+            ex_war[kt] += 1
+            if r.get("killer") in name_side:
+                ex_by_killer[r["killer"]] += 1
+
+    # ---- beats -----------------------------------------------------------
+    beats = []
+
+    def beat(sec, tick, kind, team, weight, args):
+        beats.append({
+            "sec": int(round(sec)), "tick": int(round(tick)), "kind": kind,
+            "team": team, "weight": weight, "args": args,
+        })
+
+    # First blood: first human-vs-human ship kill.
+    for r in kill_feed:
+        if r.get("is_pilot_victim"):
+            continue
+        kt = _slot_side(r.get("killer_team"))
+        vt = _slot_side(r.get("victim_team"))
+        if kt and vt and kt != vt and r.get("killer") in name_side and r.get("victim") in name_side:
+            beat(r["tick"] / tick_rate, r["tick"], "first_blood", kt, 3, {
+                "killer": r["killer"], "victim": r["victim"],
+                "victim_ship": _storyline_display_name(r.get("victim_odf"), odf_map),
+            })
+            break
+
+    # Structure kills / demolitions. Display names via odf_map verbatim;
+    # decisive role via RECYCLER_ODFS / FACTORY_ODFS membership (the same
+    # sets the winner inference trusts); extractor-class victims belong to
+    # the aggregate extractor-war lane, not the beat rail.
+    decisive_secs = []
+    for r in kill_feed:
+        vodf = (r.get("victim_odf") or "").lower()
+        stem = _norm_build_odf(vodf)
+        if not re.match(r"^[fei]b", stem):
+            continue
+        if stem in extractor_odfs:
+            continue
+        kt = _slot_side(r.get("killer_team"))
+        vt = _slot_side(r.get("victim_team"))
+        if not vt:
+            continue
+        name = _storyline_display_name(r.get("victim_odf"), odf_map)
+        if kt and kt == vt:
+            beat(r["tick"] / tick_rate, r["tick"], "demolition", kt, 1, {
+                "killer": r.get("killer"), "structure": name, "structure_odf": stem,
+            })
+            continue
+        role = None
+        if vodf in RECYCLER_ODFS:
+            role = "recycler"
+        elif vodf in FACTORY_ODFS:
+            role = "factory"
+        weight = 5 if role else 2
+        sec = r["tick"] / tick_rate
+        args = {
+            "killer": r.get("killer"),
+            "owner": leader_name(vt),
+            "victim_team": vt,
+            "structure": name,
+            "structure_odf": stem,
+            "role": role,
+        }
+        if role:
+            args["killer_ship"] = _storyline_display_name(r.get("killer_odf"), odf_map)
+            if sec_team_pts is not None and base_radius_m:
+                bcent = (tb1 if vt == 1 else tb2).get("centroid") or {}
+                bx, bz = bcent.get("x"), bcent.get("z")
+                peak = 0
+                enemy = 2 if vt == 1 else 1
+                for s in range(max(0, int(sec) - STORY_RUSH_CONTEXT_SEC), int(sec) + 1):
+                    pts = (sec_team_pts.get(s) or {}).get(enemy) or []
+                    inside = sum(1 for x, z in pts
+                                 if math.hypot(x - bx, z - bz) <= base_radius_m)
+                    peak = max(peak, inside)
+                args["intruders_peak"] = peak
+            decisive_secs.append(sec)
+        beat(sec, r["tick"], "structure_kill", kt or None, weight, args)
+
+    # Pool tempo (first time at each count) + upgrades (first + new highs).
+    for side, team in ((1, e1), (2, e2)):
+        pc = team.get("pool_count") or []
+        up = team.get("upgrade_count") or []
+        seen = set()
+        up_high = 0
+        built_high = 0
+        for i in range(1, len(pc)):
+            if pc[i] > pc[i - 1] and pc[i] in (3, 5, 7) and pc[i] not in seen:
+                seen.add(pc[i])
+                beat(series_sec(i), econ_ticks[i] if i < len(econ_ticks) else series_sec(i) * tick_rate,
+                     "pool_tempo", side, 2, {"pools": pc[i], "leader": leader_name(side)})
+        for i in range(1, len(up)):
+            if up[i] > up[i - 1]:
+                built_high += up[i] - up[i - 1]
+                if up[i] > up_high:
+                    up_high = up[i]
+                    beat(series_sec(i), econ_ticks[i] if i < len(econ_ticks) else series_sec(i) * tick_rate,
+                         "upgrade", side, 2 if built_high == up[i] and up[i] == 1 else 1,
+                         {"upgraded": up[i], "leader": leader_name(side)})
+
+    # Kill bursts (non-overlapping windows), then curate: top N by size
+    # plus anything adjacent to a decisive kill (the rush's own firefight).
+    ks = [r for r in kill_feed if not r.get("is_pilot_victim")]
+    bursts = []
+    i = 0
+    while i < len(ks):
+        j = i
+        t0 = ks[i]["tick"] / tick_rate
+        while j < len(ks) and ks[j]["tick"] / tick_rate - t0 <= STORY_BURST_WINDOW_SEC:
+            j += 1
+        if j - i >= STORY_BURST_MIN_KILLS:
+            rows = ks[i:j]
+            side_counts = defaultdict(int)
+            for r in rows:
+                side_counts[_slot_side(r.get("killer_team"))] += 1
+            lead = max(side_counts, key=side_counts.get) or None
+            bursts.append({
+                "sec": t0, "tick": ks[i]["tick"], "n": j - i, "team": lead,
+                "events": [{
+                    "sec": int(round(r["tick"] / tick_rate)),
+                    "killer": r.get("killer"),
+                    "victim": r.get("victim"),
+                    "victim_ship": _storyline_display_name(r.get("victim_odf"), odf_map),
+                } for r in rows[:STORY_BURST_EVENTS_CAP]],
+            })
+            i = j
+        else:
+            i += 1
+    top_secs = {b["sec"] for b in sorted(bursts, key=lambda b: -b["n"])[:STORY_BURST_TOP_N]}
+    for b in bursts:
+        near_decisive = any(
+            d - STORY_BURST_NEAR_DECISIVE_SEC <= b["sec"] <= d + STORY_BURST_WINDOW_SEC
+            for d in decisive_secs
+        )
+        if b["sec"] in top_secs or near_decisive:
+            beat(b["sec"], b["tick"], "kill_burst", b["team"], 2,
+                 {"n": b["n"], "events": b["events"]})
+
+    # Snipes: rare, dramatic, fully-resolved rows only.
+    n_snipes = 0
+    for r in ((match_data.get("snipes") or {}).get("feed") or []):
+        if n_snipes >= STORY_SNIPE_BEAT_CAP:
+            break
+        if not (r.get("sniper") and r.get("victim")):
+            continue
+        st = _slot_side(r.get("shooter_team")) or name_side.get(r.get("sniper")) or None
+        beat(r["tick"] / tick_rate, r["tick"], "snipe", st, 2, {
+            "sniper": r.get("sniper"), "victim": r.get("victim"),
+            "victim_ship": _storyline_display_name(r.get("victim_odf"), odf_map),
+        })
+        n_snipes += 1
+
+    # Tide turns: biggest swing per sign of the net value lane.
+    w = max(1, STORY_TIDE_WINDOW_SEC // B)
+    best = {1: None, 2: None}  # beneficiary side -> (swing, end_bucket)
+    for bi in range(w, n_b):
+        swing = net_diff[bi] - net_diff[bi - w]
+        if swing >= STORY_TIDE_MIN_SCRAP and (best[1] is None or swing > best[1][0]):
+            best[1] = (swing, bi)
+        if -swing >= STORY_TIDE_MIN_SCRAP and (best[2] is None or -swing > best[2][0]):
+            best[2] = (-swing, bi)
+    for side, hit in best.items():
+        if not hit:
+            continue
+        swing, bi = hit
+        end_sec = min(int(round(duration_sec)), (bi + 1) * B)
+        beat(end_sec, end_sec * tick_rate, "tide_turn", side, 2, {
+            "delta": int(round(swing)),
+            "window_sec": STORY_TIDE_WINDOW_SEC,
+            "leader": leader_name(side),
+        })
+
+    beats.append(_storyline_result_beat(match, duration_sec, tick_rate))
+    _storyline_beat_sort(beats)
+
+    # ---- facts -----------------------------------------------------------
+    bteams = builds.get("teams") or {}
+
+    def opening(side, team):
+        fb = (bteams.get(str(side)) or {}).get("first_builds") or []
+        distinct = []
+        counts = defaultdict(int)
+        for entry in fb:
+            counts[entry.get("odf")] += 1
+        for entry in fb:
+            odf = entry.get("odf")
+            if odf and all(d["odf"] != odf for d in distinct):
+                distinct.append({"odf": odf, "name": entry.get("name"),
+                                 "count": counts[odf]})
+            if len(distinct) >= STORY_OPENING_BUILDS:
+                break
+        return {
+            "first_builds": distinct,
+            "time_to_3_pools_sec": team.get("time_to_3_pools_sec"),
+            "time_to_first_upgrade_sec": team.get("time_to_first_upgrade_sec"),
+        }
+
+    front_mean = {"1": None, "2": None}
+    for side in ("1", "2"):
+        vals = [v for v in (front.get(side) or []) if v is not None] if front.get(side) else []
+        if vals:
+            front_mean[side] = round(sum(vals) / len(vals), 3)
+
+    # Decisive = the LAST weight-5 structure kill (a rebuilt-and-rekilled
+    # recycler resolves to the kill that stuck).
+    decisive = None
+    for b in beats:
+        if b["kind"] == "structure_kill" and b["weight"] >= 5:
+            decisive = b
+    decisive_fact = None
+    if decisive:
+        decisive_fact = {
+            "sec": decisive["sec"],
+            "tick": decisive["tick"],
+            "killer": decisive["args"].get("killer"),
+            "victim_team": decisive["args"].get("victim_team"),
+            "structure": decisive["args"].get("structure"),
+            "structure_odf": decisive["args"].get("structure_odf"),
+            "role": decisive["args"].get("role"),
+            "killer_ship": decisive["args"].get("killer_ship"),
+            "intruders_peak": decisive["args"].get("intruders_peak"),
+        }
+
+    # Cast: <=4 dramatis personae, one role per player, priority order.
+    # Each role ranks its candidates and takes the best one not already
+    # cast -- the decisive killer is often ALSO the heaviest-attrition
+    # thug (Sev on the reference match), and dropping the role entirely
+    # would waste a slot the runner-up earns.
+    cast = []
+    cast_names = set()
+
+    def cast_add(role, candidates):
+        """candidates: ranked [(name, extra_dict), ...]; first uncast wins."""
+        if len(cast) >= 4:
+            return
+        for nm, extra in candidates:
+            if not nm or nm in cast_names or nm not in name_side:
+                continue
+            cast_names.add(nm)
+            entry = {"role": role, "name": nm, "steam64": name_s64.get(nm),
+                     "team": name_side.get(nm)}
+            entry.update(extra)
+            cast.append(entry)
+            return
+
+    if decisive_fact:
+        cast_add("decisive_killer", [(decisive_fact["killer"], {
+            "structure": decisive_fact["structure"], "sec": decisive_fact["sec"],
+        })])
+    cast_add("extractor_hunter", [
+        (nm, {"count": cnt})
+        for nm, cnt in sorted(ex_by_killer.items(), key=lambda kv: (-kv[1], kv[0]))
+        if cnt > 0
+    ])
+    all_thugs = []
+    for side in ("1", "2"):
+        all_thugs.extend(
+            ((match_data.get("thug_supply") or {}).get(side) or {}).get("thugs") or [])
+    cast_add("heaviest_attrition", [
+        (t.get("name"), {"ships_lost": t.get("ships_lost"),
+                         "ship_value_lost": t.get("ship_value_lost")})
+        for t in sorted(all_thugs, key=lambda t: -(t.get("ships_lost") or 0))
+        if t.get("ships_lost")
+    ])
+    cast_add("top_damage", [
+        (p.get("name"), {"dealt": round((p.get("personal") or {}).get("dealt") or 0, 1)})
+        for p in sorted(leaderboard,
+                        key=lambda p: -((p.get("personal") or {}).get("dealt") or 0))
+        if ((p.get("personal") or {}).get("dealt") or 0) > 0
+    ])
+
+    winner = match.get("winner") or {}
+    facts = {
+        "income": {"1": e1.get("scrap_income") or 0, "2": e2.get("scrap_income") or 0},
+        "extractor_war": {"1": ex_war[1], "2": ex_war[2]},
+        "materiel_fielded": {"1": fielded_cum["1"][-1] if fielded_cum["1"] else 0,
+                             "2": fielded_cum["2"][-1] if fielded_cum["2"] else 0},
+        "materiel_lost": {"1": lost_cum["1"][-1] if lost_cum["1"] else 0,
+                          "2": lost_cum["2"][-1] if lost_cum["2"] else 0},
+        "structure_spend": {"1": e1.get("outflow_structure_orders") or 0,
+                            "2": e2.get("outflow_structure_orders") or 0},
+        "front_mean": front_mean,
+        "opening": {"1": opening(1, e1), "2": opening(2, e2)},
+        "cast": cast,
+        "base_radius_m": round(base_radius_m, 1) if base_radius_m else None,
+        "decisive": decisive_fact,
+        "winner": {"team": winner.get("team"), "decided_by": winner.get("decided_by")},
+        # RESERVED: populated when structure-location telemetry lands
+        # (defensive-structure value inside the base perimeter vs field
+        # spend). The renderer self-omits while null.
+        "base_defense": None,
+    }
+    facts["archetype"] = _storyline_archetype(
+        winner.get("team"), facts, net_diff, duration_sec)
+
+    return {
+        "schema_version": STORYLINE_SCHEMA_VERSION,
+        "bucket_sec": B,
+        "duration_sec": round(duration_sec, 1),
+        "lanes": {
+            "net_combat_value_diff": net_diff,
+            "fielded_cum": fielded_cum,
+            "lost_cum": lost_cum,
+            "pool_diff": pool_diff,
+            "intensity": intensity,
+            "front": front,
+            "base_intruders": base_intruders,
+        },
+        "bands": bands,
+        "beats": beats,
+        "facts": facts,
+    }
+
+
+def restamp_storyline_outcome(match_data):
+    """Re-derive the winner-DEPENDENT storyline outputs after an
+    adjudication rewrote match.winner: facts.winner, facts.archetype, and
+    the closing `result` beat. Everything else (lanes, bands, the other
+    beats, the other facts) is winner-independent and left untouched --
+    which is what lets this run on a CACHED match dict without the
+    processing-time extras compute_storyline needed."""
+    sl = match_data.get("storyline")
+    if not sl:
+        return
+    match = match_data.get("match") or {}
+    winner = match.get("winner") or {}
+    tick_rate = match.get("tick_rate") or 20
+    duration_sec = sl.get("duration_sec") or 0
+    facts = sl.get("facts") or {}
+    facts["winner"] = {"team": winner.get("team"), "decided_by": winner.get("decided_by")}
+    facts["archetype"] = _storyline_archetype(
+        winner.get("team"), facts,
+        (sl.get("lanes") or {}).get("net_combat_value_diff") or [],
+        duration_sec,
+    )
+    sl["facts"] = facts
+    beats = [b for b in (sl.get("beats") or []) if b.get("kind") != "result"]
+    beats.append(_storyline_result_beat(match, duration_sec, tick_rate))
+    sl["beats"] = _storyline_beat_sort(beats)
+
+
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -4037,6 +4791,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     def _new_econ_side():
         return {
             "series": {"scrap": [], "max_scrap": [], "pool_count": [], "upgrade_count": []},
+            # Storyline band strips: the wire's own scrap_status enum,
+            # sampled at the same 1 Hz gate as the stored series. INTERNAL
+            # ONLY -- handed to compute_storyline() (which stores compact
+            # segments), never emitted on the economy block itself.
+            "status_series": [],
             "prev_bank": None,
             "income": 0, "regen": 0, "loose": 0, "refund": 0,
             "unclassified": 0, "loose_collections": 0, "outflow_gross": 0,
@@ -4991,6 +5750,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                             st["series"]["max_scrap"].append(_cap)
                             st["series"]["pool_count"].append(_pools)
                             st["series"]["upgrade_count"].append(_upg)
+                            st["status_series"].append(_status)
                     if _has1 and _has2:
                         econ_adv_scrap_sum += (int(ut.team1_resources.current_scrap)
                                                - int(ut.team2_resources.current_scrap))
@@ -6618,13 +7378,26 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # addition: `thug_ships_lost` / `thug_ship_value_lost` now
             # count human-piloted losses only (see the thug_supply build
             # site), so their values move on existing matches.
-            # v21 (this version) stamps each `builds.feed[]` row with the
+            # v21 stamps each `builds.feed[]` row with the
             # economic context of its own tick: `scrap_at_event` /
             # `max_scrap_at_event` / `pool_count_at_event`, read off the
             # most recent resource tick at or before the event. Purely
             # additive display telemetry (the Build Order Log badge);
             # null on build-data-only sessions and pre-first-tick events.
-            "schema_version": 21,
+            # v22 (this version) adds the top-level `storyline` block on
+            # matches carrying BOTH v4 halves (economy AND builds):
+            # bucketed lanes (net combat value, fielded/lost cumulatives,
+            # pool diff, intensity, front line, base intruders), wire-enum
+            # scrap-status band segments, curated beats (structured args,
+            # no English -- titles render client-side from STORY_COPY),
+            # typed facts + archetype for the auto-narrative, and the
+            # RESERVED facts.base_defense null plug (populated when
+            # structure-location telemetry lands). Match-global, always
+            # unfiltered, rating-inert; absent on every pre-v4 match. The
+            # winner-dependent outputs (facts.winner / facts.archetype /
+            # the result beat) are restamped by the adjudication
+            # reconciliation pass when an operator rewrites the outcome.
+            "schema_version": 22,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -6889,6 +7662,24 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # Each card emits when its data gates pass, otherwise it's omitted.
     # Match-global + always-unfiltered (read directly from currentData by the UI).
     match_data["highlights"] = compute_highlights(match_data)
+
+    # Storyline -- bird's-eye narrative block (v4 matches only: the block
+    # needs BOTH economy and builds telemetry; compute_storyline returns
+    # None otherwise and pre-v4 matches simply lack the key). Pure over the
+    # assembled match dict apart from the processing-time extras threaded
+    # here, which only winner-INDEPENDENT outputs consume -- the
+    # adjudication reconciliation path restamps winner-dependent outputs
+    # via restamp_storyline_outcome() on cached dicts without them.
+    _storyline = compute_storyline(
+        match_data,
+        status_series={1: econ_state[1]["status_series"],
+                       2: econ_state[2]["status_series"]},
+        scrap_costs=scrap_costs,
+        combat_ship_odfs=combat_ship_odfs,
+        extractor_odfs=extractor_odfs,
+    )
+    if _storyline is not None:
+        match_data["storyline"] = _storyline
 
     return match_data
 
@@ -7600,6 +8391,10 @@ def main():
     print(f"  Scrap cost set: {len(scrap_costs)} ODF stems with GameObjectClass.scrapCost")
     combat_ship_odfs = build_combat_ship_odfs(odf_db)
     print(f"  Combat-ship set: {len(combat_ship_odfs)} ODF stems (B7 terminal-chain classification)")
+    # Storyline (match.schema_version 22): extractor-war classification --
+    # chain-terminal `extractor` covers deployed scavs AND pool upgrades.
+    extractor_odfs = build_extractor_odfs(odf_db)
+    print(f"  Extractor set: {len(extractor_odfs)} ODF stems (storyline extractor-war classification)")
 
     # Load canonical player names
     known_players = load_known_players()
@@ -7648,6 +8443,7 @@ def main():
                 producer_lanes=producer_lanes,
                 scrap_costs=scrap_costs,
                 combat_ship_odfs=combat_ship_odfs,
+                extractor_odfs=extractor_odfs,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"
@@ -7788,6 +8584,11 @@ def main():
             continue
         if changed:
             md["match"]["winner"] = new_winner
+            # Storyline carries winner-derived outputs (facts.winner /
+            # facts.archetype / the result beat) -- restamp them so an
+            # operator outcome-flip never strands a stale story. Pure over
+            # the match dict, so it works on cached matches too.
+            restamp_storyline_outcome(md)
             out_path = OUTPUT_DIR / f"{mid}.json"
             if out_path not in rewritten_adj_paths:
                 with open(out_path, "w", encoding="utf-8") as f:

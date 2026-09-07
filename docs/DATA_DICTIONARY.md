@@ -959,6 +959,61 @@ one non-additive part of v19.
 
 **Spell definition** (`_reship_spells()` in [scripts/process_stats.py](../scripts/process_stats.py)): a maximal run of consecutive on-foot samples in the 1 Hz pilot series. Three runs are deliberately excluded — a run still open at the last sample (censored: the match ended before the re-ship was observed, so counting the observed prefix would fake a fast time), the run starting at index 0 (every match opens with players on foot at the recycler — opening build order, not a re-ship), and runs shorter than `RESHIP_MIN_SPELL_SEC = 10` (voluntary hops: powerup grabs, ground snipes, ship swaps at base). Because it reads the pilot series rather than correlating deaths to build orders, it captures deaths, snipes and ejects alike and cannot be fooled by re-shipping from stock. `RESHIP_MIN_SPELL_SEC` is tunable without a schema bump.
 
+#### `storyline` (`match.schema_version` 22)
+
+Match-global, always-unfiltered (highlights passthrough contract). Present
+only when the match carries **BOTH** v4 halves (`has_resource_data` AND
+`has_build_data`) — the momentum lane needs build costs, the band strips
+need resource ticks. Powers the per-match **Storyline** tab
+(`js/storyline.js`): auto-generated narrative, verdict cards, synced
+multi-lane timeline, key-moments rail. Rating-inert by construction
+(gated by `_investigation/golden_storyline_inert.py`, which strips AND
+perturbs the whole block and requires byte-identical VTSR-T canonical /
+thug-only / VTSR-C output).
+
+Built by `compute_storyline()` in [scripts/process_stats.py](../scripts/process_stats.py) —
+pure over the assembled match dict plus two processing-time extras that
+only winner-INDEPENDENT outputs consume (the wire `scrap_status` series
+for bands; the ODF classification sets). The winner-DEPENDENT outputs
+(`facts.winner`, `facts.archetype`, the `result` beat) are restamped by
+`restamp_storyline_outcome()` whenever the adjudication reconciliation
+pass rewrites a winner — including on cached matches.
+
+| Field | Type | Description |
+|---|---|---|
+| `schema_version` | `number` | Storyline block contract version (`1`) |
+| `bucket_sec` | `number` | Lane bucket width (`STORYLINE_BUCKET_SEC = 30`) |
+| `duration_sec` | `number` | Lane x-domain (match duration) |
+| `lanes.net_combat_value_diff[]` | `number[]` | Cumulative combat-ship scrap (fielded − lost), team 1 minus team 2, one value per bucket. Fielded from `builds.feed` BUILDs filtered to the `combat_ship_odfs` terminal set; lost from kill-feed victims in the same set valued by `GameObjectClass.scrapCost` — **all hulls including AI-owned ships** (deliberately unlike `thug_supply`, which attributes losses to humans; this lane totals destroyed materiel) |
+| `lanes.fielded_cum{1,2}[]` / `lanes.lost_cum{1,2}[]` | `number[]` | The four cumulative curves behind the war-machine lane. `fielded_cum[side][-1]` equals `builds.teams[side].combat_ship_value` exactly |
+| `lanes.pool_diff[]` | `number[]` | `pool_count` difference (t1 − t2) sampled at bucket starts |
+| `lanes.intensity[]` | `number[]` | Total damage per bucket, both factions (re-bucketed `timeline.by_faction`) |
+| `lanes.front{1,2}[]` | `number[]\|null` | Mean projection of each team's players onto the base-to-base axis per bucket (`0` = team 1 base, `1` = team 2 base), from 1 Hz trails. `null` without positioning |
+| `lanes.base_intruders{1,2}[]` | `number[]\|null` | Mean count of ENEMY players inside side *n*'s base perimeter per bucket — the rush detector. Perimeter = `clip(0.15 × base_separation, 100, 400)` m (the positioning pass's own R_base convention) |
+| `bands{1,2}` | `[[startSec, endSec, band]]` | Scrap-status segments from the **wire's own per-tick `scrap_status` enum** (display use is its documented purpose), 1 Hz-sampled, carry-forward over unknown samples. Bands: `green`/`yellow`/`red` (+ `parallel`). Fallback derivation from the verified regen-segment model exists but is never exercised in practice |
+| `beats[]` | `object[]` | Curated story beats, sorted by `sec` then weight. `{sec, tick, kind, team, weight, args{}}` — **structured args, no English** (titles render client-side from `STORY_COPY` in `js/storyline.js`, the `HIGHLIGHT_COPY` precedent). Kinds: `first_blood`, `pool_tempo` (first time at 3/5/7 pools), `upgrade` (first + new cumulative highs), `structure_kill` (cross-team, extractor-class excluded; decisive Recycler/Factory kills are weight 5 with `killer_ship` + `intruders_peak` rush context), `demolition` (same-team, weight 1, neutral copy — intent unknowable), `kill_burst` (≥`STORY_BURST_MIN_KILLS` in `STORY_BURST_WINDOW_SEC`; curated to top `STORY_BURST_TOP_N` + any near a decisive kill; `args.events[]` carries the constituent kills, cap 20), `snipe` (fully-resolved rows, cap 5), `tide_turn` (largest `net_combat_value_diff` swing per sign over `STORY_TIDE_WINDOW_SEC`, floor `STORY_TIDE_MIN_SCRAP`), `result` |
+| `facts.archetype` | `string` | Story-shape classification: `divergence` (econ leader lost) / `comeback` / `stomp` / `attrition_grind` / `even` / `unclear`. Decision tree in `_storyline_archetype()`; unknown keys render the generic client template, so additions are forward-safe |
+| `facts.income{1,2}` | `number` | `economy.teams[n].scrap_income` mirror |
+| `facts.extractor_war{1,2}` | `number` | Enemy extractor-CLASS structures killed by each team. Classification = ODF DB `inheritanceChain` terminal `extractor` (covers deployed scavs AND pool upgrades; data-verified — the Dower's terminal is `supplydepot` and it is genuinely not the Scion pool upgrade) |
+| `facts.materiel_fielded{1,2}` / `facts.materiel_lost{1,2}` | `number` | Final values of the war-machine cumulatives |
+| `facts.structure_spend{1,2}` | `number` | `economy.teams[n].outflow_structure_orders` mirror — scrap sent to structure orders |
+| `facts.front_mean{1,2}` | `number\|null` | Match-mean front-line position (verdict Field-control card) |
+| `facts.opening{1,2}` | `object` | `{first_builds: [{odf, name, count}] (first STORY_OPENING_BUILDS distinct), time_to_3_pools_sec, time_to_first_upgrade_sec}` — the narrative's opening sentence |
+| `facts.cast[]` | `object[]` | ≤4 dramatis personae `{role, name, steam64, team, ...role fields}`. Roles in priority order: `decisive_killer`, `extractor_hunter`, `heaviest_attrition`, `top_damage` — each ranks its candidates and takes the best player not already cast |
+| `facts.base_radius_m` | `number\|null` | The intruder-lane perimeter radius (UI tooltips) |
+| `facts.decisive` | `object\|null` | The LAST weight-5 structure kill: `{sec, tick, killer, victim_team, structure, structure_odf, role, killer_ship, intruders_peak}`. Role = membership in `RECYCLER_ODFS` / `FACTORY_ODFS` (the winner inference's own sets); display name from `odf_map` verbatim (`fbrecy_vsr` = "Matriarch", never "Recycler") |
+| `facts.winner` | `object` | `{team, decided_by}` mirror — restamped on adjudication changes |
+| `facts.base_defense` | `null` | **RESERVED.** Populated when structure-location telemetry lands: defensive-structure value inside the base perimeter (chain terminal `turret` + gun-tower classes) vs field spend. The renderer self-omits while null; wiring it is a `storyline.schema_version` 1 → 2 additive bump |
+
+Tunables (module constants in `scripts/process_stats.py`, no schema bump):
+`STORYLINE_BUCKET_SEC`, `STORY_BURST_*`, `STORY_TIDE_*`,
+`STORY_SNIPE_BEAT_CAP`, `STORY_RUSH_CONTEXT_SEC`, `STORY_OPENING_BUILDS`,
+`STORY_BASE_RADIUS_*`, `STORY_ARCH_*`. Only the `divergence` archetype and
+the generic fallback are testable on the current one-match v4 corpus — the
+other archetype templates are protected by
+`_investigation/check_story_templates.mjs`, which renders every archetype
+and beat template against fixture facts and fails on unfilled slots.
+
 #### `leaderboard[]`
 
 Each entry represents one player, sorted by personal damage dealt (descending).

@@ -105,6 +105,7 @@
 
   const MATCH_TAB_SLUGS = {
     overview:    'tab-overview-btn',
+    storyline:   'tab-storyline-btn',
     combat:      'tab-combat-btn',
     rivalries:   'tab-rivalries-btn',
     weapons:     'tab-weapons-btn',
@@ -1488,6 +1489,27 @@
     });
   }
 
+  // Storyline beat -> Replay deep-link. The 3D replay lives in an iframe
+  // whose playhead is set via its boot URL (?t=<sec>), so an in-page seek
+  // re-renders the pane with a tick hint -- the same mechanism the raw
+  // browser's ?t= cross-link uses, minus the page reload. Exposed on
+  // window for js/storyline.js (module boundary: it cannot reach
+  // pendingReplayTick / tabRendered directly). Forcing tabRendered false
+  // makes renderTabIfNeeded re-run the replay renderer, whose
+  // tickHint != null path rebuilds the iframe even for the same match.
+  window.vtOpenReplayAtTick = function (tick) {
+    if (!Number.isFinite(tick)) return;
+    pendingReplayTick = tick;
+    tabRendered['#tab-replay'] = false;
+    const btn = document.getElementById('tab-replay-btn');
+    if (!btn) return;
+    if (btn.classList.contains('active')) {
+      renderTabIfNeeded('#tab-replay');
+    } else {
+      bootstrap.Tab.getOrCreateInstance(btn).show();
+    }
+  };
+
   const allTabsEl = document.getElementById('all-tabs');
   if (allTabsEl) {
     allTabsEl.addEventListener('shown.bs.tab', (e) => {
@@ -2398,6 +2420,34 @@
     registerTabRenderer('#tab-assets', () => {
       renderAssetDamage(data.asset_damage, data.faction_totals);
     });
+
+    // Storyline tab (match.schema_version 22): the nav button only exists
+    // when the pipeline emitted a `storyline` block (v4 matches carrying
+    // BOTH economy and builds telemetry). Same bounce-then-hide dance as
+    // the Economy tab below. The renderer reads currentData.storyline --
+    // match-global, ALWAYS unfiltered (highlights passthrough contract) --
+    // never the filtered `data` view. VTStoryline.destroy() clears the
+    // module's transient state (replay-seek poll timer, hover crosshair);
+    // its Chart instances live in charts.js's activeCharts registry, so
+    // destroyAllCharts() already owns their lifecycle.
+    if (window.VTStoryline) VTStoryline.destroy();
+    const storyLi = document.getElementById('tab-storyline-li');
+    const storyAvailable = !!(currentData && currentData.storyline);
+    if (storyLi) {
+      if (!storyAvailable) {
+        const storyBtn = document.getElementById('tab-storyline-btn');
+        if (storyBtn && storyBtn.classList.contains('active')) {
+          const overviewBtn = document.getElementById('tab-overview-btn');
+          if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
+        }
+      }
+      storyLi.classList.toggle('d-none', !storyAvailable);
+    }
+    if (storyAvailable && window.VTStoryline) {
+      registerTabRenderer('#tab-storyline', () => {
+        VTStoryline.render(currentData);
+      });
+    }
 
     // Economy tab (proto v4): the nav button only exists for matches
     // carrying resource or build telemetry. When the previous match had

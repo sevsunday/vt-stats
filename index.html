@@ -347,6 +347,14 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link active" id="tab-overview-btn" data-bs-toggle="pill" data-bs-target="#tab-overview" type="button" role="tab" aria-controls="tab-overview" aria-selected="true">Overview</button>
         </li>
+        <!-- Storyline tab (match.schema_version 22). The whole <li> is
+             hidden by renderMatchData() unless the match carries a
+             `storyline` block (v4 matches with BOTH economy and builds
+             telemetry). Sits directly after Overview: it is the match's
+             bird's-eye entry point. -->
+        <li class="nav-item d-none" role="presentation" id="tab-storyline-li">
+          <button class="nav-link" id="tab-storyline-btn" data-bs-toggle="pill" data-bs-target="#tab-storyline" type="button" role="tab" aria-controls="tab-storyline" aria-selected="false">Storyline <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
+        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-combat-btn" data-bs-toggle="pill" data-bs-target="#tab-combat" type="button" role="tab" aria-controls="tab-combat" aria-selected="false">Combat</button>
         </li>
@@ -492,6 +500,74 @@
               </thead>
               <tbody></tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Storyline (match.schema_version 22; storyline block required).
+           All content is rendered by js/storyline.js (window.VTStoryline)
+           from currentData.storyline — match-global, always unfiltered
+           (highlights passthrough contract). Cards self-omit when their
+           data gates fail (e.g. no positioning => no map-control lane). -->
+      <div class="tab-pane fade" id="tab-storyline" role="tabpanel" aria-labelledby="tab-storyline-btn">
+        <div class="card mb-4 d-none" id="story-narrative-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-book-half me-2"></i>The Story</h5>
+            <span class="vt-story-why">auto-generated from match telemetry</span>
+          </div>
+          <div class="card-body">
+            <p class="vt-story-narrative mb-0" id="story-narrative"></p>
+            <div class="vt-story-cast d-none mt-3" id="story-cast"></div>
+          </div>
+        </div>
+
+        <div class="card mb-4 d-none" id="story-verdict-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-clipboard-data me-2"></i>The Verdict</h5>
+            <span class="vt-story-why">where the match was won and lost</span>
+          </div>
+          <div class="card-body">
+            <div class="row g-2" id="story-verdict-grid"></div>
+          </div>
+        </div>
+
+        <div class="card mb-4 d-none" id="story-timeline-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Match Timeline</h5>
+              <span class="vt-story-why d-none d-md-inline">drag to zoom — all lanes stay in sync; gold flags mark decisive moments</span>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary d-none" id="story-zoom-reset" type="button"
+                    title="Reset zoom on all lanes">Reset zoom</button>
+          </div>
+          <div class="card-body">
+            <div id="story-lane-momentum-wrap">
+              <div class="vt-story-lane-title" id="story-lane-momentum-title"></div>
+              <div class="vt-story-lane vt-story-lane--momentum"><canvas id="story-lane-momentum"></canvas></div>
+              <div class="vt-story-bands" id="story-bands"></div>
+            </div>
+            <div id="story-lane-map-wrap">
+              <div class="vt-story-lane-title" id="story-lane-map-title"></div>
+              <div class="vt-story-lane vt-story-lane--map"><canvas id="story-lane-map"></canvas></div>
+            </div>
+            <div id="story-lane-war-wrap">
+              <div class="vt-story-lane-title" id="story-lane-war-title"></div>
+              <div class="vt-story-lane vt-story-lane--war"><canvas id="story-lane-war"></canvas></div>
+            </div>
+            <div id="story-lane-intensity-wrap">
+              <div class="vt-story-lane-title" id="story-lane-intensity-title"></div>
+              <div class="vt-story-lane vt-story-lane--intensity"><canvas id="story-lane-intensity"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-4 d-none" id="story-beats-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-list-stars me-2"></i>Key Moments</h5>
+            <span class="vt-story-why">hover to locate on the timeline — click to open in the Replay player</span>
+          </div>
+          <div class="card-body">
+            <div class="vt-story-beats" id="story-beats"></div>
           </div>
         </div>
       </div>
@@ -1901,6 +1977,10 @@
   <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/charts-radar.js"></script>
+  <!-- Storyline tab renderer (window.VTStoryline). Depends on charts.js
+       globals (activeCharts / glassTooltipConfig / getThemeColors /
+       fmtMatchClock) so it loads after it, before app.js. -->
+  <script src="js/storyline.js"></script>
   <script src="js/positioning-charts.js"></script>
   <!-- All Matches aggregator: pure summation over a contributions dict.
        Documented exception to the "no aggregation in JS" rule so the All

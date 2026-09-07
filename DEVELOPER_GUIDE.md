@@ -1184,10 +1184,23 @@ HTML attributes: `<html data-theme="default" data-mode="dark">`.
 ### Tab Navigation
 
 Dashboard content is organized into Bootstrap nav-pills tabs:
-- **Per-match:** Overview, Combat, Rivalries, Weapons & Accuracy, Assets
-- **All Matches:** Overview, Weapons & Rivalries
+- **Per-match:** Overview, Storyline (v4 matches only), Combat, Rivalries, Weapons & Accuracy, Assets, Economy (v4 matches only), Movemint, 3D Replay
+- **All Matches:** Overview, Weapons & Rivalries, Commanders, Meta
 
 Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags. Global filter changes also trigger the same lazy re-render pipeline — `destroyAllCharts()` + `resetTabState()` + re-register deferred renderers + re-register fullscreen chart renderers.
+
+### Storyline Tab (match.schema_version 22)
+
+The Storyline tab (`#tab-storyline`, nav pill directly after Overview, hidden unless the match carries a `storyline` block) is the per-match bird's-eye narrative: it fuses economy, builds, positioning, kill-feed and timeline telemetry into one story. Rendered entirely by [`js/storyline.js`](js/storyline.js) (`window.VTStoryline = { render, destroy }`) from the pipeline-computed `storyline` block — match-global, always unfiltered (highlights passthrough contract).
+
+Four cards:
+
+1. **The Story** — an auto-generated paragraph assembled from `facts` + `archetype` by the `STORY_COPY` clause system (every sentence maps 1:1 to a named fact — no unbacked rhetoric), plus up to 4 **cast chips** (dramatis personae: decisive killer, extractor hunter, heaviest attrition, top damage) whose names cross-link to player profiles.
+2. **The Verdict** — six stat cells with team-colored name attribution and a trophy marker on each stat's winner: scrap income, extractor war, field control (front-line means, em-dash without positioning), materiel lost (all hulls incl. AI-owned — tooltip states the deliberate difference from `thug_supply`'s human-only accounting), structure investment, and result (tooltip explains `decided_by` provenance, mirroring `applyWinnerBadge` copy).
+3. **Match Timeline** — four Chart.js lanes sharing one x-domain with a synced crosshair, per-lane explainer lines, glass tooltips, and **x-only drag-zoom synced across all lanes** (vendored `chartjs-plugin-zoom`, mirroring the Economy pools-lane link pattern; shared Reset-zoom button; the scrap-status **band strips** under the Momentum lane re-clip to the zoom window). Lanes: Momentum (net combat-ship value bars + pool-advantage line + beat-flag scatter with native tooltips; gold vertical lines mark weight-5 beats on every lane), Map control (smoothed front lines + base-intruder bars — the rush detector), War machine (fielded/lost cumulatives), Combat intensity.
+4. **Key Moments** — the curated beats rail: Bootstrap icons per kind, team chips, detail sub-lines; rows with payloads (firefight unit lists, decisive-kill rush context) expand via a chevron; hovering locates the beat on all lanes via the crosshair; **clicking a row opens the 3D Replay at that moment** through `window.vtOpenReplayAtTick(tick)` (exposed by `app.js`: sets `pendingReplayTick`, clears the pane's rendered flag, shows the tab — the replay iframe reboots with `?t=<sec>`).
+
+Deep link: `?match=<id>&tab=storyline`. On pre-v4 matches the pill is hidden and the deep link bounces to Overview (same mechanism as the Economy tab). Copy iteration requires no pipeline rerun — all English lives in `js/storyline.js`'s `STORY_COPY` tables, template-gated by `_investigation/check_story_templates.mjs`. Block schema: `docs/DATA_DICTIONARY.md` §5 `storyline`; pipeline mechanics + invariants: `.cursor/rules/data-schema.mdc` "Storyline block".
 
 ### Global Player Filter
 

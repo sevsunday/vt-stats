@@ -6527,3 +6527,285 @@ html.vt-cursor-active * {
     color: var(--kb-text-secondary);
     margin-top: 0.15rem;
 }
+
+/* ============================================================
+   Storyline tab (match.schema_version 22) — .vt-story-*
+   Rendered by js/storyline.js from the pipeline `storyline` block.
+   All colors from --kb-* tokens; light mode inherits automatically.
+   ============================================================ */
+
+.vt-story-why {
+    font-size: 0.75rem;
+    color: var(--kb-text-muted);
+    font-weight: 400;
+}
+
+/* --- narrative ------------------------------------------------ */
+.vt-story-narrative {
+    font-size: 1.02rem;
+    line-height: 1.75;
+    color: var(--kb-text-primary);
+}
+.vt-story-narrative b { font-variant-numeric: tabular-nums; }
+/* Commander names in the narrative: bold only. Team coloring was removed
+   here by user call — colored names read as noise in running prose; the
+   verdict cards, lanes and beat chips keep the team-color coding. */
+.vt-story-t1,
+.vt-story-t2 { font-weight: 600; }
+.vt-story-beatref { color: var(--kb-warning); font-weight: 600; }
+.vt-story-name { font-weight: 600; }
+
+/* --- cast chips ------------------------------------------------ */
+.vt-story-cast {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.vt-story-cast-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--kb-bg-card) 75%, transparent);
+    font-size: 0.8rem;
+}
+.vt-story-cast-chip i { color: var(--kb-warning); }
+.vt-story-cast-chip--t1 i { color: var(--kb-primary); }
+.vt-story-cast-chip--t2 i { color: var(--kb-success); }
+.vt-story-cast-role {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--kb-text-muted);
+    font-weight: 600;
+}
+.vt-story-cast-chip small { color: var(--kb-text-muted); }
+
+/* --- verdict grid ---------------------------------------------- */
+.vt-story-vcell {
+    height: 100%;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: var(--kb-radius-md, 8px);
+    background: color-mix(in srgb, var(--kb-bg-card) 80%, transparent);
+}
+.vt-story-vcell--flip {
+    border-color: color-mix(in srgb, var(--kb-warning) 35%, var(--kb-border-subtle));
+}
+.vt-story-vlabel {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--kb-text-muted);
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.vt-story-vbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.82rem;
+}
+.vt-story-vchip {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--kb-text-secondary);
+}
+.vt-story-vchip b {
+    font-family: var(--vt-font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    color: var(--kb-text-primary);
+}
+.vt-story-vchip--t1 { border-left: 2px solid var(--kb-primary); padding-left: 0.4rem; }
+.vt-story-vchip--t2 { border-left: 2px solid var(--kb-success); padding-left: 0.4rem; }
+.vt-story-vwin { color: var(--kb-warning); font-size: 0.7rem; }
+.vt-story-vdecided {
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+}
+.vt-story-vcap {
+    font-size: 0.68rem;
+    color: var(--kb-text-muted);
+    margin-top: 0.3rem;
+    line-height: 1.3;
+}
+.vt-story-vmuted { color: var(--kb-text-muted); }
+
+/* --- timeline lanes -------------------------------------------- */
+.vt-story-lane-title {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    font-size: 0.8rem;
+    color: var(--kb-text-primary);
+    margin: 0.75rem 0 0.15rem;
+}
+.vt-story-lane-title b { font-weight: 600; }
+.vt-story-lane-why {
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+}
+.vt-story-legend {
+    display: inline-flex;
+    gap: 0.8rem;
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+    margin-left: auto;
+}
+.vt-story-legend-item i {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: -1px;
+}
+.vt-story-lane { position: relative; }
+.vt-story-lane--momentum { height: 170px; }
+.vt-story-lane--map { height: 150px; }
+.vt-story-lane--war { height: 140px; }
+.vt-story-lane--intensity { height: 90px; }
+
+/* --- scrap-status band strips ----------------------------------- */
+.vt-story-bands { margin-top: 0.35rem; }
+.vt-story-band-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.vt-story-band-label {
+    flex: none;
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 6px;
+}
+.vt-story-band-strip {
+    display: flex;
+    height: 12px;
+    border-radius: 3px;
+    overflow: hidden;
+}
+.vt-story-band-seg { height: 100%; opacity: 0.75; }
+.vt-story-band-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+    margin-top: 0.2rem;
+}
+.vt-story-band-legend i {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: -1px;
+    opacity: 0.75;
+}
+
+/* --- key moments rail ------------------------------------------- */
+.vt-story-beats {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 480px;
+    overflow-y: auto;
+}
+.vt-story-beat {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    padding: 0.42rem 0.6rem;
+    border-radius: var(--kb-radius-md, 8px);
+    cursor: pointer;
+    transition: background 120ms ease;
+}
+.vt-story-beat:hover {
+    background: color-mix(in srgb, var(--kb-bg-subtle) 70%, transparent);
+}
+.vt-story-beat-time {
+    flex: none;
+    width: 52px;
+    text-align: right;
+    font-family: var(--vt-font-mono, monospace);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.76rem;
+    color: var(--kb-text-muted);
+}
+.vt-story-beat-ico {
+    flex: none;
+    width: 20px;
+    text-align: center;
+    color: var(--kb-text-muted);
+    font-size: 0.85rem;
+}
+.vt-story-beat--major .vt-story-beat-ico,
+.vt-story-beat--major .vt-story-beat-title { color: var(--kb-warning); font-weight: 600; }
+.vt-story-beat-body { flex: 1; min-width: 0; }
+.vt-story-beat-title { font-size: 0.85rem; }
+.vt-story-beat-detail {
+    display: block;
+    font-size: 0.74rem;
+    color: var(--kb-text-muted);
+}
+.vt-story-beat-side {
+    flex: none;
+    font-size: 0.68rem;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--kb-border-subtle);
+    color: var(--kb-text-muted);
+    white-space: nowrap;
+}
+.vt-story-beat-side--t1 { color: var(--kb-primary); border-color: color-mix(in srgb, var(--kb-primary) 45%, transparent); }
+.vt-story-beat-side--t2 { color: var(--kb-success); border-color: color-mix(in srgb, var(--kb-success) 45%, transparent); }
+.vt-story-beat-expand {
+    flex: none;
+    width: 20px;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    text-align: center;
+    color: var(--kb-text-muted);
+    cursor: pointer;
+    line-height: 1;
+}
+.vt-story-beat-expand:hover { color: var(--kb-primary); }
+.vt-story-beat-expand--ph { visibility: hidden; cursor: inherit; }
+.vt-story-beat-sub {
+    margin: 0 0 0.35rem 114px;
+    padding: 0.35rem 0.6rem;
+    border-left: 2px solid var(--kb-border-subtle);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.vt-story-beat-subrow {
+    display: flex;
+    gap: 0.7rem;
+    font-size: 0.76rem;
+    color: var(--kb-text-secondary);
+}
+.vt-story-beat-subrow .vt-story-beat-time { width: 44px; }
+
+@media (max-width: 640px) {
+    .vt-story-legend { display: none; }
+    .vt-story-beat-side { display: none; }
+    .vt-story-beat-sub { margin-left: 2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-story-beat { transition: none; }
+}

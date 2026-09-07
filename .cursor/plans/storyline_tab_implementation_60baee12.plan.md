@@ -4,31 +4,31 @@ overview: "Add a \"Storyline\" nav pill to the per-match dashboard for v4 matche
 todos:
   - id: pipeline-block
     content: Add compute_storyline() (pure over match dict, incl. opening/cast facts + snipe/tide_turn beats) + adjudication restamp hook; bump match.schema_version 22, PIPELINE_VERSION 39
-    status: pending
+    status: completed
   - id: golden-gate
     content: Write _investigation/golden_storyline_inert.py (rating-inertness) + check_story_templates.mjs (template slot coverage)
-    status: pending
+    status: completed
   - id: index-markup
     content: Add hidden Storyline nav li + tab pane skeleton to index.html
-    status: pending
+    status: completed
   - id: storyline-js
     content: "Build js/storyline.js: lanes with tooltips, synced drag-zoom, band strips, beats rail with bi-* icons, Replay deep-links"
-    status: pending
+    status: completed
   - id: copy-tables
     content: STORY_COPY archetype templates + verdict cards with team attribution + decided_by tooltip reuse
-    status: pending
+    status: completed
   - id: css
     content: Add .vt-story-* styles to vtstats-theme.css (kb-vars only, light-mode overrides)
-    status: pending
+    status: completed
   - id: wire-tabs
     content: Register tab renderer, li gating in renderMatchData, activeCharts integration, destroy paths
-    status: pending
+    status: completed
   - id: reprocess-verify
     content: Reprocess corpus, run gates, full browser verification on Wasteland + pre-v4 bounce
-    status: pending
+    status: completed
   - id: docs
     content: Update DATA_DICTIONARY, data-schema.mdc, filter-contract.mdc, DEVELOPER_GUIDE, AGENTS/project-overview
-    status: pending
+    status: completed
 isProject: false
 ---
 
