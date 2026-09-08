@@ -124,13 +124,8 @@
         return `${esc(a.killer)} destroys ${esc(a.owner)}&#39;s ${esc(a.structure)}`;
       },
       detail: (a) => {
-        if (!a.role) return '';
-        const roleName = a.role === 'recycler' ? 'Recycler' : 'Factory';
-        const bits = [`the team&#39;s ${roleName} — losing it is usually fatal`];
-        if (a.killer) {
-          bits.push(`killing blow: ${esc(a.killer)}${a.killer_ship ? ` (${esc(a.killer_ship)})` : ''}`);
-        }
-        return bits.join(' · ');
+        if (!a.role || !a.killer) return '';
+        return `killing blow: ${esc(a.killer)}${a.killer_ship ? ` (${esc(a.killer_ship)})` : ''}`;
       },
     },
     demolition: {
@@ -140,7 +135,7 @@
     },
     kill_burst: {
       icon: 'bi-fire',
-      title: (a) => `Firefight: ${a.n} units destroyed in a minute`,
+      title: (a) => `${a.n} units destroyed in a minute`,
       detail: () => '',
     },
     snipe: {
@@ -273,12 +268,10 @@
       // killing-blow credit lives in the beat's expandable detail.
       const d = ctx.facts.decisive;
       if (!d) return null;
-      const roleName = d.role === 'recycler' ? 'Recycler' : d.role === 'factory' ? 'Factory' : null;
       const victim = d.victim_team === 1 ? 1 : 2;
       const attacker = victim === 1 ? 2 : 1;
       return `<span class="vt-story-beatref">${clock(d.sec)} — ${nameSpan(ctx, attacker)}&#39;s team ` +
-        `destroyed ${nameSpan(ctx, victim)}&#39;s ${esc(d.structure)}` +
-        `${roleName ? ` — the team&#39;s ${roleName}` : ''}.</span>`;
+        `destroyed ${nameSpan(ctx, victim)}&#39;s ${esc(d.structure)}.</span>`;
     },
     result(ctx) {
       const w = ctx.facts.winner || {};
