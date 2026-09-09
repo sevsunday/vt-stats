@@ -1,38 +1,92 @@
 /**
  * BZ2API.js - Battlezone 2: Combat Commander Game Session API Library
- * 
- * Fetches and parses multiplayer session data from the Rebellion lobby server.
+ *
+ * Fetches multiplayer session data from Nielk1's MultiplayerSessionList (MSL)
+ * aggregation API (the same source bz2vsr.com / the BZCC-Website use) and
+ * parses it into the session shape the VT Stats consumers read (gw page,
+ * Tools live-session card, topnav Tools pulse).
+ *
+ * Transport strategy (MSL enforces a CORS origin ALLOWLIST — bz2vsr.com is on
+ * it; localhost never is, and vtstats.bz only once the operator adds it):
+ *   - mode 'auto' (default): on localhost / file: contexts the direct fetch is
+ *     guaranteed-blocked, so we go proxy-first (local dev proxy from
+ *     scripts/dev_server.py, then public proxies). On real hosts we try
+ *     direct first (free upgrade the day vtstats.bz gets allowlisted) and
+ *     fall back to proxies.
+ *   - override with URL param `?mslmode=direct|proxy|auto` or
+ *     localStorage `vt.msl.mode` = 'direct' | 'proxy'.
+ * The last successful method is remembered (in-memory) and tried first on
+ * subsequent polls so a known-dead direct fetch isn't re-attempted per poll.
  */
 
 const BZ2API = (function() {
   'use strict';
 
-  const DEFAULT_API_URL = 'http://battlezone99mp.webdev.rebellion.co.uk/lobbyServer';
+  const DEFAULT_API_URL = 'https://multiplayersessionlist.iondriver.com/api/1.0/sessions?game=bigboat:battlezone_combat_commander';
   const MAP_API_BASE_URL = 'https://gamelistassets.iondriver.com/bzcc';
-  
-  // Common CORS proxies that can be used if direct fetch fails
-  // These are tried in order if direct fetch fails due to CORS
+
+  // Public CORS proxies used when the direct fetch is CORS-blocked. All take
+  // `<base><encodeURIComponent(targetUrl)>`. Best-effort only — free proxies
+  // are inherently flaky (corsproxy.io was dropped after it moved behind an
+  // API key). The durable production fix is the MSL origin allowlist.
   const CORS_PROXIES = [
-    'https://corsproxy.io/?',
     'https://api.codetabs.com/v1/proxy?quest=',  // https://codetabs.com/cors-proxy/cors-proxy.html
     'https://api.allorigins.win/raw?url=',
   ];
 
-  // Cache for last successful fetch method (in-memory, per session)
-  // null = no cache, 'direct' = direct fetch worked, or proxy URL string
+  // Local dev proxy endpoints served by `python scripts/dev_server.py`
+  // (static file server + `/__proxy?url=` CORS relay). Tried before the
+  // public proxies, but only in localhost/file: contexts. The relative
+  // candidate covers "dev_server serves the site"; the absolute ones cover
+  // "site served by another tool (e.g. Live Server) with dev_server beside
+  // it" — its ACAO:* makes cross-port localhost fetches legal.
+  const LOCAL_DEV_PROXY_BASES = [
+    '/__proxy?url=',
+    'http://localhost:8000/__proxy?url=',
+    'http://127.0.0.1:8000/__proxy?url=',
+  ];
+
+  const FETCH_MODE_STORAGE_KEY = 'vt.msl.mode';
+  const DIRECT_TIMEOUT_MS = 8000;
+  const PROXY_TIMEOUT_MS = 12000;
+
+  // Cache for last successful fetch method (in-memory, per page load).
+  // null = no cache, 'direct', or a proxy base string.
   let lastSuccessfulMethod = null;
 
+  /** True in contexts where the direct MSL fetch is guaranteed CORS-blocked. */
+  function isLocalDevContext() {
+    try {
+      if (typeof location === 'undefined') return false;
+      if (location.protocol === 'file:') return true;
+      const h = (location.hostname || '').toLowerCase();
+      return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
+    } catch (_) { return false; }
+  }
+
   /**
-   * Get proxy order with cached successful proxy first
-   * @returns {string[]} Array of proxy URLs in optimized order
+   * Resolve fetch mode: 'auto' | 'direct' | 'proxy'.
+   * URL param `?mslmode=` wins, then localStorage `vt.msl.mode`, then 'auto'.
    */
-  function getProxyOrder() {
-    if (lastSuccessfulMethod && lastSuccessfulMethod !== 'direct') {
-      const cached = lastSuccessfulMethod;
-      const others = CORS_PROXIES.filter(p => p !== cached);
-      return [cached, ...others];
-    }
-    return [...CORS_PROXIES];
+  function resolveFetchMode() {
+    try {
+      const qp = new URLSearchParams(location.search).get('mslmode');
+      if (qp === 'direct' || qp === 'proxy' || qp === 'auto') return qp;
+    } catch (_) { /* Node / no location */ }
+    try {
+      const ls = localStorage.getItem(FETCH_MODE_STORAGE_KEY);
+      if (ls === 'direct' || ls === 'proxy') return ls;
+    } catch (_) { /* storage unavailable */ }
+    return 'auto';
+  }
+
+  /**
+   * Ordered proxy bases for the current context (local dev proxy first when
+   * on localhost). Shared by the session fetch and map-data enrichment.
+   * @returns {string[]}
+   */
+  function getProxyBases() {
+    return isLocalDevContext() ? [...LOCAL_DEV_PROXY_BASES, ...CORS_PROXIES] : [...CORS_PROXIES];
   }
 
   // VSR (Vet Strategy Recycler) mod ID - special balance mod
@@ -55,94 +109,60 @@ const BZ2API = (function() {
   const VSR_MAP_DATA = {"vsr4pool":{"pools":8,"loose":245,"author":"ExE","size":2048,"baseToBase":736},"vsrjocrystalst":{"pools":7,"loose":250,"author":"blue_banana","size":1216,"baseToBase":1024},"vsr310":{"pools":7,"loose":170,"author":"Vearidons","size":1024,"baseToBase":1024},"vsrabundance":{"pools":9,"loose":340,"author":"NA","size":1024,"baseToBase":0},"vsramino":{"pools":7,"loose":180,"author":"{bac}appel","size":1024,"baseToBase":843},"stancientvsr":{"pools":7,"loose":240,"author":"{bac}appel","size":1024,"baseToBase":1153},"staztecvsr":{"pools":7,"loose":180,"author":"{bac}MalevolencE","size":640,"baseToBase":1172},"stancientposts":{"pools":7,"loose":320,"author":"Mortarion","size":1024,"baseToBase":1236},"vsrabuse":{"pools":7,"loose":220,"author":"Vearidons","size":1024,"baseToBase":1032},"vsrauslt":{"pools":7,"loose":205,"author":"Vearidons","size":1024,"baseToBase":1024},"stbarrenvsr":{"pools":7,"loose":240,"author":"{bac}appel","size":1024,"baseToBase":953},"stbowlvsr":{"pools":7,"loose":200,"author":"{bac}appel","size":1024,"baseToBase":1121},"beyond":{"pools":7,"loose":200,"author":"F9bomber","size":2048,"baseToBase":803},"stbolt":{"pools":3,"loose":120,"author":"Feared_1","size":512,"baseToBase":724},"stbadlands":{"pools":7,"loose":190,"author":"{bac}Oppressor","size":512,"baseToBase":826},"chill":{"pools":7,"loose":0,"author":"Stock","size":2048,"baseToBase":1014},"vsrcanyons":{"pools":8,"loose":310,"author":"Feared_1","size":2048,"baseToBase":1876},"vsrcncrt":{"pools":7,"loose":290,"author":"Mortarion","size":1024,"baseToBase":785},"curiosityvsr":{"pools":6,"loose":300,"author":"{bac}Cyber","size":512,"baseToBase":749},"zstcliff":{"pools":7,"loose":390,"author":"ExE","size":2048,"baseToBase":1225},"vsrconsc":{"pools":7,"loose":230,"author":"Vearidons","size":1024,"baseToBase":862},"vsrcrater":{"pools":7,"loose":200,"author":"TimeVirus","size":1024,"baseToBase":895},"cpcauldron":{"pools":8,"loose":-1,"author":"BZ2CP","size":1280,"baseToBase":1152},"vsrcracked":{"pools":7,"loose":240,"author":"Gravey","size":2048,"baseToBase":1274},"vsrcasiusv2":{"pools":7,"loose":270,"author":"ExE","size":1024,"baseToBase":1261},"stdeduxvsr":{"pools":7,"loose":260,"author":"{bac}appel","size":1024,"baseToBase":896},"vsrdomain":{"pools":7,"loose":280,"author":"blue_banana","size":1408,"baseToBase":1296},"vsrdc":{"pools":6,"loose":200,"author":"Laguna","size":1024,"baseToBase":1069},"vsrdpark":{"pools":7,"loose":180,"author":"Vearidons","size":1024,"baseToBase":870},"vsrdream":{"pools":7,"loose":185,"author":"Vearidons","size":1024,"baseToBase":834},"duskvsr":{"pools":7,"loose":-1,"author":"Aegeis","size":2048,"baseToBase":0},"vsrechelon":{"pools":7,"loose":160,"author":"ExE","size":512,"baseToBase":890},"vsreuropa":{"pools":7,"loose":210,"author":"{bac}MalevolencE","size":1024,"baseToBase":975},"vsreuronig":{"pools":7,"loose":210,"author":"{bac}MalevolencE","size":1024,"baseToBase":975},"stvsrexcav":{"pools":7,"loose":240,"author":"Mortarion","size":2048,"baseToBase":1136},"vsrequinox":{"pools":8,"loose":335,"author":"{bac}Oppressor","size":1024,"baseToBase":933},"vsregypt":{"pools":7,"loose":190,"author":"{bac}Oppressor","size":2048,"baseToBase":931},"vsrebola":{"pools":7,"loose":200,"author":"Vearidons","size":1024,"baseToBase":996},"vsrfisle":{"pools":7,"loose":220,"author":"Vearidons","size":896,"baseToBase":1042},"vsrforgot":{"pools":7,"loose":170,"author":"Vearidons","size":1024,"baseToBase":1208},"vsrf12c":{"pools":7,"loose":240,"author":"Vearidons","size":1024,"baseToBase":1024},"vsrflooded":{"pools":7,"loose":230,"author":"Gravey","size":2048,"baseToBase":1409},"vsrfinday":{"pools":7,"loose":210,"author":"spAce","size":1024,"baseToBase":1055},"vsrgarden":{"pools":7,"loose":260,"author":"{bac}appel","size":1024,"baseToBase":1067},"vsrgoldensun":{"pools":7,"loose":200,"author":"BZ2CP","size":2048,"baseToBase":1184},"stgizavsr":{"pools":8,"loose":250,"author":"{bac}appel","size":1024,"baseToBase":928},"hilo":{"pools":6,"loose":-1,"author":"Stock","size":512,"baseToBase":1109},"stbluesvsr":{"pools":7,"loose":280,"author":"{bac}appel","size":1024,"baseToBase":1179},"vsrdhisle":{"pools":7,"loose":195,"author":"Angelwing","size":2048,"baseToBase":1185},"havenvsr":{"pools":8,"loose":280,"author":"{bac}appel","size":1024,"baseToBase":841},"vsrbighilo":{"pools":7,"loose":235,"author":"{bac}appel","size":1024,"baseToBase":1267},"shound":{"pools":6,"loose":305,"author":"F9bomber","size":256,"baseToBase":780},"vsrhubris":{"pools":6,"loose":430,"author":"Gravey","size":720,"baseToBase":897},"heatedbzcc":{"pools":5,"loose":-1,"author":"Aegeis","size":1024,"baseToBase":0},"vsriceage":{"pools":7,"loose":200,"author":"ExE","size":1280,"baseToBase":1229},"stvsriraq":{"pools":7,"loose":255,"author":"Feared_1","size":1024,"baseToBase":1160},"vsrinsula":{"pools":7,"loose":285,"author":"{bac}MalevolencE","size":1280,"baseToBase":857},"vsrv8":{"pools":7,"loose":260,"author":"Vearidons","size":1280,"baseToBase":792},"vsrimpact2":{"pools":7,"loose":-1,"author":"Gravey","size":2048,"baseToBase":1237},"icecoldbzcc":{"pools":8,"loose":-1,"author":"Aegeis","size":2048,"baseToBase":0},"vsrjade":{"pools":7,"loose":250,"author":"{bac}MalevolencE","size":1024,"baseToBase":1082},"vsrknwthy":{"pools":7,"loose":200,"author":"Vearidons","size":1280,"baseToBase":707},"vsrlunar":{"pools":7,"loose":195,"author":"{bac}MalevolencE","size":1280,"baseToBase":1188},"vsrlunix":{"pools":7,"loose":250,"author":"Vearidons","size":640,"baseToBase":1050},"rjx-mars":{"pools":6,"loose":-1,"author":"NA","size":1280,"baseToBase":951},"stmayhem":{"pools":7,"loose":250,"author":"{bac}appel","size":1024,"baseToBase":1192},"stmesavsr":{"pools":7,"loose":280,"author":"{bac}appel","size":1024,"baseToBase":1103},"stmagmavsr":{"pools":6,"loose":250,"author":"{bac}Cyber","size":512,"baseToBase":561},"vsrmardenwarfare":{"pools":6,"loose":210,"author":"blue_banana","size":1152,"baseToBase":0},"vsrmojave":{"pools":7,"loose":175,"author":"{bac}MalevolencE","size":1280,"baseToBase":1088},"vsrmortwasteland":{"pools":7,"loose":290,"author":"Mortarion","size":2048,"baseToBase":996},"vsrmexican":{"pools":7,"loose":190,"author":"Vearidons","size":1024,"baseToBase":1012},"mntnpass":{"pools":7,"loose":320,"author":"BZ2CP","size":1280,"baseToBase":1120},"vsrmoonshrd":{"pools":7,"loose":110,"author":"{uscm}DarkFox","size":1024,"baseToBase":775},"mtntopbzcc":{"pools":7,"loose":-1,"author":"Aegeis","size":1024,"baseToBase":0},"stmurkybzcc":{"pools":6,"loose":-1,"author":"Aegeis","size":2048,"baseToBase":0},"vsrmidwars":{"pools":6,"loose":-1,"author":"ExE","size":1024,"baseToBase":1131},"vsrmiredon":{"pools":5,"loose":220,"author":"ExE","size":640,"baseToBase":838},"vsrnomnld":{"pools":7,"loose":-1,"author":"Angelwing","size":2048,"baseToBase":723},"vsrnigeria":{"pools":7,"loose":200,"author":"Vearidons","size":896,"baseToBase":771},"vsroverlook":{"pools":8,"loose":225,"author":"Feared_1","size":2048,"baseToBase":1280},"vsrogg":{"pools":7,"loose":260,"author":"Vearidons","size":1024,"baseToBase":1073},"vsroldboy":{"pools":7,"loose":190,"author":"NA","size":1024,"baseToBase":960},"vsroxide":{"pools":7,"loose":280,"author":"TimeVirus","size":1024,"baseToBase":1315},"cpoutposts":{"pools":6,"loose":-1,"author":"BZ2CP","size":2048,"baseToBase":836},"vsroasis":{"pools":7,"loose":220,"author":"Gravey","size":2048,"baseToBase":1216},"stphoenixvsr":{"pools":7,"loose":220,"author":"{bac}appel","size":1024,"baseToBase":1089},"stpitbull":{"pools":7,"loose":0,"author":"{bac}appel","size":1024,"baseToBase":768},"zprodigyv2":{"pools":8,"loose":-1,"author":"{bac}MalevolencE","size":640,"baseToBase":1222},"vsrpstrgle":{"pools":7,"loose":265,"author":"NA","size":1024,"baseToBase":448},"vsrpitfall":{"pools":7,"loose":160,"author":"Vearidons","size":1024,"baseToBase":842},"vsrplaza":{"pools":7,"loose":390,"author":"TimeVirus","size":1280,"baseToBase":896},"vsrplus":{"pools":7,"loose":380,"author":"ExE","size":1024,"baseToBase":906},"vsrquarry2":{"pools":7,"loose":270,"author":"Vearidons","size":1280,"baseToBase":1042},"stquagmirevsr":{"pools":7,"loose":200,"author":"{bac}appel","size":1024,"baseToBase":1027},"stredslopevsr":{"pools":7,"loose":255,"author":"{bac}appel","size":1024,"baseToBase":916},"streflexvsr":{"pools":7,"loose":240,"author":"{bac}appel","size":1024,"baseToBase":1180},"strendonvsr":{"pools":8,"loose":190,"author":"{bac}appel","size":1024,"baseToBase":992},"stridges":{"pools":6,"loose":220,"author":"{bac}appel","size":1024,"baseToBase":1108},"vsrredbluff":{"pools":7,"loose":270,"author":"TimeVirus","size":1024,"baseToBase":1732},"vsrrevo":{"pools":7,"loose":260,"author":"Mad-Dog","size":512,"baseToBase":669},"vsrravine":{"pools":7,"loose":250,"author":"{bac}MalevolencE","size":2048,"baseToBase":1505},"vsrremnant":{"pools":7,"loose":160,"author":"{bac}MalevolencE","size":640,"baseToBase":1001},"vsrroyal":{"pools":7,"loose":140,"author":"spAce","size":512,"baseToBase":759},"vsrragnor":{"pools":7,"loose":230,"author":"Vearidons","size":1024,"baseToBase":1090},"vsrrapemas":{"pools":7,"loose":270,"author":"Vearidons","size":1024,"baseToBase":962},"vsrrectal":{"pools":7,"loose":170,"author":"Vearidons","size":896,"baseToBase":730},"starena":{"pools":7,"loose":220,"author":"{bac}appel","size":1024,"baseToBase":862},"stsinister":{"pools":7,"loose":230,"author":"Feared_1","size":1152,"baseToBase":1016},"vsr6way":{"pools":6,"loose":425,"author":"Laguna","size":2048,"baseToBase":832},"vsrsahara":{"pools":7,"loose":200,"author":"{bac}MalevolencE","size":1280,"baseToBase":1242},"vsrsatart":{"pools":7,"loose":220,"author":"Vearidons","size":1024,"baseToBase":771},"vsrscammed":{"pools":7,"loose":180,"author":"Vearidons","size":1024,"baseToBase":1132},"vsrscioncent":{"pools":7,"loose":270,"author":"ExE","size":1280,"baseToBase":1152},"vsrlunast":{"pools":7,"loose":180,"author":"blue_banana","size":1184,"baseToBase":896},"vsrstack":{"pools":7,"loose":260,"author":"Vearidons","size":1024,"baseToBase":896},"vsrswgas":{"pools":6,"loose":120,"author":"Vearidons","size":896,"baseToBase":746},"vsrlanes":{"pools":7,"loose":-1,"author":"TimeVirus","size":1280,"baseToBase":1222},"stonevsr":{"pools":7,"loose":-1,"author":"Aegeis","size":2048,"baseToBase":0},"vsrsnowcentral":{"pools":7,"loose":270,"author":"ExE","size":1280,"baseToBase":1024},"strock":{"pools":7,"loose":-1,"author":"Stock","size":512,"baseToBase":288},"sttempestvsr":{"pools":6,"loose":285,"author":"{bac}appel","size":1024,"baseToBase":1182},"vsrterron":{"pools":7,"loose":280,"author":"{bac}appel","size":1024,"baseToBase":1088},"sttrenchvsr":{"pools":7,"loose":220,"author":"{bac}appel","size":1024,"baseToBase":1093},"vsrsttitan":{"pools":7,"loose":200,"author":"Blade","size":2048,"baseToBase":973},"sttrailvsr":{"pools":7,"loose":310,"author":"Death.System","size":2048,"baseToBase":1449},"vsrthewar":{"pools":7,"loose":220,"author":"Vearidons","size":1024,"baseToBase":758},"vsrthrob":{"pools":7,"loose":165,"author":"Vearidons","size":1024,"baseToBase":960},"vsrtrapped":{"pools":7,"loose":270,"author":"Vearidons","size":1024,"baseToBase":1090},"vsrbridgest":{"pools":7,"loose":250,"author":"blue_banana","size":1024,"baseToBase":1088},"vsrterrace":{"pools":7,"loose":140,"author":"TimeVirus","size":1024,"baseToBase":768},"vsrtransfer":{"pools":7,"loose":0,"author":"Gravey","size":512,"baseToBase":996},"vsrtwinpeaks":{"pools":7,"loose":280,"author":"ExE","size":1024,"baseToBase":1020},"vsrtwohills":{"pools":7,"loose":270,"author":"ExE","size":640,"baseToBase":1109},"vsruxbridge":{"pools":7,"loose":200,"author":"{bac}MalevolencE","size":512,"baseToBase":728},"vsrvort":{"pools":7,"loose":250,"author":"{LoC}StormFront","size":640,"baseToBase":830},"vsrvegan":{"pools":7,"loose":190,"author":"Vearidons","size":1024,"baseToBase":771},"vsrwales":{"pools":7,"loose":235,"author":"{bac}MalevolencE","size":896,"baseToBase":1441},"vsrwout":{"pools":7,"loose":355,"author":"Feared_1","size":2048,"baseToBase":980},"wintervalley":{"pools":7,"loose":205,"author":"Feared_1","size":640,"baseToBase":705},"vsrphazon":{"pools":8,"loose":-1,"author":"Gravey","size":1024,"baseToBase":1152},"vsrrift2":{"pools":7,"loose":0,"author":"Gravey","size":1024,"baseToBase":1875},"vsrtrinity":{"pools":7,"loose":300,"author":"{LoC}StormFront","size":2048,"baseToBase":1200}};
 
   // ============================================================================
-  // CONSTANTS & ENUMS
+  // CONSTANTS & NAME TABLES (MSL string IDs)
   // ============================================================================
 
   /**
-   * ServerInfoMode - The si field values
-   * Determines the current state of the game session
+   * Display names for MSL `Level.GameType.ID` values.
+   * The API's own `DataCache.Level.GameType[<id>].Name` takes precedence
+   * when present; this table is the offline fallback.
    */
-  const ServerInfoMode = {
-    UNKNOWN: 0,
-    OPEN_WAITING: 1,      // PreGame, has open slots
-    CLOSED_WAITING: 2,    // PreGame, full
-    OPEN_PLAYING: 3,      // InGame, has open slots
-    CLOSED_PLAYING: 4,    // InGame, full
-    EXITING: 5            // PostGame
+  const GAME_TYPE_NAMES = {
+    STRAT: 'Strategy',
+    DM: 'Deathmatch',
+    ALL: 'All'
   };
 
   /**
-   * NAT Type - The t field values
-   * Describes the NAT traversal capabilities
+   * Display names for MSL `Level.GameMode.ID` values. Note the BZCC quirk
+   * carried over from the legacy enum: mode "STRAT" is TEAM strategy, the
+   * free-for-all variant is "FFA".
    */
-  const NATType = {
-    NONE: 0,              // Works with anyone (direct connect)
-    FULL_CONE: 1,         // Accepts any datagrams to a previously used port
-    ADDRESS_RESTRICTED: 2, // Accepts from IPs we've sent to
-    PORT_RESTRICTED: 3,   // Same as above but port must match too
-    SYMMETRIC: 4,         // Different port for every destination
-    UNKNOWN: 5,           // Hasn't been determined
-    DETECTION_IN_PROGRESS: 6,
-    SUPPORTS_UPNP: 7      // Has UPNP, equivalent to NONE
+  const GAME_MODE_NAMES = {
+    STRAT: 'Team Strategy',
+    MPI: 'MPI',
+    FFA: 'Free for All',
+    DM: 'Deathmatch',
+    TEAM_DM: 'Team Deathmatch',
+    KOTH: 'King of the Hill',
+    TEAM_KOTH: 'Team King of the Hill',
+    CTF: 'Capture the Flag',
+    TEAM_CTF: 'Team Capture the Flag',
+    LOOT: 'Loot',
+    TEAM_LOOT: 'Team Loot',
+    RACE: 'Race',
+    TEAM_RACE: 'Team Race'
   };
 
-  const NATTypeNames = {
-    [NATType.NONE]: 'None',
-    [NATType.FULL_CONE]: 'Full Cone',
-    [NATType.ADDRESS_RESTRICTED]: 'Address Restricted',
-    [NATType.PORT_RESTRICTED]: 'Port Restricted',
-    [NATType.SYMMETRIC]: 'Symmetric',
-    [NATType.UNKNOWN]: 'Unknown',
-    [NATType.DETECTION_IN_PROGRESS]: 'Detecting...',
-    [NATType.SUPPORTS_UPNP]: 'UPnP'
-  };
+  /** Game modes rendered with the two-team column layout. */
+  function isTeamGameMode(gameMode) {
+    if (!gameMode) return false;
+    return gameMode === 'STRAT' || gameMode === 'MPI' || gameMode.startsWith('TEAM_');
+  }
 
   /**
-   * Game Type - The gt field values
+   * Display names for MSL `Address.NAT_TYPE` values (normalized: uppercase,
+   * underscores -> spaces).
    */
-  const GameType = {
-    ALL: 0,        // Invalid/unknown
-    DEATHMATCH: 1,
-    STRATEGY: 2
-  };
-
-  /**
-   * Game Mode - Derived from gtd field
-   * For Deathmatch: gtd % GAMEMODE_MAX gives the mode
-   */
-  const GameMode = {
-    UNKNOWN: 0,
-    DM: 1,
-    TEAM_DM: 2,
-    KOTH: 3,
-    TEAM_KOTH: 4,
-    CTF: 5,
-    TEAM_CTF: 6,
-    LOOT: 7,
-    TEAM_LOOT: 8,
-    RACE: 9,
-    TEAM_RACE: 10,
-    STRAT: 11,       // FFA Strategy
-    TEAM_STRAT: 12,  // Team Strategy
-    MPI: 13,         // Multiplayer Instant Action
-    GAMEMODE_MAX: 14
-  };
-
-  const GameModeNames = {
-    [GameMode.UNKNOWN]: 'Unknown',
-    [GameMode.DM]: 'Deathmatch',
-    [GameMode.TEAM_DM]: 'Team Deathmatch',
-    [GameMode.KOTH]: 'King of the Hill',
-    [GameMode.TEAM_KOTH]: 'Team King of the Hill',
-    [GameMode.CTF]: 'Capture the Flag',
-    [GameMode.TEAM_CTF]: 'Team Capture the Flag',
-    [GameMode.LOOT]: 'Loot',
-    [GameMode.TEAM_LOOT]: 'Team Loot',
-    [GameMode.RACE]: 'Race',
-    [GameMode.TEAM_RACE]: 'Team Race',
-    [GameMode.STRAT]: 'Free for All',
-    [GameMode.TEAM_STRAT]: 'Team Strategy',
-    [GameMode.MPI]: 'MPI'
+  const NAT_TYPE_NAMES = {
+    'NONE': 'None',
+    'FULL CONE': 'Full Cone',
+    'ADDRESS RESTRICTED': 'Address Restricted',
+    'PORT RESTRICTED': 'Port Restricted',
+    'SYMMETRIC': 'Symmetric',
+    'UNKNOWN': 'Unknown',
+    'DETECTION IN PROGRESS': 'Detecting...',
+    'SUPPORTS UPNP': 'UPnP'
   };
 
   // ============================================================================
@@ -255,30 +275,52 @@ const BZ2API = (function() {
   }
 
   /**
+   * Collect the session's mod IDs, primary mod first.
+   * @param {Object} game - MSL session `Game` block ({Mod, Mods, ...})
+   * @returns {string[]} Deduped mod ID strings
+   */
+  function collectModIds(game) {
+    const out = [];
+    const push = (id) => {
+      if (id === null || id === undefined || id === '') return;
+      const s = String(id);
+      if (!out.includes(s)) out.push(s);
+    };
+    if (game) {
+      push(game.Mod);
+      if (Array.isArray(game.Mods)) game.Mods.forEach(push);
+    }
+    return out;
+  }
+
+  /**
    * Build a Steam protocol URL for directly joining a game session
-   * @param {Object} raw - Raw session data from API
+   * @param {Object} raw - Raw MSL session object
    * @returns {string|null} Steam join URL or null if session can't be joined
    */
   function buildSteamJoinUrl(raw) {
+    const status = (raw && raw.Status) || {};
+    const game = (raw && raw.Game) || {};
+    const addr = (raw && raw.Address) || {};
+
     // Can't join locked or password-protected games
-    if (raw.l === 1 || raw.k === 1) {
+    if (status.IsLocked === true || status.HasPassword === true) {
       return null;
     }
 
     // Need at least a mod ID to build the join URL
-    const mods = parseModIds(raw.mm);
+    const mods = collectModIds(game);
     if (mods.length === 0) {
       return null;
     }
 
-    // Get the session name (decoded)
-    const sessionName = decodeBase64Name(raw.n);
-    
+    const sessionName = raw.Name || '';
+
     // Build mod list (semicolon-separated)
     const modList = mods.join(';');
-    
-    // NAT address is the 'g' field (RakNet GUID in custom Base64)
-    const natAddress = raw.g || '';
+
+    // NAT address (RakNet GUID in custom Base64, e.g. "aVfkd28@GK")
+    const natAddress = addr.NAT || '';
 
     // Build args: N,{nameLen},{name},{modListLen},{modList},{nat},0,
     const args = [
@@ -334,183 +376,81 @@ const BZ2API = (function() {
   // ============================================================================
 
   /**
-   * Get session state from ServerInfoMode (si) field
-   * @param {number} si - ServerInfoMode value
-   * @param {Array} players - Player array to check for in-game stats
-   * @returns {Object} State information
+   * Session state from the MSL `Status` block + player counts.
+   * MSL surfaces the state directly as a string ("PreGame" | "InGame" |
+   * "PostGame"), already reconciled upstream, so no stats-based override
+   * heuristic is needed anymore.
+   * @param {Object} status - MSL Status ({State, IsLocked, HasPassword})
+   * @param {number|null} playerCount
+   * @param {number|null} maxPlayers
+   * @returns {Object} State information (legacy shape)
    */
-  function parseSessionState(si, players = []) {
-    // Check if any players have in-game stats (score/kills/deaths)
-    // This can override PreGame state if game has actually started
-    const hasInGameStats = players.some(p => 
-      (p.score && p.score !== 0) || 
-      (p.kills && p.kills !== 0) || 
-      (p.deaths && p.deaths !== 0)
-    );
+  function parseSessionState(status, playerCount, maxPlayers) {
+    const rawState = status && typeof status.State === 'string' ? status.State : '';
+    const known = rawState === 'PreGame' || rawState === 'InGame' || rawState === 'PostGame';
+    const state = known ? rawState : 'Unknown';
+    const hasRoom = Number.isFinite(playerCount) && Number.isFinite(maxPlayers)
+      ? playerCount < maxPlayers
+      : false;
 
-    let state, stateDetail;
-    
-    switch (si) {
-      case ServerInfoMode.UNKNOWN:
-        state = 'Unknown';
-        stateDetail = 'unknown';
-        break;
-      case ServerInfoMode.OPEN_WAITING:
-      case ServerInfoMode.CLOSED_WAITING:
-        // Override to InGame if players have stats
-        if (hasInGameStats) {
-          state = 'InGame';
-          stateDetail = 'playing';
-        } else {
-          state = 'PreGame';
-          stateDetail = si === ServerInfoMode.OPEN_WAITING ? 'waiting' : 'full';
-        }
-        break;
-      case ServerInfoMode.OPEN_PLAYING:
-      case ServerInfoMode.CLOSED_PLAYING:
-        state = 'InGame';
-        stateDetail = si === ServerInfoMode.OPEN_PLAYING ? 'playing' : 'full';
-        break;
-      case ServerInfoMode.EXITING:
-        state = 'PostGame';
-        stateDetail = 'exiting';
-        break;
-      default:
-        state = 'Unknown';
-        stateDetail = 'unknown';
-    }
+    let stateDetail = 'unknown';
+    if (state === 'PreGame') stateDetail = hasRoom ? 'waiting' : 'full';
+    else if (state === 'InGame') stateDetail = hasRoom ? 'playing' : 'full';
+    else if (state === 'PostGame') stateDetail = 'exiting';
 
     return {
       state,
       stateDetail,
-      serverInfoMode: si,
-      hasOpenSlots: si === ServerInfoMode.OPEN_WAITING || si === ServerInfoMode.OPEN_PLAYING
+      serverInfoMode: null, // legacy numeric `si` — not exposed by MSL
+      hasOpenSlots: state !== 'PostGame' && hasRoom
     };
   }
 
   /**
-   * Get NAT type information from t field
-   * @param {number} t - NAT type value
-   * @returns {Object} NAT type information
+   * Get NAT type information from MSL `Address.NAT_TYPE`
+   * @param {string|null} t - NAT type string (e.g. "SYMMETRIC", "FULL CONE")
+   * @returns {Object} NAT type information (legacy shape)
    */
   function parseNATType(t) {
+    const norm = (t === null || t === undefined)
+      ? ''
+      : String(t).toUpperCase().replace(/_/g, ' ').trim();
+    const name = NAT_TYPE_NAMES[norm]
+      || (norm ? norm.charAt(0) + norm.slice(1).toLowerCase() : 'Unknown');
     return {
-      id: t,
-      name: NATTypeNames[t] || `Unknown (${t})`,
-      canDirectConnect: t === NATType.NONE || t === NATType.SUPPORTS_UPNP,
-      isSymmetric: t === NATType.SYMMETRIC
+      id: t ?? null,
+      name,
+      canDirectConnect: norm === 'NONE' || norm === 'SUPPORTS UPNP',
+      isSymmetric: norm === 'SYMMETRIC'
     };
   }
 
   /**
-   * Parse game type and mode from gt and gtd fields
-   * @param {number} gt - Game type (1=DM, 2=Strategy)
-   * @param {number} gtd - Game subtype/mode details
-   * @returns {Object} Game type and mode information
+   * Game type and mode from the MSL `Level` block.
+   * @param {Object} level - MSL Level ({GameType:{ID}, GameMode:{ID}, ...})
+   * @param {Object} [dataCacheLevel] - MSL `DataCache.Level` (API-provided
+   *   display names, preferred over the local fallback tables)
+   * @returns {Object} Game type and mode information (legacy shape)
    */
-  function parseGameTypeAndMode(gt, gtd) {
-    const result = {
-      gameType: null,
-      gameTypeName: null,
-      gameMode: null,
-      gameModeName: null,
-      isTeamGame: false,
-      respawn: 'One', // Default: one life
-      vehicleOnly: false,
+  function parseGameInfo(level, dataCacheLevel) {
+    const gt = (level && level.GameType && level.GameType.ID) || null;
+    const gm = (level && level.GameMode && level.GameMode.ID) || null;
+    const dcTypes = (dataCacheLevel && dataCacheLevel.GameType) || {};
+    const dcModes = (dataCacheLevel && dataCacheLevel.GameMode) || {};
+
+    return {
+      gameType: gt,
+      gameTypeName: gt
+        ? ((dcTypes[gt] && dcTypes[gt].Name) || GAME_TYPE_NAMES[gt] || gt)
+        : null,
+      gameMode: gm,
+      gameModeName: gm
+        ? ((dcModes[gm] && dcModes[gm].Name) || GAME_MODE_NAMES[gm] || gm)
+        : null,
+      isTeamGame: isTeamGameMode(gm),
       rawGameType: gt,
-      rawGameSubType: gtd
+      rawGameSubType: gm
     };
-
-    if (gt === GameType.DEATHMATCH) {
-      result.gameType = 'DM';
-      result.gameTypeName = 'Deathmatch';
-      
-      if (gtd !== null && gtd !== undefined) {
-        const modeBase = gtd % GameMode.GAMEMODE_MAX;
-        const detailed = Math.floor(gtd / GameMode.GAMEMODE_MAX);
-        
-        // Extract respawn flags from detailed value
-        const detailedFlags = detailed & 0xFF;
-        if (detailed & 256) {
-          result.respawn = 'Race'; // Respawn same race
-        } else if (detailed & 512) {
-          result.respawn = 'Any'; // Respawn any race
-        }
-        
-        // Determine if it's a team mode (odd numbers are team modes)
-        result.isTeamGame = modeBase % 2 === 0 && modeBase >= 2 && modeBase <= 10;
-        
-        // Map detailed mode to game mode
-        switch (detailedFlags) {
-          case 0: // DM
-            result.gameMode = result.isTeamGame ? 'TEAM_DM' : 'DM';
-            result.gameModeName = result.isTeamGame ? 'Team Deathmatch' : 'Deathmatch';
-            break;
-          case 1: // KOTH
-            result.gameMode = result.isTeamGame ? 'TEAM_KOTH' : 'KOTH';
-            result.gameModeName = result.isTeamGame ? 'Team King of the Hill' : 'King of the Hill';
-            break;
-          case 2: // CTF
-            result.gameMode = result.isTeamGame ? 'TEAM_CTF' : 'CTF';
-            result.gameModeName = result.isTeamGame ? 'Team Capture the Flag' : 'Capture the Flag';
-            break;
-          case 3: // Loot
-            result.gameMode = result.isTeamGame ? 'TEAM_LOOT' : 'LOOT';
-            result.gameModeName = result.isTeamGame ? 'Team Loot' : 'Loot';
-            break;
-          case 5: // Race
-            result.gameMode = result.isTeamGame ? 'TEAM_RACE' : 'RACE';
-            result.gameModeName = result.isTeamGame ? 'Team Race' : 'Race';
-            break;
-          case 6: // Race (Vehicle Only)
-            result.gameMode = result.isTeamGame ? 'TEAM_RACE' : 'RACE';
-            result.gameModeName = result.isTeamGame ? 'Team Race' : 'Race';
-            result.vehicleOnly = true;
-            break;
-          case 7: // DM (Vehicle Only)
-            result.gameMode = result.isTeamGame ? 'TEAM_DM' : 'DM';
-            result.gameModeName = result.isTeamGame ? 'Team Deathmatch' : 'Deathmatch';
-            result.vehicleOnly = true;
-            break;
-          default:
-            result.gameMode = 'DM';
-            result.gameModeName = 'Deathmatch';
-        }
-      }
-    } else if (gt === GameType.STRATEGY) {
-      result.gameType = 'STRAT';
-      result.gameTypeName = 'Strategy';
-      
-      if (gtd !== null && gtd !== undefined) {
-        const modeBase = gtd % GameMode.GAMEMODE_MAX;
-        
-        switch (modeBase) {
-          case GameMode.STRAT: // 11 - FFA Strategy
-            result.gameMode = 'FFA';
-            result.gameModeName = 'Free for All';
-            result.isTeamGame = false;
-            break;
-          case GameMode.TEAM_STRAT: // 12 - Team Strategy
-            result.gameMode = 'STRAT';
-            result.gameModeName = 'Team Strategy';
-            result.isTeamGame = true;
-            break;
-          case GameMode.MPI: // 13 - MPI
-            result.gameMode = 'MPI';
-            result.gameModeName = 'MPI';
-            result.isTeamGame = true; // MPI is co-op (one human team vs AI)
-            break;
-          default:
-            result.gameMode = 'STRAT';
-            result.gameModeName = 'Strategy';
-        }
-      }
-    } else if (gt === 0) {
-      result.gameType = 'ALL';
-      result.gameTypeName = 'All';
-    }
-
-    return result;
   }
 
   /**
@@ -523,114 +463,102 @@ const BZ2API = (function() {
     return mm.split(';').filter(id => id.length > 0);
   }
 
-  /**
-   * Convert mod IDs to enriched mod objects with workshop URLs
-   * @param {string[]} modIds - Array of mod ID strings
-   * @returns {Object[]} Array of mod objects with id and workshopUrl
-   */
-  function enrichMods(modIds) {
-    return modIds.map(id => ({
-      id: id,
-      name: id === '0' ? 'Stock' : null, // Only stock has a known name
-      workshopUrl: buildWorkshopUrl(id)
-    }));
-  }
-
-  /**
-   * Parse time limit from gtm field
-   * @param {number} gtm - Game time max value (255 = unlimited/maxed)
-   * @returns {Object} Time limit info
-   */
-  function parseTimeLimit(gtm) {
-    if (gtm === 255) {
-      return { unlimited: true, minutes: null, maxedOut: true };
-    }
-    return { unlimited: false, minutes: gtm, maxedOut: false };
-  }
-
   // ============================================================================
   // MAIN PARSERS
   // ============================================================================
 
   /**
-   * Parse a player object from raw API data
-   * @param {Object} rawPlayer - Raw player object from API
-   * @param {number} index - Player index in the list
+   * Parse a player object from an MSL session's Players[] entry
+   * @param {Object} rawPlayer - MSL player object
+   * @param {number} index - Player index in the list (0 = host)
    * @param {boolean} isTeamGame - Whether this is a team game
    * @param {boolean} isMPI - Whether this is an MPI game
-   * @returns {Object} Parsed player object
+   * @param {string|null} gameMode - MSL GameMode.ID (commander detection)
+   * @returns {Object} Parsed player object (legacy shape)
    */
   function parsePlayer(rawPlayer, index = 0, isTeamGame = false, isMPI = false, gameMode = null) {
+    const ids = (rawPlayer && rawPlayer.IDs) || {};
+    const teamBlock = (rawPlayer && rawPlayer.Team) || null;
+    const stats = (rawPlayer && rawPlayer.Stats) || null;
+
+    // MSL omits zero-valued keys inside `Stats`; the block existing means the
+    // engine reported stats, so an absent key is a true zero. No block at all
+    // (pregame / not yet reported) stays null -> UI renders '-'.
+    const stat = (key) => (stats ? (Number.isFinite(stats[key]) ? stats[key] : 0) : null);
+
+    let teamSlot = null;
+    if (teamBlock && teamBlock.SubTeam && teamBlock.SubTeam.ID !== undefined) {
+      const n = parseInt(teamBlock.SubTeam.ID, 10);
+      if (Number.isFinite(n)) teamSlot = n;
+    }
+
     const player = {
-      name: decodeBase64Name(rawPlayer.n),
-      
-      // IDs
-      rawId: rawPlayer.i,
+      name: (rawPlayer && rawPlayer.Name) || '',
+
+      // IDs (rawId keeps the legacy "S<steam64>" / "G<gogId>" form via BZRNet)
+      rawId: (ids.BZRNet && ids.BZRNet.ID) || null,
       steamId: null,
       gogId: null,
       platform: null,
       profileUrl: null,
-      
+
       // Stats
-      kills: rawPlayer.k ?? null,
-      deaths: rawPlayer.d ?? null,
-      score: rawPlayer.s ?? null,
-      
+      kills: stat('Kills'),
+      deaths: stat('Deaths'),
+      score: stat('Score'),
+
       // Team info
-      teamSlot: rawPlayer.t ?? null,
+      teamSlot,
       team: null,
       isTeamLeader: false,
       isCommander: false,
       teamIndex: null,
-      
+
       // Status flags
       isHost: index === 0,
       isHidden: false
     };
 
-    // Parse player ID to extract platform and build profile URL
-    if (rawPlayer.i) {
-      const idPrefix = rawPlayer.i[0];
-      const idValue = rawPlayer.i.substring(1);
-      
-      if (idPrefix === 'S') {
-        player.steamId = idValue;
-        player.platform = 'Steam';
-        player.profileUrl = buildSteamProfileUrl(idValue);
-      } else if (idPrefix === 'G') {
-        // GOG IDs need high bits cleaned for proper profile URLs
-        const cleanedGogId = cleanGogId(idValue);
-        player.gogId = cleanedGogId;
-        player.gogIdRaw = idValue; // Keep raw for debugging
-        player.platform = 'GOG';
-        player.profileUrl = buildGogProfileUrl(cleanedGogId);
-      }
+    // Platform IDs + profile URL
+    const steamIdRaw = ids.Steam && (ids.Steam.ID ?? ids.Steam.Raw);
+    const gogIdRaw = ids.Gog && (ids.Gog.ID ?? ids.Gog.Raw);
+    if (steamIdRaw !== undefined && steamIdRaw !== null) {
+      player.steamId = String(steamIdRaw);
+      player.platform = 'Steam';
+      player.profileUrl = buildSteamProfileUrl(player.steamId);
+    } else if (gogIdRaw !== undefined && gogIdRaw !== null) {
+      // GOG IDs need high bits cleaned for proper profile URLs
+      const cleanedGogId = cleanGogId(String(gogIdRaw));
+      player.gogId = cleanedGogId;
+      player.gogIdRaw = String(gogIdRaw); // Keep raw for debugging
+      player.platform = 'GOG';
+      player.profileUrl = buildGogProfileUrl(cleanedGogId);
     }
 
     // Check if player is hidden (no team assignment)
     // Hidden players are spectators or in a glitched state
-    if (player.teamSlot === null || player.teamSlot === 255) {
+    if (!teamBlock || teamSlot === null || teamSlot === 255) {
       player.isHidden = true;
     }
 
     // Parse team assignment
-    if (player.teamSlot !== null && player.teamSlot !== 255) {
+    if (teamSlot !== null && teamSlot !== 255) {
       if (isTeamGame && !isMPI) {
         // Two-team game: slots 1-5 = team 1, slots 6-10 = team 2
-        if (player.teamSlot >= 1 && player.teamSlot <= 5) {
+        if (teamSlot >= 1 && teamSlot <= 5) {
           player.team = 1;
-          player.teamIndex = player.teamSlot - 1;
-          player.isTeamLeader = player.teamSlot === 1;
-        } else if (player.teamSlot >= 6 && player.teamSlot <= 10) {
+          player.teamIndex = teamSlot - 1;
+          player.isTeamLeader = teamBlock.Leader === true || teamSlot === 1;
+        } else if (teamSlot >= 6 && teamSlot <= 10) {
           player.team = 2;
-          player.teamIndex = player.teamSlot - 6;
-          player.isTeamLeader = player.teamSlot === 6;
+          player.teamIndex = teamSlot - 6;
+          player.isTeamLeader = teamBlock.Leader === true || teamSlot === 6;
         }
       } else if (isMPI) {
         // MPI: all humans on team 1
         player.team = 1;
-        player.teamIndex = player.teamSlot - 1;
-        player.isTeamLeader = player.teamSlot === 1;
+        player.teamIndex = teamSlot - 1;
+        player.isTeamLeader = teamBlock.Leader === true || teamSlot === 1;
       }
     }
 
@@ -644,100 +572,145 @@ const BZ2API = (function() {
   }
 
   /**
-   * Parse a session object from raw API data
-   * @param {Object} raw - Raw session object from API
-   * @returns {Object} Parsed session object
+   * Parse a session object from the MSL API
+   * @param {Object} raw - Raw MSL session object (an entry of `Sessions[]`)
+   * @param {Object} [ctx] - Payload context: `{ mods, dataCache }` from the
+   *   top-level MSL response (mod names + display-name lookups). Optional so
+   *   a bare session can still be parsed.
+   * @returns {Object} Parsed session object (legacy shape)
    */
-  function parseSession(raw) {
+  function parseSession(raw, ctx = {}) {
+    const level = raw.Level || {};
+    const status = raw.Status || {};
+    const game = raw.Game || {};
+    const attrs = raw.Attributes || {};
+    const addr = raw.Address || {};
+    const time = raw.Time || {};
+    const modsDict = (ctx && ctx.mods) || {};
+
     // Parse game type and mode first (needed for player parsing)
-    const gameInfo = parseGameTypeAndMode(raw.gt, raw.gtd);
+    const gameInfo = parseGameInfo(level, ctx && ctx.dataCache && ctx.dataCache.Level);
     const isMPI = gameInfo.gameMode === 'MPI';
-    
+
     // Parse players with game context (pass gameMode for commander detection)
-    const players = (raw.pl || []).map((p, i) => 
+    const players = (raw.Players || []).map((p, i) =>
       parsePlayer(p, i, gameInfo.isTeamGame, isMPI, gameInfo.gameMode)
     );
-    
-    // Parse session state (needs players for stat checking)
-    const stateInfo = parseSessionState(raw.si, players);
-    
-    // Parse other fields
-    const natInfo = parseNATType(raw.t);
-    const timeLimitInfo = parseTimeLimit(raw.gtm);
-    const modIds = parseModIds(raw.mm);
-    const mods = enrichMods(modIds);
+
+    // Player counts
+    const playerCount = (raw.PlayerCount && Number.isFinite(raw.PlayerCount.Player))
+      ? raw.PlayerCount.Player
+      : players.length;
+    let maxPlayers = null;
+    if (Array.isArray(raw.PlayerTypes) && raw.PlayerTypes.length) {
+      const pt = raw.PlayerTypes.find(t => Array.isArray(t && t.Types) && t.Types.includes('Player'))
+        || raw.PlayerTypes[0];
+      if (pt && Number.isFinite(pt.Max)) maxPlayers = pt.Max;
+    }
+
+    // Session state + NAT
+    const stateInfo = parseSessionState(status, playerCount, maxPlayers);
+    const natInfo = parseNATType(addr.NAT_TYPE);
+
+    // Mods: primary first; names + workshop URLs from the payload's Mods dict
+    const modIds = collectModIds(game);
+    const mods = modIds.map(id => {
+      const entry = modsDict[id];
+      return {
+        id,
+        name: (entry && entry.Name) || (id === '0' ? 'Stock' : null),
+        workshopUrl: (entry && entry.Url) || buildWorkshopUrl(id)
+      };
+    });
 
     // Decode GUID and convert to hex string (BigInt can't be JSON serialized)
-    const guidBigInt = decodeRakNetGuid(raw.g);
-    
+    const guidBigInt = decodeRakNetGuid(addr.NAT);
+
     // Build Steam join URL (returns null if locked/password-protected)
     const steamJoinUrl = buildSteamJoinUrl(raw);
-    
+
     // Collect commanders (players with isCommander: true)
     const commanders = players
       .filter(p => p.isCommander)
       .map(p => p.name);
-    
+
     // Collect hidden players (spectators/glitched)
     const hiddenPlayers = players
       .filter(p => p.isHidden)
       .map(p => p.name);
-    
+
     // Detect VSR (Vet Strategy Recycler) balance mod
     const isVSR = modIds.includes(VSR_MOD_ID);
-    
+    const vsrEntry = isVSR ? modsDict[VSR_MOD_ID] : null;
+
+    // Elapsed time: MSL reports seconds at minute resolution; Max means the
+    // engine's minute counter pegged (legacy '>255' display sentinel).
+    const elapsedMinutes = Math.floor((Number.isFinite(time.Seconds) ? time.Seconds : 0) / 60);
+    const timeElapsedMinutes = time.Max === true ? '>255' : elapsedMinutes;
+
+    // Map file, normalized to the legacy no-extension form
+    const mapFile = level.MapFile ? String(level.MapFile).replace(/\.bzn$/i, '') : null;
+
     return {
       // Identity
-      id: raw.g,
+      id: raw.ID || addr.NAT || raw.Name || null,
       guid: guidBigInt ? guidBigInt.toString(16).padStart(16, '0') : null,
-      name: decodeBase64Name(raw.n),
-      
+      name: raw.Name || '',
+
       // Game info
-      version: raw.v,
+      version: game.Version || null,
       ...gameInfo,
-      
+
       // Game balance (VSR detection)
       gameBalance: isVSR ? 'VSR' : null,
-      gameBalanceName: isVSR ? 'Vet Strategy Recycler Variant' : null,
-      
-      // Map
-      mapFile: raw.m,
-      mapUrl: raw.mu || null,
-      
+      gameBalanceName: isVSR
+        ? ((vsrEntry && vsrEntry.Name) || 'Vet Strat Recycler Variant')
+        : null,
+
+      // Map (inline from MSL; local registry / iondriver enrichment may
+      // override or fill gaps afterwards)
+      mapFile,
+      mapUrl: level.Image || null,
+      mapName: level.Name || null,
+      mapDescription: level.Description || null,
+      mapImageUrl: level.Image || null,
+      teamNames: { team1: null, team2: null },
+
       // Players
       players,
-      playerCount: players.length,
-      maxPlayers: raw.pm,
+      playerCount,
+      maxPlayers,
       commanders,
       hiddenPlayers,
-      
+
       // Mods
       mods,
       primaryMod: modIds[0] || '0',
-      modHash: raw.d,
+      modHash: game.ModHash || null,
       isStock: modIds.length === 0 || (modIds.length === 1 && modIds[0] === '0'),
-      
+
       // Session state
       ...stateInfo,
-      
+
       // Status flags
-      isLocked: raw.l === 1,
-      hasPassword: raw.k === 1,
-      motd: raw.h || null,
-      
+      isLocked: status.IsLocked === true,
+      hasPassword: status.HasPassword === true,
+      motd: raw.Message || null,
+
       // Network
       nat: natInfo,
       steamJoinUrl,
-      tps: raw.tps,
-      maxPing: raw.pgm,
-      worstPingObserved: raw.pg,
-      
+      tps: Number.isFinite(attrs.TPS) ? attrs.TPS : null,
+      maxPing: Number.isFinite(attrs.MaxPing) ? attrs.MaxPing : null,
+      worstPingObserved: Number.isFinite(attrs.MaxPingSeen) ? attrs.MaxPingSeen : null,
+      listServer: attrs.ListServer || null,
+
       // Time
-      gameTimeMinutes: raw.gtm,
-      timeElapsedMinutes: timeLimitInfo.maxedOut ? '>255' : raw.gtm,
-      timeLimitMinutes: raw.ti || null,
-      killLimit: raw.ki || null,
-      
+      gameTimeMinutes: elapsedMinutes,
+      timeElapsedMinutes,
+      timeLimitMinutes: null, // not exposed by MSL
+      killLimit: null,        // not exposed by MSL
+
       // Preserve raw data for debugging
       _raw: raw
     };
@@ -789,8 +762,8 @@ const BZ2API = (function() {
         return result;
       }
     } catch (directError) {
-      // Try CORS proxies
-      for (const proxy of CORS_PROXIES) {
+      // Try proxies (local dev proxy first on localhost, then public)
+      for (const proxy of getProxyBases()) {
         try {
           const url = proxy + encodeURIComponent(apiUrl);
           const response = await fetch(url);
@@ -861,16 +834,23 @@ const BZ2API = (function() {
     
     await Promise.all(mapDataPromises);
     
-    // Apply map data to sessions
+    // Apply map data to sessions. GAP-FILLING merge: the MSL payload already
+    // carries inline map name/description/image (and the local registry
+    // enricher may have run first), so getdata.php values only fill what is
+    // still missing — and a failed fetch must never clobber existing values.
     for (const session of sessions) {
       const cacheKey = `${session.primaryMod}:${session.mapFile}`;
       const mapData = mapDataCache.get(cacheKey);
       
       if (mapData) {
-        session.mapName = mapData.name;
-        session.mapDescription = mapData.description;
-        session.mapImageUrl = mapData.imageUrl;
-        session.teamNames = mapData.teamNames;
+        session.mapName = session.mapName || mapData.name;
+        session.mapDescription = session.mapDescription || mapData.description;
+        session.mapImageUrl = session.mapImageUrl || mapData.imageUrl;
+        const tn = session.teamNames || {};
+        session.teamNames = {
+          team1: tn.team1 || (mapData.teamNames && mapData.teamNames.team1) || null,
+          team2: tn.team2 || (mapData.teamNames && mapData.teamNames.team2) || null
+        };
         
         // Enrich mod names from map data if available
         if (mapData.mods) {
@@ -881,11 +861,12 @@ const BZ2API = (function() {
           }
         }
       } else {
-        // Set defaults for non-enriched sessions
-        session.mapName = null;
-        session.mapDescription = null;
-        session.mapImageUrl = null;
-        session.teamNames = { team1: null, team2: null };
+        // Ensure the keys exist for downstream readers, but never null out
+        // values that are already present.
+        if (session.mapName === undefined) session.mapName = null;
+        if (session.mapDescription === undefined) session.mapDescription = null;
+        if (session.mapImageUrl === undefined) session.mapImageUrl = null;
+        if (!session.teamNames) session.teamNames = { team1: null, team2: null };
       }
     }
   }
@@ -972,65 +953,156 @@ const BZ2API = (function() {
     }
   }
 
+  // ============================================================================
+  // TRANSPORT (MSL fetch: direct / local dev proxy / public CORS proxies)
+  // ============================================================================
+
   /**
-   * Attempt to fetch from the API, trying CORS proxies if direct fetch fails
+   * Fetch a URL as JSON with a hard timeout.
+   * @param {string} url
+   * @param {number} timeoutMs
+   * @returns {Promise<Object>} Parsed JSON body
+   */
+  async function fetchJsonWithTimeout(url, timeoutMs) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetch(url, controller ? { signal: controller.signal } : undefined);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Sanity-check that a payload looks like an MSL sessions response (public
+   * proxies sometimes return their own HTML/JSON error bodies with HTTP 200).
+   */
+  function looksLikeMslPayload(data) {
+    return !!data && typeof data === 'object' && !Array.isArray(data)
+      && ('Sessions' in data || 'Metadata' in data || 'DataCache' in data);
+  }
+
+  /**
+   * Build the ordered fetch-candidate list for the resolved mode.
+   * Each candidate: { key, kind: 'direct'|'proxy', label, url, timeoutMs }.
+   */
+  function buildFetchCandidates(targetUrl, mode) {
+    const proxyCandidate = (base) => {
+      let label = 'local dev proxy';
+      try { label = new URL(base, 'http://x').hostname || label; } catch (_) { /* relative */ }
+      if (base.startsWith('/')) label = 'local dev proxy';
+      else if (base.startsWith('http://localhost') || base.startsWith('http://127.')) label = 'local dev proxy';
+      return {
+        key: base,
+        kind: 'proxy',
+        label,
+        url: base + encodeURIComponent(targetUrl),
+        timeoutMs: PROXY_TIMEOUT_MS,
+      };
+    };
+    const direct = {
+      key: 'direct',
+      kind: 'direct',
+      label: 'direct',
+      url: targetUrl,
+      timeoutMs: DIRECT_TIMEOUT_MS,
+    };
+
+    let candidates;
+    if (mode === 'direct') {
+      candidates = [direct];
+    } else if (mode === 'proxy') {
+      candidates = getProxyBases().map(proxyCandidate);
+    } else if (isLocalDevContext()) {
+      // auto @ localhost: direct is guaranteed CORS-blocked (MSL allowlist),
+      // skip it entirely — local dev proxy first, then public proxies.
+      candidates = getProxyBases().map(proxyCandidate);
+    } else {
+      // auto @ real host: direct first (works the day vtstats.bz is
+      // allowlisted), then public proxies.
+      candidates = [direct, ...getProxyBases().map(proxyCandidate)];
+    }
+
+    // Remembered-good method goes first so a known-dead direct fetch isn't
+    // re-attempted (and re-logged) on every poll.
+    if (lastSuccessfulMethod) {
+      const i = candidates.findIndex((c) => c.key === lastSuccessfulMethod);
+      if (i > 0) candidates.unshift(candidates.splice(i, 1)[0]);
+    }
+    return candidates;
+  }
+
+  /**
+   * Fetch the raw MSL sessions payload, walking the mode-appropriate
+   * candidate chain (direct fetch and/or proxies — see module header).
    * @param {Object} options - Fetch options
-   * @param {string} options.proxyUrl - Optional specific proxy URL to use
-   * @param {string} options.apiUrl - API URL (defaults to lobby server)
+   * @param {string} options.proxyUrl - Optional specific proxy base to use exclusively
+   * @param {string} options.apiUrl - API URL (defaults to the MSL sessions endpoint)
    * @param {boolean} options.bustCache - Add cache-busting param (default: true)
+   * @param {string} options.mode - Optional 'auto' | 'direct' | 'proxy' override
    * @param {Function} options.onStatus - Optional callback for status updates
-   * @returns {Promise<Object>} Raw API response
+   * @returns {Promise<Object>} Raw MSL API response
    */
   async function fetchRaw(options = {}) {
-    const { proxyUrl, apiUrl = DEFAULT_API_URL, bustCache = true, onStatus } = options;
+    const { proxyUrl, apiUrl = DEFAULT_API_URL, bustCache = true, onStatus, mode } = options;
     
     // Add cache-busting to the target URL
     const targetUrl = bustCache ? addCacheBuster(apiUrl) : apiUrl;
     
-    // If a specific proxy is provided, use it (no caching)
+    // If a specific proxy is provided, use only it (no fallback, no caching)
     if (proxyUrl) {
-      const url = proxyUrl + encodeURIComponent(targetUrl);
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
+      const data = await fetchJsonWithTimeout(proxyUrl + encodeURIComponent(targetUrl), PROXY_TIMEOUT_MS);
+      if (!looksLikeMslPayload(data)) throw new Error('Proxy returned an unexpected payload');
+      return data;
     }
     
-    // Try direct fetch first
-    onStatus?.({ step: 'direct', status: 'pending', message: 'Connecting to lobby server...' });
-    try {
-      const response = await fetch(targetUrl);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      lastSuccessfulMethod = 'direct';
-      onStatus?.({ step: 'direct', status: 'success', message: 'Connected directly' });
-      return response.json();
-    } catch (directError) {
-      console.warn('Direct fetch failed, trying CORS proxies...', directError.message);
-      onStatus?.({ step: 'direct', status: 'failed', message: 'Direct connection blocked (CORS)' });
-    }
-    
-    // Try proxies in optimized order (cached successful proxy first)
-    const proxyOrder = getProxyOrder();
-    for (const proxy of proxyOrder) {
-      const proxyName = new URL(proxy).hostname;
-      onStatus?.({ step: 'proxy', status: 'pending', proxy: proxyName, message: `Trying ${proxyName}...` });
+    const candidates = buildFetchCandidates(targetUrl, mode || resolveFetchMode());
+    let lastError = null;
+
+    for (const candidate of candidates) {
+      const step = candidate.kind; // 'direct' | 'proxy'
+      const statusExtra = candidate.kind === 'proxy' ? { proxy: candidate.label } : {};
+      onStatus?.({
+        step,
+        status: 'pending',
+        ...statusExtra,
+        message: candidate.kind === 'direct'
+          ? 'Connecting to session list...'
+          : `Trying ${candidate.label}...`,
+      });
       try {
-        const url = proxy + encodeURIComponent(targetUrl);
-        console.log('Trying proxy:', proxy);
-        const response = await fetch(url);
-        if (!response.ok) continue;
-        const data = await response.json();
-        lastSuccessfulMethod = proxy;
-        console.log('Success with proxy:', proxy);
-        onStatus?.({ step: 'proxy', status: 'success', proxy: proxyName, message: `Connected via ${proxyName}` });
+        const data = await fetchJsonWithTimeout(candidate.url, candidate.timeoutMs);
+        if (!looksLikeMslPayload(data)) throw new Error('unexpected payload');
+        lastSuccessfulMethod = candidate.key;
+        onStatus?.({
+          step,
+          status: 'success',
+          ...statusExtra,
+          message: candidate.kind === 'direct'
+            ? 'Connected directly'
+            : `Connected via ${candidate.label}`,
+        });
         return data;
-      } catch (proxyError) {
-        console.warn('Proxy failed:', proxy, proxyError.message);
-        onStatus?.({ step: 'proxy', status: 'failed', proxy: proxyName, message: `${proxyName} failed` });
+      } catch (err) {
+        lastError = err;
+        // A remembered method that stopped working shouldn't stay pinned.
+        if (lastSuccessfulMethod === candidate.key) lastSuccessfulMethod = null;
+        console.warn(`[bz2api] ${candidate.kind} fetch failed (${candidate.label}):`, err && err.message);
+        onStatus?.({
+          step,
+          status: 'failed',
+          ...statusExtra,
+          message: candidate.kind === 'direct'
+            ? 'Direct connection blocked (CORS)'
+            : `${candidate.label} failed`,
+        });
       }
     }
     
     onStatus?.({ step: 'error', status: 'failed', message: 'All connection attempts failed' });
-    throw new Error('All fetch attempts failed. CORS may be blocking requests.');
+    throw new Error(`All fetch attempts failed${lastError ? ` (last: ${lastError.message})` : ''}. CORS may be blocking requests.`);
   }
 
   /**
@@ -1108,10 +1180,15 @@ const BZ2API = (function() {
     const rawData = await fetchRaw({ ...fetchOptions, onStatus });
     
     onStatus?.({ step: 'parse', status: 'pending', message: 'Parsing session data...' });
-    const sessions = (rawData.GET || []).map(parseSession);
+    // Payload context: mod names + display-name lookups shared by every session
+    const ctx = {
+      mods: rawData.Mods || {},
+      dataCache: rawData.DataCache || {},
+    };
+    const sessions = (rawData.Sessions || []).map((s) => parseSession(s, ctx));
     
     // Sort sessions by ID for consistent ordering across refreshes
-    sessions.sort((a, b) => a.id.localeCompare(b.id));
+    sessions.sort((a, b) => String(a.id).localeCompare(String(b.id)));
     
     // Enrich sessions with map data if opt-in enabled
     if (enrichMaps) {
@@ -1175,12 +1252,11 @@ const BZ2API = (function() {
     decodeBase64Name,
     decodeRakNetGuid,
     cleanGogId,
-    parseGameTypeAndMode,
+    parseGameInfo,
     parseSessionState,
     parseNATType,
-    parseTimeLimit,
     parseModIds,
-    enrichMods,
+    collectModIds,
     
     // URL builders
     buildSteamProfileUrl,
@@ -1189,21 +1265,25 @@ const BZ2API = (function() {
     buildSteamJoinUrl,
     
     // Constants
-    ServerInfoMode,
-    NATType,
-    NATTypeNames,
-    GameType,
-    GameMode,
-    GameModeNames,
+    GAME_TYPE_NAMES,
+    GAME_MODE_NAMES,
+    NAT_TYPE_NAMES,
     VSR_MOD_ID,
     VSR_MAP_DATA,
     
     // Config
     DEFAULT_API_URL,
     MAP_API_BASE_URL,
-    CORS_PROXIES
+    CORS_PROXIES,
+    FETCH_MODE_STORAGE_KEY
   };
 })();
+
+// Expose on window so consumers using the `window.BZ2API` access pattern work
+// (a top-level `const` in a classic script is NOT a window property).
+if (typeof window !== 'undefined') {
+  window.BZ2API = BZ2API;
+}
 
 // Export for Node.js if available
 if (typeof module !== 'undefined' && module.exports) {

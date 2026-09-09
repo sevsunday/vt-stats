@@ -1,11 +1,12 @@
 /**
  * VT Stats - Game Watch - Poller
  *
- * Polls the BZ2 lobby server via the vendored `BZ2API` and surfaces the FULL
- * worldwide session list (unlike active-game-indicator / tools live-session
- * which filter to known-host VSR lobbies). Map data is enriched locally first
- * (VTGwMaps.enrichSessionsLocal) so the poll-to-render path is synchronous;
- * iondriver is hit only for the rare catalog miss.
+ * Polls the MultiplayerSessionList API via the vendored `BZ2API` and surfaces
+ * the FULL worldwide session list (unlike active-game-indicator / tools
+ * live-session which filter to known-host VSR lobbies). Map data is enriched
+ * locally first (VTGwMaps.enrichSessionsLocal) so the poll-to-render path is
+ * synchronous; iondriver getdata.php is hit only for the rare catalog miss
+ * (and MSL already carries inline map name/description/image regardless).
  *
  * Lifecycle mirrors js/tools/live-session.js: in-flight guard, error backoff,
  * visibility pause + refresh-on-return. Cadence is adaptive -- the caller
