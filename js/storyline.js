@@ -2,10 +2,10 @@
 //
 // Renders the pipeline-computed `storyline` block (match.schema_version 22:
 // bucketed lanes + wire-enum band segments + curated beats + typed facts +
-// archetype) as the per-match Storyline tab: an auto-generated narrative
-// paragraph, attributed verdict cards, a synced multi-lane timeline with
-// drag-zoom + hover tooltips + beat flags, and a key-moments rail that
-// deep-links into the Replay player.
+// archetype) as the per-match Storyline tab: attributed verdict cards, a
+// synced multi-lane timeline with drag-zoom + hover tooltips + beat flags,
+// a key-moments rail that deep-links into the Replay player, and the
+// auto-generated narrative paragraph at the bottom.
 //
 // Contract notes:
 // - The block is match-global and ALWAYS unfiltered (highlights passthrough
@@ -187,8 +187,21 @@
   // (a null clause is skipped -- data gates, not rhetoric). ctx carries
   // side1/side2 name spans, facts, and formatting helpers.
 
+  // Commander name in running prose. First mention of each side in a
+  // narrative pass appends the team's faction so the opening sentence
+  // reads "mort (Scion) opened on …; Domakus (Hadean) went …" — later
+  // mentions stay bare. Missing / unresolved factions omit the paren.
   function nameSpan(ctx, side) {
-    return `<span class="vt-story-t${side}">${esc(ctx.leader(side))}</span>`;
+    const named = ctx._named || (ctx._named = new Set());
+    const key = String(side);
+    const name = esc(ctx.leader(side));
+    let extra = '';
+    if (!named.has(key)) {
+      named.add(key);
+      const fac = typeof ctx.faction === 'function' ? ctx.faction(side) : '';
+      if (fac) extra = ` (${esc(fac)})`;
+    }
+    return `<span class="vt-story-t${side}">${name}${extra}</span>`;
   }
 
   const CLAUSES = {
@@ -207,6 +220,12 @@
       const d1 = lead(o1);
       const d2 = lead(o2);
       if (!d1 || !d2) return null;
+      // Name both commanders BEFORE the tempo clause so first-mention
+      // factions land on "mort (Scion) opened …; Domakus (Hadean) went …"
+      // rather than on a later "hit 3 pools first" re-mention (JS evaluates
+      // the tempo interpolations first if they sit above this return).
+      const n1 = nameSpan(ctx, 1);
+      const n2 = nameSpan(ctx, 2);
       let tempo = '';
       const t1 = o1.time_to_3_pools_sec;
       const t2 = o2.time_to_3_pools_sec;
@@ -214,7 +233,7 @@
         const fast = t1 < t2 ? 1 : 2;
         tempo = ` — ${nameSpan(ctx, fast)} hit 3 pools first (${clock(Math.min(t1, t2))} vs ${clock(Math.max(t1, t2))})`;
       }
-      return `${nameSpan(ctx, 1)} opened on ${d1}; ${nameSpan(ctx, 2)} went ${d2}${tempo}.`;
+      return `${n1} opened on ${d1}; ${n2} went ${d2}${tempo}.`;
     },
     economy(ctx) {
       const inc = ctx.facts.income || {};
@@ -336,6 +355,9 @@
   };
 
   function buildNarrative(ctx) {
+    // Fresh first-mention tracking so a reused ctx (tests, re-render)
+    // does not skip the faction paren on the next pass.
+    ctx._named = new Set();
     const plan = ARCH_COPY[ctx.facts.archetype] || ARCH_COPY.even;
     const parts = [];
     if (plan.frame) {
@@ -1103,11 +1125,16 @@
     if (typeof applyThemeDefaults === 'function') applyThemeDefaults();
     const t = getThemeColors();
     const leaders = match.team_leaders || {};
+    const factions = match.team_factions || {};
     const ctx = {
       duration: sl.duration_sec,
       bucketSec: sl.bucket_sec,
       facts: sl.facts || {},
       leader: (side) => ((leaders[String(side)] || {}).name) || `Team ${side}`,
+      faction: (side) => {
+        const f = factions[String(side)];
+        return (f && f.name) || '';
+      },
       // Side colors mirror the Economy tab's pools-lane convention.
       color: (side) => (side === 2 || side === '2' ? t.success : t.primary),
     };
