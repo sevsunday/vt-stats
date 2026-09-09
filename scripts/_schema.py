@@ -44,6 +44,7 @@ TIER_NO_PNG     = "no_png"
 SOURCE_AUTO_PROVEN          = "auto_proven"
 SOURCE_AUTO_BORDERLINE      = "auto_borderline"
 SOURCE_AUTO_FAILED_FALLBACK = "auto_failed_fallback"
+SOURCE_AUTO_REGISTERED      = "auto_registered"
 SOURCE_HAND_CALIBRATED      = "hand_calibrated"
 SOURCE_HAND_MIGRATED        = "hand_migrated"
 
@@ -270,6 +271,7 @@ def derive_tier(cfg: dict) -> str:
           auto_proven           -> proven
           auto_borderline       -> borderline
           auto_failed_fallback  -> failed
+          auto_registered       -> proven   (bake-to-minimap registration)
           hand_calibrated       -> hand_cal
           hand_migrated         -> hand_cal
           (anything else)       -> failed
@@ -284,6 +286,7 @@ def derive_tier(cfg: dict) -> str:
         SOURCE_AUTO_PROVEN:          TIER_PROVEN,
         SOURCE_AUTO_BORDERLINE:      TIER_BORDERLINE,
         SOURCE_AUTO_FAILED_FALLBACK: TIER_FAILED,
+        SOURCE_AUTO_REGISTERED:      TIER_PROVEN,
         SOURCE_HAND_CALIBRATED:      TIER_HAND_CAL,
         SOURCE_HAND_MIGRATED:        TIER_HAND_CAL,
     }.get(src, TIER_FAILED)

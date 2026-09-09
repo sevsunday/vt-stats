@@ -1,103 +1,101 @@
 ---
 name: 3d replay minimap flip
-overview: Fix the 3D replay "mirroring" by (A) plumbing the calibration x_flipped/y_flipped flags through the .3d.json into the minimap UV drape, and (B) determining + writing correct flips for every uncalibrated map via an automated render_overlays-based heuristic, then re-extracting all maps.
+overview: "v3 (Sep 2026): orientation IS definitively determinable - the .TER's authored paint layer (already baked to data/render/<stem>.color.png in exact world coords) is a dense ground-truth reference the old sparse-anchor scorers never used. Visual proof: BOTH originally-reported maps (vsrpstrgle, vsrravine) are NOT flipped at all - their symptom is the guessed fallback world_rect (scale/offset), not orientation. Plan: (A) plumb the existing x_flipped/y_flipped flags into the two drape sites (fixes the 15 solver-proven flipped maps, zero approval), and (B) bake-to-minimap image REGISTRATION that solves rect + flip together for fallback maps, gated by a 34-proven-map validation before any config writes; human review only for low-confidence registrations."
 todos:
   - id: extract-flips
-    content: "scripts/extract_3d.py: read affine.x_flipped/y_flipped from config and emit them inside world_rect in the .3d.json (default false; keep schema_version 3)"
-    status: pending
+    content: "scripts/extract_3d.py build_output(): emit x_flipped/y_flipped inside world_rect in BOTH branches (config affine -> bool(affine.get(...)); .TRN fallback -> false/false). Keep schema_version 3 (additive)."
+    status: completed
   - id: loader-flips
-    content: "_map-analysis/render/js/loader.js: carry xFlipped/yFlipped onto the returned worldRect object"
-    status: pending
+    content: "_map-analysis/render/js/loader.js: carry xFlipped: !!wr.x_flipped / yFlipped: !!wr.y_flipped onto the returned worldRect (absent on stale .3d.json -> false)."
+    status: completed
   - id: replay-drape
-    content: "_map-analysis/render/js/replay.js buildMinimapMaterial: apply u=1-u / v=1-v when xFlipped/yFlipped"
-    status: pending
+    content: "_map-analysis/render/js/replay.js buildMinimapMaterial (~line 397): apply if (wr.xFlipped) u = 1-u; if (wr.yFlipped) v = 1-v; after u/v computation, before clamping."
+    status: completed
   - id: viewer-drape
-    content: "_map-analysis/render/js/viewer.js buildMinimapMaterial: apply the same flip in the UV loop"
-    status: pending
-  - id: detect-helper
-    content: "Add _map-analysis/scripts/detect_minimap_flip.py: project BZN anchors under all 4 flip combos, score base-structure alignment, emit 4-panel contact sheet, --write back to config"
-    status: pending
-  - id: validate-heuristic
-    content: Run scorer read-only against the ~13 already-detected-flip maps; confirm agreement and tune threshold
-    status: pending
-  - id: run-write-review
-    content: Run scorer with --write on vsrpstrgle, vsrravine + 108 auto_failed_fallback maps; review contact sheets and hand-correct low-confidence maps
-    status: pending
-  - id: reextract
-    content: Re-run python scripts/extract_3d.py --all to regenerate every .3d.json with flip fields
-    status: pending
+    content: "_map-analysis/render/js/viewer.js buildMinimapMaterial: identical flip application in the UV loop."
+    status: completed
+  - id: reextract-flipped
+    content: Re-extract at least the 15 proven-flip maps (or --all for field consistency; 142 tracked .3d.json gain 2 fields). Verify vsrhubris .3d.json carries x_flipped/y_flipped true.
+    status: completed
+  - id: registration-tool
+    content: "New _map-analysis/scripts/register_minimap.py: dense image registration of data/render/<stem>.color.png (ground truth, known world extent = .TER bounds, row 0 = minZ/south) against data/maps/<stem>.png. Solves axis-aligned similarity (scale, tx, tz) x 4 flip hypotheses via coarse-to-fine NCC on gradient/edge images (PIL-only, 64px coarse -> 128px refine). Outputs per map: best flip combo, recovered world_rect, confidence margin, and a 3-panel audit sheet (bake | minimap | blend overlay under recovered transform)."
+    status: completed
+  - id: registration-validate
+    content: "VALIDATION GATE (read-only): run registration on the 34 auto_proven maps. Require flips match the solver's stored flags AND recovered world_rect approx config rect (center/scale within tolerance). Companion constellation-symmetry audit: compute each proven map's pool/spawn mirror-symmetry (the pstrgle x=-144 check, generalized); asymmetric constellation -> solver flip uniquely determined (strict gate); symmetric -> flip ambiguity is expected, exclude from strict gating and route to audit sheets. Only on pass may the tool write fallback configs."
+    status: completed
+  - id: registration-apply
+    content: "Run on played fallback maps (~40 incl. vsrpstrgle + vsrravine): write recovered rect + flips into configs (source: auto_registered, detector: bake_minimap_registration) for high-confidence results; queue low-confidence maps into audit-sheet review for the user. Re-extract written maps."
+    status: completed
+  - id: review-low-confidence
+    content: "User reviews audit sheets ONLY for low-confidence registrations (expected: a handful, e.g. paint-symmetric maps like hubris-style grids); decisions applied via the same tool; re-extract."
+    status: completed
   - id: validate-replay
-    content: "Verify in replay HUD: vsrpstrgle/vsrravine actors land on correct bases; Height-ramp toggle shows no positional shift; detected-flip maps correct; non-flipped maps unchanged"
-    status: pending
+    content: "Replay HUD checks: vsrravine match 2026-05-29 (Domakus+MAX side now correct - rect fix), vsrpstrgle match 2026-05-22 (Sev side correct), vsroldboy/vsrebola (proven flips honored via Part A), control vsrmortwasteland unchanged; Height ramp toggle moves nothing."
+    status: completed
 isProject: false
 ---
 
-## 3D Replay Minimap Flip Fix
+# 3D Replay Minimap Fix - v3 (orientation is determinable; reported maps are rect bugs)
 
-### Root cause (confirmed)
+Supersedes v2. New evidence (Sep 9) from the original map files changes the diagnosis for the two reported maps and unlocks a definitive automated method.
 
-Player actors and the terrain mesh are placed in true BZ2 world coords and are correct (verified: gameplay trail coords match the independent BZN object coords and `.TER` bounds). The minimap PNG is draped with a fixed UV mapping that ignores the calibration's `x_flipped`/`y_flipped` flags, so the image is rotated/mirrored under correctly-placed actors. The flags never reach the viewer: `scripts/extract_3d.py` drops them when building `world_rect`, and both viewer entry points hardcode the drape.
+## The user was right: orientation is NOT guesswork
+
+The May scorers failed for a methodological reason, not a fundamental one: they projected ~40 sparse BZN anchor points through a **guessed** `world_rect` (object bbox x 1.43) onto the minimap and scored local pixels. Two compounding errors - sparse signal, wrong rect - meant even the correct flip did not score cleanly.
+
+The definitive reference was in the map files all along: the .TER carries the engine's **authored per-cell painted ground color** (plus heights, cliff bits, texture-blend alphas), which the extract pipeline already bakes to `data/render/<stem>.color.png` at source resolution with exact world bounds (`_ter_full.py`: `world = tile_bounds x 2.0m`, row 0 = `grid_min_z` = south). That is a dense, world-coordinate ground-truth image to compare the minimap against. (Note: `data/render/` is invisible to the workspace search tools - Glob/Grep return empty there - but the files exist and Read works; use shell/git for enumeration during execution.)
+
+## Visual proof obtained (Sep 9, plan-mode reads)
+
+- **vsrravine: NOT flipped (x0y0).** The map author painted the text "MAL" onto the terrain. In the south-up color bake it appears vertically-inverted with letter order preserved - exactly correct authored text viewed south-up. Flipped to north-up it reads normally in the upper-right, precisely where the minimap PNG shows a clean readable "MAL". Text chirality is unfakeable: any x-flip would mirror the glyphs, any y-flip would invert them. The minimap orientation is correct as-is.
+- **vsrpstrgle: NOT flipped either (y0; x moot).** The bake shows the asymmetric axis is north-south: narrow south room (1 painted dot) vs wide north room (pink-wrapped, row of 4 marks with 2 large squares at the ends). The minimap's top room is the wide one with 2 bright lights at its row ends = the north room -> north-up, y0. The east-west axis is **perfectly symmetric** - verified numerically: every pool and spawn pairs exactly about world x = -144 (e.g. pools -528/+240 = -144 +/- 384, spawns -368/+80 = -144 +/- 224), and the config rect is centered on -144 - so an x-flip is a visual no-op for the drape.
+- **Therefore the reported "mirroring" on BOTH maps is the fallback `world_rect`, not orientation.** Ravine's rect (1922 x 1968) is ~2x the actual painted playable zone (~1040 x 920 from the bake) - actors render at half-scale clustered toward the center, landing in the wrong canyon visually. Power Struggle's rect stretches the image ~25-30% with offsets. Part A alone will NOT visibly fix these two maps; the rect must be corrected.
+- **Method boundary (vsrhubris check):** its paint layer is near-symmetric walls; the minimap's distinctive pinwheels are rendered 3D objects absent from paint - eyeballing is weak there. For such maps the solver's sub-2px anchor fit (which is what proved x1y1) or registration confidence decides; low-confidence cases go to human audit sheets.
+- **Retraction:** the May "user-confirmed x-flip" for vsrpstrgle (written then reverted) was an artifact of reviewing contact sheets projected through the corrupted rect - do not re-apply it. No flip writes from rect-corrupted evidence.
 
 ```mermaid
-flowchart LR
-  cfg["config.json<br/>affine.x_flipped/y_flipped"] --> extract["extract_3d.py<br/>(DROPS flips today)"]
-  extract --> j3d["render/&lt;stem&gt;.3d.json<br/>world_rect: min/max only"]
-  j3d --> loader["loader.js<br/>worldRect: min/max/w/d"]
-  loader --> drape["replay.js / viewer.js<br/>buildMinimapMaterial<br/>(no flip applied)"]
-  drape --> tex["mirrored minimap"]
+flowchart TD
+  TER[".TER paint layer<br/>(color bake, exact world coords)"] --> REG["register_minimap.py<br/>scale+tx+tz x 4 flips<br/>coarse-to-fine NCC"]
+  PNG["iondriver minimap PNG<br/>(unknown rect + orientation)"] --> REG
+  REG --> GATE{"Validation gate:<br/>34 proven maps<br/>flips 34/34 + rect matches?"}
+  GATE -->|pass| WRITE["write rect+flip to fallback configs<br/>(high-confidence only)"]
+  GATE -->|fail| SHEETS["human audit sheets only"]
+  WRITE --> LOW["low-confidence maps -> audit sheets"]
 ```
 
-Scope chosen: full sweep (2 reported maps + ~13 already-detected-flip maps + verify all 108 `auto_failed_fallback` maps). Verification method: automated `render_overlays`-style object-projection scoring.
+## Part A - flip plumbing (unchanged from v2; universal, zero approval)
 
----
+Still required: the 15 solver-proven flipped maps (6 played: `vsrebola`, `vsroldboy`, `streflexvsr`, `stbluesvsr`, `stquagmirevsr`, `vsrterron`) render mirrored today purely because the flags never reach the viewer.
 
-### Part A - Plumb flips into the drape (fixes every map at once)
+1. [scripts/extract_3d.py](scripts/extract_3d.py) `build_output()`: emit `x_flipped`/`y_flipped` in both `world_rect` branches (config -> `bool(affine.get(...))`; .TRN fallback -> `False`). `schema_version` stays 3.
+2. [_map-analysis/render/js/loader.js](_map-analysis/render/js/loader.js): `xFlipped: !!wr.x_flipped, yFlipped: !!wr.y_flipped` on `worldRect`.
+3. + 4. [_map-analysis/render/js/replay.js](_map-analysis/render/js/replay.js) and [_map-analysis/render/js/viewer.js](_map-analysis/render/js/viewer.js) `buildMinimapMaterial`: `if (wr.xFlipped) u = 1 - u; if (wr.yFlipped) v = 1 - v;` before clamping (exact mirror of `scripts/_schema.py::project_world_to_pixel` / `calibration/js/shared.js`).
+5. Re-extract (at minimum the 15; `--all` for field consistency).
 
-1. **`scripts/extract_3d.py`** - in `build_output()` where `world_rect` is assembled (lines ~146-160), also read `cfg["affine"].get("x_flipped")` / `get("y_flipped")` and add them to the emitted `world_rect` dict (line ~326). Default `False` when no affine. Keep `schema_version: 3` (additive optional fields - existing readers unaffected, no loader version-check change, no hard-fail risk if a map is missed).
+## Part B - registration: solve rect + flip together (replaces flip-only approval)
 
-2. **`_map-analysis/render/js/loader.js`** - in the `worldRect` block (lines 115-119) carry the new fields: `xFlipped: !!(wr.x_flipped)`, `yFlipped: !!(wr.y_flipped)`.
+6. **New tool** `_map-analysis/scripts/register_minimap.py`: for each map, take the color bake (ground truth; also usable: height/cliff renders as secondary channels for paint-sparse maps) and the minimap PNG; search axis-aligned similarity (uniform-ish scale, tx, tz) x 4 flip combos by NCC on gradient/edge images, coarse (64px) to fine (128px), PIL-only. Emit: flip combo, recovered `world_rect` (from the inverse transform + known .TER world bounds), confidence margin, 3-panel audit sheet (bake | minimap | blended overlay).
+7. **Validation gate (the honesty step):** run read-only on the 34 `auto_proven` maps; require recovered flips to match the solver's stored flags (~34/34) and recovered rects to agree with config rects within tolerance. The May lesson is codified: no writes until the method proves itself on ground truth.
+8. **Apply to played fallback maps** (~40 incl. the two reported): high-confidence results write `world_rect` + flips (`source: "auto_registered"`, `detector: "bake_minimap_registration"`); low-confidence maps queue for human review of audit sheets (a 3-image strip each - much easier than the 4-panel guessing). Re-extract written maps. Unplayed fallback maps: whenever, zero urgency.
+9. **Ravine + Power Struggle land here** - their fix is the recovered rect (orientation confirmed unflipped already).
 
-3. **`_map-analysis/render/js/replay.js`** `buildMinimapMaterial` (lines 396-397) - after computing `u`/`v`, apply the mirror (clamp stays after):
+## Hand-approval answer (final uncertainty ledger)
 
-```js
-let u = (wx - wr.minX) / wr.width;
-let v = (wr.maxZ - wz) / wr.depth;
-if (wr.xFlipped) u = 1 - u;
-if (wr.yFlipped) v = 1 - v;
-```
+- Zero approval: Part A, the 15 proven flips (backed by the constellation-symmetry audit - asymmetric constellations make the solver flip unique), and every fallback map where registration passes the gate with high confidence.
+- Human eyes only on: (1) low-confidence registrations (expected minority - paint-symmetric maps like the hubris grid, identified BY the tool), reviewed as 3-panel audit sheets; (2) one ~5-minute final acceptance pass in the replay HUD on the two originally-reported matches (2026-05-22 pstrgle, 2026-05-29 ravine) - user gameplay memory is the ultimate ground truth the complaint was based on.
+- If the validation gate FAILS (registration can't reproduce the 34 proven configs), fall back to v2's manual contact-sheet workflow for played fallback maps - but sheets must then be generated with per-map rect candidates, not the corrupted bbox rect.
 
-4. **`_map-analysis/render/js/viewer.js`** `buildMinimapMaterial` (UV loop lines 386-397) - identical change. This mirrors the canonical projection in `_map-analysis/calibration/js/shared.js:65-66` and `scripts/_schema.py:319-322`.
+## Validation
 
-After A, the ~13 maps with already-detected flips (and any future-correct config) render correctly once re-extracted.
+- `vsrravine` match `2026-05-29T21-23-11`: Domakus+MAX cluster renders in the correct canyon (rect fix); "MAL" text location sanity-checks the drape.
+- `vsrpstrgle` match `2026-05-22T22-04-31`: actors align with rooms/wings; Sev's side reads correctly.
+- `vsroldboy` / `vsrebola` (proven flips, played): bases correct post-Part-A.
+- Control `vsrmortwasteland` (proven x0y0, newest match): byte-identical rendering.
+- Height ramp / Wireframe toggle: zero actor movement (texture-only changes).
 
----
+## Caveats
 
-### Part B - Determine flips for uncalibrated maps
-
-The 108 `auto_failed_fallback` maps have `world_rect` = an inferred bbox of the objects, so anchors always land *inside* the rect; the only open question per map is which of the 4 flip combos is correct. Build a scriptable scorer using the existing projection + assets.
-
-5. **New helper `_map-analysis/scripts/detect_minimap_flip.py`** (reuses `_schema.load_config`, `_schema.load_map_data`, `render_overlays.project_world_to_pixel`, PIL):
-   - For a stem: load minimap PNG, BZN objects, and the config `world_rect`.
-   - Pick anchor objects in priority order: `recycler` -> `spawn_point` -> `scrap_pool`.
-   - For each of the 4 `(x_flipped, y_flipped)` combos, project anchors to pixels and compute a structure score = local luminance/contrast in a small window around each projected anchor (bases are the brightest/most-structured spots on VSR minimaps).
-   - Choose the highest-scoring combo; emit a 4-panel contact sheet (each combo's overlay) to a staging dir for human spot-check; report a confidence margin.
-   - `--write` flag: write chosen `x_flipped`/`y_flipped` back into the config via `_schema.make_affine` (keep the existing `world_rect`, keep `source: auto_failed_fallback`, stamp `detector: "minimap_flip_heuristic"`).
-
-6. **Validation pass**: run the scorer (read-only) on the ~13 maps that already have detected flips. Its output must agree with the stored flags; this calibrates the heuristic + threshold before trusting it on the 108.
-
-7. **Run + review**: run with `--write` on the 2 reported maps + the 108 fallback maps. Review contact sheets for low-confidence/low-margin maps and hand-correct those configs (or via `calibrate.html`).
-
-8. **Re-extract**: run `python scripts/extract_3d.py --all` (or the production glue `scripts/build_3d_extracts.py`) to regenerate every `data/render/<stem>.3d.json` with the flip fields populated.
-
----
-
-### Validation
-
-- Spot-check `vsrpstrgle` and `vsrravine` in the replay HUD: actors should sit on the correct bases in Minimap mode; toggling to Height ramp/Wireframe should show no positional change (proves only the texture moved).
-- Confirm the ~13 detected-flip maps now render correctly post re-extract.
-- Sanity: a non-flipped proven map (flips false) is visually unchanged.
-
-### Notes / decisions
-
-- `schema_version` stays at `3` (additive fields) to avoid a half-migrated hard-fail in `loader.js:63`. Re-extracting `--all` is still done so every map gets the field.
-- Tier is NOT promoted for fallback maps - the `world_rect` bbox is still loose; we only correct gross orientation. Fine-grained calibration remains a separate future task.
+- Registration assumes no rotation (evidence: all 15 proven deviations are pure flips at sub-2px RMSE). The gate catches violations.
+- `data/render/` is search-tool-blind; enumerate via shell/git during execution.
+- Registered rects upgrade fallback maps to solver-equivalent quality but are still gated by minimap render fidelity; `calibrate.html` hand-cal remains the escape hatch per map.
+- Git churn: +2 fields across 142 tracked `.3d.json`; config rewrites for registered maps.

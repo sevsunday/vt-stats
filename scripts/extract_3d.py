@@ -142,14 +142,21 @@ def build_output(stem: str) -> dict:
     lighting = parse_trn_lighting(trn_path)
 
     # Calibrated world_rect from the user's hand-cal / detector-fit config.
+    # x_flipped / y_flipped carry the minimap-orientation correction the
+    # calibration detector found (a number of iondriver PNGs are mirrored /
+    # rotated relative to BZ2 world coords). Threaded through so the viewer's
+    # minimap UV drape can apply them; default False when uncalibrated.
     cfg = load_config(stem)
     world_rect = None
     if cfg and cfg.get("affine"):
-        wr = cfg["affine"].get("world_rect")
+        affine = cfg["affine"]
+        wr = affine.get("world_rect")
         if wr and "min" in wr and "max" in wr:
             world_rect = {
                 "min": {"x": float(wr["min"]["x"]), "z": float(wr["min"]["z"])},
                 "max": {"x": float(wr["max"]["x"]), "z": float(wr["max"]["z"])},
+                "x_flipped": bool(affine.get("x_flipped", False)),
+                "y_flipped": bool(affine.get("y_flipped", False)),
             }
 
     if world_rect is None:
@@ -157,6 +164,8 @@ def build_output(stem: str) -> dict:
         world_rect = {
             "min": {"x": ter.world_min_x, "z": ter.world_min_z},
             "max": {"x": ter.world_max_x, "z": ter.world_max_z},
+            "x_flipped": False,
+            "y_flipped": False,
         }
 
     objects, map_name = build_objects(stem)

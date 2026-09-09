@@ -116,6 +116,11 @@ export async function loadMapData(stem) {
       minX: wr.min.x, minZ: wr.min.z,
       maxX: wr.max.x, maxZ: wr.max.z,
       width, depth, centerX, centerZ,
+      // Minimap-orientation correction from the calibration detector. The
+      // drape (replay.js / viewer.js buildMinimapMaterial) applies these as
+      // u=1-u / v=1-v. Absent on legacy .3d.json -> default false.
+      xFlipped: !!wr.x_flipped,
+      yFlipped: !!wr.y_flipped,
     },
     minimapRel:   raw.minimap_png_rel,
     minimapDim:   raw.minimap_dim,

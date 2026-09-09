@@ -390,6 +390,10 @@ async function buildMinimapMaterial(data, terrainMinH, terrainMaxH) {
     let u = (wx - wr.minX) / wr.width;
     // image-V grows downward (top-left origin), world +Z is north (top).
     let v = (wr.maxZ - wz) / wr.depth;
+    // Minimap-orientation correction (mirror of calibration/js/shared.js).
+    // Some iondriver PNGs are mirrored / rotated vs BZ2 world coords.
+    if (wr.xFlipped) u = 1 - u;
+    if (wr.yFlipped) v = 1 - v;
     u = Math.max(0, Math.min(1, u));
     v = Math.max(0, Math.min(1, v));
     uvs[i * 2]     = u;
