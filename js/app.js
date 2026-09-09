@@ -3193,17 +3193,28 @@
   // contract) -- the blocks have no per-player dimension for the filter
   // to narrow. Sections self-hide when their half of the data is absent
   // (economy-only or builds-only sessions degrade gracefully).
-  let buildlogFilter = 'builds';
+  // Durable type+kind lens. Type keys: queues/builds/cancels. Kind keys:
+  // ships/structures. 'all' is exclusive (clears every other pill). Default
+  // is Builds-only, matching the previous radio default.
+  const BUILDLOG_TYPE_KEYS = new Set(['queues', 'builds', 'cancels']);
+  const BUILDLOG_KIND_KEYS = new Set(['ships', 'structures']);
+  let buildlogFilters = new Set(['builds']);
   let buildlogShown = 0;               // pagination cursor per filter view
   const BUILDLOG_PAGE = 250;           // rows added per "Show more" click
   let buildlogWired = false;
-  // Find-bar state. Both reset on every match switch (unlike buildlogFilter,
+  // Find-bar state. Both reset on every match switch (unlike buildlogFilters,
   // which is a durable lens): a typed unit name and a commander scope are
   // meaningful only for the match that was on screen when they were chosen.
   let buildlogQuery = '';
   let buildlogScope = 'both';          // 'both' | '1' | '2'
   let buildlogSearchTimer = null;
   let econHoverWired = false;          // delegated cross-card row highlight
+  // Combat-ship stem set for the Combat ships pill. Lazy-fetched from
+  // data/combat_ship_odfs.json (same set as ships_built / Conveyor Belt).
+  // 404 or a failed fetch leaves an empty Set -- the pill still toggles,
+  // it just matches nothing.
+  let combatShipOdfs = new Set();
+  let combatShipOdfsPromise = null;
 
   // The Team Scrap Over Time card is SHELVED, not deleted: two ~3400-point
   // series over a full match read as an unusable tangle. Its markup sits at the
@@ -3263,6 +3274,7 @@
     if (builds) {
       buildlogShown = BUILDLOG_PAGE;
       resetBuildLogFindState();
+      ensureCombatShipOdfs();
       renderBuildLog();
       wireBuildLogControls();
     }
@@ -3650,13 +3662,84 @@
   }
 
   function buildlogFilterFn(row) {
-    switch (buildlogFilter) {
-      case 'queues':     return row.type === 'queue';
-      case 'builds':     return row.type === 'build';
-      case 'cancels':    return row.type === 'cancel';
-      case 'structures': return row.producer === 'constructor';
-      default:           return true;
+    // Two axes AND: empty type set = any event type, empty kind set = any
+    // unit. 'all' short-circuits. Combat ships and Structures are disjoint:
+    // ships = combat_ship_odfs minus constructor; structures = constructor.
+    if (buildlogFilters.has('all')) return true;
+    let hasType = false;
+    let typeOk = false;
+    let hasKind = false;
+    let kindOk = false;
+    buildlogFilters.forEach(k => {
+      if (BUILDLOG_TYPE_KEYS.has(k)) {
+        hasType = true;
+        if ((k === 'queues' && row.type === 'queue')
+            || (k === 'builds' && row.type === 'build')
+            || (k === 'cancels' && row.type === 'cancel')) {
+          typeOk = true;
+        }
+      } else if (BUILDLOG_KIND_KEYS.has(k)) {
+        hasKind = true;
+        if ((k === 'ships' && isCombatShip(row))
+            || (k === 'structures' && row.producer === 'constructor')) {
+          kindOk = true;
+        }
+      }
+    });
+    return (hasType ? typeOk : true) && (hasKind ? kindOk : true);
+  }
+
+  function isCombatShip(row) {
+    if (!row || row.producer === 'constructor') return false;
+    const raw = (row.odf || '').toLowerCase();
+    const stem = raw.endsWith('.odf') ? raw.slice(0, -4) : raw;
+    return combatShipOdfs.has(stem);
+  }
+
+  function ensureCombatShipOdfs() {
+    if (combatShipOdfsPromise) return combatShipOdfsPromise;
+    combatShipOdfsPromise = fetch('data/combat_ship_odfs.json', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => {
+        const stems = (j && Array.isArray(j.stems)) ? j.stems : [];
+        combatShipOdfs = new Set(stems.map(s => String(s).toLowerCase()));
+      })
+      .catch(() => { combatShipOdfs = new Set(); })
+      .then(() => {
+        if (buildlogFilters.has('ships') && currentData && currentData.builds) {
+          renderBuildLog();
+        }
+        return combatShipOdfs;
+      });
+    return combatShipOdfsPromise;
+  }
+
+  function toggleBuildlogFilter(key) {
+    if (key === 'all') {
+      if (buildlogFilters.has('all')) return;
+      buildlogFilters = new Set(['all']);
+      return;
     }
+    if (buildlogFilters.has('all')) {
+      buildlogFilters = new Set([key]);
+      return;
+    }
+    if (buildlogFilters.has(key)) {
+      buildlogFilters.delete(key);
+      if (buildlogFilters.size === 0) buildlogFilters = new Set(['all']);
+    } else {
+      buildlogFilters.add(key);
+    }
+  }
+
+  function syncBuildLogFilterPills() {
+    const group = document.getElementById('economy-buildlog-filter');
+    if (!group) return;
+    group.querySelectorAll('[data-buildlog-filter]').forEach(btn => {
+      const on = buildlogFilters.has(btn.dataset.buildlogFilter);
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
   }
 
   // Free-text find bar. Matches the DISPLAYED unit name, the ODF stem, and
@@ -3779,6 +3862,9 @@
     const teams = ((currentData.builds || {}).teams) || {};
     group.querySelectorAll('[data-buildlog-scope]').forEach(btn => {
       const side = btn.dataset.buildlogScope;
+      const on = buildlogScope === side;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-checked', on ? 'true' : 'false');
       if (side === 'both') return;
       const c = (teams[side] || {}).commander;
       btn.textContent = (c && c.name) ? c.name : `Team ${side}`;
@@ -3794,9 +3880,10 @@
       group.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-buildlog-filter]');
         if (!btn) return;
-        buildlogFilter = btn.dataset.buildlogFilter;
-        group.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+        toggleBuildlogFilter(btn.dataset.buildlogFilter);
+        syncBuildLogFilterPills();
         buildlogShown = BUILDLOG_PAGE;
+        if (buildlogFilters.has('ships')) ensureCombatShipOdfs();
         renderBuildLog();
       });
     }
@@ -3806,7 +3893,7 @@
         const btn = e.target.closest('[data-buildlog-scope]');
         if (!btn) return;
         buildlogScope = btn.dataset.buildlogScope;
-        scope.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+        syncBuildLogScopeLabels();
         buildlogShown = BUILDLOG_PAGE;
         renderBuildLog();
       });
@@ -3853,7 +3940,9 @@
     const scope = document.getElementById('economy-buildlog-scope');
     if (scope) {
       scope.querySelectorAll('[data-buildlog-scope]').forEach(b => {
-        b.classList.toggle('active', b.dataset.buildlogScope === 'both');
+        const on = b.dataset.buildlogScope === 'both';
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
       });
     }
   }

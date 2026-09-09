@@ -6406,11 +6406,56 @@ html.vt-cursor-active * {
     margin-bottom: 0.4rem;
 }
 
+/* Compact nav-pills for commander scope (radio) and type/kind filters
+   (checkbox). Smaller cousin of #match-tabs: glass tray, primary fill
+   when .active, tools-pill density. Shared by #economy-buildlog-scope
+   and #economy-buildlog-filter. No hardcoded colors. */
+.vt-econ-log-pills {
+    /* Tray must contrast against the card header (which is already
+       --kb-bg-card); mixing card-on-card would make the group invisible. */
+    background: color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 10px;
+    padding: 0.22rem;
+    border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+    flex-wrap: wrap;
+    gap: 0.1rem;
+}
+
+.vt-econ-log-pills .nav-link {
+    color: var(--kb-text-secondary);
+    font-weight: 600;
+    font-size: 0.72rem;
+    padding: 0.18rem 0.55rem;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    border-radius: 8px;
+    white-space: nowrap;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.vt-econ-log-pills .nav-link:hover {
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+}
+
+.vt-econ-log-pills .nav-link.active {
+    background: var(--kb-primary) !important;
+    color: var(--kb-primary-fg) !important;
+    box-shadow: 0 2px 8px color-mix(in oklab, var(--kb-primary), transparent 60%);
+}
+
+/* Visual clusters inside the type/kind strip: type | kind | All events. */
+.vt-econ-log-pills .vt-econ-log-pills-gap {
+    margin-left: 0.4rem;
+}
+
 /* Card-header find bar. Capped so it can't crowd out the filter pills, and
    allowed to shrink before the pills wrap on narrow viewports. */
 .vt-econ-log-search {
-    max-width: 220px;
-    min-width: 130px;
+    max-width: 180px;
+    min-width: 120px;
 }
 
 /* Tall enough to read a real build order without constant scrolling, but

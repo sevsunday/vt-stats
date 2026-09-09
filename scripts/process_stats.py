@@ -41,6 +41,11 @@ SESSIONS_DIR = PROJECT_ROOT / "data" / "sessions"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 ODF_PATH = PROJECT_ROOT / "data" / "odf.min.json"
 STEAMID_TO_NAME_PATH = PROJECT_ROOT / "data" / "steamid_to_name.txt"
+# Tiny stem list for the Build Order Log's Combat ships filter. Same set as
+# `build_combat_ship_odfs()` / `ships_built`. ODF-derived, not match-derived
+# -- rewritten every pipeline run, no PIPELINE_VERSION bump. The dashboard
+# lazy-fetches this instead of `odf.min.json` (~11 MB).
+COMBAT_SHIP_ODFS_PATH = PROJECT_ROOT / "data" / "combat_ship_odfs.json"
 
 # Sibling git clone of the upstream statsgate repo. Sync mode (default) does
 # `git pull --ff-only` here and additively mirrors any new .binpb.gz files
@@ -1803,6 +1808,23 @@ def build_combat_ship_odfs(odf_db):
             if chain and chain[-1] in COMBAT_SHIP_TERMINALS:
                 ships.add(_norm_build_odf(odf_key))
     return ships
+
+
+def write_combat_ship_odfs(combat_ship_odfs):
+    """Write `data/combat_ship_odfs.json` for the Build Order Log filter.
+
+    Sorted stems, `schema_version: 1`. The dashboard's Combat ships pill
+    is `stem in this set AND producer !== constructor`, matching
+    `ships_built` / Conveyor Belt. Constructor-built gun towers stay on
+    the Structures pill even if their classLabel terminal is `turret`.
+    """
+    payload = {
+        "schema_version": 1,
+        "stems": sorted(combat_ship_odfs),
+    }
+    with open(COMBAT_SHIP_ODFS_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+        f.write("\n")
 
 
 def disambiguate_names(odf_set, resolve_fn):
@@ -8391,6 +8413,8 @@ def main():
     print(f"  Scrap cost set: {len(scrap_costs)} ODF stems with GameObjectClass.scrapCost")
     combat_ship_odfs = build_combat_ship_odfs(odf_db)
     print(f"  Combat-ship set: {len(combat_ship_odfs)} ODF stems (B7 terminal-chain classification)")
+    write_combat_ship_odfs(combat_ship_odfs)
+    print(f"  Wrote {COMBAT_SHIP_ODFS_PATH.name} ({len(combat_ship_odfs)} stems)")
     # Storyline (match.schema_version 22): extractor-war classification --
     # chain-terminal `extractor` covers deployed scavs AND pool upgrades.
     extractor_odfs = build_extractor_odfs(odf_db)
