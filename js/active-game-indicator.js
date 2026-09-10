@@ -1,42 +1,42 @@
 /**
  * VT Stats - Active Game Indicator
  *
- * Topnav widget + cross-page pulse signal. Polls the live BZ2 lobby
- * (via the vendored BZ2API.fetchSessions) and:
+ * Dashboard-only topnav widget. Polls the live BZ2 lobby via
+ * BZ2API.fetchSessions and:
  *
- *  - On any page with the [data-vt-tools-link] attribute (Tools topnav
- *    link), flips data-vt-tools-live="0|1" so the link can pulse when a
- *    known-host VSR lobby is active.
+ *  - Renders a pulsing LIVE pill + Join-via-Steam shortcut on
+ *    #vt-active-game (index.html only). Clicking the GameWatch button
+ *    (no match) or the LIVE pill (match found) opens #gamewatch-modal,
+ *    which embeds the full /gw page in an iframe (src set lazily on
+ *    show, torn down on hide).
  *
- *  - On pages that ALSO carry the full #vt-active-game widget markup
- *    (currently only index.html), renders a pulsing LIVE pill and a
- *    Join-via-Steam shortcut. Clicking the GameWatch button (no match) or
- *    the LIVE pill (match found) opens #gamewatch-modal, which embeds the
- *    full /gw page in an iframe (src set lazily on show, torn down on hide).
+ *  - Flips data-vt-tools-live="0|1" on the dashboard's [data-vt-tools-link]
+ *    so the Tools link can pulse when a known-host lobby is active.
  *
+ * Does nothing on pages without #vt-active-game (early-return in init).
  * Self-contained: bootstraps on DOMContentLoaded, exposes nothing on
  * window, has zero coupling to js/app.js.
  *
  * Loaders:
  *   - data/known-hosts.json     (eager, on init) -> allowlist Set + name map
  *   - data/steamid_to_name.txt  (lazy, on first MATCH_FOUND) -> canonical
- *     name resolver for pill/dropdown labels.
- *   - data/vsrmaplist.json      (lazy, on first MATCH_FOUND) -> map metadata
- *     for the modal thumbnail + name fallback.
+ *     name resolver for pill labels.
  *
  * Polling:
- *   - 30s base cadence, paused while document.hidden, immediate refresh
- *     on visibility return.
+ *   - 60s cadence always (presence-only; no fast path), never faster than
+ *     POLL_HIDDEN_MIN_MS while document.hidden, immediate refresh on
+ *     visibility return.
  *   - In-flight guard prevents overlapping requests.
- *   - Backoff on consecutive errors: 30s -> 60s -> 120s cap, resets on
- *     first success. Errors are silent (state -> NO_MATCH).
+ *   - Backoff on consecutive errors: 60s -> 120s cap, resets on first
+ *     success. Errors are silent (state -> NO_MATCH).
  */
 (function () {
   'use strict';
 
   // ---------------------------------------------------------------- Config
 
-  const POLL_INTERVAL_MS = 30_000;
+  const POLL_INTERVAL_MS = 60_000;
+  const POLL_HIDDEN_MIN_MS = 60_000;
   const POLL_MAX_BACKOFF_MS = 120_000;
   const BOOT_DELAY_MS = 500;
 
@@ -387,21 +387,23 @@
     }
   }
 
+  function clampPollDelay(desiredMs) {
+    const d = Math.max(0, Number(desiredMs) || 0);
+    if (document.hidden) return Math.max(d, POLL_HIDDEN_MIN_MS);
+    return d;
+  }
+
   function schedule() {
     if (pollTimerId !== null) {
       clearTimeout(pollTimerId);
       pollTimerId = null;
     }
-    if (document.hidden) return;
-    pollTimerId = setTimeout(tick, nextDelayMs);
+    pollTimerId = setTimeout(tick, clampPollDelay(nextDelayMs));
   }
 
   function onVisibilityChange() {
     if (document.hidden) {
-      if (pollTimerId !== null) {
-        clearTimeout(pollTimerId);
-        pollTimerId = null;
-      }
+      schedule();
     } else {
       tick();
     }
@@ -411,14 +413,13 @@
 
   async function init() {
     const hasWidget = ensureDom();
-    if (hasWidget) {
-      renderLoading();
-    }
+    if (!hasWidget) return;
+    renderLoading();
     wireGamewatchModal();
     document.addEventListener('visibilitychange', onVisibilityChange);
     await loadKnownHosts();
     if (knownHosts.size === 0) {
-      if (hasWidget) renderNoMatch();
+      renderNoMatch();
       setToolsLiveSignal(false);
       return;
     }

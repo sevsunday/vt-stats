@@ -9,9 +9,10 @@
  * (and MSL already carries inline map name/description/image regardless).
  *
  * Lifecycle mirrors js/tools/live-session.js: in-flight guard, error backoff,
- * visibility pause + refresh-on-return. Cadence is adaptive -- the caller
+ * visibility floor + refresh-on-return. Cadence is adaptive -- the caller
  * supplies `shouldPollFast(sessions)` (true when an of-interest lobby is live)
- * to switch between fast and idle cadences.
+ * to switch between fast (15s, visible only) and idle (60s) cadences. A
+ * backgrounded tab never polls faster than POLL_HIDDEN_MIN_MS.
  *
  * On a transient poll error the previous snapshot is intentionally NOT
  * cleared (clearing would flash the whole list to empty and back); we just
@@ -27,8 +28,9 @@
 
   // ---------------------------------------------------------------- Config
 
-  const POLL_INTERVAL_MS = 12_000;       // idle cadence
-  const POLL_INTERVAL_FAST_MS = 5_000;   // active cadence (of-interest lobby live)
+  const POLL_INTERVAL_MS = 60_000;       // idle cadence
+  const POLL_INTERVAL_FAST_MS = 15_000;  // active cadence (of-interest lobby live, visible tab)
+  const POLL_HIDDEN_MIN_MS = 60_000;     // floor while document.hidden
   const POLL_MAX_BACKOFF_MS = 120_000;   // error backoff cap
 
   // ---------------------------------------------------------------- State
@@ -66,6 +68,12 @@
       try { fast = !!opts.shouldPollFast(sessions); } catch (_) { fast = false; }
     }
     return fast ? POLL_INTERVAL_FAST_MS : POLL_INTERVAL_MS;
+  }
+
+  function clampPollDelay(desiredMs) {
+    const d = Math.max(0, Number(desiredMs) || 0);
+    if (document.hidden) return Math.max(d, POLL_HIDDEN_MIN_MS);
+    return d;
   }
 
   // ---------------------------------------------------------------- Poll
@@ -112,23 +120,17 @@
       clearTimeout(pollTimerId);
       pollTimerId = null;
     }
-    if (document.hidden) {
-      // Paused while backgrounded: no pending poll for the UI to count down to.
-      if (opts.onSchedule) { try { opts.onSchedule(null, null); } catch (_) { /* */ } }
-      return;
-    }
-    pollTimerId = setTimeout(tick, nextDelayMs);
+    const delay = clampPollDelay(nextDelayMs);
+    pollTimerId = setTimeout(tick, delay);
     if (opts.onSchedule) {
-      try { opts.onSchedule(Date.now() + nextDelayMs, nextDelayMs); } catch (_) { /* */ }
+      try { opts.onSchedule(Date.now() + delay, delay); } catch (_) { /* */ }
     }
   }
 
   function onVisibilityChange() {
     if (document.hidden) {
-      if (pollTimerId !== null) {
-        clearTimeout(pollTimerId);
-        pollTimerId = null;
-      }
+      // Keep polling, but re-clamp so a 15s tick cannot fire in the background.
+      schedule();
     } else {
       tick();
     }

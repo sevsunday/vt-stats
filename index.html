@@ -28,11 +28,11 @@
       </a>
 
       <!-- Active Game Indicator. Polls the live BZ2 lobby via window.BZ2API
-           every 30s (paused while tab hidden) and surfaces a pulsing LIVE
-           pill whenever a session hosted by an allowlisted Steam64 ID is
-           live. Clicking either the GameWatch button (no match) or the LIVE
-           pill (match found) opens #gamewatch-modal, which embeds the full
-           /gw page in an iframe. Self-bootstrapping; see
+           every 60s (60s floor while tab hidden, 120s error cap) and surfaces
+           a pulsing LIVE pill whenever a session hosted by an allowlisted
+           Steam64 ID is live. Clicking either the GameWatch button (no match)
+           or the LIVE pill (match found) opens #gamewatch-modal, which embeds
+           the full /gw page in an iframe. Dashboard-only; see
            js/active-game-indicator.js. -->
       <div id="vt-active-game" class="vt-active-game" data-state="loading" aria-live="polite">
         <button type="button"
@@ -2021,12 +2021,12 @@
        card (js/tools/live-session.js). Must load before
        active-game-indicator.js. -->
   <script src="js/live-session-card.js"></script>
-  <!-- Active Game Indicator: self-contained topnav widget that polls the
-       BZ2 lobby via window.BZ2API and surfaces a pulsing LIVE pill +
-       click-through modal whenever a session hosted by an allowlisted
-       Steam64 (data/known-hosts.json) is live. Also flips the Tools
-       topnav link's data-vt-tools-live attribute when the same condition
-       holds, driving the link's pulse animation. -->
+  <!-- Active Game Indicator: dashboard-only topnav widget that polls the
+       BZ2 lobby via window.BZ2API every 60s and surfaces a pulsing LIVE
+       pill + Game Watch iframe modal whenever a session hosted by an
+       allowlisted Steam64 (data/known-hosts.json) is live. Also flips the
+       dashboard Tools link's data-vt-tools-live attribute when the same
+       condition holds. Early-returns on pages without #vt-active-game. -->
   <script src="js/active-game-indicator.js"></script>
 
   <!-- Site-wide custom cursor + Settings gear. Self-bootstrapping; injects a

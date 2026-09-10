@@ -162,11 +162,9 @@
     }
     if (statusDotEl) statusDotEl.classList.remove('gw-dot--stale');
     // Live countdown to the next poll, matching the ring (which fills as the
-    // counter ticks toward 0). Reflects the adaptive cadence + error backoff
-    // automatically via nextPollDueAt.
-    if (document.hidden) {
-      updatedEl.textContent = 'paused';
-    } else if (!nextPollDueAt) {
+    // counter ticks toward 0). Reflects the adaptive cadence, hidden floor,
+    // and error backoff automatically via nextPollDueAt.
+    if (!nextPollDueAt) {
       updatedEl.textContent = 'updating\u2026';
     } else {
       const remaining = Math.max(0, Math.ceil((nextPollDueAt - Date.now()) / 1000));
@@ -195,7 +193,7 @@
   function updateRing() {
     if (!ringFgEl) return;
     let progress = 0; // 0 = just polled (empty), 1 = due now (full)
-    if (!document.hidden && nextPollDueAt && nextPollDelayMs > 0) {
+    if (nextPollDueAt && nextPollDelayMs > 0) {
       const remaining = Math.max(0, nextPollDueAt - Date.now());
       progress = Math.min(1, Math.max(0, 1 - remaining / nextPollDelayMs));
     }
@@ -224,7 +222,7 @@
   function onRingVisibilityChange() {
     if (document.hidden) {
       stopRingLoop();
-      updateRing(); // settle to paused/empty
+      updateRing(); // 1s ticker still drives the ring while hidden
     } else {
       startRingLoop();
     }

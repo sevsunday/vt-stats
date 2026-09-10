@@ -51,7 +51,9 @@ SITE_URL = "https://vtstats.bz"
 # v10 adds the ELO topnav link (dedicated /elo/ page) after Maps.
 # v11 reorders the topnav: Players moves after Maps so it sits
 # immediately left of ELO (Models · Maps · Players · ELO · Tools).
-PLAYER_TEMPLATE_VERSION = 11
+# v12 drops the Tools-link live-pulse poller (bz2api.js +
+# active-game-indicator.js) from stubs; the dashboard owns that poller.
+PLAYER_TEMPLATE_VERSION = 12
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

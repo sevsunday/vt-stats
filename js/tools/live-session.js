@@ -9,7 +9,7 @@
  * Wire model (with `js/tools/main.js`):
  *   - main.js calls VTLiveSession.init({ ...callbacks })
  *   - VTLiveSession owns the BZ2API polling lifecycle, in-flight guard,
- *     error backoff, visibility handling, force-refresh, lock-lobby
+ *     error backoff, visibility floor (60s min while hidden), force-refresh, lock-lobby
  *     freeze, and ignore-live kill-switch
  *   - On each successful poll: diff vs previous roster (by steam64),
  *     emit join/leave toasts (gated by suppression contract), then
@@ -39,9 +39,10 @@
 
   // ---------------------------------------------------------------- Config
 
-  const POLL_INTERVAL_MS = 30_000;          // idle cadence (no allowlisted game)
-  const POLL_INTERVAL_FAST_MS = 5_000;      // active cadence (>=1 allowlisted VSR game)
-  const POLL_MAX_BACKOFF_MS = 120_000;      // error backoff cap (unchanged)
+  const POLL_INTERVAL_MS = 60_000;          // idle cadence (no allowlisted game)
+  const POLL_INTERVAL_FAST_MS = 15_000;   // active cadence (>=1 allowlisted VSR game, visible tab)
+  const POLL_HIDDEN_MIN_MS = 60_000;      // floor while document.hidden
+  const POLL_MAX_BACKOFF_MS = 120_000;     // error backoff cap
 
   // ---------------------------------------------------------------- State
 
@@ -251,10 +252,9 @@
       allowlistedSessions = filtered;
       errorStreak = 0;
       // Cadence by presence: when at least one known-host VSR session
-      // is live, poll every 5s so the live-mirror Team Balonce feels
-      // live. When the field is empty, fall back to the 30s idle
-      // cadence. Game ending naturally returns us to slow on the next
-      // tick (filtered drops to 0).
+      // is live, poll every 15s while the tab is visible. When the
+      // field is empty, fall back to the 60s idle cadence. A hidden
+      // tab never polls faster than POLL_HIDDEN_MIN_MS.
       nextDelayMs = filtered.length > 0 ? POLL_INTERVAL_FAST_MS : POLL_INTERVAL_MS;
 
       const currentSession = pickPrimarySession(allowlistedSessions);
@@ -295,22 +295,26 @@
     }
   }
 
+  function clampPollDelay(desiredMs) {
+    const d = Math.max(0, Number(desiredMs) || 0);
+    if (document.hidden) return Math.max(d, POLL_HIDDEN_MIN_MS);
+    return d;
+  }
+
   function schedule() {
     if (pollTimerId !== null) {
       clearTimeout(pollTimerId);
       pollTimerId = null;
     }
-    if (document.hidden || ignoreLive) return;
-    pollTimerId = setTimeout(tick, nextDelayMs);
+    if (ignoreLive) return;
+    pollTimerId = setTimeout(tick, clampPollDelay(nextDelayMs));
   }
 
   function onVisibilityChange() {
+    if (ignoreLive) return;
     if (document.hidden) {
-      if (pollTimerId !== null) {
-        clearTimeout(pollTimerId);
-        pollTimerId = null;
-      }
-    } else if (!ignoreLive) {
+      schedule();
+    } else {
       tick();
     }
   }
