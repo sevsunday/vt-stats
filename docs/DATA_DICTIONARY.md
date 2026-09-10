@@ -92,7 +92,7 @@ Match metadata. Most fields are captured at match start; in proto v3 the
 | 19 | `team1_race` | `Race` | **v2+.** Team 1's faction (authoritative when non-zero) |
 | 20 | `team2_race` | `Race` | **v2+.** Team 2's faction |
 | 21 | `game_outcome` | `Outcome` | **v3-only.** Host-attested outcome from the end-of-game dialog: `0` UNSPECIFIED, `1000` TEAM1_WIN, `1001` TEAM2_WIN, `1002` DRAW, `1003` GAME_CANCELLED (1000-series values double as Win32 TaskDialog button IDs upstream; out-of-enum values like `IDCANCEL = 2` are possible when the host ESCs the dialog and are treated as unattested). See [§10 Match Winner Resolution](#10-match-winner-resolution-inference--v15-attestation). |
-| 22 | `players` | `repeated PlayerInfo` | **v3-only.** Per-tick-accumulated roster (replaces fields 6/7/9/10): `{steam64, teamnum, nickname}` per player observed in any slot at any tick — captures late joiners; `nickname` is first-recorded. Hash-ordered on the wire (NOT first-seen). May carry garbage entries with invalid Steam64s from EMPTY slots (the collector scans without a player-handle guard); the pipeline's `_valid_steam64` gate (`(s64 >> 32) == 0x01100001`) drops them from the working identity while `match.roster` preserves them flagged `valid: false`. |
+| 22 | `players` | `repeated PlayerInfo` | **v3-only.** Per-tick-accumulated roster (replaces fields 6/7/9/10): `{steam64, teamnum, nickname}` per player the collector recorded — nickname is first-recorded, `teamnum` is first-seen slot. Hash-ordered on the wire (NOT first-seen). Working identity is the valid-Steam64 **union of `UpdateTick.players`**; this list is a nickname/slot hint always compared via `match.roster_qa` (never gated on length). Header-only 0-tick names are ghosts and are dropped. May carry garbage entries with invalid Steam64s from EMPTY slots (the collector scans without a player-handle guard); the pipeline's `_valid_steam64` gate (`(s64 >> 32) == 0x01100001`) drops them from the working identity while `match.roster` preserves them flagged `valid: false`. |
 
 All six `terrain_*` fields are 0.0 when the collector does not populate them (pre-schema sessions). The pipeline treats all-zero as "unset" and falls back to observed player extents for `positioning.map_bounds`; the source choice is surfaced via `positioning.map_bounds_source` (`"terrain"` vs `"observed"`).
 
@@ -292,7 +292,7 @@ Players are identified by `uint64` Steam64 IDs. The header provides three lookup
 
 The pipeline builds `nick_map` (slot → name) by joining `teamnum_to_s64` with `s64_to_nick`.
 
-**Proto v3:** the three maps are `reserved`; identity comes from the `header.players` PlayerInfo roster instead (see the StatHeader table above), normalized into the same three working dicts by `_build_identity_maps()` in `scripts/process_stats.py` — **evidence-first**. Invalid Steam64s (empty-slot collector garbage) are dropped via the `_valid_steam64` gate. Active players are placed at the **majority-vote slot from the engine's event attributions** (every `team` field on `DamageDealt` / `UnitDestroyed` / `UnitSniped` / `PickupPowerup` is the actor's team slot 1-10 at that moment) — `PlayerInfo.teamnum` only records the FIRST slot seen, which pre-game lobby shuffles corrupt both loudly (contested slots between full-match players) and silently (wrong-side placements that fire no conflict). No-evidence players (spectators, cameos, phantoms) keep their roster-hint slot when free; when taken, `presence_share >= 0.25` overflows to the lowest free same-side slot (campod spectators keep a visible-but-never-rated row) and lower presence drops. Every resolution lands on `match.roster_conflicts` (`resolution: "evidence" | "reassigned" | "dropped"`, `assigned_slot`, `presence_share`, `evidence_events`). The raw roster survives verbatim on `match.roster` (`[{steam64, slot, nickname, valid}]`, pre-`ACCOUNT_REROUTES`).
+**Proto v3:** the three maps are `reserved`; working identity is the valid-Steam64 **union of `UpdateTick.players`**, with `header.players` as a nickname / first-seen-slot hint that `_build_identity_maps()` in `scripts/process_stats.py` always compares (never gated on header length). Invalid Steam64s (empty-slot collector garbage) are dropped via the `_valid_steam64` gate. Header-only names with 0 ticks are ghosts and are dropped (`roster_conflicts.reason: "no_tick_presence"`). Tick-only ids (empty header / missed late joiners) are synthesized. Active players are placed at the **majority-vote slot from the engine's event attributions** (every `team` field on `DamageDealt` / `UnitDestroyed` / `UnitSniped` / `PickupPowerup` is the actor's team slot 1-10 at that moment) — `PlayerInfo.teamnum` only records the FIRST slot seen, which pre-game lobby shuffles corrupt both loudly (contested slots between full-match players) and silently (wrong-side placements that fire no conflict). No-evidence tick-union players (campod spectators) keep their roster-hint slot when free; when taken, `presence_share >= 0.25` overflows to the lowest free same-side slot and lower presence drops. Silent tick-only with no slot hint drop as `tick_only_no_slot`. Every resolution lands on `match.roster_conflicts` (`resolution`, `reason`, `assigned_slot`, `presence_share`, `evidence_events`). Always-on `match.roster_qa` records header-vs-tick-union counts (`agreed` when the sets match). The raw roster survives verbatim on `match.roster` (`[{steam64, slot, nickname, valid}]`, pre-`ACCOUNT_REROUTES`).
 
 ### Faction Resolution
 
@@ -340,7 +340,7 @@ When multiple ODF strings resolve to the same display name, the raw ODF is appen
 
 The pipeline normalizes identity through `_build_identity_maps(header, schema, events)`:
 - **v1/v2**: `slot_to_s64` / `s64_to_slot` / `s64_to_nick` copied directly from `header.teamnum_to_s64` / `header.s64_to_teamnum` / `header.s64_to_nick`
-- **v3**: the same three dicts derived from `header.players` — entries failing the `_valid_steam64` gate are dropped (empty-slot collector garbage); active players sit at their engine-event-evidence majority slot (the roster's first-seen `teamnum` is only a hint), no-evidence spectators keep/overflow-within their hinted side by presence (all resolutions → `match.roster_conflicts`)
+- **v3/v4**: the same three dicts from the valid-Steam64 union of `UpdateTick.players` — `header.players` is a nickname/slot hint always compared via `match.roster_qa`; entries failing the `_valid_steam64` gate are dropped (empty-slot collector garbage); header-only 0-tick ghosts are dropped (`no_tick_presence`); active players sit at their engine-event-evidence majority slot; no-evidence tick-union spectators keep/overflow-within their hinted side by presence (all resolutions → `match.roster_conflicts`)
 - Builds `nick_map` (slot → nickname) by joining `slot_to_s64` with `s64_to_nick`
 - Faction is determined by slot convention (1-5 = Team 1, 6-10 = Team 2)
 
@@ -760,7 +760,7 @@ Each match file has these top-level keys:
 | `teams` | `object` | `"1"` and `"2"` → arrays of roster entries |
 | `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). Match-global, always-unfiltered. |
 | `team_factions` | `object` | `{ "1": { code, name } \| null, "2": { code, name } \| null }` — derived faction per team. `code` is one of `"i"` (ISDF) / `"e"` (Hadean) / `"f"` (Scion); `name` is the human label. `null` for teams with no signal (sandbox / pure-AI / corrupt match). Schema v3+. See [Team Faction Detection](#team-faction-detection) for the algorithm. Match-global, always-unfiltered. |
-| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. `3` adds `match.team_factions` + `match.winner` (this commit). Absence indicates legacy data written before this PR. Bumped only when an output-shape-breaking change ships. |
+| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. `3` adds `match.team_factions` + `match.winner`. **`23` (current)** adds `match.roster_qa` + `roster_conflicts.reason` (tick-union identity). Absence indicates legacy data. Bumped only when an output-shape-breaking change ships. |
 | `has_position_data` | `boolean` | `true` iff the session contained `UpdateTick` events. Mirrored from `positioning.has_position_data`. Drives Positioning-tab UI gating. |
 | `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed. Mirrored from `positioning.has_target_lock_data`. Distinguishes "no T-key data" (pre-schema or never pressed) from "0% lock" in Career Radar tooltips. |
 | `has_pickup_data` | `boolean` | Phase 3. `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. |
@@ -769,6 +769,9 @@ Each match file has these top-level keys:
 | `sentinel_damage` | `object` | Per-match telemetry for engine sentinels dropped by the `> 1e6` filter: `{ count, total_amount, first_tick, last_tick }`. `count` is DD+DR pair count (one pair = 1); `total_amount` is the sum of DD-side amounts. `first_tick` / `last_tick` are `null` on clean matches. Always present (zeros when clean). Match-global, always-unfiltered. See [§7](#7-sentinel-damage-filter). |
 | `has_resource_data` | `boolean` | **`match.schema_version` 17 (proto v4).** `true` iff the session carried per-tick `ResourceState` telemetry. **Absent = `false`** (inverse of the `has_bullet_hit_data` default — the legacy corpus lacks the data). Gates the `economy` block + every economy UI surface. Mirrored on manifest entries + contributions. |
 | `has_build_data` | `boolean` | **`match.schema_version` 17 (proto v4).** `true` iff the session carried `BuildEvent` telemetry. Absent = `false`. Gates the `builds` block. Mirrored on manifest entries + contributions. |
+| `roster` | `array \| null` | **v15.** Raw v3 `PlayerInfo` passthrough `[{steam64, slot, nickname, valid}]`, including invalid empty-slot garbage (`valid: false`) for wire-accurate provenance. Pre-`ACCOUNT_REROUTES`. `null` on v1/v2. Match-global, always-unfiltered. |
+| `roster_conflicts` | `array` | Identity-shim audit (`[]` when header and ticks agree and no slot correction fired). v23 adds `reason`: `no_tick_presence` / `tick_only_no_slot` / `roster_hint_mismatch` / `evidence_collision` / `slot_occupied` / `low_presence` / `no_free_team_slot`. Match-global, always-unfiltered. |
+| `roster_qa` | `object \| null` | **v23.** Always-on header-vs-tick-union QA: `{header_valid, tick_union, ghosts_dropped, tick_only_added, max_tick_players, agreed}`. `agreed` is true iff the valid header Steam64 set equals the UpdateTick union. Console stays quiet when agreed. `null` pre-v3. Match-global, always-unfiltered. |
 
 Each roster entry: `{ slot, player_id, name, steam64 }`
 
@@ -2761,6 +2764,11 @@ disconnects (small `last_event_tick`) with one window check. Players
 who died often but stayed in the match end-to-end have a full presence
 window and are **not** flagged -- their dead time is correctly NOT a
 participation deficit.
+
+When `first_event_tick` is `None` (no events at all — a header-only ghost
+that somehow still received a leaderboard row), `_is_low_activity_row`
+returns `(True, 0.0)` so the row is omitted from ELO rather than treated
+as a full-match presence.
 
 ### Pool-level counters
 

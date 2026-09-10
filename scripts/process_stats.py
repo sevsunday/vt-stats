@@ -89,7 +89,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # curated beats + typed facts + archetype on every v4 match (needs BOTH
 # economy and builds telemetry). Bands segment the wire's own per-tick
 # scrap_status enum captured alongside the stored economy series.
-PIPELINE_VERSION = 39
+# 39 -> 40: tick-union roster QA (match.schema_version 23). Working identity
+# is the valid-Steam64 union of UpdateTick.players, not header.players;
+# header-only ghosts (0 ticks) are dropped; tick-only late joiners /
+# empty-header files are synthesized. Always-on match.roster_qa telemetry.
+PIPELINE_VERSION = 40
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -517,17 +521,14 @@ def _valid_steam64(s64):
     return (s64 >> 32) == 0x01100001
 
 
-# Minimum share of the match's UpdateTicks a NO-EVIDENCE roster claimant
-# (a player with zero engine-attributed events -- spectators, cameos,
-# stale-scan phantoms) must have been present for to be REASSIGNED to a
-# free slot on their team side when their roster slot is taken, instead
-# of dropped. Real churn cases (Oldboy 2026-08-23, Strategy Arena
-# 2026-08-24) proved `PlayerInfo.teamnum` only records the FIRST slot a
-# Steam64 was seen in -- pre-game lobby shuffles make it unreliable --
-# so active players are placed by engine event evidence instead (see
-# _build_identity_maps); this floor only separates real spectators
-# (campods: reassign, visible-but-never-rated) from cameos and phantoms
-# (drop). Tunable without a schema bump (bump PIPELINE_VERSION on change).
+# Minimum share of the match's UpdateTicks a NO-EVIDENCE tick-union
+# claimant (a player who appeared on at least one UpdateTick but has
+# zero engine-attributed events -- campod spectators, cameos) must
+# have been present for to be REASSIGNED to a free slot on their team
+# side when their roster-hint slot is taken, instead of dropped.
+# Header-only names with 0 ticks are never participants (see
+# _build_identity_maps). Tunable without a schema bump (bump
+# PIPELINE_VERSION on change).
 ROSTER_OVERFLOW_MIN_SHARE = 0.25
 
 # Canonical set of the three base faction pilot ODFs (player on foot).
@@ -3186,12 +3187,13 @@ def _is_low_activity_row(first_tick, last_tick, tick_rate, duration_sec):
     LOW_ACTIVITY_MIN_PRESENCE of match.duration_sec. Catches both late
     joiners (large first_tick) and early disconnects (small last_tick).
 
-    Returns (False, duration_sec) when first_tick is None (no events
-    seen for this player at all -- shouldn't happen for a real
-    leaderboard row, but be safe).
+    Returns (True, 0.0) when first_tick is None (no events at all).
+    Header-only ghosts must never look like a full-match presence.
     """
-    if first_tick is None or last_tick is None or duration_sec <= 0 or tick_rate <= 0:
-        return False, float(duration_sec or 0)
+    if first_tick is None or last_tick is None:
+        return True, 0.0
+    if duration_sec <= 0 or tick_rate <= 0:
+        return False, 0.0
     presence_sec = max(0.0, (last_tick - first_tick) / tick_rate)
     return (presence_sec / duration_sec) < LOW_ACTIVITY_MIN_PRESENCE, presence_sec
 
@@ -3350,60 +3352,53 @@ def _apply_account_reroutes_to_events(events, reroute_map):
             if x.picker and g(x.picker): x.picker = g(x.picker)
 
 
+class _RosterPlayer:
+    """Working identity row for `_build_identity_maps` (header or tick-only)."""
+    __slots__ = ("steam64", "nickname", "teamnum")
+
+    def __init__(self, steam64, nickname, teamnum):
+        self.steam64 = steam64
+        self.nickname = nickname or ""
+        self.teamnum = int(teamnum)
+
+
 def _build_identity_maps(header, schema, events):
     """Build the three working identity dicts for process_match().
 
     v1/v2: direct copies of the header maps (unchanged legacy behavior).
 
-    v3: derived from `header.players` -- but EVIDENCE-FIRST, because
-    `PlayerInfo.teamnum` only records the FIRST slot each Steam64 was
-    ever seen in. Pre-game lobby shuffles make that hint unreliable in
-    two distinct ways, both observed on real data:
+    v3/v4: the participant set is the valid-Steam64 UNION of every
+    UpdateTick.players[].player (late joiners included; first tick is not
+    special). `header.players` is a nickname / first-seen-slot HINT that
+    is always compared against that union -- never the source of truth,
+    never gated on header length > 10.
 
-      * Contested slots between FULL-MATCH players (Strategy Arena
-        2026-08-24: VTrider transited slot 6 while hosting, F9bomber
-        actually played it) -- presence cannot discriminate between two
-        ~100%-presence claimants and first-appearance picks wrong.
-      * SILENT wrong-side placements (same match: Sev first-seen at a
-        team-1 slot he shuffled through, actually played slot 7) -- no
-        conflict ever fires, so no tie-break can catch it.
-
-    The authoritative signal is the EVENT STREAM: per the proto,
-    "anything with a `team` refers to the team slot from 1-10", stamped
-    by the ENGINE on every DamageDealt / UnitDestroyed / UnitSniped /
-    PickupPowerup at the moment it happened. A single scan builds a
-    per-Steam64 slot histogram (tens of thousands of unanimous votes for
-    an active player) plus UpdateTick presence:
-
-      * Validity gate -- the v3 collector scans EMPTY slots without the
-        old GetPlayerHandle() guard, emitting garbage Steam64s (observed:
-        8029124719555444850 / 30064771072 on empty slot 10). The
-        `_valid_steam64` gate drops them from the working dicts, which
-        keeps their ghost trails out of positioning and denies them
-        leaderboard rows.
+      * Validity gate -- garbage Steam64s from empty-slot collector
+        scans fail `_valid_steam64` and stay out of working maps.
+      * Header-only names with 0 tick samples are ghosts (process-lifetime
+        collector leak, Sept 7 2026) and are dropped
+        (`reason: "no_tick_presence"`). They never get a leaderboard row.
+      * Tick-only Steam64s (empty header, or a late joiner the header
+        missed) are synthesized with an empty nick (known_players fills
+        it later) and placed by engine votes; silent tick-only with no
+        slot hint drop as `tick_only_no_slot`.
       * Evidenced players (any engine slot votes) sit at their
-        majority-vote slot -- the roster hint is ignored (a correction is
-        WARNed + audited when they differ). Evidence collisions (should
-        not happen; engine-attributed) resolve toward the better-attested
-        claimant, the loser overflowing within their evidenced side.
-      * No-evidence players (spectators who never dealt/took damage,
-        cameos, stale-scan phantoms) fall back to the roster hint when
-        that slot is FREE (v1/v2-parity: an uncontested roster row is
-        honored at any presence). When the slot is taken, substantial
-        presence (>= ROSTER_OVERFLOW_MIN_SHARE of ticks) overflows to
-        the lowest free slot on the hint's team side (e.g. a campod
-        spectator keeps a visible-but-never-rated row); low presence
-        drops (cameo / phantom).
+        majority-vote slot -- the roster hint is ignored when it is a
+        1-10 first-seen value that disagrees. Evidence collisions overflow
+        within the evidenced side.
+      * No-evidence tick-union players (campod spectators) fall back to
+        the roster hint when that slot is FREE. When taken, substantial
+        presence (>= ROSTER_OVERFLOW_MIN_SHARE) overflows to the lowest
+        free same-side slot; low presence drops. Header-only 0-tick
+        names are NOT honored.
 
-    All corrections, reassignments, and drops are recorded in
-    `roster_conflicts` with `resolution: "evidence" | "reassigned" |
-    "dropped"` (+ `assigned_slot`, `presence_share`, `evidence_events`).
+    Always-on QA: `roster_qa` records header_valid vs tick_union counts.
+    Console WARN only when they disagree or a single tick lists > 10
+    players.
 
     Returns `(slot_to_s64, s64_to_slot, s64_to_nick, roster,
-    roster_conflicts)` where `roster` is the RAW PlayerInfo passthrough
-    (list of {steam64, slot, nickname, valid} dicts; None for v1/v2 --
-    pre-ACCOUNT_REROUTES identity, wire-accurate provenance) and
-    `roster_conflicts` lists conflict resolutions (always a list).
+    roster_conflicts, roster_qa)` -- roster is the RAW PlayerInfo
+    passthrough (None + roster_qa None for v1/v2).
     """
     if schema not in (PROTO_SCHEMA_V3, PROTO_SCHEMA_V4):
         return (
@@ -3412,6 +3407,7 @@ def _build_identity_maps(header, schema, events):
             dict(header.s64_to_nick),
             None,
             [],
+            None,
         )
 
     roster = [
@@ -3424,8 +3420,13 @@ def _build_identity_maps(header, schema, events):
         for p in header.players
     ]
 
-    valid_entries = [p for p in header.players if _valid_steam64(p.steam64)]
-    invalid_count = len(header.players) - len(valid_entries)
+    header_by_s64 = {}
+    invalid_count = 0
+    for p in header.players:
+        if not _valid_steam64(p.steam64):
+            invalid_count += 1
+            continue
+        header_by_s64.setdefault(p.steam64, p)
     if invalid_count:
         print(
             f"  WARN: v3 roster: dropped {invalid_count} invalid-Steam64 "
@@ -3433,16 +3434,17 @@ def _build_identity_maps(header, schema, events):
         )
 
     # ------------------------------------------------------------------
-    # Evidence pass: one scan over the event stream. Engine slot votes
-    # from every team-stamped event kind + UpdateTick presence counts.
+    # Evidence pass: one scan. UpdateTick presence is the participant
+    # set (not restricted to header ids). Engine slot votes from every
+    # team-stamped event kind.
     # ------------------------------------------------------------------
-    valid_set = {p.steam64 for p in valid_entries}
     slot_evidence: dict[int, Counter] = {}
     samples: dict[int, int] = {}
     total_ticks = 0
+    max_tick_players = 0
 
     def _vote(s64, slot):
-        if s64 in valid_set and 1 <= slot <= 10:
+        if s64 and _valid_steam64(s64) and 1 <= slot <= 10:
             slot_evidence.setdefault(s64, Counter())[slot] += 1
 
     for evt in events:
@@ -3450,8 +3452,11 @@ def _build_identity_maps(header, schema, events):
         if kind == "update_tick":
             ut = evt.update_tick
             total_ticks += 1
+            n_players = len(ut.players)
+            if n_players > max_tick_players:
+                max_tick_players = n_players
             for ps in ut.players:
-                if ps.player in valid_set:
+                if ps.player and _valid_steam64(ps.player):
                     samples[ps.player] = samples.get(ps.player, 0) + 1
         elif kind == "damage_dealt":
             d = evt.damage_dealt
@@ -3469,6 +3474,27 @@ def _build_identity_maps(header, schema, events):
             d = evt.pickup_powerup
             _vote(d.picker, d.picker_team)
 
+    tick_union = set(samples)
+    header_valid_set = set(header_by_s64)
+    ghosts = header_valid_set - tick_union
+    tick_only = tick_union - header_valid_set
+    roster_qa = {
+        "header_valid": len(header_valid_set),
+        "tick_union": len(tick_union),
+        "ghosts_dropped": len(ghosts),
+        "tick_only_added": len(tick_only),
+        "max_tick_players": max_tick_players,
+        "agreed": not ghosts and not tick_only,
+    }
+    if (not roster_qa["agreed"]) or max_tick_players > 10:
+        print(
+            f"  WARN: v3 roster QA: header_valid={roster_qa['header_valid']} "
+            f"tick_union={roster_qa['tick_union']} "
+            f"ghosts_dropped={roster_qa['ghosts_dropped']} "
+            f"tick_only_added={roster_qa['tick_only_added']} "
+            f"max_tick_players={max_tick_players}"
+        )
+
     slot_to_s64 = {}
     s64_to_slot = {}
     s64_to_nick = {}
@@ -3482,17 +3508,54 @@ def _build_identity_maps(header, schema, events):
     def _share(p):
         return (samples.get(p.steam64, 0) / total_ticks) if total_ticks else 0.0
 
-    evidenced = [p for p in valid_entries if p.steam64 in slot_evidence]
-    unevidenced = [p for p in valid_entries if p.steam64 not in slot_evidence]
+    def _conflict(*, slot, steam64, nickname, kept_steam64, resolution,
+                 assigned_slot, presence_share, evidence_events, reason):
+        roster_conflicts.append({
+            "slot": slot,
+            "steam64": str(steam64),
+            "nickname": nickname or "",
+            "kept_steam64": str(kept_steam64) if kept_steam64 else None,
+            "resolution": resolution,
+            "assigned_slot": assigned_slot,
+            "presence_share": round(presence_share, 3),
+            "evidence_events": evidence_events,
+            "reason": reason,
+        })
+
+    for s64 in sorted(ghosts):
+        hp = header_by_s64[s64]
+        _conflict(
+            slot=int(hp.teamnum),
+            steam64=s64,
+            nickname=hp.nickname or "",
+            kept_steam64=None,
+            resolution="dropped",
+            assigned_slot=None,
+            presence_share=0.0,
+            evidence_events=0,
+            reason="no_tick_presence",
+        )
+
+    working = []
+    for s64 in tick_union:
+        hp = header_by_s64.get(s64)
+        if hp is not None:
+            working.append(_RosterPlayer(s64, hp.nickname, hp.teamnum))
+        else:
+            working.append(_RosterPlayer(s64, "", 0))
+
+    evidenced = [p for p in working if p.steam64 in slot_evidence]
+    unevidenced = [p for p in working if p.steam64 not in slot_evidence]
 
     # Phase A: engine-evidenced players, strongest evidence first.
-    corrections = []  # (PlayerInfo, roster_hint_slot, assigned_slot, n_votes)
+    corrections = []  # (_RosterPlayer, roster_hint_slot, assigned_slot, n_votes)
     for p in sorted(evidenced, key=lambda p: -sum(slot_evidence[p.steam64].values())):
         ev_slot, ev_n = slot_evidence[p.steam64].most_common(1)[0]
         roster_hint = int(p.teamnum)
+        hint_ok = 1 <= roster_hint <= 10
         if ev_slot not in slot_to_s64:
             _assign(p, ev_slot)
-            if ev_slot != roster_hint:
+            if hint_ok and ev_slot != roster_hint:
                 print(
                     f"  WARN: v3 roster: {p.steam64} ({p.nickname!r}) placed at "
                     f"slot {ev_slot} by engine event evidence ({ev_n} votes; "
@@ -3511,30 +3574,43 @@ def _build_identity_maps(header, schema, events):
                 f"{p.steam64} ({p.nickname!r}, {ev_n} votes) "
                 f"{f'reassigned to free slot {free_slot}' if free_slot is not None else 'dropped (no free team slot)'}"
             )
-            roster_conflicts.append({
-                "slot": ev_slot,
-                "steam64": str(p.steam64),
-                "nickname": p.nickname or "",
-                "kept_steam64": str(slot_to_s64[ev_slot]),
-                "resolution": "reassigned" if free_slot is not None else "dropped",
-                "assigned_slot": free_slot,
-                "presence_share": round(_share(p), 3),
-                "evidence_events": ev_n,
-            })
+            _conflict(
+                slot=ev_slot,
+                steam64=p.steam64,
+                nickname=p.nickname,
+                kept_steam64=slot_to_s64[ev_slot],
+                resolution="reassigned" if free_slot is not None else "dropped",
+                assigned_slot=free_slot,
+                presence_share=_share(p),
+                evidence_events=ev_n,
+                reason="evidence_collision",
+            )
 
-    # Phase B: no-evidence players (spectators / cameos / phantoms),
-    # higher presence first so real spectators claim slots before noise.
+    # Phase B: tick-union, no engine events (campod / cameos). Header-only
+    # ghosts never reach here. Higher presence first.
     for p in sorted(unevidenced, key=lambda p: -samples.get(p.steam64, 0)):
         roster_hint = int(p.teamnum)
         share = _share(p)
-        if 1 <= roster_hint <= 10 and roster_hint not in slot_to_s64:
-            # Uncontested roster row honored at any presence (v1/v2 parity).
+        hint_ok = 1 <= roster_hint <= 10
+        if hint_ok and roster_hint not in slot_to_s64:
             _assign(p, roster_hint)
+            continue
+        if not hint_ok:
+            _conflict(
+                slot=roster_hint if hint_ok else 0,
+                steam64=p.steam64,
+                nickname=p.nickname,
+                kept_steam64=None,
+                resolution="dropped",
+                assigned_slot=None,
+                presence_share=share,
+                evidence_events=0,
+                reason="tick_only_no_slot",
+            )
             continue
         holder = slot_to_s64.get(roster_hint)
         if share >= ROSTER_OVERFLOW_MIN_SHARE:
-            side = (range(1, 6) if roster_hint <= 5 else range(6, 11)) \
-                if 1 <= roster_hint <= 10 else range(1, 11)
+            side = range(1, 6) if roster_hint <= 5 else range(6, 11)
             free_slot = next((s for s in side if s not in slot_to_s64), None)
             if free_slot is not None:
                 _assign(p, free_slot)
@@ -3543,52 +3619,55 @@ def _build_identity_maps(header, schema, events):
                     f"{p.steam64} ({p.nickname!r}, no engine events, "
                     f"{share:.0%} presence) reassigned to free slot {free_slot}"
                 )
-                roster_conflicts.append({
-                    "slot": roster_hint,
-                    "steam64": str(p.steam64),
-                    "nickname": p.nickname or "",
-                    "kept_steam64": str(holder) if holder else None,
-                    "resolution": "reassigned",
-                    "assigned_slot": free_slot,
-                    "presence_share": round(share, 3),
-                    "evidence_events": 0,
-                })
+                _conflict(
+                    slot=roster_hint,
+                    steam64=p.steam64,
+                    nickname=p.nickname,
+                    kept_steam64=holder,
+                    resolution="reassigned",
+                    assigned_slot=free_slot,
+                    presence_share=share,
+                    evidence_events=0,
+                    reason="slot_occupied",
+                )
                 continue
-            reason = "no free team slot"
+            drop_reason = "no_free_team_slot"
         else:
-            reason = "low presence"
+            drop_reason = "low_presence"
         print(
             f"  WARN: v3 roster: slot {roster_hint} occupied -- "
             f"{p.steam64} ({p.nickname!r}, no engine events, "
-            f"{share:.0%} presence) dropped ({reason})"
+            f"{share:.0%} presence) dropped ({drop_reason})"
         )
-        roster_conflicts.append({
-            "slot": roster_hint,
-            "steam64": str(p.steam64),
-            "nickname": p.nickname or "",
-            "kept_steam64": str(holder) if holder else None,
-            "resolution": "dropped",
-            "assigned_slot": None,
-            "presence_share": round(share, 3),
-            "evidence_events": 0,
-        })
+        _conflict(
+            slot=roster_hint,
+            steam64=p.steam64,
+            nickname=p.nickname,
+            kept_steam64=holder,
+            resolution="dropped",
+            assigned_slot=None,
+            presence_share=share,
+            evidence_events=0,
+            reason=drop_reason,
+        )
 
     # Audit the Phase A evidence corrections now that every slot is
     # settled (kept_steam64 = whoever ended up holding the roster hint).
     for p, roster_hint, ev_slot, ev_n in corrections:
         holder = slot_to_s64.get(roster_hint)
-        roster_conflicts.append({
-            "slot": roster_hint,
-            "steam64": str(p.steam64),
-            "nickname": p.nickname or "",
-            "kept_steam64": str(holder) if holder else None,
-            "resolution": "evidence",
-            "assigned_slot": ev_slot,
-            "presence_share": round(_share(p), 3),
-            "evidence_events": ev_n,
-        })
+        _conflict(
+            slot=roster_hint,
+            steam64=p.steam64,
+            nickname=p.nickname,
+            kept_steam64=holder,
+            resolution="evidence",
+            assigned_slot=ev_slot,
+            presence_share=_share(p),
+            evidence_events=ev_n,
+            reason="roster_hint_mismatch",
+        )
 
-    return slot_to_s64, s64_to_slot, s64_to_nick, roster, roster_conflicts
+    return slot_to_s64, s64_to_slot, s64_to_nick, roster, roster_conflicts, roster_qa
 
 
 # --- Storyline block (match.schema_version 22) ---------------------------
@@ -4404,11 +4483,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     terrain_bounds = _extract_terrain_bounds(header)
 
     # Build the working identity dicts. v1/v2 read the header maps
-    # directly; v3 derives them from header.players via the validity-gated,
-    # conflict-resolved shim. Everything downstream (reroutes, nick_map,
-    # team_leaders, positioning gate, leaderboard, ELO) consumes only these
-    # three dicts, so the schema difference ends here.
-    slot_to_s64, s64_to_slot, s64_to_nick, match_roster, roster_conflicts = \
+    # directly; v3/v4 derive them from the UpdateTick union (header.players
+    # is a nickname/slot hint, always compared). Everything downstream
+    # (reroutes, nick_map, team_leaders, positioning gate, leaderboard, ELO)
+    # consumes only these three dicts, so the schema difference ends here.
+    slot_to_s64, s64_to_slot, s64_to_nick, match_roster, roster_conflicts, roster_qa = \
         _build_identity_maps(header, schema, events)
 
     if known_players is None:
@@ -7419,7 +7498,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # winner-dependent outputs (facts.winner / facts.archetype /
             # the result beat) are restamped by the adjudication
             # reconciliation pass when an operator rewrites the outcome.
-            "schema_version": 22,
+            # v23 (this version) always-on roster QA: working identity is
+            # the valid-Steam64 union of UpdateTick.players (header.players
+            # is a nickname/first-seen-slot hint). New `match.roster_qa`
+            # compares the two sets every match; `roster_conflicts`
+            # gains `reason` (`no_tick_presence` / `tick_only_no_slot`
+            # / slot-correction reasons). Header-only 0-tick ghosts are
+            # dropped (Sept 7 2026 collector leak). Not gated on header
+            # length. Pre-v3 matches emit roster_qa: null.
+            "schema_version": 23,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -7450,10 +7537,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # identity (mirrors the tiers-1/2 philosophy; the reroute
             # rewrite applies to the working dicts only). None on v1/v2.
             "roster": match_roster,
-            # v15: slot-churn audit -- valid Steam64s displaced from a
-            # contested slot by the earliest-first-appearance tie-break.
-            # Always a list; empty when no genuine conflict occurred.
+            # v15: slot-churn / tick-union audit -- valid Steam64s dropped
+            # or reassigned by the identity shim. Always a list; empty when
+            # header and ticks agree and no slot correction fired. v23 adds
+            # `reason` (`no_tick_presence` / `tick_only_no_slot` /
+            # `roster_hint_mismatch` / `evidence_collision` /
+            # `slot_occupied` / `low_presence` / `no_free_team_slot`).
             "roster_conflicts": roster_conflicts,
+            # v23: always-on header-vs-tick-union QA. null pre-v3.
+            # `agreed` is true iff the valid header Steam64 set equals the
+            # UpdateTick union. Console stays quiet when agreed.
+            "roster_qa": roster_qa,
             # BulletHit distance-to-target summary (v2-only). v1 matches
             # emit count=N total but with_distance=0 and mean/max=null
             # because the proto field doesn't exist. The dashboard's
