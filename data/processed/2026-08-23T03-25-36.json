@@ -3,7 +3,7 @@
     "id": "2026-08-23T03-25-36",
     "source_file": "2026-08-23-03-25-36.binpb.gz",
     "source_size_bytes": 16781494,
-    "pipeline_version": 39,
+    "pipeline_version": 40,
     "submitter": "VTrider",
     "map": "vsroldboy.bzn",
     "date": "2026-08-23T03:25:36.018223+00:00",
@@ -142,7 +142,7 @@
     "has_bullet_hit_data": false,
     "has_resource_data": false,
     "has_build_data": false,
-    "schema_version": 22,
+    "schema_version": 23,
     "proto_schema_version": "v3",
     "shutdown_requested": false,
     "game_outcome": "OUTCOME_TEAM2_WIN",
@@ -228,6 +228,17 @@
     ],
     "roster_conflicts": [
       {
+        "slot": 4,
+        "steam64": "76561197962996353",
+        "nickname": "Herp McDerperson",
+        "kept_steam64": null,
+        "resolution": "dropped",
+        "assigned_slot": null,
+        "presence_share": 0.0,
+        "evidence_events": 0,
+        "reason": "no_tick_presence"
+      },
+      {
         "slot": 2,
         "steam64": "76561198065368630",
         "nickname": "Unknown",
@@ -235,17 +246,8 @@
         "resolution": "dropped",
         "assigned_slot": null,
         "presence_share": 0.011,
-        "evidence_events": 0
-      },
-      {
-        "slot": 4,
-        "steam64": "76561197962996353",
-        "nickname": "Herp McDerperson",
-        "kept_steam64": "76561198002930482",
-        "resolution": "dropped",
-        "assigned_slot": null,
-        "presence_share": 0.0,
-        "evidence_events": 0
+        "evidence_events": 0,
+        "reason": "low_presence"
       },
       {
         "slot": 2,
@@ -255,7 +257,8 @@
         "resolution": "evidence",
         "assigned_slot": 3,
         "presence_share": 0.992,
-        "evidence_events": 25768
+        "evidence_events": 25768,
+        "reason": "roster_hint_mismatch"
       },
       {
         "slot": 6,
@@ -265,7 +268,8 @@
         "resolution": "evidence",
         "assigned_slot": 1,
         "presence_share": 1.0,
-        "evidence_events": 25760
+        "evidence_events": 25760,
+        "reason": "roster_hint_mismatch"
       },
       {
         "slot": 1,
@@ -275,9 +279,18 @@
         "resolution": "evidence",
         "assigned_slot": 6,
         "presence_share": 1.0,
-        "evidence_events": 15481
+        "evidence_events": 15481,
+        "reason": "roster_hint_mismatch"
       }
     ],
+    "roster_qa": {
+      "header_valid": 11,
+      "tick_union": 10,
+      "ghosts_dropped": 1,
+      "tick_only_added": 0,
+      "max_tick_players": 10,
+      "agreed": false
+    },
     "bullet_hit_distance": {
       "count": 0,
       "with_distance": 0,
