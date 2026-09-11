@@ -109,9 +109,8 @@ load_cache_index skip set):
   * data/processed/elo_commander_current.json
   * data/processed/elo_commander_history.json
 
-Corpus-wide, picker-unaware, NOT in the pipeline cache key; the dashboard
-thug-only toggle does NOT apply (separate ladder). Experimental posture:
-provisional-heavy labeling, visible game counts everywhere.
+Corpus-wide, picker-unaware, NOT in the pipeline cache key. Experimental
+posture: provisional-heavy labeling, visible game counts everywhere.
 
 Algorithm spec: DEVELOPER_GUIDE.md section 13.8. Output schemas:
 docs/DATA_DICTIONARY.md section 11.

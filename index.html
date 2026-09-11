@@ -1301,38 +1301,14 @@
           </div>
         </div>
 
-        <!-- VTSR-T Leaderboard (VT Stats Rating — Thug). Sorted by rating
-             by default. Reads data/processed/elo_current.json
-             (pipeline-emitted, full-corpus). Hides itself entirely when
-             that file is missing (fresh checkout, pipeline never run).
-             See scripts/elo.py for the algorithm. -->
-        <!-- Page-wide elo-mode banner: surfaced when the user toggles
-             into thug-only mode on the VTSR-T card. JS shows/hides
-             this; copy is static so screen-reader users get it via
-             aria-live announcements wired up in app.js. Plain
-             Bootstrap .alert.alert-warning so the chrome reads as a
-             standard advisory state-change. .vt-elo-mode-banner adds
-             nothing visual -- it's a hook for future tuning. -->
-        <div class="alert alert-warning vt-elo-mode-banner d-none mb-3" id="vt-elo-mode-banner" role="status" aria-live="polite">
-          <div class="d-flex align-items-center gap-3">
-            <div class="flex-grow-1">
-              <i class="bi bi-exclamation-triangle-fill me-1"></i>
-              <strong>Thug-only mode active.</strong>
-              Every VTSR-T number on this page is recomputed using each player's thug appearances only. Commander appearances are omitted entirely (campod and partial-presence rows still excluded as usual).
-            </div>
-            <button type="button" class="btn btn-sm btn-outline-warning flex-shrink-0" id="vt-elo-mode-banner-revert">
-              Switch back
-            </button>
-          </div>
-        </div>
-
         <!-- VTSR-T teaser. The full sortable leaderboard (expandable
-             detail panels, thug-only toggle, all 13 columns) moved to
-             the dedicated /elo/ page; this card shows the top 5
-             NON-provisional players (provisional players appear as
-             muted chips below but never occupy a top-5 slot) plus a
-             "View full leaderboard" link. Populated by
-             renderVtsrTeaser() in js/app.js. -->
+             detail panels, all 13 columns) moved to the dedicated /elo/
+             page; this card shows the top 5 NON-provisional players
+             (provisional players appear as muted chips below but never
+             occupy a top-5 slot) plus a "View full leaderboard" link.
+             Reads data/processed/elo_current.json (pipeline-emitted,
+             full-corpus). Hides itself when that file is missing.
+             Populated by renderVtsrTeaser() in js/app.js. -->
         <div class="card mb-4 d-none" id="section-vtsr">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0"><i class="bi bi-stars me-2"></i>VTSR-T Leaderboard</h5>
@@ -1663,7 +1639,7 @@
             <h5 class="modal-title mb-0" id="vtsr-methodology-modal-title">
               <i class="bi bi-stars me-2"></i>VTSR-T Methodology
             </h5>
-            <small class="text-muted" id="vtsr-methodology-modal-subtitle">v2.5 &middot; 8-axis composite</small>
+            <small class="text-muted" id="vtsr-methodology-modal-subtitle">v2.10 &middot; 8-axis composite</small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>

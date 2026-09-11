@@ -103,37 +103,9 @@
 
   <main class="vt-elo-main container-fluid px-3 px-md-4 py-4 flex-grow-1">
 
-    <!-- Page header: title + the thug-only scope toggle (moved here from
-         the dashboard — this is the canonical home; the dashboard still
-         honors the persisted mode on its other elo surfaces). -->
-    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-      <div>
-        <h1 class="vt-elo-title mb-0"><i class="bi bi-trophy me-2"></i>ELO</h1>
-        <div class="text-muted vt-elo-subtitle">VT Stats Rating &mdash; thug and commander ladders</div>
-      </div>
-      <div class="btn-group btn-group-sm" role="group" aria-label="VTSR-T scope" id="vtsr-elo-mode-group">
-        <button type="button" class="btn btn-outline-secondary active" data-elo-mode="default"
-                title="All rated matches (canonical VTSR-T)">All matches</button>
-        <button type="button" class="btn btn-outline-secondary" data-elo-mode="thugs_only"
-                title="Recompute VTSR-T using each player's thug appearances only (commander matches excluded)">
-          Thug-only
-          <span class="spinner-border spinner-border-sm ms-1 d-none" role="status" aria-hidden="true" id="vtsr-elo-mode-spinner"></span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Thug-only active banner (mirrors the dashboard banner copy). -->
-    <div class="alert alert-warning vt-elo-mode-banner d-none mb-3" id="vt-elo-mode-banner" role="status" aria-live="polite">
-      <div class="d-flex align-items-center gap-3">
-        <div class="flex-grow-1">
-          <i class="bi bi-exclamation-triangle-fill me-1"></i>
-          <strong>Thug-only mode active.</strong>
-          Every VTSR-T number on this page is recomputed using each player's thug appearances only. Commander appearances are omitted entirely.
-        </div>
-        <button type="button" class="btn btn-sm btn-outline-warning flex-shrink-0" id="vt-elo-mode-banner-revert">
-          Switch back
-        </button>
-      </div>
+    <div class="mb-3">
+      <h1 class="vt-elo-title mb-0"><i class="bi bi-trophy me-2"></i>ELO</h1>
+      <div class="text-muted vt-elo-subtitle">VT Stats Rating &mdash; thug and commander ladders</div>
     </div>
 
     <!-- Tab pills. URL-routed via ?tab= (see js/elo.js). -->
@@ -269,8 +241,7 @@
 
       <!-- Tab: VTSR-C Elo (lazy). The commander ladder is a SEPARATE ladder
            from VTSR-T — outcome-pure win/loss ELO between the two commanders
-           of every determined match, with a team-strength handicap. The
-           thug-only toggle does NOT apply here (it is hidden on this pane).
+           of every determined match, with a team-strength handicap.
            404-safe: the ladder card stays hidden and the empty state shows
            when elo_commander_current.json is absent. -->
       <div class="tab-pane fade" id="elo-tab-vtsr-c" role="tabpanel" aria-labelledby="elo-tab-vtsr-c-btn">

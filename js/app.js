@@ -221,9 +221,12 @@
   // The landing-preferences modal (which once stored `vt-landing-pref`) was
   // removed in favor of forcing every visit to default to the All Matches
   // view. Silently nuke the orphaned key on every boot so returning users
-  // get the new behavior without any stale-pref bleed-through. removeItem
-  // on a missing key is a no-op so this is idempotent.
+  // get the new behavior without any stale-pref bleed-through. The v2.7
+  // thug-only toggle (`vt.elo_mode`) is likewise retired — drop it so a
+  // returning user never carries a stale pref that nothing reads.
+  // removeItem on a missing key is a no-op so this is idempotent.
   try { localStorage.removeItem('vt-landing-pref'); } catch { /* private mode / storage blocked — silently ignore */ }
+  try { localStorage.removeItem('vt.elo_mode'); } catch { /* private mode / storage blocked — silently ignore */ }
 
   // --- Record-Your-Own-Stats Modal Dismissal ---
   // Instructional popup that walks users through running the statsgate
@@ -1454,8 +1457,8 @@
   // project-overview.mdc, any visit to index.html without an explicit
   // ?match= / ?tab= / ?filter= URL intent opens straight into the
   // most-recent match, which is exactly what we want here.
-  // Picker state (sessionStorage) and eloMode (localStorage) survive
-  // the reload so user preferences aren't trampled by a brand click.
+  // Picker state (sessionStorage) survives the reload so user
+  // preferences aren't trampled by a brand click.
   // No JS handler — that makes the brand link consistent with every
   // other standalone shell (raw, docs, tools, per-player + per-map
   // stubs) and ensures the URL bar always reflects "true root" after
@@ -2541,20 +2544,6 @@
       $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load match data.</p>';
       return;
     }
-    // Persisted thug-only mode: lazy-fetch the alt elo pair so the
-    // per-match leaderboard's Tier+VTSR-T+Last-Δ joins read the right
-    // dataset on first paint. Mirror loadAllMatches' graceful-revert
-    // path on alt-file 404.
-    if (eloMode === 'thugs_only') {
-      const ok = await ensureThugsOnlyEloLoaded();
-      if (!ok) {
-        eloMode = 'default';
-        try { localStorage.setItem(ELO_MODE_STORAGE_KEY, 'default'); } catch {}
-        syncEloModeUi();
-        showEloModeError('Thug-only ratings unavailable (run the pipeline to generate elo_current_thugs_only.json).');
-      }
-    }
-
     currentData = data;
 
     // Populate player picker for this match
@@ -2682,228 +2671,18 @@
     return Math.round(sigma);
   }
 
-  // ----- VTSR-T elo-mode toggle (dashboard-page-wide) ----------------------
-  // The "Exclude commander matches" toggle on the VTSR-T Leaderboard
-  // card swaps every elo-dependent surface on this page (VTSR-T card,
-  // per-match leaderboard Tier+VTSR-T+Last-Δ joins, per-match VTSR-T-Δ
-  // column, Career Leaderboard Tier+VTSR-T cells, "The Champion" career
-  // highlight, Commander Cohort) between the canonical full-corpus
-  // dataset and a thug-only dataset (each player's commander
-  // appearances dropped before scoring). State persists in
-  // localStorage. Player Profile + Tools pages stay on canonical.
-  //
-  // Schema:
-  //   eloMode: 'default' | 'thugs_only'
-  //   window.__vtElo / __vtEloHistory          -- canonical (always loaded)
-  //   window.__vtEloThugsOnly / __vtEloHistoryThugsOnly -- alt (lazy)
-  const ELO_MODE_STORAGE_KEY = 'vt.elo_mode';
-  let eloMode = (() => {
-    try {
-      const v = localStorage.getItem(ELO_MODE_STORAGE_KEY);
-      return v === 'thugs_only' ? 'thugs_only' : 'default';
-    } catch { return 'default'; }
-  })();
-
-  // Active elo getters. Fall back to canonical when the alt files
-  // failed to load (graceful degradation -- the toggle UI also reverts
-  // mode in that case, but a stale state read here is a safety net).
+  // ----- VTSR-T getters -----------------------------------------------------
+  // Thin aliases onto the canonical pair. The v2.7 thug-only alt pair
+  // and page-wide toggle are retired; every elo-dependent surface reads
+  // elo_current.json / elo_history.json.
   function getActiveElo() {
-    if (eloMode === 'thugs_only' && window.__vtEloThugsOnly) {
-      return window.__vtEloThugsOnly;
-    }
     return window.__vtElo || null;
   }
   function getActiveEloHistory() {
-    if (eloMode === 'thugs_only' && window.__vtEloHistoryThugsOnly) {
-      return window.__vtEloHistoryThugsOnly;
-    }
     return window.__vtEloHistory || null;
   }
-  function getEloMode() { return eloMode; }
-  // Expose for downstream modules (e.g. the renderer helpers in
-  // app.js's lower scope and the per-match leaderboard joins).
   window.vtGetActiveElo        = getActiveElo;
   window.vtGetActiveEloHistory = getActiveEloHistory;
-  window.vtGetEloMode          = getEloMode;
-
-  // Lazy-fetch the thugs-only alt-pair on first toggle ON. Idempotent:
-  // subsequent calls short-circuit. Returns true on success, false on
-  // failure (caller should revert mode + surface a user-visible error).
-  async function ensureThugsOnlyEloLoaded() {
-    if (window.__vtEloThugsOnly !== undefined && window.__vtEloHistoryThugsOnly !== undefined) {
-      return !!(window.__vtEloThugsOnly && window.__vtEloHistoryThugsOnly);
-    }
-    const [curRes, histRes] = await Promise.all([
-      fetch('data/processed/elo_current_thugs_only.json', { cache: 'no-store' }).catch(() => null),
-      fetch('data/processed/elo_history_thugs_only.json', { cache: 'no-store' }).catch(() => null),
-    ]);
-    try {
-      window.__vtEloThugsOnly = (curRes && curRes.ok) ? await curRes.json() : null;
-    } catch { window.__vtEloThugsOnly = null; }
-    try {
-      window.__vtEloHistoryThugsOnly = (histRes && histRes.ok) ? await histRes.json() : null;
-    } catch { window.__vtEloHistoryThugsOnly = null; }
-    return !!(window.__vtEloThugsOnly && window.__vtEloHistoryThugsOnly);
-  }
-
-  // Tiny inline toast for transient, non-blocking errors (graceful 404
-  // when the thugs-only files aren't present). Self-contained -- no
-  // dependency on Bootstrap's full Toast component to keep the surface
-  // minimal. Auto-dismisses after 4s.
-  function showEloModeError(msg) {
-    let host = document.getElementById('vt-elo-mode-toast-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'vt-elo-mode-toast-host';
-      host.style.cssText = 'position:fixed;top:1rem;right:1rem;z-index:1080;display:flex;flex-direction:column;gap:.5rem;pointer-events:none;';
-      document.body.appendChild(host);
-    }
-    const t = document.createElement('div');
-    t.className = 'alert alert-warning shadow-sm mb-0';
-    t.style.cssText = 'pointer-events:auto;max-width:340px;';
-    t.textContent = msg;
-    host.appendChild(t);
-    setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; }, 3700);
-    setTimeout(() => { try { host.removeChild(t); } catch {} }, 4000);
-  }
-
-  // Sync the elo-mode toggle UI (button-group active state, banner
-  // visibility, methodology modal subtitle) to the current eloMode.
-  // Pure DOM read/write -- safe to call multiple times, idempotent.
-  function syncEloModeUi() {
-    const group = document.getElementById('vtsr-elo-mode-group');
-    if (group) {
-      group.querySelectorAll('button[data-elo-mode]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.eloMode === eloMode);
-      });
-    }
-    const banner = document.getElementById('vt-elo-mode-banner');
-    if (banner) {
-      banner.classList.toggle('d-none', eloMode !== 'thugs_only');
-    }
-    const subtitle = document.getElementById('vtsr-methodology-modal-subtitle');
-    if (subtitle) {
-      const base = 'v2.10 \u00b7 8-axis composite';
-      subtitle.innerHTML = eloMode === 'thugs_only'
-        ? `${base} \u00b7 <span class="text-warning">thug-only mode</span>`
-        : base;
-    }
-  }
-
-  // Click handler for the segmented toggle in the VTSR-T card header
-  // and the "Switch back" button on the active-state banner. On first
-  // toggle ON, lazy-fetches the alt JSON pair; reverts mode and
-  // surfaces a toast if either file is missing. Persists eloMode to
-  // localStorage so the choice survives reload + cross-section nav
-  // within the same tab.
-  async function setEloMode(nextMode) {
-    if (nextMode !== 'default' && nextMode !== 'thugs_only') nextMode = 'default';
-    if (nextMode === eloMode) {
-      syncEloModeUi();
-      return;
-    }
-    const spinner = document.getElementById('vtsr-elo-mode-spinner');
-    if (nextMode === 'thugs_only') {
-      if (spinner) spinner.classList.remove('d-none');
-      const ok = await ensureThugsOnlyEloLoaded();
-      if (spinner) spinner.classList.add('d-none');
-      if (!ok) {
-        showEloModeError('Thug-only ratings unavailable (run the pipeline to generate elo_current_thugs_only.json).');
-        // Revert UI + state to default cleanly.
-        eloMode = 'default';
-        try { localStorage.setItem(ELO_MODE_STORAGE_KEY, 'default'); } catch {}
-        syncEloModeUi();
-        return;
-      }
-    }
-    eloMode = nextMode;
-    try { localStorage.setItem(ELO_MODE_STORAGE_KEY, eloMode); } catch {}
-    syncEloModeUi();
-    rerenderEloDependentViews();
-  }
-
-  // Bind the toggle controls. Idempotent -- safe to call from
-  // DOMContentLoaded; the buttons themselves are static markup.
-  function bindEloModeControls() {
-    const group = document.getElementById('vtsr-elo-mode-group');
-    if (group && !group.dataset.vtBound) {
-      group.dataset.vtBound = '1';
-      group.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-elo-mode]');
-        if (!btn) return;
-        setEloMode(btn.dataset.eloMode);
-      });
-    }
-    const revert = document.getElementById('vt-elo-mode-banner-revert');
-    if (revert && !revert.dataset.vtBound) {
-      revert.dataset.vtBound = '1';
-      revert.addEventListener('click', () => setEloMode('default'));
-    }
-  }
-
-  // Single re-render entrypoint for an elo-mode toggle. Defensive: each
-  // call site no-ops when its target DOM isn't on screen, so this is
-  // safe to fire from any state. Function-declaration form is hoisted
-  // within the IIFE; setEloMode() above resolves the call at click
-  // time so it picks up the renderers defined further down.
-  //
-  // Walks the elo-dependent surfaces in order:
-  //   1. All Matches view (if loaded) -- re-aggregate from cached
-  //      contributions with the active elo, then refresh:
-  //        a. VTSR-T teaser card (top-5 + provisional chips; the full
-  //           leaderboard lives on /elo/)
-  //        b. Career Highlights (only `the_champion` changes)
-  //        c. Career Leaderboard (Tier + VTSR-T cell joins)
-  //        d. Commander Cohort (if its tab has been rendered)
-  //   2. Per-match view (if loaded) -- re-render the leaderboard so
-  //      the VTSR-T-Δ column refreshes against the active history.
-  //      The mode-keyed delta-index cache means a toggle flip uses
-  //      the right index without an explicit invalidation step.
-  function rerenderEloDependentViews() {
-    // -- All Matches view refresh --
-    const allView = document.getElementById('all-matches-view');
-    const allViewVisible = allView && allView.style.display !== 'none';
-    const aggregator = window.VTAggregate && typeof window.VTAggregate.build === 'function';
-    if (allViewVisible && aggregator && window.__vtContributions) {
-      const filtersOn = hasAnyFilterEngaged(pickerState);
-      const fileIds = filtersOn
-        ? manifest.filter(m => entryMatchesState(m, pickerState)).map(m => m.file)
-        : Object.keys(window.__vtContributions);
-      if (fileIds.length > 0) {
-        const data = window.VTAggregate.build(window.__vtContributions, fileIds, getActiveElo());
-        window.__vtAllMatchesData = data;
-        renderVtsrTeaser(getActiveElo(), data.career_stats);
-        renderHighlights(data.career_highlights, { id: 'all-matches' }, 'career');
-        // Career Leaderboard renderer joins Tier + VTSR-T per row via
-        // careerEloFor() (which now reads through getActiveElo), so a
-        // re-render with the SAME career_stats list is enough to refresh
-        // the elo-dependent cells.
-        renderCareerTable(data.career_stats);
-        if (tabRendered['#all-tab-commanders']) {
-          renderCommanderCohort(getActiveElo());
-        }
-      } else {
-        // Filtered subset is empty -- mirror the empty-state branch in
-        // loadAllMatches: VTSR-T card hides itself, career table is
-        // empty, no aggregator data to thread through.
-        renderVtsrTeaser(getActiveElo(), []);
-      }
-    }
-
-    // -- Per-match view refresh --
-    const dashboard = document.getElementById('dashboard');
-    const dashboardVisible = dashboard && !dashboard.classList.contains('d-none');
-    if (dashboardVisible && currentData && Array.isArray(currentData.leaderboard)) {
-      // The leaderboard renderer reads getEloDeltaIndexForCurrentMatch()
-      // which is now mode-keyed, so this single call refreshes the
-      // VTSR-T-Δ column transparently. Prefer the active filtered view
-      // (currentFilteredData) so the player/team filter scope survives
-      // the toggle; fall back to the unfiltered leaderboard.
-      const rows = (currentFilteredData && currentFilteredData.leaderboard)
-        || currentData.leaderboard;
-      renderLeaderboard(rows);
-    }
-  }
 
   // Phase 8: cross-link helpers. `vtPlayerHref(steam64)` returns the
   // canonical /player/<slug>/ URL from the cached slug map, with a
@@ -2988,19 +2767,6 @@
     // placeholders. Also consumed by the per-match leaderboard's new
     // VTSR-T Δ column via getEloDeltaIndexForCurrentMatch().
     await ensureEloLoaded();
-    // If the user persisted thug-only mode in localStorage, pre-load
-    // the alt pair so the first render already uses the right dataset
-    // (avoids a default-then-flash). Falls back gracefully when the
-    // alt files are missing: setEloMode-style revert + toast.
-    if (eloMode === 'thugs_only') {
-      const ok = await ensureThugsOnlyEloLoaded();
-      if (!ok) {
-        eloMode = 'default';
-        try { localStorage.setItem(ELO_MODE_STORAGE_KEY, 'default'); } catch {}
-        syncEloModeUi();
-        showEloModeError('Thug-only ratings unavailable (run the pipeline to generate elo_current_thugs_only.json).');
-      }
-    }
 
     if (!window.VTAggregate || typeof window.VTAggregate.build !== 'function') {
       $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Aggregator unavailable.</p>';
@@ -3121,10 +2887,9 @@
 
     registerTabRenderer('#all-tab-commanders', () => {
       const cs = data.commander_stats || { rows: [], head_to_head: [] };
-      // Cohort card sits above the leaderboard; reads the active elo
-      // dataset (canonical or thug-only based on the elo-mode toggle)
-      // via getActiveElo(). Corpus-wide / picker-filter-unaware - same
-      // contract as the main-view VTSR-T leaderboard.
+      // Cohort card sits above the leaderboard; reads canonical
+      // elo_current.json via getActiveElo(). Corpus-wide /
+      // picker-filter-unaware - same contract as the VTSR-T teaser.
       wireCommanderCohortControls();
       renderCommanderCohort(getActiveElo());
       renderCommanderLeaderboard(cs.rows);
@@ -5671,17 +5436,13 @@
 
   // --- Leaderboard ---
   // --- Per-match VTSR-T Δ helpers ---
-  // Builds a lookup index from the active elo history (canonical or
-  // thug-only based on the elo-mode toggle) for the currently-loaded
-  // match and caches it on currentData.__eloDeltaIndex_<mode> so
-  // sort/filter re-renders don't re-scan the history array. Caching
-  // per-mode means a toggle flip transparently uses the right index
-  // without an explicit invalidation step. Cache also auto-invalidates
-  // on every match switch because currentData is reassigned.
+  // Join the currently-loaded match against elo_history.json and cache
+  // the result on currentData.__eloDeltaIndex so sort/filter re-renders
+  // don't re-scan the history array. Cache auto-invalidates on every
+  // match switch because currentData is reassigned.
   function getEloDeltaIndexForCurrentMatch() {
     if (!currentData || !currentData.match) return null;
-    const mode = getEloMode();
-    const cacheKey = `__eloDeltaIndex_${mode}`;
+    const cacheKey = '__eloDeltaIndex';
     if (currentData[cacheKey] !== undefined) return currentData[cacheKey];
     // Defensive: pipeline always emits a non-empty match.id, but guard
     // against a future schema change to avoid matching the first
@@ -5710,11 +5471,6 @@
     }
     return (currentData[cacheKey] = {
       available: true, excluded: false, bySteam, byName,
-      // Mode label so lookupEloDelta() can surface a "commander
-      // appearance excluded" tooltip when a row has no entry in
-      // thug-only mode (vs the row simply being a legacy / pre-elo
-      // match where no one has a delta).
-      mode,
     });
   }
 
@@ -5735,17 +5491,6 @@
         axis_contributions: d.axis_contributions || {},
       };
     }
-    // Thug-only mode special case: a row that is_commander has no entry
-    // in the alt history's deltas (commander rows are dropped before
-    // scoring). Surface a clearer signal so renderEloDeltaCell can show
-    // a "commander appearance excluded" tooltip rather than the
-    // generic "not rated in this match" copy. Mirror handling for
-    // is_campod / is_low_activity rows -- in canonical mode those
-    // already fall through to the generic null path which is fine
-    // because the row badges already explain why.
-    if (idx.mode === 'thugs_only' && row.is_commander) {
-      return { thug_mode_commander_excluded: true };
-    }
     return null;
   }
 
@@ -5760,13 +5505,6 @@
                        : 'excluded from rating';
       return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
         title="Match excluded from VTSR-T (${reasonText})"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
-    }
-    // Thug-only mode: commander row was dropped from the alt history
-    // before scoring, so there's no delta to show. Emit a clearer
-    // tooltip than the generic "Not rated in this match" copy.
-    if (d && d.thug_mode_commander_excluded) {
-      return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Commander appearance \u2014 excluded from thug-only VTSR-T"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
     }
     if (!d) {
       return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
@@ -7256,11 +6994,8 @@
       $showAllBtn.classList.toggle('active', commanderCohortShowAll);
     }
 
-    // Pre-compute commander-only axis means once per render. Reads
-    // from the active elo history (canonical or thug-only via the
-    // elo-mode toggle). In thug-only mode there are no commander rows
-    // in history -- _commanderAxisMeans degrades to an empty index and
-    // the cohort card shows the "no commander deltas" empty state.
+    // Pre-compute commander-only axis means once per render from
+    // canonical elo_history.json.
     const cmdrByKey = _commanderAxisMeans(getActiveEloHistory());
 
     // Defensive: drop visible rows that have zero commander deltas in
@@ -7467,12 +7202,10 @@
     }
   }
 
-  // Look up a career row's VTSR-T record from the active ELO payload
-  // (canonical or thug-only via the elo-mode toggle). Joins by steam64
-  // (primary) with name fallback for legacy contributions missing
-  // steam64. Returns null when ELO data isn't loaded yet (404 path)
-  // OR when this row's player has no rated appearances in the active
-  // dataset (thug-only mode + a player who only ever commanded).
+  // Look up a career row's VTSR-T record from elo_current.json. Joins
+  // by steam64 (primary) with name fallback for legacy contributions
+  // missing steam64. Returns null when ELO data isn't loaded yet
+  // (404 path) or this player has no rated appearances.
   function careerEloFor(row) {
     const elo = getActiveElo();
     if (!elo || !Array.isArray(elo.ratings)) return null;
@@ -7747,11 +7480,9 @@
             <div class="vt-movement-bar"><div class="vt-movement-bar-fill" style="width:${pct}%;background:${color};"></div></div>
           </div>`;
       }
-      // Tier + VTSR-T cells. Joined per row from the active ELO payload
-      // (canonical or thug-only via the elo-mode toggle). Falls through
-      // to em-dash when ELO is missing OR when the player has no rated
-      // appearances in the active dataset (thug-only mode + a player
-      // who only ever commanded).
+      // Tier + VTSR-T cells. Joined per row from elo_current.json.
+      // Falls through to em-dash when ELO is missing or this player
+      // has no rated appearances.
       const eloRow = careerEloFor(c);
       let tierCell = '<span style="color:var(--kb-text-muted);">&mdash;</span>';
       let vtsrCell = '<span style="color:var(--kb-text-muted);">&mdash;</span>';
@@ -8546,15 +8277,6 @@
   document.getElementById('info-back-to-all')?.addEventListener('click', () => selectMatch('__all__'));
 
   // --- Initial Boot ---
-  // Wire the elo-mode toggle controls + sync the UI to the persisted
-  // mode before the first render. The toggle buttons live in static
-  // markup so they exist by the time this runs (script is at end of
-  // body). The lazy fetch of the alt-pair happens inside loadAllMatches
-  // when eloMode === 'thugs_only' so the first render already has the
-  // right dataset (avoids a default-then-flash on persisted thug-only
-  // sessions).
-  bindEloModeControls();
-  syncEloModeUi();
 
   // Branch to the appropriate loader based on the URL state we already
   // parsed earlier (during picker init — `const initialUrlState` is in

@@ -2895,12 +2895,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--elo-mode",
-        choices=["default", "thugs_only", "unlocked", "max", "softmax", "ranks",
+        choices=["default", "unlocked", "max", "softmax", "ranks",
                  "alpha10", "alpha25", "alpha50"],
         default="default",
         help="Pick which canonical elo files to validate. 'default' reads "
-             "elo_current.json + elo_history.json. 'thugs_only' reads "
-             "elo_current_thugs_only.json + elo_history_thugs_only.json. "
+             "elo_current.json + elo_history.json. "
              "'unlocked' reads elo_current_unlocked.json + elo_history_unlocked.json "
              "(Phase 2B locked-priors ablation -- both hand-tuned commander "
              "axes ride the shrunk rolling baseline). 'alpha10'/'alpha25'/"
@@ -2953,9 +2952,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.elo_mode == "default":
         elo_current_name = "elo_current.json"
         elo_history_name = "elo_history.json"
-    elif args.elo_mode == "thugs_only":
-        elo_current_name = "elo_current_thugs_only.json"
-        elo_history_name = "elo_history_thugs_only.json"
     elif args.elo_mode == "unlocked":
         elo_current_name = "elo_current_unlocked.json"
         elo_history_name = "elo_history_unlocked.json"
@@ -3027,9 +3023,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[validate_elo] rated history entries: {n_total} "
           f"(per-match files loaded: {n_loaded}, missing: {n_missing})")
 
-    # v1.2: the commander-ladder history (canonical, mode-independent --
-    # the thug-only toggle never applies to VTSR-C). Absent-safe: the
-    # metric reports available=false and the report sections self-omit.
+    # v1.2: the commander-ladder history (canonical, mode-independent).
+    # Absent-safe: the metric reports available=false and the report
+    # sections self-omit.
     cmdr_history_path = processed_dir / "elo_commander_history.json"
     cmdr_history = None
     if cmdr_history_path.exists():

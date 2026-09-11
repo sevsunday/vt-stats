@@ -53,9 +53,7 @@ OUT_PATH      = Path(__file__).resolve().parent / "axis_timeline.json"
 # Files in data/processed/ that are NOT per-match payloads.
 NON_MATCH_FILES = {
     "elo_current.json",
-    "elo_current_thugs_only.json",
     "elo_history.json",
-    "elo_history_thugs_only.json",
     "map_stats.json",
     "matches.json",
     "match_contributions.json",
@@ -152,8 +150,8 @@ def lobby_filter(leaderboard: list[dict]) -> list[dict]:
 
     Excludes campod-heavy + low-activity rows so the raw values we
     compute use the same denominator as the pipeline's z-scores.
-    Commanders STAY (canonical, non-thug-only mode) so we can also
-    surface their per-match axis trajectories.
+    Commanders stay so we can also surface their per-match axis
+    trajectories.
     """
     return [
         p for p in leaderboard

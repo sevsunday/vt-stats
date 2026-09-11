@@ -42,8 +42,8 @@ import elo  # noqa: E402
 
 PROCESSED_DIR = REPO_ROOT / "data" / "processed"
 NON_MATCH_FILES = {
-    "elo_current.json", "elo_current_thugs_only.json",
-    "elo_history.json", "elo_history_thugs_only.json",
+    "elo_current.json",
+    "elo_history.json",
     "map_stats.json", "matches.json", "match_contributions.json",
     "player_slugs.json",
 }

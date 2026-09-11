@@ -830,7 +830,6 @@ def _target_lock_pct_lobby(
 def compute_performance_index(
     match_data: dict,
     commander_baseline_snapshot: dict[str, float] | None = None,
-    exclude_commanders: bool = False,
     lowtier_eligibility: dict[str, float] | None = None,
     lobby_score_mode: str = "zclip",
 ) -> tuple[
@@ -876,19 +875,10 @@ def compute_performance_index(
     # elo_history, no matches_played bump, no rating change at all for
     # this match. Legacy rows without the flags pass through unchanged
     # (.get() returns None which is falsy).
-    #
-    # Thug-only mode (`exclude_commanders=True`): also drop commander
-    # rows (is_commander = slot 1 / slot 6). Same pure-omission
-    # semantics -- commander appearances simply did not happen for the
-    # rated player. The v2.4 commander baseline machinery still runs
-    # but degenerates to a no-op (no commander rows reach the rolling
-    # buffers; the snapshot equals the seed prior every match; no
-    # commander rows get shifted because none reach scoring).
     lobby = [
         p for p in lobby_raw
         if not p.get("is_campod")
         and not p.get("is_low_activity")
-        and not (exclude_commanders and p.get("is_commander"))
     ]
     if not lobby:
         return [], [], [], []
@@ -1072,7 +1062,6 @@ def _player_key(p: dict) -> str:
 
 def _rating_pass(
     all_match_data: list[dict],
-    exclude_commanders: bool = False,
     exclude_locked_priors: bool = False,
     expected_performance_mode: str = "median",
     lowtier_eligibility: dict[str, float] | None = None,
@@ -1094,18 +1083,6 @@ def _rating_pass(
     Match order is ``(match.date, match.id)`` — ELO is path-dependent,
     so the composite key handles same-second imports deterministically.
 
-    When ``exclude_commanders=True`` (thug-only mode), every per-match
-    commander row (``is_commander`` set by scripts/process_stats.py for
-    slots 1 and 6) is dropped before scoring. Pure omission semantics
-    mirror the existing ``is_campod`` / ``is_low_activity`` gates: no
-    delta entry, no ``matches_played`` bump, no rating change for the
-    excluded row. The output dicts gain ``excludes_commanders: True``
-    and a ``rows_excluded_commander_mode`` counter. The v2.4 commander
-    role-adjustment machinery still runs but degenerates to a no-op
-    (no commander rows reach the rolling baseline buffers, so the
-    snapshot equals the seed prior every match and no commander rows
-    get shifted because none reach scoring).
-
     Phase 2B unlocked-priors mode: when ``exclude_locked_priors=True``
     every commander axis listed in ``COMMANDER_AXIS_PRIOR`` rides the
     shrunk rolling baseline. The two hand-tuned LOCKED axes
@@ -1114,11 +1091,7 @@ def _rating_pass(
     means at shrinkage strength ``COMMANDER_BASELINE_SHRINKAGE``,
     same as the audit-derived axes. The output dicts gain
     ``excludes_locked_priors: True`` and ``commander_baseline_locked_axes``
-    is empty on the alt JSON pair. Orthogonal to ``exclude_commanders``
-    -- both flags can be set independently. NOTE: when both flags are
-    set together the unlocked-priors machinery degenerates (no
-    commander rows reach scoring), so the alt-mode JSON pairs are
-    expected to be canonical-only or thug-only-only, not both.
+    is empty on the alt JSON pair.
 
     Phase 2C expected-performance opponent-reference mode: when
     ``expected_performance_mode != "median"`` the per-row E_i
@@ -1230,10 +1203,6 @@ def _rating_pass(
     # visibility into how often each gate fired.
     excluded_campod_rows       = 0
     excluded_low_activity_rows = 0
-    # Thug-only mode: per-row commander exclusion counter. Counted
-    # across the full corpus (mirrors the campod / low-activity
-    # counters' contract). Always 0 in canonical mode.
-    excluded_commander_rows    = 0
     # Stage E: wins-ladder match counters. A RATED match either scores
     # the wins ladder (determined outcome / draw), skips as undetermined
     # (unclear / missing team), or skips because every rated row landed
@@ -1261,23 +1230,17 @@ def _rating_pass(
         # only.
         excluded_campod_rows       += sum(1 for p in lobby_raw if p.get("is_campod"))
         excluded_low_activity_rows += sum(1 for p in lobby_raw if p.get("is_low_activity"))
-        if exclude_commanders:
-            excluded_commander_rows += sum(1 for p in lobby_raw if p.get("is_commander"))
 
         # Filter the lobby with EXACTLY the same predicate as
         # compute_performance_index() so the per-key loop below uses an
         # index that aligns with `keys` returned from that helper. Mixing
         # filtered keys with the full lobby's positional index would
         # mis-attribute display_name / steam64 / is_commander reads to
-        # adjacent players whenever any earlier row was dropped (was a
-        # latent bug in v2.5 -- harmless for rare campod / low-activity
-        # rows but dramatically amplified by thug-only mode where slots
-        # 1 / 6 are dropped on every match).
+        # adjacent players whenever any earlier row was dropped.
         lobby = [
             p for p in lobby_raw
             if not p.get("is_campod")
             and not p.get("is_low_activity")
-            and not (exclude_commanders and p.get("is_commander"))
         ]
 
         # Match-level gates: player count < 6, duration < 240s, or a
@@ -1321,7 +1284,6 @@ def _rating_pass(
             compute_performance_index(
                 md,
                 commander_baseline_snapshot=commander_baseline_snapshot,
-                exclude_commanders=exclude_commanders,
                 lowtier_eligibility=lowtier_eligibility,
                 lobby_score_mode=lobby_score_mode,
             )
@@ -1500,8 +1462,7 @@ def _rating_pass(
 
             # ---- Stage E: per-row wins-ladder update (role-blind:
             # commanders included; campod / low-activity rows already
-            # filtered by the shared lobby predicate; thug-only mode
-            # inherits its row filter for free). Symmetric K, no loss
+            # filtered by the shared lobby predicate). Symmetric K, no loss
             # aversion, no floor. Additive `wins` audit block per delta;
             # absent on rows of undetermined / one-sided matches.
             if wins_s_by_team is not None and wins_row_team.get(i) in (1, 2):
@@ -1625,14 +1586,9 @@ def _rating_pass(
     rated_match_count = sum(1 for h in history_entries if not h["match_excluded"])
     elo_current = {
         "schema_version":     ELO_SCHEMA_VERSION,
-        # Thug-only mode flag: True for elo_current_thugs_only.json,
-        # False for the canonical elo_current.json. Lets the dashboard
-        # sanity-check that it loaded the right file when toggling.
-        "excludes_commanders": bool(exclude_commanders),
         # Phase 2B unlocked-priors mode flag: True for
         # elo_current_unlocked.json. Validator + analysis tooling reads
-        # this to confirm it loaded the unlocked variant. Orthogonal to
-        # excludes_commanders.
+        # this to confirm it loaded the unlocked variant.
         "excludes_locked_priors": bool(exclude_locked_priors),
         # Phase 2C expected-performance opponent-reference mode. One of
         # ("median", "hard_max", "softmax_max"). "median" is canonical;
@@ -1695,9 +1651,6 @@ def _rating_pass(
         # can tell row counts from match counts at a glance.
         "rows_excluded_campod":              excluded_campod_rows,
         "rows_excluded_low_activity":        excluded_low_activity_rows,
-        # Thug-only mode counter. Always 0 on canonical elo_current.json;
-        # tracks how many is_commander rows were dropped on the alt file.
-        "rows_excluded_commander_mode":      excluded_commander_rows,
         "weights":            dict(THUG_WEIGHTS),
         # v2.8: low-tier at-base lift metadata. `enabled` reflects whether this
         # pass applied the lift (True only on compute_elo's second pass). The
@@ -1759,7 +1712,6 @@ def _rating_pass(
 
     elo_history = {
         "schema_version":      ELO_SCHEMA_VERSION,
-        "excludes_commanders":      bool(exclude_commanders),
         "excludes_locked_priors":   bool(exclude_locked_priors),
         "expected_performance_mode": expected_performance_mode,
         "lobby_score_mode":    lobby_score_mode,
@@ -1773,7 +1725,6 @@ def _rating_pass(
 
 def compute_elo(
     all_match_data: list[dict],
-    exclude_commanders: bool = False,
     exclude_locked_priors: bool = False,
     expected_performance_mode: str = "median",
     enable_lowtier_lift: bool = True,
@@ -1791,9 +1742,9 @@ def compute_elo(
     nobody is eligible, the canonical pass-1 result is returned unchanged.
 
     Returns the same ``(elo_current, elo_history)`` shape as before, so
-    existing callers are unaffected. ``exclude_commanders`` /
-    ``exclude_locked_priors`` / ``expected_performance_mode`` behave exactly as
-    documented on ``_rating_pass``; the lift composes with all of them.
+    existing callers are unaffected. ``exclude_locked_priors`` /
+    ``expected_performance_mode`` behave exactly as documented on
+    ``_rating_pass``; the lift composes with all of them.
     ``lobby_score_mode`` ("zclip" canonical / "rank" Phase 3 trial -- see
     ``LOBBY_SCORE_MODES``) selects the per-axis lobby-score pipeline and is
     threaded through both passes.
@@ -1805,7 +1756,6 @@ def compute_elo(
     """
     cur1, hist1, final1, canonical_before = _rating_pass(
         all_match_data,
-        exclude_commanders=exclude_commanders,
         exclude_locked_priors=exclude_locked_priors,
         expected_performance_mode=expected_performance_mode,
         lowtier_eligibility=None,
@@ -1822,7 +1772,6 @@ def compute_elo(
         return cur1, hist1
     cur2, hist2, _, _ = _rating_pass(
         all_match_data,
-        exclude_commanders=exclude_commanders,
         exclude_locked_priors=exclude_locked_priors,
         expected_performance_mode=expected_performance_mode,
         lowtier_eligibility=eligibility,

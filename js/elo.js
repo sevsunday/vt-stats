@@ -18,17 +18,16 @@
  *   Does it work?           — honest accuracy stats from the committed
  *                             data/processed/validation_summary.json.
  *
- * Data (all 404-safe): elo_current.json + elo_history.json (+ the
- * thugs_only pair lazily on toggle), elo_commander_current.json +
- * elo_commander_history.json, player_slugs.json (player links),
- * validation_summary.json (noise band + accuracy tab), and
- * match_contributions.json -> VTAggregate.build() for the corpus-wide
- * career_stats[] the leaderboard joins its Ship / K/D / Acc columns from.
+ * Data (all 404-safe): elo_current.json + elo_history.json,
+ * elo_commander_current.json + elo_commander_history.json,
+ * player_slugs.json (player links), validation_summary.json (noise band
+ * + accuracy tab), and match_contributions.json -> VTAggregate.build()
+ * for the corpus-wide career_stats[] the leaderboard joins its Ship /
+ * K/D / Acc columns from.
  *
  * Corpus-wide and picker-unaware (mirrors the VTSR-T contract). The
- * thug-only toggle persists in localStorage under the same `vt.elo_mode`
- * key the dashboard reads, so the two pages stay in sync; its control +
- * banner are shown ONLY on the VTSR-T pane (it can't reach VTSR-C).
+ * v2.7 thug-only alt pair and toggle are retired — this page always
+ * reads the canonical ratings.
  *
  * URL routing: ?tab=vtsr-t|vtsr-c|how|axes|fairness|accuracy (replaceState
  * sync on pill change; deep links boot straight into the right pane). The
@@ -107,8 +106,6 @@
   const state = {
     elo: null,            // canonical elo_current.json (null on 404)
     eloHistory: null,
-    eloThugs: undefined,  // lazy thugs_only pair (undefined = not fetched)
-    eloHistThugs: undefined,
     cmdrElo: null,        // elo_commander_current.json (null on 404 — VTSR-C card hides)
     cmdrHistory: null,    // elo_commander_history.json (null on 404 — detail panels degrade)
     slugMap: null,
@@ -143,106 +140,6 @@
       && state.validation.latest.bootstrap_proxy_std_median;
     if (typeof sigma !== 'number' || !isFinite(sigma) || sigma <= 0) return null;
     return Math.round(sigma);
-  }
-
-  // ----------------------------------------------------------------------
-  // Thug-only elo mode. Same localStorage key as the dashboard so the
-  // choice follows the user across pages.
-  // ----------------------------------------------------------------------
-
-  const ELO_MODE_STORAGE_KEY = 'vt.elo_mode';
-  let eloMode = (() => {
-    try {
-      return localStorage.getItem(ELO_MODE_STORAGE_KEY) === 'thugs_only' ? 'thugs_only' : 'default';
-    } catch { return 'default'; }
-  })();
-
-  function getActiveElo() {
-    if (eloMode === 'thugs_only' && state.eloThugs) return state.eloThugs;
-    return state.elo;
-  }
-  function getActiveEloHistory() {
-    if (eloMode === 'thugs_only' && state.eloHistThugs) return state.eloHistThugs;
-    return state.eloHistory;
-  }
-
-  async function ensureThugsOnlyLoaded() {
-    if (state.eloThugs !== undefined && state.eloHistThugs !== undefined) {
-      return !!(state.eloThugs && state.eloHistThugs);
-    }
-    const [cur, hist] = await Promise.all([
-      fetchJson(`${DATA}elo_current_thugs_only.json`),
-      fetchJson(`${DATA}elo_history_thugs_only.json`),
-    ]);
-    state.eloThugs = cur;
-    state.eloHistThugs = hist;
-    return !!(cur && hist);
-  }
-
-  function showModeToast(msg) {
-    let host = document.getElementById('vt-elo-mode-toast-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'vt-elo-mode-toast-host';
-      host.style.cssText = 'position:fixed;top:1rem;right:1rem;z-index:1080;display:flex;flex-direction:column;gap:.5rem;pointer-events:none;';
-      document.body.appendChild(host);
-    }
-    const t = document.createElement('div');
-    t.className = 'alert alert-warning shadow-sm mb-0';
-    t.style.cssText = 'pointer-events:auto;max-width:340px;';
-    t.textContent = msg;
-    host.appendChild(t);
-    setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; }, 3700);
-    setTimeout(() => { try { host.removeChild(t); } catch {} }, 4000);
-  }
-
-  function syncEloModeUi() {
-    const group = document.getElementById('vtsr-elo-mode-group');
-    if (group) {
-      group.querySelectorAll('button[data-elo-mode]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.eloMode === eloMode);
-      });
-    }
-    // Banner + control visibility is pane-scoped (VTSR-T only).
-    syncEloModeVisibility(activeTabTarget());
-  }
-
-  async function setEloMode(nextMode) {
-    if (nextMode !== 'default' && nextMode !== 'thugs_only') nextMode = 'default';
-    if (nextMode === eloMode) { syncEloModeUi(); return; }
-    const spinner = document.getElementById('vtsr-elo-mode-spinner');
-    if (nextMode === 'thugs_only') {
-      if (spinner) spinner.classList.remove('d-none');
-      const ok = await ensureThugsOnlyLoaded();
-      if (spinner) spinner.classList.add('d-none');
-      if (!ok) {
-        showModeToast('Thug-only ratings unavailable (run the pipeline to generate elo_current_thugs_only.json).');
-        eloMode = 'default';
-        try { localStorage.setItem(ELO_MODE_STORAGE_KEY, 'default'); } catch {}
-        syncEloModeUi();
-        return;
-      }
-    }
-    eloMode = nextMode;
-    try { localStorage.setItem(ELO_MODE_STORAGE_KEY, eloMode); } catch {}
-    syncEloModeUi();
-    renderLeaderboard();
-  }
-
-  function bindEloModeControls() {
-    const group = document.getElementById('vtsr-elo-mode-group');
-    if (group && !group.dataset.vtBound) {
-      group.dataset.vtBound = '1';
-      group.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-elo-mode]');
-        if (btn) setEloMode(btn.dataset.eloMode);
-      });
-    }
-    const revert = document.getElementById('vt-elo-mode-banner-revert');
-    if (revert && !revert.dataset.vtBound) {
-      revert.dataset.vtBound = '1';
-      revert.addEventListener('click', () => setEloMode('default'));
-    }
   }
 
   // ----------------------------------------------------------------------
@@ -449,7 +346,7 @@
   }
 
   function renderVtsrLastMatchSection(eloRow) {
-    const hist = getActiveEloHistory();
+    const hist = state.eloHistory;
     if (hist == null) {
       return `<section class="vt-vtsr-detail-section">
         <h6>Last-match axis breakdown</h6>
@@ -486,7 +383,7 @@
 
     // Pro-rata redistribute weights over only the axes present
     // (matches Python compute_performance_index() rule).
-    const activeElo = getActiveElo();
+    const activeElo = state.elo;
     const weightsAll = (activeElo && activeElo.weights) || {};
     const availableAxes = Object.keys(ac);
     const totalWeight = availableAxes.reduce((s, a) => s + (weightsAll[a] || 0), 0);
@@ -641,7 +538,7 @@
   }
 
   function renderLeaderboard() {
-    const elo = getActiveElo();
+    const elo = state.elo;
     const $card = document.getElementById('section-vtsr');
     const $empty = document.getElementById('elo-leaderboard-empty');
     if (!$card) return;
@@ -825,7 +722,7 @@
   // outcome-pure win/loss ELO between the two commanders of every
   // determined match, with a team-strength handicap in the expected
   // score. 404-safe (card hidden when elo_commander_current.json is
-  // absent); the thug-only toggle deliberately does NOT apply.
+  // absent).
   // ----------------------------------------------------------------------
 
   // Friendly labels for the VTSR-C v2 economy axes (mirror of the frozen
@@ -1063,7 +960,6 @@
       </div>
       <p class="text-muted small mb-0">
         ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
-        The thug-only toggle doesn&rsquo;t apply here &mdash; VTSR-C is a separate ladder built only from commander duels.
       </p>`;
 
     // Chevron rotation on expand/collapse (mirrors the VTSR-T table).
@@ -1125,23 +1021,6 @@
     if (target === DEFAULT_TAB_TARGET) url.searchParams.delete('tab');
     else url.searchParams.set('tab', slugForTarget(target));
     history.replaceState(null, '', url.toString());
-  }
-
-  function activeTabTarget() {
-    const btn = document.querySelector('#elo-tabs .nav-link.active');
-    return (btn && btn.getAttribute('data-bs-target')) || DEFAULT_TAB_TARGET;
-  }
-
-  // Thug-only is a VTSR-T scope control: VTSR-C is a separate ladder the
-  // toggle can't reach, and the explainer tabs have no ratings to rescope.
-  // Hide both the control and its banner everywhere but the VTSR-T pane so
-  // the header never implies a mode that isn't in effect on screen.
-  function syncEloModeVisibility(target) {
-    const onVtsrT = target === DEFAULT_TAB_TARGET;
-    const group = document.getElementById('vtsr-elo-mode-group');
-    if (group) group.classList.toggle('d-none', !onVtsrT);
-    const banner = document.getElementById('vt-elo-mode-banner');
-    if (banner) banner.classList.toggle('d-none', !onVtsrT || eloMode !== 'thugs_only');
   }
 
   function activateTabFromUrl() {
@@ -1306,11 +1185,6 @@
         icon: 'bi-people', title: 'Stacked thugs don\u2019t inflate your commander rating',
         body: `<p>VTSR-C\u2019s expected score already knows <strong>which side had the stronger thug team</strong> (each team\u2019s average pre-match VTSR-T feeds the formula). Win with a stacked roster and you were <em>supposed</em> to win \u2014 small gain. Win with the weaker one and the ladder pays out properly; lose with it and the penalty is tiny.</p>`,
         verdict: 'Commanding the underdog team is never a rating trap.',
-      },
-      {
-        icon: 'bi-toggles', title: 'Thug-only mode',
-        body: `<p>The toggle on the <a href="?tab=vtsr-t" data-elo-tab-link="vtsr-t">VTSR-T Elo</a> tab recomputes every rating using <strong>thug appearances only</strong> &mdash; commander matches dropped entirely. It\u2019s a second lens, not a second ladder: the canonical rating includes commander games (with the fairness adjustment above).</p>`,
-        verdict: 'Your choice follows you between this page and the dashboard. VTSR-C is a separate ladder and never changes with it.',
       },
       {
         icon: 'bi-arrow-down-circle', title: 'Losses sting less, and there\u2019s a floor',
@@ -1684,8 +1558,9 @@
   // ----------------------------------------------------------------------
 
   async function boot() {
-    bindEloModeControls();
-    syncEloModeUi();
+    // Orphaned v2.7 thug-only key — the toggle is gone; drop it so a
+    // returning user never carries a stale pref that nothing reads.
+    try { localStorage.removeItem('vt.elo_mode'); } catch { /* private mode / storage blocked */ }
 
     // "How It's Calculated" on the leaderboard card switches to the
     // How-it-works pill (no modal on this page — the tab IS the modal).
@@ -1714,7 +1589,6 @@
         if (target) {
           renderTabIfNeeded(target);
           syncUrl(target);
-          syncEloModeVisibility(target);
         }
       });
     }
@@ -1748,18 +1622,6 @@
         console.warn('[elo] aggregate build failed', err);
         state.careerStats = [];
       }
-    }
-
-    // Persisted thug-only sessions: load the alt pair BEFORE first render
-    // so there's no default-then-flash; graceful revert on 404.
-    if (eloMode === 'thugs_only') {
-      const ok = await ensureThugsOnlyLoaded();
-      if (!ok) {
-        eloMode = 'default';
-        try { localStorage.setItem(ELO_MODE_STORAGE_KEY, 'default'); } catch {}
-        showModeToast('Thug-only ratings unavailable — showing canonical VTSR-T.');
-      }
-      syncEloModeUi();
     }
 
     renderLeaderboard();
