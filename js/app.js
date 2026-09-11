@@ -3129,6 +3129,8 @@
       thugs: !!(tsups['1'] || tsups['2']),
       lost: Math.max(l1.lost.length, l2.lost.length),
       foot: Math.max(l1.foot.length, l2.foot.length),
+      cmdr: !!((tsups['1'] && tsups['1'].commander_row)
+            || (tsups['2'] && tsups['2'].commander_row)),
     };
     const s1 = buildEconomyRowSpec('1', shape);
     const s2 = buildEconomyRowSpec('2', shape);
@@ -3231,6 +3233,10 @@
         `Extractor upgrades built across the match, and when the first one went up. Upgraded extractors regenerate faster. ${fmtScrap(E.upgrades_final)} were still standing at the end.`,
         'upgrades-built', has);
 
+      statRow('Scavs built', fmtScrap(bt ? bt.scavs_built : null),
+        'Mobile scavengers finished at the recycler — Scavenger, Collector, Harvester. Queued-then-cancelled scavs are not counted.',
+        'scavs-built', shape.builds);
+
       // Scrap-status bar. Read every band DIRECTLY from its own field --
       // the old code derived red as 100 - green - yellow, which silently
       // absorbed the rounding error from the other two bands.
@@ -3317,8 +3323,10 @@
       // padded to the longer side's length so the rows BELOW the block
       // stay aligned when one team fielded more thugs than the other.
       const lists = econThugLists(ts);
-      const subRow = (t, valueHtml, key) => statRow(
-        `&nbsp;&nbsp;${vtPlayerLinkHtml(t.name, t.steam64)}`, valueHtml, null, key
+      const cmdr = T.commander_row || null;
+      const cmdrTag = ' <span class="vt-econ-cmdr-tag">cmdr</span>';
+      const subRow = (t, valueHtml, key, extraLabel) => statRow(
+        `&nbsp;&nbsp;${vtPlayerLinkHtml(t.name, t.steam64)}${extraLabel || ''}`, valueHtml, null, key
       );
 
       divider('div-thugs', hasT);
@@ -3330,6 +3338,13 @@
         const t = lists.lost[i];
         if (t) subRow(t, `${fmtScrap(t.ships_lost)} <span class="text-muted">(${fmtScrap(t.ship_value_lost)} scrap)</span>`, `thug-lost-${i}`);
         else spacer(`thug-lost-${i}`);
+      }
+      if (shape.cmdr) {
+        if (cmdr) {
+          subRow(cmdr, `${fmtScrap(cmdr.ships_lost)} <span class="text-muted">(${fmtScrap(cmdr.ship_value_lost)} scrap)</span>`, 'cmdr-lost', cmdrTag);
+        } else {
+          spacer('cmdr-lost');
+        }
       }
 
       const footSec = T.thug_pilot_sec;
@@ -3347,6 +3362,16 @@
           subRow(t, `${fmtDurationCompact(t.pilot_sec)}${tAtBase}`, `thug-foot-${i}`);
         } else {
           spacer(`thug-foot-${i}`);
+        }
+      }
+      if (shape.cmdr) {
+        if (cmdr) {
+          const cAtBase = (cmdr.at_base_pilot_sec !== null && cmdr.at_base_pilot_sec !== undefined)
+            ? ` <span class="text-muted">(${fmtDurationCompact(cmdr.at_base_pilot_sec)} at base)</span>` : '';
+          subRow(cmdr, cmdr.pilot_sec !== null && cmdr.pilot_sec !== undefined
+            ? `${fmtDurationCompact(cmdr.pilot_sec)}${cAtBase}` : '—', 'cmdr-foot', cmdrTag);
+        } else {
+          spacer('cmdr-foot');
         }
       }
 
@@ -3414,12 +3439,22 @@
     const cmdrHtml = commander
       ? vtPlayerLinkHtml(commander.name, commander.s64)
       : '<span class="text-muted">Unknown commander</span>';
+    const matchWinner = (currentData && currentData.match && currentData.match.winner) || null;
+    const winnerTeam = (matchWinner && (matchWinner.decided_by === 'adjudicated'
+      || matchWinner.decided_by === 'attested'
+      || matchWinner.decided_by === 'clean_win'
+      || matchWinner.decided_by === 'contested'))
+      ? matchWinner.team
+      : null;
+    const winnerTrophy = (String(winnerTeam) === String(side))
+      ? ' <i class="bi bi-trophy-fill vt-faction-winner-icon" title="Match winner"></i>'
+      : '';
     const teamColor = side === '1' ? 'var(--kb-primary)' : 'var(--kb-success)';
     const rows = spec.map(econRowHtml).join('');
 
     el.innerHTML = `
       <div class="card-header d-flex align-items-center justify-content-between">
-        <h5 class="mb-0"><span class="vt-econ-team-dot" style="background:${teamColor}"></span>Team ${esc(side)} — ${cmdrHtml}</h5>
+        <h5 class="mb-0"><span class="vt-econ-team-dot" style="background:${teamColor}"></span>Team ${esc(side)} — ${cmdrHtml}${winnerTrophy}</h5>
       </div>
       <div class="card-body">${rows || '<p class="text-muted mb-0">No data.</p>'}</div>`;
   }
@@ -3570,9 +3605,9 @@
       segs.push(String(bank));
       segs.push((cap === null || cap === undefined) ? '—' : String(cap));
       segs.push((pools === null || pools === undefined) ? '—' : String(pools));
-      // A queue row reads PRE-purchase (the engine debits on the following
-      // tick), so this is genuinely what the commander had to spend.
-      tip += ` · bank ${bank} of ${cap === null || cap === undefined ? '?' : cap} max`
+      // Queue-time bank (v24): QUEUE rows are pre-purchase, and a matched
+      // BUILD copies the same triad so the chip is about the order.
+      tip += ` · queued at bank ${bank} of ${cap === null || cap === undefined ? '?' : cap} max`
            + ` · ${pools === null || pools === undefined ? '?' : pools} pools`;
     }
     const inner = segs

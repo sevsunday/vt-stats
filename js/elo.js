@@ -874,27 +874,13 @@
     if ($empty) $empty.classList.add('d-none');
     card.classList.remove('d-none');
 
-    // v2 banner: economy composite recorded but inert (alpha_c = 1).
-    const isV2 = (c.schema_version || 1) >= 2;
-    const telemTotal = isV2
-      ? ratings.reduce((s, r) => s + (r.duels_with_telemetry || 0), 0) / 2
-      : 0;
-    const v2Line = isV2
-      ? ` Since proto v4, each duel also records a five-axis <strong>economy composite</strong>
-          (pool tempo, production, thug supply, efficiency, upgrades) — currently
-          <strong>recorded but not scored</strong> (\u03b1<sub>c</sub> = 1): it starts counting only
-          after the validator proves the axes predict duel outcomes${telemTotal >= 1
-            ? ` (${fmt(Math.round(telemTotal))} telemetry duel${telemTotal === 1 ? '' : 's'} so far)` : ''}.`
-      : ` Commander telemetry (resource handling, build orders) joins the formula as the collector
-          starts capturing it.`;
-    const banner = `<div class="alert alert-secondary py-2 px-3 mb-3" style="font-size: 0.82rem;">
+    const provN = c.provisional_threshold ?? 5;
+    const banner = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
       <i class="bi bi-flask me-1"></i>
-      <strong>Experimental, outcome-pure.</strong>
-      This ladder rates commanders purely on <strong>wins and losses</strong> from the
-      ${fmt(c.rated_match_count)} matches with a verified outcome.
-      The expected score already accounts for <strong>which side had the stronger thug team</strong>,
-      so winning with a weaker roster pays more than winning with a stacked one.${v2Line}
-      Ratings below ${c.provisional_threshold ?? 5} rated games are provisional.
+      <strong>Experimental.</strong>
+      This ranking only looks at whether a commander won or lost, not how they played.
+      Winning with a weaker group of thugs raises the rating more than winning with a stronger one.
+      Commanders with fewer than ${fmt(provN)} rated games are still settling in.
     </div>`;
 
     const rows = ratings.map((r, i) => {
@@ -1571,16 +1557,6 @@
         if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
       });
     }
-    // The commander ladder's explainer lives on the How-it-works pill
-    // alongside the VTSR-T one, so this switches pills.
-    const cmdrHowLink = document.getElementById('vtsr-c-how-link');
-    if (cmdrHowLink) {
-      cmdrHowLink.addEventListener('click', () => {
-        const btn = document.querySelector('#elo-tabs [data-bs-target="#elo-tab-how"]');
-        if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
-      });
-    }
-
     // Tab change -> lazy render + URL sync.
     const tabsEl = document.getElementById('elo-tabs');
     if (tabsEl) {

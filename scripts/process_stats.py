@@ -98,7 +98,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # Source-account gameplay is rewritten onto the target at ingest while
 # per-match display names stay source-side. No match.schema_version bump
 # (no new per-match fields; no provenance chip).
-PIPELINE_VERSION = 41
+# 41 -> 42: Economy card v24 -- BUILD feed rows inherit the matched QUEUE
+# scrap triad (bank/cap/pools at queue time), builds.teams.scavs_built
+# (mobile scavenger BUILD completions), and thug_supply.{n}.commander_row
+# (commander attrition sibling; team totals stay thug-only). Display-only.
+PIPELINE_VERSION = 42
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -1711,6 +1715,15 @@ COMBAT_SHIP_TERMINALS = {
     "iv_walker", "fv_walker", "aircraft",
 }
 
+# Mobile scavengers (recycler-built collectors). Terminals are the ODF
+# classLabel chain's last hop, lowercased: `scavenger` covers ISDF
+# Scavenger / Hadean Collector / Scion Harvester / Reaper, `scavengerh`
+# is the holiday Pilferer Elf. Deployed extractors and pool upgrades
+# terminate at `extractor` and are NOT in this set (Pools / Upgrades
+# already count those). Compared case-insensitively because the DB
+# stores `scavengerH`.
+SCAVENGER_TERMINALS = {"scavenger", "scavengerh"}
+
 
 def _norm_build_odf(odf):
     """Normalize a wire BuildEvent.build_odf to a lowercase stem.
@@ -1814,6 +1827,23 @@ def build_combat_ship_odfs(odf_db):
             if chain and chain[-1] in COMBAT_SHIP_TERMINALS:
                 ships.add(_norm_build_odf(odf_key))
     return ships
+
+
+def build_scavenger_odfs(odf_db):
+    """Set of ODF stems classified as mobile scavengers.
+
+    Chain-terminal based, same contract as `build_combat_ship_odfs`.
+    Powers `builds.teams.{n}.scavs_built` (BUILD completions only).
+    """
+    scavs = set()
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            chain = (entry or {}).get("inheritanceChain") or []
+            if chain and str(chain[-1]).lower() in SCAVENGER_TERMINALS:
+                scavs.add(_norm_build_odf(odf_key))
+    return scavs
 
 
 def write_combat_ship_odfs(combat_ship_odfs):
@@ -4431,7 +4461,7 @@ def restamp_storyline_outcome(match_data):
     sl["beats"] = _storyline_beat_sort(beats)
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, no_prompt=False):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, scavenger_odfs=None, no_prompt=False):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -4452,11 +4482,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
     v4 additionally carries per-team ResourceState on UpdateTicks and a
     `build_event` oneof arm; `producer_lanes` / `scrap_costs` /
-    `combat_ship_odfs` (from build_producer_lane_map /
-    build_scrap_cost_resolver / build_combat_ship_odfs over the ODF DB)
-    power the `economy` + `builds` blocks. All three default to empty so
-    a missing ODF DB degrades to unresolved lanes / null costs / zero
-    ships_built rather than crashing.
+    `combat_ship_odfs` / `scavenger_odfs` (from build_producer_lane_map /
+    build_scrap_cost_resolver / build_combat_ship_odfs /
+    build_scavenger_odfs over the ODF DB) power the `economy` + `builds`
+    blocks. All default to empty so a missing ODF DB degrades to
+    unresolved lanes / null costs / zero ships_built / zero scavs_built
+    rather than crashing.
     """
     header = session.header
     events = session.event_stream
@@ -4923,6 +4954,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     producer_lanes = producer_lanes or {}
     scrap_costs = scrap_costs or {}
     combat_ship_odfs = combat_ship_odfs or set()
+    scavenger_odfs = scavenger_odfs or set()
 
     match_has_resource_data = False
     match_has_build_data = False
@@ -4975,6 +5007,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         return {
             "units_queued": 0, "units_cancelled": 0, "units_built": 0,
             "ships_built": 0, "combat_ship_value": 0, "scrap_spent_units": 0,
+            # v24: mobile scavenger BUILD completions (Scavenger / Collector
+            # / Harvester). Queues and cancels do not count.
+            "scavs_built": 0,
             "structures_queued": 0, "structures_cancelled": 0,
             "structures_built_events": 0, "scrap_spent_structures": 0,
             "dedup_folded_queues": 0, "producer_unresolved": 0,
@@ -5011,8 +5046,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     build_feed = []  # every build event verbatim (dedup-folded rows flagged)
     build_counts = {1: _new_builds_side(), 2: _new_builds_side()}
     build_seen_queue_tuples = set()  # (tick, teamnum, producer, odf) dedup key
-    # FIFO of open unit orders per (side, stem): (cost, status_at_queue_int).
-    # Mirrors the fixture ledger contract exactly (make_v4_fixture.py).
+    # FIFO of open unit orders per (side, stem):
+    # (cost, status_at_queue_int, bank, cap, pools). The last three are the
+    # team's economy at QUEUE time so a later BUILD chip can show what
+    # the commander had to spend rather than the bank at completion.
     # BUILD/CANCEL events carry the ODF, so per-stem is the right key for
     # matching an event back to its order.
     build_open_units = {}
@@ -6055,8 +6092,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # every tick, so this is exact to 0.05 s). The engine debits
                 # the bank on the tick AFTER a QUEUE, so a queue row reports
                 # the PRE-purchase bank -- what the commander had to spend.
-                # All three stay null on a build-data-only session and on
-                # events preceding the first resource tick.
+                # v24: a matched BUILD overwrites these three with the
+                # QUEUE-time values so the chip is about the order, not
+                # the completion tick. Orphan BUILDs keep this stamp.
+                # CANCEL rows stay on their own tick. All three stay null
+                # on a build-data-only session and on events preceding the
+                # first resource tick.
                 "scrap_at_event": _est["cur_bank"],
                 "max_scrap_at_event": _est["cur_cap"],
                 "pool_count_at_event": _est["cur_pools"],
@@ -6084,10 +6125,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 if _is_struct:
                     _bc["structures_queued"] += 1
                     build_ledger[_side]["structures"] += _cost_i
-                    build_open_structs.setdefault(_ukey, []).append((_cost_i, _status_now))
+                    build_open_structs.setdefault(_ukey, []).append(
+                        (_cost_i, _status_now,
+                         _est["cur_bank"], _est["cur_cap"], _est["cur_pools"]))
                 else:
                     _bc["units_queued"] += 1
-                    build_open_units.setdefault(_ukey, []).append((_cost_i, _status_now))
+                    build_open_units.setdefault(_ukey, []).append(
+                        (_cost_i, _status_now,
+                         _est["cur_bank"], _est["cur_cap"], _est["cur_pools"]))
                     build_lane_queue.setdefault((_side, _lane), []).append(
                         (_stem, _cost_i, _status_now))
                     if _stem in combat_ship_odfs:
@@ -6178,7 +6223,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 if _is_struct:
                     _lst = build_open_structs.get(_ukey)
                     if _lst:
-                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_lst.pop(0)[1])
+                        _entry = _lst.pop(0)
+                        _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_entry[1])
+                        # v24: BUILD chip shows the QUEUE-time bank, not
+                        # the bank at completion (orphan BUILD keeps the
+                        # completion stamp written at row construction).
+                        if len(_entry) >= 5:
+                            _row["scrap_at_event"] = _entry[2]
+                            _row["max_scrap_at_event"] = _entry[3]
+                            _row["pool_count_at_event"] = _entry[4]
                     _bc["structures_built_events"] += 1
                     _bc["scrap_spent_structures"] += _cost_i
                 else:
@@ -6186,6 +6239,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if _lst:
                         _entry = _lst.pop(0)
                         _row["scrap_status_at_queue"] = SCRAP_STATUS_NAMES.get(_entry[1])
+                        if len(_entry) >= 5:
+                            _row["scrap_at_event"] = _entry[2]
+                            _row["max_scrap_at_event"] = _entry[3]
+                            _row["pool_count_at_event"] = _entry[4]
                         # Mirrors the fixture ledger: built cost books only
                         # when a matching open order exists (an orphan
                         # BUILD's deduction never happened on this wire).
@@ -6204,6 +6261,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         _bc["ships_built"] += 1
                         # War Machine basis: scrap value fielded as combat units.
                         _bc["combat_ship_value"] += _cost_i
+                    if _stem in scavenger_odfs:
+                        _bc["scavs_built"] += 1
                 if len(_bc["first_builds"]) < 10:
                     _bc["first_builds"].append({"tick": int(be.tick), "odf": _stem})
 
@@ -7245,6 +7304,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "orders_open_at_end": _bc["orders_open_at_end"],
                 "units_built": _bc["units_built"],
                 "ships_built": _bc["ships_built"],
+                "scavs_built": _bc["scavs_built"],
                 "combat_ship_value": _bc["combat_ship_value"],
                 "scrap_spent_units": _bc["scrap_spent_units"],
                 "structures_queued": _bc["structures_queued"],
@@ -7547,7 +7607,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # / slot-correction reasons). Header-only 0-tick ghosts are
             # dropped (Sept 7 2026 collector leak). Not gated on header
             # length. Pre-v3 matches emit roster_qa: null.
-            "schema_version": 23,
+            # v24 (this version): BUILD feed rows inherit the matched QUEUE
+            # scrap triad (bank/cap/pools at queue time); `builds.teams`
+            # `scavs_built` (mobile scavenger BUILD completions);
+            # `thug_supply.{n}` gains `commander_row` (commander attrition
+            # sibling -- team totals stay thug-only). Display-only.
+            "schema_version": 24,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -7729,16 +7794,50 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # construction, so no fragile victim-label string matching is needed,
     # and it inherits the v2.9 pilot-victim exclusion for free.
     _thug_rows = {1: [], 2: []}
+    _cmdr_rows = {1: None, 2: None}
     for _row in leaderboard:
         _slot = _row.get("slot")
         if not isinstance(_slot, int) or not (1 <= _slot <= 10):
             continue
+        _side = 1 if _slot <= 5 else 2
         if _row.get("is_commander"):
+            _cmdr_rows[_side] = _row
             continue
-        _thug_rows[1 if _slot <= 5 else 2].append(_row)
+        _thug_rows[_side].append(_row)
 
     _pos_players = positioning_block.get("players") or {}
     _has_pos = bool(positioning_block.get("has_position_data")) and bool(_pos_players)
+
+    def _player_supply_row(_row):
+        """Per-player attrition + on-foot stats. Shared by thugs[] and
+        commander_row so the two stay the same shape.
+        """
+        _lost = 0
+        _value = 0
+        for _psc in (_row.get("per_ship_combat") or []):
+            _stem = _norm_build_odf(_psc.get("ship") or "")
+            if _stem not in combat_ship_odfs:
+                continue
+            _deaths = int(_psc.get("deaths") or 0)
+            if _deaths <= 0:
+                continue
+            _lost += _deaths
+            # Unpriced ODFs still count as losses but add 0 scrap (the
+            # count is the reliable half; the value is best-effort).
+            _value += _deaths * int(scrap_costs.get(_stem, 0) or 0)
+        _nm = _row.get("name")
+        _pm = ((_pos_players.get(_nm) or {}).get("metrics") or {}) if _has_pos else {}
+        return {
+            "name": _nm,
+            "steam64": _row.get("steam64"),
+            "slot": _row.get("slot"),
+            "ships_lost": _lost,
+            "ship_value_lost": _value,
+            "pilot_sec": _pm.get("pilot_sec") if _pm else None,
+            "at_base_pilot_sec": _pm.get("at_base_pilot_sec") if _pm else None,
+            "reship_median_sec": _pm.get("reship_median_sec") if _pm else None,
+            "reship_spells": _pm.get("reship_spells") if _pm else None,
+        }, _pm
 
     thug_supply_block = {}
     for _side in (1, 2):
@@ -7748,37 +7847,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         _at_base_sum = 0.0
         _seen_pos = False
         for _row in _thug_rows[_side]:
-            _lost = 0
-            _value = 0
-            for _psc in (_row.get("per_ship_combat") or []):
-                _stem = _norm_build_odf(_psc.get("ship") or "")
-                if _stem not in combat_ship_odfs:
-                    continue
-                _deaths = int(_psc.get("deaths") or 0)
-                if _deaths <= 0:
-                    continue
-                _lost += _deaths
-                # Unpriced ODFs still count as losses but add 0 scrap (the
-                # count is the reliable half; the value is best-effort).
-                _value += _deaths * int(scrap_costs.get(_stem, 0) or 0)
-            _nm = _row.get("name")
-            _pm = ((_pos_players.get(_nm) or {}).get("metrics") or {}) if _has_pos else {}
+            _t, _pm = _player_supply_row(_row)
             if _pm:
                 _seen_pos = True
                 _pilot_sum += _pm.get("pilot_sec") or 0.0
                 _at_base_sum += _pm.get("at_base_pilot_sec") or 0.0
-                _pooled.extend(reship_spells_by_name.get(_nm) or [])
-            _thugs.append({
-                "name": _nm,
-                "steam64": _row.get("steam64"),
-                "slot": _row.get("slot"),
-                "ships_lost": _lost,
-                "ship_value_lost": _value,
-                "pilot_sec": _pm.get("pilot_sec") if _pm else None,
-                "at_base_pilot_sec": _pm.get("at_base_pilot_sec") if _pm else None,
-                "reship_median_sec": _pm.get("reship_median_sec") if _pm else None,
-                "reship_spells": _pm.get("reship_spells") if _pm else None,
-            })
+                _pooled.extend(reship_spells_by_name.get(_row.get("name")) or [])
+            _thugs.append(_t)
         # Heaviest attrition first, then longest on foot, then name -- the
         # order the Economy card renders the per-thug sub-rows in.
         _thugs.sort(key=lambda t: (
@@ -7787,11 +7862,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             (t["name"] or ""),
         ))
 
+        _cmdr_src = _cmdr_rows[_side]
+        _cmdr_entry = _player_supply_row(_cmdr_src)[0] if _cmdr_src else None
+
         _entry = {
             "commander": team_leaders.get(str(_side)),
             "thug_count": len(_thug_rows[_side]),
             # Team totals are Σ over thugs[] by construction -- the two
             # must reconcile exactly (gated in run_all_gates.py).
+            # commander_row is a sibling, NOT in these totals.
             "thug_ships_lost": sum(t["ships_lost"] for t in _thugs),
             "thug_ship_value_lost": sum(t["ship_value_lost"] for t in _thugs),
             "thug_pilot_sec": None,
@@ -7799,6 +7878,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "reship_median_sec": None,
             "reship_spells": None,
             "thugs": _thugs,
+            "commander_row": _cmdr_entry,
         }
         if _seen_pos:
             _entry["thug_pilot_sec"] = round(_pilot_sum, 1)
@@ -8583,6 +8663,8 @@ def main():
     print(f"  Combat-ship set: {len(combat_ship_odfs)} ODF stems (B7 terminal-chain classification)")
     write_combat_ship_odfs(combat_ship_odfs)
     print(f"  Wrote {COMBAT_SHIP_ODFS_PATH.name} ({len(combat_ship_odfs)} stems)")
+    scavenger_odfs = build_scavenger_odfs(odf_db)
+    print(f"  Scavenger set: {len(scavenger_odfs)} ODF stems (mobile scav BUILD classification)")
     # Storyline (match.schema_version 22): extractor-war classification --
     # chain-terminal `extractor` covers deployed scavs AND pool upgrades.
     extractor_odfs = build_extractor_odfs(odf_db)
@@ -8636,6 +8718,7 @@ def main():
                 scrap_costs=scrap_costs,
                 combat_ship_odfs=combat_ship_odfs,
                 extractor_odfs=extractor_odfs,
+                scavenger_odfs=scavenger_odfs,
                 no_prompt=args.no_prompt,
             )
             match_id = match_data["match"]["id"]

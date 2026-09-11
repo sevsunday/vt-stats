@@ -867,7 +867,14 @@
         </div>
         <div class="card mb-4 d-none" id="section-economy-buildlog">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0">Build Order Log</h5>
+            <h5 class="mb-0 d-flex align-items-center gap-2">
+              Build Order Log
+              <button type="button" class="btn btn-sm vt-econ-log-help-btn"
+                      data-bs-toggle="modal" data-bs-target="#economy-buildlog-help-modal"
+                      title="What the Build Order Log shows" aria-label="About the Build Order Log">
+                <i class="bi bi-info-circle"></i>
+              </button>
+            </h5>
             <div class="d-flex align-items-center flex-wrap gap-2">
               <!-- Commander scope. Labels are rewritten per match from
                    builds.teams{n}.commander.name in renderBuildLog(); picking a
@@ -1609,6 +1616,56 @@
               JavaScript library for querying live Battlezone 2: Combat Commander multiplayer session data.
             </div>
           </div>
+        </div>
+        <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Build Order Log help. Layman key for QUEUE / BUILD / CANCEL, the
+       four-number chip, and the scrap-status dots. -->
+  <div class="modal fade" id="economy-buildlog-help-modal" tabindex="-1"
+       aria-labelledby="economy-buildlog-help-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="economy-buildlog-help-title">
+            <i class="bi bi-info-circle me-2"></i>Build Order Log
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small">
+            Every order this commander queued, finished, or cancelled, in the order it happened.
+          </p>
+
+          <h6 class="mb-2">Events</h6>
+          <ul class="mb-3">
+            <li class="mb-1"><i class="bi bi-plus-circle me-1"></i><strong>Queue</strong> — the commander ordered the unit. If something else is already building, this sits in line and is not paid for yet.</li>
+            <li class="mb-1"><i class="bi bi-check-circle-fill me-1"></i><strong>Build</strong> — the unit finished. The four numbers still show the scrap bank from when it was queued, not when it rolled off the line.</li>
+            <li class="mb-1"><i class="bi bi-x-circle me-1"></i><strong>Cancel</strong> — the commander dropped it from the queue.</li>
+          </ul>
+
+          <h6 class="mb-2">The four numbers</h6>
+          <p class="mb-1"><span class="vt-econ-cost-chip"><span class="vt-econ-chip-seg">20</span><span class="vt-econ-chip-sep">|</span><span class="vt-econ-chip-seg">64</span><span class="vt-econ-chip-sep">|</span><span class="vt-econ-chip-seg">80</span><span class="vt-econ-chip-sep">|</span><span class="vt-econ-chip-seg">2</span></span></p>
+          <p class="text-muted small mb-3">
+            <strong>cost | bank | cap | pools</strong> at the moment the unit was queued.
+            Bank is what the commander had to spend (the engine takes the scrap on the next tick).
+            Cap is storage (40 for a live recycler plus 20 per pool). Pools is how many extractors they held.
+          </p>
+
+          <h6 class="mb-2">The colored dots</h6>
+          <p class="text-muted small mb-2">
+            Scrap regenerates faster when the bank is low. The dot is the band at queue time:
+          </p>
+          <ul class="list-unstyled mb-0">
+            <li class="mb-1"><span class="vt-econ-help-dot" data-status="green"></span><strong>Green</strong> — bank nearly full. Slowest regen.</li>
+            <li class="mb-1"><span class="vt-econ-help-dot" data-status="yellow"></span><strong>Yellow</strong> — mid bank.</li>
+            <li class="mb-1"><span class="vt-econ-help-dot" data-status="red"></span><strong>Red</strong> (can read orange on some themes) — bank low. Fastest regen; usually means the commander was spending as scrap came in.</li>
+            <li class="mb-0"><span class="vt-econ-help-dot" data-status="parallel"></span><strong>Parallel</strong> — unused in VSR.</li>
+          </ul>
         </div>
         <div class="modal-footer border-top">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>

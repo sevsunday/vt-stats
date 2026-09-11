@@ -6349,6 +6349,47 @@ html.vt-cursor-active * {
     margin: 0.1rem 0 0.25rem;
 }
 
+/* Commander sibling under Thug supply — not in the team totals. */
+.vt-econ-cmdr-tag {
+    display: inline-block;
+    padding: 0.05em 0.4em;
+    margin-left: 0.3em;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+    background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    vertical-align: middle;
+}
+
+.vt-econ-log-help-btn {
+    padding: 0.1rem 0.3rem;
+    line-height: 1;
+    color: var(--kb-text-muted);
+    border: 0;
+    background: transparent;
+}
+.vt-econ-log-help-btn:hover,
+.vt-econ-log-help-btn:focus-visible {
+    color: var(--kb-info);
+}
+
+.vt-econ-help-dot {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 0.35rem;
+}
+.vt-econ-help-dot[data-status="green"]    { background: var(--kb-success); }
+.vt-econ-help-dot[data-status="yellow"]   { background: var(--kb-warning); }
+.vt-econ-help-dot[data-status="red"]      { background: var(--kb-danger); }
+.vt-econ-help-dot[data-status="parallel"] { background: var(--kb-info); }
+
 .vt-econ-inferred-badge {
     background: color-mix(in oklab, var(--kb-warning) 22%, transparent);
     color: var(--kb-warning);
