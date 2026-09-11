@@ -296,7 +296,6 @@
                + description / mod / team names live in the Map Info Modal,
                opened by clicking the thumbnail above. See renderMapInfoModal()
                in js/app.js. -->
-          <div id="info-snipes-wrap" class="d-none"><span class="stat-label">Snipes</span><br><strong id="info-snipes">0</strong></div>
           <div class="d-flex flex-column gap-2">
             <button id="info-back-to-all" class="vt-nav-icon-btn vt-nav-icon-btn--primary" type="button" title="Return to the All Matches aggregate view">
               <i class="bi bi-grid-3x3-gap me-1"></i><span>All Matches</span>
@@ -393,14 +392,6 @@
           </div>
           <div class="card-body" id="player-profile-content"></div>
         </div>
-        <div class="card mb-4 vt-highlights-card d-none" id="section-highlights">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Match Highlights</h5>
-          </div>
-          <div class="card-body">
-            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="highlights-grid"></div>
-          </div>
-        </div>
         <div class="card mb-4" id="section-faction">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">
@@ -411,6 +402,14 @@
           </div>
           <div class="card-body">
             <div class="row g-3" id="faction-content"></div>
+          </div>
+        </div>
+        <div class="card mb-4 vt-highlights-card d-none" id="section-highlights">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Match Highlights</h5>
+          </div>
+          <div class="card-body">
+            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 row-cols-xl-6 g-3" id="highlights-grid"></div>
           </div>
         </div>
         <div class="card mb-4" id="section-leaderboard">
@@ -563,7 +562,6 @@
         <div class="card mb-4 d-none" id="story-narrative-card">
           <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0"><i class="bi bi-book-half me-2"></i>The Story</h5>
-            <span class="vt-story-why">auto-generated from match telemetry</span>
           </div>
           <div class="card-body">
             <p class="vt-story-narrative mb-0" id="story-narrative"></p>

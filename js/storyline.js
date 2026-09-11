@@ -112,10 +112,10 @@
     structure_kill: {
       icon: 'bi-house-x',
       // Decisive (Recycler/Factory) kills are TEAM-attributed: structures
-      // get focus-fired and the feed's killer is only the last hit. The
-      // killing-blow credit stays in the expandable detail, precisely
-      // worded. Ordinary structure kills keep the individual name (kill
-      // feed convention — usually a lone hitter).
+      // get focus-fired and the feed's killer is only the last hit. Title
+      // only — no killing-blow subtext or expandable (those live on the
+      // Overview highlights / kill feed). Ordinary structure kills keep
+      // the individual name (kill feed convention — usually a lone hitter).
       title: (a, ctx) => {
         if (a.role && a.victim_team) {
           const attacker = a.victim_team === 1 ? 2 : 1;
@@ -123,10 +123,7 @@
         }
         return `${esc(a.killer)} destroys ${esc(a.owner)}&#39;s ${esc(a.structure)}`;
       },
-      detail: (a) => {
-        if (!a.role || !a.killer) return '';
-        return `killing blow: ${esc(a.killer)}${a.killer_ship ? ` (${esc(a.killer_ship)})` : ''}`;
-      },
+      detail: () => '',
     },
     demolition: {
       icon: 'bi-hammer',
@@ -283,8 +280,7 @@
     climax(ctx) {
       // TEAM attribution, not last-hit: structure kills are focus-fired
       // and the kill feed's killer field only names whoever landed the
-      // final shot (no assist tracking on structures). The precise
-      // killing-blow credit lives in the beat's expandable detail.
+      // final shot (no assist tracking on structures).
       const d = ctx.facts.decisive;
       if (!d) return null;
       const victim = d.victim_team === 1 ? 1 : 2;
@@ -983,24 +979,14 @@
   function renderNarrative(sl, ctx) {
     const p = document.getElementById('story-narrative');
     if (p) p.innerHTML = buildNarrative(ctx);
+    // Cast chips (The Finisher / The Harasser / …) are not rendered —
+    // Overview Match Highlights already covers those standouts. Pipeline
+    // still emits facts.cast; ROLE_COPY stays for the template gate.
     const castHolder = document.getElementById('story-cast');
-    if (!castHolder) return;
-    const cast = (sl.facts.cast || []);
-    if (!cast.length) {
+    if (castHolder) {
       castHolder.classList.add('d-none');
       castHolder.innerHTML = '';
-      return;
     }
-    castHolder.classList.remove('d-none');
-    castHolder.innerHTML = cast.map((e) => {
-      const copy = ROLE_COPY[e.role];
-      if (!copy) return '';
-      return `<span class="vt-story-cast-chip vt-story-cast-chip--t${e.team || 0}">` +
-        `<i class="bi ${copy.icon}"></i>` +
-        `<span class="vt-story-cast-role">${copy.label}</span>` +
-        `${playerLinkHtml(e.name, e.steam64)}` +
-        `<small>${copy.line(e)}</small></span>`;
-    }).join('');
   }
 
   // ------------------------------------------------------------ beats rail
@@ -1011,29 +997,29 @@
         `<div class="vt-story-beat-subrow"><span class="vt-story-beat-time">${clock(e.sec)}</span>` +
         `<span>${esc(e.killer)} destroyed ${esc(e.victim)}&#39;s ${esc(e.victim_ship)}</span></div>`).join('');
     }
-    if (b.kind === 'structure_kill' && b.weight >= 5) {
-      // Precise killing-blow credit lives HERE (expandable trivia), not in
-      // the title — the title is team-attributed because structures get
-      // focus-fired and the feed only records the last hit. The intruder
-      // count is deliberately NOT shown: attackers being inside the base
-      // while a base structure dies is tautological (the lane's intrusion
-      // bars carry that signal where it earns its place).
-      const a = b.args;
-      const rows = [];
-      if (a.killer) {
-        rows.push(`Killing blow landed by ${esc(a.killer)}${a.killer_ship ? ` in a ${esc(a.killer_ship)}` : ''} — several ships typically contribute; the feed records only the final shot.`);
-      }
-      const roleName = a.role === 'recycler' ? 'Recycler' : a.role === 'factory' ? 'Factory' : null;
-      if (roleName) rows.push(`The ${esc(a.structure)} is this team&#39;s ${roleName}-class structure — losing it is usually fatal.`);
-      return rows.map((r) => `<div class="vt-story-beat-subrow"><span></span><span>${r}</span></div>`).join('');
-    }
     return '';
+  }
+
+  function sortBeatsForRail(beats) {
+    // Mirror of process_stats._storyline_beat_sort: result last among
+    // same-second rows so cached JSON (pre-sort-fix) still displays
+    // "wins" after the recycler/factory kill.
+    return (beats || []).slice().sort((a, b) => {
+      const sec = (a.sec || 0) - (b.sec || 0);
+      if (sec) return sec;
+      const ar = a.kind === 'result' ? 1 : 0;
+      const br = b.kind === 'result' ? 1 : 0;
+      if (ar !== br) return ar - br;
+      const w = (b.weight || 0) - (a.weight || 0);
+      if (w) return w;
+      return String(a.kind || '').localeCompare(String(b.kind || ''));
+    });
   }
 
   function renderBeats(sl, ctx) {
     const holder = document.getElementById('story-beats');
     if (!holder) return;
-    const rows = (sl.beats || []).map((b, i) => {
+    const rows = sortBeatsForRail(sl.beats).map((b, i) => {
       const copy = BEAT_COPY[b.kind];
       if (!copy) return '';
       const title = copy.title(b.args || {}, ctx);

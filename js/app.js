@@ -4629,13 +4629,6 @@
     if (rawLink && info.id) {
       rawLink.href = `raw.html?match=${encodeURIComponent(info.id)}`;
     }
-    const snipesWrap = document.getElementById('info-snipes-wrap');
-    if (info.snipe_count > 0) {
-      document.getElementById('info-snipes').textContent = info.snipe_count;
-      snipesWrap.classList.remove('d-none');
-    } else {
-      snipesWrap.classList.add('d-none');
-    }
 
     // Map-dimension stat blocks (Map size, Elevation, Base-to-base, Author)
     // + thumbnail. Sources are merged by getMapMeta() below.

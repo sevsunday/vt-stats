@@ -3821,7 +3821,15 @@ def _storyline_result_beat(match, duration_sec, tick_rate):
 
 
 def _storyline_beat_sort(beats):
-    beats.sort(key=lambda b: (b["sec"], -b["weight"], b["kind"]))
+    # Result last among same-second rows so "Team N wins" sits AFTER the
+    # recycler/factory kill that is the win condition (kind-alpha used to
+    # put "result" before "structure_kill").
+    beats.sort(key=lambda b: (
+        b["sec"],
+        1 if b["kind"] == "result" else 0,
+        -b["weight"],
+        b["kind"],
+    ))
     return beats
 
 
