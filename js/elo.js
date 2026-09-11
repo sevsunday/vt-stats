@@ -1,31 +1,39 @@
 /* js/elo.js — dedicated ELO page controller (elo/index.html).
  *
- * The project's canonical home for VTSR-T: the full sortable leaderboard
- * with per-row expandable detail panels (moved here from the dashboard's
- * All Matches view, which now shows a top-5 teaser), plus four explainer
- * tabs that present the rating in layman-first language:
+ * The project's canonical home for both rating ladders: the full sortable
+ * VTSR-T leaderboard with per-row expandable detail panels (moved here from
+ * the dashboard's All Matches view, which now shows a top-5 teaser), the
+ * VTSR-C commander ladder, and four explainer tabs that present the ratings
+ * in layman-first language:
  *
- *   Leaderboard (default)   — 13-column sortable table + detail panels.
+ *   VTSR-T Elo (default)    — 13-column sortable table + detail panels.
+ *   VTSR-C Elo              — the experimental commander-ladder table
+ *                             (table-only; its explainer lives on How).
  *   How it works            — annotated ΔR = K(P−E) stage + the 13.1
- *                             α-blend stage + tier ladder + worked example
- *                             (content from the shared js/vtsr-explainers.js).
+ *                             α-blend stage + the commander-ladder section
+ *                             (commanderLadderHtml) + tier ladder + worked
+ *                             example (from the shared js/vtsr-explainers.js).
  *   The 8 axes              — annotated mixing-board + weights table.
  *   Commanders & fairness   — the fairness rules as plain-language cards.
  *   Does it work?           — honest accuracy stats from the committed
  *                             data/processed/validation_summary.json.
  *
  * Data (all 404-safe): elo_current.json + elo_history.json (+ the
- * thugs_only pair lazily on toggle), player_slugs.json (player links),
+ * thugs_only pair lazily on toggle), elo_commander_current.json +
+ * elo_commander_history.json, player_slugs.json (player links),
  * validation_summary.json (noise band + accuracy tab), and
  * match_contributions.json -> VTAggregate.build() for the corpus-wide
  * career_stats[] the leaderboard joins its Ship / K/D / Acc columns from.
  *
  * Corpus-wide and picker-unaware (mirrors the VTSR-T contract). The
  * thug-only toggle persists in localStorage under the same `vt.elo_mode`
- * key the dashboard reads, so the two pages stay in sync.
+ * key the dashboard reads, so the two pages stay in sync; its control +
+ * banner are shown ONLY on the VTSR-T pane (it can't reach VTSR-C).
  *
- * URL routing: ?tab=leaderboard|how|axes|fairness|accuracy (replaceState
- * sync on pill change; deep links boot straight into the right pane).
+ * URL routing: ?tab=vtsr-t|vtsr-c|how|axes|fairness|accuracy (replaceState
+ * sync on pill change; deep links boot straight into the right pane). The
+ * VTSR-T pane is the default and writes no ?tab= at all; `leaderboard` is
+ * kept as a permanent inbound alias for pre-split links.
  */
 (function () {
   'use strict';
@@ -195,8 +203,8 @@
         btn.classList.toggle('active', btn.dataset.eloMode === eloMode);
       });
     }
-    const banner = document.getElementById('vt-elo-mode-banner');
-    if (banner) banner.classList.toggle('d-none', eloMode !== 'thugs_only');
+    // Banner + control visibility is pane-scoped (VTSR-T only).
+    syncEloModeVisibility(activeTabTarget());
   }
 
   async function setEloMode(nextMode) {
@@ -360,7 +368,7 @@
     target_lock_pct: {
       label: 'T-key usage',
       formula: 'target_lock_pct  (already 0-1)',
-      desc:    'Share of the match you held an active T-key target lock. Situational-awareness proxy at low weight.',
+      desc:    'Share of the match you held an active T-key target lock. Situational-awareness proxy at luxury weight (~0.5%).',
     },
   };
 
@@ -951,13 +959,22 @@
     return `<div class="vt-vtsr-detail-body">${statsHtml}${econHtml}${logHtml}</div>`;
   }
 
+  // The VTSR-C pill is table-only (mirrors the VTSR-T pane); the ladder's
+  // explainer lives on the How-it-works pill. Lazy-rendered like the
+  // explainer tabs — the data is already fetched at boot.
   function renderCommanderLadder() {
     const card = document.getElementById('section-vtsr-c');
     const body = document.getElementById('vtsr-c-body');
+    const $empty = document.getElementById('elo-vtsr-c-empty');
     if (!card || !body) return;
     const c = state.cmdrElo;
     const ratings = (c && Array.isArray(c.ratings)) ? c.ratings : [];
-    if (!ratings.length) { card.classList.add('d-none'); return; }
+    if (!ratings.length) {
+      card.classList.add('d-none');
+      if ($empty) $empty.classList.remove('d-none');
+      return;
+    }
+    if ($empty) $empty.classList.add('d-none');
     card.classList.remove('d-none');
 
     // v2 banner: economy composite recorded but inert (alpha_c = 1).
@@ -1068,15 +1085,22 @@
   // Tab routing (?tab=) + lazy renderers.
   // ----------------------------------------------------------------------
 
+  // The VTSR-T pane is the default: it never writes a ?tab= at all, so
+  // neither of its two accepted slugs is ever emitted. `leaderboard` is the
+  // pre-split alias and is kept forever so shared links keep landing.
+  const DEFAULT_TAB_TARGET = '#elo-tab-leaderboard';
   const TAB_SLUGS = {
-    leaderboard: '#elo-tab-leaderboard',
+    'vtsr-t': DEFAULT_TAB_TARGET,
+    'vtsr-c': '#elo-tab-vtsr-c',
     how: '#elo-tab-how',
     axes: '#elo-tab-axes',
     fairness: '#elo-tab-fairness',
     accuracy: '#elo-tab-accuracy',
+    leaderboard: DEFAULT_TAB_TARGET,
   };
   const tabRendered = {};
   const tabRenderers = {
+    '#elo-tab-vtsr-c': renderCommanderLadder,
     '#elo-tab-how': renderHowTab,
     '#elo-tab-axes': renderAxesTab,
     '#elo-tab-fairness': renderFairnessTab,
@@ -1093,21 +1117,41 @@
   }
 
   function slugForTarget(target) {
-    return Object.keys(TAB_SLUGS).find(k => TAB_SLUGS[k] === target) || 'leaderboard';
+    return Object.keys(TAB_SLUGS).find(k => TAB_SLUGS[k] === target) || 'vtsr-t';
   }
 
   function syncUrl(target) {
-    const slug = slugForTarget(target);
     const url = new URL(window.location.href);
-    if (slug === 'leaderboard') url.searchParams.delete('tab');
-    else url.searchParams.set('tab', slug);
+    if (target === DEFAULT_TAB_TARGET) url.searchParams.delete('tab');
+    else url.searchParams.set('tab', slugForTarget(target));
     history.replaceState(null, '', url.toString());
+  }
+
+  function activeTabTarget() {
+    const btn = document.querySelector('#elo-tabs .nav-link.active');
+    return (btn && btn.getAttribute('data-bs-target')) || DEFAULT_TAB_TARGET;
+  }
+
+  // Thug-only is a VTSR-T scope control: VTSR-C is a separate ladder the
+  // toggle can't reach, and the explainer tabs have no ratings to rescope.
+  // Hide both the control and its banner everywhere but the VTSR-T pane so
+  // the header never implies a mode that isn't in effect on screen.
+  function syncEloModeVisibility(target) {
+    const onVtsrT = target === DEFAULT_TAB_TARGET;
+    const group = document.getElementById('vtsr-elo-mode-group');
+    if (group) group.classList.toggle('d-none', !onVtsrT);
+    const banner = document.getElementById('vt-elo-mode-banner');
+    if (banner) banner.classList.toggle('d-none', !onVtsrT || eloMode !== 'thugs_only');
   }
 
   function activateTabFromUrl() {
     const slug = new URLSearchParams(window.location.search).get('tab');
     const target = TAB_SLUGS[slug];
-    if (!target || slug === 'leaderboard') return;
+    if (!target || target === DEFAULT_TAB_TARGET) {
+      // Normalize a legacy / redundant ?tab= that resolves to the default.
+      if (slug && target === DEFAULT_TAB_TARGET) syncUrl(DEFAULT_TAB_TARGET);
+      return;
+    }
     const btn = document.querySelector(`#elo-tabs [data-bs-target="${target}"]`);
     if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
   }
@@ -1154,12 +1198,14 @@
         <h6>The published rating: two dials</h6>
         <p class="mb-1">Under the hood, the number on the leaderboard is a <strong>mix of two ratings</strong> &mdash; one for raw match performance and one for wins &mdash; with a knob that decides the blend:</p>
         ${blendBlock}
-        <p class="mb-0 mt-2 text-muted small">Why is the Wins dial off? Match winners can only be <em>proven</em> from the recorded data in a minority of matches (see the Does it work? tab) &mdash; rating people on guesses would be worse than not rating wins at all. The formula is already wired for the day that changes.</p>
+        <p class="mb-2 mt-2 text-muted small">The Wins dial isn&rsquo;t a placeholder &mdash; it&rsquo;s a real win/loss ladder that updates on every match with a verified outcome, and each player&rsquo;s value shows in the leaderboard&rsquo;s rating tooltip. What&rsquo;s off is the <strong>mixer</strong>.</p>
+        <p class="mb-0 text-muted small">Why leave it at zero? Two reasons, both measured. A match win is a <em>team</em> result, and this rating is about one player&rsquo;s own game &mdash; your commander&rsquo;s build order and four teammates decide the ending as much as you do. And when we actually tried blending wins in (at 10%, 25% and 50%), it <strong>didn&rsquo;t predict winners any better</strong> and its confidence scores got slightly worse, so the honest call was to leave the published rating on pure performance. It also helps that most matches still end without a provable winner (see the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab), which keeps the wins sample small. The rule for turning the knob up was written down <em>before</em> the test, so it can&rsquo;t be bent to fit the result.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
         <h6>The commander ladder (VTSR-C)</h6>
         ${E.commanderLadderHtml()}
+        <p class="mb-0 mt-2 text-muted small">The ladder itself &mdash; every commander&rsquo;s rating, record and duel log &mdash; is on the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C Elo</a> pill.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -1204,7 +1250,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>What about VTSR-C?</h6>
-        <p class="mb-1">These 8 axes power <strong>VTSR-T only</strong>. The commander ladder (VTSR-C) carries <strong>no axes yet</strong> &mdash; it&rsquo;s pure win/loss until the collector starts recording commander telemetry (resource handling, build orders), which will join it through the same weighted-composite architecture.</p>
+        <p class="mb-1">These 8 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. It does now have axes of its own &mdash; the newer collector records a five-axis economy composite (pool tempo, production, thug supply, efficiency, upgrades) on every duel it covers &mdash; but they are <strong>recorded, not scored</strong>: none of it moves a commander&rsquo;s rating until the validator shows those axes actually predict duel outcomes across at least 25 telemetry duels.</p>
         <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
       </section>
     </div>`;
@@ -1249,7 +1295,7 @@
       {
         icon: 'bi-person-badge-fill', title: 'The commander ladder (VTSR-C)',
         body: `<p>Commanders now have a <strong>separate rating built purely on wins and losses</strong> &mdash; every match with a verified outcome is a 1v1 duel between the two commanders. Outcomes only count when they\u2019re <strong>proven</strong>: host-attested, reviewer-confirmed, or physically evident from the recording (base destroyed). Unverifiable matches simply don\u2019t move it.</p>`,
-        verdict: 'Experimental \u2014 outcome-pure. Full ladder on the Leaderboard tab.',
+        verdict: 'Experimental \u2014 outcome-pure. Full ladder on the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C Elo</a> tab.',
       },
       {
         icon: 'bi-cash-stack', title: 'Economy is recorded, not yet scored',
@@ -1263,13 +1309,13 @@
       },
       {
         icon: 'bi-toggles', title: 'Thug-only mode',
-        body: `<p>The toggle at the top of this page recomputes every rating using <strong>thug appearances only</strong> &mdash; commander matches dropped entirely. It\u2019s a second lens, not a second ladder: the canonical rating includes commander games (with the fairness adjustment above).</p>`,
-        verdict: 'Your choice follows you between this page and the dashboard. VTSR-C is unaffected either way.',
+        body: `<p>The toggle on the <a href="?tab=vtsr-t" data-elo-tab-link="vtsr-t">VTSR-T Elo</a> tab recomputes every rating using <strong>thug appearances only</strong> &mdash; commander matches dropped entirely. It\u2019s a second lens, not a second ladder: the canonical rating includes commander games (with the fairness adjustment above).</p>`,
+        verdict: 'Your choice follows you between this page and the dashboard. VTSR-C is a separate ladder and never changes with it.',
       },
       {
         icon: 'bi-arrow-down-circle', title: 'Losses sting less, and there\u2019s a floor',
-        body: `<p>Rating losses are scaled to <strong>85%</strong> of what the formula says (chasing people off the ladder helps nobody), and no rating can fall below <strong>1000</strong> &mdash; a soft floor with a gradual taper, not a cliff.</p>`,
-        verdict: '',
+        body: `<p>On <strong>VTSR-T</strong>, rating losses are scaled to <strong>85%</strong> of what the formula says (chasing people off the ladder helps nobody), and no rating can fall below <strong>1000</strong> &mdash; a soft floor with a gradual taper, not a cliff.</p>`,
+        verdict: 'VTSR-C has neither \u2014 a commander duel is zero-sum, so what one side wins the other loses exactly.',
       },
     ].map(c => `<div class="vt-elo-fairness-card">
         <h6><i class="bi ${c.icon}"></i>${c.title}</h6>
@@ -1280,6 +1326,7 @@
       <p class="mb-3">A skill rating is only as good as its blind spots. These are the rules that keep the <strong>two ladders</strong> &mdash; VTSR-T for thug play, VTSR-C for commanding &mdash; from punishing people for things that aren&rsquo;t skill. Each one is a <strong>pure omission</strong> (the affected match simply doesn&rsquo;t move the rating) or a measured adjustment, never a bonus pool.</p>
       <div class="vt-elo-fairness-grid">${cards}</div>
     </div>`;
+    wireTabLinks(pane);
   }
 
   // ----------------------------------------------------------------------
@@ -1405,8 +1452,9 @@
       }).join('');
       funnelHtml = `<div class="vt-elo-acc-section">
         <h6>Why the prediction sample is small</h6>
-        <p class="vt-elo-acc-blurb">A match only counts toward prediction stats when the recorded data can <strong>prove</strong> who won (one team\u2019s base destroyed, the other\u2019s untouched). Host quits, timeouts, and rebuild ambiguity leave most matches unprovable &mdash; that\u2019s a recording limitation, not a rating one.</p>
+        <p class="vt-elo-acc-blurb">A match only counts toward prediction stats when we can <strong>prove</strong> who won. Three things qualify: the recording shows it physically (one team\u2019s base destroyed, the other\u2019s untouched), the host answered the end-of-game dialog, or a reviewer signed the result off afterwards. Host quits, timeouts, and rebuild ambiguity leave most matches unprovable &mdash; that\u2019s a recording limitation, not a rating one.</p>
         <div class="vt-elo-funnel">${rows}</div>
+        <p class="vt-elo-acc-blurb mb-0 mt-2 text-muted small">Contested matches (both bases fell) and draws sit in the unprovable bar because there\u2019s no single winner to predict here &mdash; the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">commander ladder</a> does still rate contested games.</p>
       </div>`;
     }
 
@@ -1572,6 +1620,7 @@
     </div>`;
 
     ensureTooltips(pane);
+    wireTabLinks(pane);
 
     if (hist.length > 1 && window.Chart) {
       const ctx = document.getElementById('elo-history-chart');
@@ -1647,6 +1696,8 @@
         if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
       });
     }
+    // The commander ladder's explainer lives on the How-it-works pill
+    // alongside the VTSR-T one, so this switches pills.
     const cmdrHowLink = document.getElementById('vtsr-c-how-link');
     if (cmdrHowLink) {
       cmdrHowLink.addEventListener('click', () => {
@@ -1663,6 +1714,7 @@
         if (target) {
           renderTabIfNeeded(target);
           syncUrl(target);
+          syncEloModeVisibility(target);
         }
       });
     }
@@ -1711,11 +1763,11 @@
     }
 
     renderLeaderboard();
-    renderCommanderLadder();
-    tabRendered['#elo-tab-leaderboard'] = true;
+    tabRendered[DEFAULT_TAB_TARGET] = true;
 
     // Deep links (?tab=...) boot straight into the right pane; the
-    // shown.bs.tab handler above lazy-renders it.
+    // shown.bs.tab handler above lazy-renders it (VTSR-C included — its
+    // data is already fetched above, so the pill only pays for markup).
     activateTabFromUrl();
   }
 

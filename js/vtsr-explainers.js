@@ -83,9 +83,9 @@
     { term: 'eq-rt', title: 'The Performance dial', x: 63, y: 63,
       body: 'Thug ELO &mdash; everything on this page: the 8-axis match scores, move speed, the lot. This is the dial doing all the work today.' },
     { term: 'eq-rw', title: 'The Wins dial', x: 8, y: 63,
-      body: 'A classic win/loss rating. It exists in the formula, but match winners can&rsquo;t be proven reliably from the data yet &mdash; so it idles at the 1500 anchor.' },
+      body: 'A classic win/loss rating. It is <strong>real and running</strong> &mdash; every match with a verified outcome moves it, and you can see each player&rsquo;s value in the leaderboard&rsquo;s rating tooltip.' },
     { term: 'eq-alpha', title: 'The mixer knob (\u03b1)', x: 36, y: 5,
-      body: 'How much the Wins dial counts. <strong>Currently set to 0</strong> &mdash; your published rating is 100% performance. When win data becomes trustworthy, this knob turns up.' },
+      body: 'How much the Wins dial counts. <strong>Currently set to 0</strong> &mdash; your published rating is 100% performance. The wins ladder is computed but doesn&rsquo;t feed your number.' },
     { term: 'eq-vtsr', title: 'Your published rating', x: 3, y: 5,
       body: 'The VTSR-T number on the leaderboard: the two dials, mixed by the knob.' },
   ];
@@ -419,30 +419,35 @@
     return `<p class="mb-2">Commanders typically score lower on thug stats &mdash; less mobility, fewer kills, less direct combat. To offset this, the bar adjusts slightly per axis on commander matches:</p>
       <ul class="mb-2">
         <li><strong>Easier on 4 axes</strong> &middot; mobility, kill rate, damage share, efficiency &mdash; the role-driven shortfalls.</li>
+        <li><strong>A small cushion on T-key usage</strong> &middot; deliberately smaller than the gap we actually measure &mdash; commanders are prime targets and should still be locking.</li>
         <li><strong>Small bonus on PvE share</strong> &middot; commanders get rewarded slightly more for hitting enemy base / scavs.</li>
       </ul>
       <p class="mb-0 text-muted small">Net effect: a typical commander match nets ~0 ELO &mdash; neither punished nor padded. A commander who fights <em>and</em> commands earns extra credit naturally because the bar dropped.</p>`;
   }
 
   // Worked example (real numbers from data/processed/elo_history.json:
-  // Domakus 2026-05-08T23-46-02 — before=1689.81, after=1706.70,
-  // delta=+16.89, performance=+0.5665, expected=+0.2667, K back-solved
-  // = 16.89 / (2.5 * 0.2998) = 22.53).
+  // Domakus 2026-05-08T23-46-02 — before=1712.00, after=1727.03,
+  // delta=+15.03, performance=+0.5582, expected=+0.2913, K back-solved
+  // = 15.03 / (2.5 * 0.2669) = 22.53). Re-read that history entry after
+  // any re-rate; the values shift even though the story doesn't.
   function workedExampleHtml() {
-    return `<p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1689.8</strong> to <strong>1706.7</strong> (+16.9).</p>
+    return `<p class="mb-2">In a recent <strong>Domakus</strong> match, his VTSR-T moved from <strong>1712.0</strong> to <strong>1727.0</strong> (+15.0).</p>
       <ul class="mb-2">
-        <li>Match performance: <strong>+0.57</strong> (top of the lobby &mdash; the scale runs roughly &minus;1 to +1, where 0 is an average game)</li>
-        <li>Expected: <strong>+0.27</strong> (already a high-rated player &mdash; the bar was high)</li>
+        <li>Match performance: <strong>+0.56</strong> (top of the lobby &mdash; the scale runs roughly &minus;1 to +1, where 0 is an average game)</li>
+        <li>Expected: <strong>+0.29</strong> (already a high-rated player &mdash; the bar was high)</li>
         <li>Move speed (K): <strong>~22</strong> (settled veteran)</li>
       </ul>
-      <p class="mb-0">He beat the bar by +0.30, his move speed scaled that surprise, and the rating ticked up &mdash; the three steps of the formula, with real numbers.</p>`;
+      <p class="mb-0">He beat the bar by +0.27, his move speed scaled that surprise, and the rating ticked up &mdash; the three steps of the formula, with real numbers.</p>`;
   }
 
   // ------------------------------------------------------------------
   // The commander ladder (VTSR-C) — static section for the ELO page's
-  // How-it-works tab. Deliberately NOT an annotated stage (scope
-  // control): a plain pre-rendered KaTeX handicap formula + the
-  // mirror-blend story + a worked example with real corpus numbers.
+  // VTSR-C pill (it sits above the ladder table). Deliberately NOT an
+  // annotated stage (scope control): a plain pre-rendered KaTeX handicap
+  // formula + the mirror-blend story + a worked example with real corpus
+  // numbers (elo_commander_history.json, 2026-08-23T03-25-36 Oldboy:
+  // team_handicap.diff=71.61, F9bomber expected 0.5262 / delta -10.52,
+  // mort delta +14.73 — re-read that duel after any re-rate).
   // Returns '' while KaTeX is still loading (callers render it after
   // deltaRBlockHtml succeeded, so in practice KaTeX is present).
   // ------------------------------------------------------------------
@@ -451,12 +456,12 @@
       'E_A \\;=\\; \\frac{1}{1 + 10^{-\\left(\\left(R_A - R_B\\right)'
       + ' + \\lambda\\,\\left(T_A - T_B\\right)\\right) / 400}}'
     ) || '';
-    return `<p class="mb-2">Commanders get a <strong>second, separate rating</strong>: VTSR-C. It&rsquo;s the mirror image of the thug rating &mdash; VTSR-T is <em>all performance, no wins</em> (the Wins dial idles at zero until outcomes are trustworthy); VTSR-C is <em>all wins, no performance yet</em>. Both converge on the same blend architecture, from opposite ends.</p>
+    return `<p class="mb-2">Commanders get a <strong>second, separate rating</strong>: VTSR-C. It&rsquo;s the mirror image of the thug rating &mdash; VTSR-T is <em>all performance, no wins</em> (its wins ladder runs, but the mixer that would fold it into the published number sits at zero); VTSR-C is <em>all wins, no performance yet</em>. Both converge on the same blend architecture, from opposite ends.</p>
       <p class="mb-2">Every match with a <strong>verified outcome</strong> is a 1v1 duel between the two commanders &mdash; classic chess ELO: beat the expectation, gain points; fall short, lose them. One twist keeps it honest &mdash; <strong>the expected score knows which side had the stronger thugs</strong>:</p>
       ${eq ? `<div class="text-center my-2" style="overflow-x: auto;">${eq}</div>` : ''}
       <p class="mb-2"><em>R</em> is each commander&rsquo;s rating; <em>T</em> is each team&rsquo;s average thug rating (their pre-match VTSR-T); <em>&lambda;</em> converts a thug-team edge into rating points (currently 1:1 &mdash; a 100-point average-thug advantage counts like 100 rating points). Winning with the weaker roster pays big; losing with it barely costs.</p>
       <p class="mb-2">Since the proto-v4 collector, every duel also records a <strong>five-axis economy composite</strong> &mdash; pool tempo, production output, thug supply, econ efficiency, upgrade investment &mdash; each measured as the <em>differential against the opposing commander</em> (a 1v1 has no lobby to z-score against). It is <strong>recorded but not scored</strong>: the blend weight &alpha;<sub>c</sub> sits at 1 (outcome-pure) until the validator proves the axes actually predict duel outcomes on &ge; 25 telemetry duels &mdash; a pre-registered rule, so the formula can&rsquo;t be quietly tuned to fit the data it&rsquo;s judged on. The first real telemetry match is the humility anchor: the commander who <em>out-earned</em> his opponent by 33% still lost.</p>
-      <p class="mb-0 text-muted small">Real example: in a recent Oldboy match the Team 1 commander was the <em>lower-rated</em> of the two &mdash; but his thug team averaged <strong>+74 stronger</strong>, and the handicap made him the 53% favorite anyway. He lost: <strong>&minus;10.6</strong> for the favorite with the stacked side, <strong>+14.8</strong> for the winner who beat it with the weaker roster. New commanders move fast (K decays 40 &rarr; 20 over the first 5 duels) and stay <strong>provisional</strong> below 5 rated games.</p>`;
+      <p class="mb-0 text-muted small">Real example: in a recent Oldboy match the Team 1 commander was the <em>lower-rated</em> of the two &mdash; but his thug team averaged <strong>+72 stronger</strong>, and the handicap made him the 53% favorite anyway. He lost: <strong>&minus;10.5</strong> for the favorite with the stacked side, <strong>+14.7</strong> for the winner who beat it with the weaker roster. New commanders move fast (K decays 40 &rarr; 20 over the first 5 duels) and stay <strong>provisional</strong> below 5 rated games.</p>`;
   }
 
   // ------------------------------------------------------------------

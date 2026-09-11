@@ -2122,7 +2122,7 @@
           ${escapeHtml(name)}&rsquo;s record <strong>as a commander</strong>, duel by duel against
           the opposing commander. Only matches with a verified outcome count toward records;
           ratings come from the experimental
-          <a href="${state.dataPrefix}elo/?tab=leaderboard">VTSR-C ladder</a>.
+          <a href="${state.dataPrefix}elo/?tab=vtsr-c">VTSR-C ladder</a>.
         </p>
         ${headline}
         ${chartHtml}

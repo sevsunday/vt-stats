@@ -4,14 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ELO — VT Stats</title>
-  <meta name="description" content="The VTSR-T leaderboard, how the rating works, and how well it predicts matches.">
+  <meta name="description" content="The VTSR-T thug leaderboard and VTSR-C commander ladder, how both ratings work, and how well they predict matches.">
 
   <link rel="canonical" href="https://vtstats.bz/elo/">
 
   <!-- Open Graph. -->
   <meta property="og:type" content="website">
-  <meta property="og:title" content="VTSR-T ELO — VT Stats">
-  <meta property="og:description" content="The VTSR-T leaderboard, how the rating works, and how well it predicts matches.">
+  <meta property="og:title" content="ELO — VT Stats">
+  <meta property="og:description" content="The VTSR-T thug leaderboard and VTSR-C commander ladder, how both ratings work, and how well they predict matches.">
   <meta property="og:url" content="https://vtstats.bz/elo/">
   <meta property="og:site_name" content="VT Stats">
 
@@ -108,8 +108,8 @@
          honors the persisted mode on its other elo surfaces). -->
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
       <div>
-        <h1 class="vt-elo-title mb-0"><i class="bi bi-trophy me-2"></i>VTSR-T</h1>
-        <div class="text-muted vt-elo-subtitle">VT Stats Rating</div>
+        <h1 class="vt-elo-title mb-0"><i class="bi bi-trophy me-2"></i>ELO</h1>
+        <div class="text-muted vt-elo-subtitle">VT Stats Rating &mdash; thug and commander ladders</div>
       </div>
       <div class="btn-group btn-group-sm" role="group" aria-label="VTSR-T scope" id="vtsr-elo-mode-group">
         <button type="button" class="btn btn-outline-secondary active" data-elo-mode="default"
@@ -143,7 +143,14 @@
           <button class="nav-link active" id="elo-tab-leaderboard-btn" data-bs-toggle="pill"
                   data-bs-target="#elo-tab-leaderboard" type="button" role="tab"
                   aria-controls="elo-tab-leaderboard" aria-selected="true">
-            <i class="bi bi-list-ol me-1"></i>Leaderboard
+            <i class="bi bi-list-ol me-1"></i>VTSR-T Elo
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="elo-tab-vtsr-c-btn" data-bs-toggle="pill"
+                  data-bs-target="#elo-tab-vtsr-c" type="button" role="tab"
+                  aria-controls="elo-tab-vtsr-c" aria-selected="false">
+            <i class="bi bi-person-badge me-1"></i>VTSR-C Elo
           </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -252,11 +259,24 @@
             </table>
           </div>
         </div>
-        <!-- VTSR-C commander ladder (experimental; 404-safe — the card
-             stays hidden when elo_commander_current.json is absent).
-             Separate ladder from VTSR-T: outcome-pure win/loss ELO between
-             the two commanders of every determined match, with a
-             team-strength handicap. The thug-only toggle does NOT apply. -->
+        <div class="vt-elo-empty card d-none" id="elo-leaderboard-empty">
+          <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-stars d-block mb-2" style="font-size: 1.6rem;"></i>
+            No ratings published yet &mdash; run the pipeline to generate <code>elo_current.json</code>.
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: VTSR-C Elo (lazy). The commander ladder is a SEPARATE ladder
+           from VTSR-T — outcome-pure win/loss ELO between the two commanders
+           of every determined match, with a team-strength handicap. The
+           thug-only toggle does NOT apply here (it is hidden on this pane).
+           404-safe: the ladder card stays hidden and the empty state shows
+           when elo_commander_current.json is absent. -->
+      <div class="tab-pane fade" id="elo-tab-vtsr-c" role="tabpanel" aria-labelledby="elo-tab-vtsr-c-btn">
+        <!-- Table only, mirroring the VTSR-T pane. The explainer lives on
+             the How-it-works pill; the card's "How It's Calculated" button
+             switches to it. -->
         <div class="card mb-4 d-none" id="section-vtsr-c">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h5 class="mb-0">
@@ -269,10 +289,10 @@
           </div>
           <div class="card-body" id="vtsr-c-body"></div>
         </div>
-        <div class="vt-elo-empty card d-none" id="elo-leaderboard-empty">
+        <div class="vt-elo-empty card d-none" id="elo-vtsr-c-empty">
           <div class="card-body text-center text-muted py-5">
-            <i class="bi bi-stars d-block mb-2" style="font-size: 1.6rem;"></i>
-            No ratings published yet &mdash; run the pipeline to generate <code>elo_current.json</code>.
+            <i class="bi bi-person-badge d-block mb-2" style="font-size: 1.6rem;"></i>
+            No commander ratings published yet &mdash; run the pipeline to generate <code>elo_commander_current.json</code>.
           </div>
         </div>
       </div>

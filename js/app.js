@@ -7012,7 +7012,7 @@
     target_lock_pct: {
       label: 'T-key usage',
       formula: 'target_lock_pct  (already 0-1)',
-      desc:    'Share of the match you held an active T-key target lock. Situational-awareness proxy at low weight (4%).',
+      desc:    'Share of the match you held an active T-key target lock. Situational-awareness proxy at luxury weight (~0.5%).',
     },
   };
 
@@ -7210,7 +7210,7 @@
       <div class="vt-cohort-vtsrc-strip-head">
         <span class="vt-cohort-vtsrc-strip-title"><i class="bi bi-trophy me-1"></i>VTSR-C ladder \u2014 top 5</span>
         <span class="vt-cohort-vtsrc-strip-sub">win/loss rating over ${c.rated_match_count} verified duels \u00b7 experimental</span>
-        <a class="vt-cohort-vtsrc-strip-link" href="elo/?tab=leaderboard">View full commander ladder <i class="bi bi-arrow-right-short"></i></a>
+        <a class="vt-cohort-vtsrc-strip-link" href="elo/?tab=vtsr-c">View full commander ladder <i class="bi bi-arrow-right-short"></i></a>
       </div>
       <div class="vt-cohort-vtsrc-rows">${rows}</div>
     </div>`;

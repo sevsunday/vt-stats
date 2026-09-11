@@ -23,6 +23,41 @@
 
 .vt-elo-tabs { flex-wrap: nowrap; white-space: nowrap; }
 
+/* Six pills fit no phone width, so below md the strip becomes its own
+   horizontal scroller — mirrors the #match-tabs treatment in
+   css/vtstats-theme.css. Without an overflow owner the nowrap pills spill
+   out of the wrapper and drag the whole PAGE into horizontal scroll. */
+@media (max-width: 767.98px) {
+    .vt-elo-tabs {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scroll-snap-type: x proximity;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .vt-elo-tabs::-webkit-scrollbar { display: none; }
+
+    .vt-elo-tabs .nav-item {
+        flex: 0 0 auto;
+        scroll-snap-align: start;
+    }
+
+    /* Right-edge fade: the same "more tabs off-screen" hint match-tabs uses. */
+    .vt-tab-scroll-wrap:has(.vt-elo-tabs)::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 2rem;
+        pointer-events: none;
+        background: linear-gradient(to right, transparent, var(--kb-bg-body) 85%);
+        border-top-right-radius: 10px;
+        border-bottom-right-radius: 10px;
+    }
+}
+
 /* ---- 2. Explainer tabs ---------------------------------------------------- */
 
 /* Reuse the methodology modal's section rhythm outside a modal. */
