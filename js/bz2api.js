@@ -34,14 +34,16 @@ const BZ2API = (function() {
     'https://api.allorigins.win/raw?url=',
   ];
 
-  // Local dev proxy endpoints served by `python scripts/dev_server.py`
-  // (static file server + `/__proxy?url=` CORS relay). Tried before the
-  // public proxies, but only in localhost/file: contexts. The relative
-  // candidate covers "dev_server serves the site"; the absolute ones cover
-  // "site served by another tool (e.g. Live Server) with dev_server beside
-  // it" — its ACAO:* makes cross-port localhost fetches legal.
-  const LOCAL_DEV_PROXY_BASES = [
-    '/__proxy?url=',
+  // Local CORS relay served by `python scripts/dev_server.py` (default :8000).
+  // These URLs are not an alternate data source — the relay GETs the MSL /
+  // iondriver URL server-side and returns the bytes. Tried before public
+  // CORS proxies, and only in localhost/file: contexts.
+  //
+  // Same-origin `/__proxy` is ONLY valid when this page is itself served by
+  // that python server. Live Server (:5500) has no such route and 404s it,
+  // which looks like polling is broken even though the :8000 relay works.
+  const DEV_SERVER_PORTS = new Set(['8000', '8080']);
+  const LOCAL_DEV_PROXY_ABSOLUTE = [
     'http://localhost:8000/__proxy?url=',
     'http://127.0.0.1:8000/__proxy?url=',
   ];
@@ -86,7 +88,16 @@ const BZ2API = (function() {
    * @returns {string[]}
    */
   function getProxyBases() {
-    return isLocalDevContext() ? [...LOCAL_DEV_PROXY_BASES, ...CORS_PROXIES] : [...CORS_PROXIES];
+    if (!isLocalDevContext()) return [...CORS_PROXIES];
+    const bases = [];
+    let port = '';
+    try { port = String((typeof location !== 'undefined' && location.port) || ''); } catch (_) { /* */ }
+    if (DEV_SERVER_PORTS.has(port)) bases.push('/__proxy?url=');
+    bases.push(...LOCAL_DEV_PROXY_ABSOLUTE);
+    if (port === '8080') {
+      bases.push('http://localhost:8080/__proxy?url=', 'http://127.0.0.1:8080/__proxy?url=');
+    }
+    return [...bases, ...CORS_PROXIES];
   }
 
   // VSR (Vet Strategy Recycler) mod ID - special balance mod
@@ -751,32 +762,28 @@ const BZ2API = (function() {
     }
 
     const apiUrl = `${MAP_API_BASE_URL}/getdata.php?map=${encodeURIComponent(mapFile)}&mod=${encodeURIComponent(modId)}`;
-    
-    // Try direct fetch first
-    try {
-      const response = await fetch(apiUrl);
-      if (response.ok) {
-        const data = await response.json();
-        const result = parseMapData(data, mapFile);
-        mapDataCache.set(cacheKey, result);
-        return result;
-      }
-    } catch (directError) {
-      // Try proxies (local dev proxy first on localhost, then public)
-      for (const proxy of getProxyBases()) {
-        try {
-          const url = proxy + encodeURIComponent(apiUrl);
-          const response = await fetch(url);
-          if (response.ok) {
-            const data = await response.json();
-            const result = parseMapData(data, mapFile);
-            mapDataCache.set(cacheKey, result);
-            return result;
-          }
-        } catch (proxyError) {
-          // Continue to next proxy
-        }
-      }
+
+    const tryJson = async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const result = parseMapData(data, mapFile);
+      mapDataCache.set(cacheKey, result);
+      return result;
+    };
+
+    // Localhost is CORS-blocked on iondriver (same as MSL). Skip the guaranteed
+    // failing direct fetch so Live Server consoles aren't flooded every poll.
+    if (!isLocalDevContext()) {
+      try {
+        return await tryJson(apiUrl);
+      } catch (_) { /* fall through to relays */ }
+    }
+
+    for (const proxy of getProxyBases()) {
+      try {
+        return await tryJson(proxy + encodeURIComponent(apiUrl));
+      } catch (_) { /* next candidate */ }
     }
     
     // Cache null result to avoid repeated failed requests
@@ -1275,7 +1282,7 @@ const BZ2API = (function() {
     DEFAULT_API_URL,
     MAP_API_BASE_URL,
     CORS_PROXIES,
-    FETCH_MODE_STORAGE_KEY
+    FETCH_MODE_STORAGE_KEY,
   };
 })();
 
