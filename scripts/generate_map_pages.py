@@ -39,6 +39,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+import identity_aliases
+
 # Production host. Used to build absolute URLs (og:url, twitter:url,
 # canonical) so embedded link previews resolve even when shared without
 # the host prefix. CNAME in repo root is the source of truth. Mirrors
@@ -263,6 +265,9 @@ def _build_map_entry(slug: str, bucket: list[dict]) -> dict:
             name = (p.get("name") or "").strip()
             if not sid or not name:
                 continue
+            # Alias TARGET steam64: pin the career-canonical name so a
+            # source-account appearance cannot last-seen-rename this row.
+            name = identity_aliases.ALIAS_TARGET_NAMES_STR.get(sid) or name
             row = cmdr_counts.get(sid)
             if row is None:
                 row = {
@@ -274,7 +279,7 @@ def _build_map_entry(slug: str, bucket: list[dict]) -> dict:
                 cmdr_counts[sid] = row
             row["matches_commanded"] += 1
             # Names can drift across matches (rename); always promote
-            # to the most recently used name.
+            # to the most recently used name (still pinned when aliased).
             if match_date >= row["_last_iso"]:
                 row["_last_iso"] = match_date
                 row["name"] = name

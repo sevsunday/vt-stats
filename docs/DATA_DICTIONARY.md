@@ -2946,6 +2946,57 @@ matches cached from a prior run will retain their old attribution.
   threshold and appears in `career_stats[]` and the VTSR-T leaderboard
   for the first time.
 
+## 10.4 Silent Steam64 identity aliases (`PIPELINE_VERSION` 41)
+
+Silent aliases merge two Steam accounts that belong to the same person **without any per-match UI provenance**. They are **not** [`ACCOUNT_REROUTES`](#103-account-reroutes-matchschema_version-7) (nick-pattern, `via dd` chip, canonical-name takeover). The table lives in [`scripts/identity_aliases.py`](../scripts/identity_aliases.py) (`STEAM64_ALIASES` + `ALIAS_TARGET_NAMES`).
+
+### What stays visible vs what merges
+
+Per-match surfaces (leaderboard, kill feed, picker roster, highlights, storyline cast) keep the **source account's display name**. There is no `via` chip, no raw-browser banner, no "also known as", and no `rerouted_from` / `match.account_reroutes` entry.
+
+Behind that, the source Steam64 is rewritten to the target at ingest (after `ACCOUNT_REROUTES`, before `nick_for_s64`), so:
+
+- VTSR-T / VTSR-C / career / player-profile / Tools VTstats links belong to the target.
+- There is no source-account ELO row and no source-account profile unless the alias is removed.
+- Clicking the source display name in a match goes to `/player/<target-slug>/`.
+- The per-match **VTSR-T Δ** cell (`lookupEloDelta` in `js/app.js`) joins `elo_history.history[].deltas` by **steam64 first**, then name. After the ingest rewrite the source-named leaderboard row already carries the target's steam64, so the Δ cell and its `before → after` tooltip are the target's career rating with **no extra JS**. Do not add a name-based alias fallback in `lookupEloDelta` — that would leak the pairing on a dual-presence skip match.
+
+Current table entry: `76561199317457354` → `76561199066952713`. Both lines stay in `data/steamid_to_name.txt`; the source known-name is what per-match display uses.
+
+Career / ELO names are **pinned** to `ALIAS_TARGET_NAMES` (contribution `name`, rivalry-matrix keys, snipes / powerup-destruction name maps, contribution `team_leaders[].name`, `elo.py` / `elo_commander.py` `display_name`, map `top_commanders[].name`) so the aggregator's last-seen-rename cannot retitle the career row after a source-account appearance.
+
+### Dual-presence hard stop
+
+If both the source and target Steam64s appear in one lobby, the merge premise is broken. `resolve_silent_aliases()`:
+
+- Interactive: loud `accept match? (y/n)` — **y** processes the match with identities kept separate (returns `{}` for that match, skips every other alias rewrite too), **n** `sys.exit(1)`.
+- `--no-prompt` / non-TTY: **always abort** with a clear error. Stricter than outcome adjudication's defer-and-continue.
+
+`process_match` takes `no_prompt` so the checkpoint can see `--no-prompt`. Adjudication's `--no-prompt` (defer-and-continue) is unchanged.
+
+### Additive ELO field
+
+Both `elo_current.json` and `elo_history.json` (and forensic variants that inherit from `compute_elo`) carry:
+
+```json
+"steam64_aliases": { "<source>": "<target>" }
+```
+
+No `match.schema_version` bump (no new per-match fields) and no `ELO_SCHEMA_VERSION` bump (additive, same precedent as leftover `excludes_commanders` sentinels). `PIPELINE_VERSION` 40 → 41.
+
+### Player pages + Tools
+
+- Sticky slug for the source steam64 is **kept**. `player_slugs.json` stamps `alias_of` on the source entry (including the stale-preserve path). `load_slug_map` round-trips `alias_of`.
+- `/player/<source-slug>/` is overwritten with a silent trampoline (`location.replace` + meta refresh + `noindex`, title "VT Stats") to `/player/<target-slug>/`. Directory is ratings-driven, so the source card disappears.
+- Runtime `?p=<source>` / `?slug=<source>` / `?compare=<source>,...` resolve to the target and `history.replaceState` the URL. No "this account is linked" copy.
+- Tools: live lobby Steam64 aliases **only for ELO / VTstats URL / slug**. Display stays the lobby nick. Steam community URL stays the live account. Alias-source IDs are dropped from the Add-player directory snapshot.
+
+### Undo
+
+1. Delete the entry from `STEAM64_ALIASES` (and the `ALIAS_TARGET_NAMES` row if the target has no other aliases).
+2. Bump `PIPELINE_VERSION`.
+3. Re-run `python scripts/process_stats.py`. The source sticky slug was never deleted, so `/player/<source-slug>/` becomes a real profile again on the next generator pass.
+
 ## 11. VTSR / VTSR-T Outputs (`elo_current.json` + `elo_history.json`)
 
 Pipeline-emitted by [scripts/elo.py](scripts/elo.py) at the end of every `process_stats.py` run. **VTSR-T** (VT Stats Rating — Thug) is the thug-focused rating; the JSON field `vtsr` is the published headline number ($\mathrm{VTSR\text{-}T} = \alpha R^W + (1-\alpha) R^T$ — equal to **thug_elo** when $\alpha=0$). Full algorithm and constants are in [§13 of DEVELOPER_GUIDE.md](../DEVELOPER_GUIDE.md#vtsr-methodology).
@@ -2998,6 +3049,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   },
   "commander_baseline_shrinkage": 30.0,
   "commander_baseline_locked_axes": ["pve_share", "target_lock_pct"],
+  "steam64_aliases": { "76561199317457354": "76561199066952713" },  // silent identity aliases; see §10.4
   "commander_baseline_observed": {
     "mobility":         { "n": 116, "running_mean": -0.488, "shrunk_baseline_at_corpus_end": -0.488, "locked": false },
     "thug_kill_rate":   { "n": 116, "running_mean": -0.164, "shrunk_baseline_at_corpus_end": -0.164, "locked": false },

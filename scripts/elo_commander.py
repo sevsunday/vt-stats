@@ -122,6 +122,8 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
+import identity_aliases
+
 # ---------------------------------------------------------------------------
 # Constants (all tunable; no schema bump needed to retune)
 # ---------------------------------------------------------------------------
@@ -485,6 +487,9 @@ def compute_commander_elo(all_match_data: list[dict],
                 games[k] = wins[k] = losses[k] = draws[k] = 0
                 peak[k] = CMDR_ELO_ANCHOR
             display_name[k] = commanders[t].get("name") or display_name.get(k, "")
+            pinned = identity_aliases.ALIAS_TARGET_NAMES_STR.get(k)
+            if pinned:
+                display_name[k] = pinned
             if not steam64_out.get(k):
                 s64 = commanders[t].get("steam64")
                 steam64_out[k] = str(s64) if s64 else None

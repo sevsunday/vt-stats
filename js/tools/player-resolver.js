@@ -95,6 +95,9 @@
   /** @type {Map<string,string>} steam64 -> allowlist display name */
   const knownHostNames = new Map();
 
+  /** @type {Map<string,string>} source steam64 -> target steam64 */
+  const steamAliases = new Map();
+
   /** @type {Map<string,object>} steam64 -> elo_current.ratings[i] */
   const eloRatings = new Map();
   let eloMeta = null;
@@ -161,6 +164,12 @@
         eloRatings.set(r.steam64, r);
       }
     }
+    const aliases = data.steam64_aliases;
+    if (aliases && typeof aliases === 'object') {
+      for (const [src, tgt] of Object.entries(aliases)) {
+        if (src && tgt) steamAliases.set(String(src), String(tgt));
+      }
+    }
   }
 
   async function loadPlayerSlugs() {
@@ -172,6 +181,7 @@
     for (const [steam64, entry] of Object.entries(data.slugs)) {
       if (entry && typeof entry.slug === 'string') {
         playerSlugs.set(steam64, entry);
+        if (entry.alias_of) steamAliases.set(String(steam64), String(entry.alias_of));
       }
     }
   }
@@ -263,13 +273,20 @@
   function resolve(steam64, lobbyNick) {
     lobbyNick = lobbyNick || null;
     const id = steam64 ? String(steam64) : null;
+    const isAliasSource = !!(id && steamAliases.has(id));
+    const ratedId = isAliasSource ? steamAliases.get(id) : id;
 
-    const slugEntry = id ? playerSlugs.get(id) || null : null;
-    const eloEntry = id ? eloRatings.get(id) || null : null;
+    const sourceSlugEntry = id ? playerSlugs.get(id) || null : null;
+    const ratedSlugEntry = ratedId ? playerSlugs.get(ratedId) || null : null;
+    const slugEntry = ratedSlugEntry || sourceSlugEntry;
+    const eloEntry = ratedId ? eloRatings.get(ratedId) || null : null;
     const canonicalName = id && canonicalNames ? canonicalNames.get(id) || null : null;
 
-    // Display name priority: player_slugs.name -> elo.name -> canonical -> lobbyNick
-    const displayName = (slugEntry && slugEntry.name)
+    // Alias sources keep the live lobby nick (and the source-account
+    // known name as fallback). ELO / slug / VTstats URL come from the
+    // TARGET; the Steam community URL stays on the live account.
+    const displayName = (isAliasSource && lobbyNick)
+      || (sourceSlugEntry && sourceSlugEntry.name)
       || (eloEntry && eloEntry.name)
       || canonicalName
       || lobbyNick
@@ -299,7 +316,7 @@
       lobbyNick: (lobbyNick && lobbyNick.toLowerCase() !== displayName.toLowerCase()) ? lobbyNick : null,
       slug,
       steamProfileUrl: buildSteamProfileUrl(id),
-      vtstatsUrl: buildVtstatsUrl(id, slug),
+      vtstatsUrl: buildVtstatsUrl(ratedId || id, slug),
       vtsr,
       thugElo: eloEntry && Number.isFinite(eloEntry.thug_elo) ? eloEntry.thug_elo : null,
       winsElo: eloEntry && Number.isFinite(eloEntry.wins_elo) ? eloEntry.wins_elo : null,
@@ -356,13 +373,16 @@
     };
     // Priority: slug -> elo -> canonical (so slug names dominate when duplicates exist)
     for (const [steam64, entry] of playerSlugs) {
+      if (steamAliases.has(steam64)) continue;
       add(steam64, entry.name);
     }
     for (const [steam64, entry] of eloRatings) {
+      if (steamAliases.has(steam64)) continue;
       add(steam64, entry.name);
     }
     if (canonicalNames) {
       for (const [steam64, name] of canonicalNames) {
+        if (steamAliases.has(steam64)) continue;
         add(steam64, name);
       }
     }

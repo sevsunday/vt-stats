@@ -24,6 +24,7 @@ from pathlib import Path
 import statsgate_pb2          # v3 (current schema: header.players roster + game_outcome)
 import statsgate_v2_pb2       # v2 (frozen schema, retained for the 2026-04..08 corpus)
 import statsgate_v1_pb2       # v1 (legacy schema, retained for pre-Nomad sessions)
+import identity_aliases
 from google.protobuf.message import DecodeError
 
 # Internal schema labels stamped onto each match_data["match"]["proto_schema_version"].
@@ -93,7 +94,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # is the valid-Steam64 union of UpdateTick.players, not header.players;
 # header-only ghosts (0 ticks) are dropped; tick-only late joiners /
 # empty-header files are synthesized. Always-on match.roster_qa telemetry.
-PIPELINE_VERSION = 40
+# 40 -> 41: silent Steam64 identity aliases (scripts/identity_aliases.py).
+# Source-account gameplay is rewritten onto the target at ingest while
+# per-match display names stay source-side. No match.schema_version bump
+# (no new per-match fields; no provenance chip).
+PIPELINE_VERSION = 41
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -4426,7 +4431,7 @@ def restamp_storyline_outcome(match_data):
     sl["beats"] = _storyline_beat_sort(beats)
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None):
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, no_prompt=False):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -4527,9 +4532,41 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         for r in match_reroutes:
             r["from_name"] = known_players.get(r["from_s64"]) or f"acct {r['from_s64']}"
 
+    # Silent identity aliases: rewrite SOURCE Steam64 -> TARGET Steam64 so
+    # every identity-keyed downstream surface (ELO, career, profile links,
+    # per-match VTSR-T Δ) attributes the source account's gameplay to the
+    # target. Unlike ACCOUNT_REROUTES this keeps the SOURCE display name on
+    # every per-match row and emits NO provenance fields. Dual-presence
+    # (both accounts in one lobby) is a hard stop — see
+    # scripts/identity_aliases.py. Docs: DATA_DICTIONARY.md §10.4.
+    alias_display_override = {}  # target_s64 -> source display name
+    alias_hits = identity_aliases.resolve_silent_aliases(
+        slot_to_s64, match_label=str(source_file or ""), no_prompt=no_prompt,
+    )
+    if alias_hits:
+        alias_reroute_map = {}
+        for slot, (src, tgt) in alias_hits.items():
+            src_nick = s64_to_nick.get(src)
+            alias_display_override[tgt] = (
+                known_players.get(src) or src_nick or f"Player {slot}"
+            )
+            slot_to_s64[slot] = tgt
+            s64_to_slot.pop(src, None)
+            s64_to_slot[tgt] = slot
+            nick = s64_to_nick.pop(src, None)
+            if nick is not None:
+                s64_to_nick[tgt] = nick
+            alias_reroute_map[src] = tgt
+        _apply_account_reroutes_to_events(events, alias_reroute_map)
+
+    def nick_for_s64(s64):
+        if s64 in alias_display_override:
+            return alias_display_override[s64]
+        return known_players.get(s64) or s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
+
     nick_map = {}  # slot -> display name
     for slot, s64 in slot_to_s64.items():
-        nick_map[slot] = known_players.get(s64) or s64_to_nick.get(s64, f"Player {slot}")
+        nick_map[slot] = nick_for_s64(s64)
 
     all_slots = set(nick_map.keys())
 
@@ -4543,9 +4580,6 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "name": nick_map.get(slot) or s64_to_nick.get(s64),
                 "s64": str(s64),
             }
-
-    def nick_for_s64(s64):
-        return known_players.get(s64) or s64_to_nick.get(s64, f"Player {s64_to_slot.get(s64, '?')}")
 
     def in_game_nick_for(s64, resolved_name):
         """Return the raw in-game nick if it differs from `resolved_name`
@@ -7807,6 +7841,21 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     return match_data
 
 
+def _pin_alias_team_leaders(team_leaders, name_remap):
+    """Return a copy of match.team_leaders with display names remapped
+    onto alias TARGET canonical names so the aggregator's last-seen
+    commander name cannot become the source-account nick."""
+    if not name_remap or not team_leaders:
+        return team_leaders
+    out = {}
+    for k, v in team_leaders.items():
+        if isinstance(v, dict) and v.get("name") in name_remap:
+            out[k] = {**v, "name": name_remap[v["name"]]}
+        else:
+            out[k] = v
+    return out
+
+
 def _extract_contribution(match_data):
     """Return the slim per-match shape consumed by the client-side
     aggregator (`js/all-matches-aggregator.js`).
@@ -7835,13 +7884,22 @@ def _extract_contribution(match_data):
     }
 
     leaderboard = []
+    name_remap = {}  # per-match display name -> pinned career name
     for p in match_data.get("leaderboard") or []:
         personal = p.get("personal", {}) or {}
         assets = p.get("assets", {}) or {}
+        orig_name = p.get("name", "")
         # Positioning fields are best-effort: absent on pre-positioning
         # matches, present-but-no-target_lock on pre-target-lock-schema.
-        pm = (pos_players.get(p["name"]) or {}).get("metrics") or {}
+        # Looked up by the per-match display name BEFORE career pinning.
+        pm = (pos_players.get(orig_name) or {}).get("metrics") or {}
         slot = p.get("slot")
+        pinned = identity_aliases.ALIAS_TARGET_NAMES_STR.get(
+            str(p.get("steam64") or "")
+        )
+        name = pinned or orig_name
+        if pinned and orig_name and orig_name != pinned:
+            name_remap[orig_name] = pinned
         # v2.3: Loadout block trimmed to exactly what the aggregator
         # needs to rebuild career_loadout (sum of ship_seconds across
         # matches; primary/secondary rederived from the totals to
@@ -7884,8 +7942,8 @@ def _extract_contribution(match_data):
             for row in (p.get("per_ship_combat") or [])
         ]
         leaderboard.append({
-            "player_id": p.get("player_id", ""),
-            "name": p.get("name", ""),
+            "player_id": pinned or p.get("player_id", ""),
+            "name": name,
             "steam64":        p.get("steam64"),
             # Slot 1 = Team 1 commander, slot 6 = Team 2 commander.
             # Carried onto contributions so the JS aggregator can split
@@ -7942,7 +8000,7 @@ def _extract_contribution(match_data):
             "self_kills":     personal.get("self_kills", 0),
             "self_deaths":    personal.get("self_deaths", 0),
             "self_shots_hit": personal.get("self_shots_hit", 0),
-            "pickups":        pickups_by_name.get(p["name"], 0),
+            "pickups":        pickups_by_name.get(orig_name, 0),
             "weapon_breakdown": {
                 wname: {
                     "dealt": round(wdata.get("dealt", 0), 1),
@@ -7984,6 +8042,15 @@ def _extract_contribution(match_data):
         shooter: {victim: round(dmg, 1) for victim, dmg in victims.items()}
         for shooter, victims in (match_data.get("rivalry_matrix") or {}).items()
     }
+    if name_remap:
+        remapped = {}
+        for shooter, victims in rivalry_matrix.items():
+            ns = name_remap.get(shooter, shooter)
+            row = remapped.setdefault(ns, {})
+            for victim, dmg in victims.items():
+                nv = name_remap.get(victim, victim)
+                row[nv] = round(row.get(nv, 0) + dmg, 1)
+        rivalry_matrix = remapped
 
     # Per-player snipes. The match `snipes.by_player` block is already a
     # list of {name, count, ...} aggregates — flatten to a name -> count
@@ -7996,7 +8063,7 @@ def _extract_contribution(match_data):
             continue
         c = int(row.get("count", 0) or 0)
         if c > 0:
-            snipes_by_player[name] = c
+            snipes_by_player[name_remap.get(name, name)] = c
 
     # Same shape for powerup destructions (used by Pod Goblin career card).
     powerup_destructions_by_player = {}
@@ -8006,7 +8073,7 @@ def _extract_contribution(match_data):
             continue
         c = int(row.get("count", 0) or 0)
         if c > 0:
-            powerup_destructions_by_player[name] = c
+            powerup_destructions_by_player[name_remap.get(name, name)] = c
 
     # Match-level commander/faction/winner tuple. All three are
     # match-global, always-unfiltered passthrough fields per the project
@@ -8073,7 +8140,7 @@ def _extract_contribution(match_data):
         "has_build_data":       m.get("has_build_data", False),
         "commander_economy":    commander_economy,
         "sentinel_damage_count": (m.get("sentinel_damage") or {}).get("count", 0),
-        "team_leaders":  m.get("team_leaders") or {},
+        "team_leaders":  _pin_alias_team_leaders(m.get("team_leaders") or {}, name_remap),
         "team_factions": m.get("team_factions") or {},
         "winner": {
             "team":       winner.get("team"),
@@ -8569,6 +8636,7 @@ def main():
                 scrap_costs=scrap_costs,
                 combat_ship_odfs=combat_ship_odfs,
                 extractor_odfs=extractor_odfs,
+                no_prompt=args.no_prompt,
             )
             match_id = match_data["match"]["id"]
             out_path = OUTPUT_DIR / f"{match_id}.json"

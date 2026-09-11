@@ -1920,10 +1920,23 @@
     } else {
       if (filter.players.length === 0) return data;
       allowedNames = new Set(filter.players);
+      // Player-page match-log "view match" passes steam64, not the
+      // per-match display name. Treat each token as name OR steam64 so
+      // an aliased-account row (name stays source-side) still scopes.
+      for (const p of data.leaderboard || []) {
+        const sid = String(p.steam64 || '');
+        if (sid && allowedNames.has(sid) && p.name) allowedNames.add(p.name);
+      }
     }
 
     const isSingle = filter.mode === 'player' && filter.players.length === 1;
     const allNames = data.leaderboard.map(p => p.name);
+    const singleName = isSingle
+      ? ((data.leaderboard || []).find(p =>
+            p.name === filter.players[0]
+            || String(p.steam64 || '') === String(filter.players[0])
+          ) || {}).name || filter.players[0]
+      : null;
 
     const leaderboard = data.leaderboard.filter(p => allowedNames.has(p.name));
 
@@ -1931,7 +1944,7 @@
     let rivalry_matrix;
     if (isSingle) {
       rivalry_matrix = {};
-      const name = filter.players[0];
+      const name = singleName;
       if (data.rivalry_matrix[name]) rivalry_matrix[name] = data.rivalry_matrix[name];
     } else {
       rivalry_matrix = {};
@@ -1950,7 +1963,7 @@
     // Top rivalries
     let top_rivalries;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = singleName;
       top_rivalries = data.top_rivalries.filter(r => r.a === name || r.b === name);
     } else {
       top_rivalries = data.top_rivalries.filter(r => allowedNames.has(r.a) && allowedNames.has(r.b));
@@ -1959,7 +1972,7 @@
     // Kills
     let kills_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = singleName;
       kills_feed = (data.kills.feed || []).filter(e => e.killer === name || e.victim === name);
     } else {
       kills_feed = (data.kills.feed || []).filter(e => allowedNames.has(e.killer) || allowedNames.has(e.victim));
@@ -1968,7 +1981,7 @@
     let kill_rivalry_matrix;
     if (isSingle) {
       kill_rivalry_matrix = {};
-      const name = filter.players[0];
+      const name = singleName;
       if (data.kills.kill_rivalry_matrix[name]) kill_rivalry_matrix[name] = data.kills.kill_rivalry_matrix[name];
     } else {
       kill_rivalry_matrix = {};
@@ -2064,7 +2077,7 @@
     const pickupsBlock = data.pickups || {};
     let pickups_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = singleName;
       pickups_feed = (pickupsBlock.feed || []).filter(e => e.picker === name);
     } else {
       pickups_feed = (pickupsBlock.feed || []).filter(e => allowedNames.has(e.picker));
@@ -2080,7 +2093,7 @@
     const destructionsBlock = data.powerup_destructions || {};
     let destructions_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = singleName;
       destructions_feed = (destructionsBlock.feed || []).filter(e => e.killer === name);
     } else {
       destructions_feed = (destructionsBlock.feed || []).filter(e => allowedNames.has(e.killer));
@@ -2104,7 +2117,7 @@
     const snipesBlock = data.snipes || {};
     let snipes_feed;
     if (isSingle) {
-      const name = filter.players[0];
+      const name = singleName;
       snipes_feed = (snipesBlock.feed || []).filter(e => e.sniper === name || e.victim === name);
     } else {
       snipes_feed = (snipesBlock.feed || []).filter(e => allowedNames.has(e.sniper) || allowedNames.has(e.victim));
@@ -2696,6 +2709,10 @@
     if (!sid) return null;
     const slugs = (window.__vtSlugMap && window.__vtSlugMap.slugs) || null;
     const entry = slugs ? slugs[sid] : null;
+    if (entry && entry.alias_of) {
+      const target = slugs[entry.alias_of];
+      if (target && target.slug) return `player/${target.slug}/`;
+    }
     if (entry && entry.slug) return `player/${entry.slug}/`;
     return `player/index.html?p=${encodeURIComponent(sid)}`;
   }
@@ -2723,11 +2740,26 @@
   function vtSteam64FromName(name) {
     if (!name) return null;
     const cd = currentData;
-    if (!cd || !cd.header) return null;
+    if (!cd) return null;
     const cache = cd.__nickToS64Cache || (cd.__nickToS64Cache = (() => {
       const out = {};
-      const map = cd.header.s64_to_nick || {};
+      const map = (cd.header && cd.header.s64_to_nick) || {};
       for (const sid in map) out[String(map[sid] || '').trim().toLowerCase()] = sid;
+      // Processed per-match JSON has no header; fall back to the roster
+      // + leaderboard so kill-feed names still resolve to a Steam64.
+      const teams = (cd.match && cd.match.teams) || {};
+      for (const side of Object.keys(teams)) {
+        for (const p of teams[side] || []) {
+          const n = String(p.name || '').trim().toLowerCase();
+          const sid = String(p.steam64 || '').trim();
+          if (n && sid) out[n] = sid;
+        }
+      }
+      for (const p of cd.leaderboard || []) {
+        const n = String(p.name || '').trim().toLowerCase();
+        const sid = String(p.steam64 || '').trim();
+        if (n && sid) out[n] = sid;
+      }
       return out;
     })());
     return cache[String(name).trim().toLowerCase()] || null;

@@ -322,6 +322,14 @@ Two new schema fields surface the provenance:
 
 Tier 1 (binpb download) and Tier 2 (decoded JSON) remain byte-accurate to the source recording; the rewrite is processed-tier only. Bumps `match.schema_version` 6 → 7 and `PIPELINE_VERSION` 16 → 17 (full corpus reprocess on next run). Pre-v7 rows have no `rerouted_from` field; consumers default to `null` via `.get("rerouted_from")`. Full mechanism, regex semantics, and corpus audit in `docs/DATA_DICTIONARY.md` §10.3.
 
+### Silent Steam64 identity aliases (`PIPELINE_VERSION` 41)
+
+Steam64-keyed merge of two accounts that belong to the same person (`scripts/identity_aliases.py`). **Not** `ACCOUNT_REROUTES`: per-match UI keeps the source display name and emits **no** provenance fields / chips / banners. The source Steam64 is rewritten to the target at ingest so ELO, career, player-profile links, Tools VTstats URLs, and the per-match VTSR-T Δ column (`lookupEloDelta` joins `elo_history` by steam64 first) all belong to the target. Career/ELO names pin to `ALIAS_TARGET_NAMES` so last-seen-rename cannot retitle the merged row.
+
+Dual-presence (both IDs in one lobby) is a hard stop: interactive `accept match? (y/n)` (`y` = process that match with identities kept separate, `n` = abort); `--no-prompt` / non-TTY always `sys.exit(1)`. Stricter than outcome adjudication.
+
+Additive `steam64_aliases` on `elo_current.json` + `elo_history.json` (and forensic `compute_elo` variants). No `match.schema_version` / `ELO_SCHEMA_VERSION` bump. Undo: delete the table entry, bump `PIPELINE_VERSION`, reprocess. The source sticky slug is kept so `/player/<source-slug>/` can become a real profile again. Full reference: `docs/DATA_DICTIONARY.md` §10.4.
+
 ### Source-Level Filters
 
 These are applied by the statsgate collector before data reaches us:

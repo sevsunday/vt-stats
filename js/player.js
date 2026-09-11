@@ -134,8 +134,34 @@
       one persisted). */
   function slugFor(steam64) {
     if (!state.slugMap || !state.slugMap.slugs) return null;
-    const entry = state.slugMap.slugs[String(steam64)];
-    return entry && entry.slug ? entry.slug : null;
+    const slugs = state.slugMap.slugs;
+    const entry = slugs[String(steam64)];
+    if (!entry) return null;
+    if (entry.alias_of) {
+      const target = slugs[entry.alias_of];
+      if (target && target.slug) return target.slug;
+    }
+    return entry.slug || null;
+  }
+
+  function resolveAliasSteam64(steam64) {
+    const slugs = (state.slugMap && state.slugMap.slugs) || {};
+    const entry = slugs[String(steam64)];
+    if (entry && entry.alias_of) return String(entry.alias_of);
+    return steam64 == null ? steam64 : String(steam64);
+  }
+
+  function resolveAliasSlug(slug) {
+    const slugs = (state.slugMap && state.slugMap.slugs) || {};
+    for (const [sid, entry] of Object.entries(slugs)) {
+      if (!entry || entry.slug !== slug) continue;
+      if (entry.alias_of) {
+        const target = slugs[entry.alias_of];
+        return { sid: String(entry.alias_of), slug: (target && target.slug) || slug };
+      }
+      return { sid, slug: entry.slug };
+    }
+    return null;
   }
 
   /** Build the canonical /player/<slug>/ URL. When the slug map hasn't
@@ -3672,22 +3698,43 @@
     const bootSteam64 = (window.__vtPlayerBoot && window.__vtPlayerBoot.steam64) || null;
 
     if (compare) {
-      const slugs = compare.split(',').map(s => s.trim()).filter(Boolean).slice(0, COMPARE_MAX);
-      if (!slugs.length) { showSection('directory'); renderDirectoryGrid(); return; }
+      const raw = compare.split(',').map(s => s.trim()).filter(Boolean).slice(0, COMPARE_MAX);
+      if (!raw.length) { showSection('directory'); renderDirectoryGrid(); return; }
+      const remapped = raw.map(s => {
+        const r = resolveAliasSlug(s);
+        return (r && r.slug) ? r.slug : s;
+      });
+      if (remapped.join(',') !== raw.join(',')) {
+        params.set('compare', remapped.join(','));
+        const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+        history.replaceState({}, '', next);
+      }
       showSection('compare');
-      renderCompare(slugs);
+      renderCompare(remapped);
       return;
     }
 
     let rating = null;
     if (steam64) {
-      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === String(steam64));
+      const resolvedSid = resolveAliasSteam64(steam64);
+      if (String(resolvedSid) !== String(steam64)) {
+        params.set('p', resolvedSid);
+        const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+        history.replaceState({}, '', next);
+      }
+      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === String(resolvedSid));
     } else if (slug) {
-      const sid = Object.keys((state.slugMap && state.slugMap.slugs) || {})
-        .find(k => state.slugMap.slugs[k].slug === slug);
+      const resolved = resolveAliasSlug(slug);
+      if (resolved && resolved.slug && resolved.slug !== slug) {
+        params.set('slug', resolved.slug);
+        const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+        history.replaceState({}, '', next);
+      }
+      const sid = resolved ? resolved.sid : null;
       if (sid) rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === sid);
     } else if (bootSteam64) {
-      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === String(bootSteam64));
+      const resolvedSid = resolveAliasSteam64(bootSteam64);
+      rating = ((state.elo && state.elo.ratings) || []).find(r => String(r.steam64) === String(resolvedSid));
     }
 
     if (rating) {

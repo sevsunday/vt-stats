@@ -33,6 +33,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+import identity_aliases
+
 # Production host. Used to build absolute URLs (og:url, twitter:url,
 # canonical) so embedded link previews resolve even when shared without
 # the host prefix. CNAME in repo root is the source of truth.
@@ -273,14 +275,25 @@ def load_slug_map(path: Path) -> dict:
         "generated_at": data.get("generated_at"),
         "site_url": data.get("site_url", SITE_URL),
         "slugs": {
-            str(sid): {
-                "slug": (entry or {}).get("slug", ""),
-                "name": (entry or {}).get("name", ""),
-            }
+            str(sid): _slug_entry_from_disk(entry)
             for sid, entry in slugs.items()
             if (entry or {}).get("slug")
         },
     }
+
+
+def _slug_entry_from_disk(entry: dict | None) -> dict:
+    """Keep slug + name plus any `alias_of` stamp. Stripping unknown
+    fields used to wipe `alias_of` every run."""
+    entry = entry or {}
+    out = {
+        "slug": entry.get("slug", ""),
+        "name": entry.get("name", ""),
+    }
+    alias_of = entry.get("alias_of")
+    if alias_of:
+        out["alias_of"] = str(alias_of)
+    return out
 
 
 def _empty_slug_map() -> dict:
@@ -432,6 +445,18 @@ def run(
             "matches_played": 0,
         }
 
+    # Stamp (or drop) alias_of from the live silent-alias table. Source
+    # accounts are not in ratings after the merge, so they only survive
+    # via the stale-preserve path above; the trampoline renderer keys
+    # off this stamp. Pop when the alias is undone so a leftover stamp
+    # cannot keep redirecting.
+    for sid, entry in rebuilt_slugs.items():
+        tgt = identity_aliases.STEAM64_ALIASES_STR.get(sid)
+        if tgt:
+            entry["alias_of"] = tgt
+        else:
+            entry.pop("alias_of", None)
+
     slug_map["slugs"] = dict(sorted(rebuilt_slugs.items(), key=lambda kv: kv[0]))
     summary["n_total"] = len(rebuilt_slugs)
     summary["n_new"] = max(0, len(claimed_by_id) - n_reused_pre)
@@ -463,6 +488,16 @@ def run(
                     print(f"Player stubs: no change ({n_eligible} stubs up to date).")
         except Exception as e:
             print(f"WARN: failed to render player stubs ({e}); continuing.")
+        try:
+            n_tramp_w, n_tramp_s = _render_alias_trampolines(
+                slug_map=slug_map, project_root=project_root,
+            )
+            summary["alias_trampolines_written"] = n_tramp_w
+            summary["alias_trampolines_skipped"] = n_tramp_s
+            if n_tramp_w:
+                print(f"Alias trampolines: wrote {n_tramp_w}, skipped {n_tramp_s} unchanged.")
+        except Exception as e:
+            print(f"WARN: failed to render alias trampolines ({e}); continuing.")
 
     return summary
 
@@ -614,6 +649,11 @@ def _render_player_stubs(
         sid = str(rating.get("steam64") or "").strip()
         if matches < PREGEN_MIN_MATCHES or not sid:
             continue
+        if identity_aliases.STEAM64_ALIASES_STR.get(sid):
+            # Alias SOURCE accounts do not get a full profile stub —
+            # `_render_alias_trampolines` overwrites /player/<slug>/ with
+            # a silent redirect to the target.
+            continue
         entry = (slug_map.get("slugs", {}).get(sid) or {})
         slug = entry.get("slug", "")
         if not slug:
@@ -665,6 +705,57 @@ def _render_player_stubs(
         n_written += 1
 
     return (n_written, n_skipped, n_eligible)
+
+
+def _alias_trampoline_html(target_slug: str) -> str:
+    """Silent redirect stub. Title is the generic site name; noindex so
+    crawlers do not index the source-account URL. Query + hash survive
+    via location.replace so ?tab= etc. still land on the target."""
+    dest = f"../{target_slug}/"
+    canonical = f"{SITE_URL}/player/{target_slug}/"
+    safe_js = json.dumps(dest)
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '  <meta charset="utf-8">\n'
+        "  <title>VT Stats</title>\n"
+        '  <meta name="robots" content="noindex">\n'
+        f'  <meta http-equiv="refresh" content="0;url={_html_escape(dest)}">\n'
+        f'  <link rel="canonical" href="{_html_escape(canonical)}">\n'
+        f"  <script>location.replace({safe_js} + location.search + location.hash);</script>\n"
+        "</head>\n"
+        "<body></body>\n"
+        "</html>\n"
+    )
+
+
+def _render_alias_trampolines(*, slug_map: dict, project_root: Path) -> tuple[int, int]:
+    """Overwrite /player/<source-slug>/ with a trampoline to the alias
+    TARGET. Idempotent. Returns (n_written, n_skipped)."""
+    slugs = slug_map.get("slugs") or {}
+    stubs_root = project_root / PLAYER_STUBS_DIR
+    n_written = 0
+    n_skipped = 0
+    for source_sid, target_sid in identity_aliases.STEAM64_ALIASES_STR.items():
+        src_slug = (slugs.get(source_sid) or {}).get("slug")
+        tgt_slug = (slugs.get(target_sid) or {}).get("slug")
+        if not src_slug or not tgt_slug:
+            continue
+        html = _alias_trampoline_html(tgt_slug)
+        stub_dir = stubs_root / src_slug
+        stub_dir.mkdir(parents=True, exist_ok=True)
+        stub_path = stub_dir / "index.html"
+        if stub_path.exists():
+            try:
+                if stub_path.read_text(encoding="utf-8") == html:
+                    n_skipped += 1
+                    continue
+            except OSError:
+                pass
+        stub_path.write_text(html, encoding="utf-8")
+        n_written += 1
+    return n_written, n_skipped
 
 
 def _find_unsubstituted(rendered: str) -> str:

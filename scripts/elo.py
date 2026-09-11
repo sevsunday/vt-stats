@@ -56,6 +56,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+import identity_aliases
+
 
 # ---------------------------------------------------------------------------
 # Locked constants
@@ -1419,6 +1421,9 @@ def _rating_pass(
             # rated rows so excluded matches don't reset the clock.
             last_match_dt[key] = current_match_dt
             display_name[key] = lobby[i].get("name") or display_name.get(key, "")
+            pinned = identity_aliases.ALIAS_TARGET_NAMES_STR.get(key)
+            if pinned:
+                display_name[key] = pinned
             if not steam64_for_key.get(key):
                 steam64_for_key[key] = lobby[i].get("steam64")
             wh = win_history[key]
@@ -1708,6 +1713,11 @@ def _rating_pass(
             for a in COMMANDER_AXIS_PRIOR
         },
         "ratings":            ratings,
+        # Silent Steam64 aliases (scripts/identity_aliases.py). Additive;
+        # forensic alpha/unlocked/max/softmax/ranks variants inherit via
+        # compute_elo. No ELO_SCHEMA_VERSION bump (ACCOUNT_REROUTES
+        # precedent).
+        "steam64_aliases":    dict(identity_aliases.STEAM64_ALIASES_STR),
     }
 
     elo_history = {
@@ -1718,6 +1728,7 @@ def _rating_pass(
         "alpha":               effective_alpha,
         "alpha_overridden":    alpha_override is not None,
         "history":             history_entries,
+        "steam64_aliases":    dict(identity_aliases.STEAM64_ALIASES_STR),
     }
 
     return elo_current, elo_history, final_map, canonical_before_out
