@@ -7,8 +7,8 @@
  * in layman-first language:
  *
  *   VTSR-T Elo (default)    — 13-column sortable table + detail panels.
- *   VTSR-C Elo              — the experimental commander-ladder table
- *                             (table-only; its explainer lives on How).
+ *   VTSR-C Elo              — sortable experimental commander-ladder
+ *                             table (explainer lives on How).
  *   How it works            — annotated ΔR = K(P−E) stage + the 13.1
  *                             α-blend stage + the commander-ladder section
  *                             (commanderLadderHtml) + tier ladder + worked
@@ -856,9 +856,39 @@
     return `<div class="vt-vtsr-detail-body">${statsHtml}${econHtml}${logHtml}</div>`;
   }
 
-  // The VTSR-C pill is table-only (mirrors the VTSR-T pane); the ladder's
-  // explainer lives on the How-it-works pill. Lazy-rendered like the
-  // explainer tabs — the data is already fetched at boot.
+  let cmdrSortState = { key: 'vtsr_c', asc: false };
+  const expandedCmdrRows = new Set();
+
+  function cmdrRowKey(r) {
+    const raw = r.steam64 || r.name || '';
+    return String(raw).replace(/[^A-Za-z0-9_-]/g, '_');
+  }
+
+  function cmdrSort(key, asc) {
+    return (a, b) => {
+      let va; let vb;
+      switch (key) {
+        case 'name':                     va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
+        case 'record':                   va = (a.wins || 0) - (a.losses || 0); vb = (b.wins || 0) - (b.losses || 0); break;
+        case 'win_pct':                  va = a.win_pct || 0;              vb = b.win_pct || 0;              break;
+        case 'matches_commanded_rated': va = a.matches_commanded_rated || 0; vb = b.matches_commanded_rated || 0; break;
+        case 'peak_vtsr_c':             va = a.peak_vtsr_c || 0;            vb = b.peak_vtsr_c || 0;            break;
+        case 'last_delta':              va = a.last_delta || 0;             vb = b.last_delta || 0;             break;
+        case 'vtsr_c':
+        default:                         va = a.vtsr_c || 0;               vb = b.vtsr_c || 0;               break;
+      }
+      if (va < vb) return asc ? -1 : 1;
+      if (va > vb) return asc ? 1 : -1;
+      const na = (a.name || '').toLowerCase(), nb = (b.name || '').toLowerCase();
+      if (na < nb) return -1;
+      if (na > nb) return 1;
+      return 0;
+    };
+  }
+
+  // The VTSR-C pill is a sortable table (mirrors the VTSR-T pane); the
+  // ladder's explainer lives on the How-it-works pill. Lazy first paint
+  // like the explainer tabs — sort clicks re-call this directly.
   function renderCommanderLadder() {
     const card = document.getElementById('section-vtsr-c');
     const body = document.getElementById('vtsr-c-body');
@@ -883,7 +913,10 @@
       Commanders with fewer than ${fmt(provN)} rated games are still settling in.
     </div>`;
 
-    const rows = ratings.map((r, i) => {
+    const sorted = ratings.slice().sort(cmdrSort(cmdrSortState.key, cmdrSortState.asc));
+    const rows = sorted.map((r, i) => {
+      const rowKey = cmdrRowKey(r);
+      const expanded = expandedCmdrRows.has(rowKey);
       const prov = r.provisional
         ? ` <span class="vt-vtsr-provisional" data-bs-toggle="tooltip" data-bs-placement="top"
               title="Provisional — fewer than ${c.provisional_threshold ?? 5} rated commander games.">?</span>`
@@ -893,7 +926,7 @@
       const lastClass = lastDelta > 0 ? 'text-success' : (lastDelta < 0 ? 'text-danger' : 'text-muted');
       const lastSign = lastDelta > 0 ? '+' : '';
       const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
-      const detailId = `vtsr-c-detail-${i}`;
+      const detailId = `vtsr-c-detail-${rowKey}`;
       const telemChip = (r.duels_with_telemetry || 0) > 0
         ? ` <span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
               title="${r.duels_with_telemetry} duel${r.duels_with_telemetry === 1 ? '' : 's'} with proto v4 economy telemetry.">v4\u00d7${r.duels_with_telemetry}</span>`
@@ -902,7 +935,7 @@
         <td class="vt-vtsr-expand-col">
           <button type="button" class="vt-row-expand"
                   data-bs-toggle="collapse" data-bs-target="#${detailId}"
-                  aria-expanded="false" aria-controls="${detailId}"
+                  aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
                   aria-label="Toggle commander details">
             <i class="bi bi-chevron-right"></i>
           </button>
@@ -917,27 +950,27 @@
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</td>
         <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
       </tr>
-      <tr id="${detailId}" class="collapse vt-vtsr-detail">
+      <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
         <td colspan="9">${renderCmdrDetail(r)}</td>
       </tr>`;
     }).join('');
 
     body.innerHTML = `${banner}
       <div class="table-responsive">
-        <table class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
+        <table id="vtsr-c-table" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
           <thead>
             <tr>
               <th class="vt-vtsr-expand-col"></th>
               <th>#</th>
-              <th>Commander</th>
-              <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+              <th data-sort="name">Commander</th>
+              <th data-sort="vtsr_c" class="text-end sort-active" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
                   title="<strong>VTSR-C</strong><br>Commander rating. Classic win/loss ELO (anchor 1500, scale 400, symmetric K 40&rarr;20) with a team-strength handicap in the expected score.">VTSR-C</th>
-              <th class="text-end">Record</th>
-              <th class="text-end">Win %</th>
-              <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+              <th data-sort="record" class="text-end">Record</th>
+              <th data-sort="win_pct" class="text-end">Win %</th>
+              <th data-sort="matches_commanded_rated" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
                   title="Rated commander games (matches with a verified outcome where this player led a team).">Games</th>
-              <th class="text-end">Peak</th>
-              <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+              <th data-sort="peak_vtsr_c" class="text-end">Peak</th>
+              <th data-sort="last_delta" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
                   title="Most recent rated-duel rating change.">Last</th>
             </tr>
           </thead>
@@ -948,18 +981,34 @@
         ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
       </p>`;
 
-    // Chevron rotation on expand/collapse (mirrors the VTSR-T table).
+    // Track expand/collapse (delegated; survives sort re-renders).
     const tbody = document.getElementById('vtsr-c-tbody');
     if (tbody && !tbody.dataset.vtCollapseListenersBound) {
       tbody.dataset.vtCollapseListenersBound = '1';
-      const syncChevron = (e, expanded) => {
+      tbody.addEventListener('shown.bs.collapse', (e) => {
         const id = (e.target && e.target.id) || '';
+        if (id.startsWith('vtsr-c-detail-')) expandedCmdrRows.add(id.slice('vtsr-c-detail-'.length));
         const btn = tbody.querySelector(`[data-bs-target="#${id}"]`);
-        if (btn) btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      };
-      tbody.addEventListener('shown.bs.collapse', (e) => syncChevron(e, true));
-      tbody.addEventListener('hidden.bs.collapse', (e) => syncChevron(e, false));
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+      });
+      tbody.addEventListener('hidden.bs.collapse', (e) => {
+        const id = (e.target && e.target.id) || '';
+        if (id.startsWith('vtsr-c-detail-')) expandedCmdrRows.delete(id.slice('vtsr-c-detail-'.length));
+        const btn = tbody.querySelector(`[data-bs-target="#${id}"]`);
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
     }
+
+    document.querySelectorAll('#vtsr-c-table th[data-sort]').forEach(th => {
+      th.classList.toggle('sort-active', th.dataset.sort === cmdrSortState.key);
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        if (cmdrSortState.key === th.dataset.sort) cmdrSortState.asc = !cmdrSortState.asc;
+        else { cmdrSortState.key = th.dataset.sort; cmdrSortState.asc = false; }
+        renderCommanderLadder();
+      };
+    });
+
     ensureTooltips(card);
   }
 
