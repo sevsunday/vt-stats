@@ -4,7 +4,7 @@
  * Wires the poller, the local map enricher, the identity resolver, and the
  * keyed reconciler into the /gw page:
  *
- *   - Awaits VTToolsResolver.ready + VTGwMaps.ready, then starts VTGwPoller.
+ *   - Awaits VTToolsResolver.ready + VTLiveMaps.ready, then starts VTGwPoller.
  *   - On each snapshot: tags of-interest lobbies (known host), sorts them
  *     first (border-distinguished) ahead of the rest, and reconciles the one
  *     combined list into a single #gw-grid in place (no flicker).
@@ -255,7 +255,8 @@
     const resolver = getResolver();
     const waits = [];
     if (resolver && resolver.ready) waits.push(resolver.ready);
-    if (window.VTGwMaps && window.VTGwMaps.ready) waits.push(window.VTGwMaps.ready);
+    if (window.VTLiveMaps && window.VTLiveMaps.ready) waits.push(window.VTLiveMaps.ready);
+    else if (window.VTGwMaps && window.VTGwMaps.ready) waits.push(window.VTGwMaps.ready);
     try { await Promise.all(waits); } catch (_) { /* proceed degraded */ }
 
     // Eager-load the broader canonical name roster so host/player labels are

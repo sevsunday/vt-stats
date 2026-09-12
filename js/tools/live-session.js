@@ -1,10 +1,12 @@
 /**
  * VT Stats - Tools Page - Live Session module
  *
- * Polls the BZ2 lobby server via the vendored `BZ2API`, filters to
- * known-host VSR sessions, renders the chosen session into the Live
- * Session card via the factored `VTLiveSessionCard` renderer, and emits
- * roster-change events that the rest of the page consumes.
+ * Polls the MultiplayerSessionList API via the vendored `BZ2API`, filters to
+ * known-host VSR sessions, fills team names from the local map registry
+ * (`js/live-map-enrich.js`; catalog misses stay "Team 1" / "Team 2"), renders
+ * the chosen session into the Live Session card via the factored
+ * `VTLiveSessionCard` renderer, and emits roster-change events that the rest
+ * of the page consumes.
  *
  * Wire model (with `js/tools/main.js`):
  *   - main.js calls VTLiveSession.init({ ...callbacks })
@@ -243,10 +245,9 @@
       const all = (result && result.sessions) || [];
       const filtered = all.filter(isAllowlistedVsr);
 
-      // Map data enrichment on survivors only, to avoid hitting iondriver
-      // for every random lobby in the world.
-      if (filtered.length > 0) {
-        try { await api.enrichSessionsWithMapData(filtered); } catch (_) { /* non-fatal */ }
+      const liveMaps = (typeof window !== 'undefined' && (window.VTLiveMaps || window.VTGwMaps)) || null;
+      if (liveMaps && filtered.length > 0) {
+        liveMaps.enrichSessionsLocal(filtered);
       }
 
       allowlistedSessions = filtered;

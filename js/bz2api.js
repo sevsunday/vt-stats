@@ -6,24 +6,28 @@
  * parses it into the session shape the VT Stats consumers read (gw page,
  * Tools live-session card, topnav Tools pulse).
  *
- * Transport strategy (MSL enforces a CORS origin ALLOWLIST — bz2vsr.com is on
- * it; localhost never is, and vtstats.bz only once the operator adds it):
+ * Transport strategy is MSL-ONLY. MSL enforces a CORS origin ALLOWLIST;
+ * vtstats.bz is already on it (alongside bz2vsr.com and
+ * battlezonescrapfield.github.io). Localhost never is.
  *   - mode 'auto' (default): on localhost / file: contexts the direct fetch is
  *     guaranteed-blocked, so we go proxy-first (local dev proxy from
  *     scripts/dev_server.py, then public proxies). On real hosts we try
- *     direct first (free upgrade the day vtstats.bz gets allowlisted) and
- *     fall back to proxies.
+ *     direct first and fall back to proxies.
  *   - override with URL param `?mslmode=direct|proxy|auto` or
  *     localStorage `vt.msl.mode` = 'direct' | 'proxy'.
  * The last successful method is remembered (in-memory) and tried first on
  * subsequent polls so a known-dead direct fetch isn't re-attempted per poll.
+ *
+ * GameListAssets (`gamelistassets.iondriver.com/bzcc/getdata.php`) has no
+ * CORS headers. Never fetch it from the browser. Team names (svar1/svar2)
+ * come from data/map-registry.json via js/live-map-enrich.js, else
+ * "Team 1" / "Team 2". Pipeline Python still uses GLA at build time.
  */
 
 const BZ2API = (function() {
   'use strict';
 
   const DEFAULT_API_URL = 'https://multiplayersessionlist.iondriver.com/api/1.0/sessions?game=bigboat:battlezone_combat_commander';
-  const MAP_API_BASE_URL = 'https://gamelistassets.iondriver.com/bzcc';
 
   // Public CORS proxies used when the direct fetch is CORS-blocked. All take
   // `<base><encodeURIComponent(targetUrl)>`. Best-effort only — free proxies
@@ -35,9 +39,10 @@ const BZ2API = (function() {
   ];
 
   // Local CORS relay served by `python scripts/dev_server.py` (default :8000).
-  // These URLs are not an alternate data source — the relay GETs the MSL /
-  // iondriver URL server-side and returns the bytes. Tried before public
-  // CORS proxies, and only in localhost/file: contexts.
+  // These URLs are not an alternate data source — the relay GETs the MSL
+  // URL server-side and returns the bytes. Tried before public CORS proxies,
+  // and only in localhost/file: contexts. (gamelistassets stays on the
+  // Python allowlist for manual /__proxy debugging; JS never fetches GLA.)
   //
   // Same-origin `/__proxy` is ONLY valid when this page is itself served by
   // that python server. Live Server (:5500) has no such route and 404s it,
@@ -84,7 +89,7 @@ const BZ2API = (function() {
 
   /**
    * Ordered proxy bases for the current context (local dev proxy first when
-   * on localhost). Shared by the session fetch and map-data enrichment.
+   * on localhost). Used by the MSL session fetch only.
    * @returns {string[]}
    */
   function getProxyBases() {
@@ -678,8 +683,8 @@ const BZ2API = (function() {
         ? ((vsrEntry && vsrEntry.Name) || 'Vet Strat Recycler Variant')
         : null,
 
-      // Map (inline from MSL; local registry / iondriver enrichment may
-      // override or fill gaps afterwards)
+      // Map (inline from MSL; js/live-map-enrich.js may fill team names
+      // and swap the thumb to a local PNG for catalog hits)
       mapFile,
       mapUrl: level.Image || null,
       mapName: level.Name || null,
@@ -735,154 +740,6 @@ const BZ2API = (function() {
   function addCacheBuster(url) {
     const separator = url.includes('?') ? '&' : '?';
     return `${url}${separator}_cb=${Date.now()}`;
-  }
-
-  // ============================================================================
-  // MAP DATA ENRICHMENT (OPT-IN)
-  // ============================================================================
-
-  /**
-   * Cache for map data to avoid repeated API calls
-   */
-  const mapDataCache = new Map();
-
-  /**
-   * Fetch map metadata from GameListAssets API
-   * @param {string} mapFile - Map filename (without extension)
-   * @param {string} modId - Primary mod ID (or '0' for stock)
-   * @returns {Promise<Object|null>} Map data or null if fetch fails
-   */
-  async function fetchMapData(mapFile, modId = '0') {
-    if (!mapFile) return null;
-    
-    // Check cache first
-    const cacheKey = `${modId}:${mapFile}`;
-    if (mapDataCache.has(cacheKey)) {
-      return mapDataCache.get(cacheKey);
-    }
-
-    const apiUrl = `${MAP_API_BASE_URL}/getdata.php?map=${encodeURIComponent(mapFile)}&mod=${encodeURIComponent(modId)}`;
-
-    const tryJson = async (url) => {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      const result = parseMapData(data, mapFile);
-      mapDataCache.set(cacheKey, result);
-      return result;
-    };
-
-    // Localhost is CORS-blocked on iondriver (same as MSL). Skip the guaranteed
-    // failing direct fetch so Live Server consoles aren't flooded every poll.
-    if (!isLocalDevContext()) {
-      try {
-        return await tryJson(apiUrl);
-      } catch (_) { /* fall through to relays */ }
-    }
-
-    for (const proxy of getProxyBases()) {
-      try {
-        return await tryJson(proxy + encodeURIComponent(apiUrl));
-      } catch (_) { /* next candidate */ }
-    }
-    
-    // Cache null result to avoid repeated failed requests
-    mapDataCache.set(cacheKey, null);
-    return null;
-  }
-
-  /**
-   * Parse raw map API response into structured data
-   * @param {Object} data - Raw API response
-   * @param {string} mapFile - Original map filename
-   * @returns {Object} Parsed map data
-   */
-  function parseMapData(data, mapFile) {
-    if (!data) return null;
-    
-    return {
-      name: data.title || null,
-      description: data.description || null,
-      imageUrl: data.image ? `${MAP_API_BASE_URL}/${data.image}` : null,
-      mapFile: mapFile,
-      teamNames: {
-        team1: data.netVars?.svar1 || null,
-        team2: data.netVars?.svar2 || null
-      },
-      netVars: data.netVars || null,
-      mods: data.mods || null
-    };
-  }
-
-  /**
-   * Enrich sessions with map data from GameListAssets API
-   * Fetches map data in parallel for all unique maps
-   * @param {Object[]} sessions - Array of parsed sessions
-   * @returns {Promise<void>}
-   */
-  async function enrichSessionsWithMapData(sessions) {
-    // Collect unique map/mod combinations
-    const mapRequests = new Map();
-    
-    for (const session of sessions) {
-      const key = `${session.primaryMod}:${session.mapFile}`;
-      if (!mapRequests.has(key) && session.mapFile) {
-        mapRequests.set(key, {
-          mapFile: session.mapFile,
-          modId: session.primaryMod || '0'
-        });
-      }
-    }
-    
-    // Fetch all map data in parallel
-    const mapDataPromises = Array.from(mapRequests.values()).map(
-      ({ mapFile, modId }) => fetchMapData(mapFile, modId)
-    );
-    
-    await Promise.all(mapDataPromises);
-    
-    // Apply map data to sessions. GAP-FILLING merge: the MSL payload already
-    // carries inline map name/description/image (and the local registry
-    // enricher may have run first), so getdata.php values only fill what is
-    // still missing — and a failed fetch must never clobber existing values.
-    for (const session of sessions) {
-      const cacheKey = `${session.primaryMod}:${session.mapFile}`;
-      const mapData = mapDataCache.get(cacheKey);
-      
-      if (mapData) {
-        session.mapName = session.mapName || mapData.name;
-        session.mapDescription = session.mapDescription || mapData.description;
-        session.mapImageUrl = session.mapImageUrl || mapData.imageUrl;
-        const tn = session.teamNames || {};
-        session.teamNames = {
-          team1: tn.team1 || (mapData.teamNames && mapData.teamNames.team1) || null,
-          team2: tn.team2 || (mapData.teamNames && mapData.teamNames.team2) || null
-        };
-        
-        // Enrich mod names from map data if available
-        if (mapData.mods) {
-          for (const mod of session.mods) {
-            if (mapData.mods[mod.id] && !mod.name) {
-              mod.name = mapData.mods[mod.id].name || mapData.mods[mod.id].workshop_name || null;
-            }
-          }
-        }
-      } else {
-        // Ensure the keys exist for downstream readers, but never null out
-        // values that are already present.
-        if (session.mapName === undefined) session.mapName = null;
-        if (session.mapDescription === undefined) session.mapDescription = null;
-        if (session.mapImageUrl === undefined) session.mapImageUrl = null;
-        if (!session.teamNames) session.teamNames = { team1: null, team2: null };
-      }
-    }
-  }
-
-  /**
-   * Clear the map data cache
-   */
-  function clearMapCache() {
-    mapDataCache.clear();
   }
 
   // ============================================================================
@@ -1156,7 +1013,8 @@ const BZ2API = (function() {
    * @param {Object} options - Options object
    * @param {string} options.proxyUrl - Optional CORS proxy URL prefix
    * @param {string} options.apiUrl - Optional custom API URL
-   * @param {boolean} options.enrichMaps - Enable map data enrichment (default: false)
+   * @param {boolean} options.enrichMaps - Accepted for caller compatibility; no-op
+   *   (GLA getdata.php is pipeline-only). Default false.
    * @param {boolean} options.enrichVsrMaps - Enable VSR map metadata enrichment (default: false)
    * @param {Array} options.vsrMapData - Optional custom VSR map data array
    * @param {string} options.vsrMapDataMode - Required if vsrMapData provided: 'replace' or 'merge'
@@ -1197,17 +1055,9 @@ const BZ2API = (function() {
     // Sort sessions by ID for consistent ordering across refreshes
     sessions.sort((a, b) => String(a.id).localeCompare(String(b.id)));
     
-    // Enrich sessions with map data if opt-in enabled
-    if (enrichMaps) {
-      onStatus?.({ step: 'enrich-maps', status: 'pending', message: 'Loading map data...' });
-      try {
-        await enrichSessionsWithMapData(sessions);
-        onStatus?.({ step: 'enrich-maps', status: 'success', message: 'Map data loaded' });
-      } catch (e) {
-        console.warn('Map enrichment failed:', e.message);
-        onStatus?.({ step: 'enrich-maps', status: 'failed', message: 'Map data failed (continuing)' });
-      }
-    }
+    // GLA getdata.php is pipeline-only; browser CORS forbids it. Callers that
+    // still pass enrichMaps: true get MSL fields only (no network).
+    if (enrichMaps) { /* no-op */ }
     
     // Enrich sessions with VSR map data if opt-in enabled
     if (enrichVsrMaps) {
@@ -1245,11 +1095,6 @@ const BZ2API = (function() {
     parsePlayer,
     buildDataCache,
     
-    // Map enrichment (opt-in)
-    fetchMapData,
-    enrichSessionsWithMapData,
-    clearMapCache,
-    
     // VSR map enrichment (opt-in)
     getVsrMapData,
     enrichSessionsWithVsrData,
@@ -1280,7 +1125,6 @@ const BZ2API = (function() {
     
     // Config
     DEFAULT_API_URL,
-    MAP_API_BASE_URL,
     CORS_PROXIES,
     FETCH_MODE_STORAGE_KEY,
   };

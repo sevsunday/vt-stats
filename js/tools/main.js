@@ -885,6 +885,9 @@
     if (window.VTToolsResolver && window.VTToolsResolver.ready) {
       try { await window.VTToolsResolver.ready; } catch (_) { /* non-fatal */ }
     }
+    if (window.VTLiveMaps && window.VTLiveMaps.ready) {
+      try { await window.VTLiveMaps.ready; } catch (_) { /* non-fatal */ }
+    }
 
     if (modeAutoRadio) modeAutoRadio.addEventListener('change', () => { if (modeAutoRadio.checked) setMode('auto'); });
     if (modeManualRadio) modeManualRadio.addEventListener('change', () => { if (modeManualRadio.checked) setMode('manual'); });

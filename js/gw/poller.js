@@ -4,9 +4,9 @@
  * Polls the MultiplayerSessionList API via the vendored `BZ2API` and surfaces
  * the FULL worldwide session list (unlike active-game-indicator / tools
  * live-session which filter to known-host VSR lobbies). Map data is enriched
- * locally first (VTGwMaps.enrichSessionsLocal) so the poll-to-render path is
- * synchronous; iondriver getdata.php is hit only for the rare catalog miss
- * (and MSL already carries inline map name/description/image regardless).
+ * locally first (VTLiveMaps.enrichSessionsLocal) so the poll-to-render path
+ * is synchronous. Catalog misses keep MSL name/image and fall back to
+ * "Team 1" / "Team 2" — GameListAssets getdata.php is never fetched.
  *
  * Lifecycle mirrors js/tools/live-session.js: in-flight guard, error backoff,
  * visibility floor + refresh-on-return. Cadence is adaptive -- the caller
@@ -58,8 +58,9 @@
     return (typeof window !== 'undefined' && window.BZ2API) || null;
   }
 
-  function getGwMaps() {
-    return (typeof window !== 'undefined' && window.VTGwMaps) || null;
+  function getLiveMaps() {
+    const w = typeof window !== 'undefined' ? window : {};
+    return w.VTLiveMaps || w.VTGwMaps || null;
   }
 
   function computeNextDelay(sessions) {
@@ -88,15 +89,8 @@
       const result = await api.fetchSessions({ enrichMaps: false, enrichVsrMaps: false });
       const sessions = (result && result.sessions) || [];
 
-      // Local-first enrichment; iondriver only for catalog misses.
-      const gwMaps = getGwMaps();
-      let misses = sessions;
-      if (gwMaps) {
-        misses = gwMaps.enrichSessionsLocal(sessions);
-      }
-      if (misses && misses.length) {
-        try { await api.enrichSessionsWithMapData(misses); } catch (_) { /* non-fatal */ }
-      }
+      const liveMaps = getLiveMaps();
+      if (liveMaps) liveMaps.enrichSessionsLocal(sessions);
 
       errorStreak = 0;
       nextDelayMs = computeNextDelay(sessions);

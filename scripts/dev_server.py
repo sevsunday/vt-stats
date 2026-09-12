@@ -9,9 +9,11 @@ requests to an allowlisted set of upstream hosts, returning the body with
 
 Why: the MultiplayerSessionList API (live lobby data for /gw, the Tools
 live-session card, and the topnav Tools pulse) enforces a CORS origin
-ALLOWLIST — bz2vsr.com is on it, localhost never will be. `js/bz2api.js`
-detects localhost contexts and routes through this relay first, so local
-development never depends on flaky public CORS proxies.
+ALLOWLIST — vtstats.bz is on it, localhost never will be. `js/bz2api.js`
+detects localhost contexts and routes MSL through this relay first, so local
+development never depends on flaky public CORS proxies. JS never fetches
+GameListAssets getdata.php (no CORS); that host stays on the relay allowlist
+only for manual `/__proxy` debugging.
 
 Usage:
     python scripts/dev_server.py              # serve repo on :8000
@@ -44,7 +46,7 @@ PROXY_PATH = "/__proxy"
 # Only these upstream hosts may be relayed (https only).
 ALLOWED_PROXY_HOSTS = {
     "multiplayersessionlist.iondriver.com",  # MSL sessions API
-    "gamelistassets.iondriver.com",          # getdata.php map metadata
+    "gamelistassets.iondriver.com",          # getdata.php — JS no longer fetches GLA; keep for manual /__proxy debugging
 }
 
 UPSTREAM_TIMEOUT_SEC = 15

@@ -1,26 +1,22 @@
 /**
- * VT Stats - Game Watch - Local Map Enrichment
+ * VT Stats - Live Map Enrichment (Game Watch + Tools)
  *
- * Local-first replacement for BZ2API's iondriver `enrichSessionsWithMapData`.
- * The vendored `data/map-registry.json` already carries everything iondriver's
- * getdata.php returns for the fields the live-session card uses -- `title`,
- * `description`, `net_vars.svar1`/`svar2` (team names), and a local
- * `image_path` -- for the entire ~145-map VSR catalog. So for any map we have
- * locally we can enrich with zero network and keep the poll-to-render path
- * synchronous (no awaiting a flaky CORS-proxied call between poll and paint).
+ * Fills team names (svar1/svar2) and swaps thumbs to local PNGs from the
+ * vendored `data/map-registry.json`. MSL already joins map name / image /
+ * description / mods server-side; GameListAssets getdata.php has no CORS
+ * and is never fetched from the browser. Catalog misses keep MSL fields
+ * and render "Team 1" / "Team 2".
  *
  * The registry is fetched ONCE on init. `enrichSessionsLocal(sessions)` then
- * does pure in-memory lookups and returns the handful (usually zero) of
- * sessions whose map isn't in the catalog so the caller can fall back to
- * iondriver for just those.
+ * does pure in-memory lookups and returns sessions whose map isn't in the
+ * catalog (callers ignore misses — MSL fields stay).
  *
- * Public API (window.VTGwMaps):
+ * Public API (window.VTLiveMaps; window.VTGwMaps is an alias):
  *   - ready : Promise resolved once the registry load attempt completes
  *   - enrichSessionsLocal(sessions) : object[]  // returns catalog misses
  *   - getRegistry() : object | null
  *
- * Field parity with BZ2API.enrichSessionsWithMapData (so the shared
- * VTLiveSessionCard renderer reads identical fields):
+ * Field shape the shared VTLiveSessionCard renderer reads:
  *   session.mapName, session.mapDescription, session.mapImageUrl,
  *   session.teamNames { team1, team2 }
  */
@@ -34,8 +30,8 @@
     'data/map-registry.json',
   ];
 
-  // Relative path the live-session card resolves its <img> against. The /gw
-  // page lives in a subdirectory, so local PNGs are one level up.
+  // Relative path the live-session card resolves its <img> against. Both
+  // /gw/ and /tools/ live in a subdirectory, so local PNGs are one level up.
   const LOCAL_MAP_IMG_PREFIX = '../data/maps/';
 
   // ---------------------------------------------------------------- State
@@ -59,7 +55,7 @@
   async function loadMapRegistry() {
     const data = await fetchWithFallback(MAP_REGISTRY_URL_CANDIDATES, (r) => r.json());
     if (!data || typeof data !== 'object') {
-      console.warn('[gw-maps] failed to load map-registry.json (iondriver fallback only)');
+      console.warn('[live-maps] failed to load map-registry.json (team names will fall back to Team 1 / Team 2)');
       registry = {};
       return;
     }
@@ -76,9 +72,9 @@
   // ---------------------------------------------------------------- Enrichment
 
   /**
-   * Enrich each session in place from the local registry. Mirrors the field
-   * shape BZ2API.enrichSessionsWithMapData sets. Returns the array of sessions
-   * with no local catalog entry (caller may fall back to iondriver for those).
+   * Enrich each session in place from the local registry. Returns the array of
+   * sessions with no local catalog entry (MSL name/image stay; team names
+   * stay null so renderers show Team 1 / Team 2).
    */
   function enrichSessionsLocal(sessions) {
     const misses = [];
@@ -112,9 +108,11 @@
 
   // ---------------------------------------------------------------- Exports
 
-  window.VTGwMaps = {
+  const api = {
     ready,
     enrichSessionsLocal,
     getRegistry: () => registry,
   };
+  window.VTLiveMaps = api;
+  window.VTGwMaps = api;
 })();
