@@ -346,13 +346,18 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link active" id="tab-overview-btn" data-bs-toggle="pill" data-bs-target="#tab-overview" type="button" role="tab" aria-controls="tab-overview" aria-selected="true">Overview</button>
         </li>
-        <!-- Storyline tab (match.schema_version 22). The whole <li> is
-             hidden by renderMatchData() unless the match carries a
-             `storyline` block (v4 matches with BOTH economy and builds
-             telemetry). Sits directly after Overview: it is the match's
-             bird's-eye entry point. -->
-        <li class="nav-item d-none" role="presentation" id="tab-storyline-li">
-          <button class="nav-link" id="tab-storyline-btn" data-bs-toggle="pill" data-bs-target="#tab-storyline" type="button" role="tab" aria-controls="tab-storyline" aria-selected="false">Storyline <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
+        <!-- Economy tab (proto v4 commander telemetry). The whole <li> is
+             hidden by renderMatchData() when the match carries neither
+             economy nor builds data (the entire pre-v4 corpus). -->
+        <li class="nav-item d-none" role="presentation" id="tab-economy-li">
+          <button class="nav-link" id="tab-economy-btn" data-bs-toggle="pill" data-bs-target="#tab-economy" type="button" role="tab" aria-controls="tab-economy" aria-selected="false">Economy <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
+        </li>
+        <!-- Per-match Elo (VTSR-T). Always visible; empty-state when the
+             match was excluded from rating or elo_history is missing.
+             Match-global (highlights passthrough) — the player filter only
+             preselects a row. -->
+        <li class="nav-item" role="presentation" id="tab-elo-li">
+          <button class="nav-link" id="tab-elo-btn" data-bs-toggle="pill" data-bs-target="#tab-elo" type="button" role="tab" aria-controls="tab-elo" aria-selected="false">Elo <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-combat-btn" data-bs-toggle="pill" data-bs-target="#tab-combat" type="button" role="tab" aria-controls="tab-combat" aria-selected="false">Combat</button>
@@ -366,14 +371,14 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-assets-btn" data-bs-toggle="pill" data-bs-target="#tab-assets" type="button" role="tab" aria-controls="tab-assets" aria-selected="false">Assets</button>
         </li>
-        <!-- Economy tab (proto v4 commander telemetry). The whole <li> is
-             hidden by renderMatchData() when the match carries neither
-             economy nor builds data (the entire pre-v4 corpus). -->
-        <li class="nav-item d-none" role="presentation" id="tab-economy-li">
-          <button class="nav-link" id="tab-economy-btn" data-bs-toggle="pill" data-bs-target="#tab-economy" type="button" role="tab" aria-controls="tab-economy" aria-selected="false">Economy <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
-        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-positioning-btn" data-bs-toggle="pill" data-bs-target="#tab-positioning" type="button" role="tab" aria-controls="tab-positioning" aria-selected="false">Movemint</button>
+        </li>
+        <!-- Storyline tab (match.schema_version 22). Hidden unless the
+             match carries a `storyline` block. Sits immediately left of
+             3D Replay (second-to-last). -->
+        <li class="nav-item d-none" role="presentation" id="tab-storyline-li">
+          <button class="nav-link" id="tab-storyline-btn" data-bs-toggle="pill" data-bs-target="#tab-storyline" type="button" role="tab" aria-controls="tab-storyline" aria-selected="false">Storyline <span class="vt-tab-new-badge" aria-label="new feature">NEW</span></button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-replay-btn" data-bs-toggle="pill" data-bs-target="#tab-replay" type="button" role="tab" aria-controls="tab-replay" aria-selected="false">3D Replay</button>
@@ -503,71 +508,169 @@
         </div>
       </div>
 
-      <!-- Tab: Storyline (match.schema_version 22; storyline block required).
-           All content is rendered by js/storyline.js (window.VTStoryline)
-           from currentData.storyline — match-global, always unfiltered
-           (highlights passthrough contract). Cards self-omit when their
-           data gates fail (e.g. no positioning => no map-control lane). -->
-      <div class="tab-pane fade" id="tab-storyline" role="tabpanel" aria-labelledby="tab-storyline-btn">
-        <div class="card mb-4 d-none" id="story-verdict-card">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-clipboard-data me-2"></i>The Verdict</h5>
-            <span class="vt-story-why">where the match was won and lost</span>
-          </div>
-          <div class="card-body">
-            <div class="row g-2" id="story-verdict-grid"></div>
-          </div>
+      <!-- Tab: Economy (proto v4 commander telemetry; match-global, always
+           unfiltered — same passthrough contract as highlights/kill-feed
+           winner. Sections self-hide when their half of the data is absent:
+           scrap chart + pools chart + production economy rows need has_resource_data,
+           build log + production build rows need has_build_data.) -->
+      <div class="tab-pane fade" id="tab-economy" role="tabpanel" aria-labelledby="tab-economy-btn">
+        <div class="row g-4 mb-4 d-none" id="section-economy-production">
+          <div class="col-lg-6"><div class="card h-100" id="economy-production-t1"></div></div>
+          <div class="col-lg-6"><div class="card h-100" id="economy-production-t2"></div></div>
         </div>
-
-        <div class="card mb-4 d-none" id="story-timeline-card">
+        <div class="card mb-4 d-none" id="section-economy-pools">
           <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Scrap Pools Over Time</h5>
             <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Match Timeline</h5>
-              <span class="vt-story-why d-none d-md-inline">drag to zoom — all lanes stay in sync; gold flags mark decisive moments</span>
+              <button class="btn btn-sm btn-outline-secondary" id="economy-pools-zoom-reset" type="button"
+                      title="Reset zoom" aria-label="Reset zoom">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <button class="btn btn-sm" data-expand="section-economy-pools" title="Fullscreen">
+                <i class="bi bi-arrows-fullscreen"></i>
+              </button>
             </div>
-            <button class="btn btn-sm btn-outline-secondary d-none" id="story-zoom-reset" type="button"
-                    title="Reset zoom on all lanes">Reset zoom</button>
           </div>
           <div class="card-body">
-            <div id="story-lane-momentum-wrap">
-              <div class="vt-story-lane-title" id="story-lane-momentum-title"></div>
-              <div class="vt-story-lane vt-story-lane--momentum"><canvas id="story-lane-momentum"></canvas></div>
-              <div class="vt-story-bands" id="story-bands"></div>
-            </div>
-            <div id="story-lane-map-wrap">
-              <div class="vt-story-lane-title" id="story-lane-map-title"></div>
-              <div class="vt-story-lane vt-story-lane--map"><canvas id="story-lane-map"></canvas></div>
-            </div>
-            <div id="story-lane-war-wrap">
-              <div class="vt-story-lane-title" id="story-lane-war-title"></div>
-              <div class="vt-story-lane vt-story-lane--war"><canvas id="story-lane-war"></canvas></div>
-            </div>
-            <div id="story-lane-intensity-wrap">
-              <div class="vt-story-lane-title" id="story-lane-intensity-title"></div>
-              <div class="vt-story-lane vt-story-lane--intensity"><canvas id="story-lane-intensity"></canvas></div>
+            <div class="vt-econ-pools-lanes">
+              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t1"></canvas></div>
+              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t2"></canvas></div>
             </div>
           </div>
+        </div>
+        <div class="card mb-4 d-none" id="section-economy-buildlog">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0 d-flex align-items-center gap-2">
+              Build Order Log
+              <button type="button" class="btn btn-sm vt-econ-log-help-btn"
+                      data-bs-toggle="modal" data-bs-target="#economy-buildlog-help-modal"
+                      title="What the Build Order Log shows" aria-label="About the Build Order Log">
+                <i class="bi bi-info-circle"></i>
+              </button>
+            </h5>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <!-- Commander scope. Labels are rewritten per match from
+                   builds.teams{n}.commander.name in renderBuildLog(); picking a
+                   single commander renders that log full width. Radio: one
+                   selection at a time. No data-bs-toggle -- these are not
+                   Bootstrap tabs. -->
+              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-scope" role="radiogroup" aria-label="Build log commander scope">
+                <li class="nav-item">
+                  <button class="nav-link active" data-buildlog-scope="both" type="button" role="radio" aria-checked="true">Both</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link" data-buildlog-scope="1" type="button" role="radio" aria-checked="false">Team 1</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link" data-buildlog-scope="2" type="button" role="radio" aria-checked="false">Team 2</button>
+                </li>
+              </ul>
+              <!-- Type (queues/builds/cancels) AND kind (ships/structures)
+                   checkbox pills. All events is an exclusive reset. No
+                   data-bs-toggle -- these are not Bootstrap tabs. -->
+              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-filter" role="group" aria-label="Build log filter">
+                <li class="nav-item">
+                  <button class="nav-link" data-buildlog-filter="queues" type="button" aria-pressed="false">Queues</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link active" data-buildlog-filter="builds" type="button" aria-pressed="true">Builds</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link" data-buildlog-filter="cancels" type="button" aria-pressed="false">Cancels</button>
+                </li>
+                <li class="nav-item vt-econ-log-pills-gap">
+                  <button class="nav-link" data-buildlog-filter="ships" type="button" aria-pressed="false"
+                          title="Combat vehicles only (tanks, scouts, assault tanks). Same set as Conveyor Belt.">Combat ships</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link" data-buildlog-filter="structures" type="button" aria-pressed="false">Structures</button>
+                </li>
+                <li class="nav-item vt-econ-log-pills-gap">
+                  <button class="nav-link" data-buildlog-filter="all" type="button" aria-pressed="false">All events</button>
+                </li>
+              </ul>
+              <input type="search" id="economy-buildlog-search"
+                     class="form-control form-control-sm vt-econ-log-search"
+                     placeholder="Type to filter..." aria-label="Filter build log by unit or producer"
+                     autocomplete="off">
+            </div>
+          </div>
+          <div class="card-body" id="economy-buildlog-content"></div>
         </div>
 
-        <div class="card mb-4 d-none" id="story-beats-card">
+        <!-- SHELVED: Team Scrap Over Time. Two ~3400-point series over a full
+             match render as an unreadable tangle, so the card is parked at the
+             bottom of the tab, kept permanently `d-none`, and its Chart.js
+             instance is never built (see ECONOMY_SCRAP_CHART_ENABLED in
+             js/app.js -- flip the constant to restore it for good, or append
+             ?scrapchart=1 to peek at it once). Kept in the DOM so restoring is
+             a one-line change; display:none costs no layout or paint. -->
+        <div class="card mb-4 d-none" id="section-economy-scrap">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-list-stars me-2"></i>Key Moments</h5>
-            <span class="vt-story-why">hover to locate on the timeline — click to open in the Replay player</span>
+            <h5 class="mb-0">Team Scrap Over Time</h5>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary" id="economy-zoom-reset" type="button"
+                      title="Reset zoom" aria-label="Reset zoom">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <button class="btn btn-sm" data-expand="section-economy-scrap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
           </div>
-          <div class="card-body">
-            <div class="vt-story-beats" id="story-beats"></div>
-          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="economy-scrap-chart"></canvas></div></div>
         </div>
+      </div>
 
-        <div class="card mb-4 d-none" id="story-narrative-card">
+      <!-- Tab: Elo (per-match VTSR-T + compact VTSR-C strip when a
+           commander duel exists). Rendered by js/match-elo.js
+           (window.VTMatchElo). Match-global, always unfiltered
+           (highlights passthrough); the player filter only preselects. -->
+      <div class="tab-pane fade" id="tab-elo" role="tabpanel" aria-labelledby="tab-elo-btn">
+        <div class="card mb-4 d-none" id="match-elo-empty">
+          <div class="card-body text-muted" id="match-elo-empty-body"></div>
+        </div>
+        <div class="card mb-4 d-none" id="section-match-elo-lobby">
           <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0"><i class="bi bi-book-half me-2"></i>The Story</h5>
+            <h5 class="mb-0">Lobby rating moves</h5>
+            <span class="vt-match-elo-why d-none d-md-inline">how this match changed each player's VTSR-T — click a row</span>
           </div>
-          <div class="card-body">
-            <p class="vt-story-narrative mb-0" id="story-narrative"></p>
-            <div class="vt-story-cast d-none mt-3" id="story-cast"></div>
+          <div class="card-body" id="match-elo-lobby-body"></div>
+        </div>
+        <div class="row g-4 mb-4 d-none" id="section-match-elo-detail">
+          <div class="col-lg-7">
+            <div class="card h-100" id="section-match-elo-player">
+              <div class="card-header d-flex align-items-center justify-content-between">
+                <h5 class="mb-0" id="match-elo-player-title">This player's rating</h5>
+              </div>
+              <div class="card-body" id="match-elo-player-body"></div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="card h-100" id="section-match-elo-scatter">
+              <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <h5 class="mb-0">Over / under vs expectation</h5>
+                <span class="vt-match-elo-why">above the line = played better than this lobby expected
+                  <i class="bi bi-info-circle vt-col-info vt-match-elo-info" role="img" aria-label="What played better than expected means" data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="left" data-elo-expected-tip="1" title=""></i>
+                </span>
+              </div>
+              <div class="card-body">
+                <div class="vt-match-elo-scatter-wrap"><canvas id="match-elo-scatter"></canvas></div>
+              </div>
+            </div>
           </div>
         </div>
+        <div class="card mb-4 d-none" id="section-match-elo-vtsrc">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">Commander ladder this match <span class="vt-cohort-title-tag">VTSR-C · experimental</span></h5>
+            <span class="vt-match-elo-why">win/loss rating — not the 8-axis composite</span>
+          </div>
+          <div class="card-body" id="match-elo-vtsrc-body"></div>
+          <div class="card-footer">
+            <a class="small" href="elo/?tab=vtsr-c">How VTSR-C works</a>
+          </div>
+        </div>
+        <p class="text-muted small d-none mb-0" id="match-elo-footer">
+          <a href="elo/?tab=how">How VTSR-T works</a>
+        </p>
       </div>
 
       <!-- Tab: Combat -->
@@ -835,118 +938,6 @@
         </div>
       </div>
 
-      <!-- Tab: Economy (proto v4 commander telemetry; match-global, always
-           unfiltered — same passthrough contract as highlights/kill-feed
-           winner. Sections self-hide when their half of the data is absent:
-           scrap chart + pools chart + production economy rows need has_resource_data,
-           build log + production build rows need has_build_data.) -->
-      <div class="tab-pane fade" id="tab-economy" role="tabpanel" aria-labelledby="tab-economy-btn">
-        <div class="row g-4 mb-4 d-none" id="section-economy-production">
-          <div class="col-lg-6"><div class="card h-100" id="economy-production-t1"></div></div>
-          <div class="col-lg-6"><div class="card h-100" id="economy-production-t2"></div></div>
-        </div>
-        <div class="card mb-4 d-none" id="section-economy-pools">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Scrap Pools Over Time</h5>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary" id="economy-pools-zoom-reset" type="button"
-                      title="Reset zoom" aria-label="Reset zoom">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-              <button class="btn btn-sm" data-expand="section-economy-pools" title="Fullscreen">
-                <i class="bi bi-arrows-fullscreen"></i>
-              </button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="vt-econ-pools-lanes">
-              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t1"></canvas></div>
-              <div class="vt-econ-pools-lane"><canvas id="economy-pools-t2"></canvas></div>
-            </div>
-          </div>
-        </div>
-        <div class="card mb-4 d-none" id="section-economy-buildlog">
-          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h5 class="mb-0 d-flex align-items-center gap-2">
-              Build Order Log
-              <button type="button" class="btn btn-sm vt-econ-log-help-btn"
-                      data-bs-toggle="modal" data-bs-target="#economy-buildlog-help-modal"
-                      title="What the Build Order Log shows" aria-label="About the Build Order Log">
-                <i class="bi bi-info-circle"></i>
-              </button>
-            </h5>
-            <div class="d-flex align-items-center flex-wrap gap-2">
-              <!-- Commander scope. Labels are rewritten per match from
-                   builds.teams{n}.commander.name in renderBuildLog(); picking a
-                   single commander renders that log full width. Radio: one
-                   selection at a time. No data-bs-toggle -- these are not
-                   Bootstrap tabs. -->
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-scope" role="radiogroup" aria-label="Build log commander scope">
-                <li class="nav-item">
-                  <button class="nav-link active" data-buildlog-scope="both" type="button" role="radio" aria-checked="true">Both</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-scope="1" type="button" role="radio" aria-checked="false">Team 1</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-scope="2" type="button" role="radio" aria-checked="false">Team 2</button>
-                </li>
-              </ul>
-              <!-- Type (queues/builds/cancels) AND kind (ships/structures)
-                   checkbox pills. All events is an exclusive reset. No
-                   data-bs-toggle -- these are not Bootstrap tabs. -->
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="economy-buildlog-filter" role="group" aria-label="Build log filter">
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-filter="queues" type="button" aria-pressed="false">Queues</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link active" data-buildlog-filter="builds" type="button" aria-pressed="true">Builds</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-filter="cancels" type="button" aria-pressed="false">Cancels</button>
-                </li>
-                <li class="nav-item vt-econ-log-pills-gap">
-                  <button class="nav-link" data-buildlog-filter="ships" type="button" aria-pressed="false"
-                          title="Combat vehicles only (tanks, scouts, assault tanks). Same set as Conveyor Belt.">Combat ships</button>
-                </li>
-                <li class="nav-item">
-                  <button class="nav-link" data-buildlog-filter="structures" type="button" aria-pressed="false">Structures</button>
-                </li>
-                <li class="nav-item vt-econ-log-pills-gap">
-                  <button class="nav-link" data-buildlog-filter="all" type="button" aria-pressed="false">All events</button>
-                </li>
-              </ul>
-              <input type="search" id="economy-buildlog-search"
-                     class="form-control form-control-sm vt-econ-log-search"
-                     placeholder="Type to filter..." aria-label="Filter build log by unit or producer"
-                     autocomplete="off">
-            </div>
-          </div>
-          <div class="card-body" id="economy-buildlog-content"></div>
-        </div>
-
-        <!-- SHELVED: Team Scrap Over Time. Two ~3400-point series over a full
-             match render as an unreadable tangle, so the card is parked at the
-             bottom of the tab, kept permanently `d-none`, and its Chart.js
-             instance is never built (see ECONOMY_SCRAP_CHART_ENABLED in
-             js/app.js -- flip the constant to restore it for good, or append
-             ?scrapchart=1 to peek at it once). Kept in the DOM so restoring is
-             a one-line change; display:none costs no layout or paint. -->
-        <div class="card mb-4 d-none" id="section-economy-scrap">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Team Scrap Over Time</h5>
-            <div class="d-flex align-items-center gap-2">
-              <button class="btn btn-sm btn-outline-secondary" id="economy-zoom-reset" type="button"
-                      title="Reset zoom" aria-label="Reset zoom">
-                <i class="bi bi-arrow-counterclockwise"></i>
-              </button>
-              <button class="btn btn-sm" data-expand="section-economy-scrap" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="economy-scrap-chart"></canvas></div></div>
-        </div>
-      </div>
-
       <!-- Tab: Positioning -->
       <div class="tab-pane fade" id="tab-positioning" role="tabpanel" aria-labelledby="tab-positioning-btn">
         <!-- Always-on intro banner explaining the Movemint Profile concept -->
@@ -1028,6 +1019,73 @@
             <button class="btn btn-sm" data-expand="section-ring-histogram" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body"><div class="chart-container"><canvas id="ring-histogram-chart"></canvas></div></div>
+        </div>
+      </div>
+
+      <!-- Tab: Storyline (match.schema_version 22; storyline block required).
+           All content is rendered by js/storyline.js (window.VTStoryline)
+           from currentData.storyline — match-global, always unfiltered
+           (highlights passthrough contract). Cards self-omit when their
+           data gates fail (e.g. no positioning => no map-control lane). -->
+      <div class="tab-pane fade" id="tab-storyline" role="tabpanel" aria-labelledby="tab-storyline-btn">
+        <div class="card mb-4 d-none" id="story-verdict-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-clipboard-data me-2"></i>The Verdict</h5>
+            <span class="vt-story-why">where the match was won and lost</span>
+          </div>
+          <div class="card-body">
+            <div class="row g-2" id="story-verdict-grid"></div>
+          </div>
+        </div>
+
+        <div class="card mb-4 d-none" id="story-timeline-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Match Timeline</h5>
+              <span class="vt-story-why d-none d-md-inline">drag to zoom — all lanes stay in sync; gold flags mark decisive moments</span>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary d-none" id="story-zoom-reset" type="button"
+                    title="Reset zoom on all lanes">Reset zoom</button>
+          </div>
+          <div class="card-body">
+            <div id="story-lane-momentum-wrap">
+              <div class="vt-story-lane-title" id="story-lane-momentum-title"></div>
+              <div class="vt-story-lane vt-story-lane--momentum"><canvas id="story-lane-momentum"></canvas></div>
+              <div class="vt-story-bands" id="story-bands"></div>
+            </div>
+            <div id="story-lane-map-wrap">
+              <div class="vt-story-lane-title" id="story-lane-map-title"></div>
+              <div class="vt-story-lane vt-story-lane--map"><canvas id="story-lane-map"></canvas></div>
+            </div>
+            <div id="story-lane-war-wrap">
+              <div class="vt-story-lane-title" id="story-lane-war-title"></div>
+              <div class="vt-story-lane vt-story-lane--war"><canvas id="story-lane-war"></canvas></div>
+            </div>
+            <div id="story-lane-intensity-wrap">
+              <div class="vt-story-lane-title" id="story-lane-intensity-title"></div>
+              <div class="vt-story-lane vt-story-lane--intensity"><canvas id="story-lane-intensity"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card mb-4 d-none" id="story-beats-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-list-stars me-2"></i>Key Moments</h5>
+            <span class="vt-story-why">hover to locate on the timeline — click to open in the Replay player</span>
+          </div>
+          <div class="card-body">
+            <div class="vt-story-beats" id="story-beats"></div>
+          </div>
+        </div>
+
+        <div class="card mb-4 d-none" id="story-narrative-card">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0"><i class="bi bi-book-half me-2"></i>The Story</h5>
+          </div>
+          <div class="card-body">
+            <p class="vt-story-narrative mb-0" id="story-narrative"></p>
+            <div class="vt-story-cast d-none mt-3" id="story-cast"></div>
+          </div>
         </div>
       </div>
 
@@ -2037,6 +2095,10 @@
        globals (activeCharts / glassTooltipConfig / getThemeColors /
        fmtMatchClock) so it loads after it, before app.js. -->
   <script src="js/storyline.js"></script>
+  <!-- Per-match Elo tab renderer (window.VTMatchElo). Depends on
+       charts.js globals (activeCharts / glassTooltipConfig / getThemeColors)
+       so it loads after it, before app.js. -->
+  <script src="js/match-elo.js"></script>
   <script src="js/positioning-charts.js"></script>
   <!-- All Matches aggregator: pure summation over a contributions dict.
        Documented exception to the "no aggregation in JS" rule so the All

@@ -100,10 +100,28 @@ function glassTooltipHandler(context) {
   }
 
   const pos = chart.canvas.getBoundingClientRect();
+  const tipOpts = (chart.options && chart.options.plugins && chart.options.plugins.tooltip) || {};
+  const alignAbove = tipOpts.vtAlign === 'above';
   tooltip.style.opacity = '1';
   tooltip.style.left = pos.left + window.scrollX + tooltipModel.caretX + 'px';
-  tooltip.style.top = pos.top + window.scrollY + tooltipModel.caretY - 10 + 'px';
-  tooltip.style.transform = 'translateX(-50%)';
+  if (alignAbove) {
+    // Sit the bubble fully above the caret so it doesn't cover the
+    // point (Elo scatter click-to-select). Flip below if that would
+    // clip off the top of the viewport.
+    const gap = 8;
+    const tipH = tooltip.offsetHeight || 0;
+    const caretTop = pos.top + tooltipModel.caretY;
+    if (caretTop - tipH - gap < 8) {
+      tooltip.style.top = pos.top + window.scrollY + tooltipModel.caretY + 'px';
+      tooltip.style.transform = 'translate(-50%, 12px)';
+    } else {
+      tooltip.style.top = pos.top + window.scrollY + tooltipModel.caretY + 'px';
+      tooltip.style.transform = `translate(-50%, calc(-100% - ${gap}px))`;
+    }
+  } else {
+    tooltip.style.top = pos.top + window.scrollY + tooltipModel.caretY - 10 + 'px';
+    tooltip.style.transform = 'translateX(-50%)';
+  }
 }
 
 const glassTooltipConfig = {

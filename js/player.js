@@ -2726,9 +2726,12 @@
       .join('');
   }
 
-  // v2.10: the two luxury axes carry ~0.5% weight each, so there's nothing
-  // actionable to coach -- they're excluded from Performance observations
-  // entirely (they still appear in the Strengths & weaknesses preview).
+  // v2.10 copy contract (shared with js/match-elo.js LUXURY_AXES):
+  // snipe_bonus + target_lock_pct are luxury/preview axes (~0.5% weight
+  // each). They stay on Strengths & weaknesses / radar / bar grids so we
+  // can measure them. They must NEVER appear in causal rating copy
+  // (coaching, helped/hurt, "why Δ moved"). Copy this exclude set, not the
+  // z-score, when adding a new copy surface.
   const COACHING_EXCLUDE = new Set(['snipe_bonus', 'target_lock_pct']);
 
   function renderCoachingPanel(ranked) {

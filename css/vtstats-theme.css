@@ -434,6 +434,13 @@ body::before {
     border-radius: 10px;
     padding: 0.375rem;
     border: 1px solid color-mix(in oklab, var(--kb-text-primary) 5%, transparent);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+#match-tabs .nav-item,
+#all-tabs .nav-item {
+    flex: 0 0 auto;
 }
 
 #match-tabs .nav-link,
@@ -443,6 +450,7 @@ body::before {
     font-size: 0.875rem;
     padding: 0.5rem 1rem;
     border-radius: 8px;
+    white-space: nowrap;
     transition: color 0.2s ease, background-color 0.2s ease;
 }
 
@@ -2991,8 +2999,8 @@ h4:hover .docs-heading-anchor,
     }
 
     /* Right-edge fade hint: suggests more tabs are off-screen.
-       Only applied to the 6-tab match-tabs wrapper (always overflows on
-       mobile); the 2-tab all-tabs fits without scrolling. */
+       Applied to the match-tabs wrapper (always overflows on mobile);
+       the 4-tab all-tabs fits without scrolling. */
     .vt-tab-scroll-wrap:has(#match-tabs)::after {
         content: "";
         position: absolute;
@@ -3314,6 +3322,10 @@ h4:hover .docs-heading-anchor,
    The body carries label + formula (in <code>) + description + per-row
    sigma interpretation; 260px wraps the formula awkwardly. */
 .tooltip.vt-axis-tooltip {
+    --bs-tooltip-max-width: 340px;
+}
+
+.tooltip.vt-match-elo-tip {
     --bs-tooltip-max-width: 340px;
 }
 
@@ -6873,3 +6885,164 @@ html.vt-cursor-active * {
 @media (prefers-reduced-motion: reduce) {
     .vt-story-beat { transition: none; }
 }
+
+/* ------------------------------------------------------------------
+   Per-match Elo tab (#tab-elo / js/match-elo.js)
+   Lobby Δ list, selected-player verdict + axis bars, P-vs-E scatter,
+   compact VTSR-C duel strip (hidden when this match has no duel).
+   ------------------------------------------------------------------ */
+.vt-match-elo-why {
+    font-size: 0.78rem;
+    color: var(--kb-text-muted);
+}
+.vt-match-elo-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.4fr) minmax(80px, 2fr) 4.5rem;
+    gap: 0.6rem;
+    align-items: center;
+    padding: 0.35rem 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.vt-match-elo-row:hover {
+    background: color-mix(in oklab, var(--kb-primary) 8%, transparent);
+}
+.vt-match-elo-row.is-selected {
+    background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    outline: 1px solid color-mix(in oklab, var(--kb-primary) 35%, transparent);
+}
+.vt-match-elo-row.is-unrated {
+    opacity: 0.55;
+}
+.vt-match-elo-row-who {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    min-width: 0;
+}
+.vt-match-elo-track {
+    position: relative;
+    display: block;
+    min-width: 80px;
+    width: 100%;
+    height: 8px;
+    background: color-mix(in srgb, var(--kb-text-muted) 22%, transparent);
+    border-radius: 4px;
+}
+.vt-match-elo-track-center {
+    position: absolute;
+    left: 50%;
+    top: -2px;
+    bottom: -2px;
+    width: 1px;
+    background: color-mix(in srgb, var(--kb-text-muted) 50%, transparent);
+}
+.vt-match-elo-track-fill {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+}
+.vt-match-elo-track-fill.is-positive { background: var(--kb-success); }
+.vt-match-elo-track-fill.is-negative { background: var(--kb-danger); }
+.vt-match-elo-delta {
+    font-family: var(--bs-font-monospace);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    font-size: 0.85rem;
+}
+.vt-match-elo-cmdr {
+    display: inline-block;
+    padding: 0.1em 0.45em;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-primary) 25%, transparent);
+    border-radius: 999px;
+    vertical-align: middle;
+}
+.vt-match-elo-unrated-label {
+    margin: 0.75rem 0 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+}
+.vt-match-elo-headline {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.vt-match-elo-headline-delta {
+    font-family: var(--bs-font-monospace);
+    font-size: 1.6rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+}
+.vt-match-elo-headline-range {
+    font-size: 0.95rem;
+    color: var(--kb-text-secondary);
+}
+.vt-match-elo-verdict {
+    font-size: 0.95rem;
+    color: var(--kb-text-primary);
+}
+.vt-match-elo-info {
+    margin-left: 0.15rem;
+}
+.vt-match-elo-sentence {
+    font-size: 0.85rem;
+    color: var(--kb-text-secondary);
+}
+.vt-match-elo-cmdr-note {
+    font-size: 0.78rem;
+    color: var(--kb-text-muted);
+}
+.vt-match-elo-axis-luxury {
+    opacity: 0.7;
+}
+.vt-match-elo-scatter-wrap {
+    position: relative;
+    height: 280px;
+}
+.vt-match-elo-vtsrc-row {
+    grid-template-columns: minmax(140px, 1.4fr) minmax(80px, 2fr) 4.5rem 5.5rem;
+}
+.vt-match-elo-vtsrc-range {
+    font-size: 0.8rem;
+    color: var(--kb-text-secondary);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.vt-match-elo-vtsrc-verdict {
+    font-size: 0.9rem;
+    color: var(--kb-text-primary);
+}
+#match-elo-footer a,
+#section-match-elo-vtsrc .card-footer a {
+    color: var(--kb-primary);
+}
+
+@media (max-width: 640px) {
+    .vt-match-elo-row {
+        grid-template-columns: 1fr 3.5rem;
+        grid-template-rows: auto auto;
+    }
+    .vt-match-elo-track { grid-column: 1 / -1; }
+    .vt-match-elo-vtsrc-row {
+        grid-template-columns: 1fr 3.5rem;
+        grid-template-rows: auto auto auto;
+    }
+    .vt-match-elo-vtsrc-range {
+        grid-column: 1 / -1;
+        text-align: left;
+    }
+}
+

@@ -610,7 +610,16 @@
     };
   }
 
-  const Y_AXIS_WIDTH = 64;
+  // Shared left-axis box for every lane so scrap-status bands (aligned
+  // to momentum.chartArea.left) stay flush with the plots. 108px fits
+  // Map control ticks like "Ithium base" / "irkvale base" at 10px.
+  const Y_AXIS_WIDTH = 108;
+  const MAP_TICK_NAME_MAX = 14;
+
+  function clipMapName(name) {
+    const s = String(name || '');
+    return s.length > MAP_TICK_NAME_MAX ? s.slice(0, MAP_TICK_NAME_MAX - 1) + '\u2026' : s;
+  }
 
   function yFit(axis) {
     axis.width = Y_AXIS_WIDTH;
@@ -762,8 +771,8 @@
           y: {
             min: 0, max: 1,
             ticks: {
-              stepSize: 0.5, font: { size: 10 },
-              callback: (v) => (v === 0 ? `${ctx.leader(1)} base` : v === 1 ? `${ctx.leader(2)} base` : 'mid'),
+              stepSize: 0.5, font: { size: 10 }, autoSkip: false,
+              callback: (v) => (v === 0 ? `${clipMapName(ctx.leader(1))} base` : v === 1 ? `${clipMapName(ctx.leader(2))} base` : 'mid'),
             },
             afterFit: yFit,
           },

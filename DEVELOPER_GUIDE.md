@@ -1185,14 +1185,14 @@ HTML attributes: `<html data-theme="default" data-mode="dark">`.
 ### Tab Navigation
 
 Dashboard content is organized into Bootstrap nav-pills tabs:
-- **Per-match:** Overview, Storyline (v4 matches only), Combat, Rivalries, Weapons & Accuracy, Assets, Economy (v4 matches only), Movemint, 3D Replay
+- **Per-match:** Overview, Economy (v4 matches only), Elo, Combat, Rivalries, Weapons & Accuracy, Assets, Movemint, Storyline (v4 matches only), 3D Replay
 - **All Matches:** Overview, Weapons & Rivalries, Commanders, Meta
 
 Tabs use **lazy rendering**: only the active tab renders charts on match load. Other tabs render their content on first activation via the Bootstrap `shown.bs.tab` event. Match switch resets all tab render flags. Global filter changes also trigger the same lazy re-render pipeline — `destroyAllCharts()` + `resetTabState()` + re-register deferred renderers + re-register fullscreen chart renderers.
 
 ### Storyline Tab (match.schema_version 22)
 
-The Storyline tab (`#tab-storyline`, nav pill directly after Overview, hidden unless the match carries a `storyline` block) is the per-match bird's-eye narrative: it fuses economy, builds, positioning, kill-feed and timeline telemetry into one story. Rendered entirely by [`js/storyline.js`](js/storyline.js) (`window.VTStoryline = { render, destroy }`) from the pipeline-computed `storyline` block — match-global, always unfiltered (highlights passthrough contract).
+The Storyline tab (`#tab-storyline`, nav pill immediately left of 3D Replay, hidden unless the match carries a `storyline` block) is the per-match bird's-eye narrative: it fuses economy, builds, positioning, kill-feed and timeline telemetry into one story. Rendered entirely by [`js/storyline.js`](js/storyline.js) (`window.VTStoryline = { render, destroy }`) from the pipeline-computed `storyline` block — match-global, always unfiltered (highlights passthrough contract).
 
 Four cards (top → bottom):
 
@@ -1202,6 +1202,21 @@ Four cards (top → bottom):
 4. **The Story** — an auto-generated paragraph assembled from `facts` + `archetype` by the `STORY_COPY` clause system (every sentence maps 1:1 to a named fact — no unbacked rhetoric). First mention of each commander in the paragraph appends the team's faction in parentheses (`mort (Scion)`); later mentions stay the bare name. Cast chips (The Finisher / The Harasser / …) are not rendered here — Overview Match Highlights already covers those standouts.
 
 Deep link: `?match=<id>&tab=storyline`. On pre-v4 matches the pill is hidden and the deep link bounces to Overview (same mechanism as the Economy tab). Copy iteration requires no pipeline rerun — all English lives in `js/storyline.js`'s `STORY_COPY` tables, template-gated by `_investigation/check_story_templates.mjs`. Block schema: `docs/DATA_DICTIONARY.md` §5 `storyline`; pipeline mechanics + invariants: `.cursor/rules/data-schema.mdc` "Storyline block".
+
+### Elo Tab (per-match VTSR-T)
+
+The Elo tab (`#tab-elo`, always-visible pill after Economy / after Overview when Economy is hidden) explains how **this match** moved VTSR-T, with a compact VTSR-C addendum when a commander duel exists. It is the digestible companion to the Overview Player Leaderboard's Δ column. Rendered entirely by [`js/match-elo.js`](js/match-elo.js) (`window.VTMatchElo = { render, destroy }`) from `elo_history.json` (already fetched on dashboard boot via `ensureEloLoaded()`) joined to `currentData.match.id`, plus unfiltered `currentData.leaderboard` for team / commander / campod / partial badges. VTSR-C rows come from a lazy 404-safe fetch of `elo_commander_history.json`.
+
+Four cards:
+
+1. **Lobby rating moves** — CSS diverging bars of every rated player's Δ, sorted descending, team-colored, click-to-select. **Default selection is the biggest gainer** (`rated[0]`), not the largest `|Δ|`. A single-player filter still preselects that player. Campod / Partial rows sit in a muted "Not rated this match" group.
+2. **Selected player** — signed Δ + `before → after`, a one-sentence P-vs-E verdict ("Played better than this lobby expected") with an (i) tooltip explaining Played vs Expected, a `MATCH_ELO_COPY` helped/hurt sentence, commander-cushion note when `axis_contributions_meta` is present, and the bipolar 8-axis bar grid with plain-language readings (`Above lobby` / `Average` / `Below lobby`). Snipe / T-key sit last and slightly muted (v2.10 luxury weights) and are **excluded from the helped/hurt sentence** (`LUXURY_AXES` — preview-only; they do not move the rating).
+3. **Over / under vs expectation** — Chart.js scatter of the rated lobby (X = expected, Y = performance, `y = x` "played as expected"). Click a point to select. Glass tooltip sits **above** the point (`vtAlign: 'above'`) so it does not cover the hit target.
+4. **Commander ladder this match** — compact two-row VTSR-C strip (experimental) when `elo_commander_history.json` has a `duels[]` row for this match: signed Δ, `before → after`, one favorite/underdog sentence, optional thug-gap clause. **Self-hides** when there is no duel (historical undetermined corpus). Not a cloned P-vs-E scatter; economy axes are recorded-not-scored and stay off this card.
+
+**Match-global, always unfiltered** (highlights passthrough). The per-match player filter only **preselects** a row when exactly one player is selected. Empty states cover history 404, `match_excluded` (too few players / too short / cancelled), and an empty rated lobby. Footer links to `elo/?tab=how`; the VTSR-C card links to `elo/?tab=vtsr-c`. No pipeline / schema bump.
+
+Deep link: `?match=<id>&tab=elo`.
 
 ### Global Player Filter
 
@@ -1251,8 +1266,8 @@ The Share button (topnav, `bi-link-45deg`) copies a URL representing the current
 | `tab` | see slug tables below | Omitted when on the default Overview tab |
 | `t` | raw tick (uint32) | One-shot Replay seek target. Produced by the Raw Data Browser's events-table row click. Forces `tab=replay` when no explicit `tab` is provided. Consumed once by `VTReplay.jumpToTick` on initial load and cleared — subsequent renders ignore it. |
 
-**Valid tab slugs (per-match):** `overview`, `combat`, `rivalries`, `weapons`, `assets`, `positioning`, `replay`
-**Valid tab slugs (all-matches):** `overview`, `weapons-rivalries`
+**Valid tab slugs (per-match):** `overview`, `economy`, `elo`, `combat`, `rivalries`, `weapons`, `assets`, `positioning`, `storyline`, `replay`
+**Valid tab slugs (all-matches):** `overview`, `weapons-rivalries`, `commanders`, `meta`
 
 Slug-to-button mappings are defined in `MATCH_TAB_SLUGS` and `ALL_TAB_SLUGS` at the top of `js/app.js`.
 

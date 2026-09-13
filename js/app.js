@@ -105,13 +105,14 @@
 
   const MATCH_TAB_SLUGS = {
     overview:    'tab-overview-btn',
-    storyline:   'tab-storyline-btn',
+    economy:     'tab-economy-btn',
+    elo:         'tab-elo-btn',
     combat:      'tab-combat-btn',
     rivalries:   'tab-rivalries-btn',
     weapons:     'tab-weapons-btn',
     assets:      'tab-assets-btn',
-    economy:     'tab-economy-btn',
     positioning: 'tab-positioning-btn',
+    storyline:   'tab-storyline-btn',
     replay:      'tab-replay-btn',
   };
   const ALL_TAB_SLUGS = {
@@ -1486,7 +1487,8 @@
   const matchTabsEl = document.getElementById('match-tabs');
   if (matchTabsEl) {
     matchTabsEl.addEventListener('shown.bs.tab', (e) => {
-      const target = e.target.getAttribute('data-bs-target');
+      const btn = e.target.closest ? e.target.closest('[data-bs-target]') : e.target;
+      const target = btn && btn.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
       syncUrl();
     });
@@ -2437,6 +2439,26 @@
       renderAssetDamage(data.asset_damage, data.faction_totals);
     });
 
+    // Per-match Elo tab: always registered (empty-state when the match
+    // was excluded or elo_history is missing). Reads currentData +
+    // __vtEloHistory — match-global, never the filtered `data` view.
+    // The player filter only preselects a row. Chart instances live in
+    // charts.js's activeCharts registry (destroyAllCharts owns them).
+    if (window.VTMatchElo) VTMatchElo.destroy();
+    registerTabRenderer('#tab-elo', () => {
+      if (!window.VTMatchElo) return;
+      const filterPlayers = (filterState.mode === 'player')
+        ? (filterState.players || [])
+        : [];
+      VTMatchElo.render(currentData, { filterPlayers });
+    });
+    // If this re-render landed on an already-visible Elo pane (filter
+    // change, or a deep-link whose shown.bs.tab raced the dashboard
+    // unhide), paint immediately — tabRendered was just reset.
+    if (document.getElementById('tab-elo-btn')?.classList.contains('active')) {
+      renderTabIfNeeded('#tab-elo');
+    }
+
     // Storyline tab (match.schema_version 22): the nav button only exists
     // when the pipeline emitted a `storyline` block (v4 matches carrying
     // BOTH economy and builds telemetry). Same bounce-then-hide dance as
@@ -2606,6 +2628,13 @@
     if (!activateTabFromSlug(tabSlug, MATCH_TAB_SLUGS)) {
       const overviewBtn = document.getElementById('tab-overview-btn');
       if (overviewBtn) bootstrap.Tab.getOrCreateInstance(overviewBtn).show();
+    } else {
+      // shown.bs.tab can miss on first paint (fade + dashboard just
+      // unhidden). Force the lazy renderer if the slug isn't Overview.
+      const btnId = MATCH_TAB_SLUGS[tabSlug];
+      const btn = btnId ? document.getElementById(btnId) : null;
+      const target = btn && btn.getAttribute('data-bs-target');
+      if (target && target !== '#tab-overview') renderTabIfNeeded(target);
     }
 
     syncUrl();
