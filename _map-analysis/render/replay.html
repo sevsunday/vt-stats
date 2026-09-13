@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VT Stats - Match Replay (Ace Combat-style)</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="stylesheet" href="css/replay-style.css">
@@ -17,6 +18,18 @@
 </head>
 
 <body class="replay-mode">
+<script>
+(function () {
+  try {
+    if (window.matchMedia('(max-width: 768px)').matches
+      || (window.matchMedia('(max-height: 520px)').matches
+          && window.matchMedia('(pointer: coarse)').matches)) {
+      document.body.classList.add('replay-compact');
+    }
+    if (window.parent !== window) document.body.classList.add('replay-embedded');
+  } catch (err) { /* ignore */ }
+})();
+</script>
 
 <!--
   Match picker landing. Hidden by default; shown when no `?match=` URL
@@ -61,52 +74,34 @@
 <div class="replay-speedlines" aria-hidden="true"></div>
 
 <!--
-  Top-left HUD: match strip + map controls. Mirrors the index.html layout
-  so users feel at home; the right side carries the roster panel and the
-  bottom carries the transport bar.
+  Compact / expanded top cluster: truncated match title + Roster/Expand.
+  Hidden on desktop-in-tab (dashboard banner already names the match).
+  Shown in compact always, and as a title-only chip in desktop expand.
 -->
-<aside id="hud">
-  <header class="hud-header">
-    <a href="index.html" class="hud-back" title="Back to map directory">&laquo; All maps</a>
-    <h1 id="match-name">loading...</h1>
-    <div class="map-sub" id="match-meta">&nbsp;</div>
-    <div class="map-sub" id="match-winner">&nbsp;</div>
-  </header>
+<header id="replay-chrome" class="replay-chrome">
+  <div class="replay-title-chip" id="match-name">loading...</div>
+  <div class="replay-chrome-actions">
+    <button type="button" id="btn-roster" class="replay-icon-btn" title="Roster" aria-expanded="false" aria-controls="roster-panel">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6m-5.784 6A2.24 2.24 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.3 6.3 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1zM4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5"/></svg>
+      <span class="replay-icon-label">Roster</span>
+    </button>
+    <button type="button" id="btn-expand-top" class="replay-icon-btn replay-expand-btn" title="Fullscreen" aria-pressed="false">
+      <svg class="icon-enter" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 1a.5.5 0 0 0-.5.5v4a.5.5 0 0 1-1 0v-4A1.5 1.5 0 0 1 1.5 0h4a.5.5 0 0 1 0 1zM10 .5a.5.5 0 0 1 .5-.5h4A1.5 1.5 0 0 1 16 1.5v4a.5.5 0 0 1-1 0v-4a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 1-.5-.5M.5 10a.5.5 0 0 1 .5.5v4a.5.5 0 0 0 .5.5h4a.5.5 0 0 1 0 1h-4A1.5 1.5 0 0 1 0 14.5v-4a.5.5 0 0 1 .5-.5m15 0a.5.5 0 0 1 .5.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a.5.5 0 0 1 0-1h4a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 1 .5-.5"/></svg>
+      <svg class="icon-exit" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M5.5 0a.5.5 0 0 1 .5.5v4A1.5 1.5 0 0 1 4.5 6h-4a.5.5 0 0 1 0-1h4a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 1 .5-.5m5 0a.5.5 0 0 1 .5.5v4a.5.5 0 0 0 .5.5h4a.5.5 0 0 1 0 1h-4A1.5 1.5 0 0 1 10 4.5v-4a.5.5 0 0 1 .5-.5M0 10.5a.5.5 0 0 1 .5-.5h4A1.5 1.5 0 0 1 6 11.5v4a.5.5 0 0 1-1 0v-4a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 1-.5-.5m10 1a1.5 1.5 0 0 1 1.5-1.5h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 0-.5.5v4a.5.5 0 0 1-1 0z"/></svg>
+    </button>
+  </div>
+</header>
 
-  <section class="hud-section">
-    <h2>Floor</h2>
-    <label class="radio-row"><input type="radio" name="floor" value="minimap" checked> Minimap</label>
-    <label class="radio-row"><input type="radio" name="floor" value="tiles" disabled> Game tiles <span class="hint-inline">(soon)</span></label>
-    <label class="radio-row"><input type="radio" name="floor" value="ramp"> Height ramp</label>
-    <label class="radio-row"><input type="radio" name="floor" value="wire"> Wireframe</label>
-  </section>
-
-  <section class="hud-section">
-    <h2>Height exaggeration</h2>
-    <div class="slider-row">
-      <input type="range" id="height-exag" min="0.5" max="6" step="0.1" value="1.5">
-      <span class="val" id="height-exag-val">1.5x</span>
-    </div>
-    <div class="hint">Real heights from .TER. Bump for steeper hills, drop
-      for flatter view. Actors auto-track.</div>
-  </section>
-
-  <section class="hud-section">
-    <h2>Perf</h2>
-    <div class="kv-row"><span>FPS</span><span class="val" id="fps">&mdash;</span></div>
-  </section>
-
-  <footer class="hud-footer">
-    <a href="../calibration/index.html">&laquo; back to calibration</a>
-  </footer>
-</aside>
+<div id="roster-backdrop" class="roster-backdrop" hidden></div>
 
 <!--
   Right-edge collapsible roster panel. Phase 2 layers chase-cam wiring on
-  top of the focus affordance + adds keyboard cycling.
+  top of the focus affordance + adds keyboard cycling. Compact restyles this
+  as a bottom sheet.
 -->
 <aside id="roster-panel" class="roster-panel">
   <header class="roster-head">
+    <span class="roster-handle" aria-hidden="true"></span>
     <span class="roster-title">Roster</span>
     <span class="roster-bulk">
       <button id="roster-all-on" title="ALL ON">on</button>
@@ -126,38 +121,40 @@
 <div id="kill-ticker" class="kill-ticker"></div>
 
 <!--
-  Bottom transport bar. Phase 1: scrub + play/pause + step ±5s + speed pill.
-  Phase 3 layers cam-mode pills and a Labels toggle into a parallel tray.
+  Bottom transport bar. Compact: full-width scrub row above a single
+  controls row. Desktop flattens via display:contents (scrub sits after
+  time). Expand lives here on desktop so it never covers roster.
 -->
 <footer id="transport" class="transport">
-  <button id="btn-restart" class="t-btn t-btn-icon" title="Restart (Home)">&#9198;</button>
-  <button id="btn-step-back" class="t-btn t-btn-icon" title="Step back 5s (Left)">&#10094;&#10094;</button>
-  <button id="btn-play" class="t-btn t-btn-play" title="Play (Space)">&#9654;</button>
-  <button id="btn-step-fwd" class="t-btn t-btn-icon" title="Step forward 5s (Right)">&#10095;&#10095;</button>
+  <span class="t-row t-row-controls">
+    <button id="btn-restart" class="t-btn t-btn-icon" title="Restart (Home)">&#9198;</button>
+    <button id="btn-step-back" class="t-btn t-btn-icon" title="Step back 5s (Left)">&#10094;&#10094;</button>
+    <button id="btn-play" class="t-btn t-btn-play" title="Play (Space)">&#9654;</button>
+    <button id="btn-step-fwd" class="t-btn t-btn-icon" title="Step forward 5s (Right)">&#10095;&#10095;</button>
 
-  <span class="t-time"><span id="t-cur">0:00</span> / <span id="t-tot">0:00</span></span>
+    <span class="t-time"><span id="t-cur">0:00</span> / <span id="t-tot">0:00</span></span>
 
-  <span class="scrub-wrap">
-    <input type="range" id="scrub" class="scrub" min="0" max="1000" value="0" step="1">
-    <span class="scrub-markers" id="scrub-markers" aria-hidden="true"></span>
+    <select id="speed" class="t-speed" title="Playback speed">
+      <option value="1">1x</option>
+    </select>
+
+    <span class="t-cam-pills">
+      <button class="cam-pill" data-cam="free"    title="Free orbit (1)">Free</button>
+      <button class="cam-pill" data-cam="chase"   title="Chase cam (2)">Chase</button>
+      <button class="cam-pill" data-cam="topdown" title="Top-down (3)">Top</button>
+    </span>
+    <button type="button" id="btn-expand" class="t-btn t-btn-icon t-expand" title="Fullscreen" aria-pressed="false">
+      <svg class="icon-enter" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.5 1a.5.5 0 0 0-.5.5v4a.5.5 0 0 1-1 0v-4A1.5 1.5 0 0 1 1.5 0h4a.5.5 0 0 1 0 1zM10 .5a.5.5 0 0 1 .5-.5h4A1.5 1.5 0 0 1 16 1.5v4a.5.5 0 0 1-1 0v-4a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 1-.5-.5M.5 10a.5.5 0 0 1 .5.5v4a.5.5 0 0 0 .5.5h4a.5.5 0 0 1 0 1h-4A1.5 1.5 0 0 1 0 14.5v-4a.5.5 0 0 1 .5-.5m15 0a.5.5 0 0 1 .5.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a.5.5 0 0 1 0-1h4a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 1 .5-.5"/></svg>
+      <svg class="icon-exit" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M5.5 0a.5.5 0 0 1 .5.5v4A1.5 1.5 0 0 1 4.5 6h-4a.5.5 0 0 1 0-1h4a.5.5 0 0 0 .5-.5v-4a.5.5 0 0 1 .5-.5m5 0a.5.5 0 0 1 .5.5v4a.5.5 0 0 0 .5.5h4a.5.5 0 0 1 0 1h-4A1.5 1.5 0 0 1 10 4.5v-4a.5.5 0 0 1 .5-.5M0 10.5a.5.5 0 0 1 .5-.5h4A1.5 1.5 0 0 1 6 11.5v4a.5.5 0 0 1-1 0v-4a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 1-.5-.5m10 1a1.5 1.5 0 0 1 1.5-1.5h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 0-.5.5v4a.5.5 0 0 1-1 0z"/></svg>
+    </button>
   </span>
 
-  <select id="speed" class="t-speed" title="Playback speed">
-    <option value="1">1x</option>
-  </select>
-
-  <!--
-    Right-side cluster: camera-mode pills + Labels toggle. Letterbox uses
-    the `L` hotkey (no UI button by design; per plan).
-  -->
-  <span class="t-cam-pills">
-    <button class="cam-pill" data-cam="free"    title="Free orbit (1)">Free</button>
-    <button class="cam-pill" data-cam="chase"   title="Chase cam (2)">Chase</button>
-    <button class="cam-pill" data-cam="topdown" title="Top-down (3)">Top</button>
-    <button class="cam-pill" data-cam="cinema"  title="Cinema auto (4)">Cinema</button>
+  <span class="t-row t-row-scrub">
+    <span class="scrub-wrap">
+      <input type="range" id="scrub" class="scrub" min="0" max="1000" value="0" step="1">
+      <span class="scrub-markers" id="scrub-markers" aria-hidden="true"></span>
+    </span>
   </span>
-  <button id="btn-labels" class="t-btn t-btn-icon t-toggle" title="Labels (N)">Labels</button>
-  <button id="btn-pools" class="t-btn t-btn-icon t-toggle is-active" title="Scrap pools (P)">Pools</button>
 </footer>
 
 <div id="status">loading match data...</div>

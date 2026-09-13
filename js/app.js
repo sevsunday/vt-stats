@@ -1490,6 +1490,8 @@
       const btn = e.target.closest ? e.target.closest('[data-bs-target]') : e.target;
       const target = btn && btn.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
+      if (target === '#tab-replay') maybeAutoExpandReplay();
+      else exitReplayExpand({ consumeHistory: false });
       syncUrl();
     });
   }
@@ -2170,9 +2172,11 @@
   // companion panels). The standalone _map-analysis/render/replay.html owns
   // the entire interactive surface: trail playback, ship tracking, kill
   // flashes, scrap-pool overlay, four camera modes, roster, transport,
-  // results overlay. We just embed it in an iframe pointed at
+  // results overlay. We embed it in an iframe pointed at
   //   _map-analysis/render/replay.html?match=<id>[&t=<sec>]
-  // and decorate the wrapper with a fullscreen button.
+  // Expand is owned by the iframe (postMessage) and applied here as CSS
+  // expand on the wrap plus native Fullscreen API on the wrap — never
+  // on the iframe (iOS Safari will not fullscreen iframes).
   //
   // Two boot-time gates decide between iframe vs empty-state:
   //   1. data.positioning.has_position_data === true
@@ -2185,6 +2189,10 @@
   const REPLAY_MANIFEST_PATH = 'data/render/_manifest.json';
   let __replayManifestPromise = null;
   let __replayManifestStems = null; // Set<string> | null
+  let replayExpandActive = false;
+  let replayExpandPushed = false;
+  let replayNativeFs = false;
+  let replayExpandWired = false;
 
   function ensureReplayManifest() {
     if (__replayManifestPromise) return __replayManifestPromise;
@@ -2205,6 +2213,163 @@
     return ((matchMeta && matchMeta.map) || '').replace(/\.bzn$/i, '').toLowerCase();
   }
 
+  function getReplayWrap() {
+    return document.querySelector('#tab-replay .vt-replay-3d-wrap');
+  }
+
+  function getReplayFrame() {
+    return document.querySelector('#tab-replay .vt-replay-3d-frame');
+  }
+
+  function isReplayCompactViewport() {
+    return window.matchMedia('(max-width: 768px)').matches
+      || (window.matchMedia('(max-height: 520px)').matches
+        && window.matchMedia('(pointer: coarse)').matches);
+  }
+
+  function replayFsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function postReplayExpandState(expanded) {
+    const frame = getReplayFrame();
+    if (!frame || !frame.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage({
+        source: 'vt-stats',
+        action: 'expand-state',
+        expanded: !!expanded,
+      }, location.origin);
+    } catch { /* iframe not ready */ }
+  }
+
+  function tryReplayNativeFs() {
+    const wrap = getReplayWrap();
+    if (!wrap) return;
+    if (replayFsElement() === wrap) {
+      replayNativeFs = true;
+      return;
+    }
+    const fn = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+    if (!fn) return;
+    try {
+      const ret = fn.call(wrap);
+      if (ret && typeof ret.then === 'function') {
+        ret.then(() => { replayNativeFs = true; }).catch(() => { replayNativeFs = false; });
+      }
+    } catch {
+      replayNativeFs = false;
+    }
+  }
+
+  function exitReplayNativeFs() {
+    const wrap = getReplayWrap();
+    const fsEl = replayFsElement();
+    if (!wrap || fsEl !== wrap) {
+      replayNativeFs = false;
+      return;
+    }
+    const fn = document.exitFullscreen || document.webkitExitFullscreen;
+    if (!fn) { replayNativeFs = false; return; }
+    try {
+      Promise.resolve(fn.call(document)).catch(() => {});
+    } catch { /* ignore */ }
+    replayNativeFs = false;
+  }
+
+  function enterReplayExpand() {
+    if (replayExpandActive) {
+      tryReplayNativeFs();
+      postReplayExpandState(true);
+      return;
+    }
+    replayExpandActive = true;
+    document.body.classList.add('vt-replay-expand-active');
+    if (!replayExpandPushed) {
+      history.pushState(null, '', location.href);
+      replayExpandPushed = true;
+    }
+    tryReplayNativeFs();
+    postReplayExpandState(true);
+  }
+
+  function exitReplayExpand(opts) {
+    const fromPopstate = !!(opts && opts.fromPopstate);
+    const fromNativeFs = !!(opts && opts.fromNativeFs);
+    const consumeHistory = opts && Object.prototype.hasOwnProperty.call(opts, 'consumeHistory')
+      ? !!opts.consumeHistory
+      : !fromPopstate;
+    if (!replayExpandActive && !fromPopstate) return;
+    replayExpandActive = false;
+    document.body.classList.remove('vt-replay-expand-active');
+    if (!fromNativeFs) exitReplayNativeFs();
+    postReplayExpandState(false);
+    if (consumeHistory && replayExpandPushed) {
+      replayExpandPushed = false;
+      history.back();
+    } else {
+      replayExpandPushed = false;
+    }
+  }
+
+  function maybeAutoExpandReplay() {
+    const btn = document.getElementById('tab-replay-btn');
+    if (!btn || !btn.classList.contains('active')) return;
+    const container = document.getElementById('tab-replay');
+    if (!container || container.dataset.replayState !== 'ready') return;
+    if (!isReplayCompactViewport()) return;
+    enterReplayExpand();
+  }
+
+  function onReplayFullscreenChange() {
+    const wrap = getReplayWrap();
+    const fsEl = replayFsElement();
+    if (wrap && fsEl === wrap) {
+      replayNativeFs = true;
+      if (!replayExpandActive) enterReplayExpand();
+      return;
+    }
+    if (replayNativeFs && replayExpandActive) {
+      replayNativeFs = false;
+      exitReplayExpand({ fromNativeFs: true });
+    }
+  }
+
+  function onReplayPopState() {
+    if (!replayExpandPushed && !replayExpandActive) return;
+    replayExpandPushed = false;
+    if (replayExpandActive) exitReplayExpand({ fromPopstate: true });
+  }
+
+  function onReplayExpandMessage(ev) {
+    if (!ev.data || ev.data.source !== 'vt-replay') return;
+    const frame = getReplayFrame();
+    if (frame && ev.source && ev.source !== frame.contentWindow) return;
+    if (ev.data.action === 'hello') {
+      postReplayExpandState(replayExpandActive);
+    } else if (ev.data.action === 'exit-expand') {
+      exitReplayExpand();
+    } else if (ev.data.action === 'toggle-expand') {
+      if (replayExpandActive) exitReplayExpand();
+      else enterReplayExpand();
+    }
+  }
+
+  function onReplayExpandKeydown(e) {
+    if (e.key !== 'Escape' || !replayExpandActive) return;
+    exitReplayExpand();
+  }
+
+  function ensureReplayExpandWired() {
+    if (replayExpandWired) return;
+    replayExpandWired = true;
+    window.addEventListener('message', onReplayExpandMessage);
+    window.addEventListener('popstate', onReplayPopState);
+    document.addEventListener('fullscreenchange', onReplayFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onReplayFullscreenChange);
+    document.addEventListener('keydown', onReplayExpandKeydown);
+  }
+
   function renderReplayTab(container, data, tickHint) {
     if (!container) return;
     const matchMeta = (data && data.match) || (currentData && currentData.match) || {};
@@ -2220,9 +2385,16 @@
     if (container.dataset.matchId === matchId
         && container.dataset.replayState === (available ? 'ready' : 'empty')
         && tickHint == null) {
+      ensureReplayExpandWired();
+      if (available) maybeAutoExpandReplay();
+      else exitReplayExpand({ consumeHistory: false });
       return;
     }
 
+    const existingWrap = getReplayWrap();
+    if (existingWrap && replayFsElement() === existingWrap) {
+      exitReplayNativeFs();
+    }
     container.innerHTML = '';
 
     if (!available) {
@@ -2239,6 +2411,7 @@
       container.appendChild(empty);
       container.dataset.matchId = matchId;
       container.dataset.replayState = 'empty';
+      exitReplayExpand({ consumeHistory: false });
       return;
     }
 
@@ -2262,51 +2435,28 @@
     frame.setAttribute('allow', 'fullscreen');
     frame.setAttribute('allowfullscreen', '');
     frame.src = `${REPLAY_VIEWER_PATH}?match=${encodeURIComponent(matchId)}${tParam}`;
-
-    const fsBtn = document.createElement('button');
-    fsBtn.type = 'button';
-    fsBtn.className = 'vt-replay-3d-fs-btn';
-    fsBtn.title = 'Fullscreen (Esc to exit)';
-    fsBtn.innerHTML = '<i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>';
-    fsBtn.addEventListener('click', () => {
-      if (typeof frame.requestFullscreen === 'function') {
-        // Promise rejection (e.g. user gesture issues, blocked by perms)
-        // is silently ignored -- users can still F11 the whole tab.
-        frame.requestFullscreen().catch(() => { /* noop */ });
-      }
+    frame.addEventListener('load', () => {
+      postReplayExpandState(replayExpandActive);
     });
 
-    // Swap icon while the iframe is fullscreened. Esc / "exit" button on
-    // the OS chrome will fire fullscreenchange too.
-    const onFsChange = () => {
-      const isFs = document.fullscreenElement === frame;
-      const icon = fsBtn.querySelector('i');
-      if (icon) {
-        icon.className = isFs ? 'bi bi-fullscreen-exit' : 'bi bi-arrows-fullscreen';
-      }
-      fsBtn.title = isFs ? 'Exit fullscreen (Esc)' : 'Fullscreen (Esc to exit)';
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    // Stash the listener on the wrap so clearReplayTab() can remove it
-    // (avoids the listener accumulating across match changes).
-    wrap.__vtFsListener = onFsChange;
-
     wrap.appendChild(frame);
-    wrap.appendChild(fsBtn);
     container.appendChild(wrap);
     container.dataset.matchId = matchId;
     container.dataset.replayState = 'ready';
+
+    ensureReplayExpandWired();
+    if (replayExpandActive) {
+      tryReplayNativeFs();
+      postReplayExpandState(true);
+    } else {
+      maybeAutoExpandReplay();
+    }
   }
 
   function clearReplayTab() {
     const container = document.getElementById('tab-replay');
     if (!container) return;
-    // Detach any fullscreenchange listener stashed by renderReplayTab().
-    const wrap = container.querySelector('.vt-replay-3d-wrap');
-    if (wrap && wrap.__vtFsListener) {
-      document.removeEventListener('fullscreenchange', wrap.__vtFsListener);
-      wrap.__vtFsListener = null;
-    }
+    exitReplayExpand({ consumeHistory: false });
     container.innerHTML = '';
     delete container.dataset.matchId;
     delete container.dataset.replayState;
@@ -8240,8 +8390,8 @@
     });
     // The Replay tab used to register a chart-fullscreen renderer here for
     // the legacy Chart.js damage timeline. The 3D viewer iframe owns its
-    // own fullscreen affordance (Fullscreen API on the iframe element via
-    // the .vt-replay-3d-fs-btn button), so no registration is needed.
+    // own expand control (CSS expand + Fullscreen API on the wrap via
+    // postMessage); no chart-fullscreen registration is needed.
   }
 
   function registerAllMatchesCharts(data) {

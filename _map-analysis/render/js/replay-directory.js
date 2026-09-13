@@ -42,7 +42,10 @@ export async function bootReplayDirectory() {
   document.body.classList.add('directory-mode');
   document.body.classList.remove('replay-mode');
   document.getElementById('scene').classList.add('hidden');
-  document.getElementById('hud').classList.add('hidden');
+  const chrome = document.getElementById('replay-chrome');
+  if (chrome) chrome.classList.add('hidden');
+  const backdrop = document.getElementById('roster-backdrop');
+  if (backdrop) backdrop.classList.add('hidden');
   document.getElementById('status').classList.add('hidden');
   const transport = document.getElementById('transport');
   if (transport) transport.classList.add('hidden');

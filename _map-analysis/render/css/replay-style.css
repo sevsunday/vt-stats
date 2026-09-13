@@ -1,17 +1,13 @@
 /* render/css/replay-style.css
  *
  * Replay-specific HUD styling layered ON TOP of style.css. Keeps style.css
- * untouched so the non-replay viewer is unaffected.
+ * untouched so the non-replay viewer (calibration map) is unaffected.
  *
- * Design surface (Phase 1):
- *   - Top-left aside#hud: match strip + floor + height + perf (reuses base styles)
- *   - Right-edge aside#roster-panel: 10 actors grouped by team
- *   - Bottom transport bar (footer#transport): scrub + play + step + speed
+ * Design surface:
+ *   - Compact / expanded top cluster (.replay-chrome)
+ *   - Right-edge aside#roster-panel (bottom sheet in compact)
+ *   - Bottom transport bar (footer#transport)
  *   - Faction-tint variables mirroring `--kb-faction-*` from production CSS
- *
- * Phase 2 will extend the roster row affordances + label styling.
- * Phase 3 will add letterbox + vignette + film grain.
- * Phase 4 will add the directory landing card grid.
  */
 
 :root {
@@ -45,21 +41,140 @@ body.directory-mode .replay-letterbox-bar,
 body.directory-mode #replay-labels,
 body.directory-mode #kill-ticker,
 body.directory-mode #transport,
-body.directory-mode #roster-panel {
+body.directory-mode #roster-panel,
+body.directory-mode .replay-chrome,
+body.directory-mode .roster-backdrop {
   display: none !important;
 }
 
-/* Reuse the base aside#hud width but allow it to shrink so it doesn't crowd
- * the roster panel on narrow displays. */
-aside#hud {
-  max-width: 280px;
+.replay-chrome.hidden,
+.roster-backdrop.hidden {
+  display: none !important;
 }
 
-/* Hint chip used inside disabled radio rows ("Game tiles (soon)"). */
-.hint-inline {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-style: italic;
+/* iOS iframe footgun: 100vh inside an iframe clips. Fill the player instead. */
+body.replay-mode canvas#scene {
+  width: 100%;
+  height: 100%;
+}
+
+.t-row {
+  display: contents;
+}
+
+/* Desktop visual order: buttons → time → scrub → speed → cams → expand.
+   Compact ignores this (rows stack, scrub uses order: -1). */
+body.replay-mode:not(.replay-compact) #btn-restart,
+body.replay-mode:not(.replay-compact) #btn-step-back,
+body.replay-mode:not(.replay-compact) #btn-play,
+body.replay-mode:not(.replay-compact) #btn-step-fwd {
+  order: 1;
+}
+body.replay-mode:not(.replay-compact) .t-time { order: 2; }
+body.replay-mode:not(.replay-compact) .scrub-wrap { order: 3; }
+body.replay-mode:not(.replay-compact) .t-speed { order: 4; }
+body.replay-mode:not(.replay-compact) .t-cam-pills { order: 5; }
+body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
+
+.t-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.t-expand .icon-exit,
+.replay-expand-btn .icon-exit {
+  display: none;
+}
+.t-expand[aria-pressed="true"] .icon-enter,
+.replay-expand-btn[aria-pressed="true"] .icon-enter {
+  display: none;
+}
+.t-expand[aria-pressed="true"] .icon-exit,
+.replay-expand-btn[aria-pressed="true"] .icon-exit {
+  display: block;
+}
+
+/* Compact / expanded top cluster. Hidden on desktop-in-tab. */
+.replay-chrome {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 13;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px;
+  pointer-events: none;
+}
+.replay-chrome > * {
+  pointer-events: auto;
+}
+.replay-title-chip {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.replay-chrome-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.replay-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  touch-action: manipulation;
+}
+.replay-icon-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.replay-icon-btn[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.replay-icon-label {
+  display: none;
+}
+
+.roster-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  background: rgba(8, 11, 16, 0.45);
+}
+
+.roster-handle {
+  display: none;
 }
 
 /* -----------------------------------------------------------------
@@ -412,18 +527,32 @@ aside#hud {
 }
 
 .t-speed {
-  background: rgba(0, 0, 0, 0.4);
+  appearance: none;
+  -webkit-appearance: none;
+  color-scheme: dark;
+  background-color: #151b24;
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
-  color: var(--text);
   font-family: inherit;
   font-size: 12px;
-  padding: 6px 8px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 6px 26px 6px 10px;
   cursor: pointer;
-  min-width: 60px;
-  text-align: center;
+  min-width: 4.5em;
+  flex-shrink: 0;
+  text-align: left;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23d8dde6' d='M1 0h8L5 6z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 6px;
 }
 .t-speed:hover { border-color: var(--accent); }
+.t-speed option {
+  color: #d8dde6;
+  background: #151b24;
+}
 
 /* -----------------------------------------------------------------
    Roster footer (keyboard hint)
@@ -444,7 +573,7 @@ aside#hud {
 }
 
 /* -----------------------------------------------------------------
-   Transport: cam pills + Labels toggle
+   Transport: cam pills
    ----------------------------------------------------------------- */
 
 .t-cam-pills {
@@ -1109,25 +1238,220 @@ body.replay-chase-active .replay-speedlines {
   font-weight: 500;
 }
 
-/* On narrow viewports the transport stretches edge-to-edge and the roster
-   collapses to a thin pill. */
 @media (max-width: 1024px) {
   .roster-panel {
     width: 220px;
     font-size: 11px;
   }
 }
-@media (max-width: 768px) {
-  aside#hud {
-    max-width: 220px;
-    font-size: 11px;
+
+/* Desktop expand: title chip only (dashboard chrome is gone). */
+body.replay-expanded .replay-chrome {
+  display: flex;
+}
+body.replay-expanded:not(.replay-compact) #btn-roster,
+body.replay-expanded:not(.replay-compact) #btn-expand-top {
+  display: none;
+}
+
+/* YouTube-style chrome hide while playing. */
+body.replay-chrome-hidden .replay-chrome,
+body.replay-chrome-hidden #transport {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+body.replay-chrome-hidden .kill-ticker {
+  opacity: 0.35;
+}
+body.replay-chrome-hidden.replay-roster-open .replay-chrome,
+body.replay-chrome-hidden.replay-roster-open #transport,
+body.replay-chrome-hidden.replay-roster-open #roster-panel,
+body.replay-chrome-hidden.replay-roster-open .roster-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.replay-chrome-hidden .replay-chrome,
+  body.replay-chrome-hidden #transport {
+    transition: none;
   }
-  .roster-panel {
-    top: auto;
-    bottom: calc(var(--vt-transport-height) + 24px);
-    width: calc(100vw - 24px);
-    max-height: 220px;
-    right: 12px;
-    left: 12px;
+}
+
+/* Compact HUD (phones + coarse-pointer landscape). Driven by body.replay-compact. */
+body.replay-compact {
+  --vt-transport-height: 80px;
+}
+
+body.replay-compact .replay-chrome {
+  display: flex;
+}
+
+body.replay-compact #btn-expand {
+  display: none;
+}
+
+body.replay-compact .transport {
+  left: 8px;
+  right: 8px;
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  height: auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+}
+
+body.replay-compact .t-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+body.replay-compact .t-row-scrub {
+  order: -1;
+  width: 100%;
+}
+
+body.replay-compact .t-row-controls {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+
+body.replay-compact .t-btn,
+body.replay-compact .t-btn-play {
+  min-height: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 8px;
+  touch-action: manipulation;
+}
+
+body.replay-compact .t-btn-play {
+  min-width: 36px;
+}
+
+body.replay-compact .t-speed {
+  height: 32px;
+  min-width: 4.5em;
+  flex-shrink: 0;
+}
+
+body.replay-compact .t-time {
+  min-width: 64px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+body.replay-compact .scrub-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+body.replay-compact .scrub {
+  width: 100%;
+}
+
+body.replay-compact .t-cam-pills {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+body.replay-compact .cam-pill {
+  min-width: 0;
+  min-height: 32px;
+  height: 32px;
+  padding: 0 4px;
+  font-size: 10px;
+  touch-action: manipulation;
+}
+
+body.replay-compact .roster-backdrop {
+  display: none;
+}
+body.replay-compact.replay-roster-open .roster-backdrop {
+  display: block;
+}
+
+body.replay-compact .roster-panel {
+  top: auto;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  width: auto;
+  max-height: min(70dvh, 480px);
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  border-radius: 12px 12px 0 0;
+  z-index: 14;
+  transform: translateY(110%);
+  transition: transform 0.22s ease;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+body.replay-compact.replay-roster-open .roster-panel {
+  transform: translateY(0);
+  pointer-events: auto;
+}
+body.replay-compact .roster-panel.is-collapsed {
+  width: auto;
+  overflow-y: auto;
+}
+body.replay-compact .roster-panel.is-collapsed .roster-body,
+body.replay-compact .roster-panel.is-collapsed .roster-bulk {
+  display: block;
+}
+body.replay-compact .roster-head {
+  flex-wrap: wrap;
+}
+
+body.replay-compact .roster-handle {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 0 auto 8px;
+  flex: 1 0 100%;
+  order: -1;
+}
+body.replay-compact .roster-foot {
+  display: none;
+}
+
+body.replay-compact .kill-ticker {
+  left: 12px;
+  right: auto;
+  width: min(70vw, 280px);
+  max-height: none;
+  bottom: calc(var(--vt-transport-height) + 16px + env(safe-area-inset-bottom, 0px));
+}
+body.replay-compact .kill-ticker-row:nth-child(n+3) {
+  display: none;
+}
+
+body.replay-compact .replay-results .results-card {
+  width: calc(100vw - 16px);
+  max-height: 100dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 14px 20px;
+}
+
+body.replay-embedded .results-action-btn[data-action="pick"] {
+  display: none;
+}
+
+body.replay-compact .results-banner-title {
+  font-size: 18px;
+  letter-spacing: 0.08em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.replay-compact .roster-panel {
+    transition: none;
   }
 }

@@ -27,6 +27,10 @@ let _showing = false;
 let _onReplayClick = null;
 let _onCloseClick = null;
 
+function isEmbeddedReplayResults() {
+  try { return window.parent !== window; } catch { return true; }
+}
+
 /**
  * Mount the results overlay. Idempotent: if it's already shown, no-op.
  *
@@ -54,7 +58,6 @@ export function showResultsScreen(matchData, roster, tickRate, opts = {}) {
   overlay.innerHTML = renderResultsHtml(matchData, roster, tickRate);
   overlay.classList.add('is-visible');
 
-  // Wire actions.
   const replayBtn = overlay.querySelector('[data-action="replay"]');
   const closeBtn  = overlay.querySelector('[data-action="close"]');
   const pickBtn   = overlay.querySelector('[data-action="pick"]');
@@ -157,7 +160,7 @@ function renderResultsHtml(matchData, roster, tickRate) {
       <div class="results-actions">
         <button class="t-btn results-action-btn" data-action="replay">&#10227; Replay</button>
         <button class="t-btn results-action-btn" data-action="close">&times; Dismiss</button>
-        <button class="t-btn results-action-btn" data-action="pick">&laquo; Pick another match</button>
+        ${isEmbeddedReplayResults() ? '' : '<button class="t-btn results-action-btn" data-action="pick">&laquo; Pick another match</button>'}
       </div>
     </div>`;
 }

@@ -124,10 +124,6 @@ const STATE = {
   scrubbing: false,
   playStartWall: 0,
   playStartProgress: 0,
-  // FPS
-  fps: 0,
-  fpsAccum: 0,
-  fpsFrames: 0,
   lastTime: 0,
   // RAF
   rafId: null,
@@ -136,15 +132,16 @@ const STATE = {
 // Speed pills mirror js/positioning-player.js:20.
 const SPEEDS = [0.5, 1, 2, 5, 10, 20];
 
+window.addEventListener('message', (ev) => {
+  if (!ev.data || ev.data.source !== 'vt-stats') return;
+  if (ev.data.action === 'expand-state') setExpandedClass(!!ev.data.expanded);
+});
+
 // ============================================================================
 // Boot
 // ============================================================================
 
 const params = readReplayUrlParams();
-boot().catch(err => {
-  console.error(err);
-  setStatus(err && err.message || String(err), true);
-});
 
 async function boot() {
   // Directory mode: no `?match=` param -> render the picker landing and
@@ -153,6 +150,14 @@ async function boot() {
   if (params.isPickerLanding) {
     await bootReplayDirectory();
     return;
+  }
+
+  // Compact class + expand handshake before the (large) match JSON loads
+  // so the loading state doesn't show the desktop roster covering the canvas.
+  try {
+    wireReplayChrome({ canvas: false });
+  } catch (err) {
+    console.error(err);
   }
 
   setStatus('loading match index...');
@@ -190,11 +195,11 @@ async function boot() {
   }
 
   // Recommended floor-mode default per calibration tier (auto_failed_fallback
-  // -> tiles or ramp; otherwise -> minimap). User can flip in the HUD.
+  // -> tiles or ramp; otherwise -> minimap). No HUD radios; `?floor=` is
+  // the hidden hatch for calibration / debugging.
   const manifest = await loadMapManifest();
   const manifestEntry = findManifestEntry(manifest, stem);
   const recommendedFloor = await resolveDefaultFloorMode(stem, manifestEntry);
-  // ?floor= URL param wins over the recommendation.
   const initialFloor = params.floor || recommendedFloor;
 
   setStatus('building scene...');
@@ -220,15 +225,13 @@ async function boot() {
   initCamera(mapData);
 
   wireMatchStrip(matchMeta);
-  const resolvedFloor = wireFloorMode(initialFloor);
-  wireExaggerationSlider();
+  const resolvedFloor = resolveFloorMode(initialFloor);
   wireTransport();
   wireScrubMarkers();
   wireCameraModePills();
   wireRoster();
   wireKeyboard();
-  wireLabelsToggle();
-  wirePoolsToggle();
+  wireReplayCanvasChrome();
 
   applyFloorMode(resolvedFloor);
   setStatus(null);
@@ -267,6 +270,9 @@ function initRenderer() {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   STATE.renderer = renderer;
   window.addEventListener('resize', onWindowResize);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onWindowResize);
+  }
 }
 
 function initScene(mapData) {
@@ -616,61 +622,18 @@ function addWinnerMarker(container, tick, title) {
 }
 
 function wireMatchStrip(matchMeta) {
-  const setText = (id, text) => {
-    const el = document.getElementById(id); if (el) el.textContent = text;
-  };
+  const el = document.getElementById('match-name');
+  if (!el) return;
   const m = STATE.matchData.match || {};
-  const tf = m.team_factions || {};
-  const t1Faction = (tf['1'] && tf['1'].name) || '?';
-  const t2Faction = (tf['2'] && tf['2'].name) || '?';
-  setText('match-name', matchMeta.name || m.id);
-  setText('match-meta', `${matchMeta.player_count}p · ${t1Faction} vs ${t2Faction} · ${formatDuration(STATE.totalSec)}`);
-
-  const winner = m.winner;
-  const winEl = document.getElementById('match-winner');
-  if (winEl && winner) {
-    if (winner.team) {
-      const winnerTeamFaction = (tf[String(winner.team)] && tf[String(winner.team)].name) || `Team ${winner.team}`;
-      const decTick = winner.evidence && winner.evidence.loser_rec_destroyed_tick;
-      const decSec = decTick ? Math.round(decTick / STATE.tickRate) : null;
-      winEl.textContent = decSec
-        ? `${winnerTeamFaction} win · ${formatDuration(decSec)} (${winner.decided_by})`
-        : `${winnerTeamFaction} win (${winner.decided_by})`;
-    } else {
-      winEl.textContent = `outcome ${winner.decided_by}`;
-    }
-  }
+  el.textContent = matchMeta.name || m.id || '';
+  el.title = el.textContent;
 }
 
-function wireFloorMode(initial) {
-  const radios = document.querySelectorAll('input[name="floor"]');
-
-  // Disable minimap radio if no minimap material was built. Tiles is gated
-  // by HTML attribute today (tier-3 shader port deferred).
-  const mmRadio = document.querySelector('input[name="floor"][value="minimap"]');
-  if (mmRadio && !STATE.terrainMinimapMat) mmRadio.disabled = true;
-
-  // Guard against `initial` pointing at a disabled radio. Pick the first
-  // enabled radio in priority order (ramp -> minimap -> wire) as fallback.
-  const targetRadio = document.querySelector(`input[name="floor"][value="${initial}"]`);
-  if (!targetRadio || targetRadio.disabled) {
-    const fallbackOrder = ['ramp', 'minimap', 'wire'];
-    for (const candidate of fallbackOrder) {
-      const r = document.querySelector(`input[name="floor"][value="${candidate}"]`);
-      if (r && !r.disabled) { initial = candidate; break; }
-    }
-  }
-
-  for (const r of radios) {
-    r.checked = (r.value === initial);
-    r.addEventListener('change', e => {
-      if (e.target.checked) {
-        applyFloorMode(e.target.value);
-        pushReplayUrlState({ floor: e.target.value });
-      }
-    });
-  }
-  return initial;  // caller uses this to drive applyFloorMode() before paint
+function resolveFloorMode(initial) {
+  const allowed = new Set(['minimap', 'ramp', 'wire', 'tiles']);
+  let mode = allowed.has(initial) ? initial : 'ramp';
+  if (mode === 'minimap' && !STATE.terrainMinimapMat) mode = 'ramp';
+  return mode;
 }
 
 function applyFloorMode(mode) {
@@ -692,26 +655,12 @@ function applyFloorMode(mode) {
       break;
     case 'tiles':
       // Tier-3 composite material isn't ported into the replay yet (heavy
-      // shader-injection job from viewer.js). Soft-fall back to ramp; the
-      // radio remains responsive for forward-compat.
+      // shader-injection job from viewer.js). Soft-fall back to ramp.
       STATE.terrainMesh.visible = true;
       STATE.terrainMesh.material = STATE.terrainRampMat;
       STATE.terrainWireframe.visible = false;
       break;
   }
-}
-
-function wireExaggerationSlider() {
-  const slider = document.getElementById('height-exag');
-  const valEl = document.getElementById('height-exag-val');
-  if (!slider) return;
-  slider.value = String(STATE.terrainExaggeration);
-  if (valEl) valEl.textContent = `${STATE.terrainExaggeration.toFixed(1)}x`;
-  slider.addEventListener('input', e => {
-    const f = parseFloat(e.target.value);
-    if (valEl) valEl.textContent = `${f.toFixed(1)}x`;
-    applyHeightExaggeration(f);
-  });
 }
 
 // Re-apply height exaggeration to the terrain mesh, wireframe, and beacons.
@@ -838,6 +787,7 @@ function play() {
   STATE.playStartProgress = STATE.progressSec;
   STATE.playStartWall = performance.now();
   syncPlayButton();
+  showReplayChrome();
 }
 
 function maybeShowResults() {
@@ -854,6 +804,7 @@ function pause() {
   if (!STATE.isPlaying) return;
   STATE.isPlaying = false;
   syncPlayButton();
+  showReplayChrome({ hideAfter: false });
 }
 
 function seekTo(tSec, resumePlayback = true) {
@@ -1059,31 +1010,16 @@ function wireCameraModePills() {
   }
 }
 
-function wireLabelsToggle() {
-  const btn = document.getElementById('btn-labels');
-  if (!btn) return;
-  STATE.labelsVisible = true;
-  btn.classList.add('is-active');
-  btn.addEventListener('click', () => {
-    STATE.labelsVisible = !STATE.labelsVisible;
-    btn.classList.toggle('is-active', STATE.labelsVisible);
-    if (STATE.labelsContainer) {
-      STATE.labelsContainer.classList.toggle('is-hidden', !STATE.labelsVisible);
-    }
-  });
+function toggleLabels() {
+  STATE.labelsVisible = !STATE.labelsVisible;
+  if (STATE.labelsContainer) {
+    STATE.labelsContainer.classList.toggle('is-hidden', !STATE.labelsVisible);
+  }
 }
 
-function wirePoolsToggle() {
-  const btn = document.getElementById('btn-pools');
-  if (!btn) return;
-  // Defaults to on; the markup carries `.is-active` so the visual matches
-  // STATE.poolsVisible at boot without an extra reflow.
-  btn.classList.toggle('is-active', STATE.poolsVisible);
-  btn.addEventListener('click', () => {
-    STATE.poolsVisible = !STATE.poolsVisible;
-    btn.classList.toggle('is-active', STATE.poolsVisible);
-    if (STATE.poolsGroup) STATE.poolsGroup.visible = STATE.poolsVisible;
-  });
+function togglePools() {
+  STATE.poolsVisible = !STATE.poolsVisible;
+  if (STATE.poolsGroup) STATE.poolsGroup.visible = STATE.poolsVisible;
 }
 
 function setActorVisibilityByName(name, visible) {
@@ -1119,7 +1055,7 @@ function wireKeyboard() {
   document.addEventListener('keydown', e => {
     // Don't hijack typing in any form input.
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
 
     switch (e.code) {
       // ---- Transport ----
@@ -1148,7 +1084,6 @@ function wireKeyboard() {
       case 'Digit1': e.preventDefault(); setCameraMode('free');    break;
       case 'Digit2': e.preventDefault(); setCameraMode('chase');   break;
       case 'Digit3': e.preventDefault(); setCameraMode('topdown'); break;
-      case 'Digit4': e.preventDefault(); setCameraMode('cinema');  break;
 
       // ---- Roster controls ----
       case 'BracketLeft':
@@ -1171,20 +1106,26 @@ function wireKeyboard() {
         e.preventDefault();
         toggleRosterCollapsed();
         break;
+      case 'Escape':
+        if (document.body.classList.contains('replay-roster-open')) {
+          e.preventDefault();
+          closeRosterSheet();
+        } else if (document.body.classList.contains('replay-expanded')) {
+          e.preventDefault();
+          requestReplayExpand(false);
+        }
+        break;
       case 'KeyL':
         e.preventDefault();
         toggleLetterbox();   // Phase 3: see toggleLetterbox() impl
         break;
       case 'KeyN':
         e.preventDefault();
-        toggleLabelsHotkey();
+        toggleLabels();
         break;
       case 'KeyP':
         e.preventDefault();
-        {
-          const btn = document.getElementById('btn-pools');
-          if (btn) btn.click();
-        }
+        togglePools();
         break;
     }
   });
@@ -1241,20 +1182,243 @@ function toggleAllRosterVisibility() {
 }
 
 function toggleRosterCollapsed() {
+  if (isReplayCompact()) {
+    toggleRosterSheet();
+    return;
+  }
   STATE.rosterCollapsed = !STATE.rosterCollapsed;
   const panel = document.getElementById('roster-panel');
   if (panel) panel.classList.toggle('is-collapsed', STATE.rosterCollapsed);
-}
-
-function toggleLabelsHotkey() {
-  const btn = document.getElementById('btn-labels');
-  if (btn) btn.click();
 }
 
 // Phase 3 hooks. Stub implementations so the keys don't error out before
 // Phase 3 ships the letterbox + film-grain layer.
 function toggleLetterbox() {
   document.body.classList.toggle('replay-letterboxed');
+}
+
+// ============================================================================
+// Compact chrome, roster sheet, expand protocol
+// ============================================================================
+
+const COMPACT_MQ_WIDTH = '(max-width: 768px)';
+const COMPACT_MQ_LANDSCAPE = '(max-height: 520px) and (pointer: coarse)';
+const CHROME_HIDE_MS = 3000;
+const TAP_MAX_MOVE_PX = 8;
+const TAP_MAX_MS = 400;
+
+let chromeHideTimer = null;
+let tapCandidate = null;
+const activePointers = new Set();
+
+function isEmbeddedReplay() {
+  try { return window.parent !== window; } catch { return true; }
+}
+
+function isReplayCompact() {
+  return document.body.classList.contains('replay-compact');
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function syncCompactClass() {
+  const on = window.matchMedia(COMPACT_MQ_WIDTH).matches
+    || window.matchMedia(COMPACT_MQ_LANDSCAPE).matches;
+  const was = isReplayCompact();
+  document.body.classList.toggle('replay-compact', on);
+  if (was && !on) {
+    closeRosterSheet();
+    document.body.classList.remove('replay-chrome-hidden');
+    clearTimeout(chromeHideTimer);
+    chromeHideTimer = null;
+  }
+  onWindowResize();
+}
+
+function showReplayChrome(opts = {}) {
+  document.body.classList.remove('replay-chrome-hidden');
+  clearTimeout(chromeHideTimer);
+  chromeHideTimer = null;
+  const hideAfter = opts.hideAfter !== false
+    && STATE.isPlaying
+    && isReplayCompact()
+    && !prefersReducedMotion()
+    && !document.body.classList.contains('replay-roster-open');
+  if (hideAfter) {
+    chromeHideTimer = setTimeout(() => {
+      if (!STATE.isPlaying || !isReplayCompact()) return;
+      if (document.body.classList.contains('replay-roster-open')) return;
+      document.body.classList.add('replay-chrome-hidden');
+    }, CHROME_HIDE_MS);
+  }
+}
+
+function toggleReplayChrome() {
+  if (!isReplayCompact()) return;
+  if (document.body.classList.contains('replay-chrome-hidden')) {
+    showReplayChrome();
+  } else {
+    document.body.classList.add('replay-chrome-hidden');
+    clearTimeout(chromeHideTimer);
+    chromeHideTimer = null;
+  }
+}
+
+function openRosterSheet() {
+  document.body.classList.add('replay-roster-open');
+  const btn = document.getElementById('btn-roster');
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+  const backdrop = document.getElementById('roster-backdrop');
+  if (backdrop) backdrop.hidden = false;
+  showReplayChrome({ hideAfter: false });
+}
+
+function closeRosterSheet() {
+  document.body.classList.remove('replay-roster-open');
+  const btn = document.getElementById('btn-roster');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  const backdrop = document.getElementById('roster-backdrop');
+  if (backdrop) backdrop.hidden = true;
+}
+
+function toggleRosterSheet() {
+  if (document.body.classList.contains('replay-roster-open')) closeRosterSheet();
+  else openRosterSheet();
+}
+
+function setExpandedClass(on) {
+  document.body.classList.toggle('replay-expanded', !!on);
+  for (const id of ['btn-expand', 'btn-expand-top']) {
+    const btn = document.getElementById(id);
+    if (!btn) continue;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'Exit fullscreen' : 'Fullscreen';
+  }
+}
+
+function requestReplayExpand(want) {
+  if (isEmbeddedReplay()) {
+    window.parent.postMessage({
+      source: 'vt-replay',
+      action: want ? 'toggle-expand' : 'exit-expand',
+    }, location.origin);
+    return;
+  }
+  const root = document.documentElement;
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  if (want) {
+    const fn = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (fn) Promise.resolve(fn.call(root)).catch(() => {});
+  } else if (fsEl) {
+    const fn = document.exitFullscreen || document.webkitExitFullscreen;
+    if (fn) Promise.resolve(fn.call(document)).catch(() => {});
+  }
+}
+
+function toggleReplayExpand() {
+  requestReplayExpand(!document.body.classList.contains('replay-expanded'));
+}
+
+function onCanvasPointerDown(e) {
+  activePointers.add(e.pointerId);
+  if (activePointers.size === 1) {
+    tapCandidate = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId };
+  } else {
+    tapCandidate = null;
+  }
+}
+
+function onCanvasPointerUp(e) {
+  activePointers.delete(e.pointerId);
+  if (!tapCandidate || tapCandidate.id !== e.pointerId) return;
+  const dx = e.clientX - tapCandidate.x;
+  const dy = e.clientY - tapCandidate.y;
+  const dt = e.timeStamp - tapCandidate.t;
+  tapCandidate = null;
+  if (Math.hypot(dx, dy) > TAP_MAX_MOVE_PX || dt > TAP_MAX_MS) return;
+  if (!isReplayCompact()) return;
+  if (document.body.classList.contains('replay-roster-open')) {
+    closeRosterSheet();
+    return;
+  }
+  toggleReplayChrome();
+}
+
+function onCanvasPointerCancel(e) {
+  activePointers.delete(e.pointerId);
+  tapCandidate = null;
+}
+
+function wireReplayChrome(opts = {}) {
+  if (isEmbeddedReplay()) document.body.classList.add('replay-embedded');
+
+  syncCompactClass();
+  if (!wireReplayChrome._mqBound) {
+    wireReplayChrome._mqBound = true;
+    const mqWidth = window.matchMedia(COMPACT_MQ_WIDTH);
+    const mqLand = window.matchMedia(COMPACT_MQ_LANDSCAPE);
+    const onMq = () => syncCompactClass();
+    if (mqWidth.addEventListener) {
+      mqWidth.addEventListener('change', onMq);
+      mqLand.addEventListener('change', onMq);
+    } else {
+      mqWidth.addListener(onMq);
+      mqLand.addListener(onMq);
+    }
+  }
+
+  if (!wireReplayChrome._controlsBound) {
+    wireReplayChrome._controlsBound = true;
+    const rosterBtn = document.getElementById('btn-roster');
+    if (rosterBtn) rosterBtn.addEventListener('click', toggleRosterSheet);
+    const backdrop = document.getElementById('roster-backdrop');
+    if (backdrop) backdrop.addEventListener('click', closeRosterSheet);
+    const handle = document.querySelector('.roster-handle');
+    if (handle) handle.addEventListener('click', closeRosterSheet);
+
+    const expandBtns = [
+      document.getElementById('btn-expand'),
+      document.getElementById('btn-expand-top'),
+    ];
+    for (const btn of expandBtns) {
+      if (btn) btn.addEventListener('click', toggleReplayExpand);
+    }
+
+    if (isEmbeddedReplay()) {
+      window.parent.postMessage({ source: 'vt-replay', action: 'hello' }, location.origin);
+    }
+
+    if (!isEmbeddedReplay()) {
+      const onFs = () => {
+        const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        setExpandedClass(on);
+      };
+      document.addEventListener('fullscreenchange', onFs);
+      document.addEventListener('webkitfullscreenchange', onFs);
+    }
+
+    const bumpChrome = () => {
+      if (isReplayCompact()) showReplayChrome();
+    };
+    const transport = document.getElementById('transport');
+    if (transport) transport.addEventListener('pointerdown', bumpChrome);
+    const chrome = document.getElementById('replay-chrome');
+    if (chrome) chrome.addEventListener('pointerdown', bumpChrome);
+  }
+
+  if (opts.canvas !== false) wireReplayCanvasChrome();
+}
+
+function wireReplayCanvasChrome() {
+  if (wireReplayCanvasChrome._bound) return;
+  const canvas = STATE.canvas || document.getElementById('scene');
+  if (!canvas) return;
+  wireReplayCanvasChrome._bound = true;
+  canvas.addEventListener('pointerdown', onCanvasPointerDown);
+  canvas.addEventListener('pointerup', onCanvasPointerUp);
+  canvas.addEventListener('pointercancel', onCanvasPointerCancel);
 }
 
 // ============================================================================
@@ -1283,16 +1447,6 @@ function tick(timeMs) {
     } else {
       STATE.progressSec = next;
     }
-  }
-
-  STATE.fpsAccum += dtMs;
-  STATE.fpsFrames += 1;
-  if (STATE.fpsAccum >= 500) {
-    STATE.fps = 1000 * STATE.fpsFrames / STATE.fpsAccum;
-    const fpsEl = document.getElementById('fps');
-    if (fpsEl) fpsEl.textContent = STATE.fps.toFixed(0);
-    STATE.fpsAccum = 0;
-    STATE.fpsFrames = 0;
   }
 
   if (STATE.cameraCtl) STATE.cameraCtl.update(dtSec, STATE.actors);
@@ -1542,10 +1696,13 @@ function setStatus(msg, isError = false) {
 }
 
 function onWindowResize() {
-  if (!STATE.camera) return;
-  STATE.camera.aspect = window.innerWidth / window.innerHeight;
+  if (!STATE.camera || !STATE.renderer) return;
+  const vv = window.visualViewport;
+  const w = Math.max(1, Math.round((vv && vv.width) || window.innerWidth));
+  const h = Math.max(1, Math.round((vv && vv.height) || window.innerHeight));
+  STATE.camera.aspect = w / h;
   STATE.camera.updateProjectionMatrix();
-  STATE.renderer.setSize(window.innerWidth, window.innerHeight, false);
+  STATE.renderer.setSize(w, h, false);
 }
 
 function formatDuration(sec) {
@@ -1568,3 +1725,8 @@ function cssEscape(s) {
   }
   return String(s).replace(/["\\]/g, '\\$&');
 }
+
+boot().catch(err => {
+  console.error(err);
+  setStatus(err && err.message || String(err), true);
+});

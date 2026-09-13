@@ -2786,9 +2786,10 @@ h4:hover .docs-heading-anchor,
  * Replay Player (3D embed)
  * Iframe wrapper around the standalone _map-analysis/render/replay.html
  * viewer. The iframe owns its own UI (transport bar, roster panel, kill
- * ticker, camera pills, scrub markers, etc.) -- this stylesheet only
- * positions the wrapper in the dashboard's #tab-replay pane and skins
- * the dashboard-side fullscreen button + the empty-state card.
+ * ticker, camera pills, scrub markers, expand control, etc.) -- this
+ * stylesheet only positions the wrapper in the dashboard's #tab-replay
+ * pane and skins the empty-state card. Expand is `body.vt-replay-expand-active`
+ * (CSS) plus native Fullscreen API on the wrap, never on the iframe.
  * ============================================================ */
 
 .vt-replay-3d-wrap {
@@ -2799,11 +2800,10 @@ h4:hover .docs-heading-anchor,
        (`position: fixed; bottom: 12px` inside replay.html) is always in
        view without scrolling. `min(...)` (no floor) guarantees the iframe
        shrinks with short viewports; the `min-height` safety net only
-       kicks in on tiny screens (<660px tall) where some scroll is
-       unavoidable. The 1400px ceiling caps it on 4K so the canvas
-       doesn't grow unreasonably tall. The 240px subtractor approximates
-       the chrome above the iframe (topnav ~60 + match-info banner ~120
-       + tab strip ~52 + padding ~8). */
+       kicks in on tiny screens where some scroll is unavoidable. The
+       1400px ceiling caps it on 4K so the canvas doesn't grow unreasonably
+       tall. The 240px subtractor approximates the chrome above the iframe
+       (topnav ~60 + match-info banner ~120 + tab strip ~52 + padding ~8). */
     height: min(calc(100vh - 240px), 1400px);
     min-height: 420px;
     border-radius: 10px;
@@ -2812,49 +2812,57 @@ h4:hover .docs-heading-anchor,
     border: 1px solid var(--kb-border-subtle);
 }
 
+@media (max-width: 768px), (max-height: 520px) and (pointer: coarse) {
+    .vt-replay-3d-wrap {
+        height: min(calc(100dvh - 180px), 1400px);
+        min-height: 280px;
+    }
+}
+
 .vt-replay-3d-frame {
     width: 100%;
     height: 100%;
     border: 0;
     display: block;
-    /* Match the wrapper's rounded corners so there's no white seam. */
     background: var(--kb-bg-subtle);
 }
 
-/* Native fullscreen on the iframe element itself -- Esc exits in every
-   browser. Override the wrapper's clamped height so we go edge-to-edge. */
-.vt-replay-3d-frame:fullscreen {
-    width: 100vw;
-    height: 100vh;
+body.vt-replay-expand-active {
+    overflow: hidden;
+}
+
+body.vt-replay-expand-active > nav.navbar,
+body.vt-replay-expand-active #match-info,
+body.vt-replay-expand-active .vt-tab-scroll-wrap {
+    display: none !important;
+}
+
+body.vt-replay-expand-active #tab-replay .vt-replay-3d-wrap {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    height: 100dvh;
+    width: 100%;
+    border-radius: 0;
+    min-height: 0;
+    border: none;
+}
+
+body.vt-replay-expand-active #tab-replay .vt-replay-3d-wrap:fullscreen,
+body.vt-replay-expand-active #tab-replay .vt-replay-3d-wrap:-webkit-full-screen {
+    width: 100%;
+    height: 100%;
     border-radius: 0;
 }
 
-.vt-replay-3d-fs-btn {
-    position: absolute;
-    top: 0.75rem;
-    right: 0.75rem;
-    z-index: 5;
-    padding: 0.4rem 0.65rem;
-    background: color-mix(in oklab, var(--kb-bg-card) 75%, transparent);
-    color: var(--kb-text-primary);
-    border: 1px solid var(--kb-border-subtle);
-    border-radius: 6px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-    cursor: pointer;
-    transition: background var(--vt-anim-duration) var(--vt-anim-ease),
-                border-color var(--vt-anim-duration) var(--vt-anim-ease);
+body.vt-replay-expand-active #tab-replay {
+    display: block;
+    opacity: 1;
 }
 
-.vt-replay-3d-fs-btn:hover {
-    background: color-mix(in oklab, var(--kb-primary) 18%, var(--kb-bg-card));
-    border-color: color-mix(in oklab, var(--kb-primary), transparent 50%);
-}
-
-.vt-replay-3d-fs-btn i {
-    font-size: 0.95rem;
-    line-height: 1;
+body.vt-replay-expand-active #dashboard,
+body.vt-replay-expand-active .tab-content {
+    overflow: visible;
 }
 
 /* Empty state card for matches without position data or 3D extract. */
