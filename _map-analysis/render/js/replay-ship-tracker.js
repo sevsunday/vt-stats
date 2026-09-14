@@ -1,22 +1,23 @@
 /* render/js/replay-ship-tracker.js
  *
- * Per-player ship-at-tick reconstructed from the existing event streams in
- * the production match JSON. The dashboard's `loadout.primary_ship` is a
- * whole-match aggregate ("most-used ship over 41 minutes") which is wrong
- * for any single playback timestamp -- e.g. a player whose primary_ship is
- * a tank but who spent the first 8 minutes in a scout would render as a tank
- * during those minutes if you read primary_ship blindly.
+ * Per-player ship-at-tick for the 3D replay.
  *
- * Sources of evidence (all already in matchData; no pipeline change):
- *   - kills.feed[].tick + killer / killer_odf       (~30 entries this match)
- *   - kills.feed[].tick + victim / victim_odf       (just-before-death state)
- *   - pickups.feed[].tick + picker / picker_odf     (~50+ entries)
- *   - snipes.feed[].tick + sniper / sniper_odf
- *   - snipes.feed[].tick + victim / victim_odf
+ * Preferred source (match.schema_version 25+):
+ *   positioning.players[name].ship_timeline  -- full-rate
+ *   UpdateTick PlayerState.odf transitions emitted by the pipeline.
+ *   This is the wire truth, including real eject / re-ship ticks.
  *
- * Build phase: walk every event in tick order, build per-player tick-sorted
- * `[{tSec, odf}, ...]`. Lookup phase: binary search for the latest event
- * <= tSec for a given player.
+ * Fallback (pre-v25 JSON, or a player with an empty timeline):
+ *   Reconstruct from sparse event streams already in matchData:
+ *     - kills.feed[].tick + killer / killer_odf
+ *     - kills.feed[].tick + victim / victim_odf  (+ synthetic death->pilot)
+ *     - pickups.feed[].tick + picker / picker_odf
+ *     - snipes.feed[].tick + sniper / sniper_odf
+ *     - snipes.feed[].tick + victim / victim_odf  (+ synthetic death->pilot)
+ *   The reconstruction lags re-ships until the player's next
+ *   kill/pickup/snipe -- that is why v25 exists.
+ *
+ * Lookup phase: binary search for the latest event <= tSec.
  *
  * Initial-state rule: VSR matches always start every player in their
  * faction's basic scout (`ivscout_vsr.odf` / `evscout_vsr.odf` /
@@ -100,9 +101,34 @@ export function buildShipTracker(matchData, roster) {
   // form; we keep the .odf suffix because that's the canonical key in
   // matchData.odf_map.
   const eventsByName = new Map();
+  // Players whose ship comes from the pipeline timeline. Their event
+  // list is already authoritative; skip the sparse reconstruction
+  // (including the synthetic death->pilot events) so a stale pickup
+  // or kill cannot overwrite a later re-ship.
+  const timelineBacked = new Set();
+
+  const posPlayers = (matchData.positioning && matchData.positioning.players) || {};
+  for (const row of (roster || [])) {
+    if (!row || !row.name) continue;
+    const tl = posPlayers[row.name] && posPlayers[row.name].ship_timeline;
+    const tArr = tl && tl.t;
+    const odfArr = tl && tl.odf;
+    if (!tArr || !odfArr || !tArr.length || tArr.length !== odfArr.length) continue;
+    const list = [];
+    for (let i = 0; i < tArr.length; i++) {
+      if (!odfArr[i] || !Number.isFinite(tArr[i])) continue;
+      list.push({ tSec: tArr[i], odf: odfArr[i] });
+    }
+    if (!list.length) continue;
+    list.sort((a, b) => a.tSec - b.tSec);
+    eventsByName.set(row.name, list);
+    timelineBacked.add(row.name);
+  }
+
   function pushEvent(name, tSec, odf) {
     if (!name || !odf) return;
     if (!Number.isFinite(tSec)) return;
+    if (timelineBacked.has(name)) return;
     const list = eventsByName.get(name) || [];
     list.push({ tSec, odf });
     if (list.length === 1) eventsByName.set(name, list);

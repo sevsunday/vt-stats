@@ -898,6 +898,10 @@ Per-player block:
     "x": [...], "z": [...], "y": [...],
     "segments": [[0, 412], [413, 678], [679, 847]]
   },
+  "ship_timeline": {
+    "t": [0.1, 144.3, 162.2, ...],
+    "odf": ["fvscout_vsr.odf", "fsuser_m.odf", "fvscoutm_vsr.odf", ...]
+  },
   "heatmap_grid_xz": [[...32×32 bin counts over map_bounds...]],
   "heatmap_polar": [[...16×8 angular×radial bin counts around spawn...]]
 }
@@ -907,6 +911,7 @@ Key behaviors:
 
 - `trail.t[]` is **sparse** — values may skip (player absent from an `UpdateTick` due to death/disconnect/out-of-scope). All time math iterates `t[i]` as authoritative seconds, never array index.
 - `trail.segments[]` splits the trail at teleport detections (death/respawn warps). Frontends draw one polyline per segment; renderers must not interpolate across gaps.
+- `ship_timeline` (**`match.schema_version` 25**, `PIPELINE_VERSION` 45) is the full-rate `UpdateTick.PlayerState.odf` step function (transitions only, 0.1 s precision, verbatim wire ODF strings). The 3D replay (`replay-ship-tracker.js`) prefers it over the pre-v25 sparse kill/pickup/snipe reconstruction, which lagged re-ships until the player's next attesting event. Display-only; not in contributions. Pre-v25 JSON has no field (tracker falls back).
 - When no `UpdateTick` data is present, the block emits with `has_position_data: false`, empty `players: {}`, and nulls/zeros elsewhere. Frontend gates Positioning-tab UI off this flag.
 - Full schema with field tables, derivations, and known limitations lives in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) under "Positioning Block".
 

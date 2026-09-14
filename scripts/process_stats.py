@@ -110,7 +110,10 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # next sample (collector tick-0 PlayerState.position unset -- often
 # world origin). Spawn median stays first 3 KEPT samples. No
 # match.schema_version bump (trail shape unchanged).
-PIPELINE_VERSION = 44
+# 44 -> 45: emit positioning.players[name].ship_timeline (full-rate
+# UpdateTick PlayerState.odf transitions) so the 3D replay labels the
+# ship the player is actually in. Display-only; not in contributions.
+PIPELINE_VERSION = 45
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -2818,14 +2821,17 @@ def _extract_terrain_bounds(header):
 def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                          slot_to_s64, roster_slots, nick_for_s64,
                          match_has_target_lock_data=False,
-                         terrain_bounds=None):
+                         terrain_bounds=None,
+                         ship_timelines_by_s64=None):
     """Compute the positioning block from raw per-player samples.
 
     raw_samples_by_s64: dict[s64] -> list of
     (t_sec, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio) tuples,
     in tick order. match_has_target_lock_data is the match-global flag captured
     in the main event loop (True iff any PlayerState had has_target=True during
-    the match).
+    the match). ship_timelines_by_s64: optional dict[s64] ->
+    {t: [sec], odf: [wire odf]} of full-rate ship transitions (v25);
+    attached to each player row as ship_timeline.
 
     Returns the full positioning dict per the JSON schema in the plan.
     """
@@ -3139,6 +3145,13 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
             },
             "heatmap_grid_xz": heatmap_grid_xz,
             "heatmap_polar": heatmap_polar,
+            # v25: full-rate UpdateTick PlayerState.odf transitions.
+            # Parallel arrays, transitions only, verbatim wire ODF
+            # strings (odf_map keys). Empty when this player had no
+            # non-empty ODF on any UpdateTick. Display-only — the 3D
+            # replay prefers this over the sparse event reconstruction.
+            "ship_timeline": (ship_timelines_by_s64 or {}).get(s64)
+            or {"t": [], "odf": []},
         }
 
     # --- Activity score: second pass with match-relative p95 normalizers ---
@@ -4952,6 +4965,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # per_ship_combat.
     s64_to_current_odf = {}
 
+    # v25: full-rate ship ODF transitions for the 3D replay. Append
+    # (tick, odf) whenever a player's non-empty PlayerState.odf differs
+    # from the last recorded one. Typically tens of entries per player.
+    ship_odf_transitions = defaultdict(list)
+
     # Per-(s64, odf_lower) combat aggregates. One row per player per ship
     # they used in the match. Sums kills / deaths / dealt damage /
     # shots / hits / pvp_kills / pvp_hits, all tick-joined to the active
@@ -6022,7 +6040,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     # / UnitDestroyed event in the same or following
                     # ticks attributes correctly to the player's ACTIVE
                     # ship at event time (not their starting ship).
+                    last_odf = s64_to_current_odf.get(s64)
                     s64_to_current_odf[s64] = ps.odf
+                    # v25: record every ODF change at full tick rate so
+                    # the replay can label the ship the player is
+                    # actually in (the sparse kill/pickup/snipe
+                    # reconstruction lags re-ships by minutes).
+                    if last_odf != ps.odf:
+                        ship_odf_transitions[s64].append((tick, ps.odf))
                     # v2.3: per-tick per-ship accumulator. Keyed by ODF
                     # (lowercased) directly -- no class taxonomy. The
                     # leaderboard build resolves each ODF to a pretty
@@ -7125,6 +7150,19 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     else:
         normalized_samples = {}
 
+    # v25: normalize ship ODF transitions onto the same t=0 as trail.t
+    # (seconds from min_tick). Keep 0.1s precision so a re-ship at
+    # tick 96406 / 20 = 4820.3s lands exactly, not floored to 4820.
+    ship_timelines_by_s64 = {}
+    if min_tick != float("inf") and ship_odf_transitions:
+        for s64, trans in ship_odf_transitions.items():
+            t_list = []
+            odf_list = []
+            for t_raw, odf in trans:
+                t_list.append(round((t_raw - min_tick) / tick_rate, 1))
+                odf_list.append(odf)
+            ship_timelines_by_s64[s64] = {"t": t_list, "odf": odf_list}
+
     positioning_block = _compute_positioning(
         normalized_samples,
         min_tick if min_tick != float("inf") else 0,
@@ -7134,6 +7172,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         nick_for_s64,
         match_has_target_lock_data=match_has_target_lock_data,
         terrain_bounds=terrain_bounds,
+        ship_timelines_by_s64=ship_timelines_by_s64,
     )
     # Private side-channel (never serialized): {player name -> [spell secs]}.
     # Pooled into the per-team `thug_supply` medians further down.
@@ -7672,12 +7711,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # / slot-correction reasons). Header-only 0-tick ghosts are
             # dropped (Sept 7 2026 collector leak). Not gated on header
             # length. Pre-v3 matches emit roster_qa: null.
-            # v24 (this version): BUILD feed rows inherit the matched QUEUE
-            # scrap triad (bank/cap/pools at queue time); `builds.teams`
-            # `scavs_built` (mobile scavenger BUILD completions);
-            # `thug_supply.{n}` gains `commander_row` (commander attrition
-            # sibling -- team totals stay thug-only). Display-only.
-            "schema_version": 24,
+            # v24: BUILD feed rows inherit the matched QUEUE scrap triad
+            # (bank/cap/pools at queue time); `builds.teams` `scavs_built`
+            # (mobile scavenger BUILD completions); `thug_supply.{n}`
+            # gains `commander_row` (commander attrition sibling -- team
+            # totals stay thug-only). Display-only.
+            # v25 (this version): `positioning.players[name].ship_timeline`
+            # (full-rate UpdateTick PlayerState.odf transitions) so the
+            # 3D replay labels the ship the player is actually in.
+            # Display-only; not in contributions.
+            "schema_version": 25,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
