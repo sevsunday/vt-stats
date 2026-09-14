@@ -461,9 +461,9 @@ Axis convention: **+X East, +Y Up, +Z North** (developer-confirmed). Horizontal 
 
 Downsample target: **1 Hz** regardless of source `tick_rate`. Keep a sample if `(tick - min_tick) % (tick_rate / 1) == 0` per player (gaps don't drift cadence because each player has its own `last_kept_tick`).
 
-Spawn: **median of first 3 kept samples** per player (robust against tick-0 jitter).
+Spawn: **median of first 3 kept samples** per player (robust against tick-0 jitter). A leading 1 Hz sample that already exceeds `POSITIONING_TELEPORT_MIN_SPEED` (300 u/s) to the next sample is **dropped first** (`_drop_leading_teleport_prefix`; `PIPELINE_VERSION` 44) — collector tick-0 `PlayerState.position` is often unset at world origin. Later death/respawn jumps stay in the trail.
 
-Teleport detection: self-calibrated `max(300, p99_speed × 2)` u/s on horizontal delta only. Teleport gaps excluded from `path_length`, split `trail.segments`, and exclude first re-entry of each new segment from `return_to_base_count`. Teleport ticks still count for `time_in_base_pct`.
+Teleport detection: self-calibrated `max(300, p99_speed × 2)` u/s on horizontal delta only. Teleport gaps excluded from `path_length`, split `trail.segments`, and exclude first re-entry of each new segment from `return_to_base_count`. Teleport ticks still count for `time_in_base_pct`. Replay interpolation also skips a leftover singleton prefix on unreprocessed JSON so paused t=0 holds the real spawn, not map center.
 
 `base_separation`: floored internal scaling value `max(computed_centroid_dist, 500, observed_max_range × 0.3)`. Drives `R_base = 0.15 × base_separation` for the `time_in_base_pct` heuristics. **Not** the user-facing "how far apart are the bases" measurement — that is `base_to_base_distance`, the raw unfloored horizontal distance between Team 1 and Team 2 spawn centroids (`null` when either team empty). Both fields are emitted on the positioning block; `base_to_base_distance` is also mirrored onto the `match` object. Personal base radius: team stddev × 1.1 clipped to `[100, 400]`; 150 fallback for unknown/small teams.
 

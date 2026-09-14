@@ -106,7 +106,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # placeholder "Unknown" on header.author_steam64 (canonical Steam name
 # unchanged). match.roster[].nickname stays wire-accurate. No
 # match.schema_version bump (shape unchanged).
-PIPELINE_VERSION = 43
+# 43 -> 44: drop leading 1 Hz trail samples that teleport-jump to the
+# next sample (collector tick-0 PlayerState.position unset -- often
+# world origin). Spawn median stays first 3 KEPT samples. No
+# match.schema_version bump (trail shape unchanged).
+PIPELINE_VERSION = 44
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -2506,6 +2510,33 @@ def _horiz_dist(ax, az, bx, bz):
     return (dx * dx + dz * dz) ** 0.5
 
 
+def _drop_leading_teleport_prefix(samples):
+    """Drop prefix samples that teleport-jump to the next 1 Hz sample.
+
+    Collector tick-0 ``PlayerState.position`` is often unset (world origin
+    or mid-map). Teleport detection would isolate those as a singleton
+    ``[[0, 0], ...]`` segment; dropping them here so spawn / replay /
+    heatmaps start at the real base. Only a PREFIX is stripped -- later
+    death/respawn jumps stay in the trail as mid-trail segments.
+
+    Uses ``POSITIONING_TELEPORT_MIN_SPEED`` (300 u/s) without waiting for
+    the match p99. A real opening walk never covers 300 units in one
+    second. ``samples`` is ``(t_sec, x, y, z, ...)`` in time order.
+    """
+    if not samples or len(samples) < 2:
+        return samples
+    out = list(samples)
+    while len(out) >= 2:
+        dt = out[1][0] - out[0][0]
+        if dt <= 0:
+            break
+        speed = _horiz_dist(out[0][1], out[0][3], out[1][1], out[1][3]) / dt
+        if speed <= POSITIONING_TELEPORT_MIN_SPEED:
+            break
+        out.pop(0)
+    return out
+
+
 def _median(values):
     """Median of a list of floats. Assumes non-empty input."""
     sorted_vals = sorted(values)
@@ -2824,6 +2855,9 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
     # False for legacy buffers that predate the 6-tuple (len(s) < 6).
     trails = {}
     for s64, samples in raw_samples_by_s64.items():
+        if not samples:
+            continue
+        samples = _drop_leading_teleport_prefix(samples)
         if not samples:
             continue
         t_arr = [s[0] for s in samples]

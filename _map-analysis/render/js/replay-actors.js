@@ -295,9 +295,11 @@ const TRAIL_HALO_OPACITY   = 0.45;
  * (x, z) so the glyph yaw faces the direction of travel without flickering.
  * Stationary actors keep their last heading.
  *
- * Out-of-window actors (tSec outside [firstSeenSec, lastSeenSec]) are made
- * invisible; this keeps glyphs from snapping back to spawn at the bounds
- * and avoids ghost actors hovering at world origin.
+ * Out-of-window actors (tSec outside [firstSeenSec - 2s, lastSeenSec]) are
+ * made invisible; this keeps glyphs from snapping back to spawn at the
+ * bounds and avoids ghost actors hovering at world origin. The 2s lead
+ * slack covers a dropped collector tick-0 prefix so paused t=0 still
+ * shows the first kept spawn sample.
  *
  * `opts` (all optional):
  *   - shipTracker  : ship-at-tick lookup from buildShipTracker(); when
@@ -334,8 +336,11 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
     }
 
     // Out of trail window -> hide glyph. We re-show on next frame inside
-    // window, no extra allocation.
-    if (tSec < actor.firstSeenSec - 0.5 || tSec > actor.lastSeenSec + 0.5) {
+    // window, no extra allocation. Slack before firstSeen is 2s (not 0.5)
+    // so a dropped collector tick-0 prefix (first_seen_sec = 1 after
+    // PIPELINE_VERSION 44) still shows at paused t=0; interpolateTrailXYZ
+    // already holds the first kept spawn sample for tSec <= t[0].
+    if (tSec < actor.firstSeenSec - 2.0 || tSec > actor.lastSeenSec + 0.5) {
       actor.mesh.visible = false;
       continue;
     } else {

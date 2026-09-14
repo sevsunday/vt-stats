@@ -308,6 +308,37 @@ function upperBound(arr, target) {
 
 // -------------------- Trail interpolation (XYZ) --------------------
 
+// Same floor as POSITIONING_TELEPORT_MIN_SPEED in scripts/process_stats.py.
+const TRAIL_TELEPORT_MIN_SPEED = 300;
+
+/**
+ * Skip a leading singleton teleport prefix (collector tick-0 position
+ * unset — often world origin). Unreprocessed JSON still has
+ * `segments [[0,0],[1,…]]`; after PIPELINE_VERSION 44 the prefix is already
+ * dropped and this returns 0.
+ */
+export function firstUsableTrailIdx(trail) {
+  const t = trail && trail.t;
+  if (!t || !t.length) return 0;
+  const n = t.length;
+  const segs = (trail.segments && trail.segments.length) ? trail.segments : [[0, n - 1]];
+  let s = 0;
+  while (s < segs.length - 1) {
+    const a0 = segs[s][0];
+    const a1 = segs[s][1];
+    if (a0 !== a1) break;
+    const b = segs[s + 1][0];
+    if (b <= a0 || b >= n) break;
+    const dt = t[b] - t[a0];
+    if (!(dt > 0)) break;
+    const dx = trail.x[b] - trail.x[a0];
+    const dz = trail.z[b] - trail.z[a0];
+    if (Math.hypot(dx, dz) / dt <= TRAIL_TELEPORT_MIN_SPEED) break;
+    s += 1;
+  }
+  return segs[s][0];
+}
+
 /**
  * Segment-aware binary search on `trail.t[]` returning {x, y, z, idx} at
  * `tSec`. Mirror of js/positioning-player.js:405-437 extended to interpolate
@@ -317,14 +348,19 @@ function upperBound(arr, target) {
  * lookup straddles a segment boundary (i.e. between a respawn / teleport),
  * we snap to the previous segment's last sample rather than tweening across
  * the gap. That gives a clean "respawn cut" rather than a flyover.
+ *
+ * A leading singleton junk sample (t=0 at origin) is skipped: paused t=0
+ * holds the first usable spawn sample, and a straddling pair snaps forward
+ * instead of holding at the junk `lo`.
  */
 export function interpolateTrailXYZ(trail, tSec) {
   const t = trail.t;
   if (!t || !t.length) return null;
   const n = t.length;
-  if (tSec <= t[0]) {
-    return finite3(trail.x[0], trail.y[0], trail.z[0], 0,
-      scalarAt(trail.hp, 0), scalarAt(trail.ammo, 0));
+  const usable = firstUsableTrailIdx(trail);
+  if (tSec <= t[usable]) {
+    return finite3(trail.x[usable], trail.y[usable], trail.z[usable], usable,
+      scalarAt(trail.hp, usable), scalarAt(trail.ammo, usable));
   }
   if (tSec >= t[n - 1]) {
     return finite3(trail.x[n - 1], trail.y[n - 1], trail.z[n - 1], n - 1,
@@ -336,10 +372,20 @@ export function interpolateTrailXYZ(trail, tSec) {
     const mid = (lo + hi) >> 1;
     if (t[mid] <= tSec) lo = mid; else hi = mid;
   }
+  if (lo < usable) {
+    lo = usable;
+    if (hi < usable) hi = Math.min(n - 1, usable + 1);
+  }
   // Segment-boundary snap: if lo and hi are in different segments (i.e. a
-  // teleport/respawn happens between them) hold position at lo.
+  // teleport/respawn happens between them) hold position at lo — unless lo
+  // is still a skipped prefix, in which case snap forward to usable/hi.
   const segs = (trail.segments && trail.segments.length) ? trail.segments : [[0, n - 1]];
   if (segOfIdx(lo, segs) !== segOfIdx(hi, segs)) {
+    if (lo < usable) {
+      const snap = hi >= usable ? hi : usable;
+      return finite3(trail.x[snap], trail.y[snap], trail.z[snap], snap,
+        scalarAt(trail.hp, snap), scalarAt(trail.ammo, snap));
+    }
     return finite3(trail.x[lo], trail.y[lo], trail.z[lo], lo,
       scalarAt(trail.hp, lo), scalarAt(trail.ammo, lo));
   }
@@ -413,10 +459,12 @@ export function sliceTrailWindow(trail, tSec, lookbackSec) {
     }
     head = (t[hi] <= tSec) ? hi : lo;
   }
+  const usable = firstUsableTrailIdx(trail);
+  if (head < usable) head = usable;
   // Walk backward until we hit a segment boundary or the lookback floor.
   const segs = (trail.segments && trail.segments.length) ? trail.segments : [[0, n - 1]];
   const headSeg = segOfIdx(head, segs);
-  const segStart = segs[headSeg][0];
+  const segStart = Math.max(segs[headSeg][0], usable);
   const tFloor = tSec - lookbackSec;
 
   let tail = head;

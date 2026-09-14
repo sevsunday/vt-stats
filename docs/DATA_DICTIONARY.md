@@ -1247,7 +1247,7 @@ Player movement analytics derived from `UpdateTick` events. Captured positions a
 
 | Field | Type | Description |
 |---|---|---|
-| `spawn` | `{x, y, z}` | Median of first 3 kept samples — robust against tick-0 jitter |
+| `spawn` | `{x, y, z}` | Median of first 3 **kept** samples — robust against tick-0 jitter. A leading 1 Hz sample that teleport-jumps to the next sample (collector `PlayerState.position` unset at origin / mid-map) is dropped before this median, so it is not one of the three. |
 | `personal_base_radius` | `number` | Clip of `team_radius × 1.1` to the `[100, 400]` range; 150 fallback |
 | `sample_count` | `number` | Per-player kept-sample count (may be less than `match_sample_count` for late joiners / early disconnects) |
 | `first_seen_sec` | `number` | First `trail.t[]` value |
@@ -1264,7 +1264,8 @@ Raw `UpdateTick` events pass through a six-stage funnel before metrics are emitt
 ```mermaid
 flowchart TD
   Raw["Raw UpdateTick PlayerStates"] --> Down["1. Downsample to 1 Hz per player"]
-  Down --> Spawn["2. Spawn ref = median of first 3 kept samples"]
+  Down --> Prefix["1b. Drop leading teleport-prefix samples"]
+  Prefix --> Spawn["2. Spawn ref = median of first 3 kept samples"]
   Spawn --> Teleport["3. Self-calibrated teleport threshold"]
   Teleport --> Scale["4. Team-scale constants (base_separation, radii)"]
   Scale --> Metrics["5. Per-player metrics (dist, path, hull, returns, time_in_base)"]
@@ -1274,7 +1275,8 @@ flowchart TD
 Stage-by-stage code anchors in `scripts/process_stats.py`:
 
 1. **Downsample to 1 Hz per player.** Independent cadence per player so absences don't drift sampling. Constants: `POSITIONING_SAMPLE_RATE_HZ = 1` at [scripts/process_stats.py:36](scripts/process_stats.py); downsample gate lives in the raw UpdateTick loop around [scripts/process_stats.py:773-776](scripts/process_stats.py).
-2. **Spawn reference = median of first 3 kept samples.** Robust against tick-0 jitter. Constant `POSITIONING_SPAWN_SAMPLES = 3` at [scripts/process_stats.py:37](scripts/process_stats.py); computed at [scripts/process_stats.py:446-451](scripts/process_stats.py).
+1b. **Drop leading teleport-prefix samples.** While the step from sample 0 → 1 exceeds `POSITIONING_TELEPORT_MIN_SPEED` (300 u/s), pop sample 0. Collector tick-0 position is often unset (world origin). Later death/respawn jumps are **not** stripped (prefix only). `_drop_leading_teleport_prefix()` in [scripts/process_stats.py](scripts/process_stats.py).
+2. **Spawn reference = median of first 3 kept samples.** Robust against tick-0 jitter. Constant `POSITIONING_SPAWN_SAMPLES = 3`; computed after the prefix drop.
 3. **Self-calibrated teleport threshold.** `max(300 u/s, p99_speed × 2)` — see Teleport detection below. Computed at [scripts/process_stats.py:515-522](scripts/process_stats.py).
 4. **Team-scale constants.** `base_separation` (three-way floor) and per-team base radii. Computed at [scripts/process_stats.py:453-499](scripts/process_stats.py).
 5. **Per-player metrics.** Distances, path length (teleport-aware), convex hull, hysteresis-gated returns, time-in-base. First-pass loop at [scripts/process_stats.py:528-620](scripts/process_stats.py).
@@ -1328,6 +1330,8 @@ The threshold is **self-calibrated per match**: compute per-step speeds across a
 - First re-entry of each new segment excluded from `return_to_base_count`
 
 But still counted in `time_in_base_pct` because the player genuinely was at their base during the respawn window.
+
+**Leading uninitialized sample (`PIPELINE_VERSION` 44).** A first 1 Hz sample that already exceeds the 300 u/s floor to the next sample (often `(0, 0)` on the recording client) is **dropped from the trail** before spawn / segments / metrics. Replay interpolation also skips a leftover singleton prefix on unreprocessed JSON so paused t=0 sits at the real base, not map center.
 
 ##### `base_separation` derivation
 
