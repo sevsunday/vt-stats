@@ -5557,41 +5557,62 @@
     const active = activeFactions || new Set(['1', '2']);
     const bothActive = active.has('1') && active.has('2');
 
-    const rosterHtml = (teamList) => {
-      if (!teamList || teamList.length === 0) return '<em style="color:var(--kb-text-muted)">No players</em>';
-      // Render each name with optional inline in-game-nick subtext when the
-      // canonical/known name differs from the in-game alias. The subtext is
-      // emitted by the pipeline (in_game_nick is null when they match, or
-      // when it is the collector-host placeholder Unknown); usefulInGameNick
-      // also drops that placeholder on current JSON before reprocess.
-      return teamList.map(p => {
+    // Wrap chips: commander (slot 1 / 6) first with a shield pip, then
+    // remaining slots in roster order. Camera-pod rows (leaderboard
+    // is_campod) are omitted from this roster — they stay on the
+    // Player Leaderboard / kill feed / everywhere else. Names
+    // deep-link via vtPlayerLinkHtml. in_game_nick is null when it
+    // matches the canonical name, or when it is the collector-host
+    // placeholder Unknown; usefulInGameNick also drops that
+    // placeholder on current JSON before reprocess.
+    const campodKeys = new Set();
+    ((currentData && currentData.leaderboard) || []).forEach(r => {
+      if (!r || !r.is_campod) return;
+      if (r.steam64) campodKeys.add(String(r.steam64));
+      if (r.name) campodKeys.add(r.name);
+    });
+    const isCampodPlayer = (p) =>
+      (p.steam64 && campodKeys.has(String(p.steam64))) || (p.name && campodKeys.has(p.name));
+    const rosterHtml = (teamList, leaderSlot) => {
+      if (!teamList || teamList.length === 0) {
+        return '<em class="vt-faction-roster-empty">No players</em>';
+      }
+      const visible = teamList.filter(p => !isCampodPlayer(p));
+      // Entire side was camera-pod: skip the chip row rather than
+      // claiming "No players" (team totals still render below).
+      if (visible.length === 0) return '';
+      const sorted = [...visible].sort((a, b) => {
+        const aCmdr = a.slot === leaderSlot ? 0 : 1;
+        const bCmdr = b.slot === leaderSlot ? 0 : 1;
+        if (aCmdr !== bCmdr) return aCmdr - bCmdr;
+        return (a.slot || 0) - (b.slot || 0);
+      });
+      const chips = sorted.map(p => {
+        const isCmdr = p.slot === leaderSlot;
         const nickRaw = usefulInGameNick(p.in_game_nick);
         const nick = nickRaw
           ? `<span class="vt-nick-inline">@${esc(nickRaw)}</span>`
           : '';
-        return `${esc(p.name)}${nick}`;
-      }).join(', ');
+        const pip = isCmdr
+          ? '<i class="bi bi-shield-fill vt-faction-cmdr-pip" title="Commander"></i>'
+          : '';
+        const chipClass = isCmdr
+          ? 'vt-faction-player-chip vt-faction-player-chip--cmdr'
+          : 'vt-faction-player-chip';
+        return `<span class="${chipClass}">${pip}${vtPlayerLinkHtml(p.name, p.steam64)}${nick}</span>`;
+      }).join('');
+      return `<div class="vt-faction-roster">${chips}</div>`;
     };
 
-    const leaderName = (teamList, leaderSlot) => {
-      if (teamList && teamList.length > 0) {
-        const leader = teamList.find(p => p.slot === leaderSlot);
-        if (leader) return esc(leader.name);
-        return esc(teamList[0].name);
-      }
-      return null;
-    };
-
-    // Header annotation: in multi-player mode for teams that are rendering
-    // their filtered subset, show "N selected" instead of the team-leader
-    // name. Non-subset teams (and team/all modes) keep the leader-name.
+    // Multi-player subset: "N selected" in the header. Commander name
+    // lives on the first roster chip, not as a header subtitle.
     const o = opts || {};
-    const t1Header = (o.multiPlayer && o.t1Subset)
-      ? `${(teams['1'] || []).length} selected`
-      : (leaderName(teams['1'], 1) || 'TBD');
-    const t2Header = (o.multiPlayer && o.t2Subset)
-      ? `${(teams['2'] || []).length} selected`
-      : (leaderName(teams['2'], 6) || 'TBD');
+    const t1SubsetNote = (o.multiPlayer && o.t1Subset)
+      ? `<span class="vt-faction-subset-note">${(teams['1'] || []).length} selected</span>`
+      : '';
+    const t2SubsetNote = (o.multiPlayer && o.t2Subset)
+      ? `<span class="vt-faction-subset-note">${(teams['2'] || []).length} selected</span>`
+      : '';
 
     // Faction badge: derived from match.team_factions (match-global,
     // never narrowed by the player filter -- faction is fixed per
@@ -5623,47 +5644,53 @@
     const t2Muted = !bothActive && !active.has('2');
     const mutedNote = '<span class="vt-faction-muted-badge" title="Not included in current filter"><i class="bi bi-eye-slash me-1"></i>Filtered out</span>';
 
+    // Compact labeled pair. Titles must not contain double quotes —
+    // esc() covers & < > only (tooltip-copy contract).
+    const compactStat = (label, valueHtml, title) => `
+          <div class="vt-faction-stat"${title ? ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(title)}"` : ''}>
+            <span class="vt-faction-stat-label">${esc(label)}</span>
+            <span class="vt-faction-stat-value">${valueHtml}</span>
+          </div>`;
+
+    // Player/Assets breakdown used to occupy its own row; it now rides
+    // on the Dealt tooltip so the strip stays one line.
+    const dealtTitle = (f) =>
+      `Dealt. Player ${fmt(f.player_dealt || 0)} (PvP ${fmt(f.pvp_dealt || 0)} · PvE ${fmt(f.pve_dealt || 0)}). Assets ${fmt(f.asset_dealt || 0)}.`;
+
+    const combatStats = (f) => `
+          <div class="vt-faction-stats">
+            ${compactStat('Dealt', fmt(f.total_dealt || 0), dealtTitle(f))}
+            ${compactStat('Rec', fmt(f.total_received || 0), 'Damage received by this team.')}
+            ${compactStat('Acc', fmtAccPct(f.accuracy), 'Team shot accuracy.')}
+          </div>`;
+
     // Economy stats are match-global / always-unfiltered (same passthrough
     // as highlights). Combat Dealt/Received/Acc still follow the player
     // filter. Pre-v4 matches omit the row rather than inventing zeros.
-    const econStatRow = (side) => {
+    const econStats = (side) => {
       if (typeof matchHasResourceData !== 'function' || !matchHasResourceData()) return '';
       const E = ((currentData && currentData.economy && currentData.economy.teams) || {})[side] || {};
       return `
-          <div class="d-flex flex-wrap gap-4 mb-3">
-            <div class="stat-card" data-bs-toggle="tooltip" data-bs-placement="top" title="Scrap generated. Every point of scrap that arrived in the bank all match."><div class="stat-value">${fmtScrap(E.scrap_income)}</div><div class="stat-label">Scrap</div></div>
-            <div class="stat-card" data-bs-toggle="tooltip" data-bs-placement="top" title="Scrap spent. Every point of scrap that left the bank."><div class="stat-value">${fmtScrap(E.scrap_outflow_gross)}</div><div class="stat-label">Spent</div></div>
-            <div class="stat-card" data-bs-toggle="tooltip" data-bs-placement="top" title="Loose collected. Scrap hauled in from the field by scavengers."><div class="stat-value">${fmtScrap(E.income_loose)}</div><div class="stat-label">Loose</div></div>
+          <div class="vt-faction-stats">
+            ${compactStat('Scrap', fmtScrap(E.scrap_income), 'Scrap generated. Every point of scrap that arrived in the bank all match.')}
+            ${compactStat('Spent', fmtScrap(E.scrap_outflow_gross), 'Scrap spent. Every point of scrap that left the bank.')}
+            ${compactStat('Loose', fmtScrap(E.income_loose), 'Loose collected. Scrap hauled in from the field by scavengers.')}
           </div>`;
     };
 
+    const panelHtml = (side, totals, roster, leaderSlot, teamClass, muted, winnerClass, facBadge, trophy, subsetNote) => `
+      <div class="col-md-6">
+        <div class="vt-faction-panel ${teamClass}${muted ? ' vt-faction-panel--muted' : ''}${winnerClass}">
+          <h6 class="vt-faction-heading"><span>Team ${side}</span>${facBadge}${trophy}${subsetNote}${muted ? mutedNote : ''}</h6>
+          ${rosterHtml(roster, leaderSlot)}
+          ${combatStats(totals)}
+          ${econStats(side)}
+        </div>
+      </div>`;
+
     container.innerHTML = `
-      <div class="col-md-6">
-        <div class="vt-faction-panel ${t1Muted ? 'vt-faction-panel--muted' : ''}${t1Winner}" style="border-left-color:var(--kb-primary);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-primary);">Team 1 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t1Header}</span>${t1FacBadge}${t1WinnerTrophy}${t1Muted ? mutedNote : ''}</h6>
-          <div class="d-flex flex-wrap gap-4 mb-3">
-            <div class="stat-card"><div class="stat-value">${fmt(f1.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
-            <div class="stat-card"><div class="stat-value">${fmt(f1.total_received || 0)}</div><div class="stat-label">Received</div></div>
-            <div class="stat-card"><div class="stat-value">${fmtAccPct(f1.accuracy)}</div><div class="stat-label">Accuracy</div></div>
-          </div>
-          ${econStatRow('1')}
-          <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f1.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f1.pvp_dealt || 0)} · PvE ${fmt(f1.pve_dealt || 0)})</span> | Assets: ${fmt(f1.asset_dealt || 0)}</div>
-          <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['1'])}</div>
-        </div>
-      </div>
-      <div class="col-md-6">
-        <div class="vt-faction-panel ${t2Muted ? 'vt-faction-panel--muted' : ''}${t2Winner}" style="border-left-color:var(--kb-accent);">
-          <h6 class="d-flex align-items-center gap-2 mb-3" style="color:var(--kb-accent);">Team 2 <span class="fw-normal" style="font-size:0.8rem;color:var(--kb-text-secondary);">— ${t2Header}</span>${t2FacBadge}${t2WinnerTrophy}${t2Muted ? mutedNote : ''}</h6>
-          <div class="d-flex flex-wrap gap-4 mb-3">
-            <div class="stat-card"><div class="stat-value">${fmt(f2.total_dealt || 0)}</div><div class="stat-label">Dealt</div></div>
-            <div class="stat-card"><div class="stat-value">${fmt(f2.total_received || 0)}</div><div class="stat-label">Received</div></div>
-            <div class="stat-card"><div class="stat-value">${fmtAccPct(f2.accuracy)}</div><div class="stat-label">Accuracy</div></div>
-          </div>
-          ${econStatRow('2')}
-          <div class="small" style="color:var(--kb-text-muted);">Player: ${fmt(f2.player_dealt || 0)} <span style="opacity:0.75;">(PvP ${fmt(f2.pvp_dealt || 0)} · PvE ${fmt(f2.pve_dealt || 0)})</span> | Assets: ${fmt(f2.asset_dealt || 0)}</div>
-          <div class="small mt-1" style="color:var(--kb-text-secondary);">${rosterHtml(teams['2'])}</div>
-        </div>
-      </div>
+      ${panelHtml('1', f1, teams['1'], 1, 'vt-faction-panel--t1', t1Muted, t1Winner, t1FacBadge, t1WinnerTrophy, t1SubsetNote)}
+      ${panelHtml('2', f2, teams['2'], 6, 'vt-faction-panel--t2', t2Muted, t2Winner, t2FacBadge, t2WinnerTrophy, t2SubsetNote)}
     `;
 
     // Outcome pill in the Faction Scoreboard card header. We deliberately

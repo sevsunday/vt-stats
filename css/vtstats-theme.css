@@ -1980,16 +1980,16 @@ body::before {
 }
 
 /* ============================================================================
-   FACTION SCOREBOARD — Hero Treatment
-   First visual in the Overview tab — elevated presentation
+   FACTION SCOREBOARD — Player-first compact layout
+   Roster chips lead; team combat/economy totals sit in a quiet strip below.
    ============================================================================ */
 
 #section-faction .card-body {
-    padding: 1.5rem;
+    padding: 1.15rem;
 }
 
 .vt-faction-panel {
-    padding: 1.5rem;
+    padding: 1rem 1.1rem;
     border-radius: 0;
     background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
     backdrop-filter: blur(6px);
@@ -1999,17 +1999,125 @@ body::before {
     transition: box-shadow 0.2s ease;
 }
 
+.vt-faction-panel--t1 {
+    border-left-color: var(--kb-primary);
+}
+
+.vt-faction-panel--t2 {
+    border-left-color: var(--kb-accent);
+}
+
 .vt-faction-panel:hover {
     box-shadow: var(--vt-shadow-elevation-1);
 }
 
-.vt-faction-panel .stat-value {
-    font-size: 1.75rem;
-    font-weight: 700;
+.vt-faction-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-bottom: 0.65rem;
 }
 
-.vt-faction-panel .stat-label {
-    margin-top: 0.125rem;
+.vt-faction-panel--t1 .vt-faction-heading {
+    color: var(--kb-primary);
+}
+
+.vt-faction-panel--t2 .vt-faction-heading {
+    color: var(--kb-accent);
+}
+
+.vt-faction-subset-note {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--kb-text-secondary);
+}
+
+.vt-faction-roster {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.7rem;
+}
+
+.vt-faction-roster-empty {
+    color: var(--kb-text-muted);
+    font-size: 0.85rem;
+}
+
+.vt-faction-player-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.28rem 0.7rem;
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--kb-bg-muted) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--kb-border-subtle), transparent 25%);
+    border-radius: 999px;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vt-faction-player-chip .vt-nick-inline {
+    font-weight: 400;
+}
+
+.vt-faction-player-chip--cmdr {
+    background: color-mix(in oklab, var(--kb-bg-muted) 55%, transparent);
+}
+
+.vt-faction-panel--t1 .vt-faction-player-chip--cmdr {
+    border-color: color-mix(in oklab, var(--kb-primary) 55%, var(--kb-border-subtle));
+}
+
+.vt-faction-panel--t2 .vt-faction-player-chip--cmdr {
+    border-color: color-mix(in oklab, var(--kb-accent) 55%, var(--kb-border-subtle));
+}
+
+.vt-faction-cmdr-pip {
+    color: var(--kb-warning);
+    font-size: 0.78em;
+    line-height: 1;
+}
+
+.vt-faction-stats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.2rem 1rem;
+}
+
+.vt-faction-stats + .vt-faction-stats {
+    margin-top: 0.3rem;
+}
+
+.vt-faction-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    cursor: help;
+}
+
+.vt-faction-stat-label {
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+}
+
+.vt-faction-stat-value {
+    font-family: 'Geist Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--kb-text-primary);
 }
 
 /* Muted state — team is outside the current filter scope.
@@ -2051,9 +2159,9 @@ body::before {
 }
 
 /* Faction badge — derived from match.team_factions (schema_version 3+).
-   Sits next to the team-leader name in faction scoreboard headers. Color
-   is keyed by data-faction-code: i = ISDF, e = Hadean, f = Scion. All
-   colors come from existing --kb-* tokens; no hardcoded values. */
+   Sits next to Team N in faction scoreboard headers. Color is keyed by
+   data-faction-code: i = ISDF, e = Hadean, f = Scion. All colors come
+   from existing --kb-* tokens; no hardcoded values. */
 .vt-faction-badge {
     display: inline-flex;
     align-items: center;
