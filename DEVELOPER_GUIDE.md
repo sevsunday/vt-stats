@@ -164,7 +164,7 @@ Re-ship time is measured **spell-based, not death-anchored**: `_reship_spells()`
 | 1 | `map` | `string` | Map filename (e.g. `havenvsr.bzn`) |
 | 2 | `start_time` | `google.protobuf.Timestamp` | Match start time (UTC) |
 | 3 | `author_nickname` | `string` | Recording player's name. **v3 note:** set at last-tick and currently resolves to `'Unknown'` (upstream nit); the pipeline derives submitter identity from the sessions folder name instead. |
-| 4 | `author_steam64` | `uint64` | Recording player's Steam64 ID |
+| 4 | `author_steam64` | `uint64` | Recording player's Steam64 ID (the statsgate client). When that player's `PlayerInfo.nickname` is the placeholder `'Unknown'` (known collector bug when the host is also the recorder), `in_game_nick_for` omits it; `match.roster[].nickname` stays wire-accurate. Do not key off `author_nickname` (v3+ it is `'Unknown'` even when `PlayerInfo.nickname` is correct). |
 | 5 | `tick_rate` | `uint32` | Simulation tick rate (typically 20) |
 | 6 | `s64_to_nick` | `map<uint64, string>` | **v1/v2 only — `reserved` in v3.** Steam64 → Nickname |
 | 7 | `teamnum_to_s64` | `map<int32, uint64>` | **v1/v2 only — `reserved` in v3.** Slot (1-10) → Steam64 |

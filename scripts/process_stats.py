@@ -102,7 +102,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # scrap triad (bank/cap/pools at queue time), builds.teams.scavs_built
 # (mobile scavenger BUILD completions), and thug_supply.{n}.commander_row
 # (commander attrition sibling; team totals stay thug-only). Display-only.
-PIPELINE_VERSION = 42
+# 42 -> 43: in_game_nick_for suppresses the collector-host GetName
+# placeholder "Unknown" on header.author_steam64 (canonical Steam name
+# unchanged). match.roster[].nickname stays wire-accurate. No
+# match.schema_version bump (shape unchanged).
+PIPELINE_VERSION = 43
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -4571,11 +4575,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # (both accounts in one lobby) is a hard stop — see
     # scripts/identity_aliases.py. Docs: DATA_DICTIONARY.md §10.4.
     alias_display_override = {}  # target_s64 -> source display name
+    alias_reroute_map = {}  # source_s64 -> target_s64 (empty when no hits)
     alias_hits = identity_aliases.resolve_silent_aliases(
         slot_to_s64, match_label=str(source_file or ""), no_prompt=no_prompt,
     )
     if alias_hits:
-        alias_reroute_map = {}
         for slot, (src, tgt) in alias_hits.items():
             src_nick = s64_to_nick.get(src)
             alias_display_override[tgt] = (
@@ -4612,18 +4616,44 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "s64": str(s64),
             }
 
+    # Recording / statsgate client Steam64. Known collector bug when the
+    # host is also the recorder: that player's PlayerInfo.nickname is the
+    # placeholder "Unknown". Identifies the collector; there is no
+    # separate game-host field. Do not key off author_nickname (v3+ it
+    # is "Unknown" even when PlayerInfo.nickname is correct).
+    author_s64 = int(getattr(header, "author_steam64", 0) or 0)
+    collector_s64s = set()
+    if author_s64:
+        collector_s64s.add(author_s64)
+        aliased = alias_reroute_map.get(author_s64)
+        if aliased:
+            collector_s64s.add(aliased)
+
     def in_game_nick_for(s64, resolved_name):
         """Return the raw in-game nick if it differs from `resolved_name`
         (case-insensitive, trimmed). Otherwise return None so consumers
         can suppress the subtext entirely. Surfaces the in-game alias on
         the dashboard only when it adds new information beyond what the
         canonical/known-name registry already shows.
+
+        Also drops the collector-host GetName placeholder "Unknown"
+        (casefold) when this row is the recording player
+        (`header.author_steam64`, plus silent-alias target). If
+        author_steam64 is unset, any casefold-unknown nick is dropped so
+        we never emit `@Unknown`. Real aliases (InfectedOtter, Danya)
+        are unchanged. match.roster[].nickname stays the wire value.
         """
         raw = s64_to_nick.get(s64)
         if not raw or not resolved_name:
             return None
-        if raw.strip().casefold() == resolved_name.strip().casefold():
+        raw_stripped = raw.strip()
+        if not raw_stripped:
             return None
+        if raw_stripped.casefold() == resolved_name.strip().casefold():
+            return None
+        if raw_stripped.casefold() == "unknown":
+            if not author_s64 or s64 in collector_s64s:
+                return None
         return raw
 
     # Per-player accumulators (keyed on Steam64)
@@ -6763,7 +6793,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # subtext in the UI (leaderboard, kill feed, faction roster) when
             # it differs from the canonical/known-name `name` field
             # (case-insensitive, trimmed). None when the canonical name and
-            # the in-game nick match -- the UI suppresses the subtext.
+            # the in-game nick match, or when the nick is the collector-host
+            # GetName placeholder "Unknown" -- the UI suppresses the subtext.
             "in_game_nick": in_game_nick_for(s64, name) if s64 else None,
             "slot": slot,
             # Slot 1 = Team 1 commander, slot 6 = Team 2 commander.

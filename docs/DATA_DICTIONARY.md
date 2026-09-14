@@ -74,7 +74,7 @@ Match metadata. Most fields are captured at match start; in proto v3 the
 | 1 | `map` | `string` | Map filename (e.g. `havenvsr.bzn`) |
 | 2 | `start_time` | `Timestamp` | Match start time (UTC) |
 | 3 | `author_nickname` | `string` | Recording player's nickname (v3 note: written at last tick; currently resolves to `'Unknown'` — the pipeline uses the sessions folder name for submitter identity) |
-| 4 | `author_steam64` | `uint64` | Recording player's Steam64 ID |
+| 4 | `author_steam64` | `uint64` | Recording player's Steam64 ID (the statsgate client). Identifies the collector; there is no separate game-host field. When that player's `PlayerInfo.nickname` is the placeholder `'Unknown'` (known collector bug when the host is also the recorder), `in_game_nick_for` omits it so UI/replay show the Steam/canonical name. Do **not** key off `author_nickname` — on v3+ it is `'Unknown'` even when `PlayerInfo.nickname` is correct. `match.roster[].nickname` stays the wire value. |
 | 5 | `tick_rate` | `uint32` | Simulation tick rate (typically 20 ticks/second) |
 | 6 | `s64_to_nick` | `map<uint64, string>` | **v1/v2 only — `reserved` in v3.** Steam64 ID → Nickname lookup |
 | 7 | `teamnum_to_s64` | `map<int32, uint64>` | **v1/v2 only — `reserved` in v3.** Slot number (1-10) → Steam64 ID |
@@ -768,11 +768,11 @@ Each match file has these top-level keys:
 | `sentinel_damage` | `object` | Per-match telemetry for engine sentinels dropped by the `> 1e6` filter: `{ count, total_amount, first_tick, last_tick }`. `count` is DD+DR pair count (one pair = 1); `total_amount` is the sum of DD-side amounts. `first_tick` / `last_tick` are `null` on clean matches. Always present (zeros when clean). Match-global, always-unfiltered. See [§7](#7-sentinel-damage-filter). |
 | `has_resource_data` | `boolean` | **`match.schema_version` 17 (proto v4).** `true` iff the session carried per-tick `ResourceState` telemetry. **Absent = `false`** (inverse of the `has_bullet_hit_data` default — the legacy corpus lacks the data). Gates the `economy` block + every economy UI surface. Mirrored on manifest entries + contributions. |
 | `has_build_data` | `boolean` | **`match.schema_version` 17 (proto v4).** `true` iff the session carried `BuildEvent` telemetry. Absent = `false`. Gates the `builds` block. Mirrored on manifest entries + contributions. |
-| `roster` | `array \| null` | **v15.** Raw v3 `PlayerInfo` passthrough `[{steam64, slot, nickname, valid}]`, including invalid empty-slot garbage (`valid: false`) for wire-accurate provenance. Pre-`ACCOUNT_REROUTES`. `null` on v1/v2. Match-global, always-unfiltered. |
+| `roster` | `array \| null` | **v15.** Raw v3 `PlayerInfo` passthrough `[{steam64, slot, nickname, valid}]`, including invalid empty-slot garbage (`valid: false`) for wire-accurate provenance. Pre-`ACCOUNT_REROUTES`. `null` on v1/v2. Match-global, always-unfiltered. Nickname is the wire value — a collector-host GetName bug can leave `'Unknown'` here even when `in_game_nick` is `null` and the display name is the Steam/canonical name. |
 | `roster_conflicts` | `array` | Identity-shim audit (`[]` when header and ticks agree and no slot correction fired). v23 adds `reason`: `no_tick_presence` / `tick_only_no_slot` / `roster_hint_mismatch` / `evidence_collision` / `slot_occupied` / `low_presence` / `no_free_team_slot`. Match-global, always-unfiltered. |
 | `roster_qa` | `object \| null` | **v23.** Always-on header-vs-tick-union QA: `{header_valid, tick_union, ghosts_dropped, tick_only_added, max_tick_players, agreed}`. `agreed` is true iff the valid header Steam64 set equals the UpdateTick union. Console stays quiet when agreed. `null` pre-v3. Match-global, always-unfiltered. |
 
-Each roster entry: `{ slot, player_id, name, steam64 }`
+Each roster entry: `{ slot, player_id, name, steam64, in_game_nick }`. `in_game_nick` is `null` when it matches the canonical name (case-insensitive) or when it is the collector-host placeholder `'Unknown'` (`PIPELINE_VERSION` 43+).
 
 #### `economy` (proto v4 — `match.schema_version` 17)
 

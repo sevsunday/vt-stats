@@ -2910,6 +2910,17 @@
   window.vtPlayerHref = vtPlayerHref;
   window.vtPlayerLinkHtml = vtPlayerLinkHtml;
 
+  // Collector-host GetName placeholder: PlayerInfo.nickname "Unknown" is
+  // not a useful in-game alias. Pipeline in_game_nick_for also drops it
+  // (PIPELINE_VERSION 43); this keeps current JSON (and Overview @chips)
+  // on the canonical Steam name. Real aliases (InfectedOtter) pass.
+  function usefulInGameNick(nick) {
+    if (nick == null) return null;
+    const s = String(nick).trim();
+    if (!s || s.toLowerCase() === 'unknown') return null;
+    return s;
+  }
+
   // Name -> Steam64 reverse-lookup, scoped to the current match. The
   // kill_feed / snipe_feed entries carry display names (resolved via
   // the pipeline's nick_for_s64) but not the raw Steam64, so we rebuild
@@ -5550,11 +5561,13 @@
       if (!teamList || teamList.length === 0) return '<em style="color:var(--kb-text-muted)">No players</em>';
       // Render each name with optional inline in-game-nick subtext when the
       // canonical/known name differs from the in-game alias. The subtext is
-      // emitted by the pipeline (in_game_nick is null when they match) so
-      // we just check truthiness here.
+      // emitted by the pipeline (in_game_nick is null when they match, or
+      // when it is the collector-host placeholder Unknown); usefulInGameNick
+      // also drops that placeholder on current JSON before reprocess.
       return teamList.map(p => {
-        const nick = p.in_game_nick
-          ? `<span class="vt-nick-inline">@${esc(p.in_game_nick)}</span>`
+        const nickRaw = usefulInGameNick(p.in_game_nick);
+        const nick = nickRaw
+          ? `<span class="vt-nick-inline">@${esc(nickRaw)}</span>`
           : '';
         return `${esc(p.name)}${nick}`;
       }).join(', ');
@@ -5783,8 +5796,9 @@
       const moveCell = typeof renderMovementCell === 'function'
         ? renderMovementCell(positioning, r.name)
         : '<span style="color:var(--kb-text-muted);">—</span>';
-      const nickSub = r.in_game_nick
-        ? `<small class="vt-nick-sub">@${esc(r.in_game_nick)}</small>`
+      const nickRaw = usefulInGameNick(r.in_game_nick);
+      const nickSub = nickRaw
+        ? `<small class="vt-nick-sub">@${esc(nickRaw)}</small>`
         : '';
       // v2.5: spectator-style exclusion badges. is_campod / is_low_activity
       // are pipeline-set; supporting fields (campod_share,
@@ -6409,11 +6423,13 @@
       const m = Math.floor(sec / 60);
       const s = Math.floor(sec % 60);
       const ts = `${m}:${String(s).padStart(2, '0')}`;
-      const killerNick = entry.killer_in_game_nick
-        ? `<span class="vt-nick-inline">@${esc(entry.killer_in_game_nick)}</span>`
+      const killerNickRaw = usefulInGameNick(entry.killer_in_game_nick);
+      const killerNick = killerNickRaw
+        ? `<span class="vt-nick-inline">@${esc(killerNickRaw)}</span>`
         : '';
-      const victimNick = entry.victim_in_game_nick
-        ? `<span class="vt-nick-inline">@${esc(entry.victim_in_game_nick)}</span>`
+      const victimNickRaw = usefulInGameNick(entry.victim_in_game_nick);
+      const victimNick = victimNickRaw
+        ? `<span class="vt-nick-inline">@${esc(victimNickRaw)}</span>`
         : '';
       const killerOdfResolved = odfName(entry.killer_odf);
       const victimOdfResolved = odfName(entry.victim_odf);
@@ -6509,11 +6525,13 @@
       const m = Math.floor(sec / 60);
       const s = Math.floor(sec % 60);
       const ts = `${m}:${String(s).padStart(2, '0')}`;
-      const sniperNick = entry.sniper_in_game_nick
-        ? `<span class="vt-nick-inline">@${esc(entry.sniper_in_game_nick)}</span>`
+      const sniperNickRaw = usefulInGameNick(entry.sniper_in_game_nick);
+      const sniperNick = sniperNickRaw
+        ? `<span class="vt-nick-inline">@${esc(sniperNickRaw)}</span>`
         : '';
-      const victimNick = entry.victim_in_game_nick
-        ? `<span class="vt-nick-inline">@${esc(entry.victim_in_game_nick)}</span>`
+      const victimNickRaw = usefulInGameNick(entry.victim_in_game_nick);
+      const victimNick = victimNickRaw
+        ? `<span class="vt-nick-inline">@${esc(victimNickRaw)}</span>`
         : '';
       const sniperOdf = entry.sniper_odf
         ? `<span style="color:var(--kb-text-muted);font-size:0.75rem;">(${esc(stripOdf(entry.sniper_odf))})</span>`

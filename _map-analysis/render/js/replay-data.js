@@ -36,6 +36,17 @@ const CALIB_CONFIG_DIR  = '../calibration/configs';
 // 2466.8s, has positioning + target-lock + pickup data, proto v2.
 const DEFAULT_MATCH_ID  = '2026-05-22T22-04-31';
 
+// Collector-host GetName placeholder: PlayerInfo.nickname "Unknown" is
+// not a useful in-game alias. Pipeline in_game_nick_for also drops it
+// (PIPELINE_VERSION 43); this keeps current JSON labels on the
+// canonical Steam name (e.g. Sev). Real aliases (InfectedOtter) pass.
+export function usefulInGameNick(nick) {
+  if (nick == null) return null;
+  const s = String(nick).trim();
+  if (!s || s.toLowerCase() === 'unknown') return null;
+  return s;
+}
+
 // -------------------- URL params --------------------
 
 /**
@@ -203,7 +214,7 @@ export function buildRoster(matchData) {
 
     rows.push({
       name,                                        // canonical key
-      displayName: lbRow.in_game_nick || name,     // shown on the label
+      displayName: usefulInGameNick(lbRow.in_game_nick) || name, // shown on the label
       team,                                        // 1 | 2
       slot: lbRow.slot,
       factionCode,

@@ -201,6 +201,7 @@ Mapping is `RACE_TO_FACTION_CODE` in `scripts/process_stats.py`. When either hea
 Players are identified by `uint64` Steam64 IDs. Identity source depends on schema:
 - **v1/v2**: the header provides three lookup maps — `s64_to_nick` (Steam64 → display name), `teamnum_to_s64` (slot 1-10 → Steam64), `s64_to_teamnum` (reverse).
 - **v3**: the maps are gone (`reserved`); working identity is the valid-Steam64 union of `UpdateTick.players` via the `_build_identity_maps()` shim (`header.players` is a nickname/slot hint, always compared — see "v3 Identity" above). Everything downstream of the shim consumes the same three working dicts regardless of schema.
+- **Collector-host placeholder nick (`PIPELINE_VERSION` 43):** when the recording player (`header.author_steam64`) is also the game host, `PlayerInfo.nickname` can be the literal `'Unknown'`. `in_game_nick_for` returns `None` for that placeholder so UI/replay use the Steam/canonical name. `match.roster[].nickname` stays the wire value. Do not add an identity alias / ACCOUNT_REROUTE for this; do not key off `author_nickname` (v3+ it is `'Unknown'` even when `PlayerInfo.nickname` is correct).
 
 ## Critical: Damage Semantics
 

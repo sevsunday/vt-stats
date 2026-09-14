@@ -28,6 +28,7 @@ import {
   buildRoster,
   buildKillIndex,
   getTickRate,
+  usefulInGameNick,
 } from './replay-data.js';
 import {
   buildActorsGroup,
@@ -1608,8 +1609,10 @@ function appendKillTicker(killEntry, killerFactionCode) {
   li.className = 'kill-ticker-row';
   // Prefer in-game nick where present (matches the dashboard's renderKillFeed
   // approach and what the user actually saw on the chat overlay).
-  const killerName = killEntry.killer_in_game_nick || killEntry.killer || 'env';
-  const victimName = killEntry.victim_in_game_nick || killEntry.victim || '?';
+  const killerName = usefulInGameNick(killEntry.killer_in_game_nick)
+                     || killEntry.killer || 'env';
+  const victimName = usefulInGameNick(killEntry.victim_in_game_nick)
+                     || killEntry.victim || '?';
   // Production kill-feed schema doesn't carry a weapon; show the killer's
   // ship ODF resolved through odf_map. Falls back to bare ODF stem.
   const odfMap = (STATE.matchData && STATE.matchData.odf_map) || {};
