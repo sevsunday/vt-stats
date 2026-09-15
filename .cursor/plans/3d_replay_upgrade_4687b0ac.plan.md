@@ -1,9 +1,9 @@
 ---
 name: 3D Replay Upgrade
-overview: "Upgrade the dashboard’s 3D Replay iframe (the same viewer behind `?tab=replay`) in four phases: HUD from data we already emit, a proto/pipeline pass so BUILD positions / T-lock / structures land in JSON, then 3D structures and FX, then an Elo Δ strip. Turret-class structures (Gun Spire / Spike / Defender / Gun Tower) are DEFERRED — the collector dev suspects a bug (they are ship-class and their destruction events are missing from the wire), so structure death tracking is UnitDestroyed-only and turrets stay untracked until the fix ships."
+overview: "Upgrade the dashboard’s 3D Replay iframe (the same viewer behind `?tab=replay`) in four phases: HUD from data we already emit, a proto/pipeline pass so BUILD positions / T-lock / structures land in JSON, then 3D structures and FX, then an Elo Δ strip. New HUD must reuse the existing compact/mobile contract (body.replay-compact, bottom-sheet roster, chrome auto-hide, safe-area). Turret-class structures are DEFERRED — collector bug, ship-class, missing UnitDestroyed — so deaths are UnitDestroyed-only and turrets stay untracked until the fix ships."
 todos:
   - id: phase1-scrap-feed
-    content: "Phase 1: scrap meters, unified event feed (everything except pods by default), kill-flash/ticker Team-N fix, starting recyclers with identity-break despawn, beat toasts, v20-correct now-building strip — replay iframe only"
+    content: "Phase 1: scrap meters, unified event feed (everything except pods by default), kill-flash/ticker Team-N fix, starting recyclers with identity-break despawn, beat toasts, v20-correct now-building strip — all under the existing compact HUD contract"
     status: pending
   - id: phase2-proto-pipeline
     content: "Phase 2: sync BuildEvent.position from upstream proto, PIPELINE 46 / schema 26, emit feed[].position + trail.target[] + trail.speed[] + structures[] (UnitDestroyed-only deaths, turret-class untracked); golden inert + docs + proto regen"
@@ -12,10 +12,10 @@ todos:
     content: "Phase 3: 3D primitive structures (tracked instances only), scup-only pool tint, armory delivery-drop FX, live T-lock from trail.target, structure-death flashes"
     status: pending
   - id: phase4-elo-strip
-    content: "Phase 4: lobby Elo Δ strip (reveal-to-final-Δ; history handed over via the existing hello postMessage handshake)"
+    content: "Phase 4: lobby Elo Δ strip on desktop; compact reuses the roster bottom sheet (no new left-column overlay)"
     status: pending
   - id: verify-browser
-    content: "Browser-verify Ancient Hills dashboard replay tab + standalone; pre-v4 / Wasteland degradation; turret-untracked behavior"
+    content: "Browser-verify Ancient Hills desktop + compact (768px and coarse-landscape 520px) + expanded iframe; pre-v4 / Wasteland; turret-untracked"
     status: pending
 isProject: false
 ---
@@ -51,6 +51,37 @@ flowchart LR
 
 ---
 
+## Compact / mobile HUD contract (binding — do not regress)
+
+The replay already has a working compact system. Every new overlay **joins it**; nothing new invents a second breakpoint, a second expand path, or a persistent left/right column on phones.
+
+**What already exists (keep, reuse):**
+
+- Compact class is `body.replay-compact`, set in both [`replay.html`](_map-analysis/render/replay.html) boot and `syncCompactClass()` in [`replay.js`](_map-analysis/render/js/replay.js) from **either** `(max-width: 768px)` **or** `(max-height: 520px) and (pointer: coarse)` — phones and coarse-pointer landscape. Live `matchMedia` listeners retoggle on rotate.
+- Dashboard wrap uses the **same MQ** ([`css/vtstats-theme.css`](css/vtstats-theme.css) `.vt-replay-3d-wrap`) and `maybeAutoExpandReplay()` auto-enters `vt-replay-expand-active` on compact viewports so the iframe fills `100dvh`. Compact work is verified **inside that expanded wrap**, not only as a tiny in-tab iframe.
+- iOS iframe footgun already handled: canvas is `width/height: 100%` of the player, never `100vh`.
+- Roster is a **bottom sheet** (`max-height: min(70dvh, 480px)`, `env(safe-area-inset-bottom)`, backdrop, handle). Keyboard hint footer is hidden.
+- Transport stacks: scrub full-width on top, controls `overflow-x: auto`, `touch-action: manipulation`, 32px min tap targets.
+- Kill ticker moves **bottom-left** above transport and **caps at 2 visible rows** (`.kill-ticker-row:nth-child(n+3) { display: none }`).
+- Playing on compact auto-hides chrome after 3s (`body.replay-chrome-hidden`); a short canvas tap toggles it; roster-open and `prefers-reduced-motion` cancel the hide. The ticker stays at 0.35 opacity when chrome is hidden.
+
+**Decisions for everything this plan adds:**
+
+1. **No new overlay on compact that the current chrome does not already have a slot for.** Desktop may grow a left Elo column and a right feed; compact must not.
+2. **Scrap meters (compact):** two short vertical pills (~40–48px) in the **top-left / top-right** under `.replay-chrome` padding (`env(safe-area-inset-top)`). They ride `replay-chrome-hidden` (fade with chrome). On the coarse-landscape MQ, switch to **horizontal** mini-bars so they do not eat the short axis. Never the full in-game tower height.
+3. **Event feed (compact):** occupy the **existing kill-ticker slot** (same left/bottom/safe-area math). Keep the 2-row cap. Filter chips are **not** a wrapping chip cloud — a single horizontally-scrollable row, chrome-visible only, or a one-icon “filter” that opens chips. Default remains everything-except-pods.
+4. **Now-building (compact):** hidden. The feed already shows queue/build rows; a second producer HUD is desktop-only.
+5. **Beat toasts (compact):** one line, max ~2s, above the 2-row feed, never covering transport. `prefers-reduced-motion`: skip the toast, keep the gold scrub tick.
+6. **Elo Δ (compact, phase 4):** do **not** pin a left-edge lobby strip. Put the Δ list **inside the roster bottom sheet** (a “This match Δ” block above the team rows). Clicking a Δ row still focuses chase cam and closes the sheet. Desktop keeps the persistent strip.
+7. **Turret-untracked legend (phase 3):** desktop-only muted line; compact omits it.
+8. **All new interactive HUD** uses `touch-action: manipulation` and ≥32px hit targets under `.replay-compact`.
+9. **Chrome-hide membership:** meters, now-building, feed chips, beat toasts, desktop Elo strip fade with `.replay-chrome-hidden`. The 2-row compact feed stays (dimmed, like today’s ticker). Roster-open restores chrome.
+10. **Directory mode** already `display: none`s ticker/transport/roster — add every new overlay to that same suppress list in [`replay-style.css`](_map-analysis/render/css/replay-style.css).
+11. **Do not change** the compact MQ, auto-expand handshake, or `100vh` canvas rule unless a verified bug requires it.
+12. **CSS co-location:** all compact restyles live next to the existing `body.replay-compact` / `body.replay-chrome-hidden` / `@media (prefers-reduced-motion)` blocks in [`replay-style.css`](_map-analysis/render/css/replay-style.css). Do not add a second stylesheet or a second breakpoint number.
+
+---
+
 ## Turrets are deferred — suspected collector bug (decision)
 
 Measured on Ancient Hills (`2026-09-14T04-40-07`): 19 constructor BUILDs of `fbspir_vsr` (Gun Spire, 6000 HP), **zero** `UnitDestroyed` rows for any turret ODF, yet 2,292 `DamageDealt` rows into spires summing 117,938 HP ≈ 19.66 × 6000 — they all died, silently. Corpus-wide scan: **3 turret-death rows across all 160 matches** (2 `fbspir_vsr`, 1 `ibgtow_vsr`). The events are *unreliable*, not merely absent — one recorded death in a match proves nothing about the rest.
@@ -74,7 +105,7 @@ Work only under `_map-analysis/render/`. Verify on Ancient Hills via the dashboa
 
 ### Scrap meters (P0)
 
-Two static vertical meters (T1 left, T2 right), gated on `economy.has_resource_data` (hidden pre-v4). Sample `economy.teams.{1,2}` series at the playhead via `tickToSec` over the shared `economy.ticks[]`.
+Two static vertical meters (T1 left, T2 right on desktop), gated on `economy.has_resource_data` (hidden pre-v4). Sample `economy.teams.{1,2}` series at the playhead via `tickToSec` over the shared `economy.ticks[]`. Compact size/placement is the contract above — not a scaled-down desktop layout.
 
 Paint the **background from the census**, never from `scrap_status` (that enum is the regen band the current level sits in, not the paint):
 
@@ -91,7 +122,7 @@ Paint the **background from the census**, never from `scrap_status` (that enum i
 Replace the 6-row kill-only ticker with a rolling feed (cap ~12). Sources: `kills.feed`, `builds.feed`, `snipes.feed`, `pickups.feed`, `powerup_destructions.feed`, `storyline.beats`.
 
 - **Default = everything except pods** (user decision). Pods = the service-pod family (`apserv*` stems, same family as `VEHICLE_DESTRUCTION_IGNORE_ODFS` / the non-members of `data/combat_ship_odfs.json` pod set) — they are ~1,635 of Ancient Hills' 2,249 build rows. Harvester/Collector/scav builds and all combat-ship builds stay visible by default.
-- Filter chips: Kills / Builds / Queues / Cancels / Snipes / Pickups / Beats / **Pods (off)**. Pre-v4 matches hide the build-related chips.
+- Filter chips: Kills / Builds / Queues / Cancels / Snipes / Pickups / Beats / **Pods (off)**. Pre-v4 matches hide the build-related chips. Compact: 2-row feed in the current ticker slot; chips are a horizontal scroller, chrome-visible only.
 - Structure kills render `odf_map[victim_odf]` (“destroyed Matriarch”), never “→ Team 2”.
 - **Fix `fireKillFlash` in [`replay.js`](_map-analysis/render/js/replay.js):** stop `return`ing when the victim has no actor. Always append the feed row; plant the 3D flash at the killer’s interpolated trail position when the victim has none (skip the flash only if neither side resolves). Today 243 of 394 Ancient Hills kill rows silently vanish.
 
@@ -107,7 +138,7 @@ Factory glyphs stay out of phase 1 — they are constructor-built and get exact 
 ### Also in phase 1
 
 - **Storyline beats** as gold scrub ticks + short toasts. Copy the kind→title map into the replay (mirror of `STORY_COPY` in [`js/storyline.js`](js/storyline.js)); do not load storyline.js into the iframe.
-- **“Now building” strip** per team walking `builds.feed` to the playhead — **must mirror the v20 lane model**: one order per lane (recycler / factory / armory), same-ODF stacking, and a CANCEL burst **clears the entire lane queue** (the collector caps bulk-cancel emission at 10 events while pod stacks reach depth 39 — popping one-per-CANCEL drifts permanently). Constructor lane: show queue heads; on inferred-mode matches (`structures_completion_source: "inferred"`, e.g. Wasteland 2026-09-03) heads never complete — display as “ordered”, not “building”.
+- **“Now building” strip** (desktop only; compact hides it) per team walking `builds.feed` to the playhead — **must mirror the v20 lane model**: one order per lane (recycler / factory / armory), same-ODF stacking, and a CANCEL burst **clears the entire lane queue** (the collector caps bulk-cancel emission at 10 events while pod stacks reach depth 39 — popping one-per-CANCEL drifts permanently). Constructor lane: show queue heads; on inferred-mode matches (`structures_completion_source: "inferred"`, e.g. Wasteland 2026-09-03) heads never complete — display as “ordered”, not “building”.
 - **Pickup / snipe / pod-destroyed FX** at the picker/killer trail position. Skip rows whose picker/killer is a `Team N` label (AI — 5 such pickup rows on Ancient Hills; no trail to anchor).
 
 Primitives only; GLB meshes are explicitly out of scope for this plan.
@@ -167,7 +198,8 @@ New module `replay-structures.js`: spawn faction-tinted **primitives** at instan
 
 VTSR-T is a post-match update in [`elo_history.json`](data/processed/elo_history.json) — there is no live rating, and recomputing composites mid-match would be a second rating engine that contradicts the published Δ. So:
 
-- Compact lobby strip, one row per **rated** player (campod/partial excluded — no delta exists): faction pip + name (click focuses chase cam), pre-match VTSR-T in Geist Mono, diverging Δ bar scaled to the lobby max |Δ|, tooltip `before → after` + P vs E. Luxury axes (`snipe_bonus`, `target_lock_pct`) never appear in causal copy.
+- **Desktop:** compact lobby strip on the left, one row per **rated** player (campod/partial excluded — no delta exists): faction pip + name (click focuses chase cam), pre-match VTSR-T in Geist Mono, diverging Δ bar scaled to the lobby max |Δ|, tooltip `before → after` + P vs E. Luxury axes (`snipe_bonus`, `target_lock_pct`) never appear in causal copy.
+- **Compact:** same list lives at the top of the roster bottom sheet (“This match Δ”), not as a second overlay. Row tap focuses chase cam and closes the sheet.
 - **Reveal mechanic (labeled storytelling, not “live Elo”):** bar starts as a faint ghost of the final Δ and fills solid as the playhead passes that player’s kill/damage timestamps (`kills.feed` + `timeline.by_player` buckets); all bars snap full at the winner-decided tick. Excluded matches: strip hidden.
 - **Load path:** embedded → the parent hands the single history entry over the **existing `hello` postMessage handshake** in `onReplayExpandMessage` (`ensureEloLoaded()` has already fetched it; don’t invent a second channel or re-download). Standalone → fetch `../../data/processed/elo_history.json`, pick `match_id`, 404-safe hide.
 - Join = steam64-first then name, a tiny local copy of the [`js/match-elo.js`](js/match-elo.js) join (do not load that file in the iframe). Optional two-row VTSR-C commander footer only when `elo_commander_history.json` has this match’s duel; same experimental posture.
@@ -192,6 +224,7 @@ VTSR-T is a post-match update in [`elo_history.json`](data/processed/elo_history
 - After reprocess: jammers/extractors/dowers/factories despawn on their real `UnitDestroyed` ticks; **turret instances exist in the block as `untracked` and never render**; Ice Age’s lone recorded spire death does NOT despawn anything; upgrade tints sit on exact pools; armory drops land field-wide; T-lock diamonds follow the samples.
 - Pre-v4 match: no meters, no build chips, recyclers still present via positioning.
 - Golden inert gate passes: VTSR-T + VTSR-C byte-identical with all new fields stripped/perturbed.
-- Compact + expanded iframe layouts: meters/feed/strip don’t cover the transport bar.
+- Compact **and** expanded iframe: meters/feed/strip never cover the transport bar.
+- **Compact pass (required, same as desktop):** 390×844 portrait and ~844×390 coarse landscape, both in the dashboard auto-expanded wrap and standalone `replay.html`. Check: 2-row feed above transport, meters are short pills (horizontal in landscape), now-building absent, filter chips don’t wrap, tap-to-toggle chrome still works, roster sheet still opens over the new HUD, Elo Δ (phase 4) is inside the sheet, safe-area insets on notched devices, `prefers-reduced-motion` skips toasts and chrome auto-hide.
 
 Implementation lands phase-by-phase so scrap meters + feed are playable before the pipeline run.
