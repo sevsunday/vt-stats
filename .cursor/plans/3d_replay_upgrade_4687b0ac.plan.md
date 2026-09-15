@@ -1,21 +1,21 @@
 ---
 name: 3D Replay Upgrade
-overview: "Upgrade the dashboard’s 3D Replay iframe (the same viewer behind `?tab=replay`) in four phases: HUD from data we already emit, a proto/pipeline pass so BUILD positions / T-lock / structure deaths are in JSON, then 3D structures and FX, then an honest Elo Δ strip. Gun-spire deaths are real in Ancient Hills but never appear as UnitDestroyed — the pipeline must infer them from damage."
+overview: "Upgrade the dashboard’s 3D Replay iframe (the same viewer behind `?tab=replay`) in four phases: HUD from data we already emit, a proto/pipeline pass so BUILD positions / T-lock / structures land in JSON, then 3D structures and FX, then an Elo Δ strip. Turret-class structures (Gun Spire / Spike / Defender / Gun Tower) are DEFERRED — the collector dev suspects a bug (they are ship-class and their destruction events are missing from the wire), so structure death tracking is UnitDestroyed-only and turrets stay untracked until the fix ships."
 todos:
   - id: phase1-scrap-feed
-    content: "Phase 1: scrap meters, unified event feed (pods off by default), kill-flash/ticker Team-N fix, starting recyclers, beat toasts, now-building strip — replay iframe only"
+    content: "Phase 1: scrap meters, unified event feed (everything except pods by default), kill-flash/ticker Team-N fix, starting recyclers with identity-break despawn, beat toasts, v20-correct now-building strip — replay iframe only"
     status: pending
   - id: phase2-proto-pipeline
-    content: "Phase 2: BuildEvent.position proto field 6, PIPELINE 46 / schema 26, emit feed[].position + trail.target[] + structures[] with death inference; golden inert + docs + proto regen"
+    content: "Phase 2: sync BuildEvent.position from upstream proto, PIPELINE 46 / schema 26, emit feed[].position + trail.target[] + trail.speed[] + structures[] (UnitDestroyed-only deaths, turret-class untracked); golden inert + docs + proto regen"
     status: pending
   - id: phase3-structures-tlock
-    content: "Phase 3: 3D primitive structures from structures[], pool occupancy tint, live T-lock from trail.target, structure-death flashes"
+    content: "Phase 3: 3D primitive structures (tracked instances only), scup-only pool tint, armory delivery-drop FX, live T-lock from trail.target, structure-death flashes"
     status: pending
   - id: phase4-elo-strip
-    content: "Phase 4: lobby Elo Δ strip (reveal-to-final-Δ, postMessage history when embedded)"
+    content: "Phase 4: lobby Elo Δ strip (reveal-to-final-Δ; history handed over via the existing hello postMessage handshake)"
     status: pending
   - id: verify-browser
-    content: Browser-verify Ancient Hills dashboard replay tab + standalone; pre-v4 / Wasteland degradation
+    content: "Browser-verify Ancient Hills dashboard replay tab + standalone; pre-v4 / Wasteland degradation; turret-untracked behavior"
     status: pending
 isProject: false
 ---
@@ -24,9 +24,7 @@ isProject: false
 
 ## How you actually open it
 
-Yes — [https://vtstats.bz/?match=2026-09-14T04-40-07&tab=replay](https://vtstats.bz/?match=2026-09-14T04-40-07&tab=replay) **is** this same 3D player.
-
-`index.html` `#tab-replay` is an empty pane. [`js/app.js`](js/app.js) `renderReplayTab()` injects an iframe:
+[https://vtstats.bz/?match=2026-09-14T04-40-07&tab=replay](https://vtstats.bz/?match=2026-09-14T04-40-07&tab=replay) **is** this viewer. `index.html` `#tab-replay` is an empty pane; [`js/app.js`](js/app.js) `renderReplayTab()` injects an iframe:
 
 ```2188:2437:js/app.js
 const REPLAY_VIEWER_PATH = '_map-analysis/render/replay.html';
@@ -34,9 +32,7 @@ const REPLAY_VIEWER_PATH = '_map-analysis/render/replay.html';
 frame.src = `${REPLAY_VIEWER_PATH}?match=${encodeURIComponent(matchId)}${tParam}`;
 ```
 
-The dashboard URL only selects the match + tab. The engine, HUD, and new meters/feed/structures all live in [`_map-analysis/render/`](_map-analysis/render/) (`replay.html`, `js/replay.js`, `css/replay-style.css`). The iframe fetches `data/processed/<id>.json` itself — **it never sees the dashboard player filter**. Treat every new replay field as match-global / unfiltered (same contract as `economy` / `builds` / `storyline` / `highlights`).
-
-(The old Chart.js `VTReplay` in `js/timeline-player.js` is the Combat-tab 2D timeline, not this tab.)
+The engine, HUD, and everything new live under [`_map-analysis/render/`](_map-analysis/render/) (committed — only `_investigation/` etc. are gitignored). The iframe fetches `data/processed/<id>.json` itself and **never sees the dashboard player filter** — every new replay field is match-global / always-unfiltered (same contract as `economy` / `builds` / `storyline` / `highlights`). The Chart.js `VTReplay` in `js/timeline-player.js` is the Combat-tab 2D timeline, unrelated.
 
 ```mermaid
 flowchart LR
@@ -51,166 +47,151 @@ flowchart LR
   iframe -.->|"phase 4"| elo
 ```
 
----
-
-## Gun spires: you are right they died
-
-On Ancient Hills (`2026-09-14T04-40-07`) this is **not** a pipeline drop. The wire has:
-
-- **19** constructor BUILDs of `fbspir_vsr` (Gun Spire, Vehicle, `maxHealth` 6000)
-- **0** `UnitDestroyed` with victim ODF `spir` / `gt2` / `gt4` / `gtow` / `pgen`
-- **35** destroy events where the **killer** was a gun spire (last at tick 111872, ~2s before the Matriarch died)
-- **2292** `DamageDealt` into `fbspir_vsr`, **sum 117,938 HP** ≈ **19.66 × 6000** — every spire was shot to death (small overkill)
-
-Jammers (`fbjamm`, Building, 800 HP) **do** emit `UnitDestroyed` (11 built / 11 killed) and show up in storyline `structure_kill` beats. Empty `UnitDestroyed` rows (429) are the existing Team-0 phantoms (all fields blank), not missing turrets.
-
-So: turrets/towers/battery trays often **never get a death event**. Replay cannot wait on `kills.feed` for them. Phase 2 must infer `death_tick` from attributed damage vs ODF `maxHealth`, and use `UnitDestroyed` when it exists (jammers, extractors, factories, recyclers).
-
-Storyline also never flags gun-spire kills today for the same reason — out of scope unless we later restamp beats; do not silently change storyline in this work.
+**Time convention (binding for all new consumers):** the replay's kill index, `storyline.beats[].sec`, `economy.ticks[]`, and `builds.feed[].tick` are all absolute `tick / tick_rate` — use the existing `tickToSec()` in [`replay-data.js`](_map-analysis/render/js/replay-data.js) everywhere. (Trails are `(tick − min_tick) / tick_rate`; `min_tick` ≈ 0–1 corpus-wide, so no correction is needed — but do not invent a third convention.)
 
 ---
 
-## Elo Δ strip — how it would work (honest version)
+## Turrets are deferred — suspected collector bug (decision)
 
-VTSR-T is a **post-match** update in [`data/processed/elo_history.json`](data/processed/elo_history.json) (`history[].deltas[]`: `before` / `after` / `delta` / `performance` / `expected` / `axis_contributions`). There is no live rating on the wire. Recomputing the 8-axis composite every frame from a partial lobby would be a second rating engine and would **not** match the published Δ.
+Measured on Ancient Hills (`2026-09-14T04-40-07`): 19 constructor BUILDs of `fbspir_vsr` (Gun Spire, 6000 HP), **zero** `UnitDestroyed` rows for any turret ODF, yet 2,292 `DamageDealt` rows into spires summing 117,938 HP ≈ 19.66 × 6000 — they all died, silently. Corpus-wide scan: **3 turret-death rows across all 160 matches** (2 `fbspir_vsr`, 1 `ibgtow_vsr`). The events are *unreliable*, not merely absent — one recorded death in a match proves nothing about the rest.
 
-**Ship this (phase 4):** a compact lobby strip (left edge, under chrome / opposite the feed), same join as [`js/match-elo.js`](js/match-elo.js):
+The statsgate dev's explanation fits the data exactly: gun-tower-types are **ship-class** ("ships, not buildings"), and the ODF DB agrees — every gun-tower ODF is **Vehicle category with `inheritanceChain` terminal `turret`** (`fbspir` Gun Spire, `ebgt2g` Spike, `ebgt4g` Defender, `ibgtow` Gun Tower, + `fbport`/rocket-tower variants; 40 stems total). Every other constructor-built structure is Building category with a real building terminal (`extractor`, `factory`, `jammer`, `powerplant`, `supplydepot`, `commtower`, `commbunker`, `armory`, `barracks`, `recycler`) — and those DO emit destruction events (verified: 11/11 Jammers, 7 Extractor+, 3 Dower, 2 Mega Xenomator, 1 Forge, 1 Matriarch, 1 Overseer Array on Ancient Hills).
 
-- One row per **rated** player (campod / partial stay out, same as Elo tab)
-- Faction pip + name (click focuses chase cam)
-- Pre-match VTSR-T in Geist Mono
-- A diverging bar: center = 0, right = gain, left = loss, length = `|delta|` vs the lobby’s max `|Δ|`
-- Tooltip: `before → after`, P vs E (luxury axes stay out of causal copy — `LUXURY_AXES`)
+**Decisions (final for this plan):**
 
-**Playback behavior (storytelling, labeled as such):** the bar is a faint ghost of the final Δ from t=0; a solid fill **reveals** toward that final Δ as the playhead passes that player’s kill / damage timestamps (from `kills.feed` + optional `timeline.by_player`). Copy: “this match’s Δ, revealed as their impact lands” — not “live VTSR”. At the winner-decided tick (existing gold scrub marker) every bar snaps to 100% fill. Excluded matches: hide the strip.
-
-**Load path:** when embedded, parent `postMessage`s the already-fetched `window.__vtEloHistory` entry for this match (avoid a second download of the full history file). Standalone `replay.html?match=` fetches `../../data/processed/elo_history.json` and picks `match_id`. 404 / no deltas → hide.
-
-Do **not** animate VTSR-C here beyond an optional two-row commander footer if `elo_commander_history` has a duel (mirror the Elo tab strip). Same experimental posture.
+1. **Classification is mechanical**: turret-class = chain terminal `turret` in `data/odf.min.json` (a `build_turret_odfs()` helper mirroring the existing `build_extractor_odfs()` pattern). Never a hardcoded stem list.
+2. **No HP-depletion death inference anywhere.** The damage-attribution machinery from the earlier draft (nearest-shooter matching, sentinel filtering, repair caveats) is DELETED from scope. Structure deaths come from `UnitDestroyed` only.
+3. **Turret instances are still emitted** in the `structures` block (their BUILD positions are real and useful later) but carry `death_reason: "untracked"` and are **not rendered** in 3D. Gated by a module constant `TURRET_DEATHS_RELIABLE = False` in `scripts/process_stats.py` — when the collector fix ships, flip it + bump `PIPELINE_VERSION`; turret deaths then resolve through the same UnitDestroyed matcher with zero schema change. Do NOT auto-detect per-session (the 3 stray events would false-positive).
+4. The 3 historical turret-death rows stay in `kills.feed` and the event feed (they are real events) — they just never despawn a `structures` instance while untracked.
+5. **Storyline beats are untouched** — no restamp for turret kills in this work.
+6. File the upstream statsgate issue (spire/tower `UnitDestroyed` missing; ship-class pathway) so the fix has a paper trail.
 
 ---
 
 ## Phase 1 — HUD from JSON we already have (no reprocess)
 
-Work only under `_map-analysis/render/`. Verify on Ancient Hills via the dashboard replay tab (and standalone `replay.html?match=`).
+Work only under `_map-analysis/render/`. Verify on Ancient Hills via the dashboard replay tab and standalone `replay.html?match=`.
 
 ### Scrap meters (P0)
 
-Two static vertical meters (T1 left, T2 right), gated on `economy.has_resource_data`. Sample `economy.teams.{1,2}` at playhead from shared `economy.ticks[]`.
+Two static vertical meters (T1 left, T2 right), gated on `economy.has_resource_data` (hidden pre-v4). Sample `economy.teams.{1,2}` series at the playhead via `tickToSec` over the shared `economy.ticks[]`.
 
-Paint the **background** from census, not `scrap_status`:
+Paint the **background from the census**, never from `scrap_status` (that enum is the regen band the current level sits in, not the paint):
 
-- Red (bottom): `20 × upgrade_count` (20-scrap segments)
+- Red (bottom): `20 × upgrade_count`
 - Yellow: `20 × (pool_count − upgrade_count)`
-- Green (top): 40 if `max_scrap === 40 + 20 × pool_count`, else recycler dead (no green)
-- White fill from the bottom: `scrap / max_scrap` of the **painted** height (in-game look; your 70 / 2-red / 1-yellow / 40-green screenshot)
-- Numeral overlay = current bank
-- Faction-tint the chrome; hide on pre-v4
+- Green (top): 40 when `max_scrap === 40 + 20 × pool_count` (recycler alive); no green segment when the identity breaks
+- White fill from the bottom: `scrap / max_scrap` of the painted height; numeral overlay = current bank (the 70 / 2-red / 1-yellow / 40-green screenshot)
+- Faction-tint the chrome
 
-`max_scrap` already matches that identity on every Ancient Hills frame.
+`max_scrap` matches the identity on all 5,615 Ancient Hills frames, both teams.
 
-### Event feed (P0)
+### Unified event feed (P0)
 
-Replace the 6-row kill-only ticker with a unified rolling feed (keep a compact cap, e.g. 12). Sources: `kills.feed`, `builds.feed`, `snipes.feed`, `pickups.feed`, `powerup_destructions.feed`, `storyline.beats`.
+Replace the 6-row kill-only ticker with a rolling feed (cap ~12). Sources: `kills.feed`, `builds.feed`, `snipes.feed`, `pickups.feed`, `powerup_destructions.feed`, `storyline.beats`.
 
-**Pods off by default**, checkbox to show them. Treat as pods: `apserv_vsr` / service-pod stems (same family as [`VEHICLE_DESTRUCTION_IGNORE_ODFS`](scripts/process_stats.py) and the Economy log’s combat-ship pill via `data/combat_ship_odfs.json`). Default-visible builds: constructor events + combat-ship BUILD/QUEUE/CANCEL. Structure kills use `odf_map[victim_odf]` (“destroyed Matriarch”), never “→ Team 2”.
+- **Default = everything except pods** (user decision). Pods = the service-pod family (`apserv*` stems, same family as `VEHICLE_DESTRUCTION_IGNORE_ODFS` / the non-members of `data/combat_ship_odfs.json` pod set) — they are ~1,635 of Ancient Hills' 2,249 build rows. Harvester/Collector/scav builds and all combat-ship builds stay visible by default.
+- Filter chips: Kills / Builds / Queues / Cancels / Snipes / Pickups / Beats / **Pods (off)**. Pre-v4 matches hide the build-related chips.
+- Structure kills render `odf_map[victim_odf]` (“destroyed Matriarch”), never “→ Team 2”.
+- **Fix `fireKillFlash` in [`replay.js`](_map-analysis/render/js/replay.js):** stop `return`ing when the victim has no actor. Always append the feed row; plant the 3D flash at the killer’s interpolated trail position when the victim has none (skip the flash only if neither side resolves). Today 243 of 394 Ancient Hills kill rows silently vanish.
 
-**Fix `fireKillFlash` in [`replay.js`](_map-analysis/render/js/replay.js):** do not `return` when the victim is not an actor. Still append the feed row; plant the flash at the killer’s interpolated position (or skip the 3D flash only).
+### Starting recyclers (no proto needed)
 
-Filter chips on the feed header: Kills / Builds / Queues / Cancels / Snipes / Pickups / Beats / Pods. Pods default off. Pre-v4: builds/economy chips hide.
+One recycler glyph per team from t=0 at `positioning.team_base.{n}.centroid`, terrain-snapped ([`objects.js`](_map-analysis/render/js/objects.js) already has the primitive). Despawn on **either**:
 
-### Starting recyclers (no proto)
+- a `kills.feed` row whose victim stem is one of the three recycler stems (`ibrecy_vsr` / `ebrecym_vsr` / `fbrecy_vsr` — mirror them as a JS constant; `RECYCLER_ODFS` is Python-side), or
+- the economy identity break: `max_scrap !== 40 + 20 × pool_count` (NOT a “−40 delta” — a simultaneous pool loss changes the delta). Verified: fires in 22 of 30 v4 matches, including genuinely mid-match losses (Wasteland ~13 min before end; Titan; Throbbing Gristle) that the kill feed can miss.
 
-From t=0, one recycler glyph per team at `positioning.team_base.{n}.centroid` (terrain-snapped, faction-tinted box — [`objects.js`](_map-analysis/render/js/objects.js) already has a `recycler` primitive). Despawn on recycler `kills.feed` (`RECYCLER_ODFS`) or when that team’s `max_scrap` loses the 40. Factory stays off until BUILD xyz exists (field placement is often not next to spawn).
+Factory glyphs stay out of phase 1 — they are constructor-built and get exact positions in phase 2.
 
-### Also in phase 1 (data already there)
+### Also in phase 1
 
-- Gold scrub ticks + short toasts from `storyline.beats` (`STORY_COPY` lives in [`js/storyline.js`](js/storyline.js) — either import a small shared table or duplicate the kind→title map in replay; do not load all of storyline.js into the iframe)
-- “Now building” strip per team by walking `builds.feed` to the playhead (recycler / factory / armory head order)
-- Pickup / snipe / pod-destroyed FX at picker or killer trail xyz (no pipeline)
+- **Storyline beats** as gold scrub ticks + short toasts. Copy the kind→title map into the replay (mirror of `STORY_COPY` in [`js/storyline.js`](js/storyline.js)); do not load storyline.js into the iframe.
+- **“Now building” strip** per team walking `builds.feed` to the playhead — **must mirror the v20 lane model**: one order per lane (recycler / factory / armory), same-ODF stacking, and a CANCEL burst **clears the entire lane queue** (the collector caps bulk-cancel emission at 10 events while pod stacks reach depth 39 — popping one-per-CANCEL drifts permanently). Constructor lane: show queue heads; on inferred-mode matches (`structures_completion_source: "inferred"`, e.g. Wasteland 2026-09-03) heads never complete — display as “ordered”, not “building”.
+- **Pickup / snipe / pod-destroyed FX** at the picker/killer trail position. Skip rows whose picker/killer is a `Team N` label (AI — 5 such pickup rows on Ancient Hills; no trail to anchor).
 
-Primitives only for any new 3D bits in this phase. GLBs are a follow-up, not in this plan’s implementation.
+Primitives only; GLB meshes are explicitly out of scope for this plan.
 
 ---
 
-## Phase 2 — Proto + pipeline (all replay data we still lack)
+## Phase 2 — Proto + pipeline
 
-Additive only. **No ELO_SCHEMA_VERSION bump.** Rating-inert golden gate (strip/perturb new fields; `elo_history.json` byte-identical — it has no `computed_at`).
+Additive only. **No `ELO_SCHEMA_VERSION` bump.** New golden gate (mirroring `golden_v18_no_drift.py`): strip AND perturb every new field, require byte-identical `elo_history.json` (the one output without a `computed_at` stamp).
 
 | Knob | Now → next |
 |---|---|
-| `scripts/statsgate.proto` | `Vec3 position = 6` on `BuildEvent` (comment: world xyz of the completed unit/structure; present on BUILD only; absent on QUEUE/CANCEL and pre-2026-09-07 sessions) |
+| `scripts/statsgate.proto` | `Vec3 position = 6` on `BuildEvent` — **sync the exact field name/comment from upstream [VTrider/statsgate](https://github.com/VTrider/statsgate) first** (our proto is a verbatim mirror; the collector already emits it). Wire-verified: 15-byte Vec3, BUILD events only, present in 29/30 v4 matches (from 2026-09-07 on) |
 | `PIPELINE_VERSION` | 45 → 46 |
 | `match.schema_version` | 25 → 26 |
 
-Regen: `statsgate_pb2.py`, `vendor/protobufjs/statsgate.proto.json`, `scripts/verify_proto_decode.mjs` on one file per era. Raw-browser tooltips pick up the proto comment via `extract_proto_docs.py`.
+Regen per the playbook: `statsgate_pb2.py`, `vendor/protobufjs/statsgate.proto.json` (`cmd /c` for the redirect), `scripts/verify_proto_decode.mjs` on one file per era. v4 detection is unaffected (presence of build_event/resources, checked before `header.players`). Raw-browser field tooltips pick the comment up via `extract_proto_docs.py`.
 
 ### `builds.feed[].position`
 
-In the `build_event` branch (~6167 in [`scripts/process_stats.py`](scripts/process_stats.py)): if `be.HasField("position")`, emit `{x,y,z}` rounded like trails; else `null`. Emit on **every** BUILD (factory pad spawns too). Replay 3D structures use **constructor BUILD** only. 29/30 v4 matches have field 6; Wasteland 2026-09-03 stays null.
+In the `build_event` branch (~line 6167 of [`scripts/process_stats.py`](scripts/process_stats.py)): emit `{x, y, z}` (trail rounding) when the field is present, else `null`. Emit on **every** BUILD — factory/armory pad rows included (phase 3 uses them for delivery FX and the recycler-pad median). Wasteland 2026-09-03 stays all-null.
 
-### `trail.target[]`
+### `trail.target[]` and `trail.speed[]`
 
-[`compute_positioning`](scripts/process_stats.py) already builds `target_arr` then drops it. Emit a bool (or 0/1) array parallel to `t/x/y/z/hp/ammo`. Live T-lock in replay; diamonds follow the sample, not career `target_lock_pct > 0.4`.
+`compute_positioning` already builds `target_arr` per sample and drops it on emit; `PlayerState.speed` is on every wire tick and equally dropped. Emit both as parallel arrays next to `t/x/y/z/hp/ammo` (target as 0/1, speed rounded 1dp). Target drives live T-lock; speed is cheap now and enables speed-scaled FX later. Both display-only, not in contributions.
 
-### Top-level `structures` block (match-global)
+### Top-level `structures` block (match-global, always-unfiltered)
 
-Derived, so the iframe does not decode binpb or run HP math:
+Pre-derived so the iframe never decodes binpb:
 
-- **Starting recyclers:** spawn_tick 0, xyz = team_base centroid, odf from faction (`ibrecy_vsr` / `ebrecym_vsr` / `fbrecy_vsr`)
-- **Constructor BUILD with position:** one instance per completion
-- **Not included:** factory/armory unit pad spawns (no AI trails); scavenger-planted first extractors (no BuildEvent xyz — still a collector gap). Upgrade BUILDs (`*scup`) **are** included and snap to pool `world` coords
+- **Instances:**
+  - Starting recycler per team: `spawn_tick: 0`, odf by faction. Position = **median of `producer_resolved == "recycler"` lane BUILD pad positions** when field-6 data exists (pad cluster verified ~3 m tight), else `team_base.{n}.centroid`.
+  - One instance per **constructor BUILD with position** — this covers every factory/armory too (all Building-class factories are constructor-built: Kiln, Forge, Xenomator, Mega Xenomator, Arsenal — verified with real `maxHealth` 5000–8000).
+  - **Not included:** factory/armory-lane unit pad spawns (units, not structures) and scavenger-planted first extractors (no BuildEvent — collector gap; do not invent positions). Upgrade BUILDs (`*scup`) are included and land on exact pool coordinates (verified).
+- **Per instance:** `id`, `team`, `odf`, `name`, `cls: "building" | "turret"` (chain terminal), `x, y, z`, `spawn_tick`, `max_hp` (ODF `maxHealth`), `death_tick` (null unless killed), `death_reason: "unit_destroyed" | "survived" | "untracked"`.
+- **Death matching — `UnitDestroyed` only:** match `(side, odf)` → assign to the **living instance nearest the killer’s trail position** at that tick, FIFO fallback when the killer has no trail (Team-N killers). Turret-class instances are always `untracked` while `TURRET_DEATHS_RELIABLE = False`.
+- No HP series, no damage scanning. If the block is absent (pre-v26 JSON) the viewer falls back to phase-1 recyclers only.
 
-Per instance: `id`, `team`, `odf`, `name`, `x,y,z`, `spawn_tick`, `max_hp` (ODF `maxHealth`), `death_tick` (null if survived), `death_reason` ∈ `unit_destroyed` | `hp_depleted` | `survived`
+### Docs + contract
 
-**Death:**
-
-1. If a `UnitDestroyed` matches `(team, odf)`: assign to the living instance **nearest the killer’s trail** (or FIFO if no killer pos)
-2. Else attribute `DamageDealt` with `victim==0` and that `victim_odf`/`victim_team` to the living instance nearest the **shooter’s** trail; when cumulative damage ≥ `max_hp`, `death_reason=hp_depleted`
-3. Do not invent xyz for scav-plants just to make `pool_count` line up
-
-Optional compact `hp` series (1 Hz from spawn→death) only if the JSON cost on Ancient Hills stays modest; otherwise death_tick is enough for despawn and we skip structure HP bars in phase 3.
-
-Filter contract: match-global, not in `_extract_contribution`, not in the aggregator. Docs: `DATA_DICTIONARY.md`, `data-schema.mdc`, `DEVELOPER_GUIDE.md`, `filter-contract.mdc` reference table.
-
-`--force` / cache miss via PIPELINE_VERSION; `--no-prompt` for the reprocess.
+Filter contract: match-global, never narrowed; NOT in `_extract_contribution` / the aggregator. Update `docs/DATA_DICTIONARY.md`, `.cursor/rules/data-schema.mdc`, `DEVELOPER_GUIDE.md`, the `filter-contract.mdc` reference table, **and** `.cursor/rules/project-overview.mdc` + `AGENTS.md` (repo convention for feature-sized changes). Reprocess with `--no-prompt`.
 
 ---
 
-## Phase 3 — 3D structures + live T-lock (needs phase 2 JSON)
+## Phase 3 — 3D structures + FX (needs phase 2 JSON)
 
-New replay module (e.g. `replay-structures.js`): spawn faction-tinted **primitives** at instance xyz at `spawn_tick`, despawn at `death_tick`, terrain-snap Y like pools. Recyclers from the `structures` block replace the phase-1 heuristic so both paths share one list.
+New module `replay-structures.js`: spawn faction-tinted **primitives** at instance xyz at `spawn_tick`, despawn at `death_tick`, terrain-snap Y like pools. Render **only** instances with `death_reason !== "untracked"` — defensive turrets are intentionally absent; add one muted legend line (“turrets not yet tracked”) so their absence reads as deliberate. Recyclers from the block replace the phase-1 heuristic (one shared list).
 
-- Pool markers: faction-tint / pulse while a living `*scav`/`*scup` instance sits within ~8 m of that pool’s `world` (loader already flattens `world` → `x,z`)
-- Live T-lock: `updateTLockDiamonds` reads interpolated `trail.target` (interpolate like HP: stepwise bool)
-- Structure kill flash at instance xyz when `death_tick` is crossed (covers gun spires the ticker never saw)
-
-Gate 3D structures on `structures` presence; pre-v26 / no-position matches keep phase-1 recyclers only.
+- **Pool ownership tint:** faction-tint/pulse a pool marker while a living `*scup` **upgrade** instance sits on it (~8 m snap; verified exact coordinates). Scav-planted base extractors never enter the block — the tint is upgrade-only and the legend says so.
+- **Armory delivery drops:** armory-lane BUILD positions are **delivery targets**, not the armory pad (900 m spread vs the recycler pad’s 3 m — verified). Render a brief drop-pod streak + ground flash at that xyz on each armory BUILD (71 on Ancient Hills). Pure FX, zero heuristics.
+- **Live T-lock:** `updateTLockDiamonds` reads stepwise-interpolated `trail.target` — diamonds flicker with the key, not the career `target_lock_pct > 0.4` gate.
+- **Structure death flash** at instance xyz when `death_tick` crosses — full confidence now (real events only).
 
 ---
 
 ## Phase 4 — Elo Δ strip
 
-As specified above. New overlay in `replay.html` + CSS in `replay-style.css`. Join logic can be a tiny copy of the Elo-tab steam64 join (do not load all of `match-elo.js` into the iframe). Luxury-axis copy contract still applies in tooltips.
+VTSR-T is a post-match update in [`elo_history.json`](data/processed/elo_history.json) — there is no live rating, and recomputing composites mid-match would be a second rating engine that contradicts the published Δ. So:
+
+- Compact lobby strip, one row per **rated** player (campod/partial excluded — no delta exists): faction pip + name (click focuses chase cam), pre-match VTSR-T in Geist Mono, diverging Δ bar scaled to the lobby max |Δ|, tooltip `before → after` + P vs E. Luxury axes (`snipe_bonus`, `target_lock_pct`) never appear in causal copy.
+- **Reveal mechanic (labeled storytelling, not “live Elo”):** bar starts as a faint ghost of the final Δ and fills solid as the playhead passes that player’s kill/damage timestamps (`kills.feed` + `timeline.by_player` buckets); all bars snap full at the winner-decided tick. Excluded matches: strip hidden.
+- **Load path:** embedded → the parent hands the single history entry over the **existing `hello` postMessage handshake** in `onReplayExpandMessage` (`ensureEloLoaded()` has already fetched it; don’t invent a second channel or re-download). Standalone → fetch `../../data/processed/elo_history.json`, pick `match_id`, 404-safe hide.
+- Join = steam64-first then name, a tiny local copy of the [`js/match-elo.js`](js/match-elo.js) join (do not load that file in the iframe). Optional two-row VTSR-C commander footer only when `elo_commander_history.json` has this match’s duel; same experimental posture.
 
 ---
 
-## Gaps we will not fake
+## Deferred / will not fake
 
-- **Scavenger-planted first extractors:** no xyz until the collector emits deploy or AI trails. Meter still shows pool count; 3D hut appears at upgrade time.
-- **Turret `UnitDestroyed`:** collector gap; we infer death from HP. Worth an upstream statsgate note, not a blocker.
-- **AI scav/constructor actors:** pad spawn only; no trail. No persistent ghosts.
-- **GLB building meshes:** follow-up after primitives.
+- **Turret-class structures** (Gun Spire / Spike / Defender / Gun Tower / rocket towers): untracked until the collector fix ships → then flip `TURRET_DEATHS_RELIABLE`, bump `PIPELINE_VERSION`, reprocess. Upstream issue to be filed.
+- **Scavenger-planted first extractors:** no BuildEvent xyz — collector gap. The meter still shows pool count; the 3D hut appears at upgrade time.
+- **AI scav/constructor actors:** pad-spawn only, no trails — no persistent ghosts.
+- **Per-hit tracer arrays** (`DamageDealt` player-victim ≈ 14k rows/match → ~200–400 KB compact arrays for tracer-line FX): genuinely good, but deferred — revisit after structures ship.
+- **GLB building/ship meshes:** follow-up after primitives.
+- **Storyline turret-kill beats:** out of scope with the collector bug open.
 
 ---
 
 ## Verification
 
-- Ancient Hills via dashboard `?match=2026-09-14T04-40-07&tab=replay` and standalone replay URL: scrap meters (incl. a 70 / 2-red / 1-yellow frame), feed without pods, pod toggle, Team-N structure lines, recycler spawn/despawn at Matriarch tick 112085
-- After reprocess: constructor spires/jammers at BUILD xyz; gun spires **despawn** (hp_depleted) even with 0 kill-feed rows; jammers despawn on UnitDestroyed; T-lock diamonds flicker with the key, not career %
-- Pre-v4 match: no meters / no build feed; recyclers still if positioning exists
-- Wasteland 2026-09-03: `position` null, `structures` recyclers-only
-- Golden inert: VTSR-T / VTSR-C unchanged
-- Compact/expand iframe: meters + feed readable, not covering transport
+- Ancient Hills via `?match=2026-09-14T04-40-07&tab=replay` **and** standalone: meters match the screenshot recipe (a 70 / 2-red / 1-yellow / 40-green frame exists), feed defaults to everything-but-pods with working chips, Team-N structure kills appear in the feed, recycler despawns at Matriarch tick 112085.
+- Wasteland `2026-09-03`: mid-match recycler identity-break despawn (~13 min before end); `position` all null; `structures` recyclers-only; now-building shows constructor orders as “ordered”.
+- After reprocess: jammers/extractors/dowers/factories despawn on their real `UnitDestroyed` ticks; **turret instances exist in the block as `untracked` and never render**; Ice Age’s lone recorded spire death does NOT despawn anything; upgrade tints sit on exact pools; armory drops land field-wide; T-lock diamonds follow the samples.
+- Pre-v4 match: no meters, no build chips, recyclers still present via positioning.
+- Golden inert gate passes: VTSR-T + VTSR-C byte-identical with all new fields stripped/perturbed.
+- Compact + expanded iframe layouts: meters/feed/strip don’t cover the transport bar.
 
-No production edits until this plan is approved. Implementation follows the four phases so scrap/feed can land and be played with before the pipeline run.
+Implementation lands phase-by-phase so scrap meters + feed are playable before the pipeline run.
