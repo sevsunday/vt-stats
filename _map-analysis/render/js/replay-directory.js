@@ -55,6 +55,13 @@ export async function bootReplayDirectory() {
   if (labels) labels.classList.add('hidden');
   const ticker = document.getElementById('kill-ticker');
   if (ticker) ticker.classList.add('hidden');
+  for (const id of [
+    'event-feed', 'feed-chips', 'scrap-meters', 'now-building',
+    'beat-toast', 'elo-strip', 'roster-elo',
+  ]) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  }
 
   const dir = document.getElementById('directory');
   if (!dir) {

@@ -344,7 +344,6 @@ export function buildTLockDiamonds(actors) {
   group.name = 'replay-tlocks';
   const diamonds = [];
   for (const actor of actors) {
-    if (!actor.targetLockPct || actor.targetLockPct < TLOCK_THRESHOLD) continue;
     const tint = (FACTION_TINTS[actor.factionCode] || FACTION_TINTS._);
     const color = new THREE.Color(tint);
 
@@ -376,6 +375,14 @@ export function updateTLockDiamonds(diamonds, tSecWall) {
   const pulse = 0.65 + 0.25 * Math.sin(tSecWall * Math.PI);
   for (const d of diamonds) {
     if (!d.actor.visible || !d.actor.lastValidPos) {
+      d.mesh.visible = false;
+      continue;
+    }
+    const live = d.actor.trail && Array.isArray(d.actor.trail.target);
+    const on = live
+      ? !!d.actor.curTarget
+      : ((d.actor.targetLockPct || 0) > TLOCK_THRESHOLD);
+    if (!on) {
       d.mesh.visible = false;
       continue;
     }

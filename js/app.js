@@ -2231,6 +2231,29 @@
     return document.fullscreenElement || document.webkitFullscreenElement || null;
   }
 
+  function replayEloPiggyback() {
+    const matchId = (currentData && currentData.match && currentData.match.id) || '';
+    const hist = window.__vtEloHistory;
+    const entry = ((hist && hist.history) || []).find((h) => h.match_id === matchId) || null;
+    const chist = window.__vtEloCommanderHistory;
+    const duels = (chist && (chist.duels || chist.history)) || [];
+    const duel = duels.find((d) => d.match_id === matchId) || null;
+    return { eloHistoryEntry: entry, commanderDuel: duel };
+  }
+
+  function ensureCommanderEloHistoryLoaded() {
+    if (window.__vtEloCommanderHistory !== undefined) {
+      return Promise.resolve(window.__vtEloCommanderHistory);
+    }
+    return fetch('data/processed/elo_commander_history.json', { cache: 'no-store' })
+      .then((res) => (res && res.ok ? res.json() : null))
+      .catch(() => null)
+      .then((json) => {
+        window.__vtEloCommanderHistory = json;
+        return json;
+      });
+  }
+
   function postReplayExpandState(expanded) {
     const frame = getReplayFrame();
     if (!frame || !frame.contentWindow) return;
@@ -2239,8 +2262,22 @@
         source: 'vt-stats',
         action: 'expand-state',
         expanded: !!expanded,
+        ...replayEloPiggyback(),
       }, location.origin);
     } catch { /* iframe not ready */ }
+    if (window.__vtEloCommanderHistory === undefined) {
+      ensureCommanderEloHistoryLoaded().then(() => {
+        try {
+          if (!frame.contentWindow) return;
+          frame.contentWindow.postMessage({
+            source: 'vt-stats',
+            action: 'expand-state',
+            expanded: !!expanded,
+            ...replayEloPiggyback(),
+          }, location.origin);
+        } catch { /* iframe gone */ }
+      });
+    }
   }
 
   function tryReplayNativeFs() {

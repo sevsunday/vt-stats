@@ -360,11 +360,13 @@ export function interpolateTrailXYZ(trail, tSec) {
   const usable = firstUsableTrailIdx(trail);
   if (tSec <= t[usable]) {
     return finite3(trail.x[usable], trail.y[usable], trail.z[usable], usable,
-      scalarAt(trail.hp, usable), scalarAt(trail.ammo, usable));
+      scalarAt(trail.hp, usable), scalarAt(trail.ammo, usable),
+      { target: stepBool(trail.target, usable), speed: scalarAt(trail.speed, usable) });
   }
   if (tSec >= t[n - 1]) {
     return finite3(trail.x[n - 1], trail.y[n - 1], trail.z[n - 1], n - 1,
-      scalarAt(trail.hp, n - 1), scalarAt(trail.ammo, n - 1));
+      scalarAt(trail.hp, n - 1), scalarAt(trail.ammo, n - 1),
+      { target: stepBool(trail.target, n - 1), speed: scalarAt(trail.speed, n - 1) });
   }
   // Binary search for the bracketing pair (lo, hi) where t[lo] <= tSec <= t[hi].
   let lo = 0, hi = n - 1;
@@ -384,15 +386,18 @@ export function interpolateTrailXYZ(trail, tSec) {
     if (lo < usable) {
       const snap = hi >= usable ? hi : usable;
       return finite3(trail.x[snap], trail.y[snap], trail.z[snap], snap,
-        scalarAt(trail.hp, snap), scalarAt(trail.ammo, snap));
+        scalarAt(trail.hp, snap), scalarAt(trail.ammo, snap),
+        { target: stepBool(trail.target, snap), speed: scalarAt(trail.speed, snap) });
     }
     return finite3(trail.x[lo], trail.y[lo], trail.z[lo], lo,
-      scalarAt(trail.hp, lo), scalarAt(trail.ammo, lo));
+      scalarAt(trail.hp, lo), scalarAt(trail.ammo, lo),
+      { target: stepBool(trail.target, lo), speed: scalarAt(trail.speed, lo) });
   }
   const span = t[hi] - t[lo];
   if (span <= 0) {
     return finite3(trail.x[lo], trail.y[lo], trail.z[lo], lo,
-      scalarAt(trail.hp, lo), scalarAt(trail.ammo, lo));
+      scalarAt(trail.hp, lo), scalarAt(trail.ammo, lo),
+      { target: stepBool(trail.target, lo), speed: scalarAt(trail.speed, lo) });
   }
   const frac = (tSec - t[lo]) / span;
   return finite3(
@@ -402,6 +407,7 @@ export function interpolateTrailXYZ(trail, tSec) {
     lo,
     lerpScalar(trail.hp, lo, hi, frac),
     lerpScalar(trail.ammo, lo, hi, frac),
+    { target: stepBool(trail.target, lo), speed: lerpScalar(trail.speed, lo, hi, frac) },
   );
 }
 
@@ -432,9 +438,19 @@ function segOfIdx(i, segs) {
 // occasionally pads. NaN positions would visually park actors at the world
 // origin, which would scream "bug" forever; better to return null and let
 // the actor go invisible for this frame.
-function finite3(x, y, z, idx, hp = null, ammo = null) {
+function stepBool(arr, idx) {
+  if (!arr) return null;
+  return !!arr[idx];
+}
+
+function finite3(x, y, z, idx, hp = null, ammo = null, extra = null) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
-  return { x, y, z, idx, hp, ammo };
+  const out = { x, y, z, idx, hp, ammo, target: null, speed: null };
+  if (extra) {
+    if (extra.target != null) out.target = extra.target;
+    if (extra.speed != null) out.speed = extra.speed;
+  }
+  return out;
 }
 
 /**

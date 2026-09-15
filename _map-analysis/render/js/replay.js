@@ -58,6 +58,29 @@ import { buildObjectsGroup } from './objects.js';
 import { bootReplayDirectory } from './replay-directory.js';
 import { showResultsScreen, hideResultsScreen, isResultsShowing } from './replay-results.js';
 import { buildShipTracker } from './replay-ship-tracker.js';
+import {
+  initReplayHud,
+  updateReplayHud,
+  rebuildReplayHud,
+  getHudBeats,
+  getFxEvents,
+  isTeamLabel,
+} from './replay-hud.js';
+import {
+  buildStartingRecyclers,
+  updateStartingRecyclers,
+  disposeStartingRecyclers,
+  buildStructuresLayer,
+  updateStructuresLayer,
+  livingUpgradeAnchors,
+  applyPoolUpgradeTint,
+  collectArmoryDrops,
+  triggerArmoryDrop,
+  updateArmoryDrops,
+  clearArmoryDrops,
+  findStructureDeaths,
+} from './replay-structures.js';
+import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
 // Module-level state
@@ -103,6 +126,16 @@ const STATE = {
   poolsGroup: null,
   pools: null,
   poolsVisible: true,
+  recyclersGroup: null,
+  recyclers: null,
+  structuresGroup: null,
+  structures: null,
+  structureDeathFired: -Infinity,
+  armoryDrops: [],
+  armoryDropIndex: [],
+  armoryFiredTSec: -Infinity,
+  fxEvents: [],
+  fxFiredTSec: -Infinity,
   // Camera controller (Phase 2 layer over OrbitControls)
   cameraCtl: null,
   camMode: 'free',
@@ -135,7 +168,13 @@ const SPEEDS = [0.5, 1, 2, 5, 10, 20];
 
 window.addEventListener('message', (ev) => {
   if (!ev.data || ev.data.source !== 'vt-stats') return;
-  if (ev.data.action === 'expand-state') setExpandedClass(!!ev.data.expanded);
+  if (ev.data.action === 'expand-state') {
+    setExpandedClass(!!ev.data.expanded);
+    acceptParentElo(ev.data);
+    if (STATE.matchData) {
+      void initReplayElo(STATE.matchData, { onFocus: (name) => focusActor(name, true) });
+    }
+  }
 });
 
 // ============================================================================
@@ -223,7 +262,12 @@ async function boot() {
   initBeacons();
   initTLocks();
   initPools();
+  initStructureOverlays();
   initCamera(mapData);
+
+  initReplayHud(matchData);
+  STATE.fxEvents = getFxEvents(matchData);
+  void initReplayElo(matchData, { onFocus: (name) => focusActor(name, true) });
 
   wireMatchStrip(matchMeta);
   const resolvedFloor = resolveFloorMode(initialFloor);
@@ -591,6 +635,21 @@ function wireScrubMarkers() {
     }
   }
 
+  const beats = getHudBeats(STATE.matchData).filter((b) => (b.weight || 1) >= 5);
+  for (const beat of beats) {
+    const pct = (beat.tSec / Math.max(1, STATE.totalSec)) * 100;
+    if (pct < 0 || pct > 100) continue;
+    const tick = document.createElement('span');
+    tick.className = 'scrub-marker scrub-marker--beat';
+    tick.style.left = `${pct.toFixed(2)}%`;
+    tick.title = `${beat.kind || 'beat'} at ${formatDuration(beat.tSec)}`;
+    tick.addEventListener('click', (e) => {
+      e.stopPropagation();
+      seekTo(beat.tSec);
+    });
+    container.appendChild(tick);
+  }
+
   // Gold winner-decided markers. Two pulses: factory destruction, then
   // recycler destruction (the actual "match decided" tick). Tooltip names
   // each phase.
@@ -695,6 +754,47 @@ function applyHeightExaggeration(factor) {
   // (now-scaled) heightmap, so they need to be rebuilt in lockstep.
   disposePools();
   initPools();
+  initStructureOverlays();
+}
+
+function disposeStructureOverlays() {
+  if (STATE.recyclersGroup) {
+    STATE.scene.remove(STATE.recyclersGroup);
+    disposeStartingRecyclers(STATE.recyclersGroup);
+    STATE.recyclersGroup = null;
+    STATE.recyclers = null;
+  }
+  if (STATE.structuresGroup) {
+    STATE.scene.remove(STATE.structuresGroup);
+    disposeStartingRecyclers(STATE.structuresGroup);
+    STATE.structuresGroup = null;
+    STATE.structures = null;
+  }
+  if (STATE.scene && STATE.armoryDrops && STATE.armoryDrops.length) {
+    clearArmoryDrops(STATE.scene, STATE.armoryDrops);
+  }
+}
+
+function initStructureOverlays() {
+  disposeStructureOverlays();
+  const derived = buildStructuresLayer(
+    STATE.matchData, STATE.mapData, STATE.terrainExaggeration,
+  );
+  if (derived && derived.items && derived.items.length) {
+    STATE.structuresGroup = derived.group;
+    STATE.structures = derived.items;
+    STATE.scene.add(derived.group);
+  } else {
+    const rec = buildStartingRecyclers(
+      STATE.matchData, STATE.mapData, STATE.terrainExaggeration,
+    );
+    STATE.recyclersGroup = rec.group;
+    STATE.recyclers = rec.items;
+    STATE.scene.add(rec.group);
+  }
+  STATE.armoryDropIndex = collectArmoryDrops(STATE.matchData);
+  STATE.armoryFiredTSec = STATE.progressSec - 0.001;
+  STATE.structureDeathFired = STATE.progressSec - 0.001;
 }
 
 // ============================================================================
@@ -1229,6 +1329,9 @@ function syncCompactClass() {
     || window.matchMedia(COMPACT_MQ_LANDSCAPE).matches;
   const was = isReplayCompact();
   document.body.classList.toggle('replay-compact', on);
+  if (was !== on) {
+    rebuildReplayElo(STATE.progressSec);
+  }
   if (was && !on) {
     closeRosterSheet();
     document.body.classList.remove('replay-chrome-hidden');
@@ -1482,6 +1585,16 @@ function renderFrame(dtSec = 0) {
   if (STATE.beacons) {
     updateSpawnBeacons(STATE.beacons, STATE.progressSec);
   }
+  if (STATE.recyclers) {
+    updateStartingRecyclers(STATE.recyclers, STATE.progressSec);
+  }
+  if (STATE.structures) {
+    updateStructuresLayer(STATE.structures, STATE.progressSec);
+    applyPoolUpgradeTint(STATE.poolsGroup, livingUpgradeAnchors(STATE.structures));
+  }
+  if (STATE.armoryDrops && STATE.armoryDrops.length) {
+    updateArmoryDrops(STATE.scene, STATE.armoryDrops, dtSec || 0.016);
+  }
   // 4. Kill flashes -- trigger any new ones as playback advances; advance
   //    the lifecycle of existing ones.
   triggerNewKillFlashes();
@@ -1493,8 +1606,9 @@ function renderFrame(dtSec = 0) {
     const wallSec = performance.now() / 1000;
     updateTLockDiamonds(STATE.tlocks, wallSec);
   }
-  // 6. Kill ticker (DOM update; debounced internally).
-  syncKillTicker();
+  // 6. Unified event feed + scrap meters + now-building + Elo strip.
+  updateReplayHud(STATE.progressSec);
+  updateReplayElo(STATE.progressSec);
   // 7. Project labels to screen (camera-dependent; runs after camera update).
   if (STATE.labels) {
     updateActorLabels(STATE.labels, STATE.camera, STATE.renderer, { show: STATE.labelsVisible });
@@ -1524,29 +1638,75 @@ function maybeThrottleUrlState() {
  * resets it so we re-fire on replay.
  */
 function triggerNewKillFlashes() {
-  if (!STATE.killIndex || !STATE.killIndex.entries.length) return;
-
   // Detect rewind: if progressSec went backward, reset the fired-watermark
   // and clear any existing flashes. Otherwise we fire any kills crossed
   // since last frame.
   if (STATE.progressSec < STATE.killFiredTSec - 0.05) {
     clearAllKillFlashes(STATE.scene, STATE.killFlashes);
     STATE.killFiredTSec = STATE.progressSec - 0.001;
-    rebuildKillTicker();   // resync the rolling ticker to the new playhead
+    STATE.fxFiredTSec = STATE.progressSec - 0.001;
+    STATE.armoryFiredTSec = STATE.progressSec - 0.001;
+    STATE.structureDeathFired = STATE.progressSec - 0.001;
+    if (STATE.armoryDrops && STATE.armoryDrops.length) {
+      clearArmoryDrops(STATE.scene, STATE.armoryDrops);
+    }
+    rebuildReplayHud(STATE.progressSec);
+    rebuildReplayElo(STATE.progressSec);
   }
 
   const lo = STATE.killFiredTSec;
   const hi = STATE.progressSec;
   if (hi <= lo) return;
 
-  // Walk the indexed array bracketing [lo, hi].
-  for (let i = 0; i < STATE.killIndex.tSecArr.length; i++) {
-    const t = STATE.killIndex.tSecArr[i];
-    if (t <= lo) continue;
-    if (t > hi) break;
-    fireKillFlash(STATE.killIndex.entries[i]);
+  if (STATE.killIndex && STATE.killIndex.tSecArr && STATE.killIndex.tSecArr.length) {
+    for (let i = 0; i < STATE.killIndex.tSecArr.length; i++) {
+      const t = STATE.killIndex.tSecArr[i];
+      if (t <= lo) continue;
+      if (t > hi) break;
+      fireKillFlash(STATE.killIndex.entries[i]);
+    }
   }
+  fireWindowFx(lo, hi);
   STATE.killFiredTSec = hi;
+}
+
+function findActorByName(name) {
+  if (!name || !STATE.actors) return null;
+  return STATE.actors.find((a) => a.name === name || a.displayName === name) || null;
+}
+
+function actorFlashPos(actor) {
+  if (!actor) return null;
+  if (actor.lastValidPos) return { ...actor.lastValidPos };
+  return actor.spawn || null;
+}
+
+function fireWorldFlash(pos, factionCode, actor, nonce) {
+  if (!pos) return;
+  const flash = triggerKillFlash(STATE.scene, pos, factionCode || '_', actor, nonce);
+  STATE.killFlashes.push(flash);
+}
+
+function fireWindowFx(lo, hi) {
+  for (const ev of STATE.fxEvents || []) {
+    if (ev.tSec <= lo) continue;
+    if (ev.tSec > hi) break;
+    if (isTeamLabel(ev.name)) continue;
+    const actor = findActorByName(ev.name);
+    fireWorldFlash(actorFlashPos(actor), actor && actor.factionCode, actor, ev);
+  }
+  for (const drop of STATE.armoryDropIndex || []) {
+    if (drop.tSec <= Math.max(lo, STATE.armoryFiredTSec)) continue;
+    if (drop.tSec > hi) break;
+    STATE.armoryDrops.push(triggerArmoryDrop(
+      STATE.scene, drop, STATE.mapData && STATE.mapData.heightmap, STATE.terrainExaggeration,
+    ));
+  }
+  STATE.armoryFiredTSec = hi;
+  for (const hit of findStructureDeaths(STATE.structures, lo, hi)) {
+    fireWorldFlash({ x: hit.x, y: hit.y, z: hit.z }, '_', null, hit);
+  }
+  STATE.structureDeathFired = hi;
 }
 
 /**
@@ -1558,30 +1718,19 @@ function fireKillFlash(killEntry) {
   if (!killEntry) return;
 
   // Victim's nick is in `victim`; killer's in `killer` (canonical name).
-  const victimActor = STATE.actors.find(a => a.name === killEntry.victim
-                                           || a.displayName === killEntry.victim);
-  // killer can be empty for environment kills; default to the victim's
-  // opposite-team faction so the ring still has a color.
-  const killerActor = STATE.actors.find(a => a.name === killEntry.killer
-                                           || a.displayName === killEntry.killer);
+  // Structure kills often land as literal "Team 1"/"Team 2" with no actor.
+  const victimActor = findActorByName(killEntry.victim);
+  const killerActor = findActorByName(killEntry.killer);
   const killerFactionCode = killerActor ? killerActor.factionCode
                           : (victimActor ? otherFaction(victimActor.factionCode) : '_');
 
-  // Resolve a position for the flash: prefer the victim's interpolated
-  // position at the kill tick, falling back to last-known.
-  let pos = null;
-  if (victimActor && victimActor.lastValidPos) {
-    pos = { ...victimActor.lastValidPos };
-  } else if (victimActor) {
-    pos = victimActor.spawn || null;
-  }
+  // Prefer the victim's last-known position; fall back to the killer so
+  // Team-N structure kills still plant a ring. Skip the 3D flash only
+  // when neither side resolves — the HUD feed still shows the row.
+  const pos = actorFlashPos(victimActor) || actorFlashPos(killerActor);
   if (!pos) return;
 
-  const flash = triggerKillFlash(STATE.scene, pos, killerFactionCode, victimActor, killEntry);
-  STATE.killFlashes.push(flash);
-
-  // Append to the rolling kill ticker.
-  appendKillTicker(killEntry, killerFactionCode);
+  fireWorldFlash(pos, killerFactionCode, victimActor, killEntry);
 }
 
 function otherFaction(code) {

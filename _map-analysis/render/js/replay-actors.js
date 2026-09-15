@@ -364,6 +364,8 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
     // match). Read by the floating label bars and the side-roster HUD.
     actor.curHp = interp.hp;
     actor.curAmmo = interp.ammo;
+    actor.curTarget = interp.target;
+    actor.curSpeed = interp.speed;
 
     // Heading: atan2 over (x, z). Note +Y up world convention: rotation around
     // +Y of `theta` matches a yaw such that an X-forward glyph points in the

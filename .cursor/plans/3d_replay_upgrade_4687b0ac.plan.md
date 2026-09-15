@@ -4,19 +4,19 @@ overview: "Upgrade the dashboard’s 3D Replay iframe (the same viewer behind `?
 todos:
   - id: phase1-scrap-feed
     content: "Phase 1: scrap meters, unified event feed (everything except pods by default), kill-flash/ticker Team-N fix, starting recyclers with identity-break despawn, beat toasts, v20-correct now-building strip — all under the existing compact HUD contract"
-    status: pending
+    status: completed
   - id: phase2-proto-pipeline
     content: "Phase 2: sync BuildEvent.position from upstream proto, PIPELINE 46 / schema 26, emit feed[].position + trail.target[] + trail.speed[] + structures[] (UnitDestroyed-only deaths, turret-class untracked); golden inert + docs + proto regen"
-    status: pending
+    status: completed
   - id: phase3-structures-tlock
     content: "Phase 3: 3D primitive structures (tracked instances only), scup-only pool tint, armory delivery-drop FX, live T-lock from trail.target, structure-death flashes"
-    status: pending
+    status: completed
   - id: phase4-elo-strip
     content: "Phase 4: lobby Elo Δ strip on desktop; compact reuses the roster bottom sheet (no new left-column overlay)"
-    status: pending
+    status: completed
   - id: verify-browser
-    content: "Browser-verify Ancient Hills desktop + compact (768px and coarse-landscape 520px) + expanded iframe; pre-v4 / Wasteland; turret-untracked"
-    status: pending
+    content: Browser-verify Ancient Hills desktop + compact (768px and coarse-landscape 520px) + expanded iframe; pre-v4 / Wasteland; turret-untracked
+    status: completed
 isProject: false
 ---
 

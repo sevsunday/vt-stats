@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VT Stats - Match Replay (Ace Combat-style)</title>
 <link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/replay-style.css">
+<link rel="stylesheet" href="css/replay-style.css?v=hud-layout-12">
 
 <script type="importmap">
 {
@@ -115,10 +115,42 @@
   </footer>
 </aside>
 
-<!--
-  Bottom-right rolling kill ticker. Max 6 entries, fade with age. Phase 2.
--->
-<div id="kill-ticker" class="kill-ticker"></div>
+<div id="scrap-meters" class="scrap-meters" hidden>
+  <div class="scrap-meter" data-side="1">
+    <div class="scrap-meter-stack">
+      <div class="scrap-meter-team">T1</div>
+      <div class="scrap-meter-track">
+        <div class="scrap-meter-bands" aria-hidden="true"></div>
+        <div class="scrap-meter-ticks" aria-hidden="true"></div>
+        <div class="scrap-meter-fill" aria-hidden="true"></div>
+      </div>
+      <div class="scrap-meter-num">0</div>
+    </div>
+    <div class="scrap-meter-cmdr" hidden></div>
+  </div>
+  <div class="scrap-meter" data-side="2">
+    <div class="scrap-meter-cmdr" hidden></div>
+    <div class="scrap-meter-stack">
+      <div class="scrap-meter-team">T2</div>
+      <div class="scrap-meter-track">
+        <div class="scrap-meter-bands" aria-hidden="true"></div>
+        <div class="scrap-meter-ticks" aria-hidden="true"></div>
+        <div class="scrap-meter-fill" aria-hidden="true"></div>
+      </div>
+      <div class="scrap-meter-num">0</div>
+    </div>
+  </div>
+</div>
+
+<div id="now-building" class="now-building" hidden></div>
+<div id="beat-toast" class="beat-toast" hidden></div>
+
+<div id="elo-strip" class="elo-strip" hidden></div>
+
+<div id="event-feed" class="event-feed">
+  <div id="feed-chips" class="feed-chips"></div>
+  <div id="kill-ticker" class="kill-ticker"></div>
+</div>
 
 <!--
   Bottom transport bar. Compact: full-width scrub row above a single
