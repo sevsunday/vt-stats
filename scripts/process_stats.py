@@ -113,7 +113,17 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 44 -> 45: emit positioning.players[name].ship_timeline (full-rate
 # UpdateTick PlayerState.odf transitions) so the 3D replay labels the
 # ship the player is actually in. Display-only; not in contributions.
-PIPELINE_VERSION = 45
+# 45 -> 46: 3D replay v26 -- BuildEvent.build_position on builds.feed[],
+# trail.target[] + trail.speed[] from PlayerState, and top-level
+# structures[] (constructor BUILD xyz + UnitDestroyed-only deaths;
+# turret-class instances stay death_reason=untracked while
+# TURRET_DEATHS_RELIABLE is False). Display-only; not in contributions.
+PIPELINE_VERSION = 46
+
+# Collector usually omits UnitDestroyed for gun-tower / turret-class
+# vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
+# emitting those deaths reliably. Do NOT infer deaths from HP.
+TURRET_DEATHS_RELIABLE = False
 
 TIMELINE_BUCKET_SECONDS = 10
 
@@ -2826,7 +2836,7 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
     """Compute the positioning block from raw per-player samples.
 
     raw_samples_by_s64: dict[s64] -> list of
-    (t_sec, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio) tuples,
+    (t_sec, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio, speed) tuples,
     in tick order. match_has_target_lock_data is the match-global flag captured
     in the main event loop (True iff any PlayerState had has_target=True during
     the match). ship_timelines_by_s64: optional dict[s64] ->
@@ -2877,10 +2887,11 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
         # to all-None and the replay simply hides the bars.
         hp_arr = [s[6] if len(s) > 6 else None for s in samples]
         ammo_arr = [s[7] if len(s) > 7 else None for s in samples]
+        speed_arr = [s[8] if len(s) > 8 else None for s in samples]
         trails[s64] = {
             "t": t_arr, "x": x_arr, "y": y_arr, "z": z_arr,
             "target": target_arr, "pilot": pilot_arr,
-            "hp": hp_arr, "ammo": ammo_arr,
+            "hp": hp_arr, "ammo": ammo_arr, "speed": speed_arr,
             "first_seen": t_arr[0], "last_seen": t_arr[-1],
             "sample_count": len(t_arr),
         }
@@ -3141,6 +3152,11 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
                 # and ammo (blue) bars.
                 "hp": [round(v, 3) if v is not None else None for v in tr["hp"]],
                 "ammo": [round(v, 3) if v is not None else None for v in tr["ammo"]],
+                # v26: live T-lock + authored PlayerState.speed, parallel
+                # to t/x/y/z. target is 0/1; speed is 1 dp (None when the
+                # wire sample was missing). Pre-v26 JSON has neither key.
+                "target": [1 if v else 0 for v in tr["target"]],
+                "speed": [round(v, 1) if v is not None else None for v in tr["speed"]],
                 "segments": segments,
             },
             "heatmap_grid_xz": heatmap_grid_xz,
@@ -3821,6 +3837,26 @@ def build_extractor_odfs(odf_db):
         for odf_key, entry in bucket.items():
             chain = (entry or {}).get("inheritanceChain") or []
             if chain and chain[-1] == "extractor":
+                out.add(_norm_build_odf(odf_key))
+    return out
+
+
+def build_turret_odfs(odf_db):
+    """Set of ODF stems whose inheritanceChain terminal is `turret`.
+
+    Gun-tower types sit in the Vehicle bucket with terminal `turret`.
+    Chain-based like build_extractor_odfs; NEVER a hardcoded stem list.
+    Used to classify structures[].cls and to gate death tracking while
+    TURRET_DEATHS_RELIABLE is False (collector usually skips their
+    UnitDestroyed events).
+    """
+    out = set()
+    for bucket in (odf_db or {}).values():
+        if not isinstance(bucket, dict):
+            continue
+        for odf_key, entry in bucket.items():
+            chain = (entry or {}).get("inheritanceChain") or []
+            if chain and chain[-1] == "turret":
                 out.add(_norm_build_odf(odf_key))
     return out
 
@@ -4512,7 +4548,213 @@ def restamp_storyline_outcome(match_data):
     sl["beats"] = _storyline_beat_sort(beats)
 
 
-def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, scavenger_odfs=None, no_prompt=False):
+_FACTION_RECYCLER_STEM = {
+    "i": "ibrecy_vsr",
+    "e": "ebrecym_vsr",
+    "f": "fbrecy_vsr",
+}
+
+
+def _round_xyz(x, y, z):
+    return {
+        "x": round(float(x), 2),
+        "y": round(float(y), 2),
+        "z": round(float(z), 2),
+    }
+
+
+def _median_xyz_dicts(positions):
+    if not positions:
+        return None
+    xs = sorted(p["x"] for p in positions)
+    ys = sorted(p["y"] for p in positions)
+    zs = sorted(p["z"] for p in positions)
+    n = len(xs)
+    mid = n // 2
+    if n % 2:
+        return _round_xyz(xs[mid], ys[mid], zs[mid])
+    return _round_xyz(
+        (xs[mid - 1] + xs[mid]) / 2.0,
+        (ys[mid - 1] + ys[mid]) / 2.0,
+        (zs[mid - 1] + zs[mid]) / 2.0,
+    )
+
+
+def _trail_xz_at(trail, t_sec):
+    t = (trail or {}).get("t") or []
+    xs = (trail or {}).get("x") or []
+    zs = (trail or {}).get("z") or []
+    n = min(len(t), len(xs), len(zs))
+    if n == 0:
+        return None
+    if t_sec <= t[0]:
+        return (xs[0], zs[0])
+    if t_sec >= t[n - 1]:
+        return (xs[n - 1], zs[n - 1])
+    lo, hi = 0, n - 1
+    while lo + 1 < hi:
+        mid = (lo + hi) // 2
+        if t[mid] <= t_sec:
+            lo = mid
+        else:
+            hi = mid
+    return (xs[lo], zs[lo])
+
+
+def _lookup_max_hp(ship_caps, stem):
+    if not ship_caps or not stem:
+        return None
+    pair = ship_caps.get(stem) or ship_caps.get(stem + ".odf")
+    if not pair:
+        return None
+    hp = pair[0]
+    return round(float(hp), 1) if hp is not None else None
+
+
+def compute_structures(match_data, turret_odfs=None, ship_caps=None):
+    """Derive the match-global structures[] block (schema 26).
+
+    Starting recyclers (one per team) plus one instance per constructor
+    BUILD that carries xyz. Factory/armory/recycler *lane* pads are
+    units, not buildings. Deaths come from UnitDestroyed / kill feed
+    only -- never HP inference. Turret-class instances stay
+    death_reason='untracked' while TURRET_DEATHS_RELIABLE is False.
+    Always emitted (empty instances list on matches with no signal).
+    """
+    turret_odfs = turret_odfs or set()
+    match = match_data.get("match") or {}
+    tick_rate = match.get("tick_rate") or 20
+    tick_range = match.get("tick_range") or [0, 0]
+    min_tick = tick_range[0] if tick_range else 0
+    odf_map = match_data.get("odf_map") or {}
+    factions = match.get("team_factions") or {}
+    team_base = ((match_data.get("positioning") or {}).get("team_base")) or {}
+    players = ((match_data.get("positioning") or {}).get("players")) or {}
+    feed = ((match_data.get("builds") or {}).get("feed")) or []
+    kills = ((match_data.get("kills") or {}).get("feed")) or []
+
+    instances = []
+
+    rec_pads = {1: [], 2: []}
+    for row in feed:
+        if row.get("type") != "build":
+            continue
+        if (row.get("producer_resolved") or row.get("producer")) != "recycler":
+            continue
+        pos = row.get("position")
+        if pos and isinstance(pos.get("x"), (int, float)) and isinstance(pos.get("z"), (int, float)):
+            side = row.get("team")
+            if side in (1, 2):
+                rec_pads[side].append(pos)
+
+    for side in (1, 2):
+        code = ((factions.get(str(side)) or {}).get("code") or "").lower()
+        stem = _FACTION_RECYCLER_STEM.get(code)
+        if not stem:
+            continue
+        pos = _median_xyz_dicts(rec_pads.get(side) or [])
+        if pos is None:
+            c = ((team_base.get(str(side)) or {}).get("centroid")) or {}
+            if not isinstance(c.get("x"), (int, float)) or not isinstance(c.get("z"), (int, float)):
+                continue
+            pos = _round_xyz(c["x"], 0.0, c["z"])
+        pretty = odf_map.get(stem + ".odf") or odf_map.get(stem) or stem
+        instances.append({
+            "id": f"recycler-{side}",
+            "team": side,
+            "odf": stem,
+            "name": pretty,
+            "cls": "building",
+            "kind": "recycler",
+            "x": pos["x"],
+            "y": pos["y"],
+            "z": pos["z"],
+            "spawn_tick": 0,
+            "max_hp": _lookup_max_hp(ship_caps, stem),
+            "death_tick": None,
+            "death_reason": None,
+        })
+
+    seq = 0
+    for row in feed:
+        if row.get("type") != "build":
+            continue
+        if (row.get("producer_resolved") or row.get("producer")) != "constructor":
+            continue
+        pos = row.get("position")
+        if not pos or not isinstance(pos.get("x"), (int, float)) or not isinstance(pos.get("z"), (int, float)):
+            continue
+        stem = _norm_build_odf(row.get("odf"))
+        if not stem:
+            continue
+        side = row.get("team")
+        if side not in (1, 2):
+            continue
+        seq += 1
+        cls = "turret" if stem in turret_odfs else "building"
+        pretty = row.get("name") or odf_map.get(stem + ".odf") or odf_map.get(stem) or stem
+        inst = {
+            "id": f"b-{side}-{stem}-{seq}",
+            "team": side,
+            "odf": stem,
+            "name": pretty,
+            "cls": cls,
+            "x": round(float(pos["x"]), 2),
+            "y": round(float(pos.get("y") or 0.0), 2),
+            "z": round(float(pos["z"]), 2),
+            "spawn_tick": int(row.get("tick") or 0),
+            "max_hp": _lookup_max_hp(ship_caps, stem),
+            "death_tick": None,
+            "death_reason": "untracked" if (cls == "turret" and not TURRET_DEATHS_RELIABLE) else None,
+        }
+        instances.append(inst)
+
+    living = {}
+    for inst in instances:
+        if inst.get("death_reason") == "untracked":
+            continue
+        living.setdefault((inst["team"], inst["odf"]), []).append(inst)
+
+    for inst_list in living.values():
+        inst_list.sort(key=lambda it: it.get("spawn_tick") or 0)
+
+    for row in kills:
+        stem = _norm_build_odf(row.get("victim_odf"))
+        if not stem:
+            continue
+        side = _slot_side(row.get("victim_team"))
+        pool = living.get((side, stem))
+        if not pool:
+            continue
+        tick = int(row.get("tick") or 0)
+        t_sec = (tick - min_tick) / max(1, tick_rate)
+        killer_xz = None
+        killer = row.get("killer")
+        if killer and killer in players:
+            killer_xz = _trail_xz_at((players[killer] or {}).get("trail"), t_sec)
+        chosen = None
+        if killer_xz and len(pool) > 1:
+            kx, kz = killer_xz
+            best = None
+            for inst in pool:
+                d = (inst["x"] - kx) ** 2 + (inst["z"] - kz) ** 2
+                if best is None or d < best[0]:
+                    best = (d, inst)
+            chosen = best[1] if best else pool[0]
+        else:
+            chosen = pool[0]
+        chosen["death_tick"] = tick
+        chosen["death_reason"] = "destroyed"
+        pool.remove(chosen)
+
+    return {
+        "schema_version": 1,
+        "turret_deaths_reliable": bool(TURRET_DEATHS_RELIABLE),
+        "instances": instances,
+    }
+
+
+def process_match(session, source_file, source_size_bytes, submitter, resolve_weapon, resolve_unit, known_powerup_odfs, building_odfs, known_players=None, schema=PROTO_SCHEMA_V2, ship_caps=None, ordnance_ranges=None, producer_lanes=None, scrap_costs=None, combat_ship_odfs=None, extractor_odfs=None, scavenger_odfs=None, turret_odfs=None, no_prompt=False):
     """Process a single match session into pre-computed stats.
 
     `source_size_bytes` is the byte size of the source .binpb.gz at
@@ -4900,7 +5142,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     slot_faction_votes = defaultdict(Counter)  # slot -> Counter[faction_code]
 
     # Positioning: per-player raw sample buffer (downsampled to ~1 Hz in the loop below).
-    # Keyed by Steam64 -> list of (tick, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio) tuples in tick order.
+    # Keyed by Steam64 -> list of (tick, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio, speed) tuples in tick order.
     # is_pilot flags on-foot samples (pilot ODF) so the VTSR-T low-tier at-base lift
     # can measure ship-denied time (on foot AND within the base radius).
     position_samples = defaultdict(list)
@@ -6124,6 +6366,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     is_pilot_odf(ps.odf),
                     hp_ratio,
                     ammo_ratio,
+                    float(ps.speed),
                 ))
             i += 1
 
@@ -6190,6 +6433,21 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "scrap_at_event": _est["cur_bank"],
                 "max_scrap_at_event": _est["cur_cap"],
                 "pool_count_at_event": _est["cur_pools"],
+                # v26: wire Vec3 BuildEvent.build_position. Only defined
+                # for BUILD events (HasField). QUEUE/CANCEL and pre-field
+                # sessions emit null. JSON key is `position` (plan contract).
+                "position": (
+                    {
+                        "x": round(float(be.build_position.x), 2),
+                        "y": round(float(be.build_position.y), 2),
+                        "z": round(float(be.build_position.z), 2),
+                    }
+                    if (
+                        _etype == "build"
+                        and be.HasField("build_position")
+                    )
+                    else None
+                ),
             }
 
             if _etype == "queue":
@@ -7143,9 +7401,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         normalized_samples = {}
         for s64, samples in position_samples.items():
             normalized = []
-            for t_raw, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio in samples:
+            for t_raw, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio, speed in samples:
                 t_sec = int((t_raw - min_tick) / tick_rate)
-                normalized.append((t_sec, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio))
+                normalized.append((t_sec, x, y, z, has_target, is_pilot, hp_ratio, ammo_ratio, speed))
             normalized_samples[s64] = normalized
     else:
         normalized_samples = {}
@@ -7716,11 +7974,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # (mobile scavenger BUILD completions); `thug_supply.{n}`
             # gains `commander_row` (commander attrition sibling -- team
             # totals stay thug-only). Display-only.
-            # v25 (this version): `positioning.players[name].ship_timeline`
+            # v25: `positioning.players[name].ship_timeline`
             # (full-rate UpdateTick PlayerState.odf transitions) so the
             # 3D replay labels the ship the player is actually in.
+            # v26 (this version): `builds.feed[].position` from
+            # BuildEvent.build_position; `trail.target[]` + `trail.speed[]`;
+            # top-level `structures[]` (constructor BUILD xyz +
+            # UnitDestroyed-only deaths; turret-class untracked).
             # Display-only; not in contributions.
-            "schema_version": 25,
+            "schema_version": 26,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -8025,6 +8287,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     )
     if _storyline is not None:
         match_data["storyline"] = _storyline
+
+    # v26: 3D-replay structure instances. Always emitted (empty list when
+    # the match has no constructor BUILD xyz and no team_base centroid).
+    # Display-only; rating-inert; not in contributions.
+    match_data["structures"] = compute_structures(
+        match_data,
+        turret_odfs=turret_odfs or set(),
+        ship_caps=ship_caps,
+    )
 
     return match_data
 
@@ -8777,6 +9048,8 @@ def main():
     # chain-terminal `extractor` covers deployed scavs AND pool upgrades.
     extractor_odfs = build_extractor_odfs(odf_db)
     print(f"  Extractor set: {len(extractor_odfs)} ODF stems (storyline extractor-war classification)")
+    turret_odfs = build_turret_odfs(odf_db)
+    print(f"  Turret set: {len(turret_odfs)} ODF stems (structures[] turret-class; deaths untracked)")
 
     # Load canonical player names
     known_players = load_known_players()
@@ -8827,6 +9100,7 @@ def main():
                 combat_ship_odfs=combat_ship_odfs,
                 extractor_odfs=extractor_odfs,
                 scavenger_odfs=scavenger_odfs,
+                turret_odfs=turret_odfs,
                 no_prompt=args.no_prompt,
             )
             match_id = match_data["match"]["id"]

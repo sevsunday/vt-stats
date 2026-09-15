@@ -759,7 +759,7 @@ Each match file has these top-level keys:
 | `teams` | `object` | `"1"` and `"2"` → arrays of roster entries |
 | `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). Match-global, always-unfiltered. |
 | `team_factions` | `object` | `{ "1": { code, name } \| null, "2": { code, name } \| null }` — derived faction per team. `code` is one of `"i"` (ISDF) / `"e"` (Hadean) / `"f"` (Scion); `name` is the human label. `null` for teams with no signal (sandbox / pure-AI / corrupt match). Schema v3+. See [Team Faction Detection](#team-faction-detection) for the algorithm. Match-global, always-unfiltered. |
-| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. `3` adds `match.team_factions` + `match.winner`. **`25` (current)** adds `positioning.players[name].ship_timeline` (full-rate `UpdateTick.PlayerState.odf` transitions for the 3D replay). `24` added `builds.teams.scavs_built`, `thug_supply.{n}.commander_row`, and BUILD feed chips inheriting the matched QUEUE scrap triad. Absence indicates legacy data. Bumped only when an output-shape-breaking change ships. |
+| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. `3` adds `match.team_factions` + `match.winner`. **`26` (current)** adds `builds.feed[].position` (`BuildEvent.build_position`), `trail.target[]` + `trail.speed[]`, and the top-level `structures[]` block for the 3D replay. `25` added `positioning.players[name].ship_timeline`. `24` added `builds.teams.scavs_built`, `thug_supply.{n}.commander_row`, and BUILD feed chips inheriting the matched QUEUE scrap triad. Absence indicates legacy data. Bumped only when an output-shape-breaking change ships. |
 | `has_position_data` | `boolean` | `true` iff the session contained `UpdateTick` events. Mirrored from `positioning.has_position_data`. Drives Positioning-tab UI gating. |
 | `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed. Mirrored from `positioning.has_target_lock_data`. Distinguishes "no T-key data" (pre-schema or never pressed) from "0% lock" in Career Radar tooltips. |
 | `has_pickup_data` | `boolean` | Phase 3. `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. |
@@ -879,7 +879,7 @@ Match-global, always-unfiltered. Present only when `has_build_data`.
 | Field | Type | Description |
 |---|---|---|
 | `has_build_data` | `boolean` | Always `true` when the block exists |
-| `feed[]` | `object[]` | Every BuildEvent: `{tick, type, producer, producer_resolved, team, teamnum, odf, name, scrap_cost, scrap_status_at_queue, scrap_status_at_build, scrap_at_event, max_scrap_at_event, pool_count_at_event}`. `producer_resolved` ∈ `"recycler"\|"factory"\|null` (reverse-map over odf.min.json producer menus, `cpu`/`insane` + `virtual_class_*` excluded — menus verified disjoint); `name` = unit display name via `prettify_odf()`; both scrap-status stamps recorded, skill summaries key on the QUEUE tick (deduction timing — measured) |
+| `feed[]` | `object[]` | Every BuildEvent: `{tick, type, producer, producer_resolved, team, teamnum, odf, name, scrap_cost, scrap_status_at_queue, scrap_status_at_build, scrap_at_event, max_scrap_at_event, pool_count_at_event, position}`. `producer_resolved` ∈ `"recycler"\|"factory"\|null` (reverse-map over odf.min.json producer menus, `cpu`/`insane` + `virtual_class_*` excluded — menus verified disjoint); `name` = unit display name via `prettify_odf()`; both scrap-status stamps recorded, skill summaries key on the QUEUE tick (deduction timing — measured). **v26** `position` is `{x,y,z}` from wire `BuildEvent.build_position` on BUILD rows (`HasField`); `null` on QUEUE/CANCEL and on sessions captured before field 6 |
 | `feed[].scrap_at_event` / `max_scrap_at_event` / `pool_count_at_event` | `number\|null` | **v21 stamped at the event tick; v24 BUILD inherits QUEUE.** QUEUE and CANCEL still report the team's scrap bank, storage cap and pool count at the **most recent resource tick at or before that event**. A QUEUE row is the **pre-purchase** bank (the engine debits on the next tick: `t=3515` QUEUE → `t=3516` bank 80 → 60). **v24:** a matched BUILD overwrites the triad with the values stored on its open QUEUE order, so the Build Order Log chip is about the order (what the commander had to spend), not the completion tick. An orphan BUILD (no open order) keeps the completion-time stamp. CANCEL stays on its own tick. All three are `null` on a build-data-but-no-resource-data session and on any event preceding the first resource tick. Display telemetry for the context badge (`cost \| bank \| cap \| pools`); rating-inert (`_investigation/golden_builds_inert.py` blanks the whole feed). Verified by `_investigation/probe_feed_context.py` (BUILD chip == matched QUEUE triad) |
 | `teams{n}.units_queued` / `units_cancelled` / `units_built` | `number` | Unit-lane counts (factory + recycler + armory). `units_cancelled` is the RAW CANCEL event count, kept for tier-2 reconcile — for display use the v20 split below, since a bulk cancel fires one event per queued unit and this number blends "backed out of a build" with "trimmed an over-long queue" |
 | `teams{n}.orders_backed_out` | `number` | **v20.** Bulk cancels that hit a live order, i.e. the commander cancelled something already building. This is the reaction/mistake metric and the count `cancel_sunk_cost` belongs to |
@@ -1017,6 +1017,40 @@ the generic fallback are testable on the current one-match v4 corpus — the
 other archetype templates are protected by
 `_investigation/check_story_templates.mjs`, which renders every archetype
 and beat template against fixture facts and fails on unfilled slots.
+
+#### `structures` (`match.schema_version` 26)
+
+Match-global, always-unfiltered. Always emitted on a v26 reprocess (empty
+`instances` when the match has no constructor BUILD xyz and no team-base
+centroid). Powers the 3D replay's building primitives. Display-only and
+rating-inert (gated by `_investigation/golden_replay_v26_inert.py` — strip
++ perturb `structures`, `feed[].position`, `trail.target`, `trail.speed`;
+byte-identical VTSR-T + VTSR-C). Not in `_extract_contribution`.
+
+Built by `compute_structures()` after economy/builds/positioning attach.
+
+| Field | Type | Description |
+|---|---|---|
+| `schema_version` | `number` | Structures-block contract (`1`) |
+| `turret_deaths_reliable` | `boolean` | Mirror of `TURRET_DEATHS_RELIABLE` in `process_stats.py`. `false` until the collector emits `UnitDestroyed` for gun-tower / turret-class vehicles. Flip the constant + bump `PIPELINE_VERSION` when upstream is fixed — do **not** infer deaths from HP |
+| `instances[]` | `object[]` | Starting recyclers (one per team: faction ODF, median of recycler-lane BUILD pads else `team_base.centroid`) plus one row per **constructor** BUILD that carries xyz. Factory/armory/recycler *lane* pads are units, not buildings. Includes `*scup` pool upgrades |
+
+Each instance:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Stable within the match (`recycler-1` / `b-{side}-{stem}-{n}`) |
+| `team` | `number` | 1 or 2 |
+| `odf` | `string` | Normalized stem |
+| `name` | `string` | `odf_map` display name |
+| `cls` | `string` | `"building"` or `"turret"` (inheritanceChain terminal `turret`, via `build_turret_odfs()`) |
+| `x`/`y`/`z` | `number` | World meters, 2 dp |
+| `spawn_tick` | `number` | 0 for starting recyclers; BUILD tick otherwise |
+| `max_hp` | `number\|null` | `GameObjectClass.maxHealth` via `ship_caps` |
+| `death_tick` | `number\|null` | Kill-feed / `UnitDestroyed` tick, or `null` if still standing / untracked |
+| `death_reason` | `string\|null` | `"destroyed"` (matched UnitDestroyed), `"untracked"` (turrets while the collector flag is False), or `null` (alive) |
+
+Death matching: `(side, odf)` → nearest living instance to the killer's trail at `(tick − min_tick) / tick_rate`; FIFO if the killer has no trail. Turret-class rows are never matched while `TURRET_DEATHS_RELIABLE` is False and the 3D replay **does not render** them.
 
 #### `leaderboard[]`
 
@@ -1319,6 +1353,9 @@ All distances computed on the `(x, z)` horizontal plane against the player's per
 | `z` | `number[]` | Per-sample world Z (north/south) |
 | `y` | `number[]` | Per-sample world Y (up/down). Stored but not used by v1 metrics; available for future elevation features |
 | `segments` | `[number, number][]` | Index ranges `[start, end]` (inclusive) split at teleport detections. Frontend draws one polyline per segment; the first sample of each post-teleport segment is excluded from `return_to_base_count` |
+| `hp` / `ammo` | `(number\|null)[]` | **v10.** 0–1 ratios vs the ship's `maxHealth` / `maxAmmo`. `null` when the ship had no resolvable cap |
+| `target` | `number[]` | **v26.** Parallel 0/1 T-lock channel (`PlayerState.has_target`). Pre-v26 JSON has no key (replay falls back to career `target_lock_pct`) |
+| `speed` | `(number\|null)[]` | **v26.** Authored `PlayerState.speed` at 1 dp. Pre-v26 JSON has no key |
 
 ##### Teleport detection
 
