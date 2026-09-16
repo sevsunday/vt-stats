@@ -4,31 +4,31 @@ overview: "Eight-phase render-layer polish of the per-match 3D replay: force Tea
 todos:
   - id: team-colors
     content: "Phase 1: Introduce --vt-team-1/-2 tokens; re-key all faction tints to team (actors/structures glyph+trail, event feed, scrap meter outline via data-side, now-building, roster dot+name, inert elo strip). Switch JS data-faction -> data-team."
-    status: pending
+    status: completed
   - id: contrails
     content: "Phase 2: Shorten trails (lookback 30->10s, samples 64->24), drop the halo line, lower base opacity; add STATE.trailsVisible + toggleTrails() gated in the frame loop; add the 'trails' button to the roster bulk row and wire it."
-    status: pending
+    status: completed
   - id: roster-inv-shield
     content: "Phase 3: Remove the roster INV button (HTML + handler); thread isCommander onto the actor and render a yellow commander shield in each roster row's .r-name with CSS."
-    status: pending
+    status: completed
   - id: nowbuild-cmdr
     content: "Phase 4: Add commander names to the now-building T1/T2 headers via the existing commanderName() helper."
-    status: pending
+    status: completed
   - id: struct-labels
     content: "Phase 5: Add structure back-refs (userData.pickLabel/team) in replay-structures.js; add a raycaster + #struct-tip tooltip in replay.js for desktop hover + mobile tap showing 'Name - Team N'."
-    status: pending
+    status: completed
   - id: mobile-fixes
     content: "Phase 6: Compact scrap meters pinned in corners, never idle-hidden, commander name shown as a small horizontal chip; bump event-feed row background opacity (less transparent)."
-    status: pending
+    status: completed
   - id: roster-refinements
     content: "Phase 7: Desktop roster - add a - / + collapse button (hide title at rail width); grow the event feed when collapsed; delete the [] \\ V H keyboard shortcuts + the footer hint subtext; add a leading team-color dot before each scrap-bar commander name."
-    status: pending
+    status: completed
   - id: killrow-clarity
     content: "Phase 8: Reformat player-kill feed rows to the verb form 'killer killed victim (ship)' so the killer's ship is unambiguous; add an inline .kt-ship parenthetical (AI-unit-kill variant unchanged)."
-    status: pending
+    status: completed
   - id: cachebust-verify
     content: Bump CSS cache-bust to hud-layout-13 and browser-verify desktop + compact (colors, trails toggle, shield, now-building headers, building tooltips, corner meters, feed readability) plus a pre-v4 no-econ match.
-    status: pending
+    status: completed
 isProject: false
 ---
 

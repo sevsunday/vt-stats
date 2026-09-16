@@ -18,6 +18,13 @@
   --vt-faction-f: #a87cff;   /* Scion purple */
   --vt-faction-_: #9aa3b0;   /* unknown */
 
+  /* Team colors: T1 blue, T2 red. The replay HUD colors by TEAM, not faction,
+   * so mirror matches read the way players expect. Keep in sync with
+   * TEAM_TINTS in js/replay-actors.js + js/replay-structures.js. */
+  --vt-team-1: #5dadff;      /* Team 1 blue */
+  --vt-team-2: #ff5d5d;      /* Team 2 red */
+  --vt-team-_: #9aa3b0;      /* neutral / env */
+
   --vt-roster-width: 280px;
   --vt-transport-height: 56px;
   --vt-feed-width: 280px;
@@ -219,6 +226,36 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
 .roster-panel.is-collapsed .roster-bulk {
   display: none;
 }
+.roster-panel.is-collapsed .roster-title {
+  display: none;
+}
+.roster-collapse {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, color 0.15s;
+}
+.roster-collapse:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+body.replay-compact .roster-collapse {
+  display: none;
+}
+body.replay-roster-collapsed:not(.replay-compact) .event-feed {
+  max-height: calc(100vh - var(--vt-transport-height) - var(--vt-overlay-top) - 28px);
+}
 
 .roster-head {
   display: flex;
@@ -233,6 +270,7 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
+  margin-right: auto;
 }
 
 .roster-bulk {
@@ -253,6 +291,11 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
 .roster-bulk button:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+.roster-bulk button.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(106, 169, 255, 0.14);
 }
 
 .roster-team + .roster-team {
@@ -275,9 +318,8 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   text-transform: uppercase;
   color: var(--vt-faction-_);
 }
-.roster-team-name[data-faction="i"] { color: var(--vt-faction-i); }
-.roster-team-name[data-faction="e"] { color: var(--vt-faction-e); }
-.roster-team-name[data-faction="f"] { color: var(--vt-faction-f); }
+.roster-team-name[data-team="1"] { color: var(--vt-team-1); }
+.roster-team-name[data-team="2"] { color: var(--vt-team-2); }
 
 .roster-team-actions {
   display: inline-flex;
@@ -370,9 +412,16 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   flex-shrink: 0;
   box-shadow: 0 0 4px currentColor;
 }
-.r-dot[data-faction="i"] { background: var(--vt-faction-i); color: var(--vt-faction-i); }
-.r-dot[data-faction="e"] { background: var(--vt-faction-e); color: var(--vt-faction-e); }
-.r-dot[data-faction="f"] { background: var(--vt-faction-f); color: var(--vt-faction-f); }
+.r-dot[data-team="1"] { background: var(--vt-team-1); color: var(--vt-team-1); }
+.r-dot[data-team="2"] { background: var(--vt-team-2); color: var(--vt-team-2); }
+
+.r-cmdr {
+  display: inline-flex;
+  align-items: center;
+  color: #ffcf3a;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 3px rgba(255, 207, 58, 0.5));
+}
 
 .r-disp {
   font-weight: 500;
@@ -664,9 +713,8 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   will-change: transform;
 }
 
-.vt-actor-label[data-faction="i"] { border-bottom-color: var(--vt-faction-i); }
-.vt-actor-label[data-faction="e"] { border-bottom-color: var(--vt-faction-e); }
-.vt-actor-label[data-faction="f"] { border-bottom-color: var(--vt-faction-f); }
+.vt-actor-label[data-team="1"] { border-bottom-color: var(--vt-team-1); }
+.vt-actor-label[data-team="2"] { border-bottom-color: var(--vt-team-2); }
 
 .vt-actor-label-dot {
   width: 6px;
@@ -675,9 +723,8 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   background: var(--vt-faction-_);
   box-shadow: 0 0 4px currentColor;
 }
-.vt-actor-label[data-faction="i"] .vt-actor-label-dot { background: var(--vt-faction-i); color: var(--vt-faction-i); }
-.vt-actor-label[data-faction="e"] .vt-actor-label-dot { background: var(--vt-faction-e); color: var(--vt-faction-e); }
-.vt-actor-label[data-faction="f"] .vt-actor-label-dot { background: var(--vt-faction-f); color: var(--vt-faction-f); }
+.vt-actor-label[data-team="1"] .vt-actor-label-dot { background: var(--vt-team-1); color: var(--vt-team-1); }
+.vt-actor-label[data-team="2"] .vt-actor-label-dot { background: var(--vt-team-2); color: var(--vt-team-2); }
 
 .vt-actor-label-name {
   font-weight: 600;
@@ -743,8 +790,8 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   align-items: center;
   gap: 6px;
   padding: 4px 9px;
-  background: rgba(15, 19, 26, 0.78);
-  border-left: 3px solid var(--vt-faction-_);
+  background: rgba(15, 19, 26, 0.92);
+  border-left: 3px solid var(--vt-team-_);
   border-radius: 3px;
   font-size: 11px;
   color: var(--text);
@@ -759,15 +806,19 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   opacity: 1;
   transform: translateX(0);
 }
-.kill-ticker-row[data-faction="i"] { border-left-color: var(--vt-faction-i); }
-.kill-ticker-row[data-faction="e"] { border-left-color: var(--vt-faction-e); }
-.kill-ticker-row[data-faction="f"] { border-left-color: var(--vt-faction-f); }
+.kill-ticker-row[data-team="1"] { border-left-color: var(--vt-team-1); }
+.kill-ticker-row[data-team="2"] { border-left-color: var(--vt-team-2); }
 
 .kt-killer { font-weight: 600; }
 .kt-arrow  { color: var(--text-muted); }
 .kt-victim { font-weight: 500; }
 .kt-weapon {
   margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+.kt-ship {
   font-size: 10px;
   color: var(--text-muted);
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
@@ -901,6 +952,17 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
 .scrap-meter[data-side="1"] .scrap-meter-cmdr {
   transform: none;
 }
+.scrap-meter-cmdr-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin: 0 2px;
+  vertical-align: middle;
+  background: var(--vt-team-_);
+}
+.scrap-meter[data-side="1"] .scrap-meter-cmdr-dot { background: var(--vt-team-1); }
+.scrap-meter[data-side="2"] .scrap-meter-cmdr-dot { background: var(--vt-team-2); }
 .scrap-meter-track {
   position: relative;
   width: 22px;
@@ -910,9 +972,8 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   --scrap-fill-thickness: 10px;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 6px 16px rgba(0, 0, 0, 0.35);
 }
-.scrap-meter[data-faction="i"] .scrap-meter-track { box-shadow: 0 0 0 1px var(--vt-faction-i), 0 6px 16px rgba(0, 0, 0, 0.35); }
-.scrap-meter[data-faction="e"] .scrap-meter-track { box-shadow: 0 0 0 1px var(--vt-faction-e), 0 6px 16px rgba(0, 0, 0, 0.35); }
-.scrap-meter[data-faction="f"] .scrap-meter-track { box-shadow: 0 0 0 1px var(--vt-faction-f), 0 6px 16px rgba(0, 0, 0, 0.35); }
+.scrap-meter[data-side="1"] .scrap-meter-track { box-shadow: 0 0 0 1px var(--vt-team-1), 0 6px 16px rgba(0, 0, 0, 0.35); }
+.scrap-meter[data-side="2"] .scrap-meter-track { box-shadow: 0 0 0 1px var(--vt-team-2), 0 6px 16px rgba(0, 0, 0, 0.35); }
 .scrap-meter-bands {
   position: absolute;
   inset: 0;
@@ -982,9 +1043,8 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   border-radius: 4px;
   backdrop-filter: blur(3px);
 }
-.now-building-side[data-faction="i"] { border-left-color: var(--vt-faction-i); }
-.now-building-side[data-faction="e"] { border-left-color: var(--vt-faction-e); }
-.now-building-side[data-faction="f"] { border-left-color: var(--vt-faction-f); }
+.now-building-side[data-team="1"] { border-left-color: var(--vt-team-1); }
+.now-building-side[data-team="2"] { border-left-color: var(--vt-team-2); }
 .now-building-label {
   font-size: 10px;
   font-weight: 700;
@@ -1065,9 +1125,8 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   border-radius: 50%;
   background: var(--vt-faction-_);
 }
-.elo-strip-row[data-faction="i"] .elo-strip-pip { background: var(--vt-faction-i); }
-.elo-strip-row[data-faction="e"] .elo-strip-pip { background: var(--vt-faction-e); }
-.elo-strip-row[data-faction="f"] .elo-strip-pip { background: var(--vt-faction-f); }
+.elo-strip-row[data-team="1"] .elo-strip-pip { background: var(--vt-team-1); }
+.elo-strip-row[data-team="2"] .elo-strip-pip { background: var(--vt-team-2); }
 .elo-strip-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1671,6 +1730,39 @@ body.replay-chrome-hidden.replay-roster-open .elo-strip {
   }
 }
 
+/* Structure hover/tap info chip. */
+.struct-tip {
+  position: fixed;
+  z-index: 30;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(15, 19, 26, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  font-size: 12px;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+.struct-tip[hidden] { display: none !important; }
+.struct-tip-name { font-weight: 600; }
+.struct-tip-team {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--vt-team-_);
+}
+.struct-tip-team[data-team="1"] { color: var(--vt-team-1); }
+.struct-tip-team[data-team="2"] { color: var(--vt-team-2); }
+
 /* Compact HUD (phones + coarse-pointer landscape). Driven by body.replay-compact. */
 body.replay-compact {
   --vt-transport-height: 80px;
@@ -1828,8 +1920,8 @@ body.replay-compact .kill-ticker {
   max-height: none;
   bottom: auto;
 }
-body.replay-compact .kill-ticker-row:nth-child(n+3),
-body.replay-compact .event-feed-row:nth-child(n+3) {
+body.replay-compact .kill-ticker-row:nth-child(n+4),
+body.replay-compact .event-feed-row:nth-child(n+4) {
   display: none;
 }
 body.replay-compact .feed-chips {
@@ -1860,7 +1952,17 @@ body.replay-compact .scrap-meter-team {
   font-size: 9px;
 }
 body.replay-compact .scrap-meter-cmdr {
-  display: none;
+  display: block;
+  writing-mode: horizontal-tb;
+  transform: none;
+  max-height: none;
+  max-width: 60px;
+  align-self: center;
+  font-size: 9px;
+  line-height: 1.1;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 body.replay-compact .beat-toast {
   top: auto;

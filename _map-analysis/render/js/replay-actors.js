@@ -42,14 +42,13 @@ const SHIP_GLYPH = {
   generic:  { kind: 'pyramid', args: [5, 9, 4],    yOffset: 4 },
 };
 
-// Per-faction RGB tints. Mirror of `--kb-faction-i/-e/-f` from
-// `css/vtstats-theme.css` so the production palette is authoritative. Hex
-// values copied verbatim; if the parent theme bumps them, just sync here.
-const FACTION_TINTS = {
-  i: { hex: '#5dadff', emissive: 0x183c66 },  // ISDF blue
-  e: { hex: '#ff8a55', emissive: 0x66220a },  // Hadean orange
-  f: { hex: '#a87cff', emissive: 0x331a66 },  // Scion purple
-  // unknown (commander cohort outside DM): grey
+// Per-TEAM RGB tints. The replay HUD deliberately colors by team (1 blue /
+// 2 red), not by faction, so mirror matches read the way players expect.
+// Keep in sync with `--vt-team-1/-2` in css/replay-style.css.
+const TEAM_TINTS = {
+  1: { hex: '#5dadff', emissive: 0x183c66 },  // Team 1 blue
+  2: { hex: '#ff5d5d', emissive: 0x661a1a },  // Team 2 red
+  // neutral / unknown: grey
   _: { hex: '#9aa3b0', emissive: 0x222932 },
 };
 
@@ -86,8 +85,8 @@ function makeGeometry(catKey) {
   }
 }
 
-function getFactionTint(code) {
-  return FACTION_TINTS[code] || FACTION_TINTS._;
+function getTeamTint(team) {
+  return TEAM_TINTS[team] || TEAM_TINTS._;
 }
 
 // ------------------ Per-actor build ------------------
@@ -121,7 +120,7 @@ export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
                       || '';
 
   const catKey = pickGlyphCategory(initialOdf);
-  const tint   = getFactionTint(rosterRow.factionCode);
+  const tint   = getTeamTint(rosterRow.team);
   const style  = SHIP_GLYPH[catKey] || SHIP_GLYPH.generic;
 
   const geom = makeGeometry(catKey);
@@ -152,6 +151,7 @@ export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
     name: rosterRow.name,
     displayName: rosterRow.displayName,
     team: rosterRow.team,
+    isCommander: !!rosterRow.isCommander,
     factionCode: rosterRow.factionCode,
     factionName: rosterRow.factionName,
     primaryShipOdf: rosterRow.primaryShipOdf,
@@ -275,12 +275,9 @@ export function setActorShipODF(actor, newOdf, odfMap, onChange) {
 // updating `geometry.setDrawRange(0, count)`. This avoids per-frame GC churn.
 // ============================================================================
 
-const TRAIL_LOOKBACK_SEC   = 30;     // window length per the plan
-const MAX_TRAIL_SAMPLES    = 64;     // 30s @ 1Hz + interpolated head + slack
-const TRAIL_BASE_OPACITY   = 0.85;   // head opacity; tail fades to 0
-// Bloom factor: how much the wider "halo" line saturates relative to the
-// head. Bumping this brightens the trail without redrawing more lines.
-const TRAIL_HALO_OPACITY   = 0.45;
+const TRAIL_LOOKBACK_SEC   = 10;     // window length (shortened to cut noise)
+const MAX_TRAIL_SAMPLES    = 24;     // 10s @ 1Hz + interpolated head + slack
+const TRAIL_BASE_OPACITY   = 0.70;   // head opacity; tail fades to 0
 
 
 // ------------------ Per-frame update ------------------
@@ -399,10 +396,9 @@ function lerpAngle(a, b, t) {
 }
 
 /**
- * Build a per-actor trail line. Two THREE.Line objects layered on top of
- * each other -- a thin "main" line with full opacity vertex colors, and a
- * wider "halo" line with reduced opacity that fakes a bloom glow without
- * needing a full post-processing pass. Both draw additively.
+ * Build a per-actor trail line. A single thin additive THREE.Line with a
+ * vertex-color head->tail falloff. Kept deliberately short + thin (see
+ * TRAIL_LOOKBACK_SEC) so the scene doesn't drown in ribbons.
  */
 export function buildTrailForActor(actor) {
   const tint = new THREE.Color(actor.tintHex);
@@ -421,28 +417,16 @@ export function buildTrailForActor(actor) {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     opacity: TRAIL_BASE_OPACITY,
-    linewidth: 1, // most browsers cap at 1; halo line provides the visual width
-  });
-  const haloMat = new THREE.LineBasicMaterial({
-    vertexColors: true,
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    opacity: TRAIL_HALO_OPACITY,
-    linewidth: 1,
+    linewidth: 1, // most browsers cap at 1; single thin line to cut noise
   });
 
   const main = new THREE.Line(geom, mainMat);
-  const halo = new THREE.Line(geom, haloMat);
   main.frustumCulled = false;
-  halo.frustumCulled = false;
   main.name = `trail-main-${actor.name}`;
-  halo.name = `trail-halo-${actor.name}`;
 
   return {
     geom,
     main,
-    halo,
     positions,
     colors,
     tint,
@@ -463,7 +447,6 @@ export function buildTrailsGroup(actors) {
     const t = buildTrailForActor(actor);
     actor.trailObj = t;  // back-ref so updates can reach this actor's trail
     trails.push(t);
-    group.add(t.halo);
     group.add(t.main);
   }
   return { trails, group };
@@ -482,11 +465,9 @@ export function updateTrails(actors, tSec, hm, terrainExaggeration) {
     if (!actor.trailObj) continue;
     if (!actor.visible) {
       actor.trailObj.main.visible = false;
-      actor.trailObj.halo.visible = false;
       continue;
     }
     actor.trailObj.main.visible = true;
-    actor.trailObj.halo.visible = true;
 
     const window = sliceTrailWindow(actor.trail, tSec, TRAIL_LOOKBACK_SEC);
     const n = Math.min(window.t.length, MAX_TRAIL_SAMPLES);
@@ -598,7 +579,7 @@ export function buildActorLabels(actors, container) {
   for (const actor of actors) {
     const el = document.createElement('div');
     el.className = 'vt-actor-label';
-    el.dataset.faction = actor.factionCode || '_';
+    el.dataset.team = actor.team || '_';
     el.dataset.name = actor.name;
     const dot = document.createElement('span');
     dot.className = 'vt-actor-label-dot';

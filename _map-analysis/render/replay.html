@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VT Stats - Match Replay (Ace Combat-style)</title>
 <link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/replay-style.css?v=hud-layout-12">
+<link rel="stylesheet" href="css/replay-style.css?v=hud-layout-13">
 
 <script type="importmap">
 {
@@ -51,6 +51,9 @@
   this container; cheaper than vendoring CSS2DRenderer for 10 labels.
 -->
 <div id="replay-labels" class="replay-labels" aria-hidden="true"></div>
+
+<!-- Structure hover/tap info chip (building name + owning team). -->
+<div id="struct-tip" class="struct-tip" hidden></div>
 
 <!--
   Letterbox bars (Phase 3 wires the toggle, but the DOM is here so the
@@ -106,13 +109,11 @@
     <span class="roster-bulk">
       <button id="roster-all-on" title="ALL ON">on</button>
       <button id="roster-all-off" title="ALL OFF">off</button>
-      <button id="roster-invert" title="Invert">inv</button>
+      <button id="roster-trails" class="is-on" title="Toggle contrails" aria-pressed="true">trails</button>
     </span>
+    <button id="roster-collapse" class="roster-collapse" title="Collapse" aria-expanded="true">&minus;</button>
   </header>
   <div class="roster-body" id="roster-list"></div>
-  <footer class="roster-foot">
-    <span class="roster-hint">[ ] cycle &middot; \\ hide &middot; V toggle all &middot; H collapse</span>
-  </footer>
 </aside>
 
 <div id="scrap-meters" class="scrap-meters" hidden>

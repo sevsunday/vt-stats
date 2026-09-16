@@ -10,11 +10,10 @@ import { sampleTerrainHeight } from './objects.js';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
 
-const FACTION_TINTS = {
-  i: 0x5dadff,
-  e: 0xff8a55,
-  f: 0xa87cff,
-  _: 0xb0b0b0,
+const TEAM_TINTS = {
+  1: 0x5dadff,   // Team 1 blue
+  2: 0xff5d5d,   // Team 2 red
+  _: 0xb0b0b0,   // neutral
 };
 
 const RECYCLER_SIZE = [20, 8, 14];
@@ -24,11 +23,6 @@ const Y_OFF_RECYCLER = 4;
 const Y_OFF_BUILDING = 3.5;
 const POOL_SNAP_M = 8;
 const DROP_DURATION = 1.15;
-
-function factionCode(matchData, team) {
-  const tf = (matchData.match && matchData.match.team_factions) || {};
-  return ((tf[String(team)] || {}).code) || '_';
-}
 
 function scaledHm(mapData, exaggeration) {
   const base = mapData && mapData.heightmap;
@@ -73,6 +67,14 @@ function centroidOf(matchData, side) {
   return { x: c.x, z: c.z };
 }
 
+// Resolve an ODF stem to its pretty display name via the match's odf_map,
+// mirroring replay-hud.js's prettyOdf(). Used for structure hover/tap labels.
+function prettyStructName(odfMap, odf) {
+  if (!odf) return 'Structure';
+  const key = odf.endsWith('.odf') ? odf : `${odf}.odf`;
+  return odfMap[key] || odfMap[odf] || odfMap[odf.toLowerCase()] || odf.replace(/\.odf$/i, '');
+}
+
 export function buildStartingRecyclers(matchData, mapData, exaggeration) {
   const hm = scaledHm(mapData, exaggeration);
   const group = new THREE.Group();
@@ -81,9 +83,10 @@ export function buildStartingRecyclers(matchData, mapData, exaggeration) {
   for (const side of [1, 2]) {
     const c = centroidOf(matchData, side);
     if (!c) continue;
-    const code = factionCode(matchData, side);
-    const mesh = makeBox(RECYCLER_SIZE, FACTION_TINTS[code] || FACTION_TINTS._, `recycler-${side}`);
+    const mesh = makeBox(RECYCLER_SIZE, TEAM_TINTS[side] || TEAM_TINTS._, `recycler-${side}`);
     mesh.position.set(c.x, placeY(hm, c.x, c.z, Y_OFF_RECYCLER), c.z);
+    mesh.userData.pickLabel = 'Recycler';
+    mesh.userData.team = side;
     group.add(mesh);
     items.push({
       side,
@@ -135,6 +138,7 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
   const group = new THREE.Group();
   group.name = 'replay-structures';
   const items = [];
+  const odfMap = matchData.odf_map || {};
   let skippedTurrets = 0;
   for (const inst of block.instances) {
     if (inst.death_reason === 'untracked' || inst.cls === 'turret') {
@@ -142,9 +146,10 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
       continue;
     }
     if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z)) continue;
-    const code = factionCode(matchData, inst.team);
-    const mesh = makeBox(instanceSize(inst), FACTION_TINTS[code] || FACTION_TINTS._, `struct-${inst.id || inst.odf}`);
+    const mesh = makeBox(instanceSize(inst), TEAM_TINTS[inst.team] || TEAM_TINTS._, `struct-${inst.id || inst.odf}`);
     mesh.position.set(inst.x, placeY(hm, inst.x, inst.z, instanceYOff(inst)), inst.z);
+    mesh.userData.pickLabel = prettyStructName(odfMap, inst.odf);
+    mesh.userData.team = inst.team;
     mesh.visible = false;
     group.add(mesh);
     items.push({

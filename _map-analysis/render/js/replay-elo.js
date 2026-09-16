@@ -97,7 +97,7 @@ function rowHtml(item, maxAbs, tSec, snapSec) {
   const fill = ghost * revealFrac(item.times, tSec, snapSec);
   const tip = `${before} → ${after}${p != null && e != null ? ` · P ${Number(p).toFixed(2)} vs E ${Number(e).toFixed(2)}` : ''}`;
   return `
-    <div class="elo-strip-row" data-name="${esc(item.row.name)}" data-faction="${esc(item.faction)}" title="${esc(tip)}">
+    <div class="elo-strip-row" data-name="${esc(item.row.name)}" data-team="${esc(item.row.faction || item.row.team || '_')}" title="${esc(tip)}">
       <span class="elo-strip-pip"></span>
       <span class="elo-strip-name">${esc(item.row.name)}</span>
       <span class="elo-strip-before">${before}</span>

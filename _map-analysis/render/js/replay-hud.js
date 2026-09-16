@@ -273,7 +273,7 @@ function formatEvent(matchData, ev) {
     }
     const victim = usefulInGameNick(row.victim_in_game_nick) || row.victim || '?';
     const ship = prettyOdf(matchData, row.killer_odf);
-    return { lead: killer, mid: '→', tail: victim, extra: ship };
+    return { lead: killer, mid: 'killed', tail: victim, ship };
   }
   if (ev.kind === 'build' || ev.kind === 'queue' || ev.kind === 'cancel') {
     const name = row.name || prettyOdf(matchData, row.odf) || row.odf || 'unit';
@@ -306,11 +306,12 @@ function renderRow(matchData, ev) {
   const li = document.createElement('div');
   li.className = 'kill-ticker-row event-feed-row is-shown';
   li.dataset.kind = ev.kind;
-  li.dataset.faction = ev.faction || '_';
+  li.dataset.team = ev.team || '_';
   li.innerHTML = `
     <span class="kt-killer">${esc(parts.lead)}</span>
     ${parts.mid ? `<span class="kt-arrow">${esc(parts.mid)}</span>` : ''}
     ${parts.tail ? `<span class="kt-victim">${esc(parts.tail)}</span>` : ''}
+    ${parts.ship ? `<span class="kt-ship">(${esc(parts.ship)})</span>` : ''}
     ${parts.extra ? `<span class="kt-weapon">${esc(parts.extra)}</span>` : ''}
   `;
   return li;
@@ -338,21 +339,30 @@ function labelMeters(matchData) {
     const cmdr = el.querySelector('.scrap-meter-cmdr');
     if (!cmdr) continue;
     const name = commanderName(matchData, side);
-    cmdr.textContent = name;
+    cmdr.innerHTML = name ? `<span class="scrap-meter-cmdr-dot"></span>${esc(name)}` : '';
     cmdr.hidden = !name;
     cmdr.title = name;
   }
 }
 
-function paintMeter(el, sample, faction) {
+function paintMeter(el, sample) {
   if (!el) return;
-  el.dataset.faction = faction || '_';
   const num = el.querySelector('.scrap-meter-num');
   const fill = el.querySelector('.scrap-meter-fill');
   const bands = el.querySelector('.scrap-meter-bands');
+  const compact = document.body.classList.contains('replay-compact');
   if (!sample) {
-    el.hidden = true;
-    return;
+    // Compact: keep the meter pinned in its corner instead of popping out on
+    // an idle/null tick. Hold the last-known reading if we have one; otherwise
+    // (no data yet) fall through to hide. Desktop keeps hide-on-idle.
+    if (compact && el._lastSample) {
+      sample = el._lastSample;
+    } else {
+      el.hidden = true;
+      return;
+    }
+  } else {
+    el._lastSample = sample;
   }
   el.hidden = false;
   const red = 20 * sample.upgrades;
@@ -458,7 +468,7 @@ function renderNowBuilding(matchData, tSec) {
   const order = ['recycler', 'factory', 'armory', 'constructor'];
   let any = false;
   const parts = [1, 2].map((side) => {
-    const faction = factionForTeam(matchData, side);
+    const cmdr = commanderName(matchData, side);
     const rows = [];
     for (const lane of order) {
       const cur = Object.hasOwn(walked.lanes[side], lane) ? walked.lanes[side][lane] : null;
@@ -471,7 +481,7 @@ function renderNowBuilding(matchData, tSec) {
     if (!rows.length) {
       rows.push('<div class="now-building-row now-building-empty">idle</div>');
     }
-    return `<div class="now-building-side" data-faction="${esc(faction)}"><div class="now-building-label">T${side}</div>${rows.join('')}</div>`;
+    return `<div class="now-building-side" data-team="${side}"><div class="now-building-label">T${side}${cmdr ? ` &mdash; ${esc(cmdr)}` : ''}</div>${rows.join('')}</div>`;
   });
   root.innerHTML = parts.join('');
   root.hidden = !any && !matchData.builds;
@@ -611,12 +621,10 @@ export function updateReplayHud(tSec) {
     paintMeter(
       document.querySelector('.scrap-meter[data-side="1"]'),
       sampleEconomyTeam(_state.matchData, 1, tSec),
-      factionForTeam(_state.matchData, 1),
     );
     paintMeter(
       document.querySelector('.scrap-meter[data-side="2"]'),
       sampleEconomyTeam(_state.matchData, 2, tSec),
-      factionForTeam(_state.matchData, 2),
     );
   }
   if (_state.hasBuild && Math.abs(tSec - _state.lastBuildSec) >= 0.25) {

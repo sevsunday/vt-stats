@@ -20,12 +20,11 @@ const BEACON_RADIUS_M    = 4.5;
 const BEACON_BASE_OPACITY = 0.55;
 const BEACON_FADE_DURATION_SEC = 8.0;  // fade duration after dwell condition
 
-// Faction tints (mirror of replay-actors.js; duplicate so the modules
-// aren't tightly coupled). Sourced from `--kb-faction-i/-e/-f`.
-const FACTION_TINTS = {
-  i: '#5dadff',
-  e: '#ff8a55',
-  f: '#a87cff',
+// Team tints (mirror of TEAM_TINTS in replay-actors.js; duplicated so the
+// modules aren't tightly coupled). T1 blue / T2 red / neutral grey.
+const TEAM_TINTS = {
+  1: '#5dadff',
+  2: '#ff5d5d',
   _: '#9aa3b0',
 };
 
@@ -43,7 +42,7 @@ const FACTION_TINTS = {
  */
 function buildBeacon(rosterRow, hm, terrainExaggeration) {
   if (!rosterRow.spawn) return null;
-  const tint = FACTION_TINTS[rosterRow.factionCode] || FACTION_TINTS._;
+  const tint = TEAM_TINTS[rosterRow.team] || TEAM_TINTS._;
   const color = new THREE.Color(tint);
 
   // Translucent emissive cylinder. additive blend so overlapping team beacons
@@ -209,11 +208,11 @@ const FLASH_X_SIZE_M = 6;
 /**
  * Trigger a single kill flash. Call when playback crosses a kill tick.
  *   pos: { x, y, z } in world coords (victim's last known position)
- *   killerFactionCode: 'i' | 'e' | 'f' | '_'
+ *   killerTeam: 1 | 2 | '_'
  *   victimActor: optional THREE actor whose glyph should flash white
  */
-export function triggerKillFlash(scene, pos, killerFactionCode, victimActor, _killNonce) {
-  const tint = (FACTION_TINTS[killerFactionCode] || FACTION_TINTS._);
+export function triggerKillFlash(scene, pos, killerTeam, victimActor, _killNonce) {
+  const tint = (TEAM_TINTS[killerTeam] || TEAM_TINTS._);
   const color = new THREE.Color(tint);
 
   // ---- Ring (expanding torus, additive blend) ----
@@ -344,7 +343,7 @@ export function buildTLockDiamonds(actors) {
   group.name = 'replay-tlocks';
   const diamonds = [];
   for (const actor of actors) {
-    const tint = (FACTION_TINTS[actor.factionCode] || FACTION_TINTS._);
+    const tint = (TEAM_TINTS[actor.team] || TEAM_TINTS._);
     const color = new THREE.Color(tint);
 
     const geom = new THREE.OctahedronGeometry(TLOCK_SIZE_M);

@@ -147,6 +147,7 @@ const STATE = {
   prevVisibleSnapshot: null,
   rosterCollapsed: false,
   labelsVisible: true,
+  trailsVisible: true,
   // Kill ticker (DOM rolling list at bottom-right)
   killTickerEntries: [],
   // Transport
@@ -943,13 +944,12 @@ function wireRoster() {
     if (!g.actors.length) continue;
     const tf = (STATE.matchData.match.team_factions || {})[String(g.team)];
     const factionName = tf ? tf.name : `Team ${g.team}`;
-    const factionCode = tf ? tf.code : '_';
     const sec = document.createElement('div');
     sec.className = 'roster-team';
     sec.dataset.team = String(g.team);
     sec.innerHTML = `
       <div class="roster-team-head">
-        <span class="roster-team-name" data-faction="${factionCode}">${escapeHtml(factionName)}</span>
+        <span class="roster-team-name" data-team="${g.team}">${escapeHtml(factionName)}</span>
         <span class="roster-team-actions">
           <button class="rt-btn" data-act="show">show all</button>
           <button class="rt-btn" data-act="hide">hide all</button>
@@ -973,10 +973,12 @@ function wireRoster() {
   // Panel-level bulk controls.
   const allOn  = document.getElementById('roster-all-on');
   const allOff = document.getElementById('roster-all-off');
-  const invert = document.getElementById('roster-invert');
   if (allOn)  allOn.addEventListener('click',  () => STATE.actors.forEach(a => setActorVisibilityByName(a.name, true)));
   if (allOff) allOff.addEventListener('click', () => STATE.actors.forEach(a => setActorVisibilityByName(a.name, false)));
-  if (invert) invert.addEventListener('click', () => STATE.actors.forEach(a => setActorVisibilityByName(a.name, !a.visible)));
+  const trailsBtn = document.getElementById('roster-trails');
+  if (trailsBtn) trailsBtn.addEventListener('click', () => toggleTrails());
+  const collapseBtn = document.getElementById('roster-collapse');
+  if (collapseBtn) collapseBtn.addEventListener('click', () => toggleRosterCollapsed());
 
   // Apply ?hide= URL param.
   if (params.hide && params.hide.length) {
@@ -1029,9 +1031,10 @@ function buildRosterRow(actor) {
   // observes a new event for this player.
   const initialShipName = actor.currentShipName || actor.primaryShipName || '';
   li.innerHTML = `
-    <button class="r-eye" title="Toggle visibility (\\)" aria-pressed="true">${EYE_OPEN_SVG}</button>
+    <button class="r-eye" title="Toggle visibility" aria-pressed="true">${EYE_OPEN_SVG}</button>
     <button class="r-name" title="Focus chase cam">
-      <span class="r-dot" data-faction="${actor.factionCode || '_'}"></span>
+      ${actor.isCommander ? `<span class="r-cmdr" title="Commander">${CMDR_SHIELD_SVG}</span>` : ''}
+      <span class="r-dot" data-team="${actor.team || '_'}"></span>
       <span class="r-disp">${escapeHtml(actor.displayName || actor.name)}</span>
       <span class="r-ship">${escapeHtml(initialShipName)}</span>
       <span class="r-vitals">
@@ -1118,6 +1121,16 @@ function toggleLabels() {
   }
 }
 
+function toggleTrails() {
+  STATE.trailsVisible = !STATE.trailsVisible;
+  if (STATE.trailsGroup) STATE.trailsGroup.visible = STATE.trailsVisible;
+  const btn = document.getElementById('roster-trails');
+  if (btn) {
+    btn.classList.toggle('is-on', STATE.trailsVisible);
+    btn.setAttribute('aria-pressed', STATE.trailsVisible ? 'true' : 'false');
+  }
+}
+
 function togglePools() {
   STATE.poolsVisible = !STATE.poolsVisible;
   if (STATE.poolsGroup) STATE.poolsGroup.visible = STATE.poolsVisible;
@@ -1145,6 +1158,7 @@ function setActorVisibilityByName(name, visible) {
 
 // SVG inlines for the eye-toggle icons (Bootstrap-like, but inlined so we
 // don't have to vendor an icon font here).
+const CMDR_SHIELD_SVG = '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="M8 0c-.69 0-1.843.265-2.928.56-1.11.3-2.229.655-2.887.87a1.54 1.54 0 0 0-1.044 1.262c-.596 4.477.787 7.795 2.465 9.99a11.8 11.8 0 0 0 2.517 2.453c.386.273.744.482 1.048.625.28.132.581.24.829.24s.548-.108.829-.24a7 7 0 0 0 1.048-.625 11.8 11.8 0 0 0 2.517-2.453c1.678-2.195 3.061-5.513 2.465-9.99a1.54 1.54 0 0 0-1.044-1.263 63 63 0 0 0-2.887-.87C9.843.266 8.69 0 8 0"/></svg>';
 const EYE_OPEN_SVG  = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zm-8 3.5A3.5 3.5 0 1 1 11.5 8 3.5 3.5 0 0 1 8 11.5zm0-2A1.5 1.5 0 1 0 6.5 8 1.5 1.5 0 0 0 8 9.5z"/></svg>';
 const EYE_OFF_SVG   = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M13.36 11.78a8.94 8.94 0 0 0 2.64-3.78s-3-5.5-8-5.5a7.7 7.7 0 0 0-2.79.5l1.18 1.18A6.7 6.7 0 0 1 8 4c4 0 6.7 4 6.7 4a8 8 0 0 1-2.07 2.7zM2.07 2.07L0 4.14l3.05 3.05A8 8 0 0 0 0 8s3 5.5 8 5.5a7.7 7.7 0 0 0 3.86-1.05l2 2 1.42-1.42-13.21-13.21zM8 11.5a3.5 3.5 0 0 1-3.4-4.36l1.49 1.5A1.5 1.5 0 0 0 8 9.5l-.01.5a1.5 1.5 0 0 0 1.5 1.5z"/></svg>';
 
@@ -1186,27 +1200,6 @@ function wireKeyboard() {
       case 'Digit2': e.preventDefault(); setCameraMode('chase');   break;
       case 'Digit3': e.preventDefault(); setCameraMode('topdown'); break;
 
-      // ---- Roster controls ----
-      case 'BracketLeft':
-        e.preventDefault();
-        cycleFocus(-1, e.shiftKey);
-        break;
-      case 'BracketRight':
-        e.preventDefault();
-        cycleFocus(+1, e.shiftKey);
-        break;
-      case 'Backslash':
-        e.preventDefault();
-        if (STATE.focusedName) setActorVisibilityByName(STATE.focusedName, false);
-        break;
-      case 'KeyV':
-        e.preventDefault();
-        toggleAllRosterVisibility();
-        break;
-      case 'KeyH':
-        e.preventDefault();
-        toggleRosterCollapsed();
-        break;
       case 'Escape':
         if (document.body.classList.contains('replay-roster-open')) {
           e.preventDefault();
@@ -1290,6 +1283,13 @@ function toggleRosterCollapsed() {
   STATE.rosterCollapsed = !STATE.rosterCollapsed;
   const panel = document.getElementById('roster-panel');
   if (panel) panel.classList.toggle('is-collapsed', STATE.rosterCollapsed);
+  document.body.classList.toggle('replay-roster-collapsed', STATE.rosterCollapsed);
+  const btn = document.getElementById('roster-collapse');
+  if (btn) {
+    btn.innerHTML = STATE.rosterCollapsed ? '&plus;' : '&minus;';
+    btn.title = STATE.rosterCollapsed ? 'Expand' : 'Collapse';
+    btn.setAttribute('aria-expanded', STATE.rosterCollapsed ? 'false' : 'true');
+  }
 }
 
 // Phase 3 hooks. Stub implementations so the keys don't error out before
@@ -1442,6 +1442,14 @@ function onCanvasPointerUp(e) {
   const dt = e.timeStamp - tapCandidate.t;
   tapCandidate = null;
   if (Math.hypot(dx, dy) > TAP_MAX_MOVE_PX || dt > TAP_MAX_MS) return;
+  // Structure label on tap: if the tap lands on a building, show its info
+  // chip near the tap and swallow the tap (don't toggle chrome).
+  const structHit = pickStructureAt(e.clientX, e.clientY);
+  if (structHit) {
+    showStructTip(e.clientX, e.clientY, structHit);
+    return;
+  }
+  hideStructTip();
   if (!isReplayCompact()) return;
   if (document.body.classList.contains('replay-roster-open')) {
     closeRosterSheet();
@@ -1453,6 +1461,63 @@ function onCanvasPointerUp(e) {
 function onCanvasPointerCancel(e) {
   activePointers.delete(e.pointerId);
   tapCandidate = null;
+}
+
+// ---- Structure hover/tap labels ----------------------------------------
+// Raycast the structure + recycler groups and surface a small info chip with
+// the building's pretty ODF name + owning team. Desktop = hover, mobile = tap.
+const _structRaycaster = new THREE.Raycaster();
+const _structPointer = new THREE.Vector2();
+
+function pickStructureAt(clientX, clientY) {
+  if (!STATE.camera || !STATE.renderer) return null;
+  const groups = [];
+  if (STATE.structuresGroup) groups.push(STATE.structuresGroup);
+  if (STATE.recyclersGroup) groups.push(STATE.recyclersGroup);
+  if (!groups.length) return null;
+  const rect = STATE.renderer.domElement.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  _structPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  _structPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  _structRaycaster.setFromCamera(_structPointer, STATE.camera);
+  const hits = _structRaycaster.intersectObjects(groups, true);
+  for (const h of hits) {
+    const ud = h.object && h.object.userData;
+    if (ud && ud.pickLabel) return { label: ud.pickLabel, team: ud.team };
+  }
+  return null;
+}
+
+function showStructTip(clientX, clientY, hit) {
+  const tip = document.getElementById('struct-tip');
+  if (!tip) return;
+  const teamStr = (hit.team === 1 || hit.team === 2)
+    ? `<span class="struct-tip-team" data-team="${hit.team}">Team ${hit.team}</span>` : '';
+  tip.innerHTML = `<span class="struct-tip-name">${escapeHtml(hit.label)}</span>${teamStr}`;
+  tip.hidden = false;
+  const pad = 14;
+  const rect = tip.getBoundingClientRect();
+  let x = clientX + pad;
+  let y = clientY + pad;
+  if (x + rect.width > window.innerWidth) x = clientX - rect.width - pad;
+  if (y + rect.height > window.innerHeight) y = clientY - rect.height - pad;
+  tip.style.left = `${Math.max(4, x)}px`;
+  tip.style.top = `${Math.max(4, y)}px`;
+}
+
+function hideStructTip() {
+  const tip = document.getElementById('struct-tip');
+  if (tip && !tip.hidden) tip.hidden = true;
+}
+
+function onCanvasPointerMove(e) {
+  // Desktop hover only. Touch uses tap (onCanvasPointerUp); ignore it here,
+  // and never fight an in-progress drag/orbit gesture.
+  if (e.pointerType === 'touch') return;
+  if (activePointers.size > 0) { hideStructTip(); return; }
+  const hit = pickStructureAt(e.clientX, e.clientY);
+  if (hit) showStructTip(e.clientX, e.clientY, hit);
+  else hideStructTip();
 }
 
 function wireReplayChrome(opts = {}) {
@@ -1523,6 +1588,8 @@ function wireReplayCanvasChrome() {
   canvas.addEventListener('pointerdown', onCanvasPointerDown);
   canvas.addEventListener('pointerup', onCanvasPointerUp);
   canvas.addEventListener('pointercancel', onCanvasPointerCancel);
+  canvas.addEventListener('pointermove', onCanvasPointerMove);
+  canvas.addEventListener('pointerleave', hideStructTip);
 }
 
 // ============================================================================
@@ -1578,7 +1645,7 @@ function renderFrame(dtSec = 0) {
     syncRosterVitals(STATE.actors);
   }
   // 2. Update trails (reads trail.t/x/y/z directly, terrain-relative Y).
-  if (STATE.trails) {
+  if (STATE.trails && STATE.trailsVisible) {
     updateTrails(STATE.actors, STATE.progressSec, STATE.mapData.heightmap, STATE.terrainExaggeration);
   }
   // 3. Spawn beacons.
@@ -1681,9 +1748,9 @@ function actorFlashPos(actor) {
   return actor.spawn || null;
 }
 
-function fireWorldFlash(pos, factionCode, actor, nonce) {
+function fireWorldFlash(pos, teamKey, actor, nonce) {
   if (!pos) return;
-  const flash = triggerKillFlash(STATE.scene, pos, factionCode || '_', actor, nonce);
+  const flash = triggerKillFlash(STATE.scene, pos, teamKey || '_', actor, nonce);
   STATE.killFlashes.push(flash);
 }
 
@@ -1693,7 +1760,7 @@ function fireWindowFx(lo, hi) {
     if (ev.tSec > hi) break;
     if (isTeamLabel(ev.name)) continue;
     const actor = findActorByName(ev.name);
-    fireWorldFlash(actorFlashPos(actor), actor && actor.factionCode, actor, ev);
+    fireWorldFlash(actorFlashPos(actor), actor && actor.team, actor, ev);
   }
   for (const drop of STATE.armoryDropIndex || []) {
     if (drop.tSec <= Math.max(lo, STATE.armoryFiredTSec)) continue;
@@ -1711,7 +1778,7 @@ function fireWindowFx(lo, hi) {
 
 /**
  * Spawn a flash for one feed entry. Resolves the victim actor by name + the
- * killer's faction code. Looks up the victim's interpolated position at the
+ * killer's team. Looks up the victim's interpolated position at the
  * kill tick so the marker plants at the right spot even when scrubbing.
  */
 function fireKillFlash(killEntry) {
@@ -1721,8 +1788,8 @@ function fireKillFlash(killEntry) {
   // Structure kills often land as literal "Team 1"/"Team 2" with no actor.
   const victimActor = findActorByName(killEntry.victim);
   const killerActor = findActorByName(killEntry.killer);
-  const killerFactionCode = killerActor ? killerActor.factionCode
-                          : (victimActor ? otherFaction(victimActor.factionCode) : '_');
+  const killerTeam = killerActor ? killerActor.team
+                          : (victimActor ? (victimActor.team === 1 ? 2 : (victimActor.team === 2 ? 1 : '_')) : '_');
 
   // Prefer the victim's last-known position; fall back to the killer so
   // Team-N structure kills still plant a ring. Skip the 3D flash only
@@ -1730,12 +1797,7 @@ function fireKillFlash(killEntry) {
   const pos = actorFlashPos(victimActor) || actorFlashPos(killerActor);
   if (!pos) return;
 
-  fireWorldFlash(pos, killerFactionCode, victimActor, killEntry);
-}
-
-function otherFaction(code) {
-  // Crude but works: just return the unknown-grey for unknown sides.
-  return '_';
+  fireWorldFlash(pos, killerTeam, victimActor, killEntry);
 }
 
 // ============================================================================
