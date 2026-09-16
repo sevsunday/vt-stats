@@ -1490,7 +1490,7 @@
       const btn = e.target.closest ? e.target.closest('[data-bs-target]') : e.target;
       const target = btn && btn.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
-      if (target === '#tab-replay') maybeAutoExpandReplay();
+      if (target === '#tab-replay') { maybeAutoExpandReplay(); scrollReplayIntoView(); }
       else exitReplayExpand({ consumeHistory: false });
       syncUrl();
     });
@@ -2347,6 +2347,27 @@
     } else {
       replayExpandPushed = false;
     }
+  }
+
+  function scrollReplayIntoView() {
+    // Desktop only: compact auto-expands to fullscreen; expanded state overlays.
+    if (isReplayCompactViewport() || replayExpandActive) return;
+    // The replay renderer is async (ensureReplayManifest().then), so rAF-poll
+    // until the iframe wrap exists with real height, then scroll its top flush
+    // under the sticky navbar so the transport bar + event feed are in view.
+    let tries = 0;
+    const tick = () => {
+      const wrap = getReplayWrap();
+      if (wrap && wrap.getBoundingClientRect().height > 100) {
+        const nav = document.querySelector('nav.navbar');
+        const navH = nav ? nav.getBoundingClientRect().height : 0;
+        const top = window.scrollY + wrap.getBoundingClientRect().top - navH;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        return;
+      }
+      if (tries++ < 30) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   }
 
   function maybeAutoExpandReplay() {
