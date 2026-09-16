@@ -101,6 +101,7 @@ const STATE = {
   killIndex: null,
   shipTracker: null,
   // Scene objects
+  worldGroup: null,
   terrainMesh: null,
   terrainBaseHeights: null,
   terrainExaggeration: 1.5,
@@ -336,6 +337,23 @@ function initScene(mapData) {
   const fogEnd   = worldExtent * 3.0;
   scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
   STATE.scene = scene;
+
+  // Reflect the whole world across the Z axis so the replay reads north-up /
+  // east-right like the in-game minimap. A proper straight-down camera with
+  // east-on-the-right is inherently south-up; the in-game map is the mirror,
+  // so we mirror the scene content (scale.z = -1). three.js flips triangle
+  // winding + the normal matrix for negative-determinant matrices, so
+  // lighting, back-face culling, and raycasting all stay correct. Everything
+  // world-space (terrain, minimap drape, actors, trails, structures, FX) is
+  // parented here with RAW coords; the two things OUTSIDE the group -- the
+  // perspective camera and the DOM labels -- consume reflected coords instead
+  // (labels via the reflected `lastValidPos`, the camera via a reflected
+  // worldRect copy). See initCamera / updateActors.
+  const worldGroup = new THREE.Group();
+  worldGroup.name = 'world-reflect';
+  worldGroup.scale.z = -1;
+  scene.add(worldGroup);
+  STATE.worldGroup = worldGroup;
 }
 
 function initLights(mapData) {
@@ -356,10 +374,12 @@ function initLights(mapData) {
   const sunAngleRad = sunAngle * Math.PI / 180.0;
   const sunDist = 2000;
   const sun = new THREE.DirectionalLight(new THREE.Color(sunHex), 2.0);
+  // Sun stays on the (unreflected) scene, so negate its Z to match the
+  // world-reflect group (scale.z = -1) and keep the lighting direction stable.
   sun.position.set(
     Math.cos(sunAngleRad) * sunDist * 0.7,
     Math.sin(sunAngleRad) * sunDist,
-    Math.cos(sunAngleRad) * sunDist * 0.7,
+    -(Math.cos(sunAngleRad) * sunDist * 0.7),
   );
   STATE.scene.add(sun);
 }
@@ -414,7 +434,7 @@ async function initFloor(mapData) {
   const mesh = new THREE.Mesh(geom, rampMat);
   mesh.name = 'terrain';
   STATE.terrainMesh = mesh;
-  STATE.scene.add(mesh);
+  STATE.worldGroup.add(mesh);
 
   const wire = new THREE.LineSegments(
     new THREE.WireframeGeometry(geom),
@@ -422,7 +442,7 @@ async function initFloor(mapData) {
   );
   wire.visible = false;
   STATE.terrainWireframe = wire;
-  STATE.scene.add(wire);
+  STATE.worldGroup.add(wire);
 
   if (mapData.minimapRel) {
     await buildMinimapMaterial(mapData);
@@ -506,14 +526,14 @@ function initActors() {
   );
   STATE.actors = actors;
   STATE.actorsGroup = group;
-  STATE.scene.add(group);
+  STATE.worldGroup.add(group);
 }
 
 function initTrails() {
   const { trails, group } = buildTrailsGroup(STATE.actors);
   STATE.trails = trails;
   STATE.trailsGroup = group;
-  STATE.scene.add(group);
+  STATE.worldGroup.add(group);
 }
 
 function initLabels() {
@@ -529,14 +549,14 @@ function initBeacons() {
   );
   STATE.beacons = beacons;
   STATE.beaconsGroup = group;
-  STATE.scene.add(group);
+  STATE.worldGroup.add(group);
 }
 
 function initTLocks() {
   const { diamonds, group } = buildTLockDiamonds(STATE.actors);
   STATE.tlocks = diamonds;
   STATE.tlocksGroup = group;
-  STATE.scene.add(group);
+  STATE.worldGroup.add(group);
 }
 
 function initPools() {
@@ -554,12 +574,12 @@ function initPools() {
   group.visible = STATE.poolsVisible;
   STATE.poolsGroup = group;
   STATE.pools = objs;
-  STATE.scene.add(group);
+  STATE.worldGroup.add(group);
 }
 
 function disposePools() {
   if (!STATE.poolsGroup) return;
-  STATE.scene.remove(STATE.poolsGroup);
+  STATE.worldGroup.remove(STATE.poolsGroup);
   STATE.poolsGroup.traverse(obj => {
     if (obj.geometry) obj.geometry.dispose();
     if (obj.material) {
@@ -576,7 +596,16 @@ function disposePools() {
 // ============================================================================
 
 function initCamera(mapData) {
-  const wr = mapData.worldRect;
+  // The camera + OrbitControls live on the unreflected scene, but the world
+  // content is inside the world-reflect group (scale.z = -1). So the camera
+  // must target REFLECTED coords. We hand it a worldRect copy with Z mirrored;
+  // everything else (minimap drape, etc.) keeps the raw worldRect. Actor
+  // follow (chase/cinema) works automatically because lastValidPos is already
+  // stored reflected.
+  const wr = { ...mapData.worldRect,
+    centerZ: -mapData.worldRect.centerZ,
+    minZ: -mapData.worldRect.maxZ,
+    maxZ: -mapData.worldRect.minZ };
   const cam = new THREE.PerspectiveCamera(
     55, window.innerWidth / window.innerHeight, 1, 8000,
   );
@@ -595,7 +624,7 @@ function initCamera(mapData) {
   controls.update();
   STATE.controls = controls;
 
-  STATE.cameraCtl = createCameraController(cam, controls, mapData);
+  STATE.cameraCtl = createCameraController(cam, controls, { ...mapData, worldRect: wr });
   STATE.camMode = 'free';
   // Cinema needs read access to the kill index + current playback time.
   STATE.cameraCtl.setCinemaInputs({
@@ -746,7 +775,7 @@ function applyHeightExaggeration(factor) {
 
   // Rebuild beacons so their cylinder anchors track the new visual ground.
   if (STATE.beaconsGroup) {
-    STATE.scene.remove(STATE.beaconsGroup);
+    STATE.worldGroup.remove(STATE.beaconsGroup);
     disposeSpawnBeacons(STATE.beaconsGroup);
   }
   initBeacons();
@@ -760,19 +789,19 @@ function applyHeightExaggeration(factor) {
 
 function disposeStructureOverlays() {
   if (STATE.recyclersGroup) {
-    STATE.scene.remove(STATE.recyclersGroup);
+    STATE.worldGroup.remove(STATE.recyclersGroup);
     disposeStartingRecyclers(STATE.recyclersGroup);
     STATE.recyclersGroup = null;
     STATE.recyclers = null;
   }
   if (STATE.structuresGroup) {
-    STATE.scene.remove(STATE.structuresGroup);
+    STATE.worldGroup.remove(STATE.structuresGroup);
     disposeStartingRecyclers(STATE.structuresGroup);
     STATE.structuresGroup = null;
     STATE.structures = null;
   }
-  if (STATE.scene && STATE.armoryDrops && STATE.armoryDrops.length) {
-    clearArmoryDrops(STATE.scene, STATE.armoryDrops);
+  if (STATE.worldGroup && STATE.armoryDrops && STATE.armoryDrops.length) {
+    clearArmoryDrops(STATE.worldGroup, STATE.armoryDrops);
   }
 }
 
@@ -784,14 +813,14 @@ function initStructureOverlays() {
   if (derived && derived.items && derived.items.length) {
     STATE.structuresGroup = derived.group;
     STATE.structures = derived.items;
-    STATE.scene.add(derived.group);
+    STATE.worldGroup.add(derived.group);
   } else {
     const rec = buildStartingRecyclers(
       STATE.matchData, STATE.mapData, STATE.terrainExaggeration,
     );
     STATE.recyclersGroup = rec.group;
     STATE.recyclers = rec.items;
-    STATE.scene.add(rec.group);
+    STATE.worldGroup.add(rec.group);
   }
   STATE.armoryDropIndex = collectArmoryDrops(STATE.matchData);
   STATE.armoryFiredTSec = STATE.progressSec - 0.001;
@@ -1657,7 +1686,7 @@ function renderFrame(dtSec = 0) {
     applyPoolUpgradeTint(STATE.poolsGroup, livingUpgradeAnchors(STATE.structures));
   }
   if (STATE.armoryDrops && STATE.armoryDrops.length) {
-    updateArmoryDrops(STATE.scene, STATE.armoryDrops, dtSec || 0.016);
+    updateArmoryDrops(STATE.worldGroup, STATE.armoryDrops, dtSec || 0.016);
   }
   // 4. Kill flashes -- trigger any new ones as playback advances; advance
   //    the lifecycle of existing ones.
@@ -1712,7 +1741,7 @@ function triggerNewKillFlashes() {
     STATE.armoryFiredTSec = STATE.progressSec - 0.001;
     STATE.structureDeathFired = STATE.progressSec - 0.001;
     if (STATE.armoryDrops && STATE.armoryDrops.length) {
-      clearArmoryDrops(STATE.scene, STATE.armoryDrops);
+      clearArmoryDrops(STATE.worldGroup, STATE.armoryDrops);
     }
     rebuildReplayHud(STATE.progressSec);
     rebuildReplayElo(STATE.progressSec);
@@ -1741,8 +1770,11 @@ function findActorByName(name) {
 
 function actorFlashPos(actor) {
   if (!actor) return null;
+  // lastValidPos is already stored in reflected (world-reflect) coords, so it
+  // drops straight onto the scene-space kill flash. The spawn fallback is in
+  // raw coords, so reflect its Z.
   if (actor.lastValidPos) return { ...actor.lastValidPos };
-  return actor.spawn || null;
+  return actor.spawn ? { ...actor.spawn, z: -actor.spawn.z } : null;
 }
 
 function fireWorldFlash(pos, teamKey, actor, nonce) {
@@ -1763,12 +1795,14 @@ function fireWindowFx(lo, hi) {
     if (drop.tSec <= Math.max(lo, STATE.armoryFiredTSec)) continue;
     if (drop.tSec > hi) break;
     STATE.armoryDrops.push(triggerArmoryDrop(
-      STATE.scene, drop, STATE.mapData && STATE.mapData.heightmap, STATE.terrainExaggeration,
+      STATE.worldGroup, drop, STATE.mapData && STATE.mapData.heightmap, STATE.terrainExaggeration,
     ));
   }
   STATE.armoryFiredTSec = hi;
   for (const hit of findStructureDeaths(STATE.structures, lo, hi)) {
-    fireWorldFlash({ x: hit.x, y: hit.y, z: hit.z }, '_', null, hit);
+    // Kill flashes live on the (unreflected) scene, so reflect Z to match the
+    // world-reflect group.
+    fireWorldFlash({ x: hit.x, y: hit.y, z: -hit.z }, '_', null, hit);
   }
   STATE.structureDeathFired = hi;
 }

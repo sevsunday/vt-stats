@@ -355,8 +355,12 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
 
     const y = (interp.y - baseOffsetM) * terrainExaggeration;
     const yPos = y + actor.yOffset;
+    // The actor mesh lives inside the world-reflect group (scale.z = -1), so
+    // its position is set in RAW local coords. lastValidPos, however, is
+    // consumed in world space (DOM label projection, chase/cinema camera,
+    // scene-space kill flashes), so store it reflected to match.
     actor.mesh.position.set(interp.x, yPos, interp.z);
-    actor.lastValidPos = { x: interp.x, y: yPos, z: interp.z };
+    actor.lastValidPos = { x: interp.x, y: yPos, z: -interp.z };
     // Live HP/ammo ratios (0-1, or null when the ship has no cap / pre-v10
     // match). Read by the floating label bars and the side-roster HUD.
     actor.curHp = interp.hp;
