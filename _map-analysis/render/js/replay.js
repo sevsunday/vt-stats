@@ -1032,12 +1032,12 @@ function buildRosterRow(actor) {
     <button class="r-eye" title="Toggle visibility" aria-pressed="true">${EYE_OPEN_SVG}</button>
     <button class="r-name" title="Focus chase cam">
       <span class="r-disp">${escapeHtml(actor.displayName || actor.name)}</span>
+      ${actor.isCommander ? `<span class="r-cmdr" title="Commander">${CMDR_SHIELD_SVG}</span>` : ''}
       <span class="r-ship">${escapeHtml(initialShipName)}</span>
       <span class="r-vitals">
         <span class="r-bar r-bar-hp"><i></i></span>
         <span class="r-bar r-bar-ammo"><i></i></span>
       </span>
-      ${actor.isCommander ? `<span class="r-cmdr" title="Commander">${CMDR_SHIELD_SVG}</span>` : ''}
     </button>
     <button class="r-follow" title="Follow">&#9654;</button>
   `;
