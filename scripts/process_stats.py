@@ -118,7 +118,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # structures[] (constructor BUILD xyz + UnitDestroyed-only deaths;
 # turret-class instances stay death_reason=untracked while
 # TURRET_DEATHS_RELIABLE is False). Display-only; not in contributions.
-PIPELINE_VERSION = 46
+PIPELINE_VERSION = 47
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -6739,6 +6739,27 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         if odf
     }
 
+    def register_odf_name(odf):
+        """Resolve an ODF's display name and register it into odf_map.
+
+        Any ODF referenced by an emitted block (e.g. a surviving starting
+        recycler in structures[]) that never entered the event stream still
+        gets a proper name from data/odf.min.json instead of the raw stem,
+        and becomes "known" for the match (Raw Data Browser + storyline
+        resolve it too). Generic -- reuse at any emit site that names ODFs.
+        """
+        if not odf:
+            return odf
+        key = odf if odf.lower().endswith(".odf") else f"{odf}.odf"
+        stem = re.sub(r"\.odf$", "", key, flags=re.IGNORECASE)
+        if key in odf_map:
+            return odf_map[key]
+        if stem in odf_map:
+            return odf_map[stem]
+        name = prettify_odf(key)
+        odf_map[key] = name
+        return name
+
     # Compute match duration
     duration_sec = (max_tick - min_tick) / tick_rate if max_tick > min_tick else 0
 
@@ -8296,6 +8317,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         turret_odfs=turret_odfs or set(),
         ship_caps=ship_caps,
     )
+    # Resolve any structure ODF that wasn't observed in the event stream
+    # (e.g. a surviving starting recycler like ebrecym_vsr) via the ODF DB,
+    # registering the name into odf_map. Preserves good constructor-build
+    # names (row.name differs from the raw stem).
+    for _inst in ((match_data.get("structures") or {}).get("instances") or []):
+        _resolved = register_odf_name(_inst.get("odf"))
+        if _resolved and (not _inst.get("name") or _inst["name"] == _inst.get("odf")):
+            _inst["name"] = _resolved
 
     return match_data
 
