@@ -4,22 +4,22 @@ overview: "One phased pass over the pending 3D-replay polish: roster row/header 
 todos:
   - id: phase1-roster
     content: "Phase 1 (replay.js): buildRosterRow - drop .r-dot + move .r-cmdr shield after .r-vitals; wireRoster - headers = g.label (Team 1/Team 2), remove unused tf/factionName; optionally delete dead .r-dot CSS"
-    status: pending
+    status: completed
   - id: phase2-meters
     content: "Phase 2 (replay-style.css): enlarge desktop scrap meters (track 22->26/168->196, fill-thickness 10->12, cmdr max-height 168->196 + font 11->12, team font 10->11, num +1px); bump replay.html cache-bust hud-layout-13 -> 14"
-    status: pending
+    status: completed
   - id: phase3-scroll
     content: "Phase 3 (js/app.js): add scrollReplayIntoView() (rAF-defer, scroll wrap under runtime navbar height, desktop-only/skip-expanded) and call it in the #match-tabs shown.bs.tab handler for #tab-replay"
-    status: pending
+    status: completed
   - id: phase4-odf-resolver
     content: "Phase 4 (process_stats.py): add register_odf_name() self-registering resolver + structures.instances post-pass; bump PIPELINE_VERSION 46 -> 47"
-    status: pending
+    status: completed
   - id: phase4-reprocess-verify
     content: Reprocess (python scripts/process_stats.py --no-prompt); verify rating-inert via _investigation/golden_replay_v26_inert.py + unchanged elo_history.json hash; browser-check recycler tooltips (Procreator/Recycler/Matriarch)
-    status: pending
+    status: completed
   - id: verify-render
     content: Browser-verify Phases 1-3 render-only (Team 1/2 headers blue/red, no dots, shield right of bars, larger meters, replay pill scrolls player under the navbar)
-    status: pending
+    status: completed
 isProject: false
 ---
 
