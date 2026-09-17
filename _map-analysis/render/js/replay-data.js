@@ -289,6 +289,117 @@ export function killsAtTick(killIndex, tSec, halfWindowSec = 0.2) {
   return killIndex.entries.slice(lo, hi);
 }
 
+// -------------------- Engagement indexing (combat lines) --------------------
+
+// Phase A fallback: how long before a kill the shooter->victim beam appears.
+const ENGAGE_LEAD_IN_SEC = 2.5;
+
+// Non-player kill-feed endpoints (AI ships owned by a team, environmental
+// deaths, on-foot self-kills). Beams can only connect actors we can place, so
+// these are dropped from the synthesized fallback index.
+function isRealPlayerName(name) {
+  if (!name) return false;
+  if (name === 'World' || name === 'Self') return false;
+  if (/^Team [12]$/.test(name)) return false;
+  return true;
+}
+
+/**
+ * Build the engagement index consumed by replay-engagements.js. Prefers the
+ * pipeline-emitted per-pair damage intervals (`match.engagements`, Phase B);
+ * falls back to synthesizing lead-in intervals from the kill feed (Phase A) so
+ * the feature works on un-reprocessed / pre-schema matches with NO renderer
+ * branching.
+ *
+ * Returns { entries, tStartArr, maxDur, source }, entries sorted by tStart:
+ *   entry = { shooter, victim, tStart, tEnd, dmg, lethal }
+ */
+export function buildEngagementIndex(matchData, killIndex) {
+  const eng = matchData && matchData.engagements;
+  const hasBlock = !!(eng && Array.isArray(eng.pairs) && eng.pairs.length);
+  const entries = hasBlock
+    ? engagementEntriesFromBlock(eng, killIndex)
+    : engagementEntriesFromKills(killIndex);
+
+  entries.sort((a, b) => a.tStart - b.tStart);
+  const tStartArr = new Array(entries.length);
+  let maxDur = 0;
+  for (let i = 0; i < entries.length; i++) {
+    tStartArr[i] = entries[i].tStart;
+    const d = entries[i].tEnd - entries[i].tStart;
+    if (d > maxDur) maxDur = d;
+  }
+  return { entries, tStartArr, maxDur, source: hasBlock ? 'engagements' : 'killfeed' };
+}
+
+function engagementEntriesFromBlock(eng, killIndex) {
+  const out = [];
+  for (const p of eng.pairs || []) {
+    if (!p) continue;
+    const shooter = p.s, victim = p.v;
+    const t0 = Number(p.t0), t1 = Number(p.t1);
+    if (!isRealPlayerName(shooter) || !isRealPlayerName(victim)) continue;
+    if (!Number.isFinite(t0) || !Number.isFinite(t1)) continue;
+    out.push({
+      shooter, victim,
+      victimStruct: null,
+      tStart: t0,
+      tEnd: Math.max(t0, t1),
+      dmg: Number(p.dmg) || 0,
+      lethal: killWithin(killIndex, shooter, victim, t0, t1 + 0.5),
+    });
+  }
+  // Player -> structure ("attacking a builder"). Victim is resolved to a live
+  // structure instance at draw time (renderer's structureFor).
+  for (const p of eng.structure_pairs || []) {
+    if (!p) continue;
+    const shooter = p.s;
+    const t0 = Number(p.t0), t1 = Number(p.t1);
+    if (!isRealPlayerName(shooter)) continue;
+    if (!Number.isFinite(t0) || !Number.isFinite(t1)) continue;
+    out.push({
+      shooter,
+      victim: null,
+      victimStruct: { team: p.vteam, odf: p.vodf, name: p.vname },
+      tStart: t0,
+      tEnd: Math.max(t0, t1),
+      dmg: Number(p.dmg) || 0,
+      lethal: false,
+    });
+  }
+  return out;
+}
+
+function engagementEntriesFromKills(killIndex) {
+  const out = [];
+  if (!killIndex || !killIndex.entries) return out;
+  for (const e of killIndex.entries) {
+    if (!isRealPlayerName(e.killer) || !isRealPlayerName(e.victim)) continue;
+    if (!Number.isFinite(e.tSec)) continue;
+    out.push({
+      shooter: e.killer,
+      victim: e.victim,
+      tStart: e.tSec - ENGAGE_LEAD_IN_SEC,
+      tEnd: e.tSec,
+      dmg: 0,
+      lethal: true,
+    });
+  }
+  return out;
+}
+
+// True when a kill-feed entry matches shooter->victim within [t0, t1].
+function killWithin(killIndex, shooter, victim, t0, t1) {
+  if (!killIndex || !killIndex.tSecArr || !killIndex.tSecArr.length) return false;
+  const lo = lowerBound(killIndex.tSecArr, t0);
+  const hi = upperBound(killIndex.tSecArr, t1);
+  for (let i = lo; i < hi; i++) {
+    const k = killIndex.entries[i];
+    if (k.killer === shooter && k.victim === victim) return true;
+  }
+  return false;
+}
+
 function lowerBound(arr, target) {
   let lo = 0, hi = arr.length;
   while (lo < hi) {

@@ -53,7 +53,12 @@ import {
   updateTLockDiamonds,
 } from './replay-fx.js';
 import { createCameraController } from './replay-cameras.js';
-import { killsAtTick, killsInWindow } from './replay-data.js';
+import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js';
+import {
+  buildEngagementLines,
+  updateEngagements,
+  clearEngagementHighlights,
+} from './replay-engagements.js';
 import { buildObjectsGroup } from './objects.js';
 import { bootReplayDirectory } from './replay-directory.js';
 import { showResultsScreen, hideResultsScreen, isResultsShowing } from './replay-results.js';
@@ -119,6 +124,12 @@ const STATE = {
   beacons: null,
   tlocks: null,
   tlocksGroup: null,
+  // Combat engagement overlay (red attack beams + under-attack reticles).
+  // Lives in scene space (reflected coords), like kill flashes.
+  engagements: null,
+  engagementsGroup: null,
+  engagementIndex: null,
+  engagementsVisible: true,
   // Static map-feature overlay (scrap pools). Loose scrap and spawn points
   // are intentionally excluded -- the latter is already represented by the
   // spawn beacon layer, the former has no pickup data so we'd be drawing
@@ -263,6 +274,7 @@ async function boot() {
   initLabels();
   initBeacons();
   initTLocks();
+  initEngagements();
   initPools();
   initStructureOverlays();
   initCamera(mapData);
@@ -557,6 +569,19 @@ function initTLocks() {
   STATE.tlocks = diamonds;
   STATE.tlocksGroup = group;
   STATE.worldGroup.add(group);
+}
+
+function initEngagements() {
+  // Beams + reticles use reflected coords (via actorFlashPos), so the group
+  // attaches to the SCENE, not the world-reflect group -- mirrors kill flashes.
+  const { beams, reticles, group } = buildEngagementLines();
+  STATE.engagements = { beams, reticles, group };
+  STATE.engagementsGroup = group;
+  group.visible = STATE.engagementsVisible;
+  STATE.scene.add(group);
+  // Prefer the pipeline-emitted engagements block; falls back to kill-feed
+  // lead-in intervals when absent (pre-v27 / un-reprocessed matches).
+  STATE.engagementIndex = buildEngagementIndex(STATE.matchData, STATE.killIndex);
 }
 
 function initPools() {
@@ -1004,6 +1029,8 @@ function wireRoster() {
   if (allOff) allOff.addEventListener('click', () => STATE.actors.forEach(a => setActorVisibilityByName(a.name, false)));
   const trailsBtn = document.getElementById('roster-trails');
   if (trailsBtn) trailsBtn.addEventListener('click', () => toggleTrails());
+  const engageBtn = document.getElementById('roster-engagements');
+  if (engageBtn) engageBtn.addEventListener('click', () => toggleEngagements());
   const collapseBtn = document.getElementById('roster-collapse');
   if (collapseBtn) collapseBtn.addEventListener('click', () => toggleRosterCollapsed());
 
@@ -1154,6 +1181,18 @@ function toggleTrails() {
   if (btn) {
     btn.classList.toggle('is-on', STATE.trailsVisible);
     btn.setAttribute('aria-pressed', STATE.trailsVisible ? 'true' : 'false');
+  }
+}
+
+function toggleEngagements() {
+  STATE.engagementsVisible = !STATE.engagementsVisible;
+  if (STATE.engagementsGroup) STATE.engagementsGroup.visible = STATE.engagementsVisible;
+  // Turning off clears any glyph emissive boost so ships don't stay glowing.
+  if (!STATE.engagementsVisible) clearEngagementHighlights({ isKillFlashing });
+  const btn = document.getElementById('roster-engagements');
+  if (btn) {
+    btn.classList.toggle('is-on', STATE.engagementsVisible);
+    btn.setAttribute('aria-pressed', STATE.engagementsVisible ? 'true' : 'false');
   }
 }
 
@@ -1694,6 +1733,21 @@ function renderFrame(dtSec = 0) {
   if (STATE.killFlashes && STATE.killFlashes.length) {
     updateKillFlashes(STATE.scene, STATE.killFlashes, dtSec || 0.016);
   }
+  // 4.5 Combat engagement lines (red attack beams + under-attack reticles).
+  //     Pure function of progressSec, so scrubbing is automatically correct.
+  if (STATE.engagements && STATE.engagementsVisible) {
+    updateEngagements(STATE.engagementIndex, STATE.progressSec, {
+      beams: STATE.engagements.beams,
+      reticles: STATE.engagements.reticles,
+      actorFor: findActorByName,
+      posOf: actorFlashPos,
+      structureFor,
+      camera: STATE.camera,
+      wallSec: performance.now() / 1000,
+      isKillFlashing,
+      maxBeams: document.body.classList.contains('replay-compact') ? 10 : undefined,
+    });
+  }
   // 5. T-lock diamonds (hostile-locked indicator).
   if (STATE.tlocks && STATE.tlocks.length) {
     const wallSec = performance.now() / 1000;
@@ -1736,6 +1790,7 @@ function triggerNewKillFlashes() {
   // since last frame.
   if (STATE.progressSec < STATE.killFiredTSec - 0.05) {
     clearAllKillFlashes(STATE.scene, STATE.killFlashes);
+    clearEngagementHighlights({ isKillFlashing });
     STATE.killFiredTSec = STATE.progressSec - 0.001;
     STATE.fxFiredTSec = STATE.progressSec - 0.001;
     STATE.armoryFiredTSec = STATE.progressSec - 0.001;
@@ -1775,6 +1830,53 @@ function actorFlashPos(actor) {
   // raw coords, so reflect its Z.
   if (actor.lastValidPos) return { ...actor.lastValidPos };
   return actor.spawn ? { ...actor.spawn, z: -actor.spawn.z } : null;
+}
+
+// True when a kill flash currently owns this actor's glyph emissive, so the
+// engagement highlight defers (keeps the white kill-impact boost visible).
+function isKillFlashing(actor) {
+  if (!actor || !STATE.killFlashes) return false;
+  for (const f of STATE.killFlashes) if (f.victimActor === actor) return true;
+  return false;
+}
+
+function normStructOdf(odf) {
+  return String(odf || '').toLowerCase().replace(/\.odf$/, '');
+}
+
+// Resolve a structure engagement victim (team + odf) to the nearest LIVING
+// instance at tSec, returned in reflected scene coords (matching actorFlashPos).
+// The structure meshes live in worldGroup (scale.z = -1) and sit on terrain, so
+// we mirror their placement: world Z = -inst.z, Y = terrain height at (x, z).
+function structureFor(vs, tSec, shooterPos) {
+  const block = STATE.matchData && STATE.matchData.structures;
+  const insts = block && block.instances;
+  if (!insts || !insts.length || !vs) return null;
+  const tick = tSec * (STATE.tickRate || 20);
+  const wantOdf = normStructOdf(vs.odf);
+  const hm = STATE.mapData && STATE.mapData.heightmap;
+  const scaledHm = hm ? { ...hm, scale: hm.scale * STATE.terrainExaggeration } : null;
+  let best = null;
+  let bestD = Infinity;
+  for (const inst of insts) {
+    if (inst.team !== vs.team) continue;
+    if (normStructOdf(inst.odf) !== wantOdf) continue;
+    if (inst.spawn_tick != null && tick < inst.spawn_tick) continue;
+    if (inst.death_tick != null && tick > inst.death_tick) continue;
+    if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z)) continue;
+    const wx = inst.x;
+    const wz = -inst.z;  // reflected world Z
+    const wy = (scaledHm ? sampleTerrainHeight(scaledHm, inst.x, inst.z) : 0) + 8;
+    if (shooterPos) {
+      const dx = wx - shooterPos.x;
+      const dz = wz - shooterPos.z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = { x: wx, y: wy, z: wz }; }
+    } else if (!best) {
+      best = { x: wx, y: wy, z: wz };
+    }
+  }
+  return best;
 }
 
 function fireWorldFlash(pos, teamKey, actor, nonce) {
