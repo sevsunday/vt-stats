@@ -47,8 +47,24 @@ ADJUDICATIONS_SCHEMA_VERSION = 1
 VALID_OUTCOMES = ("team1", "team2", "draw", "cancelled", "unknown")
 
 # Proto schema eras that require sign-off. v1/v2 predate the attestation
-# dialog and are grandfathered (never prompt) unless --adjudicate-all.
+# dialog and are grandfathered (never prompt) unless --adjudicate-all (or
+# a per-match force_ids bypass, e.g. --adjudicate-f9's hinted matches).
 _LEGACY_SCHEMAS = {"v1", "v2"}
+
+# Display-only outcome hints from external sources (currently the
+# F9bomber community ledger's overlap stamps). Keyed by match id; the
+# value is a preformatted label rendered as an extra evidence line in
+# the prompt. NEVER auto-applied -- the operator remains the final
+# authority. Populated per-run by scripts/process_stats.py via
+# set_external_hints().
+EXTERNAL_HINTS: dict = {}
+
+
+def set_external_hints(hints):
+    """Replace the module-level external-hint map ({match_id: label})."""
+    EXTERNAL_HINTS.clear()
+    if hints:
+        EXTERNAL_HINTS.update(hints)
 
 
 # ---------------------------------------------------------------------------
@@ -95,13 +111,20 @@ def save_adjudications(adjudications):
 # Candidacy
 # ---------------------------------------------------------------------------
 
-def is_candidate(match_data, adjudications, adjudicate_all=False):
-    """True when this match should prompt for sign-off this run."""
+def is_candidate(match_data, adjudications, adjudicate_all=False,
+                 force_ids=frozenset()):
+    """True when this match should prompt for sign-off this run.
+
+    `force_ids`: match ids exempt from the legacy v1/v2 grandfather skip
+    (e.g. --adjudicate-f9 passes the F9-hinted overlap set, which is
+    v2-era-heavy). Already-adjudicated matches never re-prompt regardless.
+    """
     m = match_data.get("match") or {}
     mid = m.get("id")
     if not mid or mid in adjudications:
         return False
-    if not adjudicate_all and m.get("proto_schema_version") in _LEGACY_SCHEMAS:
+    if (not adjudicate_all and mid not in force_ids
+            and m.get("proto_schema_version") in _LEGACY_SCHEMAS):
         return False
     if not match_data.get("leaderboard"):
         # Zero-roster degenerate -- nothing to confirm.
@@ -324,6 +347,8 @@ def render_prompt(match_data, display_name, index, total):
         "",
         f" Host selected (in-game dialog):  {host_label}",
         f" Kill-feed evidence:              {evidence_label}",
+        *([f" F9 ledger (community):           {EXTERNAL_HINTS[m.get('id')]}"]
+          if m.get("id") in EXTERNAL_HINTS else []),
         f" Current resolution:              {_current_resolution_label(winner)}",
         "",
         " Confirm the actual outcome:",

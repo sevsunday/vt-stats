@@ -3237,6 +3237,33 @@ def _compute_positioning(raw_samples_by_s64, min_tick, tick_rate,
     }
 
 
+def _load_f9_ledger():
+    """Load the committed F9bomber external ledger, or None when absent.
+
+    data/external/f9_ledger.json is written once by the standalone
+    scripts/import_f9_ledger.py (NOT part of this pipeline). Consumers:
+    the adjudication jogger (`overlaps` -> display-only prompt hints) and
+    the VTSR-C external-duel walk (`duels` ->
+    elo_commander.compute_commander_elo). Missing/corrupt file degrades
+    to the pre-import pipeline behavior.
+    """
+    path = PROJECT_ROOT / "data" / "external" / "f9_ledger.json"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            ledger = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"  WARN: could not read {path.name} ({e}); ignoring F9 ledger")
+        return None
+    if not isinstance(ledger, dict):
+        print(f"  WARN: {path.name} has an unexpected shape; ignoring F9 ledger")
+        return None
+    print(f"Loaded F9 ledger: {len(ledger.get('duels') or [])} community duels, "
+          f"{len(ledger.get('overlaps') or [])} overlap hints")
+    return ledger
+
+
 def load_known_players(path=STEAMID_TO_NAME_PATH):
     """Load canonical player names from the known-players registry.
 
@@ -9119,6 +9146,17 @@ def _parse_args():
         ),
     )
     parser.add_argument(
+        "--adjudicate-f9",
+        action="store_true",
+        help=(
+            "Widen outcome review to matches with an F9bomber community-"
+            "ledger outcome hint (data/external/f9_ledger.json overlaps), "
+            "including proto v1/v2 era matches the default candidacy "
+            "skips. The hint line is display-only; the operator remains "
+            "the final authority."
+        ),
+    )
+    parser.add_argument(
         "--adjudicate-all",
         action="store_true",
         help=(
@@ -9328,15 +9366,41 @@ def main():
     adj_store = adjudication_module.load_adjudications()
     interactive = (sys.stdin.isatty() and not args.no_prompt) or args.force_prompt
 
+    # F9bomber external ledger (data/external/f9_ledger.json, committed by
+    # the one-shot scripts/import_f9_ledger.py). Soft-missing: without it
+    # the pipeline behaves exactly as before. Two consumers in this run:
+    # the adjudication jogger hints below, and the VTSR-C external-duel
+    # walk at the elo_commander emit.
+    f9_ledger = _load_f9_ledger()
+    f9_hint_ids = frozenset()
+    if f9_ledger:
+        hints = {}
+        for ov in f9_ledger.get("overlaps") or []:
+            mid = ov.get("match_id")
+            if not mid:
+                continue
+            wname = ov.get("f9_winner_name") or "?"
+            our_team = ov.get("our_team")
+            if our_team in (1, 2):
+                hints[mid] = f"Team {our_team} win \u2014 {wname} (community record)"
+            else:
+                hints[mid] = f"{wname} won (community record; side unmapped)"
+        adjudication_module.set_external_hints(hints)
+        f9_hint_ids = frozenset(hints)
+
     # Dedupe prompt candidates by match id (dual recordings appear twice in
     # all_match_data); reconciliation below still touches every dict.
+    # --adjudicate-f9 widens candidacy to hinted matches even in the
+    # grandfathered v1/v2 proto era (the F9-overlap window is v2-heavy).
+    force_ids = f9_hint_ids if args.adjudicate_f9 else frozenset()
     candidates = []
     seen_candidate_ids = set()
     for md in all_match_data:
         mid = md["match"].get("id")
         if mid in seen_candidate_ids:
             continue
-        if adjudication_module.is_candidate(md, adj_store, args.adjudicate_all):
+        if adjudication_module.is_candidate(md, adj_store, args.adjudicate_all,
+                                            force_ids=force_ids):
             candidates.append(md)
             seen_candidate_ids.add(mid)
     candidates.sort(key=lambda md: md["match"].get("date") or "")
@@ -9510,7 +9574,13 @@ def main():
             raise RuntimeError("canonical VTSR-T history unavailable")
         import elo_commander as elo_commander_module
         cmdr_current, cmdr_history = elo_commander_module.compute_commander_elo(
-            all_match_data, elo_history
+            all_match_data, elo_history,
+            external_duels=(f9_ledger.get("duels") if f9_ledger else None),
+            external_overlap_ids=frozenset(
+                ov.get("match_id")
+                for ov in (f9_ledger.get("overlaps") if f9_ledger else []) or []
+                if ov.get("match_id")
+            ),
         )
         cmdr_current_path = OUTPUT_DIR / "elo_commander_current.json"
         with open(cmdr_current_path, "w", encoding="utf-8") as f:
@@ -9521,6 +9591,8 @@ def main():
         print(f"VTSR-C: {cmdr_current_path.name} "
               f"({len(cmdr_current.get('ratings', []))} commanders · "
               f"{cmdr_current.get('rated_match_count', 0)} rated duels · "
+              f"{cmdr_current.get('external_duels_rated', 0)} community duels · "
+              f"{cmdr_current.get('external_skipped_overlap_runtime', 0)} community skipped-overlap · "
               f"{cmdr_current.get('matches_skipped_undetermined', 0)} skipped undetermined · "
               f"{cmdr_current.get('matches_skipped_missing_commander', 0)} skipped missing-commander)")
     except Exception as e:

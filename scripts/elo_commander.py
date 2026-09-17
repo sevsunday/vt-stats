@@ -1,9 +1,28 @@
-"""VTSR-C -- Commander Rating v2 (win/loss ELO with a team-strength handicap
-plus an INERT economy-performance composite behind CMDR_ALPHA_C = 1.0).
+"""VTSR-C -- Commander Rating v3 (win/loss ELO with a team-strength handicap,
+an INERT economy-performance composite behind CMDR_ALPHA_C = 1.0, and
+external community-ledger duels from F9bomber's hand-kept records).
 
 Pure module, no I/O -- mirrors the `scripts/elo.py` contract.
-`compute_commander_elo(all_match_data, elo_history)` returns
-`(elo_commander_current, elo_commander_history)` dicts ready for `json.dump`.
+`compute_commander_elo(all_match_data, elo_history, external_duels=None)`
+returns `(elo_commander_current, elo_commander_history)` dicts ready for
+`json.dump`.
+
+v3 additions (schema 2 -> 3; ratings not comparable with v2 values):
+
+  * EXTERNAL DUELS -- pre-gated community games from
+    data/external/f9_ledger.json (one-shot import of F9bomber's ledger;
+    see scripts/import_f9_ledger.py + the decision memo
+    critique/decisions/f9-external-duels.md). Outcome-pure S at
+    k_factor(games) * CMDR_K_EXTERNAL_SCALE (1.0 = full K, operator-
+    ratified as definitive), interleaved chronologically at day
+    precision (after same-day telemetry, sheet-row order), team-strength
+    handicap read from a running VTSR-T snapshot folded out of
+    elo_history (empty pre-corpus -> handicap 0), W/L tallied into the
+    headline record with per-rating `duels_external` + top-level
+    `external_duels_rated` transparency counters, per-duel
+    `source: "f9" | "telemetry"` provenance, and a runtime overlap guard
+    (`external_skipped_overlap_runtime`) so a backfilled binpb of a
+    ledger-covered lobby can never double-count.
 
 v2 additions (consequence-free while CMDR_ALPHA_C == 1.0):
 
@@ -119,7 +138,7 @@ docs/DATA_DICTIONARY.md section 11.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import identity_aliases
@@ -202,7 +221,25 @@ CMDR_ECON_STD_SHRINKAGE = 10.0
 # loses ships; the cap keeps one lopsided stomp from defining the axis.
 THUG_SUPPLY_CAP = 3.0
 
-CMDR_ELO_SCHEMA_VERSION = 2
+# ---- v3: external community ledger (F9bomber) -----------------------------
+
+# K multiplier applied to external (community-ledger) duels on top of the
+# standard k_factor() schedule. 1.0 = full K: the operator ratified
+# F9bomber's hand-logged outcomes as definitive (28/28 agreement with our
+# telemetry on Steam64-paired overlapping games; pre-registered in
+# critique/decisions/f9-external-duels.md). Lower to discount externals
+# without a schema bump.
+CMDR_K_EXTERNAL_SCALE = 1.0
+
+# Credit metadata surfaced on elo_commander_current.json so UI credit
+# lines never hardcode the provider.
+EXTERNAL_PROVIDER_NAME = "F9bomber"
+EXTERNAL_PROVIDER_URL = "https://f9bomber.com"
+
+# v3: external community duels (data/external/f9_ledger.json) walk the
+# ladder alongside telemetry duels -- ratings are no longer comparable
+# with schema-2 values (peak_vtsr_c reset precedent).
+CMDR_ELO_SCHEMA_VERSION = 3
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +429,10 @@ def _econ_axis_values(md: dict) -> dict[int, dict[str, float | None]] | None:
 # ---------------------------------------------------------------------------
 
 def compute_commander_elo(all_match_data: list[dict],
-                          elo_history: dict) -> tuple[dict, dict]:
+                          elo_history: dict,
+                          external_duels: list[dict] | None = None,
+                          external_overlap_ids: frozenset | set | None = None
+                          ) -> tuple[dict, dict]:
     """Chronological VTSR-C walk over the canonical rated-match history.
 
     `all_match_data`: full per-match dicts (as held in-memory by
@@ -401,6 +441,21 @@ def compute_commander_elo(all_match_data: list[dict],
     `elo.compute_elo()` -- its `history` list is chronological and its
     per-match deltas carry the pre-match `before` ratings that feed the
     team-strength handicap.
+    `external_duels`: optional pre-gated community duels from
+    `data/external/f9_ledger.json` (`duels` list). Externals interleave
+    chronologically -- day precision, sorted AFTER any same-day telemetry
+    matches, sheet-row order within a day -- and score outcome-pure at
+    `k_factor(games) * CMDR_K_EXTERNAL_SCALE`. Their team-strength
+    handicap reads each resolved thug's then-current VTSR-T from a
+    running snapshot folded out of `elo_history` (pre-corpus duels see an
+    empty snapshot -> handicap 0, exactly like our own earliest matches).
+    W/L records tally externals alongside telemetry; `rated_match_count`
+    stays telemetry-only with externals counted in `external_duels_rated`.
+    `external_overlap_ids`: match ids the importer already consumed as
+    dual-records (`f9_ledger.json` `overlaps[].match_id`) -- excluded
+    from the runtime overlap guard so a corpus match paired to one F9
+    row cannot ALSO block a sibling rematch row (same night, same
+    commanders, same roster, different map).
 
     Returns `(elo_commander_current, elo_commander_history)`.
     """
@@ -430,6 +485,14 @@ def compute_commander_elo(all_match_data: list[dict],
     rated_match_count = 0
     skipped_undetermined = 0
     skipped_missing_commander = 0
+    # Dual recordings that share ONE match id produce TWO elo_history
+    # entries (two submitters' files landing on the same second). One
+    # physical game must rate exactly one duel -- the second entry is
+    # skipped and counted here. (VTSR-T's own double-walk of such
+    # entries is a separate pre-existing behavior, deliberately not
+    # touched from this module.)
+    rated_match_ids: set = set()
+    skipped_duplicate_recording = 0
 
     # v2: rolling per-axis differential-std state (team-1-perspective
     # diffs; mean-zero by construction so the estimator is a shrunk RMS).
@@ -445,7 +508,213 @@ def compute_commander_elo(all_match_data: list[dict],
                / (CMDR_ECON_STD_SHRINKAGE + std_count[axis]))
         return math.sqrt(var) if var > 0 else prior
 
-    for entry in (elo_history.get("history") or []):
+    # ---- v3: external community-ledger duels ----------------------------
+    # Running per-player VTSR-T snapshot (steam64 str -> latest `after`),
+    # folded from every telemetry history entry as the merged walk passes
+    # it. Externals read their team-strength handicap from here; before
+    # the first telemetry match it is empty -> handicap 0.
+    vtsr_t_now: dict[str, float] = {}
+    duels_external: dict[str, int] = {}
+    external_rated = 0
+    external_skipped_overlap = 0
+
+    # Runtime overlap guard: a frozen ledger cannot know about binpb files
+    # BACKFILLED after import. Skip an external when a corpus match sits
+    # within +-1 day with the same commander-Steam64 pair and >= 60% of
+    # the external's resolved participants on its leaderboard (expected 0
+    # skips today; counted + WARNed so a future backfill can't
+    # double-count a lobby).
+    guard_index: list[tuple[date, frozenset, set]] = []
+    if external_duels:
+        consumed = external_overlap_ids or frozenset()
+        for md in all_match_data:
+            m = md.get("match") or {}
+            if m.get("id") in consumed:
+                # Already accounted for by the importer's one-to-one
+                # pairing -- must not double-block a sibling F9 row.
+                continue
+            try:
+                g_day = datetime.fromisoformat(
+                    str(m.get("date") or "").replace("Z", "+00:00")).date()
+            except ValueError:
+                continue
+            leaders = m.get("team_leaders") or {}
+            pair = {str((leaders.get("1") or {}).get("s64") or ""),
+                    str((leaders.get("2") or {}).get("s64") or "")} - {""}
+            if len(pair) != 2:
+                continue
+            lobby_s64s = {str(row.get("steam64"))
+                          for row in (md.get("leaderboard") or [])
+                          if row.get("steam64")}
+            guard_index.append((g_day, frozenset(pair), lobby_s64s))
+
+    def _external_overlaps_corpus(duel: dict) -> bool:
+        cmdrs = duel.get("commanders") or {}
+        c1s = (cmdrs.get("1") or {}).get("steam64")
+        c2s = (cmdrs.get("2") or {}).get("steam64")
+        if not (c1s and c2s):
+            return False
+        try:
+            ext_day = date.fromisoformat(str(duel.get("date") or ""))
+        except ValueError:
+            return False
+        pair = frozenset((str(c1s), str(c2s)))
+        participants = {str(c1s), str(c2s)}
+        for side in ("1", "2"):
+            for t in (duel.get("thugs") or {}).get(side) or []:
+                if t.get("steam64"):
+                    participants.add(str(t["steam64"]))
+        for g_day, g_pair, g_lobby in guard_index:
+            if abs((g_day - ext_day).days) > 1 or g_pair != pair:
+                continue
+            if len(participants & g_lobby) / len(participants) >= 0.6:
+                return True
+        return False
+
+    # Merged chronological stream: telemetry entries keep their exact
+    # history order via (day, 0, index); externals sort after same-day
+    # telemetry via (day, 1, sheet_row). Day-precision interleaving is a
+    # documented approximation -- F9 logs calendar days, not timestamps.
+    events: list[tuple[tuple, str, Any]] = []
+    for idx, entry in enumerate(elo_history.get("history") or []):
+        day = str(entry.get("match_date") or "")[:10]
+        events.append(((day, 0, idx), "telemetry", entry))
+    for duel in (external_duels or []):
+        events.append(((str(duel.get("date") or ""), 1,
+                        int(duel.get("row") or 0)), "external", duel))
+    events.sort(key=lambda e: e[0])
+
+    for _sort_key, kind, payload in events:
+        if kind == "external":
+            duel = payload
+            if _external_overlaps_corpus(duel):
+                external_skipped_overlap += 1
+                print(f"  WARN: F9 external duel r{duel.get('row')} "
+                      f"({duel.get('date')} {duel.get('map_title')}) overlaps "
+                      f"a corpus match; skipped (ours supersedes)")
+                continue
+
+            cmdrs = duel.get("commanders") or {}
+            side_rows = {1: cmdrs.get("1") or {}, 2: cmdrs.get("2") or {}}
+            win_side = duel.get("winner_side")
+            if win_side not in (1, 2):
+                # Importer guarantees this; defensive skip keeps the walk
+                # alive on a hand-edited ledger.
+                continue
+            scores_ext = {win_side: 1.0, 3 - win_side: 0.0}
+
+            # Team-strength handicap from the running VTSR-T snapshot
+            # over each side's RESOLVED thugs (unrated/unresolved skip;
+            # empty side -> None -> expected_score zeroes the term).
+            t_means: dict[int, float | None] = {}
+            for side in (1, 2):
+                vals = [vtsr_t_now[str(t["steam64"])]
+                        for t in (duel.get("thugs") or {}).get(str(side)) or []
+                        if t.get("steam64")
+                        and str(t["steam64"]) in vtsr_t_now]
+                t_means[side] = (sum(vals) / len(vals)) if vals else None
+
+            keys_ext = {s: _key(side_rows[s]) for s in (1, 2)}
+            for side in (1, 2):
+                k = keys_ext[side]
+                if k not in rating:
+                    rating[k] = CMDR_ELO_ANCHOR
+                    games[k] = wins[k] = losses[k] = draws[k] = 0
+                    peak[k] = CMDR_ELO_ANCHOR
+                # Externals only seed a display name when the key is new;
+                # telemetry appearances (canonical names) always win.
+                if k not in display_name:
+                    display_name[k] = side_rows[side].get("name") or ""
+                pinned = identity_aliases.ALIAS_TARGET_NAMES_STR.get(k)
+                if pinned:
+                    display_name[k] = pinned
+                if not steam64_out.get(k):
+                    s64v = side_rows[side].get("steam64")
+                    steam64_out[k] = str(s64v) if s64v else None
+
+            r_before_ext = {s: rating[keys_ext[s]] for s in (1, 2)}
+            e1_ext = expected_score(
+                r_before_ext[1], r_before_ext[2], t_means[1], t_means[2]
+            )
+            expected_ext = {1: e1_ext, 2: 1.0 - e1_ext}
+            sentinel = f"f9:{duel.get('row')}"
+
+            duel_commanders_ext = {}
+            for side in (1, 2):
+                k = keys_ext[side]
+                ki = k_factor(games[k]) * CMDR_K_EXTERNAL_SCALE
+                dr = ki * (scores_ext[side] - expected_ext[side])
+                r_after = r_before_ext[side] + dr
+                rating[k] = r_after
+                games[k] += 1
+                if scores_ext[side] == 1.0:
+                    wins[k] += 1
+                else:
+                    losses[k] += 1
+                duels_external[k] = duels_external.get(k, 0) + 1
+                if r_after > peak[k]:
+                    peak[k] = r_after
+                    peak_at[k] = sentinel
+                    peak_date[k] = duel.get("date", "")
+                elif k not in peak_at:
+                    peak_at[k] = sentinel
+                    peak_date[k] = duel.get("date", "")
+                last_match[k] = sentinel
+                last_delta[k] = dr
+                duel_commanders_ext[str(side)] = {
+                    "steam64": steam64_out.get(k),
+                    "name": display_name.get(k, ""),
+                    "before": round(r_before_ext[side], 2),
+                    "after": round(r_after, 2),
+                    "delta": round(dr, 2),
+                    "expected": round(expected_ext[side], 4),
+                    "k": round(ki, 2),
+                    "score": scores_ext[side],
+                    "score_blend": {
+                        "alpha_c": CMDR_ALPHA_C,
+                        "s_raw": scores_ext[side],
+                        "s_blended": scores_ext[side],
+                    },
+                }
+
+            t1m_ext, t2m_ext = t_means[1], t_means[2]
+            duels.append({
+                "match_id": "",
+                "source": "f9",
+                "external_row": duel.get("row"),
+                "date": duel.get("date", ""),
+                "map": duel.get("map_title", ""),
+                "decided_by": "external",
+                "adjudicated": False,
+                "outcome": f"team{win_side}",
+                "commanders": duel_commanders_ext,
+                "team_handicap": {
+                    "t1_thug_mean": (round(t1m_ext, 2)
+                                     if t1m_ext is not None else None),
+                    "t2_thug_mean": (round(t2m_ext, 2)
+                                     if t2m_ext is not None else None),
+                    "diff": (round(t1m_ext - t2m_ext, 2)
+                             if (t1m_ext is not None and t2m_ext is not None)
+                             else 0.0),
+                    "lambda": CMDR_LAMBDA_TEAM_HANDICAP,
+                },
+                # Externals carry no v4 economy telemetry by definition.
+                "performance": {"available": False},
+            })
+            external_rated += 1
+            continue
+
+        entry = payload
+        # Fold this entry's post-match VTSR-T ratings into the running
+        # snapshot FIRST -- later-sorted externals (same day or after)
+        # must see post-match values; this entry's own handicap reads the
+        # deltas' `before` fields via _team_thug_means, never the
+        # snapshot, so folding early cannot leak into it.
+        for d in (entry.get("deltas") or []):
+            s64f = d.get("steam64")
+            aft = d.get("after")
+            if s64f is not None and isinstance(aft, (int, float)):
+                vtsr_t_now[str(s64f)] = float(aft)
         if entry.get("match_excluded"):
             continue
         deltas = entry.get("deltas") or []
@@ -458,6 +727,10 @@ def compute_commander_elo(all_match_data: list[dict],
             # the in-memory corpus. Counted with missing-commander skips
             # (we cannot identify the commanders without the match).
             skipped_missing_commander += 1
+            continue
+        if match_id in rated_match_ids:
+            # Same-id dual recording already rated this game as a duel.
+            skipped_duplicate_recording += 1
             continue
 
         winner = (md.get("match") or {}).get("winner") or {}
@@ -601,6 +874,7 @@ def compute_commander_elo(all_match_data: list[dict],
         t1m, t2m = thug_means[1], thug_means[2]
         duels.append({
             "match_id": match_id,
+            "source": "telemetry",
             "date": entry.get("match_date", ""),
             "decided_by": decided_by,
             "adjudicated": bool(winner.get("adjudicated")),
@@ -621,6 +895,7 @@ def compute_commander_elo(all_match_data: list[dict],
             "performance": perf_block,
         })
         rated_match_count += 1
+        rated_match_ids.add(match_id)
 
     ratings_out = []
     for k in rating:
@@ -643,6 +918,9 @@ def compute_commander_elo(all_match_data: list[dict],
             # v2: duels where the economy composite had telemetry (both
             # v4 flags true). 0 for every pre-v4-era commander.
             "duels_with_telemetry": duels_with_telemetry.get(k, 0),
+            # v3: duels sourced from the external community ledger
+            # (included in matches_commanded_rated + the W/L record).
+            "duels_external": duels_external.get(k, 0),
         })
     ratings_out.sort(key=lambda r: (-r["vtsr_c"], r["name"].lower()))
 
@@ -660,6 +938,16 @@ def compute_commander_elo(all_match_data: list[dict],
         "rated_match_count": rated_match_count,
         "matches_skipped_undetermined": skipped_undetermined,
         "matches_skipped_missing_commander": skipped_missing_commander,
+        "matches_skipped_duplicate_recording": skipped_duplicate_recording,
+        # v3: external community ledger (F9bomber). rated_match_count
+        # stays telemetry-only; externals are counted separately.
+        "k_external_scale": CMDR_K_EXTERNAL_SCALE,
+        "external_duels_rated": external_rated,
+        "external_skipped_overlap_runtime": external_skipped_overlap,
+        "external_provider": (
+            {"name": EXTERNAL_PROVIDER_NAME, "url": EXTERNAL_PROVIDER_URL}
+            if external_rated else None
+        ),
         # v2: economy-performance composite constants + rolling-std
         # telemetry (inert at alpha_c = 1.0; see the decision memo).
         "alpha_c": CMDR_ALPHA_C,
