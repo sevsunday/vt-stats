@@ -2807,3 +2807,37 @@ Reads `data/models/`: `geometry/<stem>.glb` (geometry + UVs + per-primitive mate
 
 Picker-unaware (mirrors ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The `Models` topnav link (`bi-box`) sits immediately after ODF on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` + `MAP_TEMPLATE_VERSION` bumped to thread it through all stubs).
 
+## 18. LEGO Models Browser (`lego/`)
+
+Standalone three.js viewer for community modeler **Darkvale's** Battlezone-inspired LEGO builds, rendered in-browser directly from his BrickLink Studio `.io` files via three.js `LDrawLoader`. Mirrors the `/models` page architecture (directory grid + single-model viewer + Ultra rendering) but is a distinct, slimmer implementation — LEGO has none of the BZCC model machinery (textures, team colors, loadouts, drive, collision, animation). Files: [lego/index.html](lego/index.html), [js/lego.js](js/lego.js), [js/lego-viewer.js](js/lego-viewer.js), [css/lego.css](css/lego.css).
+
+### 18.1 Build pipeline (`scripts/build_lego.py`)
+
+Standalone, single-command, incremental — NOT wired into `process_stats.py` (mirrors `scripts/object-render/`). `python scripts/build_lego.py` is the ONLY step to add models or images.
+
+- For each `data/lego/*.io` (a Stud.io ZIP): extract `model.ldr` (STANDARD official LDraw part numbers — never `model2.ldr`, which uses Stud.io-internal numbering), `thumbnail.png`, and `.info`.
+- BFS-fetch the ENTIRE part / sub-part / primitive closure from the LDraw library (official `parts` → official `p` → unofficial `parts` → unofficial `p`), throttled + retry-on-transient, cached to the gitignored `_lego_cache/parts/` shared across models and runs.
+- **Flatten every path ref to a unique bare name** (`s/3070bs01.dat` → `s__3070bs01.dat`, `48/4-4cyli.dat` → `48__4-4cyli.dat`) in both `0 FILE` names and every type-1 reference, and inline the whole closure — producing a 100%-self-contained `.ldr` with zero runtime fetches. This is load-bearing: `LDrawLoader` only resolves inlined MPD sub-files by **bare** name; any subfolder-prefixed ref is fetched externally and silently dropped, so a part whose geometry lives entirely in an `s\` sub-part would render nothing.
+- Detect a pre-existing `0 FILE` header (some exports carry one — e.g. Titan) and do NOT double-wrap, else the wrapper becomes an empty main model → 0 geometry.
+- Write `data/lego/<slug>/model.ldr` + `thumbnail.png` + a `renders/` scaffold dir; refresh `data/lego/index.json` + `data/lego/LDConfig.ldr`.
+- **Incremental**: per-model cache key `(io_stem, sha256(io_bytes), LEGO_BUILD_VERSION)` recorded per entry (`source_hash` + `build_version`); an unchanged `.io` with existing output and a matching build version is SKIPPED. `renders/` is ALWAYS rescanned (so adding PNGs is instant). Flags: `--force`, `--model <slug>`, `--no-network`, `--prune`. Bump `LEGO_BUILD_VERSION` to force a full rebuild.
+- **Completeness gate**: fails loudly (non-zero exit, `missing=[...]`) if any referenced part is unresolvable in the LDraw library (a genuinely custom / flexible Stud.io element), rather than shipping partial geometry. A Python triangle counter (type-3 = 1 tri, type-4 quad = 2 tris, recursively memoized) cross-checks the geometry and is stored as `triangles` (it matches three.js's `geometry.index.count / 3` exactly).
+
+`data/lego/index.json`: `{build_version, generated, count, models:[{slug, name, faction, faction_code, version, parts, triangles, ldr, thumb, renders[], studio_version, source_file, source_hash, build_version}]}`. Paths are relative to `data/lego/`. The `.io` sources are committed (source of truth, like `data/sessions/*.binpb.gz`).
+
+### 18.2 Viewer (`js/lego-viewer.js`)
+
+`LegoViewer` class: `WebGLRenderer` (ACES tone mapping, `PCFSoftShadowMap`, `preserveDrawingBuffer` for capture), `OrbitControls`, sun `DirectionalLight` + hemisphere + ambient, and an invisible `ShadowMaterial` ground. Load path: `preloadMaterials('../data/lego/LDConfig.ldr')` once, then per model `fetch(...).text()` + `LDrawLoader.parse()` (NOT `load()`, which calls `setMaterials([])` and wipes the palette → magenta), a null-material/null-child sanitize sweep (LDrawLoader emits conditional-line `LineSegments` with `null` material that crash `renderer.render`), a Y-flip (`rotation.x = π`, LDraw is -Y up), and a center/sit-on-ground/frame pass. Toggles: auto-rotate, wireframe, edges, background (dark/light), grid, and sun on/off + intensity/azimuth/elevation. **HQ (Ultra)** ports the `/models` composer chain verbatim — `EffectComposer` with TAA (idle-time 32-sample supersampling gated by `_isSceneStill()`) → GTAO (screen-space-radius ambient occlusion) → UnrealBloom → OutputPass (sRGB) → SMAA, plus a 4096 shadow map + uncapped DPR; `_ultraActive()` bypasses it under wireframe. `capture()` renders canonical angles at supersampled resolution and returns data URLs for download.
+
+### 18.3 Directory + three view modes (`js/lego.js`)
+
+No `?model=` → directory: committed-thumbnail card grid with search, faction chips, and sort (name / faction / parts). `?model=<slug>` → single-model viewer with a 3-way segmented **View** control honoring the three displays: **Standard** (interactive, Ultra off), **HQ** (same canvas, Ultra on, reveals the HQ Capture button), and **Photos** (hides the canvas, shows a gallery of `renders/*.png` with a friendly empty-state placeholder until Darkvale's studio renders are uploaded). The viewer is paused in Photos mode.
+
+### 18.4 Credit + attribution
+
+Darkvale is credited as sole modeler in four places — directory hero (`Designed & built by Darkvale`), per-card `by Darkvale`, viewer `Modeled by Darkvale` chip, and the page footer — all deep-linked to his Steam profile (`steamcommunity.com/profiles/76561198136459671`). The footer additionally carries required LDraw Parts Library (CC BY 4.0) + BrickLink Studio attribution.
+
+### 18.5 Picker filter contract
+
+Picker-unaware (mirrors Models / ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The `LEGO` topnav link (`bi-bricks`) sits immediately after Models on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` 12 → 13 / `MAP_TEMPLATE_VERSION` 7 → 8 thread it through all stubs).
+
