@@ -782,9 +782,15 @@
         ? `<span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
              title="This duel carried proto v4 economy telemetry — its econ composite is recorded (inert while \u03b1_c = 1).">v4</span>`
         : '';
+      // v3: external community-ledger duels carry source "f9" and no
+      // match id — tag them instead of pretending they were recorded.
+      const community = duel.source === 'f9'
+        ? `<span class="vt-f9-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+             title="Hand-logged community duel from F9bomber's ledger (f9bomber.com)${duel.map ? ' \u2014 ' + esc(duel.map) : ''}.">community</span>`
+        : '';
       return `<tr>
         <td class="text-muted">${esc(String(duel.date || '').slice(0, 10))}</td>
-        <td>vs ${playerLinkHtml(opp.name || '?', opp.steam64)} ${telem}</td>
+        <td>vs ${playerLinkHtml(opp.name || '?', opp.steam64)} ${telem}${community}</td>
         <td class="text-center ${resCls} fw-semibold">${res}</td>
         <td class="text-end ${dCls}">${d > 0 ? '+' : ''}${(d || 0).toFixed(1)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
@@ -827,6 +833,11 @@
     }
 
     const telemCount = r.duels_with_telemetry || 0;
+    const extCount = r.duels_external || 0;
+    const extStat = extCount > 0
+      ? `<div data-bs-toggle="tooltip" data-bs-placement="top"
+             title="Duels from F9bomber's hand-kept community ledger — rated at the same K, counted in the record."><span class="vt-stat-label">Community</span><span class="vt-stat-value">${extCount} duel${extCount === 1 ? '' : 's'}</span></div>`
+      : '';
     const statsHtml = `<section class="vt-vtsr-detail-section">
       <h6>Commander record</h6>
       <div class="vt-vtsr-detail-stats">
@@ -834,6 +845,7 @@
         <div><span class="vt-stat-label">Peak</span><span class="vt-stat-value">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</span></div>
         <div><span class="vt-stat-label">Rated games</span><span class="vt-stat-value">${r.matches_commanded_rated}</span></div>
         <div><span class="vt-stat-label">v4 telemetry</span><span class="vt-stat-value">${telemCount} duel${telemCount === 1 ? '' : 's'}</span></div>
+        ${extStat}
       </div>
     </section>`;
 
@@ -946,7 +958,10 @@
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
             title="Wins-Losses-Draws across rated commander games.">${record}</td>
         <td class="text-end">${((r.win_pct || 0) * 100).toFixed(0)}%</td>
-        <td class="text-end">${r.matches_commanded_rated}</td>
+        <td class="text-end">${r.matches_commanded_rated}${(r.duels_external || 0) > 0
+          ? ` <span class="vt-f9-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="${r.duels_external} of these duels come from F9bomber's hand-kept community ledger (f9bomber.com).">${r.duels_external} community</span>`
+          : ''}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</td>
         <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
       </tr>
@@ -968,7 +983,7 @@
               <th data-sort="record" class="text-end">Record</th>
               <th data-sort="win_pct" class="text-end">Win %</th>
               <th data-sort="matches_commanded_rated" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-                  title="Rated commander games (matches with a verified outcome where this player led a team).">Games</th>
+                  title="Rated commander games (matches with a verified outcome where this player led a team). The small chip counts duels sourced from F9bomber's community ledger.">Games</th>
               <th data-sort="peak_vtsr_c" class="text-end">Peak</th>
               <th data-sort="last_delta" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
                   title="Most recent rated-duel rating change.">Last</th>
@@ -979,7 +994,11 @@
       </div>
       <p class="text-muted small mb-0">
         ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
-      </p>`;
+      </p>
+      ${(c.external_duels_rated || 0) > 0
+        ? `<p class="text-muted small mb-0 mt-1">Includes ${fmt(c.external_duels_rated)} community match records from
+             <a href="${esc((c.external_provider || {}).url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc((c.external_provider || {}).name || 'F9bomber')}</a>.</p>`
+        : ''}`;
 
     // Track expand/collapse (delegated; survives sort re-renders).
     const tbody = document.getElementById('vtsr-c-tbody');
@@ -1409,7 +1428,7 @@
       }).join('');
       cmdrAccHtml = `<div class="vt-elo-acc-section">
         <h6>Commander ladder accuracy (VTSR-C)</h6>
-        <p class="vt-elo-acc-blurb">Replaying the commander ladder match-by-match: knowing only the two commanders\u2019 pre-match ratings and their teams\u2019 thug strength, how often did it pick the actual winner of the ${vc.n_scored ?? 0} verified duels? (Coin flip = 50%. The ladder is <strong>experimental</strong> and the sample is small \u2014 expect this number to move.)</p>
+        <p class="vt-elo-acc-blurb">Replaying the commander ladder match-by-match: knowing only the two commanders\u2019 pre-match ratings and their teams\u2019 thug strength, how often did it pick the actual winner of the ${vc.n_scored ?? 0} rated duels (telemetry + community-logged)? (Coin flip = 50%. The ladder is <strong>experimental</strong> \u2014 expect this number to move.)</p>
         <div class="vt-elo-statgrid" style="margin-bottom: 0.85rem;">
           <div class="vt-elo-statcard">
             <div class="vt-elo-stat-head">
@@ -1417,7 +1436,7 @@
               ${(() => { const b = badge('accuracy', vc.accuracy); return b ? `<span class="vt-elo-badge is-${b.tone}">${b.label}</span>` : ''; })()}
             </div>
             <div class="vt-elo-stat-value">${pct(vc.accuracy)}</div>
-            <div class="vt-elo-stat-caption">Of ${vc.n_scored ?? 0} verified commander duels, how often the pre-match favorite (rating + team-strength handicap) actually won.</div>
+            <div class="vt-elo-stat-caption">Of ${vc.n_scored ?? 0} rated commander duels (telemetry + community-logged), how often the pre-match favorite (rating + team-strength handicap) actually won.</div>
             <details class="vt-elo-stat-tech">
               <summary>Technical definition</summary>
               <div class="vt-elo-stat-tech-body">Chronological replay from elo_commander_history.json; draws excluded from the denominator; log-loss ${vc.log_loss != null ? vc.log_loss.toFixed(3) : '\u2014'}.</div>

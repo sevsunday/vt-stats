@@ -3202,6 +3202,7 @@
       renderMetaDurationHistogram('meta-duration-canvas',       mc.duration_bands);
       renderMetaPlayerCount('meta-playercount-canvas',          mc.player_counts);
       renderMetaOverTime('meta-overtime-canvas',                mc.matches_over_time);
+      renderF9CommunityCard();
     });
 
     registerAllMatchesCharts(data);
@@ -6868,6 +6869,60 @@
   function renderAggMeta(meta) {
     renderHeroStats(meta);
     renderHeroChips(meta);
+  }
+
+  // ---- Community Ledger card (All Matches -> Meta tab) -----------------
+  // Static rollup of F9bomber's hand-kept match ledger
+  // (data/external/f9_community.json). Corpus-wide reference data:
+  // deliberately NOT merged into the picker-scoped faction_stats /
+  // meta_charts above, and never re-aggregated by the picker. 404-safe:
+  // the card stays hidden when the file is absent. Fetched once per
+  // session.
+  let f9CommunityCache; // undefined = not fetched; null = 404/absent
+  function renderF9CommunityCard() {
+    const card = document.getElementById('section-f9-community');
+    const body = document.getElementById('f9-community-body');
+    if (!card || !body) return;
+
+    const paint = (comm) => {
+      if (!comm || !(comm.duel_count > 0)) { card.classList.add('d-none'); return; }
+      const fs = comm.faction_stats || {};
+      const FAC = [['i', 'ISDF'], ['e', 'Hadean'], ['f', 'Scion']];
+      const rows = FAC.map(([code, label]) => {
+        const s = fs[code] || { picks: 0, wins: 0 };
+        const wr = s.picks > 0 ? ((s.wins / s.picks) * 100).toFixed(1) + '%' : '\u2014';
+        return `<tr>
+          <td><span class="vt-faction-badge" data-faction-code="${code}">${label}</span></td>
+          <td class="text-end vt-mono">${s.picks.toLocaleString()}</td>
+          <td class="text-end vt-mono">${s.wins.toLocaleString()}</td>
+          <td class="text-end vt-mono">${wr}</td>
+        </tr>`;
+      }).join('');
+      const range = Array.isArray(comm.date_range) ? comm.date_range : [null, null];
+      const prov = comm.provider || {};
+      body.innerHTML = `
+        <p class="small text-secondary mb-2">
+          ${comm.duel_count.toLocaleString()} hand-logged community matches
+          (${esc(range[0] || '?')} \u2192 ${esc(range[1] || '?')}), even 3v3/4v4/5v5 lobbies only,
+          deduplicated against recorded matches. Kept separate from the recorded-corpus
+          charts above on purpose.
+        </p>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-2" style="font-size:0.85rem;">
+            <thead><tr><th>Faction</th><th class="text-end">Picks</th><th class="text-end">Wins</th><th class="text-end">Win %</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <p class="text-muted small mb-0">Includes data from
+          <a href="${esc(prov.url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc(prov.name || 'F9bomber')}</a>.</p>`;
+      card.classList.remove('d-none');
+    };
+
+    if (f9CommunityCache !== undefined) { paint(f9CommunityCache); return; }
+    fetch('data/external/f9_community.json')
+      .then(r => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then(json => { f9CommunityCache = json || null; paint(f9CommunityCache); });
   }
 
   // Recent Matches strip. Reuses .vt-match-picker-card so a future styling

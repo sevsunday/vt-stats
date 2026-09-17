@@ -1810,6 +1810,20 @@
     return _cmdrEloHistFetchPromise;
   }
 
+  // Lazy one-shot fetch of the F9bomber community rollups
+  // (data/external/f9_community.json -- thug team records etc.). Same
+  // 404 contract: null caches and every consumer self-omits.
+  let _f9CommunityFetchPromise = null;
+  function ensureF9CommunityLoaded() {
+    if (state.f9Community !== undefined) return Promise.resolve(state.f9Community);
+    if (!_f9CommunityFetchPromise) {
+      _f9CommunityFetchPromise = fetchJson(`${state.dataPrefix}data/external/f9_community.json`)
+        .catch(() => null)
+        .then(json => { state.f9Community = json || null; return state.f9Community; });
+    }
+    return _f9CommunityFetchPromise;
+  }
+
   /** Chronological VTSR-C points for one commander: every duel in
       elo_commander_history.json where they sat on either side. */
   function buildCmdrRatingSeries(sid) {
@@ -1828,6 +1842,10 @@
           delta:    side.delta,
           score:    side.score,
           opponent: opp.name || '',
+          // v3: community-ledger duels carry source "f9", a map title
+          // and NO match id (missing source = telemetry).
+          source:   duel.source || 'telemetry',
+          map:      duel.map || '',
         });
       }
     }
@@ -2266,10 +2284,14 @@
                 const dStr = Number.isFinite(p.delta)
                   ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)}` : '\u2014';
                 const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
-                return [
+                const lines = [
                   `VTSR-C: ${p.after.toFixed(0)} (${dStr})`,
                   `${res} vs ${p.opponent || 'unknown'}`,
                 ];
+                if (p.source === 'f9') {
+                  lines.push(`Community duel (F9 ledger)${p.map ? ' \u2014 ' + p.map : ''}`);
+                }
+                return lines;
               },
             },
           },
@@ -2564,9 +2586,40 @@
             </div>
           </div>
         </div>
+
+        <!-- Community team record strip (F9 ledger; fills async, hides on 404) -->
+        <div class="col-12 d-none" id="vt-f9-record-wrap">
+          <div class="card">
+            <div class="card-body py-2 small" id="vt-f9-record"></div>
+          </div>
+        </div>
       </div>
     `;
     $('vt-player-tab-overview').innerHTML = html;
+
+    // Community team record (as thug) from F9bomber's hand-kept ledger.
+    // Team outcomes only -- NEVER framed as a skill rating and never a
+    // VTSR-T input. 404 / no row / zero games: the strip stays hidden.
+    ensureF9CommunityLoaded().then((comm) => {
+      const wrap = $('vt-f9-record-wrap');
+      const bodyEl = $('vt-f9-record');
+      if (!wrap || !bodyEl || !comm) return;
+      const sid = String(rating.steam64 || '');
+      if (!sid) return;
+      const rec = (comm.thug_records || []).find(t => String(t.steam64 || '') === sid);
+      if (!rec || !((rec.team_wins || 0) + (rec.team_losses || 0))) return;
+      const prov = comm.provider || {};
+      const url = prov.url || 'https://f9bomber.com';
+      const pname = prov.name || 'F9bomber';
+      bodyEl.innerHTML = `
+        <i class="bi bi-people me-1"></i>
+        <strong>Community team record (as thug):</strong>
+        <span class="vt-mono">${rec.team_wins}\u2013${rec.team_losses}</span>
+        <span class="text-secondary">across ${(rec.team_wins || 0) + (rec.team_losses || 0)} hand-logged games
+        \u00b7 team outcomes, not a skill rating \u00b7 includes data from
+        <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(pname)}</a></span>`;
+      wrap.classList.remove('d-none');
+    });
 
     // Render the radar once the panel is in the DOM. renderPlayerRadar
     // is a global from js/charts-radar.js. We need at least 2 career

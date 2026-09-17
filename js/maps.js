@@ -210,6 +210,15 @@
     const reg = state.registry || {};
     const allKeys = new Set([...Object.keys(stats), ...Object.keys(reg)]);
 
+    // F9bomber community-ledger play counts, keyed by registry key.
+    // Entries with map_key null (maps unknown to the registry) simply
+    // never paint a chip. NEVER merged into match_count — that number
+    // means "recorded matches" and drives the recent-matches table.
+    const communityGames = new Map();
+    for (const m of ((state.f9Community && state.f9Community.maps) || [])) {
+      if (m && m.map_key) communityGames.set(m.map_key, safeNum(m.games));
+    }
+
     const rows = [];
     for (const key of allKeys) {
       const s = stats[key] || null;
@@ -241,6 +250,7 @@
         last_played:      s ? s.last_played : null,
         top_commanders:   s ? (s.top_commanders || []) : [],
         recent_matches:   s ? (s.recent_matches || []) : [],
+        community_games:  communityGames.get(key) || 0,
       });
     }
     return rows;
@@ -542,6 +552,13 @@
       const t1 = row.net_vars.svar1 || '\u2014';
       const t2 = row.net_vars.svar2 || '\u2014';
       chips.push(metaChip('shield', 'Team names', `${t1} vs ${t2}`));
+    }
+    if (row.community_games > 0) {
+      // F9bomber community-ledger play count. Separate from match_count
+      // (recorded matches) by design; credit lives in the title text.
+      chips.push(`<span class="vt-map-meta-chip" title="Hand-logged games on this map from F9bomber's community ledger (f9bomber.com) — separate from recorded matches.">
+        <i class="bi bi-people"></i><span class="label">Community games</span><span class="value">${row.community_games}</span>
+      </span>`);
     }
     chips.push(`<span class="vt-map-meta-chip vt-map-meta-chip-mono">
       <i class="bi bi-file-earmark-code"></i><span class="label">File</span><code>${escapeHtml(row.key)}.bzn</code>
@@ -919,14 +936,18 @@
     state.dataPrefix = detectDataPrefix();
 
     try {
-      const [mapStats, registry, slugMap] = await Promise.all([
+      const [mapStats, registry, slugMap, f9Community] = await Promise.all([
         fetchJson(`${state.dataPrefix}data/processed/map_stats.json`).catch(() => null),
         fetchJson(`${state.dataPrefix}data/map-registry.json`).catch(() => null),
         fetchJson(`${state.dataPrefix}data/processed/player_slugs.json`).catch(() => null),
+        // F9bomber community-ledger rollups (404-safe; only the per-map
+        // "community games" hero chip reads it).
+        fetchJson(`${state.dataPrefix}data/external/f9_community.json`).catch(() => null),
       ]);
       state.mapStats = mapStats;
       state.registry = registry;
       state.slugMap = slugMap;
+      state.f9Community = f9Community;
     } catch (e) {
       console.error('maps.js boot: failed to load data', e);
     }
