@@ -60,7 +60,8 @@ SITE_URL = "https://vtstats.bz"
 # immediately left of ELO (Models · Maps · Players · ELO · Tools).
 # v7 drops the Tools-link live-pulse poller (bz2api.js +
 # active-game-indicator.js) from stubs; the dashboard owns that poller.
-MAP_TEMPLATE_VERSION = 7
+# v8 threads the LEGO topnav link (bi-bricks, after Models) through every stub.
+MAP_TEMPLATE_VERSION = 8
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently
