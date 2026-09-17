@@ -911,6 +911,8 @@
     if (!ratings.length) {
       card.classList.add('d-none');
       if ($empty) $empty.classList.remove('d-none');
+      const $credit = document.getElementById('vtsr-c-f9-credit');
+      if ($credit) { $credit.replaceChildren(); $credit.hidden = true; }
       return;
     }
     if ($empty) $empty.classList.add('d-none');
@@ -958,10 +960,9 @@
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
             title="Wins-Losses-Draws across rated commander games.">${record}</td>
         <td class="text-end">${((r.win_pct || 0) * 100).toFixed(0)}%</td>
-        <td class="text-end">${r.matches_commanded_rated}${(r.duels_external || 0) > 0
-          ? ` <span class="vt-f9-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-                title="${r.duels_external} of these duels come from F9bomber's hand-kept community ledger (f9bomber.com).">${r.duels_external} community</span>`
-          : ''}</td>
+        <td class="text-end"${(r.duels_external || 0) > 0
+          ? ` data-bs-toggle="tooltip" data-bs-placement="top" title="${r.duels_external} of these games came from F9bomber's match records"`
+          : ''}>${r.matches_commanded_rated}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</td>
         <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
       </tr>
@@ -983,7 +984,7 @@
               <th data-sort="record" class="text-end">Record</th>
               <th data-sort="win_pct" class="text-end">Win %</th>
               <th data-sort="matches_commanded_rated" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-                  title="Rated commander games (matches with a verified outcome where this player led a team). The small chip counts duels sourced from F9bomber's community ledger.">Games</th>
+                  title="Rated commander games (matches with a verified outcome where this player led a team).">Games</th>
               <th data-sort="peak_vtsr_c" class="text-end">Peak</th>
               <th data-sort="last_delta" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
                   title="Most recent rated-duel rating change.">Last</th>
@@ -994,11 +995,20 @@
       </div>
       <p class="text-muted small mb-0">
         ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
-      </p>
-      ${(c.external_duels_rated || 0) > 0
-        ? `<p class="text-muted small mb-0 mt-1">Includes ${fmt(c.external_duels_rated)} community match records from
-             <a href="${esc((c.external_provider || {}).url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc((c.external_provider || {}).name || 'F9bomber')}</a>.</p>`
-        : ''}`;
+      </p>`;
+
+    const $credit = document.getElementById('vtsr-c-f9-credit');
+    if ($credit) {
+      if ((c.external_duels_rated || 0) > 0) {
+        const prov = c.external_provider || {};
+        $credit.innerHTML = `Includes ${fmt(c.external_duels_rated)} games from
+             <a href="${esc(prov.url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc(prov.name || 'F9bomber')}</a>.`;
+        $credit.hidden = false;
+      } else {
+        $credit.replaceChildren();
+        $credit.hidden = true;
+      }
+    }
 
     // Track expand/collapse (delegated; survives sort re-renders).
     const tbody = document.getElementById('vtsr-c-tbody');
