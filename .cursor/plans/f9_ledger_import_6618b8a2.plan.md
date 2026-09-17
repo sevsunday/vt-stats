@@ -4,40 +4,40 @@ overview: "One-time import of F9bomber's hand-kept match ledger (f9stats-2026091
 todos:
   - id: hygiene
     content: "Phase 0: gitignore ~$*.xlsx, remove steamid_to_name.txt line 309 duplicate (Waddles), commit xlsx"
-    status: pending
+    status: completed
   - id: alias-files
     content: Create data/external/f9_name_map.json (9 aliases + 8 exclusions) and f9_map_aliases.json (verified registry keys only)
-    status: pending
+    status: completed
   - id: importer
     content: Write scripts/import_f9_ledger.py (funnel + Steam64 overlap pairing + fail-loud validation) and commit f9_ledger.json + f9_community.json
-    status: pending
+    status: completed
   - id: elo-commander
     content: "elo_commander.py: external_duels merged walk, vtsr_t_now handicap, full-K scoring, source/duels_external fields, runtime overlap guard, schema 2->3"
-    status: pending
+    status: completed
   - id: pipeline-wiring
     content: "process_stats.py: load ledger 404-soft, pass to compute_commander_elo, extend summary print, add --adjudicate-f9 flag"
-    status: pending
+    status: completed
   - id: adjudication-jogger
     content: "adjudication.py: EXTERNAL_HINTS + set_external_hints(), F9 hint line in render_prompt, force_ids bypass in is_candidate"
-    status: pending
+    status: completed
   - id: verify-inert
     content: Run pipeline --no-prompt post-import; verify elo_history.json hash unchanged (VTSR-T inert)
-    status: pending
+    status: completed
   - id: adjudicate-session
     content: User runs interactive --adjudicate-f9 session (~54 prompts with F9 jogger)
     status: pending
   - id: ui-elo
     content: "js/elo.js: community chip + detail stat + external duel-log rows + f9: sentinel tooltips + footer credit + blurb tweak; vtsr-explainers.js sentence"
-    status: pending
+    status: completed
   - id: ui-player-meta-maps
     content: js/player.js community record strip + chart tolerance; index.html + js/app.js Meta community card; js/maps.js hero chip; .vt-f9-chip CSS
-    status: pending
+    status: completed
   - id: docs-memo-gate
     content: Decision memo, DATA_DICTIONARY/DEVELOPER_GUIDE/AGENTS/rules updates, README line, _investigation/check_f9_ledger.py gate
-    status: pending
+    status: completed
   - id: final-verify
     content: Run validate_elo.py + check_f9_ledger.py + golden gates; browser-check ELO ladder, F9bomber player page, Meta tab, Mojave map page
-    status: pending
+    status: completed
 isProject: false
 ---
 

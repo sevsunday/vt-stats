@@ -3501,3 +3501,42 @@ Each per-map stub's `<head>` carries an Open Graph block that Discord / Slack / 
 | `twitter:card` | `"summary_large_image"`. |
 | Inline `<script>window.__vtMapBoot = {...}</script>` | `{ map_file: "<slug>", template_version: <int> }` — picked up by `js/maps.js` `dispatch()` to trigger single-map mode without depending on a query string. |
 
+## 15. External Community Ledger (F9bomber)
+
+One-time import of F9bomber's hand-kept match spreadsheet (`f9stats/f9stats-20260913.xlsx`, committed as provenance). The standalone `scripts/import_f9_ledger.py` (openpyxl, NOT part of the pipeline — mirrors the `scripts/object-render/` posture) applies the locked eligibility funnel, resolves identities, pairs dual-recorded games against our corpus, and writes two committed artifacts under `data/external/`. The pipeline reads the JSON forever after; re-running the importer is only needed for a new ledger drop or an alias-table change. Decision memo (frozen parameters + sign-offs): `critique/decisions/f9-external-duels.md`.
+
+**The ledger is NOT telemetry.** No fake `<match_id>.json`, no manifest entries, no `match_contributions` rows, nothing in `VTAggregate`, `map_stats.match_count`, or picker-scoped `faction_stats`. Exactly TWO rating-adjacent consumers exist: the VTSR-C external-duel walk (§13.12 v3 in `DEVELOPER_GUIDE.md`) and the adjudication jogger. Everything else is display-only. `scripts/elo.py` and `js/all-matches-aggregator.js` are forbidden consumers (gated by `_investigation/check_f9_ledger.py`). VTSR-T is provably untouched — `elo_history.json` (the only stamp-free processed file) hashes byte-identical across the import.
+
+### Inputs (committed, human-editable)
+
+- `data/external/f9_name_map.json` — `{schema_version, map: {<norm F9 name>: <steam64 str>}, exclude_names: [<norm name>]}`. Names are `norm()`-normalized (lowercase alphanumeric only); every Steam64 MUST exist in `data/steamid_to_name.txt` (importer fails loudly). `exclude_names` drops a row from the duel feed when ANY participant matches (operator declined to resolve: Lone, Mr.Scout, Croatian Knight, General BlackDragon, Systeme, RollyPolly, Jabbapop, Devastator). Resolution is exact-match only — never substring; ambiguous names stay unresolved and key the ladder as `name:<name>` (auto-merges when an alias lands later, since VTSR-C recomputes from scratch every run).
+- `data/external/f9_map_aliases.json` — `{schema_version, map: {<norm F9 title>: <registry key>}}`. Evidence-based joins for community map names (`quarry` → `vsrquarry2`, `aliendunes` → `st_dunes`, `mortswasteland` → `vsrmortwasteland` — each proven by a 1.00-roster-identity collision with a recorded match). Targets must exist in `data/map-registry.json`; unmapped titles carry `map_key: null` and simply paint no map-page chip.
+
+### Eligibility funnel (strict partition of the sheet's rows; order matters)
+
+roster-complete → commanders parse as `A vs B` (names de-duped per side, commander stripped from own thug list) → even teams with 2-4 thugs/side (3v3 / 4v4 / 5v5 only) → no participant doubles as a straggler → winner is one of the two commanders → duration present and ≥ 240s → exact-dup dedup → **overlap pairing** (ours supersedes) → excluded-name filter (unpaired rows only — paired rows always become `overlaps[]` jogger entries). Overlap pairing: our matches within ±1 day (F9 dates are US-local vs our UTC ids), map title-stem match OR alias-resolved registry key == our raw map-file stem, commander pair equal by Steam64 set (keyname-set fallback), greedy one-to-one by participant-name Jaccard ≥ 0.4.
+
+### `data/external/f9_ledger.json`
+
+`{schema_version: 1, provenance: {provider, url, source_file, sheet_sha256, imported_at, importer}, funnel: {<counters>}, duels: [...], overlaps: [...], excluded: {by_name}}`.
+
+| Field | Meaning |
+|---|---|
+| `duels[].row` | Source spreadsheet row (stable id; the `f9:<row>` sentinel in ladder fields derives from it). |
+| `duels[].date` | `YYYY-MM-DD` (day precision — the ledger has no timestamps). |
+| `duels[].map_title` / `map_key` | Verbatim F9 title + resolved registry key (`null` when unknown to the registry). |
+| `duels[].size` / `duration_sec` | `"3v3" \| "4v4" \| "5v5"`, seconds (≥ 240 guaranteed). |
+| `duels[].commanders.{1,2}` | `{name (F9 spelling), steam64 (str \| null)}`. |
+| `duels[].thugs.{1,2}[]` | Same shape; even lengths guaranteed. |
+| `duels[].winner_side` | `1 \| 2` (always set — winner-not-a-commander rows were dropped). |
+| `duels[].factions.{1,2}` | `"ISDF" \| "Hadean" \| "Scion" \| null` (normalized from the sheet's `I.S.D.F` spellings). |
+| `overlaps[]` | `{f9_row, match_id, jaccard, f9_winner_name, our_team (1\|2\|null), our_decided_by_at_import}` — dual-recorded games excluded from the duel feed; powers the adjudication jogger hint (`--adjudicate-f9` widens candidacy to these ids even in the grandfathered v1/v2 proto era). Display-only: the operator remains the final authority, and host-cancelled matches keep Cancelled. **Batch adjudication (2026-09-17):** the 50 unclear hints passing the pre-registered six-gate rule (jaccard 1.0, duration ≤ 120s, two-sided pairing uniqueness) were applied mechanically by the one-shot `scripts/apply_f9_adjudications.py` under a rule-level operator ratification — entries carry `note: "auto-applied from F9bomber ledger row <N> (…)"` in `data/match_outcome_adjudications.json` (the undo handle); the 6 gate-failing hints stay unclear permanently. Same-id dual recordings rate exactly one VTSR-C duel via the `matches_skipped_duplicate_recording` guard. Full rule + results: the decision memo's batch-adjudication addendum. |
+
+### `data/external/f9_community.json` (display-only rollups)
+
+`{schema_version: 1, provider: {name, url}, generated_at, duel_count, date_range, thug_records: [{steam64|null, name, team_wins, team_losses, games}], commander_records: [{…, wins, losses, games}], faction_stats: {i/e/f: {picks, wins}}, maps: [{map_key|null, title, games}]}`. Consumers (all 404-safe, all crediting `F9bomber` → `https://f9bomber.com`): the player-page Overview community-record strip (`js/player.js` — copy states **team outcomes, not a skill rating**; never a VTSR-T input), the All Matches → Meta **Community Ledger** card (`js/app.js` `renderF9CommunityCard()` — deliberately separate from picker-scoped `faction_stats`), and the per-map hero chip `Community games: N` (`js/maps.js` — **never** merged into `map_stats.match_count`, which means "recorded matches").
+
+### VTSR-C surface changes (schema 3)
+
+`elo_commander_current.json` gains `k_external_scale`, `external_duels_rated`, `external_skipped_overlap_runtime`, `external_provider {name, url} | null`, and per-rating `duels_external`; `elo_commander_history.json` duels gain `source: "f9" | "telemetry"` (+ `external_row`, `map` on externals). Headline W-L-D and `matches_commanded_rated` INCLUDE external duels (rating and record tell the same story); `rated_match_count` stays telemetry-only. Full mechanics: `DEVELOPER_GUIDE.md` §13.12 v3.
+
