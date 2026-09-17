@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LEGO Models — VT Stats</title>
+  <meta name="description" content="Browse Darkvale's Battlezone-inspired LEGO models, rendered interactively in 3D.">
+
+  <link rel="canonical" href="https://vtstats.bz/lego/">
+
+  <!-- Open Graph (directory landing). -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="LEGO Models by Darkvale — VT Stats">
+  <meta property="og:description" content="Browse Darkvale's Battlezone-inspired LEGO models, rendered interactively in 3D.">
+  <meta property="og:url" content="https://vtstats.bz/lego/">
+  <meta property="og:site_name" content="VT Stats">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/lego.css">
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body class="d-flex flex-column h-100">
+
+  <!-- Navbar. Mirrors models/index.html; the LEGO link carries `.active`. -->
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn" title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <a href="../docs.html" class="vt-nav-icon-btn" title="Open the docs" aria-label="Docs">
+            <i class="bi bi-book me-1"></i>Docs
+          </a>
+          <a href="../raw.html" class="vt-nav-icon-btn"
+             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)" aria-label="Raw data browser">
+            <i class="bi bi-code-square me-1"></i>Raw data
+          </a>
+          <a href="../odf/" class="vt-nav-icon-btn"
+             title="Browse the BZ2 Object Definition File (ODF) database" aria-label="ODF browser">
+            <i class="bi bi-boxes me-1"></i>ODF
+          </a>
+          <a href="../models/" class="vt-nav-icon-btn"
+             title="Browse 3D unit &amp; building models" aria-label="Models">
+            <i class="bi bi-box me-1"></i>Models
+          </a>
+          <a href="./" class="vt-nav-icon-btn active" aria-current="page"
+             title="Browse Darkvale's LEGO models" aria-label="LEGO">
+            <i class="bi bi-bricks me-1"></i>LEGO
+          </a>
+          <a href="../map/" class="vt-nav-icon-btn" title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <a href="../player/" class="vt-nav-icon-btn" title="Browse player career profiles" aria-label="Players">
+            <i class="bi bi-people me-1"></i>Players
+          </a>
+          <a href="../elo/" class="vt-nav-icon-btn"
+             title="VTSR-T leaderboard, methodology &amp; rating accuracy" aria-label="ELO">
+            <i class="bi bi-trophy me-1"></i>ELO
+          </a>
+          <a href="../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)" aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
+          </a>
+
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette me-1"></i>Theme
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Directory grid -->
+  <main id="directory" class="directory flex-grow-1">
+    <div class="lego-hero">
+      <span class="lego-hero-title"><i class="bi bi-bricks"></i>LEGO Creations</span>
+      <span class="lego-credit">Designed &amp; built by
+        <a class="lego-credit-link" href="https://steamcommunity.com/profiles/76561198136459671"
+           target="_blank" rel="noopener" title="Darkvale's Steam profile">Darkvale</a>
+      </span>
+    </div>
+    <div class="directory-hint">Click a model to inspect &middot; drag to orbit &middot; scroll to zoom &middot; switch to HQ for high-quality rendering</div>
+    <div class="toolbar">
+      <input id="search" class="search" type="search" placeholder="Search name or faction..." autocomplete="off" />
+      <div id="faction-chips" class="chips" data-group="faction"></div>
+      <div class="toolbar-right">
+        <label class="sortwrap">Sort
+          <select id="sort" class="sort">
+            <option value="name">Name</option>
+            <option value="faction">Faction</option>
+            <option value="parts-desc">Parts (high)</option>
+            <option value="parts-asc">Parts (low)</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div id="count-label" class="count-label"></div>
+    <div id="model-grid" class="model-grid"></div>
+    <div id="empty" class="empty" hidden>No models match the current filters.</div>
+  </main>
+
+  <!-- Single-model viewer -->
+  <section id="viewer" class="viewer flex-grow-1" hidden>
+    <div class="viewer-bar">
+      <a id="back-btn" class="btn back" href="./">&larr; All models</a>
+      <div class="viewer-titlewrap">
+        <span id="viewer-title" class="viewer-title"></span>
+        <span id="viewer-meta" class="viewer-meta"></span>
+      </div>
+      <div class="viewer-actions">
+        <div class="seg" id="view-seg" title="Standard = fast interactive; HQ = high-quality rendering; Photos = Darkvale's studio renders">
+          <button class="seg-btn" data-view="standard">Standard</button>
+          <button class="seg-btn on" data-view="hq">HQ</button>
+          <button class="seg-btn" data-view="photos">Photos</button>
+        </div>
+        <button id="spin-btn" class="btn toggle" title="Auto-rotate the model">Auto-rotate</button>
+        <button id="wire-btn" class="btn toggle" title="Wireframe">Wireframe</button>
+        <button id="edges-btn" class="btn toggle" title="Show brick edge outlines">Edges</button>
+        <button id="light-btn" class="btn toggle" aria-expanded="false" title="Show light settings">Light</button>
+        <button id="reset-btn" class="btn" title="Reset the camera">Reset view</button>
+        <button id="capture-btn" class="btn" title="Render canonical angles at HQ and download them" style="display:none;">Capture HQ</button>
+      </div>
+    </div>
+    <div id="stage" class="stage">
+      <div id="stage-loading" class="stage-loading" hidden>
+        <div class="spinner-border" role="status" aria-hidden="true"></div>
+        <span id="stage-loading-label">Loading&hellip;</span>
+      </div>
+      <div id="viewer-dock" class="viewer-dock">
+        <div id="light-panel" class="light-panel" hidden>
+          <label class="light-row light-head"><span>Sun light</span><input id="sun-on" type="checkbox" class="light-toggle" checked title="Toggle the sun key light" /></label>
+          <label class="light-row">
+            <span class="light-label">Intensity</span>
+            <input id="sun-intensity" type="range" min="0" max="6" step="0.1" value="2.6" />
+            <span id="sun-intensity-val" class="light-val">2.6</span>
+          </label>
+          <label class="light-row">
+            <span class="light-label">Azimuth</span>
+            <input id="sun-az" type="range" min="0" max="360" step="1" value="215" />
+            <span id="sun-az-val" class="light-val">215&deg;</span>
+          </label>
+          <label class="light-row">
+            <span class="light-label">Elevation</span>
+            <input id="sun-el" type="range" min="0" max="90" step="1" value="90" />
+            <span id="sun-el-val" class="light-val">90&deg;</span>
+          </label>
+          <div class="scene-bg-block">
+            <span class="scene-bg-label">Background</span>
+            <div class="seg scene-bg-seg" id="scene-bg-seg">
+              <button class="seg-btn on" data-bg="dark">Dark</button>
+              <button class="seg-btn" data-bg="light">Light</button>
+            </div>
+          </div>
+          <label class="light-row scene-check">
+            <span class="light-label">Grid</span>
+            <input id="scene-grid" type="checkbox" checked />
+          </label>
+        </div>
+      </div>
+      <div id="photos" class="photos" hidden></div>
+    </div>
+  </section>
+
+  <footer class="lego-footer">
+    LEGO models designed &amp; built by
+    <a href="https://steamcommunity.com/profiles/76561198136459671" target="_blank" rel="noopener">Darkvale</a>.
+    Rendered from <a href="https://www.bricklink.com/v3/studio/download.page" target="_blank" rel="noopener">BrickLink Studio</a> files,
+    using parts from the <a href="https://library.ldraw.org/" target="_blank" rel="noopener">LDraw&trade; Parts Library</a>
+    (CC BY 4.0). LDraw is a trademark of the Estate of James Jessiman.
+  </footer>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script type="module" src="../js/lego.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+</body>
+</html>
