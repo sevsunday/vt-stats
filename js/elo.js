@@ -762,7 +762,7 @@
     const entries = cmdrDuelsFor(r);
     if (!entries.length) {
       return `<div class="text-muted small p-2">
-        Duel-by-duel detail unavailable (elo_commander_history.json missing).
+        Match-by-match detail unavailable (elo_commander_history.json missing).
       </div>`;
     }
 
@@ -780,13 +780,13 @@
         : `Their thug team averaged ${myThugDiff >= 0 ? '+' : ''}${Math.round(myThugDiff)} VTSR-T vs the opponent's — the expected score already discounts/credits this.`;
       const telem = (duel.performance || {}).available
         ? `<span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-             title="This duel carried proto v4 economy telemetry — its econ composite is recorded (inert while \u03b1_c = 1).">v4</span>`
+             title="This match carried proto v4 economy telemetry — its econ composite is recorded (inert while \u03b1_c = 1).">v4</span>`
         : '';
       // v3: external community-ledger duels carry source "f9" and no
       // match id — tag them instead of pretending they were recorded.
       const community = duel.source === 'f9'
         ? `<span class="vt-f9-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-             title="Hand-logged community duel from F9bomber's ledger (f9bomber.com)${duel.map ? ' \u2014 ' + esc(duel.map) : ''}.">community</span>`
+             title="F9Stats match from F9bomber's ledger (f9bomber.com)${duel.map ? ' \u2014 ' + esc(duel.map) : ''}.">F9Stats</span>`
         : '';
       return `<tr>
         <td class="text-muted">${esc(String(duel.date || '').slice(0, 10))}</td>
@@ -794,7 +794,7 @@
         <td class="text-center ${resCls} fw-semibold">${res}</td>
         <td class="text-end ${dCls}">${d > 0 ? '+' : ''}${(d || 0).toFixed(1)}</td>
         <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-            title="Pre-duel win probability from rating + team-strength handicap.">${((me.expected || 0) * 100).toFixed(0)}%</td>
+            title="Pre-match win probability from rating + team-strength handicap.">${((me.expected || 0) * 100).toFixed(0)}%</td>
         <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top"
             title="${esc(thugTip)}">${myThugDiff == null ? '\u2014' : `${myThugDiff >= 0 ? '+' : ''}${Math.round(myThugDiff)}`}</td>
       </tr>`;
@@ -836,7 +836,7 @@
     const extCount = r.duels_external || 0;
     const extStat = extCount > 0
       ? `<div data-bs-toggle="tooltip" data-bs-placement="top"
-             title="Duels from F9bomber's hand-kept community ledger — rated at the same K, counted in the record."><span class="vt-stat-label">Community</span><span class="vt-stat-value">${extCount} duel${extCount === 1 ? '' : 's'}</span></div>`
+             title="Matches from F9bomber's hand-kept community ledger — rated at the same K, counted in the record."><span class="vt-stat-label">F9Stats</span><span class="vt-stat-value">${extCount} match${extCount === 1 ? '' : 'es'}</span></div>`
       : '';
     const statsHtml = `<section class="vt-vtsr-detail-section">
       <h6>Commander record</h6>
@@ -844,13 +844,13 @@
         <div><span class="vt-stat-label">Record</span><span class="vt-stat-value">${r.wins}-${r.losses}-${r.draws}</span></div>
         <div><span class="vt-stat-label">Peak</span><span class="vt-stat-value">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</span></div>
         <div><span class="vt-stat-label">Rated games</span><span class="vt-stat-value">${r.matches_commanded_rated}</span></div>
-        <div><span class="vt-stat-label">v4 telemetry</span><span class="vt-stat-value">${telemCount} duel${telemCount === 1 ? '' : 's'}</span></div>
+        <div><span class="vt-stat-label">v4 telemetry</span><span class="vt-stat-value">${telemCount} match${telemCount === 1 ? '' : 'es'}</span></div>
         ${extStat}
       </div>
     </section>`;
 
     const logHtml = `<section class="vt-vtsr-detail-section">
-      <h6>Duel log <span class="vt-vtsr-detail-sub text-muted">(most recent ${Math.min(5, entries.length)})</span></h6>
+      <h6>Match log <span class="vt-vtsr-detail-sub text-muted">(most recent ${Math.min(5, entries.length)})</span></h6>
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-0" style="font-size: 0.8rem;">
           <thead><tr>
@@ -858,7 +858,7 @@
             <th class="text-end">\u0394</th>
             <th class="text-end">Expected</th>
             <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-                title="Their thug team's mean VTSR-T advantage in that duel (the handicap input).">Thug \u0394</th>
+                title="Their thug team's mean VTSR-T advantage in that match (the handicap input).">Thug \u0394</th>
           </tr></thead>
           <tbody>${duelRows}</tbody>
         </table>
@@ -1002,7 +1002,7 @@
       if ((c.external_duels_rated || 0) > 0) {
         const prov = c.external_provider || {};
         $credit.innerHTML = `Includes ${fmt(c.external_duels_rated)} games from
-             <a href="${esc(prov.url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc(prov.name || 'F9bomber')}</a>.`;
+             <a href="#vtsr-c-f9-modal" data-bs-toggle="modal" data-bs-target="#vtsr-c-f9-modal">${esc(prov.name || 'F9bomber')}</a>.`;
         $credit.hidden = false;
       } else {
         $credit.replaceChildren();

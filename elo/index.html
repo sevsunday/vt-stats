@@ -282,6 +282,46 @@
     </div>
   </main>
 
+  <!-- F9bomber import explainer. Opened from the VTSR-C card-header
+       credit ("Includes N games from F9bomber"). Footer buttons are
+       the credit-anchor (f9bomber.com) and F9's public stats page. -->
+  <div class="modal fade" id="vtsr-c-f9-modal" tabindex="-1"
+       aria-labelledby="vtsr-c-f9-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title mb-0" id="vtsr-c-f9-modal-title">
+            About F9bomber&rsquo;s games
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>F9stats merge started with F9bomber&rsquo;s hand-kept match stats from
+            <strong>January 2, 2025</strong> through <strong>September 7, 2026</strong>
+            (a bit over 1,300 games). We kept only the <strong>3v3, 4v4, and 5v5</strong>
+            games to maintain consistency with our current VTstats pipeline; dropped games
+            with stragglers to avoid ambiguity, games shorter than four minutes, and any game
+            we already had a recording of &mdash; which result in ~500 games left.</p>
+          <p class="mb-0">Note that the imported F9 matches are wins-based only, but because
+            VTSR-C is also currently a wins ladder &mdash; it&rsquo;s considered good data.
+            F9 matches also include team thugs, so we still use each side&rsquo;s
+            <strong>thug rating (VTSR-T)</strong> to weight the result: beating a stronger
+            group of teammates is worth more than beating a weaker one. Games from before
+            we had thug ratings don&rsquo;t get that adjustment yet, same as our own earliest
+            matches. F9 games feed VTSR-C only; they do not change anyone&rsquo;s thug rating.</p>
+        </div>
+        <div class="modal-footer border-top">
+          <a href="https://f9bomber.com" target="_blank" rel="noopener"
+             class="btn btn-sm btn-primary">F9bomber</a>
+          <a href="https://bz2stats.us/pages/vsr.html" target="_blank" rel="noopener"
+             class="btn btn-sm btn-outline-primary">
+            Stats<i class="bi bi-box-arrow-up-right ms-2"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <!-- Chart.js: the Does-it-work tab's metric history sparkline. -->
   <script src="../vendor/chartjs/chart.umd.min.js"></script>
