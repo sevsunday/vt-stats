@@ -668,6 +668,22 @@ Top 5 bidirectional pairs sorted by total.
 }
 ```
 
+#### `engagements` (`match.schema_version` 27)
+
+Coalesced player-vs-player `DamageDealt` intervals for the 3D replay's attack-line overlay (red beam shooter -> victim + red reticle on players under attack). Match-global, display-only, rating-inert (not in contributions / ELO).
+
+```json
+{
+  "window_sec": 2.0,
+  "min_damage": 40.0,
+  "pairs": [
+    { "s": "VTrider", "v": "Lithium", "t0": 812.35, "t1": 816.90, "dmg": 1240.0 }
+  ]
+}
+```
+
+Consecutive same-`(shooter, victim)` hits within `window_sec` merge into one interval; intervals under `min_damage` are dropped. `s`/`v` are canonical nicks (join the leaderboard / kill feed / replay actors); `pairs` is sorted by `t0`. Pre-v27 matches omit the block, and `buildEngagementIndex()` in `_map-analysis/render/js/replay-data.js` falls back to synthesizing kill-feed lead-in intervals so the overlay works everywhere.
+
 The same `timeline` structure drives two UIs:
 
 1. The **Combat tab** static stacked-area chart (`renderTimeline` in `js/charts.js`).
@@ -913,6 +929,7 @@ Key behaviors:
 - `trail.segments[]` splits the trail at teleport detections (death/respawn warps). Frontends draw one polyline per segment; renderers must not interpolate across gaps.
 - `ship_timeline` (**`match.schema_version` 25**, `PIPELINE_VERSION` 45) is the full-rate `UpdateTick.PlayerState.odf` step function (transitions only, 0.1 s precision, verbatim wire ODF strings). The 3D replay (`replay-ship-tracker.js`) prefers it over the pre-v25 sparse kill/pickup/snipe reconstruction, which lagged re-ships until the player's next attesting event. Display-only; not in contributions. Pre-v25 JSON has no field (tracker falls back).
 - **v26 / `PIPELINE_VERSION` 46:** `trail.target[]` (0/1 T-lock) and `trail.speed[]` (authored `PlayerState.speed`, 1 dp) ride parallel to `t/x/y/z`. `builds.feed[].position` is the wire `BuildEvent.build_position` Vec3 on BUILD rows (`null` otherwise). Top-level `structures[]` is the 3D replay's building layer: starting recyclers + constructor BUILD xyz; deaths from `UnitDestroyed` only; turret-class instances stay `death_reason: "untracked"` while `TURRET_DEATHS_RELIABLE` is False and are not rendered. Rating-inert (`_investigation/golden_replay_v26_inert.py`). Not in contributions.
+- **v27 / `PIPELINE_VERSION` 48:** top-level `engagements` block (coalesced player-vs-player `DamageDealt` intervals; `{window_sec, min_damage, pairs:[{s,v,t0,t1,dmg}]}`) for the 3D replay's attack-line overlay. Coalesced in the normalized `de_*` damage loop (covers v1-v4), keyed by canonical nick. Display-only, rating-inert (`_investigation/golden_replay_v26_inert.py`), not in contributions. Pre-v27 matches fall back to kill-feed-synthesized lead-in intervals client-side (`buildEngagementIndex()`).
 - When no `UpdateTick` data is present, the block emits with `has_position_data: false`, empty `players: {}`, and nulls/zeros elsewhere. Frontend gates Positioning-tab UI off this flag.
 - Full schema with field tables, derivations, and known limitations lives in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) under "Positioning Block".
 

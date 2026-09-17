@@ -370,6 +370,15 @@ After the main pass, the timeline is recomputed from scratch. This is necessary 
 - Asset damage (shooter = 0) is included in the faction timeline but not the player timeline
 - The sentinel filter from [§7](#7-sentinel-damage-filter) is mirrored here so the timeline reflects exactly the same dropped-event set as the per-match aggregates.
 
+### Step 6b: Combat Engagements (`match.schema_version` 27)
+
+The top-level `engagements` block coalesces **player-vs-player** `DamageDealt` events into per-pair intervals for the 3D replay's attack-line overlay (red beam shooter -> victim + a red reticle on any player under attack). Built in the same normalized `de_*` damage loop, so it covers v1/v2/v3/v4.
+
+- Gate: both `shooter` and `victim` are players (Steam64 > 0), `shooter != victim` (self-damage excluded), and the damage amount is non-zero. The sentinel filter runs first, so `> 1e6` force-kills never enter.
+- Coalescing: consecutive hits from the same `(shooter, victim)` within `ENGAGE_WINDOW_SEC` (2.0s) extend one open interval; a larger gap closes it (kept only if total `>= ENGAGE_MIN_DAMAGE`, 40) and opens a new one. Open intervals are flushed at end of match.
+- Shape: `engagements = {window_sec, min_damage, pairs: [{s, v, t0, t1, dmg}, ...]}` where `s`/`v` are canonical nicks (via `nick_for_s64`, matching the leaderboard + kill feed + replay actors), `t0`/`t1` are seconds, `dmg` is total damage in the interval. `pairs` is sorted by `t0`.
+- Match-global, always-unfiltered, **display-only / rating-inert** (not in `match_contributions`, ELO, or any career rollup). Pre-v27 matches have no block; the replay falls back to synthesizing kill-feed lead-in intervals client-side.
+
 ### Step 7: Derived Outputs
 
 After event processing, the pipeline computes:
@@ -759,7 +768,7 @@ Each match file has these top-level keys:
 | `teams` | `object` | `"1"` and `"2"` → arrays of roster entries |
 | `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). Match-global, always-unfiltered. |
 | `team_factions` | `object` | `{ "1": { code, name } \| null, "2": { code, name } \| null }` — derived faction per team. `code` is one of `"i"` (ISDF) / `"e"` (Hadean) / `"f"` (Scion); `name` is the human label. `null` for teams with no signal (sandbox / pure-AI / corrupt match). Schema v3+. See [Team Faction Detection](#team-faction-detection) for the algorithm. Match-global, always-unfiltered. |
-| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. `3` adds `match.team_factions` + `match.winner`. **`26` (current)** adds `builds.feed[].position` (`BuildEvent.build_position`), `trail.target[]` + `trail.speed[]`, and the top-level `structures[]` block for the 3D replay. `25` added `positioning.players[name].ship_timeline`. `24` added `builds.teams.scavs_built`, `thug_supply.{n}.commander_row`, and BUILD feed chips inheriting the matched QUEUE scrap triad. Absence indicates legacy data. Bumped only when an output-shape-breaking change ships. |
+| `schema_version` | `number` | Per-match output schema version. `1` = Phase 3 baseline. `2` adds the top-level `highlights` block. `3` adds `match.team_factions` + `match.winner`. **`27` (current)** adds the top-level `engagements` block (coalesced player-vs-player damage intervals for the 3D replay attack-line overlay). `26` added `builds.feed[].position` (`BuildEvent.build_position`), `trail.target[]` + `trail.speed[]`, and the top-level `structures[]` block for the 3D replay. `25` added `positioning.players[name].ship_timeline`. `24` added `builds.teams.scavs_built`, `thug_supply.{n}.commander_row`, and BUILD feed chips inheriting the matched QUEUE scrap triad. Absence indicates legacy data. Bumped only when an output-shape-breaking change ships. |
 | `has_position_data` | `boolean` | `true` iff the session contained `UpdateTick` events. Mirrored from `positioning.has_position_data`. Drives Positioning-tab UI gating. |
 | `has_target_lock_data` | `boolean` | `true` iff any `PlayerState.has_target=true` sample was observed. Mirrored from `positioning.has_target_lock_data`. Distinguishes "no T-key data" (pre-schema or never pressed) from "0% lock" in Career Radar tooltips. |
 | `has_pickup_data` | `boolean` | Phase 3. `true` iff the match contains at least one `PickupPowerup` event. `false` for pre-Phase-3 sessions captured before the proto added the event. |

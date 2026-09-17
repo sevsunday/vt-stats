@@ -154,6 +154,14 @@ Top-level `storyline` block on every match carrying **BOTH** v4 halves (`has_res
 - **`facts.base_defense` is a RESERVED null plug** — populated when structure-location telemetry lands (defensive-structure value inside the base perimeter, chain terminal `turret`, vs field spend). The renderer self-omits while null; wiring it is a `storyline.schema_version` 1 → 2 additive bump, not a UI restructuring.
 - Tunables without a schema bump: `STORYLINE_BUCKET_SEC`, `STORY_BURST_*` (calibrate on the corpus — the kill feed exists corpus-wide), `STORY_TIDE_*`, `STORY_SNIPE_BEAT_CAP`, `STORY_RUSH_CONTEXT_SEC`, `STORY_OPENING_BUILDS`, `STORY_BASE_RADIUS_*`, `STORY_ARCH_*`.
 
+## Combat engagements block (match.schema_version 27, PIPELINE_VERSION 48)
+
+Top-level `engagements` block on every match: `{window_sec, min_damage, pairs: [{s, v, t0, t1, dmg}, ...]}`. Coalesces **player-vs-player** `DamageDealt` into per-pair intervals for the 3D replay's attack-line overlay (red beam shooter -> victim + red reticle on players under attack). Built in the normalized `de_*` damage loop in `process_match` (covers v1/v2/v3/v4), so it sits after the sentinel filter's `continue`.
+
+- **Gate**: `de_shooter > 0 and de_victim > 0 and de_shooter != de_victim and de_victim_amount != 0.0` (both players, self-damage excluded). Coalesce consecutive same-pair hits within `ENGAGE_WINDOW_SEC` (2.0s); close an interval on a larger gap, keeping it only if `>= ENGAGE_MIN_DAMAGE` (40). `s`/`v` are canonical nicks via `nick_for_s64` so they join the leaderboard / kill feed / replay actors. `pairs` sorted by `t0`.
+- **Display-only / rating-inert.** Not in `match_contributions`, ELO, or any career rollup. Nothing in `scripts/elo.py` / `scripts/elo_commander.py` reads it. Gated by `_investigation/golden_replay_v26_inert.py` (strip + perturb -> byte-identical VTSR-T + VTSR-C).
+- **Client fallback**: pre-v27 matches have no block; `buildEngagementIndex()` in `_map-analysis/render/js/replay-data.js` synthesizes kill-feed lead-in intervals so the overlay works everywhere with no renderer branching. `ENGAGE_WINDOW_SEC` / `ENGAGE_MIN_DAMAGE` are tunable without a schema bump (still bump `PIPELINE_VERSION`).
+
 ## Protobuf Events (v2/v3/v4 current layout)
 
 Event types in `StatEvent.event_type` oneof:

@@ -118,7 +118,7 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # structures[] (constructor BUILD xyz + UnitDestroyed-only deaths;
 # turret-class instances stay death_reason=untracked while
 # TURRET_DEATHS_RELIABLE is False). Display-only; not in contributions.
-PIPELINE_VERSION = 47
+PIPELINE_VERSION = 48
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -126,6 +126,15 @@ PIPELINE_VERSION = 47
 TURRET_DEATHS_RELIABLE = False
 
 TIMELINE_BUCKET_SECONDS = 10
+
+# --- Combat engagement capture (match.schema_version 27) ---
+# Player->player DamageDealt events are coalesced into per-pair intervals for
+# the 3D replay's "attack line" overlay: consecutive hits from the same shooter
+# to the same victim within ENGAGE_WINDOW_SEC merge into one interval; intervals
+# with less than ENGAGE_MIN_DAMAGE total are dropped as noise. Display-only /
+# rating-inert (see _investigation/golden_replay_v26_inert.py).
+ENGAGE_WINDOW_SEC = 2.0
+ENGAGE_MIN_DAMAGE = 40.0
 
 # --- v4 economy / builds capture constants (match.schema_version 17) ---
 # The proto v4 collector samples per-team ResourceState on EVERY UpdateTick.
@@ -5026,6 +5035,46 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     dmg_by_victim = defaultdict(list)  # victim_s64 -> [(tick, shooter_s64, amount), ...]
     pvp_kill_log = []                  # [(tick, killer_s64, victim_s64, feed_idx), ...]
 
+    # Combat engagement capture (match.schema_version 27, display-only).
+    # Coalesce player->player DamageDealt into per-pair intervals for the 3D
+    # replay's attack-line overlay. Keyed (shooter_s64, victim_s64); an open
+    # interval extends while hits keep landing within ENGAGE_WINDOW_SEC, else it
+    # closes (kept only if >= ENGAGE_MIN_DAMAGE) and a new one opens.
+    engage_open = {}                   # (shooter, victim) -> {t_start, t_end, dmg}
+    engage_closed = []                 # [(shooter, victim, t_start_tick, t_end_tick, dmg), ...]
+    _engage_window_ticks = ENGAGE_WINDOW_SEC * tick_rate
+
+    def _engage_add(shooter, victim, tick, amount):
+        key = (shooter, victim)
+        cur = engage_open.get(key)
+        if cur is not None and (tick - cur["t_end"]) <= _engage_window_ticks:
+            cur["t_end"] = tick
+            cur["dmg"] += amount
+        else:
+            if cur is not None and cur["dmg"] >= ENGAGE_MIN_DAMAGE:
+                engage_closed.append((key[0], key[1], cur["t_start"], cur["t_end"], cur["dmg"]))
+            engage_open[key] = {"t_start": tick, "t_end": tick, "dmg": amount}
+
+    # Player -> structure damage ("attacking a builder"), same coalescing. The
+    # victim is not a player (Steam64 0), so it is keyed by the owning team slot
+    # + building ODF stem; the replay resolves that to the nearest living
+    # structure instance at draw time. v2+ only (v1 DamageDealt carries no
+    # event-time victim_odf). Display-only / rating-inert.
+    engage_struct_open = {}            # (shooter, vteam, vodf) -> {t_start, t_end, dmg}
+    engage_struct_closed = []          # [(shooter, vteam, vodf, t_start, t_end, dmg), ...]
+
+    def _engage_struct_add(shooter, vteam, vodf, tick, amount):
+        key = (shooter, vteam, vodf)
+        cur = engage_struct_open.get(key)
+        if cur is not None and (tick - cur["t_end"]) <= _engage_window_ticks:
+            cur["t_end"] = tick
+            cur["dmg"] += amount
+        else:
+            if cur is not None and cur["dmg"] >= ENGAGE_MIN_DAMAGE:
+                engage_struct_closed.append(
+                    (key[0], key[1], key[2], cur["t_start"], cur["t_end"], cur["dmg"]))
+            engage_struct_open[key] = {"t_start": tick, "t_end": tick, "dmg": amount}
+
     # Faction totals
     faction_dealt = defaultdict(float)
     faction_received = defaultdict(float)
@@ -5638,6 +5687,22 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         f"amount={de_amount} odf='{de_ordnance or ''}'"
                     )
                 continue
+
+            # Combat engagement capture (schema 27): coalesce player->player
+            # damage into per-pair intervals for the replay attack-line overlay.
+            # Sits on the normalized de_* shape, so it covers v1/v2/v3/v4.
+            if de_shooter > 0 and de_victim > 0 and de_shooter != de_victim and de_victim_amount != 0.0:
+                _engage_add(de_shooter, de_victim, de_tick, de_victim_amount)
+            elif de_shooter > 0 and de_victim == 0 and 1 <= de_victim_team <= 10 and de_amount != 0.0:
+                # Player -> structure ("attacking a builder"). v2+ carries the
+                # event-time victim_odf; v1 does not, so it self-skips.
+                # building_odfs keys are lowercased WITH the .odf suffix (mirror
+                # the structure_dealt check below), so test membership on the
+                # raw-lowercased odf but key/emit the normalized stem so the
+                # replay's structureFor matches structures[] inst.odf.
+                _vraw = de_victim_odf_event.lower() if de_victim_odf_event else ""
+                if _vraw and _vraw in building_odfs:
+                    _engage_struct_add(de_shooter, de_victim_team, _norm_build_odf(_vraw), de_tick, de_amount)
 
             skip_shooter = (de_shooter_team == 0 or de_amount == 0.0)
 
@@ -7392,6 +7457,47 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     for f_num, buckets in timeline_faction.items():
         tl_by_faction[str(f_num)] = [round(buckets.get(b, 0), 1) for b in range(total_buckets)]
 
+    # Combat engagements (match.schema_version 27): flush any open intervals,
+    # then emit coalesced player->player (and player->structure) damage
+    # intervals for the replay attack-line overlay.
+    for _key, _cur in engage_open.items():
+        if _cur["dmg"] >= ENGAGE_MIN_DAMAGE:
+            engage_closed.append((_key[0], _key[1], _cur["t_start"], _cur["t_end"], _cur["dmg"]))
+    for _key, _cur in engage_struct_open.items():
+        if _cur["dmg"] >= ENGAGE_MIN_DAMAGE:
+            engage_struct_closed.append(
+                (_key[0], _key[1], _key[2], _cur["t_start"], _cur["t_end"], _cur["dmg"]))
+    engagement_pairs = [
+        {
+            "s": nick_for_s64(_shooter),
+            "v": nick_for_s64(_victim),
+            "t0": round(_t0 / tick_rate, 2),
+            "t1": round(_t1 / tick_rate, 2),
+            "dmg": round(_dmg, 1),
+        }
+        for _shooter, _victim, _t0, _t1, _dmg in engage_closed
+    ]
+    engagement_pairs.sort(key=lambda p: p["t0"])
+    structure_pairs = [
+        {
+            "s": nick_for_s64(_shooter),
+            "vteam": int(_vteam),
+            "vodf": _vodf,
+            "vname": prettify_odf(_vodf),
+            "t0": round(_t0 / tick_rate, 2),
+            "t1": round(_t1 / tick_rate, 2),
+            "dmg": round(_dmg, 1),
+        }
+        for _shooter, _vteam, _vodf, _t0, _t1, _dmg in engage_struct_closed
+    ]
+    structure_pairs.sort(key=lambda p: p["t0"])
+    engagements_block = {
+        "window_sec": ENGAGE_WINDOW_SEC,
+        "min_damage": ENGAGE_MIN_DAMAGE,
+        "pairs": engagement_pairs,
+        "structure_pairs": structure_pairs,
+    }
+
     # Asset damage breakdown
     asset_damage = {
         "by_player": {},
@@ -7998,12 +8104,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # v25: `positioning.players[name].ship_timeline`
             # (full-rate UpdateTick PlayerState.odf transitions) so the
             # 3D replay labels the ship the player is actually in.
-            # v26 (this version): `builds.feed[].position` from
+            # v26: `builds.feed[].position` from
             # BuildEvent.build_position; `trail.target[]` + `trail.speed[]`;
             # top-level `structures[]` (constructor BUILD xyz +
             # UnitDestroyed-only deaths; turret-class untracked).
             # Display-only; not in contributions.
-            "schema_version": 26,
+            # v27 (this version): top-level `engagements` block (coalesced
+            # player->player DamageDealt intervals for the replay attack-line
+            # overlay). Display-only; not in contributions; rating-inert.
+            "schema_version": 27,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -8105,6 +8214,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "by_player": tl_by_player,
             "by_faction": tl_by_faction,
         },
+        "engagements": engagements_block,
         "asset_damage": asset_damage,
         "kills": {
             "leaderboard": kills_leaderboard,
