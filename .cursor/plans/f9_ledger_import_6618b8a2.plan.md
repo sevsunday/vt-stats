@@ -54,6 +54,8 @@ isProject: false
 
 ## Measured acceptance numbers (importer report must match)
 
+Re-verified 2026-09-17 against the grown corpus (165 matches through 2026-09-17, incl. the five new Sep-17 sessions and the refreshed adjudications/elo outputs): every number below reproduced identically. New matches postdate F9's last row (2026-09-07), so overlap pairing is unaffected; the new player DraconisMarch resolves cleanly with no name collision; the steamid duplicate (line 309 Waddles / line 768 Totokomo) is still present and Phase 0 item 2 still applies.
+
 - Funnel: 1309 rows -> no_rosters 334, uneven 192, size 82, straggler 1, winner 4, no-duration 11, short 3 -> **682 pre-overlap** -> overlap-removed **82** -> excluded-name **91** -> **FINAL 509** (partition sums to 1309).
 - 509 = 435 pre-corpus (< 2026-04-16) + 74 corpus-era; 226x 5v5, 152x 4v4, 131x 3v3; 2025: 231, 2026: 278.
 - Both commanders Steam64-resolved: 504/509. Thug slots resolved: 3140/3244 (96.8%).
@@ -147,7 +149,7 @@ At the VTSR-C emit (line ~8990): load `data/external/f9_ledger.json` (missing fi
 
 - [scripts/adjudication.py](scripts/adjudication.py): module global `EXTERNAL_HINTS: dict[str, str] = {}` + `set_external_hints(d)`. `render_prompt()` (line 278) inserts after the Kill-feed evidence line: ` F9 ledger (community):          Team N win — <name>` when the match id has a hint. `is_candidate()` (line 98) gains `force_ids=frozenset()` kwarg: the legacy v1/v2 skip is bypassed when `mid in force_ids` (the 2026-04..08 unclear candidates are proto v2 and would otherwise never prompt).
 - [scripts/process_stats.py](scripts/process_stats.py): new `--adjudicate-f9` flag; build hints from `ledger["overlaps"]` (`our_team` + `f9_winner_name`), call `set_external_hints()`, pass `force_ids={mid for mid in hints}` when the flag is set (candidate loop at line 8814-8821).
-- **Operator session** (user, one time): `python scripts/process_stats.py --adjudicate-f9` -> ~54 prompts with the F9 hint line; answers persist in `data/match_outcome_adjudications.json`; reconciliation restamps winners, manifest, contributions, and storyline (existing machinery). Expected effect: VTSR-C telemetry duels ~58 -> ~112; `matches_skipped_undetermined` drops; wins-ladder R^W fields move (legitimate); headline VTSR-T unchanged (ALPHA = 0).
+- **Operator session** (user, one time): `python scripts/process_stats.py --adjudicate-f9` -> ~54 prompts with the F9 hint line; answers persist in `data/match_outcome_adjudications.json`; reconciliation restamps winners, manifest, contributions, and storyline (existing machinery). Expected effect: VTSR-C telemetry duels ~70 -> ~124 (70 = live `rated_match_count` as of the 2026-09-17 recompute; read the fresh value at run time); `matches_skipped_undetermined` drops from 74; wins-ladder R^W fields move (legitimate); headline VTSR-T unchanged (ALPHA = 0). Note: a couple of the 54 hinted matches may be host-cancelled (`decided_by: "cancelled"`) — the hint is display-only and the operator should keep Cancelled for those (attested cancellation outranks any winner claim).
 
 ## Phase 4 — UI (all consumers 404-safe)
 
@@ -169,6 +171,6 @@ At the VTSR-C emit (line ~8990): load `data/external/f9_ledger.json` (missing fi
 ## Rollout order + verification
 
 1. Phase 0 + 1; run importer; check report against the acceptance numbers above; commit artifacts.
-2. Phase 2; hash `data/processed/elo_history.json` (the only stamp-free file); run `python scripts/process_stats.py --no-prompt`; **hash must be unchanged** (VTSR-T inert). VTSR-C ladder now carries 58 telemetry + 509 external duels.
+2. Phase 2; hash `data/processed/elo_history.json` (the only stamp-free file); run `python scripts/process_stats.py --no-prompt`; **hash must be unchanged** (VTSR-T inert). VTSR-C ladder now carries the current telemetry duels (70 as of 2026-09-17) + 509 external duels; `external_duels_rated` must read 509 and `external_skipped_overlap_runtime` must read 0.
 3. Phase 3; user runs the interactive `--adjudicate-f9` session (~54 prompts). VTSR-T `wins_*` fields move legitimately; `vtsr` headline unchanged.
 4. Phases 4 + 5; run `python scripts/validate_elo.py` (expect §10 n_scored to jump; record in memo); run `_investigation/check_f9_ledger.py` + existing golden gates; browser-check ELO ladder, a player page (F9bomber), Meta tab, a map page (Mojave).
