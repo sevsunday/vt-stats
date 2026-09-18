@@ -151,4 +151,107 @@ next run is examined.
 
 ## Results
 
-_(appended after the rules above were committed)_
+_(appended after the rules above were committed; commit `fd4afe95`
+registered the rules, this section landed after the first run)_
+
+First run: 2026-09-18, validator v1.4 (`VALIDATOR_VERSION = 5`), 625
+duels of which **120 scoreable telemetry duels**, canonical `lambda = 1.0`,
+scale 400. Every row below is scored on those same 120 rows, canonical
+included.
+
+| variant | accuracy | Δacc | log-loss | Δll | promote |
+|---|---|---|---|---|---|
+| `canonical` (V0) | **72.5%** | — | 0.611 | — | baseline |
+| `cmdr_in_mean` (V1) | 73.3% | +0.8pp | 0.604 | −0.0071 | FAIL (Δacc < +3pp) |
+| `cmdr_conditional` (V2) | 71.7% | −0.8pp | 0.611 | −0.0002 | FAIL |
+| `three_term` λ₂=0.25 (V3) | 72.5% | +0.0pp | 0.604 | −0.0070 | FAIL |
+| `three_term` λ₂=0.5 | 68.3% | −4.2pp | 0.601 | −0.0100 | FAIL (discard) |
+| `three_term` λ₂=1.0 | 68.3% | −4.2pp | 0.606 | −0.0050 | FAIL (discard) |
+| `softmax` τ=400 | 70.0% | −2.5pp | 0.610 | −0.0011 | FAIL |
+| `softmax` τ=200 | 66.7% | −5.8pp | 0.610 | −0.0007 | FAIL (discard) |
+| `softmax` τ=100 | 64.2% | −8.3pp | 0.613 | +0.0024 | FAIL (discard) |
+| `hard_max` | 60.8% | −11.7pp | 0.614 | +0.0029 | FAIL (discard) |
+
+**VERDICT: HOLD at V0 (canonical).** No variant clears the +3pp
+accuracy condition, so the promote rule is not satisfied by anything and
+no partial credit applies. The shipped formula is unchanged.
+
+### Q1 — commander VTSR-T: a whisper, not a step change
+
+V1 is the only variant that moves both metrics the right way: **+0.8pp
+accuracy and a genuinely better log-loss (−0.0071)**, improving in three
+of four confidence bands (55-65%: 66.7 → 68.9, 65-75%: 72.2 → 73.0,
+75%+: 78.9 → 81.8) and giving back ground only in the 50-55% coin-flip
+band (80.0 → 75.0, n=20).
+
+That is exactly the shape the exclusion argument predicts. The
+commander's own fighting *is* mildly informative, and it is *mostly*
+already priced into VTSR-C — so folding it in buys a fraction of a
+point, not the step change that would justify changing a validated
+formula. +0.8pp on n=120 sits far inside the ±8pp Wilson interval this
+corpus affords; it is indistinguishable from noise at this sample size.
+
+**V2 (provisional-conditional) losing to V1** is the genuinely
+surprising result, since the a-priori argument for leaning on VTSR-T
+specifically when VTSR-C is thin is the strongest of the three. The
+likely mechanism is that the provisional window (5 duels) is too narrow
+to matter on a corpus where the frequent commanders are all long past it
+— so V2 is V0 with a handful of rows perturbed, and those rows are the
+noisiest ones. Not worth a redesign on this evidence.
+
+**V3 is a textbook overfitting curve**: neutral at λ₂=0.25, then −4.2pp
+at both λ₂=0.5 and λ₂=1.0 while log-loss keeps *improving*. A second
+fitted dial sharpens confidence on the rows it happens to fit and gets
+the calls wrong. This is why the grid was registered coarse.
+
+**Re-run trigger:** when the scoreable telemetry subset roughly doubles
+(~250 duels), at which point a real +3pp would be detectable. V1 is the
+only variant worth carrying forward; V2, V3 at λ₂ ≥ 0.5, all softmax
+τ ≤ 200, and hard MAX are discarded under the discard rule.
+
+### Q2 — uneven lobbies: untestable, chip stays
+
+| lobby shape | accuracy | n |
+|---|---|---|
+| even rated-row counts | 72.2% | 115 |
+| uneven | 80.0% | **5** |
+
+Five rows. Nothing is knowable from this, exactly as the sample-size
+caveat predicted. The Balonce Meter's uneven-teams **caveat chip remains
+the correct answer** — it states the limitation instead of modelling it
+on no evidence. No headcount term is designed.
+
+### Q3 — softmax aggregation: roadmap §13.1 CLOSED, negative
+
+This is the load-bearing finding of the run. Roadmap §13.1 and
+`critique/decisions/phase-2c-max-vs-median.md` both carried "Tools Team
+Balonce could legitimately switch from team-mean to softmax-weighted
+mean" as READY NOW, on the strength of the Phase 2A result that hard-MAX
+aggregation beat team-mean by ~10pp.
+
+**Inside the VTSR-C duel formula it is strictly and substantially
+worse, monotonically so:** τ=400 −2.5pp, τ=200 −5.8pp, τ=100 −8.3pp,
+hard MAX −11.7pp. Accuracy degrades in lockstep with how MAX-like the
+aggregation gets, and the two most MAX-like variants make log-loss worse
+as well — they are confidently wrong.
+
+The two results do not actually conflict; they are different predictors.
+Phase 2A aggregated **thug VTSR-T as the whole prediction** of a
+`clean_win` outcome, where a carry's lethality plausibly is what makes a
+team a threat. Here the commander gap is the dominant term and `T` is
+only a **handicap correction** to it — and a handicap wants the *typical*
+strength of the squad a commander has to work with, not its ceiling. One
+smurf does not change how hard the commander's job is nearly as much as
+MAX implies.
+
+**Recommendation: mark roadmap §13.1 CLOSED (negative).** Do not wire
+softmax into Team Balonce. Anyone revisiting it should be pointed at
+this table first.
+
+## Source files
+
+- `scripts/validate_elo.py` §14 `metric_cmdr_t_term` (regenerable:
+  `python scripts/validate_elo.py`, output `_validation/report.md` §14 +
+  `report.json` `cmdr_t_term`, schema 4 → 5)
+- `js/balonce-meter.js` (`computeWinProb` — the V0 formula under test)
+- This memo

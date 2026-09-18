@@ -90,7 +90,7 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = 4  # v1.3 (VTSR-C v2): econ-axis sign agreement (#12) + alpha_c ablation (#13)
+VALIDATOR_VERSION = 5  # v1.4 (Balonce Meter): T-term ablation (#14, pre-registered)
 
 DEFAULT_PROCESSED_DIR = Path("data") / "processed"
 DEFAULT_OUTPUT_DIR = Path("_validation")
@@ -154,6 +154,21 @@ RATING_GAP_BUCKETS = [
 # lambda from elo_commander_history.json is merged in if absent, so the
 # emitted ladder's setting is always scored alongside the alternatives.
 CMDR_LAMBDA_ABLATION = [0.0, 0.5, 1.0, 1.5]
+
+# v1.4 (Balonce Meter): T-term ablation grids. Pre-registered in
+# critique/decisions/balonce-meter-t-term.md -- read that memo BEFORE
+# touching these, and never retune them to chase an observed result.
+# lambda2 grid for the V3 three-term variant (commander-VTSR-T gap as its
+# own weighted term). Coarse on purpose: a finely-swept second dial on a
+# ~120-duel subset is how a model learns noise.
+CMDR_T_LAMBDA2_GRID = [0.25, 0.5, 1.0]
+# tau grid for softmax thug aggregation (Q3). SOFTMAX_TAU (200) is the
+# Phase 2A/2C value and is always included.
+CMDR_T_SOFTMAX_TAUS = [100.0, 200.0, 400.0]
+# Reliability bands for the promote rule's condition 4 (the gain must not
+# be confined to one confidence bucket). Mirrors the Balonce Meter's own
+# strip in js/balonce-meter.js.
+CMDR_T_BANDS = [(0.50, 0.55), (0.55, 0.65), (0.65, 0.75), (0.75, 1.01)]
 
 # Fallbacks mirroring scripts/elo_commander.py constants -- used only when
 # the history JSON predates a field (keeps the validator a pure consumer
@@ -1404,6 +1419,326 @@ def metric_vtsr_c(cmdr_history: dict[str, Any] | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Metric #14 (v1.4): Balonce Meter T-term ablations
+# ---------------------------------------------------------------------------
+
+
+def _duel_thug_detail(
+    history: dict[str, Any], per_match: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Per-match, per-side pre-match rating detail the duel rows do not
+    carry: the individual non-commander `before` ratings, the commander's
+    own `before`, and the rated-row counts.
+
+    Keyed by match_id. Only telemetry duels (which have a match_id that
+    joins back to elo_history + the per-match JSON) get an entry; F9
+    ledger rows cannot, which is the registered sample-size caveat.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for entry in history.get("history") or []:
+        if entry.get("match_excluded"):
+            continue
+        deltas = entry.get("deltas") or []
+        if not deltas:
+            continue
+        mid = entry.get("match_id") or ""
+        md = per_match.get(mid)
+        if not md:
+            continue
+        lobby = md.get("leaderboard") or []
+        by_s64 = {str(r["steam64"]): r for r in lobby if r.get("steam64")}
+        by_name = {r.get("name"): r for r in lobby}
+        thugs: dict[int, list[float]] = {1: [], 2: []}
+        cmdr: dict[int, float | None] = {1: None, 2: None}
+        for d in deltas:
+            row = None
+            s64 = d.get("steam64")
+            if s64 is not None:
+                row = by_s64.get(str(s64))
+            if row is None:
+                row = by_name.get(d.get("name"))
+            if row is None:
+                continue
+            team = _slot_team_side(row.get("slot"))
+            if team is None:
+                continue
+            before = d.get("before")
+            if not isinstance(before, (int, float)):
+                continue
+            if row.get("is_commander"):
+                if cmdr[team] is None:
+                    cmdr[team] = float(before)
+            else:
+                thugs[team].append(float(before))
+        out[mid] = {"thugs": thugs, "cmdr": cmdr}
+    return out
+
+
+def _slot_team_side(slot: Any) -> int | None:
+    """Slot convention: 1-5 = team 1, 6-10 = team 2."""
+    try:
+        s = int(slot)
+    except (TypeError, ValueError):
+        return None
+    if 1 <= s <= 5:
+        return 1
+    if 6 <= s <= 10:
+        return 2
+    return None
+
+
+def _softmax_mean(values: list[float], tau: float) -> float | None:
+    """Softmax-weighted mean: approaches max as tau -> 0, plain mean as
+    tau -> inf. Shifted by the max before exponentiating (overflow-safe).
+    """
+    if not values:
+        return None
+    if tau <= 0:
+        return max(values)
+    top = max(values)
+    weights = [math.exp((v - top) / tau) for v in values]
+    total = sum(weights)
+    if total <= 0:
+        return sum(values) / len(values)
+    return sum(v * w for v, w in zip(values, weights)) / total
+
+
+def metric_cmdr_t_term(
+    cmdr_history: dict[str, Any] | None,
+    history: dict[str, Any],
+    per_match: dict[str, Any],
+) -> dict[str, Any]:
+    """Score the pre-registered T-term variants from
+    critique/decisions/balonce-meter-t-term.md.
+
+    Every variant is replayed over the FULL duel stream (so each ladder
+    evolves under its own rule) but SCORED only on the telemetry duels
+    that carry the per-player detail the variants need -- and V0 is
+    re-scored on that identical subset, so a variant is always compared
+    against canonical on the same rows, never against canonical's
+    full-corpus number (registered requirement).
+
+    Q2 (uneven lobbies) is diagnostic only -- no promote rule.
+    """
+    if not cmdr_history or not (cmdr_history.get("duels") or []):
+        return {
+            "available": False,
+            "skipped_reason": "elo_commander_history.json missing or empty",
+        }
+
+    detail = _duel_thug_detail(history, per_match)
+    if not detail:
+        return {
+            "available": False,
+            "skipped_reason": "no telemetry duels joinable to elo_history + per-match JSON",
+        }
+
+    duels = cmdr_history["duels"]
+    anchor = float(cmdr_history.get("anchor", CMDR_ANCHOR_FALLBACK))
+    k_base = float(cmdr_history.get("k_base", CMDR_K_BASE_FALLBACK))
+    k_floor = float(cmdr_history.get("k_floor", CMDR_K_FLOOR_FALLBACK))
+    prior = float(cmdr_history.get("provisional_prior",
+                                   CMDR_PROVISIONAL_PRIOR_FALLBACK))
+    scale = float(cmdr_history.get("logistic_scale",
+                                   CMDR_LOGISTIC_SCALE_FALLBACK))
+    lam = float(cmdr_history.get("lambda_team_handicap", CMDR_LAMBDA_FALLBACK))
+    prov_threshold = float(cmdr_history.get("provisional_threshold", 5))
+
+    # The scoreable subset: telemetry duels with a joinable detail row AND
+    # a non-draw outcome AND at least one rated thug on each side (without
+    # both means the handicap term is zero under EVERY variant, so the row
+    # cannot discriminate between them).
+    def scoreable(duel: dict[str, Any]) -> bool:
+        mid = duel.get("match_id") or ""
+        det = detail.get(mid)
+        if not det or duel.get("outcome") == "draw":
+            return False
+        return bool(det["thugs"][1]) and bool(det["thugs"][2])
+
+    subset_ids = {d.get("match_id") for d in duels if scoreable(d)}
+
+    def replay(variant: str, **kw: Any) -> dict[str, Any]:
+        """One full chronological replay. `variant` selects the T rule."""
+        tau = kw.get("tau", SOFTMAX_TAU)
+        lambda2 = kw.get("lambda2", 0.0)
+        rating: dict[str, float] = {}
+        games: dict[str, int] = {}
+        correct = 0.0
+        scored = 0
+        ll_sum = 0.0
+        bands = {i: {"n": 0, "hits": 0.0} for i in range(len(CMDR_T_BANDS))}
+        uneven = {"even": {"n": 0, "hits": 0.0}, "uneven": {"n": 0, "hits": 0.0}}
+
+        for duel in duels:
+            c1 = duel["commanders"]["1"]
+            c2 = duel["commanders"]["2"]
+            key1, key2 = _cmdr_duel_key(c1), _cmdr_duel_key(c2)
+            r1 = rating.get(key1, anchor)
+            r2 = rating.get(key2, anchor)
+            g1, g2 = games.get(key1, 0), games.get(key2, 0)
+
+            mid = duel.get("match_id") or ""
+            det = detail.get(mid)
+            th = duel.get("team_handicap") or {}
+            t_pair: tuple[float | None, float | None]
+            extra = 0.0
+
+            if det is None or variant == "canonical":
+                # No per-player detail (every F9 row) -> canonical means.
+                t_pair = (th.get("t1_thug_mean"), th.get("t2_thug_mean"))
+            elif variant == "softmax":
+                t_pair = (_softmax_mean(det["thugs"][1], tau),
+                          _softmax_mean(det["thugs"][2], tau))
+            elif variant == "hard_max":
+                t_pair = (max(det["thugs"][1]) if det["thugs"][1] else None,
+                          max(det["thugs"][2]) if det["thugs"][2] else None)
+            elif variant in ("cmdr_in_mean", "cmdr_conditional"):
+                # V1 folds the commander's own VTSR-T into their side's
+                # mean; V2 does so only while their VTSR-C is provisional.
+                pair: list[float | None] = [None, None]
+                for idx, side in enumerate((1, 2)):
+                    vals = list(det["thugs"][side])
+                    own = det["cmdr"][side]
+                    include = own is not None
+                    if include and variant == "cmdr_conditional":
+                        gside = g1 if side == 1 else g2
+                        include = gside < prov_threshold
+                    if include:
+                        vals.append(float(own))
+                    pair[idx] = (sum(vals) / len(vals)) if vals else None
+                t_pair = (pair[0], pair[1])
+            elif variant == "three_term":
+                t_pair = (th.get("t1_thug_mean"), th.get("t2_thug_mean"))
+                tc1, tc2 = det["cmdr"][1], det["cmdr"][2]
+                if tc1 is not None and tc2 is not None:
+                    extra = lambda2 * (float(tc1) - float(tc2))
+            else:
+                t_pair = (th.get("t1_thug_mean"), th.get("t2_thug_mean"))
+
+            t1, t2 = t_pair
+            handicap = lam * (t1 - t2) if (t1 is not None and t2 is not None) else 0.0
+            e1 = 1.0 / (1.0 + 10.0 ** (-((r1 - r2) + handicap + extra) / scale))
+
+            outcome = duel.get("outcome")
+            s1 = 0.5 if outcome == "draw" else (1.0 if outcome == "team1" else 0.0)
+
+            if mid in subset_ids:
+                scored += 1
+                hit = 0.5 if e1 == 0.5 else (1.0 if (e1 > 0.5) == (s1 == 1.0) else 0.0)
+                correct += hit
+                e_realized = e1 if s1 == 1.0 else 1.0 - e1
+                ll_sum += -math.log(max(1e-9, e_realized))
+                fav_prob = max(e1, 1.0 - e1)
+                for i, (lo, hi) in enumerate(CMDR_T_BANDS):
+                    if lo <= fav_prob < hi:
+                        bands[i]["n"] += 1
+                        bands[i]["hits"] += hit
+                        break
+                n1 = len(det["thugs"][1]) if det else 0
+                n2 = len(det["thugs"][2]) if det else 0
+                bucket = "even" if n1 == n2 else "uneven"
+                uneven[bucket]["n"] += 1
+                uneven[bucket]["hits"] += hit
+
+            k1 = k_floor + (k_base - k_floor) * max(0.0, 1.0 - g1 / prior)
+            k2 = k_floor + (k_base - k_floor) * max(0.0, 1.0 - g2 / prior)
+            rating[key1] = r1 + k1 * (s1 - e1)
+            rating[key2] = r2 + k2 * ((1.0 - s1) - (1.0 - e1))
+            games[key1], games[key2] = g1 + 1, g2 + 1
+
+        label = variant if not kw else f"{variant}:" + ",".join(
+            f"{k}={v}" for k, v in sorted(kw.items()))
+        return {
+            "variant": label,
+            "n_scored": scored,
+            "accuracy": (correct / scored) if scored else None,
+            "accuracy_ci": (list(wilson_ci(int(round(correct)), scored))
+                            if scored else None),
+            "log_loss": (ll_sum / scored) if scored else None,
+            "per_band": [
+                {
+                    "band": f"{int(lo * 100)}-{int(min(hi, 1.0) * 100)}%",
+                    "n": bands[i]["n"],
+                    "accuracy": (bands[i]["hits"] / bands[i]["n"]) if bands[i]["n"] else None,
+                }
+                for i, (lo, hi) in enumerate(CMDR_T_BANDS)
+            ],
+            "per_lobby_shape": {
+                k: {
+                    "n": v["n"],
+                    "accuracy": (v["hits"] / v["n"]) if v["n"] else None,
+                }
+                for k, v in uneven.items()
+            },
+        }
+
+    rows = [replay("canonical")]
+    rows.append(replay("cmdr_in_mean"))
+    rows.append(replay("cmdr_conditional"))
+    for l2 in CMDR_T_LAMBDA2_GRID:
+        rows.append(replay("three_term", lambda2=l2))
+    for tau in CMDR_T_SOFTMAX_TAUS:
+        rows.append(replay("softmax", tau=tau))
+    rows.append(replay("hard_max"))
+
+    base = rows[0]
+
+    def verdict(row: dict[str, Any]) -> dict[str, Any]:
+        """Apply the pre-registered promote rule verbatim."""
+        if row is base:
+            return {"eligible": False, "reason": "baseline"}
+        if base["accuracy"] is None or row["accuracy"] is None:
+            return {"eligible": False, "reason": "no scored rows"}
+        d_acc = row["accuracy"] - base["accuracy"]
+        d_ll = row["log_loss"] - base["log_loss"]
+        fails = []
+        if d_acc < 0.03:
+            fails.append(f"accuracy +{d_acc * 100:.1f}pp < +3pp")
+        if d_ll >= 0:
+            fails.append(f"log-loss {d_ll:+.4f} not improved")
+        if row["n_scored"] < 100:
+            fails.append(f"n_scored {row['n_scored']} < 100")
+        # Condition 4: the gain must not be confined to one band.
+        improved_bands = 0
+        degraded_bands = 0
+        for rb, bb in zip(row["per_band"], base["per_band"]):
+            if rb["accuracy"] is None or bb["accuracy"] is None:
+                continue
+            if rb["accuracy"] > bb["accuracy"] + 1e-9:
+                improved_bands += 1
+            elif rb["accuracy"] < bb["accuracy"] - 1e-9:
+                degraded_bands += 1
+        if improved_bands <= 1 and degraded_bands >= 1:
+            fails.append("gain confined to a single band")
+        discard = d_acc < -0.03
+        return {
+            "eligible": not fails,
+            "delta_accuracy": d_acc,
+            "delta_log_loss": d_ll,
+            "bands_improved": improved_bands,
+            "bands_degraded": degraded_bands,
+            "discard": discard,
+            "failed_conditions": fails,
+        }
+
+    for row in rows:
+        row["promote"] = verdict(row)
+
+    promoted = [r["variant"] for r in rows if r["promote"].get("eligible")]
+    return {
+        "available": True,
+        "memo": "critique/decisions/balonce-meter-t-term.md",
+        "n_duels_total": len(duels),
+        "n_scoreable_telemetry": len(subset_ids),
+        "lambda_canonical": lam,
+        "provisional_threshold": prov_threshold,
+        "variants": rows,
+        "promote_eligible": promoted,
+        "verdict": "PROMOTE-CANDIDATE" if promoted else "HOLD at canonical",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Metric #11 (v1.2): axis-vs-outcome sign agreement
 # ---------------------------------------------------------------------------
 
@@ -2632,6 +2967,60 @@ def render_markdown_report(
         lines.append("- " + (alpha_abl.get("skipped_reason") or "unavailable"))
     lines.append("")
 
+    # §14 — Balonce Meter T-term ablation (v1.4).
+    t_term = results.get("cmdr_t_term") or {}
+    lines.append("## §14 — Balonce Meter T-term ablation")
+    lines.append("")
+    if t_term.get("available"):
+        lines.append(
+            "Pre-registered in "
+            f"`{t_term.get('memo')}` — read the memo before touching the "
+            "grids. Each variant replays the FULL duel stream under its own "
+            "T rule, but is SCORED only on telemetry duels carrying the "
+            "per-player detail the variants need; canonical is re-scored on "
+            "that identical subset, so every comparison is same-rows.")
+        lines.append("")
+        lines.append(f"- **Scoreable telemetry duels:** "
+                     f"{_fmt_int(t_term.get('n_scoreable_telemetry'))} of "
+                     f"{_fmt_int(t_term.get('n_duels_total'))} total")
+        lines.append(f"- **Verdict:** **{t_term.get('verdict')}**"
+                     + (f" — {', '.join(t_term.get('promote_eligible') or [])}"
+                        if t_term.get("promote_eligible") else ""))
+        lines.append("")
+        lines.append("| variant | accuracy | Δacc | log-loss | Δll | n | promote |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for row in t_term.get("variants") or []:
+            pro = row.get("promote") or {}
+            if pro.get("reason") == "baseline":
+                note = "baseline"
+            elif pro.get("eligible"):
+                note = "**ELIGIBLE**"
+            else:
+                note = "; ".join(pro.get("failed_conditions") or []) or "—"
+            lines.append(
+                f"| `{row.get('variant')}` "
+                f"| {_fmt_pct(row.get('accuracy'))} "
+                f"| {_fmt_num(pro.get('delta_accuracy'), decimals=4)} "
+                f"| {_fmt_num(row.get('log_loss'))} "
+                f"| {_fmt_num(pro.get('delta_log_loss'), decimals=4)} "
+                f"| {_fmt_int(row.get('n_scored'))} "
+                f"| {note} |")
+        lines.append("")
+        lines.append("**Q2 (diagnostic only — no promote rule): even vs "
+                     "uneven rated-row counts, canonical T rule.**")
+        lines.append("")
+        base_row = (t_term.get("variants") or [{}])[0]
+        shape = base_row.get("per_lobby_shape") or {}
+        lines.append("| lobby shape | accuracy | n |")
+        lines.append("|---|---|---|")
+        for key in ("even", "uneven"):
+            row = shape.get(key) or {}
+            lines.append(f"| {key} | {_fmt_pct(row.get('accuracy'))} "
+                         f"| {_fmt_int(row.get('n'))} |")
+    else:
+        lines.append("- " + (t_term.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
     # Active weights footer.
     lines.append("## Active weights")
     lines.append("")
@@ -2670,9 +3059,12 @@ def render_json_report(
     schema_version 4 (v1.3, VTSR-C v2): adds top-level ``vtsr_c_perf``
     (``econ_axes`` sign-agreement study #12 + ``alpha_ablation`` #13).
     Strictly additive; existing v1/v2/v3 readers unaffected.
+    schema_version 5 (v1.4, Balonce Meter): adds top-level
+    ``cmdr_t_term`` (T-term ablation #14, pre-registered in
+    ``critique/decisions/balonce-meter-t-term.md``). Strictly additive.
     """
     return {
-        "schema_version":   4,
+        "schema_version":   5,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -3035,39 +3427,41 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  WARN: failed to load {cmdr_history_path}: {exc}")
 
     # Run metrics.
-    print("[validate_elo] [1/13] rank correlation ...")
+    print("[validate_elo] [1/14] rank correlation ...")
     rank_correlation = metric_rank_correlation(history)
-    print("[validate_elo] [2/13] calibration ...")
+    print("[validate_elo] [2/14] calibration ...")
     calibration = metric_calibration(history)
-    print("[validate_elo] [3/13] self-consistency ...")
+    print("[validate_elo] [3/14] self-consistency ...")
     self_consistency = metric_self_consistency(history)
-    print(f"[validate_elo] [4/13] bootstrap stability ({args.bootstrap_runs} runs) ...")
+    print(f"[validate_elo] [4/14] bootstrap stability ({args.bootstrap_runs} runs) ...")
     bootstrap = metric_bootstrap_stability(
         history, current,
         runs=args.bootstrap_runs,
         seed=args.seed,
     )
-    print("[validate_elo] [5/13] synthetic-winner proxy ...")
+    print("[validate_elo] [5/14] synthetic-winner proxy ...")
     synthetic_winner = metric_synthetic_winner(history, per_match)
-    print("[validate_elo] [6+7/13] clean_win prediction + log-loss ...")
+    print("[validate_elo] [6+7/14] clean_win prediction + log-loss ...")
     clean_win_accuracy = metric_clean_win_accuracy(history, per_match)
-    print("[validate_elo] [8/13] single-axis ablation ...")
+    print("[validate_elo] [8/14] single-axis ablation ...")
     axis_ablation = metric_axis_ablation(history, current, weights)
-    print(f"[validate_elo] [9/13] Dirichlet perturbation ({args.dirichlet_runs} runs) ...")
+    print(f"[validate_elo] [9/14] Dirichlet perturbation ({args.dirichlet_runs} runs) ...")
     dirichlet_perturbation = metric_dirichlet_perturbation(
         history, weights,
         runs=args.dirichlet_runs,
         concentration=args.dirichlet_concentration,
         seed=args.seed + 1,
     )
-    print("[validate_elo] [10/13] VTSR-C prediction + lambda ablation ...")
+    print("[validate_elo] [10/14] VTSR-C prediction + lambda ablation ...")
     vtsr_c = metric_vtsr_c(cmdr_history)
-    print("[validate_elo] [11/13] axis-vs-outcome sign agreement ...")
+    print("[validate_elo] [11/14] axis-vs-outcome sign agreement ...")
     axis_outcome = metric_axis_outcome(history, per_match)
-    print("[validate_elo] [12/13] VTSR-C econ-axis sign agreement ...")
+    print("[validate_elo] [12/14] VTSR-C econ-axis sign agreement ...")
     cmdr_econ_axes = metric_cmdr_econ_axes(cmdr_history)
-    print("[validate_elo] [13/13] VTSR-C alpha_c ablation ...")
+    print("[validate_elo] [13/14] VTSR-C alpha_c ablation ...")
     cmdr_alpha_ablation = metric_cmdr_alpha_ablation(cmdr_history)
+    print("[validate_elo] [14/14] Balonce Meter T-term ablation ...")
+    cmdr_t_term = metric_cmdr_t_term(cmdr_history, history, per_match)
     winner_funnel = count_winner_funnel(history, per_match)
 
     # Player count totals (corpus-wide, for the report header).
@@ -3124,6 +3518,9 @@ def main(argv: list[str] | None = None) -> int:
             "econ_axes":      cmdr_econ_axes,
             "alpha_ablation": cmdr_alpha_ablation,
         },
+        # v1.4: Balonce Meter T-term ablation (pre-registered in
+        # critique/decisions/balonce-meter-t-term.md).
+        "cmdr_t_term":            cmdr_t_term,
         "winner_funnel":          winner_funnel,
     }
 
