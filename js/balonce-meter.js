@@ -387,6 +387,10 @@
   // every read below comes off `currentData`, never the filtered view.
 
   let _lastMatchId = null;
+  // In-session only: receipts are corpus-wide, so an expand survives
+  // render() innerHTML replaces (commander-history second paint, match
+  // switch). Refresh returns to collapsed.
+  let _receiptsOpen = false;
 
   function sectionEl() {
     return document.getElementById('section-balonce');
@@ -1526,15 +1530,22 @@
       : '';
 
     return `
-      <div class="vt-balonce-zone vt-balonce-zone--receipts">
-        <div class="vt-balonce-zone-head">
-          <h6 class="vt-balonce-zone-title">Does this thing work?</h6>
-          <a class="vt-balonce-link" href="elo/index.html?tab=accuracy" target="_blank" rel="noopener">Full accuracy report <i class="bi bi-arrow-right-short" aria-hidden="true"></i></a>
+      <details class="vt-balonce-zone vt-balonce-zone--receipts"${_receiptsOpen ? ' open' : ''}>
+        <summary class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">
+            <i class="bi bi-chevron-down" aria-hidden="true"></i>
+            Does this thing work?
+          </h6>
+        </summary>
+        <div class="vt-balonce-receipts-body">
+          <div class="vt-balonce-receipts-toolbar">
+            <a class="vt-balonce-link" href="elo/index.html?tab=accuracy" target="_blank" rel="noopener">Full accuracy report <i class="bi bi-arrow-right-short" aria-hidden="true"></i></a>
+          </div>
+          <div class="vt-balonce-receipt-headline">${headline} ${spark}</div>
+          ${rel}
+          ${credit}
         </div>
-        <div class="vt-balonce-receipt-headline">${headline} ${spark}</div>
-        ${rel}
-        ${credit}
-      </div>`;
+      </details>`;
   }
 
   // ---- Section render ----------------------------------------------
@@ -1591,6 +1602,16 @@
           btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       });
+    }
+
+    // Property-assigned: the details node is new on every render, but
+    // this matches the storyline expander contract so a later refactor
+    // that keeps the node cannot stack listeners.
+    const receipts = body.querySelector('.vt-balonce-zone--receipts');
+    if (receipts) {
+      receipts.ontoggle = () => {
+        _receiptsOpen = !!receipts.open;
+      };
     }
 
     initSectionTooltips();

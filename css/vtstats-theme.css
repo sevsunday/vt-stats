@@ -7360,6 +7360,46 @@ html.vt-cursor-active * {
     color: var(--kb-text-muted);
 }
 
+/* Receipts zone is a <details>: the title is the only collapsed chrome.
+   Native marker is replaced by the rotating chevron so it matches the
+   match-picker / storyline expanders. */
+.vt-balonce-zone--receipts > summary {
+    list-style: none;
+    cursor: pointer;
+}
+.vt-balonce-zone--receipts > summary::-webkit-details-marker {
+    display: none;
+}
+.vt-balonce-zone--receipts:not([open]) > summary {
+    margin-bottom: 0;
+}
+.vt-balonce-zone--receipts > summary:focus {
+    outline: none;
+}
+.vt-balonce-zone--receipts > summary:focus-visible {
+    outline: 2px solid var(--kb-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+.vt-balonce-zone--receipts .vt-balonce-zone-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.vt-balonce-zone--receipts .vt-balonce-zone-title .bi-chevron-down {
+    font-size: 0.75rem;
+    display: inline-block;
+    transition: transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+.vt-balonce-zone--receipts[open] .vt-balonce-zone-title .bi-chevron-down {
+    transform: rotate(180deg);
+}
+.vt-balonce-receipts-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.45rem;
+}
+
 .vt-balonce-link {
     font-size: 0.74rem;
     color: var(--kb-primary);
