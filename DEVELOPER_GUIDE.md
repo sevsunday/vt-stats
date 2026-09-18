@@ -2382,6 +2382,42 @@ The blend line `vtsr = ALPHA · wins_elo + (1 − ALPHA) · thug_elo` (§13.1) n
 - **Forensic ALPHA sweep:** `compute_elo(alpha_override ∈ {0.10, 0.25, 0.50})` emits `elo_current_alpha{10,25,50}.json` (+ histories; all in the cache skip set). At α > 0 the published `vtsr` is the real blend and `peak_vtsr` tracks the **blended** value per match inside the walk (at α = 0 the blend is bit-identical to `thug_elo`, so canonical peaks are untouched). Scored via `validate_elo.py --elo-mode alpha{10,25,50}` against the **pre-registered promote rule** in `critique/decisions/phase-5-wins-blend.md`: promote-candidate iff some α improves determined-outcome accuracy ≥ +5pp AND improves log-loss AND holds Spearman within −0.01 AND calibration MAE within +0.005 AND mean drift < 50 above anchor; discard any α dropping Spearman > 0.03; else HOLD. **First sweep (2026-09-04): HOLD** — accuracy/log-loss flat at every α (39 wins-rated matches move nobody far enough to flip a team-mean comparison), while rho/self-consistency/MAE improve monotonically with α — promising trajectory, insufficient evidence. (The sweep was run twice the same day: the first pass was scored while two synthetic v4 fixtures were still on disk, the second after purging them. Same verdict, so the HOLD was not a contamination artifact — see the memo's "Corrected sweep" section, which is the binding record.)
 - **Golden gates** (`_investigation/golden_wins_elo.py`): Gate A — baseline-vs-modified `compute_elo` on the identical manifest-reconstructed corpus, every pre-existing field byte-identical (the committed files are NOT bit-reproducible outside the pipeline: the duplicate-id match exists as two different client recordings in pipeline memory but only one on disk). Gate B — an independent single-pass replay from emitted artifacts reproduces every `wins_elo` / `wins_games` exactly (the leaked-state detector).
 
+### 13.14 Balonce Meter — the shared balance + prediction surface
+
+`js/balonce-meter.js` (`window.VTBalonce`) is the **display layer** for the rating system's predictive claim. It renders on two surfaces — the Tools Team Balonce card and the per-match dashboard section `#section-balonce` — and is **entirely display-only**: no pipeline code, no schema bump, no new emission. Every number is read from already-committed JSON.
+
+**The model is not new.** The meter runs `scripts/elo_commander.py::expected_score` verbatim:
+
+$$P(\text{T1}) = \frac{1}{1 + 10^{-\left((R^C_1 - R^C_2) + \lambda\,(T_1 - T_2)\right) / S}}$$
+
+with $R^C$ = commander VTSR-C (anchor when unrated), $T$ = **mean THUG VTSR-T** per side (commanders excluded, mirroring `_team_thug_means`), and $\lambda$ / $S$ read from the emitted `lambda_team_handicap` / `logistic_scale` rather than hardcoded. `computeWinProb()` reproduces the pipeline's stored per-duel `expected` to four decimals — that exactness is the licence to print the validator's headline accuracy (§10 of `validate_elo.py`; currently 66.2% over 625 duels, 72.5% on telemetry-only) underneath it. Ship the formula the number was earned on, or omit the number.
+
+**Commander VTSR-T is displayed, never scored.** Each commander carries two ratings and both appear on their row, but only VTSR-C enters the probability. VTSR-C is outcome-pure, so everything a commander contributes *including their own flying and shooting* is already priced into the wins that built it; adding their VTSR-T double-counts it, and the two ratings are correlated enough that a third term on a 625-sample model buys variance rather than accuracy. The honest status is "principled but untested" — no validator mode has ever scored an inclusive variant — so the promotion path is a **pre-registered ablation** (team-mean-inclusive / provisional-conditional / three-term), not a silent change.
+
+**Bands** key off the FAVORITE's probability and use the community vernacular for a lopsided lobby; copy always names the **disadvantaged** side:
+
+| Favorite probability | Band | Token |
+|---|---|---|
+| 50–55% | Good game | `green` |
+| 55–65% | Slight edge | `yellow` |
+| 65–80% | PLAYEDathon | `orange` |
+| 80%+ | PLAYEDalocalypse | `red` |
+
+Under this logistic the legacy raw-sum bands (100 / 300 / 600 ΔΣVTSR) land near 53% / 60% / 68%, so these thresholds are a slightly stricter fair-game line, not a relabel.
+
+**Tools side.** The gauge is probability-driven, with ΔΣVTSR demoted to a secondary material readout (it is the number the lobby has always eyeballed, so it stays visible). `findBestPartition` gains a second objective: with both commanders set it minimizes $|P - 0.5|$, tie-broken by $|\Sigma_1 - \Sigma_2|$; otherwise the legacy sum objective is untouched. This is the substantive upgrade — because the commander gap is a fixed term inside $P$, the search compensates a weaker commander with stronger thugs instead of treating the two jobs as interchangeable. Also: real `Cmdr ΔVTSR-C` banner chip with provisional badges (the old "commander ability and thug VTSR are different skills" disclaimer is retired — the model now uses the rating that measures commanding), probability-keyed Disadvantaged badge, count-based confidence chip, an uneven-teams caveat (the handicap uses **means**, so the extra body on a 5v4 genuinely is not in the percentage), and an honesty footer. With 0 or 1 commanders set the commander term is **dropped entirely** rather than pitting a known rating against an unknown one.
+
+**Dashboard side** (`#section-balonce`, between Faction Scoreboard and Match Highlights). Match-global and ALWAYS unfiltered (highlights passthrough contract — the renderer takes `currentData`, never the filtered view). Four zones:
+
+1. **Before the match** — gauge, both commander ratings, thug means, the component gap breakdown, and per-commander stakes ($K(1-E)$ on a win, $-KE$ on a loss).
+2. **The call** — `Model called it` / `Upset` / `Draw` with `decided_by` provenance, surprise as $-\log_2 E_{\text{winner}}$ bits, and the R^W wins ladder's independent pre-match read as a **muted second opinion**. That ladder is real machinery at mixer $\alpha = 0$ (§13.13), which makes this its first user-visible job; the copy must keep it labelled as a second opinion and never as the headline.
+3. **How it actually played out** — per-team mean performance vs expected, the top axis gaps (winner − loser) annotated with corpus sign-agreement from `validation_summary.latest_detail.axis_outcome`, the econ composite framed as *recorded, not scored* ($\alpha_c = 1$), and commander rating movement. Luxury axes are excluded per the v2.10 copy contract.
+4. **Does this thing work** — the receipts: a reliability strip computed client-side by bucketing **all** stored duel probabilities (incl. F9 externals, with the provider credit) and counting how often that favorite won, each bar carrying a notch at the model's own claim, plus a `vtsr_c_accuracy` sparkline. On the current corpus the curve is monotonic — 50–55% → 57% (n=171), 55–65% → 62% (n=238), 65–75% → 73% (n=152), 75%+ → 88% (n=64).
+
+**Degradation ladder** (all four verified headless against the real corpus): match absent from `elo_history` or flagged `match_excluded` → card hidden; determined outcome with a duel row → all four zones; rated but **undetermined** (no duel row) → still renders, with VTSR-C **reconstructed** from each commander's last prior duel `after` and an `Outcome unrecorded` chip; `elo_commander_history.json` 404 → thug-only meter with the accuracy figure omitted.
+
+**Conventions.** Shared CSS is the `.vt-balonce-*` block in `css/vtstats-theme.css` (loaded by both pages); the legacy `.vt-tools-balonce-played-meter-*` rules in `css/tools.css` are retained deliberately as the Tools card's outer wrapper, following the `.vt-active-game-modal-*` class-stability precedent. The module owns tooltip init/disposal across the whole `#section-balonce` card (the header icon sits outside `#balonce-body` and `js/app.js` has no global tooltip initializer). `js/match-elo.js` delegates its `elo_commander_history.json` fetch to `ensureCmdrHistoryLoaded()` so both consumers share one request behind the `window.__vtCmdrEloHistory` sentinel.
+
 ## 14. Player Profile Pages (`player/`)
 
 The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs.html` / `raw.html` / `odf/index.html`. The page system is **dual-runtime**:
@@ -2607,7 +2643,7 @@ The Lobby Tools page is the project's **seventh standalone page**, sibling to th
 | File | Purpose |
 |---|---|
 | `tools/index.html` | Page shell: topnav, header action row, six section cards in a 2-col CSS grid (above 1280px) / single-col stack (below), reset/discard modals, Bootstrap toast container. No pre-gen stubs — single page. |
-| `css/tools.css` | All page-specific styling: grid layout, card chrome, wheel canvas, slot machine reels, coinflip selector, team-balonce columns + Played Meter, toast container, etc. |
+| `css/tools.css` | All page-specific styling: grid layout, card chrome, wheel canvas, slot machine reels, coinflip selector, team-balonce columns + the Tools-only Balonce Meter chrome, toast container, etc. The gauge itself is styled by the shared `.vt-balonce-*` block in `css/vtstats-theme.css`. |
 | `js/live-session-card.js` | Stateless renderer factored out of the legacy `js/active-game-indicator.js`. Exposes `window.VTLiveSessionCard.{renderTitle, renderBody, renderFooter, renderInto}`. Keeps `.vt-active-game-modal-*` CSS class names verbatim for stability. |
 | `js/tools/player-resolver.js` | 4-tier Steam64 resolver: `player_slugs` → `elo_current.ratings[].name` → `steamid_to_name.txt` → lobby nickname. Eager loaders for known-hosts + elo + slugs + vsrmaplist; lazy loader for steamid-to-name. Exposes `window.VTToolsResolver.{ready, resolve, resolveCustom, searchByName, getKnownHosts, getKnownHostNames, getVsrMapByFile, getCanonicalNames, getEloMeta}`. |
 | `js/tools/live-session.js` | Polls `BZ2API.fetchSessions()` at 60s idle / 15s when a known-host VSR lobby is live (60s floor while the tab is hidden, 120s error cap), filters by `known-hosts.json` allowlist + `gameBalance === 'VSR'`, renders into the Live Session card via `VTLiveSessionCard`. Lock-lobby toggle freezes the surfaced snapshot; ignore-live toggle stops polling entirely. |
@@ -2615,7 +2651,7 @@ The Lobby Tools page is the project's **seventh standalone page**, sibling to th
 | `js/tools/wheel.js` | Canvas player wheel with theme-reactive alternating `--kb-primary`/`--kb-secondary` slices (read via `getComputedStyle` + `MutationObserver` on `<html>`). Spin physics via `requestAnimationFrame` with ease-out cubic (4–6s; `prefers-reduced-motion` → 800ms snap). Result modal with Steam + VTstats deep-link icons + Remove-from-wheel + Spin again. Wheel-local `removedSteam64s` set persists across roster updates. |
 | `js/tools/coinflip.js` | Horizontal-shuffle team selector. Pre-computed winner via `Math.random() < 0.5`. Decel animation over ~2s; `prefers-reduced-motion` → 500ms snap. Team labels from live session's `teamNames.svar1`/`svar2` when present. |
 | `js/tools/map-roll.js` | Three-reel slot machine. Reel 1 (Popular) reads `vsrmaplist.json` entries where `Tags` contains `popular`. Reel 2 (Played) reads `matches.json` map_files. Reel 3 (Unplayed) reads `map-registry.json` minus Played. Pool-count pills (7+/6+/All) filter all three reels. Staggered reel deceleration 3s/4s/5s. Reveal cards link to per-map `map/<file>/`. Lazy-loads `matches.json` + `map-registry.json` on first interaction. |
-| `js/tools/team-balonce.js` | Commander configurator + odd-lobby-aware partition + drag-to-swap + Played Meter. Intentional community-in-joke misspell (`Balonce`); applies everywhere — file name, section title, CSS class names. |
+| `js/tools/team-balonce.js` | Commander configurator + odd-lobby-aware partition + drag-to-swap + the Balonce Meter (gauge itself comes from the shared `js/balonce-meter.js`; see §13.14). Intentional community-in-joke misspell (`Balonce`); applies everywhere — file name, section title, CSS class names. |
 | `js/tools/main.js` | Page bootstrap, state machine, Mode/Ignore/Lock/Reset wiring, beforeunload guard. Awaits `VTToolsResolver.ready` before initialising sub-modules. Broadcasts the active roster via a `CustomEvent('vt-tools:roster')` and component reset via `CustomEvent('vt-tools:reset-all')`. |
 
 ### 16.2 Page state machine
@@ -2706,35 +2742,26 @@ The Lobby Tools rollout **deleted** the elaborate LIVE pill widget from every no
 - The `Tools` topnav link (icon `bi-controller`) is the pulse target on the dashboard. CSS keyframes in `css/vtstats-theme.css` drive a subtle pulse animation when the attribute is `1`.
 - Other standalone shells no longer load `js/active-game-indicator.js`. Pre-gen templates drop it at `PLAYER_TEMPLATE_VERSION` 11 → 12 and `MAP_TEMPLATE_VERSION` 6 → 7 (existing stubs keep the tags until the next generator run; the JS early-return stops their polls immediately).
 
-### 16.6 Played Meter (imbalance gauge)
+### 16.6 Balonce Meter (win-probability gauge)
 
-A horizontal pill-shaped track below the Team Balonce columns. Chevron position formula:
+A horizontal pill-shaped track below the Team Balonce columns, driven by the **shared** `js/balonce-meter.js` model — see §13.14 for the formula, the band table, and why commander VTSR-T is displayed but not scored. The chevron sits at `P(Team 1 wins) × 100%`, so chevron-right still means Team 1 is the stronger side (same orientation as the legacy sum-delta meter it replaces) and the centre tick is a true coin flip.
 
-```
-delta = ΣVTSR_team1 − ΣVTSR_team2     // signed
-abs_delta = |delta|
-normalized = min(abs_delta / MAX_PLAYED_METER_DELTA, 1.0)
-chevron_pos% = 50 + 50 * normalized * sign(delta)
-```
+Markup and styling are shared with the dashboard's per-match section (`VTBalonce.meterHtml()`, `.vt-balonce-*` in `css/vtstats-theme.css`), so the two surfaces cannot drift. The Tools card adds its own chrome: a headline row (`Team 2 favored 69%` + the band pill), the component readout (`Cmdr gap` / `Thug gap` / `ΔΣVTSR`), a count-based confidence chip, an uneven-teams caveat, and the honesty footer quoting the validator's accuracy for this formula (lazy 404-safe read of `validation_summary.json`; the figure is omitted, never guessed, when the file is missing).
 
-`MAX_PLAYED_METER_DELTA = 1000` (module constant in `js/tools/team-balonce.js`; tunable post-ship). At full peg the chevron sits at 0% (Team 1 disadvantaged) or 100% (Team 2 disadvantaged); the center tick mark indicates "perfectly balanced".
+The disadvantaged team gets a `Disadvantaged` badge on its column header when the favorite's probability reaches `VTBalonce.DISADVANTAGE_PROB` (0.55) — read from the module rather than duplicated, so the Tools badge and the dashboard copy always agree.
 
-Color bands drive the label chip:
-
-| `abs_delta` | Band | Label |
-|---|---|---|
-| `< 100` | green | `Well balanced` |
-| `100 – 300` | yellow | `Slight edge — <team> at disadvantage` |
-| `300 – 600` | orange | `Imbalanced — <team> at disadvantage` |
-| `>= 600` | red | `Heavily imbalanced — <team> at disadvantage` |
-
-Disadvantaged team gets a `Disadvantaged` badge on its column header when `abs_delta >= 100`.
+> **Why this replaced the raw-sum gauge.** ΔΣVTSR knows nothing about who is commanding. A real lobby measured during this work sat at ΔΣVTSR −72 — comfortably inside the old green "Well balanced" band — while the commander gap was 168 points; the model correctly called it `PLAYEDathon` at 69%. The legacy `MAX_PLAYED_METER_DELTA` / `CMDR_BAND_*` constants are gone; ΔΣVTSR survives only as a secondary material readout because it is the number the lobby has always eyeballed.
 
 ### 16.7 Partition algorithm (odd-lobby aware)
 
-`findBestPartition(thugs, cmdr1, cmdr2)` in `team-balonce.js` exhaustively enumerates ALL `2^M` non-trivial subsets of the thug pool (skip empty + full). Each subset is one team's thugs; complement is the other. Score by `|ΣVTSR_team1 − ΣVTSR_team2|` (where team sums include each commander's VTSR). Enforce `≤5 players per team` (commander + thugs).
+`findBestPartition(thugs, cmdr1, cmdr2)` in `team-balonce.js` exhaustively enumerates ALL `2^M` non-trivial subsets of the thug pool (skip empty + full). Each subset is one team's thugs; complement is the other. Enforce `≤5 players per team` (commander + thugs).
 
-This naturally handles odd lobbies (4v3, 5v4, 3v2). Equal-strength uneven splits can beat naively-balanced even ones when the math works out; the algorithm doesn't prefer balanced thug counts unless they minimize the VTSR delta.
+The objective has two modes:
+
+- **Both commanders set** — minimize `|P − 0.5|` under the shared win-probability model, tie-broken by `|ΣVTSR_team1 − ΣVTSR_team2|`. Because the commander gap is a fixed term inside `P`, the search compensates a weaker commander with stronger thugs. Measured example: mort (VTSR-C 1468) vs VTrider (VTSR-C 1616) → Suggest deliberately stacked team 1's thugs to `+137` mean / `+146` sum and landed the lobby at **52%, Good game**. The old objective would have driven the sum toward zero and left VTrider's commanding edge uncompensated.
+- **Otherwise** — the legacy `|ΣVTSR_team1 − ΣVTSR_team2|` objective, unchanged. With fewer than two commanders set there is no commander term to balance against.
+
+This naturally handles odd lobbies (4v3, 5v4, 3v2). Equal-strength uneven splits can beat naively-balanced even ones when the math works out; the algorithm doesn't prefer balanced thug counts unless they optimize the active objective. Note the handicap term uses thug **means**, so headcount does not enter `P` — the card surfaces an explicit uneven-teams caveat rather than letting the percentage imply the extra body is free.
 
 Worst case: 10-player lobby with 0 commanders set → thug pool = 10 → `2^10 = 1024` subsets to enumerate. Trivially fast.
 

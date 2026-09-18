@@ -2575,6 +2575,19 @@
         t2Subset: t2Selected,
       });
     }
+
+    // Balonce Meter — the pre-match balance read, the prediction it
+    // implies, and how the match actually resolved. Match-global and
+    // ALWAYS unfiltered (highlights passthrough contract): the renderer
+    // takes currentData, never the filtered `data` view, and the player
+    // filter has no effect on it. Self-hides on unrated / excluded /
+    // cancelled matches. Lazy-fetches elo_commander_history.json on
+    // first use and repaints itself once it lands.
+    if (window.VTBalonce) {
+      VTBalonce.destroyMatchSection();
+      VTBalonce.renderMatchSection(currentData);
+    }
+
     renderLeaderboard(data.leaderboard);
     ensureTooltips(document.getElementById('leaderboard'));
     tabRendered['#tab-overview'] = true;
@@ -2764,6 +2777,9 @@
     // Restore default preloader content in case a prior error replaced it
     restorePreloader();
     clearReplayTab();
+    // Balonce Meter owns Bootstrap tooltips inside its card, so it gets
+    // torn down on every view switch (same contract as the replay tab).
+    if (window.VTBalonce) VTBalonce.destroyMatchSection();
     destroyAllCharts();
     resetTabState();
     // Reset Rivalry Radar state on match switch so each match starts fresh
@@ -3020,6 +3036,7 @@
     $loading.classList.remove('d-none');
     restorePreloader();
     clearReplayTab();
+    if (window.VTBalonce) VTBalonce.destroyMatchSection();
     destroyAllCharts();
     resetTabState();
 
@@ -8619,6 +8636,7 @@
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     clearReplayTab();
+    if (window.VTBalonce) VTBalonce.destroyMatchSection();
     destroyAllCharts();
 
     const panel = document.createElement('div');
