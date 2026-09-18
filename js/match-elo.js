@@ -125,7 +125,12 @@
       return 'This match was shorter than 4 minutes, so it was not rated.';
     }
     if (reason === 'cancelled') {
-      return 'This match was cancelled, so it was not rated.';
+      // Don't dead-end the reader: the Balonce Meter still shows the real
+      // pre-match ratings for this lobby plus what the result would have
+      // been worth.
+      return 'This match was cancelled, so it was not rated. The Balonce Meter '
+        + 'on the Overview tab still shows the ratings both sides brought into '
+        + 'it and what winning would have been worth.';
     }
     return 'This match was not included in VTSR-T.';
   }

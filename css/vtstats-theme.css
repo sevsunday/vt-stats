@@ -7456,6 +7456,77 @@ html.vt-cursor-active * {
     color: var(--kb-text-secondary);
 }
 
+/* ---- What-if (host-cancelled matches) ----
+   The pre-match numbers on these cards are real, but nothing was scored
+   off them. The dashed accent + Not-rated chip exist so the card can
+   never be mistaken for a match that counted. */
+
+.vt-balonce-hypothetical .vt-balonce-meter-track,
+.vt-balonce-hypothetical .vt-balonce-team {
+    border: 1px dashed var(--kb-border-subtle);
+}
+.vt-balonce-hypothetical .vt-balonce-meter-chevron { opacity: 0.7; }
+
+.vt-balonce-notrated {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+    border: 1px dashed var(--kb-warning);
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 12%, transparent);
+    font-size: 0.7rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.vt-balonce-whatif-note {
+    margin-bottom: 0.55rem;
+    font-size: 0.76rem;
+    line-height: 1.45;
+    color: var(--kb-text-secondary);
+}
+
+.vt-balonce-whatif-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 6px;
+    background-color: color-mix(in oklab, var(--kb-bg-subtle) 45%, transparent);
+    font-size: 0.78rem;
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-whatif-row + .vt-balonce-whatif-row { margin-top: 0.3rem; }
+
+.vt-balonce-whatif-cmdr {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+    min-width: 7rem;
+}
+
+.vt-balonce-whatif-branches {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.9rem;
+    margin-left: auto;
+}
+
+.vt-balonce-whatif-branch {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+.vt-balonce-whatif-label {
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+}
+.vt-balonce-whatif-branch.is-win .vt-balonce-whatif-delta { color: var(--kb-success); }
+.vt-balonce-whatif-branch.is-loss .vt-balonce-whatif-delta { color: var(--kb-danger); }
+
 /* ---- Stakes (plain-language rating-at-risk sentences) ---- */
 
 .vt-balonce-stakes { margin-top: 0.6rem; }
@@ -7748,5 +7819,12 @@ html.vt-cursor-active * {
     .vt-balonce-rel-outcome {
         grid-column: 1 / -1;
         justify-content: flex-start;
+    }
+
+    /* What-if branches stack under the commander name on a phone. */
+    .vt-balonce-whatif-branches {
+        margin-left: 0;
+        flex-direction: column;
+        align-items: flex-start;
     }
 }

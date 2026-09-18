@@ -71,6 +71,12 @@ ELO_PROVISIONAL_THRESHOLD = 10   # matches_played < this => "Provisional" badge.
 ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
 ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
 
+# The ONE exclusion reason that still gets scored in the shadow (a
+# never-applied `shadow` block on its elo_history entry, for the
+# dashboard's what-if card). See _shadow_score_match for why cancelled
+# earns it and the other two reasons do not.
+SHADOW_EXCLUSION_REASON = "cancelled"
+
 # Per-match outcome scale; bounds dR via (P_i - E_i) which lives in roughly [-1, +1].
 ELO_RATING_SCALE = 2.5
 
@@ -1058,6 +1064,110 @@ def _player_key(p: dict) -> str:
     return p.get("name") or ""
 
 
+def _shadow_score_match(
+    match_data: dict,
+    *,
+    ratings_snapshot: dict[str, float],
+    matches_played_snapshot: dict[str, int],
+    last_match_dt_snapshot: dict[str, datetime | None],
+    current_match_dt: datetime | None,
+    commander_baseline_snapshot: dict[str, float],
+    canonical_before: dict[str, float] | None,
+    lowtier_eligibility: dict[str, float] | None,
+    lobby_score_mode: str,
+    expected_performance_mode: str,
+) -> list[dict[str, Any]]:
+    """Score a match that is EXCLUDED from rating, for display only.
+
+    A host-cancelled game is a real, fully-recorded match whose result was
+    lost to a crash. It must never rate (`resolve_match_outcome` said
+    there is no winner, and `compute_elo` excludes it), but the 8-axis
+    composite still measured what everyone did, and the reader deserves to
+    see it. So we run the SAME performance index and the SAME delta
+    arithmetic the rated path uses, and label the answer as never applied.
+
+    **Read-only by construction.** Every piece of rating state arrives as
+    a plain-dict SNAPSHOT (the caller passes copies), so a stray write in
+    here cannot reach `_rating_pass`'s live dicts. That matters because
+    the mutations the rated path performs are exactly what must NOT happen
+    on an excluded match: no `thug_elo` advance, no `matches_played` bump
+    (it would shift every later K-factor), no `last_match_dt` stamp (it
+    would shift every later inactivity boost), no `axis_running_*` /
+    `commander_axis_running_*` accumulation, no `win_history` append.
+    Enforced by `_investigation/golden_shadow_inert.py`.
+
+    Returns one entry per would-be-rated row, or `[]` when the lobby is
+    empty after the v2.5 row filter.
+    """
+    perfs, keys, axis_z_by_player, _axis_meta = compute_performance_index(
+        match_data,
+        commander_baseline_snapshot=commander_baseline_snapshot,
+        lowtier_eligibility=lowtier_eligibility,
+        lobby_score_mode=lobby_score_mode,
+    )
+    if not perfs:
+        return []
+
+    lobby_raw = match_data.get("leaderboard") or []
+    lobby = [
+        p for p in lobby_raw
+        if not p.get("is_campod") and not p.get("is_low_activity")
+    ]
+    n_lobby = len(keys)
+    ratings_before = [ratings_snapshot.get(k, ELO_ANCHOR) for k in keys]
+
+    out: list[dict[str, Any]] = []
+    for i, key in enumerate(keys):
+        r_before = ratings_before[i]
+        prev_dt = last_match_dt_snapshot.get(key)
+        if prev_dt is not None and current_match_dt is not None:
+            days_inactive = max(
+                0.0,
+                (current_match_dt - prev_dt).total_seconds() / 86400.0,
+            )
+        else:
+            days_inactive = 0.0
+        ki = k_factor(matches_played_snapshot.get(key, 0), days_inactive)
+
+        # Same opponent-reference convention as the rated path, including
+        # the v2.8 canonical anchoring on pass 2.
+        if canonical_before is not None:
+            others = [
+                canonical_before.get(keys[j], ratings_before[j])
+                for j in range(n_lobby) if j != i
+            ]
+        else:
+            others = [r for j, r in enumerate(ratings_before) if j != i]
+        r_opp_ref = opponent_reference_rating(
+            others,
+            mode=expected_performance_mode,
+            softmax_tau=ELO_SOFTMAX_TAU,
+        )
+        e_i = expected_performance(r_before, r_opp_ref)
+        dr_raw = ki * ELO_RATING_SCALE * (perfs[i] - e_i)
+        if dr_raw >= 0:
+            dr = dr_raw
+        else:
+            dr = dr_raw * ELO_K_LOSS_AVERSION * floor_taper(r_before)
+
+        row = lobby[i] if i < len(lobby) else {}
+        out.append({
+            "name":        row.get("name") or "",
+            "steam64":     row.get("steam64"),
+            "is_commander": bool(row.get("is_commander")),
+            "before":      round(r_before, 2),
+            "performance": round(perfs[i], 4),
+            "expected":    round(e_i, 4),
+            # What the rating WOULD have moved. Deliberately named so it
+            # can never be mistaken for `delta` by a consumer.
+            "would_delta": round(dr, 2),
+            "axis_contributions": {
+                a: round(z, 4) for a, z in (axis_z_by_player[i] or {}).items()
+            },
+        })
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Top-level rating loop
 # ---------------------------------------------------------------------------
@@ -1260,13 +1370,60 @@ def _rating_pass(
             exclusion_reason = "cancelled"
 
         if exclusion_reason is not None:
-            history_entries.append({
+            excluded_entry: dict[str, Any] = {
                 "match_id":        match_id,
                 "match_date":      match_date,
                 "match_excluded":  True,
                 "exclusion_reason": exclusion_reason,
                 "deltas": [],
-            })
+            }
+            # A cancelled match is the one exclusion worth scoring in the
+            # shadow: it cleared the player-count and duration gates (the
+            # if/elif above tests those FIRST), so it is a real game that
+            # was interrupted rather than a non-event. `deltas` stays empty
+            # so every existing consumer -- elo_commander.py's
+            # `match_excluded` skip included -- is untouched.
+            if exclusion_reason == SHADOW_EXCLUSION_REASON:
+                shadow_deltas = _shadow_score_match(
+                    md,
+                    # Snapshots, not the live dicts: nothing in the shadow
+                    # scorer can advance a rating or bump a match count.
+                    ratings_snapshot=dict(thug_elo),
+                    matches_played_snapshot=dict(matches_played),
+                    last_match_dt_snapshot=dict(last_match_dt),
+                    current_match_dt=current_match_dt,
+                    commander_baseline_snapshot={
+                        a: commander_shrunk_baseline(
+                            a,
+                            commander_axis_running_sum[a],
+                            commander_axis_running_count[a],
+                            locked_axes=effective_locked_axes,
+                        )
+                        for a in COMMANDER_AXIS_PRIOR
+                    },
+                    canonical_before=(
+                        canonical_before_by_match.get(match_id, {})
+                        if canonical_before_by_match is not None else None
+                    ),
+                    lowtier_eligibility=lowtier_eligibility,
+                    lobby_score_mode=lobby_score_mode,
+                    expected_performance_mode=expected_performance_mode,
+                )
+                if shadow_deltas:
+                    excluded_entry["shadow"] = {
+                        "applied": False,
+                        "reason": exclusion_reason,
+                        "deltas": shadow_deltas,
+                    }
+                    # Pass 2 anchors E_i to the canonical snapshot, so the
+                    # shadow needs its own entry. Keyed by match_id, and
+                    # only ever read for the match it belongs to, so this
+                    # cannot touch a rated match's arithmetic.
+                    canonical_before_out[match_id] = {
+                        d["steam64"] or d["name"]: d["before"]
+                        for d in shadow_deltas
+                    }
+            history_entries.append(excluded_entry)
             continue
 
         # v2.4: snapshot the per-axis commander baseline BEFORE this match

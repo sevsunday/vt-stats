@@ -60,6 +60,13 @@
   const DEFAULT_LAMBDA = 1.0;
   const DEFAULT_SCALE = 400;
 
+  // Fallbacks for the VTSR-C K curve, mirroring CMDR_K_BASE /
+  // CMDR_K_FLOOR / CMDR_PROVISIONAL_PRIOR. Only reached if the emitted
+  // JSON ever stops carrying them.
+  const DEFAULT_CMDR_K_BASE = 40;
+  const DEFAULT_CMDR_K_FLOOR = 20;
+  const DEFAULT_CMDR_PROVISIONAL_PRIOR = 5;
+
   /**
    * Band edges on the FAVORITE's win probability. For calibration
    * comfort: the legacy raw-sum bands (100 / 300 / 600 delta-VTSR) land
@@ -82,6 +89,13 @@
    * in this module consumes it, so do not mistake it for dead code.
    */
   const DISADVANTAGE_PROB = 0.55;
+
+  /**
+   * The ONE `exclusion_reason` that still gets a card, rendered as a
+   * what-if. See the gate in `joinMatch` for why widening this set would
+   * be a mistake.
+   */
+  const HYPOTHETICAL_REASON = 'cancelled';
 
   /**
    * v2.10 luxury axes: measured and visualized, never named as a rating
@@ -322,6 +336,13 @@
       lambda: (src && isNum(src.lambda_team_handicap)) ? src.lambda_team_handicap : DEFAULT_LAMBDA,
       scale: (src && isNum(src.logistic_scale)) ? src.logistic_scale : DEFAULT_SCALE,
       anchor: (src && isNum(src.anchor)) ? src.anchor : ANCHOR,
+      // K curve, needed only to price a what-if (a real duel carries its
+      // own `k`). Same source-of-truth rule: read, never hardcode.
+      kBase: (src && isNum(src.k_base)) ? src.k_base : DEFAULT_CMDR_K_BASE,
+      kFloor: (src && isNum(src.k_floor)) ? src.k_floor : DEFAULT_CMDR_K_FLOOR,
+      provisionalPrior: (src && isNum(src.provisional_prior))
+        ? src.provisional_prior
+        : DEFAULT_CMDR_PROVISIONAL_PRIOR,
     };
   }
 
@@ -373,7 +394,10 @@
 
   function hideSection() {
     const el = sectionEl();
-    if (el) el.classList.add('d-none');
+    if (!el) return;
+    el.classList.add('d-none');
+    // Never let the what-if styling leak into the next match's card.
+    el.classList.remove('vt-balonce-hypothetical');
   }
 
   function destroyMatchSection() {
@@ -449,6 +473,77 @@
   }
 
   /**
+   * Reconstruct a player's pre-match VTSR-T by walking `elo_history` for
+   * their last rated delta strictly before this match's date.
+   *
+   * This is EXACT, not an approximation: VTSR-T only ever moves when a
+   * player appears in a rated match, so `after` on their previous delta
+   * IS the rating they carried into this one. (The v2.9-era inactivity
+   * mechanism in scripts/elo.py boosts the K-FACTOR by days idle, not
+   * the rating itself, so nothing drifts in between.) Returns null when
+   * the player has no prior rated match — callers fall back to the
+   * anchor, exactly as the pipeline would for a debut.
+   */
+  function reconstructVtsrT(steam64, beforeDate) {
+    const hist = eloHistory();
+    if (!hist || !Array.isArray(hist.history) || !steam64) return null;
+    const sid = String(steam64);
+    const cutoff = beforeDate ? String(beforeDate) : '';
+    let best = null;
+    let bestDate = '';
+    for (const entry of hist.history) {
+      const date = String(entry.match_date || '');
+      if (cutoff && date >= cutoff) continue;
+      for (const d of (entry.deltas || [])) {
+        if (String(d.steam64 || '') !== sid) continue;
+        if (!isNum(d.after)) continue;
+        if (best === null || date >= bestDate) {
+          best = d.after;
+          bestDate = date;
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * How many rated commander duels this player had before the given date.
+   * Feeds the K-factor for a what-if, since there is no duel row to read
+   * `k` off. Counts F9 externals too — they count toward
+   * `matches_commanded_rated` in scripts/elo_commander.py, so they move K.
+   */
+  function ratedDuelsBefore(steam64, beforeDate) {
+    const hist = window.__vtCmdrEloHistory;
+    if (!hist || !Array.isArray(hist.duels) || !steam64) return 0;
+    const sid = String(steam64);
+    const cutoff = beforeDate ? String(beforeDate) : '';
+    let n = 0;
+    for (const duel of hist.duels) {
+      const date = String(duel.date || '');
+      if (cutoff && date >= cutoff) continue;
+      for (const side of ['1', '2']) {
+        const c = duel.commanders && duel.commanders[side];
+        if (c && String(c.steam64 || '') === sid) n += 1;
+      }
+    }
+    return n;
+  }
+
+  /**
+   * The VTSR-C K-factor curve from scripts/elo_commander.py::k_factor,
+   * with every constant read from the emitted JSON rather than hardcoded.
+   */
+  function cmdrKFactor(games, consts) {
+    const prior = (consts && isNum(consts.provisionalPrior) && consts.provisionalPrior > 0)
+      ? consts.provisionalPrior
+      : DEFAULT_CMDR_PROVISIONAL_PRIOR;
+    const base = (consts && isNum(consts.kBase)) ? consts.kBase : DEFAULT_CMDR_K_BASE;
+    const floor = (consts && isNum(consts.kFloor)) ? consts.kFloor : DEFAULT_CMDR_K_FLOOR;
+    const frac = Math.max(0, 1 - (Math.max(0, games) / prior));
+    return floor + (base - floor) * frac;
+  }
+
+  /**
    * Fold the match into the shape every zone reads. Returns
    * `{available: false}` when there is nothing honest to show.
    */
@@ -461,9 +556,27 @@
     const hist = eloHistory();
     if (!hist || !Array.isArray(hist.history)) return { available: false };
     const entry = hist.history.find((h) => h.match_id === matchId);
-    // Unrated / excluded / cancelled matches have no pre-match read to
-    // show: the section hides rather than inventing one.
-    if (!entry || entry.match_excluded || !(entry.deltas || []).length) {
+    // No history row at all means we genuinely know nothing about this
+    // lobby, so there is nothing honest to show.
+    if (!entry) return { available: false };
+
+    // A host-cancelled match is a real game that got interrupted, and
+    // everything that was true BEFORE it is untouched by the crash: the
+    // ratings both sides brought, the handicap, and what the duel was
+    // worth. So it renders as a WHAT-IF instead of hiding.
+    //
+    // Deliberately scoped to `cancelled` and nothing else. The
+    // match-level gates in scripts/elo.py are an if/elif chain testing
+    // player count, then duration, then cancellation -- so `cancelled`
+    // already implies >= ELO_MIN_PLAYER_COUNT players and
+    // >= ELO_MIN_DURATION_SEC seconds. A 30-second rage-quit lands in
+    // `short_duration` and gets nothing, for free.
+    const exclusionReason = entry.match_excluded
+      ? (entry.exclusion_reason || 'unknown')
+      : null;
+    const hypothetical = exclusionReason === HYPOTHETICAL_REASON;
+    if (entry.match_excluded && !hypothetical) return { available: false };
+    if (!hypothetical && !(entry.deltas || []).length) {
       return { available: false };
     }
 
@@ -523,6 +636,25 @@
       if (!team) continue;
       perTeam[team].push({ delta: d, row });
     }
+
+    // A cancelled match has no real deltas, but scripts/elo.py scores it
+    // in the shadow and those rows carry the same
+    // {before, performance, expected, axis_contributions} shape — so every
+    // team-level helper below works on them unchanged. `would_delta` is
+    // the extra field, and it is never called `delta`.
+    const shadowDeltas = (hypothetical && entry.shadow && Array.isArray(entry.shadow.deltas))
+      ? entry.shadow.deltas
+      : null;
+    if (shadowDeltas) {
+      for (const d of shadowDeltas) {
+        const row = rowFor(d);
+        if (!row) continue;
+        const team = slotTeam(row.slot);
+        if (!team) continue;
+        perTeam[team].push({ delta: d, row });
+      }
+    }
+
     if (t1Mean == null || t2Mean == null) {
       const meanOf = (team) => {
         const vals = perTeam[team]
@@ -532,6 +664,29 @@
       };
       if (t1Mean == null) t1Mean = meanOf(1);
       if (t2Mean == null) t2Mean = meanOf(2);
+    }
+
+    // A what-if with no shadow block has nothing to average, so the
+    // handicap is rebuilt from the leaderboard using the pipeline's own
+    // predicate: thugs only (commanders are priced by VTSR-C) and rated
+    // rows only, so a camera-pod spectator or a mid-match dropout cannot
+    // drag a side's mean. Mirrors `_team_thug_means` plus the v2.5 row
+    // gates. When a shadow block IS present the loop above already used
+    // its `before` values, which are the pipeline's own snapshot — and the
+    // two agree, so this is a fallback, not a second opinion.
+    if (hypothetical && (t1Mean == null || t2Mean == null)) {
+      const meanFor = (team) => {
+        const vals = [];
+        for (const row of lobby) {
+          if (slotTeam(row.slot) !== team) continue;
+          if (row.is_commander || row.is_campod || row.is_low_activity) continue;
+          const r = reconstructVtsrT(row.steam64, match.date);
+          vals.push(isNum(r) ? r : consts.anchor);
+        }
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      };
+      t1Mean = meanFor(1);
+      t2Mean = meanFor(2);
     }
 
     // Commander VTSR-C before the match.
@@ -573,6 +728,7 @@
           || (d.name && row.name && String(d.name).toLowerCase() === String(row.name).toLowerCase());
       });
       if (hit && isNum(hit.before)) cmdrThugElo[side] = hit.before;
+      else if (hypothetical) cmdrThugElo[side] = reconstructVtsrT(row.steam64, match.date);
     }
 
     const winner = match.winner || {};
@@ -597,6 +753,11 @@
       winner,
       winnerTeam,
       isDraw,
+      // Nothing was scored: the pre-match read is real, the outcome zones
+      // become a what-if. See the gate at the top of joinMatch.
+      hypothetical,
+      exclusionReason,
+      shadowDeltas,
       hasCmdrHistory: window.__vtCmdrEloHistory != null,
     };
   }
@@ -713,10 +874,19 @@
       ? `${esc(teamPhrase(joined, fav.team))} favored <span class="vt-balonce-prob vt-mono">${fmtPct(fav.prob)}</span>`
       : 'Dead even going in';
 
+    // On a what-if the numbers below are real but nothing was scored off
+    // them, and the reader has to know that before reading any further.
+    const chip = joined.hypothetical
+      ? `<span class="vt-balonce-notrated" data-bs-toggle="tooltip" data-bs-placement="top"
+           title="The host recorded this match as cancelled, so it is excluded from VTSR-T and the commander ladder. The ratings below are the real ones both sides brought into it \u2014 only the outcome is missing.">
+           <i class="bi bi-slash-circle me-1" aria-hidden="true"></i>Not rated \u00b7 cancelled</span>`
+      : '';
+
     return `
       <div class="vt-balonce-zone vt-balonce-zone--prematch">
         <div class="vt-balonce-zone-head">
           <h6 class="vt-balonce-zone-title">Before the match</h6>
+          ${chip}
         </div>
         <div class="vt-balonce-headline">${headline}</div>
         ${meterHtml({
@@ -730,6 +900,182 @@
           ${teamColumnHtml(joined, 2)}
         </div>
         ${stakesHtml(joined)}
+      </div>`;
+  }
+
+  // ---- Zone 2a: what-if (cancelled matches) ------------------------
+
+  /**
+   * Both branches of a cancelled match, per commander: the rating each
+   * would have carried out of it had it been scored either way.
+   *
+   * A real duel hands us `k` and `expected`; a what-if has neither, so
+   * `expected` comes from the same win-probability model the gauge above
+   * uses and `k` from the published K curve at that commander's duel count
+   * going in. No new formula, no new constant.
+   */
+  function whatIfRows(joined) {
+    const rows = [];
+    for (const side of [1, 2]) {
+      const expected = side === 1 ? joined.probT1 : 1 - joined.probT1;
+      if (!isNum(expected)) continue;
+      const row = joined.commanders[side];
+      const rated = isNum(joined.cmdrBefore[side]);
+      const before = rated ? joined.cmdrBefore[side] : joined.consts.anchor;
+      const games = (row && row.steam64)
+        ? ratedDuelsBefore(row.steam64, joined.match.date)
+        : 0;
+      const k = cmdrKFactor(games, joined.consts);
+      rows.push({
+        side,
+        name: commanderName(joined, side) || `Team ${side}`,
+        before,
+        expected,
+        onWin: k * (1 - expected),
+        onLoss: -k * expected,
+        provisional: !rated,
+      });
+    }
+    return rows;
+  }
+
+  function zoneWhatIfHtml(joined) {
+    const rows = whatIfRows(joined);
+    if (!rows.length) return '';
+
+    const branch = (cls, label, before, delta) => `
+      <span class="vt-balonce-whatif-branch ${cls}">
+        <span class="vt-balonce-whatif-label">${esc(label)}</span>
+        <span class="vt-mono">${Math.round(before)} \u2192 ${Math.round(before + delta)}</span>
+        <span class="vt-mono vt-balonce-whatif-delta">${fmtSigned(delta, 1)}</span>
+      </span>`;
+
+    const body = rows.map((r) => `
+      <div class="vt-balonce-whatif-row">
+        <span class="vt-balonce-whatif-cmdr">${esc(r.name)}${r.provisional
+          ? ' <span class="text-muted">(unrated commander)</span>'
+          : ''}</span>
+        <span class="vt-balonce-whatif-branches">
+          ${branch('is-win', 'had they won', r.before, r.onWin)}
+          ${branch('is-loss', 'had they lost', r.before, r.onLoss)}
+        </span>
+      </div>`).join('');
+
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--whatif">
+        <div class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">What was at stake</h6>
+        </div>
+        <div class="vt-balonce-whatif-note">
+          Neither branch happened. The game was cancelled, so no commander
+          rating moved and nobody's VTSR-T changed \u2014 this is only what
+          the result would have been worth.
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  /**
+   * "How it was going" — the shadow read on a cancelled match.
+   *
+   * The result was lost, but the 8-axis composite still measured the whole
+   * game, so this answers the question the crash left hanging: who was
+   * actually out-playing their rating when the plug got pulled. Every
+   * number comes from the never-applied `shadow` block in elo_history
+   * (scripts/elo.py::_shadow_score_match) and is framed as `would have`.
+   */
+  function zoneWasGoingHtml(joined) {
+    if (!joined.shadowDeltas || !joined.shadowDeltas.length) return '';
+
+    const m1 = teamMeans(joined, 1);
+    const m2 = teamMeans(joined, 2);
+    const sideCopy = (team, m) => {
+      const phrase = esc(teamPhrase(joined, team));
+      if (!isNum(m.performance) || !isNum(m.expected)) {
+        return `<div class="vt-balonce-perf"><span class="vt-balonce-perf-team">${phrase}</span>
+          <span class="text-muted">not scored</span></div>`;
+      }
+      const diff = m.performance - m.expected;
+      const cls = diff > 0.05 ? 'is-positive' : diff < -0.05 ? 'is-negative' : '';
+      const verdict = diff > 0.05 ? 'was over-performing'
+        : diff < -0.05 ? 'was under-performing'
+          : 'was playing to form';
+      return `<div class="vt-balonce-perf ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Mean of this side\u2019s players: what the 8-axis composite measured over the whole game, against what their pre-match ratings predicted for this lobby. Measured but never applied \u2014 the match was cancelled.">
+        <span class="vt-balonce-perf-team">${phrase}</span>
+        <span class="vt-balonce-perf-verdict">${verdict}</span>
+        <span class="vt-mono">${fmtSigned(diff, 2)}</span>
+      </div>`;
+    };
+
+    // Which side led each axis. There is no winner to orient against, so
+    // this is a plain team-1-vs-team-2 comparison.
+    const a1 = teamAxisMeans(joined, 1);
+    const a2 = teamAxisMeans(joined, 2);
+    const agreement = axisAgreementMap();
+    const gaps = [];
+    for (const [axis, z1] of a1) {
+      if (LUXURY_AXES.has(axis)) continue;
+      if (!a2.has(axis)) continue;
+      gaps.push({ axis, diff: z1 - a2.get(axis) });
+    }
+    gaps.sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff));
+    const axisHtml = gaps.slice(0, 3).map((g) => {
+      const label = AXIS_LABELS[g.axis] || g.axis;
+      const lead = g.diff > 0 ? 1 : 2;
+      const agree = agreement.get(g.axis);
+      const tip = agree
+        ? `Across ${agree.n} decided matches the winner led this axis ${Math.round(agree.agreement * 100)}% of the time.`
+        : 'No corpus agreement figure available for this axis yet.';
+      const width = Math.min(100, Math.abs(g.diff) * 50);
+      return `<div class="vt-balonce-axis-row ${lead === 1 ? 'is-positive' : 'is-negative'}"
+        data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tip)}">
+        <span class="vt-balonce-axis-name">${esc(label)}</span>
+        <span class="vt-balonce-axis-track">
+          <span class="vt-balonce-axis-fill" style="width: ${width.toFixed(1)}%"></span>
+        </span>
+        <span class="vt-balonce-axis-note">${esc(teamPhrase(joined, lead))} led${agree
+          ? ` \u00b7 ${Math.round(agree.agreement * 100)}% typical`
+          : ''}</span>
+      </div>`;
+    }).join('');
+
+    // Per-player would-be VTSR-T moves, biggest swing first.
+    const movers = joined.shadowDeltas
+      .filter((d) => isNum(d.would_delta))
+      .slice()
+      .sort((x, y) => Math.abs(y.would_delta) - Math.abs(x.would_delta))
+      .map((d) => {
+        const cls = d.would_delta > 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative';
+        return `<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+          title="What this player\u2019s VTSR-T would have done had the match been rated. It was not \u2014 their rating is unchanged.">
+          ${playerLinkHtml(d.name, d.steam64)}${d.is_commander
+            ? ' <span class="vt-balonce-cmdr-chip">CMDR</span>'
+            : ''}
+          <span class="${cls} vt-mono">${fmtSigned(d.would_delta, 1)}</span></span>`;
+      }).join('');
+
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--wasgoing">
+        <div class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">How it was going</h6>
+        </div>
+        <div class="vt-balonce-whatif-note">
+          The result was lost, but the whole game was still recorded. This is
+          what the 8-axis composite measured over those
+          ${Math.round((joined.match.duration_sec || 0) / 60)} minutes \u2014
+          measured, never applied.
+        </div>
+        <div class="vt-balonce-perfs">
+          ${sideCopy(1, m1)}
+          ${sideCopy(2, m2)}
+        </div>
+        ${axisHtml ? `<div class="vt-balonce-axes">
+          <div class="vt-balonce-sub">Who was winning each axis</div>
+          ${axisHtml}
+        </div>` : ''}
+        ${movers ? `<div class="vt-balonce-sub">VTSR-T that would have moved</div>
+          <div class="vt-balonce-chiprow">${movers}</div>` : ''}
       </div>`;
   }
 
@@ -1216,12 +1562,23 @@
       });
     }
 
-    body.innerHTML = [
-      zonePrematchHtml(joined),
-      zoneVerdictHtml(joined),
-      zonePlayedHtml(joined),
-      zoneReceiptsHtml(),
-    ].join('');
+    // A cancelled match has a real pre-match read and a real track
+    // record, but no outcome — so the verdict and played-out zones are
+    // replaced by the what-if fork rather than faked.
+    body.innerHTML = (joined.hypothetical
+      ? [
+        zonePrematchHtml(joined),
+        zoneWhatIfHtml(joined),
+        zoneWasGoingHtml(joined),
+        zoneReceiptsHtml(),
+      ]
+      : [
+        zonePrematchHtml(joined),
+        zoneVerdictHtml(joined),
+        zonePlayedHtml(joined),
+        zoneReceiptsHtml(),
+      ]).join('');
+    card.classList.toggle('vt-balonce-hypothetical', !!joined.hypothetical);
     card.classList.remove('d-none');
 
     const eloLink = body.querySelector('[data-vt-balonce-elo-link]');

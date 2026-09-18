@@ -3230,6 +3230,22 @@ Per-match rating deltas, chronological. Powers the (deferred) per-match rating-o
 
 Excluded matches still appear in `history[]` with `match_excluded: true`, an `exclusion_reason` string (`"low_player_count"` / `"short_duration"` / `"cancelled"` / `"empty_lobby"`), and an empty `deltas[]` array. This makes `match_count + matches_excluded_*` reconcile to `len(history)`. The `"cancelled"` reason (v15) fires when `match.winner.decided_by == "cancelled"` — the host attested `GAME_CANCELLED` on the v3 end-of-game dialog (early RE / crash / restart); real combat may have occurred, so the match stays fully visible on the dashboard but never rates.
 
+#### `history[].shadow` — never-applied scoring for cancelled matches
+
+| Field | Type | Meaning |
+|---|---|---|
+| `history[].shadow` | object \| absent | Present ONLY on entries whose `exclusion_reason == "cancelled"` (`SHADOW_EXCLUSION_REASON` in [scripts/elo.py](../scripts/elo.py)) and whose would-be-rated lobby was non-empty. A cancelled game is a real, fully-recorded match whose *result* was lost, so the eight-axis composite is still computed and published — clearly labelled as never applied — to power the Balonce Meter's what-if card. Absent on every other exclusion reason and on every rated match. |
+| `shadow.applied` | bool | Always `false`. Exists so a consumer can assert on it rather than infer from the key name. |
+| `shadow.reason` | string | Echoes `exclusion_reason` (`"cancelled"`). |
+| `shadow.deltas[]` | array | One row per would-be-rated player, same v2.5 row filter as the rated path (campod / low-activity rows omitted). |
+| `shadow.deltas[].name` / `.steam64` / `.is_commander` | string / string \| null / bool | Identity, straight off the leaderboard row. |
+| `shadow.deltas[].before` | float | The rating the player carried INTO this match. Authoritative snapshot — a client reconstructing it by walking prior `deltas[].after` gets the same number, because VTSR-T only moves on rated appearances. |
+| `shadow.deltas[].performance` / `.expected` | float | $P_i$ and $E_i$ exactly as the rated path computes them (same `compute_performance_index()` call, same opponent-reference convention including the v2.8 canonical anchoring). |
+| `shadow.deltas[].would_delta` | float | What `delta` WOULD have been, loss aversion and floor taper included. **Deliberately not named `delta`** so no consumer can read it as a real rating move. |
+| `shadow.deltas[].axis_contributions` | object | Per-axis post-clip z, same shape and semantics as a rated delta's — which is why the dashboard's team-level helpers consume shadow rows unchanged. |
+
+**Rating-inert by construction and by gate.** The scorer receives rating state as plain-dict snapshots, so it cannot advance `thug_elo`, bump `matches_played`, stamp `last_match_dt`, or accumulate the axis / win-history running state. `_investigation/golden_shadow_inert.py` enforces presence + strip + perturb (see `DEVELOPER_GUIDE.md` §13.9.1). No `ELO_SCHEMA_VERSION` bump: nothing re-rates and no rated-match field changed shape.
+
 ### `data/processed/elo_commander_current.json` + `elo_commander_history.json` — VTSR-C v2 (experimental)
 
 Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_version: 2`, separate from `ELO_SCHEMA_VERSION`) right after the canonical VTSR-T pair. **Outcome-pure win/loss commander ELO with a team-strength handicap** — full derivation in [DEVELOPER_GUIDE.md §13.12](../DEVELOPER_GUIDE.md). Corpus-wide, picker-unaware, NOT in the pipeline cache key (both filenames in the `load_cache_index()` skip set). All UI consumers are 404-safe.

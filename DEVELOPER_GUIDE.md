@@ -2251,10 +2251,38 @@ Numeric labels (Tier 1 — Tier 5), no flavor names. Tier 5 spans 350 pts to giv
 
 ### 13.9 Match exclusion + provisional rules
 
-- **Excluded** matches (`player_count < 6` OR `duration_sec < 240`) do not increment `matches_played` and contribute no deltas to ratings. They appear in `elo_history.json` with `match_excluded: true` and an empty `deltas` array so the exclusion counters reconcile.
+- **Excluded** matches (`player_count < 6` OR `duration_sec < 240` OR a host-attested cancellation) do not increment `matches_played` and contribute no deltas to ratings. They appear in `elo_history.json` with `match_excluded: true` and an empty `deltas` array so the exclusion counters reconcile. Cancelled matches additionally carry a never-applied `shadow` block (§13.9.1).
 - **Provisional** badge: rated rows with `matches_played < 10` (`ELO_PROVISIONAL_THRESHOLD`) display a `?` chip. Provisional players ARE rated and ARE shown on the leaderboard (provided they're past `MIN_CAREER_MATCHES = 5`); the chip just signals "rating is still moving fast — interpret with caution".
 - **Leaderboard visibility floor** (`MIN_CAREER_MATCHES = 5`): players with fewer than 5 rated matches in the current scope are hidden from `career_stats[]` and from both leaderboard tables entirely.
 - **Ratings are corpus-wide; the picker filter narrows display only.** A picker filter that narrows to one submitter or one duration band changes which rows appear in the VTSR-T leaderboard but does NOT recompute ratings against the filtered subset — that would change the meaning of every player's rating depending on which filter they happened to be looking at.
+
+#### 13.9.1 Shadow scoring for cancelled matches (display-only)
+
+A host-cancelled game is a real, fully-recorded match whose *result* was lost to a crash — the corpus has one that ran 2h23m with the full proto-v4 telemetry suite. It must never rate (`resolve_match_outcome` found no winner; the kill-feed inference independently returned `unclear`), but the eight-axis composite still measured everything that happened. So `_shadow_score_match()` in [scripts/elo.py](scripts/elo.py) runs the SAME `compute_performance_index()` and the SAME delta arithmetic the rated path uses, and labels the answer as never applied:
+
+```json
+"shadow": {
+  "applied": false,
+  "reason": "cancelled",
+  "deltas": [
+    { "name": "Domakus", "steam64": "...", "is_commander": true,
+      "before": 1685.93, "performance": -0.3669, "expected": 0.2023,
+      "would_delta": -20.51, "axis_contributions": { } }
+  ]
+}
+```
+
+`deltas` on the entry stays `[]`, so `elo_commander.py`'s `match_excluded` skip and every other existing consumer are untouched. The field is called `would_delta`, never `delta`, so no consumer can read it by accident.
+
+**Scope**: `SHADOW_EXCLUSION_REASON = "cancelled"` only. The match-level gate is an if/elif chain testing player count, then duration, then cancellation, so a cancelled match has already cleared both minimums — and a 30-second rage-quit lands in `short_duration` and is correctly scored not at all.
+
+**Read-only by construction.** Every piece of rating state reaches the scorer as a plain-dict SNAPSHOT (the caller passes `dict(thug_elo)`, `dict(matches_played)`, `dict(last_match_dt)`), so a stray write cannot reach `_rating_pass`'s live dicts. That matters because the mutations the rated path performs are precisely what must not happen here: no `thug_elo` advance, no `matches_played` bump (it would shift every later K-factor), no `last_match_dt` stamp (it would shift every later inactivity boost), no `axis_running_*` / `commander_axis_running_*` accumulation, no `win_history` append. The one thing it does write is `canonical_before_out[match_id]`, which is keyed by match id and only ever read back for the match it belongs to, so it cannot reach a rated match's arithmetic.
+
+**Gate**: `_investigation/golden_shadow_inert.py` proves three things — PRESENCE (the block is actually emitted, so the inertness test can't pass vacuously), STRIP (re-run with `SHADOW_EXCLUSION_REASON` disabled; `elo_history` must be byte-identical once `shadow` is removed and every rating must match), and PERTURB (corrupt every shadow value, including flipping `applied` to `true`, and VTSR-C's duel stream must stay byte-identical). Verified across `elo_current.json`, `elo_history.json`, all seven forensic variant pairs, and `elo_commander_history.json`.
+
+**No version bumps.** `elo_current.json` / `elo_history.json` sit in the `load_cache_index()` skip set and regenerate every run, so no `PIPELINE_VERSION` bump is needed; per-match JSON is untouched, so no `match.schema_version`; nothing re-rates, so no `ELO_SCHEMA_VERSION` — the same call the R^W wins ladder made while inert.
+
+Consumer: the Balonce Meter's **How it was going** zone (§13.14).
 
 ### 13.10 File-format reference
 
@@ -2414,7 +2442,9 @@ Under this logistic the legacy raw-sum bands (100 / 300 / 600 ΔΣVTSR) land nea
 3. **How it actually played out** — per-team mean performance vs expected, the top axis gaps (winner − loser) annotated with corpus sign-agreement from `validation_summary.latest_detail.axis_outcome`, the econ composite framed as *recorded, not scored* ($\alpha_c = 1$), and commander rating movement. Luxury axes are excluded per the v2.10 copy contract.
 4. **Does this thing work** — the receipts: a reliability strip computed client-side by bucketing **all** stored duel probabilities (incl. F9 externals, with the provider credit) and counting how often that favorite won, each bar carrying a notch at the model's own claim, plus a `vtsr_c_accuracy` sparkline. On the current corpus the curve is monotonic — 50–55% → 57% (n=171), 55–65% → 62% (n=238), 65–75% → 73% (n=152), 75%+ → 88% (n=64).
 
-**Degradation ladder** (all four verified headless against the real corpus): match absent from `elo_history` or flagged `match_excluded` → card hidden; determined outcome with a duel row → all four zones; rated but **undetermined** (no duel row) → still renders, with VTSR-C **reconstructed** from each commander's last prior duel `after` and an `Outcome unrecorded` chip; `elo_commander_history.json` 404 → thug-only meter with the accuracy figure omitted.
+**Degradation ladder** (each rung verified headless against the real corpus): match absent from `elo_history` → card hidden; determined outcome with a duel row → all four zones; rated but **undetermined** (no duel row) → still renders, with VTSR-C **reconstructed** from each commander's last prior duel `after` and an `Outcome unrecorded` chip; `match_excluded` with `exclusion_reason == "cancelled"` → the **what-if** rungs below; any other `exclusion_reason` (`low_player_count` / `short_duration`) → card hidden; `elo_commander_history.json` 404 → thug-only meter with the accuracy figure omitted.
+
+**The cancelled-match what-if.** A host-cancelled game is a real match whose result was lost, and nothing about the *pre-match* state is affected by the crash — so the card renders rather than hiding. Scope is deliberately `cancelled` and nothing else: the match-level gate in `scripts/elo.py` is an if/elif testing player count, then duration, then cancellation, so `cancelled` already implies the lobby and length minimums were met and a 30-second rage-quit lands in `short_duration` instead. Zone 1 is unchanged and fully real, gaining a `Not rated · cancelled` chip plus a dashed `vt-balonce-hypothetical` treatment so it can never be mistaken for a scored match. The verdict zone is replaced by **What was at stake** — both branches per commander (`had they won 1468 → 1482 +13.8` / `had they lost 1468 → 1462 −6.2`), with **no** `Model called it`, no `Upset` and no surprise-in-bits, because there is no outcome to be surprised by. Ratings come from the same reconstruction the undetermined rung uses (`reconstructVtsrC`, plus a `reconstructVtsrT` sibling for the thug handicap — exact, because VTSR-T only moves when a player appears in a rated match; the inactivity mechanism boosts K, not the rating), and K from `cmdrKFactor()` reading `k_base` / `k_floor` / `provisional_prior` off the emitted JSON. **How it was going** then renders from the never-applied `shadow` block (§13.13.1): per-team played-vs-expected, which side led each axis, and the per-player VTSR-T that *would* have moved. Because shadow rows carry the same `{before, performance, expected, axis_contributions}` shape as real deltas, `teamMeans()` / `teamAxisMeans()` consume them unchanged. Absent a shadow block the zone self-omits and the card still shows zones 1, 2 and 4.
 
 **Conventions.** Shared CSS is the `.vt-balonce-*` block in `css/vtstats-theme.css` (loaded by both pages); the legacy `.vt-tools-balonce-played-meter-*` rules in `css/tools.css` are retained deliberately as the Tools card's outer wrapper, following the `.vt-active-game-modal-*` class-stability precedent. The module owns tooltip init/disposal across the whole `#section-balonce` card (the header icon sits outside `#balonce-body` and `js/app.js` has no global tooltip initializer). `js/match-elo.js` delegates its `elo_commander_history.json` fetch to `ensureCmdrHistoryLoaded()` so both consumers share one request behind the `window.__vtCmdrEloHistory` sentinel.
 
