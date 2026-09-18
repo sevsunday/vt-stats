@@ -424,6 +424,26 @@
             <div class="row g-3" id="faction-content"></div>
           </div>
         </div>
+        <!-- Balonce Meter (per-match). The community name for a lopsided
+             lobby is "getting PLAYED", so this is the balance gauge plus
+             the prediction it drives: the pre-match read, whether the
+             model called the winner, how the match actually went, and the
+             model's own track record. Rendered by
+             js/balonce-meter.js::renderMatchSection() from committed JSON
+             (elo_history + elo_commander_history + validation_summary) --
+             match-global, ALWAYS unfiltered (highlights passthrough
+             contract). Hidden when the match was not rated. -->
+        <div class="card mb-4 d-none" id="section-balonce">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Balonce Meter</h5>
+              <i class="bi bi-info-circle vt-col-info"
+                 data-bs-toggle="tooltip" data-bs-placement="bottom"
+                 title="How balanced this lobby was before it played, who the rating system favored, and how it actually turned out. The prediction is the same commander-duel formula the ratings themselves use."></i>
+            </div>
+          </div>
+          <div class="card-body" id="balonce-body"></div>
+        </div>
         <div class="card mb-4 vt-highlights-card d-none" id="section-highlights">
           <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0"><i class="bi bi-trophy-fill me-2"></i>Match Highlights</h5>

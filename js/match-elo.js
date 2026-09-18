@@ -587,7 +587,15 @@
     });
   }
 
+  // Delegates to js/balonce-meter.js so the Elo tab and the Balonce Meter
+  // section share ONE request for elo_commander_history.json (same
+  // `window.__vtCmdrEloHistory` sentinel: undefined = untried, null =
+  // unavailable). Local fallback keeps this module standalone if the
+  // shared script is ever absent.
   function ensureCommanderHistoryLoaded() {
+    if (window.VTBalonce && window.VTBalonce.ensureCmdrHistoryLoaded) {
+      return window.VTBalonce.ensureCmdrHistoryLoaded();
+    }
     if (window.__vtCmdrEloHistory !== undefined) {
       return Promise.resolve(window.__vtCmdrEloHistory);
     }

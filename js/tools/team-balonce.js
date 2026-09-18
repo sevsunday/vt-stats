@@ -843,8 +843,10 @@
       ? `Team ${fav.team} favored <span class="vt-balonce-prob vt-mono">${Math.round(fav.prob * 100)}%</span>`
       : 'Dead even';
 
+    // Compact status: the headline row above already carries the band
+    // name and the probability.
     const meter = B
-      ? B.meterHtml({ probT1: state.probT1 })
+      ? B.meterHtml({ probT1: state.probT1, compact: true })
       : '';
 
     return `

@@ -204,18 +204,24 @@
    * played, matching the legacy delta-VTSR orientation), plus a
    * three-slot footer.
    *
-   * @param {{probT1: number, statusText?: string, leftLabel?: string,
-   *          rightLabel?: string, tip?: string}} opts
+   * `compact` drops the band name and probability from the in-track
+   * status line — use it when the caller already shows both above the
+   * gauge, so the same three facts are not printed three times.
+   *
+   * @param {{probT1: number, statusText?: string, compact?: boolean,
+   *          leftLabel?: string, rightLabel?: string, tip?: string}} opts
    */
   function meterHtml(opts) {
     const o = opts || {};
     const p = isNum(o.probT1) ? Math.max(0, Math.min(1, o.probT1)) : 0.5;
     const fav = favoriteOf(p);
     const pos = (p * 100).toFixed(2);
-    const status = o.statusText != null ? o.statusText : defaultStatusText(p);
+    const status = o.statusText != null
+      ? o.statusText
+      : (o.compact ? shortStatusText(p) : defaultStatusText(p));
     const tip = o.tip ? ` title="${esc(o.tip)}" data-bs-toggle="tooltip" data-bs-placement="top"` : '';
-    const leftLabel = o.leftLabel != null ? o.leftLabel : 'Team 1 played';
-    const rightLabel = o.rightLabel != null ? o.rightLabel : 'Team 2 played';
+    const leftLabel = o.leftLabel != null ? o.leftLabel : 'Team 1 gets played';
+    const rightLabel = o.rightLabel != null ? o.rightLabel : 'Team 2 gets played';
     return `
       <div class="vt-balonce-meter"${tip}>
         <div class="vt-balonce-meter-track">
@@ -243,8 +249,21 @@
       return `${fav.band.label} \u00b7 even matchup`;
     }
     const under = fav.team === 1 ? 2 : 1;
-    const verb = fav.band.key === 'yellow' ? 'at a slight disadvantage' : 'about to get played';
-    return `${fav.band.label} \u2014 Team ${under} ${verb} \u00b7 Team ${fav.team} favored ${fmtPct(fav.prob)}`;
+    return `${fav.band.label} \u2014 Team ${under} ${disadvantageVerb(fav.band)} \u00b7 Team ${fav.team} favored ${fmtPct(fav.prob)}`;
+  }
+
+  /** Just the disadvantaged-side callout, for the compact meter. */
+  function shortStatusText(probT1) {
+    const fav = favoriteOf(probT1);
+    if (!fav.team || fav.prob < DISADVANTAGE_PROB) return 'Evenly matched';
+    const under = fav.team === 1 ? 2 : 1;
+    return `Team ${under} ${disadvantageVerb(fav.band)}`;
+  }
+
+  function disadvantageVerb(band) {
+    if (band.key === 'yellow') return 'at a slight disadvantage';
+    if (band.key === 'red') return 'is getting PLAYED';
+    return 'about to get played';
   }
 
   // ---------------------------------------------------------------- Shared loader
@@ -340,9 +359,12 @@
   }
 
   function destroyMatchSection() {
-    const body = document.getElementById('balonce-body');
-    if (body) {
-      body.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+    // Scoped to the whole CARD, not just the body: the header's info icon
+    // is static markup outside #balonce-body and app.js has no global
+    // tooltip initializer, so this module owns both.
+    const card = sectionEl();
+    if (card) {
+      card.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
         if (window.bootstrap && bootstrap.Tooltip) {
           const inst = bootstrap.Tooltip.getInstance(node);
           if (inst) inst.dispose();
@@ -354,9 +376,9 @@
   }
 
   function initSectionTooltips() {
-    const body = document.getElementById('balonce-body');
-    if (!body || !window.bootstrap || !bootstrap.Tooltip) return;
-    body.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+    const card = sectionEl();
+    if (!card || !window.bootstrap || !bootstrap.Tooltip) return;
+    card.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
       const existing = bootstrap.Tooltip.getInstance(node);
       if (existing) existing.dispose();
       new bootstrap.Tooltip(node, { html: node.hasAttribute('data-bs-html') });
@@ -663,7 +685,7 @@
           <span class="vt-balonce-band vt-balonce-band--${fav.band.key}">${esc(fav.band.label)}</span>
         </div>
         <div class="vt-balonce-headline">${headline}</div>
-        ${meterHtml({ probT1: joined.probT1 })}
+        ${meterHtml({ probT1: joined.probT1, compact: true })}
         <div class="vt-balonce-parts">${parts.join('')}</div>
         <div class="vt-balonce-teams">
           ${teamColumnHtml(joined, 1)}
@@ -1132,6 +1154,7 @@
     favoriteOf,
     meterHtml,
     defaultStatusText,
+    shortStatusText,
     fmtPct,
     cmdrConstants,
     trackRecord,

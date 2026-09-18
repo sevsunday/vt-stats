@@ -7533,8 +7533,11 @@ html.vt-cursor-active * {
 }
 
 .vt-balonce-axis-row {
+    /* Fixed label column so the bar keeps the room on a wide card —
+       the fill is a true fraction of the maximum possible axis gap, so
+       an over-long track would read as "tiny difference". */
+    grid-template-columns: minmax(90px, 9rem) 1fr minmax(120px, 11rem);
     display: grid;
-    grid-template-columns: minmax(90px, 1fr) minmax(80px, 1.6fr) minmax(120px, auto);
     gap: 0.5rem;
     align-items: center;
     font-size: 0.74rem;
