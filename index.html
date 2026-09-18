@@ -2128,6 +2128,12 @@
        charts.js globals (activeCharts / glassTooltipConfig / getThemeColors)
        so it loads after it, before app.js. -->
   <script src="js/match-elo.js"></script>
+  <!-- Balonce Meter: shared win-probability model (VTSR-C commander gap +
+       thug VTSR-T handicap) + the per-match #section-balonce renderer.
+       Also loaded by tools/index.html, where Team Balonce renders the same
+       gauge. Owns the shared 404-safe elo_commander_history loader that
+       js/match-elo.js delegates to, so it loads before app.js. -->
+  <script src="js/balonce-meter.js"></script>
   <script src="js/positioning-charts.js"></script>
   <!-- All Matches aggregator: pure summation over a contributions dict.
        Documented exception to the "no aggregation in JS" rule so the All

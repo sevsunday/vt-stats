@@ -1,0 +1,1142 @@
+/**
+ * VT Stats — Balonce Meter (shared module).
+ *
+ * The community calls a lopsided lobby "getting PLAYED", so the balance
+ * gauge is the Balonce Meter (misspell is the in-joke, same as Team
+ * Balonce). This module owns the ONE formula both surfaces render:
+ *
+ *   P(Team 1 wins) = 1 / (1 + 10^(-((Rc1 - Rc2) + lambda*(T1 - T2)) / scale))
+ *
+ *     Rc = commander VTSR-C   (anchor 1500 when unrated)
+ *     T  = mean THUG VTSR-T per side (commanders excluded)
+ *     lambda / scale read from the emitted JSON, never hardcoded here
+ *
+ * This is the VTSR-C expected-score function verbatim (see
+ * `scripts/elo_commander.py::expected_score` + `_team_thug_means`) — the
+ * one the validator scores at 66.2% over 625 duels. Both surfaces run it
+ * so the accuracy footer belongs to the formula actually on screen.
+ *
+ * Commander VTSR-T is DISPLAYED (each commander carries two ratings) but
+ * deliberately NOT in the math: VTSR-C is outcome-pure, so a commander's
+ * own fighting is already priced into the wins it produced. Adding their
+ * VTSR-T would double-count it. The promotion path is a pre-registered
+ * validator ablation, not an assumption.
+ *
+ * Status bands key off the FAVORITE's win probability:
+ *     50-55%  Good game
+ *     55-65%  Slight edge
+ *     65-80%  PLAYEDathon
+ *     80%+    PLAYEDalocalypse
+ *
+ * Display-only, end to end. No pipeline changes, no schema bumps, no new
+ * emissions — every number here is read from committed JSON
+ * (`elo_history.json`, `elo_commander_history.json`,
+ * `elo_commander_current.json` via the Tools resolver,
+ * `validation_summary.json`).
+ *
+ * Exposes:
+ *   window.VTBalonce = {
+ *     // pure helpers (both surfaces)
+ *     ANCHOR, computeWinProb, bandFor, meterHtml, favoriteOf, fmtPct,
+ *     // shared 404-safe loader (js/match-elo.js delegates to it)
+ *     ensureCmdrHistoryLoaded,
+ *     // dashboard per-match section
+ *     renderMatchSection, destroyMatchSection,
+ *   }
+ */
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------- Constants
+
+  /** Rating every commander debuts at (mirrors CMDR_ELO_ANCHOR). */
+  const ANCHOR = 1500;
+
+  /**
+   * Fallbacks ONLY — the live values come from the emitted JSON's
+   * `lambda_team_handicap` / `logistic_scale`. They exist so a 404 on the
+   * commander files still yields a sane thug-only meter instead of NaN.
+   */
+  const DEFAULT_LAMBDA = 1.0;
+  const DEFAULT_SCALE = 400;
+
+  /**
+   * Band edges on the FAVORITE's win probability. For calibration
+   * comfort: the legacy raw-sum bands (100 / 300 / 600 delta-VTSR) land
+   * near 53% / 60% / 68% under this logistic, so these thresholds are a
+   * slightly stricter fair-game line rather than a pure relabel.
+   */
+  const BANDS = [
+    { key: 'green', max: 0.55, label: 'Good game' },
+    { key: 'yellow', max: 0.65, label: 'Slight edge' },
+    { key: 'orange', max: 0.80, label: 'PLAYEDathon' },
+    { key: 'red', max: Infinity, label: 'PLAYEDalocalypse' },
+  ];
+
+  /** Favorite probability at or above which a side is called disadvantaged. */
+  const DISADVANTAGE_PROB = 0.55;
+
+  /**
+   * v2.10 luxury axes: measured and visualized, never named as a rating
+   * cause. Same contract as LUXURY_AXES in js/match-elo.js and
+   * COACHING_EXCLUDE in js/player.js — copy the exclude set, not the z.
+   */
+  const LUXURY_AXES = new Set(['snipe_bonus', 'target_lock_pct']);
+
+  /** Reliability-strip buckets over the favorite's stored probability. */
+  const RELIABILITY_BUCKETS = [
+    { lo: 0.50, hi: 0.55, label: '50-55%' },
+    { lo: 0.55, hi: 0.65, label: '55-65%' },
+    { lo: 0.65, hi: 0.75, label: '65-75%' },
+    { lo: 0.75, hi: 1.01, label: '75%+' },
+  ];
+
+  /** Minimum duels in a reliability bucket before we draw a bar. */
+  const RELIABILITY_MIN_N = 5;
+
+  const CMDR_HISTORY_URL_CANDIDATES = [
+    'data/processed/elo_commander_history.json',
+    '../data/processed/elo_commander_history.json',
+  ];
+
+  const AXIS_LABELS = {
+    net_damage_share: 'net damage',
+    thug_kill_rate: 'kill rate',
+    thug_accuracy: 'accuracy',
+    thug_efficiency: 'fight efficiency',
+    pve_share: 'PvE work',
+    mobility: 'mobility',
+    snipe_bonus: 'snipes',
+    target_lock_pct: 'T-key usage',
+  };
+
+  // ---------------------------------------------------------------- Helpers
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function isNum(v) {
+    return typeof v === 'number' && isFinite(v);
+  }
+
+  function fmtPct(p) {
+    return `${Math.round((p || 0) * 100)}%`;
+  }
+
+  function fmtSigned(n, digits) {
+    const v = n || 0;
+    const d = digits == null ? 0 : digits;
+    return (v > 0 ? '+' : v < 0 ? '\u2212' : '') + Math.abs(v).toFixed(d);
+  }
+
+  function playerLinkHtml(name, steam64) {
+    if (typeof window.vtPlayerLinkHtml === 'function') {
+      return window.vtPlayerLinkHtml(name, steam64);
+    }
+    return `<span class="vt-player-link-fallback">${esc(name)}</span>`;
+  }
+
+  /** Slot convention: 1-5 = team 1, 6-10 = team 2. */
+  function slotTeam(slot) {
+    const s = parseInt(slot, 10);
+    if (!isFinite(s)) return null;
+    if (s >= 1 && s <= 5) return 1;
+    if (s >= 6 && s <= 10) return 2;
+    return null;
+  }
+
+  // ---------------------------------------------------------------- The model
+
+  /**
+   * The VTSR-C expected score, team-1 perspective.
+   *
+   * Null-safe by design so every degradation path still renders:
+   *   - missing commander rating  -> ANCHOR (that side debuts at 1500)
+   *   - either thug mean missing  -> handicap term drops to 0, exactly
+   *                                  like `expected_score()` does when a
+   *                                  side has no rated thug rows
+   *
+   * @param {{rc1?: number, rc2?: number, t1Mean?: number, t2Mean?: number,
+   *          lambda?: number, scale?: number}} opts
+   * @returns {number} P(Team 1 wins), in (0, 1)
+   */
+  function computeWinProb(opts) {
+    const o = opts || {};
+    const scale = isNum(o.scale) && o.scale > 0 ? o.scale : DEFAULT_SCALE;
+    const lambda = isNum(o.lambda) ? o.lambda : DEFAULT_LAMBDA;
+    const rc1 = isNum(o.rc1) ? o.rc1 : ANCHOR;
+    const rc2 = isNum(o.rc2) ? o.rc2 : ANCHOR;
+    const handicap = (isNum(o.t1Mean) && isNum(o.t2Mean))
+      ? lambda * (o.t1Mean - o.t2Mean)
+      : 0;
+    const diff = (rc1 - rc2) + handicap;
+    return 1 / (1 + Math.pow(10, -diff / scale));
+  }
+
+  /** Band descriptor for a FAVORITE probability (always >= 0.5). */
+  function bandFor(favProb) {
+    const p = isNum(favProb) ? Math.max(0.5, Math.min(1, favProb)) : 0.5;
+    for (const band of BANDS) {
+      if (p < band.max) return band;
+    }
+    return BANDS[BANDS.length - 1];
+  }
+
+  /**
+   * Resolve which side is favored from a team-1 probability.
+   * @returns {{team: 1|2|null, prob: number, band: object}}
+   */
+  function favoriteOf(probT1) {
+    const p = isNum(probT1) ? probT1 : 0.5;
+    const favTeam = Math.abs(p - 0.5) < 1e-9 ? null : (p > 0.5 ? 1 : 2);
+    const favProb = Math.max(p, 1 - p);
+    return { team: favTeam, prob: favProb, band: bandFor(favProb) };
+  }
+
+  // ---------------------------------------------------------------- Meter markup
+
+  /**
+   * The shared gauge: gradient track, centre tick, chevron at
+   * `probT1 * 100%` (so chevron-right == Team 1 favored == Team 2 getting
+   * played, matching the legacy delta-VTSR orientation), plus a
+   * three-slot footer.
+   *
+   * @param {{probT1: number, statusText?: string, leftLabel?: string,
+   *          rightLabel?: string, tip?: string}} opts
+   */
+  function meterHtml(opts) {
+    const o = opts || {};
+    const p = isNum(o.probT1) ? Math.max(0, Math.min(1, o.probT1)) : 0.5;
+    const fav = favoriteOf(p);
+    const pos = (p * 100).toFixed(2);
+    const status = o.statusText != null ? o.statusText : defaultStatusText(p);
+    const tip = o.tip ? ` title="${esc(o.tip)}" data-bs-toggle="tooltip" data-bs-placement="top"` : '';
+    const leftLabel = o.leftLabel != null ? o.leftLabel : 'Team 1 played';
+    const rightLabel = o.rightLabel != null ? o.rightLabel : 'Team 2 played';
+    return `
+      <div class="vt-balonce-meter"${tip}>
+        <div class="vt-balonce-meter-track">
+          <span class="vt-balonce-meter-tick" aria-hidden="true"></span>
+          <span class="vt-balonce-meter-chevron" style="left: ${pos}%"
+                role="img" aria-label="${esc(status)}">
+            <i class="bi bi-caret-up-fill" aria-hidden="true"></i>
+          </span>
+        </div>
+        <div class="vt-balonce-meter-footer">
+          <span class="vt-balonce-meter-end">${esc(leftLabel)}</span>
+          <span class="vt-balonce-meter-status vt-balonce-meter-status--${fav.band.key}">${esc(status)}</span>
+          <span class="vt-balonce-meter-end">${esc(rightLabel)}</span>
+        </div>
+      </div>`;
+  }
+
+  /**
+   * `PLAYEDathon - Team 1 about to get played - Team 2 favored 71%`.
+   * Names the DISADVANTAGED side, mirroring the legacy copy contract.
+   */
+  function defaultStatusText(probT1) {
+    const fav = favoriteOf(probT1);
+    if (!fav.team || fav.prob < DISADVANTAGE_PROB) {
+      return `${fav.band.label} \u00b7 even matchup`;
+    }
+    const under = fav.team === 1 ? 2 : 1;
+    const verb = fav.band.key === 'yellow' ? 'at a slight disadvantage' : 'about to get played';
+    return `${fav.band.label} \u2014 Team ${under} ${verb} \u00b7 Team ${fav.team} favored ${fmtPct(fav.prob)}`;
+  }
+
+  // ---------------------------------------------------------------- Shared loader
+
+  let _cmdrHistPromise = null;
+
+  /**
+   * 404-safe single-flight fetch of `elo_commander_history.json` into the
+   * shared `window.__vtCmdrEloHistory` sentinel (`undefined` = not tried,
+   * `null` = tried and unavailable). Factored out of js/match-elo.js,
+   * which now delegates here so both consumers share one request.
+   */
+  function ensureCmdrHistoryLoaded() {
+    if (window.__vtCmdrEloHistory !== undefined) {
+      return Promise.resolve(window.__vtCmdrEloHistory);
+    }
+    if (!_cmdrHistPromise) {
+      _cmdrHistPromise = (async () => {
+        for (const url of CMDR_HISTORY_URL_CANDIDATES) {
+          try {
+            const res = await fetch(url, { cache: 'no-store' });
+            if (res && res.ok) return await res.json();
+          } catch (_) { /* try next candidate */ }
+        }
+        return null;
+      })().then((json) => {
+        window.__vtCmdrEloHistory = json;
+        return json;
+      });
+    }
+    return _cmdrHistPromise;
+  }
+
+  /** Model constants as emitted by elo_commander.py (never hardcoded). */
+  function cmdrConstants(source) {
+    const src = source || window.__vtCmdrEloHistory || null;
+    return {
+      lambda: (src && isNum(src.lambda_team_handicap)) ? src.lambda_team_handicap : DEFAULT_LAMBDA,
+      scale: (src && isNum(src.logistic_scale)) ? src.logistic_scale : DEFAULT_SCALE,
+      anchor: (src && isNum(src.anchor)) ? src.anchor : ANCHOR,
+    };
+  }
+
+  // ---------------------------------------------------------------- Track record
+
+  /**
+   * Corpus-wide VTSR-C prediction accuracy from the committed validator
+   * summary. Returns null when the file is absent or pre-dates the
+   * VTSR-C section, so every consumer can omit the claim rather than
+   * invent one.
+   */
+  function trackRecord() {
+    const v = window.__vtValidation;
+    const latest = v && v.latest;
+    if (!latest || !isNum(latest.vtsr_c_accuracy) || !isNum(latest.vtsr_c_n)) return null;
+    return {
+      accuracy: latest.vtsr_c_accuracy,
+      n: latest.vtsr_c_n,
+      logLoss: isNum(latest.vtsr_c_log_loss) ? latest.vtsr_c_log_loss : null,
+    };
+  }
+
+  /** Per-axis corpus sign-agreement (how often the winner led that axis). */
+  function axisAgreementMap() {
+    const v = window.__vtValidation;
+    const block = v && v.latest_detail && v.latest_detail.axis_outcome;
+    const out = new Map();
+    if (!block || !block.available || !Array.isArray(block.axes)) return out;
+    for (const row of block.axes) {
+      if (row && row.axis && isNum(row.sign_agreement)) {
+        out.set(row.axis, { agreement: row.sign_agreement, n: row.n });
+      }
+    }
+    return out;
+  }
+
+  // ================================================================
+  //  Dashboard per-match section
+  // ================================================================
+
+  // Match-global, ALWAYS unfiltered (highlights passthrough contract):
+  // every read below comes off `currentData`, never the filtered view.
+
+  let _lastMatchId = null;
+
+  function sectionEl() {
+    return document.getElementById('section-balonce');
+  }
+
+  function hideSection() {
+    const el = sectionEl();
+    if (el) el.classList.add('d-none');
+  }
+
+  function destroyMatchSection() {
+    const body = document.getElementById('balonce-body');
+    if (body) {
+      body.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+        if (window.bootstrap && bootstrap.Tooltip) {
+          const inst = bootstrap.Tooltip.getInstance(node);
+          if (inst) inst.dispose();
+        }
+      });
+    }
+    hideSection();
+    _lastMatchId = null;
+  }
+
+  function initSectionTooltips() {
+    const body = document.getElementById('balonce-body');
+    if (!body || !window.bootstrap || !bootstrap.Tooltip) return;
+    body.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+      const existing = bootstrap.Tooltip.getInstance(node);
+      if (existing) existing.dispose();
+      new bootstrap.Tooltip(node, { html: node.hasAttribute('data-bs-html') });
+    });
+  }
+
+  // ---- Data join ---------------------------------------------------
+
+  function eloHistory() {
+    if (typeof window.vtGetActiveEloHistory === 'function') {
+      return window.vtGetActiveEloHistory();
+    }
+    return window.__vtEloHistory || null;
+  }
+
+  function findDuel(matchId) {
+    const hist = window.__vtCmdrEloHistory;
+    if (!hist || !Array.isArray(hist.duels) || !matchId) return null;
+    return hist.duels.find((d) => d.match_id === matchId) || null;
+  }
+
+  /**
+   * Reconstruct a commander's pre-match VTSR-C by walking the duel log
+   * for their last duel strictly before this match's date. Used on
+   * matches with no duel row of their own (undetermined outcome), where
+   * the pre-match read is still meaningful even though nothing was
+   * scored.
+   */
+  function reconstructVtsrC(steam64, beforeDate) {
+    const hist = window.__vtCmdrEloHistory;
+    if (!hist || !Array.isArray(hist.duels) || !steam64) return null;
+    const sid = String(steam64);
+    const cutoff = beforeDate ? String(beforeDate) : '';
+    let best = null;
+    let bestDate = '';
+    for (const duel of hist.duels) {
+      const date = String(duel.date || '');
+      if (cutoff && date >= cutoff) continue;
+      for (const side of ['1', '2']) {
+        const c = duel.commanders && duel.commanders[side];
+        if (!c || String(c.steam64 || '') !== sid) continue;
+        if (!isNum(c.after)) continue;
+        if (best === null || date >= bestDate) {
+          best = c.after;
+          bestDate = date;
+        }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Fold the match into the shape every zone reads. Returns
+   * `{available: false}` when there is nothing honest to show.
+   */
+  function joinMatch(currentData) {
+    const match = (currentData && currentData.match) || {};
+    const matchId = match.id || null;
+    const lobby = (currentData && currentData.leaderboard) || [];
+    if (!matchId || !lobby.length) return { available: false };
+
+    const hist = eloHistory();
+    if (!hist || !Array.isArray(hist.history)) return { available: false };
+    const entry = hist.history.find((h) => h.match_id === matchId);
+    // Unrated / excluded / cancelled matches have no pre-match read to
+    // show: the section hides rather than inventing one.
+    if (!entry || entry.match_excluded || !(entry.deltas || []).length) {
+      return { available: false };
+    }
+
+    // Leaderboard join indexes (steam64 first, name fallback — mirrors
+    // the pipeline's own _team_thug_means join order).
+    const bySteam = new Map();
+    const byName = new Map();
+    for (const row of lobby) {
+      if (row.steam64) bySteam.set(String(row.steam64), row);
+      if (row.name) byName.set(String(row.name).toLowerCase(), row);
+    }
+    const rowFor = (d) => {
+      const sid = d.steam64 ? String(d.steam64) : '';
+      return (sid && bySteam.get(sid))
+        || (d.name && byName.get(String(d.name).toLowerCase()))
+        || null;
+    };
+
+    // Commanders: leaderboard is_commander, team_leaders as fallback.
+    const commanders = { 1: null, 2: null };
+    for (const row of lobby) {
+      if (!row.is_commander) continue;
+      const team = slotTeam(row.slot);
+      if (team && !commanders[team]) commanders[team] = row;
+    }
+    if (!commanders[1] || !commanders[2]) {
+      const leaders = match.team_leaders || {};
+      for (const key of ['1', '2']) {
+        const team = parseInt(key, 10);
+        if (commanders[team]) continue;
+        const leader = leaders[key];
+        const name = (leader && leader.name) ? leader.name : leader;
+        if (typeof name === 'string') {
+          const row = byName.get(name.toLowerCase());
+          if (row) commanders[team] = row;
+        }
+      }
+    }
+
+    const duel = findDuel(matchId);
+    const consts = cmdrConstants();
+
+    // Thug means: the duel row already carries the pipeline's measured
+    // values (zero leakage, computed from deltas' `before`). Without a
+    // duel we recompute them the same way.
+    let t1Mean = null;
+    let t2Mean = null;
+    if (duel && duel.team_handicap) {
+      t1Mean = isNum(duel.team_handicap.t1_thug_mean) ? duel.team_handicap.t1_thug_mean : null;
+      t2Mean = isNum(duel.team_handicap.t2_thug_mean) ? duel.team_handicap.t2_thug_mean : null;
+    }
+    const perTeam = { 1: [], 2: [] };
+    for (const d of (entry.deltas || [])) {
+      const row = rowFor(d);
+      if (!row) continue;
+      const team = slotTeam(row.slot);
+      if (!team) continue;
+      perTeam[team].push({ delta: d, row });
+    }
+    if (t1Mean == null || t2Mean == null) {
+      const meanOf = (team) => {
+        const vals = perTeam[team]
+          .filter((x) => !x.row.is_commander && isNum(x.delta.before))
+          .map((x) => x.delta.before);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      };
+      if (t1Mean == null) t1Mean = meanOf(1);
+      if (t2Mean == null) t2Mean = meanOf(2);
+    }
+
+    // Commander VTSR-C before the match.
+    const cmdrBefore = { 1: null, 2: null };
+    const cmdrAfter = { 1: null, 2: null };
+    if (duel && duel.commanders) {
+      for (const side of [1, 2]) {
+        const c = duel.commanders[String(side)];
+        if (c) {
+          cmdrBefore[side] = isNum(c.before) ? c.before : null;
+          cmdrAfter[side] = isNum(c.after) ? c.after : null;
+        }
+      }
+    } else {
+      for (const side of [1, 2]) {
+        const row = commanders[side];
+        if (row && row.steam64) {
+          cmdrBefore[side] = reconstructVtsrC(row.steam64, match.date);
+        }
+      }
+    }
+
+    const probT1 = computeWinProb({
+      rc1: cmdrBefore[1],
+      rc2: cmdrBefore[2],
+      t1Mean, t2Mean,
+      lambda: consts.lambda,
+      scale: consts.scale,
+    });
+
+    // Commander VTSR-T (display only — never in the probability).
+    const cmdrThugElo = { 1: null, 2: null };
+    for (const side of [1, 2]) {
+      const row = commanders[side];
+      if (!row) continue;
+      const hit = (entry.deltas || []).find((d) => {
+        const sid = d.steam64 ? String(d.steam64) : '';
+        return (sid && row.steam64 && sid === String(row.steam64))
+          || (d.name && row.name && String(d.name).toLowerCase() === String(row.name).toLowerCase());
+      });
+      if (hit && isNum(hit.before)) cmdrThugElo[side] = hit.before;
+    }
+
+    const winner = match.winner || {};
+    const winnerTeam = (winner.team === 1 || winner.team === 2) ? winner.team : null;
+    const isDraw = winner.decided_by === 'draw';
+
+    return {
+      available: true,
+      matchId,
+      match,
+      entry,
+      duel,
+      consts,
+      commanders,
+      cmdrBefore,
+      cmdrAfter,
+      cmdrThugElo,
+      t1Mean,
+      t2Mean,
+      probT1,
+      perTeam,
+      winner,
+      winnerTeam,
+      isDraw,
+      hasCmdrHistory: window.__vtCmdrEloHistory != null,
+    };
+  }
+
+  // ---- Zone 1: pre-match -------------------------------------------
+
+  function teamColumnHtml(joined, side) {
+    const row = joined.commanders[side];
+    const before = joined.cmdrBefore[side];
+    const thug = joined.cmdrThugElo[side];
+    const thugMean = side === 1 ? joined.t1Mean : joined.t2Mean;
+    const factionName = ((joined.match.team_factions || {})[String(side)] || {}).name;
+    const badgeCls = side === 1 ? 'badge-f1' : 'badge-f2';
+
+    const cmdrName = row
+      ? playerLinkHtml(row.name, row.steam64)
+      : '<span class="text-muted">No commander identified</span>';
+
+    // Both ratings shown side by side: VTSR-C is the one in the model,
+    // VTSR-T is the commander's own thug rating (display only).
+    const ratingBits = [];
+    if (isNum(before)) {
+      ratingBits.push(`<span class="vt-balonce-rating vt-mono" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Commander rating (VTSR-C) going into this match. This is the term the prediction uses.">VTSR-C ${Math.round(before)}</span>`);
+    } else {
+      ratingBits.push(`<span class="vt-balonce-rating vt-mono is-muted" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="No rated commander games before this match, so the model debuts them at the ${ANCHOR} anchor.">VTSR-C ${ANCHOR}*</span>`);
+    }
+    if (isNum(thug)) {
+      ratingBits.push(`<span class="vt-balonce-rating vt-mono is-secondary" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="This commander\u2019s own thug rating (VTSR-T). Shown for context \u2014 it is not part of the prediction, because VTSR-C already prices in everything that produced their wins.">T ${Math.round(thug)}</span>`);
+    }
+
+    const thugLine = isNum(thugMean)
+      ? `<span class="vt-mono">${Math.round(thugMean)}</span> avg VTSR-T`
+      : '<span class="text-muted">no rated thugs</span>';
+
+    return `
+      <div class="vt-balonce-team" data-team="${side}">
+        <div class="vt-balonce-team-head">
+          <span class="badge ${badgeCls}">${side}</span>
+          <span class="vt-balonce-team-name">${esc(factionName || `Team ${side}`)}</span>
+        </div>
+        <div class="vt-balonce-team-cmdr">
+          <span class="vt-balonce-cmdr-chip">CMDR</span>
+          ${cmdrName}
+        </div>
+        <div class="vt-balonce-team-ratings">${ratingBits.join('')}</div>
+        <div class="vt-balonce-team-thugs" data-bs-toggle="tooltip" data-bs-placement="top"
+             title="Mean pre-match VTSR-T of this side\u2019s rated thugs (the commander is excluded). This is the handicap term.">
+          <i class="bi bi-people-fill me-1" aria-hidden="true"></i>${thugLine}
+        </div>
+      </div>`;
+  }
+
+  function stakesHtml(joined) {
+    const duel = joined.duel;
+    if (!duel || !duel.commanders) return '';
+    const chips = [];
+    for (const side of [1, 2]) {
+      const c = duel.commanders[String(side)];
+      if (!c || !isNum(c.k) || !isNum(c.expected)) continue;
+      const onWin = c.k * (1 - c.expected);
+      const onLoss = -c.k * c.expected;
+      chips.push(`<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="What this duel was worth to ${esc(c.name || `Team ${side}`)} before it played: the rating moves by K times the surprise, so the underdog has more to gain.">
+        ${esc(c.name || `Team ${side}`)}: <span class="vt-mono">${fmtSigned(onWin, 1)}</span> on a win,
+        <span class="vt-mono">${fmtSigned(onLoss, 1)}</span> on a loss</span>`);
+    }
+    if (!chips.length) return '';
+    return `<div class="vt-balonce-chiprow">${chips.join('')}</div>`;
+  }
+
+  function zonePrematchHtml(joined) {
+    const fav = favoriteOf(joined.probT1);
+    const consts = joined.consts;
+
+    const cmdrGap = (isNum(joined.cmdrBefore[1]) || isNum(joined.cmdrBefore[2]))
+      ? (isNum(joined.cmdrBefore[1]) ? joined.cmdrBefore[1] : ANCHOR)
+        - (isNum(joined.cmdrBefore[2]) ? joined.cmdrBefore[2] : ANCHOR)
+      : null;
+    const thugGap = (isNum(joined.t1Mean) && isNum(joined.t2Mean))
+      ? joined.t1Mean - joined.t2Mean
+      : null;
+
+    const parts = [];
+    if (isNum(cmdrGap)) {
+      parts.push(`<span class="vt-balonce-part" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Commander rating gap (VTSR-C), team 1 minus team 2. The dominant term in the prediction.">Cmdr gap <span class="vt-mono">${fmtSigned(cmdrGap)}</span></span>`);
+    }
+    if (isNum(thugGap)) {
+      parts.push(`<span class="vt-balonce-part" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Thug-team strength gap (mean VTSR-T), team 1 minus team 2, weighted at lambda = ${consts.lambda}.">Thug gap <span class="vt-mono">${fmtSigned(thugGap)}</span></span>`);
+    }
+
+    const headline = fav.team
+      ? `Team ${fav.team} favored <span class="vt-balonce-prob vt-mono">${fmtPct(fav.prob)}</span>`
+      : 'Dead even going in';
+
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--prematch">
+        <div class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">Before the match</h6>
+          <span class="vt-balonce-band vt-balonce-band--${fav.band.key}">${esc(fav.band.label)}</span>
+        </div>
+        <div class="vt-balonce-headline">${headline}</div>
+        ${meterHtml({ probT1: joined.probT1 })}
+        <div class="vt-balonce-parts">${parts.join('')}</div>
+        <div class="vt-balonce-teams">
+          ${teamColumnHtml(joined, 1)}
+          ${teamColumnHtml(joined, 2)}
+        </div>
+        ${stakesHtml(joined)}
+      </div>`;
+  }
+
+  // ---- Zone 2: verdict ---------------------------------------------
+
+  /** Pre-match probability the model gave to the side that actually won. */
+  function winnerExpected(joined) {
+    if (!joined.winnerTeam) return null;
+    if (joined.duel && joined.duel.commanders) {
+      const c = joined.duel.commanders[String(joined.winnerTeam)];
+      if (c && isNum(c.expected)) return c.expected;
+    }
+    return joined.winnerTeam === 1 ? joined.probT1 : 1 - joined.probT1;
+  }
+
+  function surpriseCopy(bits) {
+    if (bits < 0.7) return 'the favorite held';
+    if (bits < 1.15) return 'a coin-flip lobby';
+    if (bits < 1.7) return 'an upset';
+    return 'a genuine shock';
+  }
+
+  function winsDialHtml(joined) {
+    // The R^W wins ladder is real machinery running at mixer ALPHA = 0
+    // (see critique/decisions/phase-5-wins-blend.md). Its pre-match read
+    // is an independent second opinion, so it renders muted and is never
+    // the headline.
+    // Every rated row on a side shares that side's E, so the first row
+    // carrying a wins block answers for the whole team.
+    let t1 = null;
+    for (const team of [1, 2]) {
+      const hit = (joined.perTeam[team] || [])
+        .find((x) => x.delta.wins && isNum(x.delta.wins.e));
+      if (!hit) continue;
+      t1 = team === 1 ? hit.delta.wins.e : 1 - hit.delta.wins.e;
+      break;
+    }
+    if (!isNum(t1)) return '';
+    const pct1 = Math.round(t1 * 100);
+    return `<span class="vt-balonce-chip is-muted" data-bs-toggle="tooltip" data-bs-placement="top"
+      title="Second opinion: the win/loss ladder (R^W) runs alongside the rating but its blend weight is still zero, so it never moves published VTSR-T. Shown for transparency.">
+      <i class="bi bi-activity me-1" aria-hidden="true"></i>Wins ladder saw <span class="vt-mono">${pct1}/${100 - pct1}</span></span>`;
+  }
+
+  function zoneVerdictHtml(joined) {
+    const fav = favoriteOf(joined.probT1);
+    const decidedBy = joined.winner.decided_by || null;
+
+    let callKey = 'unknown';
+    let callLabel = 'Outcome unrecorded';
+    let callIcon = 'bi-question-circle';
+    let callTip = 'No winner was recorded for this match, so there is nothing to score the prediction against.';
+
+    if (joined.isDraw) {
+      callKey = 'draw';
+      callLabel = 'Draw';
+      callIcon = 'bi-dash-circle';
+      callTip = 'The match was recorded as a draw \u2014 both commanders scored half a point.';
+    } else if (joined.winnerTeam) {
+      const calledIt = fav.team == null || fav.team === joined.winnerTeam;
+      callKey = calledIt ? 'hit' : 'upset';
+      callLabel = calledIt ? 'Model called it' : 'Upset';
+      callIcon = calledIt ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill';
+      callTip = calledIt
+        ? 'The team the model favored before the match is the team that won.'
+        : 'The underdog won. Upsets are expected at this accuracy \u2014 the model is right about two times in three, not always.';
+    }
+
+    const chips = [];
+    const wE = winnerExpected(joined);
+    if (isNum(wE) && wE > 0) {
+      const bits = -Math.log2(wE);
+      chips.push(`<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Surprise is measured in bits: minus log2 of the pre-match probability we gave the actual winner. A confident correct call sits near zero; a coin flip is 1 bit.">
+        <i class="bi bi-lightning-charge me-1" aria-hidden="true"></i>Winner was a <span class="vt-mono">${fmtPct(wE)}</span> call
+        \u00b7 <span class="vt-mono">${bits.toFixed(2)}</span> bits (${esc(surpriseCopy(bits))})</span>`);
+    }
+    const dial = winsDialHtml(joined);
+    if (dial) chips.push(dial);
+
+    const provenance = decidedBy
+      ? `<span class="vt-balonce-provenance" data-bs-toggle="tooltip" data-bs-placement="top"
+           title="How this outcome was established.">${esc(decidedByLabel(decidedBy))}</span>`
+      : '';
+
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--verdict">
+        <div class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">The call</h6>
+          ${provenance}
+        </div>
+        <div class="vt-balonce-call vt-balonce-call--${callKey}"
+             data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(callTip)}">
+          <i class="bi ${callIcon} me-2" aria-hidden="true"></i>${esc(callLabel)}
+        </div>
+        ${chips.length ? `<div class="vt-balonce-chiprow">${chips.join('')}</div>` : ''}
+      </div>`;
+  }
+
+  function decidedByLabel(decidedBy) {
+    switch (decidedBy) {
+      case 'adjudicated': return 'reviewer-confirmed';
+      case 'attested': return 'host-attested';
+      case 'clean_win': return 'physical evidence';
+      case 'contested': return 'contested';
+      case 'draw': return 'draw';
+      case 'cancelled': return 'cancelled';
+      default: return 'outcome unclear';
+    }
+  }
+
+  // ---- Zone 3: how it played out -----------------------------------
+
+  function teamMeans(joined, team) {
+    const rows = joined.perTeam[team] || [];
+    const perf = rows.filter((x) => isNum(x.delta.performance)).map((x) => x.delta.performance);
+    const exp = rows.filter((x) => isNum(x.delta.expected)).map((x) => x.delta.expected);
+    const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    return { performance: mean(perf), expected: mean(exp), n: rows.length };
+  }
+
+  function teamAxisMeans(joined, team) {
+    const rows = joined.perTeam[team] || [];
+    const sums = new Map();
+    const counts = new Map();
+    for (const { delta } of rows) {
+      const axes = delta.axis_contributions || {};
+      for (const [axis, z] of Object.entries(axes)) {
+        if (!isNum(z)) continue;
+        sums.set(axis, (sums.get(axis) || 0) + z);
+        counts.set(axis, (counts.get(axis) || 0) + 1);
+      }
+    }
+    const out = new Map();
+    for (const [axis, sum] of sums) {
+      const n = counts.get(axis) || 0;
+      if (n > 0) out.set(axis, sum / n);
+    }
+    return out;
+  }
+
+  function axisStoryHtml(joined) {
+    if (!joined.winnerTeam) return '';
+    const winnerAxes = teamAxisMeans(joined, joined.winnerTeam);
+    const loserAxes = teamAxisMeans(joined, joined.winnerTeam === 1 ? 2 : 1);
+    const agreement = axisAgreementMap();
+
+    const rows = [];
+    for (const [axis, wz] of winnerAxes) {
+      if (LUXURY_AXES.has(axis)) continue;
+      if (!loserAxes.has(axis)) continue;
+      rows.push({ axis, diff: wz - loserAxes.get(axis) });
+    }
+    rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+    const top = rows.slice(0, 3);
+    if (!top.length) return '';
+
+    const items = top.map((r) => {
+      const label = AXIS_LABELS[r.axis] || r.axis;
+      const led = r.diff > 0;
+      const agree = agreement.get(r.axis);
+      const agreeTxt = agree
+        ? `Across ${agree.n} decided matches the winner led this axis ${Math.round(agree.agreement * 100)}% of the time.`
+        : 'No corpus agreement figure available for this axis yet.';
+      const cls = led ? 'is-positive' : 'is-negative';
+      const width = Math.min(100, Math.abs(r.diff) * 50);
+      return `<div class="vt-balonce-axis-row ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="${esc(agreeTxt)}">
+        <span class="vt-balonce-axis-name">${esc(label)}</span>
+        <span class="vt-balonce-axis-track">
+          <span class="vt-balonce-axis-fill" style="width: ${width.toFixed(1)}%"></span>
+        </span>
+        <span class="vt-balonce-axis-note">${led ? 'winner led' : 'loser led'}${agree ? ` \u00b7 ${Math.round(agree.agreement * 100)}% typical` : ''}</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="vt-balonce-axes">
+      <div class="vt-balonce-sub">Where the match was won</div>
+      ${items}
+    </div>`;
+  }
+
+  function econChipHtml(joined) {
+    const perf = joined.duel && joined.duel.performance;
+    if (!perf || !perf.available || !isNum(perf.p)) return '';
+    // `p` is the team-1-perspective economy composite. Positive favors
+    // team 1. Recorded, NOT scored: alpha_c is 1.0, so this never moved
+    // the rating (see critique/decisions/vtsr-c-v2-composite.md).
+    const side = perf.p > 0 ? 1 : 2;
+    const mag = Math.abs(perf.p);
+    const strength = mag < 0.15 ? 'a narrow' : mag < 0.4 ? 'a clear' : 'a commanding';
+    const axes = perf.axes || {};
+    const best = Object.entries(axes)
+      .filter(([, v]) => v && isNum(v.z))
+      .sort((a, b) => Math.abs(b[1].z) - Math.abs(a[1].z))[0];
+    const bestTxt = best ? ` Biggest gap: ${esc(econAxisLabel(best[0]))}.` : '';
+    return `<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+      title="The commander economy composite (pool tempo, production, thug supply, bank efficiency, upgrades). It is recorded but not scored \u2014 its blend weight is still zero pending enough telemetry matches to validate it.${esc(bestTxt)}">
+      <i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Economy: ${strength} edge to Team ${side}
+      <span class="vt-mono">${fmtSigned(perf.p, 2)}</span></span>`;
+  }
+
+  function econAxisLabel(axis) {
+    switch (axis) {
+      case 'pool_tempo': return 'pool tempo';
+      case 'production_output': return 'production';
+      case 'thug_supply': return 'thug supply';
+      case 'econ_efficiency': return 'bank efficiency';
+      case 'upgrade_investment': return 'upgrades';
+      default: return axis;
+    }
+  }
+
+  function cmdrMoveHtml(joined) {
+    const duel = joined.duel;
+    if (!duel || !duel.commanders) return '';
+    const bits = [];
+    for (const side of [1, 2]) {
+      const c = duel.commanders[String(side)];
+      if (!c || !isNum(c.before) || !isNum(c.after)) continue;
+      const delta = (c.after - c.before);
+      const cls = delta > 0 ? 'vt-vtsr-delta-positive' : delta < 0 ? 'vt-vtsr-delta-negative' : '';
+      bits.push(`<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Commander rating (VTSR-C) movement from this duel.">
+        ${esc(c.name || `Team ${side}`)}
+        <span class="vt-mono">${Math.round(c.before)} \u2192 ${Math.round(c.after)}</span>
+        <span class="${cls} vt-mono">${fmtSigned(delta, 1)}</span></span>`);
+    }
+    if (!bits.length) return '';
+    return `<div class="vt-balonce-chiprow">${bits.join('')}</div>`;
+  }
+
+  function zonePlayedHtml(joined) {
+    const m1 = teamMeans(joined, 1);
+    const m2 = teamMeans(joined, 2);
+    const sideCopy = (team, m) => {
+      if (!isNum(m.performance) || !isNum(m.expected)) {
+        return `<div class="vt-balonce-perf"><span class="vt-balonce-perf-team">Team ${team}</span>
+          <span class="text-muted">no rated rows</span></div>`;
+      }
+      const diff = m.performance - m.expected;
+      const cls = diff > 0.05 ? 'is-positive' : diff < -0.05 ? 'is-negative' : '';
+      const verdict = diff > 0.05 ? 'over-performed' : diff < -0.05 ? 'under-performed' : 'played to form';
+      return `<div class="vt-balonce-perf ${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="Mean of this side\u2019s rated players: what the 8-axis composite measured this match, against what their pre-match ratings predicted for this lobby.">
+        <span class="vt-balonce-perf-team">Team ${team}</span>
+        <span class="vt-balonce-perf-verdict">${verdict}</span>
+        <span class="vt-mono">${fmtSigned(diff, 2)}</span>
+      </div>`;
+    };
+
+    const chips = [];
+    const econ = econChipHtml(joined);
+    if (econ) chips.push(econ);
+
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--played">
+        <div class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">How it actually played out</h6>
+          <a class="vt-balonce-link" href="?tab=elo" data-vt-balonce-elo-link="1">Full breakdown <i class="bi bi-arrow-right-short" aria-hidden="true"></i></a>
+        </div>
+        <div class="vt-balonce-perfs">
+          ${sideCopy(1, m1)}
+          ${sideCopy(2, m2)}
+        </div>
+        ${axisStoryHtml(joined)}
+        ${chips.length ? `<div class="vt-balonce-chiprow">${chips.join('')}</div>` : ''}
+        ${cmdrMoveHtml(joined)}
+      </div>`;
+  }
+
+  // ---- Zone 4: receipts --------------------------------------------
+
+  /**
+   * Bucket every stored pre-match probability by the favorite's
+   * confidence and count how often that favorite actually won. Pure
+   * client-side read over `duels[]` — the strip IS the calibration
+   * curve, computed from the same numbers the UI quotes.
+   */
+  function reliabilityBuckets() {
+    const hist = window.__vtCmdrEloHistory;
+    if (!hist || !Array.isArray(hist.duels)) return null;
+    const buckets = RELIABILITY_BUCKETS.map((b) => ({ ...b, n: 0, hits: 0, sumProb: 0 }));
+    let total = 0;
+    let externals = 0;
+    for (const duel of hist.duels) {
+      const c1 = duel.commanders && duel.commanders['1'];
+      const c2 = duel.commanders && duel.commanders['2'];
+      if (!c1 || !c2 || !isNum(c1.expected) || !isNum(c2.expected)) continue;
+      // Draws carry S = 0.5 on both sides: there is no favorite to score.
+      if (c1.score === 0.5 || c2.score === 0.5) continue;
+      const fav = c1.expected >= c2.expected ? c1 : c2;
+      const favProb = Math.max(c1.expected, c2.expected);
+      const won = fav.score === 1;
+      total += 1;
+      if (duel.source === 'f9') externals += 1;
+      for (const b of buckets) {
+        if (favProb >= b.lo && favProb < b.hi) {
+          b.n += 1;
+          b.sumProb += favProb;
+          if (won) b.hits += 1;
+          break;
+        }
+      }
+    }
+    if (!total) return null;
+    return { buckets, total, externals };
+  }
+
+  function reliabilityHtml() {
+    const data = reliabilityBuckets();
+    if (!data) return '';
+    const rows = data.buckets.map((b) => {
+      if (b.n < RELIABILITY_MIN_N) {
+        return `<div class="vt-balonce-rel-row is-thin">
+          <span class="vt-balonce-rel-label vt-mono">${esc(b.label)}</span>
+          <span class="vt-balonce-rel-track"></span>
+          <span class="vt-balonce-rel-value text-muted">too few games</span>
+        </div>`;
+      }
+      const actual = b.hits / b.n;
+      const claimed = b.sumProb / b.n;
+      return `<div class="vt-balonce-rel-row" data-bs-toggle="tooltip" data-bs-placement="top"
+        title="In ${b.n} games where the model gave the favorite ${esc(b.label)}, that favorite won ${b.hits} times (${fmtPct(actual)}). A well-calibrated model lands close to its own claim of ${fmtPct(claimed)}.">
+        <span class="vt-balonce-rel-label vt-mono">${esc(b.label)}</span>
+        <span class="vt-balonce-rel-track">
+          <span class="vt-balonce-rel-fill" style="width: ${(actual * 100).toFixed(1)}%"></span>
+          <span class="vt-balonce-rel-claim" style="left: ${(claimed * 100).toFixed(1)}%"></span>
+        </span>
+        <span class="vt-balonce-rel-value vt-mono">${fmtPct(actual)}</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="vt-balonce-reliability">
+      <div class="vt-balonce-sub" data-bs-toggle="tooltip" data-bs-placement="top"
+           title="Every bar is measured from the ${data.total} pre-match predictions already stored in the commander ladder. The notch marks what the model claimed; the bar is what happened.">
+        When the model is this confident, the favorite wins this often
+      </div>
+      ${rows}
+    </div>`;
+  }
+
+  /** Inline SVG sparkline of VTSR-C accuracy over validator snapshots. */
+  function accuracySparkHtml() {
+    const v = window.__vtValidation;
+    const hist = (v && Array.isArray(v.history)) ? v.history : [];
+    const pts = hist
+      .filter((h) => h && isNum(h.vtsr_c_accuracy))
+      .map((h) => h.vtsr_c_accuracy);
+    if (pts.length < 3) return '';
+    const min = Math.min(...pts);
+    const max = Math.max(...pts);
+    const span = (max - min) || 1;
+    const W = 120;
+    const H = 28;
+    const coords = pts.map((p, i) => {
+      const x = (i / (pts.length - 1)) * W;
+      const y = H - ((p - min) / span) * (H - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const first = Math.round(pts[0] * 100);
+    const last = Math.round(pts[pts.length - 1] * 100);
+    return `<span class="vt-balonce-spark" data-bs-toggle="tooltip" data-bs-placement="top"
+      title="Commander-duel prediction accuracy across ${pts.length} validator runs: ${first}% then, ${last}% now. The model gets better as the corpus grows and more outcomes get confirmed.">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Accuracy trend">
+        <polyline points="${coords}" fill="none" stroke="currentColor" stroke-width="1.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <span class="vt-mono">${first}% \u2192 ${last}%</span>
+    </span>`;
+  }
+
+  function zoneReceiptsHtml() {
+    const rec = trackRecord();
+    const rel = reliabilityHtml();
+    const spark = accuracySparkHtml();
+    if (!rec && !rel && !spark) return '';
+
+    const headline = rec
+      ? `This model picks the winner <strong>${fmtPct(rec.accuracy)}</strong> of the time across <span class="vt-mono">${rec.n}</span> commander duels.`
+      : 'Prediction track record is unavailable in this build.';
+
+    const provider = (window.__vtCmdrEloHistory || {}).external_provider;
+    const credit = provider && provider.name
+      ? `<div class="vt-balonce-credit">Community games from
+           <a href="${esc(provider.url || '#')}" target="_blank" rel="noopener">${esc(provider.name)}</a>\u2019s
+           match ledger are included in the track record.</div>`
+      : '';
+
+    return `
+      <div class="vt-balonce-zone vt-balonce-zone--receipts">
+        <div class="vt-balonce-zone-head">
+          <h6 class="vt-balonce-zone-title">Does this thing work?</h6>
+          <a class="vt-balonce-link" href="elo/index.html?tab=accuracy" target="_blank" rel="noopener">Full accuracy report <i class="bi bi-arrow-right-short" aria-hidden="true"></i></a>
+        </div>
+        <div class="vt-balonce-receipt-headline">${headline} ${spark}</div>
+        ${rel}
+        ${credit}
+      </div>`;
+  }
+
+  // ---- Section render ----------------------------------------------
+
+  function render(currentData) {
+    const card = sectionEl();
+    const body = document.getElementById('balonce-body');
+    if (!card || !body) return;
+
+    const matchId = (currentData && currentData.match && currentData.match.id) || null;
+    _lastMatchId = matchId;
+
+    const joined = joinMatch(currentData);
+    if (!joined.available) {
+      hideSection();
+      body.innerHTML = '';
+      return;
+    }
+
+    // Commander history not fetched yet: paint the thug-only read now and
+    // repaint once it lands (or stays null on 404).
+    if (window.__vtCmdrEloHistory === undefined) {
+      ensureCmdrHistoryLoaded().then(() => {
+        if (_lastMatchId === matchId) render(currentData);
+      });
+    }
+
+    body.innerHTML = [
+      zonePrematchHtml(joined),
+      zoneVerdictHtml(joined),
+      zonePlayedHtml(joined),
+      zoneReceiptsHtml(),
+    ].join('');
+    card.classList.remove('d-none');
+
+    const eloLink = body.querySelector('[data-vt-balonce-elo-link]');
+    if (eloLink) {
+      eloLink.addEventListener('click', (ev) => {
+        const btn = document.getElementById('tab-elo-btn');
+        if (btn && window.bootstrap && bootstrap.Tab) {
+          ev.preventDefault();
+          bootstrap.Tab.getOrCreateInstance(btn).show();
+          btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+    }
+
+    initSectionTooltips();
+  }
+
+  // ---------------------------------------------------------------- Exports
+
+  window.VTBalonce = {
+    ANCHOR,
+    DEFAULT_LAMBDA,
+    DEFAULT_SCALE,
+    BANDS,
+    DISADVANTAGE_PROB,
+    computeWinProb,
+    bandFor,
+    favoriteOf,
+    meterHtml,
+    defaultStatusText,
+    fmtPct,
+    cmdrConstants,
+    trackRecord,
+    ensureCmdrHistoryLoaded,
+    renderMatchSection: render,
+    destroyMatchSection,
+  };
+})();

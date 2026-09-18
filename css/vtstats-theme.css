@@ -7181,3 +7181,501 @@ html.vt-cursor-active * {
     }
 }
 
+
+/* ============================================================================
+   BALONCE METER (shared: Tools Team Balonce + per-match dashboard section)
+   ============================================================================
+   The community name for a lopsided lobby is "getting PLAYED", so the gauge
+   is the Balonce Meter. Markup is emitted by js/balonce-meter.js and used
+   verbatim on both surfaces, which is why these rules live here (loaded by
+   index.html AND tools/index.html) rather than in css/tools.css.
+
+   The legacy `.vt-tools-balonce-played-meter-*` rules in css/tools.css stay
+   put on purpose (class-name stability precedent: `.vt-active-game-modal-*`);
+   the tools card keeps that block only as the outer spacing wrapper. */
+
+.vt-balonce-meter {
+    margin: 0.35rem 0 0.1rem;
+}
+
+/* Gradient reads outward from a balanced centre: green in the middle,
+   warning at the shoulders, danger at the extremes. */
+.vt-balonce-meter-track {
+    position: relative;
+    height: 14px;
+    border-radius: 7px;
+    background: linear-gradient(
+        to right,
+        color-mix(in oklab, var(--kb-danger) 30%, transparent) 0%,
+        color-mix(in oklab, var(--kb-warning) 26%, transparent) 20%,
+        color-mix(in oklab, var(--kb-warning) 12%, transparent) 35%,
+        color-mix(in oklab, var(--kb-success) 24%, transparent) 50%,
+        color-mix(in oklab, var(--kb-warning) 12%, transparent) 65%,
+        color-mix(in oklab, var(--kb-warning) 26%, transparent) 80%,
+        color-mix(in oklab, var(--kb-danger) 30%, transparent) 100%
+    );
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.vt-balonce-meter-tick {
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    left: 50%;
+    width: 2px;
+    background-color: color-mix(in oklab, var(--kb-text-primary) 50%, transparent);
+    transform: translateX(-1px);
+}
+
+.vt-balonce-meter-chevron {
+    position: absolute;
+    top: -10px;
+    width: 18px;
+    height: 18px;
+    margin-left: -9px;
+    color: var(--kb-text-primary);
+    font-size: 1.1rem;
+    line-height: 1;
+    text-align: center;
+    transition: left var(--vt-anim-duration, 0.2s) var(--vt-anim-ease, ease-out);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-balonce-meter-chevron { transition: none; }
+}
+
+.vt-balonce-meter-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-balonce-meter-end {
+    flex-shrink: 0;
+    color: var(--kb-text-muted);
+}
+
+.vt-balonce-meter-status {
+    flex-grow: 1;
+    text-align: center;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.72rem;
+}
+
+.vt-balonce-meter-status--green {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 16%, transparent);
+}
+.vt-balonce-meter-status--yellow {
+    color: color-mix(in oklab, var(--kb-warning) 75%, var(--kb-text-primary) 25%);
+    background-color: color-mix(in oklab, var(--kb-warning) 12%, transparent);
+}
+.vt-balonce-meter-status--orange {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 18%, transparent);
+}
+.vt-balonce-meter-status--red {
+    color: var(--kb-danger);
+    background-color: color-mix(in oklab, var(--kb-danger) 18%, transparent);
+}
+
+/* ---- Band pill (status label used outside the meter footer) ---- */
+
+.vt-balonce-band {
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.vt-balonce-band--green {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 16%, transparent);
+}
+.vt-balonce-band--yellow {
+    color: color-mix(in oklab, var(--kb-warning) 75%, var(--kb-text-primary) 25%);
+    background-color: color-mix(in oklab, var(--kb-warning) 14%, transparent);
+}
+.vt-balonce-band--orange {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 20%, transparent);
+}
+.vt-balonce-band--red {
+    color: var(--kb-danger);
+    background-color: color-mix(in oklab, var(--kb-danger) 20%, transparent);
+}
+
+/* ---- Shared chips / parts readout ---- */
+
+.vt-balonce-chiprow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+}
+
+.vt-balonce-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2em 0.55em;
+    border-radius: 6px;
+    border: 1px solid var(--kb-border-subtle);
+    background-color: color-mix(in oklab, var(--kb-bg-subtle) 70%, transparent);
+    color: var(--kb-text-secondary);
+    font-size: 0.74rem;
+    line-height: 1.35;
+}
+.vt-balonce-chip.is-muted {
+    color: var(--kb-text-muted);
+    background-color: transparent;
+    border-style: dashed;
+}
+
+.vt-balonce-parts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-part .vt-mono { color: var(--kb-text-primary); }
+
+/* ---- Dashboard section zones ---- */
+
+.vt-balonce-zone + .vt-balonce-zone {
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--kb-border-subtle);
+}
+
+.vt-balonce-zone-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+
+.vt-balonce-zone-title {
+    margin: 0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+}
+
+.vt-balonce-link {
+    font-size: 0.74rem;
+    color: var(--kb-primary);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.vt-balonce-link:hover { text-decoration: underline; }
+
+.vt-balonce-headline {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+}
+.vt-balonce-prob {
+    color: var(--kb-primary);
+    font-weight: 700;
+}
+
+/* ---- Pre-match team columns ---- */
+
+.vt-balonce-teams {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.vt-balonce-team {
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 8px;
+    background-color: color-mix(in oklab, var(--kb-bg-subtle) 45%, transparent);
+    min-width: 0;
+}
+
+.vt-balonce-team-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+.vt-balonce-team-name {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--kb-text-secondary);
+}
+
+.vt-balonce-team-cmdr {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    min-width: 0;
+}
+
+.vt-balonce-cmdr-chip {
+    flex-shrink: 0;
+    padding: 0.05em 0.35em;
+    border-radius: 3px;
+    background-color: color-mix(in oklab, var(--kb-accent) 22%, transparent);
+    color: var(--kb-accent);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.vt-balonce-team-ratings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.3rem;
+}
+
+.vt-balonce-rating {
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    background-color: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    color: var(--kb-text-primary);
+    font-size: 0.72rem;
+}
+.vt-balonce-rating.is-secondary {
+    background-color: color-mix(in oklab, var(--kb-text-muted) 14%, transparent);
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-rating.is-muted {
+    background-color: transparent;
+    border: 1px dashed var(--kb-border-subtle);
+    color: var(--kb-text-muted);
+}
+
+.vt-balonce-team-thugs {
+    margin-top: 0.35rem;
+    font-size: 0.74rem;
+    color: var(--kb-text-secondary);
+}
+
+/* ---- Verdict ---- */
+
+.vt-balonce-call {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3em 0.7em;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+.vt-balonce-call--hit {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 15%, transparent);
+}
+.vt-balonce-call--upset {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 16%, transparent);
+}
+.vt-balonce-call--draw,
+.vt-balonce-call--unknown {
+    color: var(--kb-text-muted);
+    background-color: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+}
+
+.vt-balonce-provenance {
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+    text-transform: lowercase;
+}
+
+/* ---- Played-out zone ---- */
+
+.vt-balonce-perfs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.vt-balonce-perf {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 6px;
+    background-color: color-mix(in oklab, var(--kb-bg-subtle) 45%, transparent);
+    font-size: 0.78rem;
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-perf-team {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+}
+.vt-balonce-perf.is-positive .vt-mono { color: var(--kb-success); }
+.vt-balonce-perf.is-negative .vt-mono { color: var(--kb-danger); }
+
+.vt-balonce-sub {
+    margin: 0.7rem 0 0.35rem;
+    font-size: 0.72rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-balonce-axis-row {
+    display: grid;
+    grid-template-columns: minmax(90px, 1fr) minmax(80px, 1.6fr) minmax(120px, auto);
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.74rem;
+    color: var(--kb-text-secondary);
+    margin-bottom: 0.2rem;
+}
+.vt-balonce-axis-track {
+    position: relative;
+    display: block;
+    height: 7px;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--kb-text-muted) 10%, transparent);
+    overflow: hidden;
+}
+.vt-balonce-axis-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+}
+.vt-balonce-axis-row.is-positive .vt-balonce-axis-fill { background: var(--kb-success); }
+.vt-balonce-axis-row.is-negative .vt-balonce-axis-fill { background: var(--kb-danger); }
+.vt-balonce-axis-note {
+    text-align: right;
+    color: var(--kb-text-muted);
+    font-size: 0.68rem;
+}
+
+/* ---- Receipts ---- */
+
+.vt-balonce-receipt-headline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.82rem;
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-receipt-headline strong { color: var(--kb-text-primary); }
+
+.vt-balonce-spark {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--kb-primary);
+    font-size: 0.72rem;
+}
+
+.vt-balonce-reliability { margin-top: 0.6rem; }
+
+.vt-balonce-rel-row {
+    display: grid;
+    grid-template-columns: 4.5rem minmax(80px, 1fr) 3rem;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.74rem;
+    color: var(--kb-text-secondary);
+    margin-bottom: 0.25rem;
+}
+.vt-balonce-rel-row.is-thin { opacity: 0.55; }
+.vt-balonce-rel-label { color: var(--kb-text-muted); }
+.vt-balonce-rel-track {
+    position: relative;
+    display: block;
+    height: 9px;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--kb-text-muted) 10%, transparent);
+}
+.vt-balonce-rel-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--kb-primary);
+}
+/* Notch marking what the model CLAIMED, so the bar can be read against it. */
+.vt-balonce-rel-claim {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--kb-text-primary);
+}
+.vt-balonce-rel-value { text-align: right; color: var(--kb-text-primary); }
+
+.vt-balonce-credit {
+    margin-top: 0.6rem;
+    font-size: 0.7rem;
+    color: var(--kb-text-muted);
+}
+.vt-balonce-credit a { color: var(--kb-primary); }
+
+/* ---- Tools-side extras (confidence + honesty footer) ---- */
+
+.vt-balonce-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    padding-top: 0.45rem;
+    border-top: 1px solid var(--kb-border-subtle);
+    font-size: 0.68rem;
+    color: var(--kb-text-muted);
+}
+.vt-balonce-footer a { color: var(--kb-primary); text-decoration: none; }
+.vt-balonce-footer a:hover { text-decoration: underline; }
+
+.vt-balonce-confidence {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15em 0.45em;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 600;
+}
+.vt-balonce-confidence--high {
+    color: var(--kb-success);
+    background-color: color-mix(in oklab, var(--kb-success) 15%, transparent);
+}
+.vt-balonce-confidence--medium {
+    color: var(--kb-warning);
+    background-color: color-mix(in oklab, var(--kb-warning) 15%, transparent);
+}
+.vt-balonce-confidence--low {
+    color: var(--kb-danger);
+    background-color: color-mix(in oklab, var(--kb-danger) 15%, transparent);
+}
+
+@media (max-width: 640px) {
+    .vt-balonce-teams,
+    .vt-balonce-perfs {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .vt-balonce-axis-row {
+        grid-template-columns: minmax(80px, 1fr) minmax(60px, 1fr);
+    }
+    .vt-balonce-axis-note { grid-column: 1 / -1; text-align: left; }
+}
