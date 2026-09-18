@@ -7364,6 +7364,8 @@ html.vt-cursor-active * {
    Native marker is replaced by the rotating chevron so it matches the
    match-picker / storyline expanders. */
 .vt-balonce-zone--receipts > summary {
+    display: flex;
+    width: 100%;
     list-style: none;
     cursor: pointer;
 }
@@ -7381,17 +7383,13 @@ html.vt-cursor-active * {
     outline-offset: 2px;
     border-radius: 4px;
 }
-.vt-balonce-zone--receipts .vt-balonce-zone-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-}
-.vt-balonce-zone--receipts .vt-balonce-zone-title .bi-chevron-down {
-    font-size: 0.75rem;
-    display: inline-block;
+.vt-balonce-receipts-chevron {
+    font-size: 0.9rem;
+    color: var(--kb-text-secondary);
+    flex-shrink: 0;
     transition: transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
 }
-.vt-balonce-zone--receipts[open] .vt-balonce-zone-title .bi-chevron-down {
+.vt-balonce-zone--receipts[open] .vt-balonce-receipts-chevron {
     transform: rotate(180deg);
 }
 .vt-balonce-receipts-toolbar {

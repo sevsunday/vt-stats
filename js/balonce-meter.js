@@ -1532,10 +1532,8 @@
     return `
       <details class="vt-balonce-zone vt-balonce-zone--receipts"${_receiptsOpen ? ' open' : ''}>
         <summary class="vt-balonce-zone-head">
-          <h6 class="vt-balonce-zone-title">
-            <i class="bi bi-chevron-down" aria-hidden="true"></i>
-            Does this thing work?
-          </h6>
+          <h6 class="vt-balonce-zone-title">Does this thing work?</h6>
+          <i class="bi bi-chevron-down vt-balonce-receipts-chevron" aria-hidden="true"></i>
         </summary>
         <div class="vt-balonce-receipts-body">
           <div class="vt-balonce-receipts-toolbar">
