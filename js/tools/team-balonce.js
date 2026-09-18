@@ -843,17 +843,14 @@
       ? `Team ${fav.team} favored <span class="vt-balonce-prob vt-mono">${Math.round(fav.prob * 100)}%</span>`
       : 'Dead even';
 
-    // Compact status: the headline row above already carries the band
-    // name and the probability.
-    const meter = B
-      ? B.meterHtml({ probT1: state.probT1, compact: true })
-      : '';
+    // The status (Good game / Slight edge / PLAYEDathon / ...) renders
+    // inside the meter itself, so the head carries only the headline.
+    const meter = B ? B.meterHtml({ probT1: state.probT1 }) : '';
 
     return `
       <div class="vt-tools-balonce-played-meter">
         <div class="vt-tools-balonce-meter-head">
           <span class="vt-tools-balonce-meter-headline">${headline}</span>
-          <span class="vt-balonce-band vt-balonce-band--${fav.band.key}">${escapeHtml(fav.band.label)}</span>
         </div>
         ${meter}
         <div class="vt-balonce-parts">${parts.join('')}</div>

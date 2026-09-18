@@ -7260,6 +7260,14 @@ html.vt-cursor-active * {
     color: var(--kb-text-muted);
 }
 
+/* The dashboard card names the commander on both end labels
+   ("Team 1 (mort) disadv"), so they have to be allowed to shrink.
+   The Tools gauge keeps the short rigid form. */
+#section-balonce .vt-balonce-meter-end {
+    flex-shrink: 1;
+    min-width: 0;
+}
+
 .vt-balonce-meter-status {
     flex-grow: 1;
     text-align: center;
@@ -7286,32 +7294,9 @@ html.vt-cursor-active * {
     background-color: color-mix(in oklab, var(--kb-danger) 18%, transparent);
 }
 
-/* ---- Band pill (status label used outside the meter footer) ---- */
-
-.vt-balonce-band {
-    padding: 0.15em 0.55em;
-    border-radius: 999px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-}
-.vt-balonce-band--green {
-    color: var(--kb-success);
-    background-color: color-mix(in oklab, var(--kb-success) 16%, transparent);
-}
-.vt-balonce-band--yellow {
-    color: color-mix(in oklab, var(--kb-warning) 75%, var(--kb-text-primary) 25%);
-    background-color: color-mix(in oklab, var(--kb-warning) 14%, transparent);
-}
-.vt-balonce-band--orange {
-    color: var(--kb-warning);
-    background-color: color-mix(in oklab, var(--kb-warning) 20%, transparent);
-}
-.vt-balonce-band--red {
-    color: var(--kb-danger);
-    background-color: color-mix(in oklab, var(--kb-danger) 20%, transparent);
-}
+/* The band label used to ALSO render as a pill next to each caller's
+   headline. That was the same status printed twice, so the pill is gone
+   and `.vt-balonce-meter-status` above is the single home for it. */
 
 /* ---- Shared chips / parts readout ---- */
 
@@ -7471,15 +7456,34 @@ html.vt-cursor-active * {
     color: var(--kb-text-secondary);
 }
 
+/* ---- Stakes (plain-language rating-at-risk sentences) ---- */
+
+.vt-balonce-stakes { margin-top: 0.6rem; }
+
+.vt-balonce-stake {
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    background-color: color-mix(in oklab, var(--kb-bg-subtle) 45%, transparent);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--kb-text-secondary);
+}
+.vt-balonce-stake + .vt-balonce-stake { margin-top: 0.3rem; }
+.vt-balonce-stake strong { color: var(--kb-text-primary); }
+.vt-balonce-stake .vt-mono { color: var(--kb-text-primary); }
+
 /* ---- Verdict ---- */
 
 .vt-balonce-call {
     display: inline-flex;
-    align-items: center;
+    align-items: baseline;
     padding: 0.3em 0.7em;
     border-radius: 8px;
     font-size: 0.9rem;
     font-weight: 600;
+    /* Names the winner ("Model called it - Team 1 (mort) won"), so it has
+       to wrap instead of forcing the card wide. */
+    text-wrap: pretty;
 }
 .vt-balonce-call--hit {
     color: var(--kb-success);
@@ -7511,6 +7515,7 @@ html.vt-cursor-active * {
 
 .vt-balonce-perf {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: 0.4rem;
     padding: 0.35rem 0.5rem;
@@ -7589,14 +7594,43 @@ html.vt-cursor-active * {
 
 .vt-balonce-reliability { margin-top: 0.6rem; }
 
+/* Key for the two marks in every row. Without it the prediction tick is
+   just an unexplained white line across a blue bar. */
+.vt-balonce-rel-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.85rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.68rem;
+    color: var(--kb-text-muted);
+}
+.vt-balonce-rel-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.vt-balonce-rel-key-bar {
+    width: 18px;
+    height: 9px;
+    border-radius: 3px;
+    background: var(--kb-primary);
+}
+.vt-balonce-rel-key-tick {
+    width: 2px;
+    height: 13px;
+    background: var(--kb-text-primary);
+}
+.vt-balonce-rel-key-note { margin-left: auto; }
+
 .vt-balonce-rel-row {
     display: grid;
-    grid-template-columns: 4.5rem minmax(80px, 1fr) 3rem;
-    gap: 0.5rem;
+    grid-template-columns: minmax(5.5rem, 7rem) minmax(80px, 1fr) minmax(14rem, 17rem);
+    gap: 0.6rem;
     align-items: center;
     font-size: 0.74rem;
     color: var(--kb-text-secondary);
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.3rem;
 }
 .vt-balonce-rel-row.is-thin { opacity: 0.55; }
 .vt-balonce-rel-label { color: var(--kb-text-muted); }
@@ -7615,16 +7649,39 @@ html.vt-cursor-active * {
     border-radius: 4px;
     background: var(--kb-primary);
 }
-/* Notch marking what the model CLAIMED, so the bar can be read against it. */
+/* Tick marking what the model PREDICTED, so the bar can be read against
+   it. The halo keeps it legible where it lands on top of the fill. */
 .vt-balonce-rel-claim {
     position: absolute;
-    top: -3px;
-    bottom: -3px;
+    top: -4px;
+    bottom: -4px;
     width: 2px;
     margin-left: -1px;
     background: var(--kb-text-primary);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--kb-bg-card) 65%, transparent);
 }
-.vt-balonce-rel-value { text-align: right; color: var(--kb-text-primary); }
+
+/* Outcome cell: what happened, over how many games, and the read. */
+.vt-balonce-rel-outcome {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.4rem;
+}
+.vt-balonce-rel-value { color: var(--kb-text-primary); }
+.vt-balonce-rel-n {
+    color: var(--kb-text-muted);
+    font-size: 0.68rem;
+}
+.vt-balonce-rel-verdict {
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.vt-balonce-rel-verdict.is-match { color: var(--kb-success); }
+.vt-balonce-rel-verdict.is-over { color: var(--kb-info); }
+.vt-balonce-rel-verdict.is-under { color: var(--kb-warning); }
 
 .vt-balonce-credit {
     margin-top: 0.6rem;
@@ -7681,4 +7738,15 @@ html.vt-cursor-active * {
         grid-template-columns: minmax(80px, 1fr) minmax(60px, 1fr);
     }
     .vt-balonce-axis-note { grid-column: 1 / -1; text-align: left; }
+
+    /* Reliability rows drop the outcome under the bar rather than
+       squeezing three columns into a phone width. */
+    .vt-balonce-rel-row {
+        grid-template-columns: minmax(5rem, auto) minmax(60px, 1fr);
+        row-gap: 0.2rem;
+    }
+    .vt-balonce-rel-outcome {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
 }
