@@ -10,7 +10,7 @@
   - **Locked-priors ablation (v2 §6.2):** ran as a forensic alt mode. Net commander rating delta 3.9 ELO at the maximum vs a 27 ELO bootstrap noise floor. Validator headline metrics flat. Decision: keep the canonical locks.
   - **MAX / softmax `E_i` (v2 §6.1):** ran as forensic alt modes. Full corpus re-rate under hard MAX collapsed predictive Spearman rho from 0.462 to 0.188, doubled bootstrap proxy std (27 -> 50 ELO), and inflated mean rating by +522 ELO above the 1500 anchor. Decision: keep median canonical.
 - **What survived from the v2 §1b structural critiques.** The predictive-validation gap was correctly flagged (now closed by the validator). The inactivity-handling gap was correctly flagged (now closed by the K-boost). The MAX-vs-median structural concern, the locked-priors "corruption" framing, and the EOMM "behavioral conditioning tool" rhetoric did not survive empirical contact.
-- **What is genuinely open.** Lopsided-match prediction ceiling (currently untestable on the corpus), `alpha > 0` win/loss blend (data-unblocked but unshipped), Tools Team Balonce softmax-weighted aggregation (the one Phase 2A finding that survived as useful for downstream consumers), EOMM / dual-track audit (untested, gated on `alpha > 0`).
+- **What is genuinely open.** Lopsided-match prediction ceiling (currently untestable on the corpus), `alpha > 0` win/loss blend (data-unblocked but unshipped), EOMM / dual-track audit (untested, gated on `alpha > 0`). **No longer open:** Tools Team Balonce softmax-weighted aggregation — CLOSED negative 2026-09-18 (section 13.1); the Balonce Meter now runs the validated VTSR-C duel formula instead, inside which softmax and hard MAX both score strictly worse.
 - **One canonical algorithm change since v2:** `k_factor()` adds `min(20, 0.05 * days_inactive)` on top of the matches-played K. Schema-additive, no `PIPELINE_VERSION` or `ELO_SCHEMA_VERSION` bump.
 
 ---
@@ -428,7 +428,7 @@ Specific symptoms:
 
 **Decision.** Keep median as the canonical opponent reference. Do NOT promote hard MAX or softmax to canonical.
 
-**What this does NOT close out.** The Phase 2A finding that **post-hoc team-aggregation** of canonical ratings via hard MAX adds +10pp on `clean_win` prediction is still real and useful. Lobby Tools' Team Balonce could legitimately switch from team-mean to softmax-weighted-mean as its team-strength estimate at lobby-formation time, while `compute_elo` continues to use median for the rating updates themselves. These are separate decisions and Phase 2A's evidence directly motivates the Tools-page change without disturbing canonical ratings. This is documented as section 13.1 below.
+**What this does NOT close out.** The Phase 2A finding that **post-hoc team-aggregation** of canonical ratings via hard MAX adds +10pp on `clean_win` prediction is still real and useful. At the time this looked like it motivated switching Lobby Tools' Team Balonce from team-mean to softmax-weighted-mean. **That was tested and rejected in 2026-09-18** (section 13.1 + `critique/decisions/balonce-meter-t-term.md`): inside the VTSR-C duel formula the Balonce Meter now runs, where the commander gap dominates and thug rating is only a handicap term, softmax degrades accuracy monotonically (up to −11.7pp at hard MAX). Phase 2A's finding remains real for its OWN predictor — thug ratings aggregated as the whole prediction — and does not transfer to a handicap term.
 
 Full details: [critique/decisions/phase-2c-max-vs-median.md](critique/decisions/phase-2c-max-vs-median.md).
 
@@ -482,14 +482,13 @@ The v2 doc closed with a 10-item recommendation table. Status of each as of v3:
 
 Each item below is a candidate for Phase 3+ work. Each entry covers: hypothesis, what we would test, data dependency, effort estimate, current blocker. Ordered by `(data-unblocked × empirical-leverage / effort)`.
 
-#### 13.1. Tools Team Balonce: softmax-weighted team aggregation (READY NOW)
+#### 13.1. Tools Team Balonce: softmax-weighted team aggregation — **CLOSED (negative), 2026-09-18**
 
-- **Hypothesis.** The Phase 2A directional finding (hard MAX +10pp on `clean_win` prediction at team-formation time) is real for the team-aggregation question even though it failed for the rating-update question. The Tools page's Team Balonce currently uses team-mean VTSR-T as its team-strength estimate; switching to softmax-weighted (`tau = 200`) should produce more accurate balance estimates for tactical-shooter lobbies per Dehpanah's logic.
-- **What we would test.** Wire a softmax-weighted team-strength function into the Tools Team Balonce computation. Compare partition decisions (which players ended up on which team for a given input lobby) between the current mean-based balance and the new softmax-based balance on a synthetic test set of historical lobbies. Headline metric: the disadvantaged-team chevron position (the "Played Meter" gauge) under each strategy.
-- **Data dependency.** None. Reads canonical `elo_current.json`, runs at lobby-formation time only.
-- **Effort.** ~1-2 hours (one helper function + one wiring change in Tools Team Balonce).
-- **Blocker.** None. Ready to ship.
-- **Risk.** Low. This change is scoped to Tools page, does not disturb canonical ratings, and can be reverted in a single commit if a regression surfaces.
+- **Original hypothesis.** The Phase 2A directional finding (hard MAX +10pp on `clean_win` prediction at team-formation time) is real for the team-aggregation question even though it failed for the rating-update question. Team Balonce used team-mean VTSR-T as its team-strength estimate; switching to softmax-weighted (`tau = 200`) should produce more accurate balance estimates per Dehpanah's logic.
+- **What actually happened.** Team Balonce's balance estimate was replaced (Balonce Meter, `js/balonce-meter.js`) — but with the **validated VTSR-C duel formula**, in which the commander rating gap is the dominant term and thug VTSR-T enters only as a `lambda`-weighted handicap. Softmax was then scored *inside that formula* by the pre-registered ablation in `critique/decisions/balonce-meter-t-term.md` (validator §14, 120 scoreable telemetry duels).
+- **Result: strictly and monotonically worse.** Against a 72.5% canonical baseline on the same rows: `tau = 400` −2.5pp, `tau = 200` −5.8pp, `tau = 100` −8.3pp, hard MAX −11.7pp. The two most MAX-like variants degrade log-loss as well (confidently wrong, not merely wrong).
+- **Why this does not contradict Phase 2A.** Different predictors. Phase 2A aggregated thug VTSR-T as the **whole prediction** of a `clean_win` outcome, where a carry's lethality plausibly is what makes a team a threat. In the duel formula `T` is a **handicap correction** to the commander gap, and a handicap wants the *typical* strength of the squad the commander has to work with, not its ceiling — one smurf does not change how hard the commander's job is nearly as much as MAX implies.
+- **Disposition.** Do **not** wire softmax into Team Balonce. All `tau <= 200` and hard MAX are discarded under the memo's discard rule. Anyone revisiting this should read the §14 table first.
 
 #### 13.2. `alpha > 0` win/loss blend pilot (READY NOW)
 
@@ -652,7 +651,7 @@ v2 recommended fix. Ship `expected_performance_max(R_i, weighted_max(R_others))`
 
 Phase 2A preview directionally supported MAX-for-team-aggregation: hard MAX scored 53.3% vs mean R 43.3% on `clean_win` accuracy (n=30, Wilson CIs overlapping). Phase 2C ran the full re-rate.
 
-**Resolution (v3).** Section 10 documents the Phase 2C result in detail. Outcome 1 above is what the data supports: median is right for rating updates (Phase 2C), MAX is directionally right for team-aggregation at lobby-formation time (Phase 2A finding survives). The "ship both, let the validator pick" plan was followed. The validator picked median for canonical and earmarked the MAX/softmax forensic alt modes for Tools-page consumption (section 13.1).
+**Resolution (v3).** Section 10 documents the Phase 2C result in detail. Outcome 1 above is what the data supports: median is right for rating updates (Phase 2C), MAX is directionally right for team-aggregation at lobby-formation time (Phase 2A finding survives). The "ship both, let the validator pick" plan was followed. The validator picked median for canonical and earmarked the MAX/softmax forensic alt modes for Tools-page consumption — which was then tested and rejected there too (section 13.1, CLOSED negative).
 
 #### C.2. Locked priors vs PandaSkill-style empirical-only (v2 §6.2, resolved in v3 section 8)
 
@@ -790,7 +789,7 @@ Each memo is regenerable from the validator output: the comparison memos (priors
 In rough order of empirical leverage:
 
 1. **Land Phase 13.2 (`alpha > 0` blend).** The 93.3% synthetic-winner proxy is sitting unused. A small alpha (0.1, 0.25, 0.5) sweep against canonical would either confirm the canonical signal is so strong that adding winner data does nothing (ratifying our axis design) or reveal a meaningful predictive lift (which would be the first new positive empirical finding since Phase 1). I think this is the single highest-information experiment we can run right now.
-2. **Land Phase 13.1 (Tools Team Balonce softmax).** Phase 2A's directional finding deserves to be operationalized somewhere, even though the rating-update math kept median. Tools is the right place. ~2 hours of work.
+2. ~~**Land Phase 13.1 (Tools Team Balonce softmax).**~~ **DONE, negative (2026-09-18).** Team Balonce's estimate was replaced — by the validated VTSR-C duel formula, not by softmax. Softmax was then scored inside that formula and lost monotonically (section 13.1). Phase 2A's finding does not transfer from a whole-prediction aggregation to a handicap term.
 3. **Land Phase 13.3 (predictive-power growth tracking).** Cheap, recurring, gives early warning on any canonical assumption that starts to break. I would do this as part of the pipeline run rather than as a one-off.
 4. **Phase 13.5 (EOMM dual-track audit) becomes interesting only after 13.2 lands.** Until then the pure-vs-Display comparison cannot be scored.
 

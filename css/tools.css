@@ -1215,10 +1215,61 @@
     font-weight: 600;
 }
 
-/* ---------------------------------------------------------------- Played Meter */
+/* Commander row carries BOTH ratings: this chip is the VTSR-C (the one
+   in the prediction); the trailing `.vt-tools-balonce-row-vtsr` number
+   is their thug VTSR-T, shown for context only. */
+.vt-tools-balonce-row-cmdrelo {
+    flex-shrink: 0;
+    font-feature-settings: "tnum" 1;
+    font-size: 0.66rem;
+    font-weight: 700;
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    color: var(--kb-accent);
+    background-color: color-mix(in oklab, var(--kb-accent) 16%, transparent);
+}
+.vt-tools-balonce-row-cmdrelo.is-unrated {
+    color: var(--kb-text-muted);
+    background-color: transparent;
+    border: 1px dashed var(--kb-border-subtle);
+}
+
+/* ---------------------------------------------------------------- Balonce Meter
+
+   The gauge itself (track / chevron / status / bands / parts / footer) is
+   shared markup emitted by js/balonce-meter.js and styled by the
+   `.vt-balonce-*` block in css/vtstats-theme.css, so the dashboard's
+   per-match Balonce Meter section and this card cannot drift apart.
+   What stays here is the Tools-only chrome around it.
+
+   The legacy `.vt-tools-balonce-played-meter-{track,tick,chevron,footer,
+   team,label}` rules below are retained deliberately (class-name
+   stability precedent: `.vt-active-game-modal-*`) even though the shared
+   markup no longer emits those classes. */
 
 .vt-tools-balonce-played-meter {
     margin-top: 0.5rem;
+}
+
+/* Headline row above the gauge: favored team + probability, band pill. */
+.vt-tools-balonce-meter-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.15rem;
+}
+
+.vt-tools-balonce-meter-headline {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--kb-text-primary);
+}
+
+.vt-tools-balonce-footer-chips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
 }
 
 .vt-tools-balonce-played-meter-track {

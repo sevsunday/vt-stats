@@ -3,7 +3,25 @@
  *
  * Intentional misspell (community in-joke). Three-scenario commander
  * configurator + exhaustive thug-pool partition + drag-to-swap + the
- * Played Meter imbalance gauge.
+ * **Balonce Meter** (the community calls a lopsided lobby "getting
+ * PLAYED", hence the band names below).
+ *
+ * THE MODEL (shared with the dashboard's per-match section):
+ *   The meter is driven by the VTSR-C duel formula in
+ *   js/balonce-meter.js — the SAME function elo_commander.py uses to
+ *   score every real match, validated at ~66% winner accuracy over 625
+ *   duels:
+ *
+ *     P(T1) = 1 / (1 + 10^(-((Rc1 - Rc2) + lambda*(T1mean - T2mean)) / 400))
+ *
+ *   Rc = commander VTSR-C; T = mean THUG VTSR-T (commander excluded).
+ *   Both commanders must be set for the commander term to apply — with
+ *   0 or 1 set we fall back to the thug-only read rather than asserting
+ *   an unknown commander is average-vs-someone-specific.
+ *
+ *   A commander's own VTSR-T is DISPLAYED on their row but deliberately
+ *   NOT in the math: VTSR-C is outcome-pure, so their fighting is
+ *   already priced into the wins that built it.
  *
  * Algorithm:
  *   1. Determine commander setup (0, 1, or 2 set manually).
@@ -14,37 +32,51 @@
  *   3. Partition remaining thugs across two teams. Enumerate ALL 2^M
  *      non-trivial subsets (skip empty + full) — handles odd lobbies
  *      naturally (4v3, 5v4, etc). Enforce |team| <= 5 (incl. cmdr).
- *      Score each subset by |sum(team1) - sum(team2)|; pick min-delta.
- *   4. Render two team columns + Played Meter chevron + scenario banner.
+ *      Objective: with both commanders set, minimize |P - 0.5| (so a
+ *      weaker commander is compensated with stronger thugs), tie-broken
+ *      by |sum(team1) - sum(team2)|. Otherwise the legacy sum-delta
+ *      objective, unchanged.
+ *   4. Render two team columns + Balonce Meter + scenario banner.
  *
  * Drag-to-swap: HTML5 drag-and-drop. Cross-column moves recompute the
- * delta + Played Meter live. Manual swaps tracked in pageState so
+ * probability + Balonce Meter live. Manual swaps tracked in pageState so
  * "Reset to best balance" can revert.
  *
- * Played Meter (imbalance gauge):
- *   chevron_pos = 50% + 50% * min(|d|/1000, 1) * sign(d)
- *   color bands:
- *     |d| < 100  : green  - "Well balanced"
- *     100-300    : yellow - "Slight edge to <team>"
- *     300-600    : orange - "Imbalanced - <team> at disadvantage"
- *     >= 600     : red    - "Heavily imbalanced - <team> at disadvantage"
+ * Balonce Meter bands (on the FAVORITE's win probability):
+ *     50-55%  Good game
+ *     55-65%  Slight edge
+ *     65-80%  PLAYEDathon
+ *     80%+    PLAYEDalocalypse
  *
  * Provisional anchoring (mirrored from player-resolver):
- *   - Unrated / custom entries anchored at VTSR 1500
- *   - Rated-but-provisional carry their actual VTSR + flag
+ *   - Unrated / custom entries anchored at VTSR 1500 (and VTSR-C 1500)
+ *   - Rated-but-provisional carry their actual rating + flag
  *
- * Empty state: < 3 active roster players.
+ * Empty state: < 2 active roster players.
  */
 (function () {
   'use strict';
 
   // ---------------------------------------------------------------- Config
 
-  const MAX_PLAYED_METER_DELTA = 1000;
   const TEAM_SLOT_CAP = 5;
-  const CMDR_BAND_GREEN = 100;
-  const CMDR_BAND_YELLOW = 300;
-  const CMDR_BAND_ORANGE = 600;
+
+  /**
+   * Favorite-probability floor for calling a side disadvantaged (drives
+   * the team-header badge). Mirrors VTBalonce.DISADVANTAGE_PROB; read
+   * from the module so the two surfaces cannot drift.
+   */
+  function disadvantageProb() {
+    return (window.VTBalonce && window.VTBalonce.DISADVANTAGE_PROB) || 0.55;
+  }
+
+  /** Anchor used for unrated players on either ladder. */
+  const ANCHOR = 1500;
+
+  const VALIDATION_URL_CANDIDATES = [
+    '../data/processed/validation_summary.json',
+    'data/processed/validation_summary.json',
+  ];
 
   // ---------------------------------------------------------------- State
 
@@ -115,6 +147,112 @@
     return (value - mean) / std;
   }
 
+  function mean(values) {
+    if (!values.length) return null;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  // ---------------------------------------------------------------- Balance model
+
+  /** Commander rating fed to the model (anchor when unrated). */
+  function vtsrCOf(p) {
+    if (!p) return ANCHOR;
+    if (Number.isFinite(p.vtsrCEffective)) return p.vtsrCEffective;
+    if (Number.isFinite(p.vtsrC)) return p.vtsrC;
+    const meta = window.VTToolsResolver && window.VTToolsResolver.getCmdrEloMeta
+      ? window.VTToolsResolver.getCmdrEloMeta()
+      : null;
+    return (meta && Number.isFinite(meta.anchor)) ? meta.anchor : ANCHOR;
+  }
+
+  /** Model dials, read from the emitted JSON — never hardcoded here. */
+  function modelConstants() {
+    const meta = window.VTToolsResolver && window.VTToolsResolver.getCmdrEloMeta
+      ? window.VTToolsResolver.getCmdrEloMeta()
+      : null;
+    const fallback = window.VTBalonce || {};
+    return {
+      lambda: (meta && Number.isFinite(meta.lambda_team_handicap))
+        ? meta.lambda_team_handicap
+        : (fallback.DEFAULT_LAMBDA != null ? fallback.DEFAULT_LAMBDA : 1.0),
+      scale: (meta && Number.isFinite(meta.logistic_scale))
+        ? meta.logistic_scale
+        : (fallback.DEFAULT_SCALE != null ? fallback.DEFAULT_SCALE : 400),
+    };
+  }
+
+  /**
+   * Fold a team layout into everything the meter + headers need.
+   *
+   * `assignment` defaults to the live `assignmentOverride`. Sums are kept
+   * as the secondary material readout the community already reads; the
+   * PRIMARY number is `probT1` from the validated VTSR-C duel formula.
+   */
+  function balanceState(assignment) {
+    const map = assignment || assignmentOverride;
+    const teams = { 1: [], 2: [] };
+    for (const p of activeRoster) {
+      const t = map.get(playerKey(p));
+      if (t === 1 || t === 2) teams[t].push(p);
+    }
+    const cmdrKeys = { 1: commanderSetup.team1, 2: commanderSetup.team2 };
+    const cmdrs = {
+      1: cmdrKeys[1] ? findPlayer(cmdrKeys[1]) : null,
+      2: cmdrKeys[2] ? findPlayer(cmdrKeys[2]) : null,
+    };
+    const bothCmdrs = !!(cmdrs[1] && cmdrs[2]);
+
+    const sums = { 1: 0, 2: 0 };
+    const thugMeans = { 1: null, 2: null };
+    for (const side of [1, 2]) {
+      sums[side] = teams[side].reduce((s, p) => s + p.vtsr, 0);
+      const thugVals = teams[side]
+        .filter((p) => playerKey(p) !== cmdrKeys[side])
+        .map((p) => p.vtsr);
+      thugMeans[side] = mean(thugVals);
+    }
+
+    const consts = modelConstants();
+    // With fewer than two commanders set, the commander term is dropped
+    // entirely (equal-commanders assumption) rather than pitting a known
+    // rating against an unknown one.
+    const rc1 = bothCmdrs ? vtsrCOf(cmdrs[1]) : ANCHOR;
+    const rc2 = bothCmdrs ? vtsrCOf(cmdrs[2]) : ANCHOR;
+    const probT1 = window.VTBalonce
+      ? window.VTBalonce.computeWinProb({
+        rc1, rc2,
+        t1Mean: thugMeans[1],
+        t2Mean: thugMeans[2],
+        lambda: consts.lambda,
+        scale: consts.scale,
+      })
+      : 0.5;
+
+    const fav = window.VTBalonce
+      ? window.VTBalonce.favoriteOf(probT1)
+      : { team: null, prob: 0.5, band: { key: 'green', label: 'Good game' } };
+
+    return {
+      teams,
+      cmdrs,
+      bothCmdrs,
+      sums,
+      sumDelta: sums[1] - sums[2],
+      thugMeans,
+      cmdrGap: bothCmdrs ? (rc1 - rc2) : null,
+      thugGap: (Number.isFinite(thugMeans[1]) && Number.isFinite(thugMeans[2]))
+        ? thugMeans[1] - thugMeans[2]
+        : null,
+      lambda: consts.lambda,
+      probT1,
+      fav,
+      /** 1 | 2 | null — the side the model puts at a real disadvantage. */
+      disadvantaged: (fav.team && fav.prob >= disadvantageProb())
+        ? (fav.team === 1 ? 2 : 1)
+        : null,
+    };
+  }
+
   // ---------------------------------------------------------------- Candidacy ranking
 
   function rankCandidates(pool) {
@@ -139,18 +277,39 @@
 
   /**
    * Exhaustively enumerate all 2^M non-trivial subsets of the thug pool
-   * (skip empty + full). Score each by |sum(team1) - sum(team2)| where
-   * team sums include the commander's VTSR. Enforce |team| <= 5 incl. cmdr.
-   * Returns { team1, team2 } arrays of player keys, or null if no valid
-   * partition exists.
+   * (skip empty + full). Enforce |team| <= 5 incl. cmdr.
+   *
+   * OBJECTIVE (two modes):
+   *   - Both commanders set: minimize |P - 0.5| under the validated
+   *     VTSR-C duel formula, tie-broken by |sum1 - sum2|. This is the
+   *     real upgrade over the legacy sum objective — because the
+   *     commander gap is a fixed term in P, the search compensates a
+   *     weaker commander with stronger thugs instead of pretending the
+   *     two jobs are interchangeable.
+   *   - Otherwise: the legacy |sum(team1) - sum(team2)| objective,
+   *     unchanged (no commander term to balance against).
+   *
+   * Returns { team1, team2, delta, probT1 } (player-key arrays), or null
+   * if no valid partition exists.
    */
   function findBestPartition(thugs, cmdr1, cmdr2) {
+    const bothCmdrs = !!(cmdr1 && cmdr2);
+    const consts = modelConstants();
+    const rc1 = bothCmdrs ? vtsrCOf(cmdr1) : ANCHOR;
+    const rc2 = bothCmdrs ? vtsrCOf(cmdr2) : ANCHOR;
+    const probFor = (t1Mean, t2Mean) => (window.VTBalonce
+      ? window.VTBalonce.computeWinProb({
+        rc1, rc2, t1Mean, t2Mean, lambda: consts.lambda, scale: consts.scale,
+      })
+      : 0.5);
+
     if (thugs.length === 0) {
-      // No thugs to partition — return commander-only teams (if any)
+      // No thugs to partition — return commander-only teams (if any).
       return {
         team1: cmdr1 ? [playerKey(cmdr1)] : [],
         team2: cmdr2 ? [playerKey(cmdr2)] : [],
         delta: Math.abs((cmdr1 ? cmdr1.vtsr : 0) - (cmdr2 ? cmdr2.vtsr : 0)),
+        probT1: probFor(null, null),
       };
     }
     const M = thugs.length;
@@ -166,7 +325,8 @@
     // the empty-thugs-on-team-1 split: cmdr alone on team 1, lone thug
     // on team 2 → a clean 1v1.
     let best = null;
-    let bestDelta = Infinity;
+    let bestPrimary = Infinity;
+    let bestTiebreak = Infinity;
     const totalMasks = 1 << M;
     for (let mask = 0; mask < totalMasks; mask++) {
       const team1Thugs = [];
@@ -192,15 +352,17 @@
       if (team2Size > TEAM_SLOT_CAP) continue;
 
       const delta = Math.abs(team1Sum - team2Sum);
-      if (delta < bestDelta) {
-        bestDelta = delta;
-        best = {
-          team1Thugs,
-          team2Thugs,
-          team1Sum,
-          team2Sum,
-          delta,
-        };
+      const t1Mean = mean(team1Thugs.map((p) => p.vtsr));
+      const t2Mean = mean(team2Thugs.map((p) => p.vtsr));
+      const prob = probFor(t1Mean, t2Mean);
+      const primary = bothCmdrs ? Math.abs(prob - 0.5) : delta;
+      const tiebreak = delta;
+
+      if (primary < bestPrimary - 1e-12
+          || (Math.abs(primary - bestPrimary) <= 1e-12 && tiebreak < bestTiebreak)) {
+        bestPrimary = primary;
+        bestTiebreak = tiebreak;
+        best = { team1Thugs, team2Thugs, team1Sum, team2Sum, delta, probT1: prob };
       }
     }
     if (!best) return null;
@@ -208,6 +370,7 @@
       team1: (cmdr1 ? [playerKey(cmdr1)] : []).concat(best.team1Thugs.map(playerKey)),
       team2: (cmdr2 ? [playerKey(cmdr2)] : []).concat(best.team2Thugs.map(playerKey)),
       delta: best.delta,
+      probT1: best.probT1,
     };
   }
 
@@ -485,7 +648,7 @@
         <div class="vt-tools-balonce-banner vt-tools-balonce-banner--orange">
           <i class="bi bi-info-circle me-1"></i>
           <strong>0 commanders set.</strong>
-          Commander picks suggested from VTSR-T + commander match count. VTSR-T measures thug skill — it's not a perfect proxy for commander ability. Consider setting commanders manually for best results.
+          Commander picks suggested from VTSR-T + commander match count. The prediction below is running on thug ratings alone until both commanders are set — the commander gap is the strongest part of the model.
           ${provisionalNote}
         </div>
       `;
@@ -495,26 +658,35 @@
         <div class="vt-tools-balonce-banner vt-tools-balonce-banner--yellow">
           <i class="bi bi-info-circle me-1"></i>
           <strong>1 of 2 commanders set.</strong>
-          Suggesting the second commander from VTSR-T + commander match count. Same caveat applies.
+          Suggesting the second commander from VTSR-T + commander match count. The prediction still uses thug ratings only — set both commanders to bring VTSR-C into it.
           ${provisionalNote}
         </div>
       `;
     }
-    // 2 set: show cmdr ΔVTSR chip
+    // Both set: the commander term is live, so the chip reports the real
+    // VTSR-C gap. No "different skills" disclaimer any more — the model
+    // is now using the rating that actually measures commanding.
     const { cmdr1, cmdr2 } = getActiveCommanders();
-    const cmdrDelta = cmdr1 && cmdr2 ? cmdr1.vtsr - cmdr2.vtsr : 0;
-    const cmdrDeltaTxt = Math.abs(cmdrDelta) < 1
-      ? 'Cmdr ΔVTSR: balanced'
-      : `Cmdr ΔVTSR: ${cmdrDelta > 0 ? '+' : ''}${Math.round(cmdrDelta)} (Team ${cmdrDelta > 0 ? '1' : '2'} stronger thug-rating)`;
+    const gap = vtsrCOf(cmdr1) - vtsrCOf(cmdr2);
+    const gapTxt = Math.abs(gap) < 1
+      ? 'Cmdr \u0394VTSR-C: level'
+      : `Cmdr \u0394VTSR-C: ${gap > 0 ? '+' : '\u2212'}${Math.round(Math.abs(gap))} (${escapeHtml((gap > 0 ? cmdr1 : cmdr2).displayName)})`;
+    const provChips = [cmdr1, cmdr2]
+      .filter((c) => c && (c.vtsrCUnrated || c.vtsrCProvisional))
+      .map((c) => {
+        const label = c.vtsrCUnrated ? 'unrated' : `${c.vtsrCGames} duels`;
+        const tip = c.vtsrCUnrated
+          ? `${c.displayName} has no rated commander games — the model debuts them at ${ANCHOR}.`
+          : `${c.displayName} has only ${c.vtsrCGames} rated commander duels, so their VTSR-C is still provisional.`;
+        return `<span class="vt-tools-balonce-row-provisional ms-1" title="${escapeHtml(tip)}">${escapeHtml(c.displayName)}: ${escapeHtml(label)}</span>`;
+      }).join('');
     return `
       <div class="vt-tools-balonce-banner vt-tools-balonce-banner--green">
         <i class="bi bi-check-circle me-1"></i>
         <strong>Both commanders locked.</strong>
-        Showing best thug balance.
-        <span class="vt-tools-balonce-cmdr-delta-chip ms-2">${escapeHtml(cmdrDeltaTxt)}</span>
-        <div class="small mt-1 vt-tools-balonce-banner-note">
-          Cmdr ΔVTSR is informational — commander ability and thug VTSR are different skills.
-        </div>
+        Prediction is using the commander ladder plus thug ratings.
+        <span class="vt-tools-balonce-cmdr-delta-chip ms-2">${gapTxt}</span>
+        ${provChips}
         ${provisionalNote}
       </div>
     `;
@@ -551,23 +723,24 @@
   }
 
   function renderTeamColumns() {
-    const team1 = [];
-    const team2 = [];
-    for (const p of activeRoster) {
-      const team = assignmentOverride.get(playerKey(p));
-      if (team === 1) team1.push(p);
-      else if (team === 2) team2.push(p);
-    }
-    const team1Sum = team1.reduce((s, p) => s + p.vtsr, 0);
-    const team2Sum = team2.reduce((s, p) => s + p.vtsr, 0);
-    const delta = team1Sum - team2Sum;
-    const absDelta = Math.abs(delta);
-    const disadvantaged = absDelta >= CMDR_BAND_GREEN
-      ? (delta > 0 ? 2 : 1)
-      : null;
+    const state = balanceState();
+    const team1 = state.teams[1];
+    const team2 = state.teams[2];
+    const team1Sum = state.sums[1];
+    const team2Sum = state.sums[2];
+    // Disadvantage is now keyed to the model's win probability, not the
+    // raw rating sum — a side can carry more total VTSR-T and still be
+    // the underdog once the commander gap is in play.
+    const disadvantaged = state.disadvantaged;
 
-    const team1Disadv = disadvantaged === 1 ? '<span class="vt-tools-balonce-team-header-disadv badge">Disadvantaged</span>' : '';
-    const team2Disadv = disadvantaged === 2 ? '<span class="vt-tools-balonce-team-header-disadv badge">Disadvantaged</span>' : '';
+    const disadvTip = state.fav.team
+      ? `The model gives Team ${state.fav.team} a ${Math.round(state.fav.prob * 100)}% chance here.`
+      : '';
+    const disadvBadge = (side) => (disadvantaged === side
+      ? `<span class="vt-tools-balonce-team-header-disadv badge" title="${escapeHtml(disadvTip)}">Disadvantaged</span>`
+      : '');
+    const team1Disadv = disadvBadge(1);
+    const team2Disadv = disadvBadge(2);
 
     // Drop targets are the entire team-column wrappers (not the inner
     // list) — players can be dropped on the header, on the rows, OR on
@@ -610,6 +783,15 @@
                 || (team === 2 && commanderSetup.team2 === key);
     const cmdrChip = isCmdr ? '<span class="vt-tools-balonce-row-cmdrchip">CMDR</span>' : '';
     const tierBadge = p.tier ? `<span class="vt-tools-balonce-row-tier">T${p.tier}</span>` : '';
+    // Commanders carry TWO ratings and the row shows both: VTSR-C is the
+    // one in the prediction, VTSR-T (the trailing number every row has)
+    // is their thug rating, shown for context only.
+    const cmdrEloChip = isCmdr
+      ? `<span class="vt-tools-balonce-row-cmdrelo${p.vtsrCUnrated ? ' is-unrated' : ''}"
+             title="${escapeHtml(p.vtsrCUnrated
+               ? `No rated commander games yet — the model debuts ${p.displayName} at ${ANCHOR}. The number after their name is their thug rating (VTSR-T), which is not part of the prediction.`
+               : `Commander rating (VTSR-C) over ${p.vtsrCGames} rated duel${p.vtsrCGames === 1 ? '' : 's'}. This is the term the prediction uses; the trailing number is their thug rating (VTSR-T).`)}">C ${Math.round(vtsrCOf(p))}${p.vtsrCUnrated ? '*' : ''}</span>`
+      : '';
     const provisionalChip = p.isProvisional
       ? `<span class="vt-tools-balonce-row-provisional" title="${escapeHtml(p.isCustom ? 'Custom entry' : 'Provisional / unrated')}">${p.isCustom ? 'cust' : 'prov'}</span>`
       : '';
@@ -628,6 +810,7 @@
         <i class="bi bi-grip-vertical vt-tools-balonce-row-grip" aria-hidden="true"></i>
         ${cmdrChip}
         <span class="vt-tools-balonce-row-name" title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</span>
+        ${cmdrEloChip}
         ${tierBadge}
         ${provisionalChip}
         ${unsplitChip}
@@ -636,54 +819,157 @@
     `;
   }
 
+  /**
+   * The Balonce Meter. Primary number is the model's win probability
+   * (VTSR-C commander gap + thug VTSR-T handicap); the raw rating sums
+   * stay on as the secondary material readout the community reads.
+   */
   function renderPlayedMeter() {
-    const team1Sum = activeRoster
-      .filter((p) => assignmentOverride.get(playerKey(p)) === 1)
-      .reduce((s, p) => s + p.vtsr, 0);
-    const team2Sum = activeRoster
-      .filter((p) => assignmentOverride.get(playerKey(p)) === 2)
-      .reduce((s, p) => s + p.vtsr, 0);
-    const delta = team1Sum - team2Sum;       // signed: positive = Team1 stronger = Team2 disadvantaged
-    const absDelta = Math.abs(delta);
-    const normalized = Math.min(absDelta / MAX_PLAYED_METER_DELTA, 1);
-    const chevronPos = 50 + 50 * normalized * Math.sign(delta);
+    const state = balanceState();
+    const B = window.VTBalonce;
+    const fav = state.fav;
 
-    let band, label;
-    if (absDelta < CMDR_BAND_GREEN) {
-      band = 'green'; label = 'Well balanced';
-    } else if (absDelta < CMDR_BAND_YELLOW) {
-      const which = delta > 0 ? 'Team 2' : 'Team 1';
-      band = 'yellow'; label = `Slight edge — ${which} at disadvantage`;
-    } else if (absDelta < CMDR_BAND_ORANGE) {
-      const which = delta > 0 ? 'Team 2' : 'Team 1';
-      band = 'orange'; label = `Imbalanced — ${which} at disadvantage`;
-    } else {
-      const which = delta > 0 ? 'Team 2' : 'Team 1';
-      band = 'red'; label = `Heavily imbalanced — ${which} at disadvantage`;
+    const sumDelta = state.sumDelta;
+    const parts = [];
+    if (Number.isFinite(state.cmdrGap)) {
+      parts.push(`<span class="vt-balonce-part" title="Commander rating gap (VTSR-C), Team 1 minus Team 2. The strongest single term in the prediction.">Cmdr gap <span class="vt-mono">${signed(state.cmdrGap)}</span></span>`);
     }
+    if (Number.isFinite(state.thugGap)) {
+      parts.push(`<span class="vt-balonce-part" title="Thug-team strength gap (mean VTSR-T, commanders excluded), weighted at lambda = ${state.lambda}.">Thug gap <span class="vt-mono">${signed(state.thugGap)}</span></span>`);
+    }
+    parts.push(`<span class="vt-balonce-part" title="Total roster VTSR-T difference. Material weight, not the prediction \u2014 shown because it is the number the lobby has always eyeballed.">\u0394\u03a3VTSR <span class="vt-mono">${signed(sumDelta)}</span></span>`);
 
-    const deltaLabel = absDelta < 1 ? 'ΔVTSR 0' : `ΔVTSR ${delta > 0 ? '+' : '−'}${Math.round(absDelta)}`;
+    const headline = fav.team
+      ? `Team ${fav.team} favored <span class="vt-balonce-prob vt-mono">${Math.round(fav.prob * 100)}%</span>`
+      : 'Dead even';
+
+    // Compact status: the headline row above already carries the band
+    // name and the probability.
+    const meter = B
+      ? B.meterHtml({ probT1: state.probT1, compact: true })
+      : '';
 
     return `
       <div class="vt-tools-balonce-played-meter">
-        <div class="vt-tools-balonce-played-meter-track">
-          <div class="vt-tools-balonce-played-meter-tick" aria-hidden="true"></div>
-          <div class="vt-tools-balonce-played-meter-chevron"
-               style="left: ${chevronPos.toFixed(2)}%"
-               title="${escapeHtml(label)}"
-               aria-label="${escapeHtml(label)}">
-            <i class="bi bi-caret-up-fill"></i>
-          </div>
+        <div class="vt-tools-balonce-meter-head">
+          <span class="vt-tools-balonce-meter-headline">${headline}</span>
+          <span class="vt-balonce-band vt-balonce-band--${fav.band.key}">${escapeHtml(fav.band.label)}</span>
         </div>
-        <div class="vt-tools-balonce-played-meter-footer">
-          <span class="vt-tools-balonce-played-meter-team">Team 1 disadv.</span>
-          <span class="vt-tools-balonce-played-meter-label vt-tools-balonce-played-meter-label--${band}">
-            ${escapeHtml(label)} · ${escapeHtml(deltaLabel)}
-          </span>
-          <span class="vt-tools-balonce-played-meter-team">Team 2 disadv.</span>
-        </div>
+        ${meter}
+        <div class="vt-balonce-parts">${parts.join('')}</div>
+        ${renderMeterFooter(state)}
       </div>
     `;
+  }
+
+  function signed(n) {
+    const v = n || 0;
+    if (Math.abs(v) < 1) return '0';
+    return (v > 0 ? '+' : '\u2212') + Math.round(Math.abs(v));
+  }
+
+  /**
+   * Confidence chip + uneven-teams warning + the honesty footer.
+   *
+   * Confidence is count-based, not a formal interval: it reports how much
+   * of this lobby the ratings actually know about. The accuracy figure is
+   * the validator's own number for THIS formula, omitted entirely when
+   * validation_summary.json is unavailable rather than guessed at.
+   */
+  function renderMeterFooter(state) {
+    const bits = [];
+
+    // --- confidence
+    const causes = [];
+    for (const side of [1, 2]) {
+      const c = state.cmdrs[side];
+      if (!c) continue;
+      if (c.vtsrCUnrated) causes.push(`${c.displayName} has no commander record`);
+      else if (c.vtsrCProvisional) causes.push(`${c.displayName}'s commander rating is provisional`);
+    }
+    const cmdrKeySet = new Set([commanderSetup.team1, commanderSetup.team2].filter(Boolean));
+    const shakyThugs = activeRoster.filter((p) => {
+      if (cmdrKeySet.has(playerKey(p))) return false;
+      return p.isProvisional || p.isUnknown || p.isCustom;
+    }).length;
+    if (shakyThugs > 0) {
+      causes.push(`${shakyThugs} player${shakyThugs === 1 ? '' : 's'} unrated or provisional`);
+    }
+    if (!state.bothCmdrs) causes.push('commanders not both set');
+
+    let level = 'high';
+    if (causes.length >= 3) level = 'low';
+    else if (causes.length >= 1) level = 'medium';
+    const confTip = causes.length
+      ? `Reduced confidence: ${causes.join('; ')}.`
+      : 'Every player here has a settled rating, so the prediction is on its firmest footing.';
+    bits.push(`<span class="vt-balonce-confidence vt-balonce-confidence--${level}" title="${escapeHtml(confTip)}">
+      <i class="bi bi-shield-check" aria-hidden="true"></i>${level === 'high' ? 'High' : level === 'medium' ? 'Medium' : 'Low'} confidence</span>`);
+
+    // --- uneven teams: the handicap term uses MEANS, so headcount does
+    // not enter the probability. Say so rather than quietly misleading.
+    const n1 = state.teams[1].length;
+    const n2 = state.teams[2].length;
+    if (n1 !== n2 && n1 > 0 && n2 > 0) {
+      bits.push(`<span class="vt-balonce-confidence vt-balonce-confidence--medium"
+        title="${escapeHtml(`Teams are ${n1}v${n2}. The prediction compares AVERAGE thug rating, so the extra body on the larger side is not reflected in the percentage.`)}">
+        <i class="bi bi-people" aria-hidden="true"></i>${n1}v${n2} \u2014 material edge not in the %</span>`);
+    }
+
+    const rec = validationRecord();
+    const claim = rec
+      ? `Model: VTSR-C duel formula \u00b7 ${Math.round(rec.accuracy * 100)}% over ${rec.n} games`
+      : 'Model: VTSR-C duel formula';
+
+    return `
+      <div class="vt-balonce-footer">
+        <span class="vt-tools-balonce-footer-chips">${bits.join(' ')}</span>
+        <span>${escapeHtml(claim)} \u00b7
+          <a href="../elo/index.html?tab=how" target="_blank" rel="noopener">How it works</a>
+        </span>
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------- Validator record
+
+  /**
+   * Lazy, 404-safe read of the committed validator summary so the footer
+   * can quote a real accuracy number. `undefined` = not fetched yet,
+   * `null` = unavailable (footer drops the number).
+   */
+  let validationSummary;
+  let validationPromise = null;
+
+  function validationRecord() {
+    if (validationSummary === undefined) {
+      loadValidationSummary();
+      return null;
+    }
+    const latest = validationSummary && validationSummary.latest;
+    if (!latest || !Number.isFinite(latest.vtsr_c_accuracy) || !Number.isFinite(latest.vtsr_c_n)) {
+      return null;
+    }
+    return { accuracy: latest.vtsr_c_accuracy, n: latest.vtsr_c_n };
+  }
+
+  function loadValidationSummary() {
+    if (validationPromise) return validationPromise;
+    validationPromise = (async () => {
+      for (const url of VALIDATION_URL_CANDIDATES) {
+        try {
+          const res = await fetch(url, { cache: 'no-store' });
+          if (res && res.ok) return await res.json();
+        } catch (_) { /* try next */ }
+      }
+      return null;
+    })().then((json) => {
+      validationSummary = json;
+      // Repaint so the footer picks up the accuracy figure.
+      if (bodyEl && activeRoster.length >= 2) render();
+      return json;
+    });
+    return validationPromise;
   }
 
   // ---------------------------------------------------------------- Drag & drop / row events

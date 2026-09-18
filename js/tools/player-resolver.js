@@ -8,6 +8,8 @@
  *   - EAGER (on init):
  *       data/known-hosts.json    (allowlist of community hosts)
  *       data/processed/elo_current.json    (VTSR-T + commander stats)
+ *       data/processed/elo_commander_current.json  (VTSR-C ladder — the
+ *           dominant term in the Balonce Meter's win probability)
  *       data/processed/player_slugs.json   (sticky display name + slug)
  *       data/vsrmaplist.json     (used by live-session-card for map images)
  *   - LAZY (on first resolve of an unknown Steam64):
@@ -62,6 +64,12 @@
  *     vtsr,                  // number (anchored at 1500 when provisional/unknown/custom)
  *     thugElo,               // number or null
  *     winsElo,               // number or null
+ *     vtsrC,                 // VTSR-C commander rating, or null when unrated
+ *     vtsrCEffective,        // vtsrC ?? anchor — what the Balonce Meter feeds the model
+ *     vtsrCGames,            // rated commander duels (telemetry + community ledger)
+ *     vtsrCProvisional,      // bool — below the ladder's provisional threshold
+ *     vtsrCUnrated,          // bool — no entry in the commander ladder at all
+ *     vtsrCRecord,           // {w, l, d} or null
  *     matchesPlayed,         // number or 0
  *     matchesAsCmdr,         // number or 0
  *     matchesAsThug,         // number or 0
@@ -80,6 +88,7 @@
 
   const KNOWN_HOSTS_URL_CANDIDATES = ['../data/known-hosts.json', 'data/known-hosts.json'];
   const ELO_CURRENT_URL_CANDIDATES = ['../data/processed/elo_current.json', 'data/processed/elo_current.json'];
+  const CMDR_ELO_URL_CANDIDATES = ['../data/processed/elo_commander_current.json', 'data/processed/elo_commander_current.json'];
   const PLAYER_SLUGS_URL_CANDIDATES = ['../data/processed/player_slugs.json', 'data/processed/player_slugs.json'];
   const STEAM_ROSTER_URL_CANDIDATES = ['../data/steamid_to_name.txt', 'data/steamid_to_name.txt'];
   const VSR_MAP_LIST_URL_CANDIDATES = ['../data/vsrmaplist.json', 'data/vsrmaplist.json'];
@@ -101,6 +110,11 @@
   /** @type {Map<string,object>} steam64 -> elo_current.ratings[i] */
   const eloRatings = new Map();
   let eloMeta = null;
+
+  /** @type {Map<string,object>} steam64 -> elo_commander_current.ratings[i] */
+  const cmdrRatings = new Map();
+  /** Model constants from elo_commander_current.json (anchor / lambda / scale). */
+  let cmdrEloMeta = null;
 
   /** @type {Map<string,object>} steam64 -> player_slugs entry {slug, name, matches_played} */
   const playerSlugs = new Map();
@@ -168,6 +182,38 @@
     if (aliases && typeof aliases === 'object') {
       for (const [src, tgt] of Object.entries(aliases)) {
         if (src && tgt) steamAliases.set(String(src), String(tgt));
+      }
+    }
+  }
+
+  /**
+   * VTSR-C commander ladder. Feeds the Balonce Meter's dominant term: the
+   * validated prediction is driven by the commander rating gap, with thug
+   * VTSR-T only as the handicap. 404-safe: without this file the meter
+   * degrades to the thug-only read (every commander at the anchor).
+   */
+  async function loadCmdrEloCurrent() {
+    const data = await fetchWithFallback(CMDR_ELO_URL_CANDIDATES, (r) => r.json());
+    if (!data) {
+      console.warn('[player-resolver] failed to load elo_commander_current.json (commander-rating-blind mode)');
+      return;
+    }
+    // Constants come from the emitted JSON so the client never hardcodes
+    // the model's dials (mirrors js/balonce-meter.js cmdrConstants()).
+    cmdrEloMeta = {
+      schema_version: data.schema_version,
+      anchor: Number.isFinite(data.anchor) ? data.anchor : PROVISIONAL_ANCHOR_VTSR,
+      lambda_team_handicap: data.lambda_team_handicap,
+      logistic_scale: data.logistic_scale,
+      provisional_threshold: data.provisional_threshold,
+      ratings_count: Array.isArray(data.ratings) ? data.ratings.length : 0,
+      computed_at: data.computed_at || null,
+      external_provider: data.external_provider || null,
+    };
+    const ratings = Array.isArray(data.ratings) ? data.ratings : [];
+    for (const r of ratings) {
+      if (r && typeof r.steam64 === 'string') {
+        cmdrRatings.set(r.steam64, r);
       }
     }
   }
@@ -305,6 +351,18 @@
       isProvisional = true;
     }
 
+    // VTSR-C (commander ladder). Alias-aware via the same ratedId chain as
+    // VTSR-T. Unrated commanders debut at the anchor, exactly as
+    // elo_commander.py does, so the Balonce Meter can always compute.
+    const cmdrEntry = ratedId ? cmdrRatings.get(ratedId) || null : null;
+    const cmdrAnchor = (cmdrEloMeta && Number.isFinite(cmdrEloMeta.anchor))
+      ? cmdrEloMeta.anchor
+      : PROVISIONAL_ANCHOR_VTSR;
+    const vtsrC = (cmdrEntry && Number.isFinite(cmdrEntry.vtsr_c)) ? cmdrEntry.vtsr_c : null;
+    const vtsrCGames = (cmdrEntry && Number.isFinite(cmdrEntry.matches_commanded_rated))
+      ? cmdrEntry.matches_commanded_rated
+      : 0;
+
     const matchesPlayed = eloEntry && Number.isFinite(eloEntry.matches_played) ? eloEntry.matches_played : 0;
     const matchesAsCmdr = eloEntry && Number.isFinite(eloEntry.matches_as_commander) ? eloEntry.matches_as_commander : 0;
     const matchesAsThug = eloEntry && Number.isFinite(eloEntry.matches_as_thug) ? eloEntry.matches_as_thug : 0;
@@ -320,6 +378,16 @@
       vtsr,
       thugElo: eloEntry && Number.isFinite(eloEntry.thug_elo) ? eloEntry.thug_elo : null,
       winsElo: eloEntry && Number.isFinite(eloEntry.wins_elo) ? eloEntry.wins_elo : null,
+      // --- VTSR-C (commander ladder). `vtsrC` is null when unrated;
+      // `vtsrCEffective` is what the Balonce Meter feeds the model.
+      vtsrC,
+      vtsrCEffective: Number.isFinite(vtsrC) ? vtsrC : cmdrAnchor,
+      vtsrCGames,
+      vtsrCProvisional: cmdrEntry ? !!cmdrEntry.provisional : true,
+      vtsrCUnrated: !cmdrEntry,
+      vtsrCRecord: cmdrEntry
+        ? { w: cmdrEntry.wins || 0, l: cmdrEntry.losses || 0, d: cmdrEntry.draws || 0 }
+        : null,
       matchesPlayed,
       matchesAsCmdr,
       matchesAsThug,
@@ -348,6 +416,14 @@
       vtsr: PROVISIONAL_ANCHOR_VTSR,
       thugElo: null,
       winsElo: null,
+      vtsrC: null,
+      vtsrCEffective: (cmdrEloMeta && Number.isFinite(cmdrEloMeta.anchor))
+        ? cmdrEloMeta.anchor
+        : PROVISIONAL_ANCHOR_VTSR,
+      vtsrCGames: 0,
+      vtsrCProvisional: true,
+      vtsrCUnrated: true,
+      vtsrCRecord: null,
       matchesPlayed: 0,
       matchesAsCmdr: 0,
       matchesAsThug: 0,
@@ -436,6 +512,7 @@
     await Promise.all([
       loadKnownHosts(),
       loadEloCurrent(),
+      loadCmdrEloCurrent(),
       loadPlayerSlugs(),
       loadVsrMapList(),
     ]);
@@ -456,6 +533,7 @@
     getKnownHosts: () => knownHosts,
     getVsrMapByFile: () => vsrMapByFile,
     getEloMeta: () => eloMeta,
+    getCmdrEloMeta: () => cmdrEloMeta,
     PROVISIONAL_ANCHOR_VTSR,
     SITE_URL,
   };
