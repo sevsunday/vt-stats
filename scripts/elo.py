@@ -68,6 +68,13 @@ ELO_K_BASE = 40.0                # Base K-factor (rookie has K = BASE + FLOOR â‰
 ELO_K_FLOOR = 12.0               # Settled-veteran floor on K (typical provisional settle band).
 ELO_PROVISIONAL_PRIOR = 10.0     # K decays toward FLOOR over the first ~10 matches.
 ELO_PROVISIONAL_THRESHOLD = 10   # matches_played < this => "Provisional" badge.
+# Display-only ranked-ladder gate. Independent of the ? badge: a player
+# occupies a `#` when matches_played >= this. Does NOT change ratings,
+# K, or match history. Frozen in
+# critique/decisions/vtsr-t-ladder-eligibility.md; do not retune to
+# chase a name. ELO_SCHEMA_VERSION is deliberately NOT bumped (additive
+# display fields; published vtsr unchanged).
+ELO_LADDER_MIN_MATCHES = 25
 ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
 ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
 
@@ -1721,6 +1728,7 @@ def _rating_pass(
             "matches_as_commander": n_cmdr,
             "matches_as_thug":  n - n_cmdr,
             "matches_provisional": n < ELO_PROVISIONAL_THRESHOLD,
+            "leaderboard_eligible": n >= ELO_LADDER_MIN_MATCHES,
             # Stage E: wins-ladder career fields (additive). wins_games
             # counts only wins-rated rows (determined-outcome matches),
             # so it is <= matches_played; record keys w/l/d mirror the
@@ -1797,6 +1805,7 @@ def _rating_pass(
         "k_inactivity_boost_max":  K_INACTIVITY_BOOST_MAX,
         "provisional_prior":  ELO_PROVISIONAL_PRIOR,
         "provisional_threshold": ELO_PROVISIONAL_THRESHOLD,
+        "leaderboard_min_matches": ELO_LADDER_MIN_MATCHES,
         "min_player_count":   ELO_MIN_PLAYER_COUNT,
         "min_duration_sec":   ELO_MIN_DURATION_SEC,
         "computed_at":        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

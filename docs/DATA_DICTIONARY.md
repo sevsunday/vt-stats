@@ -3083,6 +3083,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "k_floor": 12.0,
   "provisional_prior": 10.0,
   "provisional_threshold": 10,
+  "leaderboard_min_matches": 25,
   "min_player_count": 6,
   "min_duration_sec": 240,
   "computed_at": "2026-05-12T22:00:00Z",
@@ -3121,6 +3122,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
     "matches_as_commander": 4,
     "matches_as_thug": 45,
     "matches_provisional": false,
+    "leaderboard_eligible": true,
     "last_match_id": "2026-05-04T03-06-22",
     "last_delta": 12.10,
     "peak_vtsr": 2708.9,
@@ -3143,7 +3145,8 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `rating_floor` | float | Soft floor below which losses go to zero. 1000.0. |
 | `floor_taper_window` | float | Width of the linear taper above the floor. 150.0 → full losses resume at 1150. |
 | `k_base`, `k_floor`, `provisional_prior` | float | K-decay curve parameters (40 / 12 / 10). |
-| `provisional_threshold` | int | matches_played below which the row gets a "Provisional" badge (10). |
+| `provisional_threshold` | int | matches_played below which the row gets a "Provisional" badge (10). Independent of `leaderboard_min_matches`. |
+| `leaderboard_min_matches` | int | Display-only ranked-ladder bar. A player occupies a `#` when `matches_played >=` this (25). UI reads this; do not hardcode. Memo: `critique/decisions/vtsr-t-ladder-eligibility.md`. |
 | `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 240). |
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
@@ -3175,12 +3178,15 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].matches_as_commander` | int | **v2.4** — count of rated matches where the player held a commander slot (slot 1 / 6 — `is_commander: true` on the leaderboard row). |
 | `ratings[].matches_as_thug` | int | **v2.4** — `matches_played - matches_as_commander`. Sums to `matches_played` exactly. Both fields are 0 for players who only appear in excluded matches. |
 | `ratings[].matches_provisional` | bool | True when `matches_played < provisional_threshold`. |
+| `ratings[].leaderboard_eligible` | bool | Display-only. `matches_played >= leaderboard_min_matches`. May occupy a ranked `#`. Does not change the rating. |
 | `ratings[].last_match_id` | string | Match id of the player's most recent rated match. |
 | `ratings[].last_delta` | float | The Δ applied at `last_match_id` (negative = loss). |
 | `ratings[].peak_vtsr` | float | Highest headline rating (`vtsr`) this player has ever held. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — the $P_i$ definition changed for commander rows; historical peaks were recomputed from scratch on the v2.4 re-rate. |
 | `ratings[].peak_at` | string | Match id where `peak_vtsr` was set. |
 | `ratings[].win_history` | array<float> | Last 10 deltas (oldest-first), used by the trend sparkline. |
 | `ratings[].axis_means` | object | **v2.3** — per-axis career-average z-scores, keyed by axis name. Each value is the mean of the player's per-match clipped-z (post `clip / 2`, so range $[-1, +1]$) across the rated matches where that axis was available for the lobby. Some keys may be absent if the player has never been in a lobby where that axis fired (e.g. matches with no positioning data → no `mobility` key). Powers the VTSR-T leaderboard's "Strong axes" tooltip on the rating cell. |
+
+Display-only ranked-ladder gate (no `ELO_SCHEMA_VERSION` bump). A player occupies a ranked `#` when `matches_played >= leaderboard_min_matches` (25). The `?` Provisional badge stays at `matches_played < 10`. Everyone else is Unranked (visible, no `#`). Memo: `critique/decisions/vtsr-t-ladder-eligibility.md`.
 
 ### `data/processed/elo_history.json`
 

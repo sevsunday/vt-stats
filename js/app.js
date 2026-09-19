@@ -1534,6 +1534,21 @@
   // the "?" Provisional chip — separate from MIN_CAREER_MATCHES (5)
   // which gates whether the row is visible at all.
   const ELO_PROVISIONAL_THRESHOLD = 10;
+  // Display-only ranked-ladder gate. Live value comes from
+  // elo_current.json `leaderboard_min_matches`. Mirrors
+  // scripts/elo.py ELO_LADDER_MIN_MATCHES. Independent of the
+  // 10-match Provisional badge. Tools / Balonce still consume the
+  // rating, not the rank.
+  const ELO_LADDER_MIN_MATCHES_FALLBACK = 25;
+  function vtsrLadderMinMatches(elo) {
+    return (elo && elo.leaderboard_min_matches != null)
+      ? elo.leaderboard_min_matches
+      : ELO_LADDER_MIN_MATCHES_FALLBACK;
+  }
+  function vtsrLadderEligible(r, elo) {
+    if (typeof r.leaderboard_eligible === 'boolean') return r.leaderboard_eligible;
+    return (r.matches_played || 0) >= vtsrLadderMinMatches(elo);
+  }
   const VTSR_TIERS = [
     { id: 1, label: 'Tier 1', short: 'I',   min: 1800, max: Infinity, token: '--vt-tier-1' },
     { id: 2, label: 'Tier 2', short: 'II',  min: 1650, max: 1800,     token: '--vt-tier-2' },
@@ -7031,7 +7046,7 @@
     $card.classList.remove('d-none');
 
     const ranked = visible
-      .filter(r => (r.matches_played || 0) >= ELO_PROVISIONAL_THRESHOLD)
+      .filter(r => vtsrLadderEligible(r, elo))
       .sort((a, b) => (b.vtsr || 0) - (a.vtsr || 0));
     const provisional = visible
       .filter(r => (r.matches_played || 0) < ELO_PROVISIONAL_THRESHOLD)

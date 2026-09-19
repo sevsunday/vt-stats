@@ -35,6 +35,11 @@
     { id: 5, label: 'Tier 5', short: 'V',   min: 1000, max: 1350,     token: 'vt-tier-5' },
   ];
   const ELO_PROVISIONAL_THRESHOLD = 10;
+  // Display-only ranked-ladder gate. Live value comes from
+  // elo_current.json `leaderboard_min_matches`. Mirrors
+  // scripts/elo.py ELO_LADDER_MIN_MATCHES. Independent of the
+  // 10-match Provisional badge.
+  const ELO_LADDER_MIN_MATCHES_FALLBACK = 25;
   const COMPARE_MAX = 4;
 
   // Commander-leaning / thug-leaning threshold. Mirrors the heuristic
@@ -194,6 +199,17 @@
   function formatNumber(n) {
     if (!Number.isFinite(n)) return '\u2014';
     return Math.round(n).toLocaleString();
+  }
+  // Career play time: 45s / 42m / 6h 47m (or 6h when minutes are 0).
+  function formatPlayTime(sec) {
+    if (!Number.isFinite(sec)) return '\u2014';
+    const s = Math.max(0, Math.round(sec));
+    if (s < 60) return s + 's';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h === 0) return m + 'm';
+    if (m === 0) return h + 'h';
+    return h + 'h ' + m + 'm';
   }
   function formatVtsr(n) {
     if (!Number.isFinite(n)) return '\u2014';
@@ -611,6 +627,10 @@
   function renderSingle(rating) {
     const role = roleLabel(rating);
     const t = resolveTier(safeNum(rating.vtsr), safeNum(rating.matches_played));
+    const rankInfo = computeRank(rating);
+    const rankHtml = rankInfo.eligible
+      ? `#${rankInfo.rank} of ${rankInfo.total}`
+      : `Unranked${vtsrProgressChipHtml(rating, state.elo)}`;
     dom.singleHero.innerHTML = `
       <div class="vt-player-single-hero-body">
         <div>
@@ -651,7 +671,7 @@
             </div>
             <div class="vt-player-single-stat">
               <div class="vt-player-single-stat-label">Career rank</div>
-              <div class="vt-player-single-stat-value">#${computeRank(rating)}</div>
+              <div class="vt-player-single-stat-value">${rankHtml}</div>
             </div>
             <div class="vt-player-single-stat">
               <div class="vt-player-single-stat-label">Provisional</div>
@@ -2497,7 +2517,7 @@
                   Primary: <strong>${escapeHtml(loadout.primary_ship.name)}</strong>
                   (${(loadout.primary_ship.share * 100).toFixed(0)}% of active time).
                   Diversity: ${loadout.ship_diversity} ship${loadout.ship_diversity === 1 ? '' : 's'}
-                  &middot; Total active: ${formatNumber(loadout.active_seconds)}s.
+                  &middot; Total active: ${formatPlayTime(loadout.active_seconds)}.
                 </p>
                 <div>
                   ${ships.map((s, i) => {
@@ -2505,7 +2525,7 @@
                     return `<div class="vt-wbar mb-2">
                       <div class="vt-wbar-head">
                         <span class="vt-wbar-name">${escapeHtml(s.name)}</span>
-                        <span class="vt-wbar-meta">${pct.toFixed(1)}% &middot; ${formatNumber(s.seconds)}s</span>
+                        <span class="vt-wbar-meta">${pct.toFixed(1)}% &middot; ${formatPlayTime(s.seconds)}</span>
                       </div>
                       <div class="vt-axis-track">
                         <div class="vt-axis-fill" style="left:0;width:${pct}%;background:color-mix(in oklab, var(--kb-primary) ${Math.max(40, 70 - i * 6)}%, transparent);"></div>
@@ -2543,7 +2563,7 @@
                         const acc = s.shots > 0 ? ((s.hits / s.shots) * 100).toFixed(1) + '%' : '\u2014';
                         return `<tr>
                           <td><strong>${escapeHtml(s.ship_name || s.ship)}</strong></td>
-                          <td class="text-end vt-matchlog-num">${formatNumber(s.time_seconds)}s</td>
+                          <td class="text-end vt-matchlog-num">${formatPlayTime(s.time_seconds)}</td>
                           <td class="text-end vt-matchlog-num">${kd}
                             <span class="text-secondary small">(${s.kills}/${s.deaths})</span>
                           </td>
@@ -2909,11 +2929,37 @@
       </li>`).join('');
   }
 
+  function vtsrLadderMinMatches(elo) {
+    return (elo && elo.leaderboard_min_matches != null)
+      ? elo.leaderboard_min_matches
+      : ELO_LADDER_MIN_MATCHES_FALLBACK;
+  }
+
+  function vtsrLadderEligible(r, elo) {
+    if (typeof r.leaderboard_eligible === 'boolean') return r.leaderboard_eligible;
+    return (r.matches_played || 0) >= vtsrLadderMinMatches(elo);
+  }
+
+  function vtsrProgressChipHtml(r, elo) {
+    const n = r.matches_played || 0;
+    const min = vtsrLadderMinMatches(elo);
+    const title = `${n} of ${min} rated matches to join the ranked ladder.`;
+    const label = n === 1 ? '1 match' : `${n} matches`;
+    return ` <span class="vt-cmdr-progress-chip" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+  }
+
   function computeRank(rating) {
-    const ratings = (state.elo && state.elo.ratings) || [];
-    const sorted = ratings.slice().sort((a, b) => safeNum(b.vtsr) - safeNum(a.vtsr));
-    const idx = sorted.findIndex(r => String(r.steam64) === String(rating.steam64));
-    return idx >= 0 ? idx + 1 : '\u2014';
+    const elo = state.elo;
+    const ratings = (elo && elo.ratings) || [];
+    const eligible = ratings.filter(r => vtsrLadderEligible(r, elo))
+      .slice().sort((a, b) => safeNum(b.vtsr) - safeNum(a.vtsr));
+    const sid = String(rating.steam64 || '');
+    const idx = eligible.findIndex(r => String(r.steam64) === sid);
+    return {
+      rank: idx >= 0 ? idx + 1 : null,
+      total: eligible.length,
+      eligible: idx >= 0,
+    };
   }
 
   // ---- Compare mode (Phase 7) -------------------------------------------

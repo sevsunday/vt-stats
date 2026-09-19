@@ -70,6 +70,11 @@
   // ----------------------------------------------------------------------
 
   const ELO_PROVISIONAL_THRESHOLD = 10;
+  // Display-only ranked-ladder gate. Live value comes from
+  // elo_current.json `leaderboard_min_matches`. Mirrors
+  // scripts/elo.py ELO_LADDER_MIN_MATCHES. Independent of the
+  // 10-match Provisional badge.
+  const ELO_LADDER_MIN_MATCHES_FALLBACK = 25;
   const VTSR_TIERS = [
     { id: 1, label: 'Tier 1', short: 'I',   min: 1800, max: Infinity },
     { id: 2, label: 'Tier 2', short: 'II',  min: 1650, max: 1800 },
@@ -91,6 +96,26 @@
     const into = vtsr - tier.min;
     return { toNext: tier.max - vtsr, fromCurrent: into, pct: into / span };
   }
+  function vtsrLadderMinMatches(elo) {
+    return (elo && elo.leaderboard_min_matches != null)
+      ? elo.leaderboard_min_matches
+      : ELO_LADDER_MIN_MATCHES_FALLBACK;
+  }
+
+  function vtsrLadderEligible(r, elo) {
+    if (typeof r.leaderboard_eligible === 'boolean') return r.leaderboard_eligible;
+    return (r.matches_played || 0) >= vtsrLadderMinMatches(elo);
+  }
+
+  function vtsrProgressChipHtml(r, elo) {
+    const n = r.matches_played || 0;
+    const min = vtsrLadderMinMatches(elo);
+    const title = `${n} of ${min} rated matches to join the ranked ladder.`;
+    const label = n === 1 ? '1 match' : `${n} matches`;
+    return ` <span class="vt-cmdr-progress-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+              title="${esc(title)}">${esc(label)}</span>`;
+  }
+
   function tierBadgeHtml(tier, opts = {}) {
     const titleAttr = opts.title ? ` title="${esc(opts.title)}" data-bs-toggle="tooltip" data-bs-placement="top"` : '';
     if (tier.id === 0) {
@@ -537,6 +562,141 @@
     </div>`;
   }
 
+  function renderVtsrLadderRow(r, elo, rank, noiseSigma) {
+    const tier = resolveTier(r.vtsr, r.matches_played);
+    let tierTip;
+    if (tier.id === 0) {
+      tierTip = `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`;
+    } else if (tier.id === 1) {
+      tierTip = `${tier.label} · ${tier.min}+ VTSR-T · top of the ladder`;
+    } else if (tier.id === 5) {
+      const fromFloor = Math.max(0, Math.round(r.vtsr - 1000));
+      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${fromFloor} pts above floor`;
+    } else {
+      const prog = tierProgress(r.vtsr, tier);
+      tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
+    }
+    const badge = tierBadgeHtml(tier, { title: tierTip });
+    const lastDelta = r.last_delta || 0;
+    const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : '';
+    const lastSign  = lastDelta > 0 ? '+' : '';
+    const rowKey = vtsrRowKey(r);
+    const detailId = `vtsr-detail-${rowKey}`;
+    const expanded = expandedVtsrRows.has(rowKey);
+
+    const careerRow = vtsrCareerByName(r);
+    const cl = (careerRow && careerRow.career_loadout) || null;
+
+    let playerCellAttrs = '';
+    const playerTipParts = [];
+    if (r.steam64) playerTipParts.push(`Steam64: ${r.steam64}`);
+    const inGameNick = (careerRow && careerRow.in_game_nick) || null;
+    if (inGameNick && inGameNick.toLowerCase() !== (r.name || '').toLowerCase()) {
+      playerTipParts.push(`In-game nick: ${inGameNick}`);
+    }
+    if (playerTipParts.length) {
+      playerCellAttrs = ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(playerTipParts.join(' \u00b7 '))}"`;
+    }
+
+    let primaryShipCell = '<td class="text-center"><span style="color:var(--kb-text-muted);">&mdash;</span></td>';
+    if (cl && cl.primary_ship && cl.primary_ship.name) {
+      const psName = cl.primary_ship.name;
+      const psShare = cl.primary_ship.share != null ? (cl.primary_ship.share * 100).toFixed(1) + '%' : '';
+      const ss = cl.secondary_ship;
+      const ssPart = (ss && ss.name && ss.share != null)
+        ? ` \u00b7 secondary ${ss.name} (${(ss.share * 100).toFixed(1)}%)`
+        : '';
+      const diversity = cl.ship_diversity || 0;
+      const diversityPart = diversity > 0
+        ? ` \u00b7 ${diversity} distinct ${diversity === 1 ? 'ship' : 'ships'}`
+        : '';
+      const activeSec = cl.active_seconds || 0;
+      const activeStr = activeSec >= 3600
+        ? (activeSec / 3600).toFixed(1) + 'h active'
+        : Math.round(activeSec / 60) + 'm active';
+      const psTip = `${psName} \u00b7 ${psShare} of ${activeStr}${ssPart}${diversityPart}`;
+      primaryShipCell = `<td class="text-center" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(psTip)}"><span class="vt-vtsr-primary-class">${esc(psName)}</span></td>`;
+    }
+
+    const pvpK = careerRow ? (careerRow.total_pvp_kills || 0) : 0;
+    const pvpD = careerRow ? (careerRow.total_pvp_deaths || 0) : 0;
+    const pveK = careerRow ? (careerRow.total_pve_kills || 0) : 0;
+    const pveD = careerRow ? (careerRow.total_pve_deaths || 0) : 0;
+    const fmtKd = (k, d) => {
+      if (d === 0 && k === 0) return '\u2014';
+      if (d === 0) return '\u221e';
+      return (k / d).toFixed(2);
+    };
+    const pvpKdStr = (pvpK + pvpD > 0) ? fmtKd(pvpK, pvpD) : '\u2014';
+    const pveKdStr = (pveK + pveD > 0) ? fmtKd(pveK, pveD) : '\u2014';
+    const pvpKdTip = (pvpK + pvpD > 0) ? `${pvpK} PvP kills / ${pvpD} PvP deaths` : 'No PvP combat';
+    const pveKdTip = (pveK + pveD > 0) ? `${pveK} PvE kills / ${pveD} PvE deaths` : 'No PvE combat';
+
+    const totalShots = careerRow ? (careerRow.total_shots_fired || 0) : 0;
+    const totalHits  = careerRow ? (careerRow.total_shots_hit || 0) : 0;
+    const totalPvpHits = careerRow ? (careerRow.total_pvp_shots_hit || 0) : 0;
+    const accStr = careerRow
+      ? ((careerRow.overall_accuracy || 0) * 100).toFixed(1) + '%'
+      : '\u2014';
+    const pvpAccStr = careerRow
+      ? ((careerRow.pvp_accuracy || 0) * 100).toFixed(1) + '%'
+      : '\u2014';
+    const accTip = totalShots > 0
+      ? `${totalHits.toLocaleString()} hits / ${totalShots.toLocaleString()} shots = ${((careerRow.overall_accuracy || 0) * 100).toFixed(2)}%`
+      : 'No shots fired this career';
+    const pvpAccTip = totalShots > 0
+      ? `${totalPvpHits.toLocaleString()} PvP hits / ${totalShots.toLocaleString()} shots = ${((careerRow.pvp_accuracy || 0) * 100).toFixed(2)}%`
+      : 'No shots fired this career';
+
+    const vtsrValueStr = noiseSigma != null
+      ? `${Math.round(r.vtsr)} VTSR-T (give or take ~${noiseSigma})`
+      : `${Math.round(r.vtsr)} VTSR-T`;
+    const vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
+
+    const lastTip = (r.last_match_id && lastDelta !== 0)
+      ? `${lastSign}${lastDelta.toFixed(2)} from match ${r.last_match_id}`
+      : (r.last_match_id ? `No rating change from match ${r.last_match_id}` : 'No rated matches yet');
+
+    const peakAt = r.peak_at || '';
+    const peakTip = peakAt
+      ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} reached at ${peakAt}`
+      : `Peak rating: ${Math.round(r.peak_vtsr || r.vtsr)}`;
+
+    const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <4 min duration`;
+
+    const detailHtml = buildVtsrDetailPanel(r, careerRow);
+    const progressChip = rank == null ? vtsrProgressChipHtml(r, elo) : '';
+    const rankCell = rank == null
+      ? '<td class="text-muted">\u2014</td>'
+      : `<td class="text-muted">${rank}</td>`;
+
+    return `<tr data-vtsr-name="${esc(r.name)}" data-vtsr-steam64="${esc(r.steam64 || '')}" data-vtsr-key="${esc(rowKey)}">
+      ${rankCell}
+      <td class="vt-vtsr-expand-col">
+        <button type="button" class="vt-row-expand"
+                data-bs-toggle="collapse" data-bs-target="#${detailId}"
+                aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
+                aria-label="Toggle row details">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </td>
+      <td class="text-center">${badge}</td>
+      <td class="fw-semibold"${playerCellAttrs}>${playerLinkHtml(r.name, r.steam64)}${progressChip}</td>
+      ${primaryShipCell}
+      <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
+      <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pveKdTip)}">${pveKdStr}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(accTip)}">${accStr}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpAccTip)}">${pvpAccStr}</td>
+      <td class="text-end ${lastClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(lastTip)}">${lastSign}${lastDelta.toFixed(1)}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
+    </tr>
+    <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
+      <td colspan="13">${detailHtml}</td>
+    </tr>`;
+  }
+
   function renderLeaderboard() {
     const elo = state.elo;
     const $card = document.getElementById('section-vtsr');
@@ -557,154 +717,57 @@
 
     _vtsrCareerStats = state.careerStats || [];
 
-    const sorted = elo.ratings.slice().sort(vtsrSort(vtsrSortState.key, vtsrSortState.asc));
+    const minMatches = vtsrLadderMinMatches(elo);
+    const $banner = document.getElementById('vtsr-ladder-banner');
+    if ($banner) {
+      $banner.innerHTML = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
+        Ranked players have at least ${fmt(minMatches)} rated matches.
+        Players with fewer than ${fmt(ELO_PROVISIONAL_THRESHOLD)} still show Provisional.
+      </div>`;
+    }
+
+    const sorter = vtsrSort(vtsrSortState.key, vtsrSortState.asc);
+    const ranked = elo.ratings.filter(r => vtsrLadderEligible(r, elo)).slice().sort(sorter);
+    const unranked = elo.ratings.filter(r => !vtsrLadderEligible(r, elo)).slice().sort(sorter);
+
     const tbody = $card.querySelector('#vtsr-table tbody');
-    tbody.innerHTML = sorted.map((r, i) => {
-      const tier = resolveTier(r.vtsr, r.matches_played);
-      let tierTip;
-      if (tier.id === 0) {
-        tierTip = `Provisional · play ${ELO_PROVISIONAL_THRESHOLD - r.matches_played} more rated matches to leave Provisional`;
-      } else if (tier.id === 1) {
-        tierTip = `${tier.label} · ${tier.min}+ VTSR-T · top of the ladder`;
-      } else if (tier.id === 5) {
-        const fromFloor = Math.max(0, Math.round(r.vtsr - 1000));
-        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${fromFloor} pts above floor`;
+    tbody.innerHTML = ranked.map((r, i) => renderVtsrLadderRow(r, elo, i + 1, noiseSigma)).join('');
+
+    const $unrankedWrap = document.getElementById('vtsr-unranked-wrap');
+    if ($unrankedWrap) {
+      if (unranked.length) {
+        const thead = document.querySelector('#vtsr-table thead');
+        const theadHtml = thead ? thead.outerHTML : '';
+        $unrankedWrap.innerHTML = `<div class="vt-vtsr-unranked">
+          <h6 class="vt-vtsr-unranked-title">Unranked</h6>
+          <p class="vt-vtsr-unranked-blurb">Need ${fmt(minMatches)} rated matches to join the ladder. No rank is assigned here.</p>
+          <table id="vtsr-unranked-table" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
+            ${theadHtml}
+            <tbody>${unranked.map(r => renderVtsrLadderRow(r, elo, null, noiseSigma)).join('')}</tbody>
+          </table>
+        </div>`;
       } else {
-        const prog = tierProgress(r.vtsr, tier);
-        tierTip = `${tier.label} · ${tier.min}–${tier.max - 1} VTSR-T · ${Math.max(0, Math.round(prog.toNext))} pts to Tier ${tier.id - 1}`;
+        $unrankedWrap.replaceChildren();
       }
-      const badge = tierBadgeHtml(tier, { title: tierTip });
-      const lastDelta = r.last_delta || 0;
-      const lastClass = lastDelta > 0 ? 'vt-vtsr-delta-positive' : lastDelta < 0 ? 'vt-vtsr-delta-negative' : '';
-      const lastSign  = lastDelta > 0 ? '+' : '';
-      const rowKey = vtsrRowKey(r);
-      const detailId = `vtsr-detail-${rowKey}`;
-      const expanded = expandedVtsrRows.has(rowKey);
+    }
 
-      const careerRow = vtsrCareerByName(r);
-      const cl = (careerRow && careerRow.career_loadout) || null;
-
-      let playerCellAttrs = '';
-      const playerTipParts = [];
-      if (r.steam64) playerTipParts.push(`Steam64: ${r.steam64}`);
-      const inGameNick = (careerRow && careerRow.in_game_nick) || null;
-      if (inGameNick && inGameNick.toLowerCase() !== (r.name || '').toLowerCase()) {
-        playerTipParts.push(`In-game nick: ${inGameNick}`);
-      }
-      if (playerTipParts.length) {
-        playerCellAttrs = ` data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(playerTipParts.join(' \u00b7 '))}"`;
-      }
-
-      let primaryShipCell = '<td class="text-center"><span style="color:var(--kb-text-muted);">&mdash;</span></td>';
-      if (cl && cl.primary_ship && cl.primary_ship.name) {
-        const psName = cl.primary_ship.name;
-        const psShare = cl.primary_ship.share != null ? (cl.primary_ship.share * 100).toFixed(1) + '%' : '';
-        const ss = cl.secondary_ship;
-        const ssPart = (ss && ss.name && ss.share != null)
-          ? ` \u00b7 secondary ${ss.name} (${(ss.share * 100).toFixed(1)}%)`
-          : '';
-        const diversity = cl.ship_diversity || 0;
-        const diversityPart = diversity > 0
-          ? ` \u00b7 ${diversity} distinct ${diversity === 1 ? 'ship' : 'ships'}`
-          : '';
-        const activeSec = cl.active_seconds || 0;
-        const activeStr = activeSec >= 3600
-          ? (activeSec / 3600).toFixed(1) + 'h active'
-          : Math.round(activeSec / 60) + 'm active';
-        const psTip = `${psName} \u00b7 ${psShare} of ${activeStr}${ssPart}${diversityPart}`;
-        primaryShipCell = `<td class="text-center" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(psTip)}"><span class="vt-vtsr-primary-class">${esc(psName)}</span></td>`;
-      }
-
-      const pvpK = careerRow ? (careerRow.total_pvp_kills || 0) : 0;
-      const pvpD = careerRow ? (careerRow.total_pvp_deaths || 0) : 0;
-      const pveK = careerRow ? (careerRow.total_pve_kills || 0) : 0;
-      const pveD = careerRow ? (careerRow.total_pve_deaths || 0) : 0;
-      const fmtKd = (k, d) => {
-        if (d === 0 && k === 0) return '\u2014';
-        if (d === 0) return '\u221e';
-        return (k / d).toFixed(2);
-      };
-      const pvpKdStr = (pvpK + pvpD > 0) ? fmtKd(pvpK, pvpD) : '\u2014';
-      const pveKdStr = (pveK + pveD > 0) ? fmtKd(pveK, pveD) : '\u2014';
-      const pvpKdTip = (pvpK + pvpD > 0) ? `${pvpK} PvP kills / ${pvpD} PvP deaths` : 'No PvP combat';
-      const pveKdTip = (pveK + pveD > 0) ? `${pveK} PvE kills / ${pveD} PvE deaths` : 'No PvE combat';
-
-      const totalShots = careerRow ? (careerRow.total_shots_fired || 0) : 0;
-      const totalHits  = careerRow ? (careerRow.total_shots_hit || 0) : 0;
-      const totalPvpHits = careerRow ? (careerRow.total_pvp_shots_hit || 0) : 0;
-      const accStr = careerRow
-        ? ((careerRow.overall_accuracy || 0) * 100).toFixed(1) + '%'
-        : '\u2014';
-      const pvpAccStr = careerRow
-        ? ((careerRow.pvp_accuracy || 0) * 100).toFixed(1) + '%'
-        : '\u2014';
-      const accTip = totalShots > 0
-        ? `${totalHits.toLocaleString()} hits / ${totalShots.toLocaleString()} shots = ${((careerRow.overall_accuracy || 0) * 100).toFixed(2)}%`
-        : 'No shots fired this career';
-      const pvpAccTip = totalShots > 0
-        ? `${totalPvpHits.toLocaleString()} PvP hits / ${totalShots.toLocaleString()} shots = ${((careerRow.pvp_accuracy || 0) * 100).toFixed(2)}%`
-        : 'No shots fired this career';
-
-      const vtsrValueStr = noiseSigma != null
-        ? `${Math.round(r.vtsr)} VTSR-T (give or take ~${noiseSigma})`
-        : `${Math.round(r.vtsr)} VTSR-T`;
-      const vtsrTip = `${vtsrValueStr} \u00b7 Thug ELO ${Math.round(r.thug_elo || r.vtsr)} \u00b7 Wins ELO ${Math.round(r.wins_elo || 1500)} \u00b7 ${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'}`;
-
-      const lastTip = (r.last_match_id && lastDelta !== 0)
-        ? `${lastSign}${lastDelta.toFixed(2)} from match ${r.last_match_id}`
-        : (r.last_match_id ? `No rating change from match ${r.last_match_id}` : 'No rated matches yet');
-
-      const peakAt = r.peak_at || '';
-      const peakTip = peakAt
-        ? `Peak ${Math.round(r.peak_vtsr || r.vtsr)} reached at ${peakAt}`
-        : `Peak rating: ${Math.round(r.peak_vtsr || r.vtsr)}`;
-
-      const matchesTip = `${r.matches_played} rated ${r.matches_played === 1 ? 'match' : 'matches'} contributing to ${Math.round(r.vtsr)} VTSR-T \u00b7 excludes matches with <6 players or <4 min duration`;
-
-      const detailHtml = buildVtsrDetailPanel(r, careerRow);
-
-      return `<tr data-vtsr-name="${esc(r.name)}" data-vtsr-steam64="${esc(r.steam64 || '')}" data-vtsr-key="${esc(rowKey)}">
-        <td>${i + 1}</td>
-        <td class="vt-vtsr-expand-col">
-          <button type="button" class="vt-row-expand"
-                  data-bs-toggle="collapse" data-bs-target="#${detailId}"
-                  aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
-                  aria-label="Toggle row details">
-            <i class="bi bi-chevron-right"></i>
-          </button>
-        </td>
-        <td class="text-center">${badge}</td>
-        <td class="fw-semibold"${playerCellAttrs}>${playerLinkHtml(r.name, r.steam64)}</td>
-        ${primaryShipCell}
-        <td class="text-end vt-vtsr-rating" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(vtsrTip)}">${Math.round(r.vtsr)}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpKdTip)}">${pvpKdStr}</td>
-        <td class="text-end text-muted" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pveKdTip)}">${pveKdStr}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(accTip)}">${accStr}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(pvpAccTip)}">${pvpAccStr}</td>
-        <td class="text-end ${lastClass}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(lastTip)}">${lastSign}${lastDelta.toFixed(1)}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr || r.vtsr)}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(matchesTip)}">${r.matches_played}</td>
-      </tr>
-      <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
-        <td colspan="13">${detailHtml}</td>
-      </tr>`;
-    }).join('');
-
-    // Track expand/collapse (delegated; survives sort re-renders).
-    if (!tbody.dataset.vtCollapseListenersBound) {
-      tbody.dataset.vtCollapseListenersBound = '1';
-      tbody.addEventListener('shown.bs.collapse', (e) => {
+    // Track expand/collapse on the persistent card body (covers both
+    // tables; survives sort re-renders).
+    const $body = document.getElementById('vtsr-card-body') || $card;
+    if (!$body.dataset.vtCollapseListenersBound) {
+      $body.dataset.vtCollapseListenersBound = '1';
+      $body.addEventListener('shown.bs.collapse', (e) => {
         const id = (e.target && e.target.id) || '';
         if (id.startsWith('vtsr-detail-')) expandedVtsrRows.add(id.slice('vtsr-detail-'.length));
       });
-      tbody.addEventListener('hidden.bs.collapse', (e) => {
+      $body.addEventListener('hidden.bs.collapse', (e) => {
         const id = (e.target && e.target.id) || '';
         if (id.startsWith('vtsr-detail-')) expandedVtsrRows.delete(id.slice('vtsr-detail-'.length));
       });
     }
 
-    // Sortable header cells.
-    document.querySelectorAll('#vtsr-table th[data-sort]').forEach(th => {
+    // Shared column sort drives both tables.
+    $card.querySelectorAll('th[data-sort]').forEach(th => {
       th.classList.toggle('sort-active', th.dataset.sort === vtsrSortState.key);
       th.style.cursor = 'pointer';
       th.onclick = () => {
@@ -1211,7 +1274,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong>; everyone else stays visible in the Unranked table.</p>
         ${E.tierTableHtml()}
       </section>
 

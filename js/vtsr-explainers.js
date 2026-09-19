@@ -497,7 +497,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong>; everyone else stays visible in the Unranked table.</p>
         ${tierTableHtml()}
       </section>
 
