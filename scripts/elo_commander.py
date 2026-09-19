@@ -7,6 +7,17 @@ Pure module, no I/O -- mirrors the `scripts/elo.py` contract.
 returns `(elo_commander_current, elo_commander_history)` dicts ready for
 `json.dump`.
 
+v4 additions (schema 3 -> 4; ratings UNCHANGED -- display eligibility only):
+
+  * LADDER GATE -- a commander occupies a ranked `#` when
+    `duels_with_telemetry >= CMDR_LADDER_MIN_V4` (8) OR
+    `duels_non_v4 >= CMDR_LADDER_MIN_NON_V4` (25). Older =
+    F9 ledger + pre-v4 corpus (`matches_commanded_rated -
+    duels_with_telemetry`). Emits per-rating `duels_non_v4` +
+    `leaderboard_eligible` and top-level `leaderboard_min_v4` /
+    `leaderboard_min_non_v4`. Memo:
+    critique/decisions/vtsr-c-ladder-eligibility.md.
+
 v3 additions (schema 2 -> 3; ratings not comparable with v2 values):
 
   * EXTERNAL DUELS -- pre-gated community games from
@@ -236,15 +247,35 @@ CMDR_K_EXTERNAL_SCALE = 1.0
 EXTERNAL_PROVIDER_NAME = "F9bomber"
 EXTERNAL_PROVIDER_URL = "https://f9bomber.com"
 
-# v3: external community duels (data/external/f9_ledger.json) walk the
-# ladder alongside telemetry duels -- ratings are no longer comparable
-# with schema-2 values (peak_vtsr_c reset precedent).
-CMDR_ELO_SCHEMA_VERSION = 3
+# Display-only ladder inclusion (schema 4). Ranked if v4 telemetry
+# duels >= MIN_V4 OR older (F9 + pre-v4 corpus) duels >= MIN_NON_V4.
+# Does NOT change ratings, K, or duel history -- only who may occupy
+# a `#` on the ELO-page ladder / cohort strip / player-page rank.
+# Frozen in critique/decisions/vtsr-c-ladder-eligibility.md; do not
+# retune to chase a name.
+CMDR_LADDER_MIN_V4 = 8
+CMDR_LADDER_MIN_NON_V4 = 25
+
+# v4: additive display eligibility. Ratings remain comparable with
+# schema 3 (no re-rate). v3: external community duels walk the ladder
+# alongside telemetry -- those ratings were not comparable with schema 2.
+CMDR_ELO_SCHEMA_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def ladder_eligible(duels_v4: int, duels_non_v4: int,
+                    min_v4: int = CMDR_LADDER_MIN_V4,
+                    min_non_v4: int = CMDR_LADDER_MIN_NON_V4) -> bool:
+    """Display-only: may this commander occupy a ranked `#`?
+
+    OR-gate: enough proto-v4 telemetry duels, or enough older games
+    (F9 ledger + pre-v4 corpus). Ratings themselves are unaffected.
+    """
+    return duels_v4 >= min_v4 or duels_non_v4 >= min_non_v4
+
 
 def expected_score(r_own: float, r_opp: float, t_own: float | None,
                    t_opp: float | None,
@@ -900,6 +931,10 @@ def compute_commander_elo(all_match_data: list[dict],
     ratings_out = []
     for k in rating:
         g = games[k]
+        telem = duels_with_telemetry.get(k, 0)
+        # Older = every rated duel that is not v4 telemetry: F9 ledger
+        # + pre-v4 corpus. Partition of matches_commanded_rated.
+        non_v4 = g - telem
         ratings_out.append({
             "name": display_name.get(k, ""),
             "steam64": steam64_out.get(k),
@@ -917,10 +952,13 @@ def compute_commander_elo(all_match_data: list[dict],
             "provisional": g < CMDR_PROVISIONAL_THRESHOLD,
             # v2: duels where the economy composite had telemetry (both
             # v4 flags true). 0 for every pre-v4-era commander.
-            "duels_with_telemetry": duels_with_telemetry.get(k, 0),
+            "duels_with_telemetry": telem,
             # v3: duels sourced from the external community ledger
             # (included in matches_commanded_rated + the W/L record).
             "duels_external": duels_external.get(k, 0),
+            # v4: display-only ladder inclusion. Ratings unchanged.
+            "duels_non_v4": non_v4,
+            "leaderboard_eligible": ladder_eligible(telem, non_v4),
         })
     ratings_out.sort(key=lambda r: (-r["vtsr_c"], r["name"].lower()))
 
@@ -934,6 +972,10 @@ def compute_commander_elo(all_match_data: list[dict],
         "lambda_team_handicap": CMDR_LAMBDA_TEAM_HANDICAP,
         "provisional_prior": CMDR_PROVISIONAL_PRIOR,
         "provisional_threshold": CMDR_PROVISIONAL_THRESHOLD,
+        # v4: display-only ranked-ladder gate (UI reads these; do not
+        # hardcode 8/25 in JS). See critique/decisions/vtsr-c-ladder-eligibility.md.
+        "leaderboard_min_v4": CMDR_LADDER_MIN_V4,
+        "leaderboard_min_non_v4": CMDR_LADDER_MIN_NON_V4,
         "computed_at": computed_at,
         "rated_match_count": rated_match_count,
         "matches_skipped_undetermined": skipped_undetermined,

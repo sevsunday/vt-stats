@@ -871,6 +871,39 @@
   let cmdrSortState = { key: 'vtsr_c', asc: false };
   const expandedCmdrRows = new Set();
 
+  // Display-only ladder-gate fallbacks. Live values come from
+  // elo_commander_current.json `leaderboard_min_*` (schema 4).
+  // Mirrors scripts/elo_commander.py CMDR_LADDER_MIN_V4 / _NON_V4.
+  const CMDR_LADDER_MIN_V4_FALLBACK = 8;
+  const CMDR_LADDER_MIN_NON_V4_FALLBACK = 25;
+
+  function cmdrLadderMins(c) {
+    return {
+      minV4: (c && c.leaderboard_min_v4 != null) ? c.leaderboard_min_v4 : CMDR_LADDER_MIN_V4_FALLBACK,
+      minNonV4: (c && c.leaderboard_min_non_v4 != null) ? c.leaderboard_min_non_v4 : CMDR_LADDER_MIN_NON_V4_FALLBACK,
+    };
+  }
+
+  function cmdrDuelsNonV4(r) {
+    if (typeof r.duels_non_v4 === 'number') return r.duels_non_v4;
+    return Math.max(0, (r.matches_commanded_rated || 0) - (r.duels_with_telemetry || 0));
+  }
+
+  function cmdrLadderEligible(r, c) {
+    if (typeof r.leaderboard_eligible === 'boolean') return r.leaderboard_eligible;
+    const { minV4, minNonV4 } = cmdrLadderMins(c);
+    return (r.duels_with_telemetry || 0) >= minV4 || cmdrDuelsNonV4(r) >= minNonV4;
+  }
+
+  function cmdrProgressChipHtml(r, c) {
+    const { minV4, minNonV4 } = cmdrLadderMins(c);
+    const v4 = r.duels_with_telemetry || 0;
+    const older = cmdrDuelsNonV4(r);
+    const title = `${v4} of ${minV4} proto-v4 commander games, or ${older} of ${minNonV4} older games (pre-v4 recordings and F9Stats) to join the ranked ladder.`;
+    return ` <span class="vt-cmdr-progress-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+              title="${esc(title)}">${v4}&nbsp;/&nbsp;${minV4} v4 · ${older}&nbsp;/&nbsp;${minNonV4} older</span>`;
+  }
+
   function cmdrRowKey(r) {
     const raw = r.steam64 || r.name || '';
     return String(raw).replace(/[^A-Za-z0-9_-]/g, '_');
@@ -898,9 +931,83 @@
     };
   }
 
+  function renderCmdrLadderRow(r, c, rank) {
+    const rowKey = cmdrRowKey(r);
+    const expanded = expandedCmdrRows.has(rowKey);
+    const prov = r.provisional
+      ? ` <span class="vt-vtsr-provisional" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="Provisional — fewer than ${c.provisional_threshold ?? 5} rated commander games.">?</span>`
+      : '';
+    const record = `${r.wins}-${r.losses}-${r.draws}`;
+    const lastDelta = r.last_delta || 0;
+    const lastClass = lastDelta > 0 ? 'text-success' : (lastDelta < 0 ? 'text-danger' : 'text-muted');
+    const lastSign = lastDelta > 0 ? '+' : '';
+    const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
+    const detailId = `vtsr-c-detail-${rowKey}`;
+    const telemChip = (r.duels_with_telemetry || 0) > 0
+      ? ` <span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+            title="${r.duels_with_telemetry} duel${r.duels_with_telemetry === 1 ? '' : 's'} with proto v4 economy telemetry.">v4\u00d7${r.duels_with_telemetry}</span>`
+      : '';
+    const progressChip = rank == null ? cmdrProgressChipHtml(r, c) : '';
+    const rankCell = rank == null
+      ? '<td class="text-muted">\u2014</td>'
+      : `<td class="text-muted">${rank}</td>`;
+    return `<tr>
+      <td class="vt-vtsr-expand-col">
+        <button type="button" class="vt-row-expand"
+                data-bs-toggle="collapse" data-bs-target="#${detailId}"
+                aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
+                aria-label="Toggle commander details">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </td>
+      ${rankCell}
+      <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}${telemChip}${progressChip}</td>
+      <td class="text-end vt-vtsr-rating">${Math.round(r.vtsr_c)}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
+          title="Wins-Losses-Draws across rated commander games.">${record}</td>
+      <td class="text-end">${((r.win_pct || 0) * 100).toFixed(0)}%</td>
+      <td class="text-end"${(r.duels_external || 0) > 0
+        ? ` data-bs-toggle="tooltip" data-bs-placement="top" title="${r.duels_external} of these games came from F9bomber's match records"`
+        : ''}>${r.matches_commanded_rated}</td>
+      <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</td>
+      <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
+    </tr>
+    <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
+      <td colspan="9">${renderCmdrDetail(r)}</td>
+    </tr>`;
+  }
+
+  function renderCmdrTableHtml(tableId, tbodyId, rows, c, ranked) {
+    const bodyRows = rows.map((r, i) => renderCmdrLadderRow(r, c, ranked ? i + 1 : null)).join('');
+    return `<div class="table-responsive">
+      <table id="${tableId}" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
+        <thead>
+          <tr>
+            <th class="vt-vtsr-expand-col"></th>
+            <th>#</th>
+            <th data-sort="name">Commander</th>
+            <th data-sort="vtsr_c" class="text-end${cmdrSortState.key === 'vtsr_c' ? ' sort-active' : ''}" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                title="<strong>VTSR-C</strong><br>Commander rating. Classic win/loss ELO (anchor 1500, scale 400, symmetric K 40&rarr;20) with a team-strength handicap in the expected score.">VTSR-C</th>
+            <th data-sort="record" class="text-end${cmdrSortState.key === 'record' ? ' sort-active' : ''}">Record</th>
+            <th data-sort="win_pct" class="text-end${cmdrSortState.key === 'win_pct' ? ' sort-active' : ''}">Win %</th>
+            <th data-sort="matches_commanded_rated" class="text-end${cmdrSortState.key === 'matches_commanded_rated' ? ' sort-active' : ''}" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="Rated commander games (matches with a verified outcome where this player led a team).">Games</th>
+            <th data-sort="peak_vtsr_c" class="text-end${cmdrSortState.key === 'peak_vtsr_c' ? ' sort-active' : ''}">Peak</th>
+            <th data-sort="last_delta" class="text-end${cmdrSortState.key === 'last_delta' ? ' sort-active' : ''}" data-bs-toggle="tooltip" data-bs-placement="top"
+                title="Most recent rated-duel rating change.">Last</th>
+          </tr>
+        </thead>
+        <tbody id="${tbodyId}">${bodyRows}</tbody>
+      </table>
+    </div>`;
+  }
+
   // The VTSR-C pill is a sortable table (mirrors the VTSR-T pane); the
   // ladder's explainer lives on the How-it-works pill. Lazy first paint
   // like the explainer tabs — sort clicks re-call this directly.
+  // Ranked vs Unranked is a display split (schema 4 eligibility flag);
+  // ratings themselves are unchanged.
   function renderCommanderLadder() {
     const card = document.getElementById('section-vtsr-c');
     const body = document.getElementById('vtsr-c-body');
@@ -918,81 +1025,32 @@
     if ($empty) $empty.classList.add('d-none');
     card.classList.remove('d-none');
 
+    const { minV4, minNonV4 } = cmdrLadderMins(c);
     const provN = c.provisional_threshold ?? 5;
     const banner = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
       <i class="bi bi-flask me-1"></i>
       <strong>Experimental.</strong>
       This ranking only looks at whether a commander won or lost, not how they played.
       Winning with a weaker group of thugs raises the rating more than winning with a stronger one.
+      Ranked commanders have at least ${fmt(minV4)} proto-v4 games or ${fmt(minNonV4)} older games (pre-v4 recordings and F9Stats).
       Commanders with fewer than ${fmt(provN)} rated games are still settling in.
     </div>`;
 
-    const sorted = ratings.slice().sort(cmdrSort(cmdrSortState.key, cmdrSortState.asc));
-    const rows = sorted.map((r, i) => {
-      const rowKey = cmdrRowKey(r);
-      const expanded = expandedCmdrRows.has(rowKey);
-      const prov = r.provisional
-        ? ` <span class="vt-vtsr-provisional" data-bs-toggle="tooltip" data-bs-placement="top"
-              title="Provisional — fewer than ${c.provisional_threshold ?? 5} rated commander games.">?</span>`
-        : '';
-      const record = `${r.wins}-${r.losses}-${r.draws}`;
-      const lastDelta = r.last_delta || 0;
-      const lastClass = lastDelta > 0 ? 'text-success' : (lastDelta < 0 ? 'text-danger' : 'text-muted');
-      const lastSign = lastDelta > 0 ? '+' : '';
-      const peakTip = r.peak_date ? `Reached ${String(r.peak_date).slice(0, 10)}` : '';
-      const detailId = `vtsr-c-detail-${rowKey}`;
-      const telemChip = (r.duels_with_telemetry || 0) > 0
-        ? ` <span class="badge vt-cmdr-telem-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-              title="${r.duels_with_telemetry} duel${r.duels_with_telemetry === 1 ? '' : 's'} with proto v4 economy telemetry.">v4\u00d7${r.duels_with_telemetry}</span>`
-        : '';
-      return `<tr>
-        <td class="vt-vtsr-expand-col">
-          <button type="button" class="vt-row-expand"
-                  data-bs-toggle="collapse" data-bs-target="#${detailId}"
-                  aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${detailId}"
-                  aria-label="Toggle commander details">
-            <i class="bi bi-chevron-right"></i>
-          </button>
-        </td>
-        <td class="text-muted">${i + 1}</td>
-        <td class="fw-semibold">${playerLinkHtml(r.name, r.steam64)}${prov}${telemChip}</td>
-        <td class="text-end vt-vtsr-rating">${Math.round(r.vtsr_c)}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-            title="Wins-Losses-Draws across rated commander games.">${record}</td>
-        <td class="text-end">${((r.win_pct || 0) * 100).toFixed(0)}%</td>
-        <td class="text-end"${(r.duels_external || 0) > 0
-          ? ` data-bs-toggle="tooltip" data-bs-placement="top" title="${r.duels_external} of these games came from F9bomber's match records"`
-          : ''}>${r.matches_commanded_rated}</td>
-        <td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(peakTip)}">${Math.round(r.peak_vtsr_c || r.vtsr_c)}</td>
-        <td class="text-end ${lastClass}">${lastSign}${lastDelta.toFixed(1)}</td>
-      </tr>
-      <tr id="${detailId}" class="collapse vt-vtsr-detail${expanded ? ' show' : ''}">
-        <td colspan="9">${renderCmdrDetail(r)}</td>
-      </tr>`;
-    }).join('');
+    const sorter = cmdrSort(cmdrSortState.key, cmdrSortState.asc);
+    const ranked = ratings.filter(r => cmdrLadderEligible(r, c)).slice().sort(sorter);
+    const unranked = ratings.filter(r => !cmdrLadderEligible(r, c)).slice().sort(sorter);
+
+    const unrankedHtml = unranked.length
+      ? `<div class="vt-vtsr-c-unranked">
+          <h6 class="vt-vtsr-c-unranked-title">Unranked</h6>
+          <p class="vt-vtsr-c-unranked-blurb">Need ${fmt(minV4)} proto-v4 commander games or ${fmt(minNonV4)} older games (pre-v4 recordings and F9Stats) to join the ladder. No rank is assigned here.</p>
+          ${renderCmdrTableHtml('vtsr-c-unranked-table', 'vtsr-c-unranked-tbody', unranked, c, false)}
+        </div>`
+      : '';
 
     body.innerHTML = `${banner}
-      <div class="table-responsive">
-        <table id="vtsr-c-table" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
-          <thead>
-            <tr>
-              <th class="vt-vtsr-expand-col"></th>
-              <th>#</th>
-              <th data-sort="name">Commander</th>
-              <th data-sort="vtsr_c" class="text-end sort-active" data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                  title="<strong>VTSR-C</strong><br>Commander rating. Classic win/loss ELO (anchor 1500, scale 400, symmetric K 40&rarr;20) with a team-strength handicap in the expected score.">VTSR-C</th>
-              <th data-sort="record" class="text-end">Record</th>
-              <th data-sort="win_pct" class="text-end">Win %</th>
-              <th data-sort="matches_commanded_rated" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-                  title="Rated commander games (matches with a verified outcome where this player led a team).">Games</th>
-              <th data-sort="peak_vtsr_c" class="text-end">Peak</th>
-              <th data-sort="last_delta" class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
-                  title="Most recent rated-duel rating change.">Last</th>
-            </tr>
-          </thead>
-          <tbody id="vtsr-c-tbody">${rows}</tbody>
-        </table>
-      </div>
+      ${renderCmdrTableHtml('vtsr-c-table', 'vtsr-c-tbody', ranked, c, true)}
+      ${unrankedHtml}
       <p class="text-muted small mb-0">
         ${fmt(c.matches_skipped_undetermined)} matches skipped (outcome unverifiable from the recording).
       </p>`;
@@ -1010,25 +1068,25 @@
       }
     }
 
-    // Track expand/collapse (delegated; survives sort re-renders).
-    const tbody = document.getElementById('vtsr-c-tbody');
-    if (tbody && !tbody.dataset.vtCollapseListenersBound) {
-      tbody.dataset.vtCollapseListenersBound = '1';
-      tbody.addEventListener('shown.bs.collapse', (e) => {
+    // Track expand/collapse on the persistent card body (covers both
+    // tables; survives sort re-renders).
+    if (!body.dataset.vtCollapseListenersBound) {
+      body.dataset.vtCollapseListenersBound = '1';
+      body.addEventListener('shown.bs.collapse', (e) => {
         const id = (e.target && e.target.id) || '';
         if (id.startsWith('vtsr-c-detail-')) expandedCmdrRows.add(id.slice('vtsr-c-detail-'.length));
-        const btn = tbody.querySelector(`[data-bs-target="#${id}"]`);
+        const btn = body.querySelector(`[data-bs-target="#${id}"]`);
         if (btn) btn.setAttribute('aria-expanded', 'true');
       });
-      tbody.addEventListener('hidden.bs.collapse', (e) => {
+      body.addEventListener('hidden.bs.collapse', (e) => {
         const id = (e.target && e.target.id) || '';
         if (id.startsWith('vtsr-c-detail-')) expandedCmdrRows.delete(id.slice('vtsr-c-detail-'.length));
-        const btn = tbody.querySelector(`[data-bs-target="#${id}"]`);
+        const btn = body.querySelector(`[data-bs-target="#${id}"]`);
         if (btn) btn.setAttribute('aria-expanded', 'false');
       });
     }
 
-    document.querySelectorAll('#vtsr-c-table th[data-sort]').forEach(th => {
+    card.querySelectorAll('th[data-sort]').forEach(th => {
       th.classList.toggle('sort-active', th.dataset.sort === cmdrSortState.key);
       th.style.cursor = 'pointer';
       th.onclick = () => {

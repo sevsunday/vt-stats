@@ -7339,15 +7339,42 @@
     return _cmdrEloFetchPromise;
   }
 
+  // Display-only VTSR-C ladder gate (schema 4). Live mins come from
+  // elo_commander_current.json; fallbacks match scripts/elo_commander.py.
+  const CMDR_LADDER_MIN_V4_FALLBACK = 8;
+  const CMDR_LADDER_MIN_NON_V4_FALLBACK = 25;
+
+  function _cmdrLadderMins(c) {
+    return {
+      minV4: (c && c.leaderboard_min_v4 != null) ? c.leaderboard_min_v4 : CMDR_LADDER_MIN_V4_FALLBACK,
+      minNonV4: (c && c.leaderboard_min_non_v4 != null) ? c.leaderboard_min_non_v4 : CMDR_LADDER_MIN_NON_V4_FALLBACK,
+    };
+  }
+
+  function _cmdrDuelsNonV4(r) {
+    if (typeof r.duels_non_v4 === 'number') return r.duels_non_v4;
+    return Math.max(0, (r.matches_commanded_rated || 0) - (r.duels_with_telemetry || 0));
+  }
+
+  function _cmdrLadderEligible(r, c) {
+    if (typeof r.leaderboard_eligible === 'boolean') return r.leaderboard_eligible;
+    const { minV4, minNonV4 } = _cmdrLadderMins(c);
+    return (r.duels_with_telemetry || 0) >= minV4 || _cmdrDuelsNonV4(r) >= minNonV4;
+  }
+
   // Compact top-5 VTSR-C strip prepended above the cohort grid. Rank,
   // player-linked name, rating, W-L-D record, provisional chip, plus a
   // link to the full ladder on the ELO page. Empty string while the
   // ladder file is absent/unloaded (the cohort renders unchanged).
+  // Top 5 is eligibility-filtered (schema 4) so a 2-game F9 spike
+  // cannot occupy a ranked slot.
   function _cohortVtsrCStripHtml() {
     const c = window.__vtCmdrElo;
     const ratings = (c && Array.isArray(c.ratings)) ? c.ratings : [];
     if (!ratings.length) return '';
-    const rows = ratings.slice(0, 5).map((r, i) => {
+    const eligible = ratings.filter(r => _cmdrLadderEligible(r, c));
+    if (!eligible.length) return '';
+    const rows = eligible.slice(0, 5).map((r, i) => {
       const prov = r.provisional
         ? `<span class="vt-cohort-prov" title="Provisional \u2014 fewer than ${c.provisional_threshold ?? 5} rated commander games">Prov</span>`
         : '';

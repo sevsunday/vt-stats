@@ -3286,7 +3286,11 @@ Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_
 | `ratings[].vtsr_c` | float | Commander rating. Anchor 1500; no floor. Sorted desc. |
 | `ratings[].matches_commanded_rated` | int | Rated duels for this commander. `wins + losses + draws` always equals it. |
 | `ratings[].win_pct` | float | `wins / matches_commanded_rated` (draws count in the denominator). |
-| `ratings[].provisional` | bool | `matches_commanded_rated < provisional_threshold` — UI renders the badge. |
+| `ratings[].provisional` | bool | `matches_commanded_rated < provisional_threshold` — UI renders the badge. Independent of `leaderboard_eligible`. |
+| `ratings[].duels_with_telemetry` | int | v4 economy-telemetry duels (both `has_resource_data` and `has_build_data`). |
+| `ratings[].duels_external` | int | F9 ledger duels (counted in `matches_commanded_rated` + W/L). |
+| `ratings[].duels_non_v4` | int | Older rated duels (F9 + pre-v4 corpus). Schema 4. |
+| `ratings[].leaderboard_eligible` | bool | Ranked-ladder inclusion (schema 4). Display-only. |
 | `ratings[].peak_at` / `peak_date` | string | Match id / match date where `peak_vtsr_c` was reached. |
 
 `elo_commander_history.json`: same header constants + `duels[]` (chronological, one entry per rated duel):
@@ -3555,4 +3559,15 @@ roster-complete → commanders parse as `A vs B` (names de-duped per side, comma
 ### VTSR-C surface changes (schema 3)
 
 `elo_commander_current.json` gains `k_external_scale`, `external_duels_rated`, `external_skipped_overlap_runtime`, `external_provider {name, url} | null`, and per-rating `duels_external`; `elo_commander_history.json` duels gain `source: "f9" | "telemetry"` (+ `external_row`, `map` on externals). Headline W-L-D and `matches_commanded_rated` INCLUDE external duels (rating and record tell the same story); `rated_match_count` stays telemetry-only. Full mechanics: `DEVELOPER_GUIDE.md` §13.12 v3.
+
+### VTSR-C ladder eligibility (schema 4)
+
+Display-only ranked-ladder gate. Ratings, K, and duel history are unchanged (`vtsr_c` remains comparable with schema 3). A commander occupies a ranked `#` when `duels_with_telemetry >= leaderboard_min_v4` (8) **OR** `duels_non_v4 >= leaderboard_min_non_v4` (25). `duels_non_v4` = `matches_commanded_rated − duels_with_telemetry` (F9 ledger + pre-v4 corpus). Everyone else is Unranked (visible, no `#`). Memo: `critique/decisions/vtsr-c-ladder-eligibility.md`.
+
+| Field | Type | Description |
+|---|---|---|
+| `leaderboard_min_v4` | int | Proto-v4 telemetry-duel bar for a ranked `#`. UI reads this; do not hardcode. |
+| `leaderboard_min_non_v4` | int | Older-game bar (F9 + pre-v4 corpus) for a ranked `#`. |
+| `ratings[].duels_non_v4` | int | Rated duels that are not v4 telemetry. Partition of `matches_commanded_rated`. |
+| `ratings[].leaderboard_eligible` | bool | May occupy a ranked `#`. Does not change the rating. |
 

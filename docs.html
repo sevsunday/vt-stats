@@ -21,22 +21,19 @@
 </head>
 <body>
 
-  <!-- Navbar. Three-zone layout: brand on the left, an Algolia-style search
-       pill absolutely centered (desktop only), and the shared destination
+  <!-- Navbar. Brand + search pill (xl+) on the left, shared destination
        cluster on the right. Docs lives in the Settings gear (active here).
-       The desktop search pill sits outside the burger collapse; on mobile
-       it falls back to a compact icon-button inside the menu. -->
+       Below xl the pill hides and a Search row in the menu covers it. -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom vt-docs-nav">
     <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
-      <!-- Centered search trigger pill (desktop only). Absolutely positioned
-           inside the sticky navbar so it floats at the viewport center
-           regardless of left / right column widths, mirroring Bootstrap's
-           own docs nav. Click or Cmd/Ctrl+K opens #docs-search-modal. -->
-      <button type="button" class="vt-docs-search-pill d-none d-md-flex"
+      <!-- Search pill (xl+ only). Flows after the brand so it cannot
+           collide with the shared destination cluster. Click or Cmd/Ctrl+K
+           opens #docs-search-modal. Below xl a Search row in the menu. -->
+      <button type="button" class="vt-docs-search-pill d-none d-xl-flex"
               id="docs-search-trigger" data-vt-docs-search-trigger
               title="Search the docs (Ctrl+K)" aria-label="Search the docs"
               aria-keyshortcuts="Control+K Meta+K">
@@ -61,7 +58,7 @@
              title="Open the dashboard" aria-label="Dashboard">
             <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
-          <button type="button" class="vt-nav-icon-btn d-md-none"
+          <button type="button" class="vt-nav-icon-btn d-xl-none"
                   data-vt-docs-search-trigger
                   title="Search the docs" aria-label="Search the docs">
             <i class="bi bi-search me-1"></i>Search

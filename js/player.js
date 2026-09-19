@@ -1853,11 +1853,53 @@
     return out;
   }
 
+  // Display-only VTSR-C ladder gate (schema 4). Live mins come from
+  // elo_commander_current.json; fallbacks match scripts/elo_commander.py.
+  const CMDR_LADDER_MIN_V4_FALLBACK = 8;
+  const CMDR_LADDER_MIN_NON_V4_FALLBACK = 25;
+
+  function cmdrLadderMins(c) {
+    return {
+      minV4: (c && c.leaderboard_min_v4 != null) ? c.leaderboard_min_v4 : CMDR_LADDER_MIN_V4_FALLBACK,
+      minNonV4: (c && c.leaderboard_min_non_v4 != null) ? c.leaderboard_min_non_v4 : CMDR_LADDER_MIN_NON_V4_FALLBACK,
+    };
+  }
+
+  function cmdrDuelsNonV4(r) {
+    if (typeof r.duels_non_v4 === 'number') return r.duels_non_v4;
+    return Math.max(0, (r.matches_commanded_rated || 0) - (r.duels_with_telemetry || 0));
+  }
+
+  function cmdrLadderEligible(r, c) {
+    if (typeof r.leaderboard_eligible === 'boolean') return r.leaderboard_eligible;
+    const { minV4, minNonV4 } = cmdrLadderMins(c);
+    return (r.duels_with_telemetry || 0) >= minV4 || cmdrDuelsNonV4(r) >= minNonV4;
+  }
+
+  function cmdrProgressChipHtml(r, c) {
+    const { minV4, minNonV4 } = cmdrLadderMins(c);
+    const v4 = r.duels_with_telemetry || 0;
+    const older = cmdrDuelsNonV4(r);
+    const title = `${v4} of ${minV4} proto-v4 commander games, or ${older} of ${minNonV4} older games (pre-v4 recordings and F9Stats) to join the ranked ladder.`;
+    return `<span class="vt-cmdr-progress-chip" title="${escapeHtml(title)}">${v4}&nbsp;/&nbsp;${minV4} v4 · ${older}&nbsp;/&nbsp;${minNonV4} older</span>`;
+  }
+
   function cmdrLadderRowFor(steam64) {
-    const ratings = (state.cmdrElo && state.cmdrElo.ratings) || [];
+    const c = state.cmdrElo;
+    const ratings = (c && Array.isArray(c.ratings)) ? c.ratings : [];
     const sid = String(steam64 || '');
     const idx = ratings.findIndex(r => String(r.steam64 || '') === sid);
-    return idx >= 0 ? { row: ratings[idx], rank: idx + 1, total: ratings.length } : null;
+    if (idx < 0) return null;
+    const row = ratings[idx];
+    // Pipeline already sorts by vtsr_c desc, name; filter preserves order.
+    const eligible = ratings.filter(r => cmdrLadderEligible(r, c));
+    const eidx = eligible.findIndex(r => String(r.steam64 || '') === sid);
+    return {
+      row,
+      rank: eidx >= 0 ? eidx + 1 : null,
+      total: eligible.length,
+      eligible: eidx >= 0,
+    };
   }
 
   function renderRivalsTab(rating) {
@@ -2040,14 +2082,23 @@
     const provChip = ladder && ladder.row.provisional
       ? `<span class="vt-cmdr-riv-prov" title="Provisional \u2014 fewer than ${(c && c.provisional_threshold) ?? 5} rated commander games">Provisional</span>`
       : '';
+    const unrankedChip = ladder && !ladder.eligible
+      ? cmdrProgressChipHtml(ladder.row, c)
+      : '';
+    const rankValue = !ladder
+      ? '\u2014'
+      : (ladder.eligible ? `#${ladder.rank}` : 'Unranked');
+    const rankLabel = !ladder
+      ? 'ladder rank'
+      : (ladder.eligible ? `of ${ladder.total} on the ladder` : 'not yet ranked');
     const headline = `<div class="vt-cmdr-riv-headline">
       <div class="vt-cmdr-riv-stat">
         <span class="vt-cmdr-riv-stat-value">${ladder ? Math.round(ladder.row.vtsr_c) : '\u2014'}</span>
         <span class="vt-cmdr-riv-stat-label">VTSR-C ${provChip}</span>
       </div>
       <div class="vt-cmdr-riv-stat">
-        <span class="vt-cmdr-riv-stat-value">${ladder ? `#${ladder.rank}` : '\u2014'}</span>
-        <span class="vt-cmdr-riv-stat-label">${ladder ? `of ${ladder.total} on the ladder` : 'ladder rank'}</span>
+        <span class="vt-cmdr-riv-stat-value">${rankValue}</span>
+        <span class="vt-cmdr-riv-stat-label">${rankLabel} ${unrankedChip}</span>
       </div>
       <div class="vt-cmdr-riv-stat">
         <span class="vt-cmdr-riv-stat-value">${riv.wins}-${riv.losses}-${riv.draws}</span>
