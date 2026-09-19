@@ -34,54 +34,49 @@
 
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a href="index.html" class="vt-nav-icon-btn">
-            <i class="bi bi-speedometer2"></i><span class="vt-nav-label ms-2">Dashboard</span>
+          <a href="index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
-          <a href="docs.html" class="vt-nav-icon-btn">
-            <i class="bi bi-book me-1"></i>Docs
-          </a>
-
           <a href="odf/" class="vt-nav-icon-btn"
              title="Browse the BZ2 Object Definition File (ODF) database"
              aria-label="ODF browser">
-            <i class="bi bi-boxes"></i><span class="vt-nav-label ms-2">ODF</span>
+            <i class="bi bi-boxes me-1"></i>ODF
           </a>
-          <a href="models/" class="vt-nav-icon-btn"
-             title="Browse 3D unit & building models"
-             aria-label="Models">
-            <i class="bi bi-box"></i><span class="vt-nav-label ms-2">Models</span>
-          </a>
-          <a href="lego/" class="vt-nav-icon-btn"
-             title="Browse Darkvale's LEGO models"
-             aria-label="LEGO">
-            <i class="bi bi-bricks"></i><span class="vt-nav-label ms-2">LEGO</span>
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+            </ul>
+          </div>
           <a href="map/" class="vt-nav-icon-btn"
-             title="Browse the VSR map catalog"
-             aria-label="Maps">
-            <i class="bi bi-map"></i><span class="vt-nav-label ms-2">Maps</span>
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
           </a>
-          <a href="player/" class="vt-nav-icon-btn"
-             title="Browse player career profiles"
-             aria-label="Players">
-            <i class="bi bi-people"></i><span class="vt-nav-label ms-2">Players</span>
-          </a>
-          <a href="elo/" class="vt-nav-icon-btn"
-             title="VTSR-T leaderboard, methodology &amp; rating accuracy"
-             aria-label="ELO">
-            <i class="bi bi-trophy"></i><span class="vt-nav-label ms-2">ELO</span>
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Ratings and players">
+              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="player/"><i class="bi bi-people me-2"></i>Players</a></li>
+            </ul>
+          </div>
           <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
              data-vt-tools-link data-vt-tools-live="0"
              title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
              aria-label="Tools">
-            <i class="bi bi-controller"></i><span class="vt-nav-label ms-2">Tools</span>
+            <i class="bi bi-controller me-1"></i>Tools
           </a>
-
-          <!-- Theme Dropdown -->
           <div class="dropdown">
-            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
-              <i class="bi bi-palette"></i><span class="vt-nav-label ms-2">Theme</span>
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>

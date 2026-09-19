@@ -8733,7 +8733,7 @@
   // Wire permanent two-way sync between the modal's "Don't show on page
   // load" checkbox and the persisted dismissal flag. Runs unconditionally
   // (regardless of current flag state) so navbar-triggered re-opens
-  // (#record-stats-btn-desktop / -mobile) honor the same contract as the
+  // (#record-stats-btn) honor the same contract as the
   // first-visit auto-open: opening always reflects the persisted state,
   // and closing always persists the current checkbox state — including
   // *un*checking, which clears the flag and re-enables the auto-open.

@@ -735,8 +735,21 @@ body::before {
     display: none !important;
 }
 
+/* Explicit chevron for Models / ELO dropdowns (Bootstrap's ::after is hidden). */
+.vt-nav-caret {
+    font-size: 0.65em;
+    opacity: 0.7;
+    margin-left: 0.15rem;
+}
+
+.vt-nav-dropdown .dropdown-item.active,
+.vt-nav-dropdown .dropdown-item:active {
+    background: var(--kb-primary);
+    color: var(--kb-primary-fg);
+}
+
 /* Primary-tinted variant of .vt-nav-icon-btn — used for high-emphasis
-   actions in the topnav (e.g. #record-stats-btn-desktop / -mobile).
+   actions in the topnav (e.g. #record-stats-btn).
    Mirrors the visual weight of .btn-primary while keeping the topnav's
    sizing and typography. Specificity matches the base .vt-nav-icon-btn
    hover/focus rules above; defined later in source so it wins. */
@@ -6392,6 +6405,57 @@ html.vt-cursor-active * {
     margin-top: 0.85rem;
     padding-top: 0.75rem;
     border-top: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+
+.vt-settings-divider {
+    margin: 0.5rem 0 0.65rem;
+}
+
+.vt-settings-page-slot:empty {
+    display: none;
+}
+
+.vt-settings-navlist {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin-bottom: 0.75rem;
+}
+
+.vt-settings-navitem {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 0.45rem 0.5rem;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    color: var(--kb-text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    text-align: left;
+    cursor: pointer;
+}
+
+.vt-settings-navitem:hover,
+.vt-settings-navitem:focus-visible {
+    color: var(--kb-text-primary);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    outline: none;
+}
+
+.vt-settings-navitem.active,
+.vt-settings-navitem[aria-current="page"] {
+    color: var(--kb-primary);
+}
+
+/* Page-control labels stay visible inside the gear even though
+   .vt-nav-label is display:none on desktop. */
+.vt-settings-navitem .vt-nav-label,
+.vt-settings-navitem .vt-settings-navitem-label {
+    display: inline;
+    margin-left: 0.5rem;
 }
 
 

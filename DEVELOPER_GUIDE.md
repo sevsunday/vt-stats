@@ -1276,9 +1276,9 @@ A "Persist" toggle saves the filter selection across match switches. When enable
 
 Any combination of match, filter, and tab is shareable via query parameters. All writes use `history.replaceState` (no history pollution).
 
-**URL writes are gated by the Live Sync toggle** (topnav icon, `bi-arrow-repeat`). When OFF (default), `syncUrl()` is a no-op and the URL stays clean during normal use. When ON, every state change writes to the URL. The preference persists in `localStorage` under the `vt-url-sync` key.
+**URL writes are gated by the Live Sync toggle** (Settings gear, `bi-broadcast`). When OFF (default), `syncUrl()` is a no-op and the URL stays clean during normal use. When ON, every state change writes to the URL. The preference persists in `localStorage` under the `vt-url-sync` key.
 
-The Share button (topnav, `bi-link-45deg`) copies a URL representing the current state to the clipboard regardless of the Live Sync toggle — it calls `buildShareUrl()` directly. The button briefly flips to a checkmark on success or a warning on failure. The Clipboard API is used when available (`navigator.clipboard.writeText` under a secure context), with a hidden-textarea + `document.execCommand('copy')` fallback for `file://` and plain `http://` contexts.
+The Share button (Settings gear, `bi-link-45deg`) copies a URL representing the current state to the clipboard regardless of the Live Sync toggle — it calls `buildShareUrl()` directly. The button briefly flips to a checkmark on success or a warning on failure. The Clipboard API is used when available (`navigator.clipboard.writeText` under a secure context), with a hidden-textarea + `document.execCommand('copy')` fallback for `file://` and plain `http://` contexts.
 
 | Param | Values | Notes |
 |---|---|---|
@@ -1322,7 +1322,7 @@ Inside the loader, `hydrateFilterFromUrl()` applies the URL's filter state. **UR
 
 `vt-url-sync` and `vt-filter-persist` are separate preferences with no interaction:
 
-- **`vt-url-sync`** (Live Sync toggle, topnav): governs whether state changes write to the browser URL. Defaults to off.
+- **`vt-url-sync`** (Live Sync toggle, Settings gear): governs whether state changes write to the browser URL. Defaults to off.
 - **`vt-filter-persist`** (Persist checkbox in the filter bar): governs whether the filter carries across in-session match switches. Defaults to off.
 
 A user can have either, both, or neither enabled.
@@ -1567,7 +1567,7 @@ Case-insensitive substring match on keys AND string/number/bool values, across t
 ### Entry surfaces
 
 - **Main dashboard**: "View raw" button on the match-info banner (`#info-raw-link` in `index.html`), href updated per-match by `renderBanner()` in `js/app.js`.
-- **Docs page**: "Raw data" link in the `docs.html` top nav.
+- **Docs page**: docs.html mentions the Raw Data Browser; open it from the dashboard match-info **View Raw Data** button (`raw.html?match=<id>`).
 - **Direct URL**: `raw.html?match=<id>` works without going through either.
 
 ### Schema-migration verify tool
@@ -1665,7 +1665,7 @@ The ODF Browser is the project's fourth standalone page, sibling to `index.html`
 
 | File | Purpose |
 |---|---|
-| `odf/index.html` | Page shell. Sidebar + content layout, topnav (Dashboard / Docs / Raw data / Shortcuts / theme / mode), shortcuts modal. All asset paths use `../`. |
+| `odf/index.html` | Page shell. Sidebar + content layout, topnav (shared cluster + Shortcuts in the Settings gear), shortcuts modal. All asset paths use `../`. |
 | `js/odf-browser.js` | Single-class `ODFBrowser` implementation. Reads `../data/odf.min.json`, plays `../data/audio/<file>.wav`. Exposes `window.browser` for inline `onclick` handlers. ~1,920 lines. |
 | `css/odf-browser.css` | Structural rules (height calc, scrollbars, list-item interaction states) + `.vt-odf-*` scoped classes (popover, alert variants, diff highlights, sub-header surface, etc.) + the 3-up CSS column layout for property cards. |
 | `data/audio/*.wav` | 633 vendored audio clips referenced by `.wav`-valued ODF properties. Loaded on demand at runtime; nothing else in the project consumes them. |
@@ -1678,7 +1678,7 @@ The ODF Browser is the project's fourth standalone page, sibling to `index.html`
 - **Audio preview**: any property whose value ends in `.wav` gets an inline play button that streams from `../data/audio/`. Only one audio plays at a time; "Sound file not found" surfaces inline via `.vt-odf-text-danger`.
 - **Popovers**: `subAttackClass` and `engageRange` (Vehicle category) carry context-aware popovers. All popovers initialised with `customClass: 'vt-odf-popover'` so they render against project theme tokens (mirrors the `js/raw-browser.js` line 2756 pattern).
 - **Right-click context menu**: any ODF list item right-click opens a custom menu with "Open in new tab".
-- **Keyboard shortcuts**: `↑/↓` cycle ODF list, `←/→` cycle category tabs, `Ctrl+K` focus search, `Esc` clear search, `Esc Esc` (within 750ms) reset view. Shortcuts modal accessible from the topnav button.
+- **Keyboard shortcuts**: `↑/↓` cycle ODF list, `←/→` cycle category tabs, `Ctrl+K` focus search, `Esc` clear search, `Esc Esc` (within 750ms) reset view. Shortcuts modal accessible from the Settings gear.
 
 ### URL routing
 
@@ -1699,7 +1699,7 @@ Every Bootstrap utility class and inline-style color the seed used has been swap
 
 ### Cross-page integration
 
-- **Topnav nav-link**: every other page (`index.html`, `docs.html`, `raw.html`) carries an `<a href="odf/index.html"><i class="bi bi-boxes"></i>ODF</a>` icon-button in its topnav (desktop + mobile burger variants).
+- **Topnav nav-link**: every production shell carries an ODF destination link in the shared topnav cluster.
 - **Kill-feed cross-link**: each killer/victim ODF chip in `js/app.js` `renderKillFeed()` is wrapped in `<a class="vt-odf-link" href="odf/index.html?odf=<basename>" target="_blank" rel="noopener">`. Basename is the raw `entry.killer_odf` lowercased + `.odf`-stripped + `encodeURIComponent`'d. The `.vt-odf-link` / `.vt-odf-link-fallback` styles live in `css/vtstats-theme.css` (NOT `css/odf-browser.css`) so they apply on the dashboard, which doesn't load the ODF browser stylesheet.
 
 ### Deferred from v1
@@ -2509,7 +2509,7 @@ The Player Profile Pages are the project's **fifth standalone page**, sibling to
 5. **Idempotency**: skip the write if the new content byte-for-byte matches the existing file. Print a one-line summary at the end (`X stubs written, Y unchanged, Z removed`).
 6. **Pruning**: any `player/<existing-slug>/index.html` not in this pass's output set is deleted only if its `<!-- vtstats-player-stub:vN -->` marker matches the current `PLAYER_TEMPLATE_VERSION`. Stub files without the marker are left alone (manual edits, sanity check).
 
-`PLAYER_TEMPLATE_VERSION` (currently `3`) is bumped whenever the rendered stub HTML shape changes (e.g. topnav additions, OG tag tweaks). Bumping forces a full regeneration even when the per-player numbers haven't moved. Does **NOT** require bumping `PIPELINE_VERSION` — the stub HTML is downstream of the JSON contract.
+`PLAYER_TEMPLATE_VERSION` (currently `14`) is bumped whenever the rendered stub HTML shape changes (e.g. topnav additions, OG tag tweaks). Bumping forces a full regeneration even when the per-player numbers haven't moved. Does **NOT** require bumping `PIPELINE_VERSION` — the stub HTML is downstream of the JSON contract.
 
 ### 14.4 Pages — three modes
 
@@ -2872,7 +2872,7 @@ Reads `data/models/`: `geometry/<stem>.glb` (geometry + UVs + per-primitive mate
 
 ### 17.4 Picker filter contract
 
-Picker-unaware (mirrors ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The `Models` topnav link (`bi-box`) sits immediately after ODF on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` + `MAP_TEMPLATE_VERSION` bumped to thread it through all stubs).
+Picker-unaware (mirrors ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The Models topnav dropdown (`bi-box`) sits immediately after ODF on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` 14 / `MAP_TEMPLATE_VERSION` 9).
 
 ## 18. LEGO Models Browser (`lego/`)
 
@@ -2906,5 +2906,5 @@ Darkvale is credited as sole modeler in four places — directory hero (`Designe
 
 ### 18.5 Picker filter contract
 
-Picker-unaware (mirrors Models / ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The `LEGO` topnav link (`bi-bricks`) sits immediately after Models on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` 12 → 13 / `MAP_TEMPLATE_VERSION` 7 → 8 thread it through all stubs).
+Picker-unaware (mirrors Models / ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. LEGO lives in the Models dropdown. Templates at `PLAYER_TEMPLATE_VERSION` 14 / `MAP_TEMPLATE_VERSION` 9.
 

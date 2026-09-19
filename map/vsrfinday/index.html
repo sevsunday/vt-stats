@@ -42,7 +42,7 @@
   <script>
     window.__vtMapBoot = {
       map_file:         "vsrfinday",
-      template_version: 8
+      template_version: 9
     };
   </script>
 </head>
@@ -68,50 +68,45 @@
              title="Open the dashboard" aria-label="Dashboard">
             <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
-          <a href="../../docs.html" class="vt-nav-icon-btn"
-             title="Open the docs" aria-label="Docs">
-            <i class="bi bi-book me-1"></i>Docs
-          </a>
-          <a href="../../raw.html" class="vt-nav-icon-btn"
-             title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)"
-             aria-label="Raw data browser">
-            <i class="bi bi-code-square me-1"></i>Raw data
-          </a>
           <a href="../../odf/" class="vt-nav-icon-btn"
              title="Browse the BZ2 Object Definition File (ODF) database"
              aria-label="ODF browser">
             <i class="bi bi-boxes me-1"></i>ODF
           </a>
-          <a href="../../models/" class="vt-nav-icon-btn"
-             title="Browse 3D unit & building models" aria-label="Models">
-            <i class="bi bi-box me-1"></i>Models
-          </a>
-          <a href="../../lego/" class="vt-nav-icon-btn"
-             title="Browse Darkvale's LEGO models" aria-label="LEGO">
-            <i class="bi bi-bricks me-1"></i>LEGO
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+            </ul>
+          </div>
           <a href="../" class="vt-nav-icon-btn active" aria-current="page"
              title="Browse the VSR map catalog" aria-label="Maps">
             <i class="bi bi-map me-1"></i>Maps
           </a>
-          <a href="../../player/" class="vt-nav-icon-btn"
-             title="Browse player career profiles" aria-label="Players">
-            <i class="bi bi-people me-1"></i>Players
-          </a>
-          <a href="../../elo/" class="vt-nav-icon-btn"
-             title="VTSR-T leaderboard, methodology &amp; rating accuracy" aria-label="ELO">
-            <i class="bi bi-trophy me-1"></i>ELO
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Ratings and players">
+              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="../../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+            </ul>
+          </div>
           <a href="../../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
              data-vt-tools-link data-vt-tools-live="0"
              title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
              aria-label="Tools">
             <i class="bi bi-controller me-1"></i>Tools
           </a>
-
           <div class="dropdown">
-            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
-              <i class="bi bi-palette me-1"></i>Theme
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>

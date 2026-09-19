@@ -54,203 +54,83 @@
         </a>
       </div>
 
-      <!-- Record stats CTA (desktop only). Sits immediately left of the
-           Docs link as a high-emphasis primary-tinted action that re-opens
-           the first-visit instructional modal. Carries `ms-md-auto` so it
-           anchors the right-aligned group (Record + Docs); Docs no longer
-           needs the auto-margin since Record is its left neighbor. -->
-      <button class="vt-nav-icon-btn vt-nav-icon-btn--primary d-none d-md-inline-flex ms-md-auto order-md-1"
-              id="record-stats-btn-desktop" type="button"
-              data-bs-toggle="modal" data-bs-target="#record-stats-modal"
-              title="How to record your own stats" aria-label="How to record your own stats">
-        <i class="bi bi-record-circle me-1"></i>Record
-      </button>
-
-      <!-- Docs link (desktop only). The match selector lives in the hero
-           cards now (rich picker, see #match-picker-modal). The right-side
-           group is anchored by the Record button immediately above; Docs
-           sits flush to its right. -->
-      <a href="docs.html" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1">
-        <i class="bi bi-book me-1"></i>Docs
-      </a>
-
-      <!-- ODF Browser link (desktop only). Sits immediately right of Docs
-           in the right-anchored cluster. -->
-      <a href="odf/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
-         title="Browse the BZ2 Object Definition File (ODF) database"
-         aria-label="ODF browser">
-        <i class="bi bi-boxes me-1"></i>ODF
-      </a>
-
-      <!-- Models link (desktop only). Sits immediately right of ODF; opens the
-           interactive 3D unit/building model browser. -->
-      <a href="models/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
-         title="Browse 3D unit & building models"
-         aria-label="Models">
-        <i class="bi bi-box me-1"></i>Models
-      </a>
-
-      <!-- LEGO link (desktop only). Sits immediately right of Models; opens
-           Darkvale's LEGO model browser. -->
-      <a href="lego/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
-         title="Browse Darkvale's LEGO models"
-         aria-label="LEGO">
-        <i class="bi bi-bricks me-1"></i>LEGO
-      </a>
-
-      <!-- Maps directory link (desktop only). Sibling of Players;
-           opens the VSR map catalog browser. -->
-      <a href="map/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
-         title="Browse the VSR map catalog"
-         aria-label="Maps">
-        <i class="bi bi-map me-1"></i>Maps
-      </a>
-
-      <!-- Players directory link (desktop only). Sits immediately left
-           of ELO — career profiles are the natural sibling of the
-           rating page. -->
-      <a href="player/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
-         title="Browse player career profiles"
-         aria-label="Players">
-        <i class="bi bi-people me-1"></i>Players
-      </a>
-
-      <!-- ELO link (desktop only). Dedicated VTSR-T page: full leaderboard,
-           plain-language methodology explainers, and rating-accuracy stats. -->
-      <a href="elo/" class="vt-nav-icon-btn d-none d-md-inline-flex order-md-1"
-         title="VTSR-T leaderboard, methodology &amp; rating accuracy"
-         aria-label="ELO">
-        <i class="bi bi-trophy me-1"></i>ELO
-      </a>
-
-      <!-- Tools link (desktop only). Lobby utilities (player wheel, coinflip,
-           random map, team balonce) + live-session viewer. `data-vt-tools-link`
-           marks this as the pulse target for the (formerly LIVE-pill)
-           active-game-indicator poller. `data-vt-tools-live="0|1"` is set
-           by js/active-game-indicator.js when a known-host lobby is live. -->
-      <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools d-none d-md-inline-flex order-md-1"
-         data-vt-tools-link data-vt-tools-live="0"
-         title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
-         aria-label="Tools">
-        <i class="bi bi-controller me-1"></i>Tools
-      </a>
-
-
-      <!-- Burger (mobile only). On desktop the collapse menu is always
-           expanded and packs to the right after the Docs link. -->
+      <!-- Burger (mobile only). On desktop the collapse is always expanded
+           and packs to the right via ms-md-auto. -->
       <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
               data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
               aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
         <i class="bi bi-list"></i>
       </button>
 
-      <!-- Collapsible menu. `flex-md-grow-0` disables Bootstrap's default
-           `flex-grow: 1` on .navbar-collapse so on desktop it shrinks to its
-           content width and packs next to the burger/docs on the right. -->
-      <div class="collapse navbar-collapse flex-md-grow-0 order-md-2" id="topnav-collapse">
+      <!-- Single shared cluster. Dashboard omits a Dashboard link (the
+           brand is home). Docs / Raw / LEGO / Players are not in the bar. -->
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <!-- Record stats CTA (mobile burger only). Mirrors the desktop
-               variant above; sits immediately above/left of the Docs link
-               so the high-emphasis CTA is the first item in the menu. -->
-          <button class="vt-nav-icon-btn vt-nav-icon-btn--primary d-md-none"
-                  id="record-stats-btn-mobile" type="button"
+          <button class="vt-nav-icon-btn vt-nav-icon-btn--primary"
+                  id="record-stats-btn" type="button"
                   data-bs-toggle="modal" data-bs-target="#record-stats-modal"
                   title="How to record your own stats" aria-label="How to record your own stats">
             <i class="bi bi-record-circle me-1"></i>Record
           </button>
-
-          <!-- Docs link (mobile burger only). Duplicate of the desktop
-               version above; responsive visibility hides whichever isn't
-               appropriate for the current breakpoint. -->
-          <a href="docs.html" class="vt-nav-icon-btn d-md-none">
-            <i class="bi bi-book me-1"></i>Docs
-          </a>
-
-          <!-- ODF Browser link (mobile burger only). Duplicate of the
-               desktop version above. -->
-          <a href="odf/" class="vt-nav-icon-btn d-md-none"
+          <a href="odf/" class="vt-nav-icon-btn"
              title="Browse the BZ2 Object Definition File (ODF) database"
              aria-label="ODF browser">
             <i class="bi bi-boxes me-1"></i>ODF
           </a>
-
-          <!-- Models link (mobile burger only). Duplicate of the desktop
-               version above. -->
-          <a href="models/" class="vt-nav-icon-btn d-md-none"
-             title="Browse 3D unit & building models"
-             aria-label="Models">
-            <i class="bi bi-box me-1"></i>Models
-          </a>
-
-          <!-- LEGO link (mobile burger only). Duplicate of the desktop version. -->
-          <a href="lego/" class="vt-nav-icon-btn d-md-none"
-             title="Browse Darkvale's LEGO models"
-             aria-label="LEGO">
-            <i class="bi bi-bricks me-1"></i>LEGO
-          </a>
-
-          <!-- Maps directory link (mobile burger only). Sibling of Players. -->
-          <a href="map/" class="vt-nav-icon-btn d-md-none"
-             title="Browse the VSR map catalog"
-             aria-label="Maps">
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+            </ul>
+          </div>
+          <a href="map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
             <i class="bi bi-map me-1"></i>Maps
           </a>
-
-          <!-- Players directory link (mobile burger only). Sits
-               immediately left of ELO. -->
-          <a href="player/" class="vt-nav-icon-btn d-md-none"
-             title="Browse player career profiles"
-             aria-label="Players">
-            <i class="bi bi-people me-1"></i>Players
-          </a>
-
-          <!-- ELO link (mobile burger only). Sibling of Players. -->
-          <a href="elo/" class="vt-nav-icon-btn d-md-none"
-             title="VTSR-T leaderboard, methodology &amp; rating accuracy"
-             aria-label="ELO">
-            <i class="bi bi-trophy me-1"></i>ELO
-          </a>
-
-          <!-- Tools link (mobile burger only). Sibling of Maps; opens the
-               lobby tools page. `data-vt-tools-link` makes this a live-pulse
-               target for the active-game-indicator. -->
-          <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools d-md-none"
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Ratings and players">
+              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="player/"><i class="bi bi-people me-2"></i>Players</a></li>
+            </ul>
+          </div>
+          <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
              data-vt-tools-link data-vt-tools-live="0"
              title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
              aria-label="Tools">
             <i class="bi bi-controller me-1"></i>Tools
           </a>
 
-
-          <!-- URL Sharing: Share (one-shot copy) + Live Sync (toggle).
-               Both styled as standalone vt-nav-icon-btn to match the rest of
-               the topnav. Active/flash states are handled by per-id CSS in
-               vtstats-theme.css. -->
-          <button class="vt-nav-icon-btn" id="share-url-btn"
+          <!-- Relocated into the Settings gear by js/cursor-settings.js. -->
+          <button class="vt-nav-icon-btn" id="share-url-btn" hidden data-vt-page-control
                   title="Copy shareable link to clipboard" aria-label="Copy shareable link to clipboard">
             <i class="bi bi-link-45deg"></i><span class="vt-nav-label ms-2">Share</span>
           </button>
-          <button class="vt-nav-icon-btn" id="live-sync-toggle"
+          <button class="vt-nav-icon-btn" id="live-sync-toggle" hidden data-vt-page-control
                   title="Keep URL in sync with current view" aria-label="Toggle live URL sync"
                   aria-pressed="false">
             <i class="bi bi-broadcast"></i><span class="vt-nav-label ms-2">Live sync</span>
           </button>
-
-          <!-- Theme Dropdown -->
-          <div class="dropdown">
-            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
-              <i class="bi bi-palette"></i><span class="vt-nav-label ms-2">Theme</span>
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
-          </div>
-
-          <!-- About / Source Repos -->
-          <button class="vt-nav-icon-btn" id="about-btn" type="button"
+          <button class="vt-nav-icon-btn" id="about-btn" type="button" hidden data-vt-page-control
                   data-bs-toggle="modal" data-bs-target="#about-modal"
                   title="About / source repositories" aria-label="About / source repositories">
             <i class="bi bi-info-circle"></i>
           </button>
 
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
         </div>
       </div>
     </div>

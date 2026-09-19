@@ -9,7 +9,10 @@
  * page it
  *   1. reads settings from localStorage (key `vt.cursor.settings.v1`),
  *   2. injects a gear dropdown as the last child of `.vt-nav-menu` (the one
- *      DOM anchor present in all shells + templates),
+ *      DOM anchor present in all shells + templates). The panel always
+ *      starts with a Docs row (href from this script's URL), then an
+ *      optional "This page" section that relocates `[data-vt-page-control]`
+ *      nodes (Share / Live sync / About / ODF Shortcuts), then Custom cursor.
  *   3. creates a fixed overlay <div> that plays the HD sprite (64 frames) via a
  *      CSS steps(64) keyframe (continuous spin, like in-game) and follows the
  *      mouse with the comet-tip hotspot pinned.
@@ -165,19 +168,92 @@
 
   // ---------------------------------------------------------------- Settings panel
 
+  function resolveDocsHref() {
+    if (SCRIPT_URL) {
+      try { return new URL('../docs.html', SCRIPT_URL).href; } catch (_) { /* fall through */ }
+    }
+    return 'docs.html';
+  }
+
+  function isDocsPage() {
+    const last = (location.pathname.replace(/\/+$/, '').split('/').pop() || '');
+    return last === 'docs.html';
+  }
+
+  function hideDropdown(btn) {
+    if (!btn || !window.bootstrap || !bootstrap.Dropdown) return;
+    const inst = bootstrap.Dropdown.getInstance(btn);
+    if (inst) inst.hide();
+  }
+
+  function hideGearOnModal(modalId, gearBtn) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    modal.addEventListener('show.bs.modal', () => hideDropdown(gearBtn));
+  }
+
+  function labelForControl(el) {
+    const existing = el.querySelector('.vt-nav-label');
+    if (existing && existing.textContent.trim()) return existing.textContent.trim();
+    return (el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+  }
+
+  function relocatePageControls(panel, gearBtn) {
+    const controls = Array.from(document.querySelectorAll('[data-vt-page-control]'));
+    const slot = panel.querySelector('.vt-settings-page-slot');
+    if (!slot || !controls.length) return;
+
+    const title = document.createElement('div');
+    title.className = 'vt-settings-section-title';
+    title.textContent = 'This page';
+    const list = document.createElement('div');
+    list.className = 'vt-settings-navlist';
+
+    for (const el of controls) {
+      el.classList.add('vt-settings-navitem');
+      if (!el.querySelector('.vt-nav-label, .vt-settings-navitem-label')) {
+        const text = labelForControl(el);
+        if (text) {
+          const span = document.createElement('span');
+          span.className = 'vt-settings-navitem-label';
+          span.textContent = text;
+          el.appendChild(span);
+        }
+      }
+      el.removeAttribute('hidden');
+      list.appendChild(el);
+      if (el.id === 'share-url-btn') {
+        el.addEventListener('click', () => hideDropdown(gearBtn));
+      }
+    }
+
+    slot.appendChild(title);
+    slot.appendChild(list);
+  }
+
   function buildPanel() {
     const menu = document.querySelector('.vt-nav-menu');
     if (!menu) return;
     if (menu.querySelector('.vt-settings-dropdown')) return; // idempotent
 
+    const onDocs = isDocsPage();
+    const docsHref = resolveDocsHref();
+
     const wrap = document.createElement('div');
     wrap.className = 'dropdown vt-settings-dropdown';
     wrap.innerHTML = `
-      <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
-              data-bs-auto-close="outside" title="Settings" aria-label="Settings">
+      <button class="vt-nav-icon-btn${onDocs ? ' active' : ''}" type="button" data-bs-toggle="dropdown"
+              data-bs-auto-close="outside" title="Settings" aria-label="Settings"
+              ${onDocs ? 'aria-current="page"' : ''}>
         <i class="bi bi-gear"></i><span class="vt-nav-label ms-2">Settings</span>
       </button>
       <div class="dropdown-menu dropdown-menu-end vt-settings-panel">
+        <a class="vt-settings-navitem${onDocs ? ' active' : ''}" id="vt-settings-docs"
+           href="${docsHref}"${onDocs ? ' aria-current="page"' : ''}>
+          <i class="bi bi-book"></i><span class="vt-settings-navitem-label">Docs</span>
+        </a>
+        <div class="dropdown-divider vt-settings-divider"></div>
+        <div class="vt-settings-page-slot"></div>
         <div class="vt-settings-section-title">
           <i class="bi bi-cursor-fill me-1"></i>Custom cursor
         </div>
@@ -216,6 +292,12 @@
       </div>
     `;
     menu.appendChild(wrap);
+
+    const gearBtn = wrap.querySelector('.vt-nav-icon-btn');
+    const panel = wrap.querySelector('.vt-settings-panel');
+    relocatePageControls(panel, gearBtn);
+    hideGearOnModal('about-modal', gearBtn);
+    hideGearOnModal('shortcutsModal', gearBtn);
 
     panelEls = {
       enable: wrap.querySelector('#vt-cursor-enable'),

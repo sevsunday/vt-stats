@@ -22,10 +22,10 @@
 <body>
 
   <!-- Navbar. Three-zone layout: brand on the left, an Algolia-style search
-       pill absolutely centered (desktop only), and the rest of the menu
-       (Docs / Raw data / Theme / Mode) on the right. The desktop search pill
-       sits outside the burger collapse so it stays visible at md+ widths;
-       on mobile it falls back to a compact icon-button inside the menu. -->
+       pill absolutely centered (desktop only), and the shared destination
+       cluster on the right. Docs lives in the Settings gear (active here).
+       The desktop search pill sits outside the burger collapse; on mobile
+       it falls back to a compact icon-button inside the menu. -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom vt-docs-nav">
     <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="index.html" style="color: var(--kb-text-primary); text-decoration: none;">
@@ -57,63 +57,54 @@
            content width; `ms-md-auto` then pushes it to the right edge. -->
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-2" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a href="docs.html" class="vt-nav-icon-btn active" aria-current="page">
-            <i class="bi bi-book me-1"></i>Docs
+          <a href="index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
-
-          <!-- Mobile-only search trigger (desktop uses the centered pill above
-               which is hidden via d-md-flex / d-none). -->
           <button type="button" class="vt-nav-icon-btn d-md-none"
                   data-vt-docs-search-trigger
                   title="Search the docs" aria-label="Search the docs">
             <i class="bi bi-search me-1"></i>Search
           </button>
-
-          <a href="raw.html" class="vt-nav-icon-btn" title="Browse the raw per-match data (binpb, decoded JSON, processed JSON)">
-            <i class="bi bi-code-square"></i><span class="vt-nav-label ms-2">Raw data</span>
-          </a>
-
           <a href="odf/" class="vt-nav-icon-btn"
              title="Browse the BZ2 Object Definition File (ODF) database"
              aria-label="ODF browser">
-            <i class="bi bi-boxes"></i><span class="vt-nav-label ms-2">ODF</span>
+            <i class="bi bi-boxes me-1"></i>ODF
           </a>
-          <a href="models/" class="vt-nav-icon-btn"
-             title="Browse 3D unit & building models"
-             aria-label="Models">
-            <i class="bi bi-box"></i><span class="vt-nav-label ms-2">Models</span>
-          </a>
-          <a href="lego/" class="vt-nav-icon-btn"
-             title="Browse Darkvale's LEGO models"
-             aria-label="LEGO">
-            <i class="bi bi-bricks"></i><span class="vt-nav-label ms-2">LEGO</span>
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+            </ul>
+          </div>
           <a href="map/" class="vt-nav-icon-btn"
-             title="Browse the VSR map catalog"
-             aria-label="Maps">
-            <i class="bi bi-map"></i><span class="vt-nav-label ms-2">Maps</span>
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
           </a>
-          <a href="player/" class="vt-nav-icon-btn"
-             title="Browse player career profiles"
-             aria-label="Players">
-            <i class="bi bi-people"></i><span class="vt-nav-label ms-2">Players</span>
-          </a>
-          <a href="elo/" class="vt-nav-icon-btn"
-             title="VTSR-T leaderboard, methodology &amp; rating accuracy"
-             aria-label="ELO">
-            <i class="bi bi-trophy"></i><span class="vt-nav-label ms-2">ELO</span>
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Ratings and players">
+              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="player/"><i class="bi bi-people me-2"></i>Players</a></li>
+            </ul>
+          </div>
           <a href="tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
              data-vt-tools-link data-vt-tools-live="0"
              title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
              aria-label="Tools">
-            <i class="bi bi-controller"></i><span class="vt-nav-label ms-2">Tools</span>
+            <i class="bi bi-controller me-1"></i>Tools
           </a>
-
-          <!-- Theme Dropdown -->
           <div class="dropdown">
-            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
-              <i class="bi bi-palette"></i><span class="vt-nav-label ms-2">Theme</span>
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
           </div>
