@@ -901,7 +901,7 @@
     const older = cmdrDuelsNonV4(r);
     const title = `${v4} of ${minV4} proto-v4 commander games, or ${older} of ${minNonV4} older games (pre-v4 recordings and F9Stats) to join the ranked ladder.`;
     return ` <span class="vt-cmdr-progress-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-              title="${esc(title)}">${v4}&nbsp;/&nbsp;${minV4} v4 · ${older}&nbsp;/&nbsp;${minNonV4} older</span>`;
+              title="${esc(title)}">${v4}&nbsp;/&nbsp;${minV4} v4 · ${older} older</span>`;
   }
 
   function cmdrRowKey(r) {
