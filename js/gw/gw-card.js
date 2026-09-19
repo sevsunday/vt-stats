@@ -249,10 +249,14 @@
 
   // ---------------------------------------------------------------- Sub-render: players
 
-  function playerRowHtml(session, p) {
+  // Shared name wrap (role + Steam name + differing lobby nick). Used by
+  // playerRowHtml and the in-place patch path so a nick change doesn't wait
+  // for a roster rebuild.
+  function nameWrapInnerHtml(p) {
     const r = resolver();
     const res = (r && p.steamId) ? r.resolve(p.steamId, p.name) : null;
     const name = (res && res.displayName) || p.name || '(unnamed)';
+    const lobbyNick = (res && res.lobbyNick) || null;
 
     // Link the player name to their Steam (or GOG) profile -- p.profileUrl is
     // built by bz2api.parsePlayer for any platform id. Display name still uses
@@ -261,10 +265,18 @@
       ? `<a class="gw-pname" href="${escapeHtml(p.profileUrl)}" target="${PLAYER_LINK_TARGET}" rel="noopener noreferrer" title="Open Steam profile">${escapeHtml(name)}</a>`
       : `<span class="gw-pname">${escapeHtml(name)}</span>`;
 
+    const nickHtml = lobbyNick
+      ? `<span class="gw-pnick">${escapeHtml(lobbyNick)}</span>`
+      : '';
+
     const roleHtml = p.isCommander
       ? '<i class="bi bi-flag-fill gw-prole gw-prole--cmdr" title="Commander" aria-hidden="true"></i>'
       : '';
 
+    return `${roleHtml}<span class="gw-pname-stack">${nameHtml}${nickHtml}</span>`;
+  }
+
+  function playerRowHtml(session, p) {
     const inGame = (session.state || '').toUpperCase() === 'INGAME';
     const hasStats = Number.isFinite(p.kills) || Number.isFinite(p.deaths) || Number.isFinite(p.score);
     let kdsHtml = '';
@@ -276,7 +288,7 @@
     }
 
     return `<div class="gw-prow" data-steam64="${escapeHtml(p.steamId || '')}">
-      <span class="gw-pname-wrap">${roleHtml}${nameHtml}</span>
+      <span class="gw-pname-wrap">${nameWrapInnerHtml(p)}</span>
       ${kdsHtml}
     </div>`;
   }
@@ -289,9 +301,22 @@
     return `<div class="gw-team">${head}<div class="gw-team-rows">${rows}</div></div>`;
   }
 
+  function hiddenBandHtml(session, hidden) {
+    if (!hidden.length) return '';
+    return `<div class="gw-hidden" role="group" aria-label="Hidden players">
+      <div class="gw-hidden-head">
+        <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+        Hidden
+      </div>
+      <div class="gw-hidden-rows">${hidden.map((p) => playerRowHtml(session, p)).join('')}</div>
+    </div>`;
+  }
+
   function renderPlayersHtml(session) {
     const players = Array.isArray(session.players) ? session.players : [];
     const isTeamGame = session.isTeamGame === true;
+    const hidden = players.filter((p) => p.isHidden);
+    const hiddenHtml = hiddenBandHtml(session, hidden);
 
     const open = Math.max(0, (Number.isFinite(session.maxPlayers) ? session.maxPlayers : 0) - players.length);
     const openHtml = open > 0 ? `<div class="gw-open">${open} slot${open === 1 ? '' : 's'} open</div>` : '';
@@ -304,6 +329,7 @@
       const label1 = tn.team1 || 'Team 1';
       const label2 = tn.team2 || 'Team 2';
       return `
+        ${hiddenHtml}
         <div class="gw-teams">
           ${teamColumnHtml(session, label1, t1)}
           ${teamColumnHtml(session, label2, t2)}
@@ -315,6 +341,7 @@
 
     const visible = players.filter((p) => !p.isHidden);
     return `
+      ${hiddenHtml}
       <div class="gw-plist">
         ${visible.length ? visible.map((p) => playerRowHtml(session, p)).join('') : '<div class="gw-team-empty">No players in lobby</div>'}
       </div>
@@ -401,13 +428,13 @@
   function rosterSig(session) {
     const players = (session && session.players) || [];
     return players.map((p) =>
-      `${p.steamId || p.name}:${p.kills}/${p.deaths}/${p.score}:${p.team}:${p.isCommander ? 1 : 0}`
+      `${p.steamId || p.name}:${p.name}:${p.kills}/${p.deaths}/${p.score}:${p.team}:${p.isCommander ? 1 : 0}:${p.isHidden ? 1 : 0}`
     ).join('|');
   }
 
   function membershipKey(session) {
     const players = (session && session.players) || [];
-    return players.map((p) => `${p.steamId || p.name || '?'}#${p.team}`).slice().sort().join(',');
+    return players.map((p) => `${p.steamId || p.name || '?'}#${p.team}#${p.isHidden ? 1 : 0}`).slice().sort().join(',');
   }
 
   function detailsSig(session) {
@@ -538,13 +565,18 @@
       const pband = card.querySelector('[data-gw-field="players"]');
       if (pband) pband.innerHTML = renderPlayersHtml(session); // thumbnail untouched -> no flash
     } else {
-      // patch K/D/S per row in place
+      // patch K/D/S + name wrap (Steam name / differing lobby nick) in place
       const inGame = (session.state || '').toUpperCase() === 'INGAME';
       const players = (session && session.players) || [];
       for (const p of players) {
         if (!p.steamId) continue;
         const row = card.querySelector(`.gw-prow[data-steam64="${attrEsc(p.steamId)}"]`);
         if (!row) continue;
+        const wrap = row.querySelector('.gw-pname-wrap');
+        if (wrap) {
+          const wantWrap = nameWrapInnerHtml(p);
+          if (wrap.innerHTML !== wantWrap) wrap.innerHTML = wantWrap;
+        }
         const kdsEl = row.querySelector('[data-gw-kds]');
         if (inGame && kdsEl) {
           const k = Number.isFinite(p.kills) ? p.kills : '-';

@@ -507,6 +507,12 @@ const BZ2API = (function() {
       const n = parseInt(teamBlock.SubTeam.ID, 10);
       if (Number.isFinite(n)) teamSlot = n;
     }
+    // Team.ID is the MSL side ("1" / "2"). Engine-hidden players land on 255.
+    let teamId = null;
+    if (teamBlock && teamBlock.ID !== undefined && teamBlock.ID !== null) {
+      const n = parseInt(teamBlock.ID, 10);
+      if (Number.isFinite(n)) teamId = n;
+    }
 
     const player = {
       name: (rawPlayer && rawPlayer.Name) || '',
@@ -551,14 +557,14 @@ const BZ2API = (function() {
       player.profileUrl = buildGogProfileUrl(cleanedGogId);
     }
 
-    // Check if player is hidden (no team assignment)
-    // Hidden players are spectators or in a glitched state
-    if (!teamBlock || teamSlot === null || teamSlot === 255) {
+    // Hidden: no Team block (MSL often omits team-255), slot 255, or side 255.
+    // Spectators / glitched / host-moved-off-roster players.
+    if (!teamBlock || teamSlot === null || teamSlot === 255 || teamId === 255) {
       player.isHidden = true;
     }
 
     // Parse team assignment
-    if (teamSlot !== null && teamSlot !== 255) {
+    if (teamSlot !== null && teamSlot !== 255 && teamId !== 255) {
       if (isTeamGame && !isMPI) {
         // Two-team game: slots 1-5 = team 1, slots 6-10 = team 2
         if (teamSlot >= 1 && teamSlot <= 5) {

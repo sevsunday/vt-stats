@@ -459,6 +459,36 @@ html.gw-embed .navbar {
   margin-top: 0.4rem;
 }
 
+.gw-hidden {
+  margin-bottom: 0.5rem;
+  padding: 0.35rem 0.45rem 0.45rem;
+  border-radius: 0.45rem;
+  border: 1px solid color-mix(in oklab, var(--kb-danger) 45%, transparent);
+  background: color-mix(in oklab, var(--kb-danger) 14%, transparent);
+}
+
+.gw-hidden-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--kb-danger);
+  padding: 0 0.1rem 0.25rem;
+}
+
+.gw-hidden-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.gw-hidden .gw-prow {
+  background: color-mix(in oklab, var(--kb-danger) 10%, transparent);
+}
+
 .gw-team-empty {
   font-size: 0.74rem;
   font-style: italic;
@@ -479,9 +509,25 @@ html.gw-embed .navbar {
 
 .gw-pname-wrap {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.3rem;
   min-width: 0;
+}
+
+.gw-pname-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gw-pnick {
+  font-size: 0.66rem;
+  font-style: italic;
+  color: var(--kb-text-muted);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gw-prole {
