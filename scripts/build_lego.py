@@ -82,11 +82,16 @@ LIB_SEARCH = [
     ("https://library.ldraw.org/library/unofficial", "parts"),
     ("https://library.ldraw.org/library/unofficial", "p"),
 ]
-THROTTLE_SEC = 0.25            # polite delay between network fetches
-RENDER_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+THROTTLE_SEC = 0.75            # polite delay between network fetches
+RENDER_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+# Leading faction tokens peeled from bracket-less names (e.g. ISDF-DESERT_STORM).
+LEADING_FACTION_RE = re.compile(r"^(ISDF|SCION|HADEAN)[-_](.+)$", re.IGNORECASE)
+# Trailing version token peeled from bracket-less names (e.g. Fireball-XaresV1).
+TRAILING_VER_RE = re.compile(r"^(.*?)(V\d[\d.]*)$", re.IGNORECASE)
 
 FACTION_NAMES = {
     "ISDF": "ISDF", "SCION": "Scion", "HADEAN": "Hadean",
+    "BLACK DOG": "Black Dog",
 }
 RESERVED_LEGO_SLUGS = {"index", "all", "new", "search", "api", "renders"}
 SLUG_SAFE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -104,7 +109,7 @@ def fetch(url: str) -> bytes:
         raise RuntimeError(f"--no-network set; refusing to fetch {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "vt-stats-lego-build/1.0"})
     last = None
-    for attempt in range(4):
+    for attempt in range(8):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 return r.read()
@@ -112,9 +117,17 @@ def fetch(url: str) -> bytes:
             if e.code == 404:
                 raise                       # genuine miss -- caller tries next path
             last = e                        # 429 / 5xx -- back off + retry
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            if retry_after and str(retry_after).isdigit():
+                delay = min(int(retry_after), 90)
+            elif e.code == 429:
+                delay = min(8.0 * (2 ** attempt), 90)
+            else:
+                delay = 1.5 * (attempt + 1)
         except Exception as e:              # noqa: BLE001 (timeouts etc.)
             last = e
-        time.sleep(1.0 * (attempt + 1))
+            delay = 1.5 * (attempt + 1)
+        time.sleep(delay)
     raise last
 
 
@@ -140,8 +153,18 @@ def get_part(ref: str) -> str | None:
                 got404 += 1
                 time.sleep(THROTTLE_SEC)
                 continue
-            print("   transient fetch fail (not cached):", url, e)
-            return None
+            # Rate-limit / 5xx: pause and retry the SAME location once more
+            # rather than treating a standard brick as a missing custom part.
+            print("   transient fetch fail, pausing 20s:", url, e)
+            time.sleep(20)
+            try:
+                data = fetch(url).decode("utf-8", "replace")
+                open(cpath, "w", encoding="utf-8").write(data)
+                time.sleep(THROTTLE_SEC)
+                return data
+            except Exception as e2:         # noqa: BLE001
+                print("   still failing (not cached):", url, e2)
+                return None
         except Exception as e:              # noqa: BLE001
             print("   fetch error (not cached):", url, e)
             return None
@@ -158,20 +181,46 @@ def flat_name(ref: str) -> str:
     LDrawLoader only resolves inlined MPD `0 FILE` sections by BARE name; any
     subfolder-prefixed ref (`s/<sub>.dat`, `48/<prim>.dat`, `8/<prim>.dat`) is
     otherwise fetched EXTERNALLY (`parts/s/...`) and silently dropped. Encoding
-    `/`->`__` keeps hi-res/lo-res variants distinct (48/4-4cyli != 4-4cyli)."""
-    return ref.replace("\\", "/").replace("/", "__")
+    `/`->`__` keeps hi-res/lo-res variants distinct (48/4-4cyli != 4-4cyli);
+    spaces become `_` so Stud.io `SubModel Group 1` sections round-trip."""
+    return ref.replace("\\", "/").replace("/", "__").replace(" ", "_")
+
+
+def _type1_ref(toks: list[str]) -> str:
+    """Full type-1 filename (LDraw allows spaces; toks[14:] not toks[14])."""
+    return " ".join(toks[14:]).replace("\\", "/")
+
+
+def parse_file_header(line: str) -> str | None:
+    """Return the `0 FILE <name>` name (possibly with spaces), or None."""
+    s = line.strip()
+    t = s.split()
+    if len(t) >= 3 and t[0].lstrip("\ufeff") == "0" and t[1].lower() == "file":
+        idx = s.lower().find("file")
+        return s[idx + 4:].strip()
+    return None
 
 
 def flatten_ldr_refs(text: str) -> str:
-    """Rewrite every type-1 subfile reference token to its flat bare name so it
-    resolves against the inlined MPD `0 FILE` sections."""
+    """Rewrite every type-1 subfile reference (and `0 FILE` name) to its flat
+    bare name so it resolves against the inlined MPD `0 FILE` sections."""
+    file_names: dict[str, str] = {}
+    for ln in text.splitlines():
+        hdr = parse_file_header(ln)
+        if hdr:
+            file_names[hdr.lower()] = hdr
     out = []
     for ln in text.splitlines():
+        prefix = ln[: len(ln) - len(ln.lstrip())]
         t = ln.strip().split()
+        hdr = parse_file_header(ln)
+        if hdr is not None:
+            out.append(prefix + "0 FILE " + flat_name(hdr))
+            continue
         if t and t[0].lstrip("\ufeff") == "1" and len(t) >= 15:
-            prefix = ln[: len(ln) - len(ln.lstrip())]   # preserve indent
-            toks = ln.split()
-            toks[14] = flat_name(toks[14])
+            ref = _type1_ref(t)
+            canon = file_names.get(ref.lower(), ref)
+            toks = t[:14] + [flat_name(canon)]
             ln = prefix + " ".join(toks)
         out.append(ln)
     return "\n".join(out)
@@ -183,8 +232,39 @@ def refs_in(text: str) -> list[str]:
     for ln in text.splitlines():
         t = ln.strip().split()
         if t and t[0].lstrip("\ufeff") == "1" and len(t) >= 15:
-            out.append(t[14].replace("\\", "/"))
+            out.append(_type1_ref(t))
     return out
+
+
+def mpd_main_text(text: str) -> str:
+    """Root-model lines of an MPD, excluding later `0 FILE` section bodies.
+
+    Titan-style files wrap the model itself in the first `0 FILE`; Fireball-style
+    files put grouped bricks in trailing `SubModel Group N` sections after the
+    main type-1 lines. Counting must not walk those later bodies (they are
+    already instanced via type-1 refs).
+    """
+    out: list[str] = []
+    in_section = False
+    preamble_had_type1 = False
+    first_file = True
+    for ln in text.splitlines():
+        hdr = parse_file_header(ln)
+        if hdr is not None:
+            in_section = not (first_file and not preamble_had_type1)
+            first_file = False
+            continue
+        if ln.strip().lower() == "0 nofile":
+            in_section = False
+            first_file = False
+            continue
+        if in_section:
+            continue
+        t = ln.strip().split()
+        if t and t[0].lstrip("\ufeff") == "1":
+            preamble_had_type1 = True
+        out.append(ln)
+    return "\n".join(out)
 
 
 def count_triangles(main_flat: str, defs_flat: dict[str, str]) -> int:
@@ -231,11 +311,22 @@ def build_selfcontained(ldr_text: str, slug: str):
     body = ldr_text.lstrip("\ufeff")
     main_name = slug + "-main.ldr"
 
+    # Stud.io inlines grouped bricks as MPD `0 FILE SubModel Group N` sections
+    # referenced by spaced type-1 names (`submodel group 1`). Those are local
+    # to this file — never fetch them from the LDraw library.
+    local_files = {
+        parse_file_header(ln).lower()
+        for ln in body.splitlines()
+        if parse_file_header(ln)
+    }
+
     fetched: dict[str, tuple[str, str]] = {}   # key -> (ref, text)
     seen: set[str] = set()
     missing: set[str] = set()
     queue: list[str] = []
     for r in refs_in(body):
+        if r.lower() in local_files:
+            continue
         if r.lower() not in seen:
             seen.add(r.lower())
             queue.append(r)
@@ -271,6 +362,23 @@ def build_selfcontained(ldr_text: str, slug: str):
         buf.write("\n0 NOFILE\n")
 
     defs_flat: dict[str, str] = {}
+    current_file: str | None = None
+    local_bodies: dict[str, list[str]] = {}
+    for ln in body.splitlines():
+        hdr = parse_file_header(ln)
+        if hdr is not None:
+            current_file = hdr
+            local_bodies.setdefault(hdr, [])
+            continue
+        if ln.strip().lower() == "0 nofile":
+            current_file = None
+            continue
+        if current_file is not None:
+            local_bodies[current_file].append(ln)
+    for name, lines in local_bodies.items():
+        fn = flat_name(name)
+        defs_flat[fn.lower()] = flatten_ldr_refs("\n".join(lines))
+
     for key, (ref, txt) in fetched.items():
         fn = flat_name(ref)
         body_flat = flatten_ldr_refs(txt.lstrip("\ufeff"))
@@ -279,7 +387,7 @@ def build_selfcontained(ldr_text: str, slug: str):
         buf.write(body_flat)
         buf.write("\n0 NOFILE\n")
 
-    triangles = count_triangles(fbody, defs_flat)
+    triangles = count_triangles(flatten_ldr_refs(mpd_main_text(body)), defs_flat)
     stats = {"fetched": len(fetched), "missing": sorted(missing), "triangles": triangles}
     return buf.getvalue(), stats
 
@@ -292,15 +400,41 @@ def slugify(name: str) -> str:
 
 
 def parse_meta(fname: str):
-    """'Walker[ISDF]V5.io' -> ('Walker', 'ISDF', 'ISDF', 'V5')."""
+    """'Walker[ISDF]V5.io' -> ('Walker', 'ISDF', 'ISDF', 'V5').
+
+    Also handles:
+      * trailing `.ldr` on the stem (`APC[ISDF].ldr.io`)
+      * spaces inside the faction bracket (`Transmitter[BLACK DOG].io`)
+      * bracket-less names: leading ISDF/SCION/HADEAN token + trailing Vn version
+        (`Fireball-XaresV1.io`, `ISDF-DESERT_STORM.io`)
+    """
     stem = fname[:-3] if fname.lower().endswith(".io") else fname
-    m = re.match(r"^(.*?)\[(\w+)\](.*)$", stem)
+    if stem.lower().endswith(".ldr"):
+        stem = stem[:-4]
+    m = re.match(r"^(.*?)\[([^\]]+)\](.*)$", stem)
+    if not m:
+        # Alternate: faction in parentheses (`Stronghold(SCION)V2_Copy.io`).
+        m = re.match(r"^(.*?)\(([^)]+)\)(.*)$", stem)
+        if m and m.group(2).strip().upper() not in FACTION_NAMES:
+            m = None  # skip generic parens like (wall) / (tower) / (with Bomber)
     if m:
         name = m.group(1).strip(" -")
-        code = m.group(2).upper()
+        code = m.group(2).strip().upper()
         ver = m.group(3).strip()
         return name, code, FACTION_NAMES.get(code, code.title()), ver
-    return stem, "", "", ""
+    # Bracket-less fallback.
+    code, faction, name = "", "", stem
+    lead = LEADING_FACTION_RE.match(stem)
+    if lead:
+        code = lead.group(1).upper()
+        faction = FACTION_NAMES.get(code, code.title())
+        name = lead.group(2)
+    ver = ""
+    trail = TRAILING_VER_RE.match(name)
+    if trail:
+        name, ver = trail.group(1), trail.group(2)
+    name = name.replace("_", " ").replace("-", " ").strip(" -") or stem
+    return name, code, faction, ver
 
 
 def make_slug(name: str, code: str, ver: str, used: set[str]) -> str:
@@ -316,17 +450,21 @@ def make_slug(name: str, code: str, ver: str, used: set[str]) -> str:
     return slug
 
 
+def _natural_key(s: str):
+    """Split a filename into digit/non-digit chunks so V3-1, V3-2, … V3-12
+    sort numerically instead of lexically (-1, -10, -11, -2)."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
+
+
 def scan_renders(slug: str) -> list[str]:
     """Sorted list of gallery images under data/lego/<slug>/renders/, as paths
     relative to data/lego/ (what the manifest carries)."""
     rdir = os.path.join(LEGO_DIR, slug, "renders")
     if not os.path.isdir(rdir):
         return []
-    out = []
-    for f in sorted(os.listdir(rdir)):
-        if f.lower().endswith(RENDER_EXTS):
-            out.append(f"{slug}/renders/{f}")
-    return out
+    files = [f for f in os.listdir(rdir) if f.lower().endswith(RENDER_EXTS)]
+    files.sort(key=_natural_key)
+    return [f"{slug}/renders/{f}" for f in files]
 
 
 def sha256_file(path: str) -> str:

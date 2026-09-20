@@ -50,6 +50,7 @@ const els = {
 
 let MODELS = [];
 let viewer = null;
+let controlsWired = false;
 let viewMode = 'standard';   // 'standard' | 'hq' | 'photos'
 const uiState = { search: '', faction: 'all', sort: 'name' };
 
@@ -162,7 +163,8 @@ async function openModel(slug) {
 
   renderPhotos(entry);
 
-  if (!viewer) { viewer = new LegoViewer(els.stage); wireViewerControls(); }
+  if (!viewer) viewer = new LegoViewer(els.stage);
+  if (!controlsWired) { wireViewerControls(); controlsWired = true; }
   showLoading(true, 'Loading model\u2026');
   try {
     await viewer.loadModel(entry);
@@ -198,27 +200,63 @@ function wireViewerControls() {
   els.viewSeg.querySelectorAll('.seg-btn').forEach((b) => {
     b.addEventListener('click', () => setViewMode(b.dataset.view));
   });
-  els.spin.addEventListener('click', () => { viewer.setAutoRotate(!viewer.getAutoRotate()); els.spin.classList.toggle('on', viewer.getAutoRotate()); });
-  els.wire.addEventListener('click', () => { viewer.setWireframe(!viewer.getWireframe()); els.wire.classList.toggle('on', viewer.getWireframe()); });
-  els.edges.addEventListener('click', () => { viewer.setEdges(!viewer.getEdges()); els.edges.classList.toggle('on', viewer.getEdges()); });
+  els.spin.addEventListener('click', () => {
+    if (!viewer) return;
+    viewer.setAutoRotate(!viewer.getAutoRotate());
+    els.spin.classList.toggle('on', viewer.getAutoRotate());
+  });
+  els.wire.addEventListener('click', () => {
+    if (!viewer) return;
+    viewer.setWireframe(!viewer.getWireframe());
+    els.wire.classList.toggle('on', viewer.getWireframe());
+  });
+  els.edges.addEventListener('click', () => {
+    if (!viewer) return;
+    viewer.setEdges(!viewer.getEdges());
+    els.edges.classList.toggle('on', viewer.getEdges());
+  });
   els.lightBtn.addEventListener('click', () => {
     const hidden = els.lightPanel.hidden = !els.lightPanel.hidden;
     els.lightBtn.classList.toggle('on', !hidden);
   });
-  els.reset.addEventListener('click', () => { viewer.resetView(); els.spin.classList.remove('on'); });
+  els.reset.addEventListener('click', () => {
+    if (!viewer) return;
+    viewer.resetView();
+    els.spin.classList.remove('on');
+  });
   els.capture.addEventListener('click', onCapture);
 
-  els.sunOn.addEventListener('change', () => { viewer.setSunOn(els.sunOn.checked); els.lightPanel.classList.toggle('off', !els.sunOn.checked); });
-  els.sunIntensity.addEventListener('input', () => { viewer.setSunIntensity(els.sunIntensity.value); els.sunIntensityVal.textContent = (+els.sunIntensity.value).toFixed(1); });
-  els.sunAz.addEventListener('input', () => { viewer.setSunAzimuth(els.sunAz.value); els.sunAzVal.textContent = `${els.sunAz.value}\u00b0`; });
-  els.sunEl.addEventListener('input', () => { viewer.setSunElevation(els.sunEl.value); els.sunElVal.textContent = `${els.sunEl.value}\u00b0`; });
+  els.sunOn.addEventListener('change', () => {
+    if (!viewer) return;
+    viewer.setSunOn(els.sunOn.checked);
+    els.lightPanel.classList.toggle('off', !els.sunOn.checked);
+  });
+  els.sunIntensity.addEventListener('input', () => {
+    if (!viewer) return;
+    viewer.setSunIntensity(els.sunIntensity.value);
+    els.sunIntensityVal.textContent = (+els.sunIntensity.value).toFixed(1);
+  });
+  els.sunAz.addEventListener('input', () => {
+    if (!viewer) return;
+    viewer.setSunAzimuth(els.sunAz.value);
+    els.sunAzVal.textContent = `${els.sunAz.value}\u00b0`;
+  });
+  els.sunEl.addEventListener('input', () => {
+    if (!viewer) return;
+    viewer.setSunElevation(els.sunEl.value);
+    els.sunElVal.textContent = `${els.sunEl.value}\u00b0`;
+  });
   els.sceneBgSeg.querySelectorAll('.seg-btn').forEach((b) => {
     b.addEventListener('click', () => {
+      if (!viewer) return;
       viewer.setBackground(b.dataset.bg);
       els.sceneBgSeg.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('on', x === b));
     });
   });
-  els.sceneGrid.addEventListener('change', () => viewer.setGrid(els.sceneGrid.checked));
+  els.sceneGrid.addEventListener('change', () => {
+    if (!viewer) return;
+    viewer.setGrid(els.sceneGrid.checked);
+  });
 }
 
 function syncControlsToViewer() {
@@ -236,6 +274,7 @@ function syncControlsToViewer() {
 }
 
 async function onCapture() {
+  if (!viewer) return;
   els.capture.disabled = true;
   const prev = els.capture.textContent;
   els.capture.textContent = 'Rendering\u2026';
