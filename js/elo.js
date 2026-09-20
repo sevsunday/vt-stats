@@ -107,13 +107,47 @@
     return (r.matches_played || 0) >= vtsrLadderMinMatches(elo);
   }
 
+  function inactivityWindowDays(src) {
+    return (src && src.inactivity_window_days != null) ? src.inactivity_window_days : 30;
+  }
+  function comebackGamesRequired(src) {
+    return (src && src.comeback_games_required != null) ? src.comeback_games_required : 3;
+  }
+  function commandStaleWindowDays(src) {
+    return (src && src.command_stale_window_days != null) ? src.command_stale_window_days : 90;
+  }
+
+  function statusChipHtml(cls, label, title) {
+    return ` <span class="${cls}" data-bs-toggle="tooltip" data-bs-placement="top"
+              title="${esc(title)}">${esc(label)}</span>`;
+  }
+
   function vtsrProgressChipHtml(r, elo) {
+    const status = r.inactive_status || 'active';
+    const need = comebackGamesRequired(elo);
+    if (status === 'returning') {
+      const n = r.comeback_games_played || 0;
+      return statusChipHtml(
+        'vt-vtsr-returning-chip',
+        `Returning \u00b7 ${n} of ${need}`,
+        `${n} of ${need} games since returning. Play ${Math.max(0, need - n)} more to rejoin the ranked ladder.`
+      );
+    }
+    if (status === 'inactive') {
+      const d = r.days_since_last_match || 0;
+      const win = inactivityWindowDays(elo);
+      const seen = r.last_seen_date;
+      const label = seen ? `Inactive \u00b7 ${d}d ago` : 'Inactive';
+      const title = seen
+        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match in the corpus. Play ${need} games within ${win} days to rejoin the ranked ladder.`
+        : `No recorded appearance in the corpus or community ledger. Play ${need} games within ${win} days to join the ranked ladder.`;
+      return statusChipHtml('vt-vtsr-inactive-chip', label, title);
+    }
     const n = r.matches_played || 0;
     const min = vtsrLadderMinMatches(elo);
     const title = `${n} of ${min} rated matches to join the ranked ladder.`;
     const label = n === 1 ? '1 match' : `${n} matches`;
-    return ` <span class="vt-cmdr-progress-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-              title="${esc(title)}">${esc(label)}</span>`;
+    return statusChipHtml('vt-cmdr-progress-chip', label, title);
   }
 
   function tierBadgeHtml(tier, opts = {}) {
@@ -718,11 +752,13 @@
     _vtsrCareerStats = state.careerStats || [];
 
     const minMatches = vtsrLadderMinMatches(elo);
+    const win = inactivityWindowDays(elo);
+    const need = comebackGamesRequired(elo);
     const $banner = document.getElementById('vtsr-ladder-banner');
     if ($banner) {
       $banner.innerHTML = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
-        Ranked players have at least ${fmt(minMatches)} rated matches.
-        Players with fewer than ${fmt(ELO_PROVISIONAL_THRESHOLD)} still show Provisional.
+        Ranked players have at least ${fmt(minMatches)} rated matches and have played within ${fmt(win)} days of the newest match.
+        Returning players rejoin after ${fmt(need)} games. Players with fewer than ${fmt(ELO_PROVISIONAL_THRESHOLD)} still show Provisional.
       </div>`;
     }
 
@@ -740,7 +776,7 @@
         const theadHtml = thead ? thead.outerHTML : '';
         $unrankedWrap.innerHTML = `<div class="vt-vtsr-unranked">
           <h6 class="vt-vtsr-unranked-title">Unranked</h6>
-          <p class="vt-vtsr-unranked-blurb">Need ${fmt(minMatches)} rated matches to join the ladder. No rank is assigned here.</p>
+          <p class="vt-vtsr-unranked-blurb">Need ${fmt(minMatches)} rated matches, and a game within ${fmt(win)} days of the newest match (or ${fmt(need)} games after returning), to join the ladder. No rank is assigned here.</p>
           <table id="vtsr-unranked-table" class="table table-hover align-middle mb-2" style="font-size: 0.85rem;">
             ${theadHtml}
             <tbody>${unranked.map(r => renderVtsrLadderRow(r, elo, null, noiseSigma)).join('')}</tbody>
@@ -959,12 +995,49 @@
   }
 
   function cmdrProgressChipHtml(r, c) {
+    const need = comebackGamesRequired(c);
+    const gStatus = r.inactive_status || 'active';
+    if (gStatus === 'inactive') {
+      const d = r.days_since_last_match || 0;
+      const win = inactivityWindowDays(c);
+      const seen = r.last_seen_date;
+      const label = seen ? `Inactive \u00b7 ${d}d ago` : 'Inactive';
+      const title = seen
+        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match. Play ${need} games within ${win} days to rejoin.`
+        : `No recorded appearance in the corpus or community ledger. Play ${need} games within ${win} days to join.`;
+      return statusChipHtml('vt-vtsr-inactive-chip', label, title);
+    }
+    if (gStatus === 'returning') {
+      const n = r.comeback_games_played || 0;
+      return statusChipHtml(
+        'vt-vtsr-returning-chip',
+        `Returning \u00b7 ${n} of ${need}`,
+        `${n} of ${need} games since returning. Play ${Math.max(0, need - n)} more to rejoin the ranked ladder.`
+      );
+    }
+    const cStatus = r.command_status || 'active';
+    if (cStatus === 'stale') {
+      const d = r.days_since_last_command || 0;
+      const staleWin = commandStaleWindowDays(c);
+      return statusChipHtml(
+        'vt-vtsr-stale-chip',
+        `Not commanded \u00b7 ${d}d`,
+        `Last commanded ${d} day${d === 1 ? '' : 's'} ago (grace is ${staleWin} days while still playing as a thug). Command ${need} games to rejoin the commander ladder.`
+      );
+    }
+    if (cStatus === 'returning') {
+      const n = r.command_comeback_games_played || 0;
+      return statusChipHtml(
+        'vt-vtsr-returning-chip',
+        `Returning \u00b7 ${n} of ${need} cmdr games`,
+        `${n} of ${need} commander games since the command clock reset. Command ${Math.max(0, need - n)} more to rejoin.`
+      );
+    }
     const { minV4, minNonV4 } = cmdrLadderMins(c);
     const v4 = r.duels_with_telemetry || 0;
     const older = cmdrDuelsNonV4(r);
     const title = `${v4} of ${minV4} proto-v4 commander games, or ${older} of ${minNonV4} older games (pre-v4 recordings and F9Stats) to join the ranked ladder.`;
-    return ` <span class="vt-cmdr-progress-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-              title="${esc(title)}">${v4}&nbsp;/&nbsp;${minV4} v4 · ${older} older</span>`;
+    return statusChipHtml('vt-cmdr-progress-chip', `${v4} / ${minV4} v4 \u00b7 ${older} older`, title);
   }
 
   function cmdrRowKey(r) {
@@ -1090,12 +1163,17 @@
 
     const { minV4, minNonV4 } = cmdrLadderMins(c);
     const provN = c.provisional_threshold ?? 5;
+    const win = inactivityWindowDays(c);
+    const need = comebackGamesRequired(c);
+    const staleWin = commandStaleWindowDays(c);
     const banner = `<div class="alert alert-secondary py-2 px-3 mb-3 small">
       <i class="bi bi-flask me-1"></i>
       <strong>Experimental.</strong>
       This ranking only looks at whether a commander won or lost, not how they played.
       Winning with a weaker group of thugs raises the rating more than winning with a stronger one.
-      Ranked commanders have at least ${fmt(minV4)} proto-v4 games or ${fmt(minNonV4)} older games (pre-v4 recordings and F9Stats).
+      Ranked commanders have at least ${fmt(minV4)} proto-v4 games or ${fmt(minNonV4)} older games (pre-v4 recordings and F9Stats),
+      have played within ${fmt(win)} days of the newest match, and have commanded within ${fmt(staleWin)} days
+      (or ${fmt(need)} commander games after going stale).
       Commanders with fewer than ${fmt(provN)} rated games are still settling in.
     </div>`;
 
@@ -1106,7 +1184,7 @@
     const unrankedHtml = unranked.length
       ? `<div class="vt-vtsr-c-unranked">
           <h6 class="vt-vtsr-c-unranked-title">Unranked</h6>
-          <p class="vt-vtsr-c-unranked-blurb">Need ${fmt(minV4)} proto-v4 commander games or ${fmt(minNonV4)} older games (pre-v4 recordings and F9Stats) to join the ladder. No rank is assigned here.</p>
+          <p class="vt-vtsr-c-unranked-blurb">Need ${fmt(minV4)} proto-v4 commander games or ${fmt(minNonV4)} older games (pre-v4 recordings and F9Stats), a game within ${fmt(win)} days of the newest match, and a command game within ${fmt(staleWin)} days (or ${fmt(need)} commander games after the ${fmt(staleWin)}-day grace while still thugging). No rank is assigned here.</p>
           ${renderCmdrTableHtml('vtsr-c-unranked-table', 'vtsr-c-unranked-tbody', unranked, c, false)}
         </div>`
       : '';
@@ -1274,7 +1352,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong>; everyone else stays visible in the Unranked table.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong> and a game within 30 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible in the Unranked table.</p>
         ${E.tierTableHtml()}
       </section>
 

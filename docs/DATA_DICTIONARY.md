@@ -3084,6 +3084,9 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "provisional_prior": 10.0,
   "provisional_threshold": 10,
   "leaderboard_min_matches": 25,
+  "inactivity_window_days": 30,
+  "comeback_games_required": 3,
+  "corpus_latest_date": "2026-09-18",
   "min_player_count": 6,
   "min_duration_sec": 240,
   "computed_at": "2026-05-12T22:00:00Z",
@@ -3123,6 +3126,11 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
     "matches_as_thug": 45,
     "matches_provisional": false,
     "leaderboard_eligible": true,
+    "inactive_status": "active",
+    "days_since_last_match": 4,
+    "last_seen_date": "2026-09-14",
+    "comeback_games_played": 0,
+    "comeback_games_remaining": 0,
     "last_match_id": "2026-05-04T03-06-22",
     "last_delta": 12.10,
     "peak_vtsr": 2708.9,
@@ -3146,7 +3154,10 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `floor_taper_window` | float | Width of the linear taper above the floor. 150.0 → full losses resume at 1150. |
 | `k_base`, `k_floor`, `provisional_prior` | float | K-decay curve parameters (40 / 12 / 10). |
 | `provisional_threshold` | int | matches_played below which the row gets a "Provisional" badge (10). Independent of `leaderboard_min_matches`. |
-| `leaderboard_min_matches` | int | Display-only ranked-ladder bar. A player occupies a `#` when `matches_played >=` this (25). UI reads this; do not hardcode. Memo: `critique/decisions/vtsr-t-ladder-eligibility.md`. |
+| `leaderboard_min_matches` | int | Display-only ranked-ladder bar. A player occupies a `#` when `matches_played >=` this (25) **and** `inactive_status == "active"`. UI reads this; do not hardcode. Memo: `critique/decisions/vtsr-t-ladder-eligibility.md`. |
+| `inactivity_window_days` | int | Display-only. Days of no appearance vs `corpus_latest_date` before Unranked. 30. Memo: `critique/decisions/vtsr-inactivity-threshold.md`. |
+| `comeback_games_required` | int | Display-only. Games after a >window gap before rejoining the ranked table. 3. |
+| `corpus_latest_date` | ISO date | Newest corpus match date the clocks are measured against (not wall-clock). |
 | `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 240). |
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
@@ -3178,7 +3189,11 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].matches_as_commander` | int | **v2.4** — count of rated matches where the player held a commander slot (slot 1 / 6 — `is_commander: true` on the leaderboard row). |
 | `ratings[].matches_as_thug` | int | **v2.4** — `matches_played - matches_as_commander`. Sums to `matches_played` exactly. Both fields are 0 for players who only appear in excluded matches. |
 | `ratings[].matches_provisional` | bool | True when `matches_played < provisional_threshold`. |
-| `ratings[].leaderboard_eligible` | bool | Display-only. `matches_played >= leaderboard_min_matches`. May occupy a ranked `#`. Does not change the rating. |
+| `ratings[].leaderboard_eligible` | bool | Display-only. `matches_played >= leaderboard_min_matches` **and** `inactive_status == "active"`. May occupy a ranked `#`. Does not change the rating. |
+| `ratings[].inactive_status` | string | `"active"` \| `"inactive"` \| `"returning"`. Any-appearance 30-day clock (corpus `leaderboard[]` **or** F9 duel). Lookup miss → `"inactive"`. |
+| `ratings[].days_since_last_match` | int | Whole days from last appearance to `corpus_latest_date`. |
+| `ratings[].last_seen_date` | ISO date | Date of the last any-match appearance (corpus or F9). Empty string when never seen. |
+| `ratings[].comeback_games_played` / `comeback_games_remaining` | int | Meaningful when `inactive_status == "returning"`. |
 | `ratings[].last_match_id` | string | Match id of the player's most recent rated match. |
 | `ratings[].last_delta` | float | The Δ applied at `last_match_id` (negative = loss). |
 | `ratings[].peak_vtsr` | float | Highest headline rating (`vtsr`) this player has ever held. **All `peak_vtsr` values from v2.3 are no longer comparable to v2.4** — the $P_i$ definition changed for commander rows; historical peaks were recomputed from scratch on the v2.4 re-rate. |
@@ -3186,7 +3201,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].win_history` | array<float> | Last 10 deltas (oldest-first), used by the trend sparkline. |
 | `ratings[].axis_means` | object | **v2.3** — per-axis career-average z-scores, keyed by axis name. Each value is the mean of the player's per-match clipped-z (post `clip / 2`, so range $[-1, +1]$) across the rated matches where that axis was available for the lobby. Some keys may be absent if the player has never been in a lobby where that axis fired (e.g. matches with no positioning data → no `mobility` key). Powers the VTSR-T leaderboard's "Strong axes" tooltip on the rating cell. |
 
-Display-only ranked-ladder gate (no `ELO_SCHEMA_VERSION` bump). A player occupies a ranked `#` when `matches_played >= leaderboard_min_matches` (25). The `?` Provisional badge stays at `matches_played < 10`. Everyone else is Unranked (visible, no `#`). Memo: `critique/decisions/vtsr-t-ladder-eligibility.md`.
+Display-only ranked-ladder gate (no `ELO_SCHEMA_VERSION` bump). A player occupies a ranked `#` when `matches_played >= leaderboard_min_matches` (25) **and** they are globally active (any corpus `leaderboard[]` or F9-duel appearance within `inactivity_window_days` of `corpus_latest_date`, or `comeback_games_required` games after a gap). Lookup miss → inactive, not a free pass. The `?` Provisional badge stays at `matches_played < 10`. Everyone else is Unranked (visible, no `#`). Memos: `critique/decisions/vtsr-t-ladder-eligibility.md`, `critique/decisions/vtsr-inactivity-threshold.md`.
 
 ### `data/processed/elo_history.json`
 
@@ -3296,7 +3311,13 @@ Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_
 | `ratings[].duels_with_telemetry` | int | v4 economy-telemetry duels (both `has_resource_data` and `has_build_data`). |
 | `ratings[].duels_external` | int | F9 ledger duels (counted in `matches_commanded_rated` + W/L). |
 | `ratings[].duels_non_v4` | int | Older rated duels (F9 + pre-v4 corpus). Schema 4. |
-| `ratings[].leaderboard_eligible` | bool | Ranked-ladder inclusion (schema 4). Display-only. |
+| `ratings[].leaderboard_eligible` | bool | Ranked-ladder inclusion (schema 5). Display-only. Duel-count OR-gate **and** globally active **and** command-recent. |
+| `ratings[].inactive_status` | string | `"active"` \| `"inactive"` \| `"returning"`. Shared 30-day any-appearance clock. |
+| `ratings[].days_since_last_match` / `last_seen_date` | int / ISO date | Global clock. |
+| `ratings[].comeback_games_played` / `comeback_games_remaining` | int | Meaningful when globally `returning`. |
+| `ratings[].command_status` | string | `"active"` \| `"stale"` \| `"returning"`. 90-day command clock. |
+| `ratings[].days_since_last_command` / `last_command_date` | int / ISO date | Command clock. |
+| `ratings[].command_comeback_games_played` / `command_comeback_remaining` | int | Meaningful when command `returning`. |
 | `ratings[].peak_at` / `peak_date` | string | Match id / match date where `peak_vtsr_c` was reached. |
 
 `elo_commander_history.json`: same header constants + `duels[]` (chronological, one entry per rated duel):
@@ -3575,5 +3596,18 @@ Display-only ranked-ladder gate. Ratings, K, and duel history are unchanged (`vt
 | `leaderboard_min_v4` | int | Proto-v4 telemetry-duel bar for a ranked `#`. UI reads this; do not hardcode. |
 | `leaderboard_min_non_v4` | int | Older-game bar (F9 + pre-v4 corpus) for a ranked `#`. |
 | `ratings[].duels_non_v4` | int | Rated duels that are not v4 telemetry. Partition of `matches_commanded_rated`. |
-| `ratings[].leaderboard_eligible` | bool | May occupy a ranked `#`. Does not change the rating. |
+| `ratings[].leaderboard_eligible` | bool | May occupy a ranked `#`. Schema 5 also requires globally active **and** command-recent. Does not change the rating. |
+
+### VTSR inactivity threshold (schema 5 on VTSR-C; no VTSR-T schema bump)
+
+Display-only. Ratings and history files are unchanged (`elo_history.json` byte-identical; commander `duels[]` unchanged). Helper: `scripts/inactivity.py`. Memo: `critique/decisions/vtsr-inactivity-threshold.md`. Appearances = corpus `leaderboard[]` **or** gated F9 `duels[]` (commanders and thugs). `corpus_latest_date` stays the newest corpus match. Lookup miss / never seen → `inactive` + command `stale` (empty `last_seen_date`). Never-commanded *but seen as a thug* → `command_status: "active"`.
+
+| Field | Type | Description |
+|---|---|---|
+| `inactivity_window_days` | int | Shared 30-day any-appearance window vs `corpus_latest_date`. |
+| `comeback_games_required` | int | 3 games (global) / 3 command games (VTSR-C stale comeback). |
+| `corpus_latest_date` | ISO date | Newest corpus match. Clocks are **not** wall-clock. |
+| `command_stale_window_days` | int | VTSR-C only. 90-day commander grace while still thugging. |
+| `ratings[].inactive_status` | `"active"` \| `"inactive"` \| `"returning"` | Global clock. |
+| `ratings[].command_status` | `"active"` \| `"stale"` \| `"returning"` | VTSR-C only. Never-commanded-but-seen → `active`. |
 

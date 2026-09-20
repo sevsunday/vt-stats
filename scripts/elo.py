@@ -57,6 +57,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import identity_aliases
+import inactivity
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,12 @@ ELO_PROVISIONAL_THRESHOLD = 10   # matches_played < this => "Provisional" badge.
 # chase a name. ELO_SCHEMA_VERSION is deliberately NOT bumped (additive
 # display fields; published vtsr unchanged).
 ELO_LADDER_MIN_MATCHES = 25
+# Display-only inactivity gate (does NOT change ratings / K / history).
+# A player idle longer than WINDOW days relative to the newest corpus
+# match drops off the ranked ladder and must play COMEBACK games to
+# rejoin. Frozen in critique/decisions/vtsr-inactivity-threshold.md.
+INACTIVITY_WINDOW_DAYS = 30
+COMEBACK_GAMES_REQUIRED = 3
 ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
 ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
 
@@ -1187,6 +1194,7 @@ def _rating_pass(
     canonical_before_by_match: dict | None = None,
     lobby_score_mode: str = "zclip",
     alpha_override: float | None = None,
+    external_duels: list[dict] | None = None,
 ) -> tuple[dict, dict, dict, dict]:
     """Walk ``all_match_data`` chronologically, applying the ELO update rule
     per match, and return ``(elo_current, elo_history, final_ratings_map)``
@@ -1692,6 +1700,15 @@ def _rating_pass(
         })
 
     # ----- Build elo_current.json shape -----
+    # Display-only activity clock (any appearance, 30-day window, 3-game
+    # comeback). Ratings / history are already finalized above; this only
+    # flips leaderboard_eligible. See scripts/inactivity.py.
+    activity = inactivity.compute_activity(
+        matches,
+        window_days=INACTIVITY_WINDOW_DAYS,
+        comeback_games=COMEBACK_GAMES_REQUIRED,
+        external_duels=external_duels,
+    )
     ratings = []
     final_map: dict[str, float] = {}
     for key in thug_elo:
@@ -1718,6 +1735,11 @@ def _rating_pass(
         # (matches_as_commander counts every rated row where the player held
         # slot 1 / 6; everything else is a thug appearance).
         n_cmdr = commander_match_count.get(key, 0)
+        act = inactivity.lookup_activity(
+            activity,
+            steam64_for_key.get(key),
+            display_name.get(key, ""),
+        )
         ratings.append({
             "name":             display_name.get(key, ""),
             "steam64":          steam64_for_key.get(key),
@@ -1728,7 +1750,14 @@ def _rating_pass(
             "matches_as_commander": n_cmdr,
             "matches_as_thug":  n - n_cmdr,
             "matches_provisional": n < ELO_PROVISIONAL_THRESHOLD,
-            "leaderboard_eligible": n >= ELO_LADDER_MIN_MATCHES,
+            "leaderboard_eligible": (
+                n >= ELO_LADDER_MIN_MATCHES and bool(act["active"])
+            ),
+            "inactive_status": act["inactive_status"],
+            "days_since_last_match": act["days_since_last_match"],
+            "last_seen_date": act["last_seen_date"],
+            "comeback_games_played": act["comeback_games_played"],
+            "comeback_games_remaining": act["comeback_games_remaining"],
             # Stage E: wins-ladder career fields (additive). wins_games
             # counts only wins-rated rows (determined-outcome matches),
             # so it is <= matches_played; record keys w/l/d mirror the
@@ -1806,6 +1835,11 @@ def _rating_pass(
         "provisional_prior":  ELO_PROVISIONAL_PRIOR,
         "provisional_threshold": ELO_PROVISIONAL_THRESHOLD,
         "leaderboard_min_matches": ELO_LADDER_MIN_MATCHES,
+        # Display-only inactivity gate. UI reads these; do not hardcode.
+        # critique/decisions/vtsr-inactivity-threshold.md.
+        "inactivity_window_days": INACTIVITY_WINDOW_DAYS,
+        "comeback_games_required": COMEBACK_GAMES_REQUIRED,
+        "corpus_latest_date": activity["corpus_latest_date"],
         "min_player_count":   ELO_MIN_PLAYER_COUNT,
         "min_duration_sec":   ELO_MIN_DURATION_SEC,
         "computed_at":        datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1907,6 +1941,7 @@ def compute_elo(
     enable_lowtier_lift: bool = True,
     lobby_score_mode: str = "zclip",
     alpha_override: float | None = None,
+    external_duels: list[dict] | None = None,
 ) -> tuple[dict, dict]:
     """Public entrypoint: two-pass VTSR-T with the v2.8 low-tier at-base lift.
 
@@ -1930,6 +1965,8 @@ def compute_elo(
     replaces the module ALPHA for both passes. Note the v2.8 lowtier
     eligibility then keys on the BLENDED pass-1 vtsr (documented forensic
     deviation -- the alt pairs mirror canonical settings except alpha).
+    ``external_duels`` is display-only (F9 appearances on the inactivity
+    clocks); it does not rate.
     """
     cur1, hist1, final1, canonical_before = _rating_pass(
         all_match_data,
@@ -1938,6 +1975,7 @@ def compute_elo(
         lowtier_eligibility=None,
         lobby_score_mode=lobby_score_mode,
         alpha_override=alpha_override,
+        external_duels=external_duels,
     )
     if not (LOWTIER_LIFT_ENABLED and enable_lowtier_lift):
         return cur1, hist1
@@ -1955,5 +1993,6 @@ def compute_elo(
         canonical_before_by_match=canonical_before,
         lobby_score_mode=lobby_score_mode,
         alpha_override=alpha_override,
+        external_duels=external_duels,
     )
     return cur2, hist2

@@ -7019,11 +7019,12 @@
   // ----- VTSR-T teaser card (dashboard) -----------------------------------
   // The full sortable leaderboard + expandable detail panels moved to the
   // dedicated /elo/ page (js/elo.js). The dashboard card is now a teaser:
-  // the top 5 NON-provisional players by VTSR-T plus a muted chip row of
-  // provisional players (visible, but never occupying a top-5 slot) and a
-  // "View full leaderboard" link. `careerStats` keeps the picker-filter
-  // roster contract the old full table had: only players present in the
-  // (possibly filtered) career_stats[] are shown.
+  // the top 5 ranked-eligible players by VTSR-T plus muted chip rows of
+  // provisional players and idle established players (visible, but never
+  // occupying a top-5 slot) and a "View full leaderboard" link.
+  // `careerStats` keeps the picker-filter roster contract the old full
+  // table had: only players present in the (possibly filtered)
+  // career_stats[] are shown.
   function renderVtsrTeaser(elo, careerStats) {
     const $card = document.getElementById('section-vtsr');
     if (!$card) return;
@@ -7088,6 +7089,39 @@
       } else {
         $prov.innerHTML = '';
         $prov.classList.add('d-none');
+      }
+    }
+
+    const minMatches = vtsrLadderMinMatches(elo);
+    const inactive = visible
+      .filter(r => {
+        if (vtsrLadderEligible(r, elo)) return false;
+        if ((r.matches_played || 0) < minMatches) return false;
+        const s = r.inactive_status;
+        return s === 'inactive' || s === 'returning';
+      })
+      .sort((a, b) => (b.vtsr || 0) - (a.vtsr || 0));
+    const $idle = document.getElementById('vtsr-teaser-inactive');
+    if ($idle) {
+      if (inactive.length) {
+        const chips = inactive.map(r => {
+          const returning = r.inactive_status === 'returning';
+          const d = r.days_since_last_match || 0;
+          const n = r.comeback_games_played || 0;
+          const need = (elo && elo.comeback_games_required != null) ? elo.comeback_games_required : 3;
+          const title = returning
+            ? `Returning \u00b7 ${n} of ${need} games \u00b7 ${Math.round(r.vtsr)} VTSR-T`
+            : (r.last_seen_date
+                ? `Inactive \u00b7 ${d}d ago \u00b7 ${Math.round(r.vtsr)} VTSR-T`
+                : `Inactive \u00b7 ${Math.round(r.vtsr)} VTSR-T`);
+          return `<span class="vt-vtsr-teaser-chip" data-bs-toggle="tooltip" data-bs-placement="top"
+             title="${esc(title)}">${vtPlayerLinkHtml(r.name, r.steam64)}</span>`;
+        }).join('');
+        $idle.innerHTML = `<span class="text-muted small me-1">Inactive (unranked):</span>${chips}`;
+        $idle.classList.remove('d-none');
+      } else {
+        $idle.innerHTML = '';
+        $idle.classList.add('d-none');
       }
     }
 

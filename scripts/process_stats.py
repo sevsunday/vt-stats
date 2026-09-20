@@ -9368,10 +9368,12 @@ def main():
 
     # F9bomber external ledger (data/external/f9_ledger.json, committed by
     # the one-shot scripts/import_f9_ledger.py). Soft-missing: without it
-    # the pipeline behaves exactly as before. Two consumers in this run:
-    # the adjudication jogger hints below, and the VTSR-C external-duel
-    # walk at the elo_commander emit.
+    # the pipeline behaves exactly as before. Three consumers in this run:
+    # the adjudication jogger hints below, the VTSR-C external-duel walk
+    # at the elo_commander emit, and display-only inactivity clocks
+    # (compute_elo / compute_commander_elo; F9 is not rated on VTSR-T).
     f9_ledger = _load_f9_ledger()
+    f9_duels = (f9_ledger.get("duels") if f9_ledger else None)
     f9_hint_ids = frozenset()
     if f9_ledger:
         hints = {}
@@ -9543,7 +9545,9 @@ def main():
     elo_history = None
     try:
         import elo as elo_module
-        elo_current, elo_history = elo_module.compute_elo(all_match_data)
+        elo_current, elo_history = elo_module.compute_elo(
+            all_match_data, external_duels=f9_duels
+        )
         elo_current_path = OUTPUT_DIR / "elo_current.json"
         with open(elo_current_path, "w", encoding="utf-8") as f:
             json.dump(elo_current, f, indent=2, ensure_ascii=False)
@@ -9575,7 +9579,7 @@ def main():
         import elo_commander as elo_commander_module
         cmdr_current, cmdr_history = elo_commander_module.compute_commander_elo(
             all_match_data, elo_history,
-            external_duels=(f9_ledger.get("duels") if f9_ledger else None),
+            external_duels=f9_duels,
             external_overlap_ids=frozenset(
                 ov.get("match_id")
                 for ov in (f9_ledger.get("overlaps") if f9_ledger else []) or []
@@ -9610,7 +9614,8 @@ def main():
     try:
         import elo as elo_module
         elo_current_un, elo_history_un = elo_module.compute_elo(
-            all_match_data, exclude_locked_priors=True
+            all_match_data, exclude_locked_priors=True,
+            external_duels=f9_duels,
         )
         elo_current_un_path = OUTPUT_DIR / "elo_current_unlocked.json"
         with open(elo_current_un_path, "w", encoding="utf-8") as f:
@@ -9635,7 +9640,8 @@ def main():
     try:
         import elo as elo_module
         elo_current_mx, elo_history_mx = elo_module.compute_elo(
-            all_match_data, expected_performance_mode="hard_max"
+            all_match_data, expected_performance_mode="hard_max",
+            external_duels=f9_duels,
         )
         elo_current_mx_path = OUTPUT_DIR / "elo_current_max.json"
         with open(elo_current_mx_path, "w", encoding="utf-8") as f:
@@ -9660,7 +9666,8 @@ def main():
     try:
         import elo as elo_module
         elo_current_sm, elo_history_sm = elo_module.compute_elo(
-            all_match_data, expected_performance_mode="softmax_max"
+            all_match_data, expected_performance_mode="softmax_max",
+            external_duels=f9_duels,
         )
         elo_current_sm_path = OUTPUT_DIR / "elo_current_softmax.json"
         with open(elo_current_sm_path, "w", encoding="utf-8") as f:
@@ -9688,7 +9695,8 @@ def main():
     try:
         import elo as elo_module
         elo_current_rk, elo_history_rk = elo_module.compute_elo(
-            all_match_data, lobby_score_mode="rank"
+            all_match_data, lobby_score_mode="rank",
+            external_duels=f9_duels,
         )
         elo_current_rk_path = OUTPUT_DIR / "elo_current_ranks.json"
         with open(elo_current_rk_path, "w", encoding="utf-8") as f:
@@ -9717,7 +9725,8 @@ def main():
         try:
             import elo as elo_module
             _cur_a, _hist_a = elo_module.compute_elo(
-                all_match_data, alpha_override=_alpha_val
+                all_match_data, alpha_override=_alpha_val,
+                external_duels=f9_duels,
             )
             _cur_a_path = OUTPUT_DIR / f"elo_current_alpha{_alpha_pct}.json"
             with open(_cur_a_path, "w", encoding="utf-8") as f:

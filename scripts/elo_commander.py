@@ -7,6 +7,19 @@ Pure module, no I/O -- mirrors the `scripts/elo.py` contract.
 returns `(elo_commander_current, elo_commander_history)` dicts ready for
 `json.dump`.
 
+v5 additions (schema 4 -> 5; ratings UNCHANGED -- display inactivity only):
+
+  * INACTIVITY + COMMAND-STALE GATES -- a commander occupies a ranked
+    `#` only when the v4 duel-count OR-gate still holds AND they are
+    globally active (any appearance within 30 days of the newest corpus
+    match, or 3-game comeback after a gap) AND command-recent (commanded
+    within 90 days, or 3 commander games after going stale). Emits
+    per-rating `inactive_status` / `command_status` (+ days / comeback
+    counts) and top-level `inactivity_window_days` /
+    `comeback_games_required` / `command_stale_window_days` /
+    `corpus_latest_date`. Memo:
+    critique/decisions/vtsr-inactivity-threshold.md.
+
 v4 additions (schema 3 -> 4; ratings UNCHANGED -- display eligibility only):
 
   * LADDER GATE -- a commander occupies a ranked `#` when
@@ -153,6 +166,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 import identity_aliases
+import inactivity
 
 # ---------------------------------------------------------------------------
 # Constants (all tunable; no schema bump needed to retune)
@@ -256,10 +270,20 @@ EXTERNAL_PROVIDER_URL = "https://f9bomber.com"
 CMDR_LADDER_MIN_V4 = 8
 CMDR_LADDER_MIN_NON_V4 = 25
 
-# v4: additive display eligibility. Ratings remain comparable with
-# schema 3 (no re-rate). v3: external community duels walk the ladder
-# alongside telemetry -- those ratings were not comparable with schema 2.
-CMDR_ELO_SCHEMA_VERSION = 4
+# Display-only inactivity + commander-stale gates (do NOT change ratings,
+# K, or duel history). Global clock is shared with VTSR-T (30 days / 3
+# games). Command clock: 90-day grace while still thugging, then 3
+# commander games to re-rank. Frozen in
+# critique/decisions/vtsr-inactivity-threshold.md.
+INACTIVITY_WINDOW_DAYS = 30
+COMEBACK_GAMES_REQUIRED = 3
+CMDR_STALE_WINDOW_DAYS = 90
+
+# v5: additive display inactivity fields. Ratings remain comparable with
+# schema 4 (no re-rate). v4: additive display eligibility. v3: external
+# community duels walk the ladder alongside telemetry -- those ratings
+# were not comparable with schema 2.
+CMDR_ELO_SCHEMA_VERSION = 5
 
 
 # ---------------------------------------------------------------------------
@@ -928,6 +952,17 @@ def compute_commander_elo(all_match_data: list[dict],
         rated_match_count += 1
         rated_match_ids.add(match_id)
 
+    # Display-only activity clocks (global 30d + command 90d). Duels
+    # above are unchanged; eligibility folds both clocks in at emit.
+    # See scripts/inactivity.py.
+    activity = inactivity.compute_activity(
+        all_match_data,
+        window_days=INACTIVITY_WINDOW_DAYS,
+        comeback_games=COMEBACK_GAMES_REQUIRED,
+        cmdr_stale_days=CMDR_STALE_WINDOW_DAYS,
+        external_duels=external_duels,
+    )
+
     ratings_out = []
     for k in rating:
         g = games[k]
@@ -935,9 +970,12 @@ def compute_commander_elo(all_match_data: list[dict],
         # Older = every rated duel that is not v4 telemetry: F9 ledger
         # + pre-v4 corpus. Partition of matches_commanded_rated.
         non_v4 = g - telem
+        name = display_name.get(k, "")
+        s64 = steam64_out.get(k)
+        act = inactivity.lookup_activity(activity, s64, name)
         ratings_out.append({
-            "name": display_name.get(k, ""),
-            "steam64": steam64_out.get(k),
+            "name": name,
+            "steam64": s64,
             "vtsr_c": round(rating[k], 2),
             "matches_commanded_rated": g,
             "wins": wins[k],
@@ -958,7 +996,22 @@ def compute_commander_elo(all_match_data: list[dict],
             "duels_external": duels_external.get(k, 0),
             # v4: display-only ladder inclusion. Ratings unchanged.
             "duels_non_v4": non_v4,
-            "leaderboard_eligible": ladder_eligible(telem, non_v4),
+            # v5: also requires globally active AND command-recent.
+            "leaderboard_eligible": (
+                ladder_eligible(telem, non_v4)
+                and bool(act["active"])
+                and bool(act["command_active"])
+            ),
+            "inactive_status": act["inactive_status"],
+            "days_since_last_match": act["days_since_last_match"],
+            "last_seen_date": act["last_seen_date"],
+            "comeback_games_played": act["comeback_games_played"],
+            "comeback_games_remaining": act["comeback_games_remaining"],
+            "command_status": act["command_status"],
+            "days_since_last_command": act["days_since_last_command"],
+            "last_command_date": act["last_command_date"],
+            "command_comeback_games_played": act["command_comeback_games_played"],
+            "command_comeback_remaining": act["command_comeback_remaining"],
         })
     ratings_out.sort(key=lambda r: (-r["vtsr_c"], r["name"].lower()))
 
@@ -976,6 +1029,12 @@ def compute_commander_elo(all_match_data: list[dict],
         # hardcode 8/25 in JS). See critique/decisions/vtsr-c-ladder-eligibility.md.
         "leaderboard_min_v4": CMDR_LADDER_MIN_V4,
         "leaderboard_min_non_v4": CMDR_LADDER_MIN_NON_V4,
+        # v5: display-only inactivity + commander-stale clocks.
+        # critique/decisions/vtsr-inactivity-threshold.md.
+        "inactivity_window_days": INACTIVITY_WINDOW_DAYS,
+        "comeback_games_required": COMEBACK_GAMES_REQUIRED,
+        "command_stale_window_days": CMDR_STALE_WINDOW_DAYS,
+        "corpus_latest_date": activity["corpus_latest_date"],
         "computed_at": computed_at,
         "rated_match_count": rated_match_count,
         "matches_skipped_undetermined": skipped_undetermined,

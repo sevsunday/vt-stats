@@ -1897,6 +1897,34 @@
   }
 
   function cmdrProgressChipHtml(r, c) {
+    const need = (c && c.comeback_games_required != null) ? c.comeback_games_required : 3;
+    const gStatus = r.inactive_status || 'active';
+    if (gStatus === 'inactive') {
+      const d = r.days_since_last_match || 0;
+      const seen = r.last_seen_date;
+      const title = seen
+        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match.`
+        : 'No recorded appearance in the corpus or community ledger.';
+      const label = seen ? `Inactive \u00b7 ${d}d ago` : 'Inactive';
+      return `<span class="vt-vtsr-inactive-chip" title="${escapeHtml(title)}">${label}</span>`;
+    }
+    if (gStatus === 'returning') {
+      const n = r.comeback_games_played || 0;
+      const title = `${n} of ${need} games since returning.`;
+      return `<span class="vt-vtsr-returning-chip" title="${escapeHtml(title)}">Returning \u00b7 ${n} of ${need}</span>`;
+    }
+    const cStatus = r.command_status || 'active';
+    if (cStatus === 'stale') {
+      const d = r.days_since_last_command || 0;
+      const staleWin = (c && c.command_stale_window_days != null) ? c.command_stale_window_days : 90;
+      const title = `Last commanded ${d} day${d === 1 ? '' : 's'} ago (grace is ${staleWin} days while still thugging).`;
+      return `<span class="vt-vtsr-stale-chip" title="${escapeHtml(title)}">Not commanded \u00b7 ${d}d</span>`;
+    }
+    if (cStatus === 'returning') {
+      const n = r.command_comeback_games_played || 0;
+      const title = `${n} of ${need} commander games since the command clock reset.`;
+      return `<span class="vt-vtsr-returning-chip" title="${escapeHtml(title)}">Returning \u00b7 ${n} of ${need} cmdr games</span>`;
+    }
     const { minV4, minNonV4 } = cmdrLadderMins(c);
     const v4 = r.duels_with_telemetry || 0;
     const older = cmdrDuelsNonV4(r);
@@ -2941,6 +2969,23 @@
   }
 
   function vtsrProgressChipHtml(r, elo) {
+    const status = r.inactive_status || 'active';
+    const need = (elo && elo.comeback_games_required != null) ? elo.comeback_games_required : 3;
+    if (status === 'returning') {
+      const n = r.comeback_games_played || 0;
+      const title = `${n} of ${need} games since returning. Play ${Math.max(0, need - n)} more to rejoin the ranked ladder.`;
+      return ` <span class="vt-vtsr-returning-chip" title="${escapeHtml(title)}">Returning \u00b7 ${n} of ${need}</span>`;
+    }
+    if (status === 'inactive') {
+      const d = r.days_since_last_match || 0;
+      const win = (elo && elo.inactivity_window_days != null) ? elo.inactivity_window_days : 30;
+      const seen = r.last_seen_date;
+      const title = seen
+        ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match. Play ${need} games within ${win} days to rejoin.`
+        : `No recorded appearance in the corpus or community ledger. Play ${need} games within ${win} days to join.`;
+      const label = seen ? `Inactive \u00b7 ${d}d ago` : 'Inactive';
+      return ` <span class="vt-vtsr-inactive-chip" title="${escapeHtml(title)}">${label}</span>`;
+    }
     const n = r.matches_played || 0;
     const min = vtsrLadderMinMatches(elo);
     const title = `${n} of ${min} rated matches to join the ranked ladder.`;
