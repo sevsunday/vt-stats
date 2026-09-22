@@ -435,10 +435,23 @@ Resolution chain (first match wins):
 2. `DispenserClass.objectClass` → `wpnName`
 3. `TargetingGunClass.leaderName` → `wpnName`
 4. Explosion mapping (Vehicle → TorpedoClass/GameObjectClass → parent weapon)
-5. **Fallback**: raw ODF string minus `.odf` extension
-6. **Null ordnance**: `"Unknown"`
+5. **Child-ODF reverse map** (`build_child_odf_reverse_map`, `PIPELINE_VERSION` 49) — see below
+6. **Fallback**: raw ODF string minus `.odf` extension
+7. **Null ordnance**: `"Unknown"`
 
 Disambiguate collisions by appending raw ODF in parentheses.
+
+### Child-ODF reverse map (layer 5)
+
+Mines, dispensed payloads, charge levels and impact explosions deal their damage under **their own** ODF, not the weapon's — the wire reports `xseekvsrxpl` where the player fired a `gseekervsr` (Seeker). Before layer 5 existed, 88 such stems carried ~15% of all corpus weapon damage as raw text. `build_child_odf_reverse_map(odf_db)` walks every named weapon's reference graph (`CHILD_REF_FIELDS`: the `xpl*` family, `explosionName`, `payloadName`, `launchOrd`, `ordName<N>`, `altName`, plus a nested `Expl*.ExplosionClass.classLabel`) up to `CHILD_MAP_MAX_HOPS = 3` and claims the stems it reaches.
+
+Two exclusions stop the map shadowing a better name: stems carrying their own `GameObjectClass.unitName` (the unit resolver owns those, and `prettify_odf` consults the weapon resolver **first**), and stems that are themselves named weapons. A trailing pass adds every Weapon-bucket stem directly, because a hitscan weapon declares `ordName = NULL` and the wire then reports the weapon's own ODF (`garcvsr_a` → "Arc Stream").
+
+Sibling weapons share explosion assets, so a child can have several claimants. The winner is picked by a fixed chain: curated generic name → single claimant name → fewest hops → longest common prefix against the weapon stem (and only when no weapon stem is similar at all, against its ordnance stem — this is what separates the Rocket's `xbazxpl_c` from the Burst Gun EX's) → majority claimant → alphabetical. **The chain is deterministic by design**; do not add a tie-break that depends on dict iteration order.
+
+`GENERIC_EXPLOSION_NAMES` covers the six wreck/death explosions the engine plays for *any* dying object (`xvehxpl`, `xcarxpl`, `xsgnxpl`, `xpwrxpl`, the `_e` Hadean variants) plus `kamixpl`. Hundreds of unrelated weapons reference these, so no honest claim exists — they get curated labels, checked **before** weapon claims so a stray claimant (the Wasp reaches `xpwrxpl`) can't win.
+
+Lookups are lowercased because the wire is inconsistent about case (`KAMIORDXPL`). The layer is **display-name only**: explosion stems carry zero shots and zero hits, so `thug_accuracy` and every other rating input is untouched — proven by `elo_history.json` hashing byte-identical across the v49 reprocess.
 
 ## Pipeline Output
 

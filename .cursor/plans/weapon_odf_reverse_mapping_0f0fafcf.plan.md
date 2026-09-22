@@ -4,16 +4,16 @@ overview: Extend the pipeline's weapon-name resolver to reverse-map child damage
 todos:
   - id: extend-resolver
     content: Extend build_weapon_name_resolver with reference harvest, transitive walk, tie-break resolution, and GENERIC_EXPLOSION_NAMES table
-    status: pending
+    status: completed
   - id: version-bump
     content: Bump PIPELINE_VERSION 48 → 49 and reprocess the full corpus
-    status: pending
+    status: completed
   - id: verify
     content: Verify elo_history.json hash unchanged and unresolved-stem scan reaches ~0; spot-check Seeker match
-    status: pending
+    status: completed
   - id: docs
     content: Update data-schema.mdc, DEVELOPER_GUIDE.md, DATA_DICTIONARY.md resolution-chain docs
-    status: pending
+    status: completed
 isProject: false
 ---
 

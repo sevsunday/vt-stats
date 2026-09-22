@@ -409,8 +409,31 @@ Resolves ordnance ODFs (e.g. `chaingun_c.odf` → `Chain Gun`):
 2. `DispenserClass.objectClass` → `WeaponClass.wpnName`
 3. `TargetingGunClass.leaderName` → `WeaponClass.wpnName`
 4. `Vehicle.TorpedoClass.xplBlast` or `Vehicle.GameObjectClass.explosionName` → parent weapon name (via `DispenserClass.objectClass` → vehicle → explosion mapping)
-5. **Fallback**: Strip `.odf` extension and display the raw ODF key
-6. **Null ordnance**: Display `"Unknown"`
+5. **Child-ODF reverse map** (`build_child_odf_reverse_map`, `PIPELINE_VERSION` 49) — see below
+6. **Fallback**: Strip `.odf` extension and display the raw ODF key
+7. **Null ordnance**: Display `"Unknown"`
+
+#### Child-ODF reverse map (layer 5)
+
+A weapon frequently does its damage through an object it *spawns* rather than through itself. The Scion Seeker (`gseekervsr`) drops a mine whose blast is `xseekvsrxpl`, and the wire attributes the damage to that blast — so `xseekvsrxpl` used to render as raw text in Weapon Meta. Corpus-wide, 88 such stems carried **~15% of all weapon damage** (13.9M) as unreadable stems.
+
+`build_child_odf_reverse_map(odf_db)` inverts the relationship. It walks each named weapon's reference graph up to `CHILD_MAP_MAX_HOPS = 3` (the flattened DB inlines a weapon's ordnance and payload blocks, so most children are one hop away; `gmaggun_c → charge6_c → xmagcar6_c` is the deepest real chain) collecting stems named by `CHILD_REF_FIELDS`:
+
+| Field family | Covers |
+|---|---|
+| `xplVehicle` / `xplBuilding` / `xplGround` / `xplExpire` | Per-target-class impact explosions |
+| `xplBlast` / `xplPulse` / `xplEnter` / `xplExit` | Mine blasts, pulse shells, Blink in/out |
+| `explosionName` / `payloadName` / `launchOrd` | Dispensed payloads and secondary launches |
+| `ordName<N>` / `altName` | Charge-gun levels (`charge1_c`..`charge6_c` → MAG), alt-fire modes |
+| `Expl*.ExplosionClass.classLabel` | Nested explosion blocks that name themselves rather than being pointed at |
+
+**Exclusions.** A stem is skipped if it carries its own `GameObjectClass.unitName` (the unit resolver owns it, and `prettify_odf` asks the weapon resolver first, so a claim here would shadow the better name) or if it is itself a named weapon. A final pass then maps every Weapon-bucket stem to its own `wpnName`, because a hitscan weapon declares `ordName = NULL` and the wire reports the weapon's ODF directly — that is what recovers `garcvsr_a` → `Arc Stream`.
+
+**Contested children.** Sibling weapons share explosion assets, so `xbazxpl_c` is claimed by both the Rocket and the Burst Gun EX. The winner is decided by a fixed chain — curated generic → single claimant name → fewest hops → longest common prefix against the weapon stem (falling back to the weapon's ordnance stem only when no weapon stem matches at all, which is what picks `bazooka_c`/Rocket over `eburst_a`) → majority claimant → alphabetical. Every step is order-independent; do not introduce a tie-break that depends on dict iteration.
+
+**Generic wreck explosions.** `xvehxpl`, `xcarxpl`, `xsgnxpl`, `xpwrxpl`, their `_e` Hadean twins, and `kamixpl` are played for *any* dying object of that class. Hundreds of weapons reference them, so there is no honest parent — `GENERIC_EXPLOSION_NAMES` gives them curated labels (`Vehicle Explosion`, `Craft Explosion`, …) and is consulted **before** weapon claims so a spurious claimant cannot win.
+
+The layer is **display-name only**. Explosion stems record zero shots and zero hits, so nothing reaching `thug_accuracy` or any other VTSR-T axis changes; `elo_history.json` hashed byte-identical across the v49 reprocess. Rows stay per-ODF — the map renames, it never merges statistics — so a child that now shares its parent's display name simply picks up the existing `Name (raw_stem)` disambiguation suffix (`FAF Msl (fafmsl_c)` alongside `FAF Msl (xfafmsl)`).
 
 ### Unit Resolution Chain (`build_unit_name_resolver`)
 

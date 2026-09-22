@@ -118,7 +118,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # structures[] (constructor BUILD xyz + UnitDestroyed-only deaths;
 # turret-class instances stay death_reason=untracked while
 # TURRET_DEATHS_RELIABLE is False). Display-only; not in contributions.
-PIPELINE_VERSION = 48
+# 48 -> 49: weapon-name resolver reverse-maps child damage ODFs (mine
+# blasts, impact explosions, charge levels, dispensed payloads) back to
+# their parent weapon, and names the generic wreck explosions. Display
+# names only -- no shape change, no shots/hits change, ratings unmoved.
+PIPELINE_VERSION = 49
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -1581,6 +1585,174 @@ POSITIONING_BANDS = [
 ]
 
 
+# Fields that name a CHILD object the engine spawns from a parent: the
+# explosion an ordnance leaves on impact, the mine a dispenser drops, the
+# ordnance a charge level fires. Damage lands under the child's ODF, so the
+# wire reports e.g. `xseekvsrxpl` (the blast) where the player actually fired
+# a `gseekervsr` (Seeker). Walking these backwards recovers the parent weapon.
+CHILD_REF_FIELDS = re.compile(
+    r"^(xplVehicle|xplBuilding|xplGround|xplExpire|xplBlast|xplPulse|xplEnter"
+    r"|xplExit|explosionName|payloadName|launchOrd|ordName\d*|altName)$",
+    re.IGNORECASE,
+)
+
+# Wreck / death explosions the engine plays for ANY dying object of that
+# class. Hundreds of unrelated weapons reference them, so the claim walk
+# cannot honestly attribute them to one weapon -- they are curated instead,
+# and checked BEFORE weapon claims so a stray claimant (xpwrxpl is reachable
+# from the Wasp) can't win. `_e` variants are the Hadean asset set.
+GENERIC_EXPLOSION_NAMES = {
+    "xvehxpl": "Vehicle Explosion",
+    "xvehxpl_e": "Vehicle Explosion (Hadean)",
+    "xcarxpl": "Craft Explosion",
+    "xcarxpl_e": "Craft Explosion (Hadean)",
+    "xsgnxpl": "Sign Explosion",
+    "xpwrxpl": "Powerup Explosion",
+    "kamixpl": "Kamikaze",
+}
+
+# Depth cap on the parent -> child walk. Hop 1 is the weapon entry's own
+# inlined blocks, hops 2-3 follow into the Ordnance / Mine / Explosion
+# buckets (gmaggun_c -> charge6_c -> xmagcar6_c is the deepest real chain).
+CHILD_MAP_MAX_HOPS = 3
+
+
+def _odf_stem(odf_string):
+    """Lowercased ODF string with any `.odf` suffix removed."""
+    return re.sub(r"\.odf$", "", odf_string or "", flags=re.IGNORECASE).lower()
+
+
+def _common_prefix_len(a, b):
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def _child_refs(entry):
+    """Child ODF stems declared anywhere in a (flattened) ODF entry."""
+    out = set()
+    for block, props in (entry or {}).items():
+        if not isinstance(props, dict):
+            continue
+        for field, val in props.items():
+            if isinstance(val, str) and val.strip() and CHILD_REF_FIELDS.match(field):
+                out.add(_odf_stem(val))
+        # A nested `Expl*.ExplosionClass` block declares the stem it is
+        # inlined under via classLabel (gmortarfvsr inlines xmortxpl this way
+        # rather than naming it through an xpl* field).
+        if block.rsplit(".", 1)[-1] == "ExplosionClass":
+            label = props.get("classLabel")
+            if isinstance(label, str) and label.strip():
+                out.add(_odf_stem(label))
+    return out
+
+
+def build_child_odf_reverse_map(odf_db):
+    """Map child damage ODFs back to the display name of the parent weapon.
+
+    Mine blasts, impact explosions, charge levels and dispensed payloads all
+    deal their damage under their own ODF, so ~15% of corpus weapon damage
+    used to render as a raw stem (`xseekvsrxpl`, `xminxplvsr`, `charge5_c`).
+    This walks every named weapon's reference graph (see `CHILD_REF_FIELDS`)
+    and claims the stems it reaches.
+
+    Two exclusions keep the map from shadowing a better name: stems carrying
+    their own `GameObjectClass.unitName` (the unit resolver owns those, and
+    `prettify_odf` consults the weapon resolver first), and stems that are
+    themselves named weapons.
+
+    A child asset shared between sibling weapons gets several claimants, so
+    the winner is picked by a deterministic chain: curated generic name ->
+    single claimant name -> fewest hops from the weapon -> longest common
+    prefix against the weapon stem (then, only when no weapon stem is similar
+    at all, against its ordnance stem) -> majority claimant -> alphabetical.
+    """
+    refs = {}
+    unit_named = set()
+    weapons = {}  # stem -> (wpnName, ordnance stem)
+    for bucket, items in (odf_db or {}).items():
+        if not isinstance(items, dict):
+            continue
+        for odf_key, entry in items.items():
+            if not isinstance(entry, dict):
+                continue
+            stem = _odf_stem(odf_key)
+            refs.setdefault(stem, set()).update(_child_refs(entry))
+            goc = entry.get("GameObjectClass") or {}
+            if (goc.get("unitName") or "").strip():
+                unit_named.add(stem)
+            if bucket == "Weapon":
+                wc = entry.get("WeaponClass") or {}
+                name = (wc.get("wpnName") or "").strip()
+                if name:
+                    weapons[stem] = (name, _odf_stem(wc.get("ordName") or ""))
+
+    # child stem -> [(hops, weapon stem, wpnName, ordnance stem)]
+    claims = defaultdict(list)
+    for w_stem, (w_name, ord_stem) in weapons.items():
+        seen = {w_stem}
+        frontier = [(child, 1) for child in refs.get(w_stem, ())]
+        while frontier:
+            nxt = []
+            for child, hops in frontier:
+                if child in seen or hops > CHILD_MAP_MAX_HOPS:
+                    continue
+                seen.add(child)
+                claims[child].append((hops, w_stem, w_name, ord_stem))
+                nxt.extend((c, hops + 1) for c in refs.get(child, ()))
+            frontier = nxt
+
+    resolved = {}
+    for child, claimants in claims.items():
+        if child in GENERIC_EXPLOSION_NAMES:
+            resolved[child] = GENERIC_EXPLOSION_NAMES[child]
+            continue
+        if child in unit_named or child in weapons:
+            continue
+        names = {c[2] for c in claimants}
+        if len(names) > 1:
+            fewest = min(c[0] for c in claimants)
+            claimants = [c for c in claimants if c[0] == fewest]
+            names = {c[2] for c in claimants}
+        if len(names) == 1:
+            resolved[child] = claimants[0][2]
+            continue
+        # Sibling weapons sharing one asset (xbazxpl_c is both the Rocket's
+        # and the Burst Gun EX's impact blast). Name similarity breaks it.
+        target = child[1:] if child.startswith("x") else child
+        scored = [
+            (_common_prefix_len(target, w[1:] if w.startswith("g") else w), n)
+            for _h, w, n, _o in claimants
+        ]
+        if max(score for score, _ in scored) < 2:
+            scored = [
+                (_common_prefix_len(target, o) if o else 0, n)
+                for _h, _w, n, o in claimants
+            ]
+        best = max(score for score, _ in scored)
+        pool = [n for score, n in scored if score == best] if best >= 2 else [
+            n for _score, n in scored
+        ]
+        if len(set(pool)) == 1:
+            resolved[child] = pool[0]
+            continue
+        tally = Counter(pool)
+        top = max(tally.values())
+        resolved[child] = sorted(n for n, c in tally.items() if c == top)[0]
+
+    # Generic explosions no weapon happens to reference still get their name.
+    for stem, name in GENERIC_EXPLOSION_NAMES.items():
+        resolved.setdefault(stem, name)
+    # A hitscan weapon declares `ordName = NULL`, so the wire reports the
+    # WEAPON's own ODF as the ordnance (garcvsr_a -> "Arc Stream").
+    for stem, (name, _ord) in weapons.items():
+        resolved[stem] = name
+    return resolved
+
+
 def build_weapon_name_resolver(odf_db):
     """Port of the JS weapon name resolver from the original dataProcessor.js."""
     by_ord_name = {}
@@ -1624,6 +1796,11 @@ def build_weapon_name_resolver(odf_db):
         if expl:
             by_explosion[expl] = parent_wpn
 
+    # Last resort before the raw stem: child ODFs (mine blasts, impact
+    # explosions, charge levels) mapped back to their parent weapon. Keyed
+    # lowercased because the wire is inconsistent about case (`KAMIORDXPL`).
+    by_child = build_child_odf_reverse_map(odf_db)
+
     def resolve(odf_string):
         if not odf_string:
             return "Unknown"
@@ -1633,6 +1810,7 @@ def build_weapon_name_resolver(odf_db):
             or by_object_class.get(key)
             or by_leader_name.get(key)
             or by_explosion.get(key)
+            or by_child.get(key.lower())
             or key
         )
 
