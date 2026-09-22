@@ -122,7 +122,12 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # blasts, impact explosions, charge levels, dispensed payloads) back to
 # their parent weapon, and names the generic wreck explosions. Display
 # names only -- no shape change, no shots/hits change, ratings unmoved.
-PIPELINE_VERSION = 49
+# 49 -> 50: death-tick (0,0,0) placeholder guard. The engine parks a dying
+# unit at the world origin with negative health for one tick, which fed
+# shooter-to-map-centre distances into the engagement-range histograms
+# (Burst Gun reading 800 m against a 90 m ceiling), planted phantom trail
+# points at map centre, and booked tens of thousands of fake hp_lost.
+PIPELINE_VERSION = 50
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -427,6 +432,31 @@ DIST_PCT_BIN_EDGES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120]
 # histogram, but is excluded from the % view). Safely above every real
 # direct-fire weapon (max observed ~800 m). Tunable without a schema bump.
 MAX_REASONABLE_RANGE = 2000.0
+
+# --- Death-tick position placeholder guard (match.schema_version 28) --------
+# On the tick a unit is destroyed the engine emits its PlayerState with
+# `position == (0,0,0)` (world origin) and a negative `health`; the placeholder
+# lasts exactly one tick. A BulletHit landing at that instant gets its
+# `distance_to_target` measured against the ORIGIN instead of the victim, which
+# on VSR maps reads 300-800 m. Measured on 2026-05-22T03-21-34 tick 14385:
+# reported 398.6 m with shooter and victim 30.2 m apart, shooter standing at
+# (-391.9, 72.5) -- sqrt(391.9^2 + 72.5^2) = 398.5. Across four sampled matches
+# `position == (0,0,0)` correlated 1:1 with `health < 0` (48/48, 35/35, 83/83,
+# 45/45), and 84.7% of all physically-impossible hits matched shooter->origin
+# exactly. Two independent guards reject the sample (the hit still counts for
+# accuracy -- only its RANGE is unknowable).
+#
+# Guard A: `shotSpeed * lifeSpan` is a hard ceiling -- a projectile cannot
+# travel farther. Legitimate overshoot tops out around +33% (downhill shots);
+# artifacts run 3-8x, so the factor sits comfortably between them. Covers
+# 99.8% of corpus hits (the share whose ordnance has a usable book range).
+DIST_SANITY_BOOK_FACTOR = 1.5
+# Guard B: the origin signature itself, for the 0.2% of ordnance with no book
+# range and for artifacts that land under Guard A's threshold. Only ever fires
+# on a distance already outside the book envelope, so it cannot reject a
+# plausible hit.
+DIST_ORIGIN_REL_TOL = 0.02
+DIST_ORIGIN_ABS_TOL = 5.0
 
 
 def _dist_pct_bin_index(pct):
@@ -5376,6 +5406,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # usable ordnance max range (i.e. fed the %-of-max histograms). Coverage
     # telemetry surfaced on bullet_hit_distance.with_max_range.
     bullet_hit_distance_with_maxrange = 0
+    # match.schema_version 28: distance samples thrown out by the death-tick
+    # placeholder guard (see DIST_SANITY_BOOK_FACTOR). Surfaced on
+    # bullet_hit_distance.rejected_implausible so the scale stays visible.
+    bullet_hit_distance_rejected = 0
+    # Shooter's last known position, refreshed from every UpdateTick PlayerState
+    # (the collector emits one per tick), used by the origin-signature guard.
+    # Death-tick placeholders are NOT stored -- a zeroed shooter would make the
+    # guard compare against the origin twice and match everything.
+    last_known_pos = {}
 
     # Collect all ordnance ODFs for disambiguation
     all_ordnance = set()
@@ -5704,6 +5743,34 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             if schema != PROTO_SCHEMA_V1:
                 _dt = bh.distance_to_target
                 if _dt > 0:
+                    # Death-tick placeholder guard (match.schema_version 28).
+                    # The victim is parked at the world origin for the tick it
+                    # dies, so this hit's distance can be the shooter's range
+                    # to map centre rather than to the victim. Guard A rejects
+                    # anything past the projectile's physical ceiling; Guard B
+                    # catches the origin signature itself, but only for a
+                    # distance already outside the book envelope so it can
+                    # never discard a plausible hit.
+                    _maxr = _resolve_max_range(odf)
+                    _reject = bool(_maxr) and _dt > _maxr * DIST_SANITY_BOOK_FACTOR
+                    if not _reject and (not _maxr or _dt > _maxr):
+                        _spos = last_known_pos.get(shooter)
+                        if _spos is not None:
+                            _dorg = math.sqrt(
+                                _spos[0] * _spos[0]
+                                + _spos[1] * _spos[1]
+                                + _spos[2] * _spos[2]
+                            )
+                            _tol = max(DIST_ORIGIN_ABS_TOL,
+                                       DIST_ORIGIN_REL_TOL * _dorg)
+                            if abs(_dt - _dorg) <= _tol:
+                                _reject = True
+                    if _reject:
+                        # The hit itself still counts (accuracy is unaffected);
+                        # only its engagement range is unknowable.
+                        bullet_hit_distance_rejected += 1
+                        _dt = 0.0
+                if _dt > 0:
                     bullet_hit_distance_with += 1
                     bullet_hit_distance_total += _dt
                     if _dt > bullet_hit_distance_max:
@@ -5722,7 +5789,6 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         # match.schema_version 12: %-of-weapon-max histogram +
                         # hit-weighted max-range accumulator. Only when the
                         # ordnance has a usable (non-lobbed) max range.
-                        _maxr = _resolve_max_range(odf)
                         if _maxr:
                             bullet_hit_distance_with_maxrange += 1
                             weapon_maxrange_acc[odf][0] += _maxr
@@ -6586,6 +6652,29 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 if has_target:
                     match_has_target_lock_data = True
 
+                # Death-tick placeholder (match.schema_version 28): the engine
+                # parks a dying unit at the world origin with negative health
+                # for exactly one tick, then the ejected pilot appears at the
+                # real spot on the next tick. Position and health flagged it
+                # together on every occurrence across four sampled matches
+                # (48/48, 35/35, 83/83, 45/45), but neither signal is
+                # documented upstream, so both are tested.
+                _dead_tick = (
+                    ps.health < 0
+                    or (ps.position.x == 0.0 and ps.position.y == 0.0
+                        and ps.position.z == 0.0)
+                )
+                if not _dead_tick:
+                    # Full rate, deliberately ahead of the 1 Hz positioning
+                    # gate: the BulletHit origin-signature guard needs the
+                    # shooter's position at hit time, not at the last kept
+                    # trail sample.
+                    last_known_pos[s64] = (
+                        float(ps.position.x),
+                        float(ps.position.y),
+                        float(ps.position.z),
+                    )
+
                 # --- Health/ammo (match.schema_version 10) ---
                 # Normalize absolute PlayerState.health / .ammo to 0-1 ratios
                 # against this player's CURRENT ship caps. Done every tick so
@@ -6606,12 +6695,17 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # HP lost (absolute units): only count decreases, and reset the
                 # baseline on a ship change or any health increase (heal /
                 # repair / rebuild / respawn) so those never register as damage
-                # taken. A death (health -> 0 in the same ship) IS counted.
+                # taken. A death (health -> 0 in the same ship) IS counted, but
+                # only down to zero: the death-tick placeholder reports a large
+                # negative health (-1234 in the traced case), which booked
+                # 59,232 phantom HP across one match's 48 deaths and deflated
+                # every hp_efficiency on the board.
                 _ph = _prev_health.get(s64)
+                _health_floored = max(0.0, ps.health)
                 if (_ph is not None and _prev_health_odf.get(s64) == ps.odf
-                        and ps.health < _ph):
-                    hp_lost_total[s64] += (_ph - ps.health)
-                _prev_health[s64] = ps.health
+                        and _health_floored < _ph):
+                    hp_lost_total[s64] += (_ph - _health_floored)
+                _prev_health[s64] = _health_floored
                 _prev_health_odf[s64] = ps.odf
 
                 # Ammo-out episodes: count each >0 -> ==0 transition (debounced
@@ -6622,6 +6716,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     if _empty_now and not _ammo_was_empty[s64]:
                         ammo_out_episodes[s64] += 1
                     _ammo_was_empty[s64] = _empty_now
+
+                # Never trail a death-tick placeholder -- it plants a phantom
+                # point at map centre in the heatmaps and the replay. Checked
+                # BEFORE the downsample gate so `position_last_kept_tick` does
+                # not advance; otherwise the next real sample is lost too.
+                if _dead_tick:
+                    continue
 
                 last_kept = position_last_kept_tick.get(s64)
                 if last_kept is not None and (tick - last_kept) < tick_stride:
@@ -8314,10 +8415,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # top-level `structures[]` (constructor BUILD xyz +
             # UnitDestroyed-only deaths; turret-class untracked).
             # Display-only; not in contributions.
-            # v27 (this version): top-level `engagements` block (coalesced
+            # v27: top-level `engagements` block (coalesced
             # player->player DamageDealt intervals for the replay attack-line
             # overlay). Display-only; not in contributions; rating-inert.
-            "schema_version": 27,
+            # v28 (this version): death-tick (0,0,0) placeholder guard. A
+            # dying unit is parked at the world origin with negative health
+            # for exactly one tick; samples taken there are garbage. Values
+            # MOVE on existing matches -- `weapon_breakdown[w].range_hist` /
+            # `range_pct_hist`, `personal.distance_buckets`,
+            # `bullet_hit_distance.{with_distance,mean,max}`,
+            # `positioning.players[].trail` and `personal.hp_efficiency` all
+            # shed the artifact. New `bullet_hit_distance.rejected_implausible`
+            # counts the discarded range samples (the hits themselves still
+            # count, so accuracy is untouched).
+            "schema_version": 28,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -8370,6 +8481,12 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # match.schema_version 12: hits that also had a usable ordnance
                 # max range (fed the %-of-max histograms). Coverage telemetry.
                 "with_max_range": int(bullet_hit_distance_with_maxrange),
+                # match.schema_version 28: distance samples discarded by the
+                # death-tick placeholder guard. Not subtracted from `count` --
+                # the hit happened, only its range was unknowable. Expect a
+                # fraction of a percent; a spike means the guard is misfiring
+                # or the collector regressed.
+                "rejected_implausible": int(bullet_hit_distance_rejected),
                 "mean": (
                     round(bullet_hit_distance_total / bullet_hit_distance_with, 3)
                     if bullet_hit_distance_with > 0 else None
