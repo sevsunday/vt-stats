@@ -320,6 +320,27 @@ Each ordnance ODF declares `OrdnanceClass.shotSpeed * lifeSpan` = the projectile
 
 Lobbed/timed ordnance (`lifeSpan ~ 1e30` → ~1e31 m) is excluded via `MAX_REASONABLE_RANGE = 2000.0` (those hits still count in the meters histogram, just not the `%` view). Drives the strip's `Meters | % of max` toggle (`renderWeaponRange` `opts.unit`) and the Shot Accuracy table's per-player **Engagement Envelope** column (`weaponEnvelopePct` in `js/charts.js`; weapon-weighted mean `%` of max with `Point-blank`/`Mid`/`Edge`/`Over-range` bands). Still **descriptive-only — NOT a VTSR-T axis** (ship access + role still confound). Contributions slice drops `range_pct_hist` too. Bumps `match.schema_version` 11 → 12 and `PIPELINE_VERSION` 23 → 24. `DIST_PCT_BIN_EDGES` / `MAX_REASONABLE_RANGE` tunable without a schema bump.
 
+### Death-tick (0,0,0) position placeholder (match.schema_version 28, PIPELINE_VERSION 50)
+
+**On the tick a unit is destroyed, the engine emits its `PlayerState` with `position == (0,0,0)` (world origin) and a negative `health`.** The placeholder lasts exactly one tick — the ejected pilot appears at the real spot on the next one. **A `PlayerState` with `health < 0` is never a valid position sample.** Across four sampled matches `position == (0,0,0)` correlated 1:1 with `health < 0` (48/48, 35/35, 83/83, 45/45), but neither signal is documented upstream, so `process_stats.py` tests both.
+
+Three surfaces were reading the placeholder:
+
+- **Engagement range.** A `BulletHit` landing at that instant has `distance_to_target` measured against the ORIGIN, not the victim — on VSR maps that reads 300-800 m. Traced on `2026-05-22T03-21-34` tick 14385: reported 398.6 m with shooter and victim 30.2 m apart, shooter standing at `(-391.9, 72.5)` where `sqrt(391.9² + 72.5²) = 398.5`. Burst Gun showed it worst (90 m book ceiling, multi-pellet, frequent killing blows) — a bimodal histogram with an empty gap at 150-200 m and a phantom 300-800 m mode. **84.7%** of corpus hits beyond 1.15x book max matched shooter→origin exactly.
+- **Positioning.** 729 placeholder samples across 134 matches survived the 1 Hz downsample into `trail.x/z`, planting phantom heatmap points at map centre.
+- **`hp_lost_total`.** `prev_health - (-1234)` booked 59,232 phantom HP in one match, deflating every `personal.hp_efficiency`.
+
+Two independent guards reject a distance sample; **the hit itself still counts** (`weapon_breakdown[w].hits`, accuracy, `shots_hit` are all untouched) — only its RANGE is unknowable, and `_dt` is zeroed so it skips every downstream histogram uniformly:
+
+- **Guard A** (`DIST_SANITY_BOOK_FACTOR = 1.5`, 99.8% coverage): reject when `distance > book_max * 1.5`. `shotSpeed * lifeSpan` is a hard physical ceiling. Legitimate overshoot tops out around +33% (downhill shots) while artifacts run 3-8x, so the factor sits comfortably between them.
+- **Guard B** (`DIST_ORIGIN_REL_TOL = 0.02` / `DIST_ORIGIN_ABS_TOL = 5.0`): reject when the distance matches `dist(shooter_pos, origin)` within tolerance **and** is already outside the book envelope (or the ordnance has no book range). The second clause makes a false positive impossible for book-covered ordnance. Shooter position comes from `last_known_pos`, refreshed at FULL rate from every non-placeholder `PlayerState` — deliberately ahead of the 1 Hz positioning gate, since a hit needs the position at hit time, not at the last kept trail sample. Placeholder samples are never stored there (a zeroed shooter would compare the origin against itself and match everything).
+
+New telemetry `match.bullet_hit_distance.rejected_implausible` (1,976 corpus-wide = 0.40% of distance-bearing hits). It is NOT subtracted from `count`; a spike means the guard is misfiring or the collector regressed.
+
+The positioning skip sits **before** the 1 Hz downsample gate so `position_last_kept_tick` does not advance — otherwise the next real sample is lost too. Post-fix the corpus has **zero** `(0,0)` trail samples and **zero** samples beyond 1.5x book max; Burst Gun's highest non-empty bin fell from `[600,800)` to `[100,150)`.
+
+Values MOVE on existing matches, so this is not additive: `range_hist` / `range_pct_hist`, `personal.distance_buckets`, `bullet_hit_distance.{with_distance,mean,max}`, `positioning.players[].trail` and `personal.hp_efficiency` all shed the artifact. Dropping trail samples shifts `time_in_base_pct` → `activity_score` → the VTSR-T `mobility` axis, so `ELO_SCHEMA_VERSION` bumps 10 → 11 and **pre-v11 `peak_vtsr` is no longer comparable** (measured drift: max 1.00 ELO, mean 0.20, leaderboard order unchanged). Upstream fix would be computing `distance_to_target` before the victim is zeroed, and omitting a dead unit's `PlayerState` rather than emitting a placeholder.
+
 ### Loadout Profile + Per-Ship Combat (v2.3 addition)
 
 Each `leaderboard[]` row gains two new sibling blocks:
