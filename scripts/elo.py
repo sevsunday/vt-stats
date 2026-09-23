@@ -357,13 +357,18 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # axis math, weights, priors, or output shape change. Measured drift is tiny
 # (max 1.00 ELO, mean 0.20, leaderboard order unchanged), but ratings DO move,
 # so **pre-v11 `peak_vtsr` is no longer comparable**.
-# v12 (current) = idle-thug omission (match.schema_version 30). Thug rows
+# v12 = idle-thug omission (match.schema_version 30). Thug rows
 # with personal.dealt == 0 (when the match recorded some personal damage)
 # are omitted before z-scoring, same as campod. Commanders are never
 # flagged. INPUT change only -- no axis math. Ratings DO move (the omitted
 # row loses its delta, and the rest of that lobby is re-z-scored without
 # them), so **pre-v12 `peak_vtsr` is no longer comparable**.
-ELO_SCHEMA_VERSION = 12
+# v13 (current) = terminal bench (match.schema_version 31). A connected
+# player who stops fighting after a sticky leave keeps their delta, but
+# P is taken from the lobby cut at that moment. Only that player's delta
+# moves. **pre-v13 `peak_vtsr` is not comparable** where the bench match
+# was the peak.
+ELO_SCHEMA_VERSION = 13
 
 
 # ---------------------------------------------------------------------------
@@ -880,11 +885,123 @@ def _rated_lobby(lobby_raw: list[dict]) -> list[dict]:
     ]
 
 
+def _bench_view(match_data: dict) -> dict | None:
+    """Match dict whose personals and duration stop at the bench.
+
+    ``match.bench`` is omitted so a second performance pass does not splice
+    again. Rows without ``bench_prefix`` keep their full-match stats.
+    """
+    bench = (match_data.get("match") or {}).get("bench")
+    if not bench:
+        return None
+    end = bench.get("effective_end_sec")
+    if not isinstance(end, (int, float)) or end <= 0:
+        return None
+    rows = []
+    snipe_counts = {}
+    for row in match_data.get("leaderboard") or []:
+        row2 = dict(row)
+        pre = row.get("bench_prefix") or None
+        if pre:
+            personal = dict(row.get("personal") or {})
+            personal.update(pre.get("personal") or {})
+            row2["personal"] = personal
+            if pre.get("weapon_breakdown") is not None:
+                row2["weapon_breakdown"] = pre["weapon_breakdown"]
+            snipe_counts[row.get("name")] = int(pre.get("snipes") or 0)
+        rows.append(row2)
+    match = dict(match_data.get("match") or {})
+    match.pop("bench", None)
+    match["duration_sec"] = end
+    pos = dict(match_data.get("positioning") or {})
+    players = {}
+    for name, pl in (pos.get("players") or {}).items():
+        pl2 = dict(pl)
+        metrics = dict((pl.get("metrics") or {}))
+        pre = None
+        for row in rows:
+            if row.get("name") == name:
+                pre = row.get("bench_prefix")
+                break
+        if pre:
+            if pre.get("activity_score") is not None:
+                metrics["activity_score"] = pre["activity_score"]
+            if pre.get("target_lock_pct") is not None:
+                metrics["target_lock_pct"] = pre["target_lock_pct"]
+            if pre.get("at_base_pilot_sec") is not None:
+                metrics["at_base_pilot_sec"] = pre["at_base_pilot_sec"]
+        pl2["metrics"] = metrics
+        players[name] = pl2
+    pos["players"] = players
+    snipes = dict(match_data.get("snipes") or {})
+    by_player = []
+    for name, count in snipe_counts.items():
+        if name and count > 0:
+            by_player.append({"name": name, "count": count})
+    snipes["by_player"] = by_player
+    return {
+        "match": match,
+        "leaderboard": rows,
+        "positioning": pos,
+        "snipes": snipes,
+    }
+
+
+def _splice_bench_performance(
+    match_data: dict,
+    perfs: list[float],
+    keys: list[str],
+    axis_z: list[dict[str, float]],
+    axis_meta: list[dict[str, dict[str, float]]],
+    commander_baseline_snapshot: dict[str, float] | None,
+    lowtier_eligibility: dict[str, float] | None,
+    lobby_score_mode: str,
+) -> tuple[
+    list[float],
+    list[str],
+    list[dict[str, float]],
+    list[dict[str, dict[str, float]]],
+]:
+    """Replace the benched player's P with the prefix-lobby P.
+
+    Everyone else keeps the full-match score, so their deltas do not move.
+    """
+    bench = (match_data.get("match") or {}).get("bench") or {}
+    view = _bench_view(match_data)
+    if view is None:
+        return perfs, keys, axis_z, axis_meta
+    p2, k2, z2, m2 = compute_performance_index(
+        view,
+        commander_baseline_snapshot=commander_baseline_snapshot,
+        lowtier_eligibility=lowtier_eligibility,
+        lobby_score_mode=lobby_score_mode,
+        _allow_bench_splice=False,
+    )
+    target = str(bench.get("steam64") or "")
+    src = None
+    for i, key in enumerate(k2):
+        if key == target:
+            src = i
+            break
+    dst = None
+    for i, key in enumerate(keys):
+        if key == target:
+            dst = i
+            break
+    if src is None or dst is None:
+        return perfs, keys, axis_z, axis_meta
+    perfs[dst] = p2[src]
+    axis_z[dst] = z2[src]
+    axis_meta[dst] = m2[src]
+    return perfs, keys, axis_z, axis_meta
+
+
 def compute_performance_index(
     match_data: dict,
     commander_baseline_snapshot: dict[str, float] | None = None,
     lowtier_eligibility: dict[str, float] | None = None,
     lobby_score_mode: str = "zclip",
+    _allow_bench_splice: bool = True,
 ) -> tuple[
     list[float],
     list[str],
@@ -1087,9 +1204,21 @@ def compute_performance_index(
         perf.append(p_sum)
         per_player_axis_z.append(axis_z_dict)
 
+    keys_out = [_player_key(p) for p in lobby]
+    if _allow_bench_splice and (match_data.get("match") or {}).get("bench"):
+        return _splice_bench_performance(
+            match_data,
+            perf,
+            keys_out,
+            per_player_axis_z,
+            axis_meta_by_player,
+            commander_baseline_snapshot,
+            lowtier_eligibility,
+            lobby_score_mode,
+        )
     return (
         perf,
-        [_player_key(p) for p in lobby],
+        keys_out,
         per_player_axis_z,
         axis_meta_by_player,
     )

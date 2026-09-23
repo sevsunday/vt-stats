@@ -2348,7 +2348,8 @@ body::before {
 .vt-campod-badge,
 .vt-partial-badge,
 .vt-pilot-badge,
-.vt-idle-badge {
+.vt-idle-badge,
+.vt-bench-badge {
     display: inline-block;
     padding: 0.15em 0.55em;
     margin-left: 0.4em;
@@ -2377,7 +2378,14 @@ body::before {
 .vt-partial-badge {
     color: var(--kb-warning);
     border-color: color-mix(in oklab, var(--kb-warning) 50%, var(--kb-border));
-    background: color-mix(in oklab, var(--kb-warning) 12%, transparent);
+}
+
+/* Connected player who stopped fighting after a leave. Still rated.
+   Career stats keep the whole match, so this is not a Partial badge. */
+.vt-bench-badge {
+    color: var(--kb-info);
+    border-color: color-mix(in oklab, var(--kb-info) 50%, var(--kb-border));
+    background: color-mix(in oklab, var(--kb-info) 12%, transparent);
 }
 
 /* De-emphasize excluded leaderboard rows so users immediately see the

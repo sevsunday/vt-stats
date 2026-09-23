@@ -134,7 +134,10 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # row with personal.dealt == 0 is is_zero_damage when the match recorded
 # some personal damage. scripts/elo.py omits the row (same as campod).
 # Commanders are never flagged. Ratings move.
-PIPELINE_VERSION = 52
+# 52 -> 53: terminal bench (match.schema_version 31). A player who stays
+# connected and stops fighting after a sticky leave is still rated, on
+# the lobby as it stood when they went quiet. Optional match.bench.
+PIPELINE_VERSION = 53
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -340,6 +343,20 @@ CAMPOD_MAX_SHARE = 0.25  # > 25% of match wall-clock in campod => is_campod=True
 # died-often players whose presence window is full but active_seconds is
 # short -- their dead time is correctly NOT a participation deficit.
 LOW_ACTIVITY_MIN_PRESENCE = 0.75
+
+# Terminal bench (match.schema_version 31). A player who stays in the
+# session after someone else leaves, and then deals essentially no more
+# damage through the end, is still a rated player. VTSR-T scores them on
+# the stretch before they went quiet. A crash that reconnects does not
+# qualify: presence is first tick to last tick, so a returner is not a
+# leaver, and a sitter who starts shooting again has no quiet suffix.
+BENCH_MIN_SUFFIX_SEC = 600          # quiet stretch must run to the end and last this long
+BENCH_SUFFIX_DEALT_MAX = 1500.0     # dealt damage allowed after the quiet start
+BENCH_MIN_BEFORE_DEALT = 5000.0     # they were actually fighting before they stopped
+BENCH_ALIGN_BEFORE_SEC = 180        # quiet may start this long before the leave
+BENCH_ALIGN_AFTER_SEC = 900         # or this long after it
+BENCH_MIN_ACTIVE_SHARE = 0.60       # below this, log and do not change the rating
+BENCH_CONNECTED_MIN_SHARE = 0.98    # sitter's presence covers the match (they did not disconnect)
 
 # --- Assist-aware effective kills (match.schema_version 13) -----------------
 # Raw last-hit PvP kills are a noisy performance signal: a teammate who lands
@@ -3556,6 +3573,322 @@ def _is_low_activity_row(first_tick, last_tick, tick_rate, duration_sec):
     return (presence_sec / duration_sec) < LOW_ACTIVITY_MIN_PRESENCE, presence_sec
 
 
+def _slot_side(slot):
+    """Team 1 for slots 1-5, team 2 for slots 6-10."""
+    if isinstance(slot, bool) or not isinstance(slot, int):
+        return None
+    if 1 <= slot <= 5:
+        return 1
+    if 6 <= slot <= 10:
+        return 2
+    return None
+
+
+def detect_terminal_bench(
+    leaderboard,
+    timeline_by_player,
+    bucket_seconds,
+    duration_sec,
+    leave_end_sec_by_name=None,
+):
+    """Find one connected player who went quiet through the end after a leave.
+
+    Returns a dict ``{name, steam64, effective_end_sec, active_share,
+    leaver_name}`` or None. The caller emits ``match.bench`` only when
+    ``active_share`` is at least ``BENCH_MIN_ACTIVE_SHARE``.
+
+    ``leave_end_sec_by_name`` is match-seconds of each player's last event.
+    When omitted, ``presence_window_sec`` is used, which is the leave time
+    for someone who was in from the start.
+    """
+    if not duration_sec or duration_sec <= 0 or not bucket_seconds or bucket_seconds <= 0:
+        return None
+    rows = leaderboard or []
+
+    def leave_end(row):
+        name = row.get("name")
+        if leave_end_sec_by_name and name in leave_end_sec_by_name:
+            return float(leave_end_sec_by_name[name])
+        return float(row.get("presence_window_sec") or 0.0)
+
+    leavers = [r for r in rows if r.get("is_low_activity")]
+    if not leavers:
+        return None
+
+    candidates = []
+    for row in rows:
+        if row.get("is_low_activity") or row.get("is_campod"):
+            continue
+        name = row.get("name")
+        pres = float(row.get("presence_window_sec") or 0.0)
+        if pres < duration_sec * BENCH_CONNECTED_MIN_SHARE:
+            continue
+        arr = (timeline_by_player or {}).get(name) or []
+        if not arr:
+            continue
+        total = 0.0
+        for v in arr:
+            total += v
+        csum = 0.0
+        quiet_at = None
+        for i, v in enumerate(arr):
+            csum += v
+            t = i * bucket_seconds
+            if duration_sec - t < BENCH_MIN_SUFFIX_SEC:
+                break
+            tail = total - csum
+            if tail <= BENCH_SUFFIX_DEALT_MAX and csum >= BENCH_MIN_BEFORE_DEALT:
+                quiet_at = min(duration_sec, (i + 1) * bucket_seconds)
+                break
+        if quiet_at is None:
+            continue
+        aligned = None
+        best_gap = None
+        for lv in leavers:
+            end = leave_end(lv)
+            gap = quiet_at - end
+            if -BENCH_ALIGN_BEFORE_SEC <= gap <= BENCH_ALIGN_AFTER_SEC:
+                if best_gap is None or abs(gap) < abs(best_gap):
+                    best_gap = gap
+                    aligned = lv
+        if aligned is None:
+            continue
+        candidates.append((row, quiet_at, aligned))
+
+    if len(candidates) != 1:
+        return None
+    row, quiet_at, aligned = candidates[0]
+    leave_end_sec = leave_end(aligned)
+    counts = {1: 0, 2: 0}
+    for other in rows:
+        if other is aligned:
+            continue
+        if leave_end(other) >= leave_end_sec - 60.0:
+            side = _slot_side(other.get("slot"))
+            if side:
+                counts[side] += 1
+    side = _slot_side(row.get("slot"))
+    if not side or counts.get(side, 0) <= counts.get(3 - side, 0):
+        return None
+    return {
+        "name": row.get("name"),
+        "steam64": str(row.get("steam64") or ""),
+        "effective_end_sec": round(float(quiet_at), 1),
+        "active_share": round(quiet_at / duration_sec, 4),
+        "leaver_name": aligned.get("name"),
+    }
+
+
+def _prefix_movement_metrics(positioning, end_sec):
+    """Activity, T-key, and at-base pilot time using trail samples at or before end_sec.
+
+    Activity uses the same 0.5 / 0.3 / 0.2 mix and match-relative p95
+    normalizers as ``_compute_positioning``.
+    """
+    players = (positioning or {}).get("players") or {}
+    if not players or end_sec is None:
+        return {}
+    teleport = (positioning or {}).get("teleport_threshold") or 300.0
+    raw = {}
+    for name, pl in players.items():
+        tr = pl.get("trail") or {}
+        ts = tr.get("t") or []
+        xs = tr.get("x") or []
+        zs = tr.get("z") or []
+        tgt = tr.get("target") or []
+        if not ts:
+            continue
+        idxs = [i for i, t in enumerate(ts) if t <= end_sec]
+        if len(idxs) < 2:
+            continue
+        spawn = pl.get("spawn") or {}
+        sx = spawn.get("x") or 0.0
+        sz = spawn.get("z") or 0.0
+        radius = pl.get("personal_base_radius") or 150.0
+        ship_tl = pl.get("ship_timeline") or {}
+        ship_t = ship_tl.get("t") or []
+        ship_odf = ship_tl.get("odf") or []
+        path = 0.0
+        for a, b in zip(idxs, idxs[1:]):
+            dt = ts[b] - ts[a]
+            if dt <= 0:
+                continue
+            dist = math.hypot(xs[b] - xs[a], zs[b] - zs[a])
+            if dist / dt <= teleport:
+                path += dist
+        span = max(1.0, ts[idxs[-1]] - ts[idxs[0]])
+        dists = [math.hypot(xs[i] - sx, zs[i] - sz) for i in idxs]
+        in_base = sum(1 for d in dists if d < radius)
+        locks = 0
+        lock_n = 0
+        at_base_pilot = 0
+        odf_i = 0
+        cur_odf = ""
+        for n, i in enumerate(idxs):
+            while odf_i < len(ship_t) and ship_t[odf_i] <= ts[i]:
+                cur_odf = ship_odf[odf_i] if odf_i < len(ship_odf) else ""
+                odf_i += 1
+            if i < len(tgt):
+                lock_n += 1
+                if tgt[i]:
+                    locks += 1
+            if "user_m" in (cur_odf or "").lower() and dists[n] < radius:
+                at_base_pilot += 1
+        raw[name] = {
+            "time_in_base_pct": in_base / len(idxs),
+            "max_dist": max(dists) if dists else 0.0,
+            "path_per_sec": path / span,
+            "target_lock_pct": round(locks / lock_n, 3) if lock_n else 0.0,
+            "at_base_pilot_sec": float(at_base_pilot),
+        }
+    if not raw:
+        return {}
+    maxes = sorted(v["max_dist"] for v in raw.values())
+    pps = sorted(v["path_per_sec"] for v in raw.values())
+    p95_max = _percentile(maxes, 0.95) or 1.0
+    p95_pps = _percentile(pps, 0.95) or 1.0
+    out = {}
+    for name, v in raw.items():
+        norm_max = min(v["max_dist"] / p95_max, 1.0) if p95_max > 0 else 0.0
+        norm_pps = min(v["path_per_sec"] / p95_pps, 1.0) if p95_pps > 0 else 0.0
+        score = round(100 * (
+            0.5 * (1.0 - v["time_in_base_pct"])
+            + 0.3 * norm_max
+            + 0.2 * norm_pps
+        ))
+        out[name] = {
+            "activity_score": max(0, min(100, score)),
+            "target_lock_pct": v["target_lock_pct"],
+            "at_base_pilot_sec": round(v["at_base_pilot_sec"], 1),
+        }
+    return out
+
+
+def fold_bench_combat(
+    cutoff_tick,
+    dealt_log,
+    recv_log,
+    self_log,
+    struct_log,
+    shot_log,
+    hit_log,
+    kill_log,
+    dmg_by_victim,
+    pvp_kill_log,
+    snipe_feed,
+    tick_rate,
+    nick_for_s64,
+    wpn_name,
+    s64_to_slot,
+    slot_to_faction,
+    team_factions,
+    mirror_match,
+):
+    """Sum the classified combat journal for events with tick < cutoff_tick.
+
+    The journal is appended at the same sites as the full-match accumulators,
+    so a cutoff past the last tick reproduces those personals.
+    """
+    dealt = defaultdict(float)
+    recv = defaultdict(float)
+    self_d = defaultdict(float)
+    pvp_d = defaultdict(float)
+    struct = defaultdict(float)
+    shots = defaultdict(lambda: defaultdict(int))
+    hits = defaultdict(lambda: defaultdict(int))
+    pvp_hits = defaultdict(lambda: defaultdict(int))
+    kills = defaultdict(int)
+    pvp_kills = defaultdict(int)
+    self_kills = defaultdict(int)
+    snipes = defaultdict(int)
+
+    for tick, s64, amount in dealt_log:
+        if tick < cutoff_tick:
+            dealt[s64] += amount
+    for tick, s64, amount in recv_log:
+        if tick < cutoff_tick:
+            recv[s64] += amount
+    for tick, s64, amount in self_log:
+        if tick < cutoff_tick:
+            self_d[s64] += amount
+    for tick, s64, vfc, amount in struct_log:
+        if tick >= cutoff_tick:
+            continue
+        slot = s64_to_slot.get(s64)
+        team_num = slot_to_faction(slot) if slot else 0
+        entry = team_factions.get(team_num) if team_num in (1, 2) else None
+        team_fc = entry["code"] if entry else None
+        if team_fc is None or mirror_match or vfc != team_fc:
+            struct[s64] += amount
+    for victim, events in dmg_by_victim.items():
+        for tick, shooter, amount in events:
+            if tick < cutoff_tick and shooter:
+                pvp_d[shooter] += amount
+    for tick, s64, odf in shot_log:
+        if tick < cutoff_tick and odf:
+            shots[s64][odf] += 1
+    for tick, s64, odf, is_pvp in hit_log:
+        if tick < cutoff_tick and odf:
+            hits[s64][odf] += 1
+            if is_pvp:
+                pvp_hits[s64][odf] += 1
+    for tick, s64, is_pvp, is_self in kill_log:
+        if tick < cutoff_tick:
+            kills[s64] += 1
+            if is_pvp:
+                pvp_kills[s64] += 1
+            if is_self:
+                self_kills[s64] += 1
+    for row in snipe_feed or []:
+        if (row.get("tick") or 0) < cutoff_tick:
+            snipes[row.get("sniper") or ""] += 1
+
+    dmg_cut = {}
+    for victim, events in dmg_by_victim.items():
+        kept = [e for e in events if e[0] < cutoff_tick]
+        if kept:
+            dmg_cut[victim] = kept
+    kills_cut = [row for row in pvp_kill_log if row[0] < cutoff_tick]
+    effective, _assists, _feed = _compute_effective_kills(
+        kills_cut, dmg_cut, tick_rate, nick_for_s64,
+    )
+
+    s64s = set(dealt) | set(recv) | set(self_d) | set(pvp_d) | set(struct)
+    s64s |= set(shots) | set(hits) | set(kills) | set(effective)
+    out = {}
+    for s64 in s64s:
+        d = dealt.get(s64, 0.0)
+        r = recv.get(s64, 0.0)
+        sd = self_d.get(s64, 0.0)
+        pd = pvp_d.get(s64, 0.0)
+        pve_d = max(0.0, d - pd - sd)
+        pk = pvp_kills.get(s64, 0)
+        sk = self_kills.get(s64, 0)
+        kk = kills.get(s64, 0)
+        weapons = {}
+        odfs = set(shots.get(s64, {})) | set(hits.get(s64, {}))
+        for odf in odfs:
+            key = wpn_name(odf)
+            slot = weapons.setdefault(key, {"shots": 0, "hits": 0, "pvp_hits": 0})
+            slot["shots"] += shots[s64].get(odf, 0)
+            slot["hits"] += hits[s64].get(odf, 0)
+            slot["pvp_hits"] += pvp_hits[s64].get(odf, 0)
+        out[s64] = {
+            "personal": {
+                "dealt": round(d, 1),
+                "received": round(r, 1),
+                "pvp_dealt": round(pd, 1),
+                "pve_dealt": round(pve_d, 1),
+                "structure_dealt": round(struct.get(s64, 0.0), 1),
+                "pvp_kills": pk,
+                "pve_kills": max(0, kk - pk - sk),
+                "effective_pvp_kills": round(effective.get(s64, 0.0), 2),
+            },
+            "weapon_breakdown": weapons,
+        }
+    return out, dict(snipes)
+
+
 def _stamp_zero_damage_flags(leaderboard):
     """Flag thugs who dealt exactly 0 personal damage.
 
@@ -5301,6 +5634,15 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # post-loop distribute kill credit by in-window damage share with a
     # finisher floor. See EFFECTIVE_KILL_* constants near the top of the file.
     dmg_by_victim = defaultdict(list)  # victim_s64 -> [(tick, shooter_s64, amount), ...]
+    # Terminal-bench journal. Same increments as the rating accumulators,
+    # so a cutoff past the last tick reproduces the full personals.
+    bench_dealt_log = []    # (tick, s64, amount)
+    bench_recv_log = []
+    bench_self_log = []
+    bench_struct_log = []   # (tick, s64, victim_faction_code, amount)
+    bench_shot_log = []     # (tick, s64, odf)
+    bench_hit_log = []      # (tick, s64, odf, is_pvp)
+    bench_kill_log = []     # (tick, s64, is_pvp, is_self)
     pvp_kill_log = []                  # [(tick, killer_s64, victim_s64, feed_idx), ...]
 
     # Combat engagement capture (match.schema_version 27, display-only).
@@ -5738,6 +6080,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             if shooter > 0 and odf:
                 all_ordnance.add(odf)
                 player_shots_fired[shooter][odf] += 1
+                bench_shot_log.append((bi.tick, shooter, odf))
                 slot = s64_to_slot.get(shooter)
                 if slot:
                     faction = slot_to_faction(slot)
@@ -5836,6 +6179,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             if shooter > 0 and odf:
                 all_ordnance.add(odf)
                 player_shots_hit[shooter][odf] += 1
+                bench_hit_log.append((bh.tick, shooter, odf, bool(is_pvp_hit)))
                 if is_pvp_hit:
                     # PvP-only weapon-level hit counter (subset of
                     # player_shots_hit). Drives v2.3 thug_accuracy.
@@ -6028,6 +6372,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
                 if shooter > 0:
                     player_dealt[shooter] += de_amount
+                    bench_dealt_log.append((de_tick, shooter, de_amount))
                     if odf:
                         player_weapon_dealt[shooter][odf] += de_amount
                         player_weapons_used[shooter].add(odf)
@@ -6075,6 +6420,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         v_fc = faction_from_odf(v_odf)
                         if v_fc:
                             player_structure_dealt_by_vfc[shooter][v_fc] += de_amount
+                            bench_struct_log.append((de_tick, shooter, v_fc, de_amount))
                 else:
                     asset_dealt[de_shooter_team] += de_amount
 
@@ -6087,6 +6433,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
                 if victim > 0:
                     player_received[victim] += de_victim_amount
+                    bench_recv_log.append((de_tick, victim, de_victim_amount))
                     if odf:
                         player_weapon_received[victim][odf] += de_victim_amount
                 else:
@@ -6106,6 +6453,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     # attribution ledger gates self.
                     if de_shooter == victim:
                         player_self_dealt[de_shooter] += de_amount
+                        bench_self_log.append((de_tick, de_shooter, de_amount))
                     else:
                         rivalry[de_shooter][victim] += de_amount
                         # match.schema_version 13: per-victim PvP damage log
@@ -6236,6 +6584,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                     player_self_kills[ud.killer] += 1
                 if killer_is_player:
                     player_kills[ud.killer] += 1
+                    bench_kill_log.append((
+                        ud.tick, ud.killer, bool(is_pvp_kill),
+                        bool(victim_is_player and ud.killer == ud.victim),
+                    ))
                     # Per-ship combat: attribute kill to killer's active ship.
                     kc_ship = _ship_key(ud.killer)
                     per_ship_combat[ud.killer][kc_ship]["kills"] += 1
@@ -8479,12 +8831,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # scrap_income_opening -- full-rate totals for the first 240s.
             # Additive. The VTSR-C loose_share axis uses whole-match
             # income_loose / scrap_income at weight 0.
-            # v30 (this version): leaderboard[].is_zero_damage. A thug
-            # with personal.dealt == 0 is omitted from VTSR-T and career
-            # when the match recorded some personal damage. Commanders
-            # are never flagged. Pre-v30 rows lack the field; consumers
-            # default it to false.
-            "schema_version": 30,
+            # v30: leaderboard[].is_zero_damage. A thug with personal.dealt
+            # == 0 is omitted from VTSR-T and career when the match recorded
+            # some personal damage. Commanders are never flagged. Pre-v30
+            # rows lack the field; consumers default it to false.
+            # v31 (this version): optional match.bench plus
+            # leaderboard[].bench_prefix. A connected player who stops
+            # fighting after a sticky leave stays rated; VTSR-T uses the
+            # prefix. Absent when the pattern does not fire. Not in
+            # contributions. Career stats stay the full match.
+            "schema_version": 31,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -8634,6 +8990,85 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         ),
         "positioning": positioning_block,
     }
+
+    # Terminal bench (match.schema_version 31). Optional. Career stats
+    # keep the full match; only VTSR-T reads bench_prefix.
+    _bench_hit = detect_terminal_bench(
+        leaderboard,
+        tl_by_player,
+        TIMELINE_BUCKET_SECONDS,
+        duration_sec,
+        leave_end_sec_by_name={
+            nick_for_s64(s64): (last - min_tick) / tick_rate
+            for s64, last in player_last_tick.items()
+            if s64 and min_tick != float("inf") and tick_rate > 0
+        },
+    )
+    if _bench_hit and _bench_hit["active_share"] < BENCH_MIN_ACTIVE_SHARE:
+        print(
+            f"  bench below floor: {_bench_hit['name']} "
+            f"share={_bench_hit['active_share']:.2f} after "
+            f"{_bench_hit['leaver_name']} left (not applied)"
+        )
+        _bench_hit = None
+    if _bench_hit:
+        _bench_cut = min_tick + _bench_hit["effective_end_sec"] * tick_rate
+        _prefix_by_s64, _prefix_snipes = fold_bench_combat(
+            _bench_cut,
+            bench_dealt_log, bench_recv_log, bench_self_log, bench_struct_log,
+            bench_shot_log, bench_hit_log, bench_kill_log,
+            dmg_by_victim, pvp_kill_log, snipe_feed,
+            tick_rate, nick_for_s64, wpn_name,
+            s64_to_slot, slot_to_faction, _team_factions_pre, mirror_match,
+        )
+        _full_by_s64, _full_snipes = fold_bench_combat(
+            (max_tick if max_tick < float("inf") else 0) + 1,
+            bench_dealt_log, bench_recv_log, bench_self_log, bench_struct_log,
+            bench_shot_log, bench_hit_log, bench_kill_log,
+            dmg_by_victim, pvp_kill_log, snipe_feed,
+            tick_rate, nick_for_s64, wpn_name,
+            s64_to_slot, slot_to_faction, _team_factions_pre, mirror_match,
+        )
+        _prefix_move = _prefix_movement_metrics(
+            positioning_block, _bench_hit["effective_end_sec"],
+        )
+        for _row in leaderboard:
+            _s64_raw = _row.get("steam64")
+            _s64 = int(_s64_raw) if _s64_raw else None
+            _full = (_full_by_s64.get(_s64) or {}).get("personal") or {}
+            _pers = _row.get("personal") or {}
+            for _key in (
+                "dealt", "received", "pvp_dealt", "pve_dealt", "structure_dealt",
+                "pvp_kills", "pve_kills", "effective_pvp_kills",
+            ):
+                if abs((_full.get(_key) or 0) - (_pers.get(_key) or 0)) > 0.15:
+                    print(
+                        f"  WARN bench journal {_row.get('name')} {_key}: "
+                        f"journal={_full.get(_key)} personal={_pers.get(_key)}"
+                    )
+            _pre = _prefix_by_s64.get(_s64) or {
+                "personal": {
+                    "dealt": 0.0, "received": 0.0, "pvp_dealt": 0.0,
+                    "pve_dealt": 0.0, "structure_dealt": 0.0,
+                    "pvp_kills": 0, "pve_kills": 0, "effective_pvp_kills": 0.0,
+                },
+                "weapon_breakdown": {},
+            }
+            _move = _prefix_move.get(_row.get("name")) or {}
+            _pre = dict(_pre)
+            _pre["snipes"] = int(_prefix_snipes.get(_row.get("name")) or 0)
+            _pre["activity_score"] = _move.get("activity_score")
+            _pre["target_lock_pct"] = _move.get("target_lock_pct")
+            _pre["at_base_pilot_sec"] = _move.get("at_base_pilot_sec")
+            _row["bench_prefix"] = _pre
+        match_data["match"]["bench"] = _bench_hit
+        _end = _bench_hit["effective_end_sec"]
+        print(
+            f"  bench: {_bench_hit['name']} rated through "
+            f"{int(_end // 60)}:{int(_end % 60):02d} after "
+            f"{_bench_hit['leaver_name']} left "
+            f"(share {_bench_hit['active_share']:.2f})"
+        )
 
     # v17: economy / builds blocks attach only when their data exists --
     # pre-v4 matches have no key at all (pre-v2 highlights precedent).

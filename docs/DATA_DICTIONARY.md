@@ -2892,6 +2892,38 @@ counted in each key but excluded once from the rated lobby.
   rows lack `is_zero_damage`; consumers default the flags to `False`
   and treat the row as a normal thug.
 
+### Terminal bench (`match.schema_version` 31)
+
+Optional `match.bench` and `leaderboard[].bench_prefix`. Absent when the
+pattern does not fire. Not an exclusion flag: the player stays rated, and
+career rollups still use the full match.
+
+`match.bench` is `{name, steam64, effective_end_sec, active_share,
+leaver_name}`. It fires when all of these hold:
+
+- Someone's presence window covers under 75% of the match (`is_low_activity`).
+- Exactly one other player is still connected (presence covers at least 98%)
+  and, after time T, has dealt at most 1,500 damage, with at least 10 minutes
+  of match left and at least 5,000 dealt before T.
+- T is no more than 3 minutes before that leave and no more than 15 minutes
+  after it.
+- At the leave, the quiet player's team has strictly more people still
+  present than the other team.
+- `active_share` (`T / duration_sec`) is at least 0.60. A shorter quiet
+  stretch is logged and not applied.
+
+`bench_prefix` on each leaderboard row holds the combat personal, weapon
+shots/hits, snipe count, and movement metrics cut at T. `scripts/elo.py`
+scores the benched player on that prefix lobby and leaves every other
+player's full-match performance in place. The commander handicap does not
+move, because the rated lobby is unchanged.
+
+A player who disconnects and comes back is not a leaver. A player who goes
+quiet and then deals damage again has no suffix through the end. Neither
+case emits `match.bench`.
+
+The dashboard shows a `Benched` badge. It is not the Partial badge.
+
 ## 10.3 Account Reroutes (`match.schema_version` 7)
 
 Pipeline-side identity rewrite for the shared-PC case: when a different

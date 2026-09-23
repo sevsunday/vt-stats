@@ -6438,6 +6438,17 @@
       const idleBadge = (!r.is_campod && !r.is_low_activity && r.is_zero_damage)
         ? ` <span class="vt-idle-badge" data-bs-toggle="tooltip" title="Dealt 0 damage — excluded from VTSR-T and career stats">Idle</span>`
         : '';
+      const benchInfo = currentData && currentData.match && currentData.match.bench;
+      const benchSec = benchInfo ? Number(benchInfo.effective_end_sec) || 0 : 0;
+      const benchMin = Math.floor(benchSec / 60);
+      const benchRem = Math.round(benchSec % 60);
+      const benchOn = benchInfo && (
+        (benchInfo.steam64 && String(benchInfo.steam64) === String(r.steam64))
+        || benchInfo.name === r.name
+      );
+      const benchBadge = benchOn
+        ? ` <span class="vt-bench-badge" data-bs-toggle="tooltip" title="Stopped fighting after ${esc(benchInfo.leaver_name || 'a player')} left. VTSR-T uses play through ${benchMin}:${String(benchRem).padStart(2, '0')}. Career stats still include the whole match.">Benched</span>`
+        : '';
       // v7 (schema_version 7): identity-reroute provenance chip. Set by the
       // pipeline's ACCOUNT_REROUTES mechanism (scripts/process_stats.py)
       // when this slot's Steam64 was rewritten at session-load time
@@ -6465,7 +6476,7 @@
       const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
       return `<tr class="${rowClass}">
         <td>${i + 1}</td>
-        <td class="fw-semibold">${vtPlayerLinkHtml(r.name, r.steam64)}${nickSub}${campodBadge}${partialBadge}${idleBadge}${rerouteBadge}</td>
+        <td class="fw-semibold">${vtPlayerLinkHtml(r.name, r.steam64)}${nickSub}${campodBadge}${partialBadge}${idleBadge}${benchBadge}${rerouteBadge}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
         <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>

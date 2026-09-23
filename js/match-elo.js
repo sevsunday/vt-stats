@@ -363,6 +363,16 @@
       const idle = (!row.is_campod && !row.is_low_activity && row.is_zero_damage)
         ? ' <span class="vt-idle-badge" title="Dealt 0 damage — not rated">Idle</span>'
         : '';
+      const benchInfo = currentData && currentData.match && currentData.match.bench;
+      const benchOn = benchInfo && (
+        (benchInfo.steam64 && String(benchInfo.steam64) === String(row.steam64))
+        || benchInfo.name === row.name
+      );
+      const benchSec = benchOn ? Number(benchInfo.effective_end_sec) || 0 : 0;
+      const benchClock = `${Math.floor(benchSec / 60)}:${String(Math.round(benchSec % 60)).padStart(2, '0')}`;
+      const bench = benchOn
+        ? ` <span class="vt-bench-badge" title="Stopped fighting after ${(benchInfo.leaver_name || 'a player')} left. VTSR-T uses play through ${benchClock}. Career stats still include the whole match.">Benched</span>`
+        : '';
       let trackInner = '';
       let deltaHtml = '<span class="vt-match-elo-delta text-muted">&mdash;</span>';
       if (d) {
@@ -382,7 +392,7 @@
       return `<div class="vt-match-elo-row${selected}${muted}" data-elo-key="${esc(key)}" role="button" tabindex="0">
         <span class="vt-match-elo-row-who">
           <span class="badge ${fBadge}">${row.faction || '?'}</span>
-          ${playerLinkHtml(row.name, row.steam64)}${cmdr}${campod}${partial}${idle}
+          ${playerLinkHtml(row.name, row.steam64)}${cmdr}${campod}${partial}${idle}${bench}
         </span>
         <span class="vt-match-elo-track">${trackInner}</span>
         ${deltaHtml}
