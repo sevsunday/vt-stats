@@ -858,7 +858,7 @@ const BZ2API = (function() {
    * Build the ordered fetch-candidate list for the resolved mode.
    * Each candidate: { key, kind: 'direct'|'proxy', label, url, timeoutMs }.
    */
-  function buildFetchCandidates(targetUrl, mode) {
+  function buildFetchCandidates(targetUrl, mode, flags) {
     const proxyCandidate = (base) => {
       let label = 'local dev proxy';
       try { label = new URL(base, 'http://x').hostname || label; } catch (_) { /* relative */ }
@@ -879,6 +879,17 @@ const BZ2API = (function() {
       url: targetUrl,
       timeoutMs: DIRECT_TIMEOUT_MS,
     };
+
+    // Dashboard presence pulse: one attempt, then stop. A miss leaves the
+    // Tools link unpulsed. Public CORS proxies stay on Tools / Game Watch,
+    // where the screen is actually waiting on the lobby.
+    if (flags && flags.presence) {
+      if (!isLocalDevContext()) return [direct];
+      let port = '';
+      try { port = String((typeof location !== 'undefined' && location.port) || ''); } catch (_) { /* */ }
+      const base = DEV_SERVER_PORTS.has(port) ? '/__proxy?url=' : LOCAL_DEV_PROXY_ABSOLUTE[0];
+      return [proxyCandidate(base)];
+    }
 
     let candidates;
     if (mode === 'direct') {
@@ -912,11 +923,22 @@ const BZ2API = (function() {
    * @param {string} options.apiUrl - API URL (defaults to the MSL sessions endpoint)
    * @param {boolean} options.bustCache - Add cache-busting param (default: true)
    * @param {string} options.mode - Optional 'auto' | 'direct' | 'proxy' override
+   * @param {boolean} options.quiet - Skip per-candidate console warnings
+   * @param {boolean} options.presence - One attempt only (local relay, or direct
+   *   on a public host). No public CORS proxy chain.
    * @param {Function} options.onStatus - Optional callback for status updates
    * @returns {Promise<Object>} Raw MSL API response
    */
   async function fetchRaw(options = {}) {
-    const { proxyUrl, apiUrl = DEFAULT_API_URL, bustCache = true, onStatus, mode } = options;
+    const {
+      proxyUrl,
+      apiUrl = DEFAULT_API_URL,
+      bustCache = true,
+      onStatus,
+      mode,
+      quiet = false,
+      presence = false,
+    } = options;
     
     // Add cache-busting to the target URL
     const targetUrl = bustCache ? addCacheBuster(apiUrl) : apiUrl;
@@ -928,7 +950,7 @@ const BZ2API = (function() {
       return data;
     }
     
-    const candidates = buildFetchCandidates(targetUrl, mode || resolveFetchMode());
+    const candidates = buildFetchCandidates(targetUrl, mode || resolveFetchMode(), { presence });
     let lastError = null;
 
     for (const candidate of candidates) {
@@ -959,7 +981,9 @@ const BZ2API = (function() {
         lastError = err;
         // A remembered method that stopped working shouldn't stay pinned.
         if (lastSuccessfulMethod === candidate.key) lastSuccessfulMethod = null;
-        console.warn(`[bz2api] ${candidate.kind} fetch failed (${candidate.label}):`, err && err.message);
+        if (!quiet) {
+          console.warn(`[bz2api] ${candidate.kind} fetch failed (${candidate.label}):`, err && err.message);
+        }
         onStatus?.({
           step,
           status: 'failed',

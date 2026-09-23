@@ -360,6 +360,8 @@
       const result = await api.fetchSessions({
         enrichMaps: false,
         enrichVsrMaps: false,
+        presence: true,
+        quiet: true,
       });
       const filtered = filterAllowlisted(result && result.sessions);
       const hasWidget = !!document.getElementById('vt-active-game');
@@ -374,13 +376,12 @@
       if (hasWidget) {
         dispatchWidget();
       }
-    } catch (err) {
+    } catch {
       errorStreak += 1;
       nextDelayMs = Math.min(nextDelayMs * 2, POLL_MAX_BACKOFF_MS);
       activeSessions = [];
       setToolsLiveSignal(false);
       if (document.getElementById('vt-active-game')) dispatchWidget();
-      console.warn('[active-game] poll failed:', err && err.message);
     } finally {
       inFlight = false;
       schedule();
