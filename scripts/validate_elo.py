@@ -90,7 +90,27 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = 6  # v1.5: recent-form window + match-chronology timeline (explainer telemetry)
+VALIDATOR_VERSION = 7  # v1.6: VTSR-C opening-semantics promote rule + early-vs-full
+
+# 2026-09-23 VTSR-C amendment. Confirmation duels are dated strictly after
+# this day. Mirrors elo_commander.ECON_SEMANTICS_AMENDED_ON; the history
+# header wins when it is present.
+ECON_SEMANTICS_AMENDED_ON = "2026-09-23"
+ECON_PROMOTE_MIN_CONFIRMATION = 25
+ECON_PROMOTE_CI_FLOOR = 0.55
+ECON_PROMOTE_MIN_AXES = 2
+ECON_PROMOTE_CLOSE_FLOOR = 0.50
+ECON_PROMOTE_CLOSE_MIN_N = 15
+ECON_PROMOTE_CLOSE_FRAC = 0.75
+ECON_PROMOTE_LOGLOSS_DELTA = 0.01
+ECON_OPENING_WINDOW_SEC = 240.0
+ECON_SCORED_AXES = ("pool_tempo", "combat_conversion", "regen_tempo")
+# Retired full-match formulas, diagnostic only. Not a promote sample.
+ECON_LEGACY_AXES = (
+    "pool_full", "production_full", "replacement_full",
+    "efficiency_full", "upgrade_full",
+)
+RECYCLER_STEMS = frozenset({"ibrecy_vsr", "ebrecym_vsr", "fbrecy_vsr"})
 
 # Last-N windows for the ELO page. Determined = provable-winner matches
 # the accuracy metrics already score. Rated = every non-excluded history
@@ -1983,7 +2003,15 @@ def metric_cmdr_econ_axes(
                 mean(rec["w_diffs"]) if rec["w_diffs"] else None
             ),
         })
-    rows.sort(key=lambda r: -(r["sign_agreement"] or 0.0))
+    weights = cmdr_history.get("econ_weights") or {}
+    for row in rows:
+        w = weights.get(row["axis"])
+        row["weight"] = w
+        row["scored"] = isinstance(w, (int, float)) and w > 0
+    rows.sort(key=lambda r: (
+        0 if r.get("scored") else 1,
+        -(r["sign_agreement"] or 0.0),
+    ))
 
     if not rows:
         return {
@@ -1997,6 +2025,8 @@ def metric_cmdr_econ_axes(
         "n_telemetry_duels": n_telemetry,
         "n_scored": n_scored,
         "axes": rows,
+        # Discovery sample. Not the promote gate — see `promote`.
+        "sample": "discovery",
     }
 
 
@@ -2008,8 +2038,18 @@ def metric_cmdr_econ_axes(
 CMDR_ALPHA_C_ABLATION = [1.0, 0.9, 0.8, 0.5]
 
 
+def _duel_day(duel: dict[str, Any]) -> str:
+    return str(duel.get("date") or "")[:10]
+
+
+def _duel_after(duel: dict[str, Any], day: str) -> bool:
+    d = _duel_day(duel)
+    return bool(d) and d > day
+
+
 def metric_cmdr_alpha_ablation(
     cmdr_history: dict[str, Any] | None,
+    score_date_after: str | None = None,
 ) -> dict[str, Any]:
     """Chronological ladder replay at each alpha_c in
     CMDR_ALPHA_C_ABLATION, scoring duel prediction ONLY on telemetry
@@ -2084,7 +2124,13 @@ def metric_cmdr_alpha_ablation(
             p = perf.get("p") if has_telemetry else None
 
             # Prediction scoring: non-draw TELEMETRY duels only.
-            if has_telemetry and outcome in ("team1", "team2"):
+            # `score_date_after` restricts the SCORE (confirmation
+            # sample). The rating walk still covers every duel.
+            in_score_window = (
+                score_date_after is None
+                or _duel_after(duel, score_date_after))
+            if (has_telemetry and outcome in ("team1", "team2")
+                    and in_score_window):
                 scored += 1
                 if e1 == 0.5:
                     correct += 0.5
@@ -2139,6 +2185,492 @@ def metric_cmdr_alpha_ablation(
         "n_telemetry_scored": canonical_row["n_telemetry_scored"],
         "replay_max_abs_diff": canonical_row["replay_max_abs_diff"],
         "per_alpha": per_alpha,
+        "score_date_after": score_date_after,
+    }
+
+
+def _odf_stem(odf: Any) -> str:
+    s = str(odf or "").strip().lower()
+    if s.endswith(".odf"):
+        s = s[:-4]
+    return s
+
+
+def _slot_side(slot: Any) -> int | None:
+    try:
+        s = int(slot)
+    except (TypeError, ValueError):
+        return None
+    if 1 <= s <= 5:
+        return 1
+    if 6 <= s <= 10:
+        return 2
+    return None
+
+
+def _loser_recycler_up_late(md: dict) -> bool | None:
+    """True when the losing recycler is still up at 75% of duration.
+
+    "Still up" = no kill-feed destruction of that side's recycler at or
+    before the cutoff (a later rebuild after an early death is not
+    reconstructed; an early death stays "not up", which fails safe).
+    None when the loser or the clock can't be read.
+    """
+    match = md.get("match") or {}
+    winner = match.get("winner") or {}
+    loser = winner.get("loser")
+    if loser not in (1, 2):
+        team = winner.get("team")
+        if team == 1:
+            loser = 2
+        elif team == 2:
+            loser = 1
+        else:
+            return None
+    duration = match.get("duration_sec") or 0
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        return None
+    tick_rate = match.get("tick_rate") or 20
+    if not isinstance(tick_rate, (int, float)) or tick_rate <= 0:
+        tick_rate = 20
+    tick_range = match.get("tick_range") or [0, 0]
+    try:
+        t0 = float(tick_range[0]) if tick_range else 0.0
+    except (TypeError, ValueError, IndexError):
+        t0 = 0.0
+    cutoff = t0 + ECON_PROMOTE_CLOSE_FRAC * float(duration) * float(tick_rate)
+    first: float | None = None
+    for row in (md.get("kills") or {}).get("feed") or []:
+        if _odf_stem(row.get("victim_odf")) not in RECYCLER_STEMS:
+            continue
+        if _slot_side(row.get("victim_team")) != loser:
+            continue
+        tick = row.get("tick")
+        if not isinstance(tick, (int, float)):
+            continue
+        if first is None or tick < first:
+            first = float(tick)
+    if first is None:
+        return True
+    return first > cutoff
+
+
+def _is_close_duel(md: dict | None) -> bool:
+    if not md:
+        return False
+    winner = (md.get("match") or {}).get("winner") or {}
+    if winner.get("decided_by") == "contested":
+        return True
+    return _loser_recycler_up_late(md) is True
+
+
+def _econ_sign_rows(duels: list[dict]) -> list[dict]:
+    """Sign-agreement rows for an already-filtered duel list."""
+    per_axis: dict[str, dict[str, Any]] = {}
+    for duel in duels:
+        outcome = duel.get("outcome")
+        if outcome not in ("team1", "team2"):
+            continue
+        t1_won = outcome == "team1"
+        for axis, block in ((duel.get("performance") or {}).get("axes") or {}).items():
+            diff = block.get("diff")
+            if not isinstance(diff, (int, float)):
+                continue
+            rec = per_axis.setdefault(
+                axis, {"n": 0, "credit": 0.0, "w_diffs": []})
+            rec["n"] += 1
+            rec["w_diffs"].append(diff if t1_won else -diff)
+            if diff == 0:
+                rec["credit"] += 0.5
+            elif (diff > 0) == t1_won:
+                rec["credit"] += 1.0
+    rows = []
+    for axis, rec in per_axis.items():
+        n = rec["n"]
+        agreement = (rec["credit"] / n) if n else None
+        ci = list(wilson_ci(int(round(rec["credit"])), n)) if n else None
+        rows.append({
+            "axis": axis,
+            "n": n,
+            "sign_agreement": agreement,
+            "sign_agreement_ci": ci,
+            "ci_lower": ci[0] if ci else None,
+            "mean_winner_minus_loser": (
+                mean(rec["w_diffs"]) if rec["w_diffs"] else None
+            ),
+        })
+    rows.sort(key=lambda r: -(r["sign_agreement"] or 0.0))
+    return rows
+
+
+def metric_cmdr_promote(
+    cmdr_history: dict[str, Any] | None,
+    per_match: dict[str, Any],
+) -> dict[str, Any]:
+    """2026-09-23 promote rule. Discovery duels never flip alpha_c.
+
+    Confirmation = telemetry duels dated strictly after
+    ``econ_semantics_amended_on``. HOLD unless every gate passes.
+    """
+    if not cmdr_history or not (cmdr_history.get("duels") or []):
+        return {
+            "available": False,
+            "verdict": "HOLD",
+            "skipped_reason": "elo_commander_history.json missing or empty",
+        }
+    amended = (cmdr_history.get("econ_semantics_amended_on")
+               or ECON_SEMANTICS_AMENDED_ON)
+    weights = cmdr_history.get("econ_weights") or {}
+    scored_names = [
+        a for a, w in weights.items()
+        if isinstance(w, (int, float)) and w > 0
+    ] or list(ECON_SCORED_AXES)
+
+    confirmation = []
+    for duel in cmdr_history["duels"]:
+        perf = duel.get("performance") or {}
+        if not perf.get("available"):
+            continue
+        if duel.get("outcome") not in ("team1", "team2"):
+            continue
+        if _duel_after(duel, amended):
+            confirmation.append(duel)
+
+    reasons: list[str] = []
+    n_conf = len(confirmation)
+    if n_conf < ECON_PROMOTE_MIN_CONFIRMATION:
+        reasons.append(
+            f"confirmation sample is {n_conf} "
+            f"(need {ECON_PROMOTE_MIN_CONFIRMATION} duels dated after {amended})"
+        )
+
+    conf_rows = _econ_sign_rows(confirmation)
+    by_axis = {r["axis"]: r for r in conf_rows}
+    cleared = []
+    for axis in scored_names:
+        row = by_axis.get(axis)
+        lo = (row or {}).get("ci_lower")
+        if isinstance(lo, (int, float)) and lo > ECON_PROMOTE_CI_FLOOR:
+            cleared.append(axis)
+    if len(cleared) < ECON_PROMOTE_MIN_AXES:
+        reasons.append(
+            f"{len(cleared)} scored axis(es) have a Wilson lower bound "
+            f"above {ECON_PROMOTE_CI_FLOOR} (need {ECON_PROMOTE_MIN_AXES} of "
+            f"{len(scored_names)})"
+        )
+
+    close = []
+    for duel in confirmation:
+        md = per_match.get(duel.get("match_id") or "")
+        if _is_close_duel(md):
+            close.append(duel)
+    close_rows = _econ_sign_rows(close)
+    close_by = {r["axis"]: r for r in close_rows}
+    close_testable = len(close) >= ECON_PROMOTE_CLOSE_MIN_N
+    if not close_testable:
+        reasons.append(
+            f"close subset is {len(close)} "
+            f"(need {ECON_PROMOTE_CLOSE_MIN_N}; not yet testable)"
+        )
+    else:
+        for axis in cleared:
+            agree = (close_by.get(axis) or {}).get("sign_agreement")
+            if not isinstance(agree, (int, float)) or agree < ECON_PROMOTE_CLOSE_FLOOR:
+                reasons.append(
+                    f"{axis} close-game agreement is below {ECON_PROMOTE_CLOSE_FLOOR}"
+                )
+
+    ablation = metric_cmdr_alpha_ablation(
+        cmdr_history, score_date_after=amended)
+    canon = None
+    best = None
+    for row in (ablation.get("per_alpha") or []):
+        if row.get("canonical"):
+            canon = row
+        elif row.get("log_loss") is not None:
+            if best is None or row["log_loss"] < best["log_loss"]:
+                best = row
+    if not canon or canon.get("log_loss") is None or not best:
+        reasons.append(
+            "confirmation ablation has no scored duels to compare")
+    else:
+        gain = canon["log_loss"] - best["log_loss"]
+        acc_ok = (
+            best.get("accuracy") is not None
+            and canon.get("accuracy") is not None
+            and best["accuracy"] >= canon["accuracy"])
+        if gain < ECON_PROMOTE_LOGLOSS_DELTA or not acc_ok:
+            reasons.append(
+                f"no alpha below 1.0 improves log-loss by "
+                f">= {ECON_PROMOTE_LOGLOSS_DELTA} without worsening accuracy "
+                f"(best gain {gain:.4f} at alpha {best.get('alpha_c')})"
+            )
+
+    return {
+        "available": True,
+        "verdict": "HOLD" if reasons else "PROMOTE",
+        "amended_on": amended,
+        "n_confirmation": n_conf,
+        "n_confirmation_required": ECON_PROMOTE_MIN_CONFIRMATION,
+        "log_loss_min_improvement": ECON_PROMOTE_LOGLOSS_DELTA,
+        "ci_floor": ECON_PROMOTE_CI_FLOOR,
+        "close_floor": ECON_PROMOTE_CLOSE_FLOOR,
+        "close_min_n": ECON_PROMOTE_CLOSE_MIN_N,
+        "reasons": reasons,
+        "confirmation_axes": conf_rows,
+        "axes_clearing_ci_floor": cleared,
+        "close": {
+            "n": len(close),
+            "testable": close_testable,
+            "axes": close_rows,
+        },
+        "confirmation_ablation": ablation,
+        "note": (
+            "Pre-amendment telemetry is a discovery sample. "
+            "It is published under econ_axes and is not a promote sample."
+        ),
+    }
+
+
+def _opening_sec(tick: Any, t0: float, tick_rate: float) -> float | None:
+    if not isinstance(tick, (int, float)) or tick_rate <= 0:
+        return None
+    return (float(tick) - t0) / tick_rate
+
+
+def _legacy_full_and_early(md: dict) -> dict[str, dict[int, float | None]] | None:
+    """Retired full-match formulas plus their first-240s analogues.
+
+    Diagnostic only. These are the 2026-09-04 axes, recomputed here so
+    the early-vs-full check does not depend on the scored composite.
+    """
+    econ = md.get("economy") or {}
+    builds = md.get("builds") or {}
+    if not (econ.get("has_resource_data") and builds.get("has_build_data")):
+        return None
+    match = md.get("match") or {}
+    duration = match.get("duration_sec") or 0
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        return None
+    tick_rate = match.get("tick_rate") or 20
+    if not isinstance(tick_rate, (int, float)) or tick_rate <= 0:
+        tick_rate = 20.0
+    tick_range = match.get("tick_range") or [0, 0]
+    try:
+        t0 = float(tick_range[0]) if tick_range else 0.0
+    except (TypeError, ValueError, IndexError):
+        t0 = 0.0
+    ticks = econ.get("ticks") or []
+    feed = builds.get("feed") or []
+    deaths = {1: 0, 2: 0}
+    for row in md.get("leaderboard") or []:
+        side = _slot_side(row.get("slot"))
+        if side is None:
+            continue
+        try:
+            deaths[side] += int(row.get("deaths") or 0)
+        except (TypeError, ValueError):
+            pass
+
+    out: dict[str, dict[int, float | None]] = {
+        "pool_full": {}, "pool_early": {},
+        "production_full": {}, "production_early": {},
+        "replacement_full": {},
+        "efficiency_full": {}, "efficiency_early": {},
+        "upgrade_full": {}, "upgrade_early": {},
+    }
+    minutes = float(duration) / 60.0
+    window_min = min(float(duration), ECON_OPENING_WINDOW_SEC) / 60.0
+    for side in (1, 2):
+        et = (econ.get("teams") or {}).get(str(side)) or {}
+        bt = (builds.get("teams") or {}).get(str(side)) or {}
+        pool_adv = et.get("pool_advantage_integral")
+        out["pool_full"][side] = (
+            float(pool_adv) / float(duration)
+            if isinstance(pool_adv, (int, float)) else None)
+        spent = bt.get("scrap_spent_units")
+        out["production_full"][side] = (
+            float(spent) / minutes if isinstance(spent, (int, float)) else None)
+        ships = bt.get("ships_built")
+        out["replacement_full"][side] = (
+            min(3.0, float(ships) / max(1, deaths[side]))
+            if isinstance(ships, (int, float)) else None)
+        mean_float = et.get("mean_float_ratio")
+        out["efficiency_full"][side] = (
+            1.0 - float(mean_float)
+            if isinstance(mean_float, (int, float)) else None)
+        upgrades = et.get("upgrades_final")
+        peak = et.get("peak_pools")
+        out["upgrade_full"][side] = (
+            min(1.0, float(upgrades) / float(peak))
+            if (isinstance(upgrades, (int, float))
+                and isinstance(peak, (int, float)) and peak >= 1)
+            else None)
+
+        pools = et.get("pool_count") or []
+        scrap = et.get("scrap") or []
+        caps = et.get("max_scrap") or []
+        ups = et.get("upgrade_count") or []
+        n = min(len(pools), len(ticks))
+        pool_sum = 0.0
+        pool_n = 0
+        float_sum = 0.0
+        float_n = 0
+        peak_open = 0.0
+        last_up = None
+        for i in range(n):
+            sec = _opening_sec(ticks[i], t0, float(tick_rate))
+            if sec is None or sec > ECON_OPENING_WINDOW_SEC:
+                if sec is not None and sec > ECON_OPENING_WINDOW_SEC:
+                    break
+                continue
+            try:
+                pool_sum += float(pools[i])
+                pool_n += 1
+                peak_open = max(peak_open, float(pools[i]))
+            except (TypeError, ValueError):
+                pass
+            if i < len(ups):
+                try:
+                    last_up = float(ups[i])
+                except (TypeError, ValueError):
+                    pass
+            if i < len(scrap) and i < len(caps):
+                try:
+                    cap = float(caps[i])
+                    pool = float(pools[i]) if i < len(pools) else 0.0
+                    if cap > 0 and cap != 20.0 * pool:
+                        float_sum += float(scrap[i]) / cap
+                        float_n += 1
+                except (TypeError, ValueError):
+                    pass
+        out["pool_early"][side] = (pool_sum / pool_n) if pool_n else None
+        out["efficiency_early"][side] = (
+            1.0 - float_sum / float_n) if float_n else None
+        out["upgrade_early"][side] = (
+            min(1.0, last_up / max(1.0, peak_open))
+            if last_up is not None and peak_open >= 1 else None)
+
+        early_spent = 0.0
+        saw_build = False
+        for row in feed:
+            if row.get("type") != "build" or row.get("team") != side:
+                continue
+            if (row.get("producer") == "constructor"
+                    or row.get("producer_resolved") == "constructor"):
+                continue
+            sec = _opening_sec(row.get("tick"), t0, float(tick_rate))
+            if sec is None or sec > ECON_OPENING_WINDOW_SEC:
+                continue
+            cost = row.get("scrap_cost")
+            if isinstance(cost, (int, float)):
+                early_spent += float(cost)
+                saw_build = True
+        out["production_early"][side] = (
+            early_spent / window_min if saw_build or window_min > 0 else None)
+
+    return out
+
+
+def metric_legacy_early_full(
+    cmdr_history: dict[str, Any] | None,
+    per_match: dict[str, Any],
+) -> dict[str, Any]:
+    """Early-vs-full sign agreement for the retired full-match formulas.
+
+    An axis is `lagging` when full-match agreement is at least 0.55 and
+    the opening-window analogue is missing or below 0.50. Lagging axes
+    cannot be added back. `eligible_to_restore` stays false: this
+    diagnostic does not authorize a formula change.
+    """
+    if not cmdr_history or not (cmdr_history.get("duels") or []):
+        return {
+            "available": False,
+            "skipped_reason": "elo_commander_history.json missing or empty",
+        }
+    # axis -> list of (diff_team1, t1_won) for full and early
+    buckets: dict[str, list[tuple[float, bool]]] = {}
+    n_joined = 0
+    for duel in cmdr_history["duels"]:
+        if not (duel.get("performance") or {}).get("available"):
+            continue
+        if duel.get("outcome") not in ("team1", "team2"):
+            continue
+        md = per_match.get(duel.get("match_id") or "")
+        if not md:
+            continue
+        values = _legacy_full_and_early(md)
+        if not values:
+            continue
+        n_joined += 1
+        t1_won = duel.get("outcome") == "team1"
+        for axis, sides in values.items():
+            v1, v2 = sides.get(1), sides.get(2)
+            if not (isinstance(v1, (int, float)) and isinstance(v2, (int, float))):
+                continue
+            buckets.setdefault(axis, []).append((float(v1) - float(v2), t1_won))
+
+    def _agree(pairs: list[tuple[float, bool]]) -> dict[str, Any]:
+        n = len(pairs)
+        if not n:
+            return {"n": 0, "sign_agreement": None, "sign_agreement_ci": None}
+        credit = 0.0
+        for diff, t1_won in pairs:
+            if diff == 0:
+                credit += 0.5
+            elif (diff > 0) == t1_won:
+                credit += 1.0
+        agreement = credit / n
+        ci = list(wilson_ci(int(round(credit)), n))
+        return {
+            "n": n,
+            "sign_agreement": agreement,
+            "sign_agreement_ci": ci,
+        }
+
+    pairs = (
+        ("pool_full", "pool_early"),
+        ("production_full", "production_early"),
+        ("replacement_full", None),
+        ("efficiency_full", "efficiency_early"),
+        ("upgrade_full", "upgrade_early"),
+    )
+    rows = []
+    for full_name, early_name in pairs:
+        full = _agree(buckets.get(full_name) or [])
+        early = (_agree(buckets.get(early_name) or [])
+                 if early_name else {"n": 0, "sign_agreement": None,
+                                     "sign_agreement_ci": None})
+        full_a = full.get("sign_agreement")
+        early_a = early.get("sign_agreement")
+        lagging = (
+            isinstance(full_a, (int, float)) and full_a >= 0.55
+            and (early_a is None or early_a < 0.50)
+        )
+        rows.append({
+            "axis": full_name,
+            "early_axis": early_name,
+            "full": full,
+            "early": early,
+            "lagging": lagging,
+            "eligible_to_restore": False,
+        })
+    if n_joined == 0:
+        return {
+            "available": False,
+            "skipped_reason": "no telemetry duels joined to a per-match file",
+        }
+    return {
+        "available": True,
+        "n_duels": n_joined,
+        "opening_window_sec": ECON_OPENING_WINDOW_SEC,
+        "axes": rows,
+        "note": (
+            "Retired full-match formulas. Lagging means the agreement "
+            "lives in the full match and not in the first 240s. "
+            "eligible_to_restore is false: this block does not authorize "
+            "putting an axis back into the score."
+        ),
     }
 
 
@@ -3003,12 +3535,10 @@ def render_markdown_report(
     lines.append("")
     if econ_axes.get("available"):
         lines.append(
-            "Mirror of §11 for the VTSR-C v2 economy composite: per axis, "
+            "Mirror of §11 for the VTSR-C economy composite: per axis, "
             "the share of telemetry duels the axis-leading commander won. "
-            "THE gate for the pre-registered promote rule "
-            "(critique/decisions/vtsr-c-v2-composite.md): alpha_c may drop "
-            "below 1.0 only at >= 25 telemetry duels with >= 3 axes above "
-            "0.55 and none below 0.35.")
+            "This is a direction check on the discovery sample. It is not "
+            "sufficient to score the axes. The promote rule is §12b.")
         lines.append("")
         lines.append(f"- **Telemetry duels:** "
                      f"{_fmt_int(econ_axes.get('n_telemetry_duels'))} "
@@ -3027,6 +3557,43 @@ def render_markdown_report(
         lines.append("- " + (econ_axes.get("skipped_reason") or "unavailable"))
     lines.append("")
 
+    promote = perf.get("promote") or {}
+    lines.append("## §12b — VTSR-C promote rule (confirmation sample)")
+    lines.append("")
+    if promote.get("available"):
+        lines.append(
+            f"Verdict: **{promote.get('verdict')}**. "
+            "Confirmation duels are dated after "
+            f"{promote.get('amended_on')}. "
+            f"{promote.get('note') or ''}")
+        lines.append("")
+        lines.append(
+            f"- Confirmation duels: {_fmt_int(promote.get('n_confirmation'))} "
+            f"(need {_fmt_int(promote.get('n_confirmation_required'))})")
+        for reason in promote.get("reasons") or []:
+            lines.append(f"- {reason}")
+    else:
+        lines.append("- " + (promote.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
+    legacy = perf.get("legacy_early_full") or {}
+    lines.append("## §12c — Retired formulas, early vs full match")
+    lines.append("")
+    if legacy.get("available"):
+        lines.append(legacy.get("note") or "")
+        lines.append("")
+        lines.append("| formula | full-match agreement | opening agreement | lagging |")
+        lines.append("|---|---|---|---|")
+        for row in legacy.get("axes") or []:
+            full_a = (row.get("full") or {}).get("sign_agreement")
+            early_a = (row.get("early") or {}).get("sign_agreement")
+            lines.append(
+                f"| `{row.get('axis')}` | {_fmt_pct(full_a)} | "
+                f"{_fmt_pct(early_a)} | {row.get('lagging')} |")
+    else:
+        lines.append("- " + (legacy.get("skipped_reason") or "unavailable"))
+    lines.append("")
+
     # §13 — VTSR-C alpha_c ablation (v1.3).
     alpha_abl = perf.get("alpha_ablation") or {}
     lines.append("## §13 — VTSR-C α_c ablation")
@@ -3037,9 +3604,12 @@ def render_markdown_report(
             "into the update score on telemetry duels only "
             "(S' = α_c·S + (1−α_c)·(P+1)/2; fallback duels stay "
             "outcome-pure per the ratified policy). Accuracy/log-loss "
-            "counted on non-draw TELEMETRY duels so the gate is never "
-            "diluted by fallback rows. The α_c = 1.0 row must reproduce "
-            "the emitted ladder (integrity column).")
+            "counted on non-draw TELEMETRY duels so the comparison is "
+            "never diluted by fallback rows. This table is the discovery "
+            "sample. The promote gate scores the confirmation sample only "
+            "(§12b) and requires log-loss to improve by at least 0.01. "
+            "The α_c = 1.0 row must reproduce the emitted ladder "
+            "(integrity column).")
         lines.append("")
         lines.append(f"- **Telemetry duels:** "
                      f"{_fmt_int(alpha_abl.get('n_telemetry_duels'))} of "
@@ -3161,9 +3731,12 @@ def render_json_report(
     ``clean_win_accuracy.recent`` (last-30 determined window) and
     ``clean_win_accuracy.accuracy_timeline``, plus
     ``winner_funnel.recent``. Strictly additive.
+    schema_version 7 (v1.6, VTSR-C opening semantics): adds
+    ``vtsr_c_perf.promote`` and ``vtsr_c_perf.legacy_early_full``.
+    Strictly additive.
     """
     return {
-        "schema_version":   6,
+        "schema_version":   7,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -3565,6 +4138,9 @@ def main(argv: list[str] | None = None) -> int:
     axis_outcome = metric_axis_outcome(history, per_match)
     print("[validate_elo] [12/14] VTSR-C econ-axis sign agreement ...")
     cmdr_econ_axes = metric_cmdr_econ_axes(cmdr_history)
+    print("[validate_elo] [12b] VTSR-C promote rule + legacy early-vs-full ...")
+    cmdr_promote = metric_cmdr_promote(cmdr_history, per_match)
+    cmdr_legacy = metric_legacy_early_full(cmdr_history, per_match)
     print("[validate_elo] [13/14] VTSR-C alpha_c ablation ...")
     cmdr_alpha_ablation = metric_cmdr_alpha_ablation(cmdr_history)
     print("[validate_elo] [14/14] Balonce Meter T-term ablation ...")
@@ -3636,6 +4212,10 @@ def main(argv: list[str] | None = None) -> int:
         "vtsr_c_perf": {
             "econ_axes":      cmdr_econ_axes,
             "alpha_ablation": cmdr_alpha_ablation,
+            # v1.6: confirmation-sample promote rule + retired-formula
+            # early-vs-full diagnostic. Additive.
+            "promote":        cmdr_promote,
+            "legacy_early_full": cmdr_legacy,
         },
         # v1.4: Balonce Meter T-term ablation (pre-registered in
         # critique/decisions/balonce-meter-t-term.md).

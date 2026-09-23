@@ -157,6 +157,99 @@ sign-agreement < 0.40 with n >= 40 telemetry duels.
 
 Anything else: HOLD at 1.0. No partial credit, no "almost".
 
+## Amendment (2026-09-23) — opening semantics, retired axes, reset clock
+
+The five formulas above stay the historical freeze. They are no longer
+what the composite records. This section replaces them. Justification is
+engine mechanics, not a fit to the duel outcomes that accumulated after
+the freeze. `CMDR_ALPHA_C` stays 1.0. Published `vtsr_c` values stay
+comparable with schema 5; `CMDR_ELO_SCHEMA_VERSION` bumps 5 → 6 because
+the audit-block axis keys changed meaning.
+
+### Why the 2026-09-04 axes are the wrong thing to score
+
+Same-match sign agreement asks whether the leader of an axis won that
+same duel. Several of the frozen formulas are full-match states that
+move because the match was already won: pools still standing, fewer
+deaths, more scrap spent. On the discovery corpus (54 telemetry duels
+as of this amendment) every axis cleared a 55% point estimate, and an
+α = 0.5 replay raised accuracy by about six points while log-loss
+stayed flat (0.594). That is a lagging indicator, not a skill signal.
+The original promote rule treats a 0.0002 log-loss dip as "improving."
+It does not.
+
+### Scored axes (higher = better command decision)
+
+Opening window `OPENING_WINDOW_SEC = 240` (the minimum rated-match
+length). Income and the regen band use the stored 1 Hz series, so the
+opening income is a downsample of the full-rate Tycoon measure. Both
+sides use the same clock.
+
+| Axis | Per-side value | Weight |
+|---|---|---|
+| `pool_tempo` | Seconds sooner to **3** pools. Raw value is `-(clock)`. `clock` is `time_to_3_pools_sec` when that time falls inside the opening window; otherwise it is `OPENING_WINDOW_SEC` (never reached, or reached only after the window — the same failed open). **Why 3, not 5:** 5 extractors is a mid-match event on this build clock (among sides that ever reach 5, the typical time is about 9 minutes; only a handful do it inside 240s). A time-to-5 axis inside the opening window is a tie on nearly every duel. 3 pools is the opening milestone (typical time about 3 minutes). This threshold is a timing fact about the build clock, not a fit to who won. | 0.43 |
+| `combat_conversion` | Combat-ship BUILD scrap in the opening divided by opening income, denominator `max(income, 1)`. Combat ships are the existing `combat_ship_odfs` set; constructor builds are excluded (same cut as `combat_ship_value`). Service pods and scavengers are not combat ships. | 0.35 |
+| `regen_tempo` | Share of opening samples in the red (fast-regen) band, using the verified segment model: red when `scrap < 20 × upgrade_count`. Samples with a dead recycler (`max_scrap == 20 × pool_count`) are skipped. No alive samples → axis unavailable for that duel. | 0.22 |
+
+Weights are the old priors on the three axes that remain, renormalized.
+They are still priors. They are not fitted.
+
+### Recorded, weight 0
+
+| Axis | Value | Why it is not scored |
+|---|---|---|
+| `replacement_ratio` | `min(3, ships_built / max(1, team deaths))` — the old `thug_supply` formula | It is hulls fielded per hull lost, not rebuild speed. Deaths fall because the side is winning. The display block also named `thug_supply` is a different statistic and must not be wired in. There is no honest prompt-rebuild clock in current telemetry. |
+| `upgrade_share` | `min(1, upgrades_final / peak_pools)` when `peak_pools ≥ 1` — the old `upgrade_investment` formula | More upgrades is not always better (a rush should not upgrade). The regen benefit of an upgrade is already inside `regen_tempo`. The final snapshot also forgets upgraded pools that died. |
+| `loose_share` | `income_loose / max(scrap_income, 1)` | Share of **whole-match** income that arrived as loose collected. Loose stays available all game and is often left on the ground; the whole match is the measurement. Weight stays 0. The wire records the pickup into the bank, not how many seconds the scrap sat before a scavenger reached it. Adding or widening this readout does not reset the promote clock and does not change the scored weights. |
+
+These stay in `performance.axes` with `weight: 0` so the audit can show
+them. They do not enter `P`.
+
+### Seed differential-std priors (one-time scale anchor)
+
+Re-anchored once on the discovery corpus so z-scores do not saturate
+the clip. Scale only — the sign of each axis does not depend on it.
+Do not refit these to chase accuracy.
+
+Binding scale, one-time RMS of team-1-perspective diffs on the 66-match
+discovery corpus, rounded. Not refit later.
+
+```
+pool_tempo          48     seconds-sooner diff
+combat_conversion    0.14  opening combat-scrap / income diff
+regen_tempo          0.054 red-share diff
+replacement_ratio    0.61  ships-per-loss diff (unscored)
+upgrade_share        0.25  upgrade-share diff (unscored)
+loose_share          0.11  whole-match loose/income diff (unscored; one-time RMS, scale only)
+```
+
+### Promote rule (replaces the 2026-09-04 rule)
+
+The pre-amendment telemetry duels are a **discovery** sample. They must
+not be the sample that flips `CMDR_ALPHA_C`. A duel counts toward
+confirmation only when its match date is **after** `2026-09-23`.
+
+Flip `CMDR_ALPHA_C` below 1.0 only when ALL of these hold on that
+confirmation sample:
+
+1. At least 25 confirmation duels.
+2. At least 2 of the 3 scored axes have a Wilson **lower bound** above
+   0.55 on same-match sign agreement. A point estimate is not enough.
+3. On the close subset — `decided_by == "contested"`, or the losing
+   recycler's first destruction is after 75% of duration (never
+   destroyed counts as still up) — those same axes are not below 0.50.
+   If the close subset has fewer than 15 duels, the gate is "not yet
+   testable" and blocks a flip.
+4. The early-vs-full diagnostic for the retired full-match formulas is
+   published. An axis whose agreement exists only on the full match and
+   disappears in the first 240s cannot be added back.
+5. An α ablation in {1.0, 0.9, 0.8, 0.5}, scored only on confirmation
+   duels, improves log-loss by at least 0.01 and does not worsen
+   accuracy. The discovery-sample dip of 0.0002 does not qualify.
+
+Anything else: HOLD. No partial blend. No weight refit on the
+confirmation sample.
+
 ## Consequence-free surface at ship
 
 - `CMDR_ELO_SCHEMA_VERSION 1 -> 2` (additive fields only).

@@ -127,7 +127,10 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # shooter-to-map-centre distances into the engagement-range histograms
 # (Burst Gun reading 800 m against a 90 m ceiling), planted phantom trail
 # points at map centre, and booked tens of thousands of fake hp_lost.
-PIPELINE_VERSION = 50
+# 50 -> 51: opening-window loose + income (first 240s, full rate) on
+# economy.teams. Display / VTSR-C audit only. Ratings do not read them
+# into the scored composite (loose_share weight is 0).
+PIPELINE_VERSION = 51
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -171,6 +174,12 @@ ECON_CANCEL_REFUND_FRACTION = 0.5
 # Display surfaces lead with income_loose (the amount); the piece count
 # (loose_collections) is secondary telemetry.
 ECON_LOOSE_SIZE = 5
+# First 240s of the match, matching elo_commander.OPENING_WINDOW_SEC.
+# Full-rate income and loose booked inside this window. The 1 Hz scrap
+# series cannot recover loose (spend and a pickup in the same second
+# cancel), so the opening totals are accumulated here, beside the
+# classifier, not reconstructed later.
+ECON_OPENING_WINDOW_SEC = 240.0
 # Refund-match floor. A cancel's expected refund must be at least this
 # large to be claimed off a positive bank delta. MEASURED on the real v4
 # session: every legitimate refund is >= 5 (Harvester 20 -> 10, Artillery
@@ -5590,6 +5599,8 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             "prev_bank": None,
             "income": 0, "regen": 0, "loose": 0, "refund": 0,
             "unclassified": 0, "loose_collections": 0, "outflow_gross": 0,
+            # v29: full-rate totals inside the first ECON_OPENING_WINDOW_SEC.
+            "income_opening": 0, "loose_opening": 0,
             "peak_scrap": 0, "peak_max_scrap": 0,
             "scrap_sum": 0, "float_sum": 0.0, "samples": 0,
             "status_ticks": defaultdict(int),
@@ -6471,6 +6482,13 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                         # unclassified remainder. Refund candidates are
                         # cancel events within ECON_REFUND_WINDOW_TICKS.
                         _prev = st["prev_bank"]
+                        _loose_before = st["loose"]
+                        _in_opening = (
+                            min_tick < float("inf")
+                            and tick_rate > 0
+                            and (tick - min_tick) / tick_rate
+                            <= ECON_OPENING_WINDOW_SEC
+                        )
                         if _prev is not None:
                             _d = _bank - _prev
                             if _d > 0:
@@ -6534,6 +6552,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                                         st["regen"] += 1
                                         _rem = 0
                                 st["unclassified"] += _rem
+                                if _in_opening:
+                                    st["income_opening"] += _d
+                                    st["loose_opening"] += st["loose"] - _loose_before
                             elif _d < 0:
                                 st["outflow_gross"] += -_d
                         # v20 storage-cap clamp: a dying pool drops max_scrap,
@@ -7983,6 +8004,11 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 "scrap_income": st["income"],
                 "income_regen": st["regen"],
                 "income_loose": st["loose"],
+                # v29: full-rate loose and income inside the first 240s.
+                # Opening slice. The unscored loose_share axis uses the
+                # whole-match income_loose / scrap_income pair instead.
+                "income_loose_opening": st["loose_opening"],
+                "scrap_income_opening": st["income_opening"],
                 "income_refund": st["refund"],
                 "income_unclassified": st["unclassified"],
                 "loose_collections": st["loose_collections"],
@@ -8418,17 +8444,14 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # v27: top-level `engagements` block (coalesced
             # player->player DamageDealt intervals for the replay attack-line
             # overlay). Display-only; not in contributions; rating-inert.
-            # v28 (this version): death-tick (0,0,0) placeholder guard. A
-            # dying unit is parked at the world origin with negative health
-            # for exactly one tick; samples taken there are garbage. Values
-            # MOVE on existing matches -- `weapon_breakdown[w].range_hist` /
-            # `range_pct_hist`, `personal.distance_buckets`,
-            # `bullet_hit_distance.{with_distance,mean,max}`,
-            # `positioning.players[].trail` and `personal.hp_efficiency` all
-            # shed the artifact. New `bullet_hit_distance.rejected_implausible`
-            # counts the discarded range samples (the hits themselves still
-            # count, so accuracy is untouched).
-            "schema_version": 28,
+            # v28: death-tick (0,0,0) placeholder guard. A dying unit is
+            # parked at the world origin with negative health for exactly
+            # one tick; samples taken there are garbage.
+            # v29 (this version): economy.teams income_loose_opening and
+            # scrap_income_opening -- full-rate totals for the first 240s.
+            # Additive. The VTSR-C loose_share axis uses whole-match
+            # income_loose / scrap_income at weight 0.
+            "schema_version": 29,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -9893,6 +9916,7 @@ def main():
         cmdr_current, cmdr_history = elo_commander_module.compute_commander_elo(
             all_match_data, elo_history,
             external_duels=f9_duels,
+            combat_ship_stems=combat_ship_odfs,
             external_overlap_ids=frozenset(
                 ov.get("match_id")
                 for ov in (f9_ledger.get("overlaps") if f9_ledger else []) or []

@@ -1297,11 +1297,11 @@
     const strength = mag < 0.15 ? 'a narrow' : mag < 0.4 ? 'a clear' : 'a commanding';
     const axes = perf.axes || {};
     const best = Object.entries(axes)
-      .filter(([, v]) => v && isNum(v.z))
+      .filter(([, v]) => v && isNum(v.z) && v.weight !== 0)
       .sort((a, b) => Math.abs(b[1].z) - Math.abs(a[1].z))[0];
     const bestTxt = best ? ` Biggest gap: ${esc(econAxisLabel(best[0]))}.` : '';
     return `<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-      title="The commander economy composite (pool tempo, production, thug supply, bank efficiency, upgrades). It is recorded but not scored \u2014 its blend weight is still zero pending enough telemetry matches to validate it.${esc(bestTxt)}">
+      title="The commander opening read (pool tempo, combat conversion, regen tempo). Loose share is the whole match and is not scored. The rating stays win/loss until a fresh sample clears the promote rule.${esc(bestTxt)}">
       <i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>Economy: ${strength} edge to ${esc(teamPhrase(joined, side))}
       <span class="vt-mono">${fmtSigned(perf.p, 2)}</span></span>`;
   }
@@ -1309,10 +1309,11 @@
   function econAxisLabel(axis) {
     switch (axis) {
       case 'pool_tempo': return 'pool tempo';
-      case 'production_output': return 'production';
-      case 'thug_supply': return 'thug supply';
-      case 'econ_efficiency': return 'bank efficiency';
-      case 'upgrade_investment': return 'upgrades';
+      case 'combat_conversion': return 'combat conversion';
+      case 'regen_tempo': return 'regen tempo';
+      case 'replacement_ratio': return 'replacement ratio';
+      case 'upgrade_share': return 'upgrade share';
+      case 'loose_share': return 'loose share';
       default: return axis;
     }
   }

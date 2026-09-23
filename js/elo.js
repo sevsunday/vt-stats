@@ -827,11 +827,12 @@
   // Friendly labels for the VTSR-C v2 economy axes (mirror of the frozen
   // formulas in critique/decisions/vtsr-c-v2-composite.md).
   const CMDR_ECON_AXIS_META = {
-    pool_tempo:         { label: 'Pool tempo',        desc: 'Time-weighted extractor-count advantage over the opposing commander.' },
-    production_output:  { label: 'Production output', desc: 'Scrap value fielded as units per minute.' },
-    thug_supply:        { label: 'Thug supply',       desc: 'Ships built per team ship-loss (prompt rebuilds).' },
-    econ_efficiency:    { label: 'Econ efficiency',   desc: 'Low bank float — building in the fast-regen zone instead of sitting on scrap.' },
-    upgrade_investment: { label: 'Upgrade investment', desc: 'Share of extractors upgraded (long-game investment).' },
+    pool_tempo:         { label: 'Pool tempo',         desc: 'Who reached 3 extractors first, inside the opening 4 minutes. Later than that, or never, counts as a missed open.' },
+    combat_conversion:  { label: 'Combat conversion',  desc: 'In the opening 4 minutes, how much of the scrap earned became combat ships. Pods and scavengers do not count.' },
+    regen_tempo:        { label: 'Regen tempo',        desc: 'In the opening 4 minutes, how much time the bank spent in the fast-regen (red) band, and only while the recycler was alive.' },
+    replacement_ratio:  { label: 'Replacement ratio',  desc: 'Combat ships built per ship lost. Shown, not scored — it mostly restates who was winning, and it is not rebuild speed. Not the Thug supply card.' },
+    upgrade_share:      { label: 'Upgrade share',      desc: 'Share of extractors that were upgraded by the end. Shown, not scored — a rush should not upgrade, and the regen benefit is already in regen tempo.' },
+    loose_share:        { label: 'Loose share',        desc: 'Across the whole match, how much of the scrap earned was loose collected by scavengers. Shown, not scored. The recording sees the pickup, not how long the scrap sat on the ground.' },
   };
 
   /** All duels involving one commander, newest first, each tagged with
@@ -913,10 +914,12 @@
           ? `left:50%; width:${(widthPct / 2).toFixed(2)}%;`
           : `right:50%; width:${(widthPct / 2).toFixed(2)}%;`;
         const meta = CMDR_ECON_AXIS_META[axis] || { label: axis, desc: '' };
+        const unscored = a.weight === 0;
+        const label = unscored ? `${meta.label} (not scored)` : meta.label;
         return `<div class="vt-axis-bar-row ${cls}"
                      data-bs-toggle="tooltip" data-bs-placement="top"
                      title="${esc(meta.desc)} Differential z vs the opposing commander: ${z >= 0 ? '+' : ''}${z.toFixed(2)}">
-          <span class="vt-axis-bar-name">${esc(meta.label)}</span>
+          <span class="vt-axis-bar-name">${esc(label)}</span>
           <span class="vt-axis-bar-track">
             <span class="vt-axis-bar-center"></span>
             <span class="vt-axis-bar-fill" style="${fillStyle}"></span>
@@ -1279,23 +1282,40 @@
     return Object.keys(TAB_SLUGS).find(k => TAB_SLUGS[k] === target) || 'vtsr-t';
   }
 
-  function syncUrl(target) {
+  let historyWrites = 0;
+
+  function syncUrl(target, mode) {
+    if (historyWrites) return;
     const url = new URL(window.location.href);
     if (target === DEFAULT_TAB_TARGET) url.searchParams.delete('tab');
     else url.searchParams.set('tab', slugForTarget(target));
-    history.replaceState(null, '', url.toString());
+    const next = url.pathname + url.search + url.hash;
+    const cur = window.location.pathname + window.location.search + window.location.hash;
+    if (next === cur) return;
+    if (mode === 'replace') history.replaceState(null, '', next);
+    else history.pushState(null, '', next);
   }
 
   function activateTabFromUrl() {
     const slug = new URLSearchParams(window.location.search).get('tab');
     const target = TAB_SLUGS[slug];
     if (!target || target === DEFAULT_TAB_TARGET) {
-      // Normalize a legacy / redundant ?tab= that resolves to the default.
-      if (slug && target === DEFAULT_TAB_TARGET) syncUrl(DEFAULT_TAB_TARGET);
+      // Normalize a legacy / redundant / unknown ?tab= off the entry we
+      // landed on. That is a replace, not a Back step.
+      if (slug) syncUrl(DEFAULT_TAB_TARGET, 'replace');
+      const home = document.querySelector(`#elo-tabs [data-bs-target="${DEFAULT_TAB_TARGET}"]`);
+      if (home && !home.classList.contains('active')) {
+        home._vtQuiet = true;
+        window.setTimeout(() => { if (home._vtQuiet) home._vtQuiet = false; }, 1000);
+        bootstrap.Tab.getOrCreateInstance(home).show();
+      }
       return;
     }
     const btn = document.querySelector(`#elo-tabs [data-bs-target="${target}"]`);
-    if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+    if (!btn || btn.classList.contains('active')) return;
+    btn._vtQuiet = true;
+    window.setTimeout(() => { if (btn._vtQuiet) btn._vtQuiet = false; }, 1000);
+    bootstrap.Tab.getOrCreateInstance(btn).show();
   }
 
   // ----------------------------------------------------------------------
@@ -1392,7 +1412,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>What about VTSR-C?</h6>
-        <p class="mb-1">These 8 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. It does now have axes of its own &mdash; the newer collector records a five-axis economy composite (pool tempo, production, thug supply, efficiency, upgrades) on every duel it covers &mdash; but they are <strong>recorded, not scored</strong>: none of it moves a commander&rsquo;s rating until the validator shows those axes actually predict duel outcomes across at least 25 telemetry duels.</p>
+        <p class="mb-1">These 8 axes power <strong>VTSR-T only</strong>. The commander ladder (<a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">VTSR-C</a>) scores on <strong>wins and losses alone</strong>. Newer matches also record an opening economy read &mdash; who reached 3 extractors first, how much of the opening scrap became combat ships, and how much of that opening was spent in the fast-regen band, plus an unscored share of scrap earned all match that was loose collected &mdash; but it is <strong>recorded, not scored</strong>. It does not move a rating until a fresh batch of matches, recorded after the 23 Sep 2026 rule change, clears a stricter check than &ldquo;the leader of the stat also won that same match.&rdquo;</p>
         <p class="mb-0 text-muted small">One more thing the axes are now used for: every weight above gets <strong>empirically checked against real match outcomes</strong> &mdash; which axes actually predict winning lives on the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab.</p>
       </section>
     </div>`;
@@ -1441,8 +1461,8 @@
       },
       {
         icon: 'bi-cash-stack', title: 'Economy is recorded, not yet scored',
-        body: `<p>Matches recorded with the new collector carry the commander\u2019s <strong>full economy telemetry</strong> \u2014 pool tempo, production, thug supply, efficiency, upgrades \u2014 measured head-to-head against the opposing commander. None of it moves the rating yet: the blend dial sits at <strong>outcome-pure</strong> until the validator proves those axes predict duel outcomes on a real sample (a pre-registered rule &mdash; the formula can\u2019t be tuned to fit the data that judges it).</p>`,
-        verdict: 'The first telemetry match is the cautionary tale: the commander who out-earned his opponent by 33% still lost.',
+        body: `<p>Matches recorded with the new collector carry an <strong>opening economy read</strong> against the other commander: who reached 3 extractors first, how much of the first 4 minutes of scrap became combat ships, and how much of that opening was spent in the fast-regen band. Three other readouts &mdash; ships built per ship lost, upgrade share, and how much of the scrap earned all match was loose collected &mdash; are shown and <strong>not scored</strong>. None of it moves the rating yet. The blend stays <strong>outcome-pure</strong> until a fresh sample, recorded after 23 Sep 2026, clears the pre-registered rule. The formula is not tuned to fit the matches that judge it.</p>`,
+        verdict: 'The first telemetry match is the cautionary tale: the economy composite pointed at the commander who lost.',
       },
       {
         icon: 'bi-people', title: 'Stacked thugs don\u2019t inflate your commander rating',
@@ -1717,16 +1737,20 @@
           : agree >= 0.45 ? 'is-total'
           : 'is-unprovable';
         const w = agree != null ? Math.max(1.5, agree * 100) : 0;
+        const name = econLabel(r.axis) + (r.scored === false ? ' (not scored)' : '');
         return `<div class="vt-elo-funnel-row ${tone}">
           <span class="vt-elo-funnel-label" data-bs-toggle="tooltip" data-bs-placement="top"
-                title="n = ${r.n} telemetry duels">${esc(econLabel(r.axis))}</span>
+                title="n = ${r.n} telemetry duels">${esc(name)}</span>
           <span class="vt-elo-funnel-track"><span class="vt-elo-funnel-fill" style="width:${w.toFixed(1)}%;"></span></span>
           <span class="vt-elo-funnel-count">${pct(agree)}</span>
         </div>`;
       }).join('');
+      const promo = vcp.promote;
+      const promoHtml = (promo && promo.verdict) ? `<p class="vt-elo-acc-blurb">Blend status: <strong>${esc(promo.verdict)}</strong>. ${esc(promo.note || '')} Confirmation duels so far: ${promo.n_confirmation ?? 0} (need ${promo.n_confirmation_required ?? 25}, dated after ${esc(promo.amended_on || '')}).</p>` : '';
       cmdrEconHtml += `<div class="vt-elo-acc-section">
         <h6>Do the commander economy axes predict duels?</h6>
-        <p class="vt-elo-acc-blurb">Across the ${ea.n_scored ?? 0} verified duels with proto v4 telemetry: when one commander led an economy axis, how often did they win? This is <strong>the gate</strong> for the inert v2 composite \u2014 \u03b1<sub>c</sub> drops below 1 only when \u2265 3 axes clear 55% at \u2265 25 telemetry duels (pre-registered rule; sample is tiny early, expect wide swings).</p>
+        <p class="vt-elo-acc-blurb">Across the ${ea.n_scored ?? 0} verified duels with proto v4 telemetry: when one commander led an economy axis, how often did they win? That same-match agreement is <strong>necessary and not sufficient</strong>. It does not turn the blend on. The blend stays off until a fresh sample, recorded after the 23 Sep 2026 rule change, also holds up in close games and actually improves prediction.</p>
+        ${promoHtml}
         <div class="vt-elo-funnel">${rows}</div>
       </div>`;
     }
@@ -1743,7 +1767,7 @@
       }).join('');
       cmdrEconHtml += `<div class="vt-elo-acc-section">
         <h6>The \u03b1<sub>c</sub> dial (economy blend ablation)</h6>
-        <p class="vt-elo-acc-blurb">What would happen if the economy composite started counting? The validator replays the ladder at each blend weight, scoring only the ${ab.n_telemetry_scored ?? 0} telemetry duel${(ab.n_telemetry_scored || 0) === 1 ? '' : 's'} so fallback (outcome-pure) duels never dilute the comparison. \u03b1<sub>c</sub> = 1 is the shipped, outcome-pure setting.</p>
+        <p class="vt-elo-acc-blurb">What would happen if the economy composite started counting? The validator replays the ladder at each blend weight on the matches already recorded. A small accuracy bump here is not enough: the blend stays off unless a later sample improves prediction by a pre-registered margin. \u03b1<sub>c</sub> = 1 is the shipped, outcome-pure setting.</p>
         <table class="vt-elo-gap-table">
           <thead><tr><th>Blend weight</th><th class="text-end">Duel accuracy</th><th class="text-end">Log-loss</th></tr></thead>
           <tbody>${abRows}</tbody>
@@ -1909,6 +1933,8 @@
         const target = e.target.getAttribute('data-bs-target');
         if (target) {
           renderTabIfNeeded(target);
+          const btn = e.target && e.target.closest ? e.target.closest('[data-bs-target]') : e.target;
+          if (btn && btn._vtQuiet) { btn._vtQuiet = false; return; }
           syncUrl(target);
         }
       });
@@ -1952,6 +1978,11 @@
     // shown.bs.tab handler above lazy-renders it (VTSR-C included — its
     // data is already fetched above, so the pill only pays for markup).
     activateTabFromUrl();
+    window.addEventListener('popstate', () => {
+      historyWrites++;
+      try { activateTabFromUrl(); }
+      finally { historyWrites--; }
+    });
   }
 
   if (document.readyState === 'loading') {
