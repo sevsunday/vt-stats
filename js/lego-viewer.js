@@ -13,6 +13,9 @@
  *  - conditional-line LineSegments come through with a null material and crash
  *    renderer.render(); hide them (the primary edge lines still draw).
  *  - LDraw is -Y up; flip on X by PI.
+ *  - setSize must update the canvas CSS box. A device-pixel canvas with no
+ *    CSS size is clipped to the stage's top-left, so a centered model sits
+ *    in the corner and often falls off a phone screen entirely.
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -38,6 +41,22 @@ const ULTRA_BLOOM_RADIUS = 0.4;
 const ULTRA_BLOOM_THRESHOLD = 0.9;              // LEGO has no emissives; keep bloom subtle
 const BG_COLORS = { dark: 0x2f343b, light: 0xd7dde6 };
 
+// Part origins within 8 studs chain into one build. Cover-art's separate
+// models sit much farther apart; a single vehicle stays one cluster.
+const POINT_JOIN = 160;
+const MIN_CLUSTER_PARTS = 6;
+// Bricks extend past their type-1 origin. Used only when several builds
+// share a file and the loader has merged their triangles together.
+const PART_OVERHANG = 80;
+const GROUND_OVERHANG = 24;
+// If the merged mesh is only a little bigger than the clusters, trust it
+// (real brick extents). A far speck blows the mesh radius out and is ignored.
+const MESH_STRAY_FACTOR = 1.35;
+// Sphere-in-frustum distance already fills the view; this is the margin
+// so the bricks don't sit on the edge. Replaces the old maxDim * 1.9.
+const FIT_PADDING = 1.2;
+const FRAME_DIR = new THREE.Vector3(0.75, 0.7, 1).normalize();
+
 export class LegoViewer {
   constructor(stageEl) {
     this.stage = stageEl;
@@ -47,7 +66,11 @@ export class LegoViewer {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
-    this.renderer.setSize(stageEl.clientWidth || 800, stageEl.clientHeight || 600, false);
+    // CSS box must match the stage. updateStyle false leaves the canvas at
+    // device-pixel size and the stage clips everything but the top-left.
+    const stageW = stageEl.clientWidth, stageH = stageEl.clientHeight;
+    if (stageW && stageH) this.renderer.setSize(stageW, stageH);
+    else this.renderer.setSize(800, 600, false);
     stageEl.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
@@ -105,9 +128,12 @@ export class LegoViewer {
     this._home = null;
     this._disposed = false;
     this._dragging = false;
+    this._userOrbited = false;
+    this._viewW = 0;
+    this._viewH = 0;
     this._camPrev = null;
 
-    this.controls.addEventListener('start', () => { this._dragging = true; });
+    this.controls.addEventListener('start', () => { this._dragging = true; this._userOrbited = true; });
     this.controls.addEventListener('end', () => { this._dragging = false; });
 
     this._ldraw = new LDrawLoader();
@@ -177,34 +203,204 @@ export class LegoViewer {
       if (o.isLineSegments) { lines++; o.visible = this._edges && o.material != null; }
     });
 
-    // Center + sit on ground.
-    let box = new THREE.Box3().setFromObject(group);
-    const size = new THREE.Vector3(); box.getSize(size);
-    const center = new THREE.Vector3(); box.getCenter(center);
-    group.position.sub(center);
-    box = new THREE.Box3().setFromObject(group);
-    group.position.y -= box.min.y;
-
+    // Seat on the median build and fit every build in frame.
+    LegoViewer._seat(group, text, this);
     this.scene.add(group);
     this._model = group;
-    this._radius = Math.max(size.x, size.y, size.z) || 100;
-    this._center = new THREE.Vector3(0, size.y * 0.45, 0);
+    this._userOrbited = false;
 
     this._applyWireframe();
-    this._frameCamera(size);
+    this._frameCamera();
     this._placeSun();
     this._camPrev = null;
     return { meshes, lines, tris: Math.round(tris) };
   }
 
-  _frameCamera(size) {
+  /* Triangles only. Edge lines and conditional-line control points sit far
+   * from the bricks and would yank the center. */
+  static _meshBox(root) {
+    root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    const tmp = new THREE.Box3();
+    let any = false;
+    root.traverse((o) => {
+      if (!o.isMesh || !o.geometry) return;
+      const g = o.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      if (!g.boundingBox || g.boundingBox.isEmpty()) return;
+      tmp.copy(g.boundingBox).applyMatrix4(o.matrixWorld);
+      box.union(tmp);
+      any = true;
+    });
+    if (!any) box.setFromObject(root);
+    if (box.isEmpty()) box.set(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
+    return box;
+  }
+
+  /* Type-1 origins of the root model, in the same space as rotation.x = PI
+   * (LDraw -Y up -> Y up, Z flipped). The loader merges part triangles into
+   * a few color meshes, so the file is the only record of separate builds. */
+  static _rootPoints(text) {
+    const pts = [];
+    let inRoot = false;
+    let seenFile = false;
+    for (const ln of text.split('\n')) {
+      const s = ln.trim();
+      const low = s.toLowerCase();
+      if (low.startsWith('0 file')) {
+        if (seenFile) break;
+        seenFile = true;
+        inRoot = true;
+        continue;
+      }
+      if (inRoot && low === '0 nofile') break;
+      inRoot = true;
+      if (s.charAt(0) !== '1') continue;
+      const toks = s.split(/\s+/);
+      if (toks.length < 5 || toks[0] !== '1') continue;
+      const x = +toks[2], y = +toks[3], z = +toks[4];
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+        pts.push(new THREE.Vector3(x, -y, -z));
+      }
+    }
+    return pts;
+  }
+
+  static _clusterPoints(pts) {
+    const n = pts.length;
+    if (!n) return [];
+    const parent = new Uint32Array(n);
+    for (let i = 0; i < n; i++) parent[i] = i;
+    const find = (i) => {
+      let r = i;
+      while (parent[r] !== r) r = parent[r];
+      while (parent[i] !== r) { const next = parent[i]; parent[i] = r; i = next; }
+      return r;
+    };
+    const cell = POINT_JOIN;
+    const buckets = new Map();
+    for (let i = 0; i < n; i++) {
+      const p = pts[i];
+      const ix = Math.floor(p.x / cell), iy = Math.floor(p.y / cell), iz = Math.floor(p.z / cell);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const list = buckets.get((ix + dx) + ',' + (iy + dy) + ',' + (iz + dz));
+            if (!list) continue;
+            for (let t = 0; t < list.length; t++) {
+              const j = list[t];
+              if (find(i) === find(j)) continue;
+              if (p.distanceTo(pts[j]) <= cell) parent[find(i)] = find(j);
+            }
+          }
+        }
+      }
+      const k = ix + ',' + iy + ',' + iz;
+      let own = buckets.get(k);
+      if (!own) { own = []; buckets.set(k, own); }
+      own.push(i);
+    }
+    const groups = new Map();
+    for (let i = 0; i < n; i++) {
+      const r = find(i);
+      let g = groups.get(r);
+      if (!g) { g = []; groups.set(r, g); }
+      g.push(i);
+    }
+    return Array.from(groups.values());
+  }
+
+  static _median(vals) {
+    const a = vals.slice().sort((p, q) => p - q);
+    const i = a.length >> 1;
+    return a.length % 2 ? a[i] : (a[i - 1] + a[i]) * 0.5;
+  }
+
+  static _cornerRadius(box, look) {
+    let radius = 0;
+    const corner = new THREE.Vector3();
+    const b = box;
+    for (const x of [b.min.x, b.max.x]) {
+      for (const y of [b.min.y, b.max.y]) {
+        for (const z of [b.min.z, b.max.z]) {
+          radius = Math.max(radius, corner.set(x, y, z).distanceTo(look));
+        }
+      }
+    }
+    return radius;
+  }
+
+  /* Look point = component-wise median of build centers, parked on the XZ
+   * origin. One build uses the mesh box (the visual center). Several builds
+   * use the median so the default view sits in the middle of the group, and
+   * the camera still backs up until every build fits. */
+  static _seat(group, text, viewer) {
+    const mesh = LegoViewer._meshBox(group);
+    const pts = LegoViewer._rootPoints(text);
+    let clusters = LegoViewer._clusterPoints(pts);
+    const kept = clusters.filter((c) => c.length >= MIN_CLUSTER_PARTS);
+    if (kept.length) clusters = kept;
+
+    let look;
+    let minY;
+    let radius;
+    if (clusters.length <= 1) {
+      look = mesh.getCenter(new THREE.Vector3());
+      minY = mesh.min.y;
+      radius = LegoViewer._cornerRadius(mesh, look);
+    } else {
+      const xs = [], ys = [], zs = [];
+      const center = new THREE.Vector3();
+      const fitBoxes = [];
+      minY = Infinity;
+      for (const indices of clusters) {
+        const box = new THREE.Box3();
+        for (const i of indices) box.expandByPoint(pts[i]);
+        box.getCenter(center);
+        xs.push(center.x); ys.push(center.y); zs.push(center.z);
+        if (box.min.y - GROUND_OVERHANG < minY) minY = box.min.y - GROUND_OVERHANG;
+        fitBoxes.push(box.clone().expandByScalar(PART_OVERHANG));
+      }
+      look = new THREE.Vector3(LegoViewer._median(xs), LegoViewer._median(ys), LegoViewer._median(zs));
+      radius = 0;
+      for (const fit of fitBoxes) {
+        radius = Math.max(radius, LegoViewer._cornerRadius(fit, look));
+      }
+      const meshR = LegoViewer._cornerRadius(mesh, look);
+      if (meshR <= radius * MESH_STRAY_FACTOR) radius = Math.max(radius, meshR);
+    }
+    group.position.set(-look.x, -minY, -look.z);
+    viewer._radius = radius || 100;
+    viewer._center.set(0, look.y - minY, 0);
+  }
+
+  _stageAspect() {
+    const w = this.stage.clientWidth, h = this.stage.clientHeight;
+    return (w && h) ? w / h : (this.camera.aspect || 1);
+  }
+
+  /* Distance from the look point so a sphere of `radius` fits the narrower
+   * of the vertical and horizontal fov (portrait phones included). */
+  _fitDistance(radius, aspect) {
+    const vFov = THREE.MathUtils.degToRad(this.camera.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(aspect, 1e-3));
+    const half = Math.min(vFov, hFov) / 2;
+    return (radius / Math.max(Math.sin(half), 1e-3)) * FIT_PADDING;
+  }
+
+  _frameCamera() {
+    const aspect = this._stageAspect();
     const r = this._radius;
-    const dist = r * 1.9;
-    this.camera.position.set(dist * 0.75, dist * 0.7, dist);
+    const dist = this._fitDistance(r, aspect);
+    this.camera.aspect = aspect;
+    this.camera.position.copy(this._center).addScaledVector(FRAME_DIR, dist);
     this.controls.target.copy(this._center);
     this.camera.near = Math.max(r / 100, 0.1);
-    this.camera.far = r * 50;
+    this.camera.far = Math.max(r * 50, dist * 4);
     this.camera.updateProjectionMatrix();
+    // Drop leftover orbit damping so the pose we just set is the one that sticks.
+    this.controls._sphericalDelta.set(0, 0, 0);
+    this.controls._panOffset.set(0, 0, 0);
     this.controls.update();
     this._home = { pos: this.camera.position.clone(), target: this.controls.target.clone() };
   }
@@ -277,11 +473,8 @@ export class LegoViewer {
 
   resetView() {
     this.controls.autoRotate = false;
-    if (this._home) {
-      this.camera.position.copy(this._home.pos);
-      this.controls.target.copy(this._home.target);
-      this.controls.update();
-    }
+    this._userOrbited = false;
+    if (this._model) this._frameCamera();
     this._invalidate();
   }
 
@@ -365,10 +558,19 @@ export class LegoViewer {
   _resize() {
     const w = this.stage.clientWidth, h = this.stage.clientHeight;
     if (!w || !h) return;
-    this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    if (this._composer) this._composer.setSize(w, h);
+    const sizeChanged = w !== this._viewW || h !== this._viewH;
+    const dpr = this.renderer.getPixelRatio();
+    if (sizeChanged || dpr !== this._appliedDpr) {
+      this._viewW = w;
+      this._viewH = h;
+      this._appliedDpr = dpr;
+      this.renderer.setSize(w, h);
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+      if (this._composer) this._composer.setSize(w, h);
+    }
+    // Keep the default frame fitted to the live aspect until the user orbits.
+    if (sizeChanged && this._model && !this._userOrbited) this._frameCamera();
   }
 
   setPaused(on) { this._paused = !!on; }
@@ -413,17 +615,19 @@ export class LegoViewer {
     this._composer.setSize(size, size);
     this.camera.aspect = 1; this.camera.updateProjectionMatrix();
 
-    const r = this._radius, dist = r * 1.9, cy = this._center.y;
+    const dist = this._fitDistance(this._radius, 1);
     const angles = [
-      ['front-right', dist * 0.75, dist * 0.7, dist],
-      ['front-left', -dist * 0.75, dist * 0.7, dist],
-      ['rear-right', dist * 0.75, dist * 0.7, -dist],
-      ['top', 0.01, dist * 1.4, 0.01],
-      ['side', dist, cy + r * 0.2, 0.01],
+      ['front-right', 0.75, 0.7, 1],
+      ['front-left', -0.75, 0.7, 1],
+      ['rear-right', 0.75, 0.7, -1],
+      ['top', 0.01, 1.4, 0.01],
+      ['side', 1, 0.2, 0.01],
     ];
+    const shotPos = new THREE.Vector3();
     const shots = [];
     for (const [name, x, y, z] of angles) {
-      this.camera.position.set(x, y, z);
+      shotPos.set(x, y, z).normalize().multiplyScalar(dist).add(this._center);
+      this.camera.position.copy(shotPos);
       this.controls.target.copy(this._center);
       this.controls.update();
       if (this._taaPass) this._taaPass.accumulate = false;
