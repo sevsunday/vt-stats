@@ -59,6 +59,13 @@ class DevHandler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):  # noqa: N802 (stdlib signature)
         sys.stderr.write("[dev] %s - %s\n" % (self.address_string(), fmt % args))
 
+    def end_headers(self):
+        # Static files otherwise stick in the browser module cache. A stale
+        # replay-structures.js then fails the named import in replay.js.
+        if "Cache-Control" not in str(getattr(self, "_headers_buffer", b"")):
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     # ------------------------------------------------------------- helpers
 
     def _send_cors_headers(self):

@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
 
-import { sampleTerrainHeight } from './objects.js';
+import { sampleTerrainHeight } from './objects.js?v=pool-flat';
 import {
   readReplayUrlParams,
   pushReplayUrlState,
@@ -30,7 +30,7 @@ import {
   buildKillIndex,
   getTickRate,
   usefulInGameNick,
-} from './replay-data.js';
+} from './replay-data.js?v=recycler-mobile';
 import {
   buildActorsGroup,
   updateActors,
@@ -41,7 +41,14 @@ import {
   buildActorLabels,
   updateActorLabels,
   applyVitalBars,
+  applyShipModelMode,
 } from './replay-actors.js';
+import {
+  initModelsPref,
+  modelsEnabled,
+  setModelsEnabled,
+  ensureMatchModels,
+} from './replay-ship-models.js?v=recycler-mobile';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,
@@ -54,13 +61,13 @@ import {
   updateTLockDiamonds,
 } from './replay-fx.js';
 import { createCameraController } from './replay-cameras.js';
-import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js';
+import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=recycler-mobile';
 import {
   buildEngagementLines,
   updateEngagements,
   clearEngagementHighlights,
 } from './replay-engagements.js';
-import { buildObjectsGroup } from './objects.js';
+import { buildObjectsGroup } from './objects.js?v=pool-flat';
 import { bootReplayDirectory } from './replay-directory.js';
 import { showResultsScreen, hideResultsScreen, isResultsShowing } from './replay-results.js';
 import { buildShipTracker } from './replay-ship-tracker.js';
@@ -78,6 +85,7 @@ import {
   disposeStartingRecyclers,
   buildStructuresLayer,
   updateStructuresLayer,
+  applyStructureModelMode,
   livingUpgradeAnchors,
   applyPoolUpgradeTint,
   collectArmoryDrops,
@@ -85,7 +93,7 @@ import {
   updateArmoryDrops,
   clearArmoryDrops,
   findStructureDeaths,
-} from './replay-structures.js';
+} from './replay-structures.js?v=factory-replace-b';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -218,8 +226,11 @@ async function boot() {
     console.error(err);
   }
 
-  setStatus('loading match index...');
-  const matchIndex = await loadMatchIndex();
+  const matchLabel = params.match || 'match';
+  statusStep(`Match index · matches.json`);
+  const matchIndex = await loadMatchIndex((got, total, phase) => {
+    statusTick(fetchLabel('Match index · matches.json', got, total, phase));
+  });
   const matchMeta = matchIndex.find(m => m.id === params.match);
   if (!matchMeta) {
     throw new Error(`match ${params.match} not in matches.json`);
@@ -230,17 +241,22 @@ async function boot() {
   const stem = (matchMeta.map || '').replace(/\.bzn$/i, '').toLowerCase();
   if (!stem) throw new Error(`match ${params.match} has no map stem`);
 
-  setStatus(`loading match data... ${matchMeta.name || ''}`);
-  const matchData = await loadMatchData(params.match);
+  const matchName = matchMeta.name || matchLabel;
+  statusStep(`Match · ${matchName} · ${params.match}.json`);
+  const matchData = await loadMatchData(params.match, (got, total, phase) => {
+    statusTick(fetchLabel(`Match · ${matchName} · ${params.match}.json`, got, total, phase));
+  });
   STATE.matchData = matchData;
   STATE.tickRate = getTickRate(matchData);
   STATE.totalSec = (matchData.match && matchData.match.duration_sec) || 0;
   STATE.progressSec = Math.max(0, Math.min(STATE.totalSec, params.t || 0));
 
-  setStatus('loading 3d extract...');
+  statusStep(`Terrain · ${stem}.3d.json`);
   let mapData;
   try {
-    mapData = await load3dData(stem);
+    mapData = await load3dData(stem, (got, total, phase) => {
+      statusTick(fetchLabel(`Terrain · ${stem}.3d.json`, got, total, phase));
+    });
   } catch (err) {
     throw new Error(
       `no 3D extract for ${stem} (looked for data/render/${stem}.3d.json). `
@@ -254,13 +270,14 @@ async function boot() {
 
   // HQ (game tiles) is the default when this map has a tile composite.
   // `?floor=minimap|ramp|wire` still wins and leaves the HQ button off.
+  statusStep('Map manifest');
   const manifest = await loadMapManifest();
   const manifestEntry = findManifestEntry(manifest, stem);
   const recommendedFloor = await resolveDefaultFloorMode(stem, manifestEntry);
   const hasTiles = !!(mapData.tileComposite);
   const initialFloor = params.floor || (hasTiles ? 'tiles' : recommendedFloor);
 
-  setStatus('building scene...');
+  statusStep('Roster');
   STATE.roster      = buildRoster(matchData);
   STATE.killIndex   = buildKillIndex(matchData);
   // Per-player ship-at-tick tracker. Walks kills.feed, pickups.feed, and
@@ -270,10 +287,46 @@ async function boot() {
   // start in scouts and only later upgrade).
   STATE.shipTracker = buildShipTracker(matchData, STATE.roster);
 
+  statusStep('Scene');
   initRenderer();
   initScene(mapData);
   initLights(mapData);
+  const hmCells = mapData.heightmap
+    ? `${mapData.heightmap.cellsX}×${mapData.heightmap.cellsZ}`
+    : '';
+  statusStep(hmCells ? `Terrain mesh · ${hmCells}` : 'Terrain mesh');
   await initFloor(mapData);
+  // Real meshes default on. Hold the log until this match's stems have
+  // settled so the first frame is not a pop from primitives to hulls.
+  initModelsPref();
+  syncModelsButton();
+  if (modelsEnabled()) {
+    statusStep('Model catalog · index.json');
+    let modelStep = false;
+    try {
+      await ensureMatchModels(matchData, (done, total, stem) => {
+        if (stem === 'catalog') {
+          statusTick('Model catalog · index.json');
+          return;
+        }
+        const name = stem ? ` · ${stem}` : '';
+        const label = !total
+          ? 'Models · none to load'
+          : `Models ${done}/${total}${name}`;
+        if (!modelStep) {
+          statusStep(label);
+          modelStep = true;
+        } else {
+          statusTick(label);
+        }
+      });
+    } catch (err) {
+      console.warn('replay models', err);
+    }
+  } else {
+    statusStep('Models · off');
+  }
+  statusStep('Actors and buildings');
   initActors();
   initTrails();
   initLabels();
@@ -298,9 +351,11 @@ async function boot() {
   wireReplayCanvasChrome();
 
   wireHqToggle(resolvedFloor);
+  wireModelsToggle();
   if (resolvedFloor === 'tiles') {
     applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
-    void loadHqFloor();
+    statusStep('Game tiles');
+    await loadHqFloor();
   } else {
     applyFloorMode(resolvedFloor);
   }
@@ -468,6 +523,8 @@ async function initFloor(mapData) {
   STATE.worldGroup.add(wire);
 
   if (mapData.minimapRel) {
+    const file = String(mapData.minimapRel).split('/').pop();
+    statusStep(file ? `Minimap · ${file}` : 'Minimap');
     await buildMinimapMaterial(mapData);
   }
 }
@@ -801,6 +858,59 @@ function syncHqButton() {
   if (!available) btn.title = 'Game tiles unavailable for this map';
   else if (STATE.hqLoad && !STATE.terrainTileMat && STATE.hqOn) btn.title = 'Loading high-quality tiles';
   else btn.title = on ? 'High-quality game tiles' : 'Minimap ground';
+}
+
+function syncModelsButton() {
+  const btn = document.getElementById('btn-models');
+  if (!btn) return;
+  const on = modelsEnabled();
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.classList.toggle('is-active', on);
+  if (!btn.disabled) btn.title = 'Real models';
+}
+
+function wireModelsToggle() {
+  syncModelsButton();
+  const btn = document.getElementById('btn-models');
+  if (!btn) return;
+  btn.addEventListener('click', () => { void onModelsToggle(); });
+}
+
+async function onModelsToggle() {
+  const btn = document.getElementById('btn-models');
+  const next = !modelsEnabled();
+  setModelsEnabled(next);
+  syncModelsButton();
+  if (next) {
+    if (btn) {
+      btn.disabled = true;
+      btn.title = 'Loading models';
+    }
+    statusStep('Models');
+    try {
+      await ensureMatchModels(STATE.matchData, (done, total, stem) => {
+        if (stem === 'catalog') {
+          statusTick('Model catalog · index.json');
+          return;
+        }
+        if (!total) {
+          statusTick('Models · none to load');
+          return;
+        }
+        const name = stem ? ` · ${stem}` : '';
+        statusTick(`Models ${done}/${total}${name}`);
+        if (btn) btn.title = `Loading models ${done}/${total}`;
+      });
+    } catch (err) {
+      console.warn('replay models', err);
+    }
+    if (btn) btn.disabled = false;
+  }
+  applyShipModelMode(STATE.actors);
+  applyStructureModelMode(STATE.structures, STATE.mapData, STATE.terrainExaggeration);
+  applyStructureModelMode(STATE.recyclers, STATE.mapData, STATE.terrainExaggeration);
+  setStatus(null);
+  syncModelsButton();
 }
 
 function wireHqToggle(resolvedFloor) {
@@ -1631,8 +1741,12 @@ function pickStructureAt(clientX, clientY) {
   _structRaycaster.setFromCamera(_structPointer, STATE.camera);
   const hits = _structRaycaster.intersectObjects(groups, true);
   for (const h of hits) {
-    const ud = h.object && h.object.userData;
-    if (ud && ud.pickLabel) return { label: ud.pickLabel, team: ud.team };
+    let node = h.object;
+    while (node) {
+      const ud = node.userData;
+      if (ud && ud.pickLabel) return { label: ud.pickLabel, team: ud.team };
+      node = node.parent;
+    }
   }
   return null;
 }
@@ -2208,6 +2322,62 @@ function syncWatchVodButton() {
 // Helpers
 // ============================================================================
 
+const statusLog = [];
+
+function fmtBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0 KB';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fmtFetch(got, total) {
+  if (!got && !total) return '';
+  if (total) return `${fmtBytes(got)} / ${fmtBytes(total)}`;
+  return fmtBytes(got);
+}
+
+function renderStatus(isError) {
+  const el = document.getElementById('status');
+  if (!el) return;
+  const title = document.getElementById('status-title');
+  const list = document.getElementById('status-log');
+  if (!title || !list) {
+    el.textContent = (statusLog[statusLog.length - 1] || {}).label || '';
+    el.classList.toggle('error', !!isError);
+    el.classList.remove('hidden');
+    return;
+  }
+  title.textContent = isError ? 'Could not load replay' : 'Loading replay';
+  list.replaceChildren();
+  for (const row of statusLog) {
+    const li = document.createElement('li');
+    li.className = row.state === 'active' ? 'is-active' : 'is-done';
+    li.textContent = row.label;
+    list.appendChild(li);
+  }
+  const last = list.lastElementChild;
+  if (last && last.scrollIntoView) last.scrollIntoView({ block: 'nearest' });
+  el.classList.toggle('error', !!isError);
+  el.classList.remove('hidden');
+}
+
+/** Start a new step. The previous active line is marked done. */
+function statusStep(label) {
+  for (const row of statusLog) {
+    if (row.state === 'active') row.state = 'done';
+  }
+  statusLog.push({ label, state: 'active' });
+  renderStatus(false);
+}
+
+/** Rewrite the active step in place (byte counts, model N/M). */
+function statusTick(label) {
+  const row = statusLog[statusLog.length - 1];
+  if (!row || row.state !== 'active') statusStep(label);
+  else row.label = label;
+  renderStatus(false);
+}
+
 function setStatus(msg, isError = false) {
   const el = document.getElementById('status');
   if (!el) return;
@@ -2215,9 +2385,19 @@ function setStatus(msg, isError = false) {
     el.classList.add('hidden');
     return;
   }
-  el.textContent = msg;
-  el.classList.remove('hidden');
-  el.classList.toggle('error', !!isError);
+  if (isError) {
+    statusLog.length = 0;
+    statusLog.push({ label: msg, state: 'active' });
+    renderStatus(true);
+    return;
+  }
+  statusTick(msg);
+}
+
+function fetchLabel(prefix, got, total, phase) {
+  const bytes = fmtFetch(got, total);
+  const tail = phase === 'parse' ? 'parsing' : 'downloading';
+  return bytes ? `${prefix} · ${tail} ${bytes}` : `${prefix} · ${tail}`;
 }
 
 function onWindowResize() {

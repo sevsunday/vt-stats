@@ -23,7 +23,7 @@
  * relative prefix from this module's POV.
  */
 
-import { loadMapData, loadManifest } from './loader.js';
+import { loadMapData, loadManifest, fetchJsonWithProgress } from './loader.js?v=recycler-mobile';
 
 // Path roots. The replay page lives at _map-analysis/render/replay.html, so
 // production data is reached via `../../`. Static-server-rooted-at-repo-root
@@ -93,11 +93,9 @@ export function pushReplayUrlState(patch) {
 // -------------------- Match index + match JSON --------------------
 
 let _matchIndexCache = null;
-export async function loadMatchIndex() {
+export async function loadMatchIndex(onProgress) {
   if (_matchIndexCache) return _matchIndexCache;
-  const res = await fetch(MATCH_INDEX_PATH);
-  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${MATCH_INDEX_PATH}`);
-  _matchIndexCache = await res.json();
+  _matchIndexCache = await fetchJsonWithProgress(MATCH_INDEX_PATH, onProgress);
   return _matchIndexCache;
 }
 
@@ -106,11 +104,9 @@ export async function loadMatchIndex() {
  * depending on duration) so this is gated by the picker / direct ?match=
  * url param.
  */
-export async function loadMatchData(id) {
+export async function loadMatchData(id, onProgress) {
   const url = `${MATCH_JSON_DIR}/${id}.json`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
-  return await res.json();
+  return fetchJsonWithProgress(url, onProgress);
 }
 
 // -------------------- Calibration tier --------------------
@@ -146,8 +142,8 @@ export async function resolveDefaultFloorMode(_stem, _manifestEntry) {
  * Reuse the viewer's existing loader.js so we get the int16-base64 decoder
  * + cellTypes etc. for free.
  */
-export async function load3dData(stem) {
-  return await loadMapData(stem);
+export async function load3dData(stem, onProgress) {
+  return await loadMapData(stem, onProgress);
 }
 
 export async function loadMapManifest() {

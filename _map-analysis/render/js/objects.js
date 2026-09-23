@@ -22,7 +22,7 @@ import * as THREE from 'three';
 
 const MARKER_STYLES = {
   scrap_pool:    { color: 0xffd24a, emissive: 0x553300, kind: 'cylinder',
-                    args: [8, 8, 5, 24], yOffset: 2.5 },
+                    args: [8, 8, 0.45, 24], yOffset: 0.4 },
   spawn_point:   { color: 0x5dadff, emissive: 0x002244, kind: 'cone',
                     args: [6, 14, 16],   yOffset: 7 },
   recycler:      { color: 0xb0b0b0, emissive: 0x303030, kind: 'box',

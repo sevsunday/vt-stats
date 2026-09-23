@@ -22,6 +22,12 @@
 import * as THREE from 'three';
 import { interpolateTrailXYZ, sliceTrailWindow } from './replay-data.js';
 import { prettifyShipOdf } from './replay-ship-tracker.js';
+import {
+  cloneModelBody,
+  modelsEnabled,
+  stemForOdf,
+  modelReady,
+} from './replay-ship-models.js?v=recycler-mobile';
 
 // ------------------ Constants ------------------
 
@@ -89,6 +95,92 @@ function getTeamTint(team) {
   return TEAM_TINTS[team] || TEAM_TINTS._;
 }
 
+function makePrimitiveMesh(catKey, tint) {
+  const style = SHIP_GLYPH[catKey] || SHIP_GLYPH.generic;
+  const geom = makeGeometry(catKey);
+  if (style.kind === 'cone' || style.kind === 'pyramid') {
+    geom.rotateZ(-Math.PI / 2);
+  }
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(tint.hex),
+    emissive: new THREE.Color(tint.emissive),
+    emissiveIntensity: 0.45,
+    metalness: 0.25,
+    roughness: 0.55,
+  });
+  return new THREE.Mesh(geom, mat);
+}
+
+// Real-model clones share geometry and textures with the template. Dispose
+// only the per-actor materials. Primitives own both geometry and material.
+function disposeBody(obj) {
+  if (!obj) return;
+  if (obj.userData && obj.userData.replayModel) {
+    obj.traverse((child) => {
+      if (!child.material) return;
+      const mats = Array.isArray(child.material) ? child.material : [child.material];
+      for (const m of mats) m.dispose();
+    });
+    return;
+  }
+  if (obj.geometry) obj.geometry.dispose();
+  if (obj.material) {
+    if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+    else obj.material.dispose();
+  }
+}
+
+/**
+ * Mount a catalog mesh for the actor's current ODF, or the category
+ * primitive when the toggle is off or the catalog has no loaded template.
+ */
+function mountBody(actor, catKey) {
+  const tint = getTeamTint(actor.team);
+  const style = SHIP_GLYPH[catKey] || SHIP_GLYPH.generic;
+  let next = null;
+  let yOffset = style.yOffset;
+  let isModel = false;
+  let modelStem = null;
+  if (modelsEnabled() && modelReady(actor.currentShipOdf)) {
+    next = cloneModelBody(actor.currentShipOdf, tint.hex);
+    if (next) {
+      yOffset = 0;
+      isModel = true;
+      modelStem = next.userData.modelStem || stemForOdf(actor.currentShipOdf);
+    }
+  }
+  if (!next) next = makePrimitiveMesh(catKey, tint);
+  next.name = `glyph-${actor.name}`;
+  next.userData.actorName = actor.name;
+  if (actor.glyph) {
+    actor.mesh.remove(actor.glyph);
+    disposeBody(actor.glyph);
+  }
+  actor.mesh.add(next);
+  actor.glyph = next;
+  actor.glyphIsModel = isModel;
+  actor.modelStem = modelStem;
+  actor.glyphCategory = catKey;
+  actor.yOffset = yOffset;
+  actor._baseEmissiveIntensity = isModel ? 1 : 0.45;
+}
+
+/**
+ * Re-evaluate every actor after the 3D toggle flips. A loaded catalog mesh
+ * replaces the primitive; turning the toggle off puts the primitive back.
+ */
+export function applyShipModelMode(actors) {
+  if (!actors) return;
+  for (const actor of actors) {
+    const desired = (modelsEnabled() && modelReady(actor.currentShipOdf))
+      ? stemForOdf(actor.currentShipOdf)
+      : null;
+    const showing = actor.glyphIsModel ? (actor.modelStem || null) : null;
+    if (showing === desired) continue;
+    mountBody(actor, actor.glyphCategory);
+  }
+}
+
 // ------------------ Per-actor build ------------------
 
 /**
@@ -121,33 +213,11 @@ export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
 
   const catKey = pickGlyphCategory(initialOdf);
   const tint   = getTeamTint(rosterRow.team);
-  const style  = SHIP_GLYPH[catKey] || SHIP_GLYPH.generic;
-
-  const geom = makeGeometry(catKey);
-  // Cones / pyramids point +Y by default; we want them to point along world
-  // +X so heading rotation around +Y means "yaw to face direction of travel".
-  // This rotation pre-bakes the geometry so we can rotate the parent group
-  // by `headingRad` and not fight the asset's local orientation.
-  if (style.kind === 'cone' || style.kind === 'pyramid') {
-    geom.rotateZ(-Math.PI / 2);  // tip toward +X
-  }
-
-  const mat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(tint.hex),
-    emissive: new THREE.Color(tint.emissive),
-    emissiveIntensity: 0.45,
-    metalness: 0.25,
-    roughness: 0.55,
-  });
-  const glyph = new THREE.Mesh(geom, mat);
-  glyph.name = `glyph-${rosterRow.name}`;
-  glyph.userData.actorName = rosterRow.name;
 
   const group = new THREE.Group();
   group.name = `actor-${rosterRow.name}`;
-  group.add(glyph);
 
-  return {
+  const actor = {
     name: rosterRow.name,
     displayName: rosterRow.displayName,
     team: rosterRow.team,
@@ -162,10 +232,11 @@ export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
     currentShipOdf:  initialOdf,
     currentShipName: initialPretty,
     glyphCategory: catKey,
-    yOffset: style.yOffset,
+    yOffset: 0,
     tintHex: tint.hex,
     mesh: group,
-    glyph,
+    glyph: null,
+    glyphIsModel: false,
     trail: rosterRow.trail,
     spawn: rosterRow.spawn,
     headingRad: 0,
@@ -178,6 +249,8 @@ export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
     _tintColor: new THREE.Color(tint.hex),
     _baseEmissiveIntensity: 0.45,
   };
+  mountBody(actor, catKey);
+  return actor;
 }
 
 /**
@@ -207,17 +280,14 @@ export function buildActorsGroup(roster, terrainExaggeration, opts = {}) {
 //
 // When the per-frame ship tracker reports a different odf than the actor's
 // current state, this swaps:
-//   1. the glyph geometry (cone/box/sphere/octa/tetra/pyramid per the new
-//      category; old geometry is disposed)
+//   1. the body (catalog mesh while the 3D toggle is on, else the primitive)
 //   2. the in-actor `currentShipOdf` + `currentShipName` (drives label text
 //      and the roster ship-cell live update)
 //   3. the always-on label DOM if the actor has a labelObj attached
 //
-// We DO NOT touch the material -- faction tint stays constant per actor
-// (your faction doesn't change mid-match). We only rebuild geometry on
-// real category transitions; same-category odf changes (e.g. ivscout_vsr ->
-// ivscoutm_vsr both bucket as 'scout') keep the existing geometry and
-// just update the name string.
+// The body is rebuilt when the primitive category changes OR the catalog
+// stem changes (a missile scout must not keep the basic scout mesh).
+// Same-stem ODF changes only update the name string.
 //
 // The optional `onChange(actor, oldOdf, newOdf)` callback fires AFTER
 // the actor state is updated so the caller can refresh side-panel UI
@@ -233,20 +303,13 @@ export function setActorShipODF(actor, newOdf, odfMap, onChange) {
   const newCat   = pickGlyphCategory(newOdf);
   const newPretty = prettifyShipOdf(newOdf, odfMap || {});
 
+  const prevStem = actor.glyphIsModel ? (actor.modelStem || null) : null;
   actor.currentShipOdf  = newOdf;
   actor.currentShipName = newPretty;
+  const nextStem = (modelsEnabled() && modelReady(newOdf)) ? stemForOdf(newOdf) : null;
 
-  if (newCat !== oldCat) {
-    // Geometry actually has to change. Dispose the old one and swap.
-    const style = SHIP_GLYPH[newCat] || SHIP_GLYPH.generic;
-    const geom  = makeGeometry(newCat);
-    if (style.kind === 'cone' || style.kind === 'pyramid') {
-      geom.rotateZ(-Math.PI / 2);
-    }
-    if (actor.glyph.geometry) actor.glyph.geometry.dispose();
-    actor.glyph.geometry = geom;
-    actor.glyphCategory  = newCat;
-    actor.yOffset        = style.yOffset;
+  if (newCat !== oldCat || prevStem !== nextStem) {
+    mountBody(actor, newCat);
   }
 
   // Label DOM lives outside this module but the actor holds a back-ref;
@@ -700,7 +763,8 @@ export function setActorVisibility(actor, visible) {
 
 export function disposeActors(actorsGroup) {
   actorsGroup.traverse(obj => {
-    if (obj.geometry) obj.geometry.dispose();
+    // Scout clones share geometry with the cached template.
+    if (obj.geometry && !(obj.userData && obj.userData.sharedGeom)) obj.geometry.dispose();
     if (obj.material) {
       if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
       else obj.material.dispose();

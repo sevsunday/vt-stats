@@ -2128,3 +2128,38 @@ body.replay-compact .results-banner-title {
     transition: none;
   }
 }
+
+/* Boot log. Overrides the single-line pill in style.css. */
+#status {
+  width: min(440px, calc(100vw - 32px));
+  padding: 14px 16px 12px;
+  text-align: left;
+  border-radius: 8px;
+}
+
+#status-title {
+  font-weight: 600;
+  color: var(--text, var(--text-muted));
+  margin-bottom: 8px;
+}
+
+#status-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#status-log li.is-done { opacity: 0.55; }
+#status-log li.is-active { color: var(--text, var(--text-muted)); }
+#status-log li.is-done::before { content: "· "; }
+#status-log li.is-active::before { content: "› "; }
+
+#status.error #status-title,
+#status.error #status-log li.is-active {
+  color: #ff7777;
+}

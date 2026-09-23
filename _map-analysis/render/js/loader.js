@@ -53,13 +53,57 @@ export async function loadManifest() {
   }
 }
 
-export async function loadMapData(stem) {
-  const url = `${DATA_DIR}/${stem}.3d.json`;
+/**
+ * Fetch JSON, reporting download bytes via `onProgress(received, total, phase)`.
+ * `phase` is `'download'` while the body streams and `'parse'` for JSON.parse.
+ * `total` is 0 when the server omits Content-Length.
+ */
+export async function fetchJsonWithProgress(url, onProgress) {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} fetching ${url}`);
   }
-  const raw = await res.json();
+  const total = Number(res.headers.get('content-length')) || 0;
+  const report = (received, phase) => {
+    if (onProgress) onProgress(received, total, phase);
+  };
+
+  let text;
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    text = await res.text();
+    report(text.length, 'download');
+  } else {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    let lastReport = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.byteLength;
+      const now = performance.now();
+      if (now - lastReport > 80 || (total && received >= total)) {
+        lastReport = now;
+        report(received, 'download');
+      }
+    }
+    report(received, 'download');
+    const buf = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      buf.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    text = new TextDecoder().decode(buf);
+  }
+  report(text.length, 'parse');
+  return JSON.parse(text);
+}
+
+export async function loadMapData(stem, onProgress) {
+  const url = `${DATA_DIR}/${stem}.3d.json`;
+  const raw = await fetchJsonWithProgress(url, onProgress);
   if (raw.schema_version !== 3) {
     throw new Error(`unsupported schema_version ${raw.schema_version} `
                     + `(expected 3; re-run extract_3d.py --all to refresh)`);
