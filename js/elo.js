@@ -1341,7 +1341,7 @@
         <p class="mb-1">Under the hood, the number on the leaderboard is a <strong>mix of two ratings</strong> &mdash; one for raw match performance and one for wins &mdash; with a knob that decides the blend:</p>
         ${blendBlock}
         <p class="mb-2 mt-2 text-muted small">The Wins dial isn&rsquo;t a placeholder &mdash; it&rsquo;s a real win/loss ladder that updates on every match with a verified outcome, and each player&rsquo;s value shows in the leaderboard&rsquo;s rating tooltip. What&rsquo;s off is the <strong>mixer</strong>.</p>
-        <p class="mb-0 text-muted small">Why leave it at zero? Two reasons, both measured. A match win is a <em>team</em> result, and this rating is about one player&rsquo;s own game &mdash; your commander&rsquo;s build order and four teammates decide the ending as much as you do. And when we actually tried blending wins in (at 10%, 25% and 50%), it <strong>didn&rsquo;t predict winners any better</strong> and its confidence scores got slightly worse, so the honest call was to leave the published rating on pure performance. It also helps that most matches still end without a provable winner (see the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab), which keeps the wins sample small. The rule for turning the knob up was written down <em>before</em> the test, so it can&rsquo;t be bent to fit the result.</p>
+        <p class="mb-0 text-muted small">Why leave it at zero? Two reasons, both measured. A match win is a <em>team</em> result, and this rating is about one player&rsquo;s own game &mdash; your commander&rsquo;s build order and four teammates decide the ending as much as you do. And when we actually tried blending wins in (at 10%, 25% and 50%), it <strong>didn&rsquo;t predict winners any better</strong> and its confidence scores got slightly worse, so the honest call was to leave the published rating on pure performance. Early recordings often had no provable winner, which kept that wins sample small for a long time (see the <a href="?tab=accuracy" data-elo-tab-link="accuracy">Does it work?</a> tab); newer matches are signed off, so the gap is closing. The rule for turning the knob up was written down <em>before</em> the test, so it can&rsquo;t be bent to fit the result.</p>
       </section>
 
       <section class="vt-vtsr-doc-section">
@@ -1540,10 +1540,20 @@
         tech: 'Median per-player \u03c3 over 100 bootstrap resamples of 80% of matches.',
       },
       {
-        label: 'Winner prediction', value: pct(L.clean_win_accuracy_hard_max),
-        badge: badge('accuracy', L.clean_win_accuracy_hard_max),
-        caption: `Of the ${L.clean_win_n ?? 0} matches with a provable winner, how often did the team with the highest-rated player win? (Coin flip = 50%.) Read the caveats below before judging this one.`,
-        tech: 'Hard-MAX team aggregation, clean-win subset only, scored against a log-loss baseline.',
+        label: (L.clean_win_accuracy_recent && L.clean_win_accuracy_recent.accuracy != null)
+          ? 'Current form' : 'Winner prediction',
+        value: pct((L.clean_win_accuracy_recent && L.clean_win_accuracy_recent.accuracy != null)
+          ? L.clean_win_accuracy_recent.accuracy
+          : L.clean_win_accuracy_hard_max),
+        badge: badge('accuracy', (L.clean_win_accuracy_recent && L.clean_win_accuracy_recent.accuracy != null)
+          ? L.clean_win_accuracy_recent.accuracy
+          : L.clean_win_accuracy_hard_max),
+        caption: (L.clean_win_accuracy_recent && L.clean_win_accuracy_recent.n)
+          ? `Last ${L.clean_win_accuracy_recent.n} provable matches`
+            + (L.clean_win_accuracy_recent.since_date ? ` (since ${esc(L.clean_win_accuracy_recent.since_date)})` : '')
+            + `: how often the team with the highest-rated player won. All-time: ${pct(L.clean_win_accuracy_hard_max)} of ${L.clean_win_n ?? 0}. (Coin flip = 50%.)`
+          : `Of the ${L.clean_win_n ?? 0} matches with a provable winner, how often did the team with the highest-rated player win? (Coin flip = 50%.) Read the caveats below before judging this one.`,
+        tech: 'Highest pre-match rating on the team (hard max). Provable winners only: clean win, host-attested, or reviewer-confirmed.',
       },
     ].map(c => `<div class="vt-elo-statcard">
         <div class="vt-elo-stat-head">
@@ -1587,11 +1597,17 @@
           <span class="vt-elo-funnel-count">${n}</span>
         </div>`;
       }).join('');
+      const recentFunnel = funnel.recent || null;
+      const recentLine = (recentFunnel && recentFunnel.rated)
+        ? ` ${recentFunnel.determined} of the last ${recentFunnel.rated} rated matches`
+          + (recentFunnel.since_date ? ` (since ${esc(recentFunnel.since_date)})` : '')
+          + ` had a provable winner.`
+        : '';
       funnelHtml = `<div class="vt-elo-acc-section">
-        <h6>Why the prediction sample is small</h6>
-        <p class="vt-elo-acc-blurb">A match only counts toward prediction stats when we can <strong>prove</strong> who won. Three things qualify: the recording shows it physically (one team\u2019s base destroyed, the other\u2019s untouched), the host answered the end-of-game dialog, or a reviewer signed the result off afterwards. Host quits, timeouts, and rebuild ambiguity leave most matches unprovable &mdash; that\u2019s a recording limitation, not a rating one.</p>
+        <h6>Which matches count</h6>
+        <p class="vt-elo-acc-blurb">A match counts toward prediction stats when we can <strong>prove</strong> who won. Three things qualify: the recording shows it physically (one team\u2019s base destroyed, the other\u2019s untouched), the host answered the end-of-game dialog, or a reviewer signed the result off afterwards. Host quits, timeouts, and rebuild ambiguity are a gap in the early recordings. <strong>${unprovable} of ${total}</strong> rated matches still have no provable winner.${recentLine}</p>
         <div class="vt-elo-funnel">${rows}</div>
-        <p class="vt-elo-acc-blurb mb-0 mt-2 text-muted small">Contested matches (both bases fell) and draws sit in the unprovable bar because there\u2019s no single winner to predict here &mdash; the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">commander ladder</a> does still rate contested games.</p>
+        <p class="vt-elo-acc-blurb mb-0 mt-2 text-muted small">Contested matches (both bases fell) and draws sit in the unprovable bar because there\u2019s no single winner to predict here &mdash; the <a href="?tab=vtsr-c" data-elo-tab-link="vtsr-c">commander ladder</a> does still rate contested games. That card\u2019s duel count also includes community-logged games; this chart is recorded matches only.</p>
       </div>`;
     }
 
@@ -1681,7 +1697,7 @@
       }).join('');
       axisOutcomeHtml = `<div class="vt-elo-acc-section">
         <h6>Which axes actually win games?</h6>
-        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? This is the <strong>empirical check on the axis weights</strong> \u2014 the honest ranking of what actually predicts victory, updated every pipeline run. (50% = the axis says nothing about winning; low n on self-omitting axes like Snipe bonus means treat with care.)</p>
+        <p class="vt-elo-acc-blurb">Across the ${ao.n_matches_determined ?? 0} matches with a verified winner: when one team out-scored the other on an axis, how often did that team win? Below 50% the axis lined up with the losing side. These measure one player\u2019s game, not the win itself \u2014 a team can win while shooting less accurately or less efficiently than the other. Updated every pipeline run. (50% = the axis says nothing about winning; low n on self-omitting axes like Snipe bonus means treat with care.)</p>
         <div class="vt-elo-funnel">${rows}</div>
       </div>`;
     }
@@ -1736,10 +1752,16 @@
     }
 
     // ---- History sparkline. ----
+    // Prefer match chronology (cumulative + rolling-30) when the validator
+    // emitted accuracy_timeline. Fall back to the per-run history chart.
     const hist = Array.isArray(v.history) ? v.history : [];
+    const timeline = (v.latest_detail && Array.isArray(v.latest_detail.accuracy_timeline))
+      ? v.latest_detail.accuracy_timeline.filter(row => row && row.date)
+      : [];
+    const showTrend = timeline.length > 1 || hist.length > 1;
     const histSection = `<div class="vt-elo-acc-section">
       <h6>Is it getting better?</h6>
-      ${hist.length > 1
+      ${showTrend
         ? '<div class="vt-elo-history-wrap"><canvas id="elo-history-chart"></canvas></div>'
         : `<p class="vt-elo-acc-blurb mb-0 text-muted">Only ${hist.length || 'one'} validation run recorded so far &mdash; the trend chart appears once more pipeline runs accumulate.</p>`}
     </div>`;
@@ -1759,37 +1781,83 @@
     ensureTooltips(pane);
     wireTabLinks(pane);
 
-    if (hist.length > 1 && window.Chart) {
+    if (showTrend && window.Chart) {
       const ctx = document.getElementById('elo-history-chart');
       if (ctx) {
         if (state.historyChart) { state.historyChart.destroy(); state.historyChart = null; }
-        const labels = hist.map(h => (h.generated_at || '').slice(0, 10));
         const primary = cssVar('--kb-primary', '#5b8cff');
+        const accent = cssVar('--kb-success', '#3dd68c');
         const muted = cssVar('--kb-text-muted', '#888');
+        let labels;
+        let datasets;
+        if (timeline.length > 1) {
+          let running = 0;
+          const cumulative = timeline.map((row, i) => {
+            running += row.correct_hard_max ? 1 : 0;
+            return (running / (i + 1)) * 100;
+          });
+          const rolling = timeline.map((row, i) => {
+            const start = Math.max(0, i - 29);
+            let hits = 0;
+            for (let j = start; j <= i; j++) {
+              if (timeline[j].correct_hard_max) hits++;
+            }
+            return (hits / (i - start + 1)) * 100;
+          });
+          labels = timeline.map(row => String(row.date).slice(0, 10));
+          datasets = [
+            {
+              label: 'All-time so far (%)',
+              data: cumulative,
+              borderColor: muted,
+              backgroundColor: 'transparent',
+              borderDash: [5, 4],
+              tension: 0.15,
+              pointRadius: 0,
+            },
+            {
+              label: 'Last 30 provable (%)',
+              data: rolling,
+              borderColor: primary,
+              backgroundColor: 'transparent',
+              tension: 0.15,
+              pointRadius: 0,
+            },
+            {
+              label: 'Coin flip (50%)',
+              data: timeline.map(() => 50),
+              borderColor: accent,
+              backgroundColor: 'transparent',
+              borderDash: [2, 3],
+              pointRadius: 0,
+              tension: 0,
+            },
+          ];
+        } else {
+          labels = hist.map(h => (h.generated_at || '').slice(0, 10));
+          datasets = [
+            {
+              label: 'Winner prediction (%)',
+              data: hist.map(h => h.clean_win_accuracy_hard_max != null ? h.clean_win_accuracy_hard_max * 100 : null),
+              borderColor: primary,
+              backgroundColor: 'transparent',
+              tension: 0.25,
+              pointRadius: 3,
+            },
+            {
+              label: 'Rating \u2194 performance agreement (%)',
+              data: hist.map(h => h.spearman_pooled_rho != null ? h.spearman_pooled_rho * 100 : null),
+              borderColor: muted,
+              backgroundColor: 'transparent',
+              borderDash: [5, 4],
+              tension: 0.25,
+              pointRadius: 3,
+            },
+          ];
+        }
         state.historyChart = new Chart(ctx, {
           type: 'line',
-          data: {
-            labels,
-            datasets: [
-              {
-                label: 'Winner prediction (%)',
-                data: hist.map(h => h.clean_win_accuracy_hard_max != null ? h.clean_win_accuracy_hard_max * 100 : null),
-                borderColor: primary,
-                backgroundColor: 'transparent',
-                tension: 0.25,
-                pointRadius: 3,
-              },
-              {
-                label: 'Rating \u2194 performance agreement (%)',
-                data: hist.map(h => h.spearman_pooled_rho != null ? h.spearman_pooled_rho * 100 : null),
-                borderColor: muted,
-                backgroundColor: 'transparent',
-                borderDash: [5, 4],
-                tension: 0.25,
-                pointRadius: 3,
-              },
-            ],
-          },
+          data: { labels, datasets },
           options: {
             responsive: true,
             maintainAspectRatio: false,

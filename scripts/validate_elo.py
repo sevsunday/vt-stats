@@ -90,7 +90,13 @@ from typing import Any
 # Constants
 # ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = 5  # v1.4 (Balonce Meter): T-term ablation (#14, pre-registered)
+VALIDATOR_VERSION = 6  # v1.5: recent-form window + match-chronology timeline (explainer telemetry)
+
+# Last-N windows for the ELO page. Determined = provable-winner matches
+# the accuracy metrics already score. Rated = every non-excluded history
+# row, provable or not. Tunable without a validation_summary schema bump.
+RECENT_WINDOW_N = 30
+PROVABLE_DECIDED_BY = ("clean_win", "attested", "adjudicated")
 
 DEFAULT_PROCESSED_DIR = Path("data") / "processed"
 DEFAULT_OUTPUT_DIR = Path("_validation")
@@ -885,7 +891,7 @@ def _gather_clean_win_matches(
 
     # Build a quick steam64/name -> is_commander lookup per match. Runs
     # once outside the per-team aggregation loop.
-    for match_id, _, deltas in iter_rated_history(history):
+    for match_id, match_date, deltas in iter_rated_history(history):
         match_data = per_match.get(match_id)
         if not match_data:
             continue
@@ -954,6 +960,7 @@ def _gather_clean_win_matches(
 
         eligible.append({
             "match_id":        match_id,
+            "match_date":      match_date or "",
             "winner_team":     winner_team,
             "loser_team":      3 - winner_team,
             # v15: label provenance ("clean_win" inference vs "attested"
@@ -1100,6 +1107,66 @@ def _score_aggregation(
     }
 
 
+def _prediction_correct(row: dict[str, Any], aggregation_key: str) -> bool:
+    """True when this aggregation's favorite team is the recorded winner.
+
+    A tied reference (both teams equal) is not a correct call — same rule
+    as ``_score_aggregation``.
+    """
+    r1 = row[aggregation_key][1]
+    r2 = row[aggregation_key][2]
+    if r1 == r2:
+        return False
+    predicted = 1 if r1 > r2 else 2
+    return predicted == row["winner_team"]
+
+
+def _recent_accuracy_block(eligible: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Hard-max (headline) plus mean / softmax on the last RECENT_WINDOW_N
+    determined matches. ``accuracy`` at the top level IS the hard-max rate
+    — that is the number the ELO page leads with.
+    """
+    if not eligible:
+        return None
+    window = eligible[-RECENT_WINDOW_N:]
+    aggs: dict[str, Any] = {}
+    for name, key in (
+        ("mean", "team_R_mean"),
+        ("hard_max", "team_R_max"),
+        ("softmax_max", "team_R_softmax"),
+    ):
+        scored = _score_aggregation(window, key)
+        aggs[name] = {
+            "n_correct":    scored["n_correct"],
+            "accuracy":     scored["accuracy"],
+            "accuracy_ci":  scored["accuracy_ci"],
+        }
+    hard = aggs["hard_max"]
+    return {
+        "window_n":    RECENT_WINDOW_N,
+        "n":           len(window),
+        "since_date":  (window[0].get("match_date") or "")[:10],
+        "n_correct":   hard["n_correct"],
+        "accuracy":    hard["accuracy"],
+        "accuracy_ci": hard["accuracy_ci"],
+        "aggregations": aggs,
+    }
+
+
+def _accuracy_timeline(eligible: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per determined match, chronological. The page draws
+    cumulative and rolling-30 from ``correct_hard_max``; do not pre-bake
+    those series here.
+    """
+    return [
+        {
+            "date": (row.get("match_date") or "")[:10],
+            "correct_hard_max": _prediction_correct(row, "team_R_max"),
+        }
+        for row in eligible
+    ]
+
+
 def _commander_breakout(eligible: list[dict[str, Any]]) -> dict[str, Any]:
     """v1.1: split clean_win matches into "with commander" vs "all thug"
     cohorts, score the canonical mean-R aggregation in each cohort.
@@ -1185,6 +1252,8 @@ def metric_clean_win_accuracy(
         return {
             "n_eligible":  0,
             "skipped_reason": "no clean_win matches with both teams represented",
+            "recent": None,
+            "accuracy_timeline": [],
         }
 
     # Three parallel scorings: mean / hard MAX / softmax MAX.
@@ -1228,12 +1297,15 @@ def metric_clean_win_accuracy(
         # v1.1: diagnostic breakouts.
         "commander_breakout":  _commander_breakout(eligible),
         "rating_gap_breakout": _rating_gap_breakout(eligible),
+        # v1.5: recent-form window (hard-max headline) + per-match timeline.
+        "recent":              _recent_accuracy_block(eligible),
+        "accuracy_timeline":   _accuracy_timeline(eligible),
     }
 
 
 def count_winner_funnel(
     history: dict[str, Any], per_match: dict[str, Any]
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Eligibility funnel for the winner-anchored metrics. Reported in
     the report header so the user can see how many matches we threw
     out and why.
@@ -1263,31 +1335,45 @@ def count_winner_funnel(
         "disputed_outcomes":      0,
         "skipped_no_team_split":  0,
     }
-    for match_id, _, deltas in iter_rated_history(history):
+    # (date, provable) in rated-history order, for the last-N window.
+    rated_tail: list[tuple[str, bool]] = []
+    for match_id, match_date, deltas in iter_rated_history(history):
         funnel["rated_history_entries"] += 1
         match_data = per_match.get(match_id)
+        provable = False
         if not match_data:
             funnel["missing_per_match_file"] += 1
-            continue
-        winner_block = (match_data.get("match") or {}).get("winner") or {}
-        decided_by = winner_block.get("decided_by")
-        if not decided_by:
-            funnel["winner_block_missing"] += 1
-            continue
-        if decided_by == "clean_win":
-            funnel["decided_by_clean_win"] += 1
-            if winner_block.get("disputed"):
-                funnel["disputed_outcomes"] += 1
-        elif decided_by == "attested":
-            funnel["decided_by_attested"] += 1
-        elif decided_by == "adjudicated":
-            funnel["decided_by_adjudicated"] += 1
-        elif decided_by == "contested":
-            funnel["decided_by_contested"] += 1
-        elif decided_by == "unclear":
-            funnel["decided_by_unclear"] += 1
-        elif decided_by == "draw":
-            funnel["decided_by_draw"] += 1
+        else:
+            winner_block = (match_data.get("match") or {}).get("winner") or {}
+            decided_by = winner_block.get("decided_by")
+            provable = (
+                decided_by in PROVABLE_DECIDED_BY
+                and winner_block.get("team") in (1, 2)
+            )
+            if not decided_by:
+                funnel["winner_block_missing"] += 1
+            elif decided_by == "clean_win":
+                funnel["decided_by_clean_win"] += 1
+                if winner_block.get("disputed"):
+                    funnel["disputed_outcomes"] += 1
+            elif decided_by == "attested":
+                funnel["decided_by_attested"] += 1
+            elif decided_by == "adjudicated":
+                funnel["decided_by_adjudicated"] += 1
+            elif decided_by == "contested":
+                funnel["decided_by_contested"] += 1
+            elif decided_by == "unclear":
+                funnel["decided_by_unclear"] += 1
+            elif decided_by == "draw":
+                funnel["decided_by_draw"] += 1
+        rated_tail.append((match_date or "", provable))
+    window = rated_tail[-RECENT_WINDOW_N:]
+    funnel["recent"] = {
+        "window_n":   RECENT_WINDOW_N,
+        "rated":      len(window),
+        "determined": sum(1 for _, ok in window if ok),
+        "since_date": (window[0][0][:10] if window else ""),
+    }
     return funnel
 
 
@@ -2573,6 +2659,15 @@ def render_markdown_report(
         lines.append(f"- **Mean log-loss (mean R):** {_fmt_num(cwa['log_loss_mean'])} "
                      f"(coin-flip = {_fmt_num(cwa['log_loss_coin_flip'])})")
         lines.append(f"- **Median log-loss (mean R):** {_fmt_num(cwa['log_loss_median'])}")
+        recent = cwa.get("recent") or {}
+        if recent.get("n"):
+            ci_r = recent.get("accuracy_ci") or [None, None]
+            lines.append(
+                f"- **Recent form (last {recent['n']}, hard MAX):** "
+                f"{_fmt_pct(recent.get('accuracy'))} "
+                f"(95% CI {_fmt_pair(ci_r[0], ci_r[1])}, "
+                f"since {recent.get('since_date')})"
+            )
         lines.append("")
         anchors = cwa["skillbench_anchors"]
         lines.append(
@@ -3062,9 +3157,13 @@ def render_json_report(
     schema_version 5 (v1.4, Balonce Meter): adds top-level
     ``cmdr_t_term`` (T-term ablation #14, pre-registered in
     ``critique/decisions/balonce-meter-t-term.md``). Strictly additive.
+    schema_version 6 (v1.5, explainer telemetry): adds
+    ``clean_win_accuracy.recent`` (last-30 determined window) and
+    ``clean_win_accuracy.accuracy_timeline``, plus
+    ``winner_funnel.recent``. Strictly additive.
     """
     return {
-        "schema_version":   5,
+        "schema_version":   6,
         "validator_version": VALIDATOR_VERSION,
         "weights":          weights,
         **results,
@@ -3146,6 +3245,11 @@ def _summary_history_entry(results: dict) -> dict:
         "vtsr_c_n":                   (results.get("vtsr_c") or {}).get("n_scored"),
         "vtsr_c_accuracy":            (results.get("vtsr_c") or {}).get("accuracy"),
         "vtsr_c_log_loss":            (results.get("vtsr_c") or {}).get("log_loss"),
+        # v1.5: recent-form hard-max window + pool drift. Absent on
+        # history rows written before this validator version.
+        "clean_win_accuracy_recent":  cwa.get("recent"),
+        "mean_vtsr":                  meta.get("mean_vtsr"),
+        "rating_spread_std":          meta.get("rating_spread_std"),
     }
 
 
@@ -3246,6 +3350,9 @@ def write_validation_summary(results: dict, processed_dir: Path) -> Path:
             # v1.3: VTSR-C v2 economy-composite proof sections (#12 econ
             # axes + #13 alpha_c ablation), same absent-safe contract.
             "vtsr_c_perf":  results.get("vtsr_c_perf") or {},
+            # v1.5: one row per determined match. The page computes
+            # cumulative and rolling-30 itself. Absent on older summaries.
+            "accuracy_timeline": cwa.get("accuracy_timeline") or [],
         },
         "history": prev_history,
     }
@@ -3471,6 +3578,16 @@ def main(argv: list[str] | None = None) -> int:
             seen_keys.add(player_key_for_delta(d))
     players_total = len(seen_keys)
 
+    vtsr_values = [
+        float(r["vtsr"])
+        for r in (current.get("ratings") or [])
+        if isinstance(r.get("vtsr"), (int, float))
+    ]
+    mean_vtsr = statistics.fmean(vtsr_values) if vtsr_values else None
+    rating_spread_std = (
+        statistics.pstdev(vtsr_values) if len(vtsr_values) >= 2 else None
+    )
+
     results: dict[str, Any] = {
         "meta": {
             "generated_at":          datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -3482,6 +3599,8 @@ def main(argv: list[str] | None = None) -> int:
             "rated_per_match_loaded": n_loaded,
             "rated_per_match_missing": n_missing,
             "players_total":         players_total,
+            "mean_vtsr":             mean_vtsr,
+            "rating_spread_std":     rating_spread_std,
             "players_with_min_matches": self_consistency["n_players"],
             "paths": {
                 "elo_current":   str(processed_dir / elo_current_name),
@@ -3582,6 +3701,12 @@ def main(argv: list[str] | None = None) -> int:
                 "softmax_max": "team softmax R",
             }.get(best, best)
             print(f"  Best aggregation:             {best_label} (sec 6.1 verdict)")
+        recent = clean_win_accuracy.get("recent") or {}
+        if recent.get("n"):
+            ci_r = recent.get("accuracy_ci") or [None, None]
+            print(f"  Recent form (last {recent.get('n')} MAX): "
+                  f"{_fmt_pct(recent.get('accuracy'))} "
+                  f"({_fmt_pair(ci_r[0], ci_r[1])})  since {recent.get('since_date')}")
     print(f"  Bootstrap top-{bootstrap.get('top_n', TOP_N)} Jaccard:       "
           f"{_fmt_num(bootstrap.get('jaccard_mean'))} "
           f"(min {_fmt_num(bootstrap.get('jaccard_min'))})")
