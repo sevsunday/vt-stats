@@ -9766,6 +9766,20 @@ def main():
             {(p.get("name") or "").strip() for p in lb if (p.get("name") or "").strip()},
             key=lambda n: n.lower(),
         )
+        # Picker display count. Same omission the career rollup uses:
+        # campod and partial (low-activity) rows are not "in" the match
+        # for the Select-a-match badge, count dropdown, and player sort.
+        # `player_count` stays the raw slot count — ELO's <6 gate and the
+        # per-match banner still read that.
+        active_player_count = sum(
+            1 for p in lb
+            if (p.get("name") or "").strip()
+            and not p.get("is_campod")
+            and not p.get("is_low_activity")
+        )
+        winner_team = (match_data["match"].get("winner") or {}).get("team")
+        if winner_team not in (1, 2):
+            winner_team = None
         manifest.append({
             "id": match_id,
             "name": resolve_match_name(match_data["match"]["map"], registry),
@@ -9774,6 +9788,7 @@ def main():
             "date": match_data["match"]["date"],
             "duration_sec": match_data["match"]["duration_sec"],
             "player_count": match_data["match"]["player_count"],
+            "active_player_count": active_player_count,
             "submitter": submitter_by_id.get(match_id, ""),
             "team_leaders": match_data["match"].get("team_leaders", {}),
             # Per-team faction codes ({"1": {"code": "i", ...}, "2": {...}})
@@ -9787,6 +9802,9 @@ def main():
             # v16: true once a human signed off on this match's outcome
             # (adjudication pass). Powers reviewer-confirmed UI states.
             "winner_adjudicated": bool((match_data["match"].get("winner") or {}).get("adjudicated", False)),
+            # 1 or 2 when a winner team is known; null for draw / cancelled /
+            # unclear. The picker rings that commander's dot. Display-only.
+            "winner_team": winner_team,
             "players": manifest_players,
             "has_position_data": match_data["match"].get("has_position_data", False),
             "has_target_lock_data": match_data["match"].get("has_target_lock_data", False),

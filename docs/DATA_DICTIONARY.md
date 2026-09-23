@@ -738,9 +738,12 @@ An array of match summaries used to populate the match selector dropdown.
 | `map` | `string` | Raw map name from header |
 | `date` | `string` | ISO datetime from `start_time` |
 | `duration_sec` | `number` | Match duration in seconds |
-| `player_count` | `number` | Number of named players |
+| `player_count` | `number` | Raw occupied-slot count (`StatHeader.player_count`, or `len(nick_map)` after the identity shim). Includes campod and partial players. ELO's fewer-than-6 gate and the per-match banner read this. |
+| `active_player_count` | `number` | Named `leaderboard[]` rows with both `is_campod` and `is_low_activity` false. The Select-a-match card badge, player-count dropdown, and Most/Fewest players sort. Display-only; not a rating input. |
 | `submitter` | `string` | Username of who submitted the session file |
 | `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). |
+| `winner_adjudicated` | `boolean` | v16. `true` once a human signed off on this match's outcome. |
+| `winner_team` | `number \| null` | `1` or `2` when `match.winner.team` is a team. `null` for draw, cancelled, and unclear. The picker draws a `--kb-warning` ring on that commander's dot. Display-only. |
 | `players` | `string[]` | Sorted unique display names from the match's `leaderboard[]` (same nicknames the dashboard shows). Used by the picker's free-text search blob (`buildEntrySearchBlob` in `js/app.js`). |
 | `has_position_data` | `boolean` | Mirrors per-match `match.has_position_data`. `true` iff the session contained `UpdateTick` events. Drives picker thumbnail decoration and Positioning-tab UI gating. |
 | `has_target_lock_data` | `boolean` | Mirrors per-match `match.has_target_lock_data`. `true` iff any `PlayerState.has_target=true` sample was observed. |

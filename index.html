@@ -1890,16 +1890,6 @@
                 </div>
               </div>
 
-              <!-- Outcome (single-select chips, v15: winner provenance) -->
-              <div class="vt-match-picker-filter-row">
-                <span class="vt-match-picker-filter-label">Outcome</span>
-                <div class="vt-match-picker-chipset" data-facet="outcome" role="radiogroup" aria-label="Outcome provenance">
-                  <button type="button" class="vt-match-picker-chip is-active" data-value="any" role="radio" aria-checked="true">Any</button>
-                  <button type="button" class="vt-match-picker-chip" data-value="winner" role="radio" aria-checked="false" title="Matches where the winner is known (attested, clean win, or contested)">Winner known</button>
-                  <button type="button" class="vt-match-picker-chip" data-value="attested" role="radio" aria-checked="false" title="Matches whose outcome the host confirmed at game end (proto v3+)">Attested only</button>
-                </div>
-              </div>
-
               <!-- Has VOD (single-select; client-side join against match_videos.json) -->
               <div class="vt-match-picker-filter-row">
                 <span class="vt-match-picker-filter-label">Has VOD</span>
@@ -1910,10 +1900,20 @@
                 </div>
               </div>
 
-              <!-- Players (multi-select chips, populated from manifest) -->
+              <!-- Player count (multi-select dropdown). Empty = any count.
+                   Options are the distinct active_player_count values. -->
               <div class="vt-match-picker-filter-row">
                 <span class="vt-match-picker-filter-label">Players</span>
-                <div class="vt-match-picker-chipset" data-facet="players" id="match-picker-facet-players" role="group" aria-label="Player count"></div>
+                <div class="dropdown vt-match-picker-count">
+                  <button type="button" class="form-select form-select-sm vt-match-picker-count-toggle text-start"
+                          id="match-picker-count-toggle"
+                          data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                          aria-expanded="false" aria-haspopup="listbox">
+                    Any
+                  </button>
+                  <ul class="dropdown-menu vt-match-picker-count-menu" id="match-picker-facet-players"
+                      role="group" aria-label="Player count"></ul>
+                </div>
               </div>
 
               <!-- Submitter (multi-select chips, populated from manifest) -->
@@ -1936,15 +1936,25 @@
                       <input type="search" id="match-picker-players-search" class="form-control"
                              placeholder="Filter player list..." aria-label="Filter player chips" autocomplete="off">
                     </div>
-                    <div class="btn-group btn-group-sm vt-match-picker-players-mode" role="radiogroup" aria-label="Player match mode">
-                      <button type="button" class="btn btn-outline-secondary active" data-match-mode="any" aria-pressed="true" title="Match if any selected player was in the match">Any of these</button>
-                      <button type="button" class="btn btn-outline-secondary" data-match-mode="all" aria-pressed="false" title="Match only if every selected player was in the match">All of these</button>
-                    </div>
-                    <div class="btn-group btn-group-sm vt-match-picker-players-role" role="radiogroup" aria-label="Player role">
-                      <button type="button" class="btn btn-outline-secondary active" data-role="any" aria-pressed="true" title="Selected players in any role (commander or thug)">Any role</button>
-                      <button type="button" class="btn btn-outline-secondary" data-role="commander" aria-pressed="false" title="Selected players must have commanded the match">Commander</button>
-                      <button type="button" class="btn btn-outline-secondary" data-role="thug" aria-pressed="false" title="Selected players must have been on the team but not commanding">Thug</button>
-                    </div>
+                    <ul class="nav nav-pills vt-econ-log-pills mb-0 vt-match-picker-players-mode" role="radiogroup" aria-label="Player match mode">
+                      <li class="nav-item">
+                        <button type="button" class="nav-link active" data-match-mode="any" role="radio" aria-checked="true" title="Match if any selected player was in the match">Any of these</button>
+                      </li>
+                      <li class="nav-item">
+                        <button type="button" class="nav-link" data-match-mode="all" role="radio" aria-checked="false" title="Match only if every selected player was in the match">All of these</button>
+                      </li>
+                    </ul>
+                    <ul class="nav nav-pills vt-econ-log-pills mb-0 vt-match-picker-players-role" role="radiogroup" aria-label="Player role">
+                      <li class="nav-item">
+                        <button type="button" class="nav-link active" data-role="any" role="radio" aria-checked="true" title="Selected players in any role (commander or thug)">Any role</button>
+                      </li>
+                      <li class="nav-item">
+                        <button type="button" class="nav-link" data-role="commander" role="radio" aria-checked="false" title="Selected players must have commanded the match">Commander</button>
+                      </li>
+                      <li class="nav-item">
+                        <button type="button" class="nav-link" data-role="thug" role="radio" aria-checked="false" title="Selected players must have been on the team but not commanding">Thug</button>
+                      </li>
+                    </ul>
                   </div>
                   <div class="vt-match-picker-chipset vt-match-picker-chipset--players"
                        data-facet="players-roster" id="match-picker-facet-players-roster"

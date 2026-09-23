@@ -45,14 +45,11 @@
   const $resultCount        = document.getElementById('match-picker-result-count');
   const $clearBtn           = document.getElementById('match-picker-clear');
   const $facetDuration      = $filtersBody && $filtersBody.querySelector('[data-facet="duration"]');
-  // v15: outcome-provenance facet (Any / Winner known / Attested only).
-  const $facetOutcome       = $filtersBody && $filtersBody.querySelector('[data-facet="outcome"]');
   const $facetVod           = $filtersBody && $filtersBody.querySelector('[data-facet="vod"]');
-  // `$facetPlayerCounts` is the multi-select chipset for `manifest[].player_count`.
-  // (Was named `$facetPlayers` in v1; renamed for symmetry with the v2
-  // state shape — `pickerState.playerCounts` — and to free up the
-  // "Players" name for the new full-roster chipset below.)
+  // `$facetPlayerCounts` is the checkbox menu for the active player count
+  // (manifest[].active_player_count). The toggle button sits beside it.
   const $facetPlayerCounts  = document.getElementById('match-picker-facet-players');
+  const $playerCountToggle  = document.getElementById('match-picker-count-toggle');
   const $facetSubmitters    = document.getElementById('match-picker-facet-submitters');
   // New full-roster Players chipset + its search input + Match-mode and
   // Role toggle button groups. Replaces the old Commanders block; see
@@ -85,17 +82,14 @@
   // matchMode is the presence axis ('any' = some present, 'all' = every).
   const PICKER_STATE_KEY = 'vt.picker.filters.v2';
   const PICKER_STATE_KEY_V1 = 'vt.picker.filters.v1';
-  // `playerCounts` is the multi-select facet for `manifest[].player_count`
-  // (was named `players` in v1; the new `players` field is the roster
-  // chipset, so this got a more specific name to avoid the collision).
+  // `playerCounts` is the multi-select facet for the picker's active
+  // player count (manifest[].active_player_count, falling back to
+  // player_count). Empty = any. Was named `players` in v1; the roster
+  // chipset took that name.
   const DEFAULT_PICKER_STATE = () => ({
     query: '',
     duration: 'any',                // 'any' | 'short' (<10m) | 'medium' (10-20m) | 'long' (>=20m)
-    // v15: outcome provenance facet reading manifest[].winner_decided_by.
-    //   'winner'   -> a winner is known (attested / clean_win / contested)
-    //   'attested' -> host confirmed the outcome at game end (proto v3+)
-    outcome: 'any',                 // 'any' | 'winner' | 'attested'
-    playerCounts: [],               // array of player_count numbers; empty = any
+    playerCounts: [],               // array of active-count numbers; empty = any
     submitters: [],                 // array of submitter strings; empty = any
     players: [],                    // array of nickname strings (full roster); empty = any
     matchMode: 'any',               // 'any' | 'all' — presence test against `players`
@@ -148,7 +142,7 @@
   // per-match `players` param above.
   //   ?q=<text>            (free-text search; non-empty)
   //   ?dur=short|medium|long
-  //   ?cnt=<csv-of-ints>   (player_count multi-select, e.g. 8,10)
+  //   ?cnt=<csv-of-ints>   (active player-count multi-select, e.g. 8,10)
   //   ?sub=<csv>           (submitters multi-select)
   //   ?roster=<csv>        (full-roster nickname multi-select)
   //   ?mode=all            (Match-mode toggle; 'any' is default and omitted)
@@ -177,7 +171,6 @@
       picker: {
         q:      p.get('q'),
         dur:    p.get('dur'),
-        outcome: p.get('outcome'),
         cnt:    (p.get('cnt') || '').split(',').map(s => s.trim()).filter(Boolean),
         sub:    (p.get('sub') || '').split(',').map(s => s.trim()).filter(Boolean),
         roster: (p.get('roster') || '').split(',').map(s => s.trim()).filter(Boolean),
@@ -305,7 +298,6 @@
     const ps = pickerState;
     if (ps.query)                                 params.set('q', ps.query);
     if (ps.duration && ps.duration !== 'any')     params.set('dur', ps.duration);
-    if (ps.outcome && ps.outcome !== 'any')       params.set('outcome', ps.outcome);
     if (ps.playerCounts.length)                   params.set('cnt', ps.playerCounts.join(','));
     if (ps.submitters.length)                     params.set('sub', ps.submitters.join(','));
     if (ps.players.length)                        params.set('roster', ps.players.join(','));
@@ -326,10 +318,10 @@
     history.replaceState(null, '', buildShareUrl());
   }
 
-  // The nine picker query keys, in the order buildShareUrl() emits them.
-  // Single source of truth for `syncPickerUrl()` and any future helper
-  // that needs to know what counts as "picker state" on the URL.
-  const PICKER_URL_KEYS = ['q', 'dur', 'outcome', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort', 'vod'];
+  // Picker query keys, in the order buildShareUrl() emits them.
+  // `outcome` is retired (the facet was removed) and is deleted on sync
+  // so a leftover `?outcome=` from an old link does not stick around.
+  const PICKER_URL_KEYS = ['q', 'dur', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort', 'vod'];
 
   // Picker-only URL writer — always fires (unlike `syncUrl()`), but only
   // touches the eight picker keys. Existing non-picker params (match,
@@ -343,11 +335,11 @@
   function syncPickerUrl() {
     const cur = new URLSearchParams(window.location.search);
     PICKER_URL_KEYS.forEach(k => cur.delete(k));
+    cur.delete('outcome');
 
     const ps = pickerState;
     if (ps.query)                                 cur.set('q', ps.query);
     if (ps.duration && ps.duration !== 'any')     cur.set('dur', ps.duration);
-    if (ps.outcome && ps.outcome !== 'any')       cur.set('outcome', ps.outcome);
     if (ps.playerCounts.length)                   cur.set('cnt', ps.playerCounts.join(','));
     if (ps.submitters.length)                     cur.set('sub', ps.submitters.join(','));
     if (ps.players.length)                        cur.set('roster', ps.players.join(','));
@@ -557,6 +549,16 @@
     });
   }
 
+  // Count the picker shows and filters on. Campod and partial rows are
+  // omitted via manifest.active_player_count. Pre-backfill manifests fall
+  // back to the raw slot count.
+  function pickerPlayerCount(entry) {
+    const n = entry && entry.active_player_count;
+    if (Number.isFinite(n)) return n;
+    const raw = entry && entry.player_count;
+    return Number.isFinite(raw) ? raw : 0;
+  }
+
   // --- Match picker: build + wire ---
 
   function matchHasVod(entry) {
@@ -584,13 +586,21 @@
     const leaders = entry.team_leaders || {};
     const l1 = leaders['1'] && leaders['1'].name;
     const l2 = leaders['2'] && leaders['2'].name;
+    const winSide = entry.winner_team;
     let leadersHtml = '';
     if (l1 || l2) {
+      const leaderSpan = (name, side) => {
+        const winner = winSide === side;
+        const cls = 'vt-match-picker-card-leader vt-match-picker-card-leader--t' + side +
+          (winner ? ' vt-match-picker-card-leader--winner' : '');
+        const title = winner ? ' title="Winner"' : '';
+        return `<span class="${cls}"${title}>${esc(name || '—')}</span>`;
+      };
       leadersHtml = `
         <div class="vt-match-picker-card-leaders">
-          <span class="vt-match-picker-card-leader vt-match-picker-card-leader--t1">${esc(l1 || '—')}</span>
+          ${leaderSpan(l1, 1)}
           <span class="vt-match-picker-card-leader-vs">vs</span>
-          <span class="vt-match-picker-card-leader vt-match-picker-card-leader--t2">${esc(l2 || '—')}</span>
+          ${leaderSpan(l2, 2)}
         </div>`;
     }
     const mapRaw = entry.map && entry.map !== entry.name
@@ -621,7 +631,7 @@
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
             <span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}${vodMark}</span>
-            <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${entry.player_count || '?'}p</span>
+            <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${pickerPlayerCount(entry)}p</span>
           </div>
           ${mapRaw}
           <div class="vt-match-picker-card-submeta">
@@ -867,7 +877,7 @@
   // it redundant, and we want the chip list to surface non-commanders too.
   function deriveFacets() {
     const playerCounts = Array.from(new Set(
-      manifest.map(m => m.player_count).filter(n => Number.isFinite(n) && n > 0)
+      manifest.map(pickerPlayerCount).filter(n => Number.isFinite(n) && n > 0)
     )).sort((a, b) => a - b);
 
     const submitters = Array.from(new Set(
@@ -887,9 +897,12 @@
   function buildMatchPickerFilters() {
     if (!$facetPlayerCounts || !$facetSubmitters || !$facetPlayers) return;
 
-    // Player-count chips (sizes of matches: 4, 6, 8, 10).
+    // Player-count checkboxes (active roster size: 4, 6, 8, 10).
     $facetPlayerCounts.innerHTML = pickerFacets.playerCounts.map(pc =>
-      `<button type="button" class="vt-match-picker-chip" data-value="${pc}" role="checkbox" aria-checked="false">${pc}</button>`
+      `<li><label class="dropdown-item vt-match-picker-count-item">` +
+        `<input type="checkbox" class="form-check-input" value="${pc}">` +
+        `<span>${pc}</span>` +
+      `</label></li>`
     ).join('');
 
     // Submitter chips.
@@ -927,19 +940,8 @@
       if (d < bucket.min || d >= bucket.max) return false;
     }
 
-    // Outcome provenance (v15; 'adjudicated' added at v16). Reads
-    // manifest[].winner_decided_by:
-    //   'winner'   -> adjudicated / attested / clean_win / contested
-    //                 (a winner exists)
-    //   'attested' -> host-confirmed outcomes only (proto v3+ sessions)
-    if (state.outcome && state.outcome !== 'any') {
-      const db = entry.winner_decided_by || 'unclear';
-      if (state.outcome === 'winner' && !['adjudicated', 'attested', 'clean_win', 'contested'].includes(db)) return false;
-      if (state.outcome === 'attested' && db !== 'attested') return false;
-    }
-
-    // Player count (multi-select: match any selected count).
-    if (state.playerCounts.length && !state.playerCounts.includes(entry.player_count)) return false;
+    // Player count (multi-select: match any selected active count).
+    if (state.playerCounts.length && !state.playerCounts.includes(pickerPlayerCount(entry))) return false;
 
     // Submitter (multi-select: match any selected).
     if (state.submitters.length && !state.submitters.includes(entry.submitter)) return false;
@@ -1007,8 +1009,8 @@
       case 'date-asc':      return (a, b) => new Date(a.date) - new Date(b.date);
       case 'duration-desc': return (a, b) => (b.duration_sec || 0) - (a.duration_sec || 0);
       case 'duration-asc':  return (a, b) => (a.duration_sec || 0) - (b.duration_sec || 0);
-      case 'players-desc':  return (a, b) => (b.player_count || 0) - (a.player_count || 0);
-      case 'players-asc':   return (a, b) => (a.player_count || 0) - (b.player_count || 0);
+      case 'players-desc':  return (a, b) => pickerPlayerCount(b) - pickerPlayerCount(a);
+      case 'players-asc':   return (a, b) => pickerPlayerCount(a) - pickerPlayerCount(b);
       case 'name-asc':      return (a, b) => (a.name || '').localeCompare(b.name || '');
       case 'date-desc':
       default:              return (a, b) => new Date(b.date) - new Date(a.date);
@@ -1022,7 +1024,6 @@
   function activeFilterCount(state) {
     let n = 0;
     if (state.duration && state.duration !== 'any') n++;
-    if (state.outcome && state.outcome !== 'any') n++;
     if (state.playerCounts.length) n++;
     if (state.submitters.length) n++;
     if (state.players.length) n++;
@@ -1187,8 +1188,6 @@
     pickerState = {
       query:        typeof saved.query === 'string' ? saved.query : d.query,
       duration:     ['any', 'short', 'medium', 'long'].includes(saved.duration) ? saved.duration : d.duration,
-      // v15 optional key — absent on pre-v15 saved states, defaults 'any'.
-      outcome:      ['any', 'winner', 'attested'].includes(saved.outcome) ? saved.outcome : d.outcome,
       playerCounts: Array.isArray(saved.playerCounts) ? saved.playerCounts.filter(n => Number.isFinite(n)) : d.playerCounts,
       submitters:   Array.isArray(saved.submitters) ? saved.submitters.filter(s => typeof s === 'string') : d.submitters,
       players:      Array.isArray(saved.players) ? saved.players.filter(s => typeof s === 'string') : d.players,
@@ -1219,9 +1218,6 @@
     }
     if (['short', 'medium', 'long', 'any'].includes(u.dur)) {
       pickerState.duration = u.dur;
-    }
-    if (['any', 'winner', 'attested'].includes(u.outcome)) {
-      pickerState.outcome = u.outcome;
     }
     if (Array.isArray(u.cnt) && u.cnt.length) {
       const allowed = new Set(pickerFacets.playerCounts);
@@ -1267,13 +1263,6 @@
         c.setAttribute('aria-checked', active ? 'true' : 'false');
       });
     }
-    if ($facetOutcome) {
-      $facetOutcome.querySelectorAll('.vt-match-picker-chip').forEach(c => {
-        const active = c.dataset.value === pickerState.outcome;
-        c.classList.toggle('is-active', active);
-        c.setAttribute('aria-checked', active ? 'true' : 'false');
-      });
-    }
     if ($facetVod) {
       $facetVod.querySelectorAll('.vt-match-picker-chip').forEach(c => {
         const active = c.dataset.value === pickerState.hasVod;
@@ -1282,11 +1271,14 @@
       });
     }
     if ($facetPlayerCounts) {
-      $facetPlayerCounts.querySelectorAll('.vt-match-picker-chip').forEach(c => {
-        const active = pickerState.playerCounts.includes(Number(c.dataset.value));
-        c.classList.toggle('is-active', active);
-        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      const selected = new Set(pickerState.playerCounts);
+      $facetPlayerCounts.querySelectorAll('input[type="checkbox"]').forEach(box => {
+        box.checked = selected.has(Number(box.value));
       });
+    }
+    if ($playerCountToggle) {
+      const counts = pickerState.playerCounts.slice().sort((a, b) => a - b);
+      $playerCountToggle.textContent = counts.length ? counts.join(', ') : 'Any';
     }
     if ($facetSubmitters) {
       $facetSubmitters.querySelectorAll('.vt-match-picker-chip').forEach(c => {
@@ -1306,14 +1298,14 @@
       $playersModeBtns.forEach(btn => {
         const active = btn.dataset.matchMode === pickerState.matchMode;
         btn.classList.toggle('active', active);
-        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.setAttribute('aria-checked', active ? 'true' : 'false');
       });
     }
     if ($playersRoleBtns) {
       $playersRoleBtns.forEach(btn => {
         const active = btn.dataset.role === pickerState.role;
         btn.classList.toggle('active', active);
-        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.setAttribute('aria-checked', active ? 'true' : 'false');
       });
     }
   }
@@ -1356,17 +1348,6 @@
     });
   }
 
-  // Outcome is single-select (radiogroup) — mirrors the duration wiring.
-  if ($facetOutcome) {
-    $facetOutcome.addEventListener('click', (e) => {
-      const chip = e.target.closest('.vt-match-picker-chip');
-      if (!chip) return;
-      pickerState.outcome = chip.dataset.value || 'any';
-      applyPickerStateToUI();
-      applyPickerFilters();
-    });
-  }
-
   if ($facetVod) {
     $facetVod.addEventListener('click', (e) => {
       const chip = e.target.closest('.vt-match-picker-chip');
@@ -1377,7 +1358,9 @@
     });
   }
 
-  // PlayerCounts, Submitters, Players are multi-select (group) — click toggles.
+  // Submitters and the roster are multi-select chipsets — click toggles.
+  // Player count is a checkbox dropdown (wired below); checking a box
+  // must not hit this chip handler.
   function wireMultiChipset(container, stateKey, coerce) {
     if (!container) return;
     container.addEventListener('click', (e) => {
@@ -1393,9 +1376,40 @@
       applyPickerFilters();
     });
   }
-  wireMultiChipset($facetPlayerCounts, 'playerCounts', v => Number(v));
   wireMultiChipset($facetSubmitters, 'submitters', null);
   wireMultiChipset($facetPlayers, 'players', null);
+
+  // Player-count dropdown. Checked values OR together; none checked = any.
+  // The menu is moved to document.body while open: the modal dialog is
+  // CSS-transformed, and position:fixed inside that transform is not the
+  // viewport, so Popper's coordinates land in the wrong place.
+  if ($playerCountToggle && $facetPlayerCounts && window.bootstrap && window.bootstrap.Dropdown) {
+    const countMenuHome = $facetPlayerCounts.parentElement;
+    $playerCountToggle.addEventListener('show.bs.dropdown', () => {
+      document.body.appendChild($facetPlayerCounts);
+    });
+    $playerCountToggle.addEventListener('hidden.bs.dropdown', () => {
+      if (countMenuHome) countMenuHome.appendChild($facetPlayerCounts);
+    });
+    window.bootstrap.Dropdown.getOrCreateInstance($playerCountToggle, {
+      autoClose: 'outside',
+      popperConfig(defaults) {
+        return Object.assign({}, defaults, { strategy: 'fixed' });
+      },
+    });
+  }
+  if ($facetPlayerCounts) {
+    $facetPlayerCounts.addEventListener('change', () => {
+      const selected = [];
+      $facetPlayerCounts.querySelectorAll('input[type="checkbox"]').forEach(box => {
+        if (box.checked) selected.push(Number(box.value));
+      });
+      selected.sort((a, b) => a - b);
+      pickerState.playerCounts = selected;
+      applyPickerStateToUI();
+      applyPickerFilters();
+    });
+  }
 
   // --- Wiring: players search (visibility-only — does NOT filter matches) ---
 
@@ -1485,6 +1499,17 @@
   hydratePickerStateFromUrl(initialUrlState.picker);
   applyPickerStateToUI();
   applyPickerFilters();
+  // The outcome facet is gone. Strip a leftover param now, before any
+  // match load, so an old shared link doesn't keep ?outcome= in the bar.
+  // currentTarget is still null here, so syncPickerUrl() would no-op.
+  {
+    const cur = new URLSearchParams(window.location.search);
+    if (cur.has('outcome')) {
+      cur.delete('outcome');
+      const qs = paramsToString(cur);
+      history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+    }
+  }
   if (window.VTVideoLinks) {
     VTVideoLinks.ensureLoaded().then(() => applyPickerFilters());
   }
@@ -1510,6 +1535,12 @@
       const active = $pickerGrid && $pickerGrid.querySelector('.vt-match-picker-card.is-active');
       if (active && typeof active.scrollIntoView === 'function') {
         active.scrollIntoView({ block: 'nearest' });
+      }
+    });
+    $pickerModalEl.addEventListener('hide.bs.modal', () => {
+      if ($playerCountToggle && window.bootstrap && window.bootstrap.Dropdown) {
+        const countDropdown = window.bootstrap.Dropdown.getInstance($playerCountToggle);
+        if (countDropdown) countDropdown.hide();
       }
     });
     $pickerModalEl.addEventListener('hidden.bs.modal', () => {

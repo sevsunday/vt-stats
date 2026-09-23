@@ -4179,6 +4179,13 @@ td.vt-col-split {
     background: var(--kb-accent);
 }
 
+/* Winning commander's dot. Same gold as the per-match trophy
+   (.vt-faction-winner-icon uses --kb-warning). The team fill stays
+   inside the ring. */
+.vt-match-picker-card-leader--winner::before {
+    box-shadow: 0 0 0 1.5px var(--kb-warning);
+}
+
 .vt-match-picker-card-leader-vs {
     color: var(--kb-text-muted);
     font-size: 0.75rem;
@@ -4268,6 +4275,54 @@ td.vt-col-split {
 .vt-match-picker-sort {
     min-width: 150px;
     max-width: 220px;
+}
+
+/* Player-count multi-select. Looks like the Sort <select>; the menu is
+   checkboxes so several counts can be OR'd. None checked reads "Any". */
+.vt-match-picker-count {
+    position: relative;
+    flex: 0 1 auto;
+}
+
+.vt-match-picker-count-toggle {
+    width: auto;
+    min-width: 7.5rem;
+    max-width: 14rem;
+    cursor: pointer;
+    line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vt-match-picker-count-menu {
+    max-height: 16rem;
+    overflow-y: auto;
+    min-width: 7.5rem;
+    padding: 0.25rem;
+    /* Portaled to document.body while open. The modal sits at 1055,
+       so the menu has to paint above it. */
+    z-index: 1080;
+}
+
+.vt-match-picker-count-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.3rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--kb-text-primary);
+}
+
+.vt-match-picker-count-item .form-check-input {
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.vt-match-picker-count-menu .dropdown-item:active {
+    background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    color: var(--kb-text-primary);
 }
 
 .vt-match-picker-chipset {
