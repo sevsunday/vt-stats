@@ -681,8 +681,15 @@
     object-fit: contain;
 }
 
-/* Build Trees modal: ?embed=1 hides the site navbar so the iframe is
-   the browser (sidebar + detail), not a second copy of the top nav. */
-html.vt-odf-embed .navbar {
+/* Build Trees modal: ?embed=1 hides the site navbar and the unit list
+   so the iframe is only this ODF's detail. */
+html.vt-odf-embed .navbar,
+html.vt-odf-embed #odfSidebar {
     display: none;
+}
+
+html.vt-odf-embed #odfContent {
+    flex: 0 0 100%;
+    max-width: 100%;
+    width: 100%;
 }

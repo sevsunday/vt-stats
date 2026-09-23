@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VSR Faction Build Trees — VT Stats</title>
+  <title>VSR Build Trees — VT Stats</title>
   <meta name="description" content="Fully expanded VSR build trees for ISDF, Hadean, and Scion, from each recycler through constructors, factories, and armories.">
 
   <link rel="canonical" href="https://vtstats.bz/build/">
 
   <meta property="og:type" content="website">
-  <meta property="og:title" content="VSR Faction Build Trees — VT Stats">
+  <meta property="og:title" content="VSR Build Trees — VT Stats">
   <meta property="og:description" content="Fully expanded VSR build trees for ISDF, Hadean, and Scion, from each recycler through constructors, factories, and armories.">
   <meta property="og:url" content="https://vtstats.bz/build/">
   <meta property="og:site_name" content="VT Stats">
@@ -51,6 +51,7 @@
             <ul class="dropdown-menu dropdown-menu-end">
               <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
               <li><a class="dropdown-item active" href="./" aria-current="page"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="../odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
             </ul>
           </div>
           <div class="dropdown vt-nav-dropdown">
@@ -97,9 +98,14 @@
 
   <main class="vt-tree-page flex-grow-1">
     <header class="vt-tree-head">
-      <div>
-        <h1 class="vt-tree-title">VSR Faction Build Trees</h1>
-        <p class="vt-tree-lede">Every unit each recycler can field, then everything those constructors, factories, and armories build.</p>
+      <h1 class="vt-tree-title">VSR Build Trees</h1>
+      <div class="vt-tree-tabs" role="tablist" aria-label="Faction">
+        <button type="button" class="vt-tree-tab is-active" role="tab" id="vt-tab-isdf"
+                data-vt-faction-tab="isdf" aria-selected="true" aria-controls="vt-panel-isdf">ISDF</button>
+        <button type="button" class="vt-tree-tab" role="tab" id="vt-tab-hadean"
+                data-vt-faction-tab="hadean" aria-selected="false" aria-controls="vt-panel-hadean">Hadean</button>
+        <button type="button" class="vt-tree-tab" role="tab" id="vt-tab-scion"
+                data-vt-faction-tab="scion" aria-selected="false" aria-controls="vt-panel-scion">Scion</button>
       </div>
       <label class="visually-hidden" for="vt-tree-find">Find a unit</label>
       <input id="vt-tree-find" class="form-control vt-tree-find" type="search"
@@ -107,16 +113,13 @@
     </header>
     <p id="vt-tree-status" class="vt-tree-status" hidden></p>
     <div id="vt-tree-columns" class="vt-tree-columns">
-      <section class="vt-tree-col" data-faction="i">
-        <h2 class="vt-tree-faction"><span class="vt-tree-faction-mark" aria-hidden="true"></span>ISDF</h2>
+      <section class="vt-tree-col" id="vt-panel-isdf" data-faction="i" data-faction-id="isdf" role="tabpanel" aria-labelledby="vt-tab-isdf">
         <div id="vt-tree-isdf" class="vt-tree-col-body"></div>
       </section>
-      <section class="vt-tree-col" data-faction="e">
-        <h2 class="vt-tree-faction"><span class="vt-tree-faction-mark" aria-hidden="true"></span>Hadean</h2>
+      <section class="vt-tree-col" id="vt-panel-hadean" data-faction="e" data-faction-id="hadean" role="tabpanel" aria-labelledby="vt-tab-hadean" hidden>
         <div id="vt-tree-hadean" class="vt-tree-col-body"></div>
       </section>
-      <section class="vt-tree-col" data-faction="f">
-        <h2 class="vt-tree-faction"><span class="vt-tree-faction-mark" aria-hidden="true"></span>Scion</h2>
+      <section class="vt-tree-col" id="vt-panel-scion" data-faction="f" data-faction-id="scion" role="tabpanel" aria-labelledby="vt-tab-scion" hidden>
         <div id="vt-tree-scion" class="vt-tree-col-body"></div>
       </section>
     </div>
@@ -126,12 +129,20 @@
     <div class="modal-dialog modal-dialog-centered vt-tree-odf-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="vt-tree-odf-title">ODF</h5>
-          <a id="vt-tree-odf-open" class="vt-tree-odf-open" href="../odf/" target="_blank" rel="noopener">Open in ODF browser</a>
+          <h5 class="modal-title" id="vt-tree-odf-title">Unit</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body p-0">
-          <iframe id="vt-tree-odf-frame" class="vt-tree-odf-frame" title="ODF browser"></iframe>
+          <div class="row g-0 h-100">
+            <div id="vt-tree-detail" class="col-12 col-lg-2 p-3"></div>
+            <div class="col-12 col-lg vt-tree-odf-frame-col">
+              <iframe id="vt-tree-odf-frame" class="vt-tree-odf-frame" title="ODF browser"></iframe>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a id="vt-tree-odf-open" class="btn btn-outline-secondary" href="../odf/" target="_blank" rel="noopener">Open in ODF browser</a>
+          <a id="vt-tree-odf-model" class="btn btn-primary" href="../models/" target="_blank" rel="noopener" hidden>Model</a>
         </div>
       </div>
     </div>

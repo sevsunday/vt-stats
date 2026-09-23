@@ -7,15 +7,14 @@
     flex-direction: column;
     gap: 0.75rem;
     padding: 0.85rem 1rem 0.75rem;
-    overflow: auto;
+    overflow: hidden;
 }
 
 .vt-tree-head {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 0.75rem 1.25rem;
+    align-items: center;
+    gap: 0.55rem 0.85rem;
 }
 
 .vt-tree-title {
@@ -25,15 +24,10 @@
     color: var(--kb-text-primary);
 }
 
-.vt-tree-lede {
-    margin: 0.2rem 0 0;
-    max-width: 42rem;
-    color: var(--kb-text-secondary);
-    font-size: 0.9rem;
-}
-
 .vt-tree-find {
-    min-width: min(100%, 16rem);
+    flex: 1 1 14rem;
+    max-width: 18rem;
+    margin-left: auto;
     background: var(--kb-bg-subtle);
     color: var(--kb-text-primary);
     border-color: var(--kb-border-subtle);
@@ -56,10 +50,44 @@
     color: var(--kb-danger);
 }
 
+.vt-tree-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+
+.vt-tree-tab {
+    --vt-tab: var(--kb-primary);
+    border: 1px solid var(--kb-border-subtle);
+    background: transparent;
+    color: var(--kb-text-secondary);
+    border-radius: 999px;
+    padding: 0.1rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 650;
+    line-height: 1.4;
+}
+
+.vt-tree-tab[data-vt-faction-tab="isdf"] { --vt-tab: var(--kb-faction-i); }
+.vt-tree-tab[data-vt-faction-tab="hadean"] { --vt-tab: var(--kb-faction-e); }
+.vt-tree-tab[data-vt-faction-tab="scion"] { --vt-tab: var(--kb-faction-f); }
+
+.vt-tree-tab.is-active {
+    color: var(--kb-text-primary);
+    border-color: var(--vt-tab);
+    background: color-mix(in oklab, var(--vt-tab) 18%, transparent);
+}
+
+.vt-tree-tab:hover,
+.vt-tree-tab:focus-visible {
+    color: var(--kb-text-primary);
+    outline: none;
+}
+
 .vt-tree-columns {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
     min-height: 0;
 }
 
@@ -67,108 +95,195 @@
     --vt-tree-faction: var(--kb-primary);
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     min-width: 0;
     min-height: 0;
-    border-left: 3px solid var(--vt-tree-faction);
-    padding-left: 0.75rem;
+}
+
+.vt-tree-col[hidden] {
+    display: none;
 }
 
 .vt-tree-col[data-faction="i"] { --vt-tree-faction: var(--kb-faction-i); }
 .vt-tree-col[data-faction="e"] { --vt-tree-faction: var(--kb-faction-e); }
 .vt-tree-col[data-faction="f"] { --vt-tree-faction: var(--kb-faction-f); }
 
-.vt-tree-faction {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0 0 0.6rem;
-    font-size: 1.05rem;
-    font-weight: 650;
-    color: var(--kb-text-primary);
-}
-
-.vt-tree-faction-mark {
-    width: 0.55rem;
-    height: 1.1rem;
-    border-radius: 2px;
-    background: var(--vt-tree-faction);
-}
-
 .vt-tree-col-body {
+    --vt-tile-min: 11rem;
+    --vt-tile-gap: 0.7rem;
+    overflow: auto;
+    flex: 1 1 auto;
     min-height: 0;
+    padding-right: 0.35rem;
 }
 
-.vt-tree-node {
-    margin-bottom: 0.45rem;
-}
-
-.vt-tree-node.is-dim {
+.vt-tree-gallery > .vt-tree-node.is-dim,
+.vt-tree-section.is-dim > .vt-tree-section-head {
     opacity: 0.28;
 }
 
-.vt-tree-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.35rem;
+.vt-tree-section {
+    margin: 0;
+    padding: 0;
+    border: 0;
 }
 
-.vt-tree-card {
+/* Three nests step in. Deeper producers stay on that last inset. */
+.vt-tree-section[data-depth="2"],
+.vt-tree-section[data-depth="3"],
+.vt-tree-section[data-depth="4"] {
+    margin-left: 0.7rem;
+}
+
+.vt-tree-conduit {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--vt-tile-min)), 1fr));
+    height: 0.85rem;
+    margin-top: -1px;
+    pointer-events: none;
+}
+
+.vt-tree-conduit::before {
+    content: "";
+    grid-column: 1;
+    justify-self: center;
+    width: 0.95rem;
+    height: 100%;
+    transform: translateX(-50%);
+    border-right: 2px solid var(--vt-tree-faction);
+    border-bottom: 2px solid var(--vt-tree-faction);
+}
+
+.vt-tree-section:has(> .vt-tree-section-body:not(.show)) > .vt-tree-conduit {
+    display: none;
+}
+
+.vt-tree-section-head,
+.vt-tree-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--vt-tile-min)), 1fr));
+    gap: var(--vt-tile-gap);
+}
+
+.vt-tree-section-head .vt-tree-tile {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.vt-tree-section-head .vt-tree-caret {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: end;
+    align-self: start;
+    z-index: 1;
+    margin: 0.3rem 0.3rem 0 0;
+}
+
+.vt-tree-section-body {
+    position: relative;
+    margin: 0 0 0.85rem;
+    padding: 1.15rem 0.7rem 0.75rem;
+    background:
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) left 0 top 0 / 14px 2px no-repeat,
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) left 0 top 0 / 2px 14px no-repeat,
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) right 0 top 0 / 14px 2px no-repeat,
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) right 0 top 0 / 2px 14px no-repeat,
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) left 0 bottom 0 / 14px 2px no-repeat,
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) left 0 bottom 0 / 2px 14px no-repeat,
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) right 0 bottom 0 / 14px 2px no-repeat,
+        linear-gradient(var(--vt-tree-faction), var(--vt-tree-faction)) right 0 bottom 0 / 2px 14px no-repeat,
+        color-mix(in oklab, var(--vt-tree-faction) 7%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--vt-tree-faction) 28%, transparent);
+}
+
+.vt-tree-section-body::before {
+    content: "BUILDS";
+    position: absolute;
+    top: 0;
+    left: 0.85rem;
+    transform: translateY(-50%);
+    padding: 0 0.4rem;
+    background: var(--kb-bg-body);
+    color: var(--vt-tree-faction);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    line-height: 1;
+}
+
+.vt-tree-section-body .vt-tree-section-body::before {
+    background: color-mix(in oklab, var(--vt-tree-faction) 7%, var(--kb-bg-body));
+}
+
+.vt-tree-section-body .vt-tree-section-body .vt-tree-section-body::before {
+    background: color-mix(in oklab, var(--vt-tree-faction) 13%, var(--kb-bg-body));
+}
+
+.vt-tree-section-body > .vt-tree-section {
+    margin-top: 0.75rem;
+}
+
+.vt-tree-tile {
     --vt-tree-cat: var(--kb-text-secondary);
-    flex: 1 1 auto;
-    min-width: 0;
     display: flex;
-    gap: 0.55rem;
-    padding: 0.45rem 0.55rem;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    padding: 0.3rem 0.3rem 0.35rem;
     border: 1px solid color-mix(in oklab, var(--vt-tree-cat) 45%, var(--kb-border-subtle));
-    border-left: 3px solid var(--vt-tree-cat);
     border-radius: 0.4rem;
     background: color-mix(in oklab, var(--vt-tree-cat) 10%, var(--kb-bg-card));
     color: var(--kb-text-primary);
+    text-align: center;
+    cursor: pointer;
 }
 
-.vt-tree-card[data-category="Vehicle"]  { --vt-tree-cat: var(--kb-primary); }
-.vt-tree-card[data-category="Building"] { --vt-tree-cat: var(--kb-warning); }
-.vt-tree-card[data-category="Weapon"]   { --vt-tree-cat: var(--kb-success); }
-.vt-tree-card[data-category="Ordnance"] { --vt-tree-cat: var(--kb-success); }
-.vt-tree-card[data-category="Pilot"]    { --vt-tree-cat: var(--kb-info); }
-.vt-tree-card[data-category="Powerup"]  { --vt-tree-cat: var(--kb-info); }
-.vt-tree-card[data-category="Effect"]   { --vt-tree-cat: var(--kb-accent); }
+.vt-tree-tile:hover,
+.vt-tree-tile:focus-visible {
+    border-color: var(--vt-tree-cat);
+    outline: none;
+}
 
-.vt-tree-shot {
-    width: 4.5rem;
-    height: 4.5rem;
-    flex: 0 0 auto;
-    object-fit: contain;
+.vt-tree-tile[data-category="Vehicle"]  { --vt-tree-cat: var(--kb-primary); }
+.vt-tree-tile[data-category="Building"] { --vt-tree-cat: var(--kb-warning); }
+.vt-tree-tile[data-category="Weapon"]   { --vt-tree-cat: var(--kb-success); }
+.vt-tree-tile[data-category="Ordnance"] { --vt-tree-cat: var(--kb-success); }
+.vt-tree-tile[data-category="Pilot"]    { --vt-tree-cat: var(--kb-info); }
+.vt-tree-tile[data-category="Powerup"]  { --vt-tree-cat: var(--kb-info); }
+.vt-tree-tile[data-category="Effect"]   { --vt-tree-cat: var(--kb-accent); }
+
+.vt-tree-shot-frame {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1;
     border-radius: 0.25rem;
     background: color-mix(in oklab, var(--kb-bg-body) 65%, transparent);
+    overflow: hidden;
 }
 
-.vt-tree-card-main {
-    min-width: 0;
-    flex: 1 1 auto;
+.vt-tree-shot {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
 }
 
-.vt-tree-name-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.35rem 0.45rem;
-}
-
-.vt-tree-name {
+.vt-tree-tile-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    margin-top: 0.25rem;
+    min-height: 2.3em;
+    font-size: 0.72rem;
     font-weight: 650;
-    line-height: 1.2;
+    line-height: 1.15;
 }
 
-.vt-tree-role {
-    font-size: 0.65rem;
-    font-weight: 650;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--vt-tree-cat);
-    border: 1px solid color-mix(in oklab, var(--vt-tree-cat) 45%, transparent);
-    border-radius: 999px;
-    padding: 0.05rem 0.4rem;
+.vt-tree-tile-cost {
+    font-size: 0.68rem;
+    color: var(--kb-text-muted);
 }
 
 .vt-tree-missing {
@@ -177,80 +292,10 @@
     color: var(--kb-text-muted);
 }
 
-.vt-tree-stats {
-    margin: 0.3rem 0 0;
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0.05rem 0.55rem;
-    font-size: 0.75rem;
-}
-
-.vt-tree-stat-label {
-    color: var(--kb-text-muted);
-}
-
-.vt-tree-stat-value {
-    color: var(--kb-text-primary);
-}
-
-.vt-tree-weapons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    margin-top: 0.35rem;
-}
-
-.vt-tree-wpn,
-.vt-tree-btn {
-    font-size: 0.72rem;
-    line-height: 1.2;
-    padding: 0.15rem 0.4rem;
-    border-radius: 0.25rem;
-    border: 1px solid var(--kb-border-subtle);
-    background: var(--kb-bg-subtle);
-    color: var(--kb-text-primary);
-    text-decoration: none;
-}
-
-.vt-tree-wpn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    cursor: pointer;
-}
-
-.vt-tree-btn {
-    cursor: pointer;
-}
-
-.vt-tree-wpn:hover,
-.vt-tree-btn:hover,
-.vt-tree-wpn:focus-visible,
-.vt-tree-btn:focus-visible {
-    color: var(--kb-text-primary);
-    background: color-mix(in oklab, var(--vt-tree-cat, var(--kb-primary)) 22%, var(--kb-bg-subtle));
-    border-color: color-mix(in oklab, var(--vt-tree-cat, var(--kb-primary)) 50%, var(--kb-border-subtle));
-    outline: none;
-}
-
-.vt-tree-wpn-mark {
-    font-weight: 750;
-}
-
-.vt-tree-wpn-mark[data-assault="1"] { color: var(--kb-warning); }
-.vt-tree-wpn-mark[data-assault="0"] { color: var(--kb-info); }
-
-.vt-tree-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-top: 0.4rem;
-}
-
 .vt-tree-caret {
     flex: 0 0 auto;
-    margin-top: 0.35rem;
-    padding: 0.1rem 0.2rem;
+    margin-top: 0.15rem;
+    padding: 0.1rem 0.15rem;
     border: 0;
     background: transparent;
     color: var(--kb-text-secondary);
@@ -272,14 +317,8 @@
     transform: rotate(-90deg);
 }
 
-.vt-tree-children {
-    margin: 0.25rem 0 0.15rem 0.45rem;
-    padding-left: 0.7rem;
-    border-left: 2px solid color-mix(in oklab, var(--vt-tree-faction) 45%, transparent);
-}
-
 .vt-tree-odf-dialog {
-    width: min(1400px, calc(100vw - 1.5rem));
+    width: calc(100vw - 2rem);
     max-width: none;
     height: calc(100vh - 2rem);
     margin: 1rem auto;
@@ -292,18 +331,33 @@
     border-color: var(--kb-border-subtle);
 }
 
-.vt-tree-odf-dialog .modal-header {
+.vt-tree-odf-dialog .modal-header,
+.vt-tree-odf-dialog .modal-footer {
     border-color: var(--kb-border-subtle);
-    gap: 0.75rem;
 }
 
 .vt-tree-odf-dialog .modal-title {
     margin-right: auto;
 }
 
-.vt-tree-odf-open {
-    font-size: 0.85rem;
-    white-space: nowrap;
+.vt-tree-odf-dialog .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.vt-tree-odf-dialog .modal-body > .row {
+    height: 100%;
+}
+
+#vt-tree-detail {
+    height: 100%;
+    overflow: auto;
+}
+
+.vt-tree-odf-frame-col {
+    height: 100%;
+    min-height: 0;
 }
 
 .vt-tree-odf-frame {
@@ -314,25 +368,21 @@
     background: var(--kb-bg-body);
 }
 
-.vt-tree-odf-dialog .modal-body {
-    min-height: 0;
+@media (min-width: 992px) {
+    #vt-tree-detail {
+        border-right: 1px solid var(--kb-border-subtle);
+    }
 }
 
-@media (min-width: 1100px) {
-    .vt-tree-page {
-        overflow: hidden;
+@media (max-width: 991.98px) {
+    #vt-tree-detail {
+        height: auto;
+        max-height: 38vh;
+        border-bottom: 1px solid var(--kb-border-subtle);
     }
 
-    .vt-tree-columns {
-        flex: 1 1 auto;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.75rem;
-    }
-
-    .vt-tree-col-body {
-        overflow: auto;
-        flex: 1 1 auto;
-        padding-right: 0.35rem;
+    .vt-tree-odf-frame-col {
+        height: 52vh;
     }
 }
 

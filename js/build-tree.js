@@ -169,141 +169,121 @@
         });
     }
 
-    function renderNode(rawName, parentEl, path) {
+    function scrapCostOf(odf) {
+        const value = odf && odf.GameObjectClass && odf.GameObjectClass.scrapCost;
+        if (value == null || value === '') return '';
+        return String(value);
+    }
+
+    function makeShot(geom, className) {
+        const frame = el('span', 'vt-tree-shot-frame');
+        if (!geom) return frame;
+        const img = el('img', className || 'vt-tree-shot');
+        img.alt = '';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        img.src = SHOTS_BASE + geom + '/hero.png';
+        img.setAttribute('data-fallback', THUMB_BASE + geom + '.png');
+        attachShot(img);
+        frame.appendChild(img);
+        return frame;
+    }
+
+    function describeUnit(rawName) {
         const stem = stemOf(rawName);
-        if (!stem || path.has(stem)) return;
-        path.add(stem);
+        const hit = index.get(stem + '.odf');
+        const odf = hit && hit.data;
+        const filename = (hit && hit.filename) || (stem + '.odf');
+        const name = odf ? unitName(odf, stem) : stem;
+        return {
+            stem,
+            odf,
+            category: (hit && hit.category) || '',
+            name,
+            geom: odf ? modelStem(odf) : '',
+            cost: odf ? scrapCostOf(odf) : '',
+            children: odf ? childNames(odf, filename) : [],
+            search: (name + ' ' + stem).toLowerCase(),
+        };
+    }
+
+    function makeTile(info) {
+        const tile = el('button', 'vt-tree-tile');
+        tile.type = 'button';
+        tile.dataset.vtTreeOpen = '1';
+        tile.dataset.stem = info.stem;
+        tile.dataset.name = info.name;
+        if (info.category) tile.dataset.category = info.category;
+        tile.appendChild(makeShot(info.geom));
+        const nameEl = el('span', 'vt-tree-tile-name');
+        nameEl.textContent = info.name;
+        tile.appendChild(nameEl);
+        if (info.cost !== '') {
+            const costEl = el('span', 'vt-tree-tile-cost vt-mono');
+            costEl.textContent = info.cost;
+            tile.appendChild(costEl);
+        }
+        return tile;
+    }
+
+    function renderLeaf(info) {
+        const node = el('div', 'vt-tree-node');
+        node.dataset.stem = info.stem;
+        node.dataset.search = info.search;
+        node.appendChild(makeTile(info));
+        return node;
+    }
+
+    // A producer is a full-width section. Direct children that build nothing
+    // share one gallery. Children that build more are nested sections, in
+    // menu order, so a factory's ships stay inside the factory.
+    function renderSection(parentEl, info, path) {
+        if (!info.stem || path.has(info.stem)) return;
+        path.add(info.stem);
         try {
-            const hit = index.get(stem + '.odf');
-            const odf = hit && hit.data;
-            const category = (hit && hit.category) || '';
-            const filename = (hit && hit.filename) || (stem + '.odf');
-            const name = odf ? unitName(odf, stem) : stem;
-            const role = odf ? roleLabel(odf) : '';
-            const geom = odf ? modelStem(odf) : '';
-            const children = odf ? childNames(odf, filename) : [];
+            const section = el('section', 'vt-tree-section vt-tree-node');
+            section.dataset.stem = info.stem;
+            section.dataset.search = info.search;
+            section.dataset.depth = String(path.size);
 
-            const node = el('div', 'vt-tree-node');
-            node.dataset.stem = stem;
-            node.dataset.search = (name + ' ' + stem).toLowerCase();
+            const head = el('div', 'vt-tree-section-head');
+            head.appendChild(makeTile(info));
+            const bodyId = 'vt-tree-kids-' + (++seq);
+            const caret = el('button', 'vt-tree-caret');
+            caret.type = 'button';
+            caret.setAttribute('data-bs-toggle', 'collapse');
+            caret.setAttribute('data-bs-target', '#' + bodyId);
+            caret.setAttribute('aria-expanded', 'true');
+            caret.setAttribute('aria-label', 'Toggle units built by ' + info.name);
+            caret.appendChild(el('i', 'bi bi-caret-down-fill'));
+            head.appendChild(caret);
 
-            const row = el('div', 'vt-tree-row');
-            const card = el('div', 'vt-tree-card');
-            if (category) card.dataset.category = category;
+            const conduit = el('div', 'vt-tree-conduit');
+            conduit.setAttribute('aria-hidden', 'true');
 
-            if (geom) {
-                const img = el('img', 'vt-tree-shot');
-                img.alt = '';
-                img.loading = 'lazy';
-                img.decoding = 'async';
-                img.src = SHOTS_BASE + geom + '/hero.png';
-                img.setAttribute('data-fallback', THUMB_BASE + geom + '.png');
-                attachShot(img);
-                card.appendChild(img);
+            const body = el('div', 'vt-tree-section-body collapse show');
+            body.id = bodyId;
+            section.appendChild(head);
+            section.appendChild(conduit);
+            section.appendChild(body);
+            parentEl.appendChild(section);
+
+            const leaves = [];
+            const producers = [];
+            info.children.forEach((child) => {
+                const described = describeUnit(child);
+                if (path.has(described.stem)) return;
+                if (described.children.length) producers.push(described);
+                else leaves.push(described);
+            });
+            if (leaves.length) {
+                const gallery = el('div', 'vt-tree-gallery');
+                leaves.forEach((leaf) => gallery.appendChild(renderLeaf(leaf)));
+                body.appendChild(gallery);
             }
-
-            const main = el('div', 'vt-tree-card-main');
-            const nameRow = el('div', 'vt-tree-name-row');
-            const nameEl = el('span', 'vt-tree-name');
-            nameEl.textContent = name;
-            nameRow.appendChild(nameEl);
-            if (role) {
-                const chip = el('span', 'vt-tree-role');
-                chip.textContent = role;
-                nameRow.appendChild(chip);
-            }
-            main.appendChild(nameRow);
-
-            if (!odf) {
-                const missing = el('p', 'vt-tree-missing');
-                missing.textContent = 'Not in the ODF database';
-                main.appendChild(missing);
-            } else {
-                const stats = statRows(odf, category);
-                if (stats.length) {
-                    const list = el('div', 'vt-tree-stats');
-                    stats.forEach((stat) => {
-                        const label = el('span', 'vt-tree-stat-label');
-                        label.textContent = stat.label;
-                        const value = el('span', 'vt-tree-stat-value vt-mono');
-                        value.textContent = stat.value;
-                        list.appendChild(label);
-                        list.appendChild(value);
-                    });
-                    main.appendChild(list);
-                }
-
-                const weapons = weaponChips(odf);
-                if (weapons.length) {
-                    const wrap = el('div', 'vt-tree-weapons');
-                    weapons.forEach((weapon) => {
-                        const chip = el('button', 'vt-tree-wpn');
-                        chip.type = 'button';
-                        chip.dataset.vtTreeOpen = '1';
-                        chip.dataset.stem = weapon.stem;
-                        chip.dataset.name = weapon.name;
-                        const mark = el('span', 'vt-tree-wpn-mark');
-                        mark.dataset.assault = weapon.assault;
-                        mark.textContent = weapon.assault === '1' ? 'A' : 'C';
-                        chip.appendChild(mark);
-                        const label = document.createElement('span');
-                        label.textContent = weapon.count > 1
-                            ? weapon.name + ' \u00d7' + weapon.count
-                            : weapon.name;
-                        chip.appendChild(label);
-                        wrap.appendChild(chip);
-                    });
-                    main.appendChild(wrap);
-                }
-
-                const actions = el('div', 'vt-tree-actions');
-                const full = el('button', 'vt-tree-btn');
-                full.type = 'button';
-                full.dataset.vtTreeOpen = '1';
-                full.dataset.stem = stem;
-                full.dataset.name = name;
-                full.textContent = 'View full data';
-                actions.appendChild(full);
-                if (geom) {
-                    const model = el('a', 'vt-tree-btn');
-                    model.href = '../models/?model=' + encodeURIComponent(geom);
-                    model.target = '_blank';
-                    model.rel = 'noopener';
-                    model.textContent = 'Model';
-                    actions.appendChild(model);
-                }
-                main.appendChild(actions);
-            }
-
-            card.appendChild(main);
-            row.appendChild(card);
-
-            let kidsEl = null;
-            if (children.length) {
-                const kidsId = 'vt-tree-kids-' + (++seq);
-                const caret = el('button', 'vt-tree-caret');
-                caret.type = 'button';
-                caret.setAttribute('data-bs-toggle', 'collapse');
-                caret.setAttribute('data-bs-target', '#' + kidsId);
-                caret.setAttribute('aria-expanded', 'true');
-                caret.setAttribute('aria-label', 'Toggle units built by ' + name);
-                const icon = el('i', 'bi bi-caret-down-fill');
-                caret.appendChild(icon);
-                row.appendChild(caret);
-
-                kidsEl = el('div', 'vt-tree-children collapse show');
-                kidsEl.id = kidsId;
-            }
-
-            node.appendChild(row);
-            if (kidsEl) node.appendChild(kidsEl);
-            parentEl.appendChild(node);
-
-            if (kidsEl) {
-                children.forEach((child) => renderNode(child, kidsEl, path));
-            }
+            producers.forEach((producer) => renderSection(body, producer, path));
         } finally {
-            path.delete(stem);
+            path.delete(info.stem);
         }
     }
 
@@ -318,12 +298,18 @@
             body.appendChild(missing);
             return;
         }
-        renderNode(root.odf, body, new Set());
+        renderSection(body, describeUnit(root.odf), new Set());
+    }
+
+    function visiblePanel() {
+        return document.querySelector('.vt-tree-col:not([hidden])');
     }
 
     function applyFind(raw) {
         const query = String(raw || '').trim().toLowerCase();
-        document.querySelectorAll('.vt-tree-node').forEach((node) => {
+        const panel = visiblePanel();
+        const nodes = panel ? panel.querySelectorAll('.vt-tree-node') : [];
+        nodes.forEach((node) => {
             if (!query) {
                 node.classList.remove('is-dim');
                 return;
@@ -337,25 +323,154 @@
             }
             node.classList.toggle('is-dim', !(self || descendant));
         });
-        if (!query || !window.bootstrap) return;
-        document.querySelectorAll('.vt-tree-children.collapse').forEach((box) => {
+        if (!query || !panel || !window.bootstrap) return;
+        panel.querySelectorAll('.vt-tree-section-body.collapse').forEach((box) => {
             if (!box.querySelector('.vt-tree-node:not(.is-dim)')) return;
             window.bootstrap.Collapse.getOrCreateInstance(box, { toggle: false }).show();
         });
     }
 
-    function openOdf(stem, name) {
-        const frame = document.getElementById('vt-tree-odf-frame');
-        const title = document.getElementById('vt-tree-odf-title');
-        const link = document.getElementById('vt-tree-odf-open');
-        if (!frame || !odfModal) return;
-        title.textContent = name || stem;
-        link.href = '../odf/?odf=' + encodeURIComponent(stem);
-        if (frame.dataset.stem !== stem) {
-            frame.dataset.stem = stem;
-            frame.src = '../odf/?odf=' + encodeURIComponent(stem) + '&embed=1';
+    function factionFromUrl() {
+        const raw = new URLSearchParams(window.location.search).get('faction');
+        if (raw === 'hadean' || raw === 'scion' || raw === 'isdf') return raw;
+        return 'isdf';
+    }
+
+    let historyWrites = 0;
+
+    function showFaction(id, writeUrl) {
+        document.querySelectorAll('.vt-tree-col').forEach((col) => {
+            col.hidden = col.dataset.factionId !== id;
+        });
+        document.querySelectorAll('[data-vt-faction-tab]').forEach((tab) => {
+            const on = tab.dataset.vtFactionTab === id;
+            tab.classList.toggle('is-active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        if (writeUrl && !historyWrites) {
+            const url = new URL(window.location.href);
+            if (id === 'isdf') url.searchParams.delete('faction');
+            else url.searchParams.set('faction', id);
+            const next = url.pathname + url.search + url.hash;
+            const cur = window.location.pathname + window.location.search + window.location.hash;
+            if (next !== cur) window.history.pushState({ faction: id }, '', next);
         }
-        odfModal.show();
+        const find = document.getElementById('vt-tree-find');
+        if (find) applyFind(find.value);
+    }
+
+    function lookupStem(stem) {
+        const hit = index.get(stemOf(stem) + '.odf');
+        return hit || null;
+    }
+
+    function fillDetail(stem) {
+        const detail = document.getElementById('vt-tree-detail');
+        const title = document.getElementById('vt-tree-odf-title');
+        const key = stemOf(stem);
+        const hit = lookupStem(key);
+        const odf = hit && hit.data;
+        const category = (hit && hit.category) || '';
+        const name = odf ? unitName(odf, key) : key;
+        const role = odf ? roleLabel(odf) : '';
+        const geom = odf ? modelStem(odf) : '';
+        title.textContent = name;
+        detail.textContent = '';
+        detail.dataset.category = category;
+
+        const layout = el('div', 'd-flex flex-column gap-3');
+        if (geom) {
+            const frame = el('div', 'border border-subtle rounded p-2');
+            const img = el('img', 'img-fluid d-block mx-auto');
+            img.alt = '';
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            img.src = SHOTS_BASE + geom + '/hero.png';
+            img.setAttribute('data-fallback', THUMB_BASE + geom + '.png');
+            attachShot(img);
+            frame.appendChild(img);
+            layout.appendChild(frame);
+        }
+
+        const heading = el('div', 'd-flex flex-wrap align-items-center gap-2');
+        const nameEl = el('h2', 'h5 mb-0');
+        nameEl.textContent = name;
+        heading.appendChild(nameEl);
+        if (role) {
+            const chip = el('span', 'badge bg-secondary');
+            chip.textContent = role;
+            heading.appendChild(chip);
+        }
+        layout.appendChild(heading);
+
+        if (!odf) {
+            const missing = el('p', 'text-muted mb-0');
+            missing.textContent = 'Not in the ODF database';
+            layout.appendChild(missing);
+        } else {
+            const stats = statRows(odf, category);
+            if (stats.length) {
+                const list = el('ul', 'list-group list-group-flush small mb-0');
+                stats.forEach((stat) => {
+                    const item = el('li', 'list-group-item d-flex justify-content-between align-items-baseline gap-2 px-0');
+                    const label = el('span', 'text-muted');
+                    label.textContent = stat.label;
+                    const value = el('span', 'vt-mono');
+                    value.textContent = stat.value;
+                    item.appendChild(label);
+                    item.appendChild(value);
+                    list.appendChild(item);
+                });
+                layout.appendChild(list);
+            }
+            const weapons = weaponChips(odf);
+            if (weapons.length) {
+                const wrap = el('div', 'd-flex flex-wrap gap-1');
+                weapons.forEach((weapon) => {
+                    const chip = el('button', 'btn btn-sm btn-outline-secondary');
+                    chip.type = 'button';
+                    chip.dataset.vtTreeWeapon = '1';
+                    chip.dataset.stem = weapon.stem;
+                    const mark = el('span', 'badge bg-secondary me-1');
+                    mark.textContent = weapon.assault === '1' ? 'A' : 'C';
+                    chip.appendChild(mark);
+                    const label = document.createElement('span');
+                    label.textContent = weapon.count > 1
+                        ? weapon.name + ' \u00d7' + weapon.count
+                        : weapon.name;
+                    chip.appendChild(label);
+                    wrap.appendChild(chip);
+                });
+                layout.appendChild(wrap);
+            }
+        }
+
+        detail.appendChild(layout);
+        detail.dataset.stem = key;
+
+        const open = document.getElementById('vt-tree-odf-open');
+        const model = document.getElementById('vt-tree-odf-model');
+        if (open) open.href = '../odf/?odf=' + encodeURIComponent(key);
+        if (model) {
+            if (geom) {
+                model.hidden = false;
+                model.href = '../models/?model=' + encodeURIComponent(geom);
+            } else {
+                model.hidden = true;
+            }
+        }
+        return name;
+    }
+
+    function showDetail(stem) {
+        const frame = document.getElementById('vt-tree-odf-frame');
+        const key = stemOf(stem);
+        fillDetail(key);
+        if (frame && frame.dataset.stem !== key) {
+            frame.dataset.stem = key;
+            frame.src = '../odf/?odf=' + encodeURIComponent(key) + '&embed=1';
+        }
+        if (odfModal) odfModal.show();
     }
 
     function setStatus(text, isError) {
@@ -371,12 +486,28 @@
         if (modalEl && window.bootstrap) {
             odfModal = new window.bootstrap.Modal(modalEl);
         }
+        if (modalEl) {
+            modalEl.addEventListener('click', (event) => {
+                const weapon = event.target.closest('[data-vt-tree-weapon]');
+                if (weapon) showDetail(weapon.dataset.stem);
+            });
+        }
 
         document.getElementById('vt-tree-columns').addEventListener('click', (event) => {
             const button = event.target.closest('[data-vt-tree-open]');
             if (!button) return;
             event.preventDefault();
-            openOdf(button.dataset.stem, button.dataset.name);
+            showDetail(button.dataset.stem);
+        });
+
+        document.querySelectorAll('[data-vt-faction-tab]').forEach((tab) => {
+            tab.addEventListener('click', () => showFaction(tab.dataset.vtFactionTab, true));
+        });
+        showFaction(factionFromUrl(), false);
+        window.addEventListener('popstate', () => {
+            historyWrites++;
+            try { showFaction(factionFromUrl(), false); }
+            finally { historyWrites--; }
         });
 
         const find = document.getElementById('vt-tree-find');
