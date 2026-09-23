@@ -5866,6 +5866,7 @@
           <span class="small" style="color:var(--kb-text-muted);">Slot ${player.slot}</span>
           ${player.is_campod ? '<span class="vt-campod-badge" data-bs-toggle="tooltip" title="Spent &gt;25% of the match in a camera-pod — excluded from VTSR-T and career stats">Campod</span>' : ''}
           ${player.is_low_activity ? '<span class="vt-partial-badge" data-bs-toggle="tooltip" title="Event-stream presence covered &lt;75% of match duration — excluded from VTSR-T and career stats">Partial</span>' : ''}
+          ${(!player.is_campod && !player.is_low_activity && player.is_zero_damage) ? '<span class="vt-idle-badge" data-bs-toggle="tooltip" title="Dealt 0 damage — excluded from VTSR-T and career stats">Idle</span>' : ''}
         </div>
         <div class="d-flex flex-wrap gap-4 mb-3">
           <div class="stat-card"><div class="stat-value">${fmt(ps.dealt)}</div><div class="stat-label">Dealt</div></div>
@@ -6145,27 +6146,27 @@
     const bothActive = active.has('1') && active.has('2');
 
     // Wrap chips: commander (slot 1 / 6) first with a shield pip, then
-    // remaining slots in roster order. Camera-pod rows (leaderboard
-    // is_campod) are omitted from this roster — they stay on the
-    // Player Leaderboard / kill feed / everywhere else. Names
-    // deep-link via vtPlayerLinkHtml. in_game_nick is null when it
-    // matches the canonical name, or when it is the collector-host
-    // placeholder Unknown; usefulInGameNick also drops that
-    // placeholder on current JSON before reprocess.
-    const campodKeys = new Set();
+    // remaining slots in roster order. Camera-pod rows and idle thugs
+    // (leaderboard is_campod / is_zero_damage) are omitted from this
+    // roster — they stay on the Player Leaderboard / kill feed /
+    // everywhere else. Names deep-link via vtPlayerLinkHtml.
+    // in_game_nick is null when it matches the canonical name, or when
+    // it is the collector-host placeholder Unknown; usefulInGameNick
+    // also drops that placeholder on current JSON before reprocess.
+    const hiddenRosterKeys = new Set();
     ((currentData && currentData.leaderboard) || []).forEach(r => {
-      if (!r || !r.is_campod) return;
-      if (r.steam64) campodKeys.add(String(r.steam64));
-      if (r.name) campodKeys.add(r.name);
+      if (!r || !(r.is_campod || r.is_zero_damage)) return;
+      if (r.steam64) hiddenRosterKeys.add(String(r.steam64));
+      if (r.name) hiddenRosterKeys.add(r.name);
     });
-    const isCampodPlayer = (p) =>
-      (p.steam64 && campodKeys.has(String(p.steam64))) || (p.name && campodKeys.has(p.name));
+    const isHiddenRosterPlayer = (p) =>
+      (p.steam64 && hiddenRosterKeys.has(String(p.steam64))) || (p.name && hiddenRosterKeys.has(p.name));
     const rosterHtml = (teamList, leaderSlot) => {
       if (!teamList || teamList.length === 0) {
         return '<em class="vt-faction-roster-empty">No players</em>';
       }
-      const visible = teamList.filter(p => !isCampodPlayer(p));
-      // Entire side was camera-pod: skip the chip row rather than
+      const visible = teamList.filter(p => !isHiddenRosterPlayer(p));
+      // Entire side was camera-pod or idle: skip the chip row rather than
       // claiming "No players" (team totals still render below).
       if (visible.length === 0) return '';
       const sorted = [...visible].sort((a, b) => {
@@ -6434,6 +6435,9 @@
       const partialBadge = r.is_low_activity
         ? ` <span class="vt-partial-badge" data-bs-toggle="tooltip" title="Only present for ${presenceMin}:${String(presenceRem).padStart(2,'0')} of ${durationMin}:${String(durationRem).padStart(2,'0')} — excluded from VTSR-T and career stats">Partial</span>`
         : '';
+      const idleBadge = (!r.is_campod && !r.is_low_activity && r.is_zero_damage)
+        ? ` <span class="vt-idle-badge" data-bs-toggle="tooltip" title="Dealt 0 damage — excluded from VTSR-T and career stats">Idle</span>`
+        : '';
       // v7 (schema_version 7): identity-reroute provenance chip. Set by the
       // pipeline's ACCOUNT_REROUTES mechanism (scripts/process_stats.py)
       // when this slot's Steam64 was rewritten at session-load time
@@ -6445,7 +6449,8 @@
         : '';
       const rowClass = r.is_campod
         ? 'vt-row-campod'
-        : (r.is_low_activity ? 'vt-row-partial' : '');
+        : (r.is_low_activity ? 'vt-row-partial'
+          : (r.is_zero_damage ? 'vt-row-idle' : ''));
       // v2.3: compact `TOTAL (PvP/PvE)` chip rendering on Kills/Deaths.
       // Sort behavior unchanged (sort key still `kills` / `deaths`,
       // i.e. totals). Tooltip surfaces the explicit split + the
@@ -6460,7 +6465,7 @@
       const eloCell = renderEloDeltaCell(lookupEloDelta(eloIdx, r), eloIdx);
       return `<tr class="${rowClass}">
         <td>${i + 1}</td>
-        <td class="fw-semibold">${vtPlayerLinkHtml(r.name, r.steam64)}${nickSub}${campodBadge}${partialBadge}${rerouteBadge}</td>
+        <td class="fw-semibold">${vtPlayerLinkHtml(r.name, r.steam64)}${nickSub}${campodBadge}${partialBadge}${idleBadge}${rerouteBadge}</td>
         <td class="text-center"><span class="badge ${fBadge}">${r.faction || '?'}</span></td>
         <td class="text-end vt-col-split">${fmt(ps.pvp_dealt || 0)}</td>
         <td class="text-end vt-col-split">${fmt(ps.pve_dealt || 0)}</td>

@@ -673,9 +673,9 @@
     // A what-if with no shadow block has nothing to average, so the
     // handicap is rebuilt from the leaderboard using the pipeline's own
     // predicate: thugs only (commanders are priced by VTSR-C) and rated
-    // rows only, so a camera-pod spectator or a mid-match dropout cannot
-    // drag a side's mean. Mirrors `_team_thug_means` plus the v2.5 row
-    // gates. When a shadow block IS present the loop above already used
+    // rows only, so a camera-pod spectator, an idle thug, or a mid-match
+    // dropout cannot drag a side's mean. Mirrors `_team_thug_means` plus
+    // the v2.5 row gates. When a shadow block IS present the loop above already used
     // its `before` values, which are the pipeline's own snapshot — and the
     // two agree, so this is a fallback, not a second opinion.
     if (hypothetical && (t1Mean == null || t2Mean == null)) {
@@ -683,7 +683,7 @@
         const vals = [];
         for (const row of lobby) {
           if (slotTeam(row.slot) !== team) continue;
-          if (row.is_commander || row.is_campod || row.is_low_activity) continue;
+          if (row.is_commander || row.is_campod || row.is_low_activity || row.is_zero_damage) continue;
           const r = reconstructVtsrT(row.steam64, match.date);
           vals.push(isNum(r) ? r : consts.anchor);
         }

@@ -1118,6 +1118,7 @@
         is_commander: !!lbRow.is_commander,
         is_campod:    !!lbRow.is_campod,
         is_low_activity: !!lbRow.is_low_activity,
+        is_zero_damage: !!lbRow.is_zero_damage,
         won: (m.winner && Number.isFinite(m.winner.team)) ? (m.winner.team === lbRow.team) : null,
         winner_decided_by: (m.winner && m.winner.decided_by) || 'unclear',
         kills: lbRow.kills, deaths: lbRow.deaths,
@@ -1627,9 +1628,12 @@
       ? `<span class="${r.delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative'}">${r.delta >= 0 ? '+' : ''}${r.delta.toFixed(1)}</span>`
       : (r.is_campod ? '<span class="vt-campod-badge" title="> 25% in camera-pod ship; excluded from rating">Campod</span>'
         : r.is_low_activity ? '<span class="vt-partial-badge" title="Presence < 75% of match; excluded from rating">Partial</span>'
+        : r.is_zero_damage ? '<span class="vt-idle-badge" title="Dealt 0 damage; excluded from rating">Idle</span>'
         : '—');
     const afterCell = Number.isFinite(r.after) ? r.after.toFixed(0) : '—';
-    const rowCls = r.is_campod ? 'vt-row-campod' : (r.is_low_activity ? 'vt-row-partial' : '');
+    const rowCls = r.is_campod ? 'vt-row-campod'
+      : (r.is_low_activity ? 'vt-row-partial'
+        : (r.is_zero_damage ? 'vt-row-idle' : ''));
     const dateStr = String(r.date || '').slice(0, 10);
     const mapStr  = String(r.map || '').replace(/\.bzn$/i, '');
     const vodCell = matchVodCellHtml(r.match_id);
@@ -1688,6 +1692,7 @@
           </a>
           ${r.is_campod ? '<span class="vt-campod-badge ms-2" title="> 25% in camera-pod ship">Campod (excluded)</span>' : ''}
           ${r.is_low_activity ? '<span class="vt-partial-badge ms-2" title="Presence < 75% of match">Partial (excluded)</span>' : ''}
+          ${(!r.is_campod && !r.is_low_activity && r.is_zero_damage) ? '<span class="vt-idle-badge ms-2" title="Dealt 0 damage">Idle (excluded)</span>' : ''}
         </div>
       </div>
     </td></tr>`;
@@ -3974,6 +3979,7 @@
           is_commander: !!lb.is_commander,
           is_campod: !!lb.is_campod,
           is_low_activity: !!lb.is_low_activity,
+          is_zero_damage: !!lb.is_zero_damage,
           excluded: d && d.match_excluded,
         };
       });

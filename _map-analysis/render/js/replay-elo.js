@@ -46,7 +46,7 @@ function joinEntry(matchData, entry) {
   }
   const rated = [];
   for (const row of matchData.leaderboard || []) {
-    if (row.is_campod || row.is_low_activity) continue;
+    if (row.is_campod || row.is_low_activity || row.is_zero_damage) continue;
     const sid = row.steam64 ? String(row.steam64) : '';
     const d = (sid && bySteam.get(sid))
       || (row.name && byName.get(String(row.name).toLowerCase()))

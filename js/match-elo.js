@@ -360,6 +360,9 @@
       const partial = row.is_low_activity
         ? ' <span class="vt-partial-badge" title="Only present for part of the match — not rated">Partial</span>'
         : '';
+      const idle = (!row.is_campod && !row.is_low_activity && row.is_zero_damage)
+        ? ' <span class="vt-idle-badge" title="Dealt 0 damage — not rated">Idle</span>'
+        : '';
       let trackInner = '';
       let deltaHtml = '<span class="vt-match-elo-delta text-muted">&mdash;</span>';
       if (d) {
@@ -379,7 +382,7 @@
       return `<div class="vt-match-elo-row${selected}${muted}" data-elo-key="${esc(key)}" role="button" tabindex="0">
         <span class="vt-match-elo-row-who">
           <span class="badge ${fBadge}">${row.faction || '?'}</span>
-          ${playerLinkHtml(row.name, row.steam64)}${cmdr}${campod}${partial}
+          ${playerLinkHtml(row.name, row.steam64)}${cmdr}${campod}${partial}${idle}
         </span>
         <span class="vt-match-elo-track">${trackInner}</span>
         ${deltaHtml}

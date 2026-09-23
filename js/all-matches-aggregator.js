@@ -525,14 +525,15 @@
         // without requiring a re-process.
         const key = p.steam64 ? `s64:${p.steam64}` : (p.player_id || p.name || '');
         if (!key) continue;
-        // v2.5: skip campod-heavy + low-activity appearances. Mirrors the
-        // scripts/elo.py exclusion so career totals (matches_played,
-        // total_dealt, wins/losses, per-ship combat, weapon breakdowns)
-        // don't include rows where the player effectively didn't play.
+        // v2.5 + idle thugs: skip campod-heavy, low-activity, and
+        // zero-damage thug appearances. Mirrors the scripts/elo.py
+        // exclusion so career totals (matches_played, total_dealt,
+        // wins/losses, per-ship combat, weapon breakdowns) don't
+        // include rows where the player effectively didn't play.
         // Pure omission, no penalty -- the match simply doesn't count
         // for this player. Pipeline-emitted flags; legacy contributions
-        // default both to falsy and pass through unchanged.
-        if (p.is_campod || p.is_low_activity) continue;
+        // default all three to falsy and pass through unchanged.
+        if (p.is_campod || p.is_low_activity || p.is_zero_damage) continue;
         let c = career.get(key);
         if (!c) {
           c = newCareerBucket();
@@ -547,10 +548,10 @@
         // Steam64 is best-effort: pre-Phase-2 contributions don't carry it.
         // Once seen, lock it in so renames don't lose the identity.
         if (p.steam64 && !c.steam64) c.steam64 = p.steam64;
-        // v2.5: only real-participation rows reach this point -- campod
-        // and low-activity rows were skipped at the top of the loop, so
-        // matches_played reflects matches the player actually played
-        // in.
+        // v2.5: only real-participation rows reach this point -- campod,
+        // low-activity, and zero-damage thug rows were skipped at the
+        // top of the loop, so matches_played reflects matches the player
+        // actually played in.
         c.matches_played += 1;
         c.total_dealt          += p.dealt          || 0;
         c.total_received       += p.received       || 0;
@@ -738,7 +739,7 @@
           if (!slice || !slice.steam64) continue;
           const s64 = String(slice.steam64);
           const lbRow = lb.find(p => p && String(p.steam64 || '') === s64);
-          if (!lbRow || lbRow.is_campod || lbRow.is_low_activity) continue;
+          if (!lbRow || lbRow.is_campod || lbRow.is_low_activity || lbRow.is_zero_damage) continue;
           const cb = career.get(`s64:${s64}`);
           if (!cb) continue;
           if (m.has_resource_data) {

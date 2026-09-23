@@ -130,7 +130,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 50 -> 51: opening-window loose + income (first 240s, full rate) on
 # economy.teams. Display / VTSR-C audit only. Ratings do not read them
 # into the scored composite (loose_share weight is 0).
-PIPELINE_VERSION = 51
+# 51 -> 52: idle-thug omission (match.schema_version 30). A non-commander
+# row with personal.dealt == 0 is is_zero_damage when the match recorded
+# some personal damage. scripts/elo.py omits the row (same as campod).
+# Commanders are never flagged. Ratings move.
+PIPELINE_VERSION = 52
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -3550,6 +3554,26 @@ def _is_low_activity_row(first_tick, last_tick, tick_rate, duration_sec):
         return False, 0.0
     presence_sec = max(0.0, (last_tick - first_tick) / tick_rate)
     return (presence_sec / duration_sec) < LOW_ACTIVITY_MIN_PRESENCE, presence_sec
+
+
+def _stamp_zero_damage_flags(leaderboard):
+    """Flag thugs who dealt exactly 0 personal damage.
+
+    Verified against the match: if nobody dealt personal damage, flag
+    nobody (a recording with no damage is not a lobby of spectators).
+    Commanders are never flagged -- a commander who only builds still
+    rates on VTSR-T and still counts as having commanded. Asset damage
+    does not count. Independent of is_campod / is_low_activity.
+    """
+    any_dealt = any(
+        ((row.get("personal") or {}).get("dealt") or 0) > 0
+        for row in leaderboard
+    )
+    for row in leaderboard:
+        dealt = (row.get("personal") or {}).get("dealt") or 0
+        row["is_zero_damage"] = bool(
+            any_dealt and not row.get("is_commander") and dealt == 0
+        )
 
 
 def _compute_effective_kills(pvp_kill_log, dmg_by_victim, tick_rate, nick_for_s64):
@@ -7551,6 +7575,9 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # See _is_campod_row / _is_low_activity_row up top.
             "is_campod":           is_campod_flag,
             "is_low_activity":     is_low_flag,
+            # Stamped by _stamp_zero_damage_flags once the full lobby
+            # exists (needs to know whether anyone dealt damage).
+            "is_zero_damage":      False,
             "campod_share":        round(campod_share_val, 4),
             "presence_window_sec": round(presence_sec_val, 1),
             "steam64": str(s64) if s64 else None,
@@ -7659,6 +7686,7 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
 
     # Deterministic tie-break: player name (guards against identical personal.dealt).
     leaderboard.sort(key=lambda p: (-p["personal"]["dealt"], (p.get("name") or "").lower()))
+    _stamp_zero_damage_flags(leaderboard)
 
     # Faction totals
     faction_totals = {}
@@ -8447,11 +8475,16 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
             # v28: death-tick (0,0,0) placeholder guard. A dying unit is
             # parked at the world origin with negative health for exactly
             # one tick; samples taken there are garbage.
-            # v29 (this version): economy.teams income_loose_opening and
+            # v29: economy.teams income_loose_opening and
             # scrap_income_opening -- full-rate totals for the first 240s.
             # Additive. The VTSR-C loose_share axis uses whole-match
             # income_loose / scrap_income at weight 0.
-            "schema_version": 29,
+            # v30 (this version): leaderboard[].is_zero_damage. A thug
+            # with personal.dealt == 0 is omitted from VTSR-T and career
+            # when the match recorded some personal damage. Commanders
+            # are never flagged. Pre-v30 rows lack the field; consumers
+            # default it to false.
+            "schema_version": 30,
             # Internal debugging telemetry: which proto version the
             # source .binpb.gz was encoded against. "v1" = pre-Nomad
             # (separate DamageDealt/DamageReceived); "v2" = frozen 2026-04..08
@@ -8901,6 +8934,9 @@ def _extract_contribution(match_data):
             # through unchanged.
             "is_campod":       p.get("is_campod", False),
             "is_low_activity": p.get("is_low_activity", False),
+            # match.schema_version 30: thug who dealt 0 personal damage
+            # in a match that recorded some. Commanders are never true.
+            "is_zero_damage":  p.get("is_zero_damage", False),
             "dealt":          round(personal.get("dealt", 0), 1),
             "received":       round(personal.get("received", 0), 1),
             "pvp_dealt":      round(personal.get("pvp_dealt", 0), 1),
@@ -9790,15 +9826,16 @@ def main():
             key=lambda n: n.lower(),
         )
         # Picker display count. Same omission the career rollup uses:
-        # campod and partial (low-activity) rows are not "in" the match
-        # for the Select-a-match badge, count dropdown, and player sort.
-        # `player_count` stays the raw slot count — ELO's <6 gate and the
-        # per-match banner still read that.
+        # campod, partial (low-activity), and idle (zero-damage thug)
+        # rows are not "in" the match for the Select-a-match badge,
+        # count dropdown, and player sort. `player_count` stays the raw
+        # slot count — ELO's <6 gate and the per-match banner still read that.
         active_player_count = sum(
             1 for p in lb
             if (p.get("name") or "").strip()
             and not p.get("is_campod")
             and not p.get("is_low_activity")
+            and not p.get("is_zero_damage")
         )
         winner_team = (match_data["match"].get("winner") or {}).get("team")
         if winner_team not in (1, 2):

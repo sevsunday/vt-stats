@@ -24,6 +24,10 @@ Detection at decode time (**v2/v3/v4 can NEVER be told apart by parse failure** 
 
 The detected schema is stamped onto every match output as `match.proto_schema_version` (`"v1"` | `"v2"` | `"v3"` | `"v4"`). UI never branches on it -- it's debugging telemetry. The pipeline normalizes all four schemas to a single internal shape (`DamageEvent` adapter for v1/v2 damage layouts; `_build_identity_maps()` shim for the v2-maps-vs-v3-roster split; v4 blocks are additive and simply absent pre-v4) so downstream aggregators (leaderboard, weapon meta, rivalry, kills, positioning, highlights, etc.) are schema-agnostic.
 
+## Idle thug omission (`match.schema_version` 30)
+
+`leaderboard[].is_zero_damage` is true for a non-commander row whose rounded `personal.dealt` is 0, but only when some row in the match dealt personal damage. Commanders are never flagged. `scripts/elo.py` omits the row from the rated lobby the same way as `is_campod` / `is_low_activity` (no delta, no `matches_played` bump, no wins-ladder update). Career rollup and `active_player_count` skip it. `player_count` stays the raw slot count, so the VTSR ≥6 gate does not unrate the match. Asset damage does not count. Pre-v30 rows lack the field; consumers default it to false. `ELO_SCHEMA_VERSION` 12 and `CMDR_ELO_SCHEMA_VERSION` 9: pre-v12 `peak_vtsr` and pre-v9 `peak_vtsr_c` are not comparable (the idle thug leaves the thug-mean handicap; commander duel math is unchanged).
+
 Bumping `scripts/statsgate.proto` going forward: regenerate the **current** descriptor pair (`statsgate_pb2.py` + `vendor/protobufjs/statsgate.proto.json`). The v1 and v2 pairs are frozen unless we need to backport a bugfix. See `.cursor/rules/schema-migration.mdc` for the full playbook.
 
 ## v3 Identity: tick-union roster + the Identity Shim

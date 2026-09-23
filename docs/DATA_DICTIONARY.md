@@ -739,7 +739,7 @@ An array of match summaries used to populate the match selector dropdown.
 | `date` | `string` | ISO datetime from `start_time` |
 | `duration_sec` | `number` | Match duration in seconds |
 | `player_count` | `number` | Raw occupied-slot count (`StatHeader.player_count`, or `len(nick_map)` after the identity shim). Includes campod and partial players. ELO's fewer-than-6 gate and the per-match banner read this. |
-| `active_player_count` | `number` | Named `leaderboard[]` rows with both `is_campod` and `is_low_activity` false. The Select-a-match card badge, player-count dropdown, and Most/Fewest players sort. Display-only; not a rating input. |
+| `active_player_count` | `number` | Named `leaderboard[]` rows with `is_campod`, `is_low_activity`, and `is_zero_damage` all false. The Select-a-match card badge, player-count dropdown, and Most/Fewest players sort. Display-only; not a rating input. |
 | `submitter` | `string` | Username of who submitted the session file |
 | `team_leaders` | `object` | `{ "1": { name, s64 }, "2": { name, s64 } }` — slot 1 and slot 6 occupants. Drives the picker's Commander/Thug Role facet (a name in `team_leaders` is the match's commander; otherwise it's a thug). |
 | `winner_adjudicated` | `boolean` | v16. `true` once a human signed off on this match's outcome. |
@@ -2772,21 +2772,23 @@ Semantics:
   report the shooter's range to map centre (see the engagement-range
   section above and `.cursor/rules/data-schema.mdc`).
 
-## 10.2 Spectator-Style Exclusion Flags (`match.schema_version` 6)
+## 10.2 Spectator-Style Exclusion Flags (`match.schema_version` 6, idle thugs at 30)
 
-Two new boolean flags + two supporting numeric metrics on every per-match
-`leaderboard[]` row, set by the pipeline at row build time. Power the
-v2.5 row-level exclusion gates in [scripts/elo.py](../scripts/elo.py) +
+Boolean flags plus supporting numeric metrics on every per-match
+`leaderboard[]` row, set by the pipeline. They power the row-level
+exclusion gates in [scripts/elo.py](../scripts/elo.py) and
 [js/all-matches-aggregator.js](../js/all-matches-aggregator.js). Rows
-where either flag is true are **omitted** from VTSR-T calculations and
-from the All Matches career aggregator -- pure omission, **no penalty**,
-no `delta` in `elo_history`, no `matches_played` increment. The match
-simply does not happen for that player rating-wise.
+where any of `is_campod`, `is_low_activity`, or `is_zero_damage` is true
+are **omitted** from VTSR-T calculations and from the All Matches career
+aggregator -- pure omission, **no penalty**, no `delta` in `elo_history`,
+no `matches_played` increment. The match simply does not happen for that
+player rating-wise. `player_count` (the VTSR ≥6 gate) is unchanged.
 
 ```json
 "leaderboard": [{
   "is_campod":           false,   // > CAMPOD_MAX_SHARE of match wall-clock in a camera-pod ship
   "is_low_activity":     false,   // event-stream presence covered < LOW_ACTIVITY_MIN_PRESENCE of duration
+  "is_zero_damage":      false,   // thug with personal.dealt == 0; commanders never flagged (schema 30)
   "campod_share":        0.0,     // 0.0-1.0 share of match.duration_sec spent in a campod
   "presence_window_sec": 1203.4   // (last_event_tick - first_event_tick) / tick_rate
 }]
@@ -2842,6 +2844,25 @@ that somehow still received a leaderboard row), `_is_low_activity_row`
 returns `(True, 0.0)` so the row is omitted from ELO rather than treated
 as a full-match presence.
 
+### `is_zero_damage` (Rule 3, `match.schema_version` 30)
+
+Set by `_stamp_zero_damage_flags()` after the leaderboard is built, when
+all three hold:
+
+- At least one leaderboard row has `personal.dealt > 0`. If every row is
+  0, nobody is flagged (a recording with no damage is not a lobby of
+  spectators).
+- The row is not a commander (`is_commander` is false; slots 1 and 6).
+  A commander who never fires still rates on VTSR-T and still counts as
+  having commanded.
+- The row's rounded `personal.dealt` is exactly 0. Asset damage does not
+  count. A thug who fired and missed, or who died before shooting, is
+  flagged: omission, not a penalty.
+
+Independent of `is_campod` / `is_low_activity`. The dashboard shows one
+badge, Campod then Partial then Idle. Pre-v30 rows lack the field;
+consumers default it to false.
+
 ### Pool-level counters
 
 Surfaced on [`elo_current.json`](#data-processed-elo-current-json):
@@ -2850,23 +2871,26 @@ Surfaced on [`elo_current.json`](#data-processed-elo-current-json):
   flagged with `is_campod`.
 - `rows_excluded_low_activity` — total leaderboard rows across the corpus
   flagged with `is_low_activity`.
+- `rows_excluded_zero_damage` — total leaderboard rows across the corpus
+  flagged with `is_zero_damage`.
 
-These are independent counters; a row hitting both flags is counted in
-both keys but excluded once from the rated lobby either way.
+These are independent counters; a row hitting more than one flag is
+counted in each key but excluded once from the rated lobby.
 
 ### Cross-references
 
-- The All Matches aggregator skips rows where EITHER flag is true (see
-  [js/all-matches-aggregator.js](../js/all-matches-aggregator.js)) so
+- The All Matches aggregator skips rows where any exclusion flag is true
+  (see [js/all-matches-aggregator.js](../js/all-matches-aggregator.js)) so
   `career_stats[]`, `commander_stats[]`, `global_weapon_meta`,
   `global_rivalries`, and `meta_charts` all reflect real-participation
-  rows only.
+  rows only. Commanders are never `is_zero_damage`, so command counts
+  are unchanged by Rule 3.
 - The per-match dashboard keeps excluded rows VISIBLE in the Player
-  Leaderboard (with `Campod` / `Partial` badges + 55% opacity) for
-  transparency.
-- Backward-compatible: pre-v6 rows lack these fields; consumers default
-  both flags to `False` via `.get("is_campod", False)` and treat the
-  row as a normal thug.
+  Leaderboard (with `Campod` / `Partial` / `Idle` badges + 55% opacity)
+  for transparency.
+- Backward-compatible: pre-v6 rows lack the campod fields and pre-v30
+  rows lack `is_zero_damage`; consumers default the flags to `False`
+  and treat the row as a normal thug.
 
 ## 10.3 Account Reroutes (`match.schema_version` 7)
 
@@ -3117,6 +3141,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "matches_excluded_cancelled": 0,       // v15: host-attested GAME_CANCELLED matches (visible on the dashboard, never rated)
   "rows_excluded_campod": 13,            // v2.5: leaderboard rows skipped for is_campod (>25% match in camera-pod)
   "rows_excluded_low_activity": 0,       // v2.5: leaderboard rows skipped for is_low_activity (presence < 75% of match)
+  "rows_excluded_zero_damage": 0,        // schema 30: thug rows skipped for personal.dealt == 0
   "weights": { "net_damage_share": 0.20, "thug_kill_rate": 0.20, "thug_efficiency": 0.16,
                "thug_accuracy": 0.15, "pve_share": 0.12, "mobility": 0.08,
                "snipe_bonus": 0.005, "target_lock_pct": 0.005 },  // v2.10: luxury axes cut to 0.005; raw sum ≈0.92, runtime-renormalized

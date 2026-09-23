@@ -146,10 +146,10 @@ def load_json(path: Path) -> dict:
 
 
 def lobby_filter(leaderboard: list[dict]) -> list[dict]:
-    """Mirror compute_performance_index's lobby filter (v2.5).
+    """Mirror compute_performance_index's lobby filter.
 
-    Excludes campod-heavy + low-activity rows so the raw values we
-    compute use the same denominator as the pipeline's z-scores.
+    Excludes campod, low-activity, and zero-damage thug rows so the raw
+    values we compute use the same denominator as the pipeline's z-scores.
     Commanders stay so we can also surface their per-match axis
     trajectories.
     """
@@ -157,6 +157,7 @@ def lobby_filter(leaderboard: list[dict]) -> list[dict]:
         p for p in leaderboard
         if not p.get("is_campod")
         and not p.get("is_low_activity")
+        and not p.get("is_zero_damage")
     ]
 
 

@@ -26,18 +26,21 @@ Math: for commander row i and shifted axis a:
     z'_{i,a} = clip(clip(z_{i,a}, -2, +2) / 2  -  baseline[a],  -1, +1)
 For thug rows or omitted axes, z'_{i,a} = clip(z_{i,a}, -2, +2) / 2.
 
-v2.5 (current): row-level exclusion gates. Two new boolean flags on each
+v2.5 (current): row-level exclusion gates. Boolean flags on each
 per-match leaderboard row (set by scripts/process_stats.py): ``is_campod``
-(player spent > 25% of match wall-clock in a camera-pod ship) and
+(player spent > 25% of match wall-clock in a camera-pod ship),
 ``is_low_activity`` (event-stream presence window covered < 75% of match
-duration -- catches late joiners AND mid-match disconnects). Rows where
-either flag is True are omitted from the rated lobby before z-scoring:
+duration -- catches late joiners AND mid-match disconnects), and
+``is_zero_damage`` (a thug whose personal.dealt is 0 in a match that
+recorded some personal damage; commanders are never flagged). Rows where
+any flag is True are omitted from the rated lobby before z-scoring:
 no per-axis contribution, no delta entry in ``elo_history``, no
 ``matches_played`` increment, no rating change at all for this match.
 Pure omission, zero penalty -- the match simply did not happen for the
-excluded player rating-wise. Two new pool-level counters on
+excluded player rating-wise. Pool-level counters on
 ``elo_current.json`` (``rows_excluded_campod`` /
-``rows_excluded_low_activity``) make the gates auditable. No algorithm
+``rows_excluded_low_activity`` / ``rows_excluded_zero_damage``) make the
+gates auditable. No algorithm
 changes: axis weights, priors, K-factor, loss aversion, floor taper,
 shrinkage strengths, alpha-blend all unchanged.
 
@@ -354,7 +357,13 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # axis math, weights, priors, or output shape change. Measured drift is tiny
 # (max 1.00 ELO, mean 0.20, leaderboard order unchanged), but ratings DO move,
 # so **pre-v11 `peak_vtsr` is no longer comparable**.
-ELO_SCHEMA_VERSION = 11
+# v12 (current) = idle-thug omission (match.schema_version 30). Thug rows
+# with personal.dealt == 0 (when the match recorded some personal damage)
+# are omitted before z-scoring, same as campod. Commanders are never
+# flagged. INPUT change only -- no axis math. Ratings DO move (the omitted
+# row loses its delta, and the rest of that lobby is re-z-scored without
+# them), so **pre-v12 `peak_vtsr` is no longer comparable**.
+ELO_SCHEMA_VERSION = 12
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +866,20 @@ def _target_lock_pct_lobby(
 # Performance index per lobby
 # ---------------------------------------------------------------------------
 
+def _rated_lobby(lobby_raw: list[dict]) -> list[dict]:
+    """Drop campod, low-activity, and zero-damage thug rows.
+
+    Pure omission. ``is_zero_damage`` is never set on commanders.
+    Legacy rows without the flags pass through (``.get`` is falsy).
+    """
+    return [
+        p for p in lobby_raw
+        if not p.get("is_campod")
+        and not p.get("is_low_activity")
+        and not p.get("is_zero_damage")
+    ]
+
+
 def compute_performance_index(
     match_data: dict,
     commander_baseline_snapshot: dict[str, float] | None = None,
@@ -896,20 +919,14 @@ def compute_performance_index(
     ``Σ_axis (axis_z[axis] * weight'_axis) ≈ per_player_P[i]``.
     """
     lobby_raw = match_data.get("leaderboard") or []
-    # v2.5: exclude campod-heavy + low-activity rows from the rated lobby
-    # so spectator-style and late-join / mid-match-DC appearances don't
-    # dock real players' VTSR-T and don't deflate the lobby z-score
-    # baseline. Flags are set by scripts/process_stats.py (see
-    # CAMPOD_MAX_SHARE / LOW_ACTIVITY_MIN_PRESENCE up there). Pure
-    # omission semantics -- excluded players get no delta entry in
-    # elo_history, no matches_played bump, no rating change at all for
-    # this match. Legacy rows without the flags pass through unchanged
-    # (.get() returns None which is falsy).
-    lobby = [
-        p for p in lobby_raw
-        if not p.get("is_campod")
-        and not p.get("is_low_activity")
-    ]
+    # v2.5 + idle thugs: exclude campod-heavy, low-activity, and
+    # zero-damage thug rows from the rated lobby so spectator-style and
+    # late-join / mid-match-DC appearances don't dock real players'
+    # VTSR-T and don't deflate the lobby z-score baseline. Flags are set
+    # by scripts/process_stats.py. Pure omission -- excluded players get
+    # no delta entry in elo_history, no matches_played bump, no rating
+    # change at all for this match.
+    lobby = _rated_lobby(lobby_raw)
     if not lobby:
         return [], [], [], []
 
@@ -1131,10 +1148,7 @@ def _shadow_score_match(
         return []
 
     lobby_raw = match_data.get("leaderboard") or []
-    lobby = [
-        p for p in lobby_raw
-        if not p.get("is_campod") and not p.get("is_low_activity")
-    ]
+    lobby = _rated_lobby(lobby_raw)
     n_lobby = len(keys)
     ratings_before = [ratings_snapshot.get(k, ELO_ANCHOR) for k in keys]
 
@@ -1338,6 +1352,7 @@ def _rating_pass(
     # visibility into how often each gate fired.
     excluded_campod_rows       = 0
     excluded_low_activity_rows = 0
+    excluded_zero_damage_rows  = 0
     # Stage E: wins-ladder match counters. A RATED match either scores
     # the wins ladder (determined outcome / draw), skips as undetermined
     # (unclear / missing team), or skips because every rated row landed
@@ -1365,6 +1380,7 @@ def _rating_pass(
         # only.
         excluded_campod_rows       += sum(1 for p in lobby_raw if p.get("is_campod"))
         excluded_low_activity_rows += sum(1 for p in lobby_raw if p.get("is_low_activity"))
+        excluded_zero_damage_rows  += sum(1 for p in lobby_raw if p.get("is_zero_damage"))
 
         # Filter the lobby with EXACTLY the same predicate as
         # compute_performance_index() so the per-key loop below uses an
@@ -1372,11 +1388,7 @@ def _rating_pass(
         # filtered keys with the full lobby's positional index would
         # mis-attribute display_name / steam64 / is_commander reads to
         # adjacent players whenever any earlier row was dropped.
-        lobby = [
-            p for p in lobby_raw
-            if not p.get("is_campod")
-            and not p.get("is_low_activity")
-        ]
+        lobby = _rated_lobby(lobby_raw)
 
         # Match-level gates: player count < 6, duration < 240s, or a
         # host-attested cancellation (v15 winner.decided_by == "cancelled")
@@ -1646,8 +1658,8 @@ def _rating_pass(
                 delta_entry["axis_contributions_meta"] = dict(row_axis_meta)
 
             # ---- Stage E: per-row wins-ladder update (role-blind:
-            # commanders included; campod / low-activity rows already
-            # filtered by the shared lobby predicate). Symmetric K, no loss
+            # commanders included; campod / low-activity / zero-damage
+            # rows already filtered by the shared lobby predicate). Symmetric K, no loss
             # aversion, no floor. Additive `wins` audit block per delta;
             # absent on rows of undetermined / one-sided matches.
             if wins_s_by_team is not None and wins_row_team.get(i) in (1, 2):
@@ -1864,6 +1876,7 @@ def _rating_pass(
         # can tell row counts from match counts at a glance.
         "rows_excluded_campod":              excluded_campod_rows,
         "rows_excluded_low_activity":        excluded_low_activity_rows,
+        "rows_excluded_zero_damage":         excluded_zero_damage_rows,
         "weights":            dict(THUG_WEIGHTS),
         # v2.8: low-tier at-base lift metadata. `enabled` reflects whether this
         # pass applied the lift (True only on compute_elo's second pass). The

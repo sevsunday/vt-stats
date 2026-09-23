@@ -1440,6 +1440,11 @@
         verdict: '',
       },
       {
+        icon: 'bi-eye-slash', title: 'Sitting out doesn\u2019t count',
+        body: `<p>A thug who deals <strong>no damage at all</strong> in a match that otherwise had fighting is treated the same way. The game doesn\u2019t count for them. A commander who never fires still rates &mdash; building is the job.</p>`,
+        verdict: 'Shown with an "Idle" badge on the per-match leaderboard.',
+      },
+      {
         icon: 'bi-hourglass-split', title: 'Late joins &amp; disconnects don\u2019t count',
         body: `<p>If you were present for less than 75% of a match &mdash; joined late, dropped mid-game &mdash; the match <strong>isn\u2019t rated for you</strong>. Half a game says nothing fair about your skill either way.</p>`,
         verdict: 'Shown with a "Partial" badge on the per-match leaderboard.',

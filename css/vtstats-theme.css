@@ -2335,17 +2335,20 @@ body::before {
 
 /* Campod + Partial row badges (v2.5). Sit inside the Player Leaderboard
    "Player" cell next to the player name when the row is excluded from
-   VTSR-T and career stats for one of two reasons:
+   VTSR-T and career stats for one of three reasons:
      - Campod : spent >25% of match wall-clock in a camera-pod ship.
      - Partial: event-stream presence window covered <75% of match
                 duration (late joiner or mid-match disconnect).
-   Both flags are pipeline-emitted; the row stays visible in the
+     - Idle   : thug dealt 0 damage in a match that recorded some.
+                Commanders are never Idle.
+   The flags are pipeline-emitted; the row stays visible in the
    per-match leaderboard for transparency but is de-emphasized via the
    .vt-row-* row classes below. Tooltips carry the actual share /
    presence numbers. */
 .vt-campod-badge,
 .vt-partial-badge,
-.vt-pilot-badge {
+.vt-pilot-badge,
+.vt-idle-badge {
     display: inline-block;
     padding: 0.15em 0.55em;
     margin-left: 0.4em;
@@ -2381,12 +2384,14 @@ body::before {
    real ratees. Hover restores most of the opacity for readability when
    inspecting the row. */
 .vt-row-campod,
-.vt-row-partial {
+.vt-row-partial,
+.vt-row-idle {
     opacity: 0.55;
 }
 
 .vt-row-campod:hover,
-.vt-row-partial:hover {
+.vt-row-partial:hover,
+.vt-row-idle:hover {
     opacity: 0.9;
 }
 

@@ -310,11 +310,14 @@ INACTIVITY_WINDOW_DAYS = 30
 COMEBACK_GAMES_REQUIRED = 3
 CMDR_STALE_WINDOW_DAYS = 90
 
+# v9: idle thugs (is_zero_damage) drop out of the VTSR-T rated lobby, so
+# they leave the thug-mean handicap. Commander duel math is unchanged.
+# Pre-v9 peak_vtsr_c is not comparable.
 # v8: loose_share is the whole match, still weight 0. Ratings remain
 # comparable with schema 7 (alpha_c stays 1; the axis does not enter P).
 # v7: weight-0 loose_share audit axis. v6: opening-decision axes.
 # v5: display inactivity. v3 ratings were not comparable with schema 2.
-CMDR_ELO_SCHEMA_VERSION = 8
+CMDR_ELO_SCHEMA_VERSION = 9
 
 
 # ---------------------------------------------------------------------------
