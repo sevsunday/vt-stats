@@ -61,7 +61,8 @@ SITE_URL = "https://vtstats.bz"
 # v7 drops the Tools-link live-pulse poller (bz2api.js +
 # active-game-indicator.js) from stubs; the dashboard owns that poller.
 # v8 threads the LEGO topnav link (bi-bricks, after Models) through every stub.
-MAP_TEMPLATE_VERSION = 9
+# v10 turns the ODF topnav link into a dropdown (ODF Browser, Build Trees).
+MAP_TEMPLATE_VERSION = 10
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently

@@ -1747,16 +1747,12 @@ Every Bootstrap utility class and inline-style color the seed used has been swap
 
 ### Cross-page integration
 
-- **Topnav nav-link**: every production shell carries an ODF destination link in the shared topnav cluster.
+- **Topnav**: every production shell carries an ODF dropdown (ODF Browser, Build Trees) in the shared topnav cluster.
 - **Kill-feed cross-link**: each killer/victim ODF chip in `js/app.js` `renderKillFeed()` is wrapped in `<a class="vt-odf-link" href="odf/index.html?odf=<basename>" target="_blank" rel="noopener">`. Basename is the raw `entry.killer_odf` lowercased + `.odf`-stripped + `encodeURIComponent`'d. The `.vt-odf-link` / `.vt-odf-link-fallback` styles live in `css/vtstats-theme.css` (NOT `css/odf-browser.css`) so they apply on the dashboard, which doesn't load the ODF browser stylesheet.
 
-### Deferred from v1
+### VSR Faction Build Trees
 
-The seed shipped with a VSR Build Tree feature (`generateBuildTree()` and friends) that visualised faction tech progression. It's intentionally stripped from the v1 port to keep scope tight; when re-added later:
-
-1. The 7 stripped methods (`initializeBuildTree`, `showBuildTree`, `generateBuildTree`, `extractODFProperties`, `findChildODFs`, `getCategoryColor`, `formatTreeProperties`) need to be re-introduced.
-2. **Bug 7 from `odf-browser-seed/ODFBrowser_TechSpec.md` §9** — the hardcoded faction roots `ibrecy_vsr` / `ebrecym_vsr` / `fbrecy_vsr` — must be made configurable so the feature works for non-VSR mods.
-3. The 3 faction logo PNGs (`img/ISDF-Logo.png`, `img/Hadean-Logo.png`, `img/Scion-Logo2.png`) need to be vendored.
+The seed's fullscreen build-tree modal lives as its own page at `build/index.html` (`js/build-tree.js`, `css/build-tree.css`). It walks `data/odf.min.json` from the three VSR recyclers. Faction roots are the `FACTION_ROOTS` constant in `js/build-tree.js` (the Bug 7 fix — retarget that table for a non-VSR mod). Column headers use `--kb-faction-*` instead of the seed's logo PNGs. **View full data** iframes `odf/?odf=<stem>&embed=1` (navbar hidden) and links out to the full ODF page. Corpus-wide, picker-unaware, not in the pipeline cache key.
 
 ### Known limitations carried over from the seed
 

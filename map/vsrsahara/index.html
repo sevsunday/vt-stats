@@ -42,7 +42,7 @@
   <script>
     window.__vtMapBoot = {
       map_file:         "vsrsahara",
-      template_version: 9
+      template_version: 10
     };
   </script>
 </head>
@@ -68,11 +68,16 @@
              title="Open the dashboard" aria-label="Dashboard">
             <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
-          <a href="../../odf/" class="vt-nav-icon-btn"
-             title="Browse the BZ2 Object Definition File (ODF) database"
-             aria-label="ODF browser">
-            <i class="bi bi-boxes me-1"></i>ODF
-          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF">
+              <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+            </ul>
+          </div>
           <div class="dropdown vt-nav-dropdown">
             <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
                     data-bs-auto-close="true" aria-label="Models">

@@ -3,18 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Game Watch — VT Stats</title>
-  <meta name="description" content="Live view of every active Battlezone: Combat Commander lobby worldwide, with community matches of interest pinned first.">
+  <title>VSR Faction Build Trees — VT Stats</title>
+  <meta name="description" content="Fully expanded VSR build trees for ISDF, Hadean, and Scion, from each recycler through constructors, factories, and armories.">
 
-  <link rel="canonical" href="https://vtstats.bz/gw/">
+  <link rel="canonical" href="https://vtstats.bz/build/">
 
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Game Watch — VT Stats">
-  <meta property="og:description" content="Live view of every active BZ2 Combat Commander lobby worldwide, community matches pinned first.">
-  <meta property="og:url" content="https://vtstats.bz/gw/">
-  <meta property="og:image" content="https://vtstats.bz/data/og/player-card.png">
+  <meta property="og:title" content="VSR Faction Build Trees — VT Stats">
+  <meta property="og:description" content="Fully expanded VSR build trees for ISDF, Hadean, and Scion, from each recycler through constructors, factories, and armories.">
+  <meta property="og:url" content="https://vtstats.bz/build/">
   <meta property="og:site_name" content="VT Stats">
-  <meta name="twitter:card" content="summary_large_image">
 
   <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
   <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
@@ -23,18 +21,10 @@
   <link rel="stylesheet" href="../css/main.css">
   <link rel="stylesheet" href="../css/layout.css">
   <link rel="stylesheet" href="../css/vtstats-theme.css">
-  <link rel="stylesheet" href="../css/gw.css">
-
-  <!-- Embedded mode: when /gw is iframed (e.g. the dashboard Game Watch
-       modal) with ?embed=1, hide the standalone navbar so only the live
-       grid shows. Runs pre-paint to avoid a navbar flash. -->
-  <script>
-    try { if (new URLSearchParams(location.search).has('embed')) { document.documentElement.classList.add('gw-embed'); } } catch (e) { /* noop */ }
-  </script>
+  <link rel="stylesheet" href="../css/build-tree.css">
 </head>
 <body class="d-flex flex-column h-100">
 
-  <!-- Navbar. Shared destination cluster; Game Watch is not a bar item. -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4 gap-2">
       <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
@@ -54,13 +44,13 @@
             <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
           <div class="dropdown vt-nav-dropdown">
-            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
-                    data-bs-auto-close="true" aria-label="ODF">
+            <button class="vt-nav-icon-btn active" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF" aria-current="page">
               <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
               <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
-              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
             </ul>
           </div>
           <div class="dropdown vt-nav-dropdown">
@@ -105,56 +95,51 @@
     </div>
   </nav>
 
-  <main class="vt-gw-main flex-grow-1">
-    <div class="container-fluid px-3 px-md-4 py-3 py-md-4">
-
-      <!-- Header strip: live pulse dot + title + count/updated chips. -->
-      <header class="vt-gw-header">
-        <div class="vt-gw-header-lead">
-          <span class="gw-dot" id="gw-status-dot" aria-hidden="true"></span>
-          <h1 class="vt-gw-title mb-0"><i class="bi bi-broadcast-pin me-2"></i>Game Watch</h1>
-        </div>
-        <div class="vt-gw-header-meta">
-          <span class="vt-gw-chip vt-mono" id="gw-count">Checking lobbies...</span>
-          <span class="gw-ring" id="gw-ring" title="Time until the next refresh" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <circle class="gw-ring-track" cx="12" cy="12" r="9"></circle>
-              <circle class="gw-ring-fg" cx="12" cy="12" r="9"></circle>
-            </svg>
-          </span>
-          <span class="vt-gw-chip vt-mono" id="gw-updated">connecting...</span>
-        </div>
-      </header>
-
-      <!-- All active lobbies in one grid. Of-interest (known-host) lobbies
-           are sorted first and distinguished by the accent border only. -->
-      <section class="vt-gw-section" aria-label="Active lobbies">
-        <div class="vt-gw-grid" id="gw-grid"></div>
-      </section>
-
-      <!-- Empty state: no lobbies anywhere. -->
-      <div class="vt-gw-empty" id="gw-empty" hidden>
-        <i class="bi bi-cup-hot vt-gw-empty-icon" aria-hidden="true"></i>
-        <p class="vt-gw-empty-title mb-1">No active lobbies right now</p>
-        <p class="vt-gw-empty-sub mb-0">Nobody is hosting at the moment. This page updates automatically the second a lobby goes live.</p>
+  <main class="vt-tree-page flex-grow-1">
+    <header class="vt-tree-head">
+      <div>
+        <h1 class="vt-tree-title">VSR Faction Build Trees</h1>
+        <p class="vt-tree-lede">Every unit each recycler can field, then everything those constructors, factories, and armories build.</p>
       </div>
-
+      <label class="visually-hidden" for="vt-tree-find">Find a unit</label>
+      <input id="vt-tree-find" class="form-control vt-tree-find" type="search"
+             placeholder="Find a unit or ODF&hellip;" autocomplete="off">
+    </header>
+    <p id="vt-tree-status" class="vt-tree-status" hidden></p>
+    <div id="vt-tree-columns" class="vt-tree-columns">
+      <section class="vt-tree-col" data-faction="i">
+        <h2 class="vt-tree-faction"><span class="vt-tree-faction-mark" aria-hidden="true"></span>ISDF</h2>
+        <div id="vt-tree-isdf" class="vt-tree-col-body"></div>
+      </section>
+      <section class="vt-tree-col" data-faction="e">
+        <h2 class="vt-tree-faction"><span class="vt-tree-faction-mark" aria-hidden="true"></span>Hadean</h2>
+        <div id="vt-tree-hadean" class="vt-tree-col-body"></div>
+      </section>
+      <section class="vt-tree-col" data-faction="f">
+        <h2 class="vt-tree-faction"><span class="vt-tree-faction-mark" aria-hidden="true"></span>Scion</h2>
+        <div id="vt-tree-scion" class="vt-tree-col-body"></div>
+      </section>
     </div>
   </main>
 
-  <!-- ============================================================
-       SCRIPTS
-       ============================================================ -->
+  <div class="modal fade" id="vt-tree-odf-modal" tabindex="-1" aria-labelledby="vt-tree-odf-title">
+    <div class="modal-dialog modal-dialog-centered vt-tree-odf-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="vt-tree-odf-title">ODF</h5>
+          <a id="vt-tree-odf-open" class="vt-tree-odf-open" href="../odf/" target="_blank" rel="noopener">Open in ODF browser</a>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <iframe id="vt-tree-odf-frame" class="vt-tree-odf-frame" title="ODF browser"></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="../js/theme.js"></script>
-  <script src="../js/bz2api.js"></script>
-  <script src="../js/live-session-card.js"></script>
-  <script src="../js/live-map-enrich.js"></script>
-  <script src="../js/tools/player-resolver.js"></script>
-  <script src="../js/gw/reconciler.js"></script>
-  <script src="../js/gw/gw-card.js"></script>
-  <script src="../js/gw/poller.js"></script>
-  <script src="../js/gw/main.js"></script>
+  <script src="../js/build-tree.js"></script>
   <script src="../js/cursor-settings.js"></script>
 </body>
 </html>

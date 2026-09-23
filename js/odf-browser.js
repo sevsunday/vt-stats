@@ -4,8 +4,8 @@
  * Single-class implementation ported from odf-browser-seed/js/odf.js with the
  * following differences vs the seed:
  *
- * - VSR Build Tree feature stripped wholesale (7 methods + 3 caller sites);
- *   Bug 7 (hardcoded faction roots) is moot here. Will land in a follow-up.
+ * - VSR Build Tree lives on its own page (build/index.html, js/build-tree.js),
+ *   not in this browser. Faction roots are FACTION_ROOTS in that file.
  * - Path rewires: ../data/odf.min.json (fetch) and ../data/audio/<file>.wav
  *   (inline-onclick audio path emitted by formatValue).
  * - Bug 1 fix: filterODFData() filteredProperties is now `let` so it can be
