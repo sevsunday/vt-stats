@@ -3,7 +3,7 @@
     "id": "2026-05-15T00-03-04",
     "source_file": "2026-05-15-00-03-04.binpb.gz",
     "source_size_bytes": 2851256,
-    "pipeline_version": 48,
+    "pipeline_version": 50,
     "submitter": "Nomad",
     "map": "STAncientvsr.bzn",
     "date": "2026-05-15T00:03:04.441084+00:00",
@@ -130,7 +130,7 @@
     "has_bullet_hit_data": true,
     "has_resource_data": false,
     "has_build_data": false,
-    "schema_version": 27,
+    "schema_version": 28,
     "proto_schema_version": "v2",
     "shutdown_requested": false,
     "game_outcome": null,
@@ -139,10 +139,11 @@
     "roster_qa": null,
     "bullet_hit_distance": {
       "count": 4571,
-      "with_distance": 4571,
-      "with_max_range": 4571,
-      "mean": 74.062,
-      "max": 832.129
+      "with_distance": 4558,
+      "with_max_range": 4558,
+      "rejected_implausible": 13,
+      "mean": 73.395,
+      "max": 188.745
     },
     "distance_bin_edges": [
       10,
@@ -175,11 +176,11 @@
     ],
     "weapon_ranges": {
       "Minigun": 105.0,
-      "FAF Msl": 120.0,
+      "FAF Msl (fafmsl_c)": 120.0,
       "Pulse": 200.1,
       "Chain Gun": 135.0,
       "Laser": 120.0,
-      "Shadower Msl": 800.0
+      "Shadower Msl (shadowvsr_c)": 800.0
     },
     "terrain_bounds": {
       "min": {
@@ -249,7 +250,7 @@
         "distance_buckets": {
           "pvp": {
             "close": 283,
-            "mid": 313,
+            "mid": 312,
             "long": 0,
             "extreme": 0
           },
@@ -313,7 +314,7 @@
             ]
           }
         },
-        "FAF Msl": {
+        "FAF Msl (fafmsl_c)": {
           "dealt": 2200.0,
           "received": 350.0,
           "shots": 28,
@@ -357,6 +358,24 @@
             ]
           }
         },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 211.2,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 3810.4,
+          "received": 632.3,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Minigun": {
           "dealt": 14593.0,
           "received": 4125.0,
@@ -374,7 +393,7 @@
               60,
               74,
               38,
-              7,
+              6,
               0,
               0,
               0,
@@ -397,29 +416,11 @@
               20,
               2,
               4,
-              1
+              0
             ]
           }
         },
-        "xfafgnd": {
-          "dealt": 211.2,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 3810.4,
-          "received": 632.3,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 1750.1,
           "received": 25.1,
           "shots": 0,
@@ -562,8 +563,8 @@
           "pvp": {
             "close": 184,
             "mid": 652,
-            "long": 8,
-            "extreme": 1
+            "long": 6,
+            "extreme": 0
           },
           "pve": {
             "close": 0,
@@ -574,7 +575,7 @@
         },
         "time_low_health_pct": 0.066,
         "ammo_out_episodes": 3,
-        "hp_efficiency": 4.06
+        "hp_efficiency": 5.08
       },
       "assets": {
         "dealt": 0,
@@ -602,7 +603,7 @@
               0,
               0,
               0,
-              1,
+              0,
               0,
               0,
               0
@@ -621,11 +622,20 @@
               31,
               20,
               0,
-              1
+              0
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 398.0,
+          "received": 199.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 200.0,
           "received": 400.0,
           "shots": 4,
@@ -668,6 +678,15 @@
               0
             ]
           }
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 343.4,
+          "received": 724.1,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Laser": {
           "dealt": 4500.0,
@@ -732,7 +751,7 @@
               165,
               97,
               0,
-              2,
+              0,
               0,
               0,
               0,
@@ -753,7 +772,7 @@
               71,
               105,
               23,
-              2
+              0
             ]
           }
         },
@@ -801,7 +820,7 @@
             ]
           }
         },
-        "Shadower Msl": {
+        "Shadower Msl (shadowvsr_c)": {
           "dealt": 5280.0,
           "received": 0,
           "shots": 20,
@@ -845,25 +864,7 @@
             ]
           }
         },
-        "xcarxpl": {
-          "dealt": 398.0,
-          "received": 199.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 343.4,
-          "received": 724.1,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xshdwbld": {
+        "Shadower Msl (xshdwbld)": {
           "dealt": 120.0,
           "received": 0,
           "shots": 0,
@@ -872,7 +873,7 @@
           "self_hits": 0,
           "accuracy": 0
         },
-        "xshdwcar": {
+        "Shadower Msl (xshdwcar)": {
           "dealt": 647.3,
           "received": 200.0,
           "shots": 0,
@@ -881,7 +882,7 @@
           "self_hits": 0,
           "accuracy": 0
         },
-        "xshdwgnd": {
+        "Shadower Msl (xshdwgnd)": {
           "dealt": 106.2,
           "received": 0,
           "shots": 0,
@@ -1052,7 +1053,7 @@
           "pvp": {
             "close": 228,
             "mid": 477,
-            "long": 3,
+            "long": 0,
             "extreme": 0
           },
           "pve": {
@@ -1064,14 +1065,23 @@
         },
         "time_low_health_pct": 0.056,
         "ammo_out_episodes": 8,
-        "hp_efficiency": 2.34
+        "hp_efficiency": 3.47
       },
       "assets": {
         "dealt": 0,
         "received": 6702.9
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 1102.4,
+          "received": 396.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 650.0,
           "received": 750.0,
           "shots": 10,
@@ -1115,6 +1125,15 @@
             ]
           }
         },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 1174.2,
+          "received": 1184.6,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Minigun": {
           "dealt": 31097.0,
           "received": 11484.0,
@@ -1134,8 +1153,8 @@
               178,
               39,
               0,
-              2,
-              1,
+              0,
+              0,
               0,
               0,
               0,
@@ -1155,7 +1174,7 @@
               94,
               48,
               14,
-              3
+              0
             ]
           }
         },
@@ -1203,25 +1222,7 @@
             ]
           }
         },
-        "xcarxpl": {
-          "dealt": 1102.4,
-          "received": 396.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 1174.2,
-          "received": 1184.6,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 749.0,
           "received": 123.8,
           "shots": 0,
@@ -1400,14 +1401,23 @@
         },
         "time_low_health_pct": 0.069,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 4.28
+        "hp_efficiency": 5.03
       },
       "assets": {
         "dealt": 0,
         "received": 0
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 181.7,
+          "received": 49.6,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 50.0,
           "received": 550.0,
           "shots": 8,
@@ -1450,6 +1460,24 @@
               0
             ]
           }
+        },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 95.6,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 94.9,
+          "received": 1003.6,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Laser": {
           "dealt": 21450.0,
@@ -1538,33 +1566,6 @@
               0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 181.7,
-          "received": 49.6,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 95.6,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 94.9,
-          "received": 1003.6,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -1728,7 +1729,7 @@
           "pvp": {
             "close": 39,
             "mid": 470,
-            "long": 6,
+            "long": 2,
             "extreme": 0
           },
           "pve": {
@@ -1740,7 +1741,7 @@
         },
         "time_low_health_pct": 0.078,
         "ammo_out_episodes": 16,
-        "hp_efficiency": 3.64
+        "hp_efficiency": 5.89
       },
       "assets": {
         "dealt": 0,
@@ -1791,7 +1792,16 @@
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 369.9,
+          "received": 199.5,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 0,
           "received": 200.0,
           "shots": 3,
@@ -1799,6 +1809,15 @@
           "pvp_hits": 0,
           "self_hits": 0,
           "accuracy": 0.0
+        },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 118.5,
+          "received": 186.0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun": {
           "dealt": 17331.0,
@@ -1819,7 +1838,7 @@
               176,
               38,
               2,
-              4,
+              0,
               0,
               0,
               0,
@@ -1840,7 +1859,7 @@
               91,
               63,
               18,
-              6
+              2
             ]
           }
         },
@@ -1887,24 +1906,6 @@
               0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 369.9,
-          "received": 199.5,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 118.5,
-          "received": 186.0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -2080,14 +2081,23 @@
         },
         "time_low_health_pct": 0.017,
         "ammo_out_episodes": 4,
-        "hp_efficiency": 1.5
+        "hp_efficiency": 2.59
       },
       "assets": {
         "dealt": 0,
         "received": 72824.2
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 1290.4,
+          "received": 495.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 500.0,
           "received": 1050.0,
           "shots": 6,
@@ -2130,6 +2140,24 @@
               0
             ]
           }
+        },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 186.0,
+          "received": 181.4,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 929.1,
+          "received": 1854.0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun": {
           "dealt": 17709.0,
@@ -2219,34 +2247,7 @@
             ]
           }
         },
-        "xcarxpl": {
-          "dealt": 1290.4,
-          "received": 495.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 186.0,
-          "received": 181.4,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 929.1,
-          "received": 1854.0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 4588.9,
           "received": 0,
           "shots": 0,
@@ -2409,8 +2410,8 @@
           "pvp": {
             "close": 28,
             "mid": 669,
-            "long": 2,
-            "extreme": 1
+            "long": 1,
+            "extreme": 0
           },
           "pve": {
             "close": 0,
@@ -2421,14 +2422,23 @@
         },
         "time_low_health_pct": 0.031,
         "ammo_out_episodes": 6,
-        "hp_efficiency": 1.83
+        "hp_efficiency": 2.5
       },
       "assets": {
         "dealt": 0,
         "received": 971.2
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 481.4,
+          "received": 244.4,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 0,
           "received": 200.0,
           "shots": 2,
@@ -2456,11 +2466,11 @@
               322,
               183,
               0,
-              1,
               0,
               0,
               0,
-              1,
+              0,
+              0,
               0
             ]
           },
@@ -2477,7 +2487,7 @@
               206,
               161,
               100,
-              2
+              0
             ]
           }
         },
@@ -2524,15 +2534,6 @@
               0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 481.4,
-          "received": 244.4,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -2704,14 +2705,23 @@
         },
         "time_low_health_pct": 0.028,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 0.89
+        "hp_efficiency": 1.39
       },
       "assets": {
         "dealt": 0,
         "received": 0
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 1288.9,
+          "received": 596.7,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 350.0,
           "received": 450.0,
           "shots": 6,
@@ -2754,6 +2764,15 @@
               0
             ]
           }
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 641.4,
+          "received": 826.5,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun": {
           "dealt": 15402.0,
@@ -2842,24 +2861,6 @@
               0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 1288.9,
-          "received": 596.7,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 641.4,
-          "received": 826.5,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -3129,7 +3130,7 @@
       "users": 2
     },
     {
-      "weapon": "xvehxpl",
+      "weapon": "Vehicle Explosion",
       "odf": "xvehxpl.odf",
       "total_damage": 7088.0,
       "total_shots": 0,
@@ -3138,7 +3139,7 @@
       "users": 3
     },
     {
-      "weapon": "xfafmsl",
+      "weapon": "FAF Msl (xfafmsl)",
       "odf": "xfafmsl.odf",
       "total_damage": 6993.4,
       "total_shots": 0,
@@ -3147,7 +3148,7 @@
       "users": 6
     },
     {
-      "weapon": "Shadower Msl",
+      "weapon": "Shadower Msl (shadowvsr_c)",
       "odf": "shadowvsr_c.odf",
       "total_damage": 5280.0,
       "total_shots": 20,
@@ -3156,7 +3157,7 @@
       "users": 1
     },
     {
-      "weapon": "xcarxpl",
+      "weapon": "Craft Explosion",
       "odf": "xcarxpl.odf",
       "total_damage": 5112.7,
       "total_shots": 0,
@@ -3165,7 +3166,7 @@
       "users": 7
     },
     {
-      "weapon": "FAF Msl",
+      "weapon": "FAF Msl (fafmsl_c)",
       "odf": "fafmsl_c.odf",
       "total_damage": 3950.0,
       "total_shots": 67,
@@ -3183,7 +3184,7 @@
       "users": 6
     },
     {
-      "weapon": "xshdwcar",
+      "weapon": "Shadower Msl (xshdwcar)",
       "odf": "xshdwcar.odf",
       "total_damage": 647.3,
       "total_shots": 0,
@@ -3192,7 +3193,7 @@
       "users": 1
     },
     {
-      "weapon": "xfafgnd",
+      "weapon": "FAF Msl (xfafgnd)",
       "odf": "xfafgnd.odf",
       "total_damage": 611.3,
       "total_shots": 0,
@@ -3201,7 +3202,7 @@
       "users": 4
     },
     {
-      "weapon": "xshdwbld",
+      "weapon": "Shadower Msl (xshdwbld)",
       "odf": "xshdwbld.odf",
       "total_damage": 120.0,
       "total_shots": 0,
@@ -3210,7 +3211,7 @@
       "users": 1
     },
     {
-      "weapon": "xshdwgnd",
+      "weapon": "Shadower Msl (xshdwgnd)",
       "odf": "xshdwgnd.odf",
       "total_damage": 106.2,
       "total_shots": 0,
@@ -3224,7 +3225,7 @@
     "aplasevsr.odf": "Laser",
     "apserv_vsr.odf": "Service Pod",
     "chainvsr_c.odf": "Chain Gun",
-    "fafmsl_c.odf": "FAF Msl",
+    "fafmsl_c.odf": "FAF Msl (fafmsl_c)",
     "ibscav_vsr.odf": "Extractor",
     "ibscup_vsr.odf": "Extractor+",
     "ispilo.odf": "Pilot (ispilo)",
@@ -3234,18 +3235,18 @@
     "ivscoutm_vsr.odf": "Empty Scout",
     "laservsr_c.odf": "Laser",
     "minigun_c.odf": "Minigun",
-    "shadowvsr_c.odf": "Shadower Msl",
+    "shadowvsr_c.odf": "Shadower Msl (shadowvsr_c)",
     "tracer.odf": "Pulse",
     "xbldxpl.odf": "Xbldxpl",
-    "xcarxpl.odf": "Xcarxpl",
-    "xfafgnd.odf": "Xfafgnd",
-    "xfafmsl.odf": "Xfafmsl",
+    "xcarxpl.odf": "Craft Explosion",
+    "xfafgnd.odf": "FAF Msl (xfafgnd)",
+    "xfafmsl.odf": "FAF Msl (xfafmsl)",
     "xsecxpl.odf": "Xsecxpl",
-    "xshdwbld.odf": "Xshdwbld",
-    "xshdwcar.odf": "Xshdwcar",
-    "xshdwgnd.odf": "Xshdwgnd",
+    "xshdwbld.odf": "Shadower Msl (xshdwbld)",
+    "xshdwcar.odf": "Shadower Msl (xshdwcar)",
+    "xshdwgnd.odf": "Shadower Msl (xshdwgnd)",
     "xvchxpl.odf": "Xvchxpl",
-    "xvehxpl.odf": "Xvehxpl",
+    "xvehxpl.odf": "Vehicle Explosion",
     "ibrecy_vsr.odf": "Recycler"
   },
   "timeline": {

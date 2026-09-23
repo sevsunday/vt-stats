@@ -409,8 +409,31 @@ Resolves ordnance ODFs (e.g. `chaingun_c.odf` → `Chain Gun`):
 2. `DispenserClass.objectClass` → `WeaponClass.wpnName`
 3. `TargetingGunClass.leaderName` → `WeaponClass.wpnName`
 4. `Vehicle.TorpedoClass.xplBlast` or `Vehicle.GameObjectClass.explosionName` → parent weapon name (via `DispenserClass.objectClass` → vehicle → explosion mapping)
-5. **Fallback**: Strip `.odf` extension and display the raw ODF key
-6. **Null ordnance**: Display `"Unknown"`
+5. **Child-ODF reverse map** (`build_child_odf_reverse_map`, `PIPELINE_VERSION` 49) — see below
+6. **Fallback**: Strip `.odf` extension and display the raw ODF key
+7. **Null ordnance**: Display `"Unknown"`
+
+#### Child-ODF reverse map (layer 5)
+
+A weapon frequently does its damage through an object it *spawns* rather than through itself. The Scion Seeker (`gseekervsr`) drops a mine whose blast is `xseekvsrxpl`, and the wire attributes the damage to that blast — so `xseekvsrxpl` used to render as raw text in Weapon Meta. Corpus-wide, 88 such stems carried **~15% of all weapon damage** (13.9M) as unreadable stems.
+
+`build_child_odf_reverse_map(odf_db)` inverts the relationship. It walks each named weapon's reference graph up to `CHILD_MAP_MAX_HOPS = 3` (the flattened DB inlines a weapon's ordnance and payload blocks, so most children are one hop away; `gmaggun_c → charge6_c → xmagcar6_c` is the deepest real chain) collecting stems named by `CHILD_REF_FIELDS`:
+
+| Field family | Covers |
+|---|---|
+| `xplVehicle` / `xplBuilding` / `xplGround` / `xplExpire` | Per-target-class impact explosions |
+| `xplBlast` / `xplPulse` / `xplEnter` / `xplExit` | Mine blasts, pulse shells, Blink in/out |
+| `explosionName` / `payloadName` / `launchOrd` | Dispensed payloads and secondary launches |
+| `ordName<N>` / `altName` | Charge-gun levels (`charge1_c`..`charge6_c` → MAG), alt-fire modes |
+| `Expl*.ExplosionClass.classLabel` | Nested explosion blocks that name themselves rather than being pointed at |
+
+**Exclusions.** A stem is skipped if it carries its own `GameObjectClass.unitName` (the unit resolver owns it, and `prettify_odf` asks the weapon resolver first, so a claim here would shadow the better name) or if it is itself a named weapon. A final pass then maps every Weapon-bucket stem to its own `wpnName`, because a hitscan weapon declares `ordName = NULL` and the wire reports the weapon's ODF directly — that is what recovers `garcvsr_a` → `Arc Stream`.
+
+**Contested children.** Sibling weapons share explosion assets, so `xbazxpl_c` is claimed by both the Rocket and the Burst Gun EX. The winner is decided by a fixed chain — curated generic → single claimant name → fewest hops → longest common prefix against the weapon stem (falling back to the weapon's ordnance stem only when no weapon stem matches at all, which is what picks `bazooka_c`/Rocket over `eburst_a`) → majority claimant → alphabetical. Every step is order-independent; do not introduce a tie-break that depends on dict iteration.
+
+**Generic wreck explosions.** `xvehxpl`, `xcarxpl`, `xsgnxpl`, `xpwrxpl`, their `_e` Hadean twins, and `kamixpl` are played for *any* dying object of that class. Hundreds of weapons reference them, so there is no honest parent — `GENERIC_EXPLOSION_NAMES` gives them curated labels (`Vehicle Explosion`, `Craft Explosion`, …) and is consulted **before** weapon claims so a spurious claimant cannot win.
+
+The layer is **display-name only**. Explosion stems record zero shots and zero hits, so nothing reaching `thug_accuracy` or any other VTSR-T axis changes; `elo_history.json` hashed byte-identical across the v49 reprocess. Rows stay per-ODF — the map renames, it never merges statistics — so a child that now shares its parent's display name simply picks up the existing `Name (raw_stem)` disambiguation suffix (`FAF Msl (fafmsl_c)` alongside `FAF Msl (xfafmsl)`).
 
 ### Unit Resolution Chain (`build_unit_name_resolver`)
 
@@ -1089,6 +1112,21 @@ The pipeline writes `data/processed/match_contributions.json`, a dict keyed by `
 **Weapon engagement range (`match.schema_version` 11, v2-only).** `BulletHit.distance_to_target` (raw world units == in-game meters) is bucketed per `(player, weapon, channel)` into fixed-bin histograms over the shared `match.distance_bin_edges` (emitted once; `null` on v1 / no-distance matches). Bin `i` covers `[edges[i-1], edges[i])`; the trailing bin is the overflow `[edges[-1], inf)`. Each `weapon_breakdown[w].range_hist` carries a `pvp` and/or `pve` array (a channel is omitted when empty; the whole `range_hist` key is omitted when neither channel recorded distance). `personal.distance_buckets` is the per-player coarse fingerprint (`close`/`mid`/`long`/`extreme` per channel, exact sub-sums of the fine histogram since `50`/`150`/`400` are edge members). All of this is **purely descriptive playstyle/meta — never a skill signal or VTSR-T axis** (weapon/ship access drives range far more than skill). Histograms are additive, so the dashboard sums them across the player-filtered roster and across channels (`Both` = `pvp`+`pve`) before estimating percentiles. The contributions slice deliberately drops `range_hist` (no career range rollup). Consumed by the Weapons & Accuracy tab's Weapon Engagement Range strip + Shot Accuracy range fingerprint, gated on `match.bullet_hit_distance.with_distance > 0`.
 
 **Weapon-fair engagement % (`match.schema_version` 12, v2-only).** Each ordnance ODF declares `OrdnanceClass.shotSpeed * lifeSpan` = the projectile's theoretical max range in meters. Dividing each hit's distance by its ordnance's max range yields a weapon-**fair** `% of envelope` that removes the weapon-choice confound raw meters has. Per `(player, weapon, channel)` percentage histograms ride on `weapon_breakdown[w].range_pct_hist` over the shared `match.distance_pct_bin_edges` (`[10..100,120]`; trailing bin = `>120%` over-range); a representative hit-weighted book range per weapon display name is emitted once on `match.weapon_ranges` (drives the meters-mode theoretical-max reference marker + tooltips); `match.bullet_hit_distance.with_max_range` reports `%`-coverage. Lobbed/timed ordnance (`lifeSpan ~ 1e30` → ~1e31 m) is excluded via the `MAX_REASONABLE_RANGE = 2000` cap (such hits still count in the meters histogram but not the `%` view). Drives the strip's `Meters | % of max` toggle and the Shot Accuracy table's per-player **Engagement Envelope** column (weapon-weighted mean `%` of max, sortable, with `Point-blank`/`Mid`/`Edge`/`Over-range` band labels). Still **descriptive playstyle/meta only — not a VTSR-T axis** (ship access + role still confound). `null`/absent on v1 / no-distance matches; the contributions slice drops `range_pct_hist` too.
+
+**Death-tick (0,0,0) position placeholder (`match.schema_version` 28, `PIPELINE_VERSION` 50).** On the tick a unit is destroyed the engine emits its `PlayerState` with `position == (0,0,0)` (world origin) and a negative `health`, for exactly one tick — the ejected pilot appears at the real spot on the next. **A `PlayerState` with `health < 0` is never a valid position sample.** Across four sampled matches the two signals coincided 1:1 (48/48, 35/35, 83/83, 45/45), but neither is documented upstream, so the pipeline tests both.
+
+A `BulletHit` landing at that instant has `distance_to_target` measured against the ORIGIN rather than the victim, which on VSR maps reads 300-800 m. Traced on `2026-05-22T03-21-34` tick 14385: reported 398.6 m while shooter and victim were 30.2 m apart, with the shooter standing at `(-391.9, 72.5)` where `sqrt(391.9² + 72.5²) = 398.5`. Burst Gun surfaced it (90 m book ceiling, multi-pellet, frequent killing blows) as a bimodal histogram with an empty gap at 150-200 m and a phantom 300-800 m mode; **84.7%** of all corpus hits beyond 1.15x book max matched shooter→origin exactly. The same samples planted 729 phantom trail points across 134 matches and booked 59,232 fake `hp_lost` in a single match.
+
+Two independent guards reject the range sample. **The hit still counts** — `weapon_breakdown[w].hits`, `shots_hit` and every accuracy figure are untouched; only the range is unknowable, and `_dt` is zeroed so it skips all downstream histograms uniformly.
+
+| Guard | Rule | Rationale |
+|---|---|---|
+| A (`DIST_SANITY_BOOK_FACTOR = 1.5`) | reject when `distance > book_max * 1.5` | `shotSpeed * lifeSpan` is a hard physical ceiling. Legit overshoot tops out near +33% (downhill shots), artifacts run 3-8x. Covers 99.8% of corpus hits. |
+| B (`DIST_ORIGIN_REL_TOL = 0.02`, `DIST_ORIGIN_ABS_TOL = 5.0`) | reject when the distance matches `dist(shooter, origin)` within tolerance **and** already exceeds the book envelope (or no book range exists) | The second clause makes a false positive impossible for book-covered ordnance. |
+
+Guard B reads `last_known_pos`, refreshed at FULL rate from every non-placeholder `PlayerState` — deliberately ahead of the 1 Hz positioning gate, because a hit needs the shooter's position at hit time, not at the last kept trail sample. Placeholder samples never enter it (a zeroed shooter would compare the origin against itself and match everything). The positioning skip sits **before** the downsample gate so `position_last_kept_tick` does not advance; otherwise the following real sample is lost too.
+
+New telemetry `match.bullet_hit_distance.rejected_implausible` (1,976 corpus-wide, 0.40% of distance-bearing hits) is NOT subtracted from `count` — a spike there means the guard is misfiring or the collector regressed. Post-fix the corpus holds zero `(0,0)` trail samples and zero samples beyond 1.5x book max, and Burst Gun's highest non-empty bin fell from `[600,800)` to `[100,150)`. Because dropping trail samples nudges `time_in_base_pct` → `activity_score` → the VTSR-T `mobility` axis, `ELO_SCHEMA_VERSION` bumped 10 → 11 and **pre-v11 `peak_vtsr` is no longer comparable** (measured drift: max 1.00 ELO, mean 0.20, leaderboard order unchanged).
 
 `js/all-matches-aggregator.js` exposes `window.VTAggregate.build(contributions, fileIds)`. Pure summation; produces the `{meta, career_stats, global_weapon_meta, global_rivalries}` shape below. The All Matches view fetches `match_contributions.json` once per session, caches it on `window.__vtContributions`, and rebuilds the aggregate over whatever `fileIds` subset the active picker filter resolves to (when no filter is engaged, the subset is every key in the contributions dict — i.e. the unfiltered career view).
 

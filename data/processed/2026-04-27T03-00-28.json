@@ -3,7 +3,7 @@
     "id": "2026-04-27T03-00-28",
     "source_file": "2026-04-27-03-00-28.binpb.gz",
     "source_size_bytes": 279116,
-    "pipeline_version": 48,
+    "pipeline_version": 50,
     "submitter": "VTrider",
     "map": "vsrMojave.bzn",
     "date": "2026-04-27T03:00:28.644389+00:00",
@@ -102,7 +102,7 @@
     "has_bullet_hit_data": true,
     "has_resource_data": false,
     "has_build_data": false,
-    "schema_version": 27,
+    "schema_version": 28,
     "proto_schema_version": "v1",
     "shutdown_requested": false,
     "game_outcome": null,
@@ -113,6 +113,7 @@
       "count": 274,
       "with_distance": 0,
       "with_max_range": 0,
+      "rejected_implausible": 0,
       "mean": null,
       "max": null
     },
@@ -194,7 +195,7 @@
         "received": 6491.8
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "FAF Msl (fafmsl_c)": {
           "dealt": 1420.0,
           "received": 0,
           "shots": 18,
@@ -202,6 +203,15 @@
           "pvp_hits": 13,
           "self_hits": 0,
           "accuracy": 0.722
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 2370.6,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun (minigun_c)": {
           "dealt": 7046.0,
@@ -211,15 +221,6 @@
           "pvp_hits": 166,
           "self_hits": 0,
           "accuracy": 0.201
-        },
-        "xfafmsl": {
-          "dealt": 2370.6,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -314,13 +315,22 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.014,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 0.95
+        "hp_efficiency": 1.6
       },
       "assets": {
         "dealt": 2964.0,
         "received": 11597.7
       },
       "weapon_breakdown": {
+        "Craft Explosion (Hadean)": {
+          "dealt": 793.0,
+          "received": 199.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Particle Gun": {
           "dealt": 4961.0,
           "received": 0,
@@ -329,15 +339,6 @@
           "pvp_hits": 95,
           "self_hits": 0,
           "accuracy": 0.187
-        },
-        "xcarxpl_e": {
-          "dealt": 793.0,
-          "received": 199.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -695,7 +696,7 @@
       "users": 1
     },
     {
-      "weapon": "xfafmsl",
+      "weapon": "FAF Msl (xfafmsl)",
       "odf": "xfafmsl.odf",
       "total_damage": 2370.6,
       "total_shots": 0,
@@ -704,7 +705,7 @@
       "users": 1
     },
     {
-      "weapon": "FAF Msl",
+      "weapon": "FAF Msl (fafmsl_c)",
       "odf": "fafmsl_c.odf",
       "total_damage": 1420.0,
       "total_shots": 18,
@@ -713,7 +714,7 @@
       "users": 1
     },
     {
-      "weapon": "xcarxpl_e",
+      "weapon": "Craft Explosion (Hadean)",
       "odf": "xcarxpl_e.odf",
       "total_damage": 793.0,
       "total_shots": 0,
@@ -730,7 +731,7 @@
     "evscout_vsr.odf": "Xypos",
     "evscoutm_vsr.odf": "Empty Xypos",
     "evturr_vsr.odf": "Xyr Guard",
-    "fafmsl_c.odf": "FAF Msl",
+    "fafmsl_c.odf": "FAF Msl (fafmsl_c)",
     "fball2c.odf": "Fireball",
     "ivcamr_vsr.odf": "Camera Pod (ivcamr_vsr)",
     "ivscout_vsr.odf": "Scout",
@@ -738,8 +739,8 @@
     "minigun_a.odf": "Minigun (minigun_a)",
     "minigun_c.odf": "Minigun (minigun_c)",
     "shellgun_a.odf": "Shell Gun",
-    "xcarxpl_e.odf": "Xcarxpl E",
-    "xfafmsl.odf": "Xfafmsl",
+    "xcarxpl_e.odf": "Craft Explosion (Hadean)",
+    "xfafmsl.odf": "FAF Msl (xfafmsl)",
     "xfbseek.odf": "Fireball",
     "xsecxpl_e.odf": "Xsecxpl E",
     "xvchxpl_e.odf": "Xvchxpl E",
@@ -1137,7 +1138,7 @@
     "base_separation": 990.55,
     "base_to_base_distance": 990.55,
     "observed_max_range": 995.12,
-    "p99_speed": 59.0,
+    "p99_speed": 58.98,
     "teleport_threshold": 300.0,
     "team_base": {
       "1": {
@@ -1167,24 +1168,24 @@
         "first_seen_sec": 0,
         "last_seen_sec": 227,
         "metrics": {
-          "mean_dist": 384.1,
+          "mean_dist": 383.2,
           "max_dist": 748.0,
-          "p50_dist": 449.7,
+          "p50_dist": 446.1,
           "p90_dist": 638.8,
           "p95_dist": 675.1,
           "time_in_base_pct": 0.118,
           "time_to_first_leave_sec": 7,
-          "path_length": 4881.1,
-          "path_length_per_sec": 21.5,
-          "convex_hull_area": 330196.2,
+          "path_length": 4915.4,
+          "path_length_per_sec": 21.65,
+          "convex_hull_area": 330197.5,
           "bounding_box_area": 497787.2,
           "return_to_base_count": 1,
           "activity_score": 79,
           "movement_band": "Mobile",
-          "target_lock_pct": 0.452,
+          "target_lock_pct": 0.443,
           "at_base_pilot_sec": 15.0,
           "at_base_pilot_share": 0.066,
-          "pilot_sec": 75.0,
+          "pilot_sec": 76.0,
           "reship_median_sec": 66.0,
           "reship_spells": 1
         },
@@ -1638,16 +1639,16 @@
             -272.44,
             -298.47,
             -301.41,
-            0.0,
-            -298.5,
-            -301.15,
+            -295.02,
+            -298.68,
+            -301.24,
             -301.87,
             -301.87,
             -301.87,
             -301.87,
             -301.87,
             -301.86,
-            -301.71
+            -301.65
           ],
           "z": [
             510.07,
@@ -1868,16 +1869,16 @@
             313.98,
             323.84,
             348.72,
-            0.0,
-            381.4,
-            387.58,
+            371.56,
+            381.82,
+            387.77,
             389.18,
             389.18,
             389.19,
             389.19,
             389.19,
-            389.25,
-            391.01
+            389.27,
+            391.21
           ],
           "y": [
             77.5,
@@ -2098,16 +2099,16 @@
             76.78,
             77.54,
             81.29,
-            0.0,
-            126.81,
-            164.29,
-            189.26,
-            201.73,
-            201.82,
-            192.03,
-            176.2,
-            156.72,
-            145.57
+            79.64,
+            128.98,
+            165.83,
+            190.18,
+            202.03,
+            201.52,
+            191.36,
+            175.3,
+            155.68,
+            145.32
           ],
           "hp": [
             1.0,
@@ -2328,7 +2329,7 @@
             0.252,
             0.252,
             0.129,
-            0.0,
+            1.0,
             1.0,
             1.0,
             1.0,
@@ -2558,7 +2559,7 @@
             0.92,
             0.909,
             0.898,
-            0.886,
+            1.0,
             1.0,
             1.0,
             1.0,
@@ -2788,6 +2789,7 @@
             1,
             1,
             1,
+            0,
             1,
             1,
             1,
@@ -2796,8 +2798,7 @@
             1,
             1,
             1,
-            1,
-            1
+            0
           ],
           "speed": [
             0.0,
@@ -3018,28 +3019,20 @@
             37.6,
             24.7,
             27.0,
-            14.0,
-            44.3,
-            31.2,
-            18.4,
-            5.9,
-            5.9,
-            13.5,
-            18.0,
-            20.8,
+            56.6,
+            43.7,
+            30.5,
+            17.8,
+            5.3,
+            6.3,
+            13.7,
+            18.2,
+            20.9,
             6.6
           ],
           "segments": [
             [
               0,
-              217
-            ],
-            [
-              218,
-              218
-            ],
-            [
-              219,
               227
             ]
           ]
@@ -4671,7 +4664,7 @@
             0,
             0,
             2,
-            9,
+            10,
             0,
             0,
             0,
@@ -5190,7 +5183,7 @@
             2,
             3,
             3,
-            3,
+            2,
             1,
             0,
             1,
@@ -7365,7 +7358,7 @@
             1,
             7,
             7,
-            13,
+            14,
             0,
             0,
             0,
@@ -7398,7 +7391,7 @@
             5,
             6,
             11,
-            10,
+            9,
             13
           ],
           [
@@ -26316,7 +26309,7 @@
         "slot": 1,
         "ships_lost": 2,
         "ship_value_lost": 60,
-        "pilot_sec": 75.0,
+        "pilot_sec": 76.0,
         "at_base_pilot_sec": 15.0,
         "reship_median_sec": 66.0,
         "reship_spells": 1
@@ -26567,9 +26560,9 @@
         },
         "runner_up": {
           "name": "Nomad",
-          "value": 0.452
+          "value": 0.443
         },
-        "delta_pct": 0.562,
+        "delta_pct": 0.594,
         "narrative": "dominant"
       }
     ]

@@ -1148,8 +1148,9 @@ Top-level per-match object mapping raw ODF strings to their best human-readable 
 | Property | Notes |
 |---|---|
 | Keys | Raw ODF strings exactly as they appear in the binpb wire format, including the `.odf` suffix. |
-| Values | Resolved display name via `prettify_odf` — (1) weapons via `build_weapon_name_resolver` (the `Weapon.*` ordName / objectClass / leaderName / explosion chain), (2) any other game object via `build_unit_name_resolver` (`GameObjectClass.unitName` across `Vehicle`, `Building`, `Powerup`, `Pilot`, `Ordnance`), (3) title-cased form of the raw stem as a last-resort fallback for ODFs the DB does not recognize. |
-| Disambiguation | Same-name collisions inside a match (e.g. multiple "Pulse" weapons or stock + `_vsr` "Scavenger") resolve as `Name (raw_stem)` via the shared `disambiguate_names` helper. |
+| Values | Resolved display name via `prettify_odf` — (1) weapons via `build_weapon_name_resolver` (the `Weapon.*` ordName / objectClass / leaderName / explosion chain, then the **child-ODF reverse map** below), (2) any other game object via `build_unit_name_resolver` (`GameObjectClass.unitName` across `Vehicle`, `Building`, `Powerup`, `Pilot`, `Ordnance`), (3) title-cased form of the raw stem as a last-resort fallback for ODFs the DB does not recognize. |
+| Child-ODF reverse map | **`PIPELINE_VERSION` 49.** Mines, dispensed payloads, charge levels and impact explosions deal damage under their own ODF, so the wire reports `xseekvsrxpl` where the player fired a `gseekervsr` — 88 such stems carried ~15% of corpus weapon damage as raw text. `build_child_odf_reverse_map()` walks every named weapon's reference graph (the `xpl*` family, `explosionName`, `payloadName`, `launchOrd`, `ordName<N>`, `altName`, nested `Expl*.ExplosionClass.classLabel`) up to 3 hops and claims the stems it reaches, skipping any stem that has its own `unitName` or is itself a named weapon. Shared assets are decided by a deterministic chain (fewest hops → stem-prefix similarity → majority → alphabetical); the six generic wreck explosions (`xvehxpl`, `xcarxpl`, `xsgnxpl`, `xpwrxpl`, `_e` variants, `kamixpl`) get curated labels from `GENERIC_EXPLOSION_NAMES` instead, checked first. Display-only — explosion stems carry zero shots/hits, so no VTSR-T axis moves. Full derivation: `DEVELOPER_GUIDE.md` §4. |
+| Disambiguation | Same-name collisions inside a match (e.g. multiple "Pulse" weapons or stock + `_vsr` "Scavenger") resolve as `Name (raw_stem)` via the shared `disambiguate_names` helper. The reverse map renames but never merges, so a child sharing its parent's name picks up the suffix on both rows (`FAF Msl (fafmsl_c)` + `FAF Msl (xfafmsl)`). |
 | Population | Every `*_odf` field encountered in the match: `BulletInit.ordnance_odf`, `BulletHit.{ordnance_odf, victim_odf, shooter_odf}`, `DamageDealt.ordnance_odf`, `DamageReceived.ordnance_odf`, `UnitDestroyed.{killer_odf, victim_odf}`, and `PlayerState.odf`. Typically 10-50 entries per match. |
 | Consumers | Primarily [js/raw-browser.js](../js/raw-browser.js) for inline ODF resolution in the Decoded tier. `kills.by_vehicle[].name` is routed through the same `prettify_odf` chain so it always agrees with `odf_map`. |
 | Filter contract | **Match-global, always-unfiltered.** See `.cursor/rules/filter-contract.mdc`. |
@@ -1296,7 +1297,7 @@ Player movement analytics derived from `UpdateTick` events. Captured positions a
 | `first_seen_sec` | `number` | First `trail.t[]` value |
 | `last_seen_sec` | `number` | Last `trail.t[]` value |
 | `metrics` | `object` | Derived metrics (see below) |
-| `trail` | `object` | Downsampled position arrays + segment breaks |
+| `trail` | `object` | Downsampled position arrays + segment breaks. **v28:** death-tick placeholders are skipped before the 1 Hz gate — the engine parks a dying unit at `(0,0,0)` with negative `health` for exactly one tick, and 729 such samples across 134 matches used to survive the downsample as phantom points at map centre. The skip runs ahead of the gate so `position_last_kept_tick` does not advance and the next real sample is still kept. |
 | `ship_timeline` | `object` | **v25.** `{ t: number[], odf: string[] }` — parallel arrays of **full-rate** `UpdateTick.PlayerState.odf` transitions (not 1 Hz). `t[i]` is seconds from match start (`min_tick`), 0.1 s precision; `odf[i]` is the verbatim wire ODF (an `odf_map` key). First entry is the first non-empty ODF seen; a new row only when the ODF changes (typically tens of entries per player). Empty arrays when the player had no non-empty ODF. Display-only — consumed by `_map-analysis/render/js/replay-ship-tracker.js` so the 3D replay labels the ship the player is actually in. Pre-v25 matches have no field (the tracker falls back to sparse kill/pickup/snipe reconstruction). Not in contributions; no career aggregate. |
 | `heatmap_grid_xz` | `number[][]` | 64×64 bin counts over `map_bounds`. `[row][col]` where row = x-index (0 = west), col = z-index (0 = south). Grid resolution is `POSITIONING_HEATMAP_GRID_SIZE` in the pipeline; the renderer reads the array length so a bump needs no JS change |
 | `heatmap_polar` | `number[][]` | 16 angular × 8 radial bin counts around personal spawn. Angular bin 0 = due East (+X), increasing counter-clockwise. Radial bins span `0 .. p95_dist` |
@@ -1607,6 +1608,14 @@ All three are **descriptive playstyle/meta only — never a skill signal or VTSR
 | `match.bullet_hit_distance.with_max_range` | `number` | Count of distance-bearing hits that also had a usable ordnance max range (fed the `%` histograms). Coverage telemetry vs `with_distance`. |
 
 The `%`-of-max view is **weapon-fair** (normalizes away weapon-choice differences), so it is the basis for the Shot Accuracy table's per-player **Engagement Envelope** column (weapon-weighted mean `%` of max, sortable, with `Point-blank`/`Mid`/`Edge`/`Over-range` bands) and the strip's `Meters | % of max` toggle. Lobbed/timed ordnance (`lifeSpan ~ 1e30`) is excluded via `MAX_REASONABLE_RANGE = 2000` (still counted in meters). Still **descriptive-only — not a VTSR-T axis**. The contributions slice drops `range_pct_hist` (no career rollup).
+
+**Death-tick placeholder guard (`match.schema_version` 28).** On the tick a unit dies the engine emits its `PlayerState` at `position == (0,0,0)` with negative `health`, so a `BulletHit` landing then has `distance_to_target` measured to the world ORIGIN instead of the victim (300-800 m on VSR maps). Two guards reject the range sample — **the hit itself still counts**, so `hits` / `shots_hit` / every accuracy figure are unaffected; only the range is discarded.
+
+| Field | Type | Description |
+|---|---|---|
+| `match.bullet_hit_distance.rejected_implausible` | `number` | Range samples discarded by the guard. **Not** subtracted from `count` — the hit happened, only its range was unknowable. 1,976 corpus-wide (0.40% of distance-bearing hits); a spike means the guard is misfiring or the collector regressed. |
+
+Guard A rejects `distance > book_max * DIST_SANITY_BOOK_FACTOR` (1.5) — `shotSpeed * lifeSpan` is a hard physical ceiling, legitimate overshoot tops out near +33% while artifacts run 3-8x, and it covers 99.8% of corpus hits. Guard B rejects a distance matching `dist(shooter, origin)` within `DIST_ORIGIN_REL_TOL` / `DIST_ORIGIN_ABS_TOL` **and** already outside the book envelope, which makes a false positive impossible for book-covered ordnance. Full mechanism, evidence chain and the positioning / `hp_efficiency` siblings: `.cursor/rules/data-schema.mdc` "Death-tick (0,0,0) position placeholder".
 
 #### Aggregate shape (built in-memory by `VTAggregate.build()`)
 
@@ -2750,7 +2759,12 @@ Semantics:
   field is absent from the legacy proto. Capture-only -- see
   [distance_to_target.txt](../distance_to_target.txt) at the repo root
   for concrete future uses (VTSR-T axes, weapon-meta engagement-range
-  stats, highlight card refinements).
+  stats, highlight card refinements). As of `match.schema_version` 28 the
+  block also carries `rejected_implausible` and the `mean` / `max` /
+  `with_distance` figures exclude death-tick artifacts -- a dying unit is
+  parked at the world origin for one tick, so hits landing there used to
+  report the shooter's range to map centre (see the engagement-range
+  section above and `.cursor/rules/data-schema.mdc`).
 
 ## 10.2 Spectator-Style Exclusion Flags (`match.schema_version` 6)
 

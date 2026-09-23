@@ -3,7 +3,7 @@
     "id": "2026-04-27T02-42-05",
     "source_file": "2026-04-27-02-42-05.binpb.gz",
     "source_size_bytes": 657602,
-    "pipeline_version": 48,
+    "pipeline_version": 50,
     "submitter": "VTrider",
     "map": "STGizavsr.bzn",
     "date": "2026-04-27T02:42:05.025465+00:00",
@@ -102,7 +102,7 @@
     "has_bullet_hit_data": true,
     "has_resource_data": false,
     "has_build_data": false,
-    "schema_version": 27,
+    "schema_version": 28,
     "proto_schema_version": "v1",
     "shutdown_requested": false,
     "game_outcome": null,
@@ -113,6 +113,7 @@
       "count": 114,
       "with_distance": 0,
       "with_max_range": 0,
+      "rejected_implausible": 0,
       "mean": null,
       "max": null
     },
@@ -194,7 +195,7 @@
         "received": 23812.8
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "FAF Msl (fafmsl_c)": {
           "dealt": 1335.0,
           "received": 0,
           "shots": 18,
@@ -202,6 +203,15 @@
           "pvp_hits": 2,
           "self_hits": 0,
           "accuracy": 0.111
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 1796.4,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Laser": {
           "dealt": 8200.0,
@@ -221,7 +231,7 @@
           "self_hits": 0,
           "accuracy": 0.052
         },
-        "Shadower Msl": {
+        "Shadower Msl (shadowvsr_c)": {
           "dealt": 7460.0,
           "received": 0,
           "shots": 24,
@@ -230,16 +240,7 @@
           "self_hits": 0,
           "accuracy": 0.333
         },
-        "xfafmsl": {
-          "dealt": 1796.4,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xshdwcar": {
+        "Shadower Msl (xshdwcar)": {
           "dealt": 3055.2,
           "received": 1600.0,
           "shots": 0,
@@ -248,7 +249,7 @@
           "self_hits": 0,
           "accuracy": 0
         },
-        "xshdwgnd": {
+        "Shadower Msl (xshdwgnd)": {
           "dealt": 147.6,
           "received": 0,
           "shots": 0,
@@ -350,14 +351,23 @@
         "distance_buckets": null,
         "time_low_health_pct": 0.009,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 1.76
+        "hp_efficiency": 2.69
       },
       "assets": {
         "dealt": 16355.0,
         "received": 43929.1
       },
       "weapon_breakdown": {
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 816.3,
+          "received": 195.5,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 315.0,
           "received": 250.0,
           "shots": 8,
@@ -365,6 +375,24 @@
           "pvp_hits": 0,
           "self_hits": 0,
           "accuracy": 0.0
+        },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 18.2,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 435.1,
+          "received": 465.9,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun (minigun_c)": {
           "dealt": 9441.0,
@@ -375,34 +403,7 @@
           "self_hits": 0,
           "accuracy": 0.062
         },
-        "xcarxpl": {
-          "dealt": 816.3,
-          "received": 195.5,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 18.2,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 435.1,
-          "received": 465.9,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 1401.2,
           "received": 0,
           "shots": 0,
@@ -743,7 +744,7 @@
       "users": 1
     },
     {
-      "weapon": "Shadower Msl",
+      "weapon": "Shadower Msl (shadowvsr_c)",
       "odf": "shadowvsr_c.odf",
       "total_damage": 7460.0,
       "total_shots": 24,
@@ -752,7 +753,7 @@
       "users": 1
     },
     {
-      "weapon": "xshdwcar",
+      "weapon": "Shadower Msl (xshdwcar)",
       "odf": "xshdwcar.odf",
       "total_damage": 3055.2,
       "total_shots": 0,
@@ -761,7 +762,7 @@
       "users": 1
     },
     {
-      "weapon": "xfafmsl",
+      "weapon": "FAF Msl (xfafmsl)",
       "odf": "xfafmsl.odf",
       "total_damage": 2231.5,
       "total_shots": 0,
@@ -770,7 +771,7 @@
       "users": 2
     },
     {
-      "weapon": "FAF Msl",
+      "weapon": "FAF Msl (fafmsl_c)",
       "odf": "fafmsl_c.odf",
       "total_damage": 1650.0,
       "total_shots": 26,
@@ -779,7 +780,7 @@
       "users": 2
     },
     {
-      "weapon": "xvehxpl",
+      "weapon": "Vehicle Explosion",
       "odf": "xvehxpl.odf",
       "total_damage": 1401.2,
       "total_shots": 0,
@@ -788,7 +789,7 @@
       "users": 1
     },
     {
-      "weapon": "xcarxpl",
+      "weapon": "Craft Explosion",
       "odf": "xcarxpl.odf",
       "total_damage": 816.3,
       "total_shots": 0,
@@ -797,7 +798,7 @@
       "users": 1
     },
     {
-      "weapon": "xshdwgnd",
+      "weapon": "Shadower Msl (xshdwgnd)",
       "odf": "xshdwgnd.odf",
       "total_damage": 147.6,
       "total_shots": 0,
@@ -806,7 +807,7 @@
       "users": 1
     },
     {
-      "weapon": "xfafgnd",
+      "weapon": "FAF Msl (xfafgnd)",
       "odf": "xfafgnd.odf",
       "total_damage": 18.2,
       "total_shots": 0,
@@ -819,7 +820,7 @@
     "aplasevsr.odf": "Laser",
     "apserv_vsr.odf": "Service Pod",
     "apshdwvsr.odf": "Shadower Missile",
-    "fafmsl_c.odf": "FAF Msl",
+    "fafmsl_c.odf": "FAF Msl (fafmsl_c)",
     "ibscav_vsr.odf": "Extractor",
     "isuser_m.odf": "Pilot",
     "ivcamr_vsr.odf": "Camera Pod",
@@ -829,16 +830,16 @@
     "laservsr_c.odf": "Laser",
     "minigun_a.odf": "Minigun (minigun_a)",
     "minigun_c.odf": "Minigun (minigun_c)",
-    "shadowvsr_c.odf": "Shadower Msl",
+    "shadowvsr_c.odf": "Shadower Msl (shadowvsr_c)",
     "xbldxpl.odf": "Xbldxpl",
-    "xcarxpl.odf": "Xcarxpl",
-    "xfafgnd.odf": "Xfafgnd",
-    "xfafmsl.odf": "Xfafmsl",
+    "xcarxpl.odf": "Craft Explosion",
+    "xfafgnd.odf": "FAF Msl (xfafgnd)",
+    "xfafmsl.odf": "FAF Msl (xfafmsl)",
     "xsecxpl.odf": "Xsecxpl",
-    "xshdwcar.odf": "Xshdwcar",
-    "xshdwgnd.odf": "Xshdwgnd",
+    "xshdwcar.odf": "Shadower Msl (xshdwcar)",
+    "xshdwgnd.odf": "Shadower Msl (xshdwgnd)",
     "xvchxpl.odf": "Xvchxpl",
-    "xvehxpl.odf": "Xvehxpl",
+    "xvehxpl.odf": "Vehicle Explosion",
     "ibrecy_vsr.odf": "Recycler"
   },
   "timeline": {

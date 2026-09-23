@@ -3,7 +3,7 @@
     "id": "2026-09-13T04-27-54",
     "source_file": "2026-09-13-04-27-54.binpb.gz",
     "source_size_bytes": 4516065,
-    "pipeline_version": 48,
+    "pipeline_version": 50,
     "submitter": "Sev",
     "map": "vsrebola.bzn",
     "date": "2026-09-13T04:27:54.529016+00:00",
@@ -135,7 +135,7 @@
     "has_bullet_hit_data": true,
     "has_resource_data": true,
     "has_build_data": true,
-    "schema_version": 27,
+    "schema_version": 28,
     "proto_schema_version": "v4",
     "shutdown_requested": false,
     "game_outcome": "OUTCOME_TEAM2_WIN",
@@ -200,10 +200,11 @@
     },
     "bullet_hit_distance": {
       "count": 6284,
-      "with_distance": 6284,
-      "with_max_range": 6282,
-      "mean": 70.562,
-      "max": 513.528
+      "with_distance": 6259,
+      "with_max_range": 6257,
+      "rejected_implausible": 25,
+      "mean": 69.524,
+      "max": 278.362
     },
     "distance_bin_edges": [
       10,
@@ -236,16 +237,16 @@
     ],
     "weapon_ranges": {
       "Minigun": 105.0,
-      "FAF Msl": 120.0,
+      "FAF Msl (fafmsl_c)": 120.0,
       "Pulse": 200.1,
-      "Shadower Msl": 800.0,
+      "Shadower Msl (shadowvsr_c)": 800.0,
       "Chain Gun": 135.0,
       "Laser": 120.0,
       "Blast (blast_c)": 170.0,
       "Sniper": 200.0,
-      "charge6_c": 150.0,
+      "MAG (charge6_c)": 150.0,
       "Blast (blast_a)": 250.0,
-      "charge5_c": 100.0
+      "MAG (charge5_c)": 100.0
     },
     "terrain_bounds": {
       "min": {
@@ -310,13 +311,13 @@
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
-        "fav_weapon": "Shadower Msl",
+        "fav_weapon": "Shadower Msl (shadowvsr_c)",
         "weapons_used": 21,
         "distance_buckets": {
           "pvp": {
             "close": 122,
             "mid": 674,
-            "long": 52,
+            "long": 51,
             "extreme": 0
           },
           "pve": {
@@ -328,7 +329,7 @@
         },
         "time_low_health_pct": 0.092,
         "ammo_out_episodes": 3,
-        "hp_efficiency": 3.72
+        "hp_efficiency": 4.78
       },
       "assets": {
         "dealt": 0,
@@ -423,95 +424,16 @@
             ]
           }
         },
-        "charge5_c": {
-          "dealt": 11350.0,
-          "received": 0,
-          "shots": 24,
-          "hits": 5,
-          "pvp_hits": 5,
+        "Craft Explosion": {
+          "dealt": 485.7,
+          "received": 159.1,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
           "self_hits": 0,
-          "accuracy": 0.208,
-          "range_hist": {
-            "pvp": [
-              0,
-              0,
-              5,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0
-            ]
-          },
-          "range_pct_hist": {
-            "pvp": [
-              0,
-              0,
-              5,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0
-            ]
-          }
+          "accuracy": 0
         },
-        "charge6_c": {
-          "dealt": 1250.1,
-          "received": 0,
-          "shots": 8,
-          "hits": 3,
-          "pvp_hits": 3,
-          "self_hits": 0,
-          "accuracy": 0.375,
-          "range_hist": {
-            "pvp": [
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              3,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0
-            ]
-          },
-          "range_pct_hist": {
-            "pvp": [
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              0,
-              2,
-              1,
-              0,
-              0
-            ]
-          }
-        },
-        "FAF Msl": {
+        "FAF Msl (fafmsl_c)": {
           "dealt": 1030.0,
           "received": 150.0,
           "shots": 30,
@@ -555,6 +477,24 @@
             ]
           }
         },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 84.2,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 1800.8,
+          "received": 275.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Laser": {
           "dealt": 7600.0,
           "received": 4000.0,
@@ -575,7 +515,7 @@
               12,
               0,
               0,
-              1,
+              0,
               0,
               0,
               0,
@@ -595,11 +535,126 @@
               4,
               10,
               0,
-              1
+              0
             ]
           }
         },
-        "MDM Mortar": {
+        "MAG (charge5_c)": {
+          "dealt": 11350.0,
+          "received": 0,
+          "shots": 24,
+          "hits": 5,
+          "pvp_hits": 5,
+          "self_hits": 0,
+          "accuracy": 0.208,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              5,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              5,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "MAG (charge6_c)": {
+          "dealt": 1250.1,
+          "received": 0,
+          "shots": 8,
+          "hits": 3,
+          "pvp_hits": 3,
+          "self_hits": 0,
+          "accuracy": 0.375,
+          "range_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              3,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "range_pct_hist": {
+            "pvp": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              2,
+              1,
+              0,
+              0
+            ]
+          }
+        },
+        "MAG (xmagcar5_c)": {
+          "dealt": 1861.3,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "MAG (xmagcar6_c)": {
+          "dealt": 600.0,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "MAG (xmaggnd5_c)": {
+          "dealt": 857.8,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "MDM Mortar (mdmgun)": {
           "dealt": 4800.0,
           "received": 0,
           "shots": 39,
@@ -626,6 +681,15 @@
               0
             ]
           }
+        },
+        "MDM Mortar (xmdmxpl)": {
+          "dealt": 5081.3,
+          "received": 161.9,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun": {
           "dealt": 11126.0,
@@ -671,6 +735,15 @@
             ]
           }
         },
+        "Mortar": {
+          "dealt": 195.8,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Pulse": {
           "dealt": 819.0,
           "received": 1440.0,
@@ -715,7 +788,7 @@
             ]
           }
         },
-        "Shadower Msl": {
+        "Shadower Msl (shadowvsr_c)": {
           "dealt": 17360.0,
           "received": 1200.0,
           "shots": 128,
@@ -759,79 +832,7 @@
             ]
           }
         },
-        "xcarxpl": {
-          "dealt": 485.7,
-          "received": 159.1,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 84.2,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 1800.8,
-          "received": 275.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xmagcar5_c": {
-          "dealt": 1861.3,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xmagcar6_c": {
-          "dealt": 600.0,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xmaggnd5_c": {
-          "dealt": 857.8,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xmdmxpl": {
-          "dealt": 5081.3,
-          "received": 161.9,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xmortgnd": {
-          "dealt": 195.8,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xshdwbld": {
+        "Shadower Msl (xshdwbld)": {
           "dealt": 1199.1,
           "received": 50.4,
           "shots": 0,
@@ -840,7 +841,7 @@
           "self_hits": 0,
           "accuracy": 0
         },
-        "xshdwcar": {
+        "Shadower Msl (xshdwcar)": {
           "dealt": 3121.8,
           "received": 365.4,
           "shots": 0,
@@ -849,7 +850,7 @@
           "self_hits": 0,
           "accuracy": 0
         },
-        "xshdwgnd": {
+        "Shadower Msl (xshdwgnd)": {
           "dealt": 620.1,
           "received": 0,
           "shots": 0,
@@ -1024,7 +1025,7 @@
           "pvp": {
             "close": 270,
             "mid": 727,
-            "long": 3,
+            "long": 0,
             "extreme": 0
           },
           "pve": {
@@ -1036,7 +1037,7 @@
         },
         "time_low_health_pct": 0.018,
         "ammo_out_episodes": 2,
-        "hp_efficiency": 2.51
+        "hp_efficiency": 3.8
       },
       "assets": {
         "dealt": 0,
@@ -1105,7 +1106,7 @@
               140,
               98,
               136,
-              2,
+              0,
               0,
               0,
               0,
@@ -1127,11 +1128,20 @@
               60,
               36,
               2,
-              2
+              0
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 730.7,
+          "received": 271.0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 500.0,
           "received": 100.0,
           "shots": 20,
@@ -1175,6 +1185,24 @@
             ]
           }
         },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 49.9,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 985.1,
+          "received": 252.3,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Minigun": {
           "dealt": 15046.0,
           "received": 5533.0,
@@ -1194,7 +1222,7 @@
               159,
               8,
               0,
-              1,
+              0,
               0,
               0,
               0,
@@ -1215,7 +1243,7 @@
               89,
               20,
               2,
-              1
+              0
             ]
           }
         },
@@ -1262,33 +1290,6 @@
               0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 730.7,
-          "received": 271.0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 49.9,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 985.1,
-          "received": 252.3,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -1485,7 +1486,7 @@
             "close": 382,
             "mid": 821,
             "long": 20,
-            "extreme": 2
+            "extreme": 0
           },
           "pve": {
             "close": 0,
@@ -1496,7 +1497,7 @@
         },
         "time_low_health_pct": 0.041,
         "ammo_out_episodes": 5,
-        "hp_efficiency": 1.46
+        "hp_efficiency": 2.02
       },
       "assets": {
         "dealt": 0,
@@ -1547,7 +1548,16 @@
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 745.5,
+          "received": 292.0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 150.0,
           "received": 650.0,
           "shots": 8,
@@ -1591,6 +1601,24 @@
             ]
           }
         },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 54.7,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 282.1,
+          "received": 1210.3,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Laser": {
           "dealt": 11100.0,
           "received": 2500.0,
@@ -1612,7 +1640,7 @@
               0,
               0,
               0,
-              2,
+              0,
               0,
               0,
               0
@@ -1631,7 +1659,7 @@
               8,
               8,
               2,
-              2
+              0
             ]
           }
         },
@@ -1723,7 +1751,7 @@
             ]
           }
         },
-        "Shadower Msl": {
+        "Shadower Msl (shadowvsr_c)": {
           "dealt": 5720.0,
           "received": 4600.0,
           "shots": 46,
@@ -1766,6 +1794,24 @@
               0
             ]
           }
+        },
+        "Shadower Msl (xshdwbld)": {
+          "dealt": 422.3,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "Shadower Msl (xshdwcar)": {
+          "dealt": 1532.5,
+          "received": 1181.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Sniper": {
           "dealt": 100.0,
@@ -1811,52 +1857,7 @@
             ]
           }
         },
-        "xcarxpl": {
-          "dealt": 745.5,
-          "received": 292.0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 54.7,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 282.1,
-          "received": 1210.3,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xshdwbld": {
-          "dealt": 422.3,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xshdwcar": {
-          "dealt": 1532.5,
-          "received": 1181.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 892.3,
           "received": 24.5,
           "shots": 0,
@@ -2022,7 +2023,7 @@
         "distance_buckets": {
           "pvp": {
             "close": 257,
-            "mid": 380,
+            "mid": 376,
             "long": 1,
             "extreme": 0
           },
@@ -2035,7 +2036,7 @@
         },
         "time_low_health_pct": 0.008,
         "ammo_out_episodes": 13,
-        "hp_efficiency": 1.29
+        "hp_efficiency": 2.12
       },
       "assets": {
         "dealt": 0,
@@ -2103,7 +2104,7 @@
               1,
               1,
               61,
-              55,
+              53,
               0,
               0,
               0,
@@ -2125,12 +2126,21 @@
               3,
               0,
               53,
-              2,
+              0,
               0
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 590.5,
+          "received": 318.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 180.0,
           "received": 350.0,
           "shots": 8,
@@ -2174,7 +2184,16 @@
             ]
           }
         },
-        "MDM Mortar": {
+        "FAF Msl (xfafmsl)": {
+          "dealt": 243.1,
+          "received": 646.2,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "MDM Mortar (mdmgun)": {
           "dealt": 1000.0,
           "received": 0,
           "shots": 32,
@@ -2202,6 +2221,15 @@
             ]
           }
         },
+        "MDM Mortar (xmdmxpl)": {
+          "dealt": 2741.2,
+          "received": 148.3,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Minigun": {
           "dealt": 4895.0,
           "received": 4701.0,
@@ -2219,7 +2247,7 @@
               16,
               132,
               89,
-              14,
+              12,
               0,
               0,
               0,
@@ -2241,7 +2269,7 @@
               35,
               47,
               21,
-              6,
+              4,
               0
             ]
           }
@@ -2289,33 +2317,6 @@
               0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 590.5,
-          "received": 318.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 243.1,
-          "received": 646.2,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xmdmxpl": {
-          "dealt": 2741.2,
-          "received": 148.3,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -2504,7 +2505,7 @@
             "close": 271,
             "mid": 83,
             "long": 0,
-            "extreme": 2
+            "extreme": 0
           },
           "pve": {
             "close": 0,
@@ -2515,7 +2516,7 @@
         },
         "time_low_health_pct": 0.018,
         "ammo_out_episodes": 1,
-        "hp_efficiency": 1.85
+        "hp_efficiency": 2.61
       },
       "assets": {
         "dealt": 0,
@@ -2543,7 +2544,7 @@
               0,
               0,
               0,
-              2,
+              0,
               0,
               0,
               0
@@ -2562,11 +2563,20 @@
               0,
               0,
               0,
-              2
+              0
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 359.7,
+          "received": 145.4,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 40.0,
           "received": 50.0,
           "shots": 9,
@@ -2574,6 +2584,24 @@
           "pvp_hits": 0,
           "self_hits": 0,
           "accuracy": 0.0
+        },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 55.1,
+          "received": 54.7,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 27.9,
+          "received": 96.5,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun": {
           "dealt": 16802.0,
@@ -2672,34 +2700,7 @@
           "self_hits": 0,
           "accuracy": 0.0
         },
-        "xcarxpl": {
-          "dealt": 359.7,
-          "received": 145.4,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 55.1,
-          "received": 54.7,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 27.9,
-          "received": 96.5,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 2994.4,
           "received": 239.9,
           "shots": 0,
@@ -2870,8 +2871,8 @@
           "pvp": {
             "close": 395,
             "mid": 1008,
-            "long": 52,
-            "extreme": 5
+            "long": 51,
+            "extreme": 0
           },
           "pve": {
             "close": 0,
@@ -2882,7 +2883,7 @@
         },
         "time_low_health_pct": 0.029,
         "ammo_out_episodes": 31,
-        "hp_efficiency": 0.67
+        "hp_efficiency": 1.29
       },
       "assets": {
         "dealt": 0,
@@ -2933,7 +2934,16 @@
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 707.4,
+          "received": 478.4,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 350.0,
           "received": 300.0,
           "shots": 13,
@@ -2977,6 +2987,24 @@
             ]
           }
         },
+        "FAF Msl (xfafgnd)": {
+          "dealt": 73.2,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 630.6,
+          "received": 542.9,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Minigun": {
           "dealt": 13667.0,
           "received": 4697.0,
@@ -2998,7 +3026,7 @@
               0,
               0,
               0,
-              5,
+              0,
               0,
               0,
               0
@@ -3017,7 +3045,7 @@
               188,
               77,
               1,
-              5
+              0
             ]
           }
         },
@@ -3041,7 +3069,7 @@
               74,
               42,
               5,
-              1,
+              0,
               0,
               0,
               0,
@@ -3061,11 +3089,11 @@
               24,
               10,
               5,
-              1
+              0
             ]
           }
         },
-        "Shadower Msl": {
+        "Shadower Msl (shadowvsr_c)": {
           "dealt": 620.0,
           "received": 2800.0,
           "shots": 4,
@@ -3108,6 +3136,15 @@
               0
             ]
           }
+        },
+        "Shadower Msl (xshdwcar)": {
+          "dealt": 44.4,
+          "received": 532.7,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Sniper": {
           "dealt": 300.0,
@@ -3152,42 +3189,6 @@
               0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 707.4,
-          "received": 478.4,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafgnd": {
-          "dealt": 73.2,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 630.6,
-          "received": 542.9,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xshdwcar": {
-          "dealt": 44.4,
-          "received": 532.7,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -3351,8 +3352,8 @@
           "pvp": {
             "close": 160,
             "mid": 124,
-            "long": 3,
-            "extreme": 2
+            "long": 1,
+            "extreme": 0
           },
           "pve": {
             "close": 0,
@@ -3363,7 +3364,7 @@
         },
         "time_low_health_pct": 0.005,
         "ammo_out_episodes": 8,
-        "hp_efficiency": 1.54
+        "hp_efficiency": 2.33
       },
       "assets": {
         "dealt": 0,
@@ -3414,7 +3415,16 @@
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 487.1,
+          "received": 194.4,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 100.0,
           "received": 150.0,
           "shots": 6,
@@ -3458,6 +3468,15 @@
             ]
           }
         },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 194.7,
+          "received": 284.3,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Laser": {
           "dealt": 1500.0,
           "received": 500.0,
@@ -3477,7 +3496,7 @@
               1,
               4,
               0,
-              1,
+              0,
               0,
               0,
               0,
@@ -3498,7 +3517,7 @@
               2,
               2,
               0,
-              1
+              0
             ]
           }
         },
@@ -3522,8 +3541,8 @@
               0,
               0,
               0,
-              1,
-              2,
+              0,
+              0,
               0,
               0,
               0
@@ -3542,7 +3561,7 @@
               3,
               3,
               0,
-              3
+              0
             ]
           }
         },
@@ -3590,7 +3609,7 @@
             ]
           }
         },
-        "Shadower Msl": {
+        "Shadower Msl (shadowvsr_c)": {
           "dealt": 800.0,
           "received": 4000.0,
           "shots": 6,
@@ -3633,6 +3652,15 @@
               0
             ]
           }
+        },
+        "Shadower Msl (xshdwcar)": {
+          "dealt": 186.3,
+          "received": 990.8,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Sniper": {
           "dealt": 200.0,
@@ -3678,34 +3706,7 @@
             ]
           }
         },
-        "xcarxpl": {
-          "dealt": 487.1,
-          "received": 194.4,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 194.7,
-          "received": 284.3,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xshdwcar": {
-          "dealt": 186.3,
-          "received": 990.8,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 6060.5,
           "received": 0,
           "shots": 0,
@@ -3904,8 +3905,8 @@
           "pvp": {
             "close": 115,
             "mid": 326,
-            "long": 26,
-            "extreme": 1
+            "long": 24,
+            "extreme": 0
           },
           "pve": {
             "close": 0,
@@ -3916,7 +3917,7 @@
         },
         "time_low_health_pct": 0.068,
         "ammo_out_episodes": 20,
-        "hp_efficiency": 0.59
+        "hp_efficiency": 1.16
       },
       "assets": {
         "dealt": 0,
@@ -3942,7 +3943,7 @@
               30,
               21,
               0,
-              2,
+              0,
               0,
               0,
               0,
@@ -3963,11 +3964,20 @@
               9,
               0,
               0,
-              2
+              0
             ]
           }
         },
-        "FAF Msl": {
+        "Craft Explosion": {
+          "dealt": 1195.5,
+          "received": 386.2,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "FAF Msl (fafmsl_c)": {
           "dealt": 40.0,
           "received": 200.0,
           "shots": 9,
@@ -3975,6 +3985,15 @@
           "pvp_hits": 0,
           "self_hits": 0,
           "accuracy": 0.0
+        },
+        "FAF Msl (xfafmsl)": {
+          "dealt": 28.6,
+          "received": 368.7,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
         },
         "Minigun": {
           "dealt": 1073.0,
@@ -4041,7 +4060,7 @@
               24,
               0,
               0,
-              1,
+              0,
               0,
               0,
               0
@@ -4060,27 +4079,9 @@
               3,
               0,
               0,
-              1
+              0
             ]
           }
-        },
-        "xcarxpl": {
-          "dealt": 1195.5,
-          "received": 386.2,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xfafmsl": {
-          "dealt": 28.6,
-          "received": 368.7,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
         }
       },
       "loadout": {
@@ -4344,7 +4345,7 @@
       "users": 8
     },
     {
-      "weapon": "Shadower Msl",
+      "weapon": "Shadower Msl (shadowvsr_c)",
       "odf": "shadowvsr_c.odf",
       "total_damage": 24500.0,
       "total_shots": 184,
@@ -4371,7 +4372,7 @@
       "users": 2
     },
     {
-      "weapon": "charge5_c",
+      "weapon": "MAG (charge5_c)",
       "odf": "charge5_c.odf",
       "total_damage": 11350.0,
       "total_shots": 24,
@@ -4389,7 +4390,7 @@
       "users": 1
     },
     {
-      "weapon": "xvehxpl",
+      "weapon": "Vehicle Explosion",
       "odf": "xvehxpl.odf",
       "total_damage": 9947.1,
       "total_shots": 0,
@@ -4398,7 +4399,7 @@
       "users": 3
     },
     {
-      "weapon": "xmdmxpl",
+      "weapon": "MDM Mortar (xmdmxpl)",
       "odf": "xmdmxpl.odf",
       "total_damage": 7822.4,
       "total_shots": 0,
@@ -4416,7 +4417,7 @@
       "users": 8
     },
     {
-      "weapon": "MDM Mortar",
+      "weapon": "MDM Mortar (mdmgun)",
       "odf": "mdmgun.odf",
       "total_damage": 5800.0,
       "total_shots": 71,
@@ -4425,7 +4426,7 @@
       "users": 2
     },
     {
-      "weapon": "xcarxpl",
+      "weapon": "Craft Explosion",
       "odf": "xcarxpl.odf",
       "total_damage": 5302.0,
       "total_shots": 0,
@@ -4434,7 +4435,7 @@
       "users": 8
     },
     {
-      "weapon": "xshdwcar",
+      "weapon": "Shadower Msl (xshdwcar)",
       "odf": "xshdwcar.odf",
       "total_damage": 4885.0,
       "total_shots": 0,
@@ -4443,7 +4444,7 @@
       "users": 4
     },
     {
-      "weapon": "xfafmsl",
+      "weapon": "FAF Msl (xfafmsl)",
       "odf": "xfafmsl.odf",
       "total_damage": 4192.9,
       "total_shots": 0,
@@ -4452,7 +4453,7 @@
       "users": 8
     },
     {
-      "weapon": "FAF Msl",
+      "weapon": "FAF Msl (fafmsl_c)",
       "odf": "fafmsl_c.odf",
       "total_damage": 2390.0,
       "total_shots": 103,
@@ -4461,7 +4462,7 @@
       "users": 8
     },
     {
-      "weapon": "xmagcar5_c",
+      "weapon": "MAG (xmagcar5_c)",
       "odf": "xmagcar5_c.odf",
       "total_damage": 1861.3,
       "total_shots": 0,
@@ -4470,7 +4471,7 @@
       "users": 1
     },
     {
-      "weapon": "xshdwbld",
+      "weapon": "Shadower Msl (xshdwbld)",
       "odf": "xshdwbld.odf",
       "total_damage": 1621.4,
       "total_shots": 0,
@@ -4479,7 +4480,7 @@
       "users": 2
     },
     {
-      "weapon": "charge6_c",
+      "weapon": "MAG (charge6_c)",
       "odf": "charge6_c.odf",
       "total_damage": 1250.1,
       "total_shots": 8,
@@ -4488,7 +4489,7 @@
       "users": 1
     },
     {
-      "weapon": "xmaggnd5_c",
+      "weapon": "MAG (xmaggnd5_c)",
       "odf": "xmaggnd5_c.odf",
       "total_damage": 857.8,
       "total_shots": 0,
@@ -4497,9 +4498,18 @@
       "users": 1
     },
     {
-      "weapon": "xshdwgnd",
+      "weapon": "Shadower Msl (xshdwgnd)",
       "odf": "xshdwgnd.odf",
       "total_damage": 620.1,
+      "total_shots": 0,
+      "total_hits": 0,
+      "accuracy": 0,
+      "users": 1
+    },
+    {
+      "weapon": "MAG (xmagcar6_c)",
+      "odf": "xmagcar6_c.odf",
+      "total_damage": 600.0,
       "total_shots": 0,
       "total_hits": 0,
       "accuracy": 0,
@@ -4515,16 +4525,7 @@
       "users": 3
     },
     {
-      "weapon": "xmagcar6_c",
-      "odf": "xmagcar6_c.odf",
-      "total_damage": 600.0,
-      "total_shots": 0,
-      "total_hits": 0,
-      "accuracy": 0,
-      "users": 1
-    },
-    {
-      "weapon": "xfafgnd",
+      "weapon": "FAF Msl (xfafgnd)",
       "odf": "xfafgnd.odf",
       "total_damage": 317.1,
       "total_shots": 0,
@@ -4533,7 +4534,7 @@
       "users": 5
     },
     {
-      "weapon": "xmortgnd",
+      "weapon": "Mortar",
       "odf": "xmortgnd.odf",
       "total_damage": 195.8,
       "total_shots": 0,
@@ -4553,9 +4554,9 @@
     "blast_a.odf": "Blast (blast_a)",
     "blast_c.odf": "Blast (blast_c)",
     "chainvsr_c.odf": "Chain Gun",
-    "charge5_c.odf": "Charge5 C",
-    "charge6_c.odf": "Charge6 C",
-    "fafmsl_c.odf": "FAF Msl",
+    "charge5_c.odf": "MAG (charge5_c)",
+    "charge6_c.odf": "MAG (charge6_c)",
+    "fafmsl_c.odf": "FAF Msl (fafmsl_c)",
     "ibarmo_vsr.odf": "Armory",
     "ibcbun_vsr.odf": "Relay Bunker",
     "ibfact_vsr.odf": "Factory",
@@ -4577,27 +4578,27 @@
     "ivtank_vsr.odf": "Tank",
     "ivwalk_vsr.odf": "Walker",
     "laservsr_c.odf": "Laser",
-    "mdmgun.odf": "MDM Mortar",
+    "mdmgun.odf": "MDM Mortar (mdmgun)",
     "minigun_c.odf": "Minigun",
-    "shadowvsr_c.odf": "Shadower Msl",
+    "shadowvsr_c.odf": "Shadower Msl (shadowvsr_c)",
     "snipevsr.odf": "Sniper",
     "tracer.odf": "Pulse",
     "xbldxpl.odf": "Xbldxpl",
-    "xcarxpl.odf": "Xcarxpl",
-    "xfafgnd.odf": "Xfafgnd",
-    "xfafmsl.odf": "Xfafmsl",
-    "xmagcar5_c.odf": "Xmagcar5 C",
-    "xmagcar6_c.odf": "Xmagcar6 C",
-    "xmaggnd5_c.odf": "Xmaggnd5 C",
-    "xmdmxpl.odf": "Xmdmxpl",
-    "xmortgnd.odf": "Xmortgnd",
-    "xpwrxpl.odf": "Xpwrxpl",
+    "xcarxpl.odf": "Craft Explosion",
+    "xfafgnd.odf": "FAF Msl (xfafgnd)",
+    "xfafmsl.odf": "FAF Msl (xfafmsl)",
+    "xmagcar5_c.odf": "MAG (xmagcar5_c)",
+    "xmagcar6_c.odf": "MAG (xmagcar6_c)",
+    "xmaggnd5_c.odf": "MAG (xmaggnd5_c)",
+    "xmdmxpl.odf": "MDM Mortar (xmdmxpl)",
+    "xmortgnd.odf": "Mortar",
+    "xpwrxpl.odf": "Powerup Explosion",
     "xsecxpl.odf": "Xsecxpl",
-    "xshdwbld.odf": "Xshdwbld",
-    "xshdwcar.odf": "Xshdwcar",
-    "xshdwgnd.odf": "Xshdwgnd",
+    "xshdwbld.odf": "Shadower Msl (xshdwbld)",
+    "xshdwcar.odf": "Shadower Msl (xshdwcar)",
+    "xshdwgnd.odf": "Shadower Msl (xshdwgnd)",
     "xvchxpl.odf": "Xvchxpl",
-    "xvehxpl.odf": "Xvehxpl"
+    "xvehxpl.odf": "Vehicle Explosion"
   },
   "timeline": {
     "bucket_seconds": 10,
@@ -11786,23 +11787,23 @@
         "first_seen_sec": 1,
         "last_seen_sec": 1469,
         "metrics": {
-          "mean_dist": 207.3,
+          "mean_dist": 207.0,
           "max_dist": 925.7,
-          "p50_dist": 129.8,
-          "p90_dist": 458.3,
+          "p50_dist": 129.3,
+          "p90_dist": 458.6,
           "p95_dist": 643.7,
           "time_in_base_pct": 0.43,
           "time_to_first_leave_sec": 8,
-          "path_length": 26699.7,
-          "path_length_per_sec": 18.19,
+          "path_length": 26728.8,
+          "path_length_per_sec": 18.21,
           "convex_hull_area": 612197.1,
           "bounding_box_area": 704310.6,
-          "return_to_base_count": 20,
+          "return_to_base_count": 21,
           "activity_score": 69,
           "movement_band": "Mobile",
           "target_lock_pct": 0.151,
-          "at_base_pilot_sec": 323.0,
-          "at_base_pilot_share": 0.22,
+          "at_base_pilot_sec": 324.0,
+          "at_base_pilot_share": 0.221,
           "pilot_sec": 572.0,
           "reship_median_sec": 26.0,
           "reship_spells": 7
@@ -14610,24 +14611,24 @@
             -232.03,
             -236.72,
             -242.91,
-            0.0,
-            -324.6,
+            -322.72,
+            -324.71,
             -325.1,
-            -325.48,
+            -325.51,
             -325.79,
-            -325.11,
-            -321.3,
-            -320.21,
-            -322.28,
-            -327.22,
-            -334.24,
+            -324.98,
+            -321.15,
+            -320.25,
+            -322.45,
+            -327.55,
+            -334.57,
             -338.43,
-            -338.72,
+            -338.73,
             -338.82,
             -338.82,
             -338.82,
-            -338.64,
-            -338.44,
+            -338.63,
+            -338.43,
             -338.31,
             -338.29,
             -338.27,
@@ -14637,69 +14638,69 @@
             -338.27,
             -338.27,
             -338.26,
-            -338.64,
+            -338.65,
             -338.83,
             -338.83,
             -338.83,
             -338.83,
             -338.83,
-            -338.38,
-            -337.22,
-            -335.92,
-            -336.64,
-            -337.85,
-            -339.87,
-            -345.16,
-            -351.31,
-            -353.87,
-            -354.35,
-            -354.84,
-            -355.67,
-            -358.65,
-            -360.0,
-            -360.54,
-            -363.78,
-            -366.91,
-            -368.5,
-            -365.35,
-            -357.29,
-            -345.41,
-            -334.39,
-            -327.62,
-            -324.56,
-            -321.57,
-            -316.97,
-            -311.15,
-            -305.48,
-            -302.63,
-            -300.48,
-            -298.5,
-            -294.2,
-            -291.98,
+            -338.3,
+            -337.16,
+            -335.87,
+            -336.74,
+            -337.91,
+            -340.05,
+            -345.47,
+            -351.55,
+            -353.89,
+            -354.38,
+            -354.86,
+            -355.8,
+            -358.75,
+            -360.02,
+            -360.59,
+            -363.98,
+            -367.05,
+            -368.46,
+            -365.06,
+            -356.77,
+            -344.8,
+            -333.95,
+            -327.4,
+            -324.43,
+            -321.4,
+            -316.68,
+            -310.85,
+            -305.27,
+            -302.51,
+            -300.39,
+            -298.32,
+            -294.03,
+            -291.92,
             -291.52,
-            -291.62,
-            -292.83,
-            -296.03,
-            -299.03,
-            -300.36,
+            -291.65,
+            -292.97,
+            -296.2,
+            -299.13,
+            -300.4,
             -300.61,
-            -301.42,
-            -302.3,
-            -302.49,
-            -302.32,
+            -301.44,
+            -302.42,
+            -302.48,
+            -302.33,
             -302.38,
             -302.38,
-            -303.16,
-            -301.12,
-            -301.4,
-            -303.92,
-            -303.4,
-            -305.77,
-            -304.95,
+            -303.18,
+            -300.98,
+            -301.58,
+            -303.88,
+            -303.38,
+            -305.89,
+            -304.87,
             -304.15,
-            -303.59,
+            -303.53,
             -303.5,
-            -303.83,
+            -303.82,
             -303.07,
             -303.07,
             -303.07,
@@ -14707,48 +14708,48 @@
             -303.07,
             -303.07,
             -302.86,
-            -302.89,
+            -302.9,
             -302.91,
             -302.9,
-            -303.1,
+            -303.11,
             -303.28,
-            -301.86,
-            -298.71,
-            -296.67,
+            -301.76,
+            -298.49,
+            -296.6,
             -296.1,
-            -296.71,
-            -300.71,
+            -296.8,
+            -301.01,
             -304.98,
-            -307.25,
-            -310.99,
-            -315.78,
-            -320.72,
-            -325.65,
-            -330.59,
-            -335.52,
-            -340.3,
-            -344.26,
-            -346.7,
-            -347.69,
-            -346.43,
-            -343.01,
-            -338.75,
-            -334.03,
-            -329.68,
-            -325.72,
-            -322.79,
-            -320.56,
-            -318.63,
-            -317.4,
-            -316.64,
+            -307.42,
+            -311.21,
+            -316.03,
+            -320.96,
+            -325.9,
+            -330.83,
+            -335.77,
+            -340.52,
+            -344.41,
+            -346.79,
+            -347.7,
+            -346.32,
+            -342.82,
+            -338.53,
+            -333.79,
+            -329.47,
+            -325.55,
+            -322.67,
+            -320.45,
             -318.54,
-            -316.37,
-            -311.3,
-            -303.95,
-            -295.4,
-            -286.74,
-            -280.13,
-            -281.09
+            -317.37,
+            -316.69,
+            -318.56,
+            -316.18,
+            -310.99,
+            -303.52,
+            -294.99,
+            -286.25,
+            -279.93,
+            -281.31
           ],
           "z": [
             332.72,
@@ -16081,26 +16082,26 @@
             94.05,
             96.03,
             96.47,
-            0.0,
-            373.18,
+            373.24,
+            373.17,
             373.11,
-            370.78,
-            363.49,
-            351.66,
-            338.85,
-            328.93,
-            322.81,
-            320.68,
-            321.43,
+            370.54,
+            363.0,
+            351.01,
+            338.27,
+            328.53,
+            322.61,
+            320.67,
+            321.48,
             322.13,
-            318.37,
+            318.13,
             316.88,
             316.88,
             316.88,
-            319.42,
-            322.41,
+            319.57,
+            322.56,
             324.82,
-            321.06,
+            320.81,
             319.55,
             319.55,
             319.55,
@@ -16108,118 +16109,118 @@
             319.55,
             319.55,
             319.55,
-            319.94,
+            319.98,
             319.96,
             319.96,
             319.96,
             319.96,
             319.96,
-            319.46,
-            314.89,
-            306.91,
-            295.07,
-            279.01,
-            261.1,
-            243.9,
-            227.15,
-            211.5,
-            196.51,
-            181.51,
-            166.53,
-            151.62,
-            136.66,
-            121.67,
-            106.87,
-            92.17,
-            77.2,
-            61.41,
-            45.97,
-            32.91,
-            21.59,
-            7.91,
-            -8.71,
-            -26.48,
-            -43.87,
-            -60.93,
-            -78.05,
-            -95.82,
-            -110.77,
-            -121.05,
-            -128.25,
-            -131.35,
+            319.29,
+            314.61,
+            306.4,
+            294.37,
+            278.11,
+            260.22,
+            243.06,
+            226.33,
+            210.75,
+            195.76,
+            180.76,
+            165.79,
+            150.87,
+            135.91,
+            120.92,
+            106.14,
+            91.44,
+            76.43,
+            60.61,
+            45.25,
+            32.36,
+            20.97,
+            7.16,
+            -9.6,
+            -27.37,
+            -44.73,
+            -61.79,
+            -78.92,
+            -96.69,
+            -111.38,
+            -121.49,
+            -128.5,
+            -131.38,
             -131.32,
-            -130.88,
-            -126.95,
-            -122.6,
-            -118.07,
-            -112.91,
+            -130.77,
+            -126.73,
+            -122.38,
+            -117.83,
+            -112.64,
             -110.6,
-            -110.88,
-            -110.37,
-            -110.15,
+            -110.89,
+            -110.26,
+            -110.16,
             -108.88,
             -108.86,
             -108.86,
-            -107.39,
-            -109.14,
-            -109.7,
-            -108.76,
+            -107.44,
+            -109.21,
+            -109.64,
+            -108.89,
             -109.69,
-            -107.2,
-            -107.09,
-            -107.99,
-            -108.59,
+            -107.05,
+            -107.13,
+            -107.98,
+            -108.66,
             -108.7,
-            -108.19,
+            -108.08,
             -106.47,
             -106.47,
             -106.47,
             -106.47,
             -106.47,
             -106.47,
-            -106.77,
-            -106.74,
+            -106.76,
+            -106.73,
             -106.72,
             -106.73,
-            -104.29,
+            -104.04,
             -102.75,
-            -105.96,
-            -109.34,
-            -110.53,
+            -106.19,
+            -109.39,
+            -110.6,
             -111.02,
-            -108.9,
-            -103.33,
-            -99.38,
-            -96.61,
-            -88.18,
-            -75.07,
-            -60.9,
-            -46.74,
-            -32.58,
-            -18.41,
-            -4.2,
-            10.27,
-            25.06,
-            39.65,
-            53.83,
-            67.88,
-            81.79,
-            95.51,
-            109.47,
-            123.92,
-            138.42,
-            153.21,
-            168.08,
-            182.76,
-            197.09,
-            210.32,
-            217.38,
-            224.85,
-            234.82,
-            246.38,
-            254.59,
-            259.34,
-            264.21
+            -108.68,
+            -102.97,
+            -99.48,
+            -96.31,
+            -87.63,
+            -74.36,
+            -60.19,
+            -46.03,
+            -31.87,
+            -17.7,
+            -3.48,
+            11.0,
+            25.81,
+            40.33,
+            54.52,
+            68.57,
+            82.47,
+            96.19,
+            110.17,
+            124.64,
+            139.14,
+            153.95,
+            168.82,
+            183.51,
+            197.81,
+            210.98,
+            217.68,
+            225.29,
+            235.37,
+            247.01,
+            254.75,
+            259.64,
+            264.46
           ],
           "y": [
             11.47,
@@ -17552,17 +17553,17 @@
             41.95,
             43.67,
             46.28,
-            0.0,
-            66.67,
-            56.55,
-            49.33,
-            45.05,
-            40.87,
-            36.57,
-            32.37,
-            28.2,
-            24.03,
-            18.85,
+            69.53,
+            66.36,
+            55.87,
+            49.1,
+            44.84,
+            40.67,
+            36.35,
+            32.16,
+            27.99,
+            23.82,
+            18.49,
             10.24,
             10.24,
             10.24,
@@ -17586,111 +17587,111 @@
             10.24,
             10.24,
             10.24,
-            10.6,
-            23.03,
-            52.97,
-            100.18,
-            146.37,
-            180.06,
-            201.25,
-            209.93,
-            208.01,
-            203.93,
-            199.77,
-            195.6,
-            191.43,
-            187.27,
-            183.1,
-            178.93,
-            174.77,
-            170.6,
-            166.43,
-            162.27,
-            158.1,
-            153.94,
-            149.77,
-            145.6,
-            141.44,
-            137.27,
-            133.1,
-            128.91,
-            119.65,
-            107.31,
-            100.68,
-            89.05,
-            80.92,
-            68.98,
-            66.55,
-            66.31,
-            65.52,
+            10.8,
+            24.11,
+            54.93,
+            102.79,
+            148.35,
+            181.41,
+            201.98,
+            210.04,
+            207.81,
+            203.72,
+            199.56,
+            195.39,
+            191.23,
+            187.06,
+            182.89,
+            178.73,
+            174.56,
+            170.39,
+            166.23,
+            162.06,
+            157.89,
+            153.73,
+            149.56,
+            145.39,
+            141.23,
+            137.06,
+            132.89,
+            128.65,
+            118.99,
+            106.98,
+            100.17,
+            88.68,
+            80.33,
+            68.64,
+            66.54,
+            66.29,
+            65.48,
+            64.84,
             64.86,
-            64.86,
-            64.65,
-            64.46,
-            64.4,
+            64.63,
+            64.43,
+            64.41,
             64.57,
             64.56,
             64.56,
             64.54,
-            64.81,
-            64.76,
-            64.21,
+            64.84,
+            64.72,
             64.2,
+            64.22,
             63.92,
-            64.12,
+            64.14,
             64.25,
-            64.3,
             64.31,
-            64.29,
+            64.31,
+            64.3,
             64.66,
             64.66,
             64.66,
             64.66,
             64.66,
             64.66,
-            64.68,
             64.67,
             64.67,
             64.67,
-            64.77,
+            64.67,
+            64.78,
             64.64,
-            64.97,
-            65.39,
-            65.8,
+            64.98,
+            65.44,
+            65.81,
             65.91,
-            65.86,
-            65.73,
-            63.81,
-            64.45,
-            60.97,
-            56.83,
-            52.66,
-            48.5,
-            44.33,
-            40.16,
-            36.0,
-            31.83,
-            27.66,
-            25.57,
-            25.88,
-            25.7,
-            25.42,
-            25.47,
+            65.85,
+            65.55,
+            63.84,
+            64.35,
+            60.77,
+            56.62,
+            52.46,
+            48.29,
+            44.12,
+            39.96,
+            35.79,
+            31.62,
+            27.46,
+            25.67,
+            25.95,
+            25.76,
+            25.48,
+            25.51,
             25.19,
-            22.41,
-            19.47,
-            16.38,
-            12.26,
-            11.11,
-            10.6,
-            10.48,
-            11.41,
+            22.21,
+            19.43,
+            16.18,
+            12.05,
+            10.93,
+            10.44,
+            10.24,
             11.41,
             11.39,
             11.34,
-            10.84,
-            10.79,
-            11.39
+            11.26,
+            10.71,
+            10.64,
+            11.34
           ],
           "hp": [
             1.0,
@@ -19023,7 +19024,6 @@
             1.0,
             1.0,
             1.0,
-            0.0,
             1.0,
             1.0,
             1.0,
@@ -19037,6 +19037,7 @@
             1.0,
             1.0,
             1.0,
+            0.56,
             0.56,
             0.56,
             0.56,
@@ -20494,7 +20495,6 @@
             0.78,
             0.83,
             0.88,
-            0.93,
             1.0,
             1.0,
             1.0,
@@ -20627,12 +20627,13 @@
             1.0,
             1.0,
             1.0,
-            0.03,
-            0.08,
-            0.13,
-            0.18,
-            0.23,
-            0.24
+            1.0,
+            0.04,
+            0.09,
+            0.14,
+            0.19,
+            0.24,
+            0.25
           ],
           "target": [
             0,
@@ -23436,47 +23437,47 @@
             4.9,
             6.9,
             7.7,
-            6.1,
-            6.7,
-            13.7,
-            6.7,
-            10.8,
-            13.8,
-            12.6,
-            9.1,
-            6.7,
+            0.0,
+            7.0,
+            12.3,
+            6.9,
+            11.0,
+            13.9,
+            12.4,
+            8.9,
+            6.6,
+            8.0,
+            10.0,
+            1.0,
+            5.0,
+            0.0,
+            0.0,
+            1.0,
+            3.0,
+            3.0,
+            1.0,
+            5.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            4.0,
             7.8,
-            9.9,
-            0.0,
-            4.9,
-            0.0,
-            0.0,
-            0.0,
-            3.0,
-            3.0,
-            0.0,
-            4.9,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.7,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            3.8,
-            7.1,
-            24.0,
-            41.6,
-            55.1,
-            43.5,
-            32.6,
-            22.4,
+            24.8,
+            42.5,
+            54.6,
+            42.9,
+            32.1,
+            21.9,
             15.1,
             15.5,
             15.6,
@@ -23484,48 +23485,48 @@
             15.6,
             15.6,
             15.6,
-            15.8,
+            15.7,
             15.6,
             16.0,
-            17.5,
-            18.2,
-            16.9,
-            15.8,
-            16.3,
-            18.5,
-            18.5,
-            18.5,
-            18.5,
-            18.5,
+            17.6,
             18.3,
+            16.7,
+            15.8,
+            16.4,
+            18.5,
+            18.5,
+            18.5,
+            18.5,
+            18.5,
+            18.2,
             18.1,
-            11.6,
-            11.8,
-            7.6,
-            11.7,
-            7.0,
+            11.4,
+            12.0,
+            7.1,
+            12.1,
+            6.8,
             5.2,
             5.5,
             5.3,
             5.5,
             0.0,
-            0.4,
-            3.3,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            3.3,
-            3.9,
-            2.7,
-            0.3,
-            3.9,
-            1.7,
-            0.0,
-            1.7,
             0.0,
             2.4,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.7,
+            3.3,
+            4.3,
+            2.8,
+            0.6,
+            3.0,
+            1.8,
+            0.6,
+            0.7,
+            0.0,
+            2.8,
             0.0,
             0.0,
             0.0,
@@ -23542,11 +23543,11 @@
             4.6,
             1.8,
             0.0,
-            4.9,
-            10.0,
+            5.0,
+            10.3,
             2.2,
-            7.4,
-            12.6,
+            7.7,
+            12.8,
             15.6,
             15.6,
             15.6,
@@ -23555,34 +23556,30 @@
             15.6,
             15.6,
             15.6,
-            13.8,
-            14.1,
-            14.3,
-            14.3,
+            13.9,
+            14.2,
+            14.5,
             14.5,
             14.7,
+            14.9,
             15.5,
-            14.5,
+            14.8,
             15.5,
             15.6,
             15.4,
-            14.8,
-            13.7,
-            7.1,
-            10.9,
-            14.0,
+            14.9,
+            13.3,
+            7.4,
+            11.2,
+            14.3,
             15.1,
-            10.7,
+            10.6,
             7.8,
-            6.8
+            7.1
           ],
           "segments": [
             [
               0,
-              1330
-            ],
-            [
-              1331,
               1468
             ]
           ]
@@ -25005,12 +25002,12 @@
             0,
             0,
             0,
-            4,
+            3,
+            8,
             7,
             7,
-            7,
-            4,
-            11,
+            3,
+            12,
             6,
             3,
             3,
@@ -25018,7 +25015,7 @@
             5,
             49,
             29,
-            16,
+            17,
             3,
             0,
             0,
@@ -25069,8 +25066,8 @@
             0,
             0,
             4,
-            44,
-            4,
+            45,
+            3,
             4,
             1,
             0,
@@ -25733,7 +25730,7 @@
             1,
             2,
             4,
-            4,
+            3,
             3,
             0,
             0,
@@ -27865,7 +27862,7 @@
             0
           ],
           [
-            15,
+            16,
             0,
             0,
             0,
@@ -27935,8 +27932,8 @@
             28
           ],
           [
-            11,
-            25,
+            12,
+            24,
             23,
             40,
             15,
@@ -27950,7 +27947,7 @@
             34,
             35,
             39,
-            23,
+            22,
             10,
             22
           ],
@@ -188822,7 +188819,7 @@
         "ships_lost": 4,
         "ship_value_lost": 100,
         "pilot_sec": 572.0,
-        "at_base_pilot_sec": 323.0,
+        "at_base_pilot_sec": 324.0,
         "reship_median_sec": 26.0,
         "reship_spells": 7
       }
@@ -189614,7 +189611,7 @@
           0.16,
           0.225,
           0.208,
-          0.197,
+          0.192,
           0.063,
           0.053,
           0.062,

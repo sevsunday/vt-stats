@@ -3,7 +3,7 @@
     "id": "2026-09-14T03-08-02",
     "source_file": "2026-09-14-03-08-02.binpb.gz",
     "source_size_bytes": 698492,
-    "pipeline_version": 48,
+    "pipeline_version": 50,
     "submitter": "VTrider",
     "map": "stredslopevsr.bzn",
     "date": "2026-09-14T03:08:02.609376+00:00",
@@ -114,7 +114,7 @@
     "has_bullet_hit_data": true,
     "has_resource_data": true,
     "has_build_data": true,
-    "schema_version": 27,
+    "schema_version": 28,
     "proto_schema_version": "v4",
     "shutdown_requested": false,
     "game_outcome": "OUTCOME_DRAW",
@@ -161,10 +161,11 @@
     },
     "bullet_hit_distance": {
       "count": 139,
-      "with_distance": 139,
-      "with_max_range": 139,
-      "mean": 57.495,
-      "max": 365.497
+      "with_distance": 138,
+      "with_max_range": 138,
+      "rejected_implausible": 1,
+      "mean": 55.263,
+      "max": 95.299
     },
     "distance_bin_edges": [
       10,
@@ -198,7 +199,7 @@
     "weapon_ranges": {
       "Particle Gun": 105.0,
       "Plasma Cannon": 100.0,
-      "Combat Laser": 123.5
+      "Combat Laser (cphlas_c)": 123.5
     },
     "terrain_bounds": {
       "min": {
@@ -263,13 +264,13 @@
         "self_kills": 0,
         "self_deaths": 0,
         "self_shots_hit": 0,
-        "fav_weapon": "Combat Laser",
+        "fav_weapon": "Combat Laser (cphlas_c)",
         "weapons_used": 6,
         "distance_buckets": {
           "pvp": {
             "close": 35,
             "mid": 82,
-            "long": 1,
+            "long": 0,
             "extreme": 0
           },
           "pve": {
@@ -288,7 +289,7 @@
         "received": 11092.0
       },
       "weapon_breakdown": {
-        "Combat Laser": {
+        "Combat Laser (cphlas_c)": {
           "dealt": 7390.0,
           "received": 0,
           "shots": 83,
@@ -332,6 +333,24 @@
             ]
           }
         },
+        "Combat Laser (xcplasbld)": {
+          "dealt": 240.1,
+          "received": 0,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
+        "Combat Laser (xcplascar)": {
+          "dealt": 263.2,
+          "received": 13.6,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Fireball (xfbseeke)": {
           "dealt": 12.0,
           "received": 0,
@@ -361,7 +380,7 @@
               0,
               0,
               0,
-              1,
+              0,
               0,
               0,
               0,
@@ -381,29 +400,11 @@
               13,
               2,
               0,
-              1
+              0
             ]
           }
         },
-        "xcplasbld": {
-          "dealt": 240.1,
-          "received": 0,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xcplascar": {
-          "dealt": 263.2,
-          "received": 13.6,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl_e": {
+        "Vehicle Explosion (Hadean)": {
           "dealt": 630.7,
           "received": 0,
           "shots": 0,
@@ -570,13 +571,22 @@
         },
         "time_low_health_pct": 0.014,
         "ammo_out_episodes": 0,
-        "hp_efficiency": 2.08
+        "hp_efficiency": 3.65
       },
       "assets": {
         "dealt": 6300.0,
         "received": 18883.7
       },
       "weapon_breakdown": {
+        "Craft Explosion": {
+          "dealt": 427.9,
+          "received": 92.6,
+          "shots": 0,
+          "hits": 0,
+          "pvp_hits": 0,
+          "self_hits": 0,
+          "accuracy": 0
+        },
         "Plasma Cannon": {
           "dealt": 3384.0,
           "received": 0,
@@ -630,16 +640,7 @@
           "self_hits": 0,
           "accuracy": 0.0
         },
-        "xcarxpl": {
-          "dealt": 427.9,
-          "received": 92.6,
-          "shots": 0,
-          "hits": 0,
-          "pvp_hits": 0,
-          "self_hits": 0,
-          "accuracy": 0
-        },
-        "xvehxpl": {
+        "Vehicle Explosion": {
           "dealt": 942.9,
           "received": 0,
           "shots": 0,
@@ -1080,7 +1081,7 @@
   ],
   "weapon_meta": [
     {
-      "weapon": "Combat Laser",
+      "weapon": "Combat Laser (cphlas_c)",
       "odf": "cphlas_c.odf",
       "total_damage": 7390.0,
       "total_shots": 83,
@@ -1116,7 +1117,7 @@
       "users": 1
     },
     {
-      "weapon": "xvehxpl",
+      "weapon": "Vehicle Explosion",
       "odf": "xvehxpl.odf",
       "total_damage": 942.9,
       "total_shots": 0,
@@ -1125,7 +1126,7 @@
       "users": 1
     },
     {
-      "weapon": "xvehxpl_e",
+      "weapon": "Vehicle Explosion (Hadean)",
       "odf": "xvehxpl_e.odf",
       "total_damage": 630.7,
       "total_shots": 0,
@@ -1134,7 +1135,7 @@
       "users": 1
     },
     {
-      "weapon": "xcarxpl",
+      "weapon": "Craft Explosion",
       "odf": "xcarxpl.odf",
       "total_damage": 427.9,
       "total_shots": 0,
@@ -1143,7 +1144,7 @@
       "users": 1
     },
     {
-      "weapon": "xcplascar",
+      "weapon": "Combat Laser (xcplascar)",
       "odf": "xcplascar.odf",
       "total_damage": 263.2,
       "total_shots": 0,
@@ -1152,7 +1153,7 @@
       "users": 1
     },
     {
-      "weapon": "xcplasbld",
+      "weapon": "Combat Laser (xcplasbld)",
       "odf": "xcplasbld.odf",
       "total_damage": 240.1,
       "total_shots": 0,
@@ -1173,7 +1174,7 @@
   "odf_map": {
     "apserv_vsr.odf": "Service Pod",
     "cphcg_c.odf": "Particle Gun",
-    "cphlas_c.odf": "Combat Laser",
+    "cphlas_c.odf": "Combat Laser (cphlas_c)",
     "ebfact_vsr.odf": "Xenomator",
     "ebpgen_vsr.odf": "Battery Tray",
     "ebscav_vsr.odf": "Resourcer",
@@ -1198,9 +1199,9 @@
     "ionize_a.odf": "Ion Gun II",
     "plasball.odf": "Plasma Cannon",
     "plasstream.odf": "Plasma Stream",
-    "xcarxpl.odf": "Xcarxpl",
-    "xcplasbld.odf": "Xcplasbld",
-    "xcplascar.odf": "Xcplascar",
+    "xcarxpl.odf": "Craft Explosion",
+    "xcplasbld.odf": "Combat Laser (xcplasbld)",
+    "xcplascar.odf": "Combat Laser (xcplascar)",
     "xfbseek.odf": "Fireball (xfbseek)",
     "xfbseeke.odf": "Fireball (xfbseeke)",
     "xscavxpl_e.odf": "Xscavxpl E",
@@ -1208,8 +1209,8 @@
     "xsecxpl_e.odf": "Xsecxpl E",
     "xvchxpl.odf": "Xvchxpl",
     "xvchxpl_e.odf": "Xvchxpl E",
-    "xvehxpl.odf": "Xvehxpl",
-    "xvehxpl_e.odf": "Xvehxpl E",
+    "xvehxpl.odf": "Vehicle Explosion",
+    "xvehxpl_e.odf": "Vehicle Explosion (Hadean)",
     "fbrecy_vsr.odf": "Matriarch",
     "ebrecym_vsr.odf": "Procreator"
   },

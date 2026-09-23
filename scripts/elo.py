@@ -346,7 +346,15 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # signal -- the JS reader never branches on ELO_SCHEMA_VERSION. The raw dict
 # now sums to ~0.92; available-axis weights are renormalized at runtime as
 # always (see THUG_WEIGHTS note).
-ELO_SCHEMA_VERSION = 10
+# v11 (current) = death-tick (0,0,0) position placeholder guard
+# (match.schema_version 28, PIPELINE_VERSION 50). The engine parks a dying
+# unit at the world origin with negative health for exactly one tick; those
+# samples used to enter the positioning trail, shifting `time_in_base_pct` and
+# therefore `activity_score` -> the `mobility` axis. INPUT change only -- no
+# axis math, weights, priors, or output shape change. Measured drift is tiny
+# (max 1.00 ELO, mean 0.20, leaderboard order unchanged), but ratings DO move,
+# so **pre-v11 `peak_vtsr` is no longer comparable**.
+ELO_SCHEMA_VERSION = 11
 
 
 # ---------------------------------------------------------------------------
