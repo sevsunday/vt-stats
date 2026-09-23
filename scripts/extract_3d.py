@@ -207,8 +207,9 @@ def build_output(stem: str) -> dict:
         # InfoMap is per-cluster uint32. Tiny -- embed as base64 inline in
         # the .3d.json (saves a separate fetch on tier-3 select).
         info_map_b64 = base64.b64encode(ter.info_map_bytes).decode("ascii")
-        # Tile texture names from .TRN [Texture] block. Fixed 16-slot list;
-        # None for holes. Output as a JSON-safe list (None -> null).
+        # Tile texture names from .TRN [Texture] block. Fixed 16-slot list
+        # aligned with InfoMap indices (slot N = TileTextureN); None for
+        # holes. Output as a JSON-safe list (None -> null).
         tile_texture_names = parse_trn_tile_textures(trn_path) if trn_path else [None] * 16
         tile_composite = {
             "color_png_rel":   f"{stem}.color.png",

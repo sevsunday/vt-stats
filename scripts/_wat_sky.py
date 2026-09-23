@@ -275,20 +275,21 @@ def parse_trn_tile_textures(trn_path: Path | None) -> list[str | None]:
     """Pull the `[Texture]` block's TileTextureN list from `.TRN`.
 
     Returns a fixed-length 16-slot list of normalized tile stems (lowercase,
-    extension stripped). Slot index 0 corresponds to `TileTexture1` (the
-    engine's 1-indexed naming collapsed to 0-indexed so lookup matches
-    `InfoMap`'s 4-bit fields directly). Empty / missing slots are `None`.
+    extension stripped). Slot N is `TileTextureN` so the list lines up with
+    `InfoMap`'s 4-bit layer indices (0..15). Empty / missing / blank slots
+    are `None`. `TileTexture16` is outside that range and is ignored.
+
     The returned list is always exactly 16 entries; trailing `None`s are NOT
     stripped because `InfoMap` may legally reference any slot in 0..15.
 
     Example .TRN block:
 
         [Texture]
-        TileTexture1 = "rend.tga"
-        TileTexture2 = "rend2.tga"
-        TileTexture5 = "rend5.dds"      // (slots 3-4 are holes)
+        TileTexture0 = "rend.tga"
+        TileTexture1 = "rend2.tga"
+        TileTexture5 = "rend5.dds"      // (slots 2-4 are holes)
 
-    Returns: ['rend', 'rend2', None, None, 'rend5', None, ..., None]
+    Returns: ['rend', 'rend2', None, None, None, 'rend5', None, ..., None]
     (16 entries total)
 
     Accepts the common image extensions BZ:CC supports (`.tga`/`.dds`/`.bmp`/
@@ -300,14 +301,14 @@ def parse_trn_tile_textures(trn_path: Path | None) -> list[str | None]:
         return out
     ini = _parse_ini(trn_path)
     tex = ini.get("Texture", {})
-    for i in range(1, 17):
+    for i in range(16):
         raw = tex.get(f"TileTexture{i}")
         if raw is None:
             continue
         name = _normalize_tile_name(raw)
         if not name:
             continue
-        out[i - 1] = name
+        out[i] = name
     return out
 
 

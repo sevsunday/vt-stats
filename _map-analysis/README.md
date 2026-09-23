@@ -360,8 +360,8 @@ wired vs what's deferred. Use as a roadmap when extending the toolset.
 
 * `[Size]` block (when present): `MinX`, `MinZ`, `Width`, `Depth`,
   `MetersPerGrid`, `Height`, `HeightGranularity`, `Tile`, `Color`
-* `[Texture]` block: `TileTexture1..N` references (texture filenames
-  live in the game asset pak)
+* `[Texture]` block: `TileTexture0..15` references (texture filenames
+  live in the game asset pak; the suffix is the InfoMap slot)
 * `[NormalView]` lighting: `DiffuseColor`, `SpecularColor`,
   `SpecularPower`
 * `[DLL]` block: `CaptureTarget1..N` (Strategy-mode capture point

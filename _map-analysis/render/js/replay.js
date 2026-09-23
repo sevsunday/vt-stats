@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { buildTileFloorMaterial } from './tile-floor.js';
 
 import { sampleTerrainHeight } from './objects.js';
 import {
@@ -112,8 +113,12 @@ const STATE = {
   terrainExaggeration: 1.5,
   terrainRampMat: null,
   terrainMinimapMat: null,
+  terrainTileMat: null,
+  terrainTileTextures: null,
   terrainUvsMinimap: null,
   terrainWireframe: null,
+  hqOn: false,
+  hqLoad: null,
   actorsGroup: null,
   actors: null,
   trailsGroup: null,
@@ -247,13 +252,13 @@ async function boot() {
     STATE.terrainExaggeration = mapData.defaults.defaultExaggeration;
   }
 
-  // Recommended floor-mode default per calibration tier (auto_failed_fallback
-  // -> tiles or ramp; otherwise -> minimap). No HUD radios; `?floor=` is
-  // the hidden hatch for calibration / debugging.
+  // HQ (game tiles) is the default when this map has a tile composite.
+  // `?floor=minimap|ramp|wire` still wins and leaves the HQ button off.
   const manifest = await loadMapManifest();
   const manifestEntry = findManifestEntry(manifest, stem);
   const recommendedFloor = await resolveDefaultFloorMode(stem, manifestEntry);
-  const initialFloor = params.floor || recommendedFloor;
+  const hasTiles = !!(mapData.tileComposite);
+  const initialFloor = params.floor || (hasTiles ? 'tiles' : recommendedFloor);
 
   setStatus('building scene...');
   STATE.roster      = buildRoster(matchData);
@@ -292,7 +297,13 @@ async function boot() {
   wireKeyboard();
   wireReplayCanvasChrome();
 
-  applyFloorMode(resolvedFloor);
+  wireHqToggle(resolvedFloor);
+  if (resolvedFloor === 'tiles') {
+    applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
+    void loadHqFloor();
+  } else {
+    applyFloorMode(resolvedFloor);
+  }
   setStatus(null);
   startLoop();
 
@@ -397,8 +408,8 @@ function initLights(mapData) {
 }
 
 // ============================================================================
-// Floor (minimap | ramp | wire). Tier-3 "tiles" mode is deferred to a future
-// phase so we ship Phase 1 lean.
+// Floor. HQ (tiles) is the game-tile composite from tile-floor.js.
+// Off is the minimap drape. ramp / wire stay available via ?floor=.
 // ============================================================================
 
 async function initFloor(mapData) {
@@ -747,6 +758,9 @@ function wireMatchStrip(matchMeta) {
 function resolveFloorMode(initial) {
   const allowed = new Set(['minimap', 'ramp', 'wire', 'tiles']);
   let mode = allowed.has(initial) ? initial : 'ramp';
+  if (mode === 'tiles' && !(STATE.mapData && STATE.mapData.tileComposite)) {
+    mode = 'minimap';
+  }
   if (mode === 'minimap' && !STATE.terrainMinimapMat) mode = 'ramp';
   return mode;
 }
@@ -769,13 +783,78 @@ function applyFloorMode(mode) {
       STATE.terrainWireframe.visible = true;
       break;
     case 'tiles':
-      // Tier-3 composite material isn't ported into the replay yet (heavy
-      // shader-injection job from viewer.js). Soft-fall back to ramp.
       STATE.terrainMesh.visible = true;
-      STATE.terrainMesh.material = STATE.terrainRampMat;
       STATE.terrainWireframe.visible = false;
+      if (STATE.terrainTileMat) STATE.terrainMesh.material = STATE.terrainTileMat;
       break;
   }
+}
+
+function syncHqButton() {
+  const btn = document.getElementById('btn-hq');
+  if (!btn) return;
+  const available = !!(STATE.mapData && STATE.mapData.tileComposite);
+  btn.disabled = !available;
+  const on = available && STATE.hqOn;
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.classList.toggle('is-active', on);
+  if (!available) btn.title = 'Game tiles unavailable for this map';
+  else if (STATE.hqLoad && !STATE.terrainTileMat && STATE.hqOn) btn.title = 'Loading high-quality tiles';
+  else btn.title = on ? 'High-quality game tiles' : 'Minimap ground';
+}
+
+function wireHqToggle(resolvedFloor) {
+  STATE.hqOn = resolvedFloor === 'tiles';
+  syncHqButton();
+  const btn = document.getElementById('btn-hq');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (btn.disabled) return;
+    STATE.hqOn = !STATE.hqOn;
+    syncHqButton();
+    if (STATE.hqOn) {
+      if (STATE.terrainTileMat) applyFloorMode('tiles');
+      else void loadHqFloor();
+    } else {
+      applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
+    }
+  });
+}
+
+function loadHqFloor() {
+  if (STATE.terrainTileMat) {
+    if (STATE.hqOn) applyFloorMode('tiles');
+    return Promise.resolve(STATE.terrainTileMat);
+  }
+  if (!STATE.hqLoad) {
+    STATE.hqLoad = buildTileFloorMaterial(STATE.renderer, STATE.mapData)
+      .then(built => {
+        if (!built) return null;
+        STATE.terrainTileMat = built.material;
+        STATE.terrainTileTextures = built.textures;
+        return built.material;
+      });
+    syncHqButton();
+  }
+  return STATE.hqLoad.then(mat => {
+    STATE.hqLoad = null;
+    syncHqButton();
+    if (!STATE.hqOn) return mat;
+    if (!mat) {
+      STATE.hqOn = false;
+      syncHqButton();
+      applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
+      return null;
+    }
+    applyFloorMode('tiles');
+    return mat;
+  }).catch(err => {
+    STATE.hqLoad = null;
+    console.error('failed to load tile textures:', err);
+    STATE.hqOn = false;
+    syncHqButton();
+    applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
+  });
 }
 
 // Re-apply height exaggeration to the terrain mesh, wireframe, and beacons.
