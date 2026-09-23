@@ -3,40 +3,38 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script>
-    if (new URLSearchParams(location.search).get('embed') === '1') {
-      document.documentElement.classList.add('vt-odf-embed');
-    }
-  </script>
-  <title>VT Stats — ODF Browser</title>
-  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
-  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="../css/theme-system.css">
-  <link rel="stylesheet" href="../css/themes.css">
-  <link rel="stylesheet" href="../css/main.css">
-  <link rel="stylesheet" href="../css/layout.css">
-  <link rel="stylesheet" href="../css/vtstats-theme.css">
-  <link rel="stylesheet" href="../css/odf-browser.css">
+  <title>VT Stats — ODF Guide</title>
+  <meta name="description" content="Searchable ODF reference for Battlezone: Combat Commander, from the GenBlackDragon and Ultraken documentation.">
+  <link rel="stylesheet" href="../../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../../css/theme-system.css">
+  <link rel="stylesheet" href="../../css/themes.css">
+  <link rel="stylesheet" href="../../css/main.css">
+  <link rel="stylesheet" href="../../css/layout.css">
+  <link rel="stylesheet" href="../../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../../css/odf-guide.css">
 </head>
 <body class="d-flex flex-column h-100">
 
-  <!-- Navbar -->
   <nav class="navbar navbar-expand-md sticky-top border-bottom">
     <div class="container-fluid px-3 px-md-4 gap-2">
-      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+      <a class="navbar-brand fw-bold" href="../../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
-      <span id="navOdfTotal"
-            class="vt-nav-odf-total badge align-self-center"
-            data-bs-toggle="tooltip"
-            data-bs-html="true"
-            data-bs-placement="bottom"
-            title="Loading ODF database&hellip;"
-            aria-live="polite"
-            hidden></span>
+      <div class="vt-guide-nav-search">
+        <label class="visually-hidden" for="guide-search">Search the ODF guide</label>
+        <div class="vt-guide-search">
+          <i class="bi bi-search vt-guide-search-icon" aria-hidden="true"></i>
+          <input id="guide-search" class="form-control" type="search"
+                 placeholder="Search properties, classes, terms"
+                 autocomplete="off" spellcheck="false"
+                 role="combobox" aria-expanded="false" aria-controls="guide-results"
+                 aria-autocomplete="list">
+          <div id="guide-results" class="vt-guide-results" role="listbox" hidden></div>
+        </div>
+      </div>
 
-      <!-- Always-visible primary controls (mobile burger only) -->
       <div class="d-flex align-items-center gap-2 ms-auto ms-md-0 order-md-2 vt-nav-primary">
         <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none" type="button"
                 data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
@@ -47,7 +45,7 @@
 
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a href="../index.html" class="vt-nav-icon-btn"
+          <a href="../../index.html" class="vt-nav-icon-btn"
              title="Open the dashboard" aria-label="Dashboard">
             <i class="bi bi-speedometer2 me-1"></i>Dashboard
           </a>
@@ -57,9 +55,9 @@
               <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item active" href="./" aria-current="page"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
-              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
-              <li><a class="dropdown-item" href="guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
+              <li><a class="dropdown-item" href="../"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
             </ul>
           </div>
           <div class="dropdown vt-nav-dropdown">
@@ -68,11 +66,11 @@
               <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
-              <li><a class="dropdown-item" href="../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+              <li><a class="dropdown-item" href="../../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
             </ul>
           </div>
-          <a href="../map/" class="vt-nav-icon-btn"
+          <a href="../../map/" class="vt-nav-icon-btn"
              title="Browse the VSR map catalog" aria-label="Maps">
             <i class="bi bi-map me-1"></i>Maps
           </a>
@@ -82,11 +80,11 @@
               <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
-              <li><a class="dropdown-item" href="../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+              <li><a class="dropdown-item" href="../../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="../../player/"><i class="bi bi-people me-2"></i>Players</a></li>
             </ul>
           </div>
-          <a href="../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+          <a href="../../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
              data-vt-tools-link data-vt-tools-live="0"
              title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
              aria-label="Tools">
@@ -110,18 +108,37 @@
   </nav>
 
   <main class="container-fluid flex-grow-1">
-    <div class="row g-3 px-2 pt-3 pb-0 mb-0">
-      <aside id="odfSidebar" class="col-12 col-lg-3">
-        <div id="odfSidebarContent"></div>
+    <div class="row g-3 px-2 px-md-3 pt-3 pb-4">
+      <aside class="col-12 col-lg-3 order-2 order-lg-1">
+        <div class="vt-guide-toc-wrap">
+          <label class="visually-hidden" for="guide-toc-filter">Filter sections</label>
+          <input id="guide-toc-filter" class="form-control form-control-sm vt-guide-toc-filter"
+                 type="search" placeholder="Filter sections" autocomplete="off">
+          <nav id="guide-toc" aria-label="Guide sections"></nav>
+        </div>
       </aside>
-      <section id="odfContent" class="col-12 col-lg-9">
-        <div id="odfContentContent"></div>
+
+      <section class="col-12 col-lg-9 col-xl-7 order-1 order-lg-2">
+        <aside class="vt-guide-credit">
+          <p>
+            This is a copy of the
+            <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=1423355866" target="_blank" rel="noopener">ODF Guide</a>
+            by GenBlackDragon on Steam.
+            <a href="?section=about-this-document">About this document</a>
+          </p>
+        </aside>
+
+        <article id="guide-article" aria-live="polite">
+          <p class="text-secondary mb-0">Loading the guide…</p>
+        </article>
       </section>
+
+      <aside class="d-none d-xl-block col-xl-2 order-3">
+        <nav id="guide-rail" class="vt-guide-rail" aria-label="On this page"></nav>
+      </aside>
     </div>
   </main>
 
-  <!-- Keyboard shortcuts modal (the compareModal + odfContextMenu are
-       injected at runtime by js/odf-browser.js to preserve seed parity). -->
   <div class="modal fade" id="shortcutsModal" tabindex="-1" aria-labelledby="shortcutsModalLabel">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
@@ -130,27 +147,23 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <table class="table table-sm">
+          <table class="table table-sm mb-0">
             <tbody>
               <tr>
-                <td><kbd>&uarr;</kbd> / <kbd>&darr;</kbd></td>
-                <td>Navigate through ODF list</td>
-              </tr>
-              <tr>
-                <td><kbd>&larr;</kbd> / <kbd>&rarr;</kbd></td>
-                <td>Cycle through category tabs</td>
-              </tr>
-              <tr>
                 <td><kbd>Ctrl</kbd> + <kbd>K</kbd></td>
-                <td>Focus search input</td>
+                <td>Focus search</td>
+              </tr>
+              <tr>
+                <td><kbd>&uarr;</kbd> / <kbd>&darr;</kbd></td>
+                <td>Move through search results</td>
+              </tr>
+              <tr>
+                <td><kbd>Enter</kbd></td>
+                <td>Jump to the selected result</td>
               </tr>
               <tr>
                 <td><kbd>Esc</kbd></td>
-                <td>Clear search and focus input</td>
-              </tr>
-              <tr>
-                <td><kbd>Esc</kbd> <kbd>Esc</kbd></td>
-                <td>Reset view and clear search</td>
+                <td>Clear search</td>
               </tr>
             </tbody>
           </table>
@@ -159,10 +172,9 @@
     </div>
   </div>
 
-  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-  <script src="../js/theme.js"></script>
-  <script src="../js/odf-browser.js"></script>
-
-  <script src="../js/cursor-settings.js"></script>
+  <script src="../../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../../js/theme.js"></script>
+  <script src="../../js/odf-guide.js"></script>
+  <script src="../../js/cursor-settings.js"></script>
 </body>
 </html>

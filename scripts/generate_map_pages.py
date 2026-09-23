@@ -62,7 +62,8 @@ SITE_URL = "https://vtstats.bz"
 # active-game-indicator.js) from stubs; the dashboard owns that poller.
 # v8 threads the LEGO topnav link (bi-bricks, after Models) through every stub.
 # v10 turns the ODF topnav link into a dropdown (ODF Browser, Build Trees).
-MAP_TEMPLATE_VERSION = 10
+# v11 adds ODF Guide to that dropdown.
+MAP_TEMPLATE_VERSION = 11
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently
