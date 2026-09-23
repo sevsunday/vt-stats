@@ -743,10 +743,13 @@
       if (sp.get('items')) elItemsTa.value = sp.get('items').replace(/\|/g, '\n');
     }
 
-    // Strip params from URL so a refresh doesn't re-auto-run.
+    // Strip one-shot verify params so a refresh doesn't re-auto-run.
+    // Keep unrelated params (the randomizer ?tab=) on this history entry.
     try {
-      const clean = location.origin + location.pathname;
-      history.replaceState({}, '', clean);
+      const keep = new URLSearchParams(location.search);
+      ['verify', 'round', 't1', 't2', 'items'].forEach((k) => keep.delete(k));
+      const qs = keep.toString();
+      history.replaceState({}, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
     } catch (_) { /* noop */ }
 
     // The panel boots collapsed, but a deep-link visitor explicitly came

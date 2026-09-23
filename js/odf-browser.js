@@ -166,10 +166,7 @@ class ODFBrowser {
             const urlParams = new URLSearchParams(window.location.search);
             const compareParam = urlParams.get('compare');
             const odfToLoad = urlParams.get('odf');
-            // Note: ?cat= is read here for back-compat with the seed; it has
-            // no consumer downstream and the URL bar will be cleaned by
-            // updateURL on the next state change.
-            urlParams.get('cat');
+            const catParam = urlParams.get('cat');
 
             if (compareParam) {
                 const [odf1, odf2] = compareParam.split(',').map(odf => odf.trim());
@@ -194,7 +191,9 @@ class ODFBrowser {
                     if (odfItem) {
                         const categoryTab = document.querySelector(`#sidebar-tab-${odf1Match.category}`);
                         if (categoryTab) {
+                            this._suppressCatUrl = true;
                             categoryTab.click();
+                            this._suppressCatUrl = false;
                         }
                         odfItem.classList.add('active');
                         odfItem.scrollIntoView({ block: 'nearest' });
@@ -208,7 +207,19 @@ class ODFBrowser {
                     this.showError(`Could not find ODF: ${odfToLoad}`);
                     return;
                 }
+            } else if (catParam && this.data[catParam] && catParam !== this.defaultCategory()) {
+                const tab = document.querySelector(`#sidebar-tab-${catParam}`);
+                if (tab) {
+                    this._suppressCatUrl = true;
+                    tab.click();
+                    this._suppressCatUrl = false;
+                }
             } else {
+                if (catParam) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('cat');
+                    history.replaceState(null, '', url.pathname + url.search + url.hash);
+                }
                 this.loadFirstVehicleODF();
             }
         });
@@ -294,14 +305,25 @@ class ODFBrowser {
             }, 150);
         };
 
-        window.addEventListener('popstate', (event) => {
-            if (event.state) {
-                if (event.state.compare) {
-                    const [odf1, odf2] = event.state.compare.split(',');
+        window.addEventListener('popstate', () => {
+            const params = new URLSearchParams(window.location.search);
+            const compare = params.get('compare');
+            const odf = params.get('odf');
+            const cat = params.get('cat');
+            this._suppressCatUrl = true;
+            try {
+                if (compare) {
+                    const [odf1, odf2] = compare.split(',');
                     this.handleCompareState(odf1, odf2);
-                } else if (event.state.odf) {
-                    this.handleODFState(event.state.odf);
+                } else if (odf) {
+                    this.handleODFState(odf);
+                } else {
+                    const name = (cat && this.data && this.data[cat]) ? cat : this.defaultCategory();
+                    const tab = document.querySelector(`#sidebar-tab-${name}`);
+                    if (tab) tab.click();
                 }
+            } finally {
+                this._suppressCatUrl = false;
             }
         });
 
@@ -455,8 +477,39 @@ class ODFBrowser {
                 document.querySelector(`#list-${category}`).classList.add('show', 'active');
 
                 this.updateBadgeStyles();
+                this.currentCategory = category;
+                this.scheduleCategoryUrl(category);
             });
         });
+    }
+
+    defaultCategory() {
+        const keys = Object.keys(this.data || {});
+        if (keys.includes('Vehicle')) return 'Vehicle';
+        return keys[0] || 'Vehicle';
+    }
+
+    scheduleCategoryUrl(category) {
+        if (this._suppressCatUrl) return;
+        this._pendingCat = category;
+        queueMicrotask(() => {
+            if (this._pendingCat !== category) return;
+            this._pendingCat = null;
+            this.writeCategoryUrl(category);
+        });
+    }
+
+    writeCategoryUrl(category) {
+        if (this._suppressCatUrl) return;
+        const url = new URL(window.location.href);
+        url.searchParams.delete('odf');
+        url.searchParams.delete('compare');
+        if (!category || category === this.defaultCategory()) url.searchParams.delete('cat');
+        else url.searchParams.set('cat', category);
+        const next = url.pathname + url.search + url.hash;
+        const cur = window.location.pathname + window.location.search + window.location.hash;
+        if (next === cur) return;
+        history.pushState({ cat: category }, '', next);
     }
 
     generateODFList(category, odfs) {
@@ -2021,6 +2074,7 @@ class ODFBrowser {
     }
 
     updateURL(params) {
+        this._pendingCat = null;
         const url = new URL(window.location);
 
         url.searchParams.delete('odf');

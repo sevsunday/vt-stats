@@ -205,11 +205,20 @@
   // --- Live URL Sync ---
   // When off (default), URL writes from in-app state changes are suppressed so
   // the browser URL stays clean. Incoming shared URLs still apply on load.
-  // When on, every syncUrl() call rewrites the URL via history.replaceState.
+  // When on, a user view change pushes a history entry (Back walks it).
+  // The first load and setLiveSync(true) replace the current entry instead.
   // Two one-time bypasses exist: setLiveSync(true) catches the URL up to
   // current state on toggle-on, and showMatchNotFound clears stale bad-match
   // URLs on error recovery.
   let liveSyncEnabled = localStorage.getItem('vt-url-sync') === 'true';
+  // User view changes pushState once the first match has loaded.
+  // Boot canonicalization and setLiveSync(true) replace the landed entry.
+  // historyWrites suppresses both while popstate is applying a URL.
+  let dashboardHistoryLive = false;
+  let historyWrites = 0;
+  let shownUrl = window.location.pathname + window.location.search;
+  let pickerUrlMode = 'push';
+  let pickerSearchReplace = false;
 
   // Pending Replay seek target from `?t=<tick>` on initial page load. Set by
   // loadMatch() when urlState.t is present; consumed once by the Replay tab
@@ -304,6 +313,7 @@
     if (ps.matchMode === 'all')                   params.set('mode', 'all');
     if (ps.role && ps.role !== 'any')             params.set('role', ps.role);
     if (ps.sort && ps.sort !== 'date-desc')       params.set('sort', ps.sort);
+    if (ps.hasVod && ps.hasVod !== 'any')         params.set('vod', ps.hasVod);
 
     const slug = getActiveTabSlug();
     if (slug && slug !== 'overview') params.set('tab', slug);
@@ -313,9 +323,18 @@
   }
 
   // Gated URL writer — no-op unless live sync is enabled.
-  function syncUrl() {
-    if (!liveSyncEnabled) return;
-    history.replaceState(null, '', buildShareUrl());
+  // mode 'replace' rewrites the current entry (boot, catch-up).
+  // Anything else pushes once the first load has finished, so Back
+  // walks match / tab / filter changes.
+  function syncUrl(mode) {
+    if (!liveSyncEnabled || historyWrites) return;
+    const next = buildShareUrl();
+    const cur = window.location.pathname + window.location.search;
+    if (next === cur) { shownUrl = cur; return; }
+    const replace = mode === 'replace' || !dashboardHistoryLive;
+    if (replace) history.replaceState(null, '', next);
+    else history.pushState(null, '', next);
+    shownUrl = next;
   }
 
   // Picker query keys, in the order buildShareUrl() emits them.
@@ -333,6 +352,9 @@
   // can copy the URL at any time. The gate still meaningfully covers
   // the chattier per-match filter axis (filterState).
   function syncPickerUrl() {
+    const mode = pickerUrlMode || 'push';
+    pickerUrlMode = 'push';
+    if (historyWrites) return;
     const cur = new URLSearchParams(window.location.search);
     PICKER_URL_KEYS.forEach(k => cur.delete(k));
     cur.delete('outcome');
@@ -349,7 +371,20 @@
     if (ps.hasVod && ps.hasVod !== 'any')         cur.set('vod', ps.hasVod);
 
     const qs = paramsToString(cur);
-    history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+    const next = window.location.pathname + (qs ? '?' + qs : '');
+    if (next === window.location.pathname + window.location.search) {
+      shownUrl = next;
+      return;
+    }
+    if (mode === 'search' && pickerSearchReplace) history.replaceState(null, '', next);
+    else if (mode === 'search') {
+      history.pushState(null, '', next);
+      pickerSearchReplace = true;
+    } else {
+      pickerSearchReplace = false;
+      history.pushState(null, '', next);
+    }
+    shownUrl = next;
   }
 
   // Explicit share action: build the URL from current state and copy to
@@ -420,6 +455,7 @@
     }
     if (on) {
       history.replaceState(null, '', buildShareUrl());
+      shownUrl = window.location.pathname + window.location.search;
     }
   }
 
@@ -488,6 +524,10 @@
       // onto a pre-v4 match with no economy/builds telemetry) so the boot
       // falls through to the default tab instead of an empty orphan pane.
       if (btn && !(btn.closest('li') && btn.closest('li').classList.contains('d-none'))) {
+        if (!btn.classList.contains('active') && historyWrites) {
+          btn._vtQuiet = true;
+          window.setTimeout(() => { if (btn._vtQuiet) btn._vtQuiet = false; }, 1000);
+        }
         bootstrap.Tab.getOrCreateInstance(btn).show();
         return true;
       }
@@ -495,13 +535,150 @@
     return false;
   }
 
+  // Snapshot before any boot-log writes. prepareBootLog() restores this
+  // shell if an error view replaced #loading. Capturing later would freeze
+  // a half-written step list.
+  const preloaderHtml = $loading ? $loading.innerHTML : '';
+  // First loadMatch/loadAllMatches keeps the index + catalog lines. Later
+  // navigations start a fresh list.
+  let bootLogCarry = true;
+
+  function fmtBootBytes(n) {
+    if (!Number.isFinite(n) || n <= 0) return '0 KB';
+    if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function fmtBootFetch(got, total) {
+    if (!got && !total) return '';
+    if (total) return `${fmtBootBytes(got)} / ${fmtBootBytes(total)}`;
+    return fmtBootBytes(got);
+  }
+
+  function fetchLabel(prefix, got, total, phase) {
+    const bytes = fmtBootFetch(got, total);
+    const tail = phase === 'parse' ? 'parsing' : 'downloading';
+    return bytes ? `${prefix} · ${tail} ${bytes}` : `${prefix} · ${tail}`;
+  }
+
+  // Two frames: the first paints the status we just wrote; the second
+  // returns before the following paint, so a long synchronous JSON.parse
+  // or render still leaves that status on screen.
+  function nextFrame() {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => { requestAnimationFrame(resolve); });
+    });
+  }
+
+  function bootTitle(text) {
+    const el = document.getElementById('vt-boot-title');
+    if (!el || !text || el.textContent === text) return;
+    el.textContent = text;
+  }
+
+  function bootRow(key, label, state) {
+    const list = document.getElementById('vt-boot-log');
+    if (!list) return;
+    let li = list.querySelector(`[data-boot-key="${key}"]`);
+    const created = !li;
+    if (!li) {
+      li = document.createElement('li');
+      li.dataset.bootKey = key;
+      list.appendChild(li);
+    }
+    li.className = state === 'done' ? 'is-done' : (state === 'error' ? 'is-error' : 'is-active');
+    li.textContent = label;
+    if (state === 'error') {
+      const title = document.getElementById('vt-boot-title');
+      if (title) title.classList.add('is-error');
+      bootTitle('Could not load');
+    }
+    if (created && li.scrollIntoView) li.scrollIntoView({ block: 'nearest' });
+  }
+
+  function clearBootLog() {
+    const list = document.getElementById('vt-boot-log');
+    if (list) list.replaceChildren();
+    const title = document.getElementById('vt-boot-title');
+    if (title) {
+      title.classList.remove('is-error');
+      title.textContent = 'Loading match data';
+    }
+  }
+
+  function prepareBootLog() {
+    if (!document.getElementById('vt-boot-log')) {
+      $loading.innerHTML = preloaderHtml;
+    }
+    if (!bootLogCarry) clearBootLog();
+    bootLogCarry = false;
+  }
+
+  // Streamed JSON fetch. Mirrors _map-analysis/render/js/loader.js
+  // fetchJsonWithProgress, with cache: 'no-store' to match the dashboard
+  // fetches. Yields one frame after reporting 'parse' so a multi-MB
+  // JSON.parse does not freeze on the last download line.
+  async function fetchJsonWithProgress(url, onProgress) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    const total = Number(res.headers.get('content-length')) || 0;
+    const report = (received, phase) => {
+      if (onProgress) onProgress(received, total, phase);
+    };
+
+    let text;
+    if (!res.body || typeof res.body.getReader !== 'function') {
+      text = await res.text();
+      report(text.length, 'download');
+    } else {
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+      let lastReport = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.byteLength;
+        const now = performance.now();
+        if (now - lastReport > 80 || (total && received >= total)) {
+          lastReport = now;
+          report(received, 'download');
+        }
+      }
+      report(received, 'download');
+      const buf = new Uint8Array(received);
+      let offset = 0;
+      for (const chunk of chunks) {
+        buf.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      text = new TextDecoder().decode(buf);
+    }
+    report(text.length, 'parse');
+    await nextFrame();
+    return JSON.parse(text);
+  }
+
+  async function revealAfterBoot(renderLabel, reveal) {
+    bootTitle('Rendering');
+    bootRow('render', renderLabel, 'active');
+    await nextFrame();
+    if (window.VTFx) VTFx.hidePreloader();
+    $loading.classList.add('d-none');
+    reveal();
+  }
+
   let manifest;
+  const manifestPrefix = 'Match index · matches.json';
+  bootRow('manifest', manifestPrefix, 'active');
   try {
-    const res = await fetch('data/processed/matches.json', { cache: 'no-store' });
-    if (!res.ok) throw new Error(res.status);
-    manifest = await res.json();
+    manifest = await fetchJsonWithProgress('data/processed/matches.json', (got, total, phase) => {
+      bootRow('manifest', fetchLabel(manifestPrefix, got, total, phase), 'active');
+    });
+    bootRow('manifest', manifestPrefix, 'done');
   } catch {
-    $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load match manifest.</p>';
+    bootRow('manifest', manifestPrefix, 'error');
     return;
   }
 
@@ -512,11 +689,16 @@
   // prod), getMapMeta() gracefully falls back to BZ2API.VSR_MAP_DATA or
   // dashes out missing fields.
   let mapRegistry = {};
+  const registryPrefix = 'Map catalog · map-registry.json';
+  bootRow('registry', registryPrefix, 'active');
   try {
-    const regRes = await fetch('data/map-registry.json', { cache: 'no-store' });
-    if (regRes.ok) mapRegistry = await regRes.json();
+    mapRegistry = await fetchJsonWithProgress('data/map-registry.json', (got, total, phase) => {
+      bootRow('registry', fetchLabel(registryPrefix, got, total, phase), 'active');
+    });
+    bootRow('registry', registryPrefix, 'done');
   } catch {
-    // registry is optional — nothing to do
+    mapRegistry = {};
+    bootRow('registry', 'Map catalog · unavailable', 'done');
   }
 
   // Sort newest-first. The Python pipeline writes matches.json sorted
@@ -1330,9 +1512,11 @@
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
         pickerState.query = ($pickerSearch.value || '').trim().toLowerCase();
+        pickerUrlMode = 'search';
         applyPickerFilters();
       }, 80);
     });
+    $pickerSearch.addEventListener('blur', () => { pickerSearchReplace = false; });
   }
 
   // --- Wiring: facet chipsets (event delegation per chipset) ---
@@ -1596,6 +1780,7 @@
       if (target) renderTabIfNeeded(target);
       if (target === '#tab-replay') { maybeAutoExpandReplay(); scrollReplayIntoView(); }
       else exitReplayExpand({ consumeHistory: false });
+      if (btn && btn._vtQuiet) { btn._vtQuiet = false; return; }
       syncUrl();
     });
   }
@@ -1626,6 +1811,8 @@
     allTabsEl.addEventListener('shown.bs.tab', (e) => {
       const target = e.target.getAttribute('data-bs-target');
       if (target) renderTabIfNeeded(target);
+      const btn = e.target && e.target.closest ? e.target.closest('[data-bs-target]') : e.target;
+      if (btn && btn._vtQuiet) { btn._vtQuiet = false; return; }
       syncUrl();
     });
   }
@@ -2893,8 +3080,9 @@
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
-    // Restore default preloader content in case a prior error replaced it
-    restorePreloader();
+    // Restore the preloader shell if a prior error replaced it. The first
+    // call keeps the index and catalog lines; later calls start fresh.
+    prepareBootLog();
     clearReplayTab();
     // Balonce Meter owns Bootstrap tooltips inside its card, so it gets
     // torn down on every view switch (same contract as the replay tab).
@@ -2911,19 +3099,27 @@
     // leaderboard renders. ensureEloLoaded() is idempotent and swallows
     // its own fetch errors, so Promise.all only rejects on the match-JSON
     // fetch — preserving the existing error path.
+    const entry = manifest.find(m => m.file === file);
+    const matchName = (entry && (entry.name || entry.id)) || String(file).replace(/\.json$/, '');
+    const matchPrefix = `Match · ${matchName} · ${file}`;
+    const showRatings = window.__vtElo === undefined
+      || !!(window.VTVideoLinks && window.__vtMatchVideos === undefined);
+    if (showRatings) bootRow('ratings', 'Ratings and links', 'active');
+    bootRow('match', matchPrefix, 'active');
     let data;
     try {
-      const matchPromise = fetch('data/processed/' + file).then(r => {
-        if (!r.ok) throw new Error(r.status);
-        return r.json();
-      });
       [data] = await Promise.all([
-        matchPromise,
+        fetchJsonWithProgress('data/processed/' + file, (got, total, phase) => {
+          bootRow('match', fetchLabel(matchPrefix, got, total, phase), 'active');
+        }),
         ensureEloLoaded(),
         window.VTVideoLinks ? VTVideoLinks.ensureLoaded() : Promise.resolve(),
       ]);
+      bootRow('match', matchPrefix, 'done');
+      if (showRatings) bootRow('ratings', 'Ratings and links', 'done');
     } catch {
-      $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load match data.</p>';
+      bootRow('match', matchPrefix, 'error');
+      if (showRatings) bootRow('ratings', 'Ratings and links', 'done');
       return;
     }
     currentData = data;
@@ -2950,9 +3146,9 @@
       syncFilterUI();
     }
 
-    if (window.VTFx) VTFx.hidePreloader();
-    $loading.classList.add('d-none');
-    $dashboard.classList.remove('d-none');
+    await revealAfterBoot('Rendering overview', () => {
+      $dashboard.classList.remove('d-none');
+    });
 
     // `?t=<tick>` is consumed exactly once on initial load. Set it here so
     // the Replay tab renderer picks it up whether the tab is activated via
@@ -2984,7 +3180,8 @@
       if (target && target !== '#tab-overview') renderTabIfNeeded(target);
     }
 
-    syncUrl();
+    syncUrl(dashboardHistoryLive ? 'push' : 'replace');
+    dashboardHistoryLive = true;
   }
 
   function syncFilterUI() {
@@ -3029,18 +3226,27 @@
     // (±σ ELO) that the VTSR-T leaderboard surfaces as tooltips + a
     // "statistical tie" note. Same graceful-404 pattern: null hides all
     // uncertainty UI.
-    const [eloRes, histRes, slugRes, valRes] = await Promise.all([
+    const historyPrefix = 'Ratings · elo_history.json';
+    bootRow('elo-history', historyPrefix, 'active');
+    const histPromise = fetchJsonWithProgress('data/processed/elo_history.json', (got, total, phase) => {
+      bootRow('elo-history', fetchLabel(historyPrefix, got, total, phase), 'active');
+    }).then((json) => {
+      bootRow('elo-history', historyPrefix, 'done');
+      return json;
+    }).catch(() => {
+      bootRow('elo-history', 'Ratings · elo_history.json · unavailable', 'done');
+      return null;
+    });
+    const [eloRes, slugRes, valRes, hist] = await Promise.all([
       fetch('data/processed/elo_current.json', { cache: 'no-store' }).catch(() => null),
-      fetch('data/processed/elo_history.json', { cache: 'no-store' }).catch(() => null),
       fetch('data/processed/player_slugs.json', { cache: 'no-store' }).catch(() => null),
       fetch('data/processed/validation_summary.json', { cache: 'no-store' }).catch(() => null),
+      histPromise,
     ]);
     try {
       window.__vtElo = (eloRes && eloRes.ok) ? await eloRes.json() : null;
     } catch { window.__vtElo = null; }
-    try {
-      window.__vtEloHistory = (histRes && histRes.ok) ? await histRes.json() : null;
-    } catch { window.__vtEloHistory = null; }
+    window.__vtEloHistory = hist;
     try {
       window.__vtSlugMap = (slugRes && slugRes.ok) ? await slugRes.json() : null;
     } catch { window.__vtSlugMap = null; }
@@ -3157,7 +3363,7 @@
     $dashboard.classList.add('d-none');
     $allView.style.display = 'none';
     $loading.classList.remove('d-none');
-    restorePreloader();
+    prepareBootLog();
     clearReplayTab();
     if (window.VTBalonce) VTBalonce.destroyMatchSection();
     destroyAllCharts();
@@ -3166,14 +3372,17 @@
     // Fetch contributions once per session, cache on window so subsequent
     // filter changes re-aggregate without a network round trip.
     let contributions = window.__vtContributions;
+    const contribPrefix = 'Career totals · match_contributions.json';
     if (!contributions) {
+      bootRow('contrib', contribPrefix, 'active');
       try {
-        const res = await fetch('data/processed/match_contributions.json', { cache: 'no-store' });
-        if (!res.ok) throw new Error(res.status);
-        contributions = await res.json();
+        contributions = await fetchJsonWithProgress('data/processed/match_contributions.json', (got, total, phase) => {
+          bootRow('contrib', fetchLabel(contribPrefix, got, total, phase), 'active');
+        });
         window.__vtContributions = contributions;
+        bootRow('contrib', contribPrefix, 'done');
       } catch {
-        $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load aggregate data.</p>';
+        bootRow('contrib', contribPrefix, 'error');
         return;
       }
     }
@@ -3186,10 +3395,13 @@
     // either: hide the dedicated VTSR-T card and fall through to em-dash
     // placeholders. Also consumed by the per-match leaderboard's new
     // VTSR-T Δ column via getEloDeltaIndexForCurrentMatch().
+    const showRatings = window.__vtElo === undefined;
+    if (showRatings) bootRow('ratings', 'Ratings and links', 'active');
     await ensureEloLoaded();
+    if (showRatings) bootRow('ratings', 'Ratings and links', 'done');
 
     if (!window.VTAggregate || typeof window.VTAggregate.build !== 'function') {
-      $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Aggregator unavailable.</p>';
+      bootRow('agg', 'Aggregator unavailable', 'error');
       return;
     }
 
@@ -3203,9 +3415,9 @@
 
     // Empty filtered set short-circuits to a friendly empty state.
     if (filtersOn && fileIds.length === 0) {
-      if (window.VTFx) VTFx.hidePreloader();
-      $loading.classList.add('d-none');
-      $allView.style.display = 'block';
+      await revealAfterBoot('Rendering career view', () => {
+        $allView.style.display = 'block';
+      });
       updateAllMatchesFilterBanner(0);
       // Render an explicit empty view so the previous match's data isn't
       // left lingering in already-rendered tabs.
@@ -3239,15 +3451,19 @@
         const allOverviewBtn = document.getElementById('all-tab-overview-btn');
         if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
       }
-      syncUrl();
+      syncUrl(dashboardHistoryLive ? 'push' : 'replace');
+      dashboardHistoryLive = true;
       return;
     }
 
+    bootRow('agg', 'Building career totals', 'active');
+    await nextFrame();
     const data = window.VTAggregate.build(contributions, fileIds, getActiveElo());
+    bootRow('agg', 'Building career totals', 'done');
 
-    if (window.VTFx) VTFx.hidePreloader();
-    $loading.classList.add('d-none');
-    $allView.style.display = 'block';
+    await revealAfterBoot('Rendering career view', () => {
+      $allView.style.display = 'block';
+    });
 
     // Stash the aggregate data on window so the Career Radar event handlers
     // can re-render without having to thread the object through tab renderers.
@@ -3359,7 +3575,8 @@
       if (allOverviewBtn) bootstrap.Tab.getOrCreateInstance(allOverviewBtn).show();
     }
 
-    syncUrl();
+    syncUrl(dashboardHistoryLive ? 'push' : 'replace');
+    dashboardHistoryLive = true;
   }
 
   function renderTimelineSection(data) {
@@ -3454,8 +3671,22 @@
       });
     }
     if (econ || builds) {
+      // Ship-loss lines need the combat-ship stem list. Paint immediately,
+      // then again once the list arrives so the first visit is not stuck
+      // without the breakdown.
+      const shipMatchId = (currentData.match && currentData.match.id) || '';
+      const shipsReady = combatShipOdfs.size ? null : ensureCombatShipOdfs();
       renderEconomyProductionCards();
       ensureTooltips(document.getElementById('section-economy-production'));
+      if (shipsReady) {
+        shipsReady.then(() => {
+          const nowId = (currentData && currentData.match && currentData.match.id) || '';
+          if (nowId !== shipMatchId) return;
+          if (!(currentData.economy || currentData.builds)) return;
+          renderEconomyProductionCards();
+          ensureTooltips(document.getElementById('section-economy-production'));
+        });
+      }
     }
     if (builds) {
       buildlogShown = BUILDLOG_PAGE;
@@ -3497,6 +3728,63 @@
     return `<span class="fw-semibold">${esc(display)}</span>${chip}`;
   }
 
+  // Rebuilt on every production-card render. Joins thug/commander rows to
+  // the FULL match leaderboard (never the player-filtered view).
+  let econLbBySteam = new Map();
+  let econOdfNameByKey = Object.create(null);
+
+  function econIndexShipLosses() {
+    econLbBySteam = new Map();
+    const lb = (currentData && currentData.leaderboard) || [];
+    for (let i = 0; i < lb.length; i++) {
+      const row = lb[i];
+      if (row && row.steam64 != null) econLbBySteam.set(String(row.steam64), row);
+    }
+    econOdfNameByKey = Object.create(null);
+    const map = (currentData && currentData.odf_map) || {};
+    const keys = Object.keys(map);
+    for (let i = 0; i < keys.length; i++) {
+      econOdfNameByKey[keys[i].toLowerCase()] = map[keys[i]];
+    }
+  }
+
+  function econCombatStem(ship) {
+    const s = String(ship || '').trim().toLowerCase();
+    return s.endsWith('.odf') ? s.slice(0, -4) : s;
+  }
+
+  function econShipLossName(ship) {
+    const raw = String(ship || '').trim().toLowerCase();
+    const withExt = raw.endsWith('.odf') ? raw : (raw ? raw + '.odf' : '');
+    const hit = econOdfNameByKey[withExt] || econOdfNameByKey[raw] || '';
+    const name = hit || econCombatStem(ship) || 'Unknown';
+    // esc() does not escape quotes; a " in a title attribute would clip it.
+    return String(name).replace(/"/g, "'");
+  }
+
+  // Combat ships this player lost, pilots excluded. Same filter as the
+  // pipeline's ships_lost count, so the pieces add up to that number.
+  // Empty until data/combat_ship_odfs.json has loaded.
+  function econShipLossLine(player) {
+    if (!player || !combatShipOdfs.size) return '';
+    const row = econLbBySteam.get(String(player.steam64));
+    const ships = row && row.per_ship_combat;
+    if (!Array.isArray(ships)) return '';
+    const parts = [];
+    for (let i = 0; i < ships.length; i++) {
+      const psc = ships[i];
+      const stem = econCombatStem(psc && psc.ship);
+      if (!stem || stem.includes('user_m')) continue;
+      if (!combatShipOdfs.has(stem)) continue;
+      const deaths = Number(psc.deaths) || 0;
+      if (deaths <= 0) continue;
+      parts.push({ name: econShipLossName(psc.ship), deaths: deaths });
+    }
+    parts.sort((a, b) => (b.deaths - a.deaths) || (a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)));
+    if (!parts.length) return '';
+    return parts.map(p => p.name + ' \u00d7' + p.deaths).join(' \u00b7 ');
+  }
+
   // The two production cards render as a matched PAIR. Both specs come from
   // the same ordered key spine, so row N on the left is always row N on the
   // right -- the scrap-status bar used to float a line up or down depending
@@ -3504,6 +3792,7 @@
   // A `present` FLAG, never behind a bare `if`: the unconditional slot is
   // what keeps the two cards in lockstep.
   function renderEconomyProductionCards() {
+    econIndexShipLosses();
     const eteams = ((currentData.economy || {}).teams) || {};
     const bteams = ((currentData.builds || {}).teams) || {};
     const tsups = currentData.thug_supply || {};
@@ -3717,16 +4006,29 @@
       const subRow = (t, valueHtml, key, extraLabel) => statRow(
         `&nbsp;&nbsp;${vtPlayerLinkHtml(t.name, t.steam64)}${extraLabel || ''}`, valueHtml, null, key
       );
+      // One continuation line per player. Always emitted (spacer when this
+      // side has nothing) so the two cards stay on the same key spine.
+      const shipLossRow = (player, key) => {
+        const text = player ? econShipLossLine(player) : '';
+        if (!text) {
+          spacer(key);
+          return;
+        }
+        spec.push({
+          kind: 'shiploss', key, label: text, tip: text, present: true,
+        });
+      };
 
       divider('div-thugs', hasT);
       subhead('Thug supply', 'head-thugs', hasT);
       statRow('Thug ships lost', `${fmtScrap(T.thug_ships_lost)} <span class="text-muted">(${fmtScrap(T.thug_ship_value_lost)} scrap)</span>`,
-        'Fighting vehicles this commander\'s thugs lost, and what they were worth. Counts human-piloted losses only, so AI craft the commander built are not in here. Compare against combat ships built above: that is the commander\'s attrition bill.',
+        'Fighting vehicles this commander\'s thugs lost, and what they were worth. Counts human-piloted losses only, so AI craft the commander built are not in here. The line under each name lists those ships. Compare against combat ships built above: that is the commander\'s attrition bill.',
         'thug-ships-lost', hasT);
       for (let i = 0; i < shape.lost; i++) {
         const t = lists.lost[i];
         if (t) subRow(t, `${fmtScrap(t.ships_lost)} <span class="text-muted">(${fmtScrap(t.ship_value_lost)} scrap)</span>`, `thug-lost-${i}`);
         else spacer(`thug-lost-${i}`);
+        shipLossRow(t, `thug-lost-ships-${i}`);
       }
       if (shape.cmdr) {
         if (cmdr) {
@@ -3734,6 +4036,7 @@
         } else {
           spacer('cmdr-lost');
         }
+        shipLossRow(cmdr, 'cmdr-lost-ships');
       }
 
       const footSec = T.thug_pilot_sec;
@@ -3807,6 +4110,11 @@
       case 'spacer':
         // Holds a slot so the rows below stay aligned with the other card.
         return '<div class="vt-econ-stat-row vt-econ-row-spacer" aria-hidden="true"></div>';
+      case 'shiploss':
+        // The label is the breakdown; it ellipsizes. The title is the
+        // unclipped list. No info icon — the row is the explanation.
+        return `<div class="d-flex justify-content-between align-items-baseline vt-econ-stat-row vt-econ-shiploss"${key} data-bs-toggle="tooltip" title="${esc(r.tip || r.label)}">
+        <span class="vt-econ-stat-label"><span class="vt-econ-stat-label-text">${esc(r.label)}</span></span></div>`;
       default: {
         const info = r.tip
           ? `<i class="bi bi-info-circle vt-col-info" data-bs-toggle="tooltip" data-bs-html="true" title="${esc(r.tip)}"></i>`
@@ -4560,14 +4868,22 @@
     return h >>> 0;
   }
 
+  // Highlight integers always use a US thousands separator. The page-wide
+  // fmt() stays locale-aware; highlight headlines, breakdowns, and flavor
+  // sentences share this helper so a European browser cannot print 44.271
+  // on one line and 44,271 on another.
+  function formatHighlightInt(n) {
+    return Math.round(Number(n) || 0).toLocaleString('en-US');
+  }
+
   function formatHighlightValue(value, format) {
     if (value == null) return '—';
     switch (format) {
-      case 'damage':   return Math.round(value).toLocaleString();
-      case 'distance': return Math.round(value).toLocaleString();
-      case 'count':    return Math.round(value).toLocaleString();
-      case 'score':    return Math.round(value).toLocaleString();
-      case 'scrap':    return Math.round(value).toLocaleString();
+      case 'damage':   return formatHighlightInt(value);
+      case 'distance': return formatHighlightInt(value);
+      case 'count':    return formatHighlightInt(value);
+      case 'score':    return formatHighlightInt(value);
+      case 'scrap':    return formatHighlightInt(value);
       case 'duration': {
         const s = Math.max(0, Math.round(Number(value) || 0));
         return `${Math.floor(s / 60)}m:${s % 60}s`;
@@ -4814,7 +5130,7 @@
     switch (card.category) {
       case 'the_bully':
         return b.top_victim
-          ? `most on ${esc(b.top_victim)}: ${fmt(b.top_victim_damage)} dmg`
+          ? `most on ${esc(b.top_victim)}: ${formatHighlightInt(b.top_victim_damage)} dmg`
           : '';
       case 'the_grim_reaper':
         return b.top_victim
@@ -4822,7 +5138,7 @@
           : '';
       case 'bullet_sponge':
         return b.top_tormentor
-          ? `most from ${esc(b.top_tormentor)}: ${fmt(b.top_tormentor_damage)} dmg`
+          ? `most from ${esc(b.top_tormentor)}: ${formatHighlightInt(b.top_tormentor_damage)} dmg`
           : '';
       case 'the_hustler': {
         if (b.kills == null && b.deaths == null) return '';
@@ -4831,59 +5147,59 @@
       }
       case 'sharpshooter':
         if (b.shots_hit == null || b.shots_fired == null) return '';
-        return `${fmt(b.shots_hit)} / ${fmt(b.shots_fired)} shots`;
+        return `${formatHighlightInt(b.shots_hit)} / ${formatHighlightInt(b.shots_fired)} shots`;
       case 'gunner':
         if (b.accuracy == null) return '';
         return `@ ${(Number(b.accuracy) * 100).toFixed(1)}% accuracy`;
       case 'puppeteer':
         if (b.personal_dealt == null) return '';
-        return `vs ${fmt(b.personal_dealt)} personal dmg`;
+        return `vs ${formatHighlightInt(b.personal_dealt)} personal dmg`;
       case 'frenemies':
         if (b.a_to_b == null || b.b_to_a == null) return '';
-        return `${esc(card.winner.a)} ${fmt(b.a_to_b)} \u2194 ${esc(card.winner.b)} ${fmt(b.b_to_a)}`;
+        return `${esc(card.winner.a)} ${formatHighlightInt(b.a_to_b)} \u2194 ${esc(card.winner.b)} ${formatHighlightInt(b.b_to_a)}`;
       case 'roadrunner': {
         const parts = [];
         if (b.movement_band) parts.push(esc(b.movement_band));
-        if (b.path_length != null) parts.push(`${fmt(b.path_length)}u path`);
+        if (b.path_length != null) parts.push(`${formatHighlightInt(b.path_length)}u path`);
         return parts.join(' \u00b7 ');
       }
       case 'crate_pod_goblin':
         if (b.pickups == null && b.destructions == null) return '';
-        return `${fmt(b.pickups || 0)} grabbed \u00b7 ${fmt(b.destructions || 0)} denied`;
+        return `${formatHighlightInt(b.pickups || 0)} grabbed \u00b7 ${formatHighlightInt(b.destructions || 0)} denied`;
       case 'chris_kyle':
         return b.top_victim
           ? `${b.top_victim_count} snipes on ${esc(b.top_victim)}`
           : '';
       case 'the_locksmith':
         if (b.seconds_locked == null || b.total_seconds == null) return '';
-        return `~${fmt(b.seconds_locked)}s of ${fmt(b.total_seconds)}s`;
+        return `~${formatHighlightInt(b.seconds_locked)}s of ${formatHighlightInt(b.total_seconds)}s`;
       // ---- Career Highlights ----
       case 'career_the_bully':
         return b.top_victim
-          ? `most on ${esc(b.top_victim)}: ${fmt(b.top_victim_damage)} dmg`
+          ? `most on ${esc(b.top_victim)}: ${formatHighlightInt(b.top_victim_damage)} dmg`
           : '';
       case 'career_the_hustler': {
         if (b.kills == null && b.deaths == null) return '';
-        return `${fmt(b.kills)}K / ${fmt(b.deaths)}D career`;
+        return `${formatHighlightInt(b.kills)}K / ${formatHighlightInt(b.deaths)}D career`;
       }
       case 'career_sharpshooter':
         if (b.shots_hit == null || b.shots_fired == null) return '';
-        return `${fmt(b.shots_hit)} / ${fmt(b.shots_fired)} shots career`;
+        return `${formatHighlightInt(b.shots_hit)} / ${formatHighlightInt(b.shots_fired)} shots career`;
       case 'career_frenemies':
         if (b.a_to_b == null || b.b_to_a == null) return '';
-        return `${esc(card.winner.a)} ${fmt(b.a_to_b)} \u2194 ${esc(card.winner.b)} ${fmt(b.b_to_a)}`;
+        return `${esc(card.winner.a)} ${formatHighlightInt(b.a_to_b)} \u2194 ${esc(card.winner.b)} ${formatHighlightInt(b.b_to_a)}`;
       case 'career_roadrunner': {
         const parts = [];
         if (b.movement_band) parts.push(esc(b.movement_band));
-        if (b.path_length != null) parts.push(`${fmt(b.path_length)}u path`);
+        if (b.path_length != null) parts.push(`${formatHighlightInt(b.path_length)}u path`);
         return parts.join(' \u00b7 ');
       }
       case 'career_pod_goblin':
         if (b.pickups == null && b.destructions == null) return '';
-        return `${fmt(b.pickups || 0)} grabbed \u00b7 ${fmt(b.destructions || 0)} denied`;
+        return `${formatHighlightInt(b.pickups || 0)} grabbed \u00b7 ${formatHighlightInt(b.destructions || 0)} denied`;
       case 'the_champion':
         if (b.matches_played == null) return '';
-        return `${b.matches_played} rated · peak ${b.peak_vtsr != null ? Math.round(b.peak_vtsr) : '—'}`;
+        return `${formatHighlightInt(b.matches_played)} rated · peak ${b.peak_vtsr != null ? formatHighlightInt(b.peak_vtsr) : '—'}`;
       case 'the_carry':
         if (b.kills == null && b.deaths == null) return '';
         return `${b.kills}W / ${b.deaths}L commanding`;
@@ -4894,35 +5210,35 @@
       case 'the_tycoon': {
         if (b.income_regen == null && b.income_loose == null) return '';
         const parts = [];
-        if (b.income_regen != null) parts.push(`${fmt(b.income_regen)} scrap`);
+        if (b.income_regen != null) parts.push(`${formatHighlightInt(b.income_regen)} scrap`);
         // Amount-first loose display ("N loose" = scrap amount, per the
         // player-terminology contract).
-        if (b.income_loose != null) parts.push(`${fmt(b.income_loose)} loose`);
+        if (b.income_loose != null) parts.push(`${formatHighlightInt(b.income_loose)} loose`);
         return parts.join(' · ');
       }
       case 'war_machine':
         if (b.ships_built == null) return '';
-        return `${fmt(b.ships_built)} combat ships${b.builds_per_min != null ? ` · ${b.builds_per_min}/min` : ''}`;
+        return `${formatHighlightInt(b.ships_built)} combat ships${b.builds_per_min != null ? ` · ${b.builds_per_min}/min` : ''}`;
       case 'first_upgrade':
         return b.upgrade_name ? esc(b.upgrade_name) : '';
       // v17 career commander-economy siblings.
       case 'career_tycoon': {
         if (b.econ_matches == null) return '';
-        const parts = [`${fmt(b.econ_matches)} commands`];
-        if (b.avg_income_per_min != null) parts.push(`${fmt(b.avg_income_per_min)}/min`);
-        if (b.income_loose != null) parts.push(`${fmt(b.income_loose)} loose`);
+        const parts = [`${formatHighlightInt(b.econ_matches)} commands`];
+        if (b.avg_income_per_min != null) parts.push(`${formatHighlightInt(b.avg_income_per_min)}/min`);
+        if (b.income_loose != null) parts.push(`${formatHighlightInt(b.income_loose)} loose`);
         return parts.join(' · ');
       }
       case 'career_loose_collector': {
         if (b.econ_matches == null) return '';
-        const parts = [`${fmt(b.econ_matches)} commands`];
+        const parts = [`${formatHighlightInt(b.econ_matches)} commands`];
         if (b.loose_share != null) parts.push(`${(Number(b.loose_share) * 100).toFixed(0)}% of income`);
         return parts.join(' · ');
       }
       case 'career_war_machine': {
         if (b.ships_built == null) return '';
-        const parts = [`${fmt(b.ships_built)} combat ships`];
-        if (b.build_matches != null) parts.push(`${fmt(b.build_matches)} commands`);
+        const parts = [`${formatHighlightInt(b.ships_built)} combat ships`];
+        if (b.build_matches != null) parts.push(`${formatHighlightInt(b.build_matches)} commands`);
         if (b.avg_ships_per_min != null) parts.push(`${b.avg_ships_per_min}/min`);
         return parts.join(' · ');
       }
@@ -5015,8 +5331,8 @@
       const valueStr = formatHighlightValue(c.value, c.value_format);
       const breakdown = c.value_breakdown || {};
       // Interpolation context: every documented token from the v2 spec, with
-      // sensible fallbacks ('' for missing fields). Numeric fields go through
-      // fmt() so locale-grouped digits render the same in copy and breakdown.
+      // sensible fallbacks ('' for missing fields). Integer fields go through
+      // formatHighlightInt() so flavor copy matches the US-grouped headline.
       const ctx = {
         name: (c.winner && c.winner.name) || '',
         a: (c.winner && c.winner.a) || '',
@@ -5024,37 +5340,37 @@
         value: valueStr,
         delta_pct: _hlFormatDeltaPct(c.delta_pct),
         top_victim: breakdown.top_victim || '',
-        top_victim_damage: breakdown.top_victim_damage != null ? fmt(breakdown.top_victim_damage) : '',
-        top_victim_count: breakdown.top_victim_count != null ? breakdown.top_victim_count : '',
+        top_victim_damage: breakdown.top_victim_damage != null ? formatHighlightInt(breakdown.top_victim_damage) : '',
+        top_victim_count: breakdown.top_victim_count != null ? formatHighlightInt(breakdown.top_victim_count) : '',
         top_tormentor: breakdown.top_tormentor || '',
-        top_tormentor_damage: breakdown.top_tormentor_damage != null ? fmt(breakdown.top_tormentor_damage) : '',
-        kills: breakdown.kills != null ? breakdown.kills : '',
-        deaths: breakdown.deaths != null ? breakdown.deaths : '',
-        shots_hit: breakdown.shots_hit != null ? fmt(breakdown.shots_hit) : '',
-        shots_fired: breakdown.shots_fired != null ? fmt(breakdown.shots_fired) : '',
+        top_tormentor_damage: breakdown.top_tormentor_damage != null ? formatHighlightInt(breakdown.top_tormentor_damage) : '',
+        kills: breakdown.kills != null ? formatHighlightInt(breakdown.kills) : '',
+        deaths: breakdown.deaths != null ? formatHighlightInt(breakdown.deaths) : '',
+        shots_hit: breakdown.shots_hit != null ? formatHighlightInt(breakdown.shots_hit) : '',
+        shots_fired: breakdown.shots_fired != null ? formatHighlightInt(breakdown.shots_fired) : '',
         accuracy: breakdown.accuracy != null ? (Number(breakdown.accuracy) * 100).toFixed(1) + '%' : '',
-        personal_dealt: breakdown.personal_dealt != null ? fmt(breakdown.personal_dealt) : '',
-        a_to_b: breakdown.a_to_b != null ? fmt(breakdown.a_to_b) : '',
-        b_to_a: breakdown.b_to_a != null ? fmt(breakdown.b_to_a) : '',
+        personal_dealt: breakdown.personal_dealt != null ? formatHighlightInt(breakdown.personal_dealt) : '',
+        a_to_b: breakdown.a_to_b != null ? formatHighlightInt(breakdown.a_to_b) : '',
+        b_to_a: breakdown.b_to_a != null ? formatHighlightInt(breakdown.b_to_a) : '',
         movement_band: breakdown.movement_band || '',
-        path_length: breakdown.path_length != null ? fmt(breakdown.path_length) : '',
-        seconds_locked: breakdown.seconds_locked != null ? breakdown.seconds_locked : '',
-        total_seconds: breakdown.total_seconds != null ? breakdown.total_seconds : '',
-        pickups: breakdown.pickups != null ? breakdown.pickups : '',
-        destructions: breakdown.destructions != null ? breakdown.destructions : '',
+        path_length: breakdown.path_length != null ? formatHighlightInt(breakdown.path_length) : '',
+        seconds_locked: breakdown.seconds_locked != null ? formatHighlightInt(breakdown.seconds_locked) : '',
+        total_seconds: breakdown.total_seconds != null ? formatHighlightInt(breakdown.total_seconds) : '',
+        pickups: breakdown.pickups != null ? formatHighlightInt(breakdown.pickups) : '',
+        destructions: breakdown.destructions != null ? formatHighlightInt(breakdown.destructions) : '',
         // Career-mode tokens (no-op for per-match cards).
-        matches_played: breakdown.matches_played != null ? breakdown.matches_played : '',
-        peak_vtsr:      breakdown.peak_vtsr != null ? Math.round(breakdown.peak_vtsr) : '',
+        matches_played: breakdown.matches_played != null ? formatHighlightInt(breakdown.matches_played) : '',
+        peak_vtsr:      breakdown.peak_vtsr != null ? formatHighlightInt(breakdown.peak_vtsr) : '',
         map_name:       breakdown.map_name || '',
-        matches_with_positioning: breakdown.matches_with_positioning != null ? breakdown.matches_with_positioning : '',
+        matches_with_positioning: breakdown.matches_with_positioning != null ? formatHighlightInt(breakdown.matches_with_positioning) : '',
         // v17 commander-economy tokens (Elon Musk / Loose Collector / Conveyor Belt / First Upgrade + career siblings).
         // Amount-first loose contract: {income_loose} is the scrap amount.
-        income_loose: breakdown.income_loose != null ? fmt(breakdown.income_loose) : '',
+        income_loose: breakdown.income_loose != null ? formatHighlightInt(breakdown.income_loose) : '',
         loose_share:  breakdown.loose_share != null ? (Number(breakdown.loose_share) * 100).toFixed(0) + '%' : '',
-        ships_built:   breakdown.ships_built != null ? fmt(breakdown.ships_built) : '',
-        econ_matches:  breakdown.econ_matches != null ? fmt(breakdown.econ_matches) : '',
-        build_matches: breakdown.build_matches != null ? fmt(breakdown.build_matches) : '',
-        avg_income_per_min: breakdown.avg_income_per_min != null ? fmt(breakdown.avg_income_per_min) + ' scrap' : '',
+        ships_built:   breakdown.ships_built != null ? formatHighlightInt(breakdown.ships_built) : '',
+        econ_matches:  breakdown.econ_matches != null ? formatHighlightInt(breakdown.econ_matches) : '',
+        build_matches: breakdown.build_matches != null ? formatHighlightInt(breakdown.build_matches) : '',
+        avg_income_per_min: breakdown.avg_income_per_min != null ? formatHighlightInt(breakdown.avg_income_per_min) + ' scrap' : '',
         upgrade_name: breakdown.upgrade_name || '',
       };
       const flavor = _hlInterp(_hlPickCopy(c.category, c.narrative, matchId, ctx, copyTable), ctx);
@@ -8881,14 +9197,8 @@
   }
 
   // --- Match Not Found Error State ---
-  // Captured once at init so we can restore it after showing errors.
-  const preloaderHtml = $loading.innerHTML;
-
-  function restorePreloader() {
-    if ($loading.innerHTML !== preloaderHtml) {
-      $loading.innerHTML = preloaderHtml;
-    }
-  }
+  // preloaderHtml is captured before the boot log writes. showMatchNotFound
+  // replaces #loading; prepareBootLog() puts the shell back on the next load.
 
   function showMatchNotFound(badId) {
     $dashboard.classList.add('d-none');
@@ -8927,6 +9237,7 @@
       // actively misleading and the user has explicitly chosen a different
       // match, so clearing is unambiguous intent.
       history.replaceState(null, '', window.location.pathname);
+      shownUrl = window.location.pathname;
       if (val === '__all__') {
         updateMatchPickerTriggers('__all__');
       } else {
@@ -8948,6 +9259,57 @@
   // is active, so the button is naturally per-match-only with no extra
   // visibility wiring. selectMatch handles trigger sync + view-transition.
   document.getElementById('info-back-to-all')?.addEventListener('click', () => selectMatch('__all__'));
+
+  function restoreDashboardFromUrl(urlState) {
+    pickerState = DEFAULT_PICKER_STATE();
+    hydratePickerStateFromUrl(urlState.picker);
+    applyPickerStateToUI();
+    if (currentTarget != null) applyPickerFilters();
+
+    const want = urlState.match;
+    if (want === 'all') {
+      if (currentTarget !== '__all__') {
+        updateMatchPickerTriggers('__all__');
+        loadAllMatches(urlState);
+        return;
+      }
+    } else if (want) {
+      const entry = manifest.find(m => m.id === want);
+      if (entry && currentTarget !== entry.file) {
+        updateMatchPickerTriggers(entry);
+        loadMatch(entry.file, urlState);
+        return;
+      }
+    }
+
+    if (currentData && currentTarget !== '__all__') {
+      hydrateFilterFromUrl(urlState, currentData.leaderboard);
+      syncFilterUI();
+      applyFilter();
+    }
+    const slugMap = currentTarget === '__all__' ? ALL_TAB_SLUGS : MATCH_TAB_SLUGS;
+    if (!activateTabFromSlug(urlState.tab, slugMap)) {
+      const id = currentTarget === '__all__' ? 'all-tab-overview-btn' : 'tab-overview-btn';
+      const btn = document.getElementById(id);
+      if (btn && !btn.classList.contains('active')) {
+        if (historyWrites) {
+          btn._vtQuiet = true;
+          window.setTimeout(() => { if (btn._vtQuiet) btn._vtQuiet = false; }, 1000);
+        }
+        bootstrap.Tab.getOrCreateInstance(btn).show();
+      }
+    }
+  }
+
+  window.addEventListener('popstate', () => {
+    const now = window.location.pathname + window.location.search;
+    if (now === shownUrl) return;
+    if (!manifest) return;
+    shownUrl = now;
+    historyWrites++;
+    try { restoreDashboardFromUrl(parseUrlState()); }
+    finally { historyWrites--; }
+  });
 
   // --- Initial Boot ---
 

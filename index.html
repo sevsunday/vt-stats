@@ -80,6 +80,7 @@
             <ul class="dropdown-menu dropdown-menu-end">
               <li><a class="dropdown-item" href="odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
               <li><a class="dropdown-item" href="build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
             </ul>
           </div>
           <div class="dropdown vt-nav-dropdown">
@@ -148,7 +149,10 @@
         <span class="visually-hidden">Loading...</span>
       </div>
       <div class="vt-preloader-brand"><i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats</div>
-      <div class="vt-preloader-status">Loading match data&hellip;</div>
+      <div class="vt-preloader-detail">
+        <div class="vt-preloader-status" id="vt-boot-title" aria-live="polite">Loading match data</div>
+        <ol class="vt-preloader-log" id="vt-boot-log"></ol>
+      </div>
     </div>
   </div>
 
@@ -2110,6 +2114,27 @@
        loaded by elo/index.html). Must precede app.js: renderVtsrTeaser()
        reads window.VTSRExplain for the methodology modal body. -->
   <script src="js/vtsr-explainers.js"></script>
+  <script>
+    window.addEventListener('error', function (ev) {
+      var file = ev.filename || '';
+      if (file.indexOf('app.js') === -1) return;
+      var loading = document.getElementById('loading');
+      if (!loading || loading.classList.contains('d-none')) return;
+      var title = document.getElementById('vt-boot-title');
+      var list = document.getElementById('vt-boot-log');
+      var message = String(ev.message || 'Could not start').replace(/^Uncaught\s+/, '');
+      if (title) {
+        title.textContent = 'Dashboard script failed';
+        title.classList.add('is-error');
+      }
+      if (list) {
+        var li = document.createElement('li');
+        li.className = 'is-error';
+        li.textContent = message;
+        list.appendChild(li);
+      }
+    });
+  </script>
   <script src="js/app.js"></script>
 </body>
 </html>

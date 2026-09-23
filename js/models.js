@@ -255,6 +255,92 @@ let ultraCompiled = false;   // per-viewer: whether the Ultra pass chain has com
 // faction: single-select string ('all' = no filter), default ISDF.
 // category: multi-select Set (empty = no filter / "All"), default Building+Vehicle.
 const filters = { q: '', faction: 'ISDF', category: new Set(['Building', 'Vehicle']), sort: 'name' };
+const MODEL_SORTS = new Set(['name', 'faction', 'category', 'triangles-desc', 'triangles-asc']);
+const DEFAULT_MODEL_CATS = ['Building', 'Vehicle'];
+let historyWrites = 0;
+let searchReplace = false;
+let searchTimer = 0;
+
+function writesSuppressed() { return historyWrites > 0; }
+function withoutHistoryWrites(fn) {
+  historyWrites++;
+  try { return fn(); }
+  finally { historyWrites--; }
+}
+function paramsToString(params) {
+  return params.toString().replace(/%2C/gi, ',');
+}
+function locationKey() {
+  return location.pathname + location.search + location.hash;
+}
+function modelFilterParams(opts) {
+  const params = new URLSearchParams();
+  const cur = new URLSearchParams(location.search);
+  if (cur.get('embed') === '1') params.set('embed', '1');
+  const q = filters.q.trim();
+  if (q) params.set('q', q);
+  if (filters.faction === 'all') params.set('faction', 'all');
+  else if (filters.faction && filters.faction !== 'ISDF') params.set('faction', filters.faction);
+  const cats = [...filters.category].sort();
+  const def = DEFAULT_MODEL_CATS.slice().sort().join(',');
+  if (!cats.length) params.set('cat', 'all');
+  else if (cats.join(',') !== def) params.set('cat', cats.join(','));
+  if (filters.sort && filters.sort !== 'name') params.set('sort', filters.sort);
+  const keepModel = opts && opts.model;
+  if (keepModel) params.set('model', keepModel);
+  return params;
+}
+function urlFromParams(params) {
+  const qs = paramsToString(params);
+  return location.pathname + (qs ? '?' + qs : '') + location.hash;
+}
+function writeHistory(params, mode) {
+  if (writesSuppressed()) return;
+  const next = urlFromParams(params);
+  if (next === locationKey()) return;
+  if (mode === 'search') {
+    if (searchReplace) history.replaceState(null, '', next);
+    else { history.pushState(null, '', next); searchReplace = true; }
+    return;
+  }
+  if (mode !== 'replace') searchReplace = false;
+  if (mode === 'replace') history.replaceState(null, '', next);
+  else history.pushState(null, '', next);
+}
+function syncModelUrl(mode) {
+  const cur = new URLSearchParams(location.search);
+  const model = els.directory && els.directory.hidden ? cur.get('model') : null;
+  writeHistory(modelFilterParams(model ? { model } : null), mode);
+}
+function hydrateModelFilters() {
+  const params = new URLSearchParams(location.search);
+  filters.q = params.get('q') || '';
+  if (els.search) els.search.value = filters.q;
+  const factions = new Set(manifest.map((m) => m.factionName).filter(Boolean));
+  const fac = params.get('faction');
+  if (fac === 'all') filters.faction = 'all';
+  else if (fac && factions.has(fac)) filters.faction = fac;
+  else filters.faction = 'ISDF';
+  const categories = new Set(manifest.map((m) => m.category).filter(Boolean));
+  const cat = params.get('cat');
+  if (cat === 'all') filters.category = new Set();
+  else if (cat) {
+    const picked = cat.split(',').map((s) => s.trim()).filter((c) => categories.has(c));
+    filters.category = picked.length ? new Set(picked) : new Set(DEFAULT_MODEL_CATS);
+  } else {
+    filters.category = new Set(DEFAULT_MODEL_CATS);
+  }
+  const sort = params.get('sort');
+  filters.sort = MODEL_SORTS.has(sort) ? sort : 'name';
+  if (els.sort) els.sort.value = filters.sort;
+  if (els.factionChips && els.factionChips.children.length) syncChips(els.factionChips, 'faction');
+  if (els.categoryChips && els.categoryChips.children.length) syncChips(els.categoryChips, 'category');
+  if (!writesSuppressed()) {
+    const cur = new URLSearchParams(location.search);
+    const model = cur.get('model');
+    writeHistory(modelFilterParams(model ? { model } : null), 'replace');
+  }
+}
 
 // HQ is the default; only an explicit 'perf' choice opts out (null/unset -> HQ).
 function preferHq() { return HQ_AVAILABLE && localStorage.getItem(QUALITY_KEY) !== 'perf'; }
@@ -379,6 +465,7 @@ function renderChipGroup(container, group, labels) {
       }
       syncChips(container, group);
       renderDirectory();
+      syncModelUrl('push');
     };
     container.appendChild(chip);
   }
@@ -417,7 +504,7 @@ function renderDirectory() {
   for (const m of rows) {
     const card = document.createElement('a');
     card.className = 'model-card';
-    card.href = `?model=${encodeURIComponent(m.stem)}`;
+    card.href = urlFromParams(modelFilterParams({ model: m.stem }));
     const color = FACTION_COLOR[m.factionCode] || FACTION_COLOR._;
     card.style.setProperty('--accent', color);
 
@@ -1792,19 +1879,23 @@ function goDirectory() {
   els.driveHud.hidden = true;
   hideStageLoading();
   els.fps.textContent = '';
-  history.pushState({}, '', location.pathname);
+  history.pushState({}, '', urlFromParams(modelFilterParams()));
   route();
 }
 
 // ---------------- routing ----------------
 
 function route() {
+  hydrateModelFilters();
+  renderDirectory();
   const params = new URLSearchParams(location.search);
   const model = params.get('model');
   if (model) {
     const entry = manifest.find((m) => m.stem === model || m.glb === model);
     if (entry) { showViewer(entry); return; }
   }
+  if (activeViewer) { activeViewer.dispose(); activeViewer = null; }
+  driveModeOn = false;
   els.viewer.hidden = true;
   els.directory.hidden = false;
 }
@@ -1816,8 +1907,14 @@ function escapeHtml(s) {
 }
 
 function wireToolbar() {
-  els.search.oninput = () => { filters.q = els.search.value; renderDirectory(); };
-  els.sort.onchange = () => { filters.sort = els.sort.value; renderDirectory(); };
+  els.search.oninput = () => {
+    filters.q = els.search.value;
+    renderDirectory();
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => syncModelUrl('search'), 300);
+  };
+  els.search.addEventListener('blur', () => { searchReplace = false; });
+  els.sort.onchange = () => { filters.sort = els.sort.value; renderDirectory(); syncModelUrl('push'); };
   if (!HQ_AVAILABLE) {
     const wrap = els.preferHq.closest('.qualtoggle');
     if (wrap) wrap.hidden = true;
@@ -1851,15 +1948,16 @@ async function boot() {
     return;
   }
   buildChips();
-  renderDirectory();
   route();
   window.addEventListener('popstate', () => {
+    window.clearTimeout(searchTimer);
+    searchReplace = false;
     if (activeViewer) { activeViewer.dispose(); activeViewer = null; }
     driveModeOn = false;
     drivePrevKeyAim = null;
     heldDriveKeys.clear();
     if (els.driveHud) els.driveHud.hidden = true;
-    route();
+    withoutHistoryWrites(route);
   });
 }
 

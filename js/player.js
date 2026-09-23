@@ -3,8 +3,20 @@
  *
  * Boots player/index.html in three modes:
  *   - directory:     no params -> rich card-grid landing
+ *                  (?q= ?tier= ?role= ?activity= ?sort= when filters differ
+ *                  from the defaults)
  *   - single:        ?p=<steam64> OR ?slug=<slug>
+ *                  (?tab=rating|axes|highlights|rivals|loadout; Overview
+ *                  omits ?tab=). Pre-gen stubs use the same query on
+ *                  /player/<slug>/.
  *   - compare:       ?compare=<slug,slug,...>  (cap 4)
+ *                  (?x=matches when the progression chart is not by date)
+ *
+ * User-initiated view changes pushState so Back/Forward walk them.
+ * replaceState is reserved for boot canonicalization (default/unknown
+ * params, alias rewrites) and for further search commits while the
+ * search field stays focused. popstate re-applies the URL with writes
+ * suppressed.
  *
  * Pre-generated /player/<slug>/index.html stubs (Phase 3) hard-code the
  * canonical URL in their <head> and trigger the same single-player
@@ -73,6 +85,204 @@
   };
 
   function safeNum(v) { return Number.isFinite(+v) ? +v : 0; }
+
+  // ---- URL history ------------------------------------------------------
+  //
+  // pushState for a user view change (tab, chip, sort, compare axis,
+  // compare roster). replaceState for boot canonicalization and for
+  // search commits after the first one in a focus session. popstate
+  // bumps historyWrites so those applies cannot write.
+
+  const PLAYER_TAB_TARGETS = {
+    overview:   '#vt-player-tab-overview',
+    rating:     '#vt-player-tab-rating',
+    axes:       '#vt-player-tab-axes',
+    highlights: '#vt-player-tab-highlights',
+    rivals:     '#vt-player-tab-rivals',
+    loadout:    '#vt-player-tab-loadout',
+  };
+  const PLAYER_DEFAULT_TAB = PLAYER_TAB_TARGETS.overview;
+  const DIRECTORY_URL_KEYS = ['q', 'tier', 'role', 'activity', 'sort'];
+
+  let historyWrites = 0;
+  let searchReplace = false;
+  let searchTimer = 0;
+
+  function writesSuppressed() { return historyWrites > 0; }
+
+  function withoutHistoryWrites(fn) {
+    historyWrites++;
+    try { return fn(); }
+    finally { historyWrites--; }
+  }
+
+  function locationKey() {
+    return window.location.pathname + window.location.search + window.location.hash;
+  }
+
+  function paramsToString(params) {
+    return params.toString().replace(/%2C/gi, ',');
+  }
+
+  function urlFromParams(params) {
+    const qs = paramsToString(params);
+    return window.location.pathname + (qs ? '?' + qs : '') + (window.location.hash || '');
+  }
+
+  function currentParams() {
+    return new URLSearchParams(window.location.search);
+  }
+
+  // mode: 'push' | 'replace' | 'search'
+  function writeHistory(params, mode) {
+    if (writesSuppressed()) return;
+    const next = urlFromParams(params);
+    if (next === locationKey()) return;
+    if (mode === 'search') {
+      if (searchReplace) history.replaceState(null, '', next);
+      else {
+        history.pushState(null, '', next);
+        searchReplace = true;
+      }
+      return;
+    }
+    if (mode !== 'replace') searchReplace = false;
+    if (mode === 'replace') history.replaceState(null, '', next);
+    else history.pushState(null, '', next);
+  }
+
+  function endSearchSession() { searchReplace = false; }
+
+  function sectionVisible(which) {
+    const el = $(`vt-player-${which}`);
+    return !!(el && !el.classList.contains('d-none'));
+  }
+
+  function applyDirectoryToParams(params) {
+    DIRECTORY_URL_KEYS.forEach(k => params.delete(k));
+    const q = (state.filters.query || '').trim();
+    if (q) params.set('q', q);
+    if (state.filters.tiers.size) {
+      params.set('tier', [...state.filters.tiers].sort((a, b) => a - b).join(','));
+    }
+    if (state.filters.role && state.filters.role !== 'any') params.set('role', state.filters.role);
+    if (state.filters.activity && state.filters.activity !== 'active') {
+      params.set('activity', state.filters.activity);
+    }
+    if (state.filters.sort && state.filters.sort !== 'vtsr-desc') params.set('sort', state.filters.sort);
+  }
+
+  function syncDirectoryUrl(mode) {
+    if (!sectionVisible('directory')) return;
+    const params = currentParams();
+    applyDirectoryToParams(params);
+    params.delete('tab');
+    params.delete('x');
+    writeHistory(params, mode);
+  }
+
+  function paintChipGroup(root, attr, selected) {
+    if (!root) return;
+    root.querySelectorAll('.vt-chip').forEach(b => {
+      const on = attr === 'tier'
+        ? selected.has(Number(b.dataset.tier))
+        : b.dataset[attr] === selected;
+      b.setAttribute('data-selected', on ? 'true' : 'false');
+    });
+  }
+
+  function hydrateDirectoryFromUrl() {
+    const params = currentParams();
+    state.filters.query = params.get('q') || '';
+    if (dom.searchInput) dom.searchInput.value = state.filters.query;
+
+    const tiers = new Set();
+    for (const part of (params.get('tier') || '').split(',')) {
+      const s = part.trim();
+      if (!s) continue;
+      const n = Number(s);
+      if (n === 0 || (n >= 1 && n <= 5)) tiers.add(n);
+    }
+    state.filters.tiers = tiers;
+    paintChipGroup(dom.tierChips, 'tier', tiers);
+
+    const role = params.get('role');
+    state.filters.role = (role === 'commander' || role === 'thug') ? role : 'any';
+    paintChipGroup(dom.roleChips, 'role', state.filters.role);
+
+    const activity = params.get('activity');
+    state.filters.activity = (activity === 'any' || activity === 'veteran' || activity === 'pillar')
+      ? activity : 'active';
+    paintChipGroup(dom.activityChips, 'activity', state.filters.activity);
+
+    const sort = params.get('sort');
+    state.filters.sort = Object.prototype.hasOwnProperty.call(SORT_COMPARATORS, sort) ? sort : 'vtsr-desc';
+    if (dom.sortSelect) dom.sortSelect.value = state.filters.sort;
+
+    if (!writesSuppressed()) syncDirectoryUrl('replace');
+  }
+
+  function tabSlugForTarget(target) {
+    if (target === PLAYER_DEFAULT_TAB) return null;
+    return Object.keys(PLAYER_TAB_TARGETS).find(k => k !== 'overview' && PLAYER_TAB_TARGETS[k] === target) || null;
+  }
+
+  function syncTabUrl(target) {
+    if (!sectionVisible('single')) return;
+    const params = currentParams();
+    const slug = tabSlugForTarget(target);
+    if (slug) params.set('tab', slug);
+    else params.delete('tab');
+    writeHistory(params, 'push');
+  }
+
+  function activateTabFromUrl() {
+    const params = currentParams();
+    let changed = false;
+    DIRECTORY_URL_KEYS.concat(['x']).forEach(k => {
+      if (params.has(k)) { params.delete(k); changed = true; }
+    });
+    const slug = params.get('tab');
+    const target = PLAYER_TAB_TARGETS[slug];
+    const isDefault = !slug || !target || target === PLAYER_DEFAULT_TAB;
+    if (slug && isDefault) {
+      params.delete('tab');
+      changed = true;
+    }
+    if (changed) writeHistory(params, 'replace');
+    const btn = document.querySelector(`#vt-player-tabs [data-bs-target="${isDefault ? PLAYER_DEFAULT_TAB : target}"]`);
+    showTabQuiet(btn);
+  }
+
+  // Bootstrap fires shown.bs.tab after the fade, which is after popstate
+  // has already cleared historyWrites. Mark the button so that late event
+  // does not push a second entry.
+  function showTabQuiet(btn) {
+    if (!btn || btn.classList.contains('active')) return;
+    if (!(window.bootstrap && bootstrap.Tab)) return;
+    btn._vtQuiet = true;
+    window.setTimeout(() => { if (btn._vtQuiet) btn._vtQuiet = false; }, 1000);
+    bootstrap.Tab.getOrCreateInstance(btn).show();
+  }
+
+  function readCompareAxisFromUrl() {
+    const x = currentParams().get('x');
+    compareState.xAxisMode = x === 'matches' ? 'matches' : 'date';
+    if (x && x !== 'matches' && !writesSuppressed()) {
+      const params = currentParams();
+      params.delete('x');
+      writeHistory(params, 'replace');
+    }
+  }
+
+  function pushCompareList(slugs) {
+    const params = currentParams();
+    params.set('compare', slugs.join(','));
+    params.delete('tab');
+    if (compareState.xAxisMode === 'matches') params.set('x', 'matches');
+    else params.delete('x');
+    writeHistory(params, 'push');
+  }
 
   // ---- DOM refs ---------------------------------------------------------
 
@@ -474,11 +684,14 @@
     state.filters.tiers.clear();
     state.filters.role = 'any';
     state.filters.activity = 'active';
+    state.filters.sort = 'vtsr-desc';
     dom.searchInput.value = '';
+    if (dom.sortSelect) dom.sortSelect.value = 'vtsr-desc';
     dom.tierChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', 'false'));
     dom.roleChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.role === 'any' ? 'true' : 'false'));
     dom.activityChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.activity === 'active' ? 'true' : 'false'));
     renderDirectoryGrid();
+    syncDirectoryUrl('push');
   }
 
   // ---- Compare-mode selection wiring -----------------------------------
@@ -550,7 +763,10 @@
     u.searchParams.set('compare', slugs.join(','));
     u.searchParams.delete('p');
     u.searchParams.delete('slug');
-    window.location.href = u.toString();
+    u.searchParams.delete('tab');
+    u.searchParams.delete('x');
+    DIRECTORY_URL_KEYS.forEach(k => u.searchParams.delete(k));
+    window.location.href = u.pathname + (u.search || '') + (u.hash || '');
   }
 
   // ---- VTSR-T axes (the eight composite axes the rating is built on) ---
@@ -732,6 +948,7 @@
     $('vt-player-tab-highlights').innerHTML = phasePlaceholder('Highlights', 'Click this tab to load.');
     $('vt-player-tab-rivals').innerHTML     = phasePlaceholder('Rivals & most-commanded-against', 'Click this tab to load.');
     $('vt-player-tab-loadout').innerHTML    = phasePlaceholder('Loadout &amp; ships', 'Click this tab to load.');
+    activateTabFromUrl();
   }
 
   // ---- Phase 5: Rating & matches tab -----------------------------------
@@ -1757,12 +1974,83 @@
       </div>`;
   }
 
+  // Unit suffix on the headline number. Mirrors CAREER_HIGHLIGHT_UNITS in
+  // js/app.js. Empty string when value_format already self-labels (percent /
+  // accuracy) or the breakdown is the label (Pod Goblin).
+  const HIGHLIGHT_UNITS = {
+    career_the_bully:        'dmg',
+    career_the_grim_reaper:  'kills',
+    career_bullet_sponge:    'dmg',
+    career_the_hustler:      'K/D',
+    career_sharpshooter:     '',
+    career_trigger_happy:    'shots',
+    career_puppeteer:        'dmg',
+    career_frenemies:        'dmg',
+    career_roadrunner:       'mvnt',
+    career_pod_goblin:       '',
+    career_chris_kyle:       'snipes',
+    career_the_locksmith:    '',
+    career_tycoon:           'scrap',
+    career_loose_collector:  'loose',
+    career_war_machine:      'scrap',
+    the_champion:            'VTSR-T',
+    the_veteran:             'matches',
+    the_workhorse:           'commands',
+    the_carry:               '',
+    the_anchor:              '',
+    isdf_loyalist:           'matches',
+    hadean_loyalist:         'matches',
+    scion_loyalist:          'matches',
+    the_diplomat:            'teammates',
+    map_master:              '',
+    streak_king:             'wins',
+    the_polymath:            'wpns',
+  };
+
+  // Static one-line definition of what the headline number measures.
+  // Unknown categories omit the line. Not the rotating flavor copy.
+  const HIGHLIGHT_MEANING = {
+    career_tycoon:          'Lifetime scrap their team generated while they commanded (regen, loose, and refunds). A sum, not a per-minute rate.',
+    career_loose_collector: 'Lifetime loose scrap their scavengers collected while they commanded.',
+    career_war_machine:     'Lifetime scrap value of combat ships built while they commanded.',
+    career_the_hustler:     'Career kills per death, pulled toward the league average. Needs 25 kills.',
+    career_the_bully:       'Lifetime damage dealt to other players.',
+    career_the_grim_reaper: 'Lifetime kills.',
+    career_bullet_sponge:   'Lifetime damage taken.',
+    career_sharpshooter:    'Career accuracy. Needs 1,000 shots.',
+    career_trigger_happy:   'Lifetime shots fired.',
+    career_puppeteer:       'Lifetime damage from their turrets, scavengers, and deployables.',
+    career_roadrunner:      'Average movement score across matches with positioning data.',
+    career_pod_goblin:      'Lifetime powerups grabbed plus powerups denied.',
+    career_chris_kyle:      'Lifetime cockpit snipes.',
+    career_the_locksmith:   'Average share of each match spent with target lock on.',
+    the_champion:           'Current VTSR-T rating.',
+    the_veteran:            'Matches played.',
+    the_workhorse:          'Matches commanded.',
+    the_carry:              'Win rate while commanding.',
+    the_anchor:             'Win rate as a thug.',
+    isdf_loyalist:          'Matches played as ISDF.',
+    hadean_loyalist:        'Matches played as Hadean.',
+    scion_loyalist:         'Matches played as Scion.',
+    the_diplomat:           'Distinct teammates.',
+    map_master:             'Best win rate on a single map.',
+    streak_king:            'Current win streak.',
+    the_polymath:           'Distinct weapons used.',
+  };
+
+  function highlightUnitSuffix(card) {
+    const unit = HIGHLIGHT_UNITS[card.category] || '';
+    return unit ? ` <span class="vt-highlight-mini-unit">${escapeHtml(unit)}</span>` : '';
+  }
+
   function renderHighlightCard(card, playerName) {
     const isWinner = card.winner && card.winner.name === playerName;
     const w = card.winner || {};
     const ru = card.runner_up || null;
     const cls = isWinner ? 'vt-highlight-card-winner' : 'vt-highlight-card-runnerup';
     const iconCls = card.icon || (isWinner ? 'bi-trophy-fill' : 'bi-award');
+    const meaning = HIGHLIGHT_MEANING[card.category] || '';
+    const unit = highlightUnitSuffix(card);
     return `<div class="col-12 col-md-6 col-xl-4">
       <div class="vt-highlight-card-mini ${cls}">
         <div class="vt-highlight-mini-head">
@@ -1772,32 +2060,39 @@
         </div>
         <div class="vt-highlight-mini-body">
           <strong>${escapeHtml(w.name || '\u2014')}</strong>
-          <span class="vt-vtsr-rating">${formatHighlightValue(card, card.value)}</span>
+          <span class="vt-vtsr-rating">${formatHighlightValue(card, card.value)}${unit}</span>
+          ${meaning ? `<p class="vt-highlight-mini-meaning">${escapeHtml(meaning)}</p>` : ''}
           ${card.narrative ? `<p class="small text-secondary mb-0 mt-1 text-capitalize">${escapeHtml(card.narrative.replace(/_/g, ' '))}</p>` : ''}
         </div>
         ${ru ? `<div class="vt-highlight-mini-runnerup small">
           Runner-up: <strong>${escapeHtml(ru.name)}</strong>
-          <span class="vt-vtsr-rating">${formatHighlightValue(card, ru.value)}</span>
+          <span class="vt-vtsr-rating">${formatHighlightValue(card, ru.value)}${unit}</span>
         </div>` : ''}
       </div>
     </div>`;
   }
 
+  // Integer highlight metrics always group with a US comma, independent of
+  // the browser locale. Does not use the page-wide formatNumber().
+  function formatHighlightInt(n) {
+    return Math.round(+n).toLocaleString('en-US');
+  }
+
   function formatHighlightValue(card, v) {
     if (v == null) return '\u2014';
     const fmt = String(card.value_format || '').toLowerCase();
-    if (fmt === 'percent' || fmt === '%' || fmt === 'pct') {
+    if (fmt === 'percent' || fmt === '%' || fmt === 'pct' || fmt === 'accuracy') {
       const pct = +v <= 1 ? +v * 100 : +v;
       return `${pct.toFixed(1)}%`;
     }
-    if (fmt === 'ratio' || fmt === 'rate') {
+    if (fmt === 'ratio' || fmt === 'rate' || fmt === 'kd') {
       return Number.isFinite(+v) ? (Math.round(+v * 100) / 100).toFixed(2) : String(v);
     }
-    if (fmt === 'damage' || fmt === 'count' || fmt === 'kills') {
-      return Number.isFinite(+v) ? formatNumber(+v) : String(v);
+    if (fmt === 'damage' || fmt === 'count' || fmt === 'kills' || fmt === 'scrap' || fmt === 'score' || fmt === 'distance') {
+      return Number.isFinite(+v) ? formatHighlightInt(v) : String(v);
     }
     if (Number.isFinite(+v)) {
-      if (Math.abs(+v) >= 1000) return formatNumber(+v);
+      if (Math.abs(+v) >= 1000) return formatHighlightInt(v);
       return (Math.round(+v * 100) / 100).toString();
     }
     return String(v);
@@ -3125,6 +3420,7 @@
     });
 
     compareState.found = found;
+    readCompareAxisFromUrl();
 
     renderCompareHero(found);
     renderCompareBody(found);
@@ -3237,8 +3533,8 @@
                   <i class="bi bi-graph-up me-1"></i>VTSR-T progression
                 </h2>
                 <div class="vt-chip-group" role="group" aria-label="X-axis mode" id="vt-compare-x-mode">
-                  <button type="button" class="vt-chip" data-x="date" data-selected="true">By date</button>
-                  <button type="button" class="vt-chip" data-x="matches">By matches played</button>
+                  <button type="button" class="vt-chip" data-x="date" data-selected="${compareState.xAxisMode === 'matches' ? 'false' : 'true'}">By date</button>
+                  <button type="button" class="vt-chip" data-x="matches" data-selected="${compareState.xAxisMode === 'matches' ? 'true' : 'false'}">By matches played</button>
                 </div>
               </div>
               <div class="position-relative" style="height: 320px;">
@@ -3784,6 +4080,10 @@
         compareState.xAxisMode = btn.dataset.x === 'matches' ? 'matches' : 'date';
         xMode.querySelectorAll('.vt-chip').forEach(b =>
           b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
+        const params = currentParams();
+        if (compareState.xAxisMode === 'matches') params.set('x', 'matches');
+        else params.delete('x');
+        writeHistory(params, 'push');
         renderCompareTimeSeries(found);
       });
     }
@@ -3797,9 +4097,7 @@
       dispatch();
       return;
     }
-    const url = new URL(window.location.href);
-    url.searchParams.set('compare', next.join(','));
-    history.replaceState(null, '', url.toString());
+    pushCompareList(next);
     renderCompare(next);
   }
 
@@ -3807,9 +4105,7 @@
     const current = compareState.found.map(f => f.slug);
     if (current.includes(slug) || current.length >= COMPARE_MAX) return;
     const next = [...current, slug];
-    const url = new URL(window.location.href);
-    url.searchParams.set('compare', next.join(','));
-    history.replaceState(null, '', url.toString());
+    pushCompareList(next);
     renderCompare(next);
   }
 
@@ -3944,7 +4240,7 @@
 
     if (compare) {
       const raw = compare.split(',').map(s => s.trim()).filter(Boolean).slice(0, COMPARE_MAX);
-      if (!raw.length) { showSection('directory'); renderDirectoryGrid(); return; }
+      if (!raw.length) { showDirectory(); return; }
       const remapped = raw.map(s => {
         const r = resolveAliasSlug(s);
         return (r && r.slug) ? r.slug : s;
@@ -3953,6 +4249,10 @@
         params.set('compare', remapped.join(','));
         const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
         history.replaceState({}, '', next);
+      }
+      if (!writesSuppressed() && params.has('tab')) {
+        params.delete('tab');
+        writeHistory(params, 'replace');
       }
       showSection('compare');
       renderCompare(remapped);
@@ -3996,7 +4296,12 @@
       return;
     }
 
+    showDirectory();
+  }
+
+  function showDirectory() {
     showSection('directory');
+    hydrateDirectoryFromUrl();
     // Hydrate the staged-from-single-player clipboard once (10-minute
     // TTL keeps the bounce-back tight; older crumbs are dropped). When
     // a player is pending we auto-enable compare-mode and pre-tick
@@ -4025,7 +4330,10 @@
     dom.searchInput.addEventListener('input', (e) => {
       state.filters.query = e.target.value;
       renderDirectoryGrid();
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => syncDirectoryUrl('search'), 300);
     });
+    dom.searchInput.addEventListener('blur', endSearchSession);
 
     dom.tierChips.addEventListener('click', (e) => {
       const btn = e.target.closest('.vt-chip');
@@ -4040,6 +4348,7 @@
         btn.setAttribute('data-selected', 'true');
       }
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.roleChips.addEventListener('click', (e) => {
@@ -4049,6 +4358,7 @@
       dom.roleChips.querySelectorAll('.vt-chip').forEach(b =>
         b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.activityChips.addEventListener('click', (e) => {
@@ -4058,11 +4368,13 @@
       dom.activityChips.querySelectorAll('.vt-chip').forEach(b =>
         b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.sortSelect.addEventListener('change', (e) => {
       state.filters.sort = e.target.value;
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.compareToggle.addEventListener('click', () => {
@@ -4153,12 +4465,25 @@
     dom.loading.classList.add('d-none');
     dom.main.classList.remove('d-none');
 
+    if (dom.singleTabs) {
+      dom.singleTabs.addEventListener('shown.bs.tab', (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('[data-bs-target]') : e.target;
+        const target = btn && btn.getAttribute('data-bs-target');
+        if (btn && btn._vtQuiet) { btn._vtQuiet = false; return; }
+        if (target) syncTabUrl(target);
+      });
+    }
+
     // Resolve mode + first render.
     dispatch();
 
-    // Re-dispatch on browser nav so back-button from a single-player
-    // view restores the directory cleanly.
-    window.addEventListener('popstate', dispatch);
+    // Re-dispatch on browser nav so Back/Forward restore the tab,
+    // directory filters, or compare roster without writing history.
+    window.addEventListener('popstate', () => {
+      window.clearTimeout(searchTimer);
+      endSearchSession();
+      withoutHistoryWrites(dispatch);
+    });
   }
 
   function cacheDom() {

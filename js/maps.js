@@ -3,7 +3,11 @@
  *
  * Boots map/index.html and per-map pre-gen stubs at /map/<slug>/ in three
  * URL modes:
- *   - directory:    no params -> rich card-grid landing (search/filters)
+ *   - directory:    no params -> rich card-grid landing (search/filters).
+ *                  Non-default filters live in the query (?q= ?pools=
+ *                  ?size= ?tag= ?played= ?author= ?sort=) and pushState
+ *                  so Back/Forward walks them. Search commits after the
+ *                  first one in a focus session replaceState.
  *   - single (stub): /map/<slug>/  (pre-gen sets window.__vtMapBoot)
  *   - single (fb):   /map/?file=<slug>  (runtime fallback for uncovered)
  *
@@ -142,6 +146,110 @@
       sort:      'played-desc',
     },
   };
+
+  // ---- URL history (directory filters) ---------------------------------
+  const MAP_FILTER_KEYS = ['q', 'pools', 'size', 'tag', 'played', 'author', 'sort'];
+  let historyWrites = 0;
+  let searchReplace = false;
+  let searchTimer = 0;
+  function writesSuppressed() { return historyWrites > 0; }
+  function withoutHistoryWrites(fn) {
+    historyWrites++;
+    try { return fn(); }
+    finally { historyWrites--; }
+  }
+  function locationKey() {
+    return window.location.pathname + window.location.search + window.location.hash;
+  }
+  function paramsToString(params) {
+    return params.toString().replace(/%2C/gi, ',');
+  }
+  function urlFromParams(params) {
+    const qs = paramsToString(params);
+    return window.location.pathname + (qs ? '?' + qs : '') + (window.location.hash || '');
+  }
+  function currentParams() { return new URLSearchParams(window.location.search); }
+  function writeHistory(params, mode) {
+    if (writesSuppressed()) return;
+    const next = urlFromParams(params);
+    if (next === locationKey()) return;
+    if (mode === 'search') {
+      if (searchReplace) history.replaceState(null, '', next);
+      else { history.pushState(null, '', next); searchReplace = true; }
+      return;
+    }
+    if (mode !== 'replace') searchReplace = false;
+    if (mode === 'replace') history.replaceState(null, '', next);
+    else history.pushState(null, '', next);
+  }
+  function directoryVisible() {
+    const el = $('vt-map-directory');
+    return !!(el && !el.classList.contains('d-none'));
+  }
+  function knownChipIds(root, attr) {
+    const ids = new Set();
+    if (!root) return ids;
+    root.querySelectorAll('.vt-chip').forEach(b => { if (b.dataset[attr]) ids.add(b.dataset[attr]); });
+    return ids;
+  }
+  function paintSet(root, attr, set) {
+    if (!root) return;
+    root.querySelectorAll('.vt-chip').forEach(b => {
+      b.setAttribute('data-selected', set.has(b.dataset[attr]) ? 'true' : 'false');
+    });
+  }
+  function applyMapFiltersToParams(params) {
+    MAP_FILTER_KEYS.forEach(k => params.delete(k));
+    const q = (state.filters.query || '').trim();
+    if (q) params.set('q', q);
+    if (state.filters.pools.size) params.set('pools', [...state.filters.pools].sort().join(','));
+    if (state.filters.sizes.size) params.set('size', [...state.filters.sizes].sort().join(','));
+    if (state.filters.tags.size) params.set('tag', [...state.filters.tags].sort().join(','));
+    if (state.filters.played && state.filters.played !== 'all') params.set('played', state.filters.played);
+    if (state.filters.author) params.set('author', state.filters.author);
+    if (state.filters.sort && state.filters.sort !== 'played-desc') params.set('sort', state.filters.sort);
+  }
+  function syncDirectoryUrl(mode) {
+    if (!directoryVisible()) return;
+    const params = currentParams();
+    params.delete('file');
+    applyMapFiltersToParams(params);
+    writeHistory(params, mode);
+  }
+  function hydrateDirectoryFromUrl() {
+    const params = currentParams();
+    state.filters.query = params.get('q') || '';
+    if (dom.searchInput) dom.searchInput.value = state.filters.query;
+
+    const poolIds = knownChipIds(dom.poolsChips, 'pools');
+    const sizeIds = knownChipIds(dom.sizeChips, 'size');
+    const tagIds = knownChipIds(dom.tagChips, 'tag');
+    state.filters.pools = new Set((params.get('pools') || '').split(',').map(s => s.trim()).filter(id => poolIds.has(id)));
+    state.filters.sizes = new Set((params.get('size') || '').split(',').map(s => s.trim()).filter(id => sizeIds.has(id)));
+    state.filters.tags = new Set((params.get('tag') || '').split(',').map(s => s.trim()).filter(id => tagIds.has(id)));
+    paintSet(dom.poolsChips, 'pools', state.filters.pools);
+    paintSet(dom.sizeChips, 'size', state.filters.sizes);
+    paintSet(dom.tagChips, 'tag', state.filters.tags);
+
+    const played = params.get('played');
+    state.filters.played = (played === 'played' || played === 'unplayed') ? played : 'all';
+    if (dom.playedChips) {
+      dom.playedChips.querySelectorAll('.vt-chip').forEach(b => {
+        b.setAttribute('data-selected', b.dataset.played === state.filters.played ? 'true' : 'false');
+      });
+    }
+
+    const author = params.get('author') || '';
+    const authorOk = author && dom.authorSelect && [...dom.authorSelect.options].some(o => o.value === author);
+    state.filters.author = authorOk ? author : '';
+    if (dom.authorSelect) dom.authorSelect.value = state.filters.author;
+
+    const sort = params.get('sort');
+    state.filters.sort = Object.prototype.hasOwnProperty.call(SORT_COMPARATORS, sort) ? sort : 'played-desc';
+    if (dom.sortSelect) dom.sortSelect.value = state.filters.sort;
+
+    if (!writesSuppressed()) syncDirectoryUrl('replace');
+  }
 
   // ---- Data loading ----------------------------------------------------
 
@@ -467,6 +575,7 @@
     if (dom.authorSelect) dom.authorSelect.value = '';
     if (dom.sortSelect) dom.sortSelect.value = 'played-desc';
     renderDirectoryGrid();
+    syncDirectoryUrl('push');
   }
 
   // ---- Single-map view -------------------------------------------------
@@ -825,6 +934,7 @@
 
     if (!targetKey) {
       showSection('directory');
+      hydrateDirectoryFromUrl();
       renderDirectoryGrid();
       return;
     }
@@ -863,7 +973,10 @@
     dom.searchInput.addEventListener('input', (e) => {
       state.filters.query = e.target.value || '';
       renderDirectoryGrid();
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => syncDirectoryUrl('search'), 300);
     });
+    dom.searchInput.addEventListener('blur', () => { searchReplace = false; });
 
     dom.poolsChips.addEventListener('click', (e) => {
       const btn = e.target.closest('.vt-chip');
@@ -877,6 +990,7 @@
         btn.setAttribute('data-selected', 'true');
       }
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.sizeChips.addEventListener('click', (e) => {
@@ -891,6 +1005,7 @@
         btn.setAttribute('data-selected', 'true');
       }
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.tagChips.addEventListener('click', (e) => {
@@ -905,6 +1020,7 @@
         btn.setAttribute('data-selected', 'true');
       }
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.playedChips.addEventListener('click', (e) => {
@@ -914,16 +1030,19 @@
       dom.playedChips.querySelectorAll('.vt-chip').forEach(b =>
         b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.authorSelect.addEventListener('change', (e) => {
       state.filters.author = e.target.value || '';
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.sortSelect.addEventListener('change', (e) => {
       state.filters.sort = e.target.value || 'played-desc';
       renderDirectoryGrid();
+      syncDirectoryUrl('push');
     });
 
     dom.clearFiltersBtn.addEventListener('click', clearFilters);
@@ -975,7 +1094,11 @@
     if (dom.main) dom.main.classList.remove('d-none');
 
     dispatch();
-    window.addEventListener('popstate', dispatch);
+    window.addEventListener('popstate', () => {
+      window.clearTimeout(searchTimer);
+      searchReplace = false;
+      withoutHistoryWrites(dispatch);
+    });
   }
 
   function cacheDom() {

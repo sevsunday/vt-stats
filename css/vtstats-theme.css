@@ -688,6 +688,58 @@ body::before {
     color: var(--kb-text-muted);
 }
 
+.vt-preloader-status.is-error {
+    color: var(--kb-danger);
+}
+
+.vt-preloader-detail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    width: min(440px, calc(100vw - 32px));
+}
+
+.vt-preloader-log {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    max-height: 240px;
+    overflow: auto;
+    text-align: left;
+    font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    color: var(--kb-text-muted);
+}
+
+.vt-preloader-log:empty {
+    display: none;
+}
+
+.vt-preloader-log li.is-done {
+    opacity: 0.55;
+}
+
+.vt-preloader-log li.is-active {
+    color: var(--kb-text-secondary);
+}
+
+.vt-preloader-log li.is-done::before {
+    content: "· ";
+}
+
+.vt-preloader-log li.is-active::before,
+.vt-preloader-log li.is-error::before {
+    content: "› ";
+}
+
+.vt-preloader-log li.is-error {
+    color: var(--kb-danger);
+}
+
 /* Preloader fade-out */
 .vt-preloader.vt-fade-out {
     opacity: 0;
@@ -6736,6 +6788,14 @@ html.vt-cursor-active * {
     text-transform: uppercase;
     color: var(--kb-text-muted);
     margin: 0.1rem 0 0.25rem;
+}
+
+/* Ship-type continuation under a thug or commander loss row. Same
+   one-line lock as the stat rows so the paired cards stay aligned;
+   the label ellipsizes and the tooltip carries the full list. */
+.vt-econ-shiploss .vt-econ-stat-label-text {
+    padding-left: 1.5rem;
+    font-weight: 500;
 }
 
 /* Commander sibling under Thug supply — not in the team totals. */

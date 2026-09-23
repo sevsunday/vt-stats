@@ -17,6 +17,40 @@
   const PILL_ROOT_ID = 'vt-tools-randomizer-pills';
   const URL_PARAM = 'tab';
 
+  let historyWrites = 0;
+  const DEFAULT_TAB = 'shitwheel';
+
+  function locationKey() {
+    return window.location.pathname + window.location.search + window.location.hash;
+  }
+
+  function syncTabUrl(tabId) {
+    if (historyWrites) return;
+    const url = new URL(window.location.href);
+    if (!tabId || tabId === DEFAULT_TAB) url.searchParams.delete(URL_PARAM);
+    else url.searchParams.set(URL_PARAM, tabId);
+    const next = url.pathname + url.search + url.hash;
+    if (next === locationKey()) return;
+    history.pushState(null, '', next);
+  }
+
+  function showTabFromUrl(root) {
+    const desired = new URLSearchParams(window.location.search).get(URL_PARAM) || DEFAULT_TAB;
+    const target = root.querySelector(`[data-vt-tab-id="${cssEscape(desired)}"]`)
+      || root.querySelector(`[data-vt-tab-id="${DEFAULT_TAB}"]`);
+    if (!target || !window.bootstrap || !bootstrap.Tab) return;
+    if (!target.classList.contains('active')) {
+      target._vtQuiet = true;
+      window.setTimeout(() => { if (target._vtQuiet) target._vtQuiet = false; }, 1000);
+      bootstrap.Tab.getOrCreateInstance(target).show();
+    }
+    if (desired === DEFAULT_TAB && new URLSearchParams(window.location.search).has(URL_PARAM)) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete(URL_PARAM);
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    }
+  }
+
   function init() {
     const root = document.getElementById(PILL_ROOT_ID);
     if (!root) return; // panel not on this page
@@ -31,18 +65,10 @@
       btn.addEventListener('shown.bs.tab', _onShown);
     });
 
-    // URL deep-link: ?tab=shitwheel|coinflip|maproll
-    const sp = new URLSearchParams(window.location.search);
-    const desired = sp.get(URL_PARAM);
-    if (desired) {
-      const target = root.querySelector(`[data-vt-tab-id="${cssEscape(desired)}"]`);
-      if (target && window.bootstrap && bootstrap.Tab) {
-        try {
-          const tabApi = bootstrap.Tab.getOrCreateInstance(target);
-          tabApi.show();
-        } catch (_) { /* no-op */ }
-      }
-    }
+    // URL deep-link: ?tab=shitwheel|coinflip|maproll. Boot show does not
+    // push; later pill changes do, and Back restores the previous pill.
+    showTabFromUrl(root);
+    window.addEventListener('popstate', () => showTabFromUrl(root));
 
     // Fire an initial vt-tools:tab-shown for the currently-active pill so
     // wheel/maproll can do their first paint with correct dimensions.
@@ -56,6 +82,9 @@
   function _onShown(ev) {
     const tabId = (ev.target && ev.target.getAttribute('data-vt-tab-id')) || null;
     _emit(tabId);
+    const btn = ev.target;
+    if (btn && btn._vtQuiet) { btn._vtQuiet = false; return; }
+    syncTabUrl(tabId);
   }
 
   function _emit(tabId) {

@@ -53,6 +53,78 @@ let viewer = null;
 let controlsWired = false;
 let viewMode = 'standard';   // 'standard' | 'hq' | 'photos'
 const uiState = { search: '', faction: 'all', sort: 'name' };
+const LEGO_SORTS = new Set(['name', 'faction', 'parts-desc', 'parts-asc']);
+let openSlug = null;
+let historyWrites = 0;
+let searchReplace = false;
+let searchTimer = 0;
+
+function writesSuppressed() { return historyWrites > 0; }
+function withoutHistoryWrites(fn) {
+  historyWrites++;
+  try { return fn(); }
+  finally { historyWrites--; }
+}
+function paramsToString(params) {
+  return params.toString().replace(/%2C/gi, ',');
+}
+function locationKey() {
+  return location.pathname + location.search + location.hash;
+}
+function currentParams() { return new URLSearchParams(location.search); }
+function legoFilterParams(opts) {
+  const params = new URLSearchParams();
+  const q = uiState.search.trim();
+  if (q) params.set('q', q);
+  if (uiState.faction && uiState.faction !== 'all') params.set('faction', uiState.faction);
+  if (uiState.sort && uiState.sort !== 'name') params.set('sort', uiState.sort);
+  if (opts && opts.model) params.set('model', opts.model);
+  if (opts && opts.view && opts.view !== 'hq') params.set('view', opts.view);
+  return params;
+}
+function urlFromParams(params) {
+  const qs = paramsToString(params);
+  return location.pathname + (qs ? '?' + qs : '') + location.hash;
+}
+function writeHistory(params, mode) {
+  if (writesSuppressed()) return;
+  const next = urlFromParams(params);
+  if (next === locationKey()) return;
+  if (mode === 'search') {
+    if (searchReplace) history.replaceState(null, '', next);
+    else { history.pushState(null, '', next); searchReplace = true; }
+    return;
+  }
+  if (mode !== 'replace') searchReplace = false;
+  if (mode === 'replace') history.replaceState(null, '', next);
+  else history.pushState(null, '', next);
+}
+function viewFromUrl() {
+  const v = currentParams().get('view');
+  if (v === 'standard' || v === 'photos') return v;
+  return 'hq';
+}
+function syncLegoUrl(mode) {
+  const model = els.directory.hidden ? (currentParams().get('model') || openSlug) : null;
+  const view = model ? viewMode : null;
+  writeHistory(legoFilterParams({ model, view: model ? view : null }), mode);
+}
+function hydrateLegoUi() {
+  const params = currentParams();
+  uiState.search = params.get('q') || '';
+  if (els.search) els.search.value = uiState.search;
+  const factions = new Set(MODELS.map((m) => m.faction).filter(Boolean));
+  const fac = params.get('faction');
+  uiState.faction = (fac && fac !== 'all' && factions.has(fac)) ? fac : 'all';
+  const sort = params.get('sort');
+  uiState.sort = LEGO_SORTS.has(sort) ? sort : 'name';
+  if (els.sort) els.sort.value = uiState.sort;
+  if (!writesSuppressed()) {
+    const model = params.get('model');
+    const view = model ? viewFromUrl() : null;
+    writeHistory(legoFilterParams({ model, view }), 'replace');
+  }
+}
 
 /* ---------------- directory ---------------- */
 function factionList() {
@@ -69,7 +141,12 @@ function renderFactionChips() {
   });
   els.factionChips.innerHTML = chips.join('');
   els.factionChips.querySelectorAll('.filter-chip').forEach((btn) => {
-    btn.addEventListener('click', () => { uiState.faction = btn.dataset.faction; renderFactionChips(); renderGrid(); });
+    btn.addEventListener('click', () => {
+      uiState.faction = btn.dataset.faction;
+      renderFactionChips();
+      renderGrid();
+      syncLegoUrl('push');
+    });
   });
 }
 
@@ -101,7 +178,7 @@ function renderGrid() {
       : `<div class="thumb thumb-missing"></div>`;
     const photos = (m.renders && m.renders.length)
       ? `<span class="chip chip-photos">${m.renders.length} render${m.renders.length === 1 ? '' : 's'}</span>` : '';
-    return `<a class="model-card" href="?model=${encodeURIComponent(m.slug)}">
+    return `<a class="model-card" href="${esc(urlFromParams(legoFilterParams({ model: m.slug })))}">
       ${thumb}
       <div class="card-body">
         <div class="card-title">${esc(m.name)}</div>
@@ -117,8 +194,8 @@ function renderGrid() {
   els.grid.querySelectorAll('.model-card').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
-      const slug = new URL(a.href).searchParams.get('model');
-      history.pushState({ model: slug }, '', `?model=${encodeURIComponent(slug)}`);
+      const slug = new URL(a.href, location.href).searchParams.get('model');
+      writeHistory(legoFilterParams({ model: slug }), 'push');
       route();
     });
   });
@@ -131,7 +208,7 @@ function showLoading(on, label) {
   if (label && els.stageLoadingLabel) els.stageLoadingLabel.textContent = label;
 }
 
-function setViewMode(mode) {
+function setViewMode(mode, opts) {
   viewMode = mode;
   els.viewSeg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.view === mode));
   const showPhotos = mode === 'photos';
@@ -148,6 +225,7 @@ function setViewMode(mode) {
       viewer.setUltra(mode === 'hq', () => showLoading(false));
     }
   }
+  if (!(opts && opts.silent)) syncLegoUrl('push');
 }
 
 async function openModel(slug) {
@@ -177,7 +255,8 @@ async function openModel(slug) {
   // Reset toggles to defaults for the freshly-loaded model. HQ is the default
   // view; setViewMode manages the loading overlay via setUltra's ready callback.
   syncControlsToViewer();
-  setViewMode('hq');
+  openSlug = slug;
+  setViewMode(viewFromUrl(), { silent: true });
 }
 
 function renderPhotos(entry) {
@@ -297,13 +376,24 @@ async function onCapture() {
 function showDirectory() {
   els.viewer.hidden = true;
   els.directory.hidden = false;
+  openSlug = null;
   if (viewer) { viewer.dispose(); viewer = null; }
 }
 
 function route() {
-  const slug = new URL(location.href).searchParams.get('model');
-  if (slug) openModel(slug);
-  else showDirectory();
+  hydrateLegoUi();
+  renderFactionChips();
+  renderGrid();
+  const slug = currentParams().get('model');
+  if (slug) {
+    if (openSlug === slug && viewer) {
+      setViewMode(viewFromUrl(), { silent: true });
+      els.directory.hidden = true;
+      els.viewer.hidden = false;
+      return;
+    }
+    openModel(slug);
+  } else showDirectory();
 }
 
 function esc(s) {
@@ -313,10 +403,24 @@ function esc(s) {
 
 /* ---------------- boot ---------------- */
 (async () => {
-  els.back.addEventListener('click', (e) => { e.preventDefault(); history.pushState({}, '', location.pathname); route(); });
-  els.search.addEventListener('input', () => { uiState.search = els.search.value; renderGrid(); });
-  els.sort.addEventListener('change', () => { uiState.sort = els.sort.value; renderGrid(); });
-  window.addEventListener('popstate', route);
+  els.back.addEventListener('click', (e) => {
+    e.preventDefault();
+    writeHistory(legoFilterParams(), 'push');
+    route();
+  });
+  els.search.addEventListener('input', () => {
+    uiState.search = els.search.value;
+    renderGrid();
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => syncLegoUrl('search'), 300);
+  });
+  els.search.addEventListener('blur', () => { searchReplace = false; });
+  els.sort.addEventListener('change', () => { uiState.sort = els.sort.value; renderGrid(); syncLegoUrl('push'); });
+  window.addEventListener('popstate', () => {
+    window.clearTimeout(searchTimer);
+    searchReplace = false;
+    withoutHistoryWrites(route);
+  });
 
   try {
     const idx = await fetch(`${LEGO_BASE}index.json`, { cache: 'no-cache' }).then((r) => {
