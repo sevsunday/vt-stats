@@ -7,13 +7,17 @@ YouTube video-seconds so any timestamped surface can emit
 https://www.youtube.com/watch?v=<id>&t=<sec>s deep links.
 
 THIS SCRIPT IS NOT PART OF THE PIPELINE. It runs once per (match, video)
-pair when a VOD appears (`python scripts/map_match_video.py ...`), requires
-yt-dlp / opencv-python / easyocr / numpy plus an ffmpeg binary on PATH
-(import-time / PATH deps only), and writes committed
-data/external/match_videos.json. The pipeline never reads that file.
-scripts/elo.py, scripts/elo_commander.py, scripts/process_stats.py and
-js/all-matches-aggregator.js are forbidden consumers (gated by
-_investigation/check_match_videos.py). Docs: DATA_DICTIONARY.md §16.
+pair when a VOD appears. The preferred operator path is the inbox
+(`data/external/match_video_queue.json`) plus
+`python scripts/process_match_videos.py`, which subprocesses this CLI
+for each new pair. Direct invocation (`python scripts/map_match_video.py
+...`) is for debugging a single video. Requires yt-dlp / opencv-python /
+easyocr / numpy plus an ffmpeg binary on PATH (import-time / PATH deps
+only), and writes committed data/external/match_videos.json. The pipeline
+never reads that file. scripts/elo.py, scripts/elo_commander.py,
+scripts/process_stats.py and js/all-matches-aggregator.js are forbidden
+consumers (gated by _investigation/check_match_videos.py). Docs:
+DATA_DICTIONARY.md §16.
 
 Typical uncut mapping:
 

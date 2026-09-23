@@ -3649,7 +3649,7 @@ Human-curated, tool-assisted mapping from dashboard **match seconds** onto YouTu
 
 ### `data/external/match_videos.json`
 
-`{schema_version: 1, matches: {<match_id>: [entry, ...]}}`. Array per match so multiple POVs/channels coexist. Written by `scripts/map_match_video.py` (atomic temp-file + rename, `sort_keys=True`); safe to hand-edit.
+`{schema_version: 1, matches: {<match_id>: [entry, ...]}}`. Array per match so multiple POVs/channels coexist. Written by `scripts/map_match_video.py` (atomic temp-file + rename, `sort_keys=True`); safe to hand-edit. The operator inbox is `data/external/match_video_queue.json` (`schema_version: 1`, match id → channel key → URL string or `{url, offset?, anchor?, force_identity?, notes?}`); `scripts/process_match_videos.py` syncs new pairs into this store. The frontend reads only `match_videos.json`.
 
 | Field | Meaning |
 |---|---|
@@ -3677,6 +3677,7 @@ Human-curated, tool-assisted mapping from dashboard **match seconds** onto YouTu
 Standalone, **not pipeline-invoked** (`scripts/import_f9_ledger.py` precedent). Operator-only deps: `yt-dlp`, `opencv-python`, `easyocr`, `numpy`, plus an `ffmpeg` binary on PATH (`imageio-ffmpeg` is an accepted bundled fallback). Typical:
 
 ```
+python scripts/process_match_videos.py
 python scripts/map_match_video.py --match 2026-09-13T02-32-33 --video https://www.youtube.com/watch?v=2sLbGfx3rXQ --pov F9bomber
 python scripts/map_match_video.py --match … --video … --offset 0 --force-identity --yes
 python scripts/map_match_video.py --self-test

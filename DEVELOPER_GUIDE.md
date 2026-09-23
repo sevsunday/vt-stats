@@ -2968,7 +2968,7 @@ Map dashboard match-seconds onto YouTube video-seconds so kill feed / build log 
 
 ### 19.1 Store + posture
 
-Committed `data/external/match_videos.json` (`schema_version: 1`). Sibling of the F9 ledger files — external, community-sourced, standalone-tool-written, human-editable. **Zero pipeline interaction** (no schema bumps). **Forbidden consumers** `process_stats.py` / `elo.py` / `elo_commander.py` / `all-matches-aggregator.js` (gate: `_investigation/check_match_videos.py`). Display-only, 404-safe, picker-unaware, rating-inert by construction. Credit every channel wherever a link renders.
+Committed `data/external/match_videos.json` (`schema_version: 1`) is the processed store the frontend reads. Sibling inbox `data/external/match_video_queue.json` is operator-edited (match id → channel key → URL); `scripts/process_match_videos.py` syncs new pairs into the store the way new session files sit in front of `process_stats.py`. Sibling of the F9 ledger files — external, community-sourced, standalone-tool-written, human-editable. **Zero pipeline interaction** (no schema bumps). **Forbidden consumers** `process_stats.py` / `elo.py` / `elo_commander.py` / `all-matches-aggregator.js` (gate: `_investigation/check_match_videos.py`). Display-only, 404-safe, picker-unaware, rating-inert by construction. Credit every channel wherever a link renders.
 
 Time base: `match_sec = (tick − tick_range[0]) / tick_rate`. Mapping = rate-1.0 `{video_sec, match_sec, duration_sec}` segments. HUD clock skew is the module constant `MISSION_CLOCK_SKEW_SEC = 0.0` (measured on the Egypt × `2sLbGfx3rXQ` pair; stored segments already fold it in).
 
@@ -2976,18 +2976,22 @@ Time base: `match_sec = (tick − tick_range[0]) / tick_rate`. Mapping = rate-1.
 
 Operator-only deps (never required by the pipeline): `pip install yt-dlp opencv-python easyocr numpy` plus `ffmpeg` on PATH (or `pip install imageio-ffmpeg` for a bundled binary).
 
-1. Identify the match id (dashboard URL `?match=` or `data/processed/matches.json`) and the YouTube URL. Optional: whose cockpit (`--pov <name|steam64>`).
-2. Dry-run the mapper so you can read the proposed segments and QA links without writing:
+**Inbox (default).** Add the YouTube URL to `data/external/match_video_queue.json` under the match id (dashboard `?match=`), keyed by channel name. That key is also `--pov` when it matches the match roster. A string value is just the URL; an object may add `offset` / `anchor` / `force_identity` / `notes` for VODs OCR cannot finish alone. Then:
 
-   ```
-   python scripts/map_match_video.py --match 2026-09-13T02-32-33 --video https://www.youtube.com/watch?v=2sLbGfx3rXQ --pov F9bomber --dry-run
-   ```
+```
+python scripts/process_match_videos.py
+python scripts/process_match_videos.py --dry-run
+```
 
-   Uncut VODs take the sparse presence-gated OCR path (~1–2 min). Edited VODs (`--mode edited`, or auto when residuals exceed 2 s) stream the whole file at 1 fps. `--debug-frames` dumps annotated stills to `_investigation/output/video_sync/<match>/<video_id>/` (gitignored).
-3. If OCR cannot run (missing EasyOCR, scoreboard never up): supply `--offset SEC` (video = match + offset) or repeatable `--anchor MM:SS@VIDEO_SEC`. `--force-identity` bypasses the roster-name gate and is logged in `notes`.
-4. Open the printed QA `&t=` links. Confirm they land within ~2 s of the named kill. Pass `--yes` to sign off non-interactively, or answer `y` at the prompt. `verified: true` is what the frontend prefers.
-5. Re-run is idempotent for the same `(match_id, video_id)` — the entry is replaced. `verified_at` is preserved when segments + `mapping_kind` are unchanged.
-6. `python _investigation/check_match_videos.py` must pass (unknown match ids, overlapping segments, empty channel names, and forbidden-consumer grep all fail loud). Then commit `data/external/match_videos.json`.
+The batch script skips `(match_id, video_id)` pairs already in `match_videos.json` and subprocesses `map_match_video.py` for new ones (no `--yes`). Answer `y` at the existing QA prompt to sign off (`verified: true`). One bad row does not drop the rest of the queue; a non-zero exit means at least one new row failed. `--force` re-runs pairs already in the store. Removing a queue row does not delete a store entry. Then `python _investigation/check_match_videos.py` and commit both JSON files.
+
+**Single-video CLI (debugging).** Identify the match id and the YouTube URL. Optional: whose cockpit (`--pov <name|steam64>`). Dry-run the mapper so you can read the proposed segments and QA links without writing:
+
+```
+python scripts/map_match_video.py --match 2026-09-13T02-32-33 --video https://www.youtube.com/watch?v=2sLbGfx3rXQ --pov F9bomber --dry-run
+```
+
+Uncut VODs take the sparse presence-gated OCR path (~1–2 min). Edited VODs (`--mode edited`, or auto when residuals exceed 2 s) stream the whole file at 1 fps. `--debug-frames` dumps annotated stills to `_investigation/output/video_sync/<match>/<video_id>/` (gitignored). If OCR cannot run (missing EasyOCR, scoreboard never up): supply `--offset SEC` (video = match + offset) or repeatable `--anchor MM:SS@VIDEO_SEC`. `--force-identity` bypasses the roster-name gate and is logged in `notes`. Open the printed QA `&t=` links; confirm they land within ~2 s of the named kill. Pass `--yes` to sign off non-interactively, or answer `y` at the prompt. Re-run is idempotent for the same `(match_id, video_id)` — the entry is replaced. `verified_at` is preserved when segments + `mapping_kind` are unchanged. Then `python _investigation/check_match_videos.py` and commit `data/external/match_videos.json`.
 
 `--input local.mp4` skips yt-dlp (offline / a channel that blocks extraction). `--self-test` runs the synthetic two-offset assemble (cut at 20 s, ±2 s) and, when ffmpeg + EasyOCR are present, an ffmpeg-spliced OCR round-trip.
 
