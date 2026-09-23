@@ -1,10 +1,10 @@
 /*
- * Raw Data Browser (raw.html) — styles.
+ * Raw Data Browser (raw/index.html) — styles.
  *
- * Loaded ONLY on raw.html (after the shared theme/layout stack). All colors
+ * Loaded ONLY on raw/index.html (after the shared theme/layout stack). All colors
  * use --kb-* variables; all effects use --vt-* variables; no hardcoded
  * palette. Fixed-height virtualized rows (28px) are the core contract for
- * the tree renderer in js/raw-browser.js.
+ * the tree renderer in js/raw-browser.js. Legacy /raw.html redirects here.
  */
 
 /* --- Shared utility (scoped to this page) --- */
@@ -147,6 +147,62 @@
     min-width: 5.5em;
     justify-content: center;
     color: var(--kb-text-muted);
+}
+
+.vt-raw-search-hint {
+    font-size: 0.78rem;
+    max-width: 22rem;
+}
+
+.vt-raw-search-hint code {
+    font-size: 0.85em;
+}
+
+.vt-raw-op-status {
+    font-size: 0.78rem;
+    min-height: 1.2em;
+    white-space: nowrap;
+}
+
+.vt-raw-op-status--busy::before {
+    content: '';
+    display: inline-block;
+    width: 0.7em;
+    height: 0.7em;
+    margin-right: 0.4em;
+    border-radius: 50%;
+    border: 2px solid color-mix(in oklab, var(--kb-primary) 35%, transparent);
+    border-top-color: var(--kb-primary);
+    animation: vt-raw-spin 0.7s linear infinite;
+    vertical-align: -0.1em;
+}
+
+@keyframes vt-raw-spin {
+    to { transform: rotate(360deg); }
+}
+
+body.vt-raw-mode-events .vt-raw-tree-only {
+    display: none !important;
+}
+
+.vt-raw-open-events {
+    margin-left: 0.45rem;
+    padding: 0 0.4rem;
+    font-size: 0.68rem;
+    line-height: 1.4;
+    border-radius: 0.25rem;
+    border: 1px solid var(--kb-border-subtle);
+    background: color-mix(in oklab, var(--kb-bg-subtle) 70%, transparent);
+    color: var(--kb-text-primary);
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.vt-raw-open-events:hover,
+.vt-raw-open-events:focus-visible {
+    border-color: var(--kb-primary);
+    color: var(--kb-primary);
+    outline: none;
 }
 
 .vt-raw-search-group input[data-regex="true"] {
@@ -489,6 +545,34 @@
     color: var(--kb-text-primary);
 }
 
+.vt-raw-events-chip-check {
+    width: 0.72rem;
+    height: 0.72rem;
+    border: 1.5px solid currentColor;
+    border-radius: 0.15rem;
+    display: inline-block;
+    position: relative;
+    flex: 0 0 auto;
+    opacity: 0.55;
+}
+
+.vt-raw-events-chip--on .vt-raw-events-chip-check {
+    opacity: 1;
+    background: color-mix(in oklab, currentColor 22%, transparent);
+}
+
+.vt-raw-events-chip--on .vt-raw-events-chip-check::after {
+    content: '';
+    position: absolute;
+    left: 0.18rem;
+    top: 0.02rem;
+    width: 0.22rem;
+    height: 0.38rem;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+}
+
 /* Dual-handle tick range slider. Uses stacked native range inputs;
    the visual track is a separate div below the labels. */
 .vt-raw-events-slider {
@@ -586,21 +670,25 @@
 /* Virtualized table. thead is sticky; tbody is the virtualized scroll area.
    Fixed 28px row height matches ROW_HEIGHT in js/raw-browser.js. */
 .vt-raw-events-table {
+    --vt-raw-events-cols:
+        72px                      /* tick */
+        76px                      /* time */
+        130px                     /* type */
+        minmax(120px, 1.1fr)      /* shooter */
+        minmax(160px, 1.5fr)      /* actor odf */
+        minmax(120px, 1.1fr)      /* victim */
+        minmax(160px, 1.5fr)      /* victim odf */
+        minmax(150px, 1.5fr)      /* ordnance */
+        108px;                    /* amount */
     border: 1px solid var(--kb-border-subtle);
     border-radius: 0.35rem;
-    overflow: hidden;
+    overflow-x: auto;
 }
 
 .vt-raw-events-thead {
     display: grid;
-    grid-template-columns:
-        72px       /* tick */
-        76px       /* time */
-        130px      /* type */
-        minmax(140px, 1.3fr)  /* shooter */
-        minmax(140px, 1.3fr)  /* victim */
-        minmax(140px, 1.5fr)  /* ordnance */
-        100px;     /* amount */
+    grid-template-columns: var(--vt-raw-events-cols);
+    min-width: 1240px;
     align-items: center;
     padding: 0 0.35rem;
     background: color-mix(in oklab, var(--kb-bg-subtle) 70%, transparent);
@@ -625,8 +713,10 @@
 
 .vt-raw-events-body {
     position: relative;
+    min-width: 1240px;
     height: min(65vh, 760px);
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     font-family: 'Geist Mono', ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     font-size: 0.82rem;
@@ -647,14 +737,8 @@
     left: 0;
     right: 0;
     display: grid;
-    grid-template-columns:
-        72px
-        76px
-        130px
-        minmax(140px, 1.3fr)
-        minmax(140px, 1.3fr)
-        minmax(140px, 1.5fr)
-        100px;
+    grid-template-columns: var(--vt-raw-events-cols);
+    min-width: 1240px;
     align-items: center;
     padding: 0 0.35rem;
     height: 28px;
@@ -664,6 +748,10 @@
 
 .vt-raw-events-row:hover {
     background: color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent);
+}
+
+.vt-raw-events-row--current {
+    background: color-mix(in oklab, var(--kb-primary) 16%, transparent);
 }
 
 .vt-raw-events-cell {
@@ -780,6 +868,14 @@
 .vt-raw-reconcile-row--skip td {
     color: var(--kb-text-muted);
     font-style: italic;
+}
+
+.vt-raw-reconcile-row--info td {
+    color: var(--kb-text-secondary);
+}
+
+.vt-raw-reconcile-summary--fail {
+    color: var(--kb-danger);
 }
 
 /* Sentinel filter badge. Rendered above the Reconcile table when the

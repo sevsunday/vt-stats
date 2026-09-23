@@ -42,7 +42,7 @@ data/processed/                       Pre-computed JSON consumed by the browser
 index.html + JS                       Dashboard renders charts, tables, replay, positioning
 js/all-matches-aggregator.js          Pure summation over match_contributions.json
                                       scoped to the picker-filtered subset
-raw.html + js/raw-browser.js          Standalone Raw Data Browser: decodes binpb
+raw/index.html + js/raw-browser.js    Standalone Raw Data Browser: decodes binpb
                                       client-side and renders three tiers per match
 ```
 
@@ -428,7 +428,7 @@ The hero banner above the tab strip is built by `renderBanner()` + `renderMapBan
 | Players | `match.player_count` | `StatHeader.player_count` or `len(nick_map)` |
 | Submitted by | `match.submitter` | Parent folder name of the session file |
 | Map thumbnail | `data/map-registry.json[key].image_path` → `data/maps/<map_file>.png` | 70×70 `<img>` wrapped in `#info-map-thumb-btn` with a `bi-zoom-in` corner overlay. Click opens the Map Info Modal. Hidden when the match's map isn't in the registry |
-| View raw | hyperlink → `raw.html?match=<id>` | Per-match Raw Data Browser cross-link |
+| View raw | hyperlink → `raw/?match=<id>` | Per-match Raw Data Browser cross-link |
 
 ### Map Info Modal
 

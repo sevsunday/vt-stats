@@ -1544,9 +1544,9 @@ First-render spawn centroids on the 4 new-schema maps currently show a consisten
 
 ---
 
-## 11. Raw Data Browser (`raw.html`)
+## 11. Raw Data Browser (`raw/index.html`)
 
-The Raw Data Browser is a standalone, isolated page for inspecting per-match data at every layer. It is **not** part of the main dashboard — it lives in its own file with its own CSS + JS and has no shared state with `index.html`.
+The Raw Data Browser is a standalone, isolated page for inspecting per-match data at every layer. It is **not** part of the main dashboard — it lives at `/raw/` with its own CSS + JS and has no shared state with `index.html`. `raw.html` is a query-preserving redirect to `raw/` so old bookmarks keep working.
 
 ### Three tiers
 
@@ -1560,7 +1560,7 @@ Tier 2 does not exist as an on-disk artifact — it is materialized on demand in
 
 ### Decode pipeline
 
-1. `fetch('data/sessions/<submitter>/<basename>.binpb.gz')` — the binpb is served statically, same as the processed JSON.
+1. `fetch('../data/sessions/<submitter>/<basename>.binpb.gz')` — the binpb is served statically, same as the processed JSON (page lives at `/raw/`, so assets are one directory up).
 2. Gunzip via the native `DecompressionStream('gzip')` API (no vendored lib).
 3. **Triple-descriptor decode.** Try the current v3 descriptor first (`vendor/protobufjs/statsgate.proto.json` → `statsgate.ClientStatSession.decode(bytes)`); on a wire-type error from protobufjs (which is strict), fall back to v1 (`vendor/protobufjs/statsgate_v1.proto.json` → `statsgate_v1.ClientStatSession.decode(bytes)`). On success, check `header.players`: non-empty → v3; empty → lazy-load the frozen v2 descriptor (`vendor/protobufjs/statsgate_v2.proto.json` → `statsgate_v2.ClientStatSession`) and re-decode so the identity maps (reserved under v3) are readable. The detected schema is stamped on `state.protoSchemaVersion` (`"v1"` | `"v2"` | `"v3"`). The Steam64 resolver builds from `header.s64ToNick` (v1/v2) or `header.players[]` (v3).
 4. `ClientStatSession.toObject(msg, { longs: String, defaults: false, oneofs: true, bytes: String, enums: String })` → plain JS object suitable for the tree renderer.
@@ -1571,22 +1571,24 @@ Tier 2 does not exist as an on-disk artifact — it is materialized on demand in
 ### URL schema
 
 ```
-raw.html?match=<id>
+raw/?match=<id>
         &view=decoded|processed|reconcile
         &mode=tree|events        (only meaningful when view=decoded)
         &path=<json-pointer>     (tree mode only)
-        &q=<search>              (tree mode only; see "Search" + "JSONPath" below)
-        &types=<csv>             (events mode only; comma-separated oneof arm names)
+        &q=<search>              (tree and events; see "Search" + "JSONPath" below)
+        &regex=1                 (Words vs Regex; omit for Words)
+        &types=<csv>|none       (events mode only; arm names, or none for zero rows)
         &tick=<lo>-<hi>          (events mode only; inclusive tick range)
         &player=<steam64>        (events mode only; filter to rows involving this player)
 ```
 
 - Absent `match` → match picker UI.
 - Absent `view` → defaults to `decoded`.
-- Absent `mode` → defaults to `tree`.
+- Absent `mode` → defaults to `events`. `mode=tree` opens the JSON tree.
 - On `view` change, `path` and `q` reset (paths don't translate across tiers).
 - `path` uses RFC 6901 JSON Pointer format (e.g. `/eventStream/5/damageDealt/amount`).
-- `types` accepts any subset of `bulletInit,bulletHit,damageDealt,damageReceived,updateTick,unitDestroyed,unitSniped`. Empty → treated as "all".
+- `types` accepts any subset of the schema's event arms. Omit the param for every arm. `types=none` shows zero rows.
+- `raw.html?match=<id>…` redirects to `raw/?match=<id>…` (query + hash preserved).
 
 ### Domain-aware resolvers
 
@@ -1601,13 +1603,15 @@ Fixed 28px row height (`ROW_HEIGHT` in `js/raw-browser.js`, `.vt-raw-tree-row` i
 
 ### Search
 
-Case-insensitive substring match on keys AND string/number/bool values, across the entire underlying object (not just visible rows). Ctrl+Enter toggles regex mode (JS `RegExp` with `i` flag). Enter = next hit; Shift+Enter = prev hit. Jumping to a hit expands collapsed ancestors to make it visible and scrolls it into view.
+One find bar, shared by Tree and Events. Default mode is **Words**: case-insensitive AND of whitespace-separated tokens (`Gun Spire` matches that unit name; `sev spire` matches a row that has both). A visible **Regex** control (JS `RegExp` with the `i` flag) replaces the old Ctrl+Enter toggle. Invalid patterns show `bad regex` and do not run. Jump on Enter / Shift+Enter / the arrows, not on every keystroke.
+
+Haystacks include raw strings **and** resolved nicknames / ODF pretty names (`resolveSteam64` / `resolveOdf`), so the name on screen is the name you can search. Tree walks are chunked (a few thousand nodes per frame, capped at 2,000 stored hits) with a `Searching…` status so a 100k-event object cannot freeze the tab. Large arrays such as `eventStream` stay collapsed under the size cap; the summary row offers **Open in Events**.
 
 ### Entry surfaces
 
-- **Main dashboard**: "View raw" button on the match-info banner (`#info-raw-link` in `index.html`), href updated per-match by `renderBanner()` in `js/app.js`.
-- **Docs page**: docs.html mentions the Raw Data Browser; open it from the dashboard match-info **View Raw Data** button (`raw.html?match=<id>`).
-- **Direct URL**: `raw.html?match=<id>` works without going through either.
+- **Main dashboard**: "View raw" button on the match-info banner (`#info-raw-link` in `index.html`), href updated per-match by `renderBanner()` in `js/app.js` (`raw/?match=<id>`).
+- **Docs page**: docs.html mentions the Raw Data Browser; open it from the dashboard match-info **View Raw Data** button (`raw/?match=<id>`).
+- **Direct URL**: `raw/?match=<id>` works without going through either. `raw.html?match=<id>` redirects there.
 
 ### Schema-migration verify tool
 
@@ -1615,14 +1619,17 @@ Case-insensitive substring match on keys AND string/number/bool values, across t
 
 ### Events-mode view (`view=decoded&mode=events`)
 
-A virtualized alternate rendering of `event_stream`. Row for each event with columns: `Tick · Time (sec, derived from match.tick_rate) · Type · Shooter · Victim · Ordnance · Amount`. Pre-extracts hot columns into a packed array once per match load; filter/sort/render are cheap from that array.
+A virtualized alternate rendering of `event_stream`. Row for each event with columns: `Tick · Time (sec, derived from match.tick_rate) · Type · Shooter · Actor ODF · Victim · Victim ODF · Ordnance · Amount`. Pre-extracts hot columns into a packed array once per match load; filter/sort/render are cheap from that array.
+
+Actor ODF is the acting ship's stem (`shooterOdf`, else `killerOdf`, else `pickerOdf`). Victim ODF is `victimOdf`. Ordnance stays the weapon, powerup, or built unit. Each ODF cell shows the resolved name plus a stem link to `../odf/?odf=<stem>`. BulletHit rows with no damage amount show `distance_to_target` in the Amount cell as meters. UpdateTick player ODFs and BuildEvent positions stay in the tree.
 
 **Filters** (all URL-synced):
 
-- **Event-type chips** (7) — multi-select, one per oneof arm. At least one must stay enabled; clicking the last-enabled chip is a no-op.
+- **Find bar** — the same Words / Regex control as the tree. Filters the packed row haystack (type label, sub-type, both players, every ODF field raw and pretty, amount, hit distance). The card's row count is the result (`842 of 129,730`).
+- **Event-type chips** — multi-select, one per oneof arm, each with a checkbox mark. Every chip can be turned off; zero selected types renders 0 rows (`types=none`).
 - **Tick range slider** — dual-handle; seconds labels are derived from `match.tick_rate`.
 - **Player cell click** — clicking any Steam64 cell narrows to rows where that s64 is the shooter or victim. A dismissable badge above the table shows the active filter.
-- **Reset** — a single button that restores all filters to their initial state.
+- **Reset** — a single button that restores type / tick / player filters to their initial state (the find-bar query is independent).
 
 **Pair highlight** — hovering a `DamageDealt` row outlines the adjacent `DamageReceived` row (and vice versa) per the [adjacent-pair rule](.cursor/rules/data-schema.mdc). A one-pass precompute (`pairIdx: Int32Array`) indexes the pairs at load time so hover is O(1). The pair-index is only built on v1 sessions — on v2 the unified `DamageDealt` carries both sides on the same event, so `pairIdx` stays filled with `-1` and the adjacent-pair hover hint silently disables itself.
 
@@ -1630,14 +1637,15 @@ A virtualized alternate rendering of `event_stream`. Row for each event with col
 
 **Schema-aware Reconcile** — `computePersonalReceived(s64)` reads from `damageReceived` rows on v1 and from `damageDealt` rows (with `r.victim == s64`) on v2. `computePersonalPvpDealt(s64)` reads paired-DR victim on v1 and direct `r.victim` on v2. `computeSentinelSummary()` is schema-agnostic — one logical record per matching `damageDealt` row regardless of schema.
 
-**Cross-link to Replay** — clicking a row navigates to `index.html?match=<id>&tab=replay&t=<tick>`. The Replay tab honors `?t=<tick>` via `VTReplay.jumpToTick(tick)` — see below. The jump is consumed exactly once on initial page load and does not persist across subsequent renders (so the user can freely scrub after).
+**Cross-link to Replay** — clicking a row navigates to `../index.html?match=<id>&tab=replay&t=<tick>`. The Replay tab honors `?t=<tick>` via `VTReplay.jumpToTick(tick)` — see below. The jump is consumed exactly once on initial page load and does not persist across subsequent renders (so the user can freely scrub after).
 
 ### Search + JSONPath subset (tree mode)
 
-The search input accepts two kinds of query, auto-detected by the first character:
+The search input accepts three kinds of query:
 
-1. **Plain text** (default) — case-insensitive substring match against keys AND string/number/bool values. Ctrl+Enter toggles regex mode (JS `RegExp` with `i` flag). Enter = next hit; Shift+Enter = prev.
-2. **JSONPath** (when the query starts with `$`) — evaluated against the current tier's root. Explicit subset, **not** a full JSONPath spec:
+1. **Words** (default) — every whitespace-separated word must appear in the node's haystack (key + raw value + resolved nickname / ODF pretty name). Enter = next hit; Shift+Enter = prev. The walk is chunked; jumping expands collapsed ancestors.
+2. **Regex** — one JavaScript pattern with the `i` flag (e.g. `gun|spire`). The Words / Regex pills replace Ctrl+Enter. Invalid patterns show `bad regex` and do not run.
+3. **JSONPath** (when the query starts with `$`) — tree-only; evaluated against the current tier's root. Explicit subset, **not** a full JSONPath spec:
 
 ```
 path     = '$' segment*
@@ -1662,17 +1670,18 @@ Unsupported on purpose: deep descent (`..`), unions (`[1,2,3]`), slices (`[1:3]`
 
 ### Reconciliation view (`view=reconcile`)
 
-Verifies the processed JSON's aggregates against sums/counts computed from the decoded event stream. The reconciliation mappings are a **fixed, predefined list** (plan-confirmed). Adding a new mapping is an explicit plan update, not a freeform feature.
+Checks that dashboard totals match a recount of the raw events. A red row is a real disagreement. The page shows a one-line result (`N checks, M mismatches`). Adding a new mapping is an explicit plan update, not a freeform feature.
 
-Initial set (v1):
+Initial set:
 
-| Processed field | Tier-2 rule |
+| Field | Rule |
 |---|---|
 | `match.snipe_count` | `count(unitSniped)` |
 | `leaderboard[i].personal.dealt` | `Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0` |
 | `leaderboard[i].personal.received` | `Σ damageReceived.amount where victim == s64 ∧ team > 0 ∧ amount > 0` |
 | `leaderboard[i].personal.pvp_dealt` | `Σ damageDealt.amount where shooter == s64 ∧ team > 0 ∧ amount > 0 ∧ paired dr.victim > 0` |
-| `leaderboard[i].kills` | `count(unitDestroyed where killer == s64)` |
+| Raw destructions | `count(unitDestroyed where killer == s64)` — informational, not pass/fail |
+| Counted kills | `pvp_kills + pve_kills` vs `unitDestroyed` excluding self-kills and pilot victims (`user_m` in the victim ODF). Powerup and deployable exclusions need the ODF category DB, which this page does not load — remaining gap vs dashboard kills. |
 
 Delta tolerance: `±0.1` for float fields (rounding slop per `.cursor/rules/data-schema.mdc`), exact match required for integer fields. Rows that exceed the tolerance are highlighted in danger-red and the Δ column carries the offset — those represent either pipeline bugs or a schema change that the reconcile rules haven't caught up to yet.
 
@@ -1698,7 +1707,7 @@ Returns `true` if the seek was accepted, `false` if there's no active replay sta
 
 ## 12. ODF Browser (`odf/index.html`)
 
-The ODF Browser is the project's fourth standalone page, sibling to `index.html` / `docs.html` / `raw.html`. It's a read-only reference for browsing the BZ2 Object Definition File (ODF) database — the same `data/odf.min.json` the dashboard uses for weapon-name resolution, but presented as an interactive browser rather than a lookup table.
+The ODF Browser is the project's fourth standalone page, sibling to `index.html` / `docs.html` / `raw/index.html`. It's a read-only reference for browsing the BZ2 Object Definition File (ODF) database — the same `data/odf.min.json` the dashboard uses for weapon-name resolution, but presented as an interactive browser rather than a lookup table.
 
 ### Files
 
@@ -2499,7 +2508,7 @@ Under this logistic the legacy raw-sum bands (100 / 300 / 600 ΔΣVTSR) land nea
 
 ## 14. Player Profile Pages (`player/`)
 
-The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs.html` / `raw.html` / `odf/index.html`. The page system is **dual-runtime**:
+The Player Profile Pages are the project's **fifth standalone page**, sibling to `index.html` / `docs.html` / `raw/index.html` / `odf/index.html`. The page system is **dual-runtime**:
 
 1. **Pre-generated stubs** at `player/<slug>/index.html` — one HTML file per player with `matches_played >= 5`, rendered by `scripts/generate_player_pages.py` from `scripts/player_template.html`. Each stub carries per-player Open Graph meta tags in `<head>` for rich Discord / Slack / Twitter unfurls, plus a tiny `window.__vtPlayerBoot` script block that hints the client-side renderer at the player's identity before fetch.
 2. **Runtime fallback** at `player/index.html` — same client-side JS (`js/player.js`) renders unstubbed players (`?p=<steam64>` / `?slug=<slug>`), the **Directory** landing (no params), and the **Compare view** (`?compare=<csv-of-slugs>`, capped at 4 players).
@@ -2633,7 +2642,7 @@ Player profile pages are **picker-unaware** — they ignore the dashboard's matc
 
 ## 15. Map Browser Pages (`map/`)
 
-The Map Browser is the project's **sixth standalone page**, sibling to `index.html` / `docs.html` / `raw.html` / `odf/index.html` / `player/index.html`. Mirrors the player-pages architecture with deliberate simplifications: maps already have URL-safe slugs (the lowercased `map_file` stem from `build_map_registry.map_key()`) so there's no allocator and no stickiness layer. The page system is **dual-runtime**:
+The Map Browser is the project's **sixth standalone page**, sibling to `index.html` / `docs.html` / `raw/index.html` / `odf/index.html` / `player/index.html`. Mirrors the player-pages architecture with deliberate simplifications: maps already have URL-safe slugs (the lowercased `map_file` stem from `build_map_registry.map_key()`) so there's no allocator and no stickiness layer. The page system is **dual-runtime**:
 
 1. **Pre-generated stubs** at `map/<mapfile>/index.html` — one HTML file per map in `data/map-registry.json` (~143 once Phase 1's universe-extension lands in production), rendered by `scripts/generate_map_pages.py` from `scripts/map_template.html`. Each stub carries per-map Open Graph meta tags pointing at the map's actual top-down screenshot for rich Discord / Slack / Twitter unfurls, plus a tiny `window.__vtMapBoot` script block that hints the client-side renderer at the map identity before fetch.
 2. **Runtime fallback** at `map/index.html` — same client-side JS (`js/maps.js`) renders the **Directory** landing (no params), single maps via `?file=<slug>` for the rare uncovered map, and degrades gracefully when `map_stats.json` is missing.
@@ -2690,7 +2699,7 @@ Map browser pages are **picker-unaware** (mirrors VTSR-T leaderboard). The picke
 
 | Site | Wiring |
 |---|---|
-| Topnav `Maps` link | Added on `index.html`, `docs.html`, `raw.html`, `odf/index.html`, and the player template (which forces `PLAYER_TEMPLATE_VERSION` 5 → 6 to re-render every player stub with the new nav). |
+| Topnav `Maps` link | Added on `index.html`, `docs.html`, `raw/index.html`, `odf/index.html`, and the player template (which forces `PLAYER_TEMPLATE_VERSION` 5 → 6 to re-render every player stub with the new nav). |
 | Map Info Modal title | `#map-info-modal-title-link` wraps the title text; clicks open `/map/<slug>/` in a new tab (`target="_blank" rel="noopener"`) so the modal stays open. Wired in `renderMapInfoModal()` in `js/app.js`. |
 | Map Info Modal footer | New `#map-info-modal-page-link` `View full map page` button next to Close. Same `target="_blank"` semantics. Toggled `d-none` together with the title link when `meta.key` is empty. |
 | Match-info banner | New `#info-map-link` button next to `#info-raw-link`, wired in `renderMapBannerFields()`. Hidden via `d-none` when the match's map isn't in the registry (parallel to the `#info-map-thumb-btn` toggle). |
@@ -2897,7 +2906,7 @@ The Lobby Tools page is **picker-unaware** (mirrors VTSR-T leaderboard and the p
 
 ## 17. Models Browser (`models/`)
 
-The project's **eighth standalone page**, sibling to `index.html` / `docs.html` / `raw.html` / `odf/index.html` / `player/index.html` / `map/index.html` / `tools/index.html`. An interactive three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles), promoted from the `_object-render/` proof-of-concept.
+The project's **eighth standalone page**, sibling to `index.html` / `docs.html` / `raw/index.html` / `odf/index.html` / `player/index.html` / `map/index.html` / `tools/index.html`. An interactive three.js viewer for the BZCC 3D model corpus (~700 units / buildings / projectiles), promoted from the `_object-render/` proof-of-concept.
 
 ### 17.1 Files
 

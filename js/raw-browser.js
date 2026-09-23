@@ -1,5 +1,5 @@
 /**
- * VT Stats — Raw Data Browser (raw.html)
+ * VT Stats — Raw Data Browser (raw/index.html)
  *
  * Isolated from the main dashboard. Lets users inspect the raw protobuf
  * wire-format, the faithful JSON decode, and the processed aggregates for
@@ -11,7 +11,7 @@
  *   - Tier 3 (processed): rendered in the tree under view=processed.
  *
  * Decode path:
- *   fetch(data/sessions/<u>/<id>.binpb.gz)
+ *   fetch(../data/sessions/<u>/<id>.binpb.gz)
  *     -> native DecompressionStream ('gzip')
  *     -> vendored protobufjs-light (vendor/protobufjs/protobuf.min.js)
  *     -> Root.fromJSON(descriptor) + ClientStatSession.decode(bytes)
@@ -24,8 +24,9 @@
  * name. Odf_map is an additive match-global pipeline output (see
  * scripts/process_stats.py and .cursor/rules/data-schema.mdc).
  *
- * URL schema (Phase 1):
- *   raw.html?match=<id>&view=decoded|processed&path=<json-pointer>&q=<search>
+ * URL schema:
+ *   raw/?match=<id>&view=decoded|processed|reconcile&mode=tree|events
+ *       &path=<json-pointer>&q=<search>&regex=1
  * Absent `match` -> match picker. Absent `view` -> 'decoded'. On view change,
  * path and q reset (they don't translate across tiers).
  *
@@ -50,14 +51,19 @@
   // of allocating ~26 MB of row objects and freezing the main thread.
   // See .cursor/plans/lazy-projected_rows_bulk_baaa7bef.plan.md.
   const BULK_THRESHOLD = 2000;
-  const DESCRIPTOR_URL = 'vendor/protobufjs/statsgate.proto.json';
-  const DESCRIPTOR_URL_V1 = 'vendor/protobufjs/statsgate_v1.proto.json';
+  // Page lives at /raw/; all repo-root assets and sibling pages are one
+  // directory up. Matcher URLs inside /raw/ stay query-only (`?match=`).
+  const ROOT = '../';
+  const SEARCH_HIT_CAP = 2000;
+  const SEARCH_WALK_CHUNK = 8000;
+  const DESCRIPTOR_URL = ROOT + 'vendor/protobufjs/statsgate.proto.json';
+  const DESCRIPTOR_URL_V1 = ROOT + 'vendor/protobufjs/statsgate_v1.proto.json';
   const ROOT_MESSAGE_V1 = 'statsgate_v1.ClientStatSession';
   // Frozen v2 descriptor (identity maps readable). The primary descriptor
   // is now v3, which RESERVES the map fields 6/7/9/10 -- a v2 file decoded
   // under it silently loses s64ToNick / teamnumToS64 / s64ToTeamnum, so
   // legacy files re-decode through this one. Lazy-loaded on first need.
-  const DESCRIPTOR_URL_V2 = 'vendor/protobufjs/statsgate_v2.proto.json';
+  const DESCRIPTOR_URL_V2 = ROOT + 'vendor/protobufjs/statsgate_v2.proto.json';
   const ROOT_MESSAGE_V2 = 'statsgate_v2.ClientStatSession';
 
   // Schema labels mirrored from scripts/process_stats.py (PROTO_SCHEMA_V1
@@ -69,8 +75,8 @@
   const PROTO_SCHEMA_V3 = 'v3';
   const PROTO_SCHEMA_V4 = 'v4';
   const ROOT_MESSAGE = 'statsgate.ClientStatSession';
-  const PROTO_DOCS_URL = 'data/proto-docs.json';
-  const FIELD_DOCS_MANUAL_URL = 'data/field-docs-manual.json';
+  const PROTO_DOCS_URL = ROOT + 'data/proto-docs.json';
+  const FIELD_DOCS_MANUAL_URL = ROOT + 'data/field-docs-manual.json';
 
   // Sentinel damage filter — kept in sync with SENTINEL_DAMAGE_THRESHOLD in
   // scripts/process_stats.py. Engine's DAMAGE_TYPE_UNKNOWN force-kill
@@ -161,6 +167,7 @@
   let $dlBinpb, $dlDecoded, $dlProcessed,
       $dlBinpbSize, $dlDecodedSize, $dlProcessedSize;
   let $tabsRoot, $search, $searchCount, $searchPrev, $searchNext,
+      $searchWordsBtn, $searchRegexBtn, $opStatus,
       $breadcrumb, $expandBtn, $collapseBtn, $fullscreenBtn;
   let $tree, $treeCard, $treeStatus, $treeStatusText, $treeError, $matchSelect;
 
@@ -170,7 +177,7 @@
       $eventsBody, $playerBadge, $playerName, $playerClear, $eventsReset;
 
   // Phase 3 — reconcile view DOM
-  let $reconcileCard, $reconcilePlayer, $reconcileBody;
+  let $reconcileCard, $reconcilePlayer, $reconcileBody, $reconcileSummary;
 
   // v7: identity-reroute provenance banner (processed tier only).
   let $rerouteBanner;
@@ -182,7 +189,7 @@
     matchId: null,
     matchEntry: null,      // manifest entry for current match
     view: 'decoded',       // 'decoded' | 'processed'
-    mode: 'tree',          // 'tree' | 'events' — scoped to view='decoded'
+    mode: 'events',        // 'tree' | 'events' — scoped to view='decoded'
     // decoded/processed data objects
     decoded: null,         // plain JS object from protobufjs toObject
     processed: null,       // per-match processed JSON
@@ -215,8 +222,10 @@
     searchState: {
       q: '',
       regex: false,
-      hits: [],            // array of { path, row } where row is a rendered index
+      hits: [],            // array of path[] (JSON Pointer segments)
       current: -1,
+      truncated: false,    // true when stored hits hit SEARCH_HIT_CAP
+      gen: 0,              // bumped to cancel an in-flight chunked walk
     },
     // sizes fetched via HEAD for download buttons
     sizes: { binpb: null, processed: null },
@@ -337,9 +346,10 @@
     return {
       match: p.get('match'),
       view: p.get('view') || 'decoded',
-      mode: p.get('mode') || 'tree',
+      mode: p.get('mode') || 'events',
       path: p.get('path') || '',
       q: p.get('q') || '',
+      regex: p.get('regex') === '1' || p.get('regex') === 'true',
       types: p.get('types') || '',
       tick: p.get('tick') || '',
       player: p.get('player') || '',
@@ -358,16 +368,19 @@
       history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
       return;
     }
-    // Mode is only meaningful when view=decoded; omit it for the processed
-    // tier so the URL stays minimal.
-    if (state.view === 'decoded' && state.mode && state.mode !== 'tree') {
-      p.set('mode', state.mode);
+    // Mode is only meaningful when view=decoded. Events is the default,
+    // so the param is written only for the tree.
+    if (state.view === 'decoded' && state.mode === 'tree') {
+      p.set('mode', 'tree');
     }
     if (state.searchState.q) p.set('q', state.searchState.q);
+    if (state.searchState.regex) p.set('regex', '1');
     // Events-mode filters (only serialized when events mode is active).
     if (state.view === 'decoded' && state.mode === 'events' && state.events) {
       const f = state.events.filter;
-      if (f.types.size < currentEventArms().length) {
+      if (f.types.size === 0) {
+        p.set('types', 'none');
+      } else if (f.types.size < currentEventArms().length) {
         p.set('types', currentEventArms().filter(a => f.types.has(a)).join(','));
       }
       if (f.lo !== state.events.tickMin || f.hi !== state.events.tickMax) {
@@ -612,7 +625,7 @@
   // --- Manifest + HEAD size fetches ---
 
   async function loadManifest() {
-    const res = await fetch('data/processed/matches.json', { cache: 'no-store' });
+    const res = await fetch(ROOT + 'data/processed/matches.json', { cache: 'no-store' });
     if (!res.ok) throw new Error(`Failed to load manifest (HTTP ${res.status})`);
     return res.json();
   }
@@ -636,7 +649,7 @@
     $picker.classList.remove('d-none');
 
     const html = manifest.map(m => {
-      const url = `raw.html?match=${encodeURIComponent(m.id)}`;
+      const url = `?match=${encodeURIComponent(m.id)}`;
       const duration = fmtDuration(m.duration_sec);
       const date = m.date ? new Date(m.date).toLocaleString() : '';
       return `
@@ -681,10 +694,10 @@
     // Wire the Back-to-dashboard link with match-id passthrough so the user
     // lands on the same match they were viewing in raw mode.
     const backLink = document.getElementById('rh-back-link');
-    if (backLink) backLink.href = `index.html?match=${encodeURIComponent(matchId)}`;
+    if (backLink) backLink.href = `${ROOT}index.html?match=${encodeURIComponent(matchId)}`;
 
     // URLs for the three artifacts.
-    const processedUrl = `data/processed/${entry.file}`;
+    const processedUrl = `${ROOT}data/processed/${entry.file}`;
     const binpbUrl = buildBinpbUrl(entry);
 
     // Start size fetches + both data loads in parallel.
@@ -727,7 +740,7 @@
     // manifest provides one in the future.
     const sessionName = entry.id.replace('T', '-') + '.binpb.gz';
     const submitter = entry.submitter || 'VTrider';
-    return `data/sessions/${encodeURIComponent(submitter)}/${encodeURIComponent(sessionName)}`;
+    return `${ROOT}data/sessions/${encodeURIComponent(submitter)}/${encodeURIComponent(sessionName)}`;
   }
 
   async function fetchProcessed(url) {
@@ -771,6 +784,84 @@
     if (typeof val !== 'string' || !val) return null;
     if (!state.odfMap) return null;
     return state.odfMap[val] || null;
+  }
+
+  // Same test as scripts/process_stats.py::is_pilot_odf — substring
+  // `user_m` catches the three faction pilots plus VSR-mod variants.
+  function isPilotOdf(odf) {
+    return typeof odf === 'string' && odf.toLowerCase().includes('user_m');
+  }
+
+  function yieldFrame() {
+    return new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+
+  function setOpStatus(text, busy) {
+    if (!$opStatus) return;
+    if (!text) {
+      $opStatus.textContent = '';
+      $opStatus.classList.remove('vt-raw-op-status--busy');
+      return;
+    }
+    $opStatus.textContent = text;
+    $opStatus.classList.toggle('vt-raw-op-status--busy', !!busy);
+  }
+
+  function setSearchRegex(on) {
+    state.searchState.regex = !!on;
+    if ($searchWordsBtn && $searchRegexBtn) {
+      $searchWordsBtn.classList.toggle('active', !on);
+      $searchRegexBtn.classList.toggle('active', on);
+      $searchWordsBtn.setAttribute('aria-pressed', String(!on));
+      $searchRegexBtn.setAttribute('aria-pressed', String(on));
+    }
+    if ($search) {
+      if (on) $search.setAttribute('data-regex', 'true');
+      else $search.removeAttribute('data-regex');
+    }
+  }
+
+  function compileSearchQuery(q, regex) {
+    const trimmed = (q || '').trim();
+    if (!trimmed) return { type: 'empty' };
+    if (trimmed[0] === '$') return { type: 'jsonpath', expr: trimmed };
+    if (regex) {
+      try {
+        return { type: 'regex', re: new RegExp(trimmed, 'i') };
+      } catch {
+        return { type: 'error', message: 'bad regex' };
+      }
+    }
+    const words = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+    return { type: 'words', words };
+  }
+
+  function haystackMatches(haystack, compiled) {
+    if (!compiled || compiled.type === 'empty') return true;
+    if (!haystack) return false;
+    if (compiled.type === 'regex') return compiled.re.test(haystack);
+    if (compiled.type === 'words') {
+      for (const w of compiled.words) {
+        if (!haystack.includes(w)) return false;
+      }
+      return compiled.words.length > 0;
+    }
+    return false;
+  }
+
+  function scalarHaystack(key, value) {
+    const parts = [String(key)];
+    const k = kindOf(value);
+    if (k === 'string' || k === 'number' || k === 'bigint' || k === 'bool') {
+      parts.push(String(value));
+      const nick = resolveSteam64(value);
+      if (nick) parts.push(nick);
+      if (typeof value === 'string') {
+        const pretty = resolveOdf(value);
+        if (pretty) parts.push(pretty);
+      }
+    }
+    return parts.join(' ').toLowerCase();
   }
 
   // --- Header card rendering ---
@@ -884,7 +975,7 @@
       if (!id) return;
       const p = new URLSearchParams();
       p.set('match', id);
-      window.location.href = `raw.html?${p.toString()}`;
+      window.location.href = `?${p.toString()}`;
     };
   }
 
@@ -980,7 +1071,7 @@
     }
   }
 
-  function expandRow(tree, idx) {
+  function expandRow(tree, idx, skipIndex) {
     const row = tree.rows[idx];
     if (!row || !row.expandable || row.expanded) return 0;
     row.expanded = true;
@@ -1008,11 +1099,11 @@
     const insertAt = idx + 1;
     tree.rows = tree.rows.slice(0, insertAt).concat(childRows, tree.rows.slice(insertAt));
     tree.virtualCount += childRows.length;
-    rebuildIndex(tree);
+    if (!skipIndex) rebuildIndex(tree);
     return childRows.length;
   }
 
-  function collapseRow(tree, idx) {
+  function collapseRow(tree, idx, skipIndex) {
     const row = tree.rows[idx];
     if (!row || !row.expanded) return 0;
 
@@ -1034,7 +1125,7 @@
       tree.expanded.delete(row.ptr);
       tree.rows.splice(idx, end - idx);
       tree.virtualCount -= subCount;
-      rebuildIndex(tree);
+      if (!skipIndex) rebuildIndex(tree);
       return subCount + 1;
     }
 
@@ -1071,7 +1162,7 @@
       const totalRemoved = graduatedCount + subtreeCount;
       if (totalRemoved > 0) {
         tree.rows.splice(idx + 1, totalRemoved);
-        rebuildIndex(tree);
+        if (!skipIndex) rebuildIndex(tree);
       }
       tree.virtualCount -= (projectedCount + subtreeCount);
       return projectedCount + totalRemoved;
@@ -1087,7 +1178,7 @@
     const removed = end - (idx + 1);
     tree.rows.splice(idx + 1, removed);
     tree.virtualCount -= removed;
-    rebuildIndex(tree);
+    if (!skipIndex) rebuildIndex(tree);
     return removed;
   }
 
@@ -1345,6 +1436,8 @@
 
   function expandToDepth(tree, maxDepth, respectSizeCap) {
     const cap = respectSizeCap !== false; // default true
+    let expanded = 0;
+    let skippedCap = 0;
     let i = 0;
     while (i < tree.rows.length) {
       const row = tree.rows[i];
@@ -1354,14 +1447,18 @@
             ? row.value.length
             : Object.keys(row.value).length;
           if (childCount > AUTO_EXPAND_MAX_CHILDREN) {
+            skippedCap++;
             i++;
             continue;
           }
         }
-        expandRow(tree, i);
+        expandRow(tree, i, true);
+        expanded++;
       }
       i++;
     }
+    rebuildIndex(tree);
+    return { expanded, skippedCap };
   }
 
   function collapseAll(tree) {
@@ -1371,7 +1468,7 @@
     // OUT of tree.rows on collapse), so guard index bounds defensively.
     for (let i = tree.rows.length - 1; i > 0; i--) {
       if (i >= tree.rows.length) continue;
-      if (tree.rows[i].expanded) collapseRow(tree, i);
+      if (tree.rows[i].expanded) collapseRow(tree, i, true);
     }
     // Defensive post-pass: ensure no stale bulkChildren lingers and no
     // graduated rows stayed behind (collapseRow should handle both, but
@@ -1383,6 +1480,7 @@
         r.expanded = false;
       }
     }
+    rebuildIndex(tree);
   }
 
   // Ensure the row for a given pointer exists by expanding (and, when
@@ -1503,14 +1601,16 @@
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
     // Reset search on view change (paths don't translate across tiers).
+    state.searchState.gen++;
     state.searchState.q = '';
-    state.searchState.regex = false;
     state.searchState.hits = [];
     state.searchState.current = -1;
+    state.searchState.truncated = false;
     $search.value = '';
-    $search.removeAttribute('data-regex');
     $search.removeAttribute('data-jsonpath');
     $searchCount.textContent = '—';
+    setSearchRegex(false);
+    setOpStatus('');
 
     // v7: identity-reroute provenance banner is visible ONLY when
     // view=processed AND the processed JSON's match.account_reroutes is
@@ -1560,22 +1660,28 @@
     const useEvents = (mode === 'events' && !forced);
     $treeCard.classList.toggle('d-none', useEvents);
     $eventsCard.classList.toggle('d-none', !useEvents);
-    // Search + breadcrumb + expand/collapse controls only apply to tree mode.
-    // Hide the whole controls card in events mode so we don't leave an empty
-    // thin card above the events table.
+    document.body.classList.toggle('vt-raw-mode-events', useEvents);
+    // Find bar is shared by Tree and Events. Hide tree-only chrome via
+    // `.vt-raw-tree-only` CSS when Events is active. Reconcile hides the
+    // whole controls card in mountView.
     const controlsCard = document.querySelector('.vt-raw-controls');
-    if (controlsCard) controlsCard.classList.toggle('d-none', useEvents);
+    if (controlsCard && state.view !== 'reconcile') controlsCard.classList.remove('d-none');
     if (useEvents) {
       ensureEventsModel();
-      renderEventsAll();
+      renderEventsChips();
+      updateSliderBounds();
+      if (state.searchState.q.trim()) runSearch();
+      else applyEventsFilter();
     } else {
       render();
+      if (state.searchState.q.trim()) runSearch();
     }
   }
 
   // --- Virtualized rendering ---
 
   let renderScheduled = false;
+  let opBusy = false;
   function scheduleRender() {
     if (renderScheduled) return;
     renderScheduled = true;
@@ -1698,10 +1804,13 @@
     const k = row.kind;
 
     if (k === 'array') {
+      const openEvents = (state.view === 'decoded' && row.key === 'eventStream')
+        ? ` <button type="button" class="vt-raw-open-events" data-action="open-events">Open in Events</button>`
+        : '';
       if (row.expanded) {
-        return `<span class="vt-raw-tree-punc">[</span><span class="vt-raw-tree-summary">${v.length} items</span>`;
+        return `<span class="vt-raw-tree-punc">[</span><span class="vt-raw-tree-summary">${v.length} items</span>${openEvents}`;
       }
-      return `<span class="vt-raw-tree-punc">[</span><span class="vt-raw-tree-summary">${v.length} items</span><span class="vt-raw-tree-punc">]</span>`;
+      return `<span class="vt-raw-tree-punc">[</span><span class="vt-raw-tree-summary">${v.length} items</span><span class="vt-raw-tree-punc">]</span>${openEvents}`;
     }
     if (k === 'object') {
       const n = Object.keys(v).length;
@@ -1762,6 +1871,11 @@
     }
     if (action && action.dataset.action === 'expand-string') {
       expandLongString(vIdx);
+      return;
+    }
+    if (action && action.dataset.action === 'open-events') {
+      mountMode('events', false);
+      syncUrl();
       return;
     }
     setCurrent(vIdx);
@@ -1933,82 +2047,157 @@
   }
 
   // --- Search ---
+  //
+  // Default mode is Words: case-insensitive AND of whitespace-separated
+  // tokens against a haystack that includes raw values plus resolved
+  // nicknames and ODF pretty names. Regex is one JS pattern with the `i`
+  // flag (visible toggle). `$…` JSONPath stays tree-only.
+  // Jump on Enter / the arrows, not on every keystroke. Tree walks are
+  // chunked so a 100k-event object cannot freeze the tab.
 
-  // Case-insensitive substring search (default) on keys AND string/number
-  // values. Ctrl+Enter toggles regex mode. We walk the full underlying
-  // object (not just visible rows) so hits in collapsed subtrees are
-  // findable — on navigation we expand ancestors to surface them.
+  function eventsSearchActive() {
+    return state.view === 'decoded' && state.mode === 'events';
+  }
 
   function runSearch() {
-    const q = state.searchState.q.trim();
-    if (!q) {
+    const gen = ++state.searchState.gen;
+    const compiled = compileSearchQuery(state.searchState.q, state.searchState.regex);
+    state.searchState.truncated = false;
+    $search.removeAttribute('data-jsonpath');
+
+    if (compiled.type === 'empty') {
       state.searchState.hits = [];
       state.searchState.current = -1;
       $searchCount.textContent = '—';
-      render();
+      setOpStatus('');
+      if (eventsSearchActive() && state.events) applyEventsFilter();
+      else if (state.tree) render();
       return;
     }
-    // JSONPath subset: queries starting with `$` are evaluated against the
-    // current tier's root. See parseJsonPath() for the supported grammar.
-    if (q[0] === '$') {
-      try {
-        const hits = evalJsonPath(q, state.tree.rootValue);
-        state.searchState.hits = hits;
-        state.searchState.current = hits.length ? 0 : -1;
-        $searchCount.textContent = hits.length ? `1 / ${hits.length}` : '0';
+    if (compiled.type === 'error') {
+      $searchCount.textContent = compiled.message;
+      setOpStatus('');
+      return;
+    }
+
+    if (eventsSearchActive()) {
+      if (compiled.type === 'jsonpath') {
         $search.setAttribute('data-jsonpath', 'true');
-        if (hits.length) jumpToHit(0);
-        else render();
+        $searchCount.textContent = 'tree only';
+        if (state.events) applyEventsFilter();
+        return;
+      }
+      if (!state.events) ensureEventsModel();
+      applyEventsFilter();
+      state.searchState.hits = [];
+      state.searchState.current = -1;
+      const n = state.events ? state.events.filtered.length : 0;
+      $searchCount.textContent = n ? String(n) : '0';
+      return;
+    }
+
+    if (!state.tree) return;
+
+    if (compiled.type === 'jsonpath') {
+      try {
+        const hits = evalJsonPath(compiled.expr, state.tree.rootValue);
+        if (gen !== state.searchState.gen) return;
+        state.searchState.hits = hits;
+        state.searchState.current = -1;
+        $searchCount.textContent = hits.length ? String(hits.length) : '0';
+        $search.setAttribute('data-jsonpath', 'true');
+        render();
       } catch (err) {
         $searchCount.textContent = 'bad path';
         $search.setAttribute('data-jsonpath', 'error');
       }
       return;
     }
-    $search.removeAttribute('data-jsonpath');
-    const regex = state.searchState.regex;
-    let matcher;
-    try {
-      matcher = regex
-        ? new RegExp(q, 'i')
-        : null;
-    } catch {
-      $searchCount.textContent = 'bad regex';
-      return;
-    }
-    const needleLower = q.toLowerCase();
+
+    setOpStatus('Searching…', true);
+    $searchCount.textContent = '…';
+    walkTreeForSearch(compiled, gen);
+  }
+
+  function walkTreeForSearch(compiled, gen) {
     const hits = [];
-    const rootName = state.tree.rootName;
-    walkForSearch([], rootName, state.tree.rootValue, (path) => {
-      hits.push(path);
-    });
-    state.searchState.hits = hits;
-    state.searchState.current = hits.length ? 0 : -1;
-    $searchCount.textContent = hits.length ? `1 / ${hits.length}` : '0';
-    if (hits.length) jumpToHit(0);
+    const stack = [{
+      path: [],
+      key: state.tree.rootName,
+      value: state.tree.rootValue,
+      emitted: false,
+      i: 0,
+      keys: null,
+      isArr: false,
+    }];
 
-    function walkForSearch(path, key, value, emit) {
-      if (matchesNeedle(key)) emit(path.slice());
-      const k = kindOf(value);
-      if (k === 'object') {
-        for (const [ck, cv] of Object.entries(value)) {
-          walkForSearch(path.concat([ck]), ck, cv, emit);
+    const step = () => {
+      if (gen !== state.searchState.gen) return;
+      let visited = 0;
+      while (stack.length && visited < SEARCH_WALK_CHUNK && hits.length < SEARCH_HIT_CAP) {
+        const top = stack[stack.length - 1];
+        if (!top.emitted) {
+          top.emitted = true;
+          visited++;
+          if (haystackMatches(scalarHaystack(top.key, top.value), compiled)) {
+            hits.push(top.path.slice());
+            if (hits.length >= SEARCH_HIT_CAP) {
+              state.searchState.truncated = true;
+              break;
+            }
+          }
+          const k = kindOf(top.value);
+          if (k === 'object') top.keys = Object.keys(top.value);
+          else if (k === 'array') top.isArr = true;
+          else stack.pop();
+          continue;
         }
-      } else if (k === 'array') {
-        for (let i = 0; i < value.length; i++) {
-          walkForSearch(path.concat([String(i)]), String(i), value[i], emit);
+        if (top.isArr) {
+          if (top.i >= top.value.length) { stack.pop(); continue; }
+          const idx = top.i++;
+          stack.push({
+            path: top.path.concat([String(idx)]),
+            key: String(idx),
+            value: top.value[idx],
+            emitted: false,
+            i: 0,
+            keys: null,
+            isArr: false,
+          });
+        } else {
+          if (top.i >= top.keys.length) { stack.pop(); continue; }
+          const ck = top.keys[top.i++];
+          stack.push({
+            path: top.path.concat([ck]),
+            key: ck,
+            value: top.value[ck],
+            emitted: false,
+            i: 0,
+            keys: null,
+            isArr: false,
+          });
         }
-      } else if (k === 'string' || k === 'number' || k === 'bigint' || k === 'bool') {
-        if (matchesNeedle(value)) emit(path.slice());
       }
-    }
+      if (gen !== state.searchState.gen) return;
+      if (stack.length && hits.length < SEARCH_HIT_CAP) {
+        requestAnimationFrame(step);
+        return;
+      }
+      state.searchState.hits = hits;
+      state.searchState.current = -1;
+      const capMark = state.searchState.truncated ? '+' : '';
+      $searchCount.textContent = hits.length ? `${hits.length}${capMark}` : '0';
+      setOpStatus(state.searchState.truncated
+        ? `First ${SEARCH_HIT_CAP.toLocaleString()} hits`
+        : '');
+      render();
+    };
+    requestAnimationFrame(step);
+  }
 
-    function matchesNeedle(v) {
-      if (v == null) return false;
-      const s = String(v);
-      if (matcher) return matcher.test(s);
-      return s.toLowerCase().includes(needleLower);
-    }
+  function formatHitCount(n, total, truncated) {
+    const capMark = truncated ? '+' : '';
+    return `${n + 1} / ${total}${capMark}`;
   }
 
   function jumpToHit(n) {
@@ -2020,18 +2209,51 @@
     setCurrent(idx);
     scrollRowIntoView(idx);
     state.searchState.current = n;
-    $searchCount.textContent = `${n + 1} / ${hits.length}`;
+    $searchCount.textContent = formatHitCount(n, hits.length, state.searchState.truncated);
+  }
+
+  function jumpToEventHit(n) {
+    const ev = state.events;
+    if (!ev || !ev.filtered.length) return;
+    state.searchState.current = n;
+    $eventsBody.scrollTop = n * ROW_HEIGHT;
+    $searchCount.textContent = formatHitCount(n, ev.filtered.length, false);
+    renderEvents();
   }
 
   function nextHit() {
+    if (eventsSearchActive()) {
+      const ev = state.events;
+      if (!ev || !ev.filtered.length) return;
+      const n = state.searchState.current < 0
+        ? 0
+        : (state.searchState.current + 1) % ev.filtered.length;
+      jumpToEventHit(n);
+      return;
+    }
     const hits = state.searchState.hits;
     if (!hits.length) return;
-    jumpToHit((state.searchState.current + 1) % hits.length);
+    const n = state.searchState.current < 0
+      ? 0
+      : (state.searchState.current + 1) % hits.length;
+    jumpToHit(n);
   }
   function prevHit() {
+    if (eventsSearchActive()) {
+      const ev = state.events;
+      if (!ev || !ev.filtered.length) return;
+      const n = state.searchState.current < 0
+        ? ev.filtered.length - 1
+        : (state.searchState.current - 1 + ev.filtered.length) % ev.filtered.length;
+      jumpToEventHit(n);
+      return;
+    }
     const hits = state.searchState.hits;
     if (!hits.length) return;
-    jumpToHit((state.searchState.current - 1 + hits.length) % hits.length);
+    const n = state.searchState.current < 0
+      ? hits.length - 1
+      : (state.searchState.current - 1 + hits.length) % hits.length;
+    jumpToHit(n);
   }
 
   // --- Phase 3: JSONPath subset ---
@@ -2264,19 +2486,22 @@
       const arm = evt && evt.eventType;
       const payload = arm ? evt[arm] : null;
       let tick = null, shooter = '', victim = '', ordnance = '', amount = null, team = null, sub = '';
+      let actorOdf = '', victimOdf = '', distance = null;
       if (payload) {
         tick = typeof payload.tick === 'number' ? payload.tick : Number(payload.tick || 0);
         if (payload.shooter != null) shooter = String(payload.shooter);
         if (payload.victim != null) victim = String(payload.victim);
         if (payload.killer != null) shooter = String(payload.killer);
-        // PickupPowerup: map picker/picker_odf to shooter slot (the
-        // player who took the action); powerup_odf goes in ordnance.
+        // PickupPowerup: picker is the player who took the action.
+        // Ship ODFs stay in the actor/victim columns — never the player cell.
         if (payload.picker != null) shooter = String(payload.picker);
         if (payload.ordnanceOdf) ordnance = payload.ordnanceOdf;
-        if (payload.victimOdf && !ordnance) ordnance = payload.victimOdf;
         if (payload.powerupOdf && !ordnance) ordnance = payload.powerupOdf;
-        if (payload.killerOdf && !shooter) shooter = payload.killerOdf;
-        if (payload.pickerOdf && !shooter) shooter = payload.pickerOdf;
+        actorOdf = String(payload.shooterOdf || payload.killerOdf || payload.pickerOdf || '');
+        victimOdf = payload.victimOdf ? String(payload.victimOdf) : '';
+        if (payload.distanceToTarget != null && payload.distanceToTarget !== '') {
+          distance = Number(payload.distanceToTarget);
+        }
         if (payload.amount != null) amount = payload.amount;
         if (payload.team != null) team = payload.team;
         if (payload.killerTeam != null && team == null) team = payload.killerTeam;
@@ -2299,7 +2524,29 @@
           sub = [t, p].filter(Boolean).map(s => s.charAt(0) + s.slice(1).toLowerCase()).join(' · ');
         }
       }
-      rows[i] = { i, arm, tick, shooter, victim, ordnance, amount, team, sub };
+      const typeLabel = EVENT_ARM_LABELS[arm] || arm || '';
+      const extraOdfs = payload ? [
+        payload.ordnanceOdf, payload.victimOdf, payload.killerOdf,
+        payload.pickerOdf, payload.powerupOdf, payload.buildOdf,
+      ].filter(Boolean).map(String) : [];
+      const hayParts = [
+        typeLabel, arm || '', sub || '',
+        shooter, resolveSteam64(shooter) || '',
+        victim, resolveSteam64(victim) || '',
+        actorOdf, resolveOdf(actorOdf) || '',
+        victimOdf, resolveOdf(victimOdf) || '',
+        ordnance, resolveOdf(ordnance) || '',
+        amount != null ? String(amount) : '',
+        distance != null && !isNaN(distance) ? String(distance) : '',
+      ];
+      for (const o of extraOdfs) {
+        hayParts.push(o, resolveOdf(o) || '');
+      }
+      rows[i] = {
+        i, arm, tick, shooter, victim, ordnance, amount, team, sub,
+        actorOdf, victimOdf, distance,
+        haystack: hayParts.join(' ').toLowerCase(),
+      };
       if (arm && totalByType[arm] != null) totalByType[arm]++;
       if (tick != null && !isNaN(tick)) {
         if (tick < tickMin) tickMin = tick;
@@ -2348,10 +2595,11 @@
   function seedEventsFilterFromUrl() {
     const url = parseUrlState();
     const f = state.events.filter;
-    if (url.types) {
+    if (url.types === 'none') {
+      f.types = new Set();
+    } else if (url.types) {
       const wanted = new Set(url.types.split(',').filter(Boolean));
       f.types = new Set(currentEventArms().filter(a => wanted.has(a)));
-      if (f.types.size === 0) f.types = new Set(currentEventArms());
     }
     if (url.tick) {
       const [lo, hi] = url.tick.split('-').map(n => parseInt(n, 10));
@@ -2371,6 +2619,7 @@
                 class="vt-raw-events-chip ${on ? 'vt-raw-events-chip--on' : ''} vt-raw-events-type--${arm}"
                 data-arm="${arm}"
                 aria-pressed="${on}">
+          <span class="vt-raw-events-chip-check" aria-hidden="true"></span>
           <span>${EVENT_ARM_LABELS[arm]}</span>
           <span class="vt-raw-events-chip-count">${fmtInt(state.events.totalByType[arm])}</span>
         </button>`;
@@ -2407,6 +2656,8 @@
   function applyEventsFilter() {
     const ev = state.events;
     const f = ev.filter;
+    const compiled = compileSearchQuery(state.searchState.q, state.searchState.regex);
+    const useText = compiled.type === 'words' || compiled.type === 'regex';
     const filtered = [];
     const rows = ev.rows;
     for (let i = 0; i < rows.length; i++) {
@@ -2418,6 +2669,7 @@
       if (f.playerS64) {
         if (r.shooter !== f.playerS64 && r.victim !== f.playerS64) continue;
       }
+      if (useText && !haystackMatches(r.haystack, compiled)) continue;
       filtered.push(i);
     }
     ev.filtered = filtered;
@@ -2431,6 +2683,10 @@
       $playerBadge.classList.add('d-none');
     }
     $eventsBody.scrollTop = 0;
+    if (state.mode === 'events' && useText) {
+      state.searchState.current = -1;
+      $searchCount.textContent = filtered.length ? String(filtered.length) : '0';
+    }
     renderEvents();
   }
 
@@ -2473,11 +2729,16 @@
     const typeTitle = typeDoc ? ` title="${escapeAttr(typeDoc)}"` : '';
     const shooterCell = renderPlayerCell(r.shooter);
     const victimCell = renderPlayerCell(r.victim);
+    const actorOdfCell = renderOdfCell(r.actorOdf);
+    const victimOdfCell = renderOdfCell(r.victimOdf);
     const ordCell = renderOdfCell(r.ordnance);
-    const amt = r.amount != null ? Number(r.amount).toFixed(1) : '';
+    const amt = r.amount != null
+      ? Number(r.amount).toFixed(1)
+      : (r.distance != null && !isNaN(r.distance) ? `${Number(r.distance).toFixed(1)} m` : '');
+    const isCurrent = state.searchState.current === visibleIdx;
 
     return `
-      <div class="vt-raw-events-row"
+      <div class="vt-raw-events-row${isCurrent ? ' vt-raw-events-row--current' : ''}"
            style="top:${top}px"
            data-stream-idx="${r.i}"
            ${r.tick != null ? `data-tick="${r.tick}"` : ''}
@@ -2488,7 +2749,9 @@
           <span class="vt-raw-events-type-tag vt-raw-events-type--${r.arm || 'unknown'}"${typeTitle}>${escapeHtml(typeLabel)}</span>${r.sub ? ` <span class="vt-raw-events-type-sub">${escapeHtml(r.sub)}</span>` : ''}
         </div>
         <div class="vt-raw-events-cell vt-raw-events-col-shooter">${shooterCell}</div>
+        <div class="vt-raw-events-cell vt-raw-events-col-actor-odf">${actorOdfCell}</div>
         <div class="vt-raw-events-cell vt-raw-events-col-victim">${victimCell}</div>
+        <div class="vt-raw-events-cell vt-raw-events-col-victim-odf">${victimOdfCell}</div>
         <div class="vt-raw-events-cell vt-raw-events-col-ordnance">${ordCell}</div>
         <div class="vt-raw-events-cell vt-raw-events-col-amount">${amt}</div>
       </div>`;
@@ -2503,13 +2766,25 @@
     return `<span>${escapeHtml(s64OrString)}</span>`;
   }
 
+  function odfStem(odf) {
+    return String(odf).replace(/\.odf$/i, '');
+  }
+
   function renderOdfCell(odf) {
     if (!odf) return '';
     const pretty = resolveOdf(odf);
-    if (pretty && pretty !== odf) {
-      return `<span title="${escapeHtml(odf)}">${escapeHtml(pretty)}</span>`;
-    }
-    return `<span>${escapeHtml(odf)}</span>`;
+    const stem = odfStem(odf);
+    const href = `${ROOT}odf/?odf=${encodeURIComponent(stem)}`;
+    const link = `<a href="${escapeHtml(href)}" target="_blank" rel="noopener" class="vt-odf-link" title="View ${escapeAttr(stem)} in ODF Browser">${escapeHtml(stem)}</a>`;
+    if (!pretty || pretty === odf) return link;
+    // odf_map names already carry the stem in parentheses ("Scout (ivscout_vsr)").
+    // Link that parenthetical instead of appending the stem a second time.
+    const marker = `(${stem})`;
+    const idx = pretty.lastIndexOf(marker);
+    if (idx === -1) return `<span class="vt-raw-events-odf">${escapeHtml(pretty)} ${link}</span>`;
+    const before = escapeHtml(pretty.slice(0, idx));
+    const after = escapeHtml(pretty.slice(idx + marker.length));
+    return `<span class="vt-raw-events-odf">${before}(${link})${after}</span>`;
   }
 
   // --- Events interactions ---
@@ -2519,11 +2794,8 @@
     if (!btn) return;
     const arm = btn.dataset.arm;
     const f = state.events.filter;
-    if (f.types.has(arm)) {
-      if (f.types.size > 1) f.types.delete(arm);
-    } else {
-      f.types.add(arm);
-    }
+    if (f.types.has(arm)) f.types.delete(arm);
+    else f.types.add(arm);
     renderEventsChips();
     applyEventsFilter();
     syncUrl();
@@ -2553,6 +2825,7 @@
   }
 
   function onEventsBodyClick(evt) {
+    if (evt.target.closest('a')) return;
     const playerCell = evt.target.closest('[data-s64]');
     if (playerCell) {
       const s64 = playerCell.dataset.s64;
@@ -2573,7 +2846,7 @@
     params.set('match', state.matchId);
     params.set('tab', 'replay');
     params.set('t', tick);
-    window.location.href = `index.html?${params.toString()}`;
+    window.location.href = `${ROOT}index.html?${params.toString()}`;
   }
 
   function onEventsBodyHover(evt) {
@@ -2638,38 +2911,56 @@
     if (!state.decoded || !state.processed) {
       $reconcileBody.innerHTML = `<tr><td colspan="5" class="text-center vt-muted py-3">Data not ready.</td></tr>`;
       renderReconcileSentinelBadge({ pairs: 0, totalAmount: 0 });
+      if ($reconcileSummary) $reconcileSummary.textContent = '—';
       return;
     }
     ensureEventsModel(); // reuse the events-mode row extraction
     renderReconcileSentinelBadge(computeSentinelSummary());
-    const rows = [];
-    rows.push(renderReconcileRow(computeSnipes()));
+    const metrics = [];
+    metrics.push(computeSnipes());
     // v4 builds/economy match-level reconcile rows. Blocks are attached
     // only on matches carrying the data (pre-v4 matches have no block),
     // so gate on presence rather than schema stamp.
     if (state.processed.builds && state.processed.builds.has_build_data) {
-      rows.push(renderReconcileRow(computeBuildFeedCount()));
+      metrics.push(computeBuildFeedCount());
     }
     if (state.processed.economy && state.processed.economy.has_resource_data) {
-      rows.push(renderReconcileRow(computeEconomyTicks()));
+      metrics.push(computeEconomyTicks());
     }
     const s64 = $reconcilePlayer.value;
+    const html = [];
     if (s64) {
       const name = state.s64ToNick && state.s64ToNick.get(s64);
-      rows.push(renderReconcileRow(computePersonalDealt(s64, name)));
-      rows.push(renderReconcileRow(computePersonalReceived(s64, name)));
-      rows.push(renderReconcileRow(computePersonalPvpDealt(s64, name)));
+      metrics.push(computePersonalDealt(s64, name));
+      metrics.push(computePersonalReceived(s64, name));
+      metrics.push(computePersonalPvpDealt(s64, name));
       // match.schema_version 8: self-damage carve-out audit rows.
       // Verify the invariant `dealt = pvp_dealt + pve_dealt + self_dealt`
       // and `kills = pvp_kills + pve_kills + self_kills` against the raw
       // event stream.
-      rows.push(renderReconcileRow(computePersonalSelfDealt(s64, name)));
-      rows.push(renderReconcileRow(computePersonalSelfKills(s64, name)));
-      rows.push(renderReconcileRow(computeKills(s64, name)));
-    } else {
-      rows.push(`<tr class="vt-raw-reconcile-row--skip"><td colspan="5" class="text-center py-3">Select a player above to reconcile personal damage and kill totals.</td></tr>`);
+      metrics.push(computePersonalSelfDealt(s64, name));
+      metrics.push(computePersonalSelfKills(s64, name));
+      metrics.push(computeRawDestructions(s64, name));
+      metrics.push(computeCountedKills(s64, name));
     }
-    $reconcileBody.innerHTML = rows.join('');
+    let checks = 0;
+    let mismatches = 0;
+    for (const m of metrics) {
+      html.push(renderReconcileRow(m));
+      if (m.informational) continue;
+      checks++;
+      if (!reconcileRowOk(m)) mismatches++;
+    }
+    if (!s64) {
+      html.push(`<tr class="vt-raw-reconcile-row--skip"><td colspan="5" class="text-center py-3">Select a player above to reconcile personal damage and kill totals.</td></tr>`);
+    }
+    $reconcileBody.innerHTML = html.join('');
+    if ($reconcileSummary) {
+      const checkWord = checks === 1 ? 'check' : 'checks';
+      const mismatchWord = mismatches === 1 ? 'mismatch' : 'mismatches';
+      $reconcileSummary.textContent = `${checks} ${checkWord}, ${mismatches} ${mismatchWord}`;
+      $reconcileSummary.classList.toggle('vt-raw-reconcile-summary--fail', mismatches > 0);
+    }
   }
 
   // Render (or clear) the sentinel-filter badge above the Reconcile table.
@@ -2690,7 +2981,7 @@
     el.innerHTML = `
       <i class="bi bi-shield-exclamation me-2" aria-hidden="true"></i>
       <span>${pairsLabel} filtered (total dropped: ${fmt.format(Math.round(totalAmount))})</span>
-      <a class="ms-2" href="docs.html?doc=sentinel" target="_blank" rel="noopener">why?</a>
+      <a class="ms-2" href="${ROOT}docs.html?doc=sentinel" target="_blank" rel="noopener">why?</a>
     `;
     el.title = `Engine DAMAGE_TYPE_UNKNOWN force-kill sentinels (amount > 1e6). ` +
       `Filtered out of Reconcile sums to match processed JSON; the raw events table below still shows them verbatim.`;
@@ -2955,24 +3246,67 @@
     return { pairs, totalAmount };
   }
 
-  function computeKills(s64) {
+  function computeRawDestructions(s64) {
+    let count = 0;
+    for (const r of state.events.rows) {
+      if (r.arm !== 'unitDestroyed') continue;
+      if (r.shooter !== s64) continue;
+      count++;
+    }
+    return {
+      label: 'Raw destructions',
+      processed: null,
+      computed: count,
+      rule: 'count(unitDestroyed where killer == s64) — every destruction on the wire, including pilots and self-kills. Informational; not a pass/fail check.',
+      kind: 'int',
+      informational: true,
+    };
+  }
+
+  function computeCountedKills(s64) {
     const entry = findLeaderboardEntry(s64);
     let count = 0;
     for (const r of state.events.rows) {
       if (r.arm !== 'unitDestroyed') continue;
-      if (r.shooter !== s64) continue; // killer (we stored killer into shooter during model build)
+      if (r.shooter !== s64) continue;
+      if (r.victim && r.victim === r.shooter) continue;
+      const victimOdf = r.victimOdf || r.ordnance || '';
+      if (isPilotOdf(victimOdf)) continue;
       count++;
     }
+    const pvp = entry && entry.personal ? Number(entry.personal.pvp_kills || 0) : 0;
+    const pve = entry && entry.personal ? Number(entry.personal.pve_kills || 0) : 0;
+    const processed = entry && entry.personal
+      ? pvp + pve
+      : (entry ? Number(entry.kills || 0) : 0);
     return {
-      label: `leaderboard[${entry ? entry.slot : '?'}].kills`,
-      processed: entry ? Number(entry.kills || 0) : 0,
+      label: 'Counted kills',
+      processed,
       computed: count,
-      rule: 'count(unitDestroyed where killer == s64)',
+      rule: `leaderboard[${entry ? entry.slot : '?'}].personal.pvp_kills + pve_kills ↔ count(unitDestroyed where killer == s64, excluding self-kills and pilot victims (user_m in victim ODF)). Powerup and deployable exclusions need the ODF category DB, which this page does not load — remaining gap vs dashboard kills.`,
       kind: 'int',
     };
   }
 
+  function reconcileRowOk(m) {
+    if (m.informational) return true;
+    const delta = (m.computed || 0) - (m.processed || 0);
+    const absDelta = Math.abs(delta);
+    return m.kind === 'int' ? (absDelta === 0) : (absDelta <= RECONCILE_EPSILON);
+  }
+
   function renderReconcileRow(m) {
+    if (m.informational) {
+      const fmt = (v) => m.kind === 'int' ? fmtInt(v) : Number(v).toFixed(1);
+      return `
+      <tr class="vt-raw-reconcile-row--info">
+        <td>${escapeHtml(m.label)}</td>
+        <td class="text-end vt-muted">—</td>
+        <td class="text-end">${escapeHtml(fmt(m.computed))}</td>
+        <td class="text-end vt-muted">—</td>
+        <td><span class="vt-raw-reconcile-rule" title="${escapeAttr(m.rule)}">${escapeHtml(m.rule)}</span></td>
+      </tr>`;
+    }
     const delta = m.computed - m.processed;
     const absDelta = Math.abs(delta);
     const ok = m.kind === 'int' ? (absDelta === 0) : (absDelta <= RECONCILE_EPSILON);
@@ -3040,27 +3374,45 @@
     }, 250));
     $search.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
-        if (e.ctrlKey || e.metaKey) {
-          state.searchState.regex = !state.searchState.regex;
-          if (state.searchState.regex) $search.setAttribute('data-regex', 'true');
-          else $search.removeAttribute('data-regex');
-          runSearch();
-        } else if (e.shiftKey) {
-          prevHit();
-        } else {
-          nextHit();
-        }
+        if (e.shiftKey) prevHit();
+        else nextHit();
       } else if (e.key === 'Escape') {
         $search.blur();
       }
     });
+    if ($searchWordsBtn) {
+      $searchWordsBtn.addEventListener('click', () => {
+        if (!state.searchState.regex) return;
+        setSearchRegex(false);
+        runSearch();
+        syncUrl();
+      });
+    }
+    if ($searchRegexBtn) {
+      $searchRegexBtn.addEventListener('click', () => {
+        if (state.searchState.regex) return;
+        setSearchRegex(true);
+        runSearch();
+        syncUrl();
+      });
+    }
 
     $searchPrev.addEventListener('click', prevHit);
     $searchNext.addEventListener('click', nextHit);
 
-    $expandBtn.addEventListener('click', () => {
-      expandToDepth(state.tree, 3);
+    $expandBtn.addEventListener('click', async () => {
+      if (!state.tree || opBusy) return;
+      opBusy = true;
+      setOpStatus('Expanding…', true);
+      await yieldFrame();
+      const result = expandToDepth(state.tree, 3);
       render();
+      if (result.expanded === 0 && result.skippedCap > 0) {
+        setOpStatus('Large lists stay collapsed — use Events for the event stream.');
+      } else {
+        setOpStatus('');
+      }
+      opBusy = false;
     });
     if ($fullscreenBtn) {
       $fullscreenBtn.addEventListener('click', () => toggleFullscreen());
@@ -3077,7 +3429,11 @@
       e.preventDefault();
       toggleFullscreen(false);
     });
-    $collapseBtn.addEventListener('click', () => {
+    $collapseBtn.addEventListener('click', async () => {
+      if (!state.tree || opBusy) return;
+      opBusy = true;
+      setOpStatus('Collapsing…', true);
+      await yieldFrame();
       collapseAll(state.tree);
       // Keep current on root if current was deep.
       const curPtr = state.tree.current && state.tree.current.ptr;
@@ -3087,6 +3443,8 @@
         syncUrl();
       }
       render();
+      setOpStatus('');
+      opBusy = false;
     });
 
     $tree.addEventListener('scroll', scheduleRender);
@@ -3195,6 +3553,9 @@
     $searchCount = document.getElementById('raw-search-count');
     $searchPrev = document.getElementById('raw-search-prev');
     $searchNext = document.getElementById('raw-search-next');
+    $searchWordsBtn = document.getElementById('raw-search-words');
+    $searchRegexBtn = document.getElementById('raw-search-regex');
+    $opStatus = document.getElementById('raw-op-status');
     $breadcrumb = document.getElementById('raw-breadcrumb');
     $expandBtn = document.getElementById('raw-expand-btn');
     $collapseBtn = document.getElementById('raw-collapse-btn');
@@ -3228,6 +3589,7 @@
     $reconcileCard = document.getElementById('raw-reconcile-card');
     $reconcilePlayer = document.getElementById('raw-reconcile-player');
     $reconcileBody = document.getElementById('raw-reconcile-body');
+    $reconcileSummary = document.getElementById('raw-reconcile-summary');
 
     // v7: identity-reroute provenance banner (processed tier only).
     $rerouteBanner = document.getElementById('raw-reroute-banner');
@@ -3258,22 +3620,22 @@
 
     const url = parseUrlState();
     state.view = (url.view === 'processed' || url.view === 'reconcile') ? url.view : 'decoded';
-    state.mode = (url.mode === 'events') ? 'events' : 'tree';
+    state.mode = (url.mode === 'tree') ? 'tree' : 'events';
 
     if (url.match) {
       await loadMatch(url.match);
-      // Apply initial search / path if provided (tree mode only).
-      if (state.mode !== 'events') {
-        if (url.q) {
-          $search.value = url.q;
-          state.searchState.q = url.q;
-          runSearch();
-        }
-        if (url.path) {
-          const idx = ensurePathVisible(state.tree, url.path);
-          if (idx !== -1) { setCurrent(idx); scrollRowIntoView(idx); }
-        }
+      if (url.regex) setSearchRegex(true);
+      if (url.q) {
+        $search.value = url.q;
+        state.searchState.q = url.q;
+        runSearch();
       }
+      if (url.path && state.mode !== 'events' && state.view !== 'reconcile') {
+        const idx = ensurePathVisible(state.tree, url.path);
+        if (idx !== -1) { setCurrent(idx); scrollRowIntoView(idx); }
+      }
+      // loadMatch() syncs the URL before q/regex/path are restored.
+      syncUrl();
     } else {
       showMatchPicker(manifest);
     }

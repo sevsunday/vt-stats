@@ -5071,7 +5071,7 @@
     document.getElementById('info-submitter').textContent = info.submitter || '—';
     const rawLink = document.getElementById('info-raw-link');
     if (rawLink && info.id) {
-      rawLink.href = `raw.html?match=${encodeURIComponent(info.id)}`;
+      rawLink.href = `raw/?match=${encodeURIComponent(info.id)}`;
     }
 
     // Map-dimension stat blocks (Map size, Elevation, Base-to-base, Author)
