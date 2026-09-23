@@ -212,7 +212,7 @@
       else unrated.push(item);
     }
     rated.sort((a, b) => (b.delta.delta || 0) - (a.delta.delta || 0));
-    return { available: true, excluded: false, rated, unrated };
+    return { available: true, excluded: false, rated, unrated, bench: match.bench || null };
   }
 
   function pickDefaultKey(joined, filterPlayers) {
@@ -363,7 +363,7 @@
       const idle = (!row.is_campod && !row.is_low_activity && row.is_zero_damage)
         ? ' <span class="vt-idle-badge" title="Dealt 0 damage — not rated">Idle</span>'
         : '';
-      const benchInfo = currentData && currentData.match && currentData.match.bench;
+      const benchInfo = joined.bench || null;
       const benchOn = benchInfo && (
         (benchInfo.steam64 && String(benchInfo.steam64) === String(row.steam64))
         || benchInfo.name === row.name
@@ -371,7 +371,7 @@
       const benchSec = benchOn ? Number(benchInfo.effective_end_sec) || 0 : 0;
       const benchClock = `${Math.floor(benchSec / 60)}:${String(Math.round(benchSec % 60)).padStart(2, '0')}`;
       const bench = benchOn
-        ? ` <span class="vt-bench-badge" title="Stopped fighting after ${(benchInfo.leaver_name || 'a player')} left. VTSR-T uses play through ${benchClock}. Career stats still include the whole match.">Benched</span>`
+        ? ` <span class="vt-bench-badge" title="Stopped fighting after ${esc(benchInfo.leaver_name || 'a player')} left. VTSR-T uses play through ${benchClock}. Career stats still include the whole match.">Benched</span>`
         : '';
       let trackInner = '';
       let deltaHtml = '<span class="vt-match-elo-delta text-muted">&mdash;</span>';
