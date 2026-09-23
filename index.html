@@ -191,8 +191,8 @@
                + description / mod / team names live in the Map Info Modal,
                opened by clicking the thumbnail above. See renderMapInfoModal()
                in js/app.js. -->
-          <div class="d-flex flex-column gap-2">
-            <button id="info-back-to-all" class="vt-nav-icon-btn vt-nav-icon-btn--primary" type="button" title="Return to the All Matches aggregate view">
+          <div class="vt-banner-actions">
+            <button id="info-back-to-all" class="vt-nav-icon-btn vt-nav-icon-btn--secondary" type="button" title="Return to the All Matches aggregate view">
               <i class="bi bi-grid-3x3-gap me-1"></i><span>All Matches</span>
             </button>
             <a id="info-raw-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary" href="raw.html" title="Browse the raw data for this match (binpb, decoded JSON, processed JSON)">
@@ -206,6 +206,22 @@
                title="View this map's full catalog page">
               <i class="bi bi-map me-1"></i><span>View Map Page</span>
             </a>
+            <!-- Watch VOD occupies one grid cell: single video = direct
+                 link; multiple = dropdown. Wrapper hides when unmapped. -->
+            <div class="vt-banner-vod d-none" id="info-video-cell">
+              <a id="info-video-link" class="vt-nav-icon-btn vt-nav-icon-btn--secondary d-none" href="#"
+                 target="_blank" rel="noopener" title="Watch this match on YouTube">
+                <i class="bi bi-youtube me-1"></i><span>Watch VOD</span>
+              </a>
+              <div class="dropdown d-none" id="info-video-dropdown">
+                <button id="info-video-dropdown-btn" class="vt-nav-icon-btn vt-nav-icon-btn--secondary dropdown-toggle"
+                        type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                        title="Watch this match on YouTube">
+                  <i class="bi bi-youtube me-1"></i><span>Watch VOD</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" id="info-video-menu"></ul>
+              </div>
+            </div>
           </div>
         </div>
         <div id="filter-bar" class="vt-filter-bar vt-filter-bar--right">
@@ -1879,6 +1895,16 @@
                 </div>
               </div>
 
+              <!-- Has VOD (single-select; client-side join against match_videos.json) -->
+              <div class="vt-match-picker-filter-row">
+                <span class="vt-match-picker-filter-label">Has VOD</span>
+                <div class="vt-match-picker-chipset" data-facet="vod" role="radiogroup" aria-label="YouTube VOD mapping">
+                  <button type="button" class="vt-match-picker-chip is-active" data-value="any" role="radio" aria-checked="true">Any</button>
+                  <button type="button" class="vt-match-picker-chip" data-value="yes" role="radio" aria-checked="false" title="Matches with a verified YouTube VOD mapping">Has VOD</button>
+                  <button type="button" class="vt-match-picker-chip" data-value="no" role="radio" aria-checked="false" title="Matches with no YouTube VOD mapping">No VOD</button>
+                </div>
+              </div>
+
               <!-- Players (multi-select chips, populated from manifest) -->
               <div class="vt-match-picker-filter-row">
                 <span class="vt-match-picker-filter-label">Players</span>
@@ -2021,6 +2047,10 @@
   <script src="js/vtstats-fx.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/charts-radar.js"></script>
+  <!-- YouTube VOD timestamp links (window.VTVideoLinks). Loaded before
+       storyline.js and app.js so both consumers can emit Watch-on-YouTube
+       icons. 404-safe; display-only. -->
+  <script src="js/video-links.js"></script>
   <!-- Storyline tab renderer (window.VTStoryline). Depends on charts.js
        globals (activeCharts / glassTooltipConfig / getThemeColors /
        fmtMatchClock) so it loads after it, before app.js. -->

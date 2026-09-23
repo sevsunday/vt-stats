@@ -867,6 +867,11 @@ function wireTransport() {
   const tTot     = document.getElementById('t-tot');
 
   if (tTot) tTot.textContent = formatDuration(STATE.totalSec);
+  if (window.VTVideoLinks) {
+    window.VTVideoLinks.ensureLoaded({ url: '../../data/external/match_videos.json' })
+      .then(() => syncWatchVodButton());
+  }
+  wireWatchVodPicker();
 
   if (playBtn) {
     playBtn.addEventListener('click', () => {
@@ -2024,6 +2029,100 @@ function syncTransportReadouts() {
       if (scrub.value !== String(v)) scrub.value = String(v);
     }
   }
+  syncWatchVodButton();
+}
+
+function watchVodMatchId() {
+  return (STATE.matchData && STATE.matchData.match && STATE.matchData.match.id)
+    || (params && params.match) || '';
+}
+
+function hideWatchVodControls() {
+  const linkBtn = document.getElementById('btn-watch-vod');
+  const pickBtn = document.getElementById('btn-watch-vod-pick');
+  if (linkBtn) {
+    linkBtn.hidden = true;
+    linkBtn.removeAttribute('href');
+  }
+  if (pickBtn) pickBtn.hidden = true;
+}
+
+function fillWatchVodDialog(links) {
+  const list = document.getElementById('watch-vod-dialog-list');
+  if (!list) return;
+  list.innerHTML = (links || []).map((link) => {
+    const ch = escapeHtml(link.channel || 'YouTube');
+    const title = escapeHtml(link.title || '');
+    const href = escapeHtml(link.url || '#');
+    const approx = link.approx
+      ? '<span class="t-watch-dialog-title">nearest kept footage</span>'
+      : '';
+    return `<a href="${href}" target="_blank" rel="noopener">` +
+      `<span class="t-watch-dialog-ch">${ch}</span>` +
+      (title ? `<span class="t-watch-dialog-title">${title}</span>` : '') +
+      approx +
+      `</a>`;
+  }).join('');
+}
+
+function wireWatchVodPicker() {
+  const pickBtn = document.getElementById('btn-watch-vod-pick');
+  const dlg = document.getElementById('watch-vod-dialog');
+  if (!pickBtn || !dlg || pickBtn.dataset.wired === '1') return;
+  pickBtn.dataset.wired = '1';
+  pickBtn.addEventListener('click', () => {
+    syncWatchVodButton();
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+  });
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg) dlg.close();
+  });
+}
+
+function syncWatchVodButton() {
+  const linkBtn = document.getElementById('btn-watch-vod');
+  const pickBtn = document.getElementById('btn-watch-vod-pick');
+  const matchId = watchVodMatchId();
+  if (!window.VTVideoLinks || !matchId) {
+    hideWatchVodControls();
+    return;
+  }
+  const n = window.VTVideoLinks.videosFor(matchId).length;
+  if (n === 0) {
+    hideWatchVodControls();
+    return;
+  }
+  if (n === 1) {
+    const link = window.VTVideoLinks.linkForMatchSec(matchId, STATE.progressSec);
+    if (!link) {
+      hideWatchVodControls();
+      return;
+    }
+    if (pickBtn) pickBtn.hidden = true;
+    if (linkBtn) {
+      linkBtn.hidden = false;
+      linkBtn.href = link.url;
+      const approx = link.approx ? ' (nearest kept footage)' : '';
+      linkBtn.title = `Watch this moment on YouTube — ${link.channel}${approx}`;
+    }
+    return;
+  }
+  const links = window.VTVideoLinks.linksForMatchSec
+    ? window.VTVideoLinks.linksForMatchSec(matchId, STATE.progressSec)
+    : [];
+  if (!links.length) {
+    hideWatchVodControls();
+    return;
+  }
+  if (linkBtn) {
+    linkBtn.hidden = true;
+    linkBtn.removeAttribute('href');
+  }
+  if (pickBtn) {
+    pickBtn.hidden = false;
+    pickBtn.title = `Watch this moment on YouTube — ${links.length} VODs`;
+  }
+  fillWatchVodDialog(links);
 }
 
 // ============================================================================

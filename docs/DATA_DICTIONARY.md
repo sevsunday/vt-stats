@@ -3625,3 +3625,63 @@ Display-only. Ratings and history files are unchanged (`elo_history.json` byte-i
 | `ratings[].inactive_status` | `"active"` \| `"inactive"` \| `"returning"` | Global clock. |
 | `ratings[].command_status` | `"active"` \| `"stale"` \| `"returning"` | VTSR-C only. Never-commanded-but-seen → `active`. |
 
+## 16. Match Video Links (YouTube VOD Sync)
+
+Human-curated, tool-assisted mapping from dashboard **match seconds** onto YouTube **video seconds**, so any timestamped surface can emit `https://www.youtube.com/watch?v=<id>&t=<sec>s`. Videos arrive days/weeks after a match is processed and come from multiple channels, so this is never automatic discovery.
+
+**Posture** (mirrors the F9 ledger + adjudication stores):
+
+- **Zero pipeline interaction.** No `PIPELINE_VERSION` / `match.schema_version` / `ELO_SCHEMA_VERSION` bump. The mapping lives in its own committed file, never in per-match JSON.
+- **Operator is final authority.** `scripts/map_match_video.py` proposes; a human verifies spot-check links and signs off (`verified: true`).
+- **Display-only, corpus-adjacent, picker-unaware, 404-safe** on every consumer. Rating-inert **by construction**.
+- **Forbidden consumers:** `scripts/process_stats.py`, `scripts/elo.py`, `scripts/elo_commander.py`, `js/all-matches-aggregator.js` (gated by `_investigation/check_match_videos.py`).
+- **Credit every channel** wherever a link renders.
+
+### Time-base contract
+
+- Wire ticks are per-match at `match.tick_rate` Hz (never hardcoded). Canonical match seconds: `match_sec = (tick − match.tick_range[0]) / match.tick_rate`. This is the displayed match clock (kill feed, `fmtMatchClock`, `positioning.trail.t`).
+- Mapping = ordered rate-1.0 segments `{video_sec, match_sec, duration_sec}`. For a target `T` inside `[match_sec, match_sec + duration_sec)`: `video_t = video_sec + (T − match_sec)` → `&t=${Math.floor(video_t)}s`. An **uncut** video is exactly one segment. YouTube `&t=` is integer seconds.
+- HUD Mission Time may differ from the tick base by a constant `MISSION_CLOCK_SKEW_SEC` (module constant in `scripts/map_match_video.py`, currently **0.0** — measured on the Egypt × `2sLbGfx3rXQ` reference pair). Anchors convert as `anchor_match_sec = ocr_mission_sec − MISSION_CLOCK_SKEW_SEC`. The stored segments already fold the skew in.
+- Mission clock parses as `(\d{1,3}):(\d{2})` (matches past 99 minutes exist).
+
+### `data/external/match_videos.json`
+
+`{schema_version: 1, matches: {<match_id>: [entry, ...]}}`. Array per match so multiple POVs/channels coexist. Written by `scripts/map_match_video.py` (atomic temp-file + rename, `sort_keys=True`); safe to hand-edit.
+
+| Field | Meaning |
+|---|---|
+| `video_id` / `url` | YouTube id; `url` embeds it. Unique within a match's array. |
+| `title` | yt-dlp title. |
+| `channel.{name,url}` | yt-dlp `channel` + `channel_url` (CLI-overridable). Never empty `name`. |
+| `pov_steam64` | Whose cockpit this is (`--pov` resolved against the match roster); `null` when unknown. |
+| `uploaded_at` | `YYYY-MM-DD` from yt-dlp `upload_date`. |
+| `video_duration_sec` | yt-dlp duration. |
+| `mapping_kind` | `"uncut"` (single OCR-fit segment) \| `"edited"` (multi-segment) \| `"manual"` (operator `--anchor` / `--offset`). |
+| `segments[]` | `{video_sec, match_sec, duration_sec}` sorted by `match_sec`. Non-overlapping in **both** match space and video space; `duration_sec > 0`; `0 ≤ match_sec` and `match_sec + duration_sec ≤` manifest `duration_sec + 30` (end-screen slack). The union of segment match-ranges is the video's **coverage**. |
+| `anchors[]` | Audit trail of (video_sec, mission_time, match_sec, offset_sec) readings that produced the segments. |
+| `identity_check` | Roster-name OCR (or visual) evidence. Hard gate at map time; `--force-identity` logs a note. |
+| `kill_check` | Advisory HUD vs pipeline kill-counter comparison (`status`: `ok` / `warn` / `missing`). Never fails a write — the engine scoreboard may count kills the pipeline excludes (v2.9 pilot-victim). |
+| `verified` / `verified_at` | Operator clicked the QA `&t=` links and signed off. Frontend prefers verified entries. |
+| `tool_version` | Writer version (currently `1`). |
+| `notes` | Free-text (force-identity, visual calibration, etc.). |
+
+**Gap / coverage semantics (frontend):** `js/video-links.js` `linkForMatchSec(matchId, sec)` walks videos (verified first, then coverage desc, then `uploaded_at`) and returns the first covering segment. If `sec` falls in a trimmed gap of an otherwise-covering video, it snaps **forward** to the next segment start within `GAP_SNAP_MAX_SEC = 90` and marks `approx: true` (tooltip: "moment trimmed in VOD — nearest kept footage"); otherwise `null`.
+
+**Reference pair:** match `2026-09-13T02-32-33` (Egypt, 1503 s, tick_rate 20) × F9bomber `2sLbGfx3rXQ` (1577 s, uploaded 2026-09-14). Visual Mission Time vs video time is 1:1 from `0:05@5` through `18:48@1128`; `MISSION_CLOCK_SKEW_SEC = 0.0`. POV Steam64 `76561198026325621` (F9bomber).
+
+### Operator tool
+
+Standalone, **not pipeline-invoked** (`scripts/import_f9_ledger.py` precedent). Operator-only deps: `yt-dlp`, `opencv-python`, `easyocr`, `numpy`, plus an `ffmpeg` binary on PATH (`imageio-ffmpeg` is an accepted bundled fallback). Typical:
+
+```
+python scripts/map_match_video.py --match 2026-09-13T02-32-33 --video https://www.youtube.com/watch?v=2sLbGfx3rXQ --pov F9bomber
+python scripts/map_match_video.py --match … --video … --offset 0 --force-identity --yes
+python scripts/map_match_video.py --self-test
+```
+
+`--dry-run` prints the would-be JSON. `--debug-frames` dumps annotated frames to gitignored `_investigation/output/video_sync/<match>/<video_id>/`.
+
+### Frontend
+
+`js/video-links.js` → `window.VTVideoLinks` (`ensureLoaded` / `videosFor` / `linkForMatchSec` / `linkForTick`). 404-safe sentinel `window.__vtMatchVideos`. Surfaces: match-banner Watch VOD (dropdown when multiple videos), kill-feed + snipe-feed row icons, storyline key-moments rail, Build Order Log hover icons, 3D replay HUD Watch button, picker **Has VOD** facet (`hasVod` on `pickerState`, URL `?vod=`, no storage-key bump), player-page match-log VOD column. CSS: `.vt-video-link` / `.vt-video-chip` in `css/vtstats-theme.css`.
+

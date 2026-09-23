@@ -1464,6 +1464,7 @@ All dependencies are vendored locally. No CDN usage.
 | Python protobuf | >=4.25.0 | `scripts/requirements.txt` |
 | grpcio-tools | (dev only) | For `protoc` compilation — **not** in `requirements.txt`; install manually with `pip install grpcio-tools` |
 | protobufjs-cli (dev only) | 1.1.3 | For regenerating `vendor/protobufjs/statsgate.proto.json` after schema changes — run `npx pbjs -t json scripts/statsgate.proto > vendor/protobufjs/statsgate.proto.json` |
+| yt-dlp / opencv-python / easyocr / ffmpeg (**operator-only**) | — | **Not a pipeline dependency.** Required only by the standalone `scripts/map_match_video.py` YouTube VOD mapper (openpyxl / `import_f9_ledger.py` precedent). `ffmpeg` may be on PATH or bundled via `pip install imageio-ffmpeg`. Never imported by `process_stats.py`. |
 
 ---
 
@@ -2920,7 +2921,7 @@ Reads `data/models/`: `geometry/<stem>.glb` (geometry + UVs + per-primitive mate
 
 ### 17.4 Picker filter contract
 
-Picker-unaware (mirrors ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The Models topnav dropdown (`bi-box`) sits immediately after ODF on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` 14 / `MAP_TEMPLATE_VERSION` 9).
+Picker-unaware (mirrors ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. The Models topnav dropdown (`bi-box`) sits immediately after ODF on every shell + both pre-gen templates (`PLAYER_TEMPLATE_VERSION` 15 / `MAP_TEMPLATE_VERSION` 9).
 
 ## 18. LEGO Models Browser (`lego/`)
 
@@ -2954,5 +2955,45 @@ Darkvale is credited as sole modeler in four places — directory hero (`Designe
 
 ### 18.5 Picker filter contract
 
-Picker-unaware (mirrors Models / ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. LEGO lives in the Models dropdown. Templates at `PLAYER_TEMPLATE_VERSION` 14 / `MAP_TEMPLATE_VERSION` 9.
+Picker-unaware (mirrors Models / ODF / Map / Tools). Corpus-wide, NOT in the pipeline cache key, no `getFilteredData` path. LEGO lives in the Models dropdown. Templates at `PLAYER_TEMPLATE_VERSION` 15 / `MAP_TEMPLATE_VERSION` 9.
+
+## 19. YouTube VOD Timestamp Sync
+
+Map dashboard match-seconds onto YouTube video-seconds so kill feed / build log / storyline / 3D replay can open the exact VOD moment. Full schema: [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) §16.
+
+### 19.1 Store + posture
+
+Committed `data/external/match_videos.json` (`schema_version: 1`). Sibling of the F9 ledger files — external, community-sourced, standalone-tool-written, human-editable. **Zero pipeline interaction** (no schema bumps). **Forbidden consumers** `process_stats.py` / `elo.py` / `elo_commander.py` / `all-matches-aggregator.js` (gate: `_investigation/check_match_videos.py`). Display-only, 404-safe, picker-unaware, rating-inert by construction. Credit every channel wherever a link renders.
+
+Time base: `match_sec = (tick − tick_range[0]) / tick_rate`. Mapping = rate-1.0 `{video_sec, match_sec, duration_sec}` segments. HUD clock skew is the module constant `MISSION_CLOCK_SKEW_SEC = 0.0` (measured on the Egypt × `2sLbGfx3rXQ` pair; stored segments already fold it in).
+
+### 19.2 Operator runbook — a new VOD appeared
+
+Operator-only deps (never required by the pipeline): `pip install yt-dlp opencv-python easyocr numpy` plus `ffmpeg` on PATH (or `pip install imageio-ffmpeg` for a bundled binary).
+
+1. Identify the match id (dashboard URL `?match=` or `data/processed/matches.json`) and the YouTube URL. Optional: whose cockpit (`--pov <name|steam64>`).
+2. Dry-run the mapper so you can read the proposed segments and QA links without writing:
+
+   ```
+   python scripts/map_match_video.py --match 2026-09-13T02-32-33 --video https://www.youtube.com/watch?v=2sLbGfx3rXQ --pov F9bomber --dry-run
+   ```
+
+   Uncut VODs take the sparse presence-gated OCR path (~1–2 min). Edited VODs (`--mode edited`, or auto when residuals exceed 2 s) stream the whole file at 1 fps. `--debug-frames` dumps annotated stills to `_investigation/output/video_sync/<match>/<video_id>/` (gitignored).
+3. If OCR cannot run (missing EasyOCR, scoreboard never up): supply `--offset SEC` (video = match + offset) or repeatable `--anchor MM:SS@VIDEO_SEC`. `--force-identity` bypasses the roster-name gate and is logged in `notes`.
+4. Open the printed QA `&t=` links. Confirm they land within ~2 s of the named kill. Pass `--yes` to sign off non-interactively, or answer `y` at the prompt. `verified: true` is what the frontend prefers.
+5. Re-run is idempotent for the same `(match_id, video_id)` — the entry is replaced. `verified_at` is preserved when segments + `mapping_kind` are unchanged.
+6. `python _investigation/check_match_videos.py` must pass (unknown match ids, overlapping segments, empty channel names, and forbidden-consumer grep all fail loud). Then commit `data/external/match_videos.json`.
+
+`--input local.mp4` skips yt-dlp (offline / a channel that blocks extraction). `--self-test` runs the synthetic two-offset assemble (cut at 20 s, ±2 s) and, when ffmpeg + EasyOCR are present, an ffmpeg-spliced OCR round-trip.
+
+### 19.3 Frontend helper
+
+`js/video-links.js` → `window.VTVideoLinks` (loaded on `index.html` immediately before `js/storyline.js`; also on `player/index.html`, `scripts/player_template.html` at `PLAYER_TEMPLATE_VERSION` 15, and the 3D replay iframe as a classic script with a relative store URL).
+
+- `ensureLoaded(opts?)` — 404-safe fetch → `window.__vtMatchVideos` (`{}` on 404). Fire-and-forget at boot; awaited at the top of `renderMatchData()`.
+- `videosFor(matchId)` — verified first, then coverage desc, then `uploaded_at`.
+- `linkForMatchSec(matchId, sec)` → `{url, channel, title, approx} | null`. Covering segment, else snap-forward ≤ 90 s (`approx: true`).
+- `linkForTick(matchId, tick, tickRate, minTick)` — wrapper; **always pass the real `tick_rate`** (the replay iframe defaults `Number(matchMeta.tick_rate) || 10` — do not copy that fallback).
+
+Surfaces: `#info-video-link` Watch VOD (dropdown `#info-video-dropdown` when multiple videos), kill/snipe feed row icons, storyline rail icons (`e.target.closest('a')` so the row-click replay seek is untouched), Build Order Log hover icons (`vtVideoAnchorHtml` lives **at or after** `buildlogFilterFn`), 3D replay HUD `#btn-watch-vod`, picker Has-VOD facet (`pickerState.hasVod`, URL `?vod=`, default `'any'`, no `vt.picker.filters.v2` key bump), player match-log VOD column. Deleting the store file leaves every surface hidden with zero console errors.
 

@@ -1044,6 +1044,16 @@
         ? `<button class="vt-story-beat-expand" type="button" data-beat-expand="${i}" ` +
           `title="Show detail" aria-expanded="false"><i class="bi bi-chevron-down"></i></button>`
         : `<span class="vt-story-beat-expand vt-story-beat-expand--ph" aria-hidden="true"></span>`;
+      let vod = '';
+      if (typeof window.VTVideoLinks !== 'undefined' && ctx.matchId) {
+        const link = window.VTVideoLinks.linkForMatchSec(ctx.matchId, b.sec);
+        if (link) {
+          const approx = link.approx ? ' (nearest kept footage)' : '';
+          vod = `<a class="vt-video-link" href="${esc(link.url)}" target="_blank" rel="noopener" ` +
+            `title="Watch on YouTube \u2014 ${esc(link.channel)}${approx}">` +
+            `<i class="bi bi-youtube" aria-hidden="true"></i></a>`;
+        }
+      }
       return `<div class="vt-story-beat${b.weight >= 5 ? ' vt-story-beat--major' : ''}" ` +
         `data-sec="${b.sec}" data-tick="${b.tick}" role="button" ` +
         `title="Open this moment in the Replay player">` +
@@ -1052,7 +1062,7 @@
         `${expander}` +
         `<span class="vt-story-beat-body"><span class="vt-story-beat-title">${title}</span>` +
         `${detail ? `<small class="vt-story-beat-detail">${detail}</small>` : ''}</span>` +
-        `${side}</div>` +
+        `${side}${vod}</div>` +
         (sub ? `<div class="vt-story-beat-sub d-none" data-beat-sub="${i}">${sub}</div>` : '');
     }).join('');
     holder.innerHTML = rows;
@@ -1125,6 +1135,7 @@
       duration: sl.duration_sec,
       bucketSec: sl.bucket_sec,
       facts: sl.facts || {},
+      matchId: match.id || '',
       leader: (side) => ((leaders[String(side)] || {}).name) || `Team ${side}`,
       faction: (side) => {
         const f = factions[String(side)];

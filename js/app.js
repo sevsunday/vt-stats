@@ -47,6 +47,7 @@
   const $facetDuration      = $filtersBody && $filtersBody.querySelector('[data-facet="duration"]');
   // v15: outcome-provenance facet (Any / Winner known / Attested only).
   const $facetOutcome       = $filtersBody && $filtersBody.querySelector('[data-facet="outcome"]');
+  const $facetVod           = $filtersBody && $filtersBody.querySelector('[data-facet="vod"]');
   // `$facetPlayerCounts` is the multi-select chipset for `manifest[].player_count`.
   // (Was named `$facetPlayers` in v1; renamed for symmetry with the v2
   // state shape — `pickerState.playerCounts` — and to free up the
@@ -100,6 +101,9 @@
     matchMode: 'any',               // 'any' | 'all' — presence test against `players`
     role: 'any',                    // 'any' | 'commander' | 'thug'
     sort: 'date-desc',
+    // Optional v2 key (no storage-key bump): client-side join against
+    // data/external/match_videos.json. 'any' | 'yes' | 'no'.
+    hasVod: 'any',
   });
   let pickerState = DEFAULT_PICKER_STATE();
 
@@ -150,6 +154,7 @@
   //   ?mode=all            (Match-mode toggle; 'any' is default and omitted)
   //   ?role=commander|thug (Role toggle; 'any' is default and omitted)
   //   ?sort=<picker-sort>  (e.g. duration-desc; 'date-desc' is default and omitted)
+  //   ?vod=yes|no          (Has-VOD facet; 'any' is default and omitted)
 
   function parseUrlState() {
     const p = new URLSearchParams(window.location.search);
@@ -179,6 +184,7 @@
         mode:   p.get('mode'),
         role:   p.get('role'),
         sort:   p.get('sort'),
+        vod:    p.get('vod'),
       },
     };
   }
@@ -323,7 +329,7 @@
   // The nine picker query keys, in the order buildShareUrl() emits them.
   // Single source of truth for `syncPickerUrl()` and any future helper
   // that needs to know what counts as "picker state" on the URL.
-  const PICKER_URL_KEYS = ['q', 'dur', 'outcome', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort'];
+  const PICKER_URL_KEYS = ['q', 'dur', 'outcome', 'cnt', 'sub', 'roster', 'mode', 'role', 'sort', 'vod'];
 
   // Picker-only URL writer — always fires (unlike `syncUrl()`), but only
   // touches the eight picker keys. Existing non-picker params (match,
@@ -348,6 +354,7 @@
     if (ps.matchMode === 'all')                   cur.set('mode', 'all');
     if (ps.role && ps.role !== 'any')             cur.set('role', ps.role);
     if (ps.sort && ps.sort !== 'date-desc')       cur.set('sort', ps.sort);
+    if (ps.hasVod && ps.hasVod !== 'any')         cur.set('vod', ps.hasVod);
 
     const qs = paramsToString(cur);
     history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
@@ -552,6 +559,27 @@
 
   // --- Match picker: build + wire ---
 
+  function matchHasVod(entry) {
+    return !!(entry && window.VTVideoLinks && VTVideoLinks.videosFor(entry.id).length);
+  }
+
+  function stampPickerVodMark(cardEl, entry) {
+    const nameEl = cardEl.querySelector('.vt-match-picker-card-name');
+    if (!nameEl) return;
+    let mark = nameEl.querySelector('.vt-match-picker-vod');
+    if (matchHasVod(entry)) {
+      if (!mark) {
+        mark = document.createElement('i');
+        mark.className = 'bi bi-youtube vt-match-picker-vod';
+        mark.setAttribute('title', 'YouTube VOD');
+        mark.setAttribute('aria-hidden', 'true');
+        nameEl.appendChild(mark);
+      }
+    } else if (mark) {
+      mark.remove();
+    }
+  }
+
   function buildMatchPickerCardHtml(entry) {
     const leaders = entry.team_leaders || {};
     const l1 = leaders['1'] && leaders['1'].name;
@@ -583,12 +611,16 @@
       ? `<img class="${pickerThumbCls}" src="${esc(thumbSrc)}" alt="" decoding="async" loading="lazy">`
       : `<div class="vt-match-picker-card-thumb vt-match-picker-card-thumb--placeholder" aria-hidden="true"><i class="bi bi-map"></i></div>`;
 
+    const vodMark = matchHasVod(entry)
+      ? '<i class="bi bi-youtube vt-match-picker-vod" title="YouTube VOD" aria-hidden="true"></i>'
+      : '';
+
     return `
       <button type="button" class="vt-match-picker-card" data-target="${esc(entry.file)}" role="listitem">
         ${thumbHtml}
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
-            <span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}</span>
+            <span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}${vodMark}</span>
             <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${entry.player_count || '?'}p</span>
           </div>
           ${mapRaw}
@@ -934,6 +966,14 @@
       if (!state.players[test](isPresent)) return false;
     }
 
+    // Has-VOD facet — client-side join against the loaded match_videos
+    // store. Missing module / empty store treats every match as "no VOD".
+    if (state.hasVod && state.hasVod !== 'any') {
+      const has = !!(window.VTVideoLinks && VTVideoLinks.videosFor(entry.id).length);
+      if (state.hasVod === 'yes' && !has) return false;
+      if (state.hasVod === 'no' && has) return false;
+    }
+
     return true;
   }
 
@@ -987,6 +1027,7 @@
     if (state.submitters.length) n++;
     if (state.players.length) n++;
     if (state.sort && state.sort !== 'date-desc') n++;
+    if (state.hasVod && state.hasVod !== 'any') n++;
     return n;
   }
 
@@ -1028,6 +1069,14 @@
       if (ok) visibleRegular++;
     });
     if (allCard) allCard.classList.remove('d-none');
+
+    // Stamp the YouTube mark after the store loads. Cards are built once
+    // before match_videos.json arrives; rebuilding the grid would stack
+    // another delegated click listener.
+    regularCards.forEach((el) => {
+      const entry = entryByFile.get(el.dataset.target);
+      if (entry) stampPickerVodMark(el, entry);
+    });
 
     // Update the All Matches card copy to reflect the filtered count.
     // When the user is currently viewing the aggregate (currentTarget ===
@@ -1146,6 +1195,7 @@
       matchMode:    saved.matchMode === 'all' ? 'all' : 'any',
       role:         ['any', 'commander', 'thug'].includes(saved.role) ? saved.role : d.role,
       sort:         typeof saved.sort === 'string' ? saved.sort : d.sort,
+      hasVod:       ['any', 'yes', 'no'].includes(saved.hasVod) ? saved.hasVod : d.hasVod,
     };
   }
 
@@ -1198,6 +1248,9 @@
     if (typeof u.sort === 'string') {
       pickerState.sort = u.sort;
     }
+    if (['any', 'yes', 'no'].includes(u.vod)) {
+      pickerState.hasVod = u.vod;
+    }
   }
 
   // Push pickerState into the UI controls (chip active classes, sort select,
@@ -1217,6 +1270,13 @@
     if ($facetOutcome) {
       $facetOutcome.querySelectorAll('.vt-match-picker-chip').forEach(c => {
         const active = c.dataset.value === pickerState.outcome;
+        c.classList.toggle('is-active', active);
+        c.setAttribute('aria-checked', active ? 'true' : 'false');
+      });
+    }
+    if ($facetVod) {
+      $facetVod.querySelectorAll('.vt-match-picker-chip').forEach(c => {
+        const active = c.dataset.value === pickerState.hasVod;
         c.classList.toggle('is-active', active);
         c.setAttribute('aria-checked', active ? 'true' : 'false');
       });
@@ -1302,6 +1362,16 @@
       const chip = e.target.closest('.vt-match-picker-chip');
       if (!chip) return;
       pickerState.outcome = chip.dataset.value || 'any';
+      applyPickerStateToUI();
+      applyPickerFilters();
+    });
+  }
+
+  if ($facetVod) {
+    $facetVod.addEventListener('click', (e) => {
+      const chip = e.target.closest('.vt-match-picker-chip');
+      if (!chip) return;
+      pickerState.hasVod = chip.dataset.value || 'any';
       applyPickerStateToUI();
       applyPickerFilters();
     });
@@ -1415,6 +1485,9 @@
   hydratePickerStateFromUrl(initialUrlState.picker);
   applyPickerStateToUI();
   applyPickerFilters();
+  if (window.VTVideoLinks) {
+    VTVideoLinks.ensureLoaded().then(() => applyPickerFilters());
+  }
 
   // --- Match picker: modal lifecycle ---
 
@@ -2813,7 +2886,11 @@
         if (!r.ok) throw new Error(r.status);
         return r.json();
       });
-      [data] = await Promise.all([matchPromise, ensureEloLoaded()]);
+      [data] = await Promise.all([
+        matchPromise,
+        ensureEloLoaded(),
+        window.VTVideoLinks ? VTVideoLinks.ensureLoaded() : Promise.resolve(),
+      ]);
     } catch {
       $loading.innerHTML = '<p class="text-center mt-5" style="color:var(--kb-danger)">Failed to load match data.</p>';
       return;
@@ -3802,6 +3879,24 @@
     return (hasType ? typeOk : true) && (hasKind ? kindOk : true);
   }
 
+  // YouTube VOD deep-link icon for timestamped rows. Lives at/after
+  // buildlogFilterFn so the econ-tooltip gate's slice stays clean.
+  function vtVideoAnchorHtml(tickOrSec, opts) {
+    if (!window.VTVideoLinks) return '';
+    const matchId = (currentData && currentData.match && currentData.match.id) || '';
+    if (!matchId) return '';
+    const o = opts || {};
+    const link = o.matchSec
+      ? VTVideoLinks.linkForMatchSec(matchId, tickOrSec)
+      : VTVideoLinks.linkForTick(matchId, tickOrSec, o.tickRate, o.minTick);
+    if (!link) return '';
+    const approx = link.approx ? ' (nearest kept footage)' : '';
+    const cls = o.hover ? 'vt-video-link vt-video-link--hover' : 'vt-video-link';
+    return `<a class="${cls}" href="${esc(link.url)}" target="_blank" rel="noopener" ` +
+      `title="Watch on YouTube \u2014 ${esc(link.channel)}${approx}">` +
+      `<i class="bi bi-youtube" aria-hidden="true"></i></a>`;
+  }
+
   function isCombatShip(row) {
     if (!row || row.producer === 'constructor') return false;
     const raw = (row.odf || '').toLowerCase();
@@ -3933,12 +4028,13 @@
         const dupBadge = r.dedup_folded
           ? '<span class="badge vt-econ-inferred-badge" title="Duplicate wire event — counted once">dup</span>' : '';
         const struck = r.type === 'cancel' ? ' vt-econ-row-cancel' : '';
+        const vod = vtVideoAnchorHtml(r.tick, { tickRate, minTick, hover: true });
         html += `<div class="vt-econ-log-row${struck}">
           <span class="vt-econ-log-ts">${ts}</span>
           ${typeIcon[r.type] || ''}
           ${producerIcon}
           <span class="vt-econ-log-name">${econOdfChip(r.odf, r.name)}</span>
-          ${cost}${statusDot}${dupBadge}
+          ${cost}${statusDot}${dupBadge}${vod}
         </div>`;
       });
       if (!rows.length) html = '<p class="text-muted" style="font-size:0.85rem">No matching events.</p>';
@@ -4981,6 +5077,59 @@
     // Map-dimension stat blocks (Map size, Elevation, Base-to-base, Author)
     // + thumbnail. Sources are merged by getMapMeta() below.
     renderMapBannerFields(info);
+    renderMatchVideoBanner(info);
+  }
+
+  function renderMatchVideoBanner(info) {
+    const cell = document.getElementById('info-video-cell');
+    const linkEl = document.getElementById('info-video-link');
+    const dropWrap = document.getElementById('info-video-dropdown');
+    const menuEl = document.getElementById('info-video-menu');
+    const hide = () => {
+      if (cell) cell.classList.add('d-none');
+      if (linkEl) linkEl.classList.add('d-none');
+      if (dropWrap) dropWrap.classList.add('d-none');
+    };
+    if (!window.VTVideoLinks || !info || !info.id) {
+      hide();
+      return;
+    }
+    const videos = VTVideoLinks.videosFor(info.id);
+    if (!videos.length) {
+      hide();
+      return;
+    }
+    if (cell) cell.classList.remove('d-none');
+    const firstHref = (v) => {
+      const seg = (v.segments || [])[0];
+      const t = seg ? Math.max(0, Math.floor(Number(seg.video_sec) || 0)) : 0;
+      const base = v.url || '';
+      if (!base) return '#';
+      return `${base}${base.indexOf('?') >= 0 ? '&' : '?'}t=${t}s`;
+    };
+    if (videos.length === 1) {
+      if (dropWrap) dropWrap.classList.add('d-none');
+      if (linkEl) {
+        const v = videos[0];
+        const ch = (v.channel && v.channel.name) || 'YouTube';
+        const link = VTVideoLinks.linkForMatchSec(info.id, 0);
+        linkEl.href = (link && link.url) || firstHref(v);
+        linkEl.title = `Watch on YouTube \u2014 ${ch}`;
+        linkEl.classList.remove('d-none');
+      }
+      return;
+    }
+    if (linkEl) linkEl.classList.add('d-none');
+    if (dropWrap && menuEl) {
+      menuEl.innerHTML = videos.map((v) => {
+        const ch = esc((v.channel && v.channel.name) || 'YouTube');
+        const title = esc(v.title || v.video_id || 'VOD');
+        const href = esc(firstHref(v));
+        return `<li><a class="dropdown-item vt-video-chip" href="${href}" target="_blank" rel="noopener">` +
+          `<i class="bi bi-youtube me-1" aria-hidden="true"></i>${ch} \u2014 ${title}</a></li>`;
+      }).join('');
+      dropWrap.classList.remove('d-none');
+    }
   }
 
   // Map a pipeline-classified `luma_band` to the matching brightness lift
@@ -6603,6 +6752,7 @@
       html += `<i class="bi bi-arrow-right" style="color:var(--kb-danger);"></i>`;
       html += `<span class="fw-semibold">${victimHtml}</span>${victimNick}${victimOdf}${pilotBadge}`;
       html += assistHtml;
+      html += vtVideoAnchorHtml(entry.tick, { tickRate, minTick });
       html += `</div>`;
     });
     if (milestoneTick !== null && !milestoneRendered) {
@@ -6662,6 +6812,7 @@
       html += `<span class="fw-semibold" style="color:var(--kb-primary);">${esc(entry.sniper)}</span>${sniperNick}${sniperOdf}`;
       html += `<i class="bi bi-crosshair" style="color:var(--kb-accent);"></i>`;
       html += `<span class="fw-semibold" style="color:var(--kb-accent);">${esc(entry.victim)}</span>${victimNick}${victimOdf}`;
+      html += vtVideoAnchorHtml(entry.tick, { tickRate, minTick });
       html += `</div>`;
     });
     html += '</div>';

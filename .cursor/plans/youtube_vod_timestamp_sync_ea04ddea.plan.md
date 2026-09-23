@@ -4,28 +4,28 @@ overview: "Build a three-component system that maps stats ticks to YouTube VOD t
 todos:
   - id: m0-calibration
     content: "Build tool skeleton (Phases A–C: yt-dlp ingest, sparse presence-gated OCR scan, offset fit) with --debug-frames/--dry-run; run on the Egypt × 2sLbGfx3rXQ pair; measure MISSION_CLOCK_SKEW_SEC and validate the ±2 s acceptance checks"
-    status: pending
+    status: completed
   - id: tool-complete
     content: "Complete scripts/map_match_video.py: verification gates (identity, kill-counter, operator QA), manual --anchor/--offset modes, atomic store writes, module constants"
-    status: pending
+    status: completed
   - id: gate-script
     content: Add _investigation/check_match_videos.py (store invariants + forbidden-consumer grep) and register it in run_all_gates.py
-    status: pending
+    status: completed
   - id: frontend-module
     content: Create js/video-links.js (ensureLoaded/videosFor/linkForMatchSec/linkForTick) and add the script tag to index.html before storyline.js
-    status: pending
+    status: completed
   - id: frontend-surfaces
     content: "Wire v1 surfaces: banner Watch-VOD button/dropdown, kill feed + snipe feed row icons, storyline rail icons, build-log hover icons, .vt-video-link CSS in vtstats-theme.css"
-    status: pending
+    status: completed
   - id: docs
     content: "Document: DATA_DICTIONARY §16, DEVELOPER_GUIDE operator runbook, AGENTS.md / project-overview.mdc bullets, filter-contract.mdc table row"
-    status: pending
+    status: completed
   - id: m3-edited
     content: "Edited-VOD support: dense 1 fps ffmpeg pipe, scene-cut localization, speed-ramp exclusion; verify with a synthetic ffmpeg-spliced copy via --input"
-    status: pending
+    status: completed
   - id: m4-followups
     content: "Follow-ups: 3D replay HUD watch-this-moment button, picker Has-VOD facet, player-page match-log column"
-    status: pending
+    status: completed
 isProject: false
 ---
 

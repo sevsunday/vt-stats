@@ -38,6 +38,7 @@
   --vt-warn:    #ffb86c;
   --vt-danger:  #ff7777;
   --vt-gold:    #ffd24a;
+  --vt-youtube: #ff0000;
   --vt-ammo:    #4ea3ff;   /* ammo bar (always blue) */
 }
 
@@ -534,6 +535,88 @@ body.replay-roster-collapsed:not(.replay-compact) .event-feed {
 
 .t-btn-play:hover {
   background: rgba(106, 169, 255, 0.25);
+}
+
+.t-watch-vod {
+  text-decoration: none;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+}
+.t-watch-vod[hidden] {
+  display: none !important;
+}
+.t-yt-icon {
+  width: 14px;
+  height: 14px;
+  fill: var(--vt-youtube);
+  margin-right: 0.35rem;
+  flex-shrink: 0;
+}
+.t-watch-vod:hover .t-yt-icon {
+  fill: var(--vt-youtube);
+}
+
+.t-watch-dialog {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(12, 16, 24, 0.96);
+  color: var(--text);
+  padding: 0;
+  min-width: min(360px, 92vw);
+  max-width: 92vw;
+}
+.t-watch-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+.t-watch-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.t-watch-dialog-close {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+}
+.t-watch-dialog-close:hover {
+  color: var(--text);
+}
+.t-watch-dialog-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0.4rem;
+}
+.t-watch-dialog-list a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0.7rem;
+  color: var(--text);
+  text-decoration: none;
+  border-radius: 6px;
+}
+.t-watch-dialog-list a:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.t-watch-dialog-ch {
+  font-weight: 600;
+}
+.t-watch-dialog-title {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .t-time {

@@ -307,6 +307,10 @@ th[data-sort].sort-active {
        clearly regardless of the active accent theme. */
     --vt-heatmap-team1: #3b82f6;
     --vt-heatmap-team2: #ef4444;
+
+    /* YouTube brand mark — Watch VOD button only. Theme --kb-danger is
+       not YouTube red (and shifts across palettes). */
+    --vt-youtube: #ff0000;
 }
 
 /* Light mode — same effects, reduced intensity */
@@ -788,6 +792,39 @@ body::before {
 
 .vt-nav-icon-btn--secondary:active {
     filter: brightness(0.95);
+}
+
+/* Match-info banner action cluster: 2×2 grey grid (All Matches · Raw
+   Data / Map Page · Watch VOD). Missing map/VOD cells hide, so 3 items
+   wrap 2+1 and 2 items sit on one row. */
+.vt-banner-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    align-items: stretch;
+}
+.vt-banner-actions > .vt-nav-icon-btn,
+.vt-banner-vod,
+.vt-banner-vod > .dropdown,
+.vt-banner-vod .vt-nav-icon-btn {
+    width: 100%;
+    min-width: 0;
+}
+.vt-banner-vod {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+}
+.vt-banner-vod > .dropdown,
+.vt-banner-vod > .vt-nav-icon-btn {
+    flex: 1;
+}
+.vt-banner-vod .vt-nav-icon-btn {
+    height: 100%;
+}
+.vt-banner-actions .bi-youtube,
+.vt-banner-vod .bi-youtube {
+    color: var(--vt-youtube);
 }
 
 /* ============================================================================
@@ -1614,6 +1651,41 @@ body::before {
 .vt-player-link-fallback:hover,
 .vt-player-link-fallback:focus-visible {
     color: var(--kb-primary);
+}
+
+/* YouTube VOD timestamp deep-link. Sibling of .vt-odf-link so the
+   dashboard, storyline rail, and player match log pick it up without
+   a dedicated stylesheet. Muted by default; --kb-danger hover tint. */
+.vt-video-link {
+    color: var(--kb-text-muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+    margin-left: 0.15rem;
+    transition: color 0.15s ease;
+}
+.vt-video-link i {
+    font-size: 0.9em;
+}
+.vt-video-link:hover,
+.vt-video-link:focus-visible {
+    color: var(--kb-danger);
+    text-decoration: none;
+}
+.vt-video-link--hover {
+    opacity: 0;
+}
+.vt-econ-log-row:hover .vt-video-link--hover,
+.vt-econ-log-row:focus-within .vt-video-link--hover {
+    opacity: 1;
+}
+.vt-video-chip {
+    color: inherit;
+}
+.vt-video-chip:hover,
+.vt-video-chip:focus-visible {
+    color: var(--kb-danger);
 }
 
 /* Used by Phase 3 cards (Snipe Feed, Powerup/Crate Destruction Breakdown) to fully
@@ -4017,6 +4089,13 @@ td.vt-col-split {
     white-space: nowrap;
     min-width: 0;
     flex: 1 1 auto;
+}
+
+.vt-match-picker-vod {
+    color: var(--vt-youtube);
+    font-size: 0.72rem;
+    margin-left: 0.3rem;
+    vertical-align: 0.05em;
 }
 
 .vt-match-picker-card-meta {

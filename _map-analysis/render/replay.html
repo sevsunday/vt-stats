@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VT Stats - Match Replay (Ace Combat-style)</title>
 <link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/replay-style.css?v=hud-layout-18">
+<link rel="stylesheet" href="css/replay-style.css?v=hud-layout-19">
 
 <script type="importmap">
 {
@@ -167,6 +167,10 @@
     <button id="btn-step-fwd" class="t-btn t-btn-icon" title="Step forward 5s (Right)">&#10095;&#10095;</button>
 
     <span class="t-time"><span id="t-cur">0:00</span> / <span id="t-tot">0:00</span></span>
+    <a id="btn-watch-vod" class="t-btn t-watch-vod" href="#" target="_blank" rel="noopener" hidden
+       title="Watch this moment on YouTube"><svg class="t-yt-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8.051 1.999h.089c.822.003 4.987.013 6.11.157a2.29 2.29 0 0 1 1.94 1.93c.313 1.644.313 4.588.313 4.588s0 2.945-.313 4.588a2.29 2.29 0 0 1-1.924 1.924c-1.125.144-5.286.154-6.11.157h-.089c-.822-.003-4.987-.013-6.11-.157A2.29 2.29 0 0 1 .06 11.26C-.253 9.616-.253 6.672-.253 6.672s0-2.945.313-4.588A2.29 2.29 0 0 1 2.24.244C3.365.1 7.526.09 8.35.087zM8 5.206v5.588L12.603 8z"/></svg>Watch</a>
+    <button type="button" id="btn-watch-vod-pick" class="t-btn t-watch-vod" hidden
+            title="Watch this moment on YouTube"><svg class="t-yt-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8.051 1.999h.089c.822.003 4.987.013 6.11.157a2.29 2.29 0 0 1 1.94 1.93c.313 1.644.313 4.588.313 4.588s0 2.945-.313 4.588a2.29 2.29 0 0 1-1.924 1.924c-1.125.144-5.286.154-6.11.157h-.089c-.822-.003-4.987-.013-6.11-.157A2.29 2.29 0 0 1 .06 11.26C-.253 9.616-.253 6.672-.253 6.672s0-2.945.313-4.588A2.29 2.29 0 0 1 2.24.244C3.365.1 7.526.09 8.35.087zM8 5.206v5.588L12.603 8z"/></svg>Watch</button>
 
     <select id="speed" class="t-speed" title="Playback speed">
       <option value="1">1x</option>
@@ -191,8 +195,19 @@
   </span>
 </footer>
 
+<dialog id="watch-vod-dialog" class="t-watch-dialog">
+  <form method="dialog">
+    <header class="t-watch-dialog-head">
+      <span>Watch this moment</span>
+      <button type="submit" value="cancel" class="t-watch-dialog-close" aria-label="Close">&times;</button>
+    </header>
+    <div id="watch-vod-dialog-list" class="t-watch-dialog-list"></div>
+  </form>
+</dialog>
+
 <div id="status">loading match data...</div>
 
+<script src="../../js/video-links.js"></script>
 <script type="module" src="js/replay.js"></script>
 </body>
 </html>

@@ -799,6 +799,7 @@
                     <th class="vt-matchlog-th text-end" data-sort="acc">Acc</th>
                     <th class="vt-matchlog-th text-end" data-sort="delta">&Delta;VTSR</th>
                     <th class="vt-matchlog-th text-end" data-sort="after">After</th>
+                    <th class="vt-matchlog-th vt-matchlog-vod" title="YouTube VOD">VOD</th>
                     <th class="vt-matchlog-th"></th>
                   </tr>
                 </thead>
@@ -1414,6 +1415,7 @@
     const rowCls = r.is_campod ? 'vt-row-campod' : (r.is_low_activity ? 'vt-row-partial' : '');
     const dateStr = String(r.date || '').slice(0, 10);
     const mapStr  = String(r.map || '').replace(/\.bzn$/i, '');
+    const vodCell = matchVodCellHtml(r.match_id);
     return `<tr class="${rowCls}" data-match-id="${escapeHtml(r.match_id)}">
       <td class="vt-matchlog-date">${escapeHtml(dateStr)}</td>
       <td><span class="vt-matchlog-map">${escapeHtml(mapStr)}</span>
@@ -1425,6 +1427,7 @@
       <td class="text-end vt-matchlog-num">${acc}</td>
       <td class="text-end vt-matchlog-num">${deltaCell}</td>
       <td class="text-end vt-matchlog-num">${afterCell}</td>
+      <td class="text-center vt-matchlog-vod">${vodCell}</td>
       <td class="text-end">
         <button type="button" class="vt-matchlog-expand btn btn-sm" aria-label="Toggle detail">
           <i class="bi bi-chevron-down"></i>
@@ -1435,14 +1438,14 @@
 
   function renderMatchLogDetail(matchId) {
     const r = (state.matchLogState.rows || []).find(x => x.match_id === matchId);
-    if (!r) return `<tr class="vt-matchlog-detail-row"><td colspan="10" class="text-secondary py-2">No detail available.</td></tr>`;
+    if (!r) return `<tr class="vt-matchlog-detail-row"><td colspan="11" class="text-secondary py-2">No detail available.</td></tr>`;
 
     const axes = renderAxisContribBars(r);
     const wb = renderWeaponBreakdownBar(r);
     const ld = renderLoadoutBar(r);
     const fullMatchHref = `${state.dataPrefix}index.html?match=${encodeURIComponent(r.match_id)}&filter=player&players=${encodeURIComponent(state.matchLogState.rating.steam64 || '')}`;
 
-    return `<tr class="vt-matchlog-detail-row"><td colspan="10" class="vt-matchlog-detail">
+    return `<tr class="vt-matchlog-detail-row"><td colspan="11" class="vt-matchlog-detail">
       <div class="row g-3">
         <div class="col-12 col-lg-6">
           <h3 class="h6 mb-2 text-secondary text-uppercase" style="letter-spacing:0.08em;font-size:0.72rem;">
@@ -1842,6 +1845,50 @@
         .then(json => { state.f9Community = json || null; return state.f9Community; });
     }
     return _f9CommunityFetchPromise;
+  }
+
+  function ensureMatchVideosLoaded() {
+    if (window.VTVideoLinks) {
+      return window.VTVideoLinks.ensureLoaded({
+        url: `${state.dataPrefix}data/external/match_videos.json`,
+      });
+    }
+    if (window.__vtMatchVideos !== undefined) {
+      return Promise.resolve(window.__vtMatchVideos);
+    }
+    return fetchJson(`${state.dataPrefix}data/external/match_videos.json`)
+      .catch(() => null)
+      .then((json) => {
+        window.__vtMatchVideos = (json && json.matches) ? json : { matches: {} };
+        return window.__vtMatchVideos;
+      });
+  }
+
+  function matchVodCellHtml(matchId) {
+    if (!matchId) return '';
+    const videos = window.VTVideoLinks
+      ? window.VTVideoLinks.videosFor(matchId)
+      : (((window.__vtMatchVideos || {}).matches || {})[matchId] || []);
+    if (!videos.length) return '';
+    let href = '';
+    let channel = 'YouTube';
+    let approx = false;
+    if (window.VTVideoLinks) {
+      const link = window.VTVideoLinks.linkForMatchSec(matchId, 0);
+      if (link) {
+        href = link.url;
+        channel = link.channel;
+        approx = !!link.approx;
+      }
+    }
+    if (!href) {
+      const v = videos[0];
+      href = v.url || '';
+      channel = (v.channel && v.channel.name) || 'YouTube';
+    }
+    if (!href) return '';
+    const extra = approx ? ' (nearest kept footage)' : '';
+    return `<a class="vt-video-link" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="Watch on YouTube \u2014 ${escapeHtml(channel)}${extra}" onclick="event.stopPropagation()"><i class="bi bi-youtube" aria-hidden="true"></i></a>`;
   }
 
   /** Chronological VTSR-C points for one commander: every duel in
@@ -4065,6 +4112,7 @@
         // Bootstrap noise band for the Rating chart (improvement #6,
         // fable analysis). Graceful 404: null hides the band.
         fetchJson(`${state.dataPrefix}data/processed/validation_summary.json`).catch(() => null),
+        ensureMatchVideosLoaded(),
       ]);
       state.elo = elo;
       state.slugMap = slugMap;
