@@ -1215,6 +1215,125 @@
     font-weight: 600;
 }
 
+/* Session-ignored spectators. Sits under the team columns; chips are
+   not drag sources. The restore control and the row context menu both
+   put a player back. */
+.vt-tools-balonce-ignored {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin: 0.15rem 0 0.55rem;
+    padding: 0.35rem 0.45rem;
+    border: 1px dashed var(--kb-border-subtle);
+    border-radius: 8px;
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 35%, transparent);
+}
+
+.vt-tools-balonce-ignored-label {
+    flex-shrink: 0;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+    padding-top: 0.28rem;
+}
+
+.vt-tools-balonce-ignored-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.vt-tools-balonce-ignored-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    max-width: 100%;
+    padding: 0.12rem 0.15rem 0.12rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid var(--kb-border-subtle);
+    background-color: color-mix(in oklab, var(--kb-bg-card) 70%, transparent);
+    color: var(--kb-text-secondary);
+    font-size: 0.75rem;
+    opacity: 0.85;
+}
+
+.vt-tools-balonce-ignored-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 10rem;
+}
+
+.vt-tools-balonce-ignored-restore {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--kb-text-muted);
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 0.72rem;
+}
+
+.vt-tools-balonce-ignored-restore:hover,
+.vt-tools-balonce-ignored-restore:focus-visible {
+    color: var(--kb-text-primary);
+    background-color: color-mix(in oklab, var(--kb-bg-muted) 60%, transparent);
+    outline: none;
+}
+
+/* Right-click menu on a Balonce row. Fixed to the viewport so a card
+   with overflow:hidden cannot clip it. */
+.vt-tools-balonce-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 196px;
+    padding: 0.25rem;
+    background-color: var(--kb-bg-card);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.35rem;
+    box-shadow: var(--vt-shadow-elevation-2, 0 6px 24px rgba(0, 0, 0, 0.25));
+    font-size: 0.85rem;
+}
+
+.vt-tools-balonce-menu button {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding: 0.35rem 0.6rem;
+    background: none;
+    border: none;
+    border-radius: 0.25rem;
+    text-align: left;
+    color: var(--kb-text-primary);
+    cursor: pointer;
+}
+
+.vt-tools-balonce-menu button:hover,
+.vt-tools-balonce-menu button:focus-visible {
+    background-color: color-mix(in oklab, var(--kb-primary) 20%, transparent);
+    outline: none;
+}
+
+.vt-tools-balonce-menu button:disabled {
+    color: var(--kb-text-muted);
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.vt-tools-balonce-menu button:disabled:hover,
+.vt-tools-balonce-menu button:disabled:focus-visible {
+    background: none;
+}
+
 /* Commander row carries BOTH ratings: this chip is the VTSR-C (the one
    in the prediction); the trailing `.vt-tools-balonce-row-vtsr` number
    is their thug VTSR-T, shown for context only. */

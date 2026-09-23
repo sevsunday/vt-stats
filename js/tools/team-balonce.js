@@ -42,6 +42,13 @@
  * probability + Balonce Meter live. Manual swaps tracked in pageState so
  * "Reset to best balance" can revert.
  *
+ * Right-click opens a context menu: set/clear commander (flips to
+ * Manual), ignore/restore, player profile, Steam profile. Ignore is
+ * session-only and does NOT leave Live — the player drops into a strip
+ * under the columns and out of the balance. The set clears on
+ * snap-to-live, Reset all, Manual→Auto, a new lobby session, a player
+ * leaving the roster, or refresh. Nothing is written to localStorage.
+ *
  * Balonce Meter bands (on the FAVORITE's win probability):
  *     50-55%  Good game
  *     55-65%  Slight edge
@@ -103,15 +110,33 @@
    *                isCommander flags. Roster updates resync commanders.
    *                Visible in the header as a green "Live" chip.
    *   - 'manual' : commanderSetup was explicitly set by the user (via
-   *                dropdown, Suggest button, or a commander-row drag).
-   *                Roster updates DON'T resync commanders. Visible as a
-   *                muted "Manual" chip.
+   *                dropdown, Suggest button, commander context-menu
+   *                item, or a commander-row drag). Roster updates DON'T
+   *                resync commanders. Visible as a muted "Manual" chip.
+   *                Ignoring a player does not enter this mode.
    *
    * Initial 'live' is a vacuous default — when no live data has cmdrs
    * (DM mode, pre-game without team leaders, or manual roster mode),
    * the mode stays 'live' but commanderSetup stays {null, null}.
    */
   let mode = 'live';
+
+  /**
+   * Session-only spectator exclusions. Keyed like playerKey() (Steam64,
+   * or `custom:<name>`). Not persisted, not a dirty flag, and not part
+   * of pageState — refresh and leaving the page drop it for free.
+   * @type {Set<string>}
+   */
+  const ignoredKeys = new Set();
+  /** Last roster-page mode seen on `vt-tools:roster` ('auto' | 'manual'). */
+  let lastPageMode = null;
+  /** Last non-null lobby session id, for the new-lobby reset. */
+  let lastSessionId = null;
+
+  /** @type {HTMLElement|null} */
+  let menuEl = null;
+  /** @type {{ key: string, team: number|null, ignored: boolean, vtstatsUrl: string|null, steamUrl: string|null }|null} */
+  let menuContext = null;
 
   // ---------------------------------------------------------------- Helpers
 
@@ -121,6 +146,22 @@
 
   function findPlayer(key) {
     return activeRoster.find((p) => playerKey(p) === key) || null;
+  }
+
+  /** Roster rows that still count toward columns, commanders, and the meter. */
+  function playingRoster() {
+    if (ignoredKeys.size === 0) return activeRoster;
+    return activeRoster.filter((p) => !ignoredKeys.has(playerKey(p)));
+  }
+
+  /**
+   * Commander slot key, or null when the slot is empty or that player
+   * is currently ignored (they must not keep feeding the meter).
+   */
+  function playingCommanderKey(slot) {
+    const key = slot === 1 ? commanderSetup.team1 : commanderSetup.team2;
+    if (!key || ignoredKeys.has(key)) return null;
+    return key;
   }
 
   function escapeHtml(s) {
@@ -191,11 +232,11 @@
   function balanceState(assignment) {
     const map = assignment || assignmentOverride;
     const teams = { 1: [], 2: [] };
-    for (const p of activeRoster) {
+    for (const p of playingRoster()) {
       const t = map.get(playerKey(p));
       if (t === 1 || t === 2) teams[t].push(p);
     }
-    const cmdrKeys = { 1: commanderSetup.team1, 2: commanderSetup.team2 };
+    const cmdrKeys = { 1: playingCommanderKey(1), 2: playingCommanderKey(2) };
     const cmdrs = {
       1: cmdrKeys[1] ? findPlayer(cmdrKeys[1]) : null,
       2: cmdrKeys[2] ? findPlayer(cmdrKeys[2]) : null,
@@ -377,9 +418,11 @@
   // ---------------------------------------------------------------- Compute & broadcast
 
   function getActiveCommanders() {
+    const k1 = playingCommanderKey(1);
+    const k2 = playingCommanderKey(2);
     return {
-      cmdr1: commanderSetup.team1 ? findPlayer(commanderSetup.team1) : null,
-      cmdr2: commanderSetup.team2 ? findPlayer(commanderSetup.team2) : null,
+      cmdr1: k1 ? findPlayer(k1) : null,
+      cmdr2: k2 ? findPlayer(k2) : null,
     };
   }
 
@@ -405,7 +448,7 @@
     }
 
     // Manual mode.
-    const keysNow = new Set(activeRoster.map(playerKey));
+    const keysNow = new Set(playingRoster().map(playerKey));
     const next = new Map();
     for (const key of keysNow) {
       if (assignmentOverride.has(key)) {
@@ -445,7 +488,7 @@
     if (!activeRoster.length) return null;
     let team1Key = null;
     let team2Key = null;
-    for (const p of activeRoster) {
+    for (const p of playingRoster()) {
       if (!p.isLiveCommander) continue;
       if (p.liveTeam === 1 && !team1Key) team1Key = playerKey(p);
       else if (p.liveTeam === 2 && !team2Key) team2Key = playerKey(p);
@@ -462,7 +505,7 @@
    */
   function deriveLiveTeamAssignments() {
     const map = new Map();
-    for (const p of activeRoster) {
+    for (const p of playingRoster()) {
       const team = (p.liveTeam === 1 || p.liveTeam === 2) ? p.liveTeam : 1;
       map.set(playerKey(p), team);
     }
@@ -519,22 +562,25 @@
   // ---------------------------------------------------------------- Render
 
   function render() {
+    closeContextMenu();
     if (!bodyEl) return;
-    const n = activeRoster.length;
+    const playingCount = playingRoster().length;
     updateModeChip();
     updateHeaderButtons();
-    if (n < 2) {
+    const setCount = (playingCommanderKey(1) ? 1 : 0) + (playingCommanderKey(2) ? 1 : 0);
+    if (playingCount < 2) {
       bodyEl.innerHTML = `
         <div class="vt-tools-balonce-empty text-secondary small p-3">
           <i class="bi bi-people me-2"></i>
           Add at least 2 players to balonce (a commander-vs-commander 1v1 is valid).
         </div>
+        ${renderIgnoredStrip()}
       `;
-      updateCmdrStatusBadge(0);
+      updateCmdrStatusBadge(setCount);
+      wireRowEvents();
       return;
     }
 
-    const setCount = (commanderSetup.team1 ? 1 : 0) + (commanderSetup.team2 ? 1 : 0);
     const banner = renderBanner(setCount);
     const manualBanner = renderManualBanner();
     const cmdrConfig = renderCmdrConfig();
@@ -548,6 +594,7 @@
       <div class="vt-tools-balonce-columns">
         ${teamColumns}
       </div>
+      ${renderIgnoredStrip()}
       ${playedMeter}
     `;
     updateCmdrStatusBadge(setCount);
@@ -566,7 +613,7 @@
    *                    (handled by the n<2 early return in render())
    */
   function updateHeaderButtons() {
-    const setCount = (commanderSetup.team1 ? 1 : 0) + (commanderSetup.team2 ? 1 : 0);
+    const setCount = (playingCommanderKey(1) ? 1 : 0) + (playingCommanderKey(2) ? 1 : 0);
     if (swapCmdrsBtn) {
       swapCmdrsBtn.disabled = setCount !== 2;
       swapCmdrsBtn.title = setCount === 2
@@ -629,7 +676,7 @@
     if (mode === 'live') {
       chip.classList.add('vt-tools-balonce-mode--live');
       chip.innerHTML = '<i class="bi bi-broadcast" aria-hidden="true"></i>Live';
-      chip.title = 'Team columns mirror the live lobby. Any edit (drag, right-click, swap, suggest) switches to Manual.';
+      chip.title = 'Team columns mirror the live lobby. Drag, swap, suggest, or setting a commander switches to Manual. Ignoring a player does not.';
     } else {
       chip.classList.add('vt-tools-balonce-mode--manual');
       chip.innerHTML = '<i class="bi bi-pencil-fill" aria-hidden="true"></i>Manual';
@@ -638,7 +685,7 @@
   }
 
   function renderBanner(setCount) {
-    const provisionalCount = activeRoster.filter((p) => p.isProvisional).length;
+    const provisionalCount = playingRoster().filter((p) => p.isProvisional).length;
     const provisionalNote = provisionalCount > 0
       ? `<div class="vt-tools-balonce-banner-note small mt-1">${provisionalCount} provisional player${provisionalCount === 1 ? '' : 's'} included — balance has reduced confidence.</div>`
       : '';
@@ -697,11 +744,11 @@
       <div class="vt-tools-balonce-cmdr-config">
         <div class="vt-tools-balonce-cmdr-slot">
           <label class="vt-tools-balonce-cmdr-label">Team 1 Cmdr</label>
-          ${renderCmdrSelect(1, commanderSetup.team1)}
+          ${renderCmdrSelect(1, playingCommanderKey(1))}
         </div>
         <div class="vt-tools-balonce-cmdr-slot">
           <label class="vt-tools-balonce-cmdr-label">Team 2 Cmdr</label>
-          ${renderCmdrSelect(2, commanderSetup.team2)}
+          ${renderCmdrSelect(2, playingCommanderKey(2))}
         </div>
       </div>
     `;
@@ -709,7 +756,7 @@
 
   function renderCmdrSelect(team, currentKey) {
     const optBlank = '<option value="">— None —</option>';
-    const opts = activeRoster.map((p) => {
+    const opts = playingRoster().map((p) => {
       const key = playerKey(p);
       const sel = key === currentKey ? ' selected' : '';
       return `<option value="${escapeHtml(key)}"${sel}>${escapeHtml(p.displayName)} - T${p.tier || '?'}</option>`;
@@ -806,7 +853,7 @@
       <div class="vt-tools-balonce-row" draggable="true"
            data-vt-balonce-key="${escapeHtml(key)}"
            data-vt-balonce-team="${team}"
-           title="Right-click to toggle commander">
+           title="Right-click for actions">
         <i class="bi bi-grip-vertical vt-tools-balonce-row-grip" aria-hidden="true"></i>
         ${cmdrChip}
         <span class="vt-tools-balonce-row-name" title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</span>
@@ -815,6 +862,39 @@
         ${provisionalChip}
         ${unsplitChip}
         <span class="vt-tools-balonce-row-vtsr">${Math.round(p.vtsr)}</span>
+      </div>
+    `;
+  }
+
+  /**
+   * Compact strip of session-ignored players, under the team columns.
+   * Empty when nobody is ignored. Chips are not draggable; restore is
+   * the chip button or the context menu.
+   */
+  function renderIgnoredStrip() {
+    const players = activeRoster.filter((p) => ignoredKeys.has(playerKey(p)));
+    if (!players.length) return '';
+    const chips = players.map((p) => {
+      const key = playerKey(p);
+      const name = escapeHtml(p.displayName);
+      return `
+        <div class="vt-tools-balonce-ignored-chip"
+             data-vt-balonce-key="${escapeHtml(key)}"
+             data-vt-balonce-ignored="1"
+             title="Right-click for actions">
+          <span class="vt-tools-balonce-ignored-name">${name}</span>
+          <button type="button" class="vt-tools-balonce-ignored-restore"
+                  data-vt-balonce-restore="${escapeHtml(key)}"
+                  title="Restore this player" aria-label="Restore ${name}">
+            <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+          </button>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="vt-tools-balonce-ignored" role="region" aria-label="Ignored players">
+        <div class="vt-tools-balonce-ignored-label">Ignored</div>
+        <div class="vt-tools-balonce-ignored-list">${chips}</div>
       </div>
     `;
   }
@@ -884,8 +964,8 @@
       if (c.vtsrCUnrated) causes.push(`${c.displayName} has no commander record`);
       else if (c.vtsrCProvisional) causes.push(`${c.displayName}'s commander rating is provisional`);
     }
-    const cmdrKeySet = new Set([commanderSetup.team1, commanderSetup.team2].filter(Boolean));
-    const shakyThugs = activeRoster.filter((p) => {
+    const cmdrKeySet = new Set([playingCommanderKey(1), playingCommanderKey(2)].filter(Boolean));
+    const shakyThugs = playingRoster().filter((p) => {
       if (cmdrKeySet.has(playerKey(p))) return false;
       return p.isProvisional || p.isUnknown || p.isCustom;
     }).length;
@@ -963,7 +1043,7 @@
     })().then((json) => {
       validationSummary = json;
       // Repaint so the footer picks up the accuracy figure.
-      if (bodyEl && activeRoster.length >= 2) render();
+      if (bodyEl && (playingRoster().length >= 2 || ignoredKeys.size > 0)) render();
       return json;
     });
     return validationPromise;
@@ -974,8 +1054,10 @@
   function wireRowEvents() {
     const rows = bodyEl.querySelectorAll('[data-vt-balonce-key]');
     rows.forEach((row) => {
-      row.addEventListener('dragstart', onDragStart);
-      row.addEventListener('dragend', onDragEnd);
+      if (!row.hasAttribute('data-vt-balonce-ignored')) {
+        row.addEventListener('dragstart', onDragStart);
+        row.addEventListener('dragend', onDragEnd);
+      }
       row.addEventListener('contextmenu', onRowContextMenu);
     });
     const targets = bodyEl.querySelectorAll('[data-vt-balonce-droptarget]');
@@ -983,6 +1065,10 @@
       target.addEventListener('dragover', onDragOver);
       target.addEventListener('dragleave', onDragLeave);
       target.addEventListener('drop', onDrop);
+    });
+    const restores = bodyEl.querySelectorAll('[data-vt-balonce-restore]');
+    restores.forEach((btn) => {
+      btn.addEventListener('click', onRestoreClick);
     });
   }
 
@@ -1053,20 +1139,197 @@
   }
 
   /**
-   * Right-click on a player row: toggle commander status on the team
-   * they're currently on.
+   * Right-click opens the action menu. Commander assignment still lives
+   * behind the first item; it is no longer a bare toggle.
+   */
+  function onRowContextMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const key = this.getAttribute('data-vt-balonce-key');
+    if (!key) return;
+    const ignored = this.hasAttribute('data-vt-balonce-ignored');
+    const team = parseInt(this.getAttribute('data-vt-balonce-team'), 10);
+    openContextMenu(e.clientX, e.clientY, key, ignored ? null : team);
+  }
+
+  function onRestoreClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const key = this.getAttribute('data-vt-balonce-restore');
+    if (key) restorePlayer(key);
+  }
+
+  function closeContextMenu() {
+    if (menuEl) {
+      menuEl.remove();
+      menuEl = null;
+    }
+    menuContext = null;
+  }
+
+  function openContextMenu(clientX, clientY, key, team) {
+    const p = findPlayer(key);
+    if (!p) return;
+    const ignored = ignoredKeys.has(key);
+    const isCmdr = !ignored && (
+      (team === 1 && commanderSetup.team1 === key)
+      || (team === 2 && commanderSetup.team2 === key)
+    );
+    const canCommand = !ignored && (team === 1 || team === 2);
+    closeContextMenu();
+    menuContext = {
+      key,
+      team: canCommand ? team : null,
+      ignored,
+      vtstatsUrl: p.vtstatsUrl || null,
+      steamUrl: p.steamProfileUrl || null,
+    };
+
+    const menu = document.createElement('div');
+    menu.className = 'vt-tools-balonce-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = `
+      <button type="button" role="menuitem" data-vt-balonce-menu-action="commander"
+              ${canCommand ? '' : 'disabled title="Restore this player first"'}>
+        <i class="bi bi-person-fill-gear" aria-hidden="true"></i>
+        ${isCmdr ? 'Clear commander' : 'Set as commander'}
+      </button>
+      <button type="button" role="menuitem" data-vt-balonce-menu-action="ignore">
+        <i class="bi ${ignored ? 'bi-arrow-counterclockwise' : 'bi-eye-slash'}" aria-hidden="true"></i>
+        ${ignored ? 'Restore this player' : 'Ignore this player'}
+      </button>
+      <button type="button" role="menuitem" data-vt-balonce-menu-action="vtstats"
+              ${p.vtstatsUrl ? '' : 'disabled'}
+              title="${p.vtstatsUrl ? 'Open VT Stats profile' : 'No VT Stats profile for this player'}">
+        <i class="bi bi-bar-chart-fill" aria-hidden="true"></i>
+        Player profile
+      </button>
+      <button type="button" role="menuitem" data-vt-balonce-menu-action="steam"
+              ${p.steamProfileUrl ? '' : 'disabled'}
+              title="${p.steamProfileUrl ? 'Open Steam profile' : 'No Steam profile for this player'}">
+        <i class="bi bi-steam" aria-hidden="true"></i>
+        Steam profile
+      </button>
+    `;
+    menu.addEventListener('click', onMenuClick);
+    menu.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    document.body.appendChild(menu);
+    menuEl = menu;
+    placeContextMenu(menu, clientX, clientY);
+  }
+
+  function placeContextMenu(menu, clientX, clientY) {
+    const pad = 8;
+    menu.style.left = `${clientX}px`;
+    menu.style.top = `${clientY}px`;
+    const rect = menu.getBoundingClientRect();
+    let left = clientX;
+    let top = clientY;
+    if (left + rect.width > window.innerWidth - pad) {
+      left = window.innerWidth - rect.width - pad;
+    }
+    if (top + rect.height > window.innerHeight - pad) {
+      top = window.innerHeight - rect.height - pad;
+    }
+    if (left < pad) left = pad;
+    if (top < pad) top = pad;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  function onMenuClick(e) {
+    const btn = e.target.closest('[data-vt-balonce-menu-action]');
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const action = btn.getAttribute('data-vt-balonce-menu-action');
+    const ctx = menuContext;
+    closeContextMenu();
+    if (!ctx) return;
+    if (action === 'commander') {
+      if (ctx.team === 1 || ctx.team === 2) toggleCommander(ctx.key, ctx.team);
+    } else if (action === 'ignore') {
+      if (ctx.ignored) restorePlayer(ctx.key);
+      else ignorePlayer(ctx.key);
+    } else if (action === 'vtstats' && ctx.vtstatsUrl) {
+      window.open(ctx.vtstatsUrl, '_blank', 'noopener,noreferrer');
+    } else if (action === 'steam' && ctx.steamUrl) {
+      window.open(ctx.steamUrl, '_blank', 'noopener,noreferrer');
+    }
+  }
+
+  function onDocumentClick(e) {
+    if (!menuEl || menuEl.contains(e.target)) return;
+    closeContextMenu();
+  }
+
+  function onDocumentKeydown(e) {
+    if (e.key === 'Escape' && menuEl) closeContextMenu();
+  }
+
+  function onDocumentContextMenu(e) {
+    if (!menuEl) return;
+    if (menuEl.contains(e.target)) {
+      e.preventDefault();
+      return;
+    }
+    closeContextMenu();
+  }
+
+  function onDismissScroll() {
+    if (menuEl) closeContextMenu();
+  }
+
+  /**
+   * Pull a playing row out of the columns and the meter. Stays in Live
+   * when the card was already live — spectators should not freeze the
+   * lobby mirror.
+   */
+  function ignorePlayer(key) {
+    if (!key || ignoredKeys.has(key)) return;
+    ignoredKeys.add(key);
+    if (commanderSetup.team1 === key) commanderSetup.team1 = null;
+    if (commanderSetup.team2 === key) commanderSetup.team2 = null;
+    assignmentOverride.delete(key);
+    for (const swap of Array.from(manualSwaps)) {
+      const [k] = swap.split('|');
+      if (k === key) manualSwaps.delete(swap);
+    }
+    compute();
+    render();
+    updateMainState();
+  }
+
+  /**
+   * Put an ignored player back on their live team (Team 1 when the lobby
+   * has not split them). In Live mode, commander slots are re-mirrored
+   * so a restored lobby commander takes the slot again.
+   */
+  function restorePlayer(key) {
+    if (!key || !ignoredKeys.has(key)) return;
+    ignoredKeys.delete(key);
+    if (mode === 'live') {
+      const live = deriveLiveCommanderSetup();
+      commanderSetup = live
+        ? { team1: live.team1, team2: live.team2 }
+        : { team1: null, team2: null };
+    }
+    compute();
+    render();
+    updateMainState();
+  }
+
+  /**
+   * Set or clear commander on the team the row is currently on.
    *   - Already cmdr of this team -> demote (slot clears).
    *   - Not cmdr -> take the slot. If they were cmdr of the OTHER team,
    *     vacate that slot. If someone else held this slot, they get
    *     bumped back to thug duty.
    * Always flips to Manual mode.
    */
-  function onRowContextMenu(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const key = this.getAttribute('data-vt-balonce-key');
-    const currentTeam = parseInt(this.getAttribute('data-vt-balonce-team'), 10);
+  function toggleCommander(key, currentTeam) {
     if (!key || (currentTeam !== 1 && currentTeam !== 2)) return;
+    if (ignoredKeys.has(key)) return;
 
     const slotKey = `team${currentTeam}`;
     const otherSlotKey = currentTeam === 1 ? 'team2' : 'team1';
@@ -1078,9 +1341,10 @@
       commanderSetup[slotKey] = key;
     }
     manualSwaps.clear();
-    flipToManual('rightclick-cmdr');
+    flipToManual('context-cmdr');
     compute();
     render();
+    updateMainState();
   }
 
   // ---------------------------------------------------------------- Row controls
@@ -1119,7 +1383,7 @@
   function autoSuggestBoth() {
     commanderSetup = { team1: null, team2: null };
     manualSwaps.clear();
-    const ranked = rankCandidates(activeRoster);
+    const ranked = rankCandidates(playingRoster());
     if (ranked.length >= 1) commanderSetup.team1 = playerKey(ranked[0]);
     if (ranked.length >= 2) commanderSetup.team2 = playerKey(ranked[1]);
     // Suggest is an algorithmic pick, not live truth → Manual mode.
@@ -1163,7 +1427,7 @@
     const usedKeys = new Set();
     if (cmdr1) usedKeys.add(playerKey(cmdr1));
     if (cmdr2) usedKeys.add(playerKey(cmdr2));
-    const thugs = activeRoster.filter((p) => !usedKeys.has(playerKey(p)));
+    const thugs = playingRoster().filter((p) => !usedKeys.has(playerKey(p)));
     bestPartition = findBestPartition(thugs, cmdr1, cmdr2);
     assignmentOverride = new Map();
     if (bestPartition) {
@@ -1183,6 +1447,7 @@
    * roster (every `p.liveTeam` is null) — see render() for the gating.
    */
   function snapToLive() {
+    ignoredKeys.clear();
     manualSwaps.clear();
     assignmentOverride = new Map();
     const live = deriveLiveCommanderSetup();
@@ -1199,6 +1464,7 @@
   function onRosterChange(e) {
     const detail = e.detail || {};
     const pageMode = detail.mode || 'auto';
+    const sessionId = detail.sessionId || null;
     activeRoster = detail.roster || [];
 
     // Drop any commander selection whose player is no longer in roster.
@@ -1216,6 +1482,27 @@
     for (const k of Array.from(assignmentOverride.keys())) {
       if (!keys.has(k)) assignmentOverride.delete(k);
     }
+
+    // Ignore-set resets. A new lobby or a return from Manual roster
+    // drops the whole set. Otherwise only keys that left the roster go.
+    // Runs before the live commander mirror so a restored lobby
+    // commander can take their slot on this same pass.
+    let clearedIgnores = false;
+    if (sessionId && lastSessionId && sessionId !== lastSessionId) {
+      ignoredKeys.clear();
+      clearedIgnores = true;
+    }
+    if (sessionId) lastSessionId = sessionId;
+    if (!clearedIgnores && lastPageMode === 'manual' && pageMode === 'auto') {
+      ignoredKeys.clear();
+      clearedIgnores = true;
+    }
+    if (!clearedIgnores) {
+      for (const k of Array.from(ignoredKeys)) {
+        if (!keys.has(k)) ignoredKeys.delete(k);
+      }
+    }
+    lastPageMode = pageMode;
 
     // Page roster mode transitions:
     //   - Manual page mode -> Balonce should also be Manual (no live
@@ -1238,6 +1525,8 @@
   }
 
   function onResetAll() {
+    ignoredKeys.clear();
+    lastPageMode = null;
     commanderSetup = { team1: null, team2: null };
     manualSwaps.clear();
     bestPartition = null;
@@ -1262,6 +1551,10 @@
 
     window.addEventListener('vt-tools:roster', onRosterChange);
     window.addEventListener('vt-tools:reset-all', onResetAll);
+    document.addEventListener('click', onDocumentClick);
+    document.addEventListener('keydown', onDocumentKeydown);
+    document.addEventListener('contextmenu', onDocumentContextMenu, true);
+    window.addEventListener('scroll', onDismissScroll, true);
 
     render();
   }
