@@ -51,6 +51,8 @@
     activeRoster: [],
     lastSessionId: null,
     hostName: null,
+    /** Set when opened from a match (`?from=`). Null on a normal visit. */
+    matchSeed: null,
     components: {
       wheel:   { lastWinner: null, removedSteam64s: new Set(), isSpinning: false, method: 'wheel' },
       coin:    { lastResult: null, mode: 'single' },
@@ -247,6 +249,10 @@
       return;
     }
     if (pageState.mode === 'manual') {
+      if (pageState.matchSeed && pageState.matchSeed.label) {
+        rosterSourceEl.innerHTML = `<i class="bi bi-controller me-1"></i>From ${escapeHtml(pageState.matchSeed.label)}`;
+        return;
+      }
       const n = pageState.manualRoster.length;
       rosterSourceEl.innerHTML = `<i class="bi bi-pencil me-1"></i>Manual roster${n > 0 ? ` (${n} ${n === 1 ? 'entry' : 'entries'})` : ' — empty'}`;
       return;
@@ -713,6 +719,7 @@
         }
       }
       pageState.manualRoster = [];
+      pageState.matchSeed = null;
       pageState.mode = 'auto';
       // Resume polling-driven roster if not ignoreLive
       broadcastRosterChange('mode-auto');
@@ -720,6 +727,10 @@
     }
     if (next === 'manual') {
       // Auto -> Manual. Snapshot current liveRoster.
+      // A match seed is a curated lobby, not the live snapshot — leaving
+      // Manual via Auto already cleared it; coming back should not
+      // resurrect the match layout under the live copy.
+      pageState.matchSeed = null;
       pageState.manualRoster = pageState.liveRoster.slice();
       pageState.mode = 'manual';
       // Auto-unlock if locked (manual roster doesn't need to track live data)
@@ -763,11 +774,46 @@
 
   // ---------------------------------------------------------------- Reset all
 
+  /**
+   * Replace the manual roster with a match's rated lobby. Does not go
+   * through setMode('manual'), which would overwrite the roster with
+   * the live snapshot.
+   */
+  function setManualRoster(players, meta) {
+    pageState.manualRoster = (players || []).slice();
+    pageState.mode = 'manual';
+    pageState.matchSeed = meta || null;
+    if (modeManualRadio) modeManualRadio.checked = true;
+    if (modeAutoRadio) modeAutoRadio.checked = false;
+    if (pageState.lobbyLocked && window.VTLiveSession) {
+      window.VTLiveSession.setLobbyLocked(false);
+    }
+    broadcastRosterChange('match-seed');
+  }
+
+  /**
+   * Flip As played / Today on a seeded roster. Team swaps stay put.
+   */
+  function setRatingBasis(basis) {
+    if (!pageState.matchSeed) return;
+    const next = basis === 'now' ? 'now' : 'then';
+    if (pageState.matchSeed.basis === next) return;
+    pageState.matchSeed.basis = next;
+    const seedApi = window.VTToolsMatchSeed;
+    for (let i = 0; i < pageState.manualRoster.length; i++) {
+      if (seedApi) seedApi.applyBasis(pageState.manualRoster[i], next);
+    }
+    if (seedApi) seedApi.writeRatingsParam(next);
+    broadcastRosterChange('rating-basis');
+  }
+
   function resetAll() {
     pageState.mode = 'auto';
     pageState.ignoreLive = false;
     pageState.lobbyLocked = false;
     pageState.manualRoster = [];
+    pageState.matchSeed = null;
+    if (window.VTToolsMatchSeed) window.VTToolsMatchSeed.clearSeedParams();
     pageState.components.wheel = { lastWinner: null, removedSteam64s: new Set(), isSpinning: false, method: 'wheel' };
     pageState.components.coin = { lastResult: null, mode: 'single' };
     pageState.components.mapRoll = { lastResults: [null, null, null], poolFilter: '7', isRolling: false };
@@ -916,6 +962,30 @@
 
     window.addEventListener('beforeunload', onBeforeUnload);
 
+    let seeded = false;
+    if (window.VTToolsMatchSeed) {
+      try {
+        const seed = await window.VTToolsMatchSeed.load();
+        if (seed && seed.players && window.VTToolsBalonce && window.VTToolsBalonce.seedMatchLayout) {
+          window.VTToolsBalonce.seedMatchLayout(seed);
+          setManualRoster(seed.players, {
+            label: seed.label,
+            matchId: seed.matchId,
+            basis: seed.basis,
+          });
+          seeded = true;
+        } else if (seed && seed.error) {
+          const toasts = window.VTToolsToasts;
+          const msg = seed.error === 'missing'
+            ? 'That match could not be loaded.'
+            : 'This match has no rated lobby to pre-fill.';
+          if (toasts && toasts.showInfo) toasts.showInfo('What-if', msg);
+        }
+      } catch (err) {
+        console.warn('[match-seed] failed to pre-fill', err);
+      }
+    }
+
     if (window.VTLiveSession) {
       window.VTLiveSession.init({
         onRosterChange: onLiveRosterChange,
@@ -923,7 +993,7 @@
     }
 
     renderLobbyMeta();
-    broadcastRosterChange('init');
+    if (!seeded) broadcastRosterChange('init');
   }
 
   if (document.readyState === 'loading') {
@@ -937,6 +1007,8 @@
     getPageState: () => pageState,
     setMode,
     setIgnoreLive,
+    setManualRoster,
+    setRatingBasis,
     resetAll,
     isDirty,
   };

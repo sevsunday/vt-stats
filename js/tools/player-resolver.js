@@ -534,6 +534,7 @@
     getVsrMapByFile: () => vsrMapByFile,
     getEloMeta: () => eloMeta,
     getCmdrEloMeta: () => cmdrEloMeta,
+    tierFor: resolveTier,
     PROVISIONAL_ANCHOR_VTSR,
     SITE_URL,
   };

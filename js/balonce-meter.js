@@ -1591,6 +1591,14 @@
     card.classList.toggle('vt-balonce-hypothetical', !!joined.hypothetical);
     card.classList.remove('d-none');
 
+    const whatIfThen = document.getElementById('balonce-whatif-then');
+    const whatIfNow = document.getElementById('balonce-whatif-now');
+    if (matchId && whatIfThen && whatIfNow) {
+      const base = `tools/index.html?from=${encodeURIComponent(matchId)}`;
+      whatIfThen.href = `${base}&ratings=then#vt-tools-balonce`;
+      whatIfNow.href = `${base}&ratings=now#vt-tools-balonce`;
+    }
+
     const eloLink = body.querySelector('[data-vt-balonce-elo-link]');
     if (eloLink) {
       eloLink.addEventListener('click', (ev) => {

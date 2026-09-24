@@ -133,6 +133,14 @@
   /** Last non-null lobby session id, for the new-lobby reset. */
   let lastSessionId = null;
 
+  /**
+   * Match the page was opened from (`?from=`). Holds the original
+   * team/commander layout so Reset can restore it. Null on a normal
+   * Tools visit. Ratings live on the roster rows, not here.
+   * @type {{ assignments: Record<string, 1|2>, commanders: {team1: string|null, team2: string|null}, label: string }|null}
+   */
+  let matchSeed = null;
+
   /** @type {HTMLElement|null} */
   let menuEl = null;
   /** @type {{ key: string, team: number|null, ignored: boolean, vtstatsUrl: string|null, steamUrl: string|null }|null} */
@@ -570,6 +578,7 @@
     const setCount = (playingCommanderKey(1) ? 1 : 0) + (playingCommanderKey(2) ? 1 : 0);
     if (playingCount < 2) {
       bodyEl.innerHTML = `
+        ${renderRatingBasis()}
         <div class="vt-tools-balonce-empty text-secondary small p-3">
           <i class="bi bi-people me-2"></i>
           Add at least 2 players to balonce (a commander-vs-commander 1v1 is valid).
@@ -578,6 +587,7 @@
       `;
       updateCmdrStatusBadge(setCount);
       wireRowEvents();
+      wireBasisControls();
       return;
     }
 
@@ -588,6 +598,7 @@
     const playedMeter = renderPlayedMeter();
 
     bodyEl.innerHTML = `
+      ${renderRatingBasis()}
       ${banner}
       ${manualBanner}
       ${cmdrConfig}
@@ -602,6 +613,48 @@
     wireRowEvents();
     wireRowControls();
     wireManualBannerControls();
+    wireBasisControls();
+  }
+
+  function ratingBasis() {
+    const main = window.VTToolsMain;
+    const state = main && main.getPageState ? main.getPageState() : null;
+    const basis = state && state.matchSeed && state.matchSeed.basis;
+    return basis === 'now' ? 'now' : 'then';
+  }
+
+  /** As played / Today. Only while this visit was opened from a match. */
+  function renderRatingBasis() {
+    if (!matchSeed) return '';
+    const thenOn = ratingBasis() !== 'now';
+    return `
+      <div class="vt-tools-balonce-basis">
+        <div class="btn-group btn-group-sm vt-tools-pill-group" role="group" aria-label="Rating era">
+          <button type="button" class="btn btn-outline-secondary${thenOn ? ' active' : ''}"
+                  data-vt-balonce-basis="then"
+                  aria-pressed="${thenOn ? 'true' : 'false'}">As played</button>
+          <button type="button" class="btn btn-outline-secondary${thenOn ? '' : ' active'}"
+                  data-vt-balonce-basis="now"
+                  aria-pressed="${thenOn ? 'false' : 'true'}">Today</button>
+        </div>
+        <p class="vt-tools-balonce-basis-note mb-0">
+          As played is what the match card used. Today is the same lineup on current ratings.
+          Drag a player to the other team either way.
+        </p>
+      </div>`;
+  }
+
+  function wireBasisControls() {
+    if (!bodyEl) return;
+    const buttons = bodyEl.querySelectorAll('[data-vt-balonce-basis]');
+    for (let i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function () {
+        const next = this.getAttribute('data-vt-balonce-basis') === 'now' ? 'now' : 'then';
+        if (window.VTToolsMain && window.VTToolsMain.setRatingBasis) {
+          window.VTToolsMain.setRatingBasis(next);
+        }
+      });
+    }
   }
 
   /**
@@ -622,10 +675,15 @@
     }
     if (resetBtn) {
       const live = hasLiveTruth();
-      resetBtn.disabled = !live;
-      resetBtn.title = live
-        ? 'Snap back to the live lobby layout'
-        : 'No live lobby data — nothing to snap back to';
+      const seeded = !!matchSeed;
+      resetBtn.disabled = !live && !seeded;
+      if (seeded && !live) {
+        resetBtn.title = 'Reset teams and commanders to how this match was played';
+      } else if (live) {
+        resetBtn.title = 'Snap back to the live lobby layout';
+      } else {
+        resetBtn.title = 'No live lobby data — nothing to snap back to';
+      }
     }
   }
 
@@ -1446,6 +1504,67 @@
    * The button this drives is disabled when no live truth exists in the
    * roster (every `p.liveTeam` is null) — see render() for the gating.
    */
+  /**
+   * Put the columns back to the match this page was opened from.
+   * Does not change the rating era.
+   */
+  function restoreMatchLayout() {
+    if (!matchSeed) return;
+    ignoredKeys.clear();
+    manualSwaps.clear();
+    assignmentOverride = new Map();
+    const keys = Object.keys(matchSeed.assignments);
+    for (let i = 0; i < keys.length; i++) {
+      assignmentOverride.set(keys[i], matchSeed.assignments[keys[i]]);
+    }
+    commanderSetup = {
+      team1: matchSeed.commanders.team1 || null,
+      team2: matchSeed.commanders.team2 || null,
+    };
+    mode = 'manual';
+    compute();
+    render();
+  }
+
+  function onResetLayout() {
+    if (matchSeed && !hasLiveTruth()) restoreMatchLayout();
+    else snapToLive();
+  }
+
+  /**
+   * Called once, before the seeded roster is broadcast, so the first
+   * render already has teams and commanders.
+   */
+  function seedMatchLayout(seed) {
+    const assignments = {};
+    const src = (seed && seed.assignments) || {};
+    const srcKeys = Object.keys(src);
+    for (let i = 0; i < srcKeys.length; i++) {
+      const team = src[srcKeys[i]];
+      if (team === 1 || team === 2) assignments[srcKeys[i]] = team;
+    }
+    const commanders = (seed && seed.commanders) || {};
+    matchSeed = {
+      assignments,
+      commanders: {
+        team1: commanders.team1 || null,
+        team2: commanders.team2 || null,
+      },
+      label: (seed && seed.label) || '',
+    };
+    ignoredKeys.clear();
+    manualSwaps.clear();
+    assignmentOverride = new Map();
+    for (let i = 0; i < srcKeys.length; i++) {
+      if (assignments[srcKeys[i]]) assignmentOverride.set(srcKeys[i], assignments[srcKeys[i]]);
+    }
+    commanderSetup = {
+      team1: matchSeed.commanders.team1,
+      team2: matchSeed.commanders.team2,
+    };
+    mode = 'manual';
+  }
+
   function snapToLive() {
     ignoredKeys.clear();
     manualSwaps.clear();
@@ -1503,6 +1622,7 @@
       }
     }
     lastPageMode = pageMode;
+    if (pageMode === 'auto') matchSeed = null;
 
     // Page roster mode transitions:
     //   - Manual page mode -> Balonce should also be Manual (no live
@@ -1527,6 +1647,7 @@
   function onResetAll() {
     ignoredKeys.clear();
     lastPageMode = null;
+    matchSeed = null;
     commanderSetup = { team1: null, team2: null };
     manualSwaps.clear();
     bestPartition = null;
@@ -1547,7 +1668,7 @@
 
     if (autoSuggestBtn) autoSuggestBtn.addEventListener('click', autoSuggestBoth);
     if (swapCmdrsBtn) swapCmdrsBtn.addEventListener('click', swapCommanders);
-    if (resetBtn) resetBtn.addEventListener('click', snapToLive);
+    if (resetBtn) resetBtn.addEventListener('click', onResetLayout);
 
     window.addEventListener('vt-tools:roster', onRosterChange);
     window.addEventListener('vt-tools:reset-all', onResetAll);
@@ -1558,6 +1679,10 @@
 
     render();
   }
+
+  window.VTToolsBalonce = {
+    seedMatchLayout,
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
