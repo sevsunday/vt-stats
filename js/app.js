@@ -748,16 +748,16 @@
   }
 
   function stampPickerVodMark(cardEl, entry) {
-    const nameEl = cardEl.querySelector('.vt-match-picker-card-name');
-    if (!nameEl) return;
-    let mark = nameEl.querySelector('.vt-match-picker-vod');
+    const titleEl = cardEl.querySelector('.vt-match-picker-card-title');
+    if (!titleEl) return;
+    let mark = titleEl.querySelector('.vt-match-picker-vod');
     if (matchHasVod(entry)) {
       if (!mark) {
         mark = document.createElement('i');
         mark.className = 'bi bi-youtube vt-match-picker-vod';
         mark.setAttribute('title', 'YouTube VOD');
         mark.setAttribute('aria-hidden', 'true');
-        nameEl.appendChild(mark);
+        titleEl.appendChild(mark);
       }
     } else if (mark) {
       mark.remove();
@@ -812,7 +812,7 @@
         ${thumbHtml}
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
-            <span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}${vodMark}</span>
+            <span class="vt-match-picker-card-title"><span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}</span>${vodMark}</span>
             <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${pickerPlayerCount(entry)}p</span>
           </div>
           ${mapRaw}

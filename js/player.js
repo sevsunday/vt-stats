@@ -301,6 +301,7 @@
     cmdrElo:       undefined, // parsed elo_commander_current.json (lazy; undefined = unfetched, null = 404)
     cmdrEloHistory: undefined, // parsed elo_commander_history.json (lazy; undefined = unfetched, null = 404)
     cmdrRatingChart: null,   // Chart.js instance for the VTSR-C time-series (Commander tab)
+    overviewRadarChart: null, // Chart.js instance for the Overview VTSR-T radar
     mapRegistry:   undefined, // parsed data/map-registry.json (lazy; undefined = unfetched, null = 404)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
     careerStats:   null,    // result of VTAggregate.build(threshold=0).career_stats
@@ -774,10 +775,11 @@
   // ---- VTSR-T axes (the eight composite axes the rating is built on) ---
   //
   // Distinct from RADAR_AXIS_LABELS in charts-radar.js: those are the
-  // career_stats-derived visualization axes. These are the elo.py axes
-  // that drive the actual VTSR-T number. Strengths/weaknesses panel,
-  // coaching cards, and quick-wins projection all live in this space.
-  // Order is the canonical display order matching elo_current.weights
+  // career_stats-derived visualization axes (All Matches / per-match
+  // radars). These are the elo.py axes that drive the actual VTSR-T
+  // number. Overview radar, Compare radar, strengths/weaknesses,
+  // coaching cards, and quick-wins all live in this space. Order is
+  // the canonical display order matching elo_current.weights
   // (heaviest first).
   const VTSR_AXES = [
     { key: 'net_damage_share', label: 'Net Damage Share', icon: 'bi-fire' },
@@ -789,6 +791,140 @@
     { key: 'snipe_bonus',      label: 'Snipe Bonus',      icon: 'bi-eye' },
     { key: 'target_lock_pct',  label: 'T-Key Usage',      icon: 'bi-pin-angle' },
   ];
+
+  // True when a rating row carries at least one finite VTSR-T axis mean.
+  function hasVtsrMeans(rating) {
+    const means = rating && rating.axis_means;
+    if (!means) return false;
+    return VTSR_AXES.some(a => Number.isFinite(+means[a.key]));
+  }
+
+  // Clip z to [-2, +2] (elo.py's pre-/2 clip) and map onto the radar's
+  // [0, 1] spokes. Missing z sits at the midline (0.5).
+  function normalizeVtsrZ(z) {
+    if (!Number.isFinite(+z)) return 0.5;
+    const clipped = Math.max(-2, Math.min(2, +z));
+    return (clipped + 2) / 4;
+  }
+
+  // Per-axis median of raw finite z across rated rows, then normalized.
+  // Includes the focus player. Null when fewer than two rows have means.
+  function corpusMedianVtsr(ratings) {
+    const rows = (ratings || []).filter(hasVtsrMeans);
+    if (rows.length < 2) return null;
+    const raw = VTSR_AXES.map(axis => {
+      const col = [];
+      for (const r of rows) {
+        const z = r.axis_means && r.axis_means[axis.key];
+        if (Number.isFinite(+z)) col.push(+z);
+      }
+      if (!col.length) return null;
+      col.sort((a, b) => a - b);
+      const mid = Math.floor(col.length / 2);
+      return col.length % 2 ? col[mid] : (col[mid - 1] + col[mid]) / 2;
+    });
+    return { raw, values: raw.map(z => normalizeVtsrZ(z)) };
+  }
+
+  // Shared Overview + Compare spider. series = [{label, color, axisMeans}].
+  // showMedian draws a dashed corpus-median ghost from medianRatings
+  // (defaults to the loaded elo ratings). Returns the Chart instance.
+  function renderVtsrRadar(canvas, opts) {
+    if (!canvas || !window.Chart) return null;
+    const prior = (typeof Chart.getChart === 'function') ? Chart.getChart(canvas) : null;
+    if (prior) {
+      try { prior.destroy(); } catch (_) {}
+    }
+    const series = (opts && opts.series) || [];
+    const labels = VTSR_AXES.map(a => a.label);
+    const datasets = series.map(s => {
+      const means = s.axisMeans || {};
+      const rawZ = VTSR_AXES.map(a => {
+        const z = means[a.key];
+        return Number.isFinite(+z) ? +z : null;
+      });
+      return {
+        label: s.label,
+        data: rawZ.map(z => (z == null ? 0.5 : normalizeVtsrZ(z))),
+        _z: rawZ,
+        borderColor: s.color,
+        backgroundColor: alphaColor(s.color, 0.12),
+        borderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        pointBackgroundColor: s.color,
+        pointBorderColor: s.color,
+        fill: true,
+      };
+    });
+    if (opts && opts.showMedian) {
+      const ratings = opts.medianRatings || (state.elo && state.elo.ratings) || [];
+      const med = corpusMedianVtsr(ratings);
+      if (med) {
+        const ghost = (typeof getCSSVar === 'function' && getCSSVar('--kb-text-muted')) || '#888';
+        datasets.push({
+          label: 'Corpus median',
+          data: med.values,
+          _z: med.raw,
+          borderColor: alphaColor(ghost, 0.67),
+          backgroundColor: alphaColor(ghost, 0.08),
+          borderWidth: 1,
+          pointRadius: 2,
+          pointHoverRadius: 3,
+          pointBackgroundColor: alphaColor(ghost, 0.67),
+          pointBorderColor: alphaColor(ghost, 0.67),
+          borderDash: [4, 4],
+          fill: false,
+        });
+      }
+    }
+    const fmtZ = (z) => {
+      if (!Number.isFinite(+z)) return '\u2014';
+      return `${z >= 0 ? '+' : ''}${(+z).toFixed(2)}`;
+    };
+    return new Chart(canvas, {
+      type: 'radar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: (typeof getCSSVar === 'function' && getCSSVar('--kb-text-primary')) || '#e5e5e5',
+              boxWidth: 12, boxHeight: 12,
+              padding: 12,
+              usePointStyle: true,
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const z = ctx.dataset._z && ctx.dataset._z[ctx.dataIndex];
+                if (!Number.isFinite(+z)) return `${ctx.dataset.label}: \u2014`;
+                return `${ctx.dataset.label}: z = ${fmtZ(z)}`;
+              },
+              title: (items) => items.length ? VTSR_AXES[items[0].dataIndex].label : '',
+            },
+          },
+        },
+        scales: {
+          r: {
+            min: 0, max: 1,
+            ticks: { display: false, stepSize: 0.25 },
+            grid: { color: 'rgba(255,255,255,0.10)' },
+            angleLines: { color: 'rgba(255,255,255,0.12)' },
+            pointLabels: {
+              color: (typeof getCSSVar === 'function' && getCSSVar('--kb-text-muted')) || '#888',
+              font: { size: 11 },
+            },
+          },
+        },
+        elements: { line: { tension: 0.15 } },
+      },
+    });
+  }
 
   // Coaching copy keyed by axis. Each entry has a short headline +
   // one-liner action. Surfaced only when the player's axis_mean
@@ -3250,21 +3386,24 @@
           </div>
         </div>
 
-        <!-- Radar card (8-axis career radar with median ghost) -->
+        <!-- Radar card (VTSR-T axis_means with corpus-median ghost) -->
         <div class="col-12 col-lg-5">
           <div class="card h-100">
             <div class="card-body">
               <h2 class="h6 text-secondary text-uppercase mb-3" style="letter-spacing:0.08em;">
                 <i class="bi bi-bullseye me-1"></i>Performance radar
               </h2>
-              <div class="position-relative" style="aspect-ratio: 1 / 0.85;">
-                <canvas id="vt-player-overview-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+              <div id="vt-player-overview-radar-body">
+                <div class="position-relative" style="aspect-ratio: 1 / 0.85;">
+                  <canvas id="vt-player-overview-radar" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+                </div>
+                <p class="text-secondary small mb-0 mt-2 text-center">
+                  These are the <strong>VTSR-T axes</strong>. Solid = this player's
+                  career-average z. Dashed = corpus median. Outside the dashed line =
+                  above median; inside = below.
+                  <a href="?tab=axes" data-vt-open-tab="axes">Axes over time</a>
+                </p>
               </div>
-              <p class="text-secondary small mb-0 mt-2 text-center">
-                Solid = this player's career average. Dashed = median across all rated
-                players (the "middle" player on each axis). Outside the dashed line = above
-                corpus median; inside = below.
-              </p>
             </div>
           </div>
         </div>
@@ -3303,25 +3442,38 @@
       wrap.classList.remove('d-none');
     });
 
-    // Render the radar once the panel is in the DOM. renderPlayerRadar
-    // is a global from js/charts-radar.js. We need at least 2 career
-    // rows for the median ghost to be meaningful; if not, the radar
-    // gracefully falls back to a single-polygon view.
-    if (typeof window.renderPlayerRadar === 'function' && state.careerStats && state.careerStats.length) {
-      try {
-        window.renderPlayerRadar('vt-player-overview-radar', { career_stats: state.careerStats }, {
-          mode: 'career',
-          focusNames: [rating.name],
-          showMedian: true,
-        });
-      } catch (e) {
-        console.warn('player.js: renderPlayerRadar failed', e);
+    // VTSR-T spider from axis_means. No fallback to the descriptive
+    // career radar in charts-radar.js — a missing rating is an empty state.
+    if (state.overviewRadarChart) {
+      try { state.overviewRadarChart.destroy(); } catch (_) {}
+      state.overviewRadarChart = null;
+    }
+    const radarBody = $('vt-player-overview-radar-body');
+    if (!hasVtsrMeans(rating)) {
+      if (radarBody) {
+        radarBody.innerHTML = '<p class="text-secondary text-center my-4 small mb-0">Needs rated matches.</p>';
       }
     } else {
-      const el = $('vt-player-overview-radar');
-      if (el) {
-        const wrap = el.parentElement;
-        if (wrap) wrap.innerHTML = '<p class="text-secondary text-center my-4 small">Radar requires at least one rated career row.</p>';
+      const ratings = (state.elo && state.elo.ratings) || [];
+      const color = (typeof getPlayerColor === 'function') ? getPlayerColor(0) : '#36a2eb';
+      try {
+        state.overviewRadarChart = renderVtsrRadar($('vt-player-overview-radar'), {
+          series: [{ label: rating.name, color, axisMeans: rating.axis_means }],
+          showMedian: ratings.filter(hasVtsrMeans).length >= 2,
+          medianRatings: ratings,
+        });
+      } catch (e) {
+        console.warn('player.js: renderVtsrRadar failed', e);
+      }
+      const axesLink = radarBody && radarBody.querySelector('[data-vt-open-tab="axes"]');
+      if (axesLink) {
+        axesLink.addEventListener('click', (e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          const btn = document.querySelector('#vt-player-tabs [data-bs-target="#vt-player-tab-axes"]');
+          if (!btn || !(window.bootstrap && window.bootstrap.Tab)) return;
+          e.preventDefault();
+          window.bootstrap.Tab.getOrCreateInstance(btn).show();
+        });
       }
     }
   }
@@ -3839,80 +3991,14 @@
       compareState.radarChart = null;
     }
     const canvas = $('vt-compare-radar');
-    if (!canvas || !window.Chart) return;
-
-    const labels = VTSR_AXES.map(a => a.label);
-    // Normalize each axis z to a [0, 1] visual scale by clipping to
-    // [-2, 2] (the same range elo.py clips before /2 for axis_z) and
-    // mapping to 0..1 so the radar tracks every player on the same axis
-    // grid. Players with no axis_means entry get 0.5 (neutral / no
-    // signal) on that spoke.
-    function normalize(z) {
-      if (!Number.isFinite(+z)) return 0.5;
-      const clipped = Math.max(-2, Math.min(2, +z));
-      return (clipped + 2) / 4;
-    }
-
-    const datasets = found.map((f, i) => {
-      const means = (f.rating && f.rating.axis_means) || {};
-      const vals = VTSR_AXES.map(a => normalize(means[a.key]));
-      return {
+    if (!canvas) return;
+    compareState.radarChart = renderVtsrRadar(canvas, {
+      series: found.map(f => ({
         label: f.rating.name,
-        data: vals,
-        borderColor: f.color,
-        backgroundColor: alphaColor(f.color, 0.12),
-        borderWidth: 2,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        pointBackgroundColor: f.color,
-        pointBorderColor: f.color,
-        fill: true,
-      };
-    });
-
-    compareState.radarChart = new Chart(canvas, {
-      type: 'radar',
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              color: getCSSVar('--kb-text-primary') || '#e5e5e5',
-              boxWidth: 12, boxHeight: 12,
-              padding: 12,
-              usePointStyle: true,
-            },
-          },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const axis = VTSR_AXES[ctx.dataIndex];
-                const f = found[ctx.datasetIndex];
-                const z = (f && f.rating && f.rating.axis_means) ? f.rating.axis_means[axis.key] : null;
-                if (!Number.isFinite(+z)) return `${ctx.dataset.label}: —`;
-                return `${ctx.dataset.label}: z = ${(+z).toFixed(2)}`;
-              },
-              title: (items) => items.length ? VTSR_AXES[items[0].dataIndex].label : '',
-            },
-          },
-        },
-        scales: {
-          r: {
-            min: 0, max: 1,
-            ticks: { display: false, stepSize: 0.25 },
-            grid: { color: 'rgba(255,255,255,0.10)' },
-            angleLines: { color: 'rgba(255,255,255,0.12)' },
-            pointLabels: {
-              color: getCSSVar('--kb-text-muted') || '#888',
-              font: { size: 11 },
-            },
-          },
-        },
-        elements: { line: { tension: 0.15 } },
-      },
+        color: f.color,
+        axisMeans: (f.rating && f.rating.axis_means) || {},
+      })),
+      showMedian: false,
     });
   }
 
