@@ -59,12 +59,41 @@
     color: var(--kb-text-primary);
 }
 
+/* --- Navbar search trigger ------------------------------------------------
+   The pill itself is .vt-docs-search-pill from css/vtstats-theme.css (shared
+   with docs.html); this block only sizes its slot in the guide navbar. */
+
 .vt-guide-nav-search {
-    position: relative;
     flex: 1 1 10rem;
     min-width: 0;
     max-width: 28rem;
-    z-index: 30;
+}
+
+.vt-guide-search-pill {
+    display: flex;
+    width: 100%;
+    max-width: none;
+    background: color-mix(in oklab, var(--kb-primary) 18%, var(--kb-bg-card));
+    border-color: color-mix(in oklab, var(--kb-primary) 42%, var(--kb-border-subtle));
+    color: var(--kb-text-secondary);
+}
+
+.vt-guide-search-pill .vt-docs-search-pill-icon {
+    color: var(--kb-primary);
+}
+
+.vt-guide-search-pill:hover,
+.vt-guide-search-pill:focus-visible {
+    background: color-mix(in oklab, var(--kb-primary) 28%, var(--kb-bg-card));
+    border-color: var(--kb-primary);
+    color: var(--kb-text-primary);
+}
+
+/* Sits immediately left of the ODF dropdown. On a phone the collapsed menu
+   stretches it to a full-width row; from md up it stays content-sized. */
+.vt-guide-steam-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 @media (min-width: 768px) {
@@ -84,89 +113,127 @@
     }
 }
 
-.vt-guide-search {
-    position: relative;
-    margin: 0;
+/* Phones: collapse to the icon so the brand and burger keep their row. */
+@media (max-width: 575.98px) {
+    .vt-guide-nav-search {
+        flex: 0 0 auto;
+    }
+
+    .vt-guide-search-pill {
+        width: auto;
+        padding: 0.4rem 0.6rem;
+        gap: 0;
+    }
+
+    .vt-guide-search-pill .vt-docs-search-pill-label,
+    .vt-guide-search-pill .vt-docs-search-pill-kbd {
+        display: none;
+    }
 }
 
-.vt-guide-search-icon {
-    position: absolute;
-    left: 0.7rem;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--kb-primary);
-    pointer-events: none;
-    z-index: 1;
+/* --- Search modal results -------------------------------------------------
+   Chrome (header / body / footer / empty state) comes from the shared
+   .vt-docs-search-* block; rows below are guide-specific because hits are
+   grouped by section and can carry an ODF default value. */
+
+.vt-guide-hit-group + .vt-guide-hit-group {
+    border-top: 1px solid var(--kb-border-subtle);
 }
 
-.vt-guide-search .form-control {
-    padding-left: 2.15rem;
-    background: color-mix(in oklab, var(--kb-primary) 28%, var(--kb-bg-card));
-    border-color: var(--kb-primary);
-    color: var(--kb-text-primary);
-    box-shadow: none;
-}
-
-.vt-guide-search .form-control::placeholder {
-    color: var(--kb-text-secondary);
-}
-
-.vt-guide-search .form-control:focus {
-    background: color-mix(in oklab, var(--kb-primary) 38%, var(--kb-bg-card));
-    border-color: var(--kb-primary);
-    color: var(--kb-text-primary);
-    box-shadow: 0 0 0 0.2rem color-mix(in oklab, var(--kb-primary) 35%, transparent);
-}
-
-.vt-guide-results {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: calc(100% - 0.2rem);
-    max-height: min(24rem, 62vh);
-    overflow: auto;
-    background: var(--kb-bg-card);
-    border: 1px solid var(--kb-border-subtle);
-    border-radius: 0.5rem;
-    box-shadow: var(--vt-shadow-elevation-2);
+.vt-guide-hit-group-label {
+    padding: 0.5rem 1rem 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
 }
 
 .vt-guide-hit {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.35rem 0.65rem;
+    align-items: center;
+    gap: 0.65rem;
     width: 100%;
-    padding: 0.45rem 0.7rem;
+    padding: 0.5rem 1rem;
     border: 0;
-    border-bottom: 1px solid var(--kb-border-subtle);
+    border-left: 2px solid transparent;
     background: transparent;
     color: var(--kb-text-primary);
     text-align: left;
 }
 
-.vt-guide-hit:last-child {
-    border-bottom: 0;
-}
-
 .vt-guide-hit.is-active,
 .vt-guide-hit:hover {
-    background: color-mix(in oklab, var(--kb-primary) 14%, transparent);
+    background: var(--kb-bg-subtle);
+    border-left-color: var(--kb-primary);
+}
+
+.vt-guide-hit-icon {
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-guide-hit.is-active .vt-guide-hit-icon {
+    color: var(--kb-primary);
+}
+
+.vt-guide-hit-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .vt-guide-hit-label {
     font-weight: 600;
+    font-size: 0.92rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.vt-guide-hit-section,
 .vt-guide-hit-snippet {
-    flex-basis: 100%;
     color: var(--kb-text-muted);
     font-size: 0.8rem;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.vt-guide-hit-enter {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    color: var(--kb-primary);
+    opacity: 0;
+}
+
+.vt-guide-hit.is-active .vt-guide-hit-enter {
+    opacity: 1;
+}
+
+.vt-guide-search-modal .vt-docs-search-body {
+    padding: 0.25rem 0;
+}
+
+/* This dialog is modal-fullscreen-md-down, one breakpoint wider than the
+   docs one the shared styles were written for, so the results list has to
+   keep growing to md — otherwise the footer floats mid-screen on a large
+   phone with empty space beneath it. */
+@media (max-width: 767.98px) {
+    .vt-guide-search-modal .vt-docs-search-body {
+        max-height: none;
+        flex: 1 1 auto;
+    }
 }
 
 .vt-guide-credit {
-    margin-bottom: 1rem;
+    margin-bottom: 1.25rem;
     padding: 0.7rem 0.9rem;
     border: 1px solid var(--kb-border-subtle);
     border-radius: 0.5rem;
@@ -179,26 +246,20 @@
     margin: 0;
 }
 
-.vt-guide-credit a,
-.vt-guide-article-body a {
+.vt-guide-credit a {
     color: var(--kb-info);
 }
 
-.vt-guide-title {
-    margin-bottom: 0.85rem;
-    font-size: 1.55rem;
-}
-
-.vt-guide-subhead {
-    margin: 1.25rem 0 0.5rem;
-    font-size: 1.05rem;
+/* Anchor targets sit below the sticky navbar when jumped to. docs-prose
+   already sets 70px on its own headings; this covers code blocks and the
+   property sections, which are guide-only markup. */
+.vt-guide-anchor {
     scroll-margin-top: 4.75rem;
 }
 
 .vt-guide-prop {
     padding: 0.85rem 0 0.35rem;
     border-top: 1px solid var(--kb-border-subtle);
-    scroll-margin-top: 4.75rem;
 }
 
 .vt-guide-prop-head {
@@ -209,9 +270,14 @@
     margin-bottom: 0.35rem;
 }
 
-.vt-guide-prop-name {
-    color: var(--kb-text-primary);
-    font-size: 0.98rem;
+/* Scoped to .docs-prose so it beats that layer's generic inline-`code` rule
+   (equal specificity otherwise, and docs-prose would win on source order).
+   The chip look is deliberate — it is the same treatment docs-prose gives
+   inline code, just sized up to carry a heading's weight. */
+.docs-prose .vt-guide-prop-name {
+    padding: 0.1rem 0.45rem;
+    color: var(--kb-primary);
+    font-size: 1rem;
     font-weight: 650;
 }
 
@@ -224,31 +290,40 @@
     font-size: 0.82rem;
 }
 
-.vt-guide-prop p,
-.vt-guide-article-body > p {
-    margin-bottom: 0.45rem;
+/* Property bodies read as a dense reference list, so they run tighter than
+   docs-prose's article rhythm. Everything else inherits it untouched. */
+.vt-guide-prop-body > p,
+.vt-guide-prop-body > ul {
+    margin-bottom: 0.5rem;
 }
 
-.vt-guide-list {
-    margin: 0.2rem 0 0.6rem;
-    padding-left: 1.2rem;
+.vt-guide-prop-body > :last-child {
+    margin-bottom: 0;
 }
 
+/* A long class section can carry 20+ of these caveats, so the alert is
+   toned down to let the warning border and icon do the signalling instead
+   of a full-strength fill repeated down the page. */
 .vt-guide-note {
+    margin-bottom: 0.75rem;
+    padding: 0.5rem 0.85rem;
+    /* .alert-warning colours all four sides; keep the accent on the left
+       edge only so the callout reads as a margin note, not a page-level
+       warning banner. */
+    border-color: transparent;
+    border-left-width: 4px;
+    border-left-color: var(--kb-warning);
+    background: color-mix(in oklab, var(--kb-warning) 9%, transparent);
     color: var(--kb-text-secondary);
-    border-left: 3px solid var(--kb-warning);
-    padding-left: 0.65rem;
+    font-size: 0.9rem;
+}
+
+.vt-guide-note .bi {
+    color: var(--kb-warning);
 }
 
 .vt-guide-code {
-    margin: 0.35rem 0 0.7rem;
-    padding: 0.55rem 0.7rem;
     overflow-x: auto;
-    background: var(--kb-bg-subtle);
-    border: 1px solid var(--kb-border-subtle);
-    border-radius: 0.4rem;
-    color: var(--kb-text-primary);
-    scroll-margin-top: 4.75rem;
 }
 
 .vt-guide-code-section {
@@ -263,9 +338,7 @@
     color: var(--kb-text-muted);
 }
 
-.vt-guide-prop.is-flash,
-.vt-guide-subhead.is-flash,
-.vt-guide-code.is-flash {
+.vt-guide-anchor.is-flash {
     background: color-mix(in oklab, var(--kb-primary) 16%, transparent);
     border-radius: 0.35rem;
 }
@@ -293,9 +366,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .vt-guide-prop.is-flash,
-    .vt-guide-subhead.is-flash,
-    .vt-guide-code.is-flash {
+    .vt-guide-anchor.is-flash {
         outline: 2px solid var(--kb-primary);
         background: transparent;
     }

@@ -2,13 +2,15 @@
 (function () {
     'use strict';
 
-    const RESULT_LIMIT = 12;
+    const RESULT_LIMIT = 20;
     const DATA_URL = '../../data/odf-guide.json';
 
     const tocEl = document.getElementById('guide-toc');
     const tocFilterEl = document.getElementById('guide-toc-filter');
     const searchEl = document.getElementById('guide-search');
     const resultsEl = document.getElementById('guide-results');
+    const countEl = document.getElementById('guide-search-count');
+    const searchModalEl = document.getElementById('guide-search-modal');
     const articleEl = document.getElementById('guide-article');
     const railEl = document.getElementById('guide-rail');
 
@@ -19,6 +21,7 @@
     let resultIndex = 0;
     let hits = [];
     let applyingHistory = false;
+    let searchModal = null;
 
     function escapeHtml(value) {
         return String(value == null ? '' : value)
@@ -55,7 +58,7 @@
 
     function renderItems(items) {
         if (!items || !items.length) return '';
-        return '<ul class="vt-guide-list">' + items.map(function (item) {
+        return '<ul>' + items.map(function (item) {
             return '<li>' + inline(item.text || '') + renderItems(item.children) + '</li>';
         }).join('') + '</ul>';
     }
@@ -64,7 +67,7 @@
         const chip = block.default
             ? '<span class="vt-guide-default vt-mono">' + escapeHtml(block.default) + '</span>'
             : '';
-        return '<section class="vt-guide-prop" id="' + escapeHtml(block.anchor) + '">' +
+        return '<section class="vt-guide-prop vt-guide-anchor" id="' + escapeHtml(block.anchor) + '">' +
             '<div class="vt-guide-prop-head">' +
             '<code class="vt-guide-prop-name vt-mono">' + escapeHtml(block.label) + '</code>' +
             chip +
@@ -76,15 +79,20 @@
     function renderBlocks(blocks) {
         return (blocks || []).map(function (block) {
             if (block.kind === 'para') return '<p>' + inline(block.text) + '</p>';
-            if (block.kind === 'note') return '<p class="vt-guide-note">' + inline(block.text) + '</p>';
+            if (block.kind === 'note') {
+                return '<div class="alert alert-warning vt-guide-note" role="note">' +
+                    '<i class="bi bi-exclamation-triangle-fill me-2" aria-hidden="true"></i>' +
+                    inline(block.text) + '</div>';
+            }
             if (block.kind === 'subhead') {
-                return '<h3 class="vt-guide-subhead" id="' + escapeHtml(block.anchor) + '">' +
+                return '<h3 class="vt-guide-anchor" id="' + escapeHtml(block.anchor) + '">' +
                     inline(block.text) + '</h3>';
             }
             if (block.kind === 'list') return renderItems(block.items);
             if (block.kind === 'code') {
                 const id = block.anchor ? ' id="' + escapeHtml(block.anchor) + '"' : '';
-                return '<pre class="vt-guide-code"' + id + '><code>' + codeHtml(block.text) + '</code></pre>';
+                return '<pre class="docs-code-block vt-guide-code vt-guide-anchor"' + id + '><code>' +
+                    codeHtml(block.text) + '</code></pre>';
             }
             if (block.kind === 'property') return renderProperty(block);
             return '';
@@ -190,35 +198,132 @@
         return sectionTitle(entry.section);
     }
 
+    const KIND_ICONS = {
+        property: 'bi-hash',
+        heading: 'bi-hash',
+        code: 'bi-code-slash',
+        intro: 'bi-file-text',
+    };
+
+    function snippetFor(entry) {
+        const text = (entry.text || '').replace(/\s+/g, ' ').trim();
+        if (!text) return '';
+        return text.length > 150 ? text.slice(0, 150) + '…' : text;
+    }
+
+    // Collapse ranked hits into per-section groups, preserving rank order both
+    // between groups (first appearance wins) and within them. The flat `hits`
+    // array is then rebuilt in the SAME order the rows are painted in, so the
+    // keyboard index and the DOM never drift apart.
+    function groupHits(ranked) {
+        const order = [];
+        const bySection = new Map();
+        ranked.forEach(function (hit) {
+            const key = hit.entry.section;
+            if (!bySection.has(key)) {
+                bySection.set(key, []);
+                order.push(key);
+            }
+            bySection.get(key).push(hit);
+        });
+        return order.map(function (key) {
+            return { section: key, hits: bySection.get(key) };
+        });
+    }
+
+    function renderEmptyResults(message) {
+        hits = [];
+        resultIndex = 0;
+        resultsEl.innerHTML = '<div class="vt-docs-search-empty" role="presentation">' +
+            '<i class="bi bi-search me-2" aria-hidden="true"></i>' + escapeHtml(message) + '</div>';
+        if (countEl) countEl.textContent = '';
+        searchEl.setAttribute('aria-expanded', 'false');
+        searchEl.removeAttribute('aria-activedescendant');
+    }
+
     function renderResults() {
+        if (!resultsEl) return;
         const query = searchEl.value;
-        hits = search(query);
-        resultIndex = Math.min(resultIndex, Math.max(hits.length - 1, 0));
-        if (!query.trim() || !hits.length) {
-            resultsEl.hidden = true;
-            resultsEl.innerHTML = '';
-            searchEl.setAttribute('aria-expanded', 'false');
+        if (!query.trim()) {
+            const total = doc ? doc.entries.length.toLocaleString() : '';
+            renderEmptyResults(total
+                ? 'Search ' + total + ' properties, classes and terms.'
+                : 'Search the guide.');
             return;
         }
-        resultsEl.hidden = false;
-        searchEl.setAttribute('aria-expanded', 'true');
-        resultsEl.innerHTML = hits.map(function (hit, index) {
-            const entry = hit.entry;
-            const chip = entry.default
-                ? '<span class="vt-guide-default vt-mono">' + escapeHtml(entry.default) + '</span>'
-                : '';
-            const snippet = entry.kind === 'intro' || entry.kind === 'heading'
-                ? '<span class="vt-guide-hit-snippet">' + escapeHtml((entry.text || '').replace(/\s+/g, ' ').slice(0, 140)) + '</span>'
-                : '';
-            return '<button type="button" class="vt-guide-hit' + (index === resultIndex ? ' is-active' : '') +
-                '" role="option" id="guide-hit-' + index + '" aria-selected="' + (index === resultIndex ? 'true' : 'false') + '">' +
-                '<span class="vt-guide-hit-label vt-mono">' + escapeHtml(hitLabel(entry)) + '</span>' +
-                chip +
-                '<span class="vt-guide-hit-section">' + escapeHtml(sectionTitle(entry.section)) + '</span>' +
-                snippet +
-                '</button>';
+
+        const groups = groupHits(search(query));
+        hits = [];
+        groups.forEach(function (group) {
+            group.hits.forEach(function (hit) { hits.push(hit); });
+        });
+
+        if (!hits.length) {
+            renderEmptyResults('No matches in the guide.');
+            return;
+        }
+
+        resultIndex = Math.min(resultIndex, hits.length - 1);
+        if (countEl) {
+            countEl.textContent = hits.length + (hits.length === 1 ? ' result' : ' results');
+        }
+
+        let index = 0;
+        resultsEl.innerHTML = groups.map(function (group) {
+            const rows = group.hits.map(function (hit) {
+                const entry = hit.entry;
+                const position = index++;
+                const active = position === resultIndex;
+                const chip = entry.default
+                    ? '<span class="vt-guide-default vt-mono">' + escapeHtml(entry.default) + '</span>'
+                    : '';
+                const snippet = snippetFor(entry);
+                return '<button type="button" class="vt-guide-hit' + (active ? ' is-active' : '') +
+                    '" role="option" id="guide-hit-' + position + '" data-index="' + position +
+                    '" aria-selected="' + (active ? 'true' : 'false') + '">' +
+                    '<i class="bi ' + (KIND_ICONS[entry.kind] || 'bi-hash') +
+                    ' vt-guide-hit-icon" aria-hidden="true"></i>' +
+                    '<span class="vt-guide-hit-body">' +
+                    '<span class="vt-guide-hit-label vt-mono">' + escapeHtml(hitLabel(entry)) + '</span>' +
+                    (snippet ? '<span class="vt-guide-hit-snippet">' + escapeHtml(snippet) + '</span>' : '') +
+                    '</span>' +
+                    chip +
+                    '<i class="bi bi-arrow-return-left vt-guide-hit-enter" aria-hidden="true"></i>' +
+                    '</button>';
+            }).join('');
+            // role="group" keeps the options valid descendants of the
+            // listbox now that they sit inside a per-section wrapper.
+            const title = sectionTitle(group.section);
+            return '<div class="vt-guide-hit-group" role="group" aria-label="' + escapeHtml(title) + '">' +
+                '<div class="vt-guide-hit-group-label" aria-hidden="true">' + escapeHtml(title) + '</div>' +
+                rows + '</div>';
         }).join('');
+        searchEl.setAttribute('aria-expanded', 'true');
         searchEl.setAttribute('aria-activedescendant', 'guide-hit-' + resultIndex);
+    }
+
+    // Re-paint the active row without rebuilding the list (keeps scroll steady).
+    function setResultIndex(next) {
+        if (!hits.length) return;
+        resultIndex = Math.max(0, Math.min(next, hits.length - 1));
+        const rows = resultsEl.querySelectorAll('.vt-guide-hit');
+        rows.forEach(function (row, idx) {
+            const active = idx === resultIndex;
+            row.classList.toggle('is-active', active);
+            row.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        const active = rows[resultIndex];
+        if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+        searchEl.setAttribute('aria-activedescendant', 'guide-hit-' + resultIndex);
+    }
+
+    function openSearch() {
+        if (!searchModal) return;
+        searchModal.show();
+    }
+
+    function closeSearch() {
+        if (searchModal) searchModal.hide();
     }
 
     function renderToc() {
@@ -250,7 +355,7 @@
             return;
         }
         articleEl.innerHTML =
-            '<h1 class="vt-guide-title" id="guide-title">' + escapeHtml(section.title) + '</h1>' +
+            '<h1 id="guide-title">' + escapeHtml(section.title) + '</h1>' +
             '<div class="vt-guide-article-body">' + renderBlocks(section.blocks) + '</div>';
     }
 
@@ -315,8 +420,7 @@
     }
 
     function jumpToEntry(entry, mode) {
-        resultsEl.hidden = true;
-        searchEl.setAttribute('aria-expanded', 'false');
+        closeSearch();
         openSection(entry.section, entry.anchor || '', mode || 'push');
     }
 
@@ -354,8 +458,9 @@
                     : (hits[0] && hits[0].entry.section);
                 if (preview) {
                     openSection(preview, '', mode || 'replace', loc.q);
-                    resultsEl.hidden = false;
-                    searchEl.setAttribute('aria-expanded', 'true');
+                    // Deep link carried a query but no single obvious target —
+                    // surface the ranked list rather than guessing.
+                    openSearch();
                     return;
                 }
             }
@@ -380,26 +485,59 @@
         renderResults();
     }
 
+    if (searchModalEl && window.bootstrap && window.bootstrap.Modal) {
+        searchModal = window.bootstrap.Modal.getOrCreateInstance(searchModalEl);
+        searchModalEl.addEventListener('shown.bs.modal', function () {
+            searchEl.focus();
+            searchEl.select();
+            renderResults();
+        });
+    }
+
+    document.querySelectorAll('[data-vt-guide-search-trigger]').forEach(function (button) {
+        button.addEventListener('click', function (event) {
+            event.preventDefault();
+            openSearch();
+        });
+    });
+
     searchEl.addEventListener('input', onSearchInput);
-    searchEl.addEventListener('focus', function () {
-        if (searchEl.value.trim()) renderResults();
+
+    searchEl.addEventListener('keydown', function (event) {
+        const key = event.key;
+        if (key === 'ArrowDown' || key === 'ArrowUp') {
+            if (!hits.length) return;
+            event.preventDefault();
+            setResultIndex(resultIndex + (key === 'ArrowDown' ? 1 : -1));
+            return;
+        }
+        if (key === 'Enter') {
+            if (!hits.length) return;
+            event.preventDefault();
+            jumpToEntry(hits[resultIndex].entry, 'push');
+        }
+        // Esc falls through to Bootstrap, which closes the dialog.
     });
 
     resultsEl.addEventListener('mousedown', function (event) {
         const button = event.target.closest('.vt-guide-hit');
         if (!button) return;
         event.preventDefault();
-        const index = Number(button.id.replace('guide-hit-', ''));
-        const hit = hits[index];
+        const hit = hits[Number(button.dataset.index)];
         if (hit) jumpToEntry(hit.entry, 'push');
+    });
+
+    resultsEl.addEventListener('mousemove', function (event) {
+        const button = event.target.closest('.vt-guide-hit');
+        if (!button) return;
+        const index = Number(button.dataset.index);
+        if (!isNaN(index) && index !== resultIndex) setResultIndex(index);
     });
 
     tocEl.addEventListener('click', function (event) {
         const link = event.target.closest('[data-section]');
         if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
         event.preventDefault();
-        resultsEl.hidden = true;
-        searchEl.setAttribute('aria-expanded', 'false');
         openSection(link.getAttribute('data-section'), '', 'push');
     });
 
@@ -413,35 +551,9 @@
     tocFilterEl.addEventListener('input', renderToc);
 
     document.addEventListener('keydown', function (event) {
-        const key = event.key;
-        if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'k') {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
             event.preventDefault();
-            searchEl.focus();
-            searchEl.select();
-            return;
-        }
-        if (document.activeElement !== searchEl && !resultsEl.contains(document.activeElement)) return;
-        if (key === 'Escape') {
-            searchEl.value = '';
-            hits = [];
-            resultsEl.hidden = true;
-            resultsEl.innerHTML = '';
-            searchEl.setAttribute('aria-expanded', 'false');
-            return;
-        }
-        if (key === 'ArrowDown' || key === 'ArrowUp') {
-            if (resultsEl.hidden || !hits.length) return;
-            event.preventDefault();
-            resultIndex = key === 'ArrowDown'
-                ? Math.min(hits.length - 1, resultIndex + 1)
-                : Math.max(0, resultIndex - 1);
-            renderResults();
-            return;
-        }
-        if (key === 'Enter') {
-            if (resultsEl.hidden || !hits.length) return;
-            event.preventDefault();
-            jumpToEntry(hits[resultIndex].entry, 'push');
+            openSearch();
         }
     });
 

@@ -22,17 +22,18 @@
         <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
       </a>
 
+      <!-- Search trigger. Click or Ctrl/Cmd+K opens #guide-search-modal; the
+           real input lives in there (getbootstrap.com pattern, same chrome as
+           the docs page's .vt-docs-search-pill). -->
       <div class="vt-guide-nav-search">
-        <label class="visually-hidden" for="guide-search">Search the ODF guide</label>
-        <div class="vt-guide-search">
-          <i class="bi bi-search vt-guide-search-icon" aria-hidden="true"></i>
-          <input id="guide-search" class="form-control" type="search"
-                 placeholder="Search properties, classes, terms"
-                 autocomplete="off" spellcheck="false"
-                 role="combobox" aria-expanded="false" aria-controls="guide-results"
-                 aria-autocomplete="list">
-          <div id="guide-results" class="vt-guide-results" role="listbox" hidden></div>
-        </div>
+        <button type="button" class="vt-docs-search-pill vt-guide-search-pill"
+                data-vt-guide-search-trigger
+                title="Search the ODF guide (Ctrl+K)" aria-label="Search the ODF guide"
+                aria-keyshortcuts="Control+K Meta+K">
+          <i class="bi bi-search vt-docs-search-pill-icon" aria-hidden="true"></i>
+          <span class="vt-docs-search-pill-label">Search properties, classes, terms</span>
+          <kbd class="vt-docs-search-pill-kbd">Ctrl K</kbd>
+        </button>
       </div>
 
       <div class="d-flex align-items-center gap-2 ms-auto ms-md-0 order-md-2 vt-nav-primary">
@@ -44,10 +45,14 @@
       </div>
 
       <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <!-- Guide-only topnav: Dashboard / Maps / ELO / Tools are deliberately
+             omitted here so the search field has room. The brand links home
+             and the gear still carries Docs. -->
         <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
-          <a href="../../index.html" class="vt-nav-icon-btn"
-             title="Open the dashboard" aria-label="Dashboard">
-            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          <a class="btn btn-primary btn-sm vt-guide-steam-btn"
+             href="https://steamcommunity.com/sharedfiles/filedetails/?id=1423355866"
+             target="_blank" rel="noopener">
+            <i class="bi bi-steam me-1" aria-hidden="true"></i>View on Steam
           </a>
           <div class="dropdown vt-nav-dropdown">
             <button class="vt-nav-icon-btn active" type="button" data-bs-toggle="dropdown"
@@ -70,26 +75,6 @@
               <li><a class="dropdown-item" href="../../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
             </ul>
           </div>
-          <a href="../../map/" class="vt-nav-icon-btn"
-             title="Browse the VSR map catalog" aria-label="Maps">
-            <i class="bi bi-map me-1"></i>Maps
-          </a>
-          <div class="dropdown vt-nav-dropdown">
-            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
-                    data-bs-auto-close="true" aria-label="Ratings and players">
-              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="../../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
-              <li><a class="dropdown-item" href="../../player/"><i class="bi bi-people me-2"></i>Players</a></li>
-            </ul>
-          </div>
-          <a href="../../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
-             data-vt-tools-link data-vt-tools-live="0"
-             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
-             aria-label="Tools">
-            <i class="bi bi-controller me-1"></i>Tools
-          </a>
           <button class="vt-nav-icon-btn" type="button" hidden data-vt-page-control
                   data-bs-toggle="modal" data-bs-target="#shortcutsModal"
                   title="Keyboard shortcuts" aria-label="Keyboard shortcuts">
@@ -121,14 +106,15 @@
       <section class="col-12 col-lg-9 col-xl-7 order-1 order-lg-2">
         <aside class="vt-guide-credit">
           <p>
-            This is a copy of the
-            <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=1423355866" target="_blank" rel="noopener">ODF Guide</a>
-            by GenBlackDragon on Steam.
+            This is a copy of the ODF Guide by GenBlackDragon on Steam.
             <a href="?section=about-this-document">About this document</a>
           </p>
         </aside>
 
-        <article id="guide-article" aria-live="polite">
+        <!-- docs-prose is the shared reading stylesheet from css/vtstats-theme.css
+             (same one docs.html renders markdown into) — headings, paragraph
+             rhythm, lists, tables and links all come from there. -->
+        <article id="guide-article" class="docs-prose" aria-live="polite">
           <p class="text-secondary mb-0">Loading the guide…</p>
         </article>
       </section>
@@ -138,6 +124,44 @@
       </aside>
     </div>
   </main>
+
+  <!-- Search modal. Opened by the navbar pill or Ctrl/Cmd+K. Results are
+       grouped by guide section; ranking is the same scorer the old inline
+       dropdown used (js/odf-guide.js). -->
+  <div class="modal fade vt-docs-search-modal vt-guide-search-modal" id="guide-search-modal"
+       tabindex="-1" aria-labelledby="guide-search-modal-label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-md-down">
+      <div class="modal-content">
+        <div class="modal-header vt-docs-search-header">
+          <i class="bi bi-search vt-docs-search-icon" aria-hidden="true"></i>
+          <input type="search" id="guide-search"
+                 class="form-control vt-docs-search-input"
+                 placeholder="Search properties, classes, terms"
+                 aria-label="Search the ODF guide"
+                 role="combobox" aria-expanded="false"
+                 aria-controls="guide-results"
+                 aria-autocomplete="list"
+                 autocomplete="off" spellcheck="false">
+          <span id="guide-search-modal-label" class="visually-hidden">Search the ODF guide</span>
+          <span id="guide-search-count" class="vt-docs-search-count" aria-live="polite"></span>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body vt-docs-search-body">
+          <div id="guide-results" class="vt-docs-search-results" role="listbox"
+               aria-label="Search results"></div>
+        </div>
+        <div class="modal-footer vt-docs-search-footer">
+          <span class="vt-docs-search-legend">
+            <kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate
+            <span class="vt-docs-search-sep">&middot;</span>
+            <kbd>&crarr;</kbd> jump
+            <span class="vt-docs-search-sep">&middot;</span>
+            <kbd>Esc</kbd> close
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal fade" id="shortcutsModal" tabindex="-1" aria-labelledby="shortcutsModalLabel">
     <div class="modal-dialog modal-dialog-centered">
@@ -151,7 +175,7 @@
             <tbody>
               <tr>
                 <td><kbd>Ctrl</kbd> + <kbd>K</kbd></td>
-                <td>Focus search</td>
+                <td>Open search</td>
               </tr>
               <tr>
                 <td><kbd>&uarr;</kbd> / <kbd>&darr;</kbd></td>
@@ -163,7 +187,7 @@
               </tr>
               <tr>
                 <td><kbd>Esc</kbd></td>
-                <td>Clear search</td>
+                <td>Close search</td>
               </tr>
             </tbody>
           </table>
