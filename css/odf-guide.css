@@ -33,6 +33,15 @@
     font-size: 0.9rem;
 }
 
+/* Long class titles ("GameObjectClass P2: General Settings 2") stay one
+   line in the narrowed xl track. Below xl the column is a Bootstrap third
+   and may wrap. */
+@media (min-width: 1200px) {
+    .vt-guide-toc-link {
+        white-space: nowrap;
+    }
+}
+
 .vt-guide-toc-link {
     border-radius: 0;
     border-left: 3px solid transparent;
@@ -82,6 +91,14 @@
     color: var(--kb-primary);
 }
 
+/* Quiet primary chip, a step stronger than the field so it still reads
+   on the pill. Scoped here so the docs page kbd stays neutral. */
+.vt-guide-search-pill .vt-docs-search-pill-kbd {
+    background: color-mix(in oklab, var(--kb-primary) 28%, var(--kb-bg-card));
+    border-color: color-mix(in oklab, var(--kb-primary) 45%, var(--kb-border-subtle));
+    color: var(--kb-primary);
+}
+
 .vt-guide-search-pill:hover,
 .vt-guide-search-pill:focus-visible {
     background: color-mix(in oklab, var(--kb-primary) 28%, var(--kb-bg-card));
@@ -96,20 +113,26 @@
     white-space: nowrap;
 }
 
-@media (min-width: 768px) {
-    .vt-guide-nav-search {
-        flex: 0 1 26rem;
-        width: min(26rem, 36vw);
-        min-width: 12rem;
-        max-width: 26rem;
-        margin-inline: auto;
+/* Pin the field to the navbar's own midpoint. Auto margins only centered
+   it in the gap between the brand and the wider right cluster. The right
+   cluster is ~28rem, so each side keeps that much and the field shrinks
+   first. Below 1100px there isn't room to center without covering the
+   links, so the search stays in the flex row. */
+@media (min-width: 1100px) {
+    .navbar > .container-fluid {
+        position: relative;
     }
 
-    /* Let the search's auto margins take the free space so the field
-       sits in the middle, with the link cluster at the right edge. */
-    #topnav-collapse,
-    .vt-nav-primary {
-        margin-left: 0 !important;
+    .vt-guide-nav-search {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(26rem, calc(100% - 56rem));
+        max-width: none;
+        margin: 0;
+        flex: none;
+        z-index: 2;
     }
 }
 
@@ -338,6 +361,79 @@
     color: var(--kb-text-muted);
 }
 
+.vt-guide-code .vt-guide-odf-link {
+    font-family: inherit;
+}
+
+.vt-guide-odf-dialog {
+    width: calc(100vw - 2rem);
+    max-width: none;
+    height: calc(100vh - 2rem);
+    margin: 1rem auto;
+}
+
+.vt-guide-odf-dialog .modal-content {
+    height: 100%;
+    background: var(--kb-bg-card);
+    color: var(--kb-text-primary);
+    border-color: var(--kb-border-subtle);
+}
+
+.vt-guide-odf-dialog .modal-header,
+.vt-guide-odf-dialog .modal-footer {
+    border-color: var(--kb-border-subtle);
+}
+
+.vt-guide-odf-dialog .modal-title {
+    margin-right: auto;
+}
+
+.vt-guide-odf-dialog .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.vt-guide-odf-dialog .modal-body > .row {
+    height: 100%;
+}
+
+#vt-guide-detail {
+    height: 100%;
+    overflow: auto;
+}
+
+.vt-guide-odf-frame-col {
+    height: 100%;
+    min-height: 0;
+}
+
+.vt-guide-odf-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: var(--kb-bg-body);
+}
+
+@media (min-width: 992px) {
+    #vt-guide-detail {
+        border-right: 1px solid var(--kb-border-subtle);
+    }
+}
+
+@media (max-width: 991.98px) {
+    #vt-guide-detail {
+        height: auto;
+        max-height: 38vh;
+        border-bottom: 1px solid var(--kb-border-subtle);
+    }
+
+    .vt-guide-odf-frame-col {
+        height: 52vh;
+    }
+}
+
 .vt-guide-anchor.is-flash {
     background: color-mix(in oklab, var(--kb-primary) 16%, transparent);
     border-radius: 0.35rem;
@@ -355,6 +451,87 @@
 .vt-guide-rail-link {
     font-size: 0.82rem;
     padding-left: 0.2rem;
+}
+
+/* From the sidebar breakpoint up, the page itself does not scroll.
+   Each column is its own pane, so wheeling the article never moves
+   the section list or the on-this-page rail. */
+@media (min-width: 992px) {
+    /* body.h-100 in the theme is height:auto so sticky navbars can
+       track a long page. Here the columns scroll instead, so the
+       shell stays exactly one viewport tall. */
+    html,
+    body.h-100 {
+        height: 100% !important;
+        max-height: 100%;
+        overflow: hidden;
+    }
+
+    body.h-100 {
+        min-height: 0;
+    }
+
+    main {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .vt-guide-layout {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .vt-guide-layout > aside {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .vt-guide-toc-wrap,
+    .vt-guide-rail {
+        position: static;
+        top: auto;
+        flex: 1 1 auto;
+        height: 100%;
+        max-height: none;
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+    }
+
+    /* Slightly inside the column gutters so the credit and article aren't
+       flush with the sidebar or the on-this-page rail. */
+    .vt-guide-layout > .vt-guide-main {
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        padding-left: calc(var(--bs-gutter-x) * 0.5 + 1.25rem);
+        padding-right: calc(var(--bs-gutter-x) * 0.5 + 1.25rem);
+    }
+
+    /* The 70px docs offset clears a sticky navbar. This pane sits
+       below the bar, so a rail jump only needs a small gap. */
+    .vt-guide-main .docs-prose :is(h1, h2, h3, h4),
+    .vt-guide-anchor {
+        scroll-margin-top: 0.75rem;
+    }
+}
+
+/* Fixed sidebar, narrower than col-lg-3, once the right rail is visible.
+   20rem fits the longest section title on one line (nowrap above). */
+@media (min-width: 1200px) {
+    .vt-guide-layout {
+        display: grid;
+        grid-template-columns: 20rem minmax(0, 1fr) minmax(12rem, 16rem);
+    }
+
+    .vt-guide-layout > [class*="col-"] {
+        width: auto;
+        max-width: none;
+    }
 }
 
 @media (max-width: 991.98px) {

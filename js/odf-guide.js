@@ -4,6 +4,20 @@
 
     const RESULT_LIMIT = 20;
     const DATA_URL = '../../data/odf-guide.json';
+    const ODF_DATA_URL = '../../data/odf.min.json';
+    const SHOTS_BASE = '../../data/models/shots/';
+    const THUMB_BASE = '../../data/models/thumbnails/';
+    const TOKEN_RE = /\*[A-Za-z][A-Za-z0-9_]*\.odf|[A-Za-z][A-Za-z0-9_]*\.odf|"[A-Za-z][A-Za-z0-9_]*(?:\.odf)?"|[A-Za-z][A-Za-z0-9_]*/g;
+
+    const ROLE_LABELS = {
+        recycler: 'Recycler',
+        factory: 'Factory',
+        constructionrig: 'Constructor',
+        armory: 'Armory',
+        turret: 'Turret',
+        extractor: 'Extractor',
+        supplydepot: 'Supply',
+    };
 
     const tocEl = document.getElementById('guide-toc');
     const tocFilterEl = document.getElementById('guide-toc-filter');
@@ -22,6 +36,8 @@
     let hits = [];
     let applyingHistory = false;
     let searchModal = null;
+    let odfModal = null;
+    let odfIndex = new Map();
 
     function escapeHtml(value) {
         return String(value == null ? '' : value)
@@ -29,6 +45,58 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    function stemOf(name) {
+        return String(name || '').trim().replace(/\.odf$/i, '').replace(/^\*/, '').toLowerCase();
+    }
+
+    function filenameShaped(token) {
+        if (token !== token.toLowerCase()) return false;
+        if (/^[ief][a-z0-9]{4,}$/.test(token)) return true;
+        if (/[0-9_]/.test(token)) return true;
+        if (/xpl$/.test(token)) return true;
+        return false;
+    }
+
+    function stemForToken(token) {
+        if (!odfIndex.size) return '';
+        let raw = token;
+        let quoted = false;
+        if (raw.charAt(0) === '"') {
+            quoted = true;
+            raw = raw.slice(1, -1);
+        }
+        const isFile = raw.charAt(0) === '*' || /\.odf$/i.test(raw);
+        const stem = stemOf(raw);
+        if (!stem || !odfIndex.has(stem + '.odf')) return '';
+        if (isFile || quoted || filenameShaped(raw)) return stem;
+        return '';
+    }
+
+    function odfLinkHtml(stem, label) {
+        return '<a class="vt-guide-odf-link" href="../?odf=' + encodeURIComponent(stem) +
+            '" data-vt-guide-odf="' + escapeHtml(stem) + '">' + escapeHtml(label) + '</a>';
+    }
+
+    function linkify(text) {
+        const src = String(text == null ? '' : text);
+        if (!odfIndex.size) return escapeHtml(src);
+        let out = '';
+        let last = 0;
+        TOKEN_RE.lastIndex = 0;
+        let match;
+        while ((match = TOKEN_RE.exec(src))) {
+            const token = match[0];
+            out += escapeHtml(src.slice(last, match.index));
+            const stem = stemForToken(token);
+            if (!stem) out += escapeHtml(token);
+            else if (token.charAt(0) === '"') out += '&quot;' + odfLinkHtml(stem, token.slice(1, -1)) + '&quot;';
+            else out += odfLinkHtml(stem, token);
+            last = match.index + token.length;
+        }
+        out += escapeHtml(src.slice(last));
+        return out;
     }
 
     function inline(text) {
@@ -39,7 +107,7 @@
                 return '<a href="' + escapeHtml(link[2]) + '" target="_blank" rel="noopener">' +
                     escapeHtml(link[1]) + '</a>';
             }
-            return escapeHtml(part).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            return linkify(part).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
         }).join('');
     }
 
@@ -47,11 +115,11 @@
         const hash = text.indexOf('//');
         const code = hash >= 0 ? text.slice(0, hash) : text;
         const comment = hash >= 0 ? text.slice(hash) : '';
-        let html = escapeHtml(code)
+        let html = linkify(code)
             .replace(/\[([^\]]+)\]/g, '<span class="vt-guide-code-section">[$1]</span>')
-            .replace(/(^|\s)([A-Za-z_][\w#.]*)(\s*=)/g, '$1<span class="vt-guide-code-key">$2</span>$3');
+            .replace(/(^|\s)([A-Za-z_][\w#.]*)(\s+=)/g, '$1<span class="vt-guide-code-key">$2</span>$3');
         if (comment) {
-            html += '<span class="vt-guide-code-comment">' + escapeHtml(comment) + '</span>';
+            html += '<span class="vt-guide-code-comment">' + linkify(comment) + '</span>';
         }
         return html;
     }
@@ -386,9 +454,12 @@
     }
 
     function scrollToAnchor(anchor) {
+        const pane = document.querySelector('.vt-guide-main');
         if (!anchor) {
-            const title = document.getElementById('guide-title');
-            if (title) title.scrollIntoView({ block: 'start' });
+            // Section changes land on the credit line, not the title
+            // under it. The phone layout still scrolls the window.
+            if (pane) pane.scrollTop = 0;
+            window.scrollTo(0, 0);
             return;
         }
         const node = document.getElementById(anchor);
@@ -563,13 +634,264 @@
         applyingHistory = false;
     });
 
-    fetch(DATA_URL)
-        .then(function (response) {
+    function numbered(obj, prefix) {
+        if (!obj || typeof obj !== 'object') return [];
+        const re = new RegExp('^' + prefix + '(\\d+)$');
+        return Object.keys(obj)
+            .map(function (key) {
+                const match = re.exec(key);
+                return match ? { n: Number(match[1]), v: obj[key] } : null;
+            })
+            .filter(function (row) { return row && row.v != null && String(row.v).trim() !== ''; })
+            .sort(function (a, b) { return a.n - b.n; })
+            .map(function (row) { return String(row.v).trim(); });
+    }
+
+    function unitName(odf, stem) {
+        const go = odf && odf.GameObjectClass;
+        if (go && go.unitName) return String(go.unitName);
+        const weapon = odf && odf.WeaponClass;
+        if (weapon && weapon.wpnName) return String(weapon.wpnName);
+        return stem;
+    }
+
+    function roleLabel(odf) {
+        const chain = odf && odf.inheritanceChain;
+        if (!Array.isArray(chain) || !chain.length) return '';
+        return ROLE_LABELS[String(chain[chain.length - 1]).toLowerCase()] || '';
+    }
+
+    function modelStem(odf) {
+        const geom = odf && odf.GameObjectClass && odf.GameObjectClass.geometryName;
+        if (!geom) return '';
+        return String(geom).replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    }
+
+    function weaponChips(odf) {
+        const go = odf.GameObjectClass || {};
+        const counts = new Map();
+        numbered(go, 'weaponName').forEach(function (raw) {
+            const stem = stemOf(raw);
+            const hit = odfIndex.get(stem + '.odf');
+            const weapon = (hit && hit.data && hit.data.WeaponClass) || {};
+            const name = weapon.wpnName || stem;
+            const assault = String(weapon.isAssault) === '1' ? '1' : '0';
+            const key = assault + '|' + name;
+            const prev = counts.get(key);
+            if (prev) prev.count += 1;
+            else counts.set(key, { name: name, assault: assault, count: 1, stem: stem });
+        });
+        return Array.from(counts.values());
+    }
+
+    function statRows(odf, category) {
+        const go = odf.GameObjectClass || {};
+        const craft = odf.CraftClass || {};
+        const rows = [];
+        function add(label, value) {
+            if (value == null || value === '') return;
+            rows.push({ label: label, value: String(value) });
+        }
+        add('Health', go.maxHealth);
+        add('Scrap value', go.scrapValue);
+        add('Scrap cost', go.scrapCost);
+        add('Armor', go.armorClass);
+        if (category === 'Vehicle') {
+            add('Custom cost', go.customCost);
+            add('Build time', go.buildTime);
+            add('Custom time', go.customTime);
+            add('Ammo', go.maxAmmo);
+            if (go.isAssault != null && go.isAssault !== '') {
+                add('Assault', String(go.isAssault) === '1' ? 'Yes' : 'No');
+            }
+            add('Engage range', craft.engageRange);
+            add('Top speed', craft.topSpeed);
+        } else if (category === 'Building') {
+            if (go.powerCost != null && go.powerCost !== '' && String(go.powerCost) !== '0') {
+                add('Power', go.powerCost);
+            }
+            const reqs = [];
+            for (let i = 1; i <= 6; i++) {
+                const text = go['requireText' + i];
+                if (text) reqs.push(String(text));
+            }
+            if (reqs.length) add('Requires', reqs.join(', '));
+        }
+        return rows;
+    }
+
+    function el(tag, className) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        return node;
+    }
+
+    function attachShot(img) {
+        img.addEventListener('error', function onErr() {
+            const fallback = img.getAttribute('data-fallback');
+            if (fallback) {
+                img.removeAttribute('data-fallback');
+                img.src = fallback;
+                return;
+            }
+            img.remove();
+        });
+    }
+
+    function fillDetail(stem) {
+        const detail = document.getElementById('vt-guide-detail');
+        const title = document.getElementById('vt-guide-odf-title');
+        const key = stemOf(stem);
+        const hit = odfIndex.get(key + '.odf');
+        const odf = hit && hit.data;
+        const category = (hit && hit.category) || '';
+        const name = odf ? unitName(odf, key) : key;
+        const role = odf ? roleLabel(odf) : '';
+        const geom = odf ? modelStem(odf) : '';
+        title.textContent = name;
+        detail.textContent = '';
+        detail.dataset.category = category;
+
+        const layout = el('div', 'd-flex flex-column gap-3');
+        if (geom) {
+            const frame = el('div', 'border border-subtle rounded p-2');
+            const img = el('img', 'img-fluid d-block mx-auto');
+            img.alt = '';
+            img.loading = 'lazy';
+            img.decoding = 'async';
+            img.src = SHOTS_BASE + geom + '/hero.png';
+            img.setAttribute('data-fallback', THUMB_BASE + geom + '.png');
+            attachShot(img);
+            frame.appendChild(img);
+            layout.appendChild(frame);
+        }
+
+        const heading = el('div', 'd-flex flex-wrap align-items-center gap-2');
+        const nameEl = el('h2', 'h5 mb-0');
+        nameEl.textContent = name;
+        heading.appendChild(nameEl);
+        if (role) {
+            const chip = el('span', 'badge bg-secondary');
+            chip.textContent = role;
+            heading.appendChild(chip);
+        }
+        layout.appendChild(heading);
+
+        if (!odf) {
+            const missing = el('p', 'text-muted mb-0');
+            missing.textContent = 'Not in the ODF database';
+            layout.appendChild(missing);
+        } else {
+            const stats = statRows(odf, category);
+            if (stats.length) {
+                const list = el('ul', 'list-group list-group-flush small mb-0');
+                stats.forEach(function (stat) {
+                    const item = el('li', 'list-group-item d-flex justify-content-between align-items-baseline gap-2 px-0');
+                    const label = el('span', 'text-muted');
+                    label.textContent = stat.label;
+                    const value = el('span', 'vt-mono');
+                    value.textContent = stat.value;
+                    item.appendChild(label);
+                    item.appendChild(value);
+                    list.appendChild(item);
+                });
+                layout.appendChild(list);
+            }
+            const weapons = weaponChips(odf);
+            if (weapons.length) {
+                const wrap = el('div', 'd-flex flex-wrap gap-1');
+                weapons.forEach(function (weapon) {
+                    const chip = el('button', 'btn btn-sm btn-outline-secondary');
+                    chip.type = 'button';
+                    chip.dataset.vtGuideWeapon = '1';
+                    chip.dataset.stem = weapon.stem;
+                    const mark = el('span', 'badge bg-secondary me-1');
+                    mark.textContent = weapon.assault === '1' ? 'A' : 'C';
+                    chip.appendChild(mark);
+                    const label = document.createElement('span');
+                    label.textContent = weapon.count > 1
+                        ? weapon.name + ' \u00d7' + weapon.count
+                        : weapon.name;
+                    chip.appendChild(label);
+                    wrap.appendChild(chip);
+                });
+                layout.appendChild(wrap);
+            }
+        }
+
+        detail.appendChild(layout);
+
+        const open = document.getElementById('vt-guide-odf-open');
+        const model = document.getElementById('vt-guide-odf-model');
+        if (open) open.href = '../?odf=' + encodeURIComponent(key);
+        if (model) {
+            if (geom) {
+                model.hidden = false;
+                model.href = '../../models/?model=' + encodeURIComponent(geom);
+            } else {
+                model.hidden = true;
+            }
+        }
+        return name;
+    }
+
+    function showDetail(stem) {
+        const frame = document.getElementById('vt-guide-odf-frame');
+        const key = stemOf(stem);
+        fillDetail(key);
+        if (frame && frame.dataset.stem !== key) {
+            frame.dataset.stem = key;
+            frame.src = '../?odf=' + encodeURIComponent(key) + '&embed=1';
+        }
+        if (odfModal) odfModal.show();
+    }
+
+    function indexOdfDatabase(data) {
+        odfIndex = new Map();
+        Object.entries(data).forEach(function (entry) {
+            const category = entry[0];
+            const odfs = entry[1];
+            if (!odfs || typeof odfs !== 'object') return;
+            Object.entries(odfs).forEach(function (row) {
+                odfIndex.set(String(row[0]).toLowerCase(), {
+                    category: category,
+                    data: row[1],
+                    filename: row[0],
+                });
+            });
+        });
+    }
+
+    const guideOdfModalEl = document.getElementById('vt-guide-odf-modal');
+    if (guideOdfModalEl && window.bootstrap && window.bootstrap.Modal) {
+        odfModal = window.bootstrap.Modal.getOrCreateInstance(guideOdfModalEl);
+        guideOdfModalEl.addEventListener('click', function (event) {
+            const weapon = event.target.closest('[data-vt-guide-weapon]');
+            if (weapon) showDetail(weapon.dataset.stem);
+        });
+    }
+
+    articleEl.addEventListener('click', function (event) {
+        const link = event.target.closest('[data-vt-guide-odf]');
+        if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+        event.preventDefault();
+        showDetail(link.getAttribute('data-vt-guide-odf'));
+    });
+
+    function loadJson(url) {
+        return fetch(url).then(function (response) {
             if (!response.ok) throw new Error('HTTP ' + response.status);
             return response.json();
-        })
-        .then(function (payload) {
-            doc = payload;
+        });
+    }
+
+    Promise.all([
+        loadJson(DATA_URL),
+        loadJson(ODF_DATA_URL).catch(function () { return null; }),
+    ])
+        .then(function (payloads) {
+            doc = payloads[0];
+            if (payloads[1]) indexOdfDatabase(payloads[1]);
             sectionOrder = doc.sections.map(function (section) { return section.id; });
             doc.sections.forEach(function (section) { sectionById.set(section.id, section); });
             applyLocation('replace');

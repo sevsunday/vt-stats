@@ -93,7 +93,7 @@
   </nav>
 
   <main class="container-fluid flex-grow-1">
-    <div class="row g-3 px-2 px-md-3 pt-3 pb-4">
+    <div class="row g-3 px-2 px-md-3 pt-3 pb-4 vt-guide-layout">
       <aside class="col-12 col-lg-3 order-2 order-lg-1">
         <div class="vt-guide-toc-wrap">
           <label class="visually-hidden" for="guide-toc-filter">Filter sections</label>
@@ -103,7 +103,7 @@
         </div>
       </aside>
 
-      <section class="col-12 col-lg-9 col-xl-7 order-1 order-lg-2">
+      <section class="col-12 col-lg-9 col-xl-7 order-1 order-lg-2 vt-guide-main">
         <aside class="vt-guide-credit">
           <p>
             This is a copy of the ODF Guide by GenBlackDragon on Steam.
@@ -158,6 +158,29 @@
             <span class="vt-docs-search-sep">&middot;</span>
             <kbd>Esc</kbd> close
           </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="vt-guide-odf-modal" tabindex="-1" aria-labelledby="vt-guide-odf-title">
+    <div class="modal-dialog modal-dialog-centered vt-guide-odf-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="vt-guide-odf-title">Unit</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div class="row g-0 h-100">
+            <div id="vt-guide-detail" class="col-12 col-lg-2 p-3"></div>
+            <div class="col-12 col-lg vt-guide-odf-frame-col">
+              <iframe id="vt-guide-odf-frame" class="vt-guide-odf-frame" title="ODF browser"></iframe>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a id="vt-guide-odf-open" class="btn btn-outline-secondary" href="../" target="_blank" rel="noopener">Open in ODF browser</a>
+          <a id="vt-guide-odf-model" class="btn btn-primary" href="../../models/" target="_blank" rel="noopener" hidden>Model</a>
         </div>
       </div>
     </div>
