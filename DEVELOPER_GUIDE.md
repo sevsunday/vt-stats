@@ -2995,6 +2995,21 @@ python scripts/process_match_videos.py --dry-run
 
 The batch script skips `(match_id, video_id)` pairs already in `match_videos.json` and subprocesses `map_match_video.py` for new ones (no `--yes`). Answer `y` at the existing QA prompt to sign off (`verified: true`). One bad row does not drop the rest of the queue; a non-zero exit means at least one new row failed. `--force` re-runs pairs already in the store. Removing a queue row does not delete a store entry. Then `python _investigation/check_match_videos.py` and commit both JSON files.
 
+**Channel scan (new uploads).** When a configured channel posts a VOD and you do not yet know the match id:
+
+```
+python scripts/process_extvids.py
+python scripts/process_extvids.py --dry-run --limit 3
+python scripts/process_extvids.py --channel F9bomber
+python scripts/process_extvids.py --self-test
+```
+
+`scripts/process_extvids.py` lists every row in `data/external/video_channels.json` (`{key, url, parser, pov}`), skips video ids already in `match_videos.json`, and keeps a title only when that row's parser recognizes it. For F9 (`parser: "f9"`) the title must contain ` vs ` and `VSR`; commanders are the `A vs B` segment wherever it sits (a prefix such as `Adding a Ship Overlay!` is fine); the map is the last `|` segment; the description date is `Recording date: M.D.YY` (US month/day, local play date). Commander spellings resolve through `data/external/f9_name_map.json` (`muerte` → mort, `blue banana` → blue, `x-triage` → Totokomo, `xpi` → Monkey). Map titles also use `data/external/f9_map_aliases.json`. A match is a candidate when both commanders are its `team_leaders`, the map title matches the manifest name (or an alias), the UTC match date is the recording date or the next day, and `pov` is on the roster.
+
+Candidates are confirmed on the last in-game HUD frame: the script seeks backward from the end in 15s steps (up to 3 minutes of credits) until `Mission Time` OCRs, then requires that clock within 20s of `duration_sec` and a passing `identity_gate` (the scoreboard crop is the upper band, full width, because F9 pins the roster on the right). Exactly one match id writes a mapping by calling `map_match_video.py --yes` (no QA prompt; discovery notes record the clock and the matched names). Anything else is a row in gitignored `_investigation/output/extvids/report.json` and is retried on the next run. `--limit N` caps how many candidate titles are confirmed. Description metadata is cached under that same directory so a rerun does not re-fetch titles it already parsed.
+
+**Add a channel.** Append a row to `video_channels.json` and add a parser function to `PARSERS` in `scripts/process_extvids.py`. The parser receives `(title, description)` and returns `{commanders, map_title, record_date}` or `None`. Calling it with an empty description must return `None` when the title is not one of that channel's match videos (that is the cheap skip before any description fetch). Do not fork the HUD OCR or the store writer. Only `f9` is implemented.
+
 **Single-video CLI (debugging).** Identify the match id and the YouTube URL. Optional: whose cockpit (`--pov <name|steam64>`). Dry-run the mapper so you can read the proposed segments and QA links without writing:
 
 ```

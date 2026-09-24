@@ -883,8 +883,9 @@ def identity_gate(frame, roster: list[str], gpu: bool) -> dict:
         return {"names_matched": 0, "roster_size": len(roster),
                 "matched": [], "passed": False, "need": need}
     h, w = frame.shape[:2]
-    # Scoreboard occupies the upper-left ~55% x 70%.
-    crop = frame[0:int(h * 0.72), 0:int(w * 0.62)]
+    # Scoreboard is the upper band. F9's HUD pins Mission Time and the
+    # roster on the right; a left-only crop misses those names.
+    crop = frame[0:int(h * 0.75), 0:w]
     cv2, _ = require_ops()
     up = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     gray = to_gray(up)
