@@ -3438,6 +3438,7 @@
       careerRadarState = { a: null, b: null, compare: false, mode: careerRadarState.mode };
       renderVtsrTeaser(getActiveElo(), []);
       renderHighlights({ schema_version: 1, cards: [] }, { id: 'all-matches' }, 'career');
+      renderCommanderStandings(null);
       renderCareerTable([]);
       renderCareerRadar({ career_stats: [] });
       window.__vtAllMatchesData = { meta: {}, career_stats: [], global_weapon_meta: [], global_rivalries: [] };
@@ -3484,6 +3485,7 @@
     remapCareerSortKeyForColumnView(careerColumnView);
 
     renderAggMeta(data.meta);
+    renderCommanderStandings(data);
     renderRecentMatches(fileIds);
     renderVtsrTeaser(getActiveElo(), data.career_stats);
     renderHighlights(data.career_highlights, { id: 'all-matches' }, 'career');
@@ -5010,19 +5012,19 @@
       close:    ['{name} edges career T-key usage at {value}.',                          '{name} narrowly leads lifetime target lock.',          '{name} squeaks the long-run locksmith crown.'],
     },
     career_tycoon: {
-      dominant: ['{name} has generated {value} scrap commanding — a lifetime printing press.', '{name} runs the corpus economy: {value} scrap over {econ_matches} commands.', '{name} out-earns every commander by a mile.'],
-      clear:    ['{name} leads career scrap generation at {value}.',                            '{name} tops lifetime commander income ({avg_income_per_min}/min).',          '{name} holds the all-time Elon Musk crown.'],
-      close:    ['{name} edges career scrap generation at {value}.',                            '{name} narrowly leads lifetime commander income.',                           '{name} squeaks the Elon Musk crown.'],
+      dominant: ['{name} has generated {value} scrap across {econ_matches} recorded v4 games.', '{name} leads recorded v4 scrap income at {value}.', '{name} out-earns other commanders on v4 telemetry.'],
+      clear:    ['{name} leads recorded v4 scrap generation at {value}.', '{name} tops v4 commander income ({avg_income_per_min}/min over {econ_matches} games).', '{name} holds the v4 Elon Musk mark.'],
+      close:    ['{name} edges recorded v4 scrap generation at {value}.', '{name} narrowly leads v4 commander income.', '{name} squeaks the v4 Elon Musk mark.'],
     },
     career_loose_collector: {
-      dominant: ['{name} has hauled in {value} loose commanding — a career scavenger.', '{name} stripped the corpus of loose: {value} over {econ_matches} commands.', '{name} out-collects every commander by a mile.'],
-      clear:    ['{name} leads career loose collection at {value}.',                    '{name} tops lifetime loose hauled off the field.',                            '{name} holds the all-time Loose Collector crown.'],
-      close:    ['{name} edges career loose collection at {value}.',                    '{name} narrowly leads lifetime loose collected.',                             '{name} squeaks the Loose Collector crown.'],
+      dominant: ['{name} has hauled in {value} loose across {econ_matches} recorded v4 games.', '{name} leads recorded v4 loose at {value}.', '{name} out-collects other commanders on v4 telemetry.'],
+      clear:    ['{name} leads recorded v4 loose collection at {value}.', '{name} tops loose hauled off the field in {econ_matches} v4 games.', '{name} holds the v4 Loose Collector mark.'],
+      close:    ['{name} edges recorded v4 loose collection at {value}.', '{name} narrowly leads v4 loose collected.', '{name} squeaks the v4 Loose Collector mark.'],
     },
     career_war_machine: {
-      dominant: ['{name} has fielded {value} scrap of combat ships — a career assembly line.', '{name} built {ships_built} warships across {build_matches} commands.', '{name} out-produces every commander by a mile.'],
-      clear:    ['{name} leads career combat production at {value} scrap.',                     '{name} tops lifetime warship output — {ships_built} ships.',           '{name} holds the all-time conveyor-belt crown.'],
-      close:    ['{name} edges career combat production at {value} scrap.',                     '{name} narrowly leads lifetime warship output.',                       '{name} squeaks the conveyor-belt crown.'],
+      dominant: ['{name} has fielded {value} scrap of combat ships across {build_matches} recorded v4 games.', '{name} built {ships_built} warships across {build_matches} v4 games.', '{name} out-produces other commanders on v4 telemetry.'],
+      clear:    ['{name} leads recorded v4 combat production at {value} scrap.', '{name} tops v4 warship output — {ships_built} ships over {build_matches} games.', '{name} holds the v4 conveyor-belt mark.'],
+      close:    ['{name} edges recorded v4 combat production at {value} scrap.', '{name} narrowly leads v4 warship output.', '{name} squeaks the v4 conveyor-belt mark.'],
     },
     the_champion: {
       dominant: ['{name} sits at {value} VTSR-T with {matches_played} rated matches.', '{name} owns the league. {value} VTSR-T.',          '{name} is the corpus champion at {value}.'],
@@ -5202,10 +5204,14 @@
         return `${formatHighlightInt(b.matches_played)} rated · peak ${b.peak_vtsr != null ? formatHighlightInt(b.peak_vtsr) : '—'}`;
       case 'the_carry':
         if (b.kills == null && b.deaths == null) return '';
-        return `${b.kills}W / ${b.deaths}L commanding`;
+        return `${b.kills}W / ${b.deaths}L commanding · recorded matches`;
+      case 'the_anchor':
+        return 'recorded matches';
       case 'map_master':
         if (!b.map_name) return '';
-        return `${esc(b.map_name)} (${b.kills}-${b.deaths})`;
+        return `${esc(b.map_name)} (${b.kills}-${b.deaths}) · recorded matches`;
+      case 'streak_king':
+        return 'recorded matches';
       // v17 commander-economy cards (Elon Musk / Loose Collector / Conveyor Belt / First Upgrade).
       case 'the_tycoon': {
         if (b.income_regen == null && b.income_loose == null) return '';
@@ -5224,21 +5230,22 @@
       // v17 career commander-economy siblings.
       case 'career_tycoon': {
         if (b.econ_matches == null) return '';
-        const parts = [`${formatHighlightInt(b.econ_matches)} commands`];
+        const parts = [`${formatHighlightInt(b.econ_matches)} v4 games`];
         if (b.avg_income_per_min != null) parts.push(`${formatHighlightInt(b.avg_income_per_min)}/min`);
         if (b.income_loose != null) parts.push(`${formatHighlightInt(b.income_loose)} loose`);
         return parts.join(' · ');
       }
       case 'career_loose_collector': {
         if (b.econ_matches == null) return '';
-        const parts = [`${formatHighlightInt(b.econ_matches)} commands`];
+        const parts = [`${formatHighlightInt(b.econ_matches)} v4 games`];
         if (b.loose_share != null) parts.push(`${(Number(b.loose_share) * 100).toFixed(0)}% of income`);
         return parts.join(' · ');
       }
       case 'career_war_machine': {
-        if (b.ships_built == null) return '';
-        const parts = [`${formatHighlightInt(b.ships_built)} combat ships`];
-        if (b.build_matches != null) parts.push(`${formatHighlightInt(b.build_matches)} commands`);
+        if (b.ships_built == null && b.build_matches == null) return '';
+        const parts = [];
+        if (b.build_matches != null) parts.push(`${formatHighlightInt(b.build_matches)} v4 games`);
+        if (b.ships_built != null) parts.push(`${formatHighlightInt(b.ships_built)} combat ships`);
         if (b.avg_ships_per_min != null) parts.push(`${b.avg_ships_per_min}/min`);
         return parts.join(' · ');
       }
@@ -7321,7 +7328,7 @@
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
 
-  // Hero stat cards (4-up at desktop). Reads `meta` directly from the
+  // Hero stat cards (5-up at desktop). Reads `meta` directly from the
   // aggregate; tolerates partial payloads (used by both the happy path and
   // the empty-filter-set branch in loadAllMatches).
   function renderHeroStats(meta) {
@@ -7358,9 +7365,15 @@
     container.innerHTML = `
       <div class="vt-hero-stat">
         <i class="bi bi-collection-play vt-hero-stat-icon" aria-hidden="true"></i>
-        <span class="vt-hero-stat-label">Matches</span>
+        <span class="vt-hero-stat-label">Recorded</span>
         <span class="vt-hero-stat-value">${matchCount}</span>
         <span class="vt-hero-stat-sub">across ${mapsCount} ${mapsCount === 1 ? 'map' : 'maps'}</span>
+      </div>
+      <div class="vt-hero-stat" id="hero-stat-community">
+        <i class="bi bi-journal-text vt-hero-stat-icon" aria-hidden="true"></i>
+        <span class="vt-hero-stat-label">Community</span>
+        <span class="vt-hero-stat-value" id="hero-stat-community-value">\u2014</span>
+        <span class="vt-hero-stat-sub" id="hero-stat-community-sub">F9bomber ledger</span>
       </div>
       <div class="vt-hero-stat">
         <i class="bi bi-clock-history vt-hero-stat-icon" aria-hidden="true"></i>
@@ -7405,7 +7418,29 @@
     if (matchCount > 0 && tlCount > 0 && tlCount < matchCount) {
       chips.push(`<span class="vt-hero-chip"><i class="bi bi-bullseye" aria-hidden="true"></i>T-key data: <strong>${tlCount} / ${matchCount}</strong></span>`);
     }
+    if (matchCount > 0) {
+      const v4Count = meta.matches_with_resource_data || 0;
+      chips.push(`<span class="vt-hero-chip" title="Proto v4 resource telemetry. Economy highlight tiles count only these games."><i class="bi bi-cash-stack" aria-hidden="true"></i>Economy telemetry: <strong>${v4Count} / ${matchCount}</strong></span>`);
+    }
     container.innerHTML = chips.join('');
+  }
+
+  function paintHeroCommunity(comm) {
+    const valueEl = document.getElementById('hero-stat-community-value');
+    const subEl = document.getElementById('hero-stat-community-sub');
+    if (!valueEl || !subEl) return;
+    if (!comm || !(comm.duel_count > 0)) {
+      valueEl.textContent = '\u2014';
+      subEl.textContent = 'Ledger unavailable';
+      return;
+    }
+    const range = Array.isArray(comm.date_range) ? comm.date_range : [null, null];
+    const prov = comm.provider || {};
+    const href = prov.url || 'https://f9bomber.com';
+    const name = prov.name || 'F9bomber';
+    const ledgerDay = (iso) => fmtShortDate(iso ? String(iso).slice(0, 10) + 'T12:00:00' : '');
+    valueEl.textContent = comm.duel_count.toLocaleString();
+    subEl.innerHTML = `${esc(ledgerDay(range[0]))} \u2013 ${esc(ledgerDay(range[1]))} \u00b7 <a href="${esc(href)}" target="_blank" rel="noopener">${esc(name)}</a>`;
   }
 
   // Public entry point used by loadAllMatches. Splits into the two render
@@ -7415,16 +7450,29 @@
   function renderAggMeta(meta) {
     renderHeroStats(meta);
     renderHeroChips(meta);
+    ensureF9CommunityLoaded().then(paintHeroCommunity);
   }
 
-  // ---- Community Ledger card (All Matches -> Meta tab) -----------------
+  // ---- Community ledger (display-only, never folded into VTAggregate) --
   // Static rollup of F9bomber's hand-kept match ledger
   // (data/external/f9_community.json). Corpus-wide reference data:
   // deliberately NOT merged into the picker-scoped faction_stats /
-  // meta_charts above, and never re-aggregated by the picker. 404-safe:
-  // the card stays hidden when the file is absent. Fetched once per
-  // session.
+  // meta_charts, and never re-aggregated by the picker. 404-safe.
+  // Fetched once per session. Hero, commander standings, and the Meta
+  // card all read this cache.
   let f9CommunityCache; // undefined = not fetched; null = 404/absent
+  let _f9CommunityFetch = null;
+  function ensureF9CommunityLoaded() {
+    if (f9CommunityCache !== undefined) return Promise.resolve(f9CommunityCache);
+    if (!_f9CommunityFetch) {
+      _f9CommunityFetch = fetch('data/external/f9_community.json')
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null)
+        .then(json => { f9CommunityCache = json || null; return f9CommunityCache; });
+    }
+    return _f9CommunityFetch;
+  }
+
   function renderF9CommunityCard() {
     const card = document.getElementById('section-f9-community');
     const body = document.getElementById('f9-community-body');
@@ -7446,6 +7494,33 @@
       }).join('');
       const range = Array.isArray(comm.date_range) ? comm.date_range : [null, null];
       const prov = comm.provider || {};
+      const commanders = (Array.isArray(comm.commander_records) ? comm.commander_records : [])
+        .filter(r => r && (r.games || 0) > 0)
+        .slice()
+        .sort((a, b) => (b.games || 0) - (a.games || 0) || (b.wins || 0) - (a.wins || 0))
+        .slice(0, 8);
+      const cmdrRows = commanders.map(r => `<tr>
+          <td>${vtPlayerLinkHtml(r.name, r.steam64)}</td>
+          <td class="text-end vt-mono">${(r.wins || 0).toLocaleString()}\u2013${(r.losses || 0).toLocaleString()}</td>
+          <td class="text-end vt-mono">${(r.games || 0).toLocaleString()}</td>
+        </tr>`).join('');
+      const maps = (Array.isArray(comm.maps) ? comm.maps : [])
+        .filter(m => m && (m.games || 0) > 0)
+        .slice()
+        .sort((a, b) => (b.games || 0) - (a.games || 0) || String(a.title || '').localeCompare(String(b.title || '')))
+        .slice(0, 8);
+      const mapRows = maps.map(m => {
+        const title = esc(m.title || m.map_key || 'Unknown');
+        const key = String(m.map_key || '');
+        const safe = /^[a-z0-9_-]+$/i.test(key);
+        const label = safe
+          ? `<a class="vt-map-title-link" href="map/${encodeURIComponent(key.toLowerCase())}/">${title}</a>`
+          : title;
+        return `<tr>
+          <td>${label}</td>
+          <td class="text-end vt-mono">${(m.games || 0).toLocaleString()}</td>
+        </tr>`;
+      }).join('');
       body.innerHTML = `
         <p class="small text-secondary mb-2">
           ${comm.duel_count.toLocaleString()} hand-logged community matches
@@ -7453,22 +7528,38 @@
           deduplicated against recorded matches. Kept separate from the recorded-corpus
           charts above on purpose.
         </p>
-        <div class="table-responsive">
-          <table class="table table-sm align-middle mb-2" style="font-size:0.85rem;">
-            <thead><tr><th>Faction</th><th class="text-end">Picks</th><th class="text-end">Wins</th><th class="text-end">Win %</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-2 vt-standings-table">
+                <thead><tr><th>Faction</th><th class="text-end">Picks</th><th class="text-end">Wins</th><th class="text-end">Win %</th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-2 vt-standings-table">
+                <thead><tr><th>Commander</th><th class="text-end">W\u2013L</th><th class="text-end">Games</th></tr></thead>
+                <tbody>${cmdrRows}</tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-2 vt-standings-table">
+                <thead><tr><th>Map</th><th class="text-end">Games</th></tr></thead>
+                <tbody>${mapRows}</tbody>
+              </table>
+            </div>
+          </div>
         </div>
         <p class="text-muted small mb-0">Includes data from
           <a href="${esc(prov.url || 'https://f9bomber.com')}" target="_blank" rel="noopener">${esc(prov.name || 'F9bomber')}</a>.</p>`;
       card.classList.remove('d-none');
     };
 
-    if (f9CommunityCache !== undefined) { paint(f9CommunityCache); return; }
-    fetch('data/external/f9_community.json')
-      .then(r => (r.ok ? r.json() : null))
-      .catch(() => null)
-      .then(json => { f9CommunityCache = json || null; paint(f9CommunityCache); });
+    ensureF9CommunityLoaded().then(paint);
   }
 
   // Recent Matches strip. Reuses .vt-match-picker-card so a future styling
@@ -7925,6 +8016,86 @@
     return (r.duels_with_telemetry || 0) >= minV4 || _cmdrDuelsNonV4(r) >= minNonV4;
   }
 
+  // Overview standings. VTSR-C is the combined ladder. Recorded W-L comes
+  // from the picker-scoped commander rollup; community W-L comes from the
+  // F9 ledger. The two records are never added together.
+  const COMMANDER_STANDINGS_LIMIT = 8;
+  function renderCommanderStandings(data) {
+    const card = document.getElementById('section-commander-standings');
+    const body = document.getElementById('commander-standings-body');
+    if (!card || !body) return;
+
+    const paint = (cmdr, comm) => {
+      const ratings = (cmdr && Array.isArray(cmdr.ratings)) ? cmdr.ratings : [];
+      const eligible = ratings.filter(r => _cmdrLadderEligible(r, cmdr));
+      if (!eligible.length) {
+        card.classList.add('d-none');
+        body.innerHTML = '';
+        return;
+      }
+      const recordedBySid = new Map();
+      const rows = (data && data.commander_stats && data.commander_stats.rows) || [];
+      for (const row of rows) {
+        if (row && row.steam64) recordedBySid.set(String(row.steam64), row);
+      }
+      const communityBySid = new Map();
+      const crecs = (comm && Array.isArray(comm.commander_records)) ? comm.commander_records : [];
+      for (const rec of crecs) {
+        if (rec && rec.steam64) communityBySid.set(String(rec.steam64), rec);
+      }
+      const shown = eligible.slice(0, COMMANDER_STANDINGS_LIMIT);
+      const bodyRows = shown.map((r, i) => {
+        const sid = String(r.steam64 || '');
+        const rec = recordedBySid.get(sid);
+        const f9 = communityBySid.get(sid);
+        const recorded = (rec && (rec.determined_as_commander || 0) > 0)
+          ? `<span class="vt-mono" title="${rec.determined_as_commander} determined recorded games">${rec.wins_as_commander}\u2013${rec.losses_as_commander}</span>`
+          : '<span class="text-muted" title="No determined recorded results in this view">\u2014</span>';
+        const community = (f9 && (f9.games || 0) > 0)
+          ? `<span class="vt-mono" title="${f9.games} community games">${f9.wins}\u2013${f9.losses}</span>`
+          : '<span class="text-muted" title="No community command record">\u2014</span>';
+        const prov = r.provisional
+          ? ` <span class="vt-cohort-prov" title="Provisional \u2014 fewer than ${cmdr.provisional_threshold ?? 5} rated commander games">Prov</span>`
+          : '';
+        return `<tr>
+          <td class="text-muted">${i + 1}</td>
+          <td>${vtPlayerLinkHtml(r.name, r.steam64)}${prov}</td>
+          <td class="text-end vt-mono">${Math.round(r.vtsr_c || 0)}</td>
+          <td class="text-end">${recorded}</td>
+          <td class="text-end">${community}</td>
+        </tr>`;
+      }).join('');
+      const prov = (comm && comm.provider) || {};
+      const creditName = prov.name || 'F9bomber';
+      const creditUrl = prov.url || 'https://f9bomber.com';
+      body.innerHTML = `
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-2 vt-standings-table">
+            <thead><tr>
+              <th>#</th>
+              <th>Commander</th>
+              <th class="text-end">VTSR-C</th>
+              <th class="text-end">Recorded W\u2013L</th>
+              <th class="text-end">Community W\u2013L</th>
+            </tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+        <p class="text-muted small mb-0">VTSR-C ranks recorded duels and the community ledger together. The win columns stay separate. Recorded wins follow the match picker. Community wins are the full ledger from <a href="${esc(creditUrl)}" target="_blank" rel="noopener">${esc(creditName)}</a>.</p>`;
+      card.classList.remove('d-none');
+    };
+
+    if (!data) {
+      card.classList.add('d-none');
+      body.innerHTML = '';
+      return;
+    }
+    Promise.all([ensureCommanderEloLoaded(), ensureF9CommunityLoaded()]).then(([cmdr, comm]) => {
+      if (!document.getElementById('section-commander-standings')) return;
+      paint(cmdr, comm);
+    });
+  }
+
   // Compact top-5 VTSR-C strip prepended above the cohort grid. Rank,
   // player-linked name, rating, W-L-D record, provisional chip, plus a
   // link to the full ladder on the ELO page. Empty string while the
@@ -8061,8 +8232,8 @@
       const composite = (contribByPlayer[key] || { sum: 0 }).sum;
       const compositeCls = _cohortValueClass(composite);
       const compositeTip = esc(
-        `VTSR-C (preview): \u03a3 w \u00d7 z\u0304 over the player's ${cmdrN} commander match${cmdrN === 1 ? '' : 'es'}. `
-        + `Performance space [-1, +1]; not rating-space (no anchor/floor). Thug-axis performance only \u2014 commander-specific signals (scrap, build tempo) not yet collected.`
+        `Thug-axis form: \u03a3 w \u00d7 z\u0304 over the player's ${cmdrN} commander match${cmdrN === 1 ? '' : 'es'}. `
+        + `Performance space [-1, +1], not the VTSR-C rating. Scrap and build tempo are recorded on Economy Leaders and stay unscored until the commander mixer moves.`
       );
       return `<div class="vt-cohort-col-header">
         <div class="vt-cohort-col-name">${esc(r.name)}${provBadge}</div>
@@ -8072,7 +8243,7 @@
              data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="bottom"
              title="${compositeTip}">
           <strong>${_cohortFmt(composite, 2)}</strong>
-          <span class="vt-cohort-col-vtsrc-label">VTSR-C<sub>prev</sub></span>
+          <span class="vt-cohort-col-vtsrc-label">Thug axes</span>
         </div>
         <div class="vt-cohort-col-peak">${cmdrN} cmdr match${cmdrN === 1 ? '' : 'es'} \u00b7 Peak VTSR-T ${peak}</div>
       </div>`;
@@ -8127,7 +8298,7 @@
         return `<div class="vt-cohort-cell ${cls}"><strong>${_cohortFmt(cb.sum, 4)}</strong></div>`;
       }).join('');
       footerRow = `<div class="vt-cohort-row vt-cohort-sum-row">
-        <div class="vt-cohort-axis-cell"><strong>Sum (= VTSR-C<sub>prev</sub>)</strong></div>
+        <div class="vt-cohort-axis-cell"><strong>Sum (thug axes)</strong></div>
         ${sumCells}
       </div>`;
     }
@@ -8703,41 +8874,142 @@
     return `${(pct * 100).toFixed(1)}%`;
   }
 
-  function renderCommanderLeaderboard(rows) {
-    const tbody = document.querySelector('#commander-table tbody');
-    if (!tbody) return;
-    if (!rows || !rows.length) {
-      tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">No commander data in the current scope.</td></tr>';
-      return;
-    }
-    const sorted = [...rows].sort(commanderSort(commanderSortState.key, commanderSortState.asc));
-    tbody.innerHTML = sorted.map((r, i) => `
-      <tr>
-        <td>${i + 1}</td>
+  function _commanderLeaderboardRowHtml(r, rank) {
+    const rankCell = rank == null
+      ? '<td></td>'
+      : `<td>${rank}</td>`;
+    const dash = '<span style="color:var(--kb-text-muted);">—</span>';
+    return `<tr>
+        ${rankCell}
         <td class="fw-semibold">${esc(r.name)}</td>
         <td class="text-end">${r.matches_as_commander || 0}</td>
         <td class="text-end">${r.matches_as_thug || 0}</td>
         <td class="text-end">${r.wins_as_commander || 0}&ndash;${r.losses_as_commander || 0} <span style="color:var(--kb-text-muted);">(${r.determined_as_commander || 0})</span></td>
         <td class="text-end">${_winPctCell(r.win_pct_as_commander, r.determined_as_commander)}</td>
         <td class="text-end">${_winPctCell(r.win_pct_as_thug, r.determined_as_thug)}</td>
-        <td class="text-end">${r.avg_dealt_as_commander != null ? fmt(r.avg_dealt_as_commander) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
-        <td class="text-end">${r.avg_dealt_as_thug != null ? fmt(r.avg_dealt_as_thug) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
-        <td class="text-end">${r.avg_kills_as_commander != null ? r.avg_kills_as_commander.toFixed(2) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
-        <td class="text-end">${r.avg_kills_as_thug != null ? r.avg_kills_as_thug.toFixed(2) : '<span style="color:var(--kb-text-muted);">—</span>'}</td>
+        <td class="text-end">${r.avg_dealt_as_commander != null ? fmt(r.avg_dealt_as_commander) : dash}</td>
+        <td class="text-end">${r.avg_dealt_as_thug != null ? fmt(r.avg_dealt_as_thug) : dash}</td>
+        <td class="text-end">${r.avg_kills_as_commander != null ? r.avg_kills_as_commander.toFixed(2) : dash}</td>
+        <td class="text-end">${r.avg_kills_as_thug != null ? r.avg_kills_as_thug.toFixed(2) : dash}</td>
         <td class="text-center">${_factionBadge(r.favored_faction)}</td>
-      </tr>
-    `).join('');
+      </tr>`;
+  }
 
-    document.querySelectorAll('#commander-table th[data-sort]').forEach(th => {
-      th.classList.toggle('sort-active', th.dataset.sort === commanderSortState.key);
-      th.style.cursor = 'pointer';
-      th.onclick = () => {
-        if (commanderSortState.key === th.dataset.sort) commanderSortState.asc = !commanderSortState.asc;
-        else { commanderSortState.key = th.dataset.sort; commanderSortState.asc = false; }
-        renderCommanderLeaderboard(rows);
-      };
-    });
-    ensureTooltips(document.getElementById('commander-table'));
+  // Corpus-wide VTSR-C gate. null = ladder file absent, so the caller
+  // keeps one table. false = present but ineligible, or no rating row.
+  function _commanderRowEligible(row, cmdr) {
+    if (!cmdr || !Array.isArray(cmdr.ratings)) return null;
+    const sid = String(row.steam64 || '');
+    let rating = null;
+    if (sid) rating = cmdr.ratings.find(r => String(r.steam64 || '') === sid) || null;
+    else if (row.name) rating = cmdr.ratings.find(r => r.name === row.name) || null;
+    if (!rating) return false;
+    return _cmdrLadderEligible(rating, cmdr);
+  }
+
+  function _commanderUnrankedBlurb(cmdr) {
+    const { minV4, minNonV4 } = _cmdrLadderMins(cmdr);
+    const win = (cmdr && cmdr.inactivity_window_days != null) ? cmdr.inactivity_window_days : 30;
+    const staleWin = (cmdr && cmdr.command_stale_window_days != null) ? cmdr.command_stale_window_days : 90;
+    const need = (cmdr && cmdr.comeback_games_required != null) ? cmdr.comeback_games_required : 3;
+    return `Need ${minV4} proto-v4 commander games or ${minNonV4} older games (pre-v4 recordings and F9Stats), a game within ${win} days of the newest match, and a command game within ${staleWin} days (or ${need} commander games after the ${staleWin}-day grace while still thugging). No rank is assigned here.`;
+  }
+
+  function renderCommanderLeaderboard(rows) {
+    const tbody = document.querySelector('#commander-table tbody');
+    const unrankedHost = document.getElementById('commander-unranked');
+    if (!tbody) return;
+    const list = rows || [];
+    if (window.__vtCmdrElo === undefined) {
+      tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">Loading commander ladder\u2026</td></tr>';
+      if (unrankedHost) {
+        unrankedHost.classList.add('d-none');
+        unrankedHost.innerHTML = '';
+      }
+      ensureCommanderEloLoaded().then(() => {
+        if (document.getElementById('commander-table')) renderCommanderLeaderboard(rows);
+      });
+      return;
+    }
+    _paintCommanderLeaderboard(list, window.__vtCmdrElo, tbody, unrankedHost);
+  }
+
+  function _paintCommanderLeaderboard(list, cmdr, tbody, unrankedHost) {
+    const wireSort = () => {
+      document.querySelectorAll('#commander-table th[data-sort]').forEach(th => {
+        th.classList.toggle('sort-active', th.dataset.sort === commanderSortState.key);
+        th.style.cursor = 'pointer';
+        th.onclick = () => {
+          if (commanderSortState.key === th.dataset.sort) commanderSortState.asc = !commanderSortState.asc;
+          else { commanderSortState.key = th.dataset.sort; commanderSortState.asc = false; }
+          renderCommanderLeaderboard(list);
+        };
+      });
+    };
+    const hideUnranked = () => {
+      if (!unrankedHost) return;
+      unrankedHost.classList.add('d-none');
+      unrankedHost.innerHTML = '';
+    };
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">No commander data in the current scope.</td></tr>';
+      hideUnranked();
+      wireSort();
+      return;
+    }
+    const sorter = commanderSort(commanderSortState.key, commanderSortState.asc);
+    const gateOn = !!(cmdr && Array.isArray(cmdr.ratings));
+    const ranked = [];
+    const unranked = [];
+    if (!gateOn) {
+      ranked.push(...list);
+    } else {
+      for (const row of list) {
+        if (_commanderRowEligible(row, cmdr)) ranked.push(row);
+        else unranked.push(row);
+      }
+    }
+    ranked.sort(sorter);
+    unranked.sort(sorter);
+    if (!ranked.length) {
+      tbody.innerHTML = '<tr><td colspan="12" class="text-center" style="color:var(--kb-text-muted);">No ranked commanders in the current scope.</td></tr>';
+    } else {
+      tbody.innerHTML = ranked.map((r, i) => _commanderLeaderboardRowHtml(r, i + 1)).join('');
+    }
+    if (unrankedHost) {
+      if (!unranked.length) {
+        hideUnranked();
+      } else {
+        unrankedHost.classList.remove('d-none');
+        unrankedHost.innerHTML = `<div class="vt-vtsr-c-unranked">
+          <h6 class="vt-vtsr-c-unranked-title">Unranked</h6>
+          <p class="vt-vtsr-c-unranked-blurb">${esc(_commanderUnrankedBlurb(cmdr))}</p>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Player</th>
+                  <th class="text-end">Cmdr</th>
+                  <th class="text-end">Thug</th>
+                  <th class="text-end">W&ndash;L (cmdr)</th>
+                  <th class="text-end">Win % (cmdr)</th>
+                  <th class="text-end">Win % (thug)</th>
+                  <th class="text-end">Avg Dlt (cmdr)</th>
+                  <th class="text-end">Avg Dlt (thug)</th>
+                  <th class="text-end">Avg K (cmdr)</th>
+                  <th class="text-end">Avg K (thug)</th>
+                  <th class="text-center">Favored</th>
+                </tr>
+              </thead>
+              <tbody>${unranked.map(r => _commanderLeaderboardRowHtml(r, null)).join('')}</tbody>
+            </table>
+          </div>
+        </div>`;
+      }
+    }
+    wireSort();
+    ensureTooltips(document.getElementById('section-commander-leaderboard'));
   }
 
   // v17: Economy Leaders card on the All Matches → Commanders tab.

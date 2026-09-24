@@ -371,6 +371,9 @@
 
     let matchesWithPositioning = 0;
     let matchesWithTargetLock = 0;
+    // Proto v4 resource telemetry. Absent means false. Surfaces on the
+    // All Matches hero so economy crowns are read against this denominator.
+    let matchesWithResource = 0;
     // v15: matches that actually carry BulletHit data. The first
     // v3-collector batch records zero hits (upstream hook regression), so
     // accuracy-bearing sums are skipped for those matches to keep career
@@ -414,6 +417,7 @@
       if (m.submitter) submittersSet.add(m.submitter);
       if (m.has_position_data) matchesWithPositioning++;
       if (m.has_target_lock_data) matchesWithTargetLock++;
+      if (m.has_resource_data) matchesWithResource++;
       // v15 collector-gap flag: absent (legacy) means true.
       const hasBulletHit = m.has_bullet_hit_data !== false;
       if (hasBulletHit) matchesWithBulletHit++;
@@ -1242,6 +1246,7 @@
         submitters:                    Array.from(submittersSet).sort(),
         matches_with_positioning:      matchesWithPositioning,
         matches_with_target_lock_data: matchesWithTargetLock,
+        matches_with_resource_data:    matchesWithResource,
         matches_with_bullet_hit_data:  matchesWithBulletHit,
         total_sentinel_damage_dropped: totalSentinelDamageDropped,
         matches_with_sentinel_damage:  matchesWithSentinel,

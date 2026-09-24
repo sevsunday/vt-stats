@@ -1055,7 +1055,7 @@
       </button>
     </div>
 
-    <!-- Hero band: title + 4-up stat cards + chip strip. Stat cards
+    <!-- Hero band: title + 5-up stat cards + chip strip. Stat cards
          (#hero-stats) and chip row (#hero-chips) are populated by
          renderHeroStats() / renderHeroChips() in js/app.js. The picker
          trigger that used to live here was removed once the Recent
@@ -1108,6 +1108,16 @@
 
       <!-- All Tab: Overview -->
       <div class="tab-pane fade show active" id="all-tab-overview" role="tabpanel" aria-labelledby="all-tab-overview-btn">
+
+        <div class="card mb-4 d-none" id="section-commander-standings">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Commander standings <span class="vt-cohort-title-tag">VTSR-C &middot; experimental</span></h5>
+            <a href="elo/?tab=vtsr-c" class="btn btn-sm btn-primary">
+              <i class="bi bi-trophy me-1"></i>Full ladder
+            </a>
+          </div>
+          <div class="card-body" id="commander-standings-body"></div>
+        </div>
 
         <div class="card mb-4" id="section-career">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
@@ -1409,12 +1419,12 @@
               <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Commander Cohort <span class="vt-cohort-title-tag">VTSR-C &middot; experimental</span></h5>
               <i class="bi bi-info-circle vt-col-info"
                  data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                 title="<strong>Commander-vs-commander axis comparison</strong><br>Each commander's thug-axis performance averaged over <em>only the matches they commanded</em>. Pre-shift z-scores &mdash; the v2.4 role-fairness cushion is reversed for this view so true commander-vs-commander gaps surface.<br><br>Defaults to players with at least 40% commander share. Provisional ratings are always excluded; a minimum of 5 commander matches is required so the per-axis means are stable enough to compare. Use <em>Show all commanders</em> to drop the 40% threshold while keeping the 5-match floor.<br><br><strong>VTSR-C<sub>prev</sub></strong> per column is &Sigma; w &times; z&#772; over the player's commander matches (performance space [-1, +1]; not rating-space). Foundation of a future VTSR-C rating &mdash; commander-specific signals (scrap, build tempo) aren't collected upstream yet, so this preview is thug-performance only.<br><br>Sourced from <code>elo_history.json</code> &mdash; <strong>corpus-wide</strong>, independent of the active picker filter."></i>
+                 title="<strong>Commander-vs-commander axis comparison</strong><br>Each commander's thug-axis form averaged over <em>only the matches they commanded</em>. Pre-shift z-scores &mdash; the v2.4 role-fairness cushion is reversed for this view so true commander-vs-commander gaps surface.<br><br>Defaults to players with at least 40% commander share. Provisional ratings are always excluded; a minimum of 5 commander matches is required so the per-axis means are stable enough to compare. Use <em>Show all commanders</em> to drop the 40% threshold while keeping the 5-match floor.<br><br>The column total is &Sigma; w &times; z&#772; over those commander matches (performance space [-1, +1]; not rating-space). Scrap and build tempo are recorded on the Economy Leaders card and are not scored here until the commander mixer moves.<br><br>Sourced from <code>elo_history.json</code> &mdash; <strong>corpus-wide</strong>, independent of the active picker filter. The ranked VTSR-C ladder is on the ELO page."></i>
             </div>
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <div class="btn-group btn-group-sm" role="group" aria-label="Cohort view mode" id="commander-cohort-view-toggle">
                 <button type="button" class="btn btn-outline-secondary active" data-cohort-view="z" title="Per-axis z-score over commander matches only (clipped to [-1, +1], pre-shift). Green = above lobby average, red = below.">Z-scores</button>
-                <button type="button" class="btn btn-outline-secondary" data-cohort-view="contrib" title="Weighted contribution (w &times; z&#772;) over commander matches only. Final row sums to VTSR-C&#8341;&#8347;&#8337;&#8339; for the player.">Weighted</button>
+                <button type="button" class="btn btn-outline-secondary" data-cohort-view="contrib" title="Weighted contribution (w &times; z&#772;) over commander matches only. The total is thug-axis form while commanding, not the VTSR-C rating.">Weighted</button>
               </div>
               <button type="button" class="btn btn-sm btn-outline-secondary" id="commander-cohort-show-all" data-show-all="false" title="Toggle between &ge;40% commander share and every non-provisional player with at least 5 commander matches">Show all commanders</button>
               <button class="btn btn-sm" data-expand="section-commander-cohort" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
@@ -1431,11 +1441,12 @@
               <h5 class="mb-0"><i class="bi bi-person-badge me-2"></i>Commander Leaderboard</h5>
               <i class="bi bi-info-circle vt-col-info"
                  data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                 title="<strong>Commander vs Thug split</strong><br>Slot 1 (Team 1) and slot 6 (Team 2) are team commanders; everyone else is a thug. Win % columns require at least 5 determined-winner matches in that role; under that floor, the cell shows &mdash;."></i>
+                 title="<strong>Commander vs Thug split</strong><br>Slot 1 (Team 1) and slot 6 (Team 2) are team commanders; everyone else is a thug. Win % columns require at least 5 determined-winner matches in that role; under that floor, the cell shows &mdash;.<br><br>The ranked table uses the same VTSR-C ladder gate: enough proto-v4 or older commander games, a recent game, and a recent command. Commanders who miss that gate are listed under Unranked. The gate is corpus-wide and does not follow the match picker."></i>
             </div>
             <button class="btn btn-sm" data-expand="section-commander-leaderboard" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
-          <div class="card-body table-responsive vt-sticky-thead-card">
+          <div class="card-body">
+          <div class="table-responsive vt-sticky-thead-card">
             <table id="commander-table" class="table table-hover align-middle mb-0 vt-sticky-thead" style="font-size: 0.85rem;">
               <thead>
                 <tr>
@@ -1455,6 +1466,8 @@
               </thead>
               <tbody></tbody>
             </table>
+          </div>
+          <div id="commander-unranked" class="d-none"></div>
           </div>
         </div>
 
@@ -1561,7 +1574,7 @@
           </div>
         </div>
         <div class="row g-4 mb-4">
-          <div class="col-lg-6">
+          <div class="col-12">
             <!-- Community ledger card (F9bomber; static counts, hides on 404).
                  Corpus-wide reference data — deliberately NOT part of the
                  picker-scoped faction_stats above. -->

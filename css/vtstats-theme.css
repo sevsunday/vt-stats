@@ -4610,7 +4610,7 @@ td.vt-col-split {
 
 /* ============================================================================
    ALL MATCHES HERO + RECENT MATCHES STRIP
-   Markup in index.html (#all-matches-view): .vt-all-hero card + 4-up
+   Markup in index.html (#all-matches-view): .vt-all-hero card + 5-up
    .vt-hero-stats grid + conditional .vt-hero-chips chip strip, plus a
    .vt-recent-matches block that reuses .vt-match-picker-card for each
    recent-match tile. Renderers in js/app.js: renderHeroStats(),
@@ -4632,8 +4632,14 @@ td.vt-col-split {
 
 .vt-hero-stats {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.75rem;
+}
+
+@media (max-width: 1199.98px) {
+    .vt-hero-stats {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 991.98px) {
@@ -4685,6 +4691,41 @@ td.vt-col-split {
     line-height: 1.1;
     letter-spacing: -0.01em;
     color: var(--kb-text-primary);
+}
+
+.vt-hero-stat-sub a {
+    color: var(--kb-text-secondary);
+    text-decoration: none;
+}
+
+.vt-hero-stat-sub a:hover {
+    text-decoration: underline;
+}
+
+.vt-standings-table {
+    font-size: 0.85rem;
+}
+
+.vt-vtsr-c-unranked {
+    margin-top: 1.5rem;
+    padding-top: 1.1rem;
+    border-top: 1px dashed color-mix(in oklab, var(--kb-text-muted) 28%, transparent);
+}
+
+.vt-vtsr-c-unranked-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+    margin: 0 0 0.35rem 0;
+}
+
+.vt-vtsr-c-unranked-blurb {
+    font-size: 0.82rem;
+    color: var(--kb-text-muted);
+    margin-bottom: 0.75rem;
+    max-width: 52rem;
 }
 
 .vt-hero-stat-sub {
