@@ -10,14 +10,14 @@ not the newest F9 row.
 
 Two clocks, one shared helper:
 
-  * GLOBAL (30 days, any appearance) — drives VTSR-T ranked eligibility
+  * GLOBAL (90 days, any appearance) — drives VTSR-T ranked eligibility
     and is a floor for VTSR-C. Idle longer than the window relative to
     the newest corpus match → ``inactive``; playing again starts a
     3-game comeback (``returning``) before ``active``.
   * COMMAND (90 days, command appearances) — VTSR-C only. Staying
     active as a thug protects a commander rank for the grace window;
     past that, the commander must command 3 games to re-rank. A
-    command-streak also resets when an intervening >30-day global
+    command-streak also resets when an intervening >90-day global
     inactivity episode sits between two command games (a player who
     quit entirely and returned must re-command, not just resume).
 
@@ -41,7 +41,7 @@ from typing import Any
 # Frozen in critique/decisions/vtsr-inactivity-threshold.md.
 # Rating modules pass these through as arguments and also emit them
 # top-level so the UI never hardcodes the numbers.
-DEFAULT_WINDOW_DAYS = 30
+DEFAULT_WINDOW_DAYS = 90
 DEFAULT_COMEBACK_GAMES = 3
 DEFAULT_CMDR_STALE_DAYS = 90
 

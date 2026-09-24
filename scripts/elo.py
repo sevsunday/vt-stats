@@ -83,7 +83,7 @@ ELO_LADDER_MIN_MATCHES = 25
 # A player idle longer than WINDOW days relative to the newest corpus
 # match drops off the ranked ladder and must play COMEBACK games to
 # rejoin. Frozen in critique/decisions/vtsr-inactivity-threshold.md.
-INACTIVITY_WINDOW_DAYS = 30
+INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
 ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
 ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
@@ -1849,7 +1849,7 @@ def _rating_pass(
         })
 
     # ----- Build elo_current.json shape -----
-    # Display-only activity clock (any appearance, 30-day window, 3-game
+    # Display-only activity clock (any appearance, 90-day window, 3-game
     # comeback). Ratings / history are already finalized above; this only
     # flips leaderboard_eligible. See scripts/inactivity.py.
     activity = inactivity.compute_activity(

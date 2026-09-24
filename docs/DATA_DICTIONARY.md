@@ -3160,7 +3160,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
   "provisional_prior": 10.0,
   "provisional_threshold": 10,
   "leaderboard_min_matches": 25,
-  "inactivity_window_days": 30,
+  "inactivity_window_days": 90,
   "comeback_games_required": 3,
   "corpus_latest_date": "2026-09-18",
   "min_player_count": 6,
@@ -3232,7 +3232,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `k_base`, `k_floor`, `provisional_prior` | float | K-decay curve parameters (40 / 12 / 10). |
 | `provisional_threshold` | int | matches_played below which the row gets a "Provisional" badge (10). Independent of `leaderboard_min_matches`. |
 | `leaderboard_min_matches` | int | Display-only ranked-ladder bar. A player occupies a `#` when `matches_played >=` this (25) **and** `inactive_status == "active"`. UI reads this; do not hardcode. Memo: `critique/decisions/vtsr-t-ladder-eligibility.md`. |
-| `inactivity_window_days` | int | Display-only. Days of no appearance vs `corpus_latest_date` before Unranked. 30. Memo: `critique/decisions/vtsr-inactivity-threshold.md`. |
+| `inactivity_window_days` | int | Display-only. Days of no appearance vs `corpus_latest_date` before Unranked. 90. Memo: `critique/decisions/vtsr-inactivity-threshold.md`. |
 | `comeback_games_required` | int | Display-only. Games after a >window gap before rejoining the ranked table. 3. |
 | `corpus_latest_date` | ISO date | Newest corpus match date the clocks are measured against (not wall-clock). |
 | `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 240). |
@@ -3267,7 +3267,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `ratings[].matches_as_thug` | int | **v2.4** — `matches_played - matches_as_commander`. Sums to `matches_played` exactly. Both fields are 0 for players who only appear in excluded matches. |
 | `ratings[].matches_provisional` | bool | True when `matches_played < provisional_threshold`. |
 | `ratings[].leaderboard_eligible` | bool | Display-only. `matches_played >= leaderboard_min_matches` **and** `inactive_status == "active"`. May occupy a ranked `#`. Does not change the rating. |
-| `ratings[].inactive_status` | string | `"active"` \| `"inactive"` \| `"returning"`. Any-appearance 30-day clock (corpus `leaderboard[]` **or** F9 duel). Lookup miss → `"inactive"`. |
+| `ratings[].inactive_status` | string | `"active"` \| `"inactive"` \| `"returning"`. Any-appearance 90-day clock (corpus `leaderboard[]` **or** F9 duel). Lookup miss → `"inactive"`. |
 | `ratings[].days_since_last_match` | int | Whole days from last appearance to `corpus_latest_date`. |
 | `ratings[].last_seen_date` | ISO date | Date of the last any-match appearance (corpus or F9). Empty string when never seen. |
 | `ratings[].comeback_games_played` / `comeback_games_remaining` | int | Meaningful when `inactive_status == "returning"`. |
@@ -3389,7 +3389,7 @@ Emitted by [scripts/elo_commander.py](../scripts/elo_commander.py) (own `schema_
 | `ratings[].duels_external` | int | F9 ledger duels (counted in `matches_commanded_rated` + W/L). |
 | `ratings[].duels_non_v4` | int | Older rated duels (F9 + pre-v4 corpus). Schema 4. |
 | `ratings[].leaderboard_eligible` | bool | Ranked-ladder inclusion (schema 5). Display-only. Duel-count OR-gate **and** globally active **and** command-recent. |
-| `ratings[].inactive_status` | string | `"active"` \| `"inactive"` \| `"returning"`. Shared 30-day any-appearance clock. |
+| `ratings[].inactive_status` | string | `"active"` \| `"inactive"` \| `"returning"`. Shared 90-day any-appearance clock. |
 | `ratings[].days_since_last_match` / `last_seen_date` | int / ISO date | Global clock. |
 | `ratings[].comeback_games_played` / `comeback_games_remaining` | int | Meaningful when globally `returning`. |
 | `ratings[].command_status` | string | `"active"` \| `"stale"` \| `"returning"`. 90-day command clock. |
@@ -3683,7 +3683,7 @@ Display-only. Ratings and history files are unchanged (`elo_history.json` byte-i
 
 | Field | Type | Description |
 |---|---|---|
-| `inactivity_window_days` | int | Shared 30-day any-appearance window vs `corpus_latest_date`. |
+| `inactivity_window_days` | int | Shared 90-day any-appearance window vs `corpus_latest_date`. |
 | `comeback_games_required` | int | 3 games (global) / 3 command games (VTSR-C stale comeback). |
 | `corpus_latest_date` | ISO date | Newest corpus match. Clocks are **not** wall-clock. |
 | `command_stale_window_days` | int | VTSR-C only. 90-day commander grace while still thugging. |

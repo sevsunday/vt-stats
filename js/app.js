@@ -8909,7 +8909,7 @@
 
   function _commanderUnrankedBlurb(cmdr) {
     const { minV4, minNonV4 } = _cmdrLadderMins(cmdr);
-    const win = (cmdr && cmdr.inactivity_window_days != null) ? cmdr.inactivity_window_days : 30;
+    const win = (cmdr && cmdr.inactivity_window_days != null) ? cmdr.inactivity_window_days : 90;
     const staleWin = (cmdr && cmdr.command_stale_window_days != null) ? cmdr.command_stale_window_days : 90;
     const need = (cmdr && cmdr.comeback_games_required != null) ? cmdr.comeback_games_required : 3;
     return `Need ${minV4} proto-v4 commander games or ${minNonV4} older games (pre-v4 recordings and F9Stats), a game within ${win} days of the newest match, and a command game within ${staleWin} days (or ${need} commander games after the ${staleWin}-day grace while still thugging). No rank is assigned here.`;

@@ -13,7 +13,7 @@ v5 additions (schema 4 -> 5; ratings UNCHANGED -- display inactivity only):
 
   * INACTIVITY + COMMAND-STALE GATES -- a commander occupies a ranked
     `#` only when the v4 duel-count OR-gate still holds AND they are
-    globally active (any appearance within 30 days of the newest corpus
+    globally active (any appearance within 90 days of the newest corpus
     match, or 3-game comeback after a gap) AND command-recent (commanded
     within 90 days, or 3 commander games after going stale). Emits
     per-rating `inactive_status` / `command_status` (+ days / comeback
@@ -302,11 +302,11 @@ CMDR_LADDER_MIN_V4 = 8
 CMDR_LADDER_MIN_NON_V4 = 25
 
 # Display-only inactivity + commander-stale gates (do NOT change ratings,
-# K, or duel history). Global clock is shared with VTSR-T (30 days / 3
+# K, or duel history). Global clock is shared with VTSR-T (90 days / 3
 # games). Command clock: 90-day grace while still thugging, then 3
 # commander games to re-rank. Frozen in
 # critique/decisions/vtsr-inactivity-threshold.md.
-INACTIVITY_WINDOW_DAYS = 30
+INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
 CMDR_STALE_WINDOW_DAYS = 90
 

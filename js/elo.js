@@ -108,7 +108,7 @@
   }
 
   function inactivityWindowDays(src) {
-    return (src && src.inactivity_window_days != null) ? src.inactivity_window_days : 30;
+    return (src && src.inactivity_window_days != null) ? src.inactivity_window_days : 90;
   }
   function comebackGamesRequired(src) {
     return (src && src.comeback_games_required != null) ? src.comeback_games_required : 3;
@@ -1372,7 +1372,7 @@
 
       <section class="vt-vtsr-doc-section">
         <h6>Tier ladder</h6>
-        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong> and a game within 30 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible in the Unranked table.</p>
+        <p class="mb-2">Tiers are <strong>absolute</strong> VTSR-T thresholds &mdash; they don&rsquo;t track percentile, so a thin top tier is a thin top tier. Players with fewer than 10 rated matches show a <strong>Provisional</strong> badge instead of a tier. A ranked <code>#</code> additionally requires <strong>25 rated matches</strong> and a game within 90 days of the newest match in the corpus (or 3 games after returning); everyone else stays visible in the Unranked table.</p>
         ${E.tierTableHtml()}
       </section>
 

@@ -3714,7 +3714,7 @@
     }
     if (status === 'inactive') {
       const d = r.days_since_last_match || 0;
-      const win = (elo && elo.inactivity_window_days != null) ? elo.inactivity_window_days : 30;
+      const win = (elo && elo.inactivity_window_days != null) ? elo.inactivity_window_days : 90;
       const seen = r.last_seen_date;
       const title = seen
         ? `Last seen ${d} day${d === 1 ? '' : 's'} before the newest match. Play ${need} games within ${win} days to rejoin.`
