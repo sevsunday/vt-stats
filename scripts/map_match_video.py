@@ -82,9 +82,13 @@ YTDLP_FORMAT = (
     f"best[height<={FORMAT_MAX_HEIGHT}]/best"
 )
 
+# EasyOCR often reads the HUD colon as a period ("23.39" == 23:39)
+# and the bottom-center label as "MISSIDN TIME".
 MISSION_RE = re.compile(
-    r"Mission\s*Time\s+(\d{1,3}):(\d{2})", re.IGNORECASE)
-CLOCK_RE = re.compile(r"(\d{1,3}):(\d{2})")
+    r"miss\w{0,3}n\s*t[i1l]me\s+(\d{1,3})[:.](\d{2})", re.IGNORECASE)
+MISSION_LABEL_RE = re.compile(
+    r"miss\w{0,3}n\s*t[i1l]me", re.IGNORECASE)
+CLOCK_RE = re.compile(r"(\d{1,3})[:.](\d{2})")
 YOUTUBE_ID_RE = re.compile(
     r"(?:v=|/youtu\.be/|/shorts/|/embed/|youtube\.com/watch\?.*?v=)"
     r"([A-Za-z0-9_-]{11})"
@@ -455,7 +459,7 @@ def find_mission_hit(results) -> dict | None:
         if len(item) < 2:
             continue
         txt = str(item[1])
-        if re.search(r"mission\s*time", txt, re.I):
+        if MISSION_LABEL_RE.search(txt):
             bbox = item[0]
             xs = [p[0] for p in bbox]
             ys = [p[1] for p in bbox]
@@ -498,6 +502,32 @@ def find_mission_hit(results) -> dict | None:
         }
         break
     return best
+
+
+def ocr_mission_hit(frame, gpu: bool) -> dict | None:
+    """Mission Time is the upper-right scoreboard on some VODs and a small
+    green bottom-center label on others. The bottom label needs an upscale."""
+    cv2, _ = require_ops()
+    h = frame.shape[0]
+    bands = (
+        (0, max(1, int(h * 0.45)), 1),
+        (int(h * 0.72), h, 2),
+    )
+    for y0, y1, scale in bands:
+        band = frame[y0:max(y0 + 1, y1), :]
+        if scale != 1:
+            band = cv2.resize(
+                band, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        hit = find_mission_hit(ocr_read(band, allowlist=None, gpu=gpu))
+        if not hit:
+            continue
+        b = hit["bbox"]
+        hit["bbox"] = [
+            int(b[0] / scale), int(b[1] / scale) + y0,
+            int(b[2] / scale), int(b[3] / scale) + y0,
+        ]
+        return hit
+    return None
 
 
 def lock_from_hit(gray, hit: dict) -> dict:
@@ -570,7 +600,7 @@ def crop_digits(gray, lock: dict, origin: tuple[int, int] | None = None):
 def ocr_digits(crop, gpu: bool) -> int | None:
     if crop is None or getattr(crop, "size", 0) == 0:
         return None
-    results = ocr_read(crop, allowlist="0123456789:", gpu=gpu)
+    results = ocr_read(crop, allowlist="0123456789:.", gpu=gpu)
     text = ocr_join(results)
     return parse_mission_clock(text)
 
@@ -713,7 +743,8 @@ def scene_score(prev_small, cur_small) -> float:
 
 
 def sparse_scan(source: str, headers: dict | None, video_dur: float,
-                gpu: bool, debug_dir: Path | None) -> tuple[list[dict], dict | None]:
+                gpu: bool, debug_dir: Path | None,
+                page_url: str | None = None) -> tuple[list[dict], dict | None]:
     cv2, np = require_ops()
     anchors = []
     lock = None
@@ -729,26 +760,30 @@ def sparse_scan(source: str, headers: dict | None, video_dur: float,
         try:
             frame = grab_frame_png(source, t, headers)
         except RuntimeError as exc:
-            log(f"  skip t={t:.0f}s ({exc})")
-            t += SPARSE_STEP_SEC
-            continue
+            if page_url and "403" in str(exc):
+                log("  stream URL refused, refreshing")
+                try:
+                    refreshed = extract_video_info(page_url)
+                    source = refreshed["stream_url"]
+                    headers = refreshed.get("http_headers") or {}
+                    frame = grab_frame_png(source, t, headers)
+                except (RuntimeError, SystemExit) as exc2:
+                    log(f"  skip t={t:.0f}s ({exc2})")
+                    t += SPARSE_STEP_SEC
+                    continue
+            else:
+                log(f"  skip t={t:.0f}s ({exc})")
+                t += SPARSE_STEP_SEC
+                continue
         gray = to_gray(frame)
         h, w = gray.shape[:2]
         hit = None
         origin = None
         present_score = 0.0
         if lock is None:
-            quad = frame[0:h // 2, 0:w // 2]
-            results = ocr_read(quad, allowlist=None, gpu=gpu)
-            hit = find_mission_hit(results)
+            hit = ocr_mission_hit(frame, gpu)
             if hit:
-                # bbox is relative to the quadrant.
-                hit["bbox"] = [
-                    hit["bbox"][0], hit["bbox"][1],
-                    hit["bbox"][2], hit["bbox"][3],
-                ]
-                lock = lock_from_hit(gray[0:h // 2, 0:w // 2], hit)
-                # Rebase lock coords onto the full frame (quadrant origin 0,0).
+                lock = lock_from_hit(gray, hit)
                 n_hits += 1
         else:
             present, present_score, origin = template_present(gray, lock)
@@ -762,6 +797,9 @@ def sparse_scan(source: str, headers: dict | None, video_dur: float,
                         "bbox": lock["digit_box"],
                     }
                     n_hits += 1
+        if hit and video_dur > 0 and hit["mission_sec"] > video_dur + 90:
+            log(f"  t={t:7.1f}s  ignore impossible mission {hit['clock']}")
+            hit = None
         if hit:
             match_sec = hit["mission_sec"] - MISSION_CLOCK_SKEW_SEC
             offset = t - match_sec
@@ -1210,7 +1248,8 @@ def run_mapping(args) -> int:
             fail(str(e))
         log("Phase B: sparse presence-gated OCR scan...")
         raw_anchors, meta = sparse_scan(
-            source, headers, float(info.get("duration") or 0), gpu, debug_dir)
+            source, headers, float(info.get("duration") or 0), gpu, debug_dir,
+            page_url=args.video)
         lock = meta.get("lock")
         anchors = reject_outliers(raw_anchors)
         log(f"  kept {len(anchors)}/{len(raw_anchors)} anchors after outlier filter")

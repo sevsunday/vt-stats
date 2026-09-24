@@ -28,7 +28,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +40,9 @@ import map_match_video as mmv  # noqa: E402
 CHANNELS_PATH = PROJECT_ROOT / "data" / "external" / "video_channels.json"
 MANIFEST_PATH = PROJECT_ROOT / "data" / "processed" / "matches.json"
 STORE_PATH = PROJECT_ROOT / "data" / "external" / "match_videos.json"
+STEAM_NAMES_PATH = PROJECT_ROOT / "data" / "steamid_to_name.txt"
+LEDGER_PATH = PROJECT_ROOT / "data" / "external" / "f9_ledger.json"
+LEDGER_LINKS_PATH = PROJECT_ROOT / "data" / "external" / "f9_video_links.json"
 NAME_MAP_PATH = PROJECT_ROOT / "data" / "external" / "f9_name_map.json"
 MAP_ALIAS_PATH = PROJECT_ROOT / "data" / "external" / "f9_map_aliases.json"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
@@ -47,8 +50,10 @@ REPORT_DIR = PROJECT_ROOT / "_investigation" / "output" / "extvids"
 MAPPER_PATH = PROJECT_ROOT / "scripts" / "map_match_video.py"
 
 TAIL_STEP_SEC = 15.0
-TAIL_MAX_SEC = 180.0
+TAIL_MAX_SEC = 480.0
 DURATION_TOL_SEC = 20.0
+LEDGER_DURATION_TOL_SEC = 30.0
+LEDGER_LINKS_SCHEMA = 1
 CHANNELS_SCHEMA = 1
 
 VS_RE = re.compile(r"^(.*?)\s+vs\.?\s+(.*)$", re.IGNORECASE)
@@ -237,6 +242,245 @@ def stored_video_ids(store: dict) -> set[str]:
     return out
 
 
+# --------------------------------------------------------------------------- F9 ledger fallback
+
+def load_ledger_duels() -> list[dict]:
+    """Community duels that do not already have a telemetry match id."""
+    if not LEDGER_PATH.exists():
+        return []
+    data = load_json(LEDGER_PATH)
+    overlap = set()
+    for item in data.get("overlaps") or []:
+        row = (item or {}).get("f9_row")
+        if row is not None:
+            overlap.add(int(row))
+    duels = []
+    for duel in data.get("duels") or []:
+        try:
+            row = int(duel.get("row"))
+        except (TypeError, ValueError):
+            continue
+        if row in overlap:
+            continue
+        duels.append(duel)
+    return duels
+
+
+def load_steam_names() -> dict[str, str]:
+    out = {}
+    if not STEAM_NAMES_PATH.exists():
+        return out
+    for line in STEAM_NAMES_PATH.read_text(encoding="utf-8").splitlines():
+        if "=" not in line or line.startswith("#"):
+            continue
+        sid, name = line.split("=", 1)
+        sid, name = sid.strip(), name.strip()
+        if sid and name:
+            out[sid] = name
+    return out
+
+
+def iter_ledger_people(duel: dict):
+    commanders = duel.get("commanders") or {}
+    thugs = duel.get("thugs") or {}
+    for side in ("1", "2"):
+        commander = commanders.get(side) or {}
+        if commander.get("name") or commander.get("steam64"):
+            yield commander
+        for person in thugs.get(side) or []:
+            if person and (person.get("name") or person.get("steam64")):
+                yield person
+
+
+def person_aliases(person: dict, steam_names: dict) -> list[str]:
+    """Sheet spelling plus the Steam display name. The HUD shows the latter
+    (Muerte on the sheet, mort on the scoreboard)."""
+    aliases = []
+    seen = set()
+
+    def add(name) -> None:
+        key = norm(name)
+        if key and key not in seen:
+            aliases.append(str(name))
+            seen.add(key)
+
+    add(person.get("name"))
+    sid = str(person.get("steam64") or "")
+    if sid:
+        add(steam_names.get(sid))
+    return aliases
+
+
+def ledger_roster(duel: dict, steam_names: dict | None = None) -> list[str]:
+    names = []
+    seen = set()
+    for person in iter_ledger_people(duel):
+        for name in person_aliases(person, steam_names or {}):
+            key = norm(name)
+            if key not in seen:
+                names.append(name)
+                seen.add(key)
+    return names
+
+
+def ledger_commanders_match(duel: dict, commanders: list[str],
+                            name_aliases: dict) -> bool:
+    leaders = {}
+    for side in ("1", "2"):
+        person = (duel.get("commanders") or {}).get(side) or {}
+        leaders[side] = {
+            "name": person.get("name") or "",
+            "s64": str(person.get("steam64") or ""),
+        }
+    return commanders_match({"team_leaders": leaders}, commanders, name_aliases)
+
+
+def ledger_map_matches(duel: dict, map_title: str, map_aliases: dict) -> bool:
+    if norm(duel.get("map_title")) == norm(map_title):
+        return True
+    key = str(duel.get("map_key") or "").lower()
+    alias = str(map_aliases.get(norm(map_title)) or "").lower()
+    return bool(key and alias and key == alias)
+
+
+def ledger_date_matches(duel: dict, record_date: date) -> bool:
+    try:
+        played = date.fromisoformat(str(duel.get("date") or "")[:10])
+    except ValueError:
+        return False
+    return abs((played - record_date).days) <= 1
+
+
+def ledger_has_pov(duel: dict, pov: str) -> bool:
+    want = norm(pov)
+    if not want:
+        return True
+    return any(norm(name) == want for name in ledger_roster(duel))
+
+
+def shortlist_ledger(duels: list[dict], parsed: dict, pov: str,
+                     name_aliases: dict, map_aliases: dict) -> list[dict]:
+    record_date = parsed.get("record_date")
+    if record_date is None:
+        return []
+    hits = []
+    for duel in duels:
+        if not ledger_commanders_match(duel, parsed["commanders"], name_aliases):
+            continue
+        if not ledger_map_matches(duel, parsed["map_title"], map_aliases):
+            continue
+        if not ledger_date_matches(duel, record_date):
+            continue
+        if not ledger_has_pov(duel, pov):
+            continue
+        hits.append(duel)
+    return hits
+
+
+def confirm_ledger(duels: list[dict], hud: dict, gpu: bool,
+                   steam_names: dict | None = None) -> list[dict]:
+    """Duration within 30s, then half the people matched by any alias.
+    Extra spellings do not raise the bar: Muerte and mort are one person."""
+    kept = []
+    clock = hud["mission_sec"]
+    steam_names = steam_names or {}
+    for duel in duels:
+        dur = float(duel.get("duration_sec") or 0)
+        if abs(clock - dur) > LEDGER_DURATION_TOL_SEC:
+            continue
+        people = []
+        flat = []
+        seen = set()
+        for person in iter_ledger_people(duel):
+            aliases = person_aliases(person, steam_names)
+            if not aliases:
+                continue
+            people.append(aliases)
+            for name in aliases:
+                key = norm(name)
+                if key not in seen:
+                    flat.append(name)
+                    seen.add(key)
+        ident = mmv.identity_gate(hud["frame"], flat, gpu)
+        hit = {norm(name) for name in (ident.get("matched") or [])}
+        matched_people = [
+            aliases[0] for aliases in people
+            if any(norm(name) in hit for name in aliases)
+        ]
+        need = max(3, (len(people) + 1) // 2)
+        ident = {
+            "names_matched": len(matched_people),
+            "roster_size": len(people),
+            "matched": matched_people,
+            "need": need,
+            "passed": len(matched_people) >= need,
+            "at_video_sec": hud["video_sec"],
+        }
+        if ident["passed"]:
+            kept.append({
+                "duel": duel,
+                "identity": ident,
+                "delta": round(clock - dur, 1),
+            })
+    return kept
+
+
+def load_ledger_links() -> dict:
+    if not LEDGER_LINKS_PATH.exists():
+        return {"schema_version": LEDGER_LINKS_SCHEMA, "links": {}}
+    data = load_json(LEDGER_LINKS_PATH)
+    if not isinstance(data.get("links"), dict):
+        data["links"] = {}
+    data["schema_version"] = LEDGER_LINKS_SCHEMA
+    return data
+
+
+def ledger_video_ids(store: dict) -> set[str]:
+    out = set()
+    for entry in (store.get("links") or {}).values():
+        vid = (entry or {}).get("video_id")
+        if vid:
+            out.add(str(vid))
+    return out
+
+
+def write_ledger_link(store: dict, video: dict, channel: dict,
+                      hud: dict, chosen: dict, title: str) -> None:
+    duel = chosen["duel"]
+    row = str(int(duel["row"]))
+    links = store.setdefault("links", {})
+    existing = links.get(row)
+    if existing and existing.get("video_id") != video["id"]:
+        raise RuntimeError(
+            f"ledger row {row} is already linked to {existing.get('video_id')}"
+        )
+    links[row] = {
+        "row": int(duel["row"]),
+        "video_id": video["id"],
+        "url": video.get("url") or mmv.youtube_watch_url(video["id"]),
+        "title": title,
+        "channel": {
+            "name": channel.get("key") or "",
+            "url": channel.get("url") or "",
+        },
+        "mission_time": hud["clock"],
+        "mission_sec": hud["mission_sec"],
+        "hud_video_sec": hud["video_sec"],
+        "duration_sec": duel.get("duration_sec"),
+        "duration_delta_sec": chosen["delta"],
+        "names_matched": list(chosen["identity"].get("matched") or []),
+        "linked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    store["schema_version"] = LEDGER_LINKS_SCHEMA
+    LEDGER_LINKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = LEDGER_LINKS_PATH.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps(store, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(LEDGER_LINKS_PATH)
+
+
 # --------------------------------------------------------------------------- youtube
 
 def require_ytdlp():
@@ -313,10 +557,7 @@ def cached_meta(video_id: str, url: str) -> dict:
 # --------------------------------------------------------------------------- last HUD frame
 
 def mission_on_frame(frame, gpu: bool):
-    h = frame.shape[0]
-    band = frame[0:max(1, int(h * 0.45)), :]
-    results = mmv.ocr_read(band, allowlist=None, gpu=gpu)
-    return mmv.find_mission_hit(results)
+    return mmv.ocr_mission_hit(frame, gpu)
 
 
 def last_hud(url: str, gpu: bool) -> dict | None:
@@ -329,6 +570,7 @@ def last_hud(url: str, gpu: bool) -> dict | None:
     duration = float(info.get("duration") or 0)
     if duration <= 0:
         return None
+    mmv.require_ops()
     source = info["stream_url"]
     headers = info.get("http_headers") or {}
     t = max(0.0, duration - 3.0)
@@ -336,6 +578,8 @@ def last_hud(url: str, gpu: bool) -> dict | None:
     while t >= floor - 0.01:
         try:
             frame = mmv.grab_frame_png(source, t, headers)
+        except mmv.MissingOperatorDeps:
+            raise
         except RuntimeError as exc:
             log(f"    skip t={t:.0f}s ({exc})")
             t -= TAIL_STEP_SEC
@@ -377,6 +621,9 @@ def map_pair(match_id: str, url: str, pov: str, notes: str) -> int:
         "--match", match_id,
         "--video", url,
         "--yes",
+        # Discovery already required identity_gate on the last HUD frame.
+        # The mapper samples an earlier frame and can miss names there.
+        "--force-identity",
         "--notes", notes,
     ]
     if pov:
@@ -412,9 +659,52 @@ def load_channels(only: str | None) -> list[dict]:
     return channels
 
 
+def _finish_ledger(row, video, channel, hud, ledger_hits, ledger_store,
+                   known_ids, gpu, dry_run, title, steam_names=None) -> dict:
+    confirmed = confirm_ledger(ledger_hits, hud, gpu, steam_names)
+    row["confirmed"] = [c["duel"].get("row") for c in confirmed]
+    if len(confirmed) != 1:
+        clocks = [
+            f"row {d.get('row')}={d.get('duration_sec')}" for d in ledger_hits
+        ]
+        row["status"] = "ambiguous" if len(confirmed) > 1 else "not-confirmed"
+        row["detail"] = (
+            f"mission {hud['clock']} vs ledger durations {', '.join(clocks)}"
+        )
+        return row
+    chosen = confirmed[0]
+    row_id = int(chosen["duel"]["row"])
+    names = ", ".join(chosen["identity"].get("matched") or [])
+    row["ledger_row"] = row_id
+    row["notes"] = (
+        f"ledger row {row_id}: mission {hud['clock']} "
+        f"delta {chosen['delta']}s; identity "
+        f"{chosen['identity'].get('names_matched')}/"
+        f"{chosen['identity'].get('roster_size')} ({names})"
+    )
+    if dry_run:
+        row["status"] = "ledger-dry-run"
+        log(f"  DRY-RUN {video['id']} -> f9 row {row_id}  {row['notes']}")
+        return row
+    try:
+        write_ledger_link(
+            ledger_store or load_ledger_links(), video, channel, hud, chosen, title)
+    except RuntimeError as exc:
+        row["status"] = "ledger-row-taken"
+        row["detail"] = str(exc)
+        return row
+    known_ids.add(video["id"])
+    row["status"] = "ledger-linked"
+    log(f"  ledger-linked {video['id']} -> f9 row {row_id}")
+    return row
+
+
 def consider_video(video: dict, channel: dict, manifest: dict,
                    name_aliases: dict, map_aliases: dict,
-                   known_ids: set[str], gpu: bool, dry_run: bool) -> dict:
+                   known_ids: set[str], gpu: bool, dry_run: bool,
+                   ledger_duels: list[dict] | None = None,
+                   ledger_store: dict | None = None,
+                   steam_names: dict | None = None) -> dict:
     vid = video["id"]
     title = video.get("title") or ""
     parser = PARSERS.get(channel.get("parser") or "")
@@ -456,14 +746,21 @@ def consider_video(video: dict, channel: dict, manifest: dict,
     if record_date is None:
         row["status"] = "no-date"
         return row
-    hits = shortlist(manifest, parsed, channel.get("pov") or "",
-                     name_aliases, map_aliases)
+    pov = channel.get("pov") or ""
+    hits = shortlist(manifest, parsed, pov, name_aliases, map_aliases)
     row["candidates"] = [h["id"] for h in hits]
-    if not hits:
+    ledger_hits: list[dict] = []
+    if not hits and ledger_duels:
+        ledger_hits = shortlist_ledger(
+            ledger_duels, parsed, pov, name_aliases, map_aliases)
+        row["ledger_candidates"] = [d.get("row") for d in ledger_hits]
+    if not hits and not ledger_hits:
         row["status"] = "no-candidates"
         return row
     try:
         hud = last_hud(video["url"], gpu)
+    except mmv.MissingOperatorDeps:
+        raise
     except Exception as exc:
         row["status"] = "ocr-miss"
         row["detail"] = str(exc)
@@ -473,6 +770,11 @@ def consider_video(video: dict, channel: dict, manifest: dict,
         return row
     row["mission_time"] = hud["clock"]
     row["hud_video_sec"] = hud["video_sec"]
+    if not hits:
+        return _finish_ledger(
+            row, video, channel, hud, ledger_hits, ledger_store,
+            known_ids, gpu, dry_run, title, steam_names,
+        )
     confirmed = confirm_candidates(hits, hud, gpu)
     row["confirmed"] = [c["entry"]["id"] for c in confirmed]
     if len(confirmed) != 1:
@@ -514,8 +816,13 @@ def run(args) -> int:
         mmv.fail(f"missing manifest {MANIFEST_PATH}")
     manifest = index_manifest(load_json(MANIFEST_PATH))
     store = load_json(STORE_PATH) if STORE_PATH.exists() else {"matches": {}}
-    known = stored_video_ids(store)
+    ledger_store = load_ledger_links()
+    ledger_duels = load_ledger_duels()
+    steam_names = load_steam_names()
+    known = stored_video_ids(store) | ledger_video_ids(ledger_store)
     name_aliases, map_aliases = load_aliases()
+    log(f"ledger: {len(ledger_duels)} non-overlap duels, "
+        f"{len(ledger_video_ids(ledger_store))} videos already linked")
     channels = load_channels(args.channel)
     gpu = not args.no_gpu
     rows = []
@@ -566,11 +873,14 @@ def run(args) -> int:
                 ocr_budget -= 1
             row = consider_video(
                 video, channel, manifest, name_aliases, map_aliases,
-                known, gpu, args.dry_run,
+                known, gpu, args.dry_run, ledger_duels, ledger_store, steam_names,
             )
             rows.append(row)
+            target = row.get("match_id") or (
+                f"f9:{row['ledger_row']}" if row.get("ledger_row") else ""
+            )
             log(f"    {row['status']}"
-                + (f"  {row.get('match_id') or row.get('detail') or ''}"
+                + (f"  {target or row.get('detail') or ''}"
                    if row["status"] != "skip-known" else ""))
     write_report(rows)
     counts: dict[str, int] = {}
@@ -666,6 +976,53 @@ def _self_test() -> int:
         "F9bomber", aliases, {},
     )
     assert hits == []
+    duel = {
+        "row": 309,
+        "date": "2025-01-02",
+        "map_title": "Jade Green",
+        "map_key": "vsrjade",
+        "duration_sec": 2501,
+        "commanders": {
+            "1": {"name": "Sev", "steam64": "1"},
+            "2": {"name": "F9bomber", "steam64": "2"},
+        },
+        "thugs": {
+            "1": [{"name": "Herp McDerperson"}],
+            "2": [{"name": "M.S"}],
+        },
+    }
+    quarry_duel = {
+        "row": 400,
+        "date": "2025-05-04",
+        "map_title": "Quarry 2",
+        "map_key": "vsrquarry2",
+        "duration_sec": 900,
+        "commanders": {
+            "1": {"name": "F9bomber", "steam64": "9"},
+            "2": {"name": "blue", "steam64": "76561198043392032"},
+        },
+        "thugs": {"1": [], "2": []},
+    }
+    ledger = [duel, quarry_duel]
+    jade = {
+        "commanders": ["Sev", "F9bomber"],
+        "map_title": "Jade Green",
+        "record_date": date(2025, 1, 2),
+    }
+    found = shortlist_ledger(ledger, jade, "F9bomber", aliases, {})
+    assert [d["row"] for d in found] == [309], found
+    found = shortlist_ledger(
+        ledger,
+        {"commanders": ["Blue Banana", "F9bomber"], "map_title": "Quarry",
+         "record_date": date(2025, 5, 3)},
+        "F9bomber", aliases, {"quarry": "vsrquarry2"},
+    )
+    assert [d["row"] for d in found] == [400], found
+    assert ledger_roster(duel)[0] == "Sev"
+    assert "Herp McDerperson" in ledger_roster(duel)
+    muerte = {"name": "Muerte", "steam64": "76561198005099553"}
+    aliases = person_aliases(muerte, {"76561198005099553": "mort"})
+    assert aliases == ["Muerte", "mort"], aliases
     log("self-test ok")
     return 0
 
@@ -681,13 +1038,97 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-gpu", action="store_true")
     p.add_argument("--self-test", action="store_true",
                    help="parser and shortlist checks, then exit")
+    p.add_argument("--recheck-close", action="store_true",
+                   help="re-test ledger near-misses whose clock is already within 30s")
     return p
+
+
+def _clock_sec(text: str) -> int | None:
+    match = re.search(r"(\d+):(\d{2})", text or "")
+    if not match:
+        return None
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def recheck_close(args) -> int:
+    """Re-open the saved HUD second for ledger rows whose clock already
+    agreed, now that sheet names and Steam names count as one person."""
+    report_path = REPORT_DIR / "report.json"
+    if not report_path.exists():
+        mmv.fail(f"missing {report_path}")
+    report = load_json(report_path)
+    duels = {int(duel["row"]): duel for duel in load_ledger_duels()}
+    steam_names = load_steam_names()
+    store = load_ledger_links()
+    known = ledger_video_ids(store)
+    if STORE_PATH.exists():
+        known |= stored_video_ids(load_json(STORE_PATH))
+    channels = {c.get("key"): c for c in load_channels(args.channel)}
+    gpu = not args.no_gpu
+    linked = 0
+    still = 0
+    for row in report.get("rows") or []:
+        if row.get("status") != "not-confirmed":
+            continue
+        detail = row.get("detail") or ""
+        if "ledger durations" not in detail:
+            continue
+        pairs = re.findall(r"row (\d+)=(\d+)", detail)
+        clock = _clock_sec(detail)
+        if clock is None or len(pairs) != 1:
+            continue
+        row_id, dur = int(pairs[0][0]), int(pairs[0][1])
+        if abs(clock - dur) > LEDGER_DURATION_TOL_SEC:
+            continue
+        if row.get("video_id") in known:
+            continue
+        duel = duels.get(row_id)
+        if not duel:
+            continue
+        channel = channels.get(row.get("channel")) or {"key": row.get("channel"), "url": ""}
+        video_sec = float(row.get("hud_video_sec") or 0)
+        log(f"  recheck {row.get('video_id')} row {row_id} "
+            f"clock {row.get('mission_time')} vs {dur}s")
+        try:
+            info = mmv.extract_video_info(row["url"])
+            frame = mmv.grab_frame_png(
+                info["stream_url"], video_sec, info.get("http_headers") or {})
+        except (RuntimeError, SystemExit, mmv.MissingOperatorDeps) as exc:
+            log(f"    frame failed ({exc})")
+            still += 1
+            continue
+        hud = {
+            "frame": frame,
+            "video_sec": video_sec,
+            "mission_sec": clock,
+            "clock": row.get("mission_time"),
+        }
+        confirmed = confirm_ledger([duel], hud, gpu, steam_names)
+        if len(confirmed) != 1:
+            ident = mmv.identity_gate(frame, ledger_roster(duel, steam_names), gpu)
+            log(f"    still out  matched {ident.get('matched')}")
+            still += 1
+            continue
+        if args.dry_run:
+            log(f"    DRY-RUN would link row {row_id}")
+            linked += 1
+            continue
+        write_ledger_link(
+            store, {"id": row["video_id"], "url": row.get("url")},
+            channel, hud, confirmed[0], row.get("title") or "")
+        known.add(row["video_id"])
+        linked += 1
+        log(f"    linked row {row_id}  {confirmed[0]['identity'].get('matched')}")
+    log(f"recheck: linked={linked} still={still}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.self_test:
         return _self_test()
+    if args.recheck_close:
+        return recheck_close(args)
     return run(args)
 
 
