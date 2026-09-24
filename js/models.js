@@ -16,6 +16,7 @@
  */
 
 import { ObjectViewer, LIGHT_PRESETS } from './models-viewer.js';
+import { scaleToMillimeters, buildStl, build3mf } from './model-print.js';
 
 const MODELS_BASE = '../data/models/';
 const QUALITY_KEY = 'vt.obj.quality';
@@ -61,6 +62,20 @@ const els = {
   wire: document.getElementById('wire-btn'),
   wireHq: document.getElementById('wire-hq-btn'),
   sceneBtn: document.getElementById('scene-btn'),
+  sizeBtn: document.getElementById('size-btn'),
+  sizePanel: document.getElementById('size-panel'),
+  sizeMX: document.getElementById('size-m-x'),
+  sizeMY: document.getElementById('size-m-y'),
+  sizeMZ: document.getElementById('size-m-z'),
+  sizeFit: document.getElementById('size-fit'),
+  sizePresets: document.getElementById('size-presets'),
+  sizeMmX: document.getElementById('size-mm-x'),
+  sizeMmY: document.getElementById('size-mm-y'),
+  sizeMmZ: document.getElementById('size-mm-z'),
+  sizeBox: document.getElementById('size-box'),
+  sizeCopy: document.getElementById('size-copy'),
+  size3mf: document.getElementById('size-3mf'),
+  sizeStl: document.getElementById('size-stl'),
   scenePanel: document.getElementById('scene-panel'),
   sceneBgSeg: document.querySelector('#scene-panel .scene-bg-seg'),
   sceneGrid: document.getElementById('scene-grid'),
@@ -169,6 +184,7 @@ const PANES = [
   { id: 'colors', btn: els.colorsBtn, panel: els.colorsPanel },
   { id: 'textures', btn: els.texturesBtn, panel: els.texturesPanel },
   { id: 'scene', btn: els.sceneBtn, panel: els.scenePanel },
+  { id: 'size', btn: els.sizeBtn, panel: els.sizePanel },
 ];
 const panesMql = window.matchMedia('(max-width: 640px)');
 function isMobilePanes() { return panesMql.matches; }
@@ -537,6 +553,112 @@ function renderDirectory() {
   els.grid.appendChild(frag);
 }
 
+// ---------------- hull size + print download ----------------
+
+const SIZE_RATIOS = { ho: 87, n: 160, '72': 72 };
+const SIZE_FIXED_MM = { tiny: 40, hand: 120 };
+let sizeEntry = null;
+
+function longestMeters(hull) {
+  return Math.max(hull.width, hull.height, hull.length);
+}
+
+function presetMillimeters(hull, id) {
+  if (id === 'tiny' || id === 'hand') return SIZE_FIXED_MM[id];
+  const ratio = SIZE_RATIOS[id];
+  if (!ratio || !hull) return null;
+  return longestMeters(hull) * 1000 / ratio;
+}
+
+function fitMillimeters() {
+  const n = Number(els.sizeFit.value);
+  return (n >= 5 && n <= 500) ? n : null;
+}
+
+function syncSizePresetHighlight(hull) {
+  const mm = fitMillimeters();
+  els.sizePresets.querySelectorAll('.seg-btn').forEach((btn) => {
+    const preset = presetMillimeters(hull, btn.dataset.size);
+    const on = mm != null && preset != null && Math.abs(mm - preset) < 0.05;
+    btn.classList.toggle('on', on);
+  });
+}
+
+function syncSizeReadout() {
+  const hull = activeViewer && activeViewer.getHullMeters();
+  if (!hull) return;
+  els.sizeMX.textContent = `${hull.width.toFixed(2)} m`;
+  els.sizeMY.textContent = `${hull.height.toFixed(2)} m`;
+  els.sizeMZ.textContent = `${hull.length.toFixed(2)} m`;
+  const mm = fitMillimeters();
+  const axes = [
+    ['width', hull.width, els.sizeMmX],
+    ['height', hull.height, els.sizeMmY],
+    ['length', hull.length, els.sizeMmZ],
+  ];
+  let longestAxis = 'length';
+  let longestVal = -1;
+  for (const [axis, meters] of axes) {
+    if (meters > longestVal) { longestVal = meters; longestAxis = axis; }
+  }
+  if (mm == null) {
+    for (const [, , el] of axes) el.textContent = '—';
+  } else {
+    const s = mm / longestMeters(hull);
+    for (const [, meters, el] of axes) el.textContent = `${(meters * s).toFixed(1)} mm`;
+  }
+  els.sizePanel.querySelectorAll('.size-readout .size-line[data-axis]').forEach((row) => {
+    row.classList.toggle('is-longest', mm != null && row.dataset.axis === longestAxis);
+  });
+  syncSizePresetHighlight(hull);
+}
+
+function applySizePreset(id) {
+  const hull = activeViewer && activeViewer.getHullMeters();
+  const mm = presetMillimeters(hull, id);
+  if (mm == null) return;
+  els.sizeFit.value = String(Math.round(mm * 10) / 10);
+  syncSizeReadout();
+}
+
+function setupSizeUI(entry) {
+  sizeEntry = entry;
+  els.sizeBox.checked = false;
+  if (activeViewer) activeViewer.setHullBoxVisible(false);
+  applySizePreset('ho');
+}
+
+function sizeCopyText() {
+  const hull = activeViewer && activeViewer.getHullMeters();
+  const mm = fitMillimeters();
+  if (!hull || mm == null || !sizeEntry) return '';
+  const s = mm / longestMeters(hull);
+  const name = sizeEntry.unitName || sizeEntry.stem;
+  return [
+    `${name} (${sizeEntry.stem})`,
+    `In-game hull: ${hull.width.toFixed(2)} m wide, ${hull.height.toFixed(2)} m tall, ${hull.length.toFixed(2)} m long`,
+    `Print, longest side ${mm} mm: ${(hull.width * s).toFixed(1)} mm wide, ${(hull.height * s).toFixed(1)} mm tall, ${(hull.length * s).toFixed(1)} mm long`,
+  ].join('\n');
+}
+
+function downloadPrint(kind) {
+  if (!activeViewer || !sizeEntry) return;
+  const hull = activeViewer.getHullMeters();
+  const local = activeViewer.getPrintLocal();
+  const mm = fitMillimeters();
+  const tri = hull && scaleToMillimeters(local, hull, mm);
+  if (!tri || !tri.count) return;
+  const bytes = kind === '3mf' ? build3mf(tri) : buildStl(tri);
+  const blob = new Blob([bytes], {
+    type: kind === '3mf' ? 'model/3mf' : 'model/stl',
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${sizeEntry.stem}-${Math.round(mm)}mm.${kind}`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ---------------- detail viewer ----------------
 
 function showViewer(entry) {
@@ -603,6 +725,7 @@ function showViewer(entry) {
       activeViewer.setAxesVisible(scene.axes);
       if (ultraPrefs().on) setUltra(true);
       syncScenePanel();
+      setupSizeUI(entry);
     })
     .catch((e) => {
       els.stage.innerHTML = `<div class="error">Failed to load ${escapeHtml(entry.glb)}: ${escapeHtml(String(e))}</div>`;
@@ -634,6 +757,8 @@ function showViewer(entry) {
 
   els.sceneBtn.hidden = false;     // Scene pane is always applicable
   setPaneOpen('scene', false);
+  els.sizeBtn.hidden = false;      // Size pane is always applicable
+  setPaneOpen('size', false);
   els.ultraToggle.classList.toggle('on', ultraPrefs().on);
   // New viewer instance -> the Ultra passes will need to compile again.
   ultraCompiled = false;
@@ -854,6 +979,22 @@ function showViewer(entry) {
   // Scene panel. The button toggles the floating panel; the controls drive the
   // viewer + persistence.
   els.sceneBtn.onclick = () => togglePane('scene');
+  els.sizeBtn.onclick = () => togglePane('size');
+  els.sizePresets.querySelectorAll('.seg-btn').forEach((btn) => {
+    btn.onclick = () => applySizePreset(btn.dataset.size);
+  });
+  els.sizeFit.oninput = () => syncSizeReadout();
+  els.sizeBox.onchange = () => {
+    if (activeViewer) activeViewer.setHullBoxVisible(els.sizeBox.checked);
+  };
+  els.sizeCopy.onclick = async () => {
+    const text = sizeCopyText();
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); }
+    catch { /* clipboard can be denied; the numbers stay on screen */ }
+  };
+  els.size3mf.onclick = () => downloadPrint('3mf');
+  els.sizeStl.onclick = () => downloadPrint('stl');
   els.sceneBgSeg.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.onclick = () => {
       const bg = btn.dataset.bg === 'light' ? 'light' : 'dark';
@@ -1732,6 +1873,9 @@ function resetAllViewer() {
     (loadoutEntry && loadoutEntry.defaultLoadoutOdf) || (loadoutEntry && loadoutEntry.primaryOdf));
   activeViewer.setCollisionVisible(false);
   syncScenePanel();
+  els.sizeBox.checked = false;
+  activeViewer.setHullBoxVisible(false);
+  applySizePreset('ho');
 
   // Restore the default dock layout (desktop: all applicable panes open).
   applyDefaultPaneState();

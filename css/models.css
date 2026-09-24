@@ -331,6 +331,79 @@ label.light-head { cursor: pointer; }
 .light-preset-seg { display: flex; width: 100%; }
 .light-preset-seg .seg-btn { flex: 1; }
 
+/* Size pane: in-game hull meters + a fit-to-millimeters print download. */
+.size-readout { display: flex; flex-direction: column; gap: 4px; }
+.size-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--kb-text-muted);
+}
+.size-line.is-longest .size-num { color: var(--kb-primary); font-weight: 650; }
+.size-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--kb-text-secondary);
+}
+.size-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--kb-text-primary);
+}
+.size-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--kb-text-muted);
+}
+.size-fit-row input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--kb-bg-subtle);
+  color: var(--kb-text-primary);
+  border: 1px solid var(--kb-border-default);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.size-preset-seg { display: flex; width: 100%; }
+.size-preset-seg .seg-btn { flex: 1; padding-left: 0; padding-right: 0; }
+.size-panel .light-head { justify-content: space-between; }
+.size-help-btn {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--kb-text-secondary);
+  padding: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+.size-help-btn:hover { color: var(--kb-text-primary); }
+.print-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.print-preset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--kb-border-default);
+  border-radius: 8px;
+  background: var(--kb-bg-subtle);
+}
+.print-preset-name { font-weight: 650; color: var(--kb-text-primary); }
+.print-preset-size {
+  font-variant-numeric: tabular-nums;
+  color: var(--kb-primary);
+  font-size: 13px;
+}
+.print-preset-blurb { font-size: 12px; color: var(--kb-text-secondary); }
+
 /* ---- Weapon loadout overlay (top-right of the stage) -------------------- */
 .loadout-panel {
   position: absolute;

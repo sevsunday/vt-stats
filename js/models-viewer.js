@@ -589,6 +589,13 @@ export class ObjectViewer {
     this._collisionVisible = false;
     this._collisionWorldR = 0;     // current radius (m)
 
+    // Hull size (visual mesh, rest pose, meters). Measured once at frame time,
+    // before the hover lift. The outline is parented to the model.
+    this._hullSize = null;         // THREE.Vector3 width, height, length
+    this._printLocal = null;       // number[] rest-pose triangle xyz, meters
+    this._hullBoxLines = null;     // LineSegments overlay
+    this._hullBoxVisible = false;
+
     // WASD Drive Mode state (see setDriveMode / _updateDrive).
     this._driveMode = false;
     this._driveProfile = null;     // manifest `drive` block (archetype + ODF speeds)
@@ -2059,8 +2066,83 @@ export class ObjectViewer {
 
   getQuality() { return this._quality; }
 
+  /* Rest-pose visual hull, in meters. Width is X, height is Y, length is Z
+   * (fore-aft). Measured before the hover lift, so the air gap is not in it. */
+  getHullMeters() {
+    const s = this._hullSize;
+    if (!s) return null;
+    return { width: s.x, height: s.y, length: s.z };
+  }
+
+  /* Rest-pose triangle positions in model-local meters (xyz triplets). */
+  getPrintLocal() { return this._printLocal; }
+
+  setHullBoxVisible(on) {
+    this._hullBoxVisible = !!on;
+    if (this._hullBoxLines) this._hullBoxLines.visible = this._hullBoxVisible;
+  }
+
+  _captureHull(model) {
+    if (this._hullBoxLines) {
+      if (this._hullBoxLines.parent) this._hullBoxLines.parent.remove(this._hullBoxLines);
+      this._hullBoxLines.geometry.dispose();
+      this._hullBoxLines.material.dispose();
+      this._hullBoxLines = null;
+    }
+    model.updateMatrixWorld(true);
+    const rootInv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+    const v = new THREE.Vector3();
+    const out = [];
+    model.traverse((o) => {
+      if (!o.isMesh || !o.geometry || o.userData.vtOverlay) return;
+      const pos = o.geometry.attributes && o.geometry.attributes.position;
+      if (!pos) return;
+      const index = o.geometry.index;
+      const m = new THREE.Matrix4().multiplyMatrices(rootInv, o.matrixWorld);
+      const push = (i) => {
+        v.fromBufferAttribute(pos, i).applyMatrix4(m);
+        out.push(v.x, v.y, v.z);
+      };
+      if (index) {
+        for (let i = 0; i < index.count; i++) push(index.getX(i));
+      } else {
+        for (let i = 0; i < pos.count; i++) push(i);
+      }
+    });
+    this._printLocal = out;
+    const box = new THREE.Box3();
+    if (out.length >= 9) {
+      for (let i = 0; i < out.length; i += 3) {
+        box.expandByPoint(v.set(out[i], out[i + 1], out[i + 2]));
+      }
+    } else {
+      box.setFromObject(model);
+    }
+    this._hullLocalBox = box;
+    this._hullSize = box.getSize(new THREE.Vector3());
+
+    const size = this._hullSize;
+    const center = box.getCenter(new THREE.Vector3());
+    const solid = new THREE.BoxGeometry(size.x || 0.001, size.y || 0.001, size.z || 0.001);
+    const edges = new THREE.EdgesGeometry(solid);
+    solid.dispose();
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--kb-primary').trim();
+    const color = new THREE.Color();
+    if (raw) color.set(raw);
+    const lines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
+      color, transparent: true, opacity: 0.9,
+    }));
+    lines.position.copy(center);
+    lines.userData.vtOverlay = true;
+    lines.visible = this._hullBoxVisible;
+    lines.frustumCulled = false;
+    model.add(lines);
+    this._hullBoxLines = lines;
+  }
+
   _frame(model) {
-    const box = new THREE.Box3().setFromObject(model);
+    this._captureHull(model);
+    const box = this._hullLocalBox.clone();
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;

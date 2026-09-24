@@ -155,6 +155,7 @@
         <button id="fly-btn" class="btn toggle" title="Climb to this craft's ODF flightAltitude (the APC / Bomber / SAV flying ceiling) -- the camera follows it up" hidden>Fly</button>
         <button id="light-btn" class="btn toggle" aria-expanded="false" title="Show light settings">Light</button>
         <button id="scene-btn" class="btn toggle" aria-expanded="false" title="Choose a scene / background">Scene</button>
+        <button id="size-btn" class="btn toggle" aria-expanded="false" title="In-game hull size and a print-scale download">3D Print</button>
         <button id="anim-btn" class="btn toggle" aria-expanded="false" title="Play this model's baked animations" hidden>Animations</button>
         <button id="parts-btn" class="btn toggle" aria-expanded="false" title="Aim the turret, fire the guns, roll the treads, and show/hide parts" hidden>Parts</button>
         <button id="colors-btn" class="btn toggle" aria-expanded="false" title="Apply multiplayer team colors" hidden>Colors</button>
@@ -342,9 +343,77 @@
           <button id="ultra-toggle" class="btn toggle scene-ultra-btn" title="Maximum-quality rendering: ground-truth ambient occlusion (GTAO), bloom on glowing parts, temporal supersampling when the camera is still, 4K soft shadows, and native-resolution rendering. Same lighting as normal -- just cleaner. Heavy on the GPU by design.">Ultra rendering</button>
         </div>
       </div>
+      <div id="size-panel" class="light-panel size-panel" hidden>
+        <div class="light-row light-head">
+          <span>3D Print</span>
+          <button type="button" id="size-help" class="size-help-btn" data-bs-toggle="modal" data-bs-target="#print-help-modal" title="What these numbers mean" aria-label="What these numbers mean"><i class="bi bi-info-circle" aria-hidden="true"></i></button>
+        </div>
+        <div class="size-readout">
+          <div class="size-kicker">In game</div>
+          <div class="size-line"><span>Width</span><span id="size-m-x" class="size-num">—</span></div>
+          <div class="size-line"><span>Height</span><span id="size-m-y" class="size-num">—</span></div>
+          <div class="size-line"><span>Length</span><span id="size-m-z" class="size-num">—</span></div>
+        </div>
+        <label class="light-row size-fit-row">
+          <span class="light-label">Longest</span>
+          <input id="size-fit" type="number" min="5" max="500" step="1" value="40" title="Longest side of the printed model, in millimeters" />
+          <span class="light-val">mm</span>
+        </label>
+        <div class="seg size-preset-seg" id="size-presets">
+          <button type="button" class="seg-btn" data-size="tiny" title="Longest side 40 mm">Tiny</button>
+          <button type="button" class="seg-btn" data-size="hand" title="Longest side 120 mm">Hand</button>
+          <button type="button" class="seg-btn" data-size="ho" title="HO scale, 1:87">HO</button>
+          <button type="button" class="seg-btn" data-size="n" title="N scale, 1:160">N</button>
+          <button type="button" class="seg-btn" data-size="72" title="1:72">1:72</button>
+        </div>
+        <div class="size-readout">
+          <div class="size-kicker">On the print</div>
+          <div class="size-line" data-axis="width"><span>Width</span><span id="size-mm-x" class="size-num">—</span></div>
+          <div class="size-line" data-axis="height"><span>Height</span><span id="size-mm-y" class="size-num">—</span></div>
+          <div class="size-line" data-axis="length"><span>Length</span><span id="size-mm-z" class="size-num">—</span></div>
+        </div>
+        <p class="size-note">Print files are millimeters. 3MF names the unit. STL does not, so open it as millimeters.</p>
+        <p class="size-note">The file sits on its belly, which is how slicers expect a model to open. It is the visual game shell, so a slicer may still need to repair open edges, thin fins, or overlapping parts.</p>
+        <label class="light-row scene-check">
+          <span class="light-label">Outline</span>
+          <input id="size-box" type="checkbox" title="Show the hull box. Length runs fore and aft." />
+        </label>
+        <div class="parts-row">
+          <button id="size-copy" type="button" class="btn anim-mini" title="Copy the numbers to the clipboard">Copy</button>
+          <button id="size-3mf" type="button" class="btn anim-mini" title="Download a 3MF in millimeters. Recommended.">3MF</button>
+          <button id="size-stl" type="button" class="btn anim-mini" title="Download an STL in millimeters">STL</button>
+        </div>
+      </div>
       </div>
     </div>
   </section>
+
+  <div class="modal fade" id="print-help-modal" tabindex="-1" aria-labelledby="print-help-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="print-help-title"><i class="bi bi-info-circle me-2" aria-hidden="true"></i>3D Print</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small"><strong>In game</strong> is the mesh in the game's own meters. <strong>On the print</strong> is that same hull in millimeters. <strong>Longest</strong> is the biggest number in the print list. The other two sides scale with it.</p>
+          <div class="print-preset-grid">
+            <div class="print-preset-card"><span class="print-preset-name">Tiny</span><span class="print-preset-size">40 mm</span><span class="print-preset-blurb">A keychain</span></div>
+            <div class="print-preset-card"><span class="print-preset-name">Hand</span><span class="print-preset-size">120 mm</span><span class="print-preset-blurb">Sits in the palm</span></div>
+            <div class="print-preset-card"><span class="print-preset-name">HO</span><span class="print-preset-size">1:87</span><span class="print-preset-blurb">Model railroad</span></div>
+            <div class="print-preset-card"><span class="print-preset-name">N</span><span class="print-preset-size">1:160</span><span class="print-preset-blurb">Smaller railroad scale</span></div>
+            <div class="print-preset-card"><span class="print-preset-name">1:72</span><span class="print-preset-size">Kit</span><span class="print-preset-blurb">A common display scale</span></div>
+          </div>
+          <ul class="mb-0">
+            <li class="mb-2"><strong>3MF</strong> downloads the mesh and names the units as millimeters. This is the file to use. <strong>STL</strong> is the same mesh. An STL does not name its units, so tell the slicer the numbers are millimeters.</li>
+            <li class="mb-2"><strong>Outline</strong> draws the measured box on the model, so you can see which edges the three numbers cover. It is a guide. It is not printed.</li>
+            <li class="mb-2"><strong>Copy</strong> puts the meter and millimeter numbers on the clipboard, for pasting into a chat. It does not download a file.</li>
+            <li>The file sits on its belly. Print software treats Z as up, so the game's up axis is turned to match. It is the visual game shell, in its rest pose. A slicer may need to repair open edges, thin fins, or overlapping parts before it prints.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
   <script src="../js/theme.js"></script>
