@@ -4062,6 +4062,9 @@ td.vt-col-split {
     text-align: left;
     font: inherit;
     cursor: pointer;
+    /* Buttons clip overflow by default, which slices the winner ring.
+       Name ellipsis stays on the inner leader span. */
+    overflow: visible;
     transition: border-color var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
                 transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease),
                 background var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
@@ -4225,6 +4228,10 @@ td.vt-col-split {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
+    /* Room so the winner ring is not flush against this overflow clip.
+       Negative margin keeps the row the same size. */
+    padding: 2px;
+    margin: -2px;
 }
 
 .vt-match-picker-card-leader::before {
@@ -4245,10 +4252,12 @@ td.vt-col-split {
 }
 
 /* Winning commander's dot. Same gold as the per-match trophy
-   (.vt-faction-winner-icon uses --kb-warning). The team fill stays
-   inside the ring. */
+   (.vt-faction-winner-icon uses --kb-warning). The ring is a border
+   inside the 0.5rem disc so the name row's overflow clip cannot slice it.
+   The team fill stays inside the ring. */
 .vt-match-picker-card-leader--winner::before {
-    box-shadow: 0 0 0 1.5px var(--kb-warning);
+    box-sizing: border-box;
+    border: 1.5px solid var(--kb-warning);
 }
 
 .vt-match-picker-card-leader-vs {
