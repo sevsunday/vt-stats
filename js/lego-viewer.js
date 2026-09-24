@@ -654,6 +654,54 @@ export class LegoViewer {
     return shots;
   }
 
+  /* One square PNG of the home pose for a directory card. Grid and ground
+   * shadow stay off and the backdrop is transparent so the card's own
+   * gradient shows through, matching the Stud.io thumbs. */
+  captureThumb({ size = 640 } = {}) {
+    if (!this._model) return null;
+    const prevPos = this.camera.position.clone();
+    const prevTarget = this.controls.target.clone();
+    const prevAuto = this.controls.autoRotate;
+    const prevPaused = this._paused;
+    const prevGrid = this.grid.visible;
+    const prevGround = this.ground.visible;
+    const prevBg = this.scene.background;
+    const prevDpr = this.renderer.getPixelRatio();
+    const prevSize = new THREE.Vector2();
+    this.renderer.getSize(prevSize);
+
+    this._paused = true;
+    this.controls.autoRotate = false;
+    this.grid.visible = false;
+    this.ground.visible = false;
+    this.scene.background = null;
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.setPixelRatio(2);
+    this.renderer.setSize(size, size, false);
+    this.camera.aspect = 1;
+    this.camera.updateProjectionMatrix();
+    const dist = this._fitDistance(this._radius, 1);
+    this.camera.position.copy(this._center).addScaledVector(FRAME_DIR, dist);
+    this.controls.target.copy(this._center);
+    this.controls.update();
+    this.renderer.render(this.scene, this.camera);
+    const dataUrl = this.renderer.domElement.toDataURL('image/png');
+
+    this.renderer.setPixelRatio(prevDpr);
+    this.renderer.setSize(prevSize.x, prevSize.y, false);
+    this.scene.background = prevBg;
+    this.grid.visible = prevGrid;
+    this.ground.visible = prevGround;
+    this.camera.position.copy(prevPos);
+    this.controls.target.copy(prevTarget);
+    this.controls.autoRotate = prevAuto;
+    this._paused = prevPaused;
+    this._resize();
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    return dataUrl;
+  }
+
   dispose() {
     this._disposed = true;
     cancelAnimationFrame(this._raf);

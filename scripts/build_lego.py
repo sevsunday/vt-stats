@@ -131,6 +131,20 @@ def fetch(url: str) -> bytes:
     raise last
 
 
+# Studio writes BrickLink-only names (`bl_7826.dat`) for parts that have since
+# landed in the official library under the bare number (`7826.dat`).
+_STUDIO_BL_RE = re.compile(r"^bl_(\d+)\.dat$", re.IGNORECASE)
+
+
+def _studio_bl_alias(ref: str) -> str | None:
+    """`bl_7826.dat` -> `7826.dat`. None for paths and non-numeric names."""
+    base = ref.replace("\\", "/").split("/")[-1]
+    m = _STUDIO_BL_RE.match(base)
+    if not m or "/" in ref.replace("\\", "/"):
+        return None
+    return m.group(1) + ".dat"
+
+
 def get_part(ref: str) -> str | None:
     """Fetch a part/subpart/primitive .dat by LDraw ref (e.g. '3024.dat',
     's/4733s01.dat', '48/4-4cyli.dat'). Returns text or None. On-disk cached;
@@ -139,7 +153,12 @@ def get_part(ref: str) -> str | None:
     cpath = os.path.join(CACHE, ref.replace("/", "__"))
     if os.path.exists(cpath):
         data = open(cpath, "r", encoding="utf-8", errors="replace").read()
-        return data if data else None
+        if data:
+            return data
+        # Empty file is a negative cache. A Studio `bl_<n>.dat` miss can still
+        # resolve as the official `<n>.dat`, so don't stop on that alias.
+        if _studio_bl_alias(ref) is None:
+            return None
     got404 = 0
     for base, sub in LIB_SEARCH:
         url = f"{base}/{sub}/{ref}"
@@ -169,6 +188,12 @@ def get_part(ref: str) -> str | None:
             print("   fetch error (not cached):", url, e)
             return None
     if got404 == len(LIB_SEARCH):
+        alias = _studio_bl_alias(ref)
+        if alias:
+            aliased = get_part(alias)
+            if aliased:
+                open(cpath, "w", encoding="utf-8").write(aliased)
+                return aliased
         open(cpath, "w", encoding="utf-8").write("")   # negative cache: true miss everywhere
     return None
 
@@ -543,13 +568,16 @@ def process_io(path: str, fname: str, slug: str, name: str, code: str,
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "model.ldr"), "w", encoding="utf-8") as fh:
         fh.write(sc)
+    thumb_path = os.path.join(outdir, "thumbnail.png")
     try:
-        with open(os.path.join(outdir, "thumbnail.png"), "wb") as fh:
+        with open(thumb_path, "wb") as fh:
             fh.write(z.read("thumbnail.png"))
-        normalize_thumbnail(os.path.join(outdir, "thumbnail.png"))
+        normalize_thumbnail(thumb_path)
         thumb = f"{slug}/thumbnail.png"
     except KeyError:
-        thumb = None
+        # Older .io archives (APC, Factory Final) ship no Studio thumbnail.
+        # A captured card image already on disk stays the directory thumb.
+        thumb = f"{slug}/thumbnail.png" if os.path.isfile(thumb_path) else None
     ensure_renders_dir(slug)
 
     parts = info.get("total_parts")

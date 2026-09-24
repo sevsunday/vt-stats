@@ -107,16 +107,18 @@
   <!-- Directory grid -->
   <main id="directory" class="directory flex-grow-1">
     <div class="lego-hero">
-      <span class="lego-hero-title"><i class="bi bi-bricks"></i>LEGO Creations</span>
+      <span class="lego-hero-title"><i class="bi bi-bricks"></i>LEGO Models</span>
       <span class="lego-credit">Designed &amp; built by
         <a class="lego-credit-link" href="https://steamcommunity.com/profiles/76561198136459671"
            target="_blank" rel="noopener" title="Darkvale's Steam profile">Darkvale</a>
       </span>
+      <a class="lego-studio-link" href="studio/">Studio renders <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
     </div>
     <div class="directory-hint">Click a model to inspect &middot; drag to orbit &middot; scroll to zoom &middot; switch to HQ for high-quality rendering</div>
     <div class="toolbar">
       <input id="search" class="search" type="search" placeholder="Search name or faction..." autocomplete="off" />
       <div id="faction-chips" class="chips" data-group="faction"></div>
+      <button id="renders-chip" type="button" class="filter-chip" aria-pressed="false">Has renders</button>
       <div class="toolbar-right">
         <label class="sortwrap">Sort
           <select id="sort" class="sort">
@@ -145,7 +147,7 @@
         <div class="seg" id="view-seg" title="Standard = fast interactive; HQ = high-quality rendering; Photos = Darkvale's studio renders">
           <button class="seg-btn" data-view="standard">Standard</button>
           <button class="seg-btn on" data-view="hq">HQ</button>
-          <button class="seg-btn" data-view="photos">Photos</button>
+          <button class="seg-btn" data-view="photos" title="Darkvale's studio renders">Photos</button>
         </div>
         <button id="spin-btn" class="btn toggle" title="Auto-rotate the model">Auto-rotate</button>
         <button id="wire-btn" class="btn toggle" title="Wireframe">Wireframe</button>

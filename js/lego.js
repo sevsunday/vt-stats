@@ -20,6 +20,7 @@ const els = {
   count: document.getElementById('count-label'),
   search: document.getElementById('search'),
   factionChips: document.getElementById('faction-chips'),
+  rendersChip: document.getElementById('renders-chip'),
   sort: document.getElementById('sort'),
   viewer: document.getElementById('viewer'),
   stage: document.getElementById('stage'),
@@ -52,7 +53,7 @@ let MODELS = [];
 let viewer = null;
 let controlsWired = false;
 let viewMode = 'standard';   // 'standard' | 'hq' | 'photos'
-const uiState = { search: '', faction: 'all', sort: 'name' };
+const uiState = { search: '', faction: 'all', sort: 'name', hasRenders: false };
 const LEGO_SORTS = new Set(['name', 'faction', 'parts-desc', 'parts-asc']);
 let openSlug = null;
 let historyWrites = 0;
@@ -78,6 +79,7 @@ function legoFilterParams(opts) {
   if (q) params.set('q', q);
   if (uiState.faction && uiState.faction !== 'all') params.set('faction', uiState.faction);
   if (uiState.sort && uiState.sort !== 'name') params.set('sort', uiState.sort);
+  if (uiState.hasRenders) params.set('renders', '1');
   if (opts && opts.model) params.set('model', opts.model);
   if (opts && opts.view && opts.view !== 'hq') params.set('view', opts.view);
   return params;
@@ -119,6 +121,8 @@ function hydrateLegoUi() {
   const sort = params.get('sort');
   uiState.sort = LEGO_SORTS.has(sort) ? sort : 'name';
   if (els.sort) els.sort.value = uiState.sort;
+  uiState.hasRenders = params.get('renders') === '1';
+  syncRendersChip();
   if (!writesSuppressed()) {
     const model = params.get('model');
     const view = model ? viewFromUrl() : null;
@@ -150,10 +154,21 @@ function renderFactionChips() {
   });
 }
 
+function hasStudioRenders(entry) {
+  return !!(entry && entry.renders && entry.renders.length);
+}
+
+function syncRendersChip() {
+  if (!els.rendersChip) return;
+  els.rendersChip.classList.toggle('on', uiState.hasRenders);
+  els.rendersChip.setAttribute('aria-pressed', uiState.hasRenders ? 'true' : 'false');
+}
+
 function filteredSortedModels() {
   const q = uiState.search.trim().toLowerCase();
   let list = MODELS.filter((m) => {
     if (uiState.faction !== 'all' && m.faction !== uiState.faction) return false;
+    if (uiState.hasRenders && !hasStudioRenders(m)) return false;
     if (q && !(`${m.name} ${m.faction} ${m.version}`.toLowerCase().includes(q))) return false;
     return true;
   });
@@ -208,7 +223,17 @@ function showLoading(on, label) {
   if (label && els.stageLoadingLabel) els.stageLoadingLabel.textContent = label;
 }
 
+function syncPhotosButton(entry) {
+  const btn = els.viewSeg && els.viewSeg.querySelector('[data-view="photos"]');
+  if (!btn) return;
+  const has = hasStudioRenders(entry);
+  btn.disabled = !has;
+  btn.title = has ? "Darkvale's studio renders" : 'This model has no studio renders';
+}
+
 function setViewMode(mode, opts) {
+  const entry = MODELS.find((m) => m.slug === openSlug);
+  if (mode === 'photos' && !hasStudioRenders(entry)) mode = 'hq';
   viewMode = mode;
   els.viewSeg.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.view === mode));
   const showPhotos = mode === 'photos';
@@ -226,6 +251,7 @@ function setViewMode(mode, opts) {
     }
   }
   if (!(opts && opts.silent)) syncLegoUrl('push');
+  else if (currentParams().get('view') === 'photos' && mode !== 'photos') syncLegoUrl('replace');
 }
 
 async function openModel(slug) {
@@ -239,6 +265,7 @@ async function openModel(slug) {
     + `${entry.parts || '?'} parts \u00b7 ${(entry.triangles || 0).toLocaleString()} tris \u00b7 `
     + `<a class="viewer-credit" href="${DARKVALE_URL}" target="_blank" rel="noopener" title="Darkvale's Steam profile">Modeled by Darkvale</a>`;
 
+  syncPhotosButton(entry);
   renderPhotos(entry);
 
   if (!viewer) viewer = new LegoViewer(els.stage);
@@ -261,15 +288,7 @@ async function openModel(slug) {
 
 function renderPhotos(entry) {
   const renders = entry.renders || [];
-  if (!renders.length) {
-    els.photos.innerHTML = `<div class="photos-empty">
-      <i class="bi bi-images"></i>
-      <h3>No studio renders yet</h3>
-      <p>High-quality BrickLink Studio renders by <a class="lego-credit-link" href="${DARKVALE_URL}" target="_blank" rel="noopener">Darkvale</a> will appear here once uploaded.</p>
-      <p>In the meantime, use the <strong>Standard</strong> and <strong>HQ</strong> views for a live 3D look.</p>
-    </div>`;
-    return;
-  }
+  if (!renders.length) { els.photos.innerHTML = ''; return; }
   els.photos.innerHTML = `<div class="photos-grid">${renders.map((r) =>
     `<div class="photo-card"><img loading="lazy" src="${LEGO_BASE}${esc(r)}" alt="${esc(entry.name)} render by Darkvale"></div>`
   ).join('')}</div>`;
@@ -416,6 +435,14 @@ function esc(s) {
   });
   els.search.addEventListener('blur', () => { searchReplace = false; });
   els.sort.addEventListener('change', () => { uiState.sort = els.sort.value; renderGrid(); syncLegoUrl('push'); });
+  if (els.rendersChip) {
+    els.rendersChip.addEventListener('click', () => {
+      uiState.hasRenders = !uiState.hasRenders;
+      syncRendersChip();
+      renderGrid();
+      syncLegoUrl('push');
+    });
+  }
   window.addEventListener('popstate', () => {
     window.clearTimeout(searchTimer);
     searchReplace = false;
