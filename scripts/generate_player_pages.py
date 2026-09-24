@@ -58,7 +58,8 @@ SITE_URL = "https://vtstats.bz"
 # v13 threads the LEGO topnav link (bi-bricks, after Models) through every stub.
 # v16 turns the ODF topnav link into a dropdown (ODF Browser, Build Trees).
 # v17 adds ODF Guide to that dropdown.
-PLAYER_TEMPLATE_VERSION = 17
+# v18 adds the Commander profile pane (VTSR-C pill).
+PLAYER_TEMPLATE_VERSION = 18
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,

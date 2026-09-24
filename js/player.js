@@ -96,6 +96,7 @@
   const PLAYER_TAB_TARGETS = {
     overview:   '#vt-player-tab-overview',
     rating:     '#vt-player-tab-rating',
+    commander:  '#vt-player-tab-commander',
     axes:       '#vt-player-tab-axes',
     highlights: '#vt-player-tab-highlights',
     rivals:     '#vt-player-tab-rivals',
@@ -299,7 +300,8 @@
     contributions: null,    // parsed data/processed/match_contributions.json (lazy)
     cmdrElo:       undefined, // parsed elo_commander_current.json (lazy; undefined = unfetched, null = 404)
     cmdrEloHistory: undefined, // parsed elo_commander_history.json (lazy; undefined = unfetched, null = 404)
-    cmdrRatingChart: null,   // Chart.js instance for the VTSR-C time-series (Rivals tab)
+    cmdrRatingChart: null,   // Chart.js instance for the VTSR-C time-series (Commander tab)
+    mapRegistry:   undefined, // parsed data/map-registry.json (lazy; undefined = unfetched, null = 404)
     manifest:      null,    // parsed data/processed/matches.json (lazy)
     careerStats:   null,    // result of VTAggregate.build(threshold=0).career_stats
     // Directory UI state
@@ -938,15 +940,17 @@
     // need elo_history / contributions which load on Rating-tab open;
     // we re-use the same lazy-fetch when these tabs activate (cheap if
     // already loaded).
+    bindLazyTab('vt-player-tab-commander',  () => renderCommanderTab(rating));
     bindLazyTab('vt-player-tab-axes',       () => renderAxesTab(rating));
     bindLazyTab('vt-player-tab-highlights', () => renderHighlightsTab(rating));
     bindLazyTab('vt-player-tab-rivals',     () => renderRivalsTab(rating));
     bindLazyTab('vt-player-tab-loadout',    () => renderLoadoutTab(rating));
     // Render placeholders so the panes aren't empty until first
     // activation. Each renderer self-overwrites.
+    $('vt-player-tab-commander').innerHTML  = phasePlaceholder('Commander', 'Click this tab to load.');
     $('vt-player-tab-axes').innerHTML       = phasePlaceholder('Axis deep-dive', 'Click this tab to load.');
     $('vt-player-tab-highlights').innerHTML = phasePlaceholder('Highlights', 'Click this tab to load.');
-    $('vt-player-tab-rivals').innerHTML     = phasePlaceholder('Rivals & most-commanded-against', 'Click this tab to load.');
+    $('vt-player-tab-rivals').innerHTML     = phasePlaceholder('Rivals', 'Click this tab to load.');
     $('vt-player-tab-loadout').innerHTML    = phasePlaceholder('Loadout &amp; ships', 'Click this tab to load.');
     activateTabFromUrl();
   }
@@ -2015,9 +2019,9 @@
   // Static one-line definition of what the headline number measures.
   // Unknown categories omit the line. Not the rotating flavor copy.
   const HIGHLIGHT_MEANING = {
-    career_tycoon:          'Lifetime scrap their team generated while they commanded (regen, loose, and refunds). A sum, not a per-minute rate.',
-    career_loose_collector: 'Lifetime loose scrap their scavengers collected while they commanded.',
-    career_war_machine:     'Lifetime scrap value of combat ships built while they commanded.',
+    career_tycoon:          'Scrap their team generated while they commanded, counted only on recorded v4 games (regen, loose, and refunds). A sum, not a per-minute rate.',
+    career_loose_collector: 'Loose scrap their scavengers collected while they commanded, counted only on recorded v4 games.',
+    career_war_machine:     'Scrap value of combat ships built while they commanded, counted only on recorded v4 games.',
     career_the_hustler:     'Career kills per death, pulled toward the league average. Needs 25 kills.',
     career_the_bully:       'Lifetime damage dealt to other players.',
     career_the_grim_reaper: 'Lifetime kills.',
@@ -2032,14 +2036,14 @@
     the_champion:           'Current VTSR-T rating.',
     the_veteran:            'Matches played.',
     the_workhorse:          'Matches commanded.',
-    the_carry:              'Win rate while commanding.',
-    the_anchor:             'Win rate as a thug.',
+    the_carry:              'Win rate while commanding, recorded matches only.',
+    the_anchor:             'Win rate as a thug, recorded matches only.',
     isdf_loyalist:          'Matches played as ISDF.',
     hadean_loyalist:        'Matches played as Hadean.',
     scion_loyalist:         'Matches played as Scion.',
     the_diplomat:           'Distinct teammates.',
-    map_master:             'Best win rate on a single map.',
-    streak_king:            'Current win streak.',
+    map_master:             'Best win rate on a single map, recorded matches only.',
+    streak_king:            'Current win streak, recorded matches only.',
     the_polymath:           'Distinct weapons used.',
   };
 
@@ -2133,6 +2137,17 @@
     return _cmdrEloHistFetchPromise;
   }
 
+  let _mapRegistryFetchPromise = null;
+  function ensureMapRegistryLoaded() {
+    if (state.mapRegistry !== undefined) return Promise.resolve(state.mapRegistry);
+    if (!_mapRegistryFetchPromise) {
+      _mapRegistryFetchPromise = fetchJson(`${state.dataPrefix}data/map-registry.json`)
+        .catch(() => null)
+        .then(json => { state.mapRegistry = json || null; return state.mapRegistry; });
+    }
+    return _mapRegistryFetchPromise;
+  }
+
   // Lazy one-shot fetch of the F9bomber community rollups
   // (data/external/f9_community.json -- thug team records etc.). Same
   // 404 contract: null caches and every consumer self-omits.
@@ -2202,13 +2217,20 @@
         const side = sides[sideKey];
         if (!side || String(side.steam64 || '') !== sid) continue;
         const opp = sides[sideKey === '1' ? '2' : '1'] || {};
+        const hc = duel.team_handicap || {};
+        const ownMean = hc[sideKey === '1' ? 't1_thug_mean' : 't2_thug_mean'];
+        const oppMean = hc[sideKey === '1' ? 't2_thug_mean' : 't1_thug_mean'];
         out.push({
           match_id: duel.match_id,
           date:     duel.date || '',
           after:    side.after,
           delta:    side.delta,
           score:    side.score,
+          expected: (typeof side.expected === 'number' && Number.isFinite(side.expected)) ? side.expected : null,
           opponent: opp.name || '',
+          opponentSteam64: opp.steam64 || '',
+          ownThug:  (typeof ownMean === 'number' && Number.isFinite(ownMean)) ? ownMean : null,
+          oppThug:  (typeof oppMean === 'number' && Number.isFinite(oppMean)) ? oppMean : null,
           // v3: community-ledger duels carry source "f9", a map title
           // and NO match id (missing source = telemetry).
           source:   duel.source || 'telemetry',
@@ -2303,27 +2325,6 @@
       pane.innerHTML = phasePlaceholder('Rivals', 'Match contributions are still loading.');
       return;
     }
-    // Kick the VTSR-C ladder + duel-history fetches on first entry;
-    // re-render once when they land so the Commander Rivalries headline
-    // and rating time-series fill in. 404s cache null and this path
-    // never re-enters (state moves undefined -> null|object). If the
-    // user tabbed away during the fetch, defer the re-render to the
-    // next tab show — Chart.js can't size a canvas in a hidden pane.
-    if (state.cmdrElo === undefined || state.cmdrEloHistory === undefined) {
-      Promise.all([ensureCmdrEloLoaded(), ensureCmdrEloHistoryLoaded()]).then(([cur, hist]) => {
-        const paneEl = document.getElementById('vt-player-tab-rivals');
-        if (!(cur || hist) || !paneEl) return;
-        if (paneEl.offsetParent !== null) {
-          renderRivalsTab(rating);
-        } else {
-          const tabBtn = document.querySelector('[data-bs-target="#vt-player-tab-rivals"]');
-          if (tabBtn) {
-            tabBtn.addEventListener('shown.bs.tab', () => renderRivalsTab(rating), { once: true });
-          }
-        }
-      });
-    }
-    const sid = String(rating.steam64 || '');
     const name = rating.name;
 
     // Build the per-player rivalry totals by walking every match's
@@ -2367,50 +2368,20 @@
       .sort((a, b) => (b.dealt + b.received) - (a.dealt + a.received))
       .slice(0, 10);
 
-    const showCommanderPanel = shouldShowCommanderPanel(rating);
-    const commanderRows = showCommanderPanel ? buildOpposingCommanderTop5(rating, sid) : [];
-
-    const cmdrRivHtml = renderCommanderRivalriesPanel(rating, sid);
-
     pane.innerHTML = `
-      ${cmdrRivHtml}
-      <div class="row g-3">
-        <div class="col-12 ${showCommanderPanel ? 'col-xl-7' : ''}">
-          <div class="card h-100">
-            <div class="card-body">
-              <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
-                <i class="bi bi-shield-shaded me-1"></i>Top rivals (corpus-wide)
-              </h2>
-              <p class="text-secondary small mb-3">
-                Two-way damage totals across every match this player appeared in. Tilt bar
-                shows whose direction landed more damage.
-              </p>
-              ${rivalArr.length ? renderRivalsTable(rivalArr) :
-                '<p class="text-secondary mb-0">No rivalry data found.</p>'}
-            </div>
-          </div>
+      <div class="card">
+        <div class="card-body">
+          <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+            <i class="bi bi-shield-shaded me-1"></i>Top rivals (corpus-wide)
+          </h2>
+          <p class="text-secondary small mb-3">
+            Two-way damage totals across every match this player appeared in. Tilt bar
+            shows whose direction landed more damage.
+          </p>
+          ${rivalArr.length ? renderRivalsTable(rivalArr) :
+            '<p class="text-secondary mb-0">No rivalry data found.</p>'}
         </div>
-        ${showCommanderPanel ? `
-          <div class="col-12 col-xl-5">
-            <div class="card h-100">
-              <div class="card-body">
-                <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
-                  <i class="bi bi-shield-fill me-1"></i>Most-commanded-against
-                </h2>
-                <p class="text-secondary small mb-3">
-                  When ${escapeHtml(name)} is the commander, these opposing commanders show
-                  up most often <span class="text-secondary">(as a thug, facing them across the field)</span>.
-                </p>
-                ${commanderRows.length ? renderCommanderH2HTable(commanderRows, rating) :
-                  '<p class="text-secondary mb-0">No qualifying commander matchups recorded yet.</p>'}
-              </div>
-            </div>
-          </div>
-        ` : ''}
       </div>`;
-
-    // Chart.js mounts only after the canvas exists in the DOM.
-    drawCmdrRatingChart(rating, sid);
   }
 
   // ---- Commander Rivalries panel (VTSR-C) -------------------------------
@@ -2464,9 +2435,63 @@
     return { commandedTotal, wins, losses, draws, opponents: oppArr };
   }
 
+  /** Recorded opponent tallies plus F9 community duels. Overlaps stay in
+      the recorded count only: the ladder omits an F9 row when that game
+      is already in the corpus. */
+  function buildCombinedOpponents(sid, recorded) {
+    const map = new Map();
+    let f9Count = 0;
+    for (const o of recorded) {
+      map.set(String(o.steam64), {
+        steam64: String(o.steam64), name: o.name,
+        faced: o.faced, wins: o.wins, losses: o.losses, draws: o.draws,
+        lastDate: o.lastDate || '',
+      });
+    }
+    for (const p of buildCmdrRatingSeries(sid)) {
+      if (p.source !== 'f9') continue;
+      const oid = String(p.opponentSteam64 || '');
+      if (!oid) continue;
+      f9Count += 1;
+      if (!map.has(oid)) {
+        map.set(oid, {
+          steam64: oid, name: p.opponent || oid,
+          faced: 0, wins: 0, losses: 0, draws: 0, lastDate: '',
+        });
+      }
+      const t = map.get(oid);
+      t.faced += 1;
+      const date = p.date || '';
+      if (date > t.lastDate) {
+        t.lastDate = date;
+        if (p.opponent) t.name = p.opponent;
+      }
+      if (p.score === 1) t.wins += 1;
+      else if (p.score === 0) t.losses += 1;
+      else if (p.score === 0.5) t.draws += 1;
+    }
+    const opponents = Array.from(map.values())
+      .sort((a, b) => b.faced - a.faced || (b.lastDate > a.lastDate ? 1 : -1));
+    return { opponents, f9Count };
+  }
+
+  function topOpponentCalloutHtml(top, title, detailExtra) {
+    return `<div class="vt-cmdr-riv-topopp">
+      <i class="bi bi-crosshair vt-cmdr-riv-topopp-icon"></i>
+      <div>
+        <div class="vt-cmdr-riv-topopp-title">${title}:
+          <a href="${playerHref(top.steam64)}">${escapeHtml(top.name)}</a></div>
+        <div class="vt-cmdr-riv-topopp-detail">
+          Faced <strong>${top.faced}</strong> time${top.faced === 1 ? '' : 's'} as opposing commander
+          &middot; head-to-head <strong>${top.wins}-${top.losses}-${top.draws}</strong>
+          ${detailExtra || ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
   function renderCommanderRivalriesPanel(rating, sid) {
     const riv = buildCommanderRivalries(sid);
-    if (riv.commandedTotal < 1) return '';
 
     const name = rating.name;
     const ladder = cmdrLadderRowFor(sid);
@@ -2510,27 +2535,31 @@
       const l = cmdrLadderRowFor(oid);
       return l ? Math.round(l.row.vtsr_c) : null;
     };
+    const vtsrBit = (oid) => {
+      const tv = oppVtsrC(oid);
+      return tv != null ? `&middot; their VTSR-C <strong>${tv}</strong>` : '';
+    };
     let topOppHtml = '';
     const top = riv.opponents[0];
     if (top) {
-      const tv = oppVtsrC(top.steam64);
-      topOppHtml = `<div class="vt-cmdr-riv-topopp">
-        <i class="bi bi-crosshair vt-cmdr-riv-topopp-icon"></i>
-        <div>
-          <div class="vt-cmdr-riv-topopp-title">Top opponent:
-            <a href="${playerHref(top.steam64)}">${escapeHtml(top.name)}</a></div>
-          <div class="vt-cmdr-riv-topopp-detail">
-            Faced <strong>${top.faced}</strong> time${top.faced === 1 ? '' : 's'} as opposing commander
-            &middot; head-to-head <strong>${top.wins}-${top.losses}-${top.draws}</strong>
-            ${tv != null ? `&middot; their VTSR-C <strong>${tv}</strong>` : ''}
-          </div>
-        </div>
-      </div>`;
+      topOppHtml = topOpponentCalloutHtml(top, 'Top opponent (recorded)', vtsrBit(top.steam64));
+    }
+    const combined = buildCombinedOpponents(sid, riv.opponents);
+    const communityTop = combined.opponents[0];
+    const sameAsRecorded = top && communityTop
+      && String(communityTop.steam64) === String(top.steam64)
+      && communityTop.faced === top.faced;
+    if (combined.f9Count > 0 && communityTop && !sameAsRecorded) {
+      const prov = (state.cmdrElo && state.cmdrElo.external_provider) || {};
+      const url = prov.url || 'https://f9bomber.com';
+      const pname = prov.name || 'F9bomber';
+      const credit = `&middot; includes community duels from <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(pname)}</a>`;
+      topOppHtml += topOpponentCalloutHtml(
+        communityTop, 'Top opponent (with F9Stats)', `${vtsrBit(communityTop.steam64)} ${credit}`);
     }
 
-    // Top-5 enemies table.
-    const top5 = riv.opponents.slice(0, 5);
-    const tableHtml = top5.length ? `<div class="table-responsive">
+    // Every opposing commander. The card scrolls when the list is long.
+    const tableHtml = riv.opponents.length ? `<div class="table-responsive vt-cmdr-scroll">
       <table class="table table-sm align-middle mb-2">
         <thead><tr>
           <th>Opposing commander</th>
@@ -2539,7 +2568,7 @@
           <th class="text-end">Their VTSR-C</th>
         </tr></thead>
         <tbody>
-          ${top5.map(o => {
+          ${riv.opponents.map(o => {
             const det = o.wins + o.losses + o.draws;
             const recCls = det === 0 ? 'text-secondary'
               : o.wins > o.losses ? 'vt-vtsr-delta-positive'
@@ -2556,37 +2585,6 @@
       </table>
     </div>` : '';
 
-    // Nemesis / Best matchup chips: worst / best verified head-to-head,
-    // minimum 2 determined meetings; omitted below the floor. When only
-    // one opponent qualifies, show whichever chip its record earns.
-    const qualified = riv.opponents.filter(o => (o.wins + o.losses + o.draws) >= 2);
-    let chipsHtml = '';
-    if (qualified.length) {
-      const ratio = o => o.wins / (o.wins + o.losses + o.draws);
-      const sortedByRatio = qualified.slice().sort((a, b) =>
-        ratio(a) - ratio(b) || (b.wins + b.losses + b.draws) - (a.wins + a.losses + a.draws));
-      const worst = sortedByRatio[0];
-      const best = sortedByRatio[sortedByRatio.length - 1];
-      const chips = [];
-      if (qualified.length === 1) {
-        const only = qualified[0];
-        const kind = ratio(only) >= 0.5 ? 'best' : 'nemesis';
-        chips.push([kind, only]);
-      } else {
-        if (ratio(worst) < 0.5) chips.push(['nemesis', worst]);
-        if (ratio(best) >= 0.5 && best !== worst) chips.push(['best', best]);
-      }
-      chipsHtml = chips.length ? `<div class="vt-cmdr-riv-chips">
-        ${chips.map(([kind, o]) => `<span class="vt-cmdr-riv-chip is-${kind}"
-            title="${kind === 'nemesis' ? 'Worst' : 'Best'} verified head-to-head (minimum 2 decided meetings)">
-          <i class="bi ${kind === 'nemesis' ? 'bi-emoji-dizzy' : 'bi-emoji-sunglasses'}"></i>
-          ${kind === 'nemesis' ? 'Nemesis' : 'Best matchup'}:
-          <a href="${playerHref(o.steam64)}">${escapeHtml(o.name)}</a>
-          <span class="vt-cmdr-riv-chip-rec">${o.wins}-${o.losses}-${o.draws}</span>
-        </span>`).join('')}
-      </div>` : '';
-    }
-
     // VTSR-C rating time-series (c3 quick win): only when the duel
     // history is loaded and this commander has >= 2 rated duels (a
     // one-point line reads as a floating dot). The canvas is drawn by
@@ -2600,28 +2598,47 @@
         </div>
       </div>` : '';
 
-    const econHtml = renderCmdrEconBlockHtml(sid);
-
-    return `<div class="card mb-3">
+    const opponentsHtml = (topOppHtml || tableHtml) ? `<div class="card mb-3">
       <div class="card-body">
         <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
-          <i class="bi bi-person-badge me-1"></i>Commander rivalries
+          <i class="bi bi-crosshair me-1"></i>Opposing commanders
+        </h2>
+        <p class="text-secondary small mb-3">
+          Commanders ${escapeHtml(name)} faced while leading a team. W-L-D counts verified outcomes only.
+        </p>
+        ${topOppHtml}
+        ${tableHtml}
+      </div>
+    </div>` : '';
+
+    const ratingHtml = `<div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+          <i class="bi bi-person-badge me-1"></i>Commander rating
           <span class="vt-cmdr-riv-tag">VTSR-C &middot; experimental</span>
         </h2>
         <p class="text-secondary small mb-3">
-          ${escapeHtml(name)}&rsquo;s record <strong>as a commander</strong>, duel by duel against
-          the opposing commander. Only matches with a verified outcome count toward records;
-          ratings come from the experimental
+          ${escapeHtml(name)}&rsquo;s record <strong>as a commander</strong> in recorded games.
+          Only matches with a verified outcome count toward the W-L-D.
+          Ratings come from the experimental
           <a href="${state.dataPrefix}elo/?tab=vtsr-c">VTSR-C ladder</a>.
         </p>
         ${headline}
+        ${cmdrCommunityNoteHtml(ladder)}
         ${chartHtml}
-        ${econHtml}
-        ${topOppHtml}
-        ${tableHtml}
-        ${chipsHtml}
       </div>
     </div>`;
+
+    return { ratingHtml, opponentsHtml, series: cmdrSeries };
+  }
+
+  function cmdrCommunityNoteHtml(ladder) {
+    const n = ladder && ladder.row ? (ladder.row.duels_external || 0) : 0;
+    if (!n) return '';
+    const prov = (state.cmdrElo && state.cmdrElo.external_provider) || {};
+    const url = prov.url || 'https://f9bomber.com';
+    const pname = prov.name || 'F9bomber';
+    return `<p class="text-secondary small mb-3">The rated ladder also includes <strong>${n}</strong> community duel${n === 1 ? '' : 's'} from <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(pname)}</a>. The W-L-D above counts recorded games only.</p>`;
   }
 
   /** Career commander-economy stat block (proto v4 telemetry). Reads the
@@ -2658,6 +2675,7 @@
         <i class="bi bi-cash-stack me-1"></i>Commander economy
         <span class="vt-cmdr-econ-badge" title="Built from proto v4 resource/build telemetry \u2014 only matches recorded with the new collector count toward these stats.">v4 telemetry &middot; ${denomCaption}</span>
       </h3>
+      <p class="text-secondary small mb-2">Recorded, not scored. These figures are not part of the VTSR-C rating.</p>
       <div class="vt-cmdr-econ-grid">
         ${tile('Income / min', fmtR(r.avg_income_per_min), 'scrap generated per minute')}
         ${tile('Total income', fmtNum(r.total_scrap_income), 'scrap generated')}
@@ -2804,57 +2822,275 @@
     </div>`;
   }
 
-  function shouldShowCommanderPanel(rating) {
-    const cm = safeNum(rating.matches_as_commander);
-    const m = safeNum(rating.matches_played);
-    if (cm < 6) return false;
-    if (m <= 0) return false;
-    return (cm / m) >= 0.40;
+  function scheduleCommanderRerender(rating) {
+    const paneEl = document.getElementById('vt-player-tab-commander');
+    if (!paneEl) return;
+    const go = () => renderCommanderTab(rating);
+    if (paneEl.classList.contains('active') || paneEl.offsetParent !== null) go();
+    else {
+      const tabBtn = document.querySelector('[data-bs-target="#vt-player-tab-commander"]');
+      if (tabBtn) tabBtn.addEventListener('shown.bs.tab', go, { once: true });
+    }
   }
 
-  function buildOpposingCommanderTop5(rating, sid) {
-    const tally = new Map(); // opponent_steam64 -> { name, faced, wins }
-    if (!state.contributions) return [];
+  function mapStemFromFile(raw) {
+    const base = String(raw || '').split(/[/\\]/).pop();
+    return base.replace(/\.bzn$/i, '').toLowerCase();
+  }
+
+  function stripMapTitlePrefixes(rawTitle) {
+    let t = String(rawTitle || '');
+    while (true) {
+      const nxt = t.replace(/^[A-Za-z0-9]+:\s*/, '');
+      if (nxt === t) break;
+      t = nxt;
+    }
+    return t.trim();
+  }
+
+  function mapDisplayTitle(stem) {
+    const reg = state.mapRegistry && state.mapRegistry[stem];
+    const title = reg && reg.title ? stripMapTitlePrefixes(reg.title) : '';
+    return title || stem;
+  }
+
+  function forEachCommandedMatch(sid, fn) {
+    if (!state.contributions) return;
     for (const key in state.contributions) {
       const m = state.contributions[key];
-      const lb = m.leaderboard || [];
-      const myRow = lb.find(p => String(p.steam64 || '') === sid && p.is_commander);
-      if (!myRow) continue;
-      const oppRow = lb.find(p => p.is_commander && String(p.steam64 || '') !== sid);
-      if (!oppRow) continue;
-      const oid = String(oppRow.steam64 || '');
-      if (!tally.has(oid)) tally.set(oid, { steam64: oid, name: oppRow.name || oid, faced: 0, wins: 0 });
-      const t = tally.get(oid);
-      t.faced += 1;
-      if (m.winner && Number.isFinite(m.winner.team) && m.winner.team === myRow.team) t.wins += 1;
+      const myRow = (m.leaderboard || []).find(p => String(p.steam64 || '') === sid && p.is_commander);
+      if (myRow) fn(m, myRow);
     }
-    return Array.from(tally.values())
-      .filter(t => t.faced >= 1)
-      .sort((a, b) => b.faced - a.faced || b.wins - a.wins)
-      .slice(0, 5);
   }
 
-  function renderCommanderH2HTable(rows, rating) {
-    return `<table class="table table-sm align-middle">
-      <thead><tr>
-        <th>Opposing commander</th>
-        <th class="text-end">Faced</th>
-        <th class="text-end">Won</th>
-        <th class="text-end">Win %</th>
-      </tr></thead>
-      <tbody>
-        ${rows.map(r => {
-          const winPct = r.faced > 0 ? (r.wins / r.faced) * 100 : 0;
-          const cls = winPct >= 50 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative';
-          return `<tr>
-            <td><strong>${escapeHtml(r.name)}</strong></td>
-            <td class="text-end vt-matchlog-num">${r.faced}</td>
-            <td class="text-end vt-matchlog-num">${r.wins}</td>
-            <td class="text-end vt-matchlog-num ${cls}">${winPct.toFixed(0)}%</td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>`;
+  function tallyCommandOutcome(bucket, match, myRow) {
+    const w = match.winner || {};
+    const decidedBy = w.decided_by || 'unclear';
+    if (decidedBy === 'draw') bucket.draws += 1;
+    else if (CMDR_DETERMINED_DECIDED_BY.has(decidedBy) && Number.isFinite(w.team)) {
+      if (w.team === myRow.team) bucket.wins += 1;
+      else bucket.losses += 1;
+    }
+  }
+
+  function buildCommanderMaps(sid) {
+    const maps = new Map();
+    forEachCommandedMatch(sid, (m, myRow) => {
+      const stem = mapStemFromFile(m.map);
+      if (!stem) return;
+      if (!maps.has(stem)) maps.set(stem, { stem, n: 0, wins: 0, losses: 0, draws: 0 });
+      const t = maps.get(stem);
+      t.n += 1;
+      tallyCommandOutcome(t, m, myRow);
+    });
+    return Array.from(maps.values()).sort((a, b) => b.n - a.n || a.stem.localeCompare(b.stem));
+  }
+
+  function buildCommanderFactions(sid) {
+    const counts = { i: 0, e: 0, f: 0 };
+    let n = 0;
+    forEachCommandedMatch(sid, (m, myRow) => {
+      const fac = (m.team_factions || {})[String(myRow.team)];
+      const code = fac && fac.code;
+      if (Object.prototype.hasOwnProperty.call(counts, code)) {
+        counts[code] += 1;
+        n += 1;
+      }
+    });
+    return { counts, n };
+  }
+
+  function cmdrDateLabel(date) {
+    const s = String(date || '');
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : (s || '\u2014');
+  }
+
+  function renderCmdrInsightsHtml(series) {
+    const call = series.filter(p => p.expected != null && typeof p.score === 'number' && Number.isFinite(p.score));
+    const gaps = series.filter(p => p.ownThug != null && p.oppThug != null);
+    if (!call.length && !gaps.length) return '';
+    const tiles = [];
+    if (call.length) {
+      const mean = call.reduce((s, p) => s + (p.score - p.expected), 0) / call.length;
+      const pts = Math.round(mean * 100);
+      const mag = Math.abs(pts);
+      const line = pts === 0
+        ? `Results matched the pre-match call across ${call.length} rated duel${call.length === 1 ? '' : 's'}.`
+        : `Results ran ${mag} point${mag === 1 ? '' : 's'} ${pts > 0 ? 'above' : 'below'} the pre-match call, across ${call.length} rated duel${call.length === 1 ? '' : 's'}.`;
+      tiles.push(`<div class="vt-cmdr-econ-tile"><div class="vt-cmdr-riv-stat-label">Vs the call</div><div class="vt-cmdr-econ-sub">${line}</div></div>`);
+    }
+    if (gaps.length) {
+      const mean = gaps.reduce((s, p) => s + (p.ownThug - p.oppThug), 0) / gaps.length;
+      const rounded = Math.round(mean);
+      const mag = Math.abs(rounded);
+      const line = rounded === 0
+        ? `Their thugs averaged the same VTSR-T as the other side, across ${gaps.length} rated duels with a thug rating on both teams.`
+        : `Their thugs averaged ${mag} VTSR-T ${rounded > 0 ? 'higher' : 'lower'} than the other side, across ${gaps.length} rated duels with a thug rating on both teams.`;
+      tiles.push(`<div class="vt-cmdr-econ-tile"><div class="vt-cmdr-riv-stat-label">Squad gap</div><div class="vt-cmdr-econ-sub">${line}</div></div>`);
+    }
+    return `<div class="vt-cmdr-econ-grid mb-3">${tiles.join('')}</div>`;
+  }
+
+  function renderCmdrMapsHtml(sid) {
+    const rows = buildCommanderMaps(sid);
+    if (!rows.length) return '';
+    return `<div class="card mb-3"><div class="card-body">
+      <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+        <i class="bi bi-map me-1"></i>Favorite maps
+      </h2>
+      <p class="text-secondary small mb-3">Maps this player commanded, most often first. Win % appears once a game on that map has a decided outcome.</p>
+      <div class="table-responsive vt-cmdr-scroll">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr>
+            <th>Map</th>
+            <th class="text-end">Commanded</th>
+            <th class="text-end">W-L-D</th>
+            <th class="text-end">Win %</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => {
+              const det = r.wins + r.losses + r.draws;
+              const winPct = det > 0 ? Math.round((r.wins / det) * 100) : null;
+              const href = `${state.dataPrefix}map/${encodeURIComponent(r.stem)}/`;
+              return `<tr>
+                <td><a href="${href}">${escapeHtml(mapDisplayTitle(r.stem))}</a></td>
+                <td class="text-end vt-matchlog-num">${r.n}</td>
+                <td class="text-end vt-matchlog-num">${det ? `${r.wins}-${r.losses}-${r.draws}` : '\u2014'}</td>
+                <td class="text-end vt-matchlog-num">${winPct != null ? winPct + '%' : '\u2014'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div></div>`;
+  }
+
+  function renderCmdrFactionsHtml(sid) {
+    const { counts, n } = buildCommanderFactions(sid);
+    if (!n) return '';
+    const factions = [
+      { code: 'i', name: 'ISDF' },
+      { code: 'e', name: 'Hadean' },
+      { code: 'f', name: 'Scion' },
+    ];
+    return `<div class="card mb-3"><div class="card-body">
+      <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+        <i class="bi bi-flag me-1"></i>Faction when commanding
+      </h2>
+      <p class="text-secondary small mb-3">The faction their team fielded in games they commanded.</p>
+      ${factions.map(f => {
+        const c = counts[f.code];
+        const pct = (c / n) * 100;
+        return `<div class="vt-wbar mb-2">
+          <div class="vt-wbar-head">
+            <span class="vt-faction-badge" data-faction-code="${f.code}">${f.name}</span>
+            <span class="vt-wbar-meta">${c} &middot; ${Math.round(pct)}%</span>
+          </div>
+          <div class="vt-axis-track">
+            <div class="vt-axis-fill" style="left:0;width:${pct.toFixed(1)}%;background:var(--kb-faction-${f.code});"></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div></div>`;
+  }
+
+  function renderCmdrDuelLogHtml(series) {
+    if (!series.length) return '';
+    const rows = series.slice().reverse();
+    return `<div class="card mb-3"><div class="card-body">
+      <h2 class="h6 text-secondary text-uppercase mb-2" style="letter-spacing:0.08em;">
+        <i class="bi bi-list-ol me-1"></i>Rated duels
+      </h2>
+      <p class="text-secondary small mb-3">Newest first. Expected is this commander&rsquo;s pre-match win chance after the thug handicap.</p>
+      <div class="table-responsive vt-cmdr-scroll">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr>
+            <th>Date</th>
+            <th>Opponent</th>
+            <th>Result</th>
+            <th class="text-end">Expected</th>
+            <th class="text-end">&Delta; VTSR-C</th>
+            <th>Map</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(p => {
+              const res = p.score === 1 ? 'Win' : p.score === 0 ? 'Loss' : 'Draw';
+              const resCls = p.score === 1 ? 'vt-vtsr-delta-positive' : p.score === 0 ? 'vt-vtsr-delta-negative' : '';
+              const exp = p.expected != null ? `${Math.round(p.expected * 100)}%` : '\u2014';
+              const dStr = Number.isFinite(p.delta) ? `${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(1)}` : '\u2014';
+              const dCls = Number.isFinite(p.delta) ? (p.delta >= 0 ? 'vt-vtsr-delta-positive' : 'vt-vtsr-delta-negative') : '';
+              const contrib = (p.match_id && state.contributions)
+                ? (state.contributions[p.match_id + '.json'] || null) : null;
+              let mapCell = '\u2014';
+              if (p.source === 'f9') {
+                mapCell = p.map ? escapeHtml(p.map) : '\u2014';
+              } else if (contrib && contrib.map) {
+                const stem = mapStemFromFile(contrib.map);
+                mapCell = `<a href="${state.dataPrefix}map/${encodeURIComponent(stem)}/">${escapeHtml(mapDisplayTitle(stem))}</a>`;
+              }
+              const f9 = p.source === 'f9'
+                ? ' <span class="vt-cmdr-riv-tag" title="Community duel from F9bomber">F9</span>' : '';
+              const dash = (p.match_id && p.source !== 'f9')
+                ? ` <a href="${state.dataPrefix}index.html?match=${encodeURIComponent(p.match_id)}" title="Open match"><i class="bi bi-box-arrow-up-right"></i></a>`
+                : '';
+              const opp = p.opponentSteam64
+                ? `<a href="${playerHref(p.opponentSteam64)}">${escapeHtml(p.opponent || 'unknown')}</a>`
+                : escapeHtml(p.opponent || 'unknown');
+              return `<tr>
+                <td class="vt-matchlog-num">${cmdrDateLabel(p.date)}</td>
+                <td>${opp}${f9}${dash}</td>
+                <td class="${resCls}">${res}</td>
+                <td class="text-end vt-matchlog-num">${exp}</td>
+                <td class="text-end vt-matchlog-num ${dCls}">${dStr}</td>
+                <td>${mapCell}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div></div>`;
+  }
+
+  function renderCommanderTab(rating) {
+    const pane = $('vt-player-tab-commander');
+    if (!pane) return;
+    if (!state.contributions) {
+      pane.innerHTML = phasePlaceholder('Commander', 'Match contributions are still loading.');
+      return;
+    }
+    const sid = String(rating.steam64 || '');
+    const cmdrPending = state.cmdrElo === undefined || state.cmdrEloHistory === undefined;
+    const mapPending = state.mapRegistry === undefined;
+    if (cmdrPending || mapPending) {
+      const jobs = [];
+      if (cmdrPending) jobs.push(Promise.all([ensureCmdrEloLoaded(), ensureCmdrEloHistoryLoaded()]));
+      if (mapPending) jobs.push(ensureMapRegistryLoaded());
+      Promise.all(jobs).then(() => scheduleCommanderRerender(rating));
+    }
+    const riv = buildCommanderRivalries(sid);
+    const series = buildCmdrRatingSeries(sid);
+    const ladder = cmdrLadderRowFor(sid);
+    if (cmdrPending && riv.commandedTotal < 1) {
+      pane.innerHTML = phasePlaceholder('Commander', 'Loading commander rating.');
+      return;
+    }
+    if (!cmdrPending && riv.commandedTotal < 1 && series.length < 1 && !ladder) {
+      pane.innerHTML = phasePlaceholder('Commander', 'No commander games recorded.');
+      return;
+    }
+    const panel = renderCommanderRivalriesPanel(rating, sid);
+    const econ = renderCmdrEconBlockHtml(sid);
+    const econCard = econ ? `<div class="card mb-3"><div class="card-body">${econ}</div></div>` : '';
+    pane.innerHTML = `
+      ${panel.ratingHtml || ''}
+      ${renderCmdrInsightsHtml(series)}
+      ${panel.opponentsHtml || ''}
+      ${renderCmdrMapsHtml(sid)}
+      ${renderCmdrFactionsHtml(sid)}
+      ${renderCmdrDuelLogHtml(series)}
+      ${econCard}`;
+    drawCmdrRatingChart(rating, sid);
   }
 
   // ---- Phase 6d: Loadout & ships tab -----------------------------------
@@ -3288,6 +3524,7 @@
     const TABS = [
       { id: 'vt-player-tab-overview',   label: 'Overview',   icon: 'bi-info-circle' },
       { id: 'vt-player-tab-rating',     label: 'Rating',     icon: 'bi-graph-up' },
+      { id: 'vt-player-tab-commander',  label: 'Commander',  icon: 'bi-person-badge' },
       { id: 'vt-player-tab-axes',       label: 'Axes',       icon: 'bi-bullseye' },
       { id: 'vt-player-tab-highlights', label: 'Highlights', icon: 'bi-star' },
       { id: 'vt-player-tab-rivals',     label: 'Rivals',     icon: 'bi-shield-shaded' },
