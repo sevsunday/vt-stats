@@ -29,6 +29,22 @@
   // currentScript is only valid during synchronous execution -- capture now.
   const SCRIPT_URL = (document.currentScript && document.currentScript.src) || '';
 
+  // Clicky site tracking. Same tag Clicky provides:
+  // <script async data-id="101512321" src="//static.getclicky.com/js"></script>
+  // Their loader reads data-id from document.currentScript on that element.
+  // Framed documents (Game Watch modal, embedded Models / ODF panes) are
+  // already inside a tracked parent, so they do not send a second pageview.
+  // A cross-origin frame that hides window.top is treated as framed.
+  let clickyFramed = false;
+  try { clickyFramed = window.top !== window.self; } catch (_) { clickyFramed = true; }
+  if (!clickyFramed) {
+    const clicky = document.createElement('script');
+    clicky.async = true;
+    clicky.src = '//static.getclicky.com/js';
+    clicky.setAttribute('data-id', '101512321');
+    (document.head || document.documentElement).appendChild(clicky);
+  }
+
   // ---------------------------------------------------------------- Config
 
   const STORAGE_KEY = 'vt.cursor.settings.v1';
