@@ -144,6 +144,7 @@
           team: Number.isFinite(p.team) ? p.team : null,
           isHost: !!p.isHost,
           isCommander: !!p.isCommander,
+          isHidden: !!p.isHidden,
           resolved: resolved,
         };
       });

@@ -141,9 +141,9 @@
 
   /**
    * Augment a live-session roster row with the resolver's player data,
-   * preserving the live-only flags (isCommander, team, isHost) on the
-   * result so downstream components (notably Team Balonce) can mirror
-   * the lobby's commander assignment.
+   * preserving the live-only flags (isCommander, team, isHost, isHidden)
+   * on the result so downstream components (notably Team Balonce) can
+   * mirror the lobby's commander assignment and hidden slots.
    */
   function augmentLiveRow(rosterRow) {
     const base = rosterRow.resolved || rawToResolved(rosterRow);
@@ -151,6 +151,7 @@
       isLiveCommander: !!rosterRow.isCommander,
       liveTeam: Number.isFinite(rosterRow.team) ? rosterRow.team : null,
       isLiveHost: !!rosterRow.isHost,
+      isLiveHidden: !!rosterRow.isHidden,
     });
   }
 

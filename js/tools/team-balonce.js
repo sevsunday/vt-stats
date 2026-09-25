@@ -508,8 +508,8 @@
   /**
    * Read p.liveTeam for every roster row and return a key -> team map.
    * Players with liveTeam === null fall back to team 1 (caller-visible
-   * via the `unsplit` chip render path). This is the source of truth for
-   * the team columns when mode === 'live'.
+   * via the `hidden` chip when isLiveHidden, else the `unsplit` chip).
+   * This is the source of truth for the team columns when mode === 'live'.
    */
   function deriveLiveTeamAssignments() {
     const map = new Map();
@@ -900,13 +900,15 @@
     const provisionalChip = p.isProvisional
       ? `<span class="vt-tools-balonce-row-provisional" title="${escapeHtml(p.isCustom ? 'Custom entry' : 'Provisional / unrated')}">${p.isCustom ? 'cust' : 'prov'}</span>`
       : '';
-    // Unsplit chip: in Live mode, players with no live team slot (joined
-    // the lobby but haven't picked a side yet) get parked on Team 1 by
-    // default. Surface that fact so the user knows the placement is a
-    // fallback, not a real lobby choice.
-    const unsplitChip = (mode === 'live' && p.liveTeam !== 1 && p.liveTeam !== 2)
-      ? '<span class="vt-tools-balonce-row-unsplit" title="No team slot in the live lobby yet — parked on Team 1 by default">unsplit</span>'
-      : '';
+    // No live team slot: parked on Team 1 and still counted. Engine-hidden
+    // players (slot 255 / omitted team) get a `hidden` chip; everyone else
+    // with no side yet (DM, not yet slotted) keeps `unsplit`.
+    const noLiveTeam = mode === 'live' && p.liveTeam !== 1 && p.liveTeam !== 2;
+    const slotChip = !noLiveTeam
+      ? ''
+      : (p.isLiveHidden
+        ? '<span class="vt-tools-balonce-row-hidden" title="Hidden in the live lobby — parked on Team 1 and still counted">hidden</span>'
+        : '<span class="vt-tools-balonce-row-unsplit" title="No team slot in the live lobby yet — parked on Team 1 by default">unsplit</span>');
     return `
       <div class="vt-tools-balonce-row" draggable="true"
            data-vt-balonce-key="${escapeHtml(key)}"
@@ -918,7 +920,7 @@
         ${cmdrEloChip}
         ${tierBadge}
         ${provisionalChip}
-        ${unsplitChip}
+        ${slotChip}
         <span class="vt-tools-balonce-row-vtsr">${Math.round(p.vtsr)}</span>
       </div>
     `;
