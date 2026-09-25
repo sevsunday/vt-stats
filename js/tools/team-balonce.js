@@ -24,18 +24,19 @@
  *   already priced into the wins that built it.
  *
  * Algorithm:
- *   1. Determine commander setup (0, 1, or 2 set manually).
- *   2. For unset commander slots, run candidacy ranking:
- *        candidacy = vtsr_z + 1.5 * cmdr_experience_z
- *        cmdr_experience = matches_as_commander / max(matches_played, 1)
- *      Tie-break by raw matches_as_commander DESC.
- *   3. Partition remaining thugs across two teams. Enumerate ALL 2^M
- *      non-trivial subsets (skip empty + full) — handles odd lobbies
- *      naturally (4v3, 5v4, etc). Enforce |team| <= 5 (incl. cmdr).
- *      Objective: with both commanders set, minimize |P - 0.5| (so a
- *      weaker commander is compensated with stronger thugs), tie-broken
- *      by |sum(team1) - sum(team2)|. Otherwise the legacy sum-delta
- *      objective, unchanged.
+ *   1. Determine commander setup (0, 1, or 2 set manually). With 0 or 1
+ *      set the meter uses thug ratings only. Nothing is auto-filled.
+ *   2. Auto balance (header button) searches every ordered commander
+ *      pair in the playing roster, then the best thug split under that
+ *      pair. Ignored players are excluded; hidden and unsplit players
+ *      stay in. Objective: minimize |P - 0.5| with both VTSR-C terms,
+ *      tie-broken by |sum(team1) - sum(team2)|, then by fewer players
+ *      moved off their current team. Each side stays between 1 and 5.
+ *      More than 10 playing players cannot fit; the layout is left as-is.
+ *   3. findBestPartition enumerates every 2^M thug subset for a fixed
+ *      commander pair (odd lobbies included: 4v3, 5v4, 1v1). With both
+ *      commanders set it minimizes |P - 0.5|; otherwise the legacy
+ *      sum-delta objective.
  *   4. Render two team columns + Balonce Meter + scenario banner.
  *
  * Drag-to-swap: HTML5 drag-and-drop. Cross-column moves recompute the
@@ -110,7 +111,7 @@
    *                isCommander flags. Roster updates resync commanders.
    *                Visible in the header as a green "Live" chip.
    *   - 'manual' : commanderSetup was explicitly set by the user (via
-   *                dropdown, Suggest button, commander context-menu
+   *                dropdown, Auto balance, commander context-menu
    *                item, or a commander-row drag). Roster updates DON'T
    *                resync commanders. Visible as a muted "Manual" chip.
    *                Ignoring a player does not enter this mode.
@@ -183,18 +184,6 @@
   }
 
   // ---------------------------------------------------------------- Stats helpers
-
-  function meanStd(values) {
-    if (!values.length) return { mean: 0, std: 0 };
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
-    const std = Math.sqrt(variance);
-    return { mean, std: std > 0 ? std : 1e-6 };
-  }
-
-  function zscore(value, mean, std) {
-    return (value - mean) / std;
-  }
 
   function mean(values) {
     if (!values.length) return null;
@@ -302,26 +291,6 @@
     };
   }
 
-  // ---------------------------------------------------------------- Candidacy ranking
-
-  function rankCandidates(pool) {
-    if (pool.length === 0) return [];
-    const vtsrs = pool.map((p) => p.vtsr);
-    const exps = pool.map((p) => (p.matchesPlayed > 0 ? p.matchesAsCmdr / p.matchesPlayed : 0));
-    const vtsrStats = meanStd(vtsrs);
-    const expStats = meanStd(exps);
-    const scored = pool.map((p) => ({
-      player: p,
-      score: zscore(p.vtsr, vtsrStats.mean, vtsrStats.std)
-        + 1.5 * zscore(p.matchesPlayed > 0 ? p.matchesAsCmdr / p.matchesPlayed : 0, expStats.mean, expStats.std),
-    }));
-    scored.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.player.matchesAsCmdr - a.player.matchesAsCmdr;
-    });
-    return scored.map((s) => s.player);
-  }
-
   // ---------------------------------------------------------------- Partition
 
   /**
@@ -423,6 +392,65 @@
     };
   }
 
+  /**
+   * How many players this partition would move off their current column.
+   * A missing assignment counts as a move, so a first layout is stable
+   * only against itself on a second click.
+   */
+  function movesFromCurrent(partition) {
+    let moves = 0;
+    const sides = [partition.team1, partition.team2];
+    for (let s = 0; s < sides.length; s++) {
+      const team = s + 1;
+      const keys = sides[s];
+      for (let i = 0; i < keys.length; i++) {
+        if (assignmentOverride.get(keys[i]) !== team) moves++;
+      }
+    }
+    return moves;
+  }
+
+  /**
+   * Search every ordered commander pair in `roster`, then the best thug
+   * split under that pair. Closest to 50% wins; a tied probability keeps
+   * the smaller rating-sum gap; a tie there keeps the layout that moves
+   * fewer players. Returns null when the roster cannot fit in two teams
+   * of TEAM_SLOT_CAP (or has fewer than 2 players).
+   */
+  function findBestBalance(roster) {
+    const n = roster.length;
+    if (n < 2 || n > TEAM_SLOT_CAP * 2) return null;
+    let best = null;
+    let bestPrimary = Infinity;
+    let bestTie = Infinity;
+    let bestMoves = Infinity;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const thugs = [];
+        for (let k = 0; k < n; k++) {
+          if (k !== i && k !== j) thugs.push(roster[k]);
+        }
+        const part = findBestPartition(thugs, roster[i], roster[j]);
+        if (!part) continue;
+        const primary = Math.abs(part.probT1 - 0.5);
+        const tie = part.delta;
+        const moves = movesFromCurrent(part);
+        const betterPrimary = primary < bestPrimary - 1e-12;
+        const tiedPrimary = Math.abs(primary - bestPrimary) <= 1e-12;
+        const betterTie = tie < bestTie - 1e-9;
+        const tiedTie = Math.abs(tie - bestTie) <= 1e-9;
+        if (betterPrimary || (tiedPrimary && betterTie) || (tiedPrimary && tiedTie && moves < bestMoves)) {
+          bestPrimary = primary;
+          bestTie = tie;
+          bestMoves = moves;
+          best = { partition: part, cmdr1: roster[i], cmdr2: roster[j] };
+        }
+      }
+    }
+    return best;
+  }
+
   // ---------------------------------------------------------------- Compute & broadcast
 
   function getActiveCommanders() {
@@ -439,8 +467,8 @@
     //
     //   LIVE   — the panel is a passive mirror of the lobby. Every
     //            player is placed by `p.liveTeam`. No best-balance
-    //            search happens here — findBestPartition is reserved
-    //            for the magic-wand "Suggest" button.
+    //            search happens here — findBestBalance is reserved
+    //            for the Auto balance button.
     //
     //   MANUAL — the panel is a sandbox. `assignmentOverride` is the
     //            authoritative layout. We preserve user assignments
@@ -658,14 +686,26 @@
   }
 
   /**
-   * Gates the three pill-icon buttons in the card header:
-   *   - swap-cmdrs : only when both commander slots are set
-   *   - reset      : only when live data backs the roster
-   *                  (otherwise "snap back to live" has no destination)
-   *   - auto-suggest : always enabled when there are >= 2 players
-   *                    (handled by the n<2 early return in render())
+   * Gates the header buttons:
+   *   - auto balance : 2 through 10 playing players (two teams of 5)
+   *   - swap-cmdrs   : only when both commander slots are set
+   *   - reset        : only when live data backs the roster
+   *                    (otherwise "snap back to live" has no destination)
    */
   function updateHeaderButtons() {
+    const playingCount = playingRoster().length;
+    if (autoSuggestBtn) {
+      const tooSmall = playingCount < 2;
+      const tooBig = playingCount > TEAM_SLOT_CAP * 2;
+      autoSuggestBtn.disabled = tooSmall || tooBig;
+      if (tooBig) {
+        autoSuggestBtn.title = 'More than 10 players still counted. Two teams of 5 cannot hold everyone — ignore someone first.';
+      } else if (tooSmall) {
+        autoSuggestBtn.title = 'Add at least 2 players to auto balance';
+      } else {
+        autoSuggestBtn.title = 'Pick both commanders and the thug split closest to even (switches to Manual)';
+      }
+    }
     const setCount = (playingCommanderKey(1) ? 1 : 0) + (playingCommanderKey(2) ? 1 : 0);
     if (swapCmdrsBtn) {
       swapCmdrsBtn.disabled = setCount !== 2;
@@ -734,7 +774,7 @@
     if (mode === 'live') {
       chip.classList.add('vt-tools-balonce-mode--live');
       chip.innerHTML = '<i class="bi bi-broadcast" aria-hidden="true"></i>Live';
-      chip.title = 'Team columns mirror the live lobby. Drag, swap, suggest, or setting a commander switches to Manual. Ignoring a player does not.';
+      chip.title = 'Team columns mirror the live lobby. Drag, swap, Auto balance, or setting a commander switches to Manual. Ignoring a player does not.';
     } else {
       chip.classList.add('vt-tools-balonce-mode--manual');
       chip.innerHTML = '<i class="bi bi-pencil-fill" aria-hidden="true"></i>Manual';
@@ -748,13 +788,15 @@
       ? `<div class="vt-tools-balonce-banner-note small mt-1">${provisionalCount} provisional player${provisionalCount === 1 ? '' : 's'} included — balance has reduced confidence.</div>`
       : '';
 
+    const fitNote = renderFitNote();
     if (setCount === 0) {
       return `
         <div class="vt-tools-balonce-banner vt-tools-balonce-banner--orange">
           <i class="bi bi-info-circle me-1"></i>
           <strong>0 commanders set.</strong>
-          Commander picks suggested from VTSR-T + commander match count. The prediction below is running on thug ratings alone until both commanders are set — the commander gap is the strongest part of the model.
+          The prediction is using thug ratings only. Auto balance picks both commanders and the thug split.
           ${provisionalNote}
+          ${fitNote}
         </div>
       `;
     }
@@ -763,8 +805,9 @@
         <div class="vt-tools-balonce-banner vt-tools-balonce-banner--yellow">
           <i class="bi bi-info-circle me-1"></i>
           <strong>1 of 2 commanders set.</strong>
-          Suggesting the second commander from VTSR-T + commander match count. The prediction still uses thug ratings only — set both commanders to bring VTSR-C into it.
+          VTSR-C stays out of the prediction until both commanders are set. Auto balance fills both slots and splits the thugs.
           ${provisionalNote}
+          ${fitNote}
         </div>
       `;
     }
@@ -793,8 +836,16 @@
         <span class="vt-tools-balonce-cmdr-delta-chip ms-2">${gapTxt}</span>
         ${provChips}
         ${provisionalNote}
+        ${renderFitNote()}
       </div>
     `;
+  }
+
+  /** Shown when the playing roster cannot fit in two teams of 5. */
+  function renderFitNote() {
+    const n = playingRoster().length;
+    if (n <= TEAM_SLOT_CAP * 2) return '';
+    return `<div class="vt-tools-balonce-banner-note small mt-1">${n} players still counted. Two teams of 5 cannot hold everyone — ignore someone, then Auto balance can run.</div>`;
   }
 
   function renderCmdrConfig() {
@@ -1165,7 +1216,7 @@
     if (newTeam === oldTeam) return;
 
     // No slot-cap check on drag. The 5-per-team rule is an algorithm
-    // constraint inside findBestPartition (magic-wand only) — manual
+    // constraint inside findBestPartition (Auto balance only) — manual
     // experiments are free to stack any split (2v8, 1v9, etc).
 
     // Is the dragged player a commander? Two sub-cases:
@@ -1441,17 +1492,22 @@
   // ---------------------------------------------------------------- Auto-suggest / reset
 
   function autoSuggestBoth() {
-    commanderSetup = { team1: null, team2: null };
+    const roster = playingRoster();
+    if (roster.length < 2 || roster.length > TEAM_SLOT_CAP * 2) return;
+    const best = findBestBalance(roster);
+    if (!best) return;
     manualSwaps.clear();
-    const ranked = rankCandidates(playingRoster());
-    if (ranked.length >= 1) commanderSetup.team1 = playerKey(ranked[0]);
-    if (ranked.length >= 2) commanderSetup.team2 = playerKey(ranked[1]);
-    // Suggest is an algorithmic pick, not live truth → Manual mode.
+    commanderSetup = {
+      team1: playerKey(best.cmdr1),
+      team2: playerKey(best.cmdr2),
+    };
+    // An algorithmic pick, not live truth → Manual mode.
     flipToManual('suggest');
-    // Also run the best-balance partition so the magic-wand delivers a
-    // full layout (not just commander picks). Mirrors the legacy
-    // expectation that "Suggest" produces a usable balance.
-    runBestPartitionIntoManual();
+    bestPartition = best.partition;
+    assignmentOverride = new Map();
+    for (const key of best.partition.team1) assignmentOverride.set(key, 1);
+    for (const key of best.partition.team2) assignmentOverride.set(key, 2);
+    updateMainState();
     render();
   }
 
@@ -1476,36 +1532,6 @@
     render();
   }
 
-  /**
-   * Run findBestPartition with the current commanderSetup and write the
-   * result into assignmentOverride. Used by the magic-wand button so a
-   * single click yields both balanced commanders AND a balanced thug
-   * split. Mode is assumed to already be 'manual' (caller's job).
-   */
-  function runBestPartitionIntoManual() {
-    const { cmdr1, cmdr2 } = getActiveCommanders();
-    const usedKeys = new Set();
-    if (cmdr1) usedKeys.add(playerKey(cmdr1));
-    if (cmdr2) usedKeys.add(playerKey(cmdr2));
-    const thugs = playingRoster().filter((p) => !usedKeys.has(playerKey(p)));
-    bestPartition = findBestPartition(thugs, cmdr1, cmdr2);
-    assignmentOverride = new Map();
-    if (bestPartition) {
-      for (const key of bestPartition.team1) assignmentOverride.set(key, 1);
-      for (const key of bestPartition.team2) assignmentOverride.set(key, 2);
-    }
-    updateMainState();
-  }
-
-  /**
-   * Snap back to the live lobby layout. Universal "exit Manual" lever:
-   * clears every override (commanderSetup, manualSwaps, assignmentOverride)
-   * and flips mode to 'live'. compute() then re-derives both team columns
-   * AND commander assignments from the latest roster's live flags.
-   *
-   * The button this drives is disabled when no live truth exists in the
-   * roster (every `p.liveTeam` is null) — see render() for the gating.
-   */
   /**
    * Put the columns back to the match this page was opened from.
    * Does not change the rating era.
@@ -1567,6 +1593,15 @@
     mode = 'manual';
   }
 
+  /**
+   * Snap back to the live lobby layout. Universal "exit Manual" lever:
+   * clears every override (commanderSetup, manualSwaps, assignmentOverride)
+   * and flips mode to 'live'. compute() then re-derives both team columns
+   * AND commander assignments from the latest roster's live flags.
+   *
+   * The button this drives is disabled when no live truth exists in the
+   * roster (every `p.liveTeam` is null) — see render() for the gating.
+   */
   function snapToLive() {
     ignoredKeys.clear();
     manualSwaps.clear();
