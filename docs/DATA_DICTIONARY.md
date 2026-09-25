@@ -1265,6 +1265,8 @@ Pilot snipes from `UnitSniped` events. Phase 3 enriched the proto event with sho
 
 Player movement analytics derived from `UpdateTick` events. Captured positions are downsampled to **1 Hz** in the processed JSON regardless of source `tick_rate`. When a session has no `UpdateTick` events, the block is still emitted with `has_position_data: false` and empty `players`.
 
+The 3D replay additionally reads `data/processed/replay/<match_id>.bin.gz` (`PIPELINE_VERSION` 54): every non-placeholder `UpdateTick` at the recording's own `tick_rate` (20 Hz on current sessions, 30 Hz on Power Struggle). The 1 Hz trail above is unchanged and remains the input for ratings, heatmaps, and the dashboard. A missing sidecar falls back to that 1 Hz trail. Gzip-wrapped little-endian `VTR1`: `uint16` version + player count, then per player a utf-8 name and packed samples (`float32` t/x/y/z/speed, `uint8` hp/ammo/target; hp/ammo `255` = no cap). `t` is `(tick − min_tick) / tick_rate`. Not in the match JSON, not in contributions, not a rating input.
+
 ##### Axis Convention
 
 - **+X = East, −X = West**

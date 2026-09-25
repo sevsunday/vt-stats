@@ -109,6 +109,125 @@ export async function loadMatchData(id, onProgress) {
   return fetchJsonWithProgress(url, onProgress);
 }
 
+// Native-rate replay sidecar. Written by process_stats.py as
+// data/processed/replay/<id>.bin.gz. A missing file is a normal fallback
+// to the 1 Hz positioning trail (matches not yet reprocessed).
+const REPLAY_TRACK_DIR = `${MATCH_JSON_DIR}/replay`;
+const REPLAY_RATIO_MISSING = 255;
+const TRAIL_TELEPORT_MIN_SPEED = 300;
+
+export async function loadReplayTrack(matchId) {
+  let res;
+  try {
+    res = await fetch(`${REPLAY_TRACK_DIR}/${encodeURIComponent(matchId)}.bin.gz`);
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  if (typeof DecompressionStream !== 'function') return null;
+  const gz = await res.arrayBuffer();
+  const stream = new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'));
+  const raw = await new Response(stream).arrayBuffer();
+  return decodeReplayTrack(raw);
+}
+
+/**
+ * Decode a VTR1 replay track into { name: trail }. Each trail matches the
+ * shape interpolateTrailXYZ already reads, plus segments rebuilt at the
+ * 300 u/s teleport floor.
+ */
+export function decodeReplayTrack(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length < 8) return null;
+  if (String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== 'VTR1') return null;
+  const view = new DataView(buffer);
+  const version = view.getUint16(4, true);
+  if (version !== 1) return null;
+  const playerCount = view.getUint16(6, true);
+  const decoder = new TextDecoder();
+  let off = 8;
+  const out = {};
+  for (let p = 0; p < playerCount; p++) {
+    if (off + 2 > bytes.length) return null;
+    const nameLen = view.getUint16(off, true);
+    off += 2;
+    if (off + nameLen + 4 > bytes.length) return null;
+    const name = decoder.decode(bytes.subarray(off, off + nameLen));
+    off += nameLen;
+    const n = view.getUint32(off, true);
+    off += 4;
+    if (off + n * 23 > bytes.length) return null;
+    const t = new Array(n);
+    const x = new Array(n);
+    const y = new Array(n);
+    const z = new Array(n);
+    const hp = new Array(n);
+    const ammo = new Array(n);
+    const target = new Array(n);
+    const speed = new Array(n);
+    for (let i = 0; i < n; i++) {
+      t[i] = view.getFloat32(off, true); off += 4;
+      x[i] = view.getFloat32(off, true); off += 4;
+      y[i] = view.getFloat32(off, true); off += 4;
+      z[i] = view.getFloat32(off, true); off += 4;
+      const spd = view.getFloat32(off, true); off += 4;
+      const hpB = bytes[off++];
+      const ammoB = bytes[off++];
+      const tgtB = bytes[off++];
+      hp[i] = hpB === REPLAY_RATIO_MISSING ? null : hpB / 254;
+      ammo[i] = ammoB === REPLAY_RATIO_MISSING ? null : ammoB / 254;
+      target[i] = tgtB ? 1 : 0;
+      speed[i] = Number.isFinite(spd) ? spd : null;
+    }
+    const trail = { t, x, y, z, hp, ammo, target, speed };
+    trail.segments = buildReplaySegments(trail);
+    out[name] = trail;
+  }
+  return out;
+}
+
+/** Split a dense trail where a step exceeds 300 u/s. Same floor the 1 Hz prefix skip uses. */
+export function buildReplaySegments(trail) {
+  const t = trail.t || [];
+  const x = trail.x || [];
+  const z = trail.z || [];
+  const n = t.length;
+  if (!n) return [];
+  const segments = [];
+  let segStart = 0;
+  for (let i = 1; i < n; i++) {
+    const dt = t[i] - t[i - 1];
+    const speed = dt > 0 ? Math.hypot(x[i] - x[i - 1], z[i] - z[i - 1]) / dt : 0;
+    if (speed > TRAIL_TELEPORT_MIN_SPEED) {
+      segments.push([segStart, i - 1]);
+      segStart = i;
+    }
+  }
+  segments.push([segStart, n - 1]);
+  return segments;
+}
+
+/**
+ * Replace each positioned player's 1 Hz trail with the native-rate track.
+ * Players absent from the sidecar keep the 1 Hz trail. Returns how many
+ * rows were replaced.
+ */
+export function applyReplayTrack(matchData, track) {
+  const players = matchData && matchData.positioning && matchData.positioning.players;
+  if (!players || !track) return 0;
+  let replaced = 0;
+  for (const [name, trail] of Object.entries(track)) {
+    const row = players[name];
+    if (!row || !trail || !trail.t || !trail.t.length) continue;
+    row.trail = trail;
+    row.first_seen_sec = trail.t[0];
+    row.last_seen_sec = trail.t[trail.t.length - 1];
+    row.sample_count = trail.t.length;
+    replaced++;
+  }
+  return replaced;
+}
+
 // -------------------- Calibration tier --------------------
 
 const CALIB_TIER_PRIORITY = {
@@ -416,8 +535,6 @@ function upperBound(arr, target) {
 // -------------------- Trail interpolation (XYZ) --------------------
 
 // Same floor as POSITIONING_TELEPORT_MIN_SPEED in scripts/process_stats.py.
-const TRAIL_TELEPORT_MIN_SPEED = 300;
-
 /**
  * Skip a leading singleton teleport prefix (collector tick-0 position
  * unset — often world origin). Unreprocessed JSON still has

@@ -29,6 +29,10 @@ import * as THREE from 'three';
 
 const MODES = ['free', 'chase', 'topdown', 'cinema'];
 
+const MOVE_SPEED_M_S = 40;
+const MOVE_FAST_MULT = 4;
+const MOVE_GROUND_CLEAR_M = 8;
+
 const CHASE_BACK_DIST_M  = 80;
 const CHASE_UP_DIST_M    = 25;
 const CHASE_LOOKAHEAD_M  = 8;     // target slightly ahead of actor
@@ -79,9 +83,16 @@ export function createCameraController(camera, orbitControls, mapData) {
     },
     // External scoring inputs (provided by caller via setCinemaInputs)
     cinemaInputs: { killIndex: null, getProgressSec: () => 0, mapData },
-    // For non-free modes we want to disable damping in OrbitControls so our
-    // own lerps drive the camera; in free we re-enable it.
+    // WASD / QE slide the free-orbit camera and its target together.
+    move: {
+      keys: new Set(),
+      getGroundY: null,
+    },
   };
+
+  const _moveDir = new THREE.Vector3();
+  const _moveRight = new THREE.Vector3();
+  const _moveUp = new THREE.Vector3(0, 1, 0);
 
   function setCinemaInputs(inputs) {
     state.cinemaInputs = { ...state.cinemaInputs, ...inputs };
@@ -91,14 +102,11 @@ export function createCameraController(camera, orbitControls, mapData) {
     if (!MODES.includes(mode)) return;
     if (state.mode === mode) return;
 
-    // Snapshot the current camera state so we can blend out from it.
     const startPos = camera.position.clone();
     const startTgt = orbitControls.target.clone();
 
     state.mode = mode;
 
-    // Compute the target end-of-transition pose for the new mode using a
-    // single lookahead frame. Live updates after that take over.
     const target = computeTargetPose(state, mode, camera, orbitControls, mapData);
     state.transition = {
       startPos,
@@ -108,7 +116,6 @@ export function createCameraController(camera, orbitControls, mapData) {
       elapsed: 0,
     };
 
-    // Re-enable / disable OrbitControls input depending on mode.
     orbitControls.enabled = (mode === 'free');
   }
 
@@ -161,10 +168,19 @@ export function createCameraController(camera, orbitControls, mapData) {
         break;
       case 'free':
       default:
-        updateFree(state, camera, orbitControls);
+        slideFree(state, camera, orbitControls, dtSec, _moveDir, _moveRight, _moveUp);
         orbitControls.update();
         break;
     }
+  }
+
+  function moveKey(code, down) {
+    if (down) state.move.keys.add(code);
+    else state.move.keys.delete(code);
+  }
+
+  function setMoveGround(fn) {
+    state.move.getGroundY = fn || null;
   }
 
   return {
@@ -175,6 +191,9 @@ export function createCameraController(camera, orbitControls, mapData) {
     update,
     setChaseYaw: y => { state.chaseYaw = y; },
     setCinemaInputs,
+    moveKey,
+    clearMoveKeys: () => state.move.keys.clear(),
+    setMoveGround,
   };
 }
 
@@ -374,7 +393,55 @@ function updateTopDown(state, camera, orbitControls, mapData) {
 }
 
 function updateFree(state, camera, orbitControls) {
-  // OrbitControls handles everything. Nothing to do per-frame.
+  // OrbitControls handles orbit, pan, and zoom. WASD is applied first.
+}
+
+function slideFree(state, camera, orbitControls, dtSec, dir, right, up) {
+  if (state.mode !== 'free') return;
+  const keys = state.move.keys;
+  if (!keys.size || !(dtSec > 0) || dtSec >= 0.25) return;
+  camera.getWorldDirection(dir);
+  const horizLen = Math.hypot(dir.x, dir.z) || 1;
+  const fx = dir.x / horizLen;
+  const fz = dir.z / horizLen;
+  right.crossVectors(dir, up);
+  right.y = 0;
+  if (right.lengthSq() < 1e-8) right.set(1, 0, 0);
+  else right.normalize();
+  let mx = 0;
+  let my = 0;
+  let mz = 0;
+  if (keys.has('KeyW')) { mx += fx; mz += fz; }
+  if (keys.has('KeyS')) { mx -= fx; mz -= fz; }
+  if (keys.has('KeyD')) { mx += right.x; mz += right.z; }
+  if (keys.has('KeyA')) { mx -= right.x; mz -= right.z; }
+  if (keys.has('KeyE')) my += 1;
+  if (keys.has('KeyQ')) my -= 1;
+  const mag = Math.hypot(mx, my, mz);
+  if (mag <= 0) return;
+  const fast = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const speed = MOVE_SPEED_M_S * (fast ? MOVE_FAST_MULT : 1);
+  const s = speed * dtSec / mag;
+  mx *= s;
+  my *= s;
+  mz *= s;
+  camera.position.x += mx;
+  camera.position.y += my;
+  camera.position.z += mz;
+  orbitControls.target.x += mx;
+  orbitControls.target.y += my;
+  orbitControls.target.z += mz;
+  if (state.move.getGroundY) {
+    const ground = state.move.getGroundY(camera.position.x, camera.position.z);
+    if (ground != null && Number.isFinite(ground)) {
+      const floor = ground + MOVE_GROUND_CLEAR_M;
+      const lift = floor - camera.position.y;
+      if (lift > 0) {
+        camera.position.y += lift;
+        orbitControls.target.y += lift;
+      }
+    }
+  }
 }
 
 function shortestAngleDelta(a, b) {

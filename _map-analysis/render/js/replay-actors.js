@@ -339,8 +339,11 @@ export function setActorShipODF(actor, newOdf, odfMap, onChange) {
 // ============================================================================
 
 const TRAIL_LOOKBACK_SEC   = 10;     // window length (shortened to cut noise)
-const MAX_TRAIL_SAMPLES    = 24;     // 10s @ 1Hz + interpolated head + slack
+const MAX_TRAIL_SAMPLES    = 320;    // 10s at 30 Hz + slack (native tick rate)
 const TRAIL_BASE_OPACITY   = 0.70;   // head opacity; tail fades to 0
+// Time constant that matches the old per-frame alpha of 0.25 at 60 fps,
+// so a 144 Hz panel yaws at the same wall-clock rate.
+const HEADING_TAU_SEC      = 0.058;
 
 
 // ------------------ Per-frame update ------------------
@@ -373,7 +376,8 @@ const TRAIL_BASE_OPACITY   = 0.70;   // head opacity; tail fades to 0
  */
 export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
   const baseOffsetM = (hm && hm.baseOffsetM) || 0;
-  const HEADING_ALPHA = 0.25;  // low-pass coefficient on yaw (per plan)
+  const dtSec = (opts.dtSec > 0) ? opts.dtSec : (1 / 60);
+  const headingAlpha = 1 - Math.exp(-dtSec / HEADING_TAU_SEC);
   const tracker      = opts.shipTracker || null;
   const odfMap       = opts.odfMap || null;
   const onShipChange = opts.onShipChange || null;
@@ -446,7 +450,8 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
         // -Z (north as drawn) so use the standard atan2(-dz, dx).
         const targetYaw = Math.atan2(-dz, dx);
         // Wrap-aware low-pass: shortest-arc lerp between angles.
-        actor.headingRad = lerpAngle(actor.headingRad, targetYaw, HEADING_ALPHA);
+        // Time-based so 60 Hz and 144 Hz panels turn at the same rate.
+        actor.headingRad = lerpAngle(actor.headingRad, targetYaw, headingAlpha);
         actor.mesh.rotation.set(0, actor.headingRad, 0);
       }
     }

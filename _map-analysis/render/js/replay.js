@@ -30,7 +30,9 @@ import {
   buildKillIndex,
   getTickRate,
   usefulInGameNick,
-} from './replay-data.js?v=recycler-mobile';
+  loadReplayTrack,
+  applyReplayTrack,
+} from './replay-data.js?v=replay-hz';
 import {
   buildActorsGroup,
   updateActors,
@@ -42,7 +44,7 @@ import {
   updateActorLabels,
   applyVitalBars,
   applyShipModelMode,
-} from './replay-actors.js';
+} from './replay-actors.js?v=replay-hz';
 import {
   initModelsPref,
   modelsEnabled,
@@ -60,8 +62,8 @@ import {
   buildTLockDiamonds,
   updateTLockDiamonds,
 } from './replay-fx.js';
-import { createCameraController } from './replay-cameras.js';
-import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=recycler-mobile';
+import { createCameraController } from './replay-cameras.js?v=wasd-free4';
+import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=replay-hz';
 import {
   buildEngagementLines,
   updateEngagements,
@@ -250,6 +252,11 @@ async function boot() {
   STATE.tickRate = getTickRate(matchData);
   STATE.totalSec = (matchData.match && matchData.match.duration_sec) || 0;
   STATE.progressSec = Math.max(0, Math.min(STATE.totalSec, params.t || 0));
+  // Overlaps the terrain fetch. A 404 or decode failure leaves the 1 Hz trail.
+  const replayTrackPromise = loadReplayTrack(params.match).catch((err) => {
+    console.warn('Native-rate replay track unavailable; using 1 Hz trail.', err);
+    return null;
+  });
 
   statusStep(`Terrain · ${stem}.3d.json`);
   let mapData;
@@ -278,6 +285,11 @@ async function boot() {
   const initialFloor = params.floor || (hasTiles ? 'tiles' : recommendedFloor);
 
   statusStep('Roster');
+  const replayTrack = await replayTrackPromise;
+  if (replayTrack) {
+    const replaced = applyReplayTrack(matchData, replayTrack);
+    if (!replaced) console.warn('Replay track matched no roster names; using 1 Hz trail.');
+  }
   STATE.roster      = buildRoster(matchData);
   STATE.killIndex   = buildKillIndex(matchData);
   // Per-player ship-at-tick tracker. Walks kills.feed, pickups.feed, and
@@ -372,6 +384,7 @@ async function boot() {
   if (params.focus) focusActor(params.focus, /*forceCamSwitch*/ false);
 
   // Apply ?cam= URL param last so it wins over the auto-switch from focus.
+  if (params.cam === 'fly') params.cam = 'free';
   if (params.cam && ['free', 'chase', 'topdown', 'cinema'].includes(params.cam)) {
     setCameraMode(params.cam);
   }
@@ -711,13 +724,24 @@ function initCamera(mapData) {
   controls.target.set(wr.centerX, 0, wr.centerZ);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.minDistance = 50;
+  controls.minDistance = 5;
   controls.maxDistance = 4000;
   controls.maxPolarAngle = Math.PI / 2.05;
   controls.update();
   STATE.controls = controls;
 
   STATE.cameraCtl = createCameraController(cam, controls, { ...mapData, worldRect: wr });
+  STATE.cameraCtl.setMoveGround((x, zCam) => {
+    const hm = mapData.heightmap;
+    if (!hm || !hm.cellMetersX || !hm.cellMetersZ) return null;
+    const wz = -zCam;
+    const u = (x - hm.worldOriginX) / hm.cellMetersX;
+    const v = (wz - hm.worldOriginZ) / hm.cellMetersZ;
+    if (u < 0 || v < 0 || u >= hm.cellsX - 1 || v >= hm.cellsZ - 1) return null;
+    const abs = sampleTerrainHeight(hm, x, wz);
+    const base = hm.baseOffsetM || 0;
+    return (abs - base) * (STATE.terrainExaggeration || 1);
+  });
   STATE.camMode = 'free';
   // Cinema needs read access to the kill index + current playback time.
   STATE.cameraCtl.setCinemaInputs({
@@ -1341,6 +1365,7 @@ function focusActor(name, forceCamSwitch = true) {
 }
 
 function setCameraMode(mode) {
+  if (mode === 'fly') mode = 'free';
   if (!['free', 'chase', 'topdown', 'cinema'].includes(mode)) return;
   STATE.camMode = mode;
   if (STATE.cameraCtl) STATE.cameraCtl.setMode(mode);
@@ -1459,6 +1484,22 @@ function wireKeyboard() {
       case 'Digit2': e.preventDefault(); setCameraMode('chase');   break;
       case 'Digit3': e.preventDefault(); setCameraMode('topdown'); break;
 
+      case 'KeyW':
+      case 'KeyA':
+      case 'KeyS':
+      case 'KeyD':
+      case 'KeyQ':
+      case 'KeyE':
+        if (STATE.cameraCtl) {
+          e.preventDefault();
+          STATE.cameraCtl.moveKey(e.code, true);
+        }
+        break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        if (STATE.cameraCtl) STATE.cameraCtl.moveKey(e.code, true);
+        break;
+
       case 'Escape':
         if (document.body.classList.contains('replay-roster-open')) {
           e.preventDefault();
@@ -1481,6 +1522,13 @@ function wireKeyboard() {
         togglePools();
         break;
     }
+  });
+
+  document.addEventListener('keyup', (e) => {
+    if (STATE.cameraCtl) STATE.cameraCtl.moveKey(e.code, false);
+  });
+  window.addEventListener('blur', () => {
+    if (STATE.cameraCtl) STATE.cameraCtl.clearMoveKeys();
   });
 }
 
@@ -1902,6 +1950,7 @@ function renderFrame(dtSec = 0) {
         shipTracker: STATE.shipTracker,
         odfMap,
         onShipChange: handleActorShipChange,
+        dtSec,
       },
     );
     // HP/ammo bars on the side roster follow the same live ratios.
