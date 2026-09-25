@@ -14,6 +14,7 @@ import math
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -137,7 +138,10 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 52 -> 53: terminal bench (match.schema_version 31). A player who stays
 # connected and stops fighting after a sticky leave is still rated, on
 # the lobby as it stood when they went quiet. Optional match.bench.
-PIPELINE_VERSION = 53
+# 53 -> 54: native-rate 3D replay sidecar
+# data/processed/replay/<id>.bin.gz. The 1 Hz positioning trail is
+# unchanged (ratings, heatmaps, dashboard). No match.schema_version bump.
+PIPELINE_VERSION = 54
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -208,6 +212,22 @@ ECON_REFUND_MIN_MATCH = ECON_LOOSE_SIZE
 LOW_HEALTH_RATIO = 0.25
 
 POSITIONING_SAMPLE_RATE_HZ = 1  # downsample UpdateTicks to 1 Hz regardless of source tick_rate
+
+# Native-rate replay track (PIPELINE_VERSION 54). Every non-placeholder
+# UpdateTick, written beside the match JSON so the 1 Hz trail stays the
+# rating / heatmap / dashboard input. Gzip-wrapped little-endian:
+#   magic b"VTR1"
+#   uint16 version, uint16 player_count
+#   repeated player:
+#     uint16 name_len, utf-8 name, uint32 sample_count
+#     sample_count * 23 bytes: float32 t,x,y,z,speed + uint8 hp,ammo,target
+# hp/ammo 255 = no resolvable ship cap. speed is NaN when the sample
+# had none. t is (tick - min_tick) / tick_rate, same origin as trail.t.
+REPLAY_TRACK_DIR = OUTPUT_DIR / "replay"
+REPLAY_TRACK_MAGIC = b"VTR1"
+REPLAY_TRACK_VERSION = 1
+REPLAY_RATIO_MISSING = 255
+_REPLAY_SAMPLE = struct.Struct("<fffffBBB")
 POSITIONING_SPAWN_SAMPLES = 3  # median of first N kept samples = spawn reference
 POSITIONING_TELEPORT_MIN_SPEED = 300.0  # u/s floor for teleport detection (self-calibrates upward)
 POSITIONING_TELEPORT_P99_MULT = 2.0  # teleport_threshold = max(MIN, p99_speed * this)
@@ -2761,6 +2781,59 @@ def detect_team_factions(slot_first_odf, slot_faction_votes):
 
 
 # --- Positioning helpers ---
+
+
+def _replay_ratio_byte(ratio):
+    """0-254 quantisation of a 0-1 ratio. 255 means the ship had no cap."""
+    if ratio is None:
+        return REPLAY_RATIO_MISSING
+    try:
+        value = float(ratio)
+    except (TypeError, ValueError):
+        return REPLAY_RATIO_MISSING
+    if not math.isfinite(value):
+        return REPLAY_RATIO_MISSING
+    return max(0, min(254, int(round(value * 254.0))))
+
+
+def write_replay_track(match_id, samples_by_name):
+    """Write the native-rate replay sidecar for one match.
+
+    samples_by_name maps the canonical nick to a list of
+    (t_sec, x, y, z, has_target, hp_ratio, ammo_ratio, speed).
+    Returns the written path, or None when the match has no samples.
+    The 1 Hz positioning trail is not touched.
+    """
+    players = [(name, rows) for name, rows in samples_by_name.items() if name and rows]
+    if not players or not match_id:
+        return None
+    players.sort(key=lambda item: item[0].lower())
+    REPLAY_TRACK_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = REPLAY_TRACK_DIR / f"{match_id}.bin.gz"
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    parts = [REPLAY_TRACK_MAGIC, struct.pack("<HH", REPLAY_TRACK_VERSION, len(players))]
+    for name, rows in players:
+        name_b = name.encode("utf-8")
+        parts.append(struct.pack("<H", len(name_b)))
+        parts.append(name_b)
+        parts.append(struct.pack("<I", len(rows)))
+        for t_sec, x, y, z, has_target, hp_ratio, ammo_ratio, speed in rows:
+            spd = float("nan") if speed is None else float(speed)
+            parts.append(_REPLAY_SAMPLE.pack(
+                float(t_sec),
+                float(round(x, 2)),
+                float(round(y, 2)),
+                float(round(z, 2)),
+                spd,
+                _replay_ratio_byte(hp_ratio),
+                _replay_ratio_byte(ammo_ratio),
+                1 if has_target else 0,
+            ))
+    payload = b"".join(parts)
+    with gzip.open(tmp_path, "wb", compresslevel=6) as handle:
+        handle.write(payload)
+    os.replace(tmp_path, out_path)
+    return out_path
 
 
 def _horiz_dist(ax, az, bx, bz):
@@ -5814,6 +5887,10 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
     # is_pilot flags on-foot samples (pilot ODF) so the VTSR-T low-tier at-base lift
     # can measure ship-denied time (on foot AND within the base radius).
     position_samples = defaultdict(list)
+    # Native-rate replay track. Same death-tick skip as the 1 Hz trail,
+    # but every surviving UpdateTick is kept. Never fed to
+    # _compute_positioning.
+    replay_samples = defaultdict(list)
     position_last_kept_tick = {}  # s64 -> last tick we kept a sample for (for 1 Hz downsample)
     tick_stride = max(1, tick_rate // POSITIONING_SAMPLE_RATE_HZ)
 
@@ -7118,8 +7195,20 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
                 # point at map centre in the heatmaps and the replay. Checked
                 # BEFORE the downsample gate so `position_last_kept_tick` does
                 # not advance; otherwise the next real sample is lost too.
+                # The native-rate replay track uses the same skip.
                 if _dead_tick:
                     continue
+
+                replay_samples[s64].append((
+                    tick,
+                    float(ps.position.x),
+                    float(ps.position.y),
+                    float(ps.position.z),
+                    has_target,
+                    hp_ratio,
+                    ammo_ratio,
+                    float(ps.speed),
+                ))
 
                 last_kept = position_last_kept_tick.get(s64)
                 if last_kept is not None and (tick - last_kept) < tick_stride:
@@ -9249,6 +9338,26 @@ def process_match(session, source_file, source_size_bytes, submitter, resolve_we
         if _resolved and (not _inst.get("name") or _inst["name"] == _inst.get("odf")):
             _inst["name"] = _resolved
 
+    # Native-rate replay sidecar. Populated above from every non-placeholder
+    # UpdateTick and written here so it never enters the match JSON, the
+    # contribution slice, or either rating. 1 Hz metrics are already done.
+    replay_by_name = {}
+    if min_tick != float("inf") and tick_rate > 0:
+        for s64, rows in replay_samples.items():
+            name = nick_for_s64(s64)
+            if not name or not rows:
+                continue
+            converted = []
+            for t_raw, x, y, z, has_target, hp_ratio, ammo_ratio, speed in rows:
+                t_sec = (t_raw - min_tick) / tick_rate
+                converted.append((t_sec, x, y, z, has_target, hp_ratio, ammo_ratio, speed))
+            replay_by_name[name] = converted
+    replay_path = write_replay_track(match_id, replay_by_name)
+    if replay_path is not None:
+        n_replay = sum(len(rows) for rows in replay_by_name.values())
+        print(f"  Replay track: {replay_path.name} ({n_replay:,} samples, "
+              f"{replay_path.stat().st_size:,} bytes)")
+
     return match_data
 
 
@@ -9565,6 +9674,8 @@ def _extract_contribution(match_data):
         "rivalry_matrix":  rivalry_matrix,
         "snipes_by_player":               snipes_by_player,
         "powerup_destructions_by_player": powerup_destructions_by_player,
+        # Operator void. The aggregator skips the whole match when true.
+        "void": bool(m.get("void")),
     }
 
 
@@ -10206,26 +10317,37 @@ def main():
         print(f"\n=== Outcome review: {len(candidates)} match(es) awaiting sign-off ===")
         for i, md in enumerate(candidates, 1):
             display = resolve_match_name(md["match"]["map"], registry)
-            outcome = adjudication_module.prompt_for_outcome(md, display, i, len(candidates))
-            if outcome is None:
+            answered = adjudication_module.prompt_for_outcome(md, display, i, len(candidates))
+            if answered is None:
                 print("   deferred -- will ask again next run")
                 continue
-            adj_store[md["match"]["id"]] = adjudication_module.make_entry(md, outcome)
+            outcome, voided = answered
+            adj_store[md["match"]["id"]] = adjudication_module.make_entry(
+                md, outcome, void=voided
+            )
             # Flush after every answer so Ctrl+C keeps prior progress.
             adjudication_module.save_adjudications(adj_store)
-            print(f"   recorded: {outcome}")
+            print(f"   recorded: {outcome}" + (" (void)" if voided else ""))
 
     # Reconciliation: apply every adjudication entry to its match's winner
     # block -- covers freshly answered prompts AND manual edits to the
     # adjudications file (idempotent; no --force needed). On change, the
     # in-memory dict mutates (downstream consumers see it this run) and the
     # per-match JSON is rewritten (durable for future cached runs).
-    n_adj_applied = 0
     rewritten_adj_paths = set()
     for md in all_match_data:
         mid = md["match"].get("id")
         entry = adj_store.get(mid)
         if not entry:
+            # Deleting the store entry puts a previously voided match back.
+            if md["match"].get("void") or md["match"].get("void_reason"):
+                md["match"].pop("void", None)
+                md["match"].pop("void_reason", None)
+                out_path = OUTPUT_DIR / f"{mid}.json"
+                if out_path not in rewritten_adj_paths:
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        json.dump(md, f, indent=2, ensure_ascii=False)
+                    rewritten_adj_paths.add(out_path)
             continue
         try:
             new_winner, changed = adjudication_module.apply_outcome(
@@ -10241,14 +10363,26 @@ def main():
             # operator outcome-flip never strands a stale story. Pure over
             # the match dict, so it works on cached matches too.
             restamp_storyline_outcome(md)
+        # Void is orthogonal to the winner. `v` on the prompt stores
+        # entry["void"]; a later edit to false (or deleting the key)
+        # puts the match back. Stamp before manifest / contributions /
+        # ELO / map stats / inactivity so this run sees it.
+        want_void = bool(entry.get("void"))
+        had_void = bool(md["match"].get("void"))
+        if want_void:
+            md["match"]["void"] = True
+            md["match"]["void_reason"] = "operator void"
+        else:
+            md["match"].pop("void", None)
+            md["match"].pop("void_reason", None)
+        if changed or had_void != want_void:
             out_path = OUTPUT_DIR / f"{mid}.json"
             if out_path not in rewritten_adj_paths:
                 with open(out_path, "w", encoding="utf-8") as f:
                     json.dump(md, f, indent=2, ensure_ascii=False)
                 rewritten_adj_paths.add(out_path)
-            n_adj_applied += 1
     if rewritten_adj_paths:
-        print(f"  Adjudicated outcomes applied to {len(rewritten_adj_paths)} match JSON(s)")
+        print(f"  Adjudication/void updates written to {len(rewritten_adj_paths)} match JSON(s)")
 
     # Build manifest using registry-resolved names (with filename fallback
     # for any map the registry couldn't satisfy).
@@ -10309,6 +10443,9 @@ def main():
             # of the bullet default; legacy lacks this data).
             "has_resource_data": match_data["match"].get("has_resource_data", False),
             "has_build_data": match_data["match"].get("has_build_data", False),
+            # Operator void (`v` on the outcome prompt). The match stays
+            # in the picker; ratings, career, and map counts skip it.
+            "void": bool(match_data["match"].get("void")),
         })
 
     manifest.sort(key=lambda m: m["date"])

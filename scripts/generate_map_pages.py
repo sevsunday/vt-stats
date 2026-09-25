@@ -199,6 +199,10 @@ def compute_map_stats(all_match_data: list[dict], registry: dict) -> dict:
     match_buckets: dict[str, list[dict]] = {}
     for md in all_match_data or []:
         m = md.get("match") or {}
+        # Operator void: the recording stays openable, but it is not a
+        # played game for match_count, duration, commanders, or recents.
+        if m.get("void"):
+            continue
         slug = map_slug(m.get("map") or "")
         if not slug:
             continue

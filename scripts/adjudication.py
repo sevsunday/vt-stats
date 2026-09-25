@@ -44,6 +44,10 @@ ADJUDICATIONS_SCHEMA_VERSION = 1
 # mirror the collector dialog's four buttons exactly; "unknown" is the
 # operator-only escape hatch ("I can't determine this, stop asking") that
 # signs the match off while leaving its resolution unclear.
+# "void" is NOT an outcome. The prompt key `v` sets entry["void"] = True
+# and confirms the current resolution (or signs off as unknown when there
+# is none). A void match keeps its winner and drops out of ratings, career
+# totals, commander records, and map counts.
 VALID_OUTCOMES = ("team1", "team2", "draw", "cancelled", "unknown")
 
 # Proto schema eras that require sign-off. v1/v2 predate the attestation
@@ -201,11 +205,15 @@ def apply_outcome(winner, outcome):
     return new, new != winner
 
 
-def make_entry(match_data, outcome):
-    """Build the adjudications-file entry for a freshly answered prompt."""
+def make_entry(match_data, outcome, void=False):
+    """Build the adjudications-file entry for a freshly answered prompt.
+
+    `void=True` keeps `outcome` as the recorded result and marks the match
+    so downstream stats ignore it. Absent `void` means the match counts.
+    """
     m = match_data.get("match") or {}
     winner = m.get("winner") or {}
-    return {
+    entry = {
         "outcome": outcome,
         "confirmed_existing": outcome == current_outcome_token(winner),
         "prior": {
@@ -218,6 +226,9 @@ def make_entry(match_data, outcome):
         "adjudicated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "note": None,
     }
+    if void:
+        entry["void"] = True
+    return entry
 
 
 # ---------------------------------------------------------------------------
@@ -353,13 +364,19 @@ def render_prompt(match_data, display_name, index, total):
         "",
         " Confirm the actual outcome:",
         "   1: Team 1 win   2: Team 2 win   3: Draw   4: Game cancelled",
+        "   v: Void — keep this result, but the game does not count",
         f"   {enter_hint}u: Unknown (leave unclear)   d: Defer (ask next run)",
     ]
     return "\n".join(lines)
 
 
 def prompt_for_outcome(match_data, display_name, index, total):
-    """Interactive prompt. Returns an outcome token, or None for defer.
+    """Interactive prompt. Returns `(outcome, void)` or None for defer.
+
+    `v` is not a winner. It confirms the current resolution when one
+    exists, otherwise signs the match off as unknown, and sets void so
+    the game drops out of ratings and career totals. The recorded result
+    stays whatever that outcome is.
 
     Piped-stdin friendly (--force-prompt testing path): EOF on stdin is
     treated as defer so a short answer file never blocks the run.
@@ -378,11 +395,15 @@ def prompt_for_outcome(match_data, display_name, index, total):
 
         if raw == "":
             if current is not None:
-                return current
-            print("   Nothing to confirm (resolution is unclear) — pick 1-4, u, or d.")
+                return (current, False)
+            print("   Nothing to confirm (resolution is unclear) — pick 1-4, v, u, or d.")
             continue
         if raw == "d":
             return None
+        if raw == "v":
+            # Unclear matches have nothing to keep; sign off as unknown
+            # so the prompt does not come back, and still void the game.
+            return (current if current is not None else "unknown", True)
         if raw in key_map:
-            return key_map[raw]
-        print("   Unrecognized — press 1, 2, 3, 4, u, d, or Enter.")
+            return (key_map[raw], False)
+        print("   Unrecognized — press 1, 2, 3, 4, v, u, d, or Enter.")

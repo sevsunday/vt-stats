@@ -710,6 +710,15 @@
   // specific-match picker, and the not-found error picker.
   manifest.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+  // Newest match that still counts. Void matches stay in the picker and
+  // open via ?match=, but they are not the default landing.
+  function newestOpenMatch() {
+    for (let i = 0; i < manifest.length; i++) {
+      if (!manifest[i].void) return manifest[i];
+    }
+    return manifest[0] || null;
+  }
+
   // --- Match picker: format helpers ---
   // Kept local to this scope so every renderer uses the same date / duration
   // formatting as the trigger buttons.
@@ -812,7 +821,7 @@
         ${thumbHtml}
         <div class="vt-match-picker-card-body">
           <div class="vt-match-picker-card-head">
-            <span class="vt-match-picker-card-title"><span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}</span>${vodMark}</span>
+            <span class="vt-match-picker-card-title"><span class="vt-match-picker-card-name">${esc(entry.name || entry.id)}</span>${entry.void ? '<span class="vt-void-chip">Void</span>' : ''}${vodMark}</span>
             <span class="vt-match-picker-card-meta">${esc(fmtDurationShort(entry.duration_sec))} &middot; ${pickerPlayerCount(entry)}p</span>
           </div>
           ${mapRaw}
@@ -1737,8 +1746,9 @@
 
   // Default selection (most-recent). Callers below will overwrite this
   // via updateMatchPickerTriggers() as they kick off loadMatch/loadAll.
-  if (manifest.length > 0) {
-    updateMatchPickerTriggers(manifest[0]);
+  const bootMatch = newestOpenMatch();
+  if (bootMatch) {
+    updateMatchPickerTriggers(bootMatch);
   }
 
   // Brand-home is a plain `<a href="index.html">` — let the browser do
@@ -5423,6 +5433,8 @@
     document.getElementById('info-duration').textContent = `${m}m ${s}s`;
     document.getElementById('info-players').textContent = info.player_count;
     document.getElementById('info-submitter').textContent = info.submitter || '—';
+    const voidBanner = document.getElementById('match-void-banner');
+    if (voidBanner) voidBanner.classList.toggle('d-none', !info.void);
     const rawLink = document.getElementById('info-raw-link');
     if (rawLink && info.id) {
       rawLink.href = `raw/?match=${encodeURIComponent(info.id)}`;
@@ -6226,7 +6238,9 @@
     // Unclear outcomes get no highlight (the kill-feed badge already
     // surfaces the ambiguity).
     const matchWinner = (currentData && currentData.match && currentData.match.winner) || null;
-    const winnerTeam = (matchWinner && (matchWinner.decided_by === 'adjudicated' || matchWinner.decided_by === 'attested' || matchWinner.decided_by === 'clean_win' || matchWinner.decided_by === 'contested'))
+    const matchVoid = !!(currentData && currentData.match && currentData.match.void);
+    // A voided game has no winner to crown. The header badge says Voided.
+    const winnerTeam = (!matchVoid && matchWinner && (matchWinner.decided_by === 'adjudicated' || matchWinner.decided_by === 'attested' || matchWinner.decided_by === 'clean_win' || matchWinner.decided_by === 'contested'))
       ? matchWinner.team
       : null;
     const t1Winner = winnerTeam === 1 ? ' vt-faction-panel--winner' : '';
@@ -6300,9 +6314,11 @@
       // Show the outcome badge on the faction section whenever there's
       // no winning panel to trophy: unclear (inference failed) plus the
       // v15 attested no-winner outcomes (draw / cancelled).
-      const winnerForOutcome = (matchWinner && (matchWinner.decided_by === 'unclear' || matchWinner.decided_by === 'draw' || matchWinner.decided_by === 'cancelled'))
-        ? matchWinner
-        : null;
+      const winnerForOutcome = matchVoid
+        ? { decided_by: 'void' }
+        : ((matchWinner && (matchWinner.decided_by === 'unclear' || matchWinner.decided_by === 'draw' || matchWinner.decided_by === 'cancelled'))
+          ? matchWinner
+          : null);
       applyWinnerBadge(factionOutcomeBadge, winnerForOutcome, teamFactions);
       ensureTooltips(document.getElementById('section-faction'));
     }
@@ -6376,6 +6392,7 @@
     if (idx.excluded) {
       const reasonText = idx.exclusion_reason === 'low_player_count' ? 'fewer than 6 players'
                        : idx.exclusion_reason === 'short_duration'   ? 'shorter than 4 minutes'
+                       : idx.exclusion_reason === 'void'             ? 'voided — this game does not count'
                        : 'excluded from rating';
       return `<td class="text-end" data-bs-toggle="tooltip" data-bs-placement="top"
         title="Match excluded from VTSR-T (${reasonText})"><span style="color:var(--kb-text-muted);">&mdash;</span></td>`;
@@ -6899,6 +6916,16 @@
       return;
     }
     const decidedBy = winner.decided_by;
+    // Operator void. The recorded result stays in the data, but it is
+    // not the status of the game. No reviewer check, no winner name.
+    if (decidedBy === 'void') {
+      badgeEl.setAttribute('data-decided-by', 'void');
+      badgeEl.setAttribute('data-bs-toggle', 'tooltip');
+      badgeEl.setAttribute('data-bs-placement', 'bottom');
+      badgeEl.setAttribute('title', 'This game was voided. The recorded result does not count.');
+      badgeEl.innerHTML = '<i class="bi bi-slash-circle me-1"></i>Voided';
+      return;
+    }
     const factionLabelFor = (team) => {
       const fac = factions && factions[String(team)];
       return (fac && fac.name) ? fac.name : `Team ${team}`;
@@ -7006,7 +7033,9 @@
     // narrowed by the player filter.
     const headerBadge = document.getElementById('kill-feed-winner-badge');
     if (headerBadge) {
-      const winnerForBadge = currentData && currentData.match && currentData.match.winner;
+      const winnerForBadge = (currentData && currentData.match && currentData.match.void)
+        ? { decided_by: 'void' }
+        : (currentData && currentData.match && currentData.match.winner);
       const factionsForBadge = currentData && currentData.match && currentData.match.team_factions;
       applyWinnerBadge(headerBadge, winnerForBadge, factionsForBadge);
       // Initialize Bootstrap tooltips on the contested / unclear variants.
@@ -9626,15 +9655,17 @@
         showMatchNotFound(initialUrlState.match);
       }
     } else if (manifest.length > 0 && hasOtherUrlIntent) {
-      // Partial shared link (e.g. ?tab=positioning). Preserve prior behavior:
-      // load first match and apply the URL state so filter/tab hydrate.
-      updateMatchPickerTriggers(manifest[0]);
-      loadMatch(manifest[0].file, initialUrlState);
+      // Partial shared link (e.g. ?tab=positioning). Load the newest
+      // match that still counts and apply the URL state.
+      const entry = newestOpenMatch();
+      updateMatchPickerTriggers(entry);
+      loadMatch(entry.file, initialUrlState);
     } else if (manifest.length > 0) {
-      // No URL intent at all — default to the most-recent match
-      // (manifest is sorted newest-first, so manifest[0] is newest).
-      updateMatchPickerTriggers(manifest[0]);
-      loadMatch(manifest[0].file);
+      // No URL intent at all — default to the newest match that still
+      // counts. Void matches stay reachable via ?match= and the picker.
+      const entry = newestOpenMatch();
+      updateMatchPickerTriggers(entry);
+      loadMatch(entry.file);
     }
   }
 

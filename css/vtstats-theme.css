@@ -2566,6 +2566,18 @@ body::before {
     cursor: help;
 }
 
+/* Operator void. The recorded draw or win is irrelevant, so this pill
+   replaces it and stays visually louder than a normal outcome badge. */
+.vt-winner-badge[data-decided-by="void"] {
+    color: var(--kb-warning);
+    background: color-mix(in oklab, var(--kb-warning) 28%, transparent);
+    border-color: var(--kb-warning);
+    border-width: 2px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    cursor: help;
+}
+
 /* Winner highlight on the faction scoreboard panel. The .vt-faction-panel
    --winner class is still attached to the winning team's panel so other
    contexts (e.g. fullscreen modal, future per-section selectors) can
@@ -4164,6 +4176,33 @@ td.vt-col-split {
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+}
+
+.vt-void-banner {
+    flex: 1 0 100%;
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    color: var(--kb-text-secondary);
+    background: var(--kb-bg-subtle);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: var(--bs-border-radius);
+    font-size: 0.875rem;
+}
+
+.vt-void-chip {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+    background: var(--kb-bg-subtle);
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    vertical-align: middle;
 }
 
 .vt-match-picker-vod {

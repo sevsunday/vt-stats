@@ -408,6 +408,9 @@
     for (const fid of fileIds) {
       const m = contributions[fid];
       if (!m) continue; // unknown id — silently skip, matches python
+      // Operator void: the match stays in the picker, but career,
+      // commander, faction, and meta tallies skip it entirely.
+      if (m.void) continue;
 
       mapsPlayed.add(m.map);
       if (typeof m.date === 'string' && m.date.length >= 10) {

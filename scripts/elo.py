@@ -1468,6 +1468,7 @@ def _rating_pass(
 
     excluded_low_player_count = 0
     excluded_short_duration   = 0
+    excluded_void             = 0
     excluded_no_winner        = 0  # reserved (alpha-blend slot); always 0 in v1
     # v15: host-attested GAME_CANCELLED matches (early RE / crash / restart
     # per the collector's outcome dialog). Real combat may have occurred,
@@ -1519,11 +1520,16 @@ def _rating_pass(
         # adjacent players whenever any earlier row was dropped.
         lobby = _rated_lobby(lobby_raw)
 
-        # Match-level gates: player count < 6, duration < 240s, or a
-        # host-attested cancellation (v15 winner.decided_by == "cancelled")
-        # → emit excluded history row, no rating change.
+        # Match-level gates: operator void, player count < 6, duration
+        # < 240s, or a host-attested cancellation (v15
+        # winner.decided_by == "cancelled") → emit excluded history
+        # row, no rating change. Void is checked first and does not
+        # shadow-score: the operator said the game does not count.
         exclusion_reason = None
-        if (m.get("player_count", 0) or 0) < ELO_MIN_PLAYER_COUNT:
+        if m.get("void"):
+            excluded_void += 1
+            exclusion_reason = "void"
+        elif (m.get("player_count", 0) or 0) < ELO_MIN_PLAYER_COUNT:
             excluded_low_player_count += 1
             exclusion_reason = "low_player_count"
         elif (m.get("duration_sec", 0) or 0) < ELO_MIN_DURATION_SEC:
@@ -1999,6 +2005,7 @@ def _rating_pass(
         # v15: host-attested GAME_CANCELLED matches (see the match-level
         # gate above). 0 for the entire pre-v3 corpus.
         "matches_excluded_cancelled":        excluded_cancelled,
+        "matches_excluded_void":             excluded_void,
         # v2.5: row-level (not match-level) exclusion counters. A row
         # hitting both flags is counted in both keys. Key naming
         # diverges from matches_excluded_* intentionally so consumers

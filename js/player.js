@@ -1244,6 +1244,7 @@
     const contribs = state.contributions || {};
     for (const fileKey in contribs) {
       const m = contribs[fileKey];
+      if (m.void) continue;
       const lbRow = (m.leaderboard || []).find(p => String(p.steam64 || '') === sid);
       if (!lbRow) continue;
       const deltaData = deltasByMatch.get(m.id) || null;

@@ -311,6 +311,10 @@ def compute_activity(
     corpus_latest: datetime | None = None
     for md in all_match_data:
         m = md.get("match") or {}
+        # Operator void: the game does not count as an appearance and
+        # does not move the corpus clock.
+        if m.get("void"):
+            continue
         dt = parse_match_date(m.get("date"))
         if dt is None:
             continue
