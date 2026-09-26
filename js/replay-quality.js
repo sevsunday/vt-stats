@@ -25,7 +25,7 @@ export const TEXTURE_PACKS = [
   { id: '', label: 'Stock', title: 'The original game textures', urls: [] },
   {
     id: ENHANCED_SET_ID,
-    label: 'ISDF & Scion',
+    label: 'ISDF & Scion Enhanced',
     title: 'ISDF and Scion enhanced textures',
     urls: [
       {
