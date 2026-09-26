@@ -314,6 +314,7 @@
     relocatePageControls(panel, gearBtn);
     hideGearOnModal('about-modal', gearBtn);
     hideGearOnModal('shortcutsModal', gearBtn);
+    hideGearOnModal('replay-quality-modal', gearBtn);
 
     panelEls = {
       enable: wrap.querySelector('#vt-cursor-enable'),

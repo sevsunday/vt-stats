@@ -27,7 +27,7 @@ import {
   modelsEnabled,
   stemForOdf,
   modelReady,
-} from './replay-ship-models.js?v=texture-set';
+} from './replay-ship-models.js?v=replay-quality';
 
 // ------------------ Constants ------------------
 

@@ -1,0 +1,210 @@
+/* Replay quality dialog + settings panel.
+   Dashboard pages supply --kb-*. The replay shell falls back to the HUD colors. */
+
+.vt-rq {
+  color: var(--kb-text-primary, var(--text, #e8eaed));
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.vt-rq-lead,
+.vt-rq-hint {
+  color: var(--kb-text-muted, var(--text-muted, #9aa0a6));
+  font-size: 0.82rem;
+  margin: 0 0 0.75rem;
+}
+
+.vt-rq-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0 0 0.75rem;
+}
+
+.vt-rq-field > span {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--kb-text-secondary, var(--text-muted, #c4c7ce));
+}
+
+.vt-rq select {
+  width: 100%;
+  background: var(--kb-bg-subtle, rgba(255, 255, 255, 0.04));
+  color: var(--kb-text-primary, var(--text, #e8eaed));
+  border: 1px solid var(--kb-border-subtle, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  font: inherit;
+}
+
+.vt-rq-packs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.vt-rq-packs.is-off {
+  opacity: 0.45;
+}
+
+.vt-rq-pack {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.vt-rq-pack-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.vt-rq-workshop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: var(--kb-text-muted, var(--text-muted, #9aa0a6));
+  flex: 0 0 auto;
+}
+
+.vt-rq-workshop:hover {
+  color: var(--kb-text-primary, var(--text, #e8eaed));
+}
+
+.vt-rq-steam {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.vt-rq-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  cursor: pointer;
+}
+
+.vt-rq-size {
+  margin: 0 0 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.vt-rq-cache-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.vt-rq-ghost {
+  background: transparent;
+  color: var(--kb-text-primary, var(--text, #e8eaed));
+  border: 1px solid var(--kb-border-subtle, rgba(255, 255, 255, 0.18));
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.vt-rq-ghost:hover {
+  background: var(--kb-bg-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.vt-rq-purge[hidden] {
+  display: none;
+}
+
+.vt-rq-dialog {
+  color-scheme: dark;
+  background: var(--kb-bg-card, #14171c);
+  color: var(--kb-text-primary, #e8eaed);
+  border: 1px solid var(--kb-border-subtle, rgba(255, 255, 255, 0.14));
+  border-radius: 12px;
+  padding: 0;
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(92vh, 760px);
+}
+
+.vt-rq-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.vt-rq-dialog form {
+  display: flex;
+  flex-direction: column;
+  max-height: min(92vh, 760px);
+  margin: 0;
+}
+
+.vt-rq-head,
+.vt-rq-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.vt-rq-head {
+  border-bottom: 1px solid var(--kb-border-subtle, rgba(255, 255, 255, 0.1));
+  font-weight: 600;
+}
+
+.vt-rq-foot {
+  border-top: 1px solid var(--kb-border-subtle, rgba(255, 255, 255, 0.1));
+  justify-content: flex-end;
+}
+
+.vt-rq-body {
+  overflow: auto;
+  padding: 0.9rem 1rem 0.25rem;
+}
+
+.vt-rq-close {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+
+.vt-rq-primary {
+  background: var(--kb-primary, #3d8bfd);
+  color: var(--kb-primary-fg, #fff);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.vt-rq-slow {
+  display: block;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 0.2rem 0 0.2rem 0.55rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-left: 3px solid var(--kb-warning, #e0a100);
+  color: var(--kb-warning, #e0a100);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.vt-rq-slow[hidden] {
+  display: none;
+}

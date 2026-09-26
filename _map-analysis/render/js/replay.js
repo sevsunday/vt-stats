@@ -53,7 +53,16 @@ import {
   activeTextureSet,
   loadTextureCatalog,
   reapplyTextureSet,
-} from './replay-ship-models.js?v=texture-set';
+} from './replay-ship-models.js?v=replay-quality';
+import {
+  ensureQualityChosen,
+  openReplayDialog,
+  patchFromTransport,
+  readSettings,
+  QUALITY_STORAGE_KEY,
+  TEXTURE_SET_KEY,
+  SLOW_LOAD_HINT_SEC,
+} from '../../../js/replay-quality.js';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,
@@ -216,6 +225,76 @@ window.addEventListener('message', (ev) => {
 
 const params = readReplayUrlParams();
 
+let heavyBootStarted = false;
+let loadT0 = 0;
+let loadClock = null;
+
+function fmtClock(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+  const ss = String(sec % 60).padStart(2, '0');
+  return `${mm}:${ss}`;
+}
+
+function loadingTitle() {
+  if (!loadT0) return 'Loading replay';
+  return `Loading replay (${fmtClock(performance.now() - loadT0)})`;
+}
+
+function showSlowHint() {
+  const hint = document.getElementById('status-slow');
+  if (!hint || !hint.hidden) return;
+  hint.hidden = false;
+}
+
+function startLoadClock() {
+  loadT0 = performance.now();
+  if (loadClock) clearInterval(loadClock);
+  const tick = () => {
+    const title = document.getElementById('status-title');
+    if (!title || title.dataset.error === '1') return;
+    title.textContent = loadingTitle();
+    if ((performance.now() - loadT0) / 1000 >= SLOW_LOAD_HINT_SEC) showSlowHint();
+  };
+  tick();
+  loadClock = setInterval(tick, 1000);
+}
+
+function stopLoadClock() {
+  if (loadClock) clearInterval(loadClock);
+  loadClock = null;
+}
+
+function openQuality() {
+  return openReplayDialog({
+    reload: heavyBootStarted ? () => location.reload() : null,
+  });
+}
+
+function wireQualityChrome() {
+  const btn = document.getElementById('btn-quality');
+  if (btn && btn.dataset.wired !== '1') {
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => { void openQuality(); });
+  }
+  const hint = document.getElementById('status-slow');
+  if (hint && hint.dataset.wired !== '1') {
+    hint.dataset.wired = '1';
+    hint.addEventListener('click', () => { void openQuality(); });
+  }
+  const form = document.querySelector('#replay-quality-dialog form');
+  if (form && form.dataset.wired !== '1') {
+    form.dataset.wired = '1';
+    form.addEventListener('submit', (ev) => ev.preventDefault());
+  }
+}
+
+function onQualityStorage(ev) {
+  if (!heavyBootStarted) return;
+  if (ev.key !== QUALITY_STORAGE_KEY && ev.key !== TEXTURE_SET_KEY) return;
+  location.reload();
+}
+
 async function boot() {
   // Directory mode: no `?match=` param -> render the picker landing and
   // exit early. The user clicks a card, which navigates to the replay shell
@@ -232,6 +311,13 @@ async function boot() {
   } catch (err) {
     console.error(err);
   }
+  wireQualityChrome();
+  window.addEventListener('storage', onQualityStorage);
+  await ensureQualityChosen();
+  heavyBootStarted = true;
+  const quality = readSettings();
+  setModelsEnabled(quality.models !== 'off');
+  startLoadClock();
 
   const matchLabel = params.match || 'match';
   statusStep(`Match index · matches.json`);
@@ -258,10 +344,13 @@ async function boot() {
   STATE.totalSec = (matchData.match && matchData.match.duration_sec) || 0;
   STATE.progressSec = Math.max(0, Math.min(STATE.totalSec, params.t || 0));
   // Overlaps the terrain fetch. A 404 or decode failure leaves the 1 Hz trail.
-  const replayTrackPromise = loadReplayTrack(params.match).catch((err) => {
-    console.warn('Native-rate replay track unavailable; using 1 Hz trail.', err);
-    return null;
-  });
+  // Coarse quality skips the sidecar; the 1 Hz trail is already in the match JSON.
+  const replayTrackPromise = quality.motion === 'smooth'
+    ? loadReplayTrack(params.match).catch((err) => {
+      console.warn('Native-rate replay track unavailable; using 1 Hz trail.', err);
+      return null;
+    })
+    : Promise.resolve(null);
 
   statusStep(`Terrain · ${stem}.3d.json`);
   let mapData;
@@ -280,14 +369,15 @@ async function boot() {
     STATE.terrainExaggeration = mapData.defaults.defaultExaggeration;
   }
 
-  // HQ (game tiles) is the default when this map has a tile composite.
-  // `?floor=minimap|ramp|wire` still wins and leaves the HQ button off.
+  // Ground comes from the quality preset. `?floor=` still wins for this view.
   statusStep('Map manifest');
   const manifest = await loadMapManifest();
   const manifestEntry = findManifestEntry(manifest, stem);
   const recommendedFloor = await resolveDefaultFloorMode(stem, manifestEntry);
   const hasTiles = !!(mapData.tileComposite);
-  const initialFloor = params.floor || (hasTiles ? 'tiles' : recommendedFloor);
+  const initialFloor = params.floor
+    || (quality.ground === 'tiles' && hasTiles ? 'tiles' : recommendedFloor);
+  if (quality.motion !== 'smooth') statusStep('Motion · 1 Hz');
 
   statusStep('Roster');
   const replayTrack = await replayTrackPromise;
@@ -375,6 +465,7 @@ async function boot() {
   } else {
     applyFloorMode(resolvedFloor);
   }
+  stopLoadClock();
   setStatus(null);
   startLoop();
 
@@ -1083,6 +1174,7 @@ async function onModelsToggle() {
   const real = document.getElementById('models-real');
   const next = !modelsEnabled();
   setModelsEnabled(next);
+  patchFromTransport({ models: next ? 'on' : 'off' });
   syncModelsButton();
   _modelsBusy = true;
   if (real) real.disabled = true;
@@ -1119,6 +1211,7 @@ function wireHqToggle(resolvedFloor) {
   btn.addEventListener('click', () => {
     if (btn.disabled) return;
     STATE.hqOn = !STATE.hqOn;
+    patchFromTransport({ ground: STATE.hqOn ? 'tiles' : 'minimap' });
     syncHqButton();
     if (STATE.hqOn) {
       if (STATE.terrainTileMat) applyFloorMode('tiles');
@@ -1150,6 +1243,7 @@ function loadHqFloor() {
     if (!STATE.hqOn) return mat;
     if (!mat) {
       STATE.hqOn = false;
+      patchFromTransport({ ground: 'minimap' });
       syncHqButton();
       applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
       return null;
@@ -1160,6 +1254,7 @@ function loadHqFloor() {
     STATE.hqLoad = null;
     console.error('failed to load tile textures:', err);
     STATE.hqOn = false;
+    patchFromTransport({ ground: 'minimap' });
     syncHqButton();
     applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
   });
@@ -2572,7 +2667,9 @@ function renderStatus(isError) {
     el.classList.remove('hidden');
     return;
   }
-  title.textContent = isError ? 'Could not load replay' : 'Loading replay';
+  if (isError) title.dataset.error = '1';
+  else delete title.dataset.error;
+  title.textContent = isError ? 'Could not load replay' : loadingTitle();
   list.replaceChildren();
   for (const row of statusLog) {
     const li = document.createElement('li');
@@ -2614,6 +2711,7 @@ function setStatus(msg, isError = false) {
     statusLog.length = 0;
     statusLog.push({ label: msg, state: 'active' });
     renderStatus(true);
+    stopLoadClock();
     return;
   }
   statusTick(msg);

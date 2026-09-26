@@ -15,6 +15,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from '../../../vendor/three/addons/loaders/GLTFLoader.js';
+import { cachedBlobUrl, readSettings } from '../../../js/replay-quality.js';
 
 export const MODELS_STORAGE_KEY = 'vt.replay.models';
 export const TEXTURE_SET_KEY = 'vt.replay.textureSet';
@@ -248,19 +249,36 @@ function loadTexture(url, colorSpace) {
   const key = colorSpace + ':' + url;
   const hit = _texCache.get(key);
   if (hit) return hit;
-  const pending = new Promise((resolve) => {
-    _texLoader.load(url, (tex) => {
-      tex.flipY = false;
-      tex.colorSpace = colorSpace;
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.anisotropy = 8;
-      tex.needsUpdate = true;
-      resolve(tex);
-    }, undefined, () => resolve(null));
-  });
+  const pending = (async () => {
+    const src = await cachedBlobUrl(url);
+    if (!src) return null;
+    return new Promise((resolve) => {
+      _texLoader.load(src, (tex) => {
+        tex.flipY = false;
+        tex.colorSpace = colorSpace;
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.anisotropy = 8;
+        tex.needsUpdate = true;
+        resolve(tex);
+      }, undefined, () => resolve(null));
+    });
+  })();
   _texCache.set(key, pending);
   return pending;
+}
+
+async function loadFirst(urls, colorSpace) {
+  for (const url of urls) {
+    const tex = await loadTexture(url, colorSpace);
+    if (tex) return tex;
+  }
+  return null;
+}
+
+function modelDetail() {
+  const models = readSettings().models;
+  return models === 'off' || models === 'reduced' || models === 'full' ? models : 'full';
 }
 
 function loadStem(spec) {
@@ -304,6 +322,15 @@ function mapUrl(spec, name, kind) {
   }
   if (listed(spec.teamColor, name)) return assetUrl(`textures/teamcolor/${name}.png`);
   return null;
+}
+
+/** Full-size URL, or the 128px copy first when quality is Reduced. */
+function mapUrls(spec, name, kind) {
+  const full = mapUrl(spec, name, kind);
+  if (!full) return [];
+  if (modelDetail() !== 'reduced') return [full];
+  const lite = full.replace('/textures/', '/textures/replay-lite/');
+  return lite === full ? [full] : [lite, full];
 }
 
 function collectMaterials(root) {
@@ -356,8 +383,7 @@ async function paintTemplate(spec, tpl) {
     const name = mat.name;
     if (!name) return;
     if (diffuseNames.has(name)) {
-      const url = mapUrl(spec, name, 'diffuse');
-      const tex = url ? await loadTexture(url, THREE.SRGBColorSpace) : null;
+      const tex = await loadFirst(mapUrls(spec, name, 'diffuse'), THREE.SRGBColorSpace);
       if (gen !== _texGen) return;
       if (tex) {
         mat.map = tex;
@@ -365,18 +391,17 @@ async function paintTemplate(spec, tpl) {
       }
     }
     if (emisNames.has(name) && 'emissive' in mat) {
-      const url = mapUrl(spec, name, 'emissive');
-      const tex = url ? await loadTexture(url, THREE.SRGBColorSpace) : null;
+      const urls = mapUrls(spec, name, 'emissive');
+      const tex = await loadFirst(urls, THREE.SRGBColorSpace);
       if (gen !== _texGen) return;
-      if (tex || !url) {
+      if (tex || !urls.length) {
         mat.emissiveMap = tex || null;
         mat.emissive.setRGB(tex ? 1 : 0, tex ? 1 : 0, tex ? 1 : 0);
         mat.emissiveIntensity = 1;
       }
     }
     if (teamNames.has(name)) {
-      const url = mapUrl(spec, name, 'team');
-      const mask = url ? await loadTexture(url, THREE.NoColorSpace) : null;
+      const mask = await loadFirst(mapUrls(spec, name, 'team'), THREE.NoColorSpace);
       if (gen !== _texGen) return;
       if (mask) masks.set(name, mask);
     }
@@ -391,7 +416,13 @@ async function paintTemplate(spec, tpl) {
 
 async function loadStemNow(spec) {
   if (_templates.has(spec.stem)) return;
-  const gltf = await _loader.loadAsync(assetUrl(`geometry/${spec.stem}.glb`));
+  const glbUrl = assetUrl(`geometry/${spec.stem}.glb`);
+  const glbSrc = await cachedBlobUrl(glbUrl);
+  if (!glbSrc) throw new Error(`missing glb ${spec.stem}`);
+  const glbBuf = await (await fetch(glbSrc)).arrayBuffer();
+  const gltf = await new Promise((resolve, reject) => {
+    _loader.parse(glbBuf, assetUrl('geometry/'), resolve, reject);
+  });
   const scene = gltf.scene;
 
   const wrapper = new THREE.Group();

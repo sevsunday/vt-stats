@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 
 import { loadTilesManifest } from './loader.js';
+import { cachedBlobUrl } from '../../../js/replay-quality.js';
 
 // One terrain cluster is 16 cells x 2 m = 32 m. Same UV for every
 // texture, including 1024 px variants. Do not scale by image pixel size.
@@ -19,9 +20,11 @@ const TILE_METERS_PER_REPEAT = 32.0;
 // ColorMap is a soft hue shift, not a full brightness multiply.
 const COLOR_TINT_STRENGTH = 0.45;
 
-function loadTexture(url) {
+async function loadTexture(url) {
+  const src = await cachedBlobUrl(url);
+  if (!src) throw new Error(`texture ${url}`);
   return new Promise((resolve, reject) => {
-    new THREE.TextureLoader().load(url, resolve, undefined, reject);
+    new THREE.TextureLoader().load(src, resolve, undefined, reject);
   });
 }
 
@@ -37,9 +40,11 @@ async function loadAtlasPng(rel, opts = {}) {
   return tex;
 }
 
-function loadTileFromManifestEntry(entry) {
+async function loadTileFromManifestEntry(entry) {
+  const url = `../../data/render/tiles/${entry.filename}`;
+  const src = await cachedBlobUrl(url);
+  if (!src) throw new Error(entry.filename || 'tile');
   return new Promise((resolve, reject) => {
-    const url = `../../data/render/tiles/${entry.filename}`;
     const onLoad = (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.wrapS = THREE.RepeatWrapping;
@@ -50,9 +55,9 @@ function loadTileFromManifestEntry(entry) {
       resolve(tex);
     };
     if (entry.format === 'dds') {
-      new DDSLoader().load(url, onLoad, undefined, reject);
+      new DDSLoader().load(src, onLoad, undefined, reject);
     } else {
-      new THREE.TextureLoader().load(url, onLoad, undefined, reject);
+      new THREE.TextureLoader().load(src, onLoad, undefined, reject);
     }
   });
 }

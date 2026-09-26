@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/vtstats-theme.css">
+  <link rel="stylesheet" href="css/replay-quality.css">
   <!-- KaTeX (vendored, v0.16.11). Used to pre-render VTSR-T methodology
        math in the modal via katex.renderToString(); auto-render contrib is loaded
        only on docs.html. Fonts live in vendor/katex/fonts/ (woff2 only;
@@ -128,6 +129,11 @@
                   data-bs-toggle="modal" data-bs-target="#about-modal"
                   title="About / source repositories" aria-label="About / source repositories">
             <i class="bi bi-info-circle"></i>
+          </button>
+          <button class="vt-nav-icon-btn" id="replay-quality-btn" type="button" hidden data-vt-page-control
+                  data-bs-toggle="modal" data-bs-target="#replay-quality-modal"
+                  title="Replay quality" aria-label="Replay quality">
+            <i class="bi bi-sliders"></i><span class="vt-nav-label ms-2">Replay quality</span>
           </button>
 
           <div class="dropdown">
@@ -1609,6 +1615,22 @@
     </div>
   </div>
 
+  <div class="modal fade" id="replay-quality-modal" tabindex="-1" aria-labelledby="replay-quality-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title" id="replay-quality-modal-title">Replay quality</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="replay-quality-body"></div>
+        <div class="modal-footer border-top">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary btn-sm" id="replay-quality-save">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- About / Source Repos Modal -->
   <div class="modal fade" id="about-modal" tabindex="-1" aria-labelledby="about-modal-title" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -2141,6 +2163,7 @@
   <!-- Site-wide custom cursor + Settings gear. Self-bootstrapping; injects a
        gear dropdown into .vt-nav-menu and runs the BZCC cursor overlay. -->
   <script src="js/cursor-settings.js"></script>
+  <script type="module" src="js/replay-quality.js"></script>
   <!-- Shared VTSR-T explainer content + annotated-stage engine (also
        loaded by elo/index.html). Must precede app.js: renderVtsrTeaser()
        reads window.VTSRExplain for the methodology modal body. -->
