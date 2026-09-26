@@ -255,7 +255,11 @@ body { overflow: hidden; }
 
 /* Unified control dock: a single left-edge column holding every settings pane.
    The container is click-through (pointer-events:none); each pane re-enables
-   pointer events. Stacks all open panes on desktop and scrolls if tall. */
+   pointer events. Stacks all open panes on desktop and scrolls if tall.
+   Touch devices add .touch-scroll (js/models.js): WebKit will not scroll an
+   overflow container that is pointer-events:none, even when its children
+   turn pointers back on. Mouse-only desktops keep the click-through default
+   so gaps between panes still orbit the model. */
 .viewer-dock {
   position: absolute;
   left: 14px;
@@ -269,10 +273,24 @@ body { overflow: hidden; }
   overflow-y: auto;
   pointer-events: none;
 }
+.viewer-dock.touch-scroll {
+  pointer-events: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* A vertical swipe on a slider scrolls the stack; a horizontal swipe still
+   moves the thumb. */
+.viewer-dock.touch-scroll input[type="range"] {
+  touch-action: pan-y;
+}
 
-/* Control pane card. Flows inside .viewer-dock (no self-anchoring). */
+/* Control pane card. Flows inside .viewer-dock (no self-anchoring).
+   flex-shrink: 0 so WebKit cannot squash the cards into max-height and then
+   have nothing left to scroll. */
 .light-panel {
   pointer-events: auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;

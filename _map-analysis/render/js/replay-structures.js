@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { sampleTerrainHeight } from './objects.js';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
-import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=recycler-mobile';
+import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=texture-set';
 
 const TEAM_TINTS = {
   1: 0x5dadff,   // Team 1 blue
@@ -115,6 +115,55 @@ function centroidOf(matchData, side) {
   const c = tb && tb.centroid;
   if (!c || !Number.isFinite(c.x) || !Number.isFinite(c.z)) return null;
   return { x: c.x, z: c.z };
+}
+
+// One build square. A four-square recycler sits on a 2x2 center: both axes
+// a multiple of this. ISDF vehicle exits are about half a square off that
+// center, toward the other base. Hadean and Scion exits are already on it.
+const BUILD_SQUARE_M = 32;
+const PAD_ON_LATTICE_M = 2;
+
+function latticeRemainder(v) {
+  const r = Math.abs(v) % BUILD_SQUARE_M;
+  return Math.min(r, BUILD_SQUARE_M - r);
+}
+
+function nearestLattice(v) {
+  return Math.round(v / BUILD_SQUARE_M) * BUILD_SQUARE_M;
+}
+
+// Of the two lattice lines nearest to `value`, the one farther from `enemy`.
+function fartherLattice(value, enemy) {
+  const near = nearestLattice(value);
+  const cands = [near - BUILD_SQUARE_M, near, near + BUILD_SQUARE_M]
+    .sort((a, b) => Math.abs(a - value) - Math.abs(b - value))
+    .slice(0, 2);
+  const d0 = Math.abs(cands[0] - enemy);
+  const d1 = Math.abs(cands[1] - enemy);
+  return d0 >= d1 ? cands[0] : cands[1];
+}
+
+/**
+ * Starting-recycler pad. `enemy` is the other team's base centroid, or null.
+ * An axis already within 2 m of the 32 m lattice stays. An axis that is off
+ * moves to the lattice line farther from that centroid. Missing centroid, or
+ * both axes off, keeps the recorded point.
+ */
+export function recyclerPadXZ(x, z, enemy) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return { x, z };
+  const xOff = latticeRemainder(x) >= PAD_ON_LATTICE_M;
+  const zOff = latticeRemainder(z) >= PAD_ON_LATTICE_M;
+  if (xOff === zOff) return { x, z };
+  if (!enemy || !Number.isFinite(enemy.x) || !Number.isFinite(enemy.z)) return { x, z };
+  return {
+    x: xOff ? fartherLattice(x, enemy.x) : x,
+    z: zOff ? fartherLattice(z, enemy.z) : z,
+  };
+}
+
+export function enemyBaseOf(matchData, team) {
+  const other = Number(team) === 1 ? 2 : 1;
+  return centroidOf(matchData, other);
 }
 
 // Resolve an ODF stem to its pretty display name via the match's odf_map,
@@ -325,11 +374,14 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
       continue;
     }
     if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z)) continue;
+    const pad = inst.kind === 'recycler'
+      ? recyclerPadXZ(inst.x, inst.z, enemyBaseOf(matchData, inst.team))
+      : { x: inst.x, z: inst.z };
     const opening = isOpeningRecycler(inst);
     const deploySec = opening ? deploySecFor(matchData, inst.team) : null;
     const mobileOdf = deploySec != null ? mobileRecyclerOdf(inst.odf) : null;
     const deployed = makeStructureVisual(inst.odf, inst.team, instanceSize(inst), `struct-${inst.id || inst.odf}`);
-    placeStructureMesh(deployed.mesh, hm, inst.x, inst.z, deployed.isModel, instanceYOff(inst));
+    placeStructureMesh(deployed.mesh, hm, pad.x, pad.z, deployed.isModel, instanceYOff(inst));
     const label = prettyStructName(odfMap, inst.odf);
     stampStructureMesh(deployed.mesh, label, inst.team);
     deployed.mesh.visible = false;
@@ -338,7 +390,7 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
     if (mobileOdf) {
       const mobile = makeStructureVisual(mobileOdf, inst.team, instanceSize(inst), `struct-${inst.id || inst.odf}-mobile`);
       if (mobile.isModel) {
-        placeStructureMesh(mobile.mesh, hm, inst.x, inst.z, true, instanceYOff(inst));
+        placeStructureMesh(mobile.mesh, hm, pad.x, pad.z, true, instanceYOff(inst));
         stampStructureMesh(mobile.mesh, label, inst.team);
         mobile.mesh.visible = false;
         group.add(mobile.mesh);
@@ -359,8 +411,8 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
       deathSec: inst.death_tick != null ? tickToSec(inst.death_tick, tickRate) : null,
       isUpgrade: isUpgradeOdf(inst.odf),
       team: inst.team,
-      x: inst.x,
-      z: inst.z,
+      x: pad.x,
+      z: pad.z,
     });
   }
   applyFactoryReplacements(items);

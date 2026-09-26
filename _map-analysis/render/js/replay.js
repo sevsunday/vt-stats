@@ -50,7 +50,10 @@ import {
   modelsEnabled,
   setModelsEnabled,
   ensureMatchModels,
-} from './replay-ship-models.js?v=recycler-mobile';
+  activeTextureSet,
+  loadTextureCatalog,
+  reapplyTextureSet,
+} from './replay-ship-models.js?v=texture-set';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,
@@ -95,7 +98,9 @@ import {
   updateArmoryDrops,
   clearArmoryDrops,
   findStructureDeaths,
-} from './replay-structures.js?v=factory-replace-b';
+  recyclerPadXZ,
+  enemyBaseOf,
+} from './replay-structures.js?v=recycler-pad';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -357,13 +362,12 @@ async function boot() {
   const resolvedFloor = resolveFloorMode(initialFloor);
   wireTransport();
   wireScrubMarkers();
-  wireCameraModePills();
+  wireMenus();
   wireRoster();
   wireKeyboard();
   wireReplayCanvasChrome();
 
   wireHqToggle(resolvedFloor);
-  wireModelsToggle();
   if (resolvedFloor === 'tiles') {
     applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
     statusStep('Game tiles');
@@ -884,32 +888,205 @@ function syncHqButton() {
   else btn.title = on ? 'High-quality game tiles' : 'Minimap ground';
 }
 
+const TEX_SHORT = {
+  '1581901346': 'ISDF Enhanced',
+  '3365986032': 'ISDF Redux',
+  '1554202061': 'Scion Enhanced',
+};
+const TEX_ORDER = ['1581901346', '3365986032', '1554202061'];
+const STEAM_ICON = '<svg class="t-steam-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M.329 10.333A8.01 8.01 0 0 0 7.99 16C12.414 16 16 12.418 16 8s-3.586-8-8.009-8A8.006 8.006 0 0 0 0 7.468l.003.006 4.304 1.769A2.2 2.2 0 0 1 5.62 8.88l1.96-2.844-.001-.04a3.046 3.046 0 0 1 3.042-3.043 3.046 3.046 0 0 1 3.042 3.043 3.047 3.047 0 0 1-3.111 3.044l-2.804 2a2.223 2.223 0 0 1-2.564 2.563l-2.563-1.049A2.23 2.23 0 0 1 .33 10.333"/><path fill="currentColor" d="M4.868 12.683a1.715 1.715 0 0 0 1.318-3.165 1.7 1.7 0 0 0-1.263-.02l1.023.424a1.261 1.261 0 1 1-.97 2.33l-.99-.41a1.7 1.7 0 0 0 .882.84zm3.726-6.687a2.03 2.03 0 0 0 2.027 2.029 2.03 2.03 0 0 0 2.027-2.029 2.03 2.03 0 0 0-2.027-2.027 2.03 2.03 0 0 0-2.027 2.027m2.03-1.527a1.524 1.524 0 1 1-.002 3.048 1.524 1.524 0 0 1 .002-3.048"/></svg>';
+
+let _menuOpen = null;
+let _texBusy = false;
+let _modelsBusy = false;
+
 function syncModelsButton() {
   const btn = document.getElementById('btn-models');
-  if (!btn) return;
+  const real = document.getElementById('models-real');
   const on = modelsEnabled();
-  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  btn.classList.toggle('is-active', on);
-  if (!btn.disabled) btn.title = 'Real models';
+  if (btn) {
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.classList.toggle('is-active', on);
+    btn.title = on ? 'Models on' : 'Models';
+  }
+  if (real) {
+    real.setAttribute('aria-pressed', on ? 'true' : 'false');
+    real.classList.toggle('is-active', on);
+    real.disabled = _modelsBusy || _texBusy;
+  }
+  syncTextureRows();
 }
 
-function wireModelsToggle() {
+function syncTextureRows() {
+  const active = activeTextureSet();
+  document.querySelectorAll('#models-tex-rows .t-dropup-row').forEach((row) => {
+    const on = (row.dataset.set || '') === active;
+    row.classList.toggle('is-active', on);
+    row.disabled = _texBusy || _modelsBusy;
+  });
+}
+
+function packLabel(pack) {
+  return TEX_SHORT[pack.id] || pack.label;
+}
+
+function buildTextureRows(packs) {
+  const host = document.getElementById('models-tex-rows');
+  if (!host || host.dataset.built === '1') return;
+  host.dataset.built = '1';
+  const ordered = [...packs].sort((a, b) => {
+    const ia = TEX_ORDER.indexOf(a.id);
+    const ib = TEX_ORDER.indexOf(b.id);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const frag = document.createDocumentFragment();
+  const add = (id, label, title, url) => {
+    const wrap = document.createElement('div');
+    wrap.className = 't-dropup-tex';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 't-dropup-row';
+    btn.dataset.set = id;
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener('click', () => { void onTexturePick(id); });
+    wrap.appendChild(btn);
+    if (url) {
+      const link = document.createElement('a');
+      link.className = 't-dropup-steam';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.title = `Workshop page for ${title}`;
+      link.setAttribute('aria-label', `Workshop page for ${title}`);
+      link.innerHTML = STEAM_ICON;
+      wrap.appendChild(link);
+    }
+    frag.appendChild(wrap);
+  };
+  add('', 'Stock', 'The original game textures', '');
+  for (const pack of ordered) add(pack.id, packLabel(pack), pack.label, pack.url);
+  host.appendChild(frag);
+  syncTextureRows();
+}
+
+function closeMenus() {
+  _menuOpen = null;
+  for (const id of ['view-menu', 'models-menu']) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = true;
+  }
+  for (const id of ['btn-view', 'btn-models']) {
+    const btn = document.getElementById(id);
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function placeMenu(menu, btn) {
+  menu.hidden = false;
+  const width = menu.offsetWidth || 196;
+  const rect = btn.getBoundingClientRect();
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  menu.style.left = `${left}px`;
+  menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+}
+
+function toggleMenu(which) {
+  const opening = _menuOpen !== which;
+  closeMenus();
+  if (!opening) return;
+  const menu = document.getElementById(which === 'view' ? 'view-menu' : 'models-menu');
+  const btn = document.getElementById(which === 'view' ? 'btn-view' : 'btn-models');
+  if (!menu || !btn) return;
+  _menuOpen = which;
+  btn.setAttribute('aria-expanded', 'true');
+  placeMenu(menu, btn);
+}
+
+function remountSceneModels(force) {
+  applyShipModelMode(STATE.actors, force ? { force: true } : undefined);
+  applyStructureModelMode(STATE.structures, STATE.mapData, STATE.terrainExaggeration);
+  applyStructureModelMode(STATE.recyclers, STATE.mapData, STATE.terrainExaggeration);
+}
+
+function wireMenus() {
   syncModelsButton();
-  const btn = document.getElementById('btn-models');
-  if (!btn) return;
-  btn.addEventListener('click', () => { void onModelsToggle(); });
+  syncViewRows();
+  const viewBtn = document.getElementById('btn-view');
+  const modelsBtn = document.getElementById('btn-models');
+  if (viewBtn) viewBtn.addEventListener('click', () => toggleMenu('view'));
+  if (modelsBtn) modelsBtn.addEventListener('click', () => toggleMenu('models'));
+  const viewMenu = document.getElementById('view-menu');
+  if (viewMenu) {
+    viewMenu.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-cam]');
+      if (!row) return;
+      setCameraMode(row.dataset.cam);
+      closeMenus();
+    });
+  }
+  const real = document.getElementById('models-real');
+  if (real) {
+    real.addEventListener('click', () => {
+      if (real.disabled) return;
+      closeMenus();
+      void onModelsToggle();
+    });
+  }
+  document.addEventListener('pointerdown', (e) => {
+    if (!_menuOpen) return;
+    const t = e.target;
+    if (t.closest && (t.closest('.t-dropup') || t.closest('#btn-view') || t.closest('#btn-models'))) return;
+    closeMenus();
+  });
+  window.addEventListener('resize', () => {
+    if (!_menuOpen) return;
+    const menu = document.getElementById(_menuOpen === 'view' ? 'view-menu' : 'models-menu');
+    const btn = document.getElementById(_menuOpen === 'view' ? 'btn-view' : 'btn-models');
+    if (menu && btn) placeMenu(menu, btn);
+  });
+  loadTextureCatalog().then(buildTextureRows).catch((err) => {
+    console.warn('texture catalog', err);
+  });
+}
+
+async function onTexturePick(id) {
+  if (_texBusy || _modelsBusy) return;
+  if ((id || '') === activeTextureSet()) {
+    closeMenus();
+    return;
+  }
+  closeMenus();
+  _texBusy = true;
+  syncTextureRows();
+  statusStep('Textures');
+  try {
+    const applied = await reapplyTextureSet(id, (done, total, stem) => {
+      if (!total) {
+        statusTick(id ? 'Textures · saved' : 'Textures · stock');
+        return;
+      }
+      const name = stem ? ` · ${stem}` : '';
+      statusTick(`Textures ${done}/${total}${name}`);
+    });
+    if (applied && modelsEnabled()) remountSceneModels(true);
+  } catch (err) {
+    console.warn('replay textures', err);
+  }
+  _texBusy = false;
+  setStatus(null);
+  syncModelsButton();
 }
 
 async function onModelsToggle() {
-  const btn = document.getElementById('btn-models');
+  if (_modelsBusy) return;
+  const real = document.getElementById('models-real');
   const next = !modelsEnabled();
   setModelsEnabled(next);
   syncModelsButton();
+  _modelsBusy = true;
+  if (real) real.disabled = true;
   if (next) {
-    if (btn) {
-      btn.disabled = true;
-      btn.title = 'Loading models';
-    }
     statusStep('Models');
     try {
       await ensureMatchModels(STATE.matchData, (done, total, stem) => {
@@ -923,16 +1100,13 @@ async function onModelsToggle() {
         }
         const name = stem ? ` · ${stem}` : '';
         statusTick(`Models ${done}/${total}${name}`);
-        if (btn) btn.title = `Loading models ${done}/${total}`;
       });
     } catch (err) {
       console.warn('replay models', err);
     }
-    if (btn) btn.disabled = false;
   }
-  applyShipModelMode(STATE.actors);
-  applyStructureModelMode(STATE.structures, STATE.mapData, STATE.terrainExaggeration);
-  applyStructureModelMode(STATE.recyclers, STATE.mapData, STATE.terrainExaggeration);
+  remountSceneModels(false);
+  _modelsBusy = false;
   setStatus(null);
   syncModelsButton();
 }
@@ -1369,21 +1543,17 @@ function setCameraMode(mode) {
   if (!['free', 'chase', 'topdown', 'cinema'].includes(mode)) return;
   STATE.camMode = mode;
   if (STATE.cameraCtl) STATE.cameraCtl.setMode(mode);
-  // Re-sync the pill UI.
-  document.querySelectorAll('.cam-pill').forEach(p => {
-    p.classList.toggle('is-active', p.dataset.cam === mode);
-  });
-  // Toggle chase-cam speed lines via body class.
+  syncViewRows();
   document.body.classList.toggle('replay-chase-active', mode === 'chase');
   pushReplayUrlState({ cam: mode === 'free' ? null : mode });
 }
 
-function wireCameraModePills() {
-  const pills = document.querySelectorAll('.cam-pill');
-  for (const p of pills) {
-    p.classList.toggle('is-active', p.dataset.cam === STATE.camMode);
-    p.addEventListener('click', () => setCameraMode(p.dataset.cam));
-  }
+function syncViewRows() {
+  document.querySelectorAll('#view-menu [data-cam]').forEach((row) => {
+    const on = row.dataset.cam === STATE.camMode;
+    row.classList.toggle('is-active', on);
+    row.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
 }
 
 function toggleLabels() {
@@ -1501,7 +1671,10 @@ function wireKeyboard() {
         break;
 
       case 'Escape':
-        if (document.body.classList.contains('replay-roster-open')) {
+        if (_menuOpen) {
+          e.preventDefault();
+          closeMenus();
+        } else if (document.body.classList.contains('replay-roster-open')) {
           e.preventDefault();
           closeRosterSheet();
         } else if (document.body.classList.contains('replay-expanded')) {
@@ -2111,9 +2284,12 @@ function structureFor(vs, tSec, shooterPos) {
     if (inst.spawn_tick != null && tick < inst.spawn_tick) continue;
     if (inst.death_tick != null && tick > inst.death_tick) continue;
     if (!Number.isFinite(inst.x) || !Number.isFinite(inst.z)) continue;
-    const wx = inst.x;
-    const wz = -inst.z;  // reflected world Z
-    const wy = (scaledHm ? sampleTerrainHeight(scaledHm, inst.x, inst.z) : 0) + 8;
+    const pad = inst.kind === 'recycler'
+      ? recyclerPadXZ(inst.x, inst.z, enemyBaseOf(STATE.matchData, inst.team))
+      : { x: inst.x, z: inst.z };
+    const wx = pad.x;
+    const wz = -pad.z;  // reflected world Z
+    const wy = (scaledHm ? sampleTerrainHeight(scaledHm, pad.x, pad.z) : 0) + 8;
     if (shooterPos) {
       const dx = wx - shooterPos.x;
       const dz = wz - shooterPos.z;

@@ -27,7 +27,7 @@ import {
   modelsEnabled,
   stemForOdf,
   modelReady,
-} from './replay-ship-models.js?v=recycler-mobile';
+} from './replay-ship-models.js?v=texture-set';
 
 // ------------------ Constants ------------------
 
@@ -166,17 +166,20 @@ function mountBody(actor, catKey) {
 }
 
 /**
- * Re-evaluate every actor after the 3D toggle flips. A loaded catalog mesh
- * replaces the primitive; turning the toggle off puts the primitive back.
+ * Re-evaluate every actor after the models toggle flips, or after a texture
+ * pack change (`opts.force` remounts even when the stem is unchanged).
+ * A loaded catalog mesh replaces the primitive; turning models off puts
+ * the primitive back.
  */
-export function applyShipModelMode(actors) {
+export function applyShipModelMode(actors, opts) {
   if (!actors) return;
+  const force = !!(opts && opts.force);
   for (const actor of actors) {
     const desired = (modelsEnabled() && modelReady(actor.currentShipOdf))
       ? stemForOdf(actor.currentShipOdf)
       : null;
     const showing = actor.glyphIsModel ? (actor.modelStem || null) : null;
-    if (showing === desired) continue;
+    if (!force && showing === desired) continue;
     mountBody(actor, actor.glyphCategory);
   }
 }

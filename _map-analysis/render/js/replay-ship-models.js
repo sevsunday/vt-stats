@@ -2,9 +2,10 @@
  *
  * Real meshes for ships and buildings the replay already draws. On unless
  * localStorage `vt.replay.models` is "0". Loads only the stems this match
- * needs (ODF lookup against data/models/index.json), assigns the stock perf
- * diffuse + emissive maps the /models viewer uses, and clones per instance
- * so team-color uniforms are not shared.
+ * needs (ODF lookup against data/models/index.json), assigns perf diffuse,
+ * emissive, and team-color maps (stock, or a workshop pack from
+ * localStorage `vt.replay.textureSet`), and clones per instance so
+ * team-color uniforms are not shared.
  *
  * Nose is model-local -Z. Actor yaw 0 faces +X, so the wrapper yaws +90 deg
  * after a negative Z scale (three.js applies scale before rotation). The
@@ -16,6 +17,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../../../vendor/three/addons/loaders/GLTFLoader.js';
 
 export const MODELS_STORAGE_KEY = 'vt.replay.models';
+export const TEXTURE_SET_KEY = 'vt.replay.textureSet';
 
 // True engine meters.
 export const MODEL_VISUAL_SCALE = 1;
@@ -54,13 +56,17 @@ const INDEX_URL = new URL('index.json', MODELS_ROOT).href;
 const _loader = new GLTFLoader();
 const _texLoader = new THREE.TextureLoader();
 const _texCache = new Map();
-const _templates = new Map();   // stem -> { wrapper, masks }
+const _templates = new Map();   // stem -> { wrapper, masks, stem }
 const _stemLoads = new Map();   // stem -> Promise
 const _teamBundles = new Map();
+const _specByStem = new Map();
 
 let _enabled = true;
+let _textureSet = readTextureSet();
+let _packs = [];                // [{id, label, url}]
 let _byOdf = null;              // norm odf -> spec
 let _indexPromise = null;
+let _texGen = 0;
 
 function assetUrl(rel) {
   return new URL(rel, MODELS_ROOT).href;
@@ -73,6 +79,11 @@ function normOdf(odf) {
   return s;
 }
 
+function readTextureSet() {
+  try { return localStorage.getItem(TEXTURE_SET_KEY) || ''; }
+  catch { return ''; }
+}
+
 export function readModelsEnabled() {
   try { return localStorage.getItem(MODELS_STORAGE_KEY) !== '0'; }
   catch { return true; }
@@ -80,7 +91,23 @@ export function readModelsEnabled() {
 
 export function initModelsPref() {
   _enabled = readModelsEnabled();
+  _textureSet = readTextureSet();
   return _enabled;
+}
+
+/** Pack id in use, or '' for stock. */
+export function activeTextureSet() {
+  return _textureSet;
+}
+
+/** Workshop packs from the model index. Empty until the catalog has loaded. */
+export function texturePacks() {
+  return _packs;
+}
+
+export async function loadTextureCatalog() {
+  await ensureIndex();
+  return _packs;
 }
 
 export function modelsEnabled() {
@@ -160,7 +187,9 @@ async function ensureIndex() {
             diffuse: m.textures || [],
             teamColor: m.teamColorTextures || [],
             emissive: m.emissiveTextures || [],
+            textureSets: Array.isArray(m.textureSets) ? m.textureSets : [],
           };
+          if (!_specByStem.has(m.stem)) _specByStem.set(m.stem, spec);
           const keys = [...(m.odfs || [])];
           if (m.primaryOdf) keys.push(m.primaryOdf);
           for (const o of keys) {
@@ -168,6 +197,12 @@ async function ensureIndex() {
             if (key && !map.has(key)) map.set(key, spec);
           }
         }
+        const packs = (doc && doc.texture_packs) || {};
+        _packs = Object.keys(packs).map((id) => {
+          const p = packs[id] || {};
+          return { id, label: p.label || id, url: p.url || '' };
+        });
+        if (_textureSet && !_packs.some((p) => p.id === _textureSet)) _textureSet = '';
         _byOdf = map;
       })
       .catch((err) => {
@@ -238,56 +273,126 @@ function loadStem(spec) {
   return pending;
 }
 
-async function loadStemNow(spec) {
-  if (_templates.has(spec.stem)) return;
-  const gltf = await _loader.loadAsync(assetUrl(`geometry/${spec.stem}.glb`));
-  const scene = gltf.scene;
+function listed(arr, name) {
+  return Array.isArray(arr) && arr.includes(name);
+}
 
-  const diffuseNames = new Set(spec.diffuse);
-  const teamNames = new Set(spec.teamColor);
-  const emisNames = new Set(spec.emissive);
-  const masks = new Map();
+function activeSet(spec) {
+  if (!_textureSet) return null;
+  return (spec.textureSets || []).find((s) => s.id === _textureSet) || null;
+}
 
+/** Pack map when this set covers the stem, otherwise the stock file. */
+function mapUrl(spec, name, kind) {
+  const set = activeSet(spec);
+  if (kind === 'diffuse') {
+    if (set && listed(set.textures, name)) {
+      return assetUrl(`textures/mods/${set.id}/perf/${name}.png`);
+    }
+    if (listed(spec.diffuse, name)) return assetUrl(`textures/perf/${name}.png`);
+    return null;
+  }
+  if (kind === 'emissive') {
+    if (set && listed(set.emissiveTextures, name)) {
+      return assetUrl(`textures/mods/${set.id}/emissive/${name}.png`);
+    }
+    if (listed(spec.emissive, name)) return assetUrl(`textures/emissive/${name}.png`);
+    return null;
+  }
+  if (set && listed(set.teamColorTextures, name)) {
+    return assetUrl(`textures/mods/${set.id}/teamcolor/${name}.png`);
+  }
+  if (listed(spec.teamColor, name)) return assetUrl(`textures/teamcolor/${name}.png`);
+  return null;
+}
+
+function collectMaterials(root) {
   const materials = [];
-  scene.traverse((obj) => {
+  const seen = new Set();
+  root.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
     const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    for (const mat of mats) materials.push(mat);
+    for (const mat of mats) {
+      if (seen.has(mat)) continue;
+      seen.add(mat);
+      materials.push(mat);
+    }
   });
+  return materials;
+}
+
+/**
+ * Bind the active pack (stock fallback per map) onto a template.
+ * Returns false when a newer pack choice superseded this pass.
+ */
+function addNames(into, list) {
+  if (!list) return;
+  for (const n of list) into.add(n);
+}
+
+async function paintTemplate(spec, tpl) {
+  const gen = _texGen;
+  const set = activeSet(spec);
+  const diffuseNames = new Set(spec.diffuse);
+  const emisNames = new Set(spec.emissive);
+  const teamNames = new Set(spec.teamColor);
+  if (set) {
+    addNames(diffuseNames, set.textures);
+    addNames(emisNames, set.emissiveTextures);
+    addNames(teamNames, set.teamColorTextures);
+  }
+  // A later pass must also clear maps the previous pack applied.
+  if (tpl.painted) {
+    for (const prev of spec.textureSets || []) {
+      addNames(diffuseNames, prev.textures);
+      addNames(emisNames, prev.emissiveTextures);
+      addNames(teamNames, prev.teamColorTextures);
+    }
+  }
+  const masks = new Map();
+  const materials = collectMaterials(tpl.wrapper);
 
   await Promise.all(materials.map(async (mat) => {
     const name = mat.name;
     if (!name) return;
     if (diffuseNames.has(name)) {
-      const tex = await loadTexture(
-        assetUrl(`textures/perf/${name}.png`),
-        THREE.SRGBColorSpace,
-      );
+      const url = mapUrl(spec, name, 'diffuse');
+      const tex = url ? await loadTexture(url, THREE.SRGBColorSpace) : null;
+      if (gen !== _texGen) return;
       if (tex) {
         mat.map = tex;
         mat.color = new THREE.Color(0xffffff);
       }
     }
     if (emisNames.has(name) && 'emissive' in mat) {
-      const tex = await loadTexture(
-        assetUrl(`textures/emissive/${name}.png`),
-        THREE.SRGBColorSpace,
-      );
-      if (tex) {
-        mat.emissiveMap = tex;
-        mat.emissive.setRGB(1, 1, 1);
+      const url = mapUrl(spec, name, 'emissive');
+      const tex = url ? await loadTexture(url, THREE.SRGBColorSpace) : null;
+      if (gen !== _texGen) return;
+      if (tex || !url) {
+        mat.emissiveMap = tex || null;
+        mat.emissive.setRGB(tex ? 1 : 0, tex ? 1 : 0, tex ? 1 : 0);
         mat.emissiveIntensity = 1;
       }
     }
     if (teamNames.has(name)) {
-      const mask = await loadTexture(
-        assetUrl(`textures/teamcolor/${name}.png`),
-        THREE.NoColorSpace,
-      );
+      const url = mapUrl(spec, name, 'team');
+      const mask = url ? await loadTexture(url, THREE.NoColorSpace) : null;
+      if (gen !== _texGen) return;
       if (mask) masks.set(name, mask);
     }
     mat.needsUpdate = true;
   }));
+
+  if (gen !== _texGen) return false;
+  tpl.masks = masks;
+  tpl.painted = true;
+  return true;
+}
+
+async function loadStemNow(spec) {
+  if (_templates.has(spec.stem)) return;
+  const gltf = await _loader.loadAsync(assetUrl(`geometry/${spec.stem}.glb`));
+  const scene = gltf.scene;
 
   const wrapper = new THREE.Group();
   wrapper.name = `model-template-${spec.stem}`;
@@ -298,7 +403,56 @@ async function loadStemNow(spec) {
   const box = new THREE.Box3().setFromObject(wrapper);
   if (Number.isFinite(box.min.y)) wrapper.position.y = -box.min.y;
 
-  _templates.set(spec.stem, { wrapper, masks, stem: spec.stem });
+  const tpl = { wrapper, masks: new Map(), stem: spec.stem };
+  let painted = await paintTemplate(spec, tpl);
+  while (!painted) {
+    tpl.painted = true;
+    painted = await paintTemplate(spec, tpl);
+  }
+  _templates.set(spec.stem, tpl);
+}
+
+function persistTextureSet() {
+  try { localStorage.setItem(TEXTURE_SET_KEY, _textureSet); }
+  catch { /* private mode */ }
+}
+
+let _applyChain = Promise.resolve();
+
+/**
+ * Switch the scene-wide pack (`id` or '' / null for stock) and rebind every
+ * template already loaded. In-flight stem loads repaint before they publish.
+ * `onProgress(done, total, stem)` matches ensureMatchModels.
+ */
+export function reapplyTextureSet(id, onProgress) {
+  const run = _applyChain.then(() => reapplyTextureSetNow(id, onProgress));
+  _applyChain = run.then(() => {}, () => {});
+  return run;
+}
+
+async function reapplyTextureSetNow(id, onProgress) {
+  await ensureIndex();
+  const next = (id && _packs.some((p) => p.id === id)) ? id : '';
+  _textureSet = next;
+  persistTextureSet();
+  const gen = ++_texGen;
+  await Promise.allSettled([..._stemLoads.values()]);
+  if (gen !== _texGen) return false;
+
+  const entries = [..._templates.values()];
+  const total = entries.length;
+  let done = 0;
+  if (onProgress) onProgress(0, total, null);
+  await Promise.all(entries.map(async (tpl) => {
+    const spec = _specByStem.get(tpl.stem);
+    if (spec) {
+      try { await paintTemplate(spec, tpl); }
+      catch (err) { console.warn(`retexture ${tpl.stem} failed`, err); }
+    }
+    done += 1;
+    if (gen === _texGen && onProgress) onProgress(done, total, tpl.stem);
+  }));
+  return gen === _texGen;
 }
 
 function teamBundle(maskTex, color) {

@@ -189,6 +189,12 @@ const PANES = [
 const panesMql = window.matchMedia('(max-width: 640px)');
 function isMobilePanes() { return panesMql.matches; }
 
+// Touch devices must hit the scrollport itself. A mouse-only desktop stays
+// pointer-events:none so the gaps between panes still orbit the model.
+if (navigator.maxTouchPoints > 0) {
+  document.getElementById('viewer-dock')?.classList.add('touch-scroll');
+}
+
 function setPaneOpen(id, open) {
   const p = PANES.find((x) => x.id === id);
   if (!p) return;
