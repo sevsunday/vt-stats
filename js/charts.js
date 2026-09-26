@@ -129,14 +129,43 @@ const glassTooltipConfig = {
   external: glassTooltipHandler,
 };
 
-const PLAYER_PALETTE = [
-  '#36a2eb', '#ff6384', '#ffce56', '#4bc0c0', '#9966ff',
-  '#ff9f40', '#c9cbcf', '#e74c3c', '#2ecc71', '#1abc9c',
-  '#f39c12', '#8e44ad', '#3498db', '#e67e22', '#1a5276',
-];
+const _colorNormCache = new Map();
+
+function normalizeHex(color) {
+  const key = String(color || '').trim();
+  if (_colorNormCache.has(key)) return _colorNormCache.get(key);
+  let out = key;
+  if (/^#[0-9a-fA-F]{6}$/.test(key)) {
+    out = key.toLowerCase();
+  } else if (/^#[0-9a-fA-F]{3}$/.test(key)) {
+    const h = key.slice(1);
+    out = ('#' + h[0] + h[0] + h[1] + h[1] + h[2] + h[2]).toLowerCase();
+  } else if (key) {
+    const probe = document.createElement('canvas').getContext('2d');
+    if (probe) {
+      probe.fillStyle = '#000000';
+      probe.fillStyle = key;
+      const norm = probe.fillStyle;
+      if (typeof norm === 'string' && /^#[0-9a-fA-F]{6}$/.test(norm)) out = norm.toLowerCase();
+    }
+  }
+  _colorNormCache.set(key, out);
+  return out;
+}
+
+function withAlpha(color, alpha) {
+  const hex = normalizeHex(color);
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return color;
+  const aa = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0');
+  return hex + aa;
+}
+
+const SERIES_STOPS = ['primary', 'accent', 'info', 'warning', 'success', 'danger'];
 
 function getPlayerColor(index) {
-  return PLAYER_PALETTE[index % PLAYER_PALETTE.length];
+  const t = getThemeColors();
+  const i = Math.abs(Number(index) || 0) % SERIES_STOPS.length;
+  return normalizeHex(t[SERIES_STOPS[i]]);
 }
 
 function buildPlayerColorMap(names) {
@@ -145,11 +174,62 @@ function buildPlayerColorMap(names) {
   return map;
 }
 
+function chartMotionMs() {
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return 0;
+  return 450;
+}
+
+function rankedBarDataset(values) {
+  const primary = getThemeColors().primary;
+  const n = values.length;
+  const backgroundColor = values.map((_, i) => {
+    const fade = n <= 1 ? 0 : i / (n - 1);
+    return withAlpha(primary, 0.95 - fade * 0.4);
+  });
+  return {
+    data: values,
+    backgroundColor,
+    borderWidth: 0,
+    borderRadius: { topLeft: 0, topRight: 2, bottomLeft: 0, bottomRight: 2 },
+    borderSkipped: false,
+    maxBarThickness: 16,
+    categoryPercentage: 0.7,
+    barPercentage: 0.85,
+  };
+}
+
+function fillRoundRect(ctx, x, y, w, h, r) {
+  const radius = Math.max(0, Math.min(r, h / 2, w / 2));
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, radius);
+  else ctx.rect(x, y, w, h);
+  ctx.fill();
+}
+
+const rankedBarPlugin = {
+  id: 'rankedBarTrack',
+  beforeDatasetsDraw(chart) {
+    const meta = chart.getDatasetMeta(0);
+    if (!meta || meta.hidden || !chart.chartArea) return;
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    ctx.fillStyle = withAlpha(getCSSVar('--kb-bg-muted') || '#22222e', 0.85);
+    meta.data.forEach((bar) => {
+      if (!bar || bar.skip) return;
+      const h = Math.max(bar.height || 12, 4);
+      const w = chartArea.right - chartArea.left;
+      if (w <= 0) return;
+      fillRoundRect(ctx, chartArea.left, bar.y - h / 2, w, h, 2);
+    });
+    ctx.restore();
+  },
+};
+
 function applyThemeDefaults() {
   const t = getThemeColors();
   Chart.defaults.color = t.textMuted;
   Chart.defaults.borderColor = t.border;
-  Chart.defaults.animation.duration = 1000;
+  Chart.defaults.animation.duration = chartMotionMs();
   Chart.defaults.animation.easing = 'easeOutQuart';
   Chart.defaults.font.family = "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 }
@@ -558,19 +638,14 @@ function renderWeaponMeta(canvasId, weaponMeta, limit) {
   const data = weaponMeta.slice(0, limit || 15);
   const labels = data.map(w => w.weapon);
   const values = data.map(w => w.total_damage);
-  const colors = data.map((_, i) => getPlayerColor(i));
 
   const chart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
-      datasets: [{
-        data: values,
-        backgroundColor: colors.map(c => c + 'cc'),
-        borderColor: colors,
-        borderWidth: 1,
-      }],
+      datasets: [rankedBarDataset(values)],
     },
+    plugins: [rankedBarPlugin],
     options: {
       indexAxis: 'y',
       responsive: true,
@@ -590,7 +665,7 @@ function renderWeaponMeta(canvasId, weaponMeta, limit) {
         },
       },
       scales: {
-        x: { title: { display: true, text: 'Total Damage' }, beginAtZero: true },
+        x: { beginAtZero: true },
         y: { ticks: { font: { size: 11 } } },
       },
     },
@@ -896,7 +971,7 @@ function renderWeaponRange(canvasId, leaderboard, channel, binEdges, opts) {
   const labels = rows.map((r) => r.weapon);
   const stats = rows.map((r) => r.stats);
   const maxRanges = rows.map((r) => r.maxRange);
-  const colors = rows.map((_, i) => getPlayerColor(i));
+  const ink = t.primary;
 
   // Custom markers: median tick (solid) + dashed whisker p95->observed-max,
   // plus a faint theoretical-max reference tick (meters mode: weapon book
@@ -986,9 +1061,9 @@ function renderWeaponRange(canvasId, leaderboard, channel, binEdges, opts) {
       labels,
       datasets: [{
         data: stats.map((s) => [s.p10, s.p95]),
-        backgroundColor: colors.map((cc) => cc + '66'),
-        borderColor: colors,
-        borderWidth: 1,
+        backgroundColor: withAlpha(ink, 0.4),
+        borderColor: ink,
+        borderWidth: 0,
         borderSkipped: false,
         borderRadius: 3,
       }],
@@ -1048,19 +1123,14 @@ function renderVehicleKills(canvasId, vehicleData) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   const labels = vehicleData.map(v => v.name);
   const values = vehicleData.map(v => v.count);
-  const colors = vehicleData.map((_, i) => getPlayerColor(i));
 
   const chart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
-      datasets: [{
-        data: values,
-        backgroundColor: colors.map(c => c + 'cc'),
-        borderColor: colors,
-        borderWidth: 1,
-      }],
+      datasets: [rankedBarDataset(values)],
     },
+    plugins: [rankedBarPlugin],
     options: {
       indexAxis: 'y',
       responsive: true,
@@ -1075,7 +1145,7 @@ function renderVehicleKills(canvasId, vehicleData) {
         },
       },
       scales: {
-        x: { title: { display: true, text: 'Times Destroyed' }, beginAtZero: true },
+        x: { beginAtZero: true },
         y: { ticks: { font: { size: 11 } } },
       },
     },
@@ -1103,19 +1173,14 @@ function renderPowerupDestructionsChart(canvasId, byOdf) {
   // so the suffix is redundant noise on the y-axis -- strip it here.
   const labels = byOdf.map(v => (v.name || '').replace(/ Powerup$/, ''));
   const values = byOdf.map(v => v.count);
-  const colors = byOdf.map((_, i) => getPlayerColor(i));
 
   const chart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
-      datasets: [{
-        data: values,
-        backgroundColor: colors.map(c => c + 'cc'),
-        borderColor: colors,
-        borderWidth: 1,
-      }],
+      datasets: [rankedBarDataset(values)],
     },
+    plugins: [rankedBarPlugin],
     options: {
       indexAxis: 'y',
       responsive: true,
@@ -1130,7 +1195,7 @@ function renderPowerupDestructionsChart(canvasId, byOdf) {
         },
       },
       scales: {
-        x: { title: { display: true, text: 'Powerups/Crates Destroyed (shot before pickup)' }, beginAtZero: true },
+        x: { beginAtZero: true },
         y: { ticks: { font: { size: 11 } } },
       },
     },
