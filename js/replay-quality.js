@@ -17,27 +17,44 @@ export const PRESETS = {
   high: { models: 'full', ground: 'tiles', motion: 'smooth' },
 };
 
+/** One choice applies both faction packs. ISDF Redux stays separate. */
+export const ENHANCED_SET_ID = 'enhanced';
+export const ENHANCED_PACK_IDS = ['1581901346', '1554202061'];
+
 export const TEXTURE_PACKS = [
-  { id: '', label: 'Stock', title: 'The original game textures', url: '' },
+  { id: '', label: 'Stock', title: 'The original game textures', urls: [] },
   {
-    id: '1581901346',
-    label: 'ISDF Enhanced',
-    title: 'ISDF Stock-Enhanced Textures',
-    url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=1581901346',
+    id: ENHANCED_SET_ID,
+    label: 'ISDF & Scion',
+    title: 'ISDF and Scion enhanced textures',
+    urls: [
+      {
+        title: 'ISDF Stock-Enhanced Textures',
+        url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=1581901346',
+      },
+      {
+        title: 'Scion Stock-Enhanced Textures',
+        url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=1554202061',
+      },
+    ],
   },
   {
     id: '3365986032',
     label: 'ISDF Redux',
     title: 'ISDF Redux Re-Texture',
-    url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3365986032',
-  },
-  {
-    id: '1554202061',
-    label: 'Scion Enhanced',
-    title: 'Scion Stock-Enhanced Textures',
-    url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=1554202061',
+    urls: [{
+      title: 'ISDF Redux Re-Texture',
+      url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3365986032',
+    }],
   },
 ];
+
+/** Map a stored pack id onto the current choices. The two enhanced packs collapse to one. */
+export function normalizeTextureSet(id) {
+  if (!id) return '';
+  if (id === ENHANCED_SET_ID || ENHANCED_PACK_IDS.includes(id)) return ENHANCED_SET_ID;
+  return TEXTURE_PACKS.some((p) => p.id === id) ? id : '';
+}
 
 const STEAM_ICON = '<svg class="vt-rq-steam" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M.329 10.333A8.01 8.01 0 0 0 7.99 16C12.414 16 16 12.418 16 8s-3.586-8-8.009-8A8.006 8.006 0 0 0 0 7.468l.003.006 4.304 1.769A2.2 2.2 0 0 1 5.62 8.88l1.96-2.844-.001-.04a3.046 3.046 0 0 1 3.042-3.043 3.046 3.046 0 0 1 3.042 3.043 3.047 3.047 0 0 1-3.111 3.044l-2.804 2a2.223 2.223 0 0 1-2.564 2.563l-2.563-1.049A2.23 2.23 0 0 1 .33 10.333"/><path fill="currentColor" d="M4.868 12.683a1.715 1.715 0 0 0 1.318-3.165 1.7 1.7 0 0 0-1.263-.02l1.023.424a1.261 1.261 0 1 1-.97 2.33l-.99-.41a1.7 1.7 0 0 0 .882.84zm3.726-6.687a2.03 2.03 0 0 0 2.027 2.029 2.03 2.03 0 0 0 2.027-2.029 2.03 2.03 0 0 0-2.027-2.027 2.03 2.03 0 0 0-2.027 2.027m2.03-1.527a1.524 1.524 0 1 1-.002 3.048 1.524 1.524 0 0 1 .002-3.048"/></svg>';
 
@@ -148,11 +165,13 @@ export function patchFromTransport(partial) {
 
 export function readTextureSet() {
   const id = storageGet(TEXTURE_SET_KEY) || '';
-  return TEXTURE_PACKS.some((p) => p.id === id) ? id : '';
+  const next = normalizeTextureSet(id);
+  if (next !== id) storageSet(TEXTURE_SET_KEY, next);
+  return next;
 }
 
 export function writeTextureSet(id) {
-  const next = TEXTURE_PACKS.some((p) => p.id === id) ? id : '';
+  const next = normalizeTextureSet(id);
   storageSet(TEXTURE_SET_KEY, next);
   return next;
 }
@@ -258,6 +277,7 @@ export function mountPanel(host) {
     preset.appendChild(opt);
   }
   presetField.appendChild(preset);
+  const presetPicker = dressSelect(preset);
   root.appendChild(presetField);
 
   const models = selectField('Model quality', 'models', [
@@ -298,14 +318,14 @@ export function mountPanel(host) {
     label.appendChild(radio);
     label.appendChild(document.createTextNode(pack.label));
     row.appendChild(label);
-    if (pack.url) {
+    for (const credit of pack.urls || []) {
       const link = document.createElement('a');
       link.className = 'vt-rq-workshop';
-      link.href = pack.url;
+      link.href = credit.url;
       link.target = '_blank';
       link.rel = 'noopener';
-      link.title = `Workshop page for ${pack.title}`;
-      link.setAttribute('aria-label', `Workshop page for ${pack.title}`);
+      link.title = `Workshop page for ${credit.title}`;
+      link.setAttribute('aria-label', `Workshop page for ${credit.title}`);
       link.innerHTML = STEAM_ICON;
       row.appendChild(link);
     }
@@ -369,6 +389,7 @@ export function mountPanel(host) {
       ground: ground.select.value,
       motion: motion.select.value,
     });
+    presetPicker.sync();
     syncTextureDisabled();
   }
 
@@ -378,6 +399,9 @@ export function mountPanel(host) {
     models.select.value = p.models;
     ground.select.value = p.ground;
     motion.select.value = p.motion;
+    models.picker.sync();
+    ground.picker.sync();
+    motion.picker.sync();
     syncTextureDisabled();
   });
   models.select.addEventListener('change', syncPresetFromRows);
@@ -401,6 +425,10 @@ export function mountPanel(host) {
     models.select.value = settings.models;
     ground.select.value = settings.ground;
     motion.select.value = settings.motion;
+    presetPicker.sync();
+    models.picker.sync();
+    ground.picker.sync();
+    motion.picker.sync();
     cacheBox.checked = settings.cache !== false;
     purge.hidden = true;
     const id = TEXTURE_PACKS.some((p) => p.id === textureId) ? textureId : '';
@@ -446,7 +474,85 @@ function selectField(label, key, options) {
     select.appendChild(opt);
   }
   field.appendChild(select);
-  return { field, select };
+  return { field, select, picker: dressSelect(select) };
+}
+
+/** Site-styled list in place of the native popup, which stays white on Windows. */
+function dressSelect(select) {
+  select.classList.add('vt-rq-native');
+  const wrap = document.createElement('div');
+  wrap.className = 'vt-rq-picker';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'vt-rq-picker-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  const menu = document.createElement('div');
+  menu.className = 'vt-rq-picker-menu';
+  menu.hidden = true;
+  menu.setAttribute('role', 'listbox');
+
+  function sync() {
+    const chosen = select.selectedOptions[0];
+    btn.textContent = chosen ? chosen.textContent : '';
+    menu.querySelectorAll('.vt-rq-picker-item').forEach((item) => {
+      const on = item.dataset.value === select.value;
+      item.classList.toggle('is-active', on);
+      item.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+
+  for (const opt of select.options) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'vt-rq-picker-item';
+    item.dataset.value = opt.value;
+    item.textContent = opt.textContent;
+    item.setAttribute('role', 'option');
+    item.addEventListener('click', () => {
+      select.value = opt.value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      menu.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      sync();
+    });
+    menu.appendChild(item);
+  }
+
+  btn.addEventListener('click', () => {
+    const opening = menu.hidden;
+    document.querySelectorAll('.vt-rq-picker-menu').forEach((other) => {
+      other.hidden = true;
+    });
+    document.querySelectorAll('.vt-rq-picker-btn').forEach((other) => {
+      other.setAttribute('aria-expanded', 'false');
+    });
+    if (!opening) return;
+    menu.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+    const rect = btn.getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom;
+    menu.classList.toggle('is-up', below < 180 && rect.top > below);
+  });
+
+  select.addEventListener('change', sync);
+  wrap.appendChild(btn);
+  wrap.appendChild(menu);
+  select.insertAdjacentElement('afterend', wrap);
+  if (!dressSelect.wired) {
+    dressSelect.wired = true;
+    document.addEventListener('pointerdown', (ev) => {
+      const t = ev.target;
+      if (t && t.closest && t.closest('.vt-rq-picker')) return;
+      document.querySelectorAll('.vt-rq-picker-menu').forEach((other) => {
+        other.hidden = true;
+      });
+      document.querySelectorAll('.vt-rq-picker-btn').forEach((other) => {
+        other.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+  sync();
+  return { sync };
 }
 
 let replayPanel = null;

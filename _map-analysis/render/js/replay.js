@@ -62,6 +62,9 @@ import {
   QUALITY_STORAGE_KEY,
   TEXTURE_SET_KEY,
   SLOW_LOAD_HINT_SEC,
+  ENHANCED_SET_ID,
+  ENHANCED_PACK_IDS,
+  TEXTURE_PACKS,
 } from '../../../js/replay-quality.js';
 import {
   buildSpawnBeacons,
@@ -980,11 +983,9 @@ function syncHqButton() {
 }
 
 const TEX_SHORT = {
-  '1581901346': 'ISDF Enhanced',
   '3365986032': 'ISDF Redux',
-  '1554202061': 'Scion Enhanced',
 };
-const TEX_ORDER = ['1581901346', '3365986032', '1554202061'];
+const TEX_ORDER = ['3365986032'];
 const STEAM_ICON = '<svg class="t-steam-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M.329 10.333A8.01 8.01 0 0 0 7.99 16C12.414 16 16 12.418 16 8s-3.586-8-8.009-8A8.006 8.006 0 0 0 0 7.468l.003.006 4.304 1.769A2.2 2.2 0 0 1 5.62 8.88l1.96-2.844-.001-.04a3.046 3.046 0 0 1 3.042-3.043 3.046 3.046 0 0 1 3.042 3.043 3.047 3.047 0 0 1-3.111 3.044l-2.804 2a2.223 2.223 0 0 1-2.564 2.563l-2.563-1.049A2.23 2.23 0 0 1 .33 10.333"/><path fill="currentColor" d="M4.868 12.683a1.715 1.715 0 0 0 1.318-3.165 1.7 1.7 0 0 0-1.263-.02l1.023.424a1.261 1.261 0 1 1-.97 2.33l-.99-.41a1.7 1.7 0 0 0 .882.84zm3.726-6.687a2.03 2.03 0 0 0 2.027 2.029 2.03 2.03 0 0 0 2.027-2.029 2.03 2.03 0 0 0-2.027-2.027 2.03 2.03 0 0 0-2.027 2.027m2.03-1.527a1.524 1.524 0 1 1-.002 3.048 1.524 1.524 0 0 1 .002-3.048"/></svg>';
 
 let _menuOpen = null;
@@ -1031,7 +1032,7 @@ function buildTextureRows(packs) {
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
   });
   const frag = document.createDocumentFragment();
-  const add = (id, label, title, url) => {
+  const add = (id, label, title, urls) => {
     const wrap = document.createElement('div');
     wrap.className = 't-dropup-tex';
     const btn = document.createElement('button');
@@ -1042,21 +1043,26 @@ function buildTextureRows(packs) {
     btn.title = title;
     btn.addEventListener('click', () => { void onTexturePick(id); });
     wrap.appendChild(btn);
-    if (url) {
+    for (const credit of urls || []) {
       const link = document.createElement('a');
       link.className = 't-dropup-steam';
-      link.href = url;
+      link.href = credit.url;
       link.target = '_blank';
       link.rel = 'noopener';
-      link.title = `Workshop page for ${title}`;
-      link.setAttribute('aria-label', `Workshop page for ${title}`);
+      link.title = `Workshop page for ${credit.title}`;
+      link.setAttribute('aria-label', `Workshop page for ${credit.title}`);
       link.innerHTML = STEAM_ICON;
       wrap.appendChild(link);
     }
     frag.appendChild(wrap);
   };
-  add('', 'Stock', 'The original game textures', '');
-  for (const pack of ordered) add(pack.id, packLabel(pack), pack.label, pack.url);
+  add('', 'Stock', 'The original game textures', []);
+  const enhanced = TEXTURE_PACKS.find((p) => p.id === ENHANCED_SET_ID);
+  if (enhanced) add(enhanced.id, enhanced.label, enhanced.title, enhanced.urls);
+  for (const pack of ordered) {
+    if (ENHANCED_PACK_IDS.includes(pack.id)) continue;
+    add(pack.id, packLabel(pack), pack.label, pack.url ? [{ title: pack.label, url: pack.url }] : []);
+  }
   host.appendChild(frag);
   syncTextureRows();
 }

@@ -15,7 +15,13 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from '../../../vendor/three/addons/loaders/GLTFLoader.js';
-import { cachedBlobUrl, readSettings } from '../../../js/replay-quality.js';
+import {
+  cachedBlobUrl,
+  readSettings,
+  normalizeTextureSet,
+  ENHANCED_SET_ID,
+  ENHANCED_PACK_IDS,
+} from '../../../js/replay-quality.js';
 
 export const MODELS_STORAGE_KEY = 'vt.replay.models';
 export const TEXTURE_SET_KEY = 'vt.replay.textureSet';
@@ -81,8 +87,21 @@ function normOdf(odf) {
 }
 
 function readTextureSet() {
-  try { return localStorage.getItem(TEXTURE_SET_KEY) || ''; }
-  catch { return ''; }
+  let id = '';
+  try { id = localStorage.getItem(TEXTURE_SET_KEY) || ''; }
+  catch { id = ''; }
+  const next = normalizeTextureSet(id);
+  if (next !== id) {
+    try { localStorage.setItem(TEXTURE_SET_KEY, next); }
+    catch { /* private mode */ }
+  }
+  return next;
+}
+
+function activePackIds() {
+  if (!_textureSet) return [];
+  if (_textureSet === ENHANCED_SET_ID) return ENHANCED_PACK_IDS;
+  return [_textureSet];
 }
 
 export function readModelsEnabled() {
@@ -203,7 +222,9 @@ async function ensureIndex() {
           const p = packs[id] || {};
           return { id, label: p.label || id, url: p.url || '' };
         });
-        if (_textureSet && !_packs.some((p) => p.id === _textureSet)) _textureSet = '';
+        if (_textureSet && _textureSet !== ENHANCED_SET_ID && !_packs.some((p) => p.id === _textureSet)) {
+          _textureSet = '';
+        }
         _byOdf = map;
       })
       .catch((err) => {
@@ -295,32 +316,38 @@ function listed(arr, name) {
   return Array.isArray(arr) && arr.includes(name);
 }
 
-function activeSet(spec) {
-  if (!_textureSet) return null;
-  return (spec.textureSets || []).find((s) => s.id === _textureSet) || null;
+function activeSets(spec) {
+  const sets = spec.textureSets || [];
+  const out = [];
+  for (const id of activePackIds()) {
+    const set = sets.find((s) => s.id === id);
+    if (set) out.push(set);
+  }
+  return out;
 }
 
-/** Pack map when this set covers the stem, otherwise the stock file. */
-function mapUrl(spec, name, kind) {
-  const set = activeSet(spec);
-  if (kind === 'diffuse') {
-    if (set && listed(set.textures, name)) {
-      return assetUrl(`textures/mods/${set.id}/perf/${name}.png`);
-    }
-    if (listed(spec.diffuse, name)) return assetUrl(`textures/perf/${name}.png`);
-    return null;
+function packUrl(set, name, kind) {
+  if (kind === 'diffuse' && listed(set.textures, name)) {
+    return assetUrl(`textures/mods/${set.id}/perf/${name}.png`);
   }
-  if (kind === 'emissive') {
-    if (set && listed(set.emissiveTextures, name)) {
-      return assetUrl(`textures/mods/${set.id}/emissive/${name}.png`);
-    }
-    if (listed(spec.emissive, name)) return assetUrl(`textures/emissive/${name}.png`);
-    return null;
+  if (kind === 'emissive' && listed(set.emissiveTextures, name)) {
+    return assetUrl(`textures/mods/${set.id}/emissive/${name}.png`);
   }
-  if (set && listed(set.teamColorTextures, name)) {
+  if (kind === 'team' && listed(set.teamColorTextures, name)) {
     return assetUrl(`textures/mods/${set.id}/teamcolor/${name}.png`);
   }
-  if (listed(spec.teamColor, name)) return assetUrl(`textures/teamcolor/${name}.png`);
+  return null;
+}
+
+/** Pack map when an active set covers the stem, otherwise the stock file. */
+function mapUrl(spec, name, kind) {
+  for (const set of activeSets(spec)) {
+    const url = packUrl(set, name, kind);
+    if (url) return url;
+  }
+  if (kind === 'diffuse' && listed(spec.diffuse, name)) return assetUrl(`textures/perf/${name}.png`);
+  if (kind === 'emissive' && listed(spec.emissive, name)) return assetUrl(`textures/emissive/${name}.png`);
+  if (kind === 'team' && listed(spec.teamColor, name)) return assetUrl(`textures/teamcolor/${name}.png`);
   return null;
 }
 
@@ -359,11 +386,10 @@ function addNames(into, list) {
 
 async function paintTemplate(spec, tpl) {
   const gen = _texGen;
-  const set = activeSet(spec);
   const diffuseNames = new Set(spec.diffuse);
   const emisNames = new Set(spec.emissive);
   const teamNames = new Set(spec.teamColor);
-  if (set) {
+  for (const set of activeSets(spec)) {
     addNames(diffuseNames, set.textures);
     addNames(emisNames, set.emissiveTextures);
     addNames(teamNames, set.teamColorTextures);
@@ -463,7 +489,10 @@ export function reapplyTextureSet(id, onProgress) {
 
 async function reapplyTextureSetNow(id, onProgress) {
   await ensureIndex();
-  const next = (id && _packs.some((p) => p.id === id)) ? id : '';
+  const normalized = normalizeTextureSet(id);
+  const next = !normalized || normalized === ENHANCED_SET_ID || _packs.some((p) => p.id === normalized)
+    ? normalized
+    : '';
   _textureSet = next;
   persistTextureSet();
   const gen = ++_texGen;
