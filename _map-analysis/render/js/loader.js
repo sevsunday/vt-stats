@@ -33,6 +33,9 @@ export function readUrlParams() {
   const url = new URL(location.href);
   return {
     stem: (url.searchParams.get('map') || 'vsreuronig').toLowerCase(),
+    embed: url.searchParams.get('embed') === '1',
+    topdown: url.searchParams.get('topdown') === '1',
+    batch: url.searchParams.get('batch') === 'topdown',
   };
 }
 
@@ -176,6 +179,8 @@ export async function loadMapData(stem, onProgress) {
     waterYRaw:    raw.water_y_raw,
     skyTint:      raw.sky_tint,
     skyRgbFloat:  raw.sky_rgb_float,
+    // 404-safe. Colors drive the gradient; assets may be null.
+    sky:          await loadSkySidecar(raw.map_stem),
     lighting:     raw.lighting || {},
     objects:      (raw.objects || []).map(o => ({
       uid:      o.uid,
@@ -193,6 +198,19 @@ export async function loadMapData(stem, onProgress) {
       defaultExaggeration: (raw.defaults && raw.defaults.default_exaggeration) || 1.5,
     },
   };
+}
+
+/** Per-map sky sidecar. Null when the extract has not been run. */
+export async function loadSkySidecar(stem) {
+  if (!stem) return null;
+  try {
+    const res = await fetch(`${DATA_DIR}/${stem}.sky.json?v=sky-sprites2`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.warn('sky sidecar', e);
+    return null;
+  }
 }
 
 // Fetch the tiles manifest once (shared across all maps). Used by viewer.js

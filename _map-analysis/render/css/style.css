@@ -233,7 +233,8 @@ aside#hud {
 #status.hidden,
 #scene.hidden,
 #hud.hidden,
-#directory.hidden {
+#directory.hidden,
+#batch.hidden {
   display: none;
 }
 
@@ -417,4 +418,72 @@ body.directory-mode {
 
 .hud-back:hover {
   color: var(--accent);
+}
+
+/* Map-page iframe. The HUD stays in the DOM for the floor radios; the
+   caption is the only chrome. */
+body.embed-mode #hud,
+body.embed-mode #directory {
+  display: none;
+}
+
+#embed-bar {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 12;
+  max-width: calc(100vw - 20px);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+#embed-bar.hidden {
+  display: none;
+}
+
+body.topdown-mode #hud,
+body.topdown-mode #embed-bar,
+body.topdown-mode #directory {
+  display: none;
+}
+
+body.topdown-mode canvas#scene {
+  width: 512px;
+  height: 512px;
+}
+
+#batch {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+#batch h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+#batch p {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+#batch .mono {
+  font-family: ui-monospace, monospace;
+}
+
+#batch.hidden {
+  display: none;
 }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>VT Stats - 3D Map Render</title>
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=topdown1">
 
 <script type="importmap">
 {
@@ -100,8 +100,17 @@
   </footer>
 </aside>
 
+<div id="batch" class="hidden">
+  <h1>Top-down capture</h1>
+  <p>Writes a 512 px overhead photo of every extracted map into
+    <span class="mono">data/render/topdown/</span>. Pick that folder when asked.
+    Loose is not baked into the photo.</p>
+  <button type="button" class="btn" id="batch-start">Choose folder and capture</button>
+  <p id="batch-progress"></p>
+</div>
+<div id="embed-bar" class="hidden"></div>
 <div id="status">loading map data...</div>
 
-<script type="module" src="js/viewer.js"></script>
+<script type="module" src="js/viewer.js?v=sky-hq"></script>
 </body>
 </html>

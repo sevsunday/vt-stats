@@ -23,7 +23,7 @@
  * relative prefix from this module's POV.
  */
 
-import { loadMapData, loadManifest, fetchJsonWithProgress } from './loader.js?v=recycler-mobile';
+import { loadMapData, loadManifest, fetchJsonWithProgress } from './loader.js?v=sky-sprites2';
 
 // Path roots. The replay page lives at _map-analysis/render/replay.html, so
 // production data is reached via `../../`. Static-server-rooted-at-repo-root

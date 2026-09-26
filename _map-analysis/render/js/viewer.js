@@ -19,9 +19,10 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js';
+import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=sky-sprites2';
 import { buildObjectsGroup, sampleTerrainHeight } from './objects.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
+import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
 
 // ---------------- State ----------------
 
@@ -47,6 +48,11 @@ const STATE = {
   waterBaseY: null,
   lavaBaseY: null,
   objectsGroup: null,
+  // embed=1 is the empty map-page scene: mirrored world, tiles, pools + loose.
+  embed: false,
+  // topdown=1 is the orthographic terrain photo. Loose is not drawn into it.
+  topdown: false,
+  worldGroup: null,
   // FPS tracking:
   fpsAvg: 0,
   lastTime: 0,
@@ -54,13 +60,23 @@ const STATE = {
   fpsFrames: 0,
 };
 
+const TOPDOWN_PX = 512;
+
 // ---------------- Boot ----------------
 
 // Top-level router. No ?map= -> directory landing. With ?map= -> renderer.
-const { stem } = readUrlParams();
+const urlParams = readUrlParams();
+const stem = urlParams.stem;
+STATE.embed = urlParams.embed;
+STATE.topdown = urlParams.topdown;
 const hasMapParam = new URL(location.href).searchParams.has('map');
 
-if (!hasMapParam) {
+if (urlParams.batch) {
+  bootBatch().catch(err => {
+    console.error(err);
+    setStatus(err && err.message || String(err), true);
+  });
+} else if (!hasMapParam) {
   bootDirectory().catch(err => {
     console.error(err);
     setStatus(err && err.message || String(err), true);
@@ -169,37 +185,188 @@ async function boot(stem) {
   document.body.classList.remove('directory-mode');
   document.getElementById('directory').classList.add('hidden');
   document.getElementById('scene').classList.remove('hidden');
-  document.getElementById('hud').classList.remove('hidden');
   document.getElementById('status').classList.remove('hidden');
+  if (STATE.topdown) {
+    document.body.classList.add('topdown-mode');
+    document.getElementById('hud').classList.add('hidden');
+  } else if (STATE.embed) {
+    document.body.classList.add('embed-mode');
+    document.getElementById('hud').classList.add('hidden');
+    const bar = document.getElementById('embed-bar');
+    if (bar) bar.classList.remove('hidden');
+  } else {
+    document.getElementById('hud').classList.remove('hidden');
+  }
 
   // Populate the map switcher early so the user can swap maps even
   // if the current map data fails to load.
-  loadManifest().then(populateMapSwitcher).catch(err => {
-    console.warn('manifest fetch failed', err);
-  });
+  if (!STATE.topdown) {
+    loadManifest().then(populateMapSwitcher).catch(err => {
+      console.warn('manifest fetch failed', err);
+    });
+  }
 
+  initRenderer();
+  await mountMap(stem);
+  if (!STATE.topdown) wireHud(STATE.mapData);
+  if (STATE.embed && !STATE.topdown) fillEmbedBar(STATE.mapData);
+  startLoop();
+}
+
+async function mountMap(stem) {
   setStatus(`loading ${stem}.3d.json...`);
   const data = await loadMapData(stem);
+  if (STATE.scene) disposeMounted();
   STATE.mapData = data;
 
-  // Apply per-map smart defaults BEFORE building the scene, so initial
-  // mesh + object positioning use the right exaggeration.
-  if (data.defaults && typeof data.defaults.defaultExaggeration === 'number') {
+  // The overhead photo uses real relief. The interactive viewer keeps
+  // the per-map exaggeration default.
+  if (STATE.topdown) {
+    STATE.terrainExaggeration = 1;
+  } else if (data.defaults && typeof data.defaults.defaultExaggeration === 'number') {
     STATE.terrainExaggeration = data.defaults.defaultExaggeration;
   }
 
   setStatus('building scene...');
-  initRenderer();
   initScene(data);
-  await initFloor(data);          // async because of texture loading
+  await initFloor(data);
   initLights(data);
-  initLiquid(data, 'water');
-  initLiquid(data, 'lava');
-  initObjects(data);
-  initCamera(data);
-  wireHud(data);
+  if (!STATE.topdown) {
+    initLiquid(data, 'water');
+    initLiquid(data, 'lava');
+    initObjects(data);
+    initCamera(data);
+  } else {
+    initCamera(data);
+  }
+  if ((STATE.embed || STATE.topdown) && data.tileComposite) {
+    const tilesRadio = document.querySelector('input[name="floor"][value="tiles"]');
+    if (tilesRadio) tilesRadio.checked = true;
+    await activateTileMode();
+    if (!STATE.topdown) {
+      try { await attachSky(STATE); }
+      catch (err) { console.warn('sky dome', err); }
+    }
+  } else if (!STATE.embed) {
+    setStatus(null);
+  }
+  if (STATE.topdown) {
+    STATE.renderer.render(STATE.scene, STATE.camera);
+    window.__vtTopdownReady = stem;
+  }
+}
+
+function disposeMounted() {
+  const root = STATE.scene;
+  if (!root) return;
+  root.traverse(obj => {
+    if (obj.geometry && !obj.geometry.userData.vtShared) obj.geometry.dispose();
+    const mats = obj.material
+      ? (Array.isArray(obj.material) ? obj.material : [obj.material])
+      : [];
+    for (const mat of mats) {
+      for (const key of Object.keys(mat)) {
+        const value = mat[key];
+        if (value && value.isTexture) value.dispose();
+      }
+      mat.dispose();
+    }
+  });
+  STATE.scene = null;
+  STATE.worldGroup = null;
+  STATE.terrainMesh = null;
+  STATE.terrainWireframe = null;
+  STATE.terrainTileMat = null;
+  STATE.objectsGroup = null;
+  STATE.waterMesh = null;
+  STATE.lavaMesh = null;
+  STATE.skyRig = null;
+  THREE.Cache.clear();
+}
+
+async function bootBatch() {
+  document.body.classList.add('batch-mode');
+  document.getElementById('directory').classList.add('hidden');
+  document.getElementById('hud').classList.add('hidden');
+  document.getElementById('batch').classList.remove('hidden');
+  document.getElementById('scene').classList.remove('hidden');
+  STATE.topdown = true;
+  const btn = document.getElementById('batch-start');
+  btn.addEventListener('click', () => {
+    runBatch().catch(err => {
+      console.error(err);
+      setStatus(err && err.message || String(err), true);
+    });
+  });
+  // Same shot loop as the folder button, posting each PNG instead.
+  // Used to fill data/render/topdown/ without a folder picker.
+  window.__vtCaptureMissing = (stems, postBase) => captureMissing(stems, postBase);
+}
+
+async function runBatch() {
+  if (typeof window.showDirectoryPicker !== 'function') {
+    setStatus('This browser cannot write a folder. Use Chrome or Edge.', true);
+    return;
+  }
+  const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+  const progress = document.getElementById('batch-progress');
+  initRenderer();
+  const maps = await loadManifest();
+  const stems = maps.map(m => m.stem).filter(Boolean);
+  for (let i = 0; i < stems.length; i++) {
+    const stemName = stems[i];
+    if (progress) progress.textContent = `${i + 1} / ${stems.length}  ${stemName}`;
+    await mountMap(stemName);
+    await new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+    STATE.renderer.render(STATE.scene, STATE.camera);
+    const blob = await new Promise((resolve, reject) => {
+      STATE.canvas.toBlob(b => (b ? resolve(b) : reject(new Error('empty png'))), 'image/png');
+    });
+    const handle = await dir.getFileHandle(`${stemName}.png`, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+  }
+  if (progress) progress.textContent = `Wrote ${stems.length} images.`;
   setStatus(null);
-  startLoop();
+}
+
+async function shotBlob() {
+  await new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+  STATE.renderer.render(STATE.scene, STATE.camera);
+  return new Promise((resolve, reject) => {
+    STATE.canvas.toBlob(b => (b ? resolve(b) : reject(new Error('empty png'))), 'image/png');
+  });
+}
+
+async function captureMissing(stems, postBase) {
+  if (!STATE.renderer) initRenderer();
+  window.__vtCaptureProgress = { i: 0, n: stems.length, stem: '', done: false, failed: [] };
+  for (let i = 0; i < stems.length; i++) {
+    const stemName = stems[i];
+    window.__vtCaptureProgress = {
+      i, n: stems.length, stem: stemName, done: false,
+      failed: window.__vtCaptureProgress.failed,
+    };
+    try {
+      await mountMap(stemName);
+      const blob = await shotBlob();
+      const res = await fetch(`${postBase}${encodeURIComponent(stemName)}`, {
+        method: 'POST',
+        body: blob,
+      });
+      if (!res.ok) throw new Error(`save ${res.status}`);
+    } catch (err) {
+      console.error(stemName, err);
+      window.__vtCaptureProgress.failed.push(stemName);
+    }
+  }
+  window.__vtCaptureProgress.done = true;
+  window.__vtCaptureProgress.stem = '';
 }
 
 // ---------------- Setup steps ----------------
@@ -210,9 +377,14 @@ function initRenderer() {
     canvas: STATE.canvas,
     antialias: true,
     alpha: false,
+    preserveDrawingBuffer: STATE.topdown,
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  renderer.setPixelRatio(STATE.topdown ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+  if (STATE.topdown) {
+    renderer.setSize(TOPDOWN_PX, TOPDOWN_PX, false);
+  } else {
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+  }
   // r152+ uses sRGB output by default but be explicit.
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   STATE.renderer = renderer;
@@ -234,11 +406,28 @@ function initScene(data) {
     hm.cellsX * hm.cellMetersX,
     hm.cellsZ * hm.cellMetersZ,
   );
-  const fogColorHex = lighting.fog_color_hex || data.skyTint || '#1a2030';
-  const fogStart = worldExtent * 1.5;
-  const fogEnd   = worldExtent * 3.0;
-  scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
+  // Fog tuned for an orbit camera washes out a straight-down photo.
+  if (!STATE.topdown) {
+    const fogColorHex = lighting.fog_color_hex || data.skyTint || '#1a2030';
+    const fogStart = worldExtent * 1.5;
+    const fogEnd   = worldExtent * 3.0;
+    scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
+  }
   STATE.scene = scene;
+
+  // Same north-up mirror the replay uses. Terrain, tiles, pools, and loose
+  // share this group so spawn positions match the in-game map.
+  if (STATE.embed || STATE.topdown) {
+    const worldGroup = new THREE.Group();
+    worldGroup.name = 'world-reflect';
+    worldGroup.scale.z = -1;
+    scene.add(worldGroup);
+    STATE.worldGroup = worldGroup;
+  }
+}
+
+function contentParent() {
+  return STATE.worldGroup || STATE.scene;
 }
 
 function initLights(data) {
@@ -271,10 +460,12 @@ function initLights(data) {
   const sunAngleRad = sunAngle * Math.PI / 180.0;
   const sunDist = 2000;
   const sun = new THREE.DirectionalLight(new THREE.Color(sunHex), 2.0);
+  // Negate Z when the world is mirrored so the key light stays on the same hills.
+  const sunZ = ((STATE.embed || STATE.topdown) ? -1 : 1) * Math.cos(sunAngleRad) * sunDist * 0.7;
   sun.position.set(
     Math.cos(sunAngleRad) * sunDist * 0.7,    // east-ish azimuth
     Math.sin(sunAngleRad) * sunDist,          // elevation
-    Math.cos(sunAngleRad) * sunDist * 0.7,    // south-ish azimuth
+    sunZ,
   );
   STATE.scene.add(sun);
   STATE.sun = sun;
@@ -344,7 +535,7 @@ async function initFloor(data) {
   mesh.userData.minH = minH;
   mesh.userData.maxH = maxH;
   STATE.terrainMesh = mesh;
-  STATE.scene.add(mesh);
+  contentParent().add(mesh);
 
   // Wireframe overlay (hidden by default).
   const wire = new THREE.LineSegments(
@@ -353,7 +544,7 @@ async function initFloor(data) {
   );
   wire.visible = false;
   STATE.terrainWireframe = wire;
-  STATE.scene.add(wire);
+  contentParent().add(wire);
 
   // Build the minimap-textured material covering the calibrated playable
   // region. Stored on STATE so the HUD radio can swap it in.
@@ -557,7 +748,7 @@ function initLiquid(data, kind) {
   mesh.name = kind;
   mesh.renderOrder = 1;            // after opaque terrain
   mesh.visible = false;            // toggled on by HUD per-map default
-  STATE.scene.add(mesh);
+  contentParent().add(mesh);
 
   if (kind === 'water') {
     STATE.waterMesh = mesh;
@@ -570,20 +761,68 @@ function initLiquid(data, kind) {
 
 // ---------------- Objects ----------------
 
+const SPAWN_LAYOUT_KINDS = new Set(['scrap_pool', 'loose_scrap']);
+
+function sceneObjects(data) {
+  const objects = (data && data.objects) || [];
+  if (STATE.topdown) return [];
+  if (!STATE.embed) return objects;
+  return objects.filter(o => SPAWN_LAYOUT_KINDS.has(o.kind));
+}
+
 function initObjects(data) {
   // Build objects against the SCALED heightmap view so initial Y positions
-  // line up with the exaggerated terrain mesh.
+  // line up with the exaggerated terrain mesh. Embed keeps pools and the
+  // spawn-time loose layout; no ships or players.
   const scaledHm = makeScaledHeightmapView(data.heightmap, STATE.terrainExaggeration);
-  const scaledData = { ...data, heightmap: scaledHm };
+  const scaledData = { ...data, heightmap: scaledHm, objects: sceneObjects(data) };
   const group = buildObjectsGroup(scaledData);
   STATE.objectsGroup = group;
-  STATE.scene.add(group);
+  contentParent().add(group);
 }
 
 // ---------------- Camera + controls ----------------
 
-function initCamera(data) {
+function cameraFrame(data) {
   const wr = data.worldRect;
+  if (!STATE.embed) return wr;
+  // Camera lives outside the mirrored group, so it aims at reflected Z.
+  return {
+    ...wr,
+    centerZ: -wr.centerZ,
+    minZ: -wr.maxZ,
+    maxZ: -wr.minZ,
+  };
+}
+
+function initTopdownCamera(data) {
+  // Frame the heightmap exactly. Screen-up is -scene Z, which is +world Z
+  // (north) because the world group mirrors Z. Image formula, shared with
+  // scripts/build_loose_overlay.py:
+  //   u = (x - minX) / width
+  //   v = (maxZ - z) / depth
+  const hm = data.heightmap;
+  const width = hm.cellsX * hm.cellMetersX;
+  const depth = hm.cellsZ * hm.cellMetersZ;
+  const centerX = hm.worldOriginX + width * 0.5;
+  const centerZ = hm.worldOriginZ + depth * 0.5;
+  const cam = new THREE.OrthographicCamera(
+    -width / 2, width / 2, depth / 2, -depth / 2, 0.1, 20000,
+  );
+  cam.up.set(0, 0, -1);
+  cam.position.set(centerX, 4000, -centerZ);
+  cam.lookAt(centerX, 0, -centerZ);
+  cam.updateProjectionMatrix();
+  STATE.camera = cam;
+  STATE.controls = { update() {} };
+}
+
+function initCamera(data) {
+  if (STATE.topdown) {
+    initTopdownCamera(data);
+    return;
+  }
+  const wr = cameraFrame(data);
   const cam = new THREE.PerspectiveCamera(
     55, window.innerWidth / window.innerHeight, 1, 8000,
   );
@@ -632,10 +871,19 @@ function populateMapSwitcher(maps) {
   });
 }
 
+function fillEmbedBar(data) {
+  const bar = document.getElementById('embed-bar');
+  if (!bar) return;
+  const n = (data.counts && data.counts.loose_scrap) || 0;
+  const pools = (data.counts && data.counts.scrap_pool) || 0;
+  const biometal = n * 5;
+  bar.textContent = `${data.name || data.stem} · ${pools} pools · ${n} loose pieces · ${biometal} biometal`;
+}
+
 function wireHud(data) {
   const $ = id => document.getElementById(id);
   $('map-title').textContent = data.name || data.stem;
-  const wr = data.worldRect;
+  const wr = cameraFrame(data);
   $('map-sub').textContent =
     `${data.stem} - playable ${Math.round(wr.width)} x ${Math.round(wr.depth)} m`;
   $('cells').textContent =
@@ -704,7 +952,7 @@ function wireHud(data) {
           tilesRadio.disabled = true;
           // If user already picked tiles mode while we were checking,
           // gracefully fall back to minimap.
-          if (tilesRadio.checked) {
+          if (tilesRadio.checked && !STATE.embed) {
             const minimapRadio = document.querySelector('input[name="floor"][value="minimap"]');
             if (minimapRadio) {
               minimapRadio.checked = true;
@@ -719,6 +967,12 @@ function wireHud(data) {
     input.addEventListener('change', () => {
       if (!input.checked) return;
       applyFloorMode(input.value);
+      if (STATE.topdown) return;
+      if (input.value === 'tiles') {
+        attachSky(STATE).catch((err) => console.warn('sky dome', err));
+      } else {
+        detachSky(STATE);
+      }
     });
   });
 
@@ -810,13 +1064,17 @@ function applyHeightExaggeration(factor) {
   // heightmap view so the bilinear terrain sampler reads correct Y.
   if (STATE.objectsGroup) {
     const wasVisible = STATE.objectsGroup.visible;
-    STATE.scene.remove(STATE.objectsGroup);
+    contentParent().remove(STATE.objectsGroup);
     disposeGroup(STATE.objectsGroup);
     const scaledHmView = makeScaledHeightmapView(STATE.mapData.heightmap, factor);
-    const newMapData = { ...STATE.mapData, heightmap: scaledHmView };
+    const newMapData = {
+      ...STATE.mapData,
+      heightmap: scaledHmView,
+      objects: sceneObjects(STATE.mapData),
+    };
     STATE.objectsGroup = buildObjectsGroup(newMapData);
     STATE.objectsGroup.visible = wasVisible;
-    STATE.scene.add(STATE.objectsGroup);
+    contentParent().add(STATE.objectsGroup);
   }
 }
 
@@ -940,6 +1198,7 @@ function setStatus(msg, isError = false) {
 }
 
 function onWindowResize() {
+  if (!STATE.camera || !STATE.renderer || STATE.topdown) return;
   STATE.camera.aspect = window.innerWidth / window.innerHeight;
   STATE.camera.updateProjectionMatrix();
   STATE.renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -964,6 +1223,7 @@ function tick(timeMs) {
     STATE.fpsAccum = 0;
     STATE.fpsFrames = 0;
   }
-  STATE.controls.update();
+  if (STATE.controls) STATE.controls.update();
+  syncSky(STATE.skyRig, STATE.camera);
   STATE.renderer.render(STATE.scene, STATE.camera);
 }

@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
+import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
 
 import { sampleTerrainHeight } from './objects.js?v=pool-flat';
 import {
@@ -462,6 +463,12 @@ async function boot() {
 
   wireHqToggle(resolvedFloor);
   if (resolvedFloor === 'tiles') {
+    statusStep('Sky');
+    try {
+      await attachSky(STATE);
+    } catch (err) {
+      console.warn('sky dome', err);
+    }
     applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
     statusStep('Game tiles');
     await loadHqFloor();
@@ -571,6 +578,7 @@ function initLights(mapData) {
     -(Math.cos(sunAngleRad) * sunDist * 0.7),
   );
   STATE.scene.add(sun);
+  STATE.sun = sun;
 }
 
 // ============================================================================
@@ -962,7 +970,7 @@ function syncHqButton() {
   btn.classList.toggle('is-active', on);
   if (!available) btn.title = 'Game tiles unavailable for this map';
   else if (STATE.hqLoad && !STATE.terrainTileMat && STATE.hqOn) btn.title = 'Loading high-quality tiles';
-  else btn.title = on ? 'High-quality game tiles' : 'Minimap ground';
+  else btn.title = on ? 'High-quality tiles and sky' : 'Minimap ground';
 }
 
 const TEX_SHORT = {
@@ -1203,9 +1211,11 @@ function wireHqToggle(resolvedFloor) {
     patchFromTransport({ ground: STATE.hqOn ? 'tiles' : 'minimap' });
     syncHqButton();
     if (STATE.hqOn) {
+      attachSky(STATE).catch((err) => console.warn('sky dome', err));
       if (STATE.terrainTileMat) applyFloorMode('tiles');
       else void loadHqFloor();
     } else {
+      detachSky(STATE);
       applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
     }
   });
@@ -1232,6 +1242,7 @@ function loadHqFloor() {
     if (!STATE.hqOn) return mat;
     if (!mat) {
       STATE.hqOn = false;
+      detachSky(STATE);
       patchFromTransport({ ground: 'minimap' });
       syncHqButton();
       applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
@@ -1243,6 +1254,7 @@ function loadHqFloor() {
     STATE.hqLoad = null;
     console.error('failed to load tile textures:', err);
     STATE.hqOn = false;
+    detachSky(STATE);
     patchFromTransport({ ground: 'minimap' });
     syncHqButton();
     applyFloorMode(STATE.terrainMinimapMat ? 'minimap' : 'ramp');
@@ -2194,6 +2206,7 @@ function tick(timeMs) {
 
 function renderFrame(dtSec = 0) {
   if (!STATE.scene || !STATE.camera || !STATE.renderer) return;
+  syncSky(STATE.skyRig, STATE.camera);
 
   // 1. Update actor positions first (everyone reads from lastValidPos).
   if (STATE.actors) {
