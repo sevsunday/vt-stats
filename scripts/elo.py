@@ -44,9 +44,13 @@ gates auditable. No algorithm
 changes: axis weights, priors, K-factor, loss aversion, floor taper,
 shrinkage strengths, alpha-blend all unchanged.
 
-Matches with ``player_count < 6`` or ``duration_sec < 240`` don't update
-ratings; they emit a history row with ``match_excluded: true`` so
-exclusion counters reconcile.
+Matches with fewer than 6 non-campod leaderboard rows, or
+``duration_sec < 240``, don't update ratings; they emit a history row
+with ``match_excluded: true`` so exclusion counters reconcile. Camera-pod
+spectators occupy slots but are not a team, so a 1v1 watched from pods
+does not pass the gate. Idle thugs and partials still count toward it
+(they leave the rated lobby separately; dropping them here would unrate
+a real 6-player game). Raw ``player_count`` is unchanged.
 
 Full derivation: ``DEVELOPER_GUIDE.md`` §13. Output schemas:
 ``docs/DATA_DICTIONARY.md`` §11.
@@ -85,7 +89,7 @@ ELO_LADDER_MIN_MATCHES = 25
 # rejoin. Frozen in critique/decisions/vtsr-inactivity-threshold.md.
 INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
-ELO_MIN_PLAYER_COUNT = 6         # match excluded from ELO when player_count < 6.
+ELO_MIN_PLAYER_COUNT = 6         # excluded when non-campod leaderboard rows < 6.
 ELO_MIN_DURATION_SEC = 240       # 4-minute minimum.
 
 # The ONE exclusion reason that still gets scored in the shadow (a
@@ -363,12 +367,17 @@ LOBBY_SCORE_MODES = ("zclip", "rank")
 # flagged. INPUT change only -- no axis math. Ratings DO move (the omitted
 # row loses its delta, and the rest of that lobby is re-z-scored without
 # them), so **pre-v12 `peak_vtsr` is no longer comparable**.
-# v13 (current) = terminal bench (match.schema_version 31). A connected
+# v13 = terminal bench (match.schema_version 31). A connected
 # player who stops fighting after a sticky leave keeps their delta, but
 # P is taken from the lobby cut at that moment. Only that player's delta
 # moves. **pre-v13 `peak_vtsr` is not comparable** where the bench match
 # was the peak.
-ELO_SCHEMA_VERSION = 13
+# v14 (current) = the 6-player gate counts non-campod leaderboard rows,
+# not raw slot occupancy. A 1v1 with a camera-pod gallery used to rate
+# (two-person z-scores collapse to ±0.5). Idle thugs and partials still
+# count toward the gate. **pre-v14 `peak_vtsr` is not comparable** for
+# players whose peak was a match this newly excludes.
+ELO_SCHEMA_VERSION = 14
 
 
 # ---------------------------------------------------------------------------
@@ -1520,16 +1529,21 @@ def _rating_pass(
         # adjacent players whenever any earlier row was dropped.
         lobby = _rated_lobby(lobby_raw)
 
-        # Match-level gates: operator void, player count < 6, duration
-        # < 240s, or a host-attested cancellation (v15
+        # Match-level gates: operator void, fewer than 6 non-campod
+        # players, duration < 240s, or a host-attested cancellation (v15
         # winner.decided_by == "cancelled") → emit excluded history
         # row, no rating change. Void is checked first and does not
         # shadow-score: the operator said the game does not count.
+        # Campod spectators fill slots without being a team (a 1v1 with
+        # six pods has player_count 8). Idle / partial rows still count
+        # here so a real 6-player game stays rated; _rated_lobby drops
+        # them from z-scoring. Missing is_campod (legacy) counts as playing.
+        playing = sum(1 for p in lobby_raw if not p.get("is_campod"))
         exclusion_reason = None
         if m.get("void"):
             excluded_void += 1
             exclusion_reason = "void"
-        elif (m.get("player_count", 0) or 0) < ELO_MIN_PLAYER_COUNT:
+        elif playing < ELO_MIN_PLAYER_COUNT:
             excluded_low_player_count += 1
             exclusion_reason = "low_player_count"
         elif (m.get("duration_sec", 0) or 0) < ELO_MIN_DURATION_SEC:

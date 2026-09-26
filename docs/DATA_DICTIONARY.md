@@ -3237,7 +3237,7 @@ Current per-player ratings keyed for the All Matches view's VTSR-T Leaderboard. 
 | `inactivity_window_days` | int | Display-only. Days of no appearance vs `corpus_latest_date` before Unranked. 90. Memo: `critique/decisions/vtsr-inactivity-threshold.md`. |
 | `comeback_games_required` | int | Display-only. Games after a >window gap before rejoining the ranked table. 3. |
 | `corpus_latest_date` | ISO date | Newest corpus match date the clocks are measured against (not wall-clock). |
-| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates (6 / 240). |
+| `min_player_count`, `min_duration_sec` | int | ELO-exclusion gates. `min_player_count` is 6 non-campod leaderboard rows (camera-pod spectators do not count; idle thugs and partials do). `min_duration_sec` is 240. |
 | `computed_at` | ISO8601 | Wallclock time of the run. NOT part of the deterministic output contract. |
 | `match_count` | int | Number of matches that contributed to ratings (i.e. matches that passed both gates). |
 | `matches_excluded_*` | int | Per-reason exclusion counters. Sum + `match_count` reconciles to `len(manifest)`. |

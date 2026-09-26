@@ -310,6 +310,10 @@ INACTIVITY_WINDOW_DAYS = 90
 COMEBACK_GAMES_REQUIRED = 3
 CMDR_STALE_WINDOW_DAYS = 90
 
+# v10: campod spectators no longer keep a sub-6 playing lobby on the
+# rated list. Those matches are match_excluded on elo_history, so the
+# commander duel is skipped. Pre-v10 peak_vtsr_c is not comparable
+# where that duel was the peak.
 # v9: idle thugs (is_zero_damage) drop out of the VTSR-T rated lobby, so
 # they leave the thug-mean handicap. Commander duel math is unchanged.
 # Pre-v9 peak_vtsr_c is not comparable.
@@ -317,7 +321,7 @@ CMDR_STALE_WINDOW_DAYS = 90
 # comparable with schema 7 (alpha_c stays 1; the axis does not enter P).
 # v7: weight-0 loose_share audit axis. v6: opening-decision axes.
 # v5: display inactivity. v3 ratings were not comparable with schema 2.
-CMDR_ELO_SCHEMA_VERSION = 9
+CMDR_ELO_SCHEMA_VERSION = 10
 
 
 # ---------------------------------------------------------------------------

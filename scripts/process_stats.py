@@ -10398,7 +10398,9 @@ def main():
         # campod, partial (low-activity), and idle (zero-damage thug)
         # rows are not "in" the match for the Select-a-match badge,
         # count dropdown, and player sort. `player_count` stays the raw
-        # slot count — ELO's <6 gate and the per-match banner still read that.
+        # slot count — the per-match banner still reads that. Elo's <6
+        # gate counts non-campod leaderboard rows (not this active count:
+        # idle and partial rows still keep a real 6-player game rated).
         active_player_count = sum(
             1 for p in lb
             if (p.get("name") or "").strip()
