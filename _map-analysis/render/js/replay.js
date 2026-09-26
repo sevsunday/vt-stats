@@ -854,7 +854,7 @@ function initCamera(mapData) {
 
 /**
  * Overlay markers on the scrub bar:
- *   - Red ticks for kill events (one per kill in the feed).
+ *   - Gold ticks for major storyline beats (weight >= 5).
  *   - Gold pulse marker(s) for winner-decided ticks (factory + recycler
  *     destruction). Reads from `match.winner.evidence`.
  */
@@ -862,23 +862,6 @@ function wireScrubMarkers() {
   const container = document.getElementById('scrub-markers');
   if (!container || !STATE.matchData) return;
   container.innerHTML = '';
-
-  // Kill-feed red ticks. Down-sample if there are too many to keep the DOM
-  // manageable (>200 entries crowds the bar visually anyway).
-  const kills = STATE.killIndex && STATE.killIndex.tSecArr;
-  if (kills && kills.length) {
-    const maxTicks = 80;
-    const step = Math.max(1, Math.ceil(kills.length / maxTicks));
-    for (let i = 0; i < kills.length; i += step) {
-      const t = kills[i];
-      const pct = (t / Math.max(1, STATE.totalSec)) * 100;
-      const tick = document.createElement('span');
-      tick.className = 'scrub-marker scrub-marker--kill';
-      tick.style.left = `${pct.toFixed(2)}%`;
-      tick.title = `kill at ${formatDuration(t)}`;
-      container.appendChild(tick);
-    }
-  }
 
   const beats = getHudBeats(STATE.matchData).filter((b) => (b.weight || 1) >= 5);
   for (const beat of beats) {
