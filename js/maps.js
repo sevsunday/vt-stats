@@ -32,14 +32,12 @@
 
   // ---- Constants -------------------------------------------------------
 
-  // Sort comparators keyed by the <select value>. Each returns a -1/0/+1.
-  // Maps with `match_count === 0` always sort to the bottom for the
-  // "Most played" / "Recently played" defaults — they have no signal on
-  // those axes — but they sort normally on title / pools / size / author.
+  // Maps with no play count sort to the bottom for "Most played".
+  // play_count is recorded sessions plus community games.
   const SORT_COMPARATORS = {
     'played-desc': (a, b) => {
-      const ac = safeNum(a.match_count);
-      const bc = safeNum(b.match_count);
+      const ac = playCountOf(a);
+      const bc = playCountOf(b);
       if (bc !== ac) return bc - ac;
       return cmpStr(a.title, b.title);
     },
@@ -76,6 +74,11 @@
     { id: '2048p', label: '2048+', match: (s) => s > 2048 },
   ];
 
+  function playCountOf(row) {
+    if (!row) return 0;
+    if (row.play_count != null) return safeNum(row.play_count);
+    return safeNum(row.match_count) + safeNum(row.community_games);
+  }
   function safeNum(v) {
     const n = +v;
     return Number.isFinite(n) ? n : 0;
@@ -186,17 +189,30 @@
     const el = $('vt-map-directory');
     return !!(el && !el.classList.contains('d-none'));
   }
-  function knownChipIds(root, attr) {
+  function fillSet(set, values) {
+    set.clear();
+    for (const value of values) set.add(value);
+  }
+  function knownMenuIds(menu) {
     const ids = new Set();
-    if (!root) return ids;
-    root.querySelectorAll('.vt-chip').forEach(b => { if (b.dataset[attr]) ids.add(b.dataset[attr]); });
+    if (!menu) return ids;
+    menu.querySelectorAll('input[type="checkbox"]').forEach(box => {
+      if (box.value) ids.add(box.value);
+    });
     return ids;
   }
-  function paintSet(root, attr, set) {
-    if (!root) return;
-    root.querySelectorAll('.vt-chip').forEach(b => {
-      b.setAttribute('data-selected', set.has(b.dataset[attr]) ? 'true' : 'false');
+  function paintMenu(menu, toggle, set) {
+    if (!menu) return;
+    const labels = [];
+    menu.querySelectorAll('input[type="checkbox"]').forEach(box => {
+      const on = set.has(box.value);
+      box.checked = on;
+      if (on) {
+        const span = box.parentElement && box.parentElement.querySelector('span');
+        labels.push(span ? span.textContent : box.value);
+      }
     });
+    if (toggle) toggle.textContent = labels.length ? labels.join(', ') : 'Any';
   }
   function applyMapFiltersToParams(params) {
     MAP_FILTER_KEYS.forEach(k => params.delete(k));
@@ -221,23 +237,19 @@
     state.filters.query = params.get('q') || '';
     if (dom.searchInput) dom.searchInput.value = state.filters.query;
 
-    const poolIds = knownChipIds(dom.poolsChips, 'pools');
-    const sizeIds = knownChipIds(dom.sizeChips, 'size');
-    const tagIds = knownChipIds(dom.tagChips, 'tag');
-    state.filters.pools = new Set((params.get('pools') || '').split(',').map(s => s.trim()).filter(id => poolIds.has(id)));
-    state.filters.sizes = new Set((params.get('size') || '').split(',').map(s => s.trim()).filter(id => sizeIds.has(id)));
-    state.filters.tags = new Set((params.get('tag') || '').split(',').map(s => s.trim()).filter(id => tagIds.has(id)));
-    paintSet(dom.poolsChips, 'pools', state.filters.pools);
-    paintSet(dom.sizeChips, 'size', state.filters.sizes);
-    paintSet(dom.tagChips, 'tag', state.filters.tags);
+    const poolIds = knownMenuIds(dom.poolsMenu);
+    const sizeIds = knownMenuIds(dom.sizeMenu);
+    const tagIds = knownMenuIds(dom.tagMenu);
+    fillSet(state.filters.pools, (params.get('pools') || '').split(',').map(s => s.trim()).filter(id => poolIds.has(id)));
+    fillSet(state.filters.sizes, (params.get('size') || '').split(',').map(s => s.trim()).filter(id => sizeIds.has(id)));
+    fillSet(state.filters.tags, (params.get('tag') || '').split(',').map(s => s.trim()).filter(id => tagIds.has(id)));
+    paintMenu(dom.poolsMenu, dom.poolsToggle, state.filters.pools);
+    paintMenu(dom.sizeMenu, dom.sizeToggle, state.filters.sizes);
+    paintMenu(dom.tagMenu, dom.tagToggle, state.filters.tags);
 
     const played = params.get('played');
     state.filters.played = (played === 'played' || played === 'unplayed') ? played : 'all';
-    if (dom.playedChips) {
-      dom.playedChips.querySelectorAll('.vt-chip').forEach(b => {
-        b.setAttribute('data-selected', b.dataset.played === state.filters.played ? 'true' : 'false');
-      });
-    }
+    if (dom.playedSelect) dom.playedSelect.value = state.filters.played;
 
     const author = params.get('author') || '';
     const authorOk = author && dom.authorSelect && [...dom.authorSelect.options].some(o => o.value === author);
@@ -318,10 +330,10 @@
     const reg = state.registry || {};
     const allKeys = new Set([...Object.keys(stats), ...Object.keys(reg)]);
 
-    // F9bomber community-ledger play counts, keyed by registry key.
-    // Entries with map_key null (maps unknown to the registry) simply
-    // never paint a chip. NEVER merged into match_count — that number
-    // means "recorded matches" and drives the recent-matches table.
+    // F9 counts prefer the pipeline join on map_stats (community_games /
+    // play_count). The live f9_community.json fetch fills the gap when
+    // map_stats is older than schema 2. match_count stays recorded
+    // sessions; play_count is the number the directory shows.
     const communityGames = new Map();
     for (const m of ((state.f9Community && state.f9Community.maps) || [])) {
       if (m && m.map_key) communityGames.set(m.map_key, safeNum(m.games));
@@ -333,6 +345,14 @@
       const r = reg[key] || null;
       const rawTitle = (r && r.title) || '';
       const title = stripTitlePrefixes(rawTitle) || key;
+      const matchCount = s ? safeNum(s.match_count) : 0;
+      const community = (s && s.community_games != null)
+        ? safeNum(s.community_games)
+        : (communityGames.get(key) || 0);
+      const playCount = (s && s.play_count != null)
+        ? safeNum(s.play_count)
+        : matchCount + community;
+      const popular = s ? !!s.popular : false;
       rows.push({
         key,
         title,
@@ -344,21 +364,21 @@
         canonical_size:   (r && Number.isFinite(+r.canonical_size)) ? +r.canonical_size : null,
         canonical_b2b:    (r && Number.isFinite(+r.canonical_b2b)) ? +r.canonical_b2b : null,
         formatted_size:   (r && r.formatted_size) || null,
-        tags:             (r && Array.isArray(r.tags)) ? r.tags : [],
+        tags:             popular ? ['popular'] : [],
+        popular,
         net_vars:         (r && r.net_vars) || null,
         mod_resolved:     (r && r.mod_resolved) || null,
-        // Pipeline-classified brightness band: 'normal' | 'dim' | 'dark'.
-        // Drives the .vt-map-img-lift-* class on thumb/hero <img>s. Absent
-        // / unknown values fall back to 'normal' (no filter applied).
         luma_band:        (r && r.luma_band) || 'normal',
-        match_count:      s ? safeNum(s.match_count) : 0,
+        match_count:      matchCount,
+        community_games:  community,
+        play_count:       playCount,
         avg_duration_sec: s ? safeNum(s.avg_duration_sec) : 0,
         total_duration_sec: s ? safeNum(s.total_duration_sec) : 0,
         first_played:     s ? s.first_played : null,
         last_played:      s ? s.last_played : null,
         top_commanders:   s ? (s.top_commanders || []) : [],
         recent_matches:   s ? (s.recent_matches || []) : [],
-        community_games:  communityGames.get(key) || 0,
+        insights:         (s && s.insights) || null,
       });
     }
     return rows;
@@ -368,7 +388,7 @@
 
   function buildHeroStats(rows) {
     const total = rows.length;
-    const played = rows.filter(r => r.match_count > 0).length;
+    const played = rows.filter(r => playCountOf(r) > 0).length;
     const unplayed = total - played;
     return `
       <span class="vt-map-hero-stat">
@@ -388,33 +408,36 @@
       </span>`;
   }
 
-  function buildPoolsChips(rows) {
-    const present = new Set(rows.filter(r => r.pools != null).map(r => r.pools));
-    const out = [`<span class="vt-chip-group-label">Pools</span>`];
-    for (const b of POOLS_BUCKETS) {
-      // Skip a chip when zero registry entries match this bucket. Keeps
-      // the toolbar compact on narrow corpora (fully-vendored corpus
-      // shows all chips; sparse dev corpora only show the ones with
-      // signal).
-      const hits = [...present].filter(p => b.match(p)).length;
-      if (!hits) continue;
-      out.push(`<button type="button" class="vt-chip" data-pools="${escapeHtml(b.id)}" title="${b.label} pools">${b.label}</button>`);
-    }
-    return out.join('');
+  function menuItem(id, label) {
+    return `<li><label class="dropdown-item vt-map-filter-dd-item">` +
+      `<input type="checkbox" class="form-check-input" value="${escapeHtml(id)}">` +
+      `<span>${escapeHtml(label)}</span>` +
+    `</label></li>`;
   }
 
-  function buildSizeChips(rows) {
+  function buildPoolsMenu(rows) {
+    const present = new Set(rows.filter(r => r.pools != null).map(r => r.pools));
+    const items = [];
+    for (const b of POOLS_BUCKETS) {
+      const hits = [...present].filter(p => b.match(p)).length;
+      if (!hits) continue;
+      items.push(menuItem(b.id, b.label));
+    }
+    return items.join('');
+  }
+
+  function buildSizeMenu(rows) {
     const present = new Set(rows.filter(r => r.canonical_size != null).map(r => r.canonical_size));
-    const out = [`<span class="vt-chip-group-label">Size</span>`];
+    const items = [];
     for (const b of SIZE_BUCKETS) {
       const hits = [...present].filter(s => b.match(s)).length;
       if (!hits) continue;
-      out.push(`<button type="button" class="vt-chip" data-size="${escapeHtml(b.id)}" title="${b.label} terrain">${b.label}</button>`);
+      items.push(menuItem(b.id, b.label));
     }
-    return out.join('');
+    return items.join('');
   }
 
-  function buildTagChips(rows) {
+  function buildTagMenu(rows) {
     const counts = new Map();
     for (const r of rows) {
       for (const t of (r.tags || [])) {
@@ -424,11 +447,10 @@
       }
     }
     if (counts.size === 0) return '';
-    const out = [`<span class="vt-chip-group-label">Tags</span>`];
-    for (const [tag, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
-      out.push(`<button type="button" class="vt-chip" data-tag="${escapeHtml(tag)}" title="${n} maps tagged ${escapeHtml(tag)}">${escapeHtml(tag)}</button>`);
-    }
-    return out.join('');
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([tag]) => menuItem(tag, tag))
+      .join('');
   }
 
   function buildAuthorOptions(rows) {
@@ -469,14 +491,15 @@
         for (const t of f.tags) { if (tagSet.has(t)) { hit = true; break; } }
         if (!hit) return false;
       }
-      if (f.played === 'played'   && r.match_count <= 0) return false;
-      if (f.played === 'unplayed' && r.match_count >  0) return false;
+      if (f.played === 'played'   && playCountOf(r) <= 0) return false;
+      if (f.played === 'unplayed' && playCountOf(r) >  0) return false;
       if (f.author && (r.author || '').toLowerCase() !== f.author.toLowerCase()) return false;
       return true;
     }).sort(SORT_COMPARATORS[f.sort] || SORT_COMPARATORS['played-desc']);
   }
 
   const LOOSE_OVERLAY_KEY = 'vt.map.looseOverlay';
+  const IMAGE_SOURCE_KEY = 'vt.map.imageSource';
 
   function looseOverlayOn() {
     try {
@@ -486,35 +509,97 @@
     }
   }
 
+  function catalogImagesOn() {
+    try {
+      return localStorage.getItem(IMAGE_SOURCE_KEY) === 'catalog';
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function markersVisible() {
+    return looseOverlayOn() && !catalogImagesOn();
+  }
+
   function setLooseOverlay(on) {
+    if (on && catalogImagesOn()) setImageSource(false);
     try {
       localStorage.setItem(LOOSE_OVERLAY_KEY, on ? '1' : '0');
     } catch (err) { /* private mode */ }
-    document.querySelectorAll('.vt-map-loose-layer').forEach(el => {
-      el.hidden = !on;
-    });
+    applyMarkerVisibility();
     document.querySelectorAll('[data-loose-toggle]').forEach(btn => {
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.setAttribute('data-selected', on ? 'true' : 'false');
     });
   }
 
-  function loosePoints(stem) {
+  function setImageSource(catalog) {
+    if (catalog && looseOverlayOn()) setLooseOverlay(false);
+    try {
+      localStorage.setItem(IMAGE_SOURCE_KEY, catalog ? 'catalog' : 'topdown');
+    } catch (err) { /* private mode */ }
+    applyImageSources();
+    applyMarkerVisibility();
+    document.querySelectorAll('[data-image-toggle]').forEach(btn => {
+      btn.setAttribute('aria-pressed', catalog ? 'true' : 'false');
+      btn.setAttribute('data-selected', catalog ? 'true' : 'false');
+    });
+  }
+
+  function applyMarkerVisibility() {
+    const show = markersVisible();
+    document.querySelectorAll('.vt-map-loose-layer').forEach(el => {
+      const img = el.parentElement && el.parentElement.querySelector('img');
+      const failed = img && img.dataset.topdownFailed === '1';
+      el.hidden = !show || failed;
+    });
+  }
+
+  function applyImageSources() {
+    const catalog = catalogImagesOn();
+    document.querySelectorAll('img[data-topdown-src]').forEach(img => {
+      const catalogSrc = img.dataset.catalogSrc || '';
+      const topdownSrcAttr = img.dataset.topdownSrc || '';
+      const useCatalog = (catalog && catalogSrc) || img.dataset.topdownFailed === '1';
+      if (!catalog) img.dataset.topdownFailed = '';
+      const next = useCatalog ? catalogSrc : topdownSrcAttr;
+      img.classList.toggle('vt-map-thumb-topdown', !useCatalog && !!topdownSrcAttr);
+      if (next && img.getAttribute('src') !== next) img.src = next;
+    });
+  }
+
+  function markerLists(stem) {
     const maps = state.looseOverlay && state.looseOverlay.maps;
     const entry = maps && maps[stem];
-    return (entry && entry.points) || [];
+    const list = key => (entry && Array.isArray(entry[key]) ? entry[key] : []);
+    return {
+      loose: list('loose').length ? list('loose') : list('points'),
+      spawns: list('spawns'),
+      pools: list('pools'),
+    };
+  }
+
+  function hasMarkers(stem) {
+    const m = markerLists(stem);
+    return m.loose.length + m.spawns.length + m.pools.length > 0;
+  }
+
+  function markerSpans(points, cls) {
+    return points.map(pair => {
+      const u = Math.min(1, Math.max(0, Number(pair[0]) || 0));
+      const v = Math.min(1, Math.max(0, Number(pair[1]) || 0));
+      return `<span class="${cls}" style="left:${(u * 100).toFixed(3)}%;top:${(v * 100).toFixed(3)}%"></span>`;
+    }).join('');
   }
 
   function looseLayerHtml(stem) {
-    const points = loosePoints(stem);
-    if (!points.length) return '';
-    const hidden = looseOverlayOn() ? '' : ' hidden';
-    const dots = points.map(pair => {
-      const u = Math.min(1, Math.max(0, Number(pair[0]) || 0));
-      const v = Math.min(1, Math.max(0, Number(pair[1]) || 0));
-      return `<span class="vt-map-loose-dot" style="left:${(u * 100).toFixed(3)}%;top:${(v * 100).toFixed(3)}%"></span>`;
-    }).join('');
-    return `<div class="vt-map-loose-layer"${hidden} aria-hidden="true">${dots}</div>`;
+    const m = markerLists(stem);
+    if (!m.loose.length && !m.spawns.length && !m.pools.length) return '';
+    const hidden = markersVisible() ? '' : ' hidden';
+    const body = markerSpans(m.loose, 'vt-map-loose-dot')
+      + markerSpans(m.pools, 'vt-map-pool-mark')
+      + markerSpans(m.spawns, 'vt-map-spawn-mark');
+    return `<div class="vt-map-loose-layer"${hidden} aria-hidden="true">${body}</div>`;
   }
 
   function topdownSrc(row) {
@@ -527,47 +612,66 @@
 
   function bindTopdownFallback(root) {
     if (!root) return;
-    root.querySelectorAll('img[data-topdown-fallback]').forEach(img => {
+    root.querySelectorAll('img[data-topdown-src]').forEach(img => {
       const swap = () => {
-        const fallback = img.dataset.topdownFallback;
+        if (catalogImagesOn()) return;
+        const fallback = img.dataset.catalogSrc;
         if (!fallback || img.getAttribute('src') === fallback) return;
-        img.removeEventListener('error', swap);
-        img.removeAttribute('data-topdown-fallback');
+        img.dataset.topdownFailed = '1';
+        img.classList.remove('vt-map-thumb-topdown');
         img.src = fallback;
         const layer = img.parentElement && img.parentElement.querySelector('.vt-map-loose-layer');
-        if (layer) layer.remove();
+        if (layer) layer.hidden = true;
       };
       img.addEventListener('error', swap);
-      if (img.complete && img.naturalWidth === 0) swap();
+      if (!catalogImagesOn() && img.complete && img.naturalWidth === 0) swap();
     });
   }
 
   function ensureLooseToggle() {
     const host = document.querySelector('#vt-map-toolbar .card-body > .d-flex');
-    if (!host || document.getElementById('vt-map-loose-toggle')) {
+    if (!host) {
+      setImageSource(catalogImagesOn());
       setLooseOverlay(looseOverlayOn());
       return;
     }
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.id = 'vt-map-loose-toggle';
-    btn.className = 'vt-chip';
-    btn.dataset.looseToggle = '1';
-    btn.textContent = 'Loose';
-    btn.title = 'Show spawn-time loose on map images';
-    btn.addEventListener('click', () => setLooseOverlay(!looseOverlayOn()));
-    host.appendChild(btn);
+    if (!document.getElementById('vt-map-loose-toggle')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'vt-map-loose-toggle';
+      btn.className = 'vt-chip';
+      btn.dataset.looseToggle = '1';
+      btn.textContent = 'Markers';
+      btn.title = 'Show loose, team bases, and scrap pools on the terrain photo';
+      btn.addEventListener('click', () => setLooseOverlay(!looseOverlayOn()));
+      host.appendChild(btn);
+    }
+    if (!document.getElementById('vt-map-original-toggle')) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'vt-map-original-toggle';
+      btn.className = 'vt-chip';
+      btn.dataset.imageToggle = '1';
+      btn.textContent = 'Original';
+      btn.title = 'Show the original catalog screenshot';
+      btn.addEventListener('click', () => setImageSource(!catalogImagesOn()));
+      host.appendChild(btn);
+    }
+    setImageSource(catalogImagesOn());
     setLooseOverlay(looseOverlayOn());
   }
 
   function renderCard(row) {
     const href = `${row.key}/`;
     const ionSrc = iondriverSrc(row);
+    const tdSrc = topdownSrc(row);
     const liftCls = lumaLiftClass(row.luma_band);
-    const thumbClassAttr = `vt-map-card-thumb vt-map-thumb-topdown${liftCls ? ' ' + liftCls : ''}`;
-    const thumbHtml = (ionSrc || loosePoints(row.key).length)
-      ? `<img class="${thumbClassAttr}" src="${escapeHtml(topdownSrc(row))}"
-              data-topdown-fallback="${escapeHtml(ionSrc)}"
+    const showCatalog = catalogImagesOn() && !!ionSrc;
+    const thumbClassAttr = `vt-map-card-thumb${showCatalog ? '' : ' vt-map-thumb-topdown'}${liftCls ? ' ' + liftCls : ''}`;
+    const thumbHtml = (ionSrc || hasMarkers(row.key))
+      ? `<img class="${thumbClassAttr}" src="${escapeHtml(showCatalog ? ionSrc : tdSrc)}"
+              data-topdown-src="${escapeHtml(tdSrc)}"
+              data-catalog-src="${escapeHtml(ionSrc)}"
               alt="${escapeHtml(row.title)} top-down" loading="lazy" decoding="async">`
       : `<div class="vt-map-card-thumb vt-map-card-thumb-empty" aria-hidden="true"><i class="bi bi-map"></i></div>`;
     const pools = row.pools != null ? `${row.pools}p` : '';
@@ -580,18 +684,20 @@
     const tagsHtml = (row.tags || []).slice(0, 3)
       .map(t => `<span class="vt-map-card-tag">${escapeHtml(t)}</span>`)
       .join('');
-    const matchChip = row.match_count > 0
-      ? `<span class="vt-map-card-played">
-           <span class="num">${formatNumber(row.match_count)}</span>
-           <span>${row.match_count === 1 ? 'match' : 'matches'}</span>
+    const played = playCountOf(row) > 0;
+    const shown = playCountOf(row);
+    const matchChip = played
+      ? `<span class="vt-map-card-played" title="${escapeHtml(matchesTip(row))}">
+           <span class="num">${formatNumber(shown)}</span>
+           <span>${shown === 1 ? 'match' : 'matches'}</span>
          </span>`
-      : `<span class="vt-map-card-unplayed" title="No sessions recorded yet">Unplayed</span>`;
+      : `<span class="vt-map-card-unplayed" title="No recorded or community games yet">Unplayed</span>`;
     const lastPlayed = row.last_played
       ? `<span class="vt-map-card-relative">${escapeHtml(formatRelative(row.last_played))}</span>`
       : '';
     return `<a class="vt-map-card" href="${escapeHtml(href)}"
               data-key="${escapeHtml(row.key)}"
-              data-played="${row.match_count > 0 ? 'true' : 'false'}"
+              data-played="${played ? 'true' : 'false'}"
               aria-label="View map page for ${escapeHtml(row.title)}">
       <div class="vt-map-card-thumb-wrap">
         ${thumbHtml}
@@ -654,10 +760,13 @@
     state.filters.author = '';
     state.filters.sort = 'played-desc';
     if (dom.searchInput) dom.searchInput.value = '';
-    if (dom.poolsChips) dom.poolsChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', 'false'));
-    if (dom.sizeChips) dom.sizeChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', 'false'));
-    if (dom.tagChips) dom.tagChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', 'false'));
-    if (dom.playedChips) dom.playedChips.querySelectorAll('.vt-chip').forEach(b => b.setAttribute('data-selected', b.dataset.played === 'all' ? 'true' : 'false'));
+    if (dom.poolsMenu) dom.poolsMenu.querySelectorAll('input').forEach(box => { box.checked = false; });
+    if (dom.sizeMenu) dom.sizeMenu.querySelectorAll('input').forEach(box => { box.checked = false; });
+    if (dom.tagMenu) dom.tagMenu.querySelectorAll('input').forEach(box => { box.checked = false; });
+    if (dom.poolsToggle) dom.poolsToggle.textContent = 'Any';
+    if (dom.sizeToggle) dom.sizeToggle.textContent = 'Any';
+    if (dom.tagToggle) dom.tagToggle.textContent = 'Any';
+    if (dom.playedSelect) dom.playedSelect.value = 'all';
     if (dom.authorSelect) dom.authorSelect.value = '';
     if (dom.sortSelect) dom.sortSelect.value = 'played-desc';
     renderDirectoryGrid();
@@ -697,6 +806,7 @@
 
   function renderSingleShell(row) {
     if (!row) return;
+    if (dom.singleHero) dom.singleHero.classList.remove('card');
     dom.singleHero.innerHTML = renderSingleHero(row);
     dom.singleBody.innerHTML = renderSingleBody(row);
     bindTopdownFallback(dom.singleHero);
@@ -704,24 +814,101 @@
     if (looseBtn) {
       looseBtn.addEventListener('click', () => setLooseOverlay(!looseOverlayOn()));
     }
+    const imageBtn = dom.singleHero.querySelector('[data-image-toggle]');
+    if (imageBtn) {
+      imageBtn.addEventListener('click', () => setImageSource(!catalogImagesOn()));
+    }
+    const fsBtn = document.getElementById('vt-map-explore-fs');
+    if (fsBtn) fsBtn.addEventListener('click', toggleExploreFullscreen);
+    const descBtn = dom.singleHero.querySelector('[data-map-desc]');
+    if (descBtn) {
+      descBtn.addEventListener('click', () => {
+        openMapDescription(row.title, formatMapDescription(row.description));
+      });
+    }
+    setImageSource(catalogImagesOn());
     setLooseOverlay(looseOverlayOn());
     mountMapExplore(row);
   }
 
+  function ensureDescModal() {
+    let el = document.getElementById('vt-map-desc-modal');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'vt-map-desc-modal';
+    el.className = 'modal fade';
+    el.tabIndex = -1;
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = `
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="modal-title h5 mb-0"></h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body vt-map-desc-body"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function openMapDescription(title, html) {
+    const el = ensureDescModal();
+    const heading = el.querySelector('.modal-title');
+    const body = el.querySelector('.modal-body');
+    if (heading) heading.textContent = title || 'Description';
+    if (body) body.innerHTML = html || '';
+    if (window.bootstrap && window.bootstrap.Modal) {
+      window.bootstrap.Modal.getOrCreateInstance(el).show();
+    }
+  }
+
+  function matchesTip(row) {
+    const rec = safeNum(row.match_count);
+    const com = safeNum(row.community_games);
+    if (com > 0) {
+      return rec + ' recorded + ' + com + ' community games logged by F9bomber (f9bomber.com)';
+    }
+    return rec + ' recorded sessions';
+  }
+
+  function isGenericTeamName(name) {
+    return /^team\s*[12]$/i.test(String(name || '').trim());
+  }
+
+  function realTeamNames(net) {
+    if (!net) return null;
+    const a = String(net.svar1 || '').trim();
+    const b = String(net.svar2 || '').trim();
+    const aReal = a && !isGenericTeamName(a);
+    const bReal = b && !isGenericTeamName(b);
+    if (!aReal && !bReal) return null;
+    return (a || '\u2014') + ' vs ' + (b || '\u2014');
+  }
+
   function renderSingleHero(row) {
     const ionSrc = iondriverSrc(row);
+    const tdSrc = topdownSrc(row);
     const liftCls = lumaLiftClass(row.luma_band);
-    const heroClassAttr = `vt-map-single-image vt-map-thumb-topdown${liftCls ? ' ' + liftCls : ''}`;
-    const looseBtn = loosePoints(row.key).length
-      ? `<button type="button" class="vt-chip vt-map-loose-hero-toggle" data-loose-toggle="1">Loose</button>`
-      : '';
-    const imageBlock = (ionSrc || loosePoints(row.key).length)
+    const showCatalog = catalogImagesOn() && !!ionSrc;
+    const heroClassAttr = `vt-map-single-image${showCatalog ? '' : ' vt-map-thumb-topdown'}${liftCls ? ' ' + liftCls : ''}`;
+    const heroToggles = [
+      hasMarkers(row.key)
+        ? `<button type="button" class="vt-chip" data-loose-toggle="1">Markers</button>`
+        : '',
+      ionSrc
+        ? `<button type="button" class="vt-chip" data-image-toggle="1">Original</button>`
+        : '',
+    ].filter(Boolean).join('');
+    const imageBlock = (ionSrc || hasMarkers(row.key))
       ? `<div class="vt-map-single-image-wrap">
-          <img class="${heroClassAttr}" src="${escapeHtml(topdownSrc(row))}"
-               data-topdown-fallback="${escapeHtml(ionSrc)}"
+          <img class="${heroClassAttr}" src="${escapeHtml(showCatalog ? ionSrc : tdSrc)}"
+               data-topdown-src="${escapeHtml(tdSrc)}"
+               data-catalog-src="${escapeHtml(ionSrc)}"
                alt="${escapeHtml(row.title)} top-down" decoding="async" loading="eager">
           ${looseLayerHtml(row.key)}
-          ${looseBtn}
+          ${heroToggles ? `<div class="vt-map-hero-toggles">${heroToggles}</div>` : ''}
         </div>`
       : `<div class="vt-map-single-image-wrap vt-map-single-image-empty">
           <i class="bi bi-map" aria-hidden="true"></i>
@@ -745,9 +932,8 @@
     if (row.loose != null) {
       chips.push(metaChip('coin', 'Loose scrap', row.loose < 0 ? 'Unlimited' : String(row.loose)));
     }
-    if (Array.isArray(row.tags) && row.tags.length) {
-      const tagPills = row.tags.map(t => `<span class="vt-map-meta-tag">${escapeHtml(t)}</span>`).join(' ');
-      chips.push(`<span class="vt-map-meta-chip"><i class="bi bi-tag-fill"></i><span class="label">Tags</span>${tagPills}</span>`);
+    if (row.popular) {
+      chips.push(`<span class="vt-map-meta-chip"><i class="bi bi-tag-fill"></i><span class="label">Tags</span><span class="vt-map-meta-tag">popular</span></span>`);
     }
     if (row.mod_resolved && /^\d+$/.test(String(row.mod_resolved))) {
       const url = `https://steamcommunity.com/sharedfiles/filedetails/?id=${row.mod_resolved}`;
@@ -755,36 +941,35 @@
         <i class="bi bi-box-arrow-up-right"></i><span class="label">Mod</span><span class="value">${escapeHtml(row.mod_resolved)}</span>
       </a>`);
     }
-    if (row.net_vars && (row.net_vars.svar1 || row.net_vars.svar2)) {
-      const t1 = row.net_vars.svar1 || '\u2014';
-      const t2 = row.net_vars.svar2 || '\u2014';
-      chips.push(metaChip('shield', 'Team names', `${t1} vs ${t2}`));
-    }
-    if (row.community_games > 0) {
-      // F9bomber community-ledger play count. Separate from match_count
-      // (recorded matches) by design; credit lives in the title text.
-      chips.push(`<span class="vt-map-meta-chip" title="Hand-logged games on this map from F9bomber's community ledger (f9bomber.com) — separate from recorded matches.">
-        <i class="bi bi-people"></i><span class="label">Community games</span><span class="value">${row.community_games}</span>
-      </span>`);
-    }
+    const teamNames = realTeamNames(row.net_vars);
+    if (teamNames) chips.push(metaChip('shield', 'Team names', teamNames));
     chips.push(`<span class="vt-map-meta-chip vt-map-meta-chip-mono">
       <i class="bi bi-file-earmark-code"></i><span class="label">File</span><code>${escapeHtml(row.key)}.bzn</code>
     </span>`);
 
     const desc = formatMapDescription(row.description);
+    const descBtn = desc
+      ? `<button type="button" class="vt-map-desc-btn" data-map-desc="1">
+           <i class="bi bi-card-text me-1" aria-hidden="true"></i>Description
+         </button>`
+      : '';
     return `
-      <div class="card-body">
-        <div class="row g-3 vt-map-single-hero-row">
-          <div class="col-lg-7 vt-map-single-hero-image-col">
-            ${imageBlock}
-            ${desc ? `<div class="vt-map-single-description mt-3">${desc}</div>` : ''}
+      <div class="row g-3 vt-map-hero-split align-items-stretch">
+        <div class="col-lg-6">
+          <div class="card vt-map-single-meta-card h-100">
+            <div class="card-body">
+              ${imageBlock}
+              <div class="vt-map-title-row mt-3 mb-2">
+                <h1 class="vt-map-single-title mb-0">${escapeHtml(row.title)}</h1>
+                ${descBtn}
+              </div>
+              <div class="vt-map-meta-chips d-flex flex-wrap gap-2 mb-3">${chips.join('')}</div>
+              ${renderHeroSummaryStats(row)}
+            </div>
           </div>
-          <div class="col-lg-5 vt-map-single-hero-meta-col">
-            <h1 class="vt-map-single-title mb-1">${escapeHtml(row.title)}</h1>
-            ${row.author ? `<p class="vt-map-single-author text-secondary mb-2"><i class="bi bi-person-fill me-1"></i>${escapeHtml(row.author)}</p>` : ''}
-            <div class="vt-map-meta-chips d-flex flex-wrap gap-2 mb-3">${chips.join('')}</div>
-            ${renderHeroSummaryStats(row)}
-          </div>
+        </div>
+        <div class="col-lg-6">
+          ${renderExploreCard(row)}
         </div>
       </div>`;
   }
@@ -797,23 +982,24 @@
     </span>`;
   }
 
-  /** Match-summary stat blocks rendered into the hero's right rail.
-      Empty state when match_count === 0. */
+  /** Match-summary stat blocks. The Matches figure is recorded sessions
+      plus community games. Duration and dates stay recorded-only. */
   function renderHeroSummaryStats(row) {
-    if (row.match_count <= 0) {
+    const shown = playCountOf(row);
+    if (shown <= 0) {
       return `<div class="vt-map-summary-empty">
         <i class="bi bi-info-circle me-2"></i>
         <span>No matches recorded on this map yet.</span>
       </div>`;
     }
-    const avgDur = formatDuration(row.avg_duration_sec);
-    const firstChip = formatDateChip(row.first_played);
-    const lastChip = formatDateChip(row.last_played);
+    const avgDur = row.match_count > 0 ? formatDuration(row.avg_duration_sec) : '\u2014';
+    const firstChip = row.match_count > 0 ? formatDateChip(row.first_played) : '\u2014';
+    const lastChip = row.match_count > 0 ? formatDateChip(row.last_played) : '\u2014';
     return `
       <div class="vt-map-summary-stats">
-        <div class="vt-map-summary-stat">
+        <div class="vt-map-summary-stat" title="${escapeHtml(matchesTip(row))}">
           <div class="vt-map-summary-label">Matches</div>
-          <div class="vt-map-summary-value">${formatNumber(row.match_count)}</div>
+          <div class="vt-map-summary-value">${formatNumber(shown)}</div>
         </div>
         <div class="vt-map-summary-stat">
           <div class="vt-map-summary-label">Avg duration</div>
@@ -832,12 +1018,15 @@
 
   function renderExploreCard(row) {
     const stem = (row && row.key) || '';
-    return `<div class="card mb-3" id="vt-map-explore" data-map-stem="${escapeHtml(stem)}">
-      <div class="card-header">
+    return `<div class="card h-100 vt-map-explore-card" id="vt-map-explore" data-map-stem="${escapeHtml(stem)}">
+      <div class="card-header d-flex align-items-center">
         <i class="bi bi-badge-3d me-2"></i>Map
-        <span class="text-secondary small ms-2">Spawn layout</span>
+        <span class="text-secondary small ms-2" id="vt-map-explore-sub">Spawn layout</span>
+        <button type="button" class="btn btn-sm vt-map-explore-fs ms-auto" id="vt-map-explore-fs" title="Fullscreen" aria-label="Fullscreen" aria-pressed="false">
+          <i class="bi bi-fullscreen" aria-hidden="true"></i>
+        </button>
       </div>
-      <div class="card-body p-0" id="vt-map-explore-body">
+      <div class="card-body p-0 vt-map-explore-body" id="vt-map-explore-body">
         <p class="vt-map-explore-pending text-secondary small mb-0 p-3">Loading terrain&hellip;</p>
       </div>
     </div>`;
@@ -881,15 +1070,12 @@
   }
 
   function renderSingleBody(row) {
-    const sections = [renderExploreCard(row)];
-    if (row.match_count > 0) {
-      sections.push(renderTopCommandersCard(row));
-      sections.push(renderRecentMatchesCard(row));
-    } else {
-      sections.push(renderEmptyHistoryCard());
-    }
-    sections.push(renderComingSoonGrid());
-    return sections.join('');
+    if (row.match_count <= 0) return renderEmptyHistoryCard();
+    return renderInsights(row) + `
+      <div class="row g-3 vt-map-lower-row">
+        <div class="col-lg-6">${renderTopCommandersCard(row)}</div>
+        <div class="col-lg-6">${renderRecentMatchesCard(row)}</div>
+      </div>`;
   }
 
   function renderEmptyHistoryCard() {
@@ -905,30 +1091,47 @@
   function renderTopCommandersCard(row) {
     const rows = (row.top_commanders || []).slice(0, 10);
     if (!rows.length) {
-      return `<div class="card mb-3">
-        <div class="card-header"><i class="bi bi-shield-fill me-2"></i>Top Commanders</div>
+      return `<div class="card h-100">
+        <div class="card-header" title="${F9_MIXED_TIP}"><i class="bi bi-shield-fill me-2"></i>Top Commanders</div>
         <div class="card-body text-secondary">\u2014</div>
       </div>`;
     }
-    const items = rows.map((r, i) => {
+    const body = rows.map((r, i) => {
       const href = playerHref(r.steam64);
       const link = href
         ? `<a class="vt-map-cmdr-name" href="${escapeHtml(href)}">${escapeHtml(r.name)}</a>`
         : `<span class="vt-map-cmdr-name vt-map-cmdr-name-fallback">${escapeHtml(r.name)}</span>`;
-      const matchesPlural = r.matches_commanded === 1 ? 'match' : 'matches';
-      return `<li class="vt-map-cmdr-row">
-        <span class="vt-map-cmdr-rank">${i + 1}</span>
-        ${link}
-        <span class="vt-map-cmdr-count">
-          <span class="num">${formatNumber(r.matches_commanded)}</span>
-          <span class="text-secondary small">${matchesPlural} commanded</span>
-        </span>
-      </li>`;
+      const wins = safeNum(r.wins);
+      const losses = safeNum(r.losses);
+      const decided = wins + losses;
+      const winPct = decided > 0 && r.win_rate != null
+        ? `${Math.round(100 * safeNum(r.win_rate))}%`
+        : '\u2014';
+      return `<tr>
+        <td class="vt-map-cmdr-rank">${i + 1}</td>
+        <td>${link}</td>
+        <td class="text-end vt-map-cmdr-num">${formatNumber(wins)}-${formatNumber(losses)}</td>
+        <td class="text-end vt-map-cmdr-num">${winPct}</td>
+        <td class="text-end vt-map-cmdr-num">${formatNumber(r.matches_commanded)}</td>
+      </tr>`;
     }).join('');
-    return `<div class="card mb-3">
-      <div class="card-header"><i class="bi bi-shield-fill me-2"></i>Top Commanders</div>
+    return `<div class="card h-100">
+      <div class="card-header" title="${F9_MIXED_TIP}"><i class="bi bi-shield-fill me-2"></i>Top Commanders</div>
       <div class="card-body p-0">
-        <ol class="vt-map-cmdr-list mb-0">${items}</ol>
+        <div class="table-responsive">
+          <table class="table table-sm vt-map-recent-table vt-map-cmdr-table mb-0">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Commander</th>
+                <th scope="col" class="text-end">W-L</th>
+                <th scope="col" class="text-end">Win %</th>
+                <th scope="col" class="text-end">Matches</th>
+              </tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
       </div>
     </div>`;
   }
@@ -936,13 +1139,13 @@
   function renderRecentMatchesCard(row) {
     const matches = (row.recent_matches || []).slice(0, 10);
     if (!matches.length) {
-      return `<div class="card mb-3">
+      return `<div class="card h-100">
         <div class="card-header"><i class="bi bi-clock-history me-2"></i>Recent matches</div>
         <div class="card-body text-secondary">\u2014</div>
       </div>`;
     }
     const rows = matches.map(m => renderRecentMatchRow(m)).join('');
-    return `<div class="card mb-3">
+    return `<div class="card h-100">
       <div class="card-header"><i class="bi bi-clock-history me-2"></i>Recent matches</div>
       <div class="card-body p-0">
         <div class="table-responsive">
@@ -964,8 +1167,11 @@
   }
 
   function renderRecentMatchRow(m) {
-    const matchHref = `${state.dataPrefix}index.html?match=${encodeURIComponent(m.id || '')}`;
     const dateStr = formatDateChip(m.date);
+    const community = m.source === 'f9';
+    const dateCell = community
+      ? `<span class="vt-map-recent-date-label" title="Community game logged by F9bomber (https://f9bomber.com)">${escapeHtml(dateStr)}</span>`
+      : `<a href="${escapeHtml(`${state.dataPrefix}index.html?match=${encodeURIComponent(m.id || '')}`)}" class="vt-map-recent-link" title="Open this match in the dashboard">${escapeHtml(dateStr)}</a>`;
     const c1 = (m.commanders && m.commanders['1']) || null;
     const c2 = (m.commanders && m.commanders['2']) || null;
     const cmdrCell = `
@@ -978,9 +1184,7 @@
     const playerCount = m.player_count != null ? formatNumber(m.player_count) : '\u2014';
     const duration = formatDuration(m.duration_sec);
     return `<tr class="vt-map-recent-row" data-match-id="${escapeHtml(m.id || '')}">
-      <td class="vt-map-recent-date">
-        <a href="${escapeHtml(matchHref)}" class="vt-map-recent-link" title="Open this match in the dashboard">${escapeHtml(dateStr)}</a>
-      </td>
+      <td class="vt-map-recent-date">${dateCell}</td>
       <td class="vt-map-recent-cmdrs">${cmdrCell}</td>
       <td class="text-end vt-map-recent-pc">${escapeHtml(playerCount)}</td>
       <td class="text-end vt-map-recent-dur">${escapeHtml(duration)}</td>
@@ -1002,13 +1206,20 @@
   function renderWinnerChip(m) {
     const decided = m.winner_decided_by || 'unclear';
     const team = m.winner_team;
-    // v15: "attested" = host-confirmed team win from the proto v3
-    // end-of-game dialog. v16: "adjudicated" = reviewer-confirmed via the
-    // pipeline's outcome-review prompt. Same visual weight as a clean win.
-    if ((decided === 'clean_win' || decided === 'attested' || decided === 'adjudicated') && (team === 1 || team === 2)) {
+    if ((decided === 'clean_win' || decided === 'attested' || decided === 'adjudicated' || decided === 'f9') && (team === 1 || team === 2)) {
+      const cmdr = m.commanders && m.commanders[String(team)];
       const cls = team === 1 ? 'vt-map-winner-t1' : 'vt-map-winner-t2';
       const title = decided === 'attested' ? ' title="Host-attested outcome"'
-        : decided === 'adjudicated' ? ' title="Reviewer-confirmed outcome"' : '';
+        : decided === 'adjudicated' ? ' title="Reviewer-confirmed outcome"'
+        : decided === 'f9' ? ' title="Community game logged by F9bomber (https://f9bomber.com)"' : '';
+      if (cmdr && cmdr.name) {
+        const href = cmdr.s64 ? playerHref(cmdr.s64) : null;
+        const name = escapeHtml(cmdr.name);
+        if (href) {
+          return `<a href="${escapeHtml(href)}" class="vt-map-winner-chip ${cls}"${title}>${name}</a>`;
+        }
+        return `<span class="vt-map-winner-chip ${cls}"${title}>${name}</span>`;
+      }
       return `<span class="vt-map-winner-chip ${cls}"${title}>Team ${team}</span>`;
     }
     if (decided === 'contested') {
@@ -1024,36 +1235,154 @@
     return `<span class="vt-map-winner-chip vt-map-winner-unclear" title="Winner could not be inferred">\u2014</span>`;
   }
 
-  // ---- "Coming soon" placeholder grid ---------------------------------
-  // Six greyed-out cards advertising the depth we plan to add as the
-  // corpus grows. Renderer is data-driven so future plan iterations
-  // can flip a placeholder into a live card without restructuring the
-  // grid.
-  const COMING_SOON_CARDS = [
-    { icon: 'pie-chart-fill',  title: 'Team wins donut',          body: 'T1 / T2 / Contested / Unclear breakdown across this map\u2019s history.' },
-    { icon: 'shield-shaded',   title: 'Faction balance',          body: 'Per-team faction picks (ISDF / Hadean / Scion) and faction win-rate on this map.' },
-    { icon: 'trophy-fill',     title: 'Best-performing players',  body: 'Top players by VTSR-T delta achieved on this map.' },
-    { icon: 'flag-fill',       title: 'Best-performing commanders', body: 'Commander win-rate deep-dive once we have enough decided matches.' },
-    { icon: 'award-fill',      title: 'Map records',              body: 'Longest match, highest scoring, biggest blowout, closest call.' },
-    { icon: 'people-fill',     title: 'Player count histogram',   body: 'Distribution of lobby sizes recorded on this map.' },
-  ];
+  const FACTION_META = {
+    i: { label: 'ISDF', color: 'var(--kb-faction-i)' },
+    e: { label: 'Hadean', color: 'var(--kb-faction-e)' },
+    f: { label: 'Scion', color: 'var(--kb-faction-f)' },
+  };
 
-  function renderComingSoonGrid() {
-    const cards = COMING_SOON_CARDS.map(c => `
-      <div class="vt-placeholder-card">
-        <div class="vt-placeholder-card-icon"><i class="bi bi-${escapeHtml(c.icon)}" aria-hidden="true"></i></div>
-        <div class="vt-placeholder-card-title">${escapeHtml(c.title)}</div>
-        <div class="vt-placeholder-card-body">${escapeHtml(c.body)}</div>
-      </div>`).join('');
-    return `<div class="card mb-3 vt-map-coming-soon-card">
-      <div class="card-header">
-        <i class="bi bi-stars me-2"></i>More data coming soon
-        <span class="vt-map-coming-soon-sub text-secondary small ms-2">Cards will fill in as the corpus grows.</span>
-      </div>
-      <div class="card-body">
-        <div class="vt-map-coming-soon-grid">${cards}</div>
-      </div>
+  const F9_MIXED_TIP = 'Recorded matches and F9bomber community games (https://f9bomber.com).';
+
+  function insightCard(icon, title, body, extraClass, tip) {
+    const extra = extraClass ? ` ${extraClass}` : '';
+    const titleAttr = tip ? ` title="${escapeHtml(tip)}"` : '';
+    return `<div class="card vt-map-insight-card${extra}">
+      <div class="card-header"${titleAttr}><i class="bi bi-${icon} me-2"></i>${escapeHtml(title)}</div>
+      <div class="card-body">${body}</div>
     </div>`;
+  }
+
+  function renderInsights(row) {
+    const insights = row.insights;
+    if (!insights) return '';
+    const share = 'vt-map-insight-card--share';
+    const cards = [
+      renderFactionBalanceCard(insights.factions, share),
+      renderFactionWinrateCard(insights.factions, share),
+      renderPlayerCountCard(insights.player_counts, share),
+      renderBestPlayersCard(insights.best_players, share),
+    ].filter(Boolean);
+    if (!cards.length) return '';
+    return `<div class="vt-map-insight-grid mb-3">${cards.join('')}</div>`;
+  }
+
+  const FACTION_CODES = ['i', 'e', 'f'];
+
+  function factionPickTotals(factions) {
+    const sides = (factions && factions.by_side) || {};
+    const totals = {};
+    for (const code of FACTION_CODES) {
+      totals[code] = safeNum((sides['1'] || {})[code]) + safeNum((sides['2'] || {})[code]);
+    }
+    return totals;
+  }
+
+  function renderFactionBalanceCard(factions, extraClass) {
+    const totals = factionPickTotals(factions);
+    const sum = FACTION_CODES.reduce((n, code) => n + totals[code], 0);
+    if (!sum) return '';
+    const segs = FACTION_CODES.map(code => {
+      const n = totals[code];
+      const pct = (n / sum) * 100;
+      return `<span class="vt-map-fac-seg" style="width:${pct}%;background:${FACTION_META[code].color}" title="${escapeHtml(FACTION_META[code].label)} ${n}"></span>`;
+    }).join('');
+    const legend = FACTION_CODES.map(code =>
+      `<div class="vt-map-fac-line"><span class="vt-map-swatch" style="background:${FACTION_META[code].color}"></span><span>${escapeHtml(FACTION_META[code].label)}</span><span class="num">${formatNumber(totals[code])}</span></div>`
+    ).join('');
+    return insightCard('shield-shaded', 'Faction balance', `
+      <div class="vt-map-fac-bar mb-2">${segs}</div>
+      <div class="vt-map-fac-lines">${legend}</div>`, extraClass, F9_MIXED_TIP);
+  }
+
+  function renderFactionWinrateCard(factions, extraClass) {
+    const rates = (factions && factions.win_rate) || {};
+    const any = FACTION_CODES.some(code => safeNum((rates[code] || {}).decided) > 0);
+    if (!any) return '';
+    const rows = FACTION_CODES.map(code => {
+      const cell = rates[code] || {};
+      const decided = safeNum(cell.decided);
+      const wins = safeNum(cell.wins);
+      const label = decided > 0 ? `${Math.round(100 * wins / decided)}%` : '\u2014';
+      return `<li class="vt-map-record-row">
+        <span class="vt-map-winrate-name"><span class="vt-map-swatch" style="background:${FACTION_META[code].color}"></span><span>${escapeHtml(FACTION_META[code].label)}</span></span>
+        <span class="num">${label}</span>
+      </li>`;
+    }).join('');
+    return insightCard('percent', 'Faction win rate', `<ul class="vt-map-record-list vt-map-winrate-list">${rows}</ul>`, extraClass, F9_MIXED_TIP);
+  }
+
+  function renderBestPlayersCard(players, extraClass) {
+    const rows = players || [];
+    if (!rows.length) return '';
+    const items = rows.map((p, i) => {
+      const href = playerHref(p.steam64);
+      const name = href
+        ? `<a class="vt-map-cmdr-name" href="${escapeHtml(href)}">${escapeHtml(p.name)}</a>`
+        : `<span class="vt-map-cmdr-name">${escapeHtml(p.name)}</span>`;
+      const delta = safeNum(p.delta_sum);
+      const sign = delta > 0 ? '+' : '';
+      const tip = 'Total VTSR-T change from thug games on this map, not one match';
+      return `<li class="vt-map-cmdr-row">
+        <span class="vt-map-cmdr-rank">${i + 1}</span>
+        ${name}
+        <span class="vt-map-cmdr-count" title="${escapeHtml(tip)}"><span class="num">${sign}${delta.toFixed(1)} VTSR-T</span>
+          <span class="text-secondary small">${formatNumber(p.matches)} matches</span></span>
+      </li>`;
+    }).join('');
+    return insightCard('trophy-fill', 'Best thug performance', `<ol class="vt-map-cmdr-list mb-0">${items}</ol>`, extraClass);
+  }
+
+  function renderPlayerCountCard(counts, extraClass) {
+    const rows = (counts || []).filter(c => safeNum(c.matches) > 0);
+    if (!rows.length) return '';
+    const max = Math.max(...rows.map(c => safeNum(c.matches)));
+    const bars = rows.map(c => {
+      const n = safeNum(c.matches);
+      const pct = max > 0 ? (n / max) * 100 : 0;
+      return `<li class="vt-map-hist-row">
+        <span class="vt-map-hist-label">${formatNumber(c.players)}</span>
+        <span class="vt-map-hist-track"><span class="vt-map-hist-fill" style="width:${pct}%"></span></span>
+        <span class="vt-map-hist-n">${formatNumber(n)}</span>
+      </li>`;
+    }).join('');
+    return insightCard('people-fill', 'Player count', `<ul class="vt-map-hist">${bars}</ul>`, extraClass, F9_MIXED_TIP);
+  }
+
+  function exploreFsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function toggleExploreFullscreen() {
+    const card = document.getElementById('vt-map-explore');
+    const btn = document.getElementById('vt-map-explore-fs');
+    if (!card) return;
+    if (exploreFsElement() === card) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) exit.call(document);
+      return;
+    }
+    const enter = card.requestFullscreen || card.webkitRequestFullscreen;
+    if (enter) enter.call(card);
+    if (btn) btn.setAttribute('aria-pressed', 'true');
+  }
+
+  function syncExploreFullscreenButton() {
+    const card = document.getElementById('vt-map-explore');
+    const btn = document.getElementById('vt-map-explore-fs');
+    if (!btn) return;
+    const on = !!card && exploreFsElement() === card;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = on ? 'bi bi-fullscreen-exit' : 'bi bi-fullscreen';
+  }
+
+  function onExploreMessage(ev) {
+    const data = ev.data;
+    if (!data || data.source !== 'vt-map-embed' || data.action !== 'counts') return;
+    const frame = document.querySelector('#vt-map-explore-body iframe');
+    if (frame && ev.source !== frame.contentWindow) return;
+    const sub = document.getElementById('vt-map-explore-sub');
+    if (sub && data.text) sub.textContent = data.text;
   }
 
   // ---- Section toggle + dispatcher ------------------------------------
@@ -1116,84 +1445,74 @@
 
   // ---- Wiring ----------------------------------------------------------
 
+  function wireMultiMenu(menu, toggle, set) {
+    if (!menu || !toggle) return;
+    menu.addEventListener('change', () => {
+      set.clear();
+      menu.querySelectorAll('input[type="checkbox"]').forEach(box => {
+        if (box.checked) set.add(box.value);
+      });
+      paintMenu(menu, toggle, set);
+      renderDirectoryGrid();
+      syncDirectoryUrl('push');
+    });
+    if (!window.bootstrap || !window.bootstrap.Dropdown) return;
+    const home = menu.parentElement;
+    toggle.addEventListener('show.bs.dropdown', () => {
+      document.body.appendChild(menu);
+    });
+    toggle.addEventListener('hidden.bs.dropdown', () => {
+      if (home) home.appendChild(menu);
+    });
+    window.bootstrap.Dropdown.getOrCreateInstance(toggle, {
+      autoClose: 'outside',
+      popperConfig(defaults) {
+        return Object.assign({}, defaults, { strategy: 'fixed' });
+      },
+    });
+  }
+
   function wireDirectoryEvents() {
-    if (!dom.searchInput) return;
-    dom.searchInput.addEventListener('input', (e) => {
-      state.filters.query = e.target.value || '';
-      renderDirectoryGrid();
-      window.clearTimeout(searchTimer);
-      searchTimer = window.setTimeout(() => syncDirectoryUrl('search'), 300);
-    });
-    dom.searchInput.addEventListener('blur', () => { searchReplace = false; });
+    if (dom.searchInput) {
+      dom.searchInput.addEventListener('input', (e) => {
+        state.filters.query = e.target.value || '';
+        renderDirectoryGrid();
+        window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(() => syncDirectoryUrl('search'), 300);
+      });
+      dom.searchInput.addEventListener('blur', () => { searchReplace = false; });
+    }
 
-    dom.poolsChips.addEventListener('click', (e) => {
-      const btn = e.target.closest('.vt-chip');
-      if (!btn || !btn.dataset.pools) return;
-      const id = btn.dataset.pools;
-      if (state.filters.pools.has(id)) {
-        state.filters.pools.delete(id);
-        btn.setAttribute('data-selected', 'false');
-      } else {
-        state.filters.pools.add(id);
-        btn.setAttribute('data-selected', 'true');
-      }
-      renderDirectoryGrid();
-      syncDirectoryUrl('push');
-    });
+    wireMultiMenu(dom.poolsMenu, dom.poolsToggle, state.filters.pools);
+    wireMultiMenu(dom.sizeMenu, dom.sizeToggle, state.filters.sizes);
+    wireMultiMenu(dom.tagMenu, dom.tagToggle, state.filters.tags);
 
-    dom.sizeChips.addEventListener('click', (e) => {
-      const btn = e.target.closest('.vt-chip');
-      if (!btn || !btn.dataset.size) return;
-      const id = btn.dataset.size;
-      if (state.filters.sizes.has(id)) {
-        state.filters.sizes.delete(id);
-        btn.setAttribute('data-selected', 'false');
-      } else {
-        state.filters.sizes.add(id);
-        btn.setAttribute('data-selected', 'true');
-      }
-      renderDirectoryGrid();
-      syncDirectoryUrl('push');
-    });
+    if (dom.playedSelect) {
+      dom.playedSelect.addEventListener('change', (e) => {
+        const value = e.target.value;
+        state.filters.played = (value === 'played' || value === 'unplayed') ? value : 'all';
+        renderDirectoryGrid();
+        syncDirectoryUrl('push');
+      });
+    }
 
-    dom.tagChips.addEventListener('click', (e) => {
-      const btn = e.target.closest('.vt-chip');
-      if (!btn || !btn.dataset.tag) return;
-      const id = btn.dataset.tag;
-      if (state.filters.tags.has(id)) {
-        state.filters.tags.delete(id);
-        btn.setAttribute('data-selected', 'false');
-      } else {
-        state.filters.tags.add(id);
-        btn.setAttribute('data-selected', 'true');
-      }
-      renderDirectoryGrid();
-      syncDirectoryUrl('push');
-    });
+    if (dom.authorSelect) {
+      dom.authorSelect.addEventListener('change', (e) => {
+        state.filters.author = e.target.value || '';
+        renderDirectoryGrid();
+        syncDirectoryUrl('push');
+      });
+    }
 
-    dom.playedChips.addEventListener('click', (e) => {
-      const btn = e.target.closest('.vt-chip');
-      if (!btn || !btn.dataset.played) return;
-      state.filters.played = btn.dataset.played;
-      dom.playedChips.querySelectorAll('.vt-chip').forEach(b =>
-        b.setAttribute('data-selected', b === btn ? 'true' : 'false'));
-      renderDirectoryGrid();
-      syncDirectoryUrl('push');
-    });
+    if (dom.sortSelect) {
+      dom.sortSelect.addEventListener('change', (e) => {
+        state.filters.sort = e.target.value || 'played-desc';
+        renderDirectoryGrid();
+        syncDirectoryUrl('push');
+      });
+    }
 
-    dom.authorSelect.addEventListener('change', (e) => {
-      state.filters.author = e.target.value || '';
-      renderDirectoryGrid();
-      syncDirectoryUrl('push');
-    });
-
-    dom.sortSelect.addEventListener('change', (e) => {
-      state.filters.sort = e.target.value || 'played-desc';
-      renderDirectoryGrid();
-      syncDirectoryUrl('push');
-    });
-
-    dom.clearFiltersBtn.addEventListener('click', clearFilters);
+    if (dom.clearFiltersBtn) dom.clearFiltersBtn.addEventListener('click', clearFilters);
   }
 
   // ---- Boot ------------------------------------------------------------
@@ -1224,12 +1543,12 @@
     state.rows = buildRows();
 
     // Mount toolbar chips + author dropdown
-    if (dom.poolsChips) dom.poolsChips.innerHTML = buildPoolsChips(state.rows);
-    if (dom.sizeChips)  dom.sizeChips.innerHTML  = buildSizeChips(state.rows);
-    if (dom.tagChips) {
-      const html = buildTagChips(state.rows);
-      if (html) dom.tagChips.innerHTML = html;
-      else dom.tagChips.classList.add('d-none');
+    if (dom.poolsMenu) dom.poolsMenu.innerHTML = buildPoolsMenu(state.rows);
+    if (dom.sizeMenu)  dom.sizeMenu.innerHTML  = buildSizeMenu(state.rows);
+    if (dom.tagMenu) {
+      const html = buildTagMenu(state.rows);
+      if (html) dom.tagMenu.innerHTML = html;
+      else if (dom.tagDropdown) dom.tagDropdown.classList.add('d-none');
     }
     if (dom.authorSelect) dom.authorSelect.innerHTML = buildAuthorOptions(state.rows);
 
@@ -1240,6 +1559,9 @@
 
     ensureLooseToggle();
     wireDirectoryEvents();
+    window.addEventListener('message', onExploreMessage);
+    document.addEventListener('fullscreenchange', syncExploreFullscreenButton);
+    document.addEventListener('webkitfullscreenchange', syncExploreFullscreenButton);
 
     if (dom.loading) dom.loading.classList.add('d-none');
     if (dom.main) dom.main.classList.remove('d-none');
@@ -1258,10 +1580,14 @@
     dom.heroStats      = $('vt-map-hero-stats');
     dom.heroSub        = $('vt-map-hero-subtitle');
     dom.searchInput    = $('vt-map-search');
-    dom.poolsChips     = $('vt-map-pools-chips');
-    dom.sizeChips      = $('vt-map-size-chips');
-    dom.tagChips       = $('vt-map-tag-chips');
-    dom.playedChips    = $('vt-map-played-chips');
+    dom.poolsMenu      = $('vt-map-pools-menu');
+    dom.poolsToggle    = $('vt-map-pools-toggle');
+    dom.sizeMenu       = $('vt-map-size-menu');
+    dom.sizeToggle     = $('vt-map-size-toggle');
+    dom.tagMenu        = $('vt-map-tag-menu');
+    dom.tagToggle      = $('vt-map-tag-toggle');
+    dom.tagDropdown    = $('vt-map-tag-dd');
+    dom.playedSelect   = $('vt-map-played');
     dom.authorSelect   = $('vt-map-author');
     dom.sortSelect     = $('vt-map-sort');
     dom.filterCount    = $('vt-map-filter-count');

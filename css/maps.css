@@ -369,10 +369,10 @@
 }
 
 .vt-map-single-hero {
-  border-radius: var(--vt-map-card-radius);
-}
-.vt-map-single-hero-row {
-  align-items: stretch;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 .vt-map-single-image-wrap {
   position: relative;
@@ -380,7 +380,7 @@
   overflow: hidden;
   background: color-mix(in oklab, var(--kb-bg-card) 92%, var(--kb-text-primary) 4%);
   aspect-ratio: 1 / 1;
-  max-height: 380px;
+  width: min(100%, 380px);
 }
 .vt-map-single-image {
   width: 100%;
@@ -409,11 +409,50 @@
   margin-left: -1.5px;
   margin-top: -1.5px;
 }
-.vt-map-loose-hero-toggle {
+.vt-map-spawn-mark,
+.vt-map-pool-mark {
+  position: absolute;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: transparent;
+}
+.vt-map-spawn-mark {
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border: 2px solid #5dadff;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--kb-bg-body) 65%, transparent);
+}
+.vt-map-pool-mark {
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  margin-top: -5px;
+  border: 2px solid #ffd24a;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--kb-bg-body) 55%, transparent);
+}
+.vt-map-card-thumb-wrap .vt-map-spawn-mark {
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  margin-top: -4.5px;
+  border-width: 1.5px;
+}
+.vt-map-card-thumb-wrap .vt-map-pool-mark {
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  margin-top: -3.5px;
+  border-width: 1.5px;
+}
+.vt-map-hero-toggles {
   position: absolute;
   right: 0.5rem;
   bottom: 0.5rem;
   z-index: 2;
+  display: flex;
+  gap: 0.35rem;
 }
 .vt-map-single-image-empty {
   display: flex;
@@ -422,15 +461,28 @@
   font-size: 4rem;
   color: color-mix(in oklab, var(--kb-text-muted) 60%, transparent);
 }
-.vt-map-single-description {
-  font-size: 0.9rem;
-  color: var(--kb-text-secondary);
-  line-height: 1.55;
-  background: color-mix(in oklab, var(--kb-bg-card) 60%, transparent);
-  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
-  border-radius: 10px;
-  padding: 0.75rem 0.85rem;
+.vt-map-title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.vt-map-desc-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--kb-text-muted);
+  cursor: pointer;
+}
+.vt-map-desc-btn:hover {
+  color: var(--kb-primary);
+}
+.vt-map-desc-body {
   white-space: pre-line;
+  color: var(--kb-text-secondary);
+  line-height: 1.5;
 }
 .vt-map-single-title {
   font-family: 'Geist', system-ui, -apple-system, sans-serif;
@@ -653,6 +705,10 @@
   font-size: 0.78rem;
   font-weight: 600;
   border: 1px solid color-mix(in oklab, var(--kb-text-primary) 10%, transparent);
+  text-decoration: none;
+}
+a.vt-map-winner-chip:hover {
+  filter: brightness(1.15);
 }
 .vt-map-winner-t1 {
   color: var(--kb-faction-i, var(--kb-primary));
@@ -671,79 +727,230 @@
   background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
 }
 
-/* Empty 3D map on the single-map page. The iframe is the spawn layout
-   (HQ tiles, pools, loose) with no players. */
+.vt-map-filter-dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.vt-map-filter-dd-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kb-text-muted);
+  font-weight: 600;
+  margin: 0;
+}
+.vt-map-filter-dd-toggle {
+  width: auto;
+  min-width: 6.5rem;
+  max-width: 11rem;
+  cursor: pointer;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vt-map-filter-dd-menu {
+  max-height: 16rem;
+  overflow-y: auto;
+  min-width: 8rem;
+  padding: 0.25rem;
+  z-index: 1080;
+}
+.vt-map-filter-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+/* Empty 3D map beside the hero. The iframe is the spawn layout. */
+.vt-map-explore-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.vt-map-explore-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 320px;
+}
 .vt-map-explore-frame {
   display: block;
   width: 100%;
-  height: min(70vh, 640px);
-  min-height: 420px;
+  height: 100%;
+  min-height: 320px;
+  flex: 1 1 auto;
   border: 0;
   background: var(--kb-bg-subtle);
+}
+.vt-map-explore-fs {
+  color: var(--kb-text-secondary);
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+}
+.vt-map-explore-fs:hover,
+.vt-map-explore-fs[aria-pressed="true"] {
+  color: var(--kb-primary);
+}
+#vt-map-explore:fullscreen {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--kb-bg-card);
+  border-radius: 0;
+}
+#vt-map-explore:fullscreen .vt-map-explore-body,
+#vt-map-explore:fullscreen .vt-map-explore-frame {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
 }
 .vt-map-explore-pending,
 .vt-map-explore-missing {
   min-height: 4.5rem;
 }
 
-/* Coming-soon grid */
-.vt-map-coming-soon-card .card-header {
+.vt-map-lower-row {
+  margin-top: 0.15rem;
+}
+.vt-map-insight-grid {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.85rem;
+  overflow-x: auto;
+}
+.vt-map-insight-card {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  flex: 0 1 220px;
+  min-width: 200px;
+  height: auto;
+}
+.vt-map-insight-card > .card-body {
+  flex: 1 1 auto;
+}
+.vt-map-insight-card--share {
+  flex: 1 1 0;
+  min-width: 11rem;
+  max-width: none;
+}
+.vt-map-donut-row {
   display: flex;
   align-items: center;
-}
-.vt-map-coming-soon-sub {
-  font-weight: normal;
-}
-.vt-map-coming-soon-grid {
-  display: grid;
   gap: 0.85rem;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
-
-/* "Coming soon" placeholder cards. Greyed-out with a dashed border so
-   they read as "future depth" rather than empty content. Used by Phase
-   4 single-view to advertise team-wins / faction-balance / records /
-   etc. before we have the data to populate them. */
-.vt-placeholder-card {
-  opacity: 0.55;
-  border: 1px dashed color-mix(in oklab, var(--kb-text-primary) 22%, transparent);
-  background: color-mix(in oklab, var(--kb-bg-card) 50%, transparent);
-  border-radius: var(--vt-map-card-radius);
-  position: relative;
-  padding: 1rem 1rem 1.1rem;
-  min-height: 7.5rem;
+.vt-map-donut {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.vt-map-donut-legend,
+.vt-map-record-list,
+.vt-map-hist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.82rem;
+}
+.vt-map-donut-legend li,
+.vt-map-fac-rates span,
+.vt-map-record-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.vt-map-donut-legend .num,
+.vt-map-hist-n,
+.vt-map-hist-label {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-weight: 600;
+}
+.vt-map-swatch {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 2px;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+.vt-map-fac-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.vt-map-fac-side {
+  width: 3.4rem;
+  font-size: 0.75rem;
+  color: var(--kb-text-muted);
+}
+.vt-map-fac-bar {
+  display: flex;
+  flex: 1 1 auto;
+  height: 0.55rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+}
+.vt-map-fac-seg { display: block; height: 100%; }
+.vt-map-fac-lines {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  margin-top: 0.7rem;
+  font-size: 0.82rem;
+  color: var(--kb-text-secondary);
 }
-.vt-placeholder-card::after {
-  content: 'Coming soon';
-  position: absolute;
-  top: 0.5rem;
-  right: 0.6rem;
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--kb-text-muted);
-  background: color-mix(in oklab, var(--kb-bg-card) 80%, transparent);
-  border: 1px solid color-mix(in oklab, var(--kb-text-primary) 12%, transparent);
-  padding: 0.1rem 0.45rem;
-  border-radius: 999px;
+.vt-map-fac-line {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
 }
-.vt-placeholder-card-icon {
-  font-size: 1.6rem;
-  color: color-mix(in oklab, var(--kb-primary) 70%, transparent);
-}
-.vt-placeholder-card-title {
-  font-family: 'Geist', system-ui, -apple-system, sans-serif;
+.vt-map-fac-line .num {
+  margin-left: auto;
+  font-family: 'Geist Mono', ui-monospace, monospace;
   font-weight: 600;
-  font-size: 1rem;
   color: var(--kb-text-primary);
 }
-.vt-placeholder-card-body {
-  font-size: 0.85rem;
-  color: var(--kb-text-secondary);
-  line-height: 1.45;
+.vt-map-winrate-list .vt-map-record-row {
+  padding: 0.45rem 0.15rem;
+}
+.vt-map-winrate-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.15rem 0.35rem 0.15rem 0.1rem;
+}
+.vt-map-record-row {
+  justify-content: space-between;
+  padding: 0.28rem 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--kb-text-primary) 6%, transparent);
+}
+.vt-map-record-row:last-child { border-bottom: 0; }
+.vt-map-record-label { color: var(--kb-text-secondary); }
+.vt-map-hist-row {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr 1.6rem;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.28rem;
+}
+.vt-map-hist-track {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--kb-text-primary) 8%, transparent);
+  overflow: hidden;
+}
+.vt-map-hist-fill {
+  display: block;
+  height: 100%;
+  background: var(--kb-accent);
 }
 
 /* ---- 6. Empty / error states ---- */

@@ -42,7 +42,7 @@
   <script>
     window.__vtMapBoot = {
       map_file:         "vsrjocrystalst",
-      template_version: 11
+      template_version: 12
     };
   </script>
 </head>
@@ -183,23 +183,43 @@
                         aria-label="Close"></button>
               </div>
               <div class="offcanvas-body">
-                <div class="vt-chip-group" role="group" aria-label="Pools filter" id="vt-map-pools-chips">
-                  <span class="vt-chip-group-label">Pools</span>
+                <div class="vt-map-filter-dd dropdown">
+                  <span class="vt-map-filter-dd-label" id="vt-map-pools-label">Pools</span>
+                  <button type="button" class="form-select form-select-sm vt-map-filter-dd-toggle text-start"
+                          id="vt-map-pools-toggle"
+                          data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                          aria-expanded="false" aria-labelledby="vt-map-pools-label">Any</button>
+                  <ul class="dropdown-menu vt-map-filter-dd-menu" id="vt-map-pools-menu"
+                      role="group" aria-label="Pools"></ul>
                 </div>
 
-                <div class="vt-chip-group" role="group" aria-label="Size filter" id="vt-map-size-chips">
-                  <span class="vt-chip-group-label">Size</span>
+                <div class="vt-map-filter-dd dropdown">
+                  <span class="vt-map-filter-dd-label" id="vt-map-size-label">Size</span>
+                  <button type="button" class="form-select form-select-sm vt-map-filter-dd-toggle text-start"
+                          id="vt-map-size-toggle"
+                          data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                          aria-expanded="false" aria-labelledby="vt-map-size-label">Any</button>
+                  <ul class="dropdown-menu vt-map-filter-dd-menu" id="vt-map-size-menu"
+                      role="group" aria-label="Size"></ul>
                 </div>
 
-                <div class="vt-chip-group" role="group" aria-label="Tags filter" id="vt-map-tag-chips">
-                  <span class="vt-chip-group-label">Tags</span>
+                <div class="vt-map-filter-dd dropdown" id="vt-map-tag-dd">
+                  <span class="vt-map-filter-dd-label" id="vt-map-tag-label">Tags</span>
+                  <button type="button" class="form-select form-select-sm vt-map-filter-dd-toggle text-start"
+                          id="vt-map-tag-toggle"
+                          data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                          aria-expanded="false" aria-labelledby="vt-map-tag-label">Any</button>
+                  <ul class="dropdown-menu vt-map-filter-dd-menu" id="vt-map-tag-menu"
+                      role="group" aria-label="Tags"></ul>
                 </div>
 
-                <div class="vt-chip-group" role="group" aria-label="Played status" id="vt-map-played-chips">
-                  <span class="vt-chip-group-label">Status</span>
-                  <button type="button" class="vt-chip" data-played="all" data-selected="true">All</button>
-                  <button type="button" class="vt-chip" data-played="played">Has matches</button>
-                  <button type="button" class="vt-chip" data-played="unplayed">Unplayed</button>
+                <div class="vt-map-filter-dd">
+                  <label for="vt-map-played" class="vt-map-filter-dd-label">Status</label>
+                  <select id="vt-map-played" class="form-select form-select-sm vt-map-sort-select" aria-label="Played status">
+                    <option value="all" selected>Any</option>
+                    <option value="played">Has matches</option>
+                    <option value="unplayed">Unplayed</option>
+                  </select>
                 </div>
 
                 <div class="vt-map-filter-actions ms-md-auto d-flex gap-2 align-items-center">

@@ -10731,6 +10731,7 @@ def main():
             registry=registry,
             output_dir=OUTPUT_DIR,
             project_root=PROJECT_ROOT,
+            elo_history=elo_history,
         )
         verb = "Rewrote" if map_summary["wrote_map_stats"] else "No change to"
         print(

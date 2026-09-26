@@ -3,7 +3,7 @@
  *
  * Three-reel slot machine for random VSR map selection. Each reel pulls
  * from a different category, filtered by the pool-count radio pills:
- *   1. Popular   - vsrmaplist.json entries where Tags === "popular"
+ *   1. Popular   - map_stats.json maps flagged popular (top played, pipeline)
  *   2. Played    - map_files appearing in matches.json (we have stats on)
  *   3. Unplayed  - map-registry entries NOT in matches.json
  *
@@ -48,6 +48,7 @@
   };
   const MATCHES_URL_CANDIDATES = ['../data/processed/matches.json', 'data/processed/matches.json'];
   const REGISTRY_URL_CANDIDATES = ['../data/map-registry.json', 'data/map-registry.json'];
+  const MAP_STATS_URL_CANDIDATES = ['../data/processed/map_stats.json', 'data/processed/map_stats.json'];
 
   // ---------------------------------------------------------------- State
 
@@ -82,9 +83,10 @@
   function ensureDataLoaded() {
     if (dataLoadPromise) return dataLoadPromise;
     dataLoadPromise = (async () => {
-      const [matches, reg] = await Promise.all([
+      const [matches, reg, mapStats] = await Promise.all([
         fetchJsonFallback(MATCHES_URL_CANDIDATES),
         fetchJsonFallback(REGISTRY_URL_CANDIDATES),
+        fetchJsonFallback(MAP_STATS_URL_CANDIDATES),
       ]);
       // matches: array of { map: "havenvsr.bzn", ... }
       playedSet = new Set();
@@ -97,18 +99,10 @@
       }
       registry = (reg && typeof reg === 'object') ? reg : {};
 
-      // Build popular pool from vsrmaplist (loaded eagerly by resolver).
-      const vsrMap = window.VTToolsResolver && window.VTToolsResolver.getVsrMapByFile
-        ? window.VTToolsResolver.getVsrMapByFile()
-        : null;
       popularPool = [];
-      if (vsrMap) {
-        for (const [file, entry] of vsrMap) {
-          const tags = String(entry.Tags || '').toLowerCase();
-          if (tags.includes('popular')) {
-            popularPool.push(file);
-          }
-        }
+      const statMaps = (mapStats && mapStats.maps) || {};
+      for (const [file, entry] of Object.entries(statMaps)) {
+        if (entry && entry.popular) popularPool.push(file);
       }
     })();
     return dataLoadPromise;

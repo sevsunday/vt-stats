@@ -3532,8 +3532,8 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
 
 ```json
 {
-  "schema_version": 1,
-  "template_version": 1,
+  "schema_version": 2,
+  "template_version": 12,
   "generated_at": "2026-05-19T16:49:33Z",
   "site_url": "https://vtstats.bz",
   "min_recent_matches_shown": 10,
@@ -3542,6 +3542,9 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
     "havenvsr": {
       "map_file": "havenvsr",
       "match_count": 4,
+      "community_games": 9,
+      "play_count": 13,
+      "popular": true,
       "total_duration_sec": 5128,
       "avg_duration_sec": 1282,
       "first_played": "2026-04-16T01:27:48.447651+00:00",
@@ -3562,9 +3565,26 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
           "winner_decided_by": "unclear",
           "winner_team":       null
         }
-      ]
-    },
-    "vsrabuse": { /* unplayed - all stat fields zeroed */ }
+      ],
+      "insights": {
+        "wins": { "t1": 1, "t2": 1, "contested": 0, "unclear": 2 },
+        "factions": {
+          "by_side": { "1": { "i": 2, "e": 1, "f": 1 }, "2": { "i": 1, "e": 2, "f": 1 } },
+          "win_rate": { "i": { "wins": 1, "decided": 2 }, "e": { "wins": 1, "decided": 2 }, "f": { "wins": 0, "decided": 0 } }
+        },
+        "best_players": [
+          { "steam64": "76561198045727092", "name": "Snake", "delta_sum": 12.4, "matches": 2 }
+        ],
+        "best_commanders": [],
+        "records": {
+          "longest": { "id": "2026-04-29T04-07-14", "date": "2026-04-29T04:07:14.337730+00:00", "value": 384 },
+          "highest_scoring": { "id": "2026-04-29T04-07-14", "date": "2026-04-29T04:07:14.337730+00:00", "value": 40 },
+          "biggest_blowout": null,
+          "closest_call": null
+        },
+        "player_counts": [ { "players": 6, "matches": 1 } ]
+      }
+    }
   }
 }
 ```
@@ -3573,7 +3593,7 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
 
 | Field | Type | Notes |
 |---|---|---|
-| `schema_version` | int | Bumped only when consumers (`js/maps.js`) need to branch on shape changes; adding optional fields stays at v1. |
+| `schema_version` | int | `2` adds `community_games`, `play_count`, `popular`, and `insights`. `match_count` is unchanged (recorded sessions only). |
 | `template_version` | int | Mirrors `MAP_TEMPLATE_VERSION` in `scripts/generate_map_pages.py`. Bumped when the rendered stub HTML shape changes — orthogonal to `schema_version`. |
 | `generated_at` | string (ISO 8601) | UTC timestamp of the last run. Excluded from the `_stable_equals` write check so timestamp drift never triggers a no-delta rewrite. |
 | `site_url` | string | Echoes the `SITE_URL` constant for reference; consumers should still read their own `SITE_URL` rather than depending on this. |
@@ -3586,13 +3606,17 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
 | Field | Type | Aggregation rule |
 |---|---|---|
 | `map_file` | string | Same as the parent dict key. Provided redundantly so consumers iterating `Object.values()` keep the slug. |
-| `match_count` | int | Every match the map appears in. **No exclusion gates** — the match itself happened, even if individual players were excluded. |
+| `match_count` | int | Every recorded session on this map. **No exclusion gates.** Does **not** include F9 community games. |
+| `community_games` | int | Display-only count from `data/external/f9_community.json` for this registry key. `0` when the ledger has no joined games. |
+| `play_count` | int | `match_count + community_games`. The number the map directory and the Matches stat show. |
+| `popular` | bool | `true` for the top 15 maps by `play_count` (ties at the cutoff included) when `play_count >= 3`. Recomputed every pipeline run. The directory Tags filter and the Tools Popular reel read this flag. |
 | `total_duration_sec` | float | Sum of `match.duration_sec` across all matches on this map. Rounded to 1 decimal place. |
 | `avg_duration_sec` | float | `total_duration_sec / match_count` (zero on unplayed). Rounded to 1 decimal place. |
 | `first_played` | string \| null | Min `match.date` (ISO 8601 with timezone). `null` on unplayed maps. |
 | `last_played` | string \| null | Max `match.date`. `null` on unplayed. |
-| `top_commanders[]` | array | Top 10 by `matches_commanded`. **Exclusion gate**: per-row `is_campod` and `is_low_activity` are skipped (mirrors VTSR-T exclusion contract). Sort key: `(-matches_commanded, -last_appearance_iso)` so ties break to the more-recently-active commander. Capped at `MAX_TOP_COMMANDERS`. |
-| `recent_matches[]` | array | 10 most recent matches by `date desc`. **No exclusion gate** — users want full chronology, not a sanitised subset. Capped at `MAX_RECENT_MATCHES`. |
+| `top_commanders[]` | array | Top 10 commanders on this map. Recorded slot-1 / slot-6 rows (campod and low-activity skipped) plus one commanded game per non-overlapping F9 duel. Sort: wins, then win rate, then matches commanded. |
+| `recent_matches[]` | array | 10 most recent games by date, mixing recorded matches and F9 duels. A community row has `source: "f9"`, an empty `id`, and `winner_decided_by: "f9"`. |
+| `insights` | object | `wins` stays recorded-only (`{t1, t2, contested, unclear}`). `factions` and `player_counts` add F9 picks, wins, and lobby sizes (`3v3`/`4v4`/`5v5` → 6/8/10). `best_players` is recorded thug VTSR-T only. `best_commanders` uses the same win/loss counts as `top_commanders`. |
 
 ### `top_commanders[]` row shape
 
@@ -3600,19 +3624,23 @@ Per-map roll-up emitted by `scripts/generate_map_pages.py::compute_map_stats()` 
 |---|---|---|
 | `steam64` | string | Source identity for cross-link to `/player/<slug>/`. |
 | `name` | string | Display name from the most recent match the commander appeared on (handles renames; promoted to the latest seen name). |
-| `matches_commanded` | int | Count of slot-1 / slot-6 leaderboard rows on this map where neither exclusion flag was set. |
+| `matches_commanded` | int | Recorded commanded games (campod and low-activity skipped) plus non-overlapping F9 duels. |
+| `wins` | int | Decided recorded team wins plus F9 duel wins while commanding. |
+| `losses` | int | Decided recorded team losses plus F9 duel losses. Contested, draws, and cancellations are not in `wins` or `losses`. |
+| `win_rate` | float \| null | `wins / (wins + losses)`, rounded to 3 decimals. `null` when there are no decided games. |
 
 ### `recent_matches[]` row shape
 
 | Field | Type | Notes |
 |---|---|---|
-| `id` | string | Match id (matches `data/processed/matches.json` and the per-match JSON filename stem). Drives the `index.html?match=<id>` cross-link. |
-| `date` | string \| null | `match.date` (ISO 8601 w/ timezone). |
-| `duration_sec` | int \| float | `match.duration_sec`. |
-| `player_count` | int | `match.player_count`. |
-| `commanders["1"]` / `["2"]` | object \| null | `{name, s64}` for each team's commander (slot 1 / slot 6). `null` when the slot was unfilled (no team-leader on that team). The renderer maps `null` to em-dash. |
-| `winner_decided_by` | string | `"clean_win"` / `"contested"` / `"unclear"` (passthrough from `match.winner.decided_by`). |
-| `winner_team` | int \| null | `1` or `2` for `clean_win`; `null` for any other outcome (renderer maps `null` to a muted em-dash chip). |
+| `id` | string | Match id for a recorded session. Empty on an F9 community row, which does not link to the dashboard. |
+| `date` | string \| null | `match.date` or the community game's calendar day as `YYYY-MM-DDT00:00:00+00:00`. |
+| `source` | string | Present as `"f9"` on community rows. Absent on recorded rows. |
+| `winner_decided_by` | string | Recorded provenance, or `"f9"` when the row is a community duel with `winner_team` 1 or 2. |
+| `duration_sec` | int \| float | Recorded `match.duration_sec`, or the community game's duration. |
+| `player_count` | int | Recorded `match.player_count`, or 6 / 8 / 10 from a `3v3` / `4v4` / `5v5` community game. |
+| `commanders["1"]` / `["2"]` | object \| null | `{name, s64}` for each team's commander. `s64` may be empty on a community row with no Steam64. |
+| `winner_team` | int \| null | `1` or `2` when a team won, including community duels. |
 
 ### Pre-gen stub (`map/<slug>/index.html`) OG block
 
@@ -3633,7 +3661,7 @@ Each per-map stub's `<head>` carries an Open Graph block that Discord / Slack / 
 
 One-time import of F9bomber's hand-kept match spreadsheet (`f9stats/f9stats-20260913.xlsx`, committed as provenance). The standalone `scripts/import_f9_ledger.py` (openpyxl, NOT part of the pipeline — mirrors the `scripts/object-render/` posture) applies the locked eligibility funnel, resolves identities, pairs dual-recorded games against our corpus, and writes two committed artifacts under `data/external/`. The pipeline reads the JSON forever after; re-running the importer is only needed for a new ledger drop or an alias-table change. Decision memo (frozen parameters + sign-offs): `critique/decisions/f9-external-duels.md`.
 
-**The ledger is NOT telemetry.** No fake `<match_id>.json`, no manifest entries, no `match_contributions` rows, nothing in `VTAggregate`, `map_stats.match_count`, or picker-scoped `faction_stats`. Exactly TWO rating-adjacent consumers exist: the VTSR-C external-duel walk (§13.12 v3 in `DEVELOPER_GUIDE.md`) and the adjudication jogger. Everything else is display-only. `scripts/elo.py` and `js/all-matches-aggregator.js` are forbidden consumers (gated by `_investigation/check_f9_ledger.py`). VTSR-T is provably untouched — `elo_history.json` (the only stamp-free processed file) hashes byte-identical across the import.
+**The ledger is NOT telemetry.** No fake `<match_id>.json`, no manifest entries, no `match_contributions` rows, nothing in `VTAggregate`, `map_stats.match_count`, or picker-scoped `faction_stats`. `map_stats.play_count` is a display sum of `match_count` plus the ledger's per-map `games`; it does not enter ratings. Exactly TWO rating-adjacent consumers exist: the VTSR-C external-duel walk (§13.12 v3 in `DEVELOPER_GUIDE.md`) and the adjudication jogger. Everything else is display-only. `scripts/elo.py` and `js/all-matches-aggregator.js` are forbidden consumers (gated by `_investigation/check_f9_ledger.py`). VTSR-T is provably untouched — `elo_history.json` (the only stamp-free processed file) hashes byte-identical across the import.
 
 ### Inputs (committed, human-editable)
 
@@ -3662,7 +3690,7 @@ roster-complete → commanders parse as `A vs B` (names de-duped per side, comma
 
 ### `data/external/f9_community.json` (display-only rollups)
 
-`{schema_version: 1, provider: {name, url}, generated_at, duel_count, date_range, thug_records: [{steam64|null, name, team_wins, team_losses, games}], commander_records: [{…, wins, losses, games}], faction_stats: {i/e/f: {picks, wins}}, maps: [{map_key|null, title, games}]}`. Consumers (all 404-safe, all crediting `F9bomber` → `https://f9bomber.com`): the player-page Overview community-record strip (`js/player.js` — copy states **team outcomes, not a skill rating**; never a VTSR-T input), the All Matches → Meta **Community Ledger** card (`js/app.js` `renderF9CommunityCard()` — deliberately separate from picker-scoped `faction_stats`), and the per-map hero chip `Community games: N` (`js/maps.js` — **never** merged into `map_stats.match_count`, which means "recorded matches").
+`{schema_version: 1, provider: {name, url}, generated_at, duel_count, date_range, thug_records: [{steam64|null, name, team_wins, team_losses, games}], commander_records: [{…, wins, losses, games}], faction_stats: {i/e/f: {picks, wins}}, maps: [{map_key|null, title, games}]}`. Consumers (all 404-safe, all crediting `F9bomber` → `https://f9bomber.com`): the player-page Overview community-record strip (`js/player.js` — copy states **team outcomes, not a skill rating**; never a VTSR-T input), the All Matches → Meta **Community Ledger** card (`js/app.js` `renderF9CommunityCard()` — deliberately separate from picker-scoped `faction_stats`), and the per-map Matches figure (`js/maps.js` — `play_count` adds these games to recorded `match_count`; the split and the F9bomber credit live on that stat's tooltip; `match_count` itself stays recorded sessions).
 
 ### VTSR-C surface changes (schema 3)
 

@@ -63,7 +63,8 @@ SITE_URL = "https://vtstats.bz"
 # v8 threads the LEGO topnav link (bi-bricks, after Models) through every stub.
 # v10 turns the ODF topnav link into a dropdown (ODF Browser, Build Trees).
 # v11 adds ODF Guide to that dropdown.
-MAP_TEMPLATE_VERSION = 11
+# v12 replaces the directory chip rows with Any-default dropdowns.
+MAP_TEMPLATE_VERSION = 12
 
 # Pre-gen stub path within the repo. Each map slug becomes
 # `map/<slug>/index.html`. Created if missing, written idempotently
@@ -103,9 +104,26 @@ SLUG_SAFE_RE = re.compile(r"^[a-z0-9_-]+$")
 MAX_TOP_COMMANDERS = 10
 MAX_RECENT_MATCHES = 10
 
-# Output schema version. Bump only when consumers (js/maps.js) need
-# to branch on shape changes — adding optional fields stays at v1.
-MAP_STATS_SCHEMA_VERSION = 1
+# Output schema version. v2 adds display-only play_count /
+# community_games / popular plus the per-map insights block. Existing
+# match_count stays recorded-sessions-only.
+MAP_STATS_SCHEMA_VERSION = 2
+
+# Popular is the top N maps by play_count (recorded + community), ties
+# at the cutoff included, and only when play_count clears the floor.
+POPULAR_TOP_N = 15
+POPULAR_MIN_PLAYS = 3
+
+INSIGHT_BEST_PLAYERS = 5
+INSIGHT_BEST_PLAYERS_MIN = 2
+INSIGHT_BEST_COMMANDERS = 5
+INSIGHT_BEST_COMMANDERS_MIN = 3
+
+# Team-win decided_by values. Contested / draw / cancelled / unclear
+# stay out of blowout, closest-call, and commander win rate, matching
+# the Meta tab's wins_t1 / wins_t2 buckets.
+_TEAM_WIN_DECIDED = frozenset({"clean_win", "attested", "adjudicated"})
+_FACTION_CODES = ("i", "e", "f")
 
 
 # -- Slug helpers --------------------------------------------------------
@@ -164,7 +182,14 @@ def map_title_resolver(raw_map: str, registry: dict) -> str:
 
 # -- Aggregation --------------------------------------------------------
 
-def compute_map_stats(all_match_data: list[dict], registry: dict) -> dict:
+def compute_map_stats(
+    all_match_data: list[dict],
+    registry: dict,
+    *,
+    elo_history: dict | None = None,
+    community_games: dict | None = None,
+    f9_duels: dict | None = None,
+) -> dict:
     """Pure aggregator: walk `all_match_data` once and produce the
     per-map roll-up consumed by `js/maps.js` (and the future stub
     template).
@@ -191,6 +216,13 @@ def compute_map_stats(all_match_data: list[dict], registry: dict) -> dict:
         em-dash. `winner_team` is `null` for `winner_decided_by ==
         "unclear"`.
 
+    Display-only additions (schema 2), never folded into `match_count`:
+      - `community_games` / `play_count` join F9's per-map game counts.
+      - `popular` marks the top `POPULAR_TOP_N` by `play_count`.
+      - `insights` is the six per-map cards (wins, factions, best
+        players from VTSR-T deltas, commander win rate, records,
+        player-count histogram).
+
     The function is pure (no I/O). Caller wraps in a `_stable_equals`
     check to avoid gratuitous JSON rewrites on no-delta runs.
     """
@@ -212,12 +244,17 @@ def compute_map_stats(all_match_data: list[dict], registry: dict) -> dict:
     # are emitted as well; played-but-not-in-registry slugs (rare —
     # would need a played map missing from vsrmaplist AND iondriver)
     # also surface as a fallback so the catalog stays complete.
-    all_slugs = set(registry.keys()) | set(match_buckets.keys())
+    all_slugs = set(registry.keys()) | set(match_buckets.keys()) | set((f9_duels or {}).keys())
+    elo_index = _index_elo_deltas(elo_history)
 
     maps_out: dict[str, dict] = {}
     for slug in sorted(all_slugs):
         bucket = match_buckets.get(slug) or []
-        maps_out[slug] = _build_map_entry(slug, bucket)
+        maps_out[slug] = _build_map_entry(
+            slug, bucket, elo_index, (f9_duels or {}).get(slug) or [],
+        )
+
+    _apply_community_and_popular(maps_out, community_games or {})
 
     return {
         "schema_version": MAP_STATS_SCHEMA_VERSION,
@@ -230,13 +267,129 @@ def compute_map_stats(all_match_data: list[dict], registry: dict) -> dict:
     }
 
 
-def _build_map_entry(slug: str, bucket: list[dict]) -> dict:
+_F9_FACTION = {"isdf": "i", "hadean": "e", "scion": "f"}
+_F9_SIZE_PLAYERS = {"3v3": 6, "4v4": 8, "5v5": 10}
+
+
+def _pin_player(steam64, name) -> tuple[str, str, str]:
+    """Return (store key, steam64, display name). Alias targets keep the
+    canonical name. A missing Steam64 keys on the lowercased name."""
+    sid = str(steam64 or "").strip()
+    label = (name or "").strip()
+    if sid:
+        label = identity_aliases.ALIAS_TARGET_NAMES_STR.get(sid) or label
+        return sid, sid, label
+    if not label:
+        return "", "", ""
+    return "name:" + label.lower(), "", label
+
+
+def _bump_f9_commanders(cmdr_counts: dict, duel: dict) -> None:
+    winner = duel.get("winner_side")
+    if winner not in (1, 2):
+        return
+    date = _f9_sort_date(duel.get("date"))
+    commanders = duel.get("commanders") or {}
+    for side in (1, 2):
+        person = commanders.get(str(side)) or commanders.get(side) or {}
+        key, sid, label = _pin_player(person.get("steam64"), person.get("name"))
+        if not key:
+            continue
+        row = cmdr_counts.get(key)
+        if row is None:
+            row = {
+                "steam64": sid,
+                "name": label,
+                "matches_commanded": 0,
+                "wins": 0,
+                "losses": 0,
+                "_last_iso": date,
+            }
+            cmdr_counts[key] = row
+        row["matches_commanded"] += 1
+        if side == winner:
+            row["wins"] += 1
+        else:
+            row["losses"] += 1
+        if date >= (row.get("_last_iso") or ""):
+            row["_last_iso"] = date
+            row["name"] = label
+
+
+def _f9_sort_date(raw) -> str:
+    text = str(raw or "").strip()
+    if len(text) == 10:
+        return text + "T00:00:00+00:00"
+    return text
+
+
+def _f9_recent_row(duel: dict) -> dict:
+    winner = duel.get("winner_side") if duel.get("winner_side") in (1, 2) else None
+    commanders = {}
+    raw = duel.get("commanders") or {}
+    for side in ("1", "2"):
+        person = raw.get(side) or {}
+        _key, sid, label = _pin_player(person.get("steam64"), person.get("name"))
+        commanders[side] = {"name": label, "s64": sid} if label or sid else None
+    size = str(duel.get("size") or "").strip().lower()
+    return {
+        "id": "",
+        "date": _f9_sort_date(duel.get("date")) or None,
+        "duration_sec": duel.get("duration_sec") or 0,
+        "player_count": _F9_SIZE_PLAYERS.get(size) or 0,
+        "commanders": commanders,
+        "winner_decided_by": "f9",
+        "winner_team": winner,
+        "source": "f9",
+    }
+
+
+def _f9_faction_code(name) -> str | None:
+    return _F9_FACTION.get(str(name or "").strip().lower())
+
+
+def _bump_f9_insight(duel, by_side, win_rate, pc_hist, cmdrs) -> None:
+    winner = duel.get("winner_side")
+    factions = duel.get("factions") or {}
+    for side in (1, 2):
+        code = _f9_faction_code(factions.get(str(side)) or factions.get(side))
+        if code and winner in (1, 2):
+            by_side[str(side)][code] += 1
+            win_rate[code]["decided"] += 1
+            if side == winner:
+                win_rate[code]["wins"] += 1
+        person = (duel.get("commanders") or {}).get(str(side)) or {}
+        key, sid, label = _pin_player(person.get("steam64"), person.get("name"))
+        if not key or winner not in (1, 2):
+            continue
+        row = cmdrs.get(key)
+        if row is None:
+            row = {"steam64": sid, "name": label, "wins": 0, "decided": 0}
+            cmdrs[key] = row
+        row["decided"] += 1
+        if side == winner:
+            row["wins"] += 1
+        if label:
+            row["name"] = label
+    size = str(duel.get("size") or "").strip().lower()
+    players = _F9_SIZE_PLAYERS.get(size)
+    if players:
+        pc_hist[players] = pc_hist.get(players, 0) + 1
+
+
+def _build_map_entry(
+    slug: str,
+    bucket: list[dict],
+    elo_index: dict,
+    f9_duels: list | None = None,
+) -> dict:
     """Build a single per-map roll-up. `bucket` is every match (as the
     raw `match_data` dict) that played on this map; may be empty for
     unplayed registry entries.
     """
-    if not bucket:
-        return _empty_map_entry(slug)
+    f9_duels = list(f9_duels or [])
+    if not bucket and not f9_duels:
+        return _empty_map_entry(slug, elo_index)
 
     # Match-level totals -- count every match unconditionally.
     match_count = len(bucket)
@@ -256,12 +409,14 @@ def _build_map_entry(slug: str, bucket: list[dict]) -> dict:
     last_played = max(dates) if dates else None
 
     # Top commanders — tally slot 1/6 leaderboard rows where the
-    # exclusion gates pass. We track last_appearance per
-    # (steam64, name) so ties break to the more-recent commander.
+    # exclusion gates pass. Wins/losses count decided team wins only
+    # (clean_win / attested / adjudicated). Contested, draws, and
+    # cancellations stay in matches_commanded but not the record.
     cmdr_counts: dict[str, dict] = {}
     for md in bucket:
         m = md.get("match") or {}
         match_date = m.get("date") or ""
+        outcome = _winner_bucket(m.get("winner"))
         for p in md.get("leaderboard") or []:
             slot = p.get("slot")
             if slot not in (1, 6):
@@ -281,37 +436,50 @@ def _build_map_entry(slug: str, bucket: list[dict]) -> dict:
                     "steam64": sid,
                     "name": name,
                     "matches_commanded": 0,
+                    "wins": 0,
+                    "losses": 0,
                     "_last_iso": match_date,
                 }
                 cmdr_counts[sid] = row
             row["matches_commanded"] += 1
-            # Names can drift across matches (rename); always promote
-            # to the most recently used name (still pinned when aliased).
+            if outcome in ("t1", "t2"):
+                their_team = 1 if slot == 1 else 2
+                won = (outcome == "t1" and their_team == 1) or (
+                    outcome == "t2" and their_team == 2
+                )
+                if won:
+                    row["wins"] += 1
+                else:
+                    row["losses"] += 1
             if match_date >= row["_last_iso"]:
                 row["_last_iso"] = match_date
                 row["name"] = name
 
-    cmdr_sorted = sorted(
-        cmdr_counts.values(),
-        key=lambda r: (-r["matches_commanded"], _sort_iso_desc_key(r["_last_iso"])),
-    )[:MAX_TOP_COMMANDERS]
-    top_commanders = [
-        {"steam64": r["steam64"], "name": r["name"],
-         "matches_commanded": r["matches_commanded"]}
-        for r in cmdr_sorted
-    ]
+    for duel in f9_duels:
+        _bump_f9_commanders(cmdr_counts, duel)
 
-    # Recent matches — sort by date desc (ISO 8601 strings sort
-    # chronologically as long as zone offsets are present, which
-    # process_stats normalises). Cap at MAX_RECENT_MATCHES.
-    recent = sorted(
-        bucket,
-        key=lambda md: (md.get("match") or {}).get("date") or "",
-        reverse=True,
-    )[:MAX_RECENT_MATCHES]
+    def _cmdr_sort_key(r: dict) -> tuple:
+        decided = r["wins"] + r["losses"]
+        rate = (r["wins"] / decided) if decided else -1.0
+        return (-r["wins"], -rate, -r["matches_commanded"], r["name"].lower())
 
+    cmdr_sorted = sorted(cmdr_counts.values(), key=_cmdr_sort_key)[:MAX_TOP_COMMANDERS]
+    top_commanders = []
+    for r in cmdr_sorted:
+        decided = r["wins"] + r["losses"]
+        top_commanders.append({
+            "steam64": r["steam64"],
+            "name": r["name"],
+            "matches_commanded": r["matches_commanded"],
+            "wins": r["wins"],
+            "losses": r["losses"],
+            "win_rate": round(r["wins"] / decided, 3) if decided else None,
+        })
+
+    # Recent list mixes recorded sessions with community duels, then
+    # keeps the 10 newest. Community rows carry source "f9" and no match id.
     recent_rows = []
-    for md in recent:
+    for md in bucket:
         m = md.get("match") or {}
         winner = m.get("winner") or {}
         decided_by = winner.get("decided_by") or "unclear"
@@ -330,20 +498,28 @@ def _build_map_entry(slug: str, bucket: list[dict]) -> dict:
             "winner_decided_by": decided_by,
             "winner_team": winner_team,
         })
+    for duel in f9_duels:
+        recent_rows.append(_f9_recent_row(duel))
+    recent_rows.sort(key=lambda r: r.get("date") or "", reverse=True)
+    recent_rows = recent_rows[:MAX_RECENT_MATCHES]
 
     return {
         "map_file": slug,
         "match_count": match_count,
+        "community_games": 0,
+        "play_count": match_count,
+        "popular": False,
         "total_duration_sec": round(total_duration, 1),
         "avg_duration_sec": round(avg_duration, 1),
         "first_played": first_played,
         "last_played": last_played,
         "top_commanders": top_commanders,
         "recent_matches": recent_rows,
+        "insights": _build_insights(bucket, elo_index, f9_duels),
     }
 
 
-def _empty_map_entry(slug: str) -> dict:
+def _empty_map_entry(slug: str, _elo_index: dict | None = None) -> dict:
     """Catalog-completeness placeholder for unplayed maps. Same shape
     as a played-map entry so renderer code can branch on
     `match_count > 0` without null-checking every field.
@@ -351,13 +527,349 @@ def _empty_map_entry(slug: str) -> dict:
     return {
         "map_file": slug,
         "match_count": 0,
+        "community_games": 0,
+        "play_count": 0,
+        "popular": False,
         "total_duration_sec": 0.0,
         "avg_duration_sec": 0.0,
         "first_played": None,
         "last_played": None,
         "top_commanders": [],
         "recent_matches": [],
+        "insights": _empty_insights(),
     }
+
+
+def _empty_insights() -> dict:
+    side = {code: 0 for code in _FACTION_CODES}
+    return {
+        "wins": {"t1": 0, "t2": 0, "contested": 0, "unclear": 0},
+        "factions": {
+            "by_side": {"1": dict(side), "2": dict(side)},
+            "win_rate": {code: {"wins": 0, "decided": 0} for code in _FACTION_CODES},
+        },
+        "best_players": [],
+        "best_commanders": [],
+        "records": {
+            "longest": None,
+            "highest_scoring": None,
+            "biggest_blowout": None,
+            "closest_call": None,
+        },
+        "player_counts": [],
+    }
+
+
+def _winner_bucket(winner: dict | None) -> str:
+    """Same partition as the All Matches Meta map chart:
+    t1 / t2 / contested / unclear. Draws and cancellations fold into
+    unclear so the four buckets sum to the match count.
+    """
+    winner = winner or {}
+    decided = winner.get("decided_by") or "unclear"
+    team = winner.get("team")
+    if decided == "contested":
+        return "contested"
+    if decided in _TEAM_WIN_DECIDED and team in (1, 2):
+        return "t1" if team == 1 else "t2"
+    return "unclear"
+
+
+def _team_of_slot(slot) -> int | None:
+    if slot in (1, 2, 3, 4, 5):
+        return 1
+    if slot in (6, 7, 8, 9, 10):
+        return 2
+    return None
+
+
+def _prefer_extreme(current: dict | None, candidate: dict, *, high: bool) -> dict:
+    """Keep the more extreme metric. A tie breaks to the newer date."""
+    if current is None:
+        return candidate
+    cv = current["value"]
+    nv = candidate["value"]
+    if (nv > cv) if high else (nv < cv):
+        return candidate
+    if nv == cv and (candidate.get("date") or "") > (current.get("date") or ""):
+        return candidate
+    return current
+
+
+def _record_row(md: dict, value, **extra) -> dict:
+    m = md.get("match") or {}
+    row = {
+        "id": m.get("id") or "",
+        "date": m.get("date") or None,
+        "value": value,
+    }
+    row.update(extra)
+    return row
+
+
+def _build_insights(bucket: list[dict], elo_index: dict, f9_duels: list | None = None) -> dict:
+    wins = {"t1": 0, "t2": 0, "contested": 0, "unclear": 0}
+    by_side = {
+        "1": {code: 0 for code in _FACTION_CODES},
+        "2": {code: 0 for code in _FACTION_CODES},
+    }
+    win_rate = {code: {"wins": 0, "decided": 0} for code in _FACTION_CODES}
+    pc_hist: dict[int, int] = {}
+    cmdrs: dict[str, dict] = {}
+    longest = None
+    highest = None
+    blowout = None
+    closest = None
+
+    for md in bucket:
+        m = md.get("match") or {}
+        winner = m.get("winner") or {}
+        bucket_name = _winner_bucket(winner)
+        wins[bucket_name] += 1
+        match_date = m.get("date") or ""
+
+        factions = m.get("team_factions") or {}
+        side_code = {}
+        for side in ("1", "2"):
+            code = ((factions.get(side) or {}).get("code") or "").lower()
+            side_code[side] = code if code in _FACTION_CODES else None
+            if side_code[side]:
+                by_side[side][side_code[side]] += 1
+        if bucket_name in ("t1", "t2"):
+            win_side = "1" if bucket_name == "t1" else "2"
+            lose_side = "2" if win_side == "1" else "1"
+            for side, won in ((win_side, True), (lose_side, False)):
+                code = side_code.get(side)
+                if not code:
+                    continue
+                win_rate[code]["decided"] += 1
+                if won:
+                    win_rate[code]["wins"] += 1
+
+        pc = m.get("player_count") or 0
+        if isinstance(pc, (int, float)) and int(pc) > 0:
+            pc_hist[int(pc)] = pc_hist.get(int(pc), 0) + 1
+
+        t1_kills = 0
+        t2_kills = 0
+        for p in md.get("leaderboard") or []:
+            kills = int(p.get("kills") or 0)
+            side = _team_of_slot(p.get("slot"))
+            if side == 1:
+                t1_kills += kills
+            elif side == 2:
+                t2_kills += kills
+            if p.get("slot") not in (1, 6):
+                continue
+            if p.get("is_campod") or p.get("is_low_activity"):
+                continue
+            if bucket_name not in ("t1", "t2"):
+                continue
+            sid = str(p.get("steam64") or "").strip()
+            name = (p.get("name") or "").strip()
+            if not sid or not name:
+                continue
+            name = identity_aliases.ALIAS_TARGET_NAMES_STR.get(sid) or name
+            row = cmdrs.get(sid)
+            if row is None:
+                row = {"steam64": sid, "name": name, "wins": 0, "decided": 0}
+                cmdrs[sid] = row
+            row["decided"] += 1
+            their_team = 1 if p.get("slot") == 1 else 2
+            if (bucket_name == "t1" and their_team == 1) or (
+                bucket_name == "t2" and their_team == 2
+            ):
+                row["wins"] += 1
+            if match_date >= (row.get("_last") or ""):
+                row["_last"] = match_date
+                row["name"] = name
+
+        dur = m.get("duration_sec")
+        if isinstance(dur, (int, float)):
+            longest = _prefer_extreme(
+                longest, _record_row(md, round(float(dur), 1)), high=True,
+            )
+        total_kills = t1_kills + t2_kills
+        highest = _prefer_extreme(
+            highest, _record_row(md, total_kills), high=True,
+        )
+        if bucket_name in ("t1", "t2"):
+            margin = abs(t1_kills - t2_kills)
+            winner_team = 1 if bucket_name == "t1" else 2
+            marked = _record_row(md, margin, winner_team=winner_team)
+            blowout = _prefer_extreme(blowout, marked, high=True)
+            closest = _prefer_extreme(closest, marked, high=False)
+
+    for duel in f9_duels or []:
+        _bump_f9_insight(duel, by_side, win_rate, pc_hist, cmdrs)
+
+    best_commanders = []
+    for row in cmdrs.values():
+        if row["decided"] < INSIGHT_BEST_COMMANDERS_MIN:
+            continue
+        best_commanders.append({
+            "steam64": row["steam64"],
+            "name": row["name"],
+            "wins": row["wins"],
+            "decided": row["decided"],
+            "win_rate": round(row["wins"] / row["decided"], 3),
+        })
+    best_commanders.sort(
+        key=lambda r: (-r["win_rate"], -r["decided"], r["name"].lower()),
+    )
+    best_commanders = best_commanders[:INSIGHT_BEST_COMMANDERS]
+
+    players: dict[str, dict] = {}
+    for md in bucket:
+        mid = (md.get("match") or {}).get("id") or ""
+        commanders = set()
+        for p in md.get("leaderboard") or []:
+            if p.get("slot") not in (1, 6):
+                continue
+            sid = str(p.get("steam64") or "").strip()
+            if sid:
+                commanders.add(sid)
+        for delta in elo_index.get(mid) or []:
+            sid = delta["steam64"]
+            if sid in commanders:
+                continue
+            name = identity_aliases.ALIAS_TARGET_NAMES_STR.get(sid) or delta["name"]
+            row = players.get(sid)
+            if row is None:
+                row = {"steam64": sid, "name": name, "delta_sum": 0.0, "matches": 0}
+                players[sid] = row
+            row["delta_sum"] += delta["delta"]
+            row["matches"] += 1
+            row["name"] = name
+    best_players = [
+        {
+            "steam64": r["steam64"],
+            "name": r["name"],
+            "delta_sum": round(r["delta_sum"], 2),
+            "matches": r["matches"],
+        }
+        for r in players.values()
+        if r["matches"] >= INSIGHT_BEST_PLAYERS_MIN
+    ]
+    best_players.sort(
+        key=lambda r: (-r["delta_sum"], -r["matches"], r["name"].lower()),
+    )
+    best_players = best_players[:INSIGHT_BEST_PLAYERS]
+
+    def _public_record(row: dict | None) -> dict | None:
+        if not row:
+            return None
+        out = {"id": row["id"], "date": row["date"], "value": row["value"]}
+        if "winner_team" in row:
+            out["winner_team"] = row["winner_team"]
+        return out
+
+    return {
+        "wins": wins,
+        "factions": {"by_side": by_side, "win_rate": win_rate},
+        "best_players": best_players,
+        "best_commanders": best_commanders,
+        "records": {
+            "longest": _public_record(longest),
+            "highest_scoring": _public_record(highest),
+            "biggest_blowout": _public_record(blowout),
+            "closest_call": _public_record(closest),
+        },
+        "player_counts": [
+            {"players": n, "matches": pc_hist[n]} for n in sorted(pc_hist)
+        ],
+    }
+
+
+def _index_elo_deltas(elo_history: dict | None) -> dict[str, list[dict]]:
+    """match_id -> rated VTSR-T deltas. Excluded matches contribute nothing."""
+    out: dict[str, list[dict]] = {}
+    for entry in (elo_history or {}).get("history") or []:
+        if entry.get("match_excluded"):
+            continue
+        mid = entry.get("match_id") or ""
+        if not mid:
+            continue
+        rows = []
+        for delta in entry.get("deltas") or []:
+            sid = str(delta.get("steam64") or "").strip()
+            if not sid:
+                continue
+            try:
+                amount = float(delta.get("delta") or 0)
+            except (TypeError, ValueError):
+                amount = 0.0
+            rows.append({
+                "steam64": sid,
+                "name": (delta.get("name") or "").strip(),
+                "delta": amount,
+            })
+        if rows:
+            out[mid] = rows
+    return out
+
+
+def _apply_community_and_popular(maps_out: dict[str, dict], community_games: dict) -> None:
+    for slug, entry in maps_out.items():
+        games = 0
+        raw = community_games.get(slug)
+        if isinstance(raw, (int, float)):
+            games = int(raw)
+        entry["community_games"] = games
+        entry["play_count"] = int(entry.get("match_count") or 0) + games
+        entry["popular"] = False
+
+    eligible = sorted(
+        (e for e in maps_out.values() if e["play_count"] >= POPULAR_MIN_PLAYS),
+        key=lambda e: (-e["play_count"], e["map_file"]),
+    )
+    if not eligible:
+        return
+    cutoff = eligible[min(POPULAR_TOP_N, len(eligible)) - 1]["play_count"]
+    for entry in eligible:
+        if entry["play_count"] >= cutoff:
+            entry["popular"] = True
+
+
+def _load_community_games(project_root: Path) -> dict[str, int]:
+    """F9 per-map game counts keyed by registry slug. Missing file → {}.
+    Unjoined titles (`map_key` null) are skipped. Display-only.
+    """
+    path = project_root / "data" / "external" / "f9_community.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    totals: dict[str, int] = {}
+    for row in payload.get("maps") or []:
+        if not isinstance(row, dict):
+            continue
+        key = (row.get("map_key") or "").strip().lower()
+        games = row.get("games") or 0
+        if not key or not isinstance(games, (int, float)):
+            continue
+        totals[key] = totals.get(key, 0) + int(games)
+    return totals
+
+
+def _load_f9_duels(project_root: Path) -> dict[str, list]:
+    """Community duels keyed by registry slug. `duels[]` already excludes
+    games that overlap a recorded match. Unjoined titles are skipped.
+    """
+    path = project_root / "data" / "external" / "f9_ledger.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    grouped: dict[str, list] = {}
+    for duel in payload.get("duels") or []:
+        if not isinstance(duel, dict):
+            continue
+        key = str(duel.get("map_key") or "").strip().lower()
+        if not key:
+            continue
+        grouped.setdefault(key, []).append(duel)
+    return grouped
 
 
 def _commander_entry(raw: dict | None) -> dict | None:
@@ -442,6 +954,7 @@ def run(
     output_dir: Path,
     project_root: Path,
     pregen_stubs: bool = True,
+    elo_history: dict | None = None,
 ) -> dict:
     """Compute map_stats + persist `data/processed/map_stats.json` +
     (Phase 5) render per-map HTML stubs.
@@ -467,11 +980,17 @@ def run(
         print("  Skipping map_stats (registry empty / unavailable).")
         return summary
 
-    map_stats = compute_map_stats(all_match_data or [], registry)
+    map_stats = compute_map_stats(
+        all_match_data or [],
+        registry,
+        elo_history=elo_history,
+        community_games=_load_community_games(project_root),
+        f9_duels=_load_f9_duels(project_root),
+    )
 
     summary["n_total_maps"] = len(map_stats["maps"])
     summary["n_played_maps"] = sum(
-        1 for v in map_stats["maps"].values() if v["match_count"] > 0
+        1 for v in map_stats["maps"].values() if v.get("play_count", 0) > 0
     )
     summary["n_unplayed_maps"] = (
         summary["n_total_maps"] - summary["n_played_maps"]
