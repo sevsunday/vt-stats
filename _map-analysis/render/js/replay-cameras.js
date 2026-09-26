@@ -13,8 +13,10 @@
  *
  * Mode semantics:
  *   - free:     OrbitControls active. Fully user-driven.
- *   - chase:    Lerp position behind focused actor's velocity vector at
- *               ~80m back, +25m up. Lerp target onto focused actor.
+ *   - chase:    Lerp behind the focused actor (default ~80m back, +25m up).
+ *               Scroll or pinch changes distance; drag orbits around the
+ *               actor. Offsets reset when Chase is entered or the focus
+ *               actor changes. Cinema chase shots ignore those offsets.
  *   - topdown:  Snap to overhead at world center, looking straight down.
  *   - cinema:   (Phase 3) auto-director picks shots; falls through to free
  *               for now if cinema isn't wired yet.
@@ -35,6 +37,21 @@ const MOVE_GROUND_CLEAR_M = 8;
 
 const CHASE_BACK_DIST_M  = 80;
 const CHASE_UP_DIST_M    = 25;
+const CHASE_RADIUS_DEFAULT = Math.hypot(CHASE_BACK_DIST_M, CHASE_UP_DIST_M);
+const CHASE_ELEV_DEFAULT = Math.atan2(CHASE_UP_DIST_M, CHASE_BACK_DIST_M);
+const CHASE_RADIUS_MIN = 18;
+const CHASE_RADIUS_MAX = 420;
+// Stay above OrbitControls' maxPolarAngle (π/2.05) so a low orbit is not
+// pushed back up on the next controls.update().
+const CHASE_ELEV_MIN = 0.05;
+const CHASE_ELEV_MAX = 1.35;
+const CHASE_ORBIT_YAW_SENS = 0.005;    // rad per px; drag right swings camera right
+const CHASE_ORBIT_PITCH_SENS = 0.004;  // rad per px; drag down raises the camera
+const CHASE_ZOOM_WHEEL = 0.0012;       // exp scale on wheel deltaY (px)
+const CHASE_WHEEL_EASE_MS = 180;
+const CHASE_GESTURE_ALPHA = 1;
+const CHASE_WHEEL_ALPHA = 0.5;
+const CHASE_GROUND_CLEAR_M = 4;
 const CHASE_LOOKAHEAD_M  = 8;     // target slightly ahead of actor
 const CHASE_POS_ALPHA    = 0.08;  // damping for camera position
 const CHASE_TGT_ALPHA    = 0.15;  // damping for OrbitControls.target
@@ -73,6 +90,12 @@ export function createCameraController(camera, orbitControls, mapData) {
     mode: 'free',
     focusActor: null,
     chaseYaw: CHASE_DEFAULT_YAW,
+    // User chase framing. Heading-relative: the rig still follows the actor.
+    chaseOrbitYaw: 0,
+    chaseElev: CHASE_ELEV_DEFAULT,
+    chaseRadius: CHASE_RADIUS_DEFAULT,
+    chaseGesture: false,
+    chaseEaseUntil: 0,
     // For mode transitions:
     transition: null, // { startPos, startTgt, endPos, endTgt, elapsed } or null
     // Cinema director state.
@@ -94,8 +117,36 @@ export function createCameraController(camera, orbitControls, mapData) {
   const _moveRight = new THREE.Vector3();
   const _moveUp = new THREE.Vector3(0, 1, 0);
 
+  const chasePtrs = new Map();
+  let chaseDrag = null;
+  let chasePinchDist = 0;
+
   function setCinemaInputs(inputs) {
     state.cinemaInputs = { ...state.cinemaInputs, ...inputs };
+  }
+
+  function resetChaseFraming() {
+    state.chaseOrbitYaw = 0;
+    state.chaseElev = CHASE_ELEV_DEFAULT;
+    state.chaseRadius = CHASE_RADIUS_DEFAULT;
+    state.chaseEaseUntil = 0;
+  }
+
+  function snapChaseYaw(actor) {
+    if (actor && Number.isFinite(actor.headingRad)) state.chaseYaw = actor.headingRad;
+  }
+
+  function clearChasePointers() {
+    const el = orbitControls.domElement;
+    if (el) {
+      for (const id of chasePtrs.keys()) {
+        try { el.releasePointerCapture(id); } catch { /* already released */ }
+      }
+    }
+    chasePtrs.clear();
+    chaseDrag = null;
+    chasePinchDist = 0;
+    state.chaseGesture = false;
   }
 
   function setMode(mode) {
@@ -105,7 +156,12 @@ export function createCameraController(camera, orbitControls, mapData) {
     const startPos = camera.position.clone();
     const startTgt = orbitControls.target.clone();
 
+    clearChasePointers();
     state.mode = mode;
+    if (mode === 'chase') {
+      resetChaseFraming();
+      snapChaseYaw(state.focusActor);
+    }
 
     const target = computeTargetPose(state, mode, camera, orbitControls, mapData);
     state.transition = {
@@ -120,10 +176,15 @@ export function createCameraController(camera, orbitControls, mapData) {
   }
 
   function setFocusActor(actor) {
-    state.focusActor = actor || null;
+    const next = actor || null;
+    const changed = next !== state.focusActor;
+    state.focusActor = next;
     // If we're in chase and we just changed the focused actor, kick off a
     // soft re-blend toward the new behind-position so the cut isn't jarring.
-    if (state.mode === 'chase' && actor) {
+    // A new target restores the default rear shot.
+    if (state.mode === 'chase' && next && changed) {
+      resetChaseFraming();
+      snapChaseYaw(next);
       const target = computeTargetPose(state, 'chase', camera, orbitControls, mapData);
       state.transition = {
         startPos: camera.position.clone(),
@@ -181,6 +242,93 @@ export function createCameraController(camera, orbitControls, mapData) {
 
   function setMoveGround(fn) {
     state.move.getGroundY = fn || null;
+  }
+
+  function pinchDistance() {
+    const pts = chasePtrs.values();
+    const a = pts.next().value;
+    const b = pts.next().value;
+    if (!a || !b) return 0;
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function onChasePointerDown(e) {
+    if (state.mode !== 'chase') return;
+    if (e.pointerType !== 'touch' && e.button !== 0) return;
+    chasePtrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    state.transition = null;
+    state.chaseGesture = true;
+    const el = orbitControls.domElement;
+    try { el.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
+    if (chasePtrs.size === 1) {
+      chaseDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      chasePinchDist = 0;
+    } else {
+      chaseDrag = null;
+      chasePinchDist = pinchDistance();
+    }
+  }
+
+  function onChasePointerMove(e) {
+    if (state.mode !== 'chase') return;
+    if (!chasePtrs.has(e.pointerId)) return;
+    state.transition = null;
+    chasePtrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (chasePtrs.size >= 2) {
+      const d = pinchDistance();
+      if (chasePinchDist > 0 && d > 0) {
+        state.chaseRadius = clamp(
+          state.chaseRadius * (chasePinchDist / d),
+          CHASE_RADIUS_MIN, CHASE_RADIUS_MAX,
+        );
+      }
+      chasePinchDist = d;
+      chaseDrag = null;
+      return;
+    }
+    if (!chaseDrag || chaseDrag.id !== e.pointerId) return;
+    const dx = e.clientX - chaseDrag.x;
+    const dy = e.clientY - chaseDrag.y;
+    state.chaseOrbitYaw += dx * CHASE_ORBIT_YAW_SENS;
+    state.chaseElev = clamp(
+      state.chaseElev + dy * CHASE_ORBIT_PITCH_SENS,
+      CHASE_ELEV_MIN, CHASE_ELEV_MAX,
+    );
+    chaseDrag.x = e.clientX;
+    chaseDrag.y = e.clientY;
+  }
+
+  function onChasePointerUp(e) {
+    if (!chasePtrs.has(e.pointerId)) return;
+    chasePtrs.delete(e.pointerId);
+    try { orbitControls.domElement.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    if (chasePtrs.size < 2) chasePinchDist = 0;
+    if (chaseDrag && chaseDrag.id === e.pointerId) chaseDrag = null;
+    state.chaseGesture = chasePtrs.size > 0;
+  }
+
+  function onChaseWheel(e) {
+    if (state.mode !== 'chase') return;
+    e.preventDefault();
+    let dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 16;
+    else if (e.deltaMode === 2) dy *= 400;
+    if (!dy) return;
+    state.transition = null;
+    state.chaseRadius = clamp(
+      state.chaseRadius * Math.exp(dy * CHASE_ZOOM_WHEEL),
+      CHASE_RADIUS_MIN, CHASE_RADIUS_MAX,
+    );
+    state.chaseEaseUntil = performance.now() + CHASE_WHEEL_EASE_MS;
+  }
+
+  const chaseEl = orbitControls.domElement;
+  if (chaseEl) {
+    chaseEl.addEventListener('pointerdown', onChasePointerDown);
+    chaseEl.addEventListener('pointermove', onChasePointerMove);
+    chaseEl.addEventListener('pointerup', onChasePointerUp);
+    chaseEl.addEventListener('pointercancel', onChasePointerUp);
+    chaseEl.addEventListener('wheel', onChaseWheel, { passive: false });
   }
 
   return {
@@ -325,17 +473,11 @@ function computeTargetPose(state, mode, camera, orbitControls, mapData) {
         // Fallback to current pose
         return { pos: camera.position.clone(), tgt: orbitControls.target.clone() };
       }
-      const fp = state.focusActor.lastValidPos;
-      const yaw = state.focusActor.headingRad || state.chaseYaw;
-      const back = new THREE.Vector3(
-        fp.x - Math.cos(yaw) * CHASE_BACK_DIST_M,
-        fp.y + CHASE_UP_DIST_M,
-        fp.z + Math.sin(yaw) * CHASE_BACK_DIST_M,
-      );
-      const tgt = new THREE.Vector3(
-        fp.x + Math.cos(yaw) * CHASE_LOOKAHEAD_M, fp.y,
-        fp.z - Math.sin(yaw) * CHASE_LOOKAHEAD_M);
-      return { pos: back, tgt };
+      const yaw = Number.isFinite(state.focusActor.headingRad)
+        ? state.focusActor.headingRad
+        : state.chaseYaw;
+      writeChasePose(state, state.focusActor, yaw, _scratchVec, _scratchVec2);
+      return { pos: _scratchVec.clone(), tgt: _scratchVec2.clone() };
     }
     case 'topdown': {
       const wr = mapData.worldRect;
@@ -361,26 +503,65 @@ function computeTargetPose(state, mode, camera, orbitControls, mapData) {
 function updateChase(state, camera, orbitControls) {
   const actor = state.focusActor;
   if (!actor || !actor.lastValidPos) return;
-  const fp = actor.lastValidPos;
   // Smooth the chase yaw so the camera doesn't snap when the actor's heading
   // jumps. Use the actor's already-low-passed `headingRad` directly; if the
   // actor hasn't moved enough to set heading, keep the previous chase yaw.
   if (Number.isFinite(actor.headingRad)) {
     state.chaseYaw = state.chaseYaw + 0.12 * shortestAngleDelta(state.chaseYaw, actor.headingRad);
   }
-  const yaw = state.chaseYaw;
 
-  _scratchVec.set(
-    fp.x - Math.cos(yaw) * CHASE_BACK_DIST_M,
-    fp.y + CHASE_UP_DIST_M,
-    fp.z + Math.sin(yaw) * CHASE_BACK_DIST_M,
+  writeChasePose(state, actor, state.chaseYaw, _scratchVec, _scratchVec2);
+  let posAlpha = CHASE_POS_ALPHA;
+  let tgtAlpha = CHASE_TGT_ALPHA;
+  if (state.chaseGesture) {
+    posAlpha = CHASE_GESTURE_ALPHA;
+    tgtAlpha = CHASE_GESTURE_ALPHA;
+  } else if (performance.now() < state.chaseEaseUntil) {
+    posAlpha = CHASE_WHEEL_ALPHA;
+    tgtAlpha = CHASE_WHEEL_ALPHA;
+  }
+  camera.position.lerp(_scratchVec, posAlpha);
+  orbitControls.target.lerp(_scratchVec2, tgtAlpha);
+}
+
+/**
+ * Desired chase camera + look target. User distance / yaw / elevation apply
+ * only while the mode is chase, so cinema shots keep the stock rear frame.
+ * `yaw` is the followed heading; the orbit offset is added on top.
+ */
+function writeChasePose(state, actor, yaw, outPos, outTgt) {
+  const user = state.mode === 'chase';
+  const radius = user ? state.chaseRadius : CHASE_RADIUS_DEFAULT;
+  const elev = user ? state.chaseElev : CHASE_ELEV_DEFAULT;
+  const yawOff = user ? state.chaseOrbitYaw : 0;
+  const aim = yaw + yawOff;
+  const horiz = radius * Math.cos(elev);
+  const height = radius * Math.sin(elev);
+  const fp = actor.lastValidPos;
+  outPos.set(
+    fp.x - Math.cos(aim) * horiz,
+    fp.y + height,
+    fp.z + Math.sin(aim) * horiz,
   );
-  camera.position.lerp(_scratchVec, CHASE_POS_ALPHA);
+  if (user) liftChaseAboveGround(state, outPos);
+  const ahead = CHASE_LOOKAHEAD_M * Math.max(0, Math.cos(yawOff));
+  outTgt.set(
+    fp.x + Math.cos(yaw) * ahead,
+    fp.y,
+    fp.z - Math.sin(yaw) * ahead,
+  );
+}
 
-  _scratchVec2.set(
-    fp.x + Math.cos(yaw) * CHASE_LOOKAHEAD_M, fp.y,
-    fp.z - Math.sin(yaw) * CHASE_LOOKAHEAD_M);
-  orbitControls.target.lerp(_scratchVec2, CHASE_TGT_ALPHA);
+function liftChaseAboveGround(state, pos) {
+  if (!state.move.getGroundY) return;
+  const ground = state.move.getGroundY(pos.x, pos.z);
+  if (ground == null || !Number.isFinite(ground)) return;
+  const floor = ground + CHASE_GROUND_CLEAR_M;
+  if (pos.y < floor) pos.y = floor;
+}
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 function updateTopDown(state, camera, orbitControls, mapData) {

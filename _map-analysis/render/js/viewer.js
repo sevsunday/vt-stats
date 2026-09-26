@@ -19,10 +19,12 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=sky-sprites2';
+import { createCameraController } from './replay-cameras.js';
+import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=props1';
 import { buildObjectsGroup, sampleTerrainHeight } from './objects.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
+import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props1';
 
 // ---------------- State ----------------
 
@@ -32,6 +34,7 @@ const STATE = {
   scene: null,
   camera: null,
   controls: null,
+  camCtrl: null,
   mapData: null,
   terrainMesh: null,            // base mesh (renders with either material)
   terrainWireframe: null,       // wireframe overlay
@@ -48,7 +51,8 @@ const STATE = {
   waterBaseY: null,
   lavaBaseY: null,
   objectsGroup: null,
-  // embed=1 is the empty map-page scene: mirrored world, tiles, pools + loose.
+  propsGroup: null,
+  // embed=1 is the empty map-page scene: mirrored world, tiles, pools, bases, loose.
   embed: false,
   // topdown=1 is the orthographic terrain photo. Loose is not drawn into it.
   topdown: false,
@@ -61,6 +65,22 @@ const STATE = {
 };
 
 const TOPDOWN_PX = 512;
+// Playable-area rects from data/render/loose_overlay.json. Null until loaded.
+let topdownFrames = null;
+
+async function ensureTopdownFrames() {
+  if (topdownFrames) return topdownFrames;
+  try {
+    const res = await fetch('../../data/render/loose_overlay.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    topdownFrames = (data && data.maps) || {};
+  } catch (err) {
+    console.warn('topdown frame missing', err);
+    topdownFrames = {};
+  }
+  return topdownFrames;
+}
 
 // ---------------- Boot ----------------
 
@@ -192,8 +212,8 @@ async function boot(stem) {
   } else if (STATE.embed) {
     document.body.classList.add('embed-mode');
     document.getElementById('hud').classList.add('hidden');
-    const bar = document.getElementById('embed-bar');
-    if (bar) bar.classList.remove('hidden');
+    const controls = document.getElementById('embed-controls');
+    if (controls) controls.classList.remove('hidden');
   } else {
     document.getElementById('hud').classList.remove('hidden');
   }
@@ -207,9 +227,13 @@ async function boot(stem) {
   }
 
   initRenderer();
+  if (STATE.topdown) await ensureTopdownFrames();
   await mountMap(stem);
   if (!STATE.topdown) wireHud(STATE.mapData);
-  if (STATE.embed && !STATE.topdown) fillEmbedBar(STATE.mapData);
+  if (STATE.embed && !STATE.topdown) {
+    fillEmbedBar(STATE.mapData);
+    wireEmbedControls();
+  }
   startLoop();
 }
 
@@ -235,6 +259,8 @@ async function mountMap(stem) {
     initLiquid(data, 'water');
     initLiquid(data, 'lava');
     initObjects(data);
+    try { await initProps(data); }
+    catch (err) { console.warn('props', err); }
     initCamera(data);
   } else {
     initCamera(data);
@@ -278,6 +304,7 @@ function disposeMounted() {
   STATE.terrainWireframe = null;
   STATE.terrainTileMat = null;
   STATE.objectsGroup = null;
+  STATE.propsGroup = null;
   STATE.waterMesh = null;
   STATE.lavaMesh = null;
   STATE.skyRig = null;
@@ -311,6 +338,7 @@ async function runBatch() {
   const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
   const progress = document.getElementById('batch-progress');
   initRenderer();
+  await ensureTopdownFrames();
   const maps = await loadManifest();
   const stems = maps.map(m => m.stem).filter(Boolean);
   for (let i = 0; i < stems.length; i++) {
@@ -345,6 +373,7 @@ async function shotBlob() {
 
 async function captureMissing(stems, postBase) {
   if (!STATE.renderer) initRenderer();
+  await ensureTopdownFrames();
   window.__vtCaptureProgress = { i: 0, n: stems.length, stem: '', done: false, failed: [] };
   for (let i = 0; i < stems.length; i++) {
     const stemName = stems[i];
@@ -761,7 +790,7 @@ function initLiquid(data, kind) {
 
 // ---------------- Objects ----------------
 
-const SPAWN_LAYOUT_KINDS = new Set(['scrap_pool', 'loose_scrap']);
+const SPAWN_LAYOUT_KINDS = new Set(['scrap_pool', 'spawn_point', 'loose_scrap']);
 
 function sceneObjects(data) {
   const objects = (data && data.objects) || [];
@@ -770,10 +799,26 @@ function sceneObjects(data) {
   return objects.filter(o => SPAWN_LAYOUT_KINDS.has(o.kind));
 }
 
+async function initProps(data) {
+  if (STATE.topdown) return;
+  const props = (data && data.props) || [];
+  if (!props.length) return;
+  const parent = contentParent();
+  const group = await buildPropsGroup(
+    props,
+    data.heightmap,
+    STATE.terrainExaggeration,
+    STATE.renderer,
+    parent === STATE.worldGroup,
+  );
+  STATE.propsGroup = group;
+  parent.add(group);
+}
+
 function initObjects(data) {
   // Build objects against the SCALED heightmap view so initial Y positions
-  // line up with the exaggerated terrain mesh. Embed keeps pools and the
-  // spawn-time loose layout; no ships or players.
+  // line up with the exaggerated terrain mesh. Embed keeps pools, the two
+  // team bases, and the spawn-time loose layout; no ships or players.
   const scaledHm = makeScaledHeightmapView(data.heightmap, STATE.terrainExaggeration);
   const scaledData = { ...data, heightmap: scaledHm, objects: sceneObjects(data) };
   const group = buildObjectsGroup(scaledData);
@@ -796,16 +841,27 @@ function cameraFrame(data) {
 }
 
 function initTopdownCamera(data) {
-  // Frame the heightmap exactly. Screen-up is -scene Z, which is +world Z
-  // (north) because the world group mirrors Z. Image formula, shared with
-  // scripts/build_loose_overlay.py:
+  // Screen-up is -scene Z, which is +world Z (north) because the world
+  // group mirrors Z. Image formula, shared with scripts/build_loose_overlay.py:
   //   u = (x - minX) / width
   //   v = (maxZ - z) / depth
+  // The overlay JSON's view is that rect: the padded square around every
+  // marker. Maps with no markers frame the whole heightmap.
   const hm = data.heightmap;
-  const width = hm.cellsX * hm.cellMetersX;
-  const depth = hm.cellsZ * hm.cellMetersZ;
-  const centerX = hm.worldOriginX + width * 0.5;
-  const centerZ = hm.worldOriginZ + depth * 0.5;
+  let width = hm.cellsX * hm.cellMetersX;
+  let depth = hm.cellsZ * hm.cellMetersZ;
+  let minX = hm.worldOriginX;
+  let minZ = hm.worldOriginZ;
+  const stemKey = (data.stem || '').toLowerCase();
+  const view = topdownFrames && topdownFrames[stemKey] && topdownFrames[stemKey].view;
+  if (view && view.width > 0 && view.depth > 0) {
+    width = view.width;
+    depth = view.depth;
+    minX = view.min_x;
+    minZ = view.min_z;
+  }
+  const centerX = minX + width * 0.5;
+  const centerZ = minZ + depth * 0.5;
   const cam = new THREE.OrthographicCamera(
     -width / 2, width / 2, depth / 2, -depth / 2, 0.1, 20000,
   );
@@ -841,6 +897,9 @@ function initCamera(data) {
   controls.maxPolarAngle = Math.PI / 2.05; // a hair below horizon
   controls.update();
   STATE.controls = controls;
+  if (STATE.embed) {
+    STATE.camCtrl = createCameraController(cam, controls, { worldRect: wr });
+  }
 }
 
 // ---------------- HUD wiring ----------------
@@ -872,12 +931,128 @@ function populateMapSwitcher(maps) {
 }
 
 function fillEmbedBar(data) {
-  const bar = document.getElementById('embed-bar');
-  if (!bar) return;
   const n = (data.counts && data.counts.loose_scrap) || 0;
   const pools = (data.counts && data.counts.scrap_pool) || 0;
-  const biometal = n * 5;
-  bar.textContent = `${data.name || data.stem} · ${pools} pools · ${n} loose pieces · ${biometal} biometal`;
+  const bases = (data.counts && data.counts.spawn_point) || 0;
+  const loose = n * 5;
+  const basesBit = bases ? ` · ${bases} bases` : '';
+  const text = `${pools} pools${basesBit} · ${loose} loose`;
+  const bar = document.getElementById('embed-bar');
+  if (bar) {
+    bar.textContent = text;
+    bar.classList.add('hidden');
+  }
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ source: 'vt-map-embed', action: 'counts', text }, location.origin);
+    }
+  } catch (err) { /* parent unavailable */ }
+}
+
+const EMBED_MOVE_CODES = new Set([
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight',
+]);
+
+function wireEmbedControls() {
+  const root = document.getElementById('embed-controls');
+  if (!root || !STATE.camCtrl) return;
+
+  function markCam(mode) {
+    root.querySelectorAll('[data-embed-cam]').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.embedCam === mode);
+    });
+  }
+
+  root.querySelectorAll('[data-embed-cam]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.embedCam;
+      if (mode === 'free' || mode === 'topdown') {
+        STATE.camCtrl.setMode(mode);
+        markCam(mode);
+      }
+    });
+  });
+
+  const floorBtn = document.getElementById('embed-floor-btn');
+  const floorMenu = document.getElementById('embed-floor-menu');
+  const moreBtn = document.getElementById('embed-more-btn');
+  const moreMenu = document.getElementById('embed-more-menu');
+  function toggleMenu(menu, btn) {
+    if (!menu || !btn) return;
+    const open = menu.hasAttribute('hidden');
+    if (floorMenu && floorMenu !== menu) floorMenu.setAttribute('hidden', '');
+    if (moreMenu && moreMenu !== menu) moreMenu.setAttribute('hidden', '');
+    if (open) menu.removeAttribute('hidden');
+    else menu.setAttribute('hidden', '');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  if (floorBtn) floorBtn.addEventListener('click', () => toggleMenu(floorMenu, floorBtn));
+  if (moreBtn) moreBtn.addEventListener('click', () => toggleMenu(moreMenu, moreBtn));
+
+  root.querySelectorAll('[data-floor]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.floor;
+      const radio = document.querySelector(`input[name="floor"][value="${mode}"]`);
+      if (!radio || radio.disabled) return;
+      radio.checked = true;
+      radio.dispatchEvent(new Event('change'));
+      if (floorBtn) floorBtn.textContent = btn.textContent;
+      if (floorMenu) floorMenu.setAttribute('hidden', '');
+    });
+  });
+
+  function mirrorToggle(embedId, hudId) {
+    const box = document.getElementById(embedId);
+    const hud = document.getElementById(hudId);
+    if (!box || !hud) return;
+    box.checked = hud.checked;
+    box.disabled = hud.disabled;
+    box.addEventListener('change', () => {
+      hud.checked = box.checked;
+      hud.dispatchEvent(new Event('change'));
+    });
+  }
+  mirrorToggle('embed-water', 'toggle-water');
+  mirrorToggle('embed-lava', 'toggle-lava');
+  mirrorToggle('embed-objects', 'toggle-objects');
+
+  const exag = document.getElementById('embed-exag');
+  const hudExag = document.getElementById('height-exag');
+  if (exag && hudExag) {
+    exag.value = hudExag.value;
+    exag.addEventListener('input', () => {
+      hudExag.value = exag.value;
+      hudExag.dispatchEvent(new Event('input'));
+    });
+  }
+
+  const reset = document.getElementById('embed-reset');
+  if (reset) {
+    reset.addEventListener('click', () => {
+      const wr = cameraFrame(STATE.mapData);
+      const span = Math.max(wr.width, wr.depth);
+      STATE.camera.position.set(wr.centerX + span * 0.4, span * 0.6, wr.centerZ + span * 0.7);
+      STATE.controls.target.set(wr.centerX, 0, wr.centerZ);
+      STATE.controls.enabled = true;
+      if (STATE.camCtrl.getMode() !== 'free') STATE.camCtrl.setMode('free');
+      STATE.controls.update();
+      markCam('free');
+    });
+  }
+
+  window.addEventListener('keydown', (ev) => {
+    if (!STATE.embed || !STATE.camCtrl || !EMBED_MOVE_CODES.has(ev.code)) return;
+    if (ev.repeat) return;
+    STATE.camCtrl.moveKey(ev.code, true);
+    ev.preventDefault();
+  });
+  window.addEventListener('keyup', (ev) => {
+    if (!STATE.camCtrl || !EMBED_MOVE_CODES.has(ev.code)) return;
+    STATE.camCtrl.moveKey(ev.code, false);
+  });
+  window.addEventListener('blur', () => {
+    if (STATE.camCtrl) STATE.camCtrl.clearMoveKeys();
+  });
 }
 
 function wireHud(data) {
@@ -892,7 +1067,8 @@ function wireHud(data) {
     `${Math.round(data.heightmap.cellsX * data.heightmap.cellMetersX)} x `
   + `${Math.round(data.heightmap.cellsZ * data.heightmap.cellMetersZ)} m`;
 
-  // Object counts. Loose scrap = npscrx in VSR mod, worth 5 biometal/piece.
+  // Object counts. Spawn loose is npscrx, 5 scrap each; players say the
+  // total ("200 loose"), not the piece count.
   const countsEl = $('counts');
   const SCRAP_VALUE = 5;
   const labels = {
@@ -900,19 +1076,18 @@ function wireHud(data) {
     spawn_point: 'Spawns',
     recycler: 'Recyclers',
     starting_unit: 'Starting units',
-    loose_scrap: 'Loose scrap',
+    loose_scrap: 'Loose',
   };
   let total = 0;
   let html = '';
   for (const [k, label] of Object.entries(labels)) {
     const n = data.counts[k] || 0;
     if (n === 0) continue;
-    total += n;
     let valHtml;
     if (k === 'loose_scrap') {
-      const biometal = n * SCRAP_VALUE;
-      valHtml = `${n} <span class="count-aux">(${biometal} BE)</span>`;
+      valHtml = String(n * SCRAP_VALUE);
     } else {
+      total += n;
       valHtml = String(n);
     }
     html += `<div class="count-row"><span class="label">${label}</span>`
@@ -1076,6 +1251,7 @@ function applyHeightExaggeration(factor) {
     STATE.objectsGroup.visible = wasVisible;
     contentParent().add(STATE.objectsGroup);
   }
+  applyPropsExaggeration(STATE.propsGroup, factor);
 }
 
 function makeScaledHeightmapView(hm, factor) {
@@ -1223,7 +1399,9 @@ function tick(timeMs) {
     STATE.fpsAccum = 0;
     STATE.fpsFrames = 0;
   }
-  if (STATE.controls) STATE.controls.update();
+  const dtSec = Math.min(0.05, Math.max(0, dt) / 1000);
+  if (STATE.camCtrl) STATE.camCtrl.update(dtSec, []);
+  else if (STATE.controls) STATE.controls.update();
   syncSky(STATE.skyRig, STATE.camera);
   STATE.renderer.render(STATE.scene, STATE.camera);
 }

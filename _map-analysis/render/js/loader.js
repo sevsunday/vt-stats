@@ -181,6 +181,7 @@ export async function loadMapData(stem, onProgress) {
     skyRgbFloat:  raw.sky_rgb_float,
     // 404-safe. Colors drive the gradient; assets may be null.
     sky:          await loadSkySidecar(raw.map_stem),
+    props:        await loadPropsSidecar(raw.map_stem),
     lighting:     raw.lighting || {},
     objects:      (raw.objects || []).map(o => ({
       uid:      o.uid,
@@ -198,6 +199,20 @@ export async function loadMapData(stem, onProgress) {
       defaultExaggeration: (raw.defaults && raw.defaults.default_exaggeration) || 1.5,
     },
   };
+}
+
+/** Scenery and pool meshes. Empty when the extract has not been run. */
+export async function loadPropsSidecar(stem) {
+  if (!stem) return [];
+  try {
+    const res = await fetch(`${DATA_DIR}/${stem}.props.json?v=props1`);
+    if (!res.ok) return [];
+    const doc = await res.json();
+    return Array.isArray(doc.props) ? doc.props : [];
+  } catch (e) {
+    console.warn('props sidecar', e);
+    return [];
+  }
 }
 
 /** Per-map sky sidecar. Null when the extract has not been run. */

@@ -108,9 +108,34 @@
   <button type="button" class="btn" id="batch-start">Choose folder and capture</button>
   <p id="batch-progress"></p>
 </div>
+<div id="embed-controls" class="hidden" aria-label="Map viewer controls">
+  <div class="embed-views" role="group" aria-label="Camera">
+    <button type="button" data-embed-cam="free" class="is-active" title="Free orbit. WASD moves, Q/E altitude, Shift fast">Free</button>
+    <button type="button" data-embed-cam="topdown" title="Top-down">Top</button>
+  </div>
+  <div class="embed-drop">
+    <button type="button" id="embed-floor-btn" aria-expanded="false" aria-controls="embed-floor-menu">Tiles</button>
+    <div id="embed-floor-menu" class="embed-drop-menu" hidden>
+      <button type="button" data-floor="tiles">Tiles</button>
+      <button type="button" data-floor="minimap">Minimap</button>
+      <button type="button" data-floor="ramp">Height ramp</button>
+      <button type="button" data-floor="wire">Wireframe</button>
+    </div>
+  </div>
+  <div class="embed-drop">
+    <button type="button" id="embed-more-btn" aria-expanded="false" aria-controls="embed-more-menu">More</button>
+    <div id="embed-more-menu" class="embed-drop-menu" hidden>
+      <label><input type="checkbox" id="embed-water"> Water</label>
+      <label><input type="checkbox" id="embed-lava"> Lava</label>
+      <label><input type="checkbox" id="embed-objects" checked> Pools and spawns</label>
+      <label class="embed-exag">Height <input type="range" id="embed-exag" min="0.5" max="6" step="0.1" value="1.5"></label>
+    </div>
+  </div>
+  <button type="button" id="embed-reset" title="Reset camera">Reset</button>
+</div>
 <div id="embed-bar" class="hidden"></div>
 <div id="status">loading map data...</div>
 
-<script type="module" src="js/viewer.js?v=sky-hq"></script>
+<script type="module" src="js/viewer.js?v=props1"></script>
 </body>
 </html>

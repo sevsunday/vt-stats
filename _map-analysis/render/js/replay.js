@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
+import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props1';
 
 import { sampleTerrainHeight } from './objects.js?v=pool-flat';
 import {
@@ -33,7 +34,7 @@ import {
   usefulInGameNick,
   loadReplayTrack,
   applyReplayTrack,
-} from './replay-data.js?v=replay-hz';
+} from './replay-data.js?v=props1';
 import {
   buildActorsGroup,
   updateActors,
@@ -79,7 +80,7 @@ import {
   updateTLockDiamonds,
 } from './replay-fx.js';
 import { createCameraController } from './replay-cameras.js?v=wasd-free4';
-import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=replay-hz';
+import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=props1';
 import {
   buildEngagementLines,
   updateEngagements,
@@ -171,6 +172,8 @@ const STATE = {
   poolsGroup: null,
   pools: null,
   poolsVisible: true,
+  // Trees, rocks, and pool meshes. Always visible; the pools toggle does not hide them.
+  propsGroup: null,
   recyclersGroup: null,
   recyclers: null,
   structuresGroup: null,
@@ -446,6 +449,8 @@ async function boot() {
   initEngagements();
   initPools();
   initStructureOverlays();
+  try { await initProps(); }
+  catch (err) { console.warn('props', err); }
   initCamera(mapData);
 
   initReplayHud(matchData);
@@ -786,6 +791,20 @@ function initPools() {
   group.visible = STATE.poolsVisible;
   STATE.poolsGroup = group;
   STATE.pools = objs;
+  STATE.worldGroup.add(group);
+}
+
+async function initProps() {
+  const props = (STATE.mapData && STATE.mapData.props) || [];
+  if (!props.length || !STATE.mapData.heightmap) return;
+  const group = await buildPropsGroup(
+    props,
+    STATE.mapData.heightmap,
+    STATE.terrainExaggeration,
+    STATE.renderer,
+    true,
+  );
+  STATE.propsGroup = group;
   STATE.worldGroup.add(group);
 }
 
@@ -1293,6 +1312,7 @@ function applyHeightExaggeration(factor) {
   disposePools();
   initPools();
   initStructureOverlays();
+  applyPropsExaggeration(STATE.propsGroup, factor);
 }
 
 function disposeStructureOverlays() {
