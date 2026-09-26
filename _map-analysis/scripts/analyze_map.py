@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import struct
 import sys
@@ -193,6 +194,8 @@ class GameObject:
     obj_class: str
     kind: str
     position: tuple[float, float, float] | None  # (x, y, z) in meters; y is up
+    # Radians about Y from the MAT3D front vector. 0 when the file has no basis.
+    yaw: float = 0.0
     team: int | None = None
     name: str | None = None
     source: str = "ascii"  # 'ascii' or 'binary'
@@ -316,6 +319,7 @@ def parse_bzn_ascii(text: str) -> tuple[dict[str, Any], list[GameObject]]:
         team: int | None = None
         name: str | None = None
         posit: dict[str, float] = {}
+        front: dict[str, float] = {}
         i += 1
         while i < n and not lines[i].rstrip().startswith("[GameObject]"):
             ln = lines[i].rstrip()
@@ -340,16 +344,26 @@ def parse_bzn_ascii(text: str) -> tuple[dict[str, Any], list[GameObject]]:
             elif ln.startswith("  posit.z [1]"):
                 if i + 1 < n:
                     posit["z"] = _parse_float(lines[i + 1].strip())
+            elif ln.startswith("  front.x [1]"):
+                if i + 1 < n:
+                    front["x"] = _parse_float(lines[i + 1].strip())
+            elif ln.startswith("  front.z [1]"):
+                if i + 1 < n:
+                    front["z"] = _parse_float(lines[i + 1].strip())
             i += 1
 
         if obj_class:
             pos: tuple[float, float, float] | None = None
             if {"x", "y", "z"}.issubset(posit):
                 pos = (posit["x"], posit["y"], posit["z"])
+            yaw = 0.0
+            if "x" in front and "z" in front and (front["x"] or front["z"]):
+                yaw = math.atan2(front["x"], front["z"])
             objects.append(enrich_game_object(GameObject(
                 obj_class=obj_class,
                 kind=classify_objclass(obj_class),
                 position=pos,
+                yaw=yaw,
                 team=team,
                 name=name,
                 source="ascii",
@@ -459,6 +473,20 @@ def _decode_mat3d_position(data: bytes) -> tuple[float, float, float] | None:
     return None
 
 
+def _decode_mat3d_yaw(data: bytes) -> float:
+    """Yaw (radians) of the MAT3D front vector about Y. 0 if it has none."""
+    fx = fz = 0.0
+    if len(data) == 64:
+        fx, fz = struct.unpack_from("<f", data, 32)[0], struct.unpack_from("<f", data, 40)[0]
+    elif len(data) >= 36:
+        fx, fz = struct.unpack_from("<f", data, 24)[0], struct.unpack_from("<f", data, 32)[0]
+    else:
+        return 0.0
+    if fx == 0.0 and fz == 0.0:
+        return 0.0
+    return math.atan2(fx, fz)
+
+
 _ODF_CHAR_RE = re.compile(rb"^[a-z][a-z0-9_]{2,29}(?:\.[a-z0-9]{2,4})?$")
 
 
@@ -563,6 +591,7 @@ def parse_bzn_binary(buf: bytes) -> tuple[dict[str, Any], list[GameObject]]:
                 if _ODF_CHAR_RE.match(name_bytes):
                     odf = name_bytes.decode("ascii", errors="replace")
                     pos: tuple[float, float, float] | None = None
+                    yaw = 0.0
                     team: int | None = None
                     for m in range(k + 3, min(k + 3 + NEXT_OBJ_MAX_SCAN, len(toks))):
                         tm = toks[m]
@@ -588,11 +617,13 @@ def parse_bzn_binary(buf: bytes) -> tuple[dict[str, Any], list[GameObject]]:
                                     team = v
                         if tm.type_ == TYPE_MAT3D and tm.size in (48, 60, 64):
                             pos = _decode_mat3d_position(tm.data)
+                            yaw = _decode_mat3d_yaw(tm.data)
                             break
                     objects.append(enrich_game_object(GameObject(
                         obj_class=odf,
                         kind=classify_objclass(odf),
                         position=pos,
+                        yaw=yaw,
                         team=team,
                         name=None,
                         source="binary",
