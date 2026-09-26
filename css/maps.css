@@ -258,6 +258,9 @@
   object-fit: cover;
   display: block;
 }
+.vt-map-thumb-topdown {
+  object-fit: fill;
+}
 .vt-map-card-thumb-empty {
   display: flex;
   align-items: center;
@@ -384,6 +387,33 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.vt-map-loose-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.vt-map-loose-dot {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: var(--kb-success);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--kb-bg-body) 65%, transparent);
+}
+.vt-map-card-thumb-wrap .vt-map-loose-dot {
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  margin-top: -1.5px;
+}
+.vt-map-loose-hero-toggle {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 2;
 }
 .vt-map-single-image-empty {
   display: flex;
@@ -639,6 +669,21 @@
 .vt-map-winner-unclear {
   color: var(--kb-text-muted);
   background: color-mix(in oklab, var(--kb-text-muted) 12%, transparent);
+}
+
+/* Empty 3D map on the single-map page. The iframe is the spawn layout
+   (HQ tiles, pools, loose) with no players. */
+.vt-map-explore-frame {
+  display: block;
+  width: 100%;
+  height: min(70vh, 640px);
+  min-height: 420px;
+  border: 0;
+  background: var(--kb-bg-subtle);
+}
+.vt-map-explore-pending,
+.vt-map-explore-missing {
+  min-height: 4.5rem;
 }
 
 /* Coming-soon grid */

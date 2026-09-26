@@ -476,15 +476,99 @@
     }).sort(SORT_COMPARATORS[f.sort] || SORT_COMPARATORS['played-desc']);
   }
 
+  const LOOSE_OVERLAY_KEY = 'vt.map.looseOverlay';
+
+  function looseOverlayOn() {
+    try {
+      return localStorage.getItem(LOOSE_OVERLAY_KEY) !== '0';
+    } catch (err) {
+      return true;
+    }
+  }
+
+  function setLooseOverlay(on) {
+    try {
+      localStorage.setItem(LOOSE_OVERLAY_KEY, on ? '1' : '0');
+    } catch (err) { /* private mode */ }
+    document.querySelectorAll('.vt-map-loose-layer').forEach(el => {
+      el.hidden = !on;
+    });
+    document.querySelectorAll('[data-loose-toggle]').forEach(btn => {
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.setAttribute('data-selected', on ? 'true' : 'false');
+    });
+  }
+
+  function loosePoints(stem) {
+    const maps = state.looseOverlay && state.looseOverlay.maps;
+    const entry = maps && maps[stem];
+    return (entry && entry.points) || [];
+  }
+
+  function looseLayerHtml(stem) {
+    const points = loosePoints(stem);
+    if (!points.length) return '';
+    const hidden = looseOverlayOn() ? '' : ' hidden';
+    const dots = points.map(pair => {
+      const u = Math.min(1, Math.max(0, Number(pair[0]) || 0));
+      const v = Math.min(1, Math.max(0, Number(pair[1]) || 0));
+      return `<span class="vt-map-loose-dot" style="left:${(u * 100).toFixed(3)}%;top:${(v * 100).toFixed(3)}%"></span>`;
+    }).join('');
+    return `<div class="vt-map-loose-layer"${hidden} aria-hidden="true">${dots}</div>`;
+  }
+
+  function topdownSrc(row) {
+    return `${state.dataPrefix}data/render/topdown/${encodeURIComponent(row.key)}.png`;
+  }
+
+  function iondriverSrc(row) {
+    return row.image_path ? `${state.dataPrefix}data/${row.image_path}` : '';
+  }
+
+  function bindTopdownFallback(root) {
+    if (!root) return;
+    root.querySelectorAll('img[data-topdown-fallback]').forEach(img => {
+      const swap = () => {
+        const fallback = img.dataset.topdownFallback;
+        if (!fallback || img.getAttribute('src') === fallback) return;
+        img.removeEventListener('error', swap);
+        img.removeAttribute('data-topdown-fallback');
+        img.src = fallback;
+        const layer = img.parentElement && img.parentElement.querySelector('.vt-map-loose-layer');
+        if (layer) layer.remove();
+      };
+      img.addEventListener('error', swap);
+      if (img.complete && img.naturalWidth === 0) swap();
+    });
+  }
+
+  function ensureLooseToggle() {
+    const host = document.querySelector('#vt-map-toolbar .card-body > .d-flex');
+    if (!host || document.getElementById('vt-map-loose-toggle')) {
+      setLooseOverlay(looseOverlayOn());
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'vt-map-loose-toggle';
+    btn.className = 'vt-chip';
+    btn.dataset.looseToggle = '1';
+    btn.textContent = 'Loose';
+    btn.title = 'Show spawn-time loose on map images';
+    btn.addEventListener('click', () => setLooseOverlay(!looseOverlayOn()));
+    host.appendChild(btn);
+    setLooseOverlay(looseOverlayOn());
+  }
+
   function renderCard(row) {
     const href = `${row.key}/`;
-    const thumbSrc = row.image_path
-      ? `${state.dataPrefix}data/${row.image_path}`
-      : '';
+    const ionSrc = iondriverSrc(row);
     const liftCls = lumaLiftClass(row.luma_band);
-    const thumbClassAttr = `vt-map-card-thumb${liftCls ? ' ' + liftCls : ''}`;
-    const thumbHtml = thumbSrc
-      ? `<img class="${thumbClassAttr}" src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(row.title)} top-down" loading="lazy" decoding="async">`
+    const thumbClassAttr = `vt-map-card-thumb vt-map-thumb-topdown${liftCls ? ' ' + liftCls : ''}`;
+    const thumbHtml = (ionSrc || loosePoints(row.key).length)
+      ? `<img class="${thumbClassAttr}" src="${escapeHtml(topdownSrc(row))}"
+              data-topdown-fallback="${escapeHtml(ionSrc)}"
+              alt="${escapeHtml(row.title)} top-down" loading="lazy" decoding="async">`
       : `<div class="vt-map-card-thumb vt-map-card-thumb-empty" aria-hidden="true"><i class="bi bi-map"></i></div>`;
     const pools = row.pools != null ? `${row.pools}p` : '';
     const loose = row.loose != null
@@ -511,6 +595,7 @@
               aria-label="View map page for ${escapeHtml(row.title)}">
       <div class="vt-map-card-thumb-wrap">
         ${thumbHtml}
+        ${looseLayerHtml(row.key)}
         ${tagsHtml ? `<div class="vt-map-card-tag-overlay">${tagsHtml}</div>` : ''}
       </div>
       <div class="vt-map-card-body">
@@ -534,6 +619,7 @@
       dom.heroSub.textContent = `0 of ${rows.length} maps match the current filters.`;
     } else {
       dom.grid.innerHTML = visible.map(renderCard).join('');
+      bindTopdownFallback(dom.grid);
       dom.empty.hidden = true;
       dom.heroSub.textContent = visible.length === rows.length
         ? `Showing all ${rows.length} maps.`
@@ -582,10 +668,11 @@
   //
   // Sections (top-to-bottom):
   //   1. Hero strip (image + title + author + description + chip row)
-  //   2. Match summary card (count + avg duration + first/last played)
-  //   3. Top Commanders card (top 10, em-dash on zero)
-  //   4. Recent Matches table (10 most recent, click-through to dashboard)
-  //   5. "Coming soon" placeholder grid (6 greyed-out cards)
+  //   2. Empty 3D map (HQ tiles, pools, spawn-time loose; no players)
+  //   3. Match summary card (count + avg duration + first/last played)
+  //   4. Top Commanders card (top 10, em-dash on zero)
+  //   5. Recent Matches table (10 most recent, click-through to dashboard)
+  //   6. "Coming soon" placeholder grid (6 greyed-out cards)
   //
   // Empty-state branch (`match_count === 0`): hero stays normal, the
   // match summary card collapses to a "No matches recorded yet"
@@ -612,18 +699,29 @@
     if (!row) return;
     dom.singleHero.innerHTML = renderSingleHero(row);
     dom.singleBody.innerHTML = renderSingleBody(row);
+    bindTopdownFallback(dom.singleHero);
+    const looseBtn = dom.singleHero.querySelector('[data-loose-toggle]');
+    if (looseBtn) {
+      looseBtn.addEventListener('click', () => setLooseOverlay(!looseOverlayOn()));
+    }
+    setLooseOverlay(looseOverlayOn());
+    mountMapExplore(row);
   }
 
   function renderSingleHero(row) {
-    const imgSrc = row.image_path
-      ? `${state.dataPrefix}data/${row.image_path}`
-      : '';
+    const ionSrc = iondriverSrc(row);
     const liftCls = lumaLiftClass(row.luma_band);
-    const heroClassAttr = `vt-map-single-image${liftCls ? ' ' + liftCls : ''}`;
-    const imageBlock = imgSrc
+    const heroClassAttr = `vt-map-single-image vt-map-thumb-topdown${liftCls ? ' ' + liftCls : ''}`;
+    const looseBtn = loosePoints(row.key).length
+      ? `<button type="button" class="vt-chip vt-map-loose-hero-toggle" data-loose-toggle="1">Loose</button>`
+      : '';
+    const imageBlock = (ionSrc || loosePoints(row.key).length)
       ? `<div class="vt-map-single-image-wrap">
-          <img class="${heroClassAttr}" src="${escapeHtml(imgSrc)}"
+          <img class="${heroClassAttr}" src="${escapeHtml(topdownSrc(row))}"
+               data-topdown-fallback="${escapeHtml(ionSrc)}"
                alt="${escapeHtml(row.title)} top-down" decoding="async" loading="eager">
+          ${looseLayerHtml(row.key)}
+          ${looseBtn}
         </div>`
       : `<div class="vt-map-single-image-wrap vt-map-single-image-empty">
           <i class="bi bi-map" aria-hidden="true"></i>
@@ -732,8 +830,58 @@
       </div>`;
   }
 
+  function renderExploreCard(row) {
+    const stem = (row && row.key) || '';
+    return `<div class="card mb-3" id="vt-map-explore" data-map-stem="${escapeHtml(stem)}">
+      <div class="card-header">
+        <i class="bi bi-badge-3d me-2"></i>Map
+        <span class="text-secondary small ms-2">Spawn layout</span>
+      </div>
+      <div class="card-body p-0" id="vt-map-explore-body">
+        <p class="vt-map-explore-pending text-secondary small mb-0 p-3">Loading terrain&hellip;</p>
+      </div>
+    </div>`;
+  }
+
+  function exploreMissingHtml() {
+    return `<p class="vt-map-explore-missing text-secondary small mb-0 p-3">3D terrain not extracted.</p>`;
+  }
+
+  async function mountMapExplore(row) {
+    const body = document.getElementById('vt-map-explore-body');
+    if (!body) return;
+    const stem = (row && row.key) || '';
+    if (!stem) {
+      body.innerHTML = exploreMissingHtml();
+      return;
+    }
+    const jsonUrl = `${state.dataPrefix}data/render/${encodeURIComponent(stem)}.3d.json`;
+    let ok = false;
+    try {
+      let res = await fetch(jsonUrl, { method: 'HEAD', cache: 'no-store' });
+      if (res.status === 405 || res.status === 501) {
+        res = await fetch(jsonUrl, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: { Range: 'bytes=0-0' },
+        });
+      }
+      ok = res.ok;
+    } catch (err) {
+      ok = false;
+    }
+    if (!document.getElementById('vt-map-explore-body')) return;
+    if (!ok) {
+      body.innerHTML = exploreMissingHtml();
+      return;
+    }
+    const src = `${state.dataPrefix}_map-analysis/render/index.html?map=${encodeURIComponent(stem)}&embed=1`;
+    const title = `3D map of ${row.title || stem}`;
+    body.innerHTML = `<iframe class="vt-map-explore-frame" title="${escapeHtml(title)}" src="${escapeHtml(src)}"></iframe>`;
+  }
+
   function renderSingleBody(row) {
-    const sections = [];
+    const sections = [renderExploreCard(row)];
     if (row.match_count > 0) {
       sections.push(renderTopCommandersCard(row));
       sections.push(renderRecentMatchesCard(row));
@@ -1055,18 +1203,20 @@
     state.dataPrefix = detectDataPrefix();
 
     try {
-      const [mapStats, registry, slugMap, f9Community] = await Promise.all([
+      const [mapStats, registry, slugMap, f9Community, looseOverlay] = await Promise.all([
         fetchJson(`${state.dataPrefix}data/processed/map_stats.json`).catch(() => null),
         fetchJson(`${state.dataPrefix}data/map-registry.json`).catch(() => null),
         fetchJson(`${state.dataPrefix}data/processed/player_slugs.json`).catch(() => null),
         // F9bomber community-ledger rollups (404-safe; only the per-map
         // "community games" hero chip reads it).
         fetchJson(`${state.dataPrefix}data/external/f9_community.json`).catch(() => null),
+        fetchJson(`${state.dataPrefix}data/render/loose_overlay.json`).catch(() => null),
       ]);
       state.mapStats = mapStats;
       state.registry = registry;
       state.slugMap = slugMap;
       state.f9Community = f9Community;
+      state.looseOverlay = looseOverlay;
     } catch (e) {
       console.error('maps.js boot: failed to load data', e);
     }
@@ -1088,6 +1238,7 @@
     // accurate as the user filters).
     if (dom.heroStats) dom.heroStats.innerHTML = buildHeroStats(state.rows);
 
+    ensureLooseToggle();
     wireDirectoryEvents();
 
     if (dom.loading) dom.loading.classList.add('d-none');
