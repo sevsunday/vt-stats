@@ -1,8 +1,9 @@
 """`.WAT`, `.SKY`, and `.TRN` lighting / atmosphere decoders.
 
-The `.WAT` and `.SKY` formats are partially binary; we extract just the
-water plane height (.WAT byte 16 float32) and a fallback sky tint
-(first 3 floats of .SKY).
+The `.WAT` and `.SKY` formats are partially binary; we extract the
+water plane height (.WAT byte 16 float32), a fallback sky tint
+(first plausible RGB triple of .SKY, via `parse_sky_header`), and the
+dome / cloud / sun parameters (`parse_sky`).
 
 The `.TRN` is an INI text file that carries the engine's lighting model
 in human-readable blocks: `[Light]`, `[Sky]`, `[Water]`, `[NormalView]`.
@@ -58,9 +59,10 @@ def parse_wat_header(path: Path) -> dict | None:
 def parse_sky_header(path: Path) -> dict | None:
     """Return {magic, version, sky_tint} or None on failure.
 
-    The .SKY format hasn't been fully decoded, but the first ~50 float32s
-    after the header look like color gradients, fog density, sun direction,
-    time-of-day. For the POC we just want a single tint color.
+    Tint-only path used by extract_3d.py. The chunk decode (dome mesh,
+    cloud and sun stems, the three SKY1 colors) is `parse_sky`. This
+    helper's byte offsets and fallback stay as they are so existing
+    `.3d.json` sky_tint values do not move.
 
     Strategy: read the first 3 floats at byte 16 (after the magic + version +
     a few bookkeeping bytes), clamp to [0,1], treat as an RGB tint. If any
@@ -113,6 +115,169 @@ def parse_sky_header(path: Path) -> dict | None:
         "sky_tint": sky_tint,
         "sky_rgb_float": [float(rgb[0]), float(rgb[1]), float(rgb[2])],
     }
+
+
+# Fixed 7068-byte version-4 layout, identical on every ingested map.
+# Header: magic `_YKS` (little-endian `SKY_`) + uint32 version + uint32
+# flags, then chunks of (4-byte reversed tag, uint32 size, payload).
+# SKY1 holds three RGBA colors and two texture names. DOME names the mesh.
+_SKY_NAME_EXTS = (".tga", ".dds", ".fbx", ".xsi", ".pic", ".png", ".bmp",
+                  ".jpg", ".jpeg")
+
+
+def _sky_chunks(raw: bytes) -> dict[str, bytes] | None:
+    """Walk a `.SKY` body. Returns {tag: payload} or None if the file
+    is not a versioned SKY_ chunk stream."""
+    if len(raw) < 16 or raw[:4] not in (b"_YKS", b"SKY_"):
+        return None
+    chunks: dict[str, bytes] = {}
+    off = 0x0C
+    while off + 8 <= len(raw):
+        tag = raw[off:off + 4][::-1].decode("latin1")
+        size = struct.unpack_from("<I", raw, off + 4)[0]
+        payload = off + 8
+        end = payload + size
+        if end > len(raw):
+            return None
+        chunks[tag] = raw[payload:end]
+        off = end
+    if off != len(raw) or "SKY1" not in chunks or "DOME" not in chunks:
+        return None
+    return chunks
+
+
+def _zstr(blob: bytes, off: int, width: int) -> str:
+    if off < 0 or off >= len(blob):
+        return ""
+    end = blob.find(b"\x00", off, min(len(blob), off + width))
+    if end < 0:
+        end = min(len(blob), off + width)
+    return blob[off:end].decode("latin1", errors="replace").strip()
+
+
+def sky_asset_stem(name: str | None) -> str | None:
+    """Lowercase stem of a SKY texture or mesh name. Extension ignored.
+    `null` and empty slots are None."""
+    if not name:
+        return None
+    text = name.strip().strip('"').strip("'").lower()
+    if not text or text == "null":
+        return None
+    for ext in _SKY_NAME_EXTS:
+        if text.endswith(ext):
+            text = text[: -len(ext)]
+            break
+    text = text.strip()
+    return text or None
+
+
+def _rgba_hex(blob: bytes, off: int) -> str | None:
+    if off + 16 > len(blob):
+        return None
+    try:
+        r, g, b, _a = struct.unpack_from("<4f", blob, off)
+    except struct.error:
+        return None
+    if not all(v == v for v in (r, g, b)):  # NaN
+        return None
+
+    def ch(v: float) -> int:
+        return int(round(max(0.0, min(1.0, v)) * 255))
+
+    return f"#{ch(r):02x}{ch(g):02x}{ch(b):02x}"
+
+
+def parse_sky(path: Path | None) -> dict | None:
+    """Decode the dome / cloud / sun parameters from a `.SKY` file.
+
+    Returns None when the file is missing or not the version-4 chunk
+    layout. Colors are the three SKY1 RGBA triples, clamped to 8-bit:
+
+        sky      payload 0x00  (the tint `parse_sky_header` already uses)
+        zenith   payload 0x2C
+        horizon  payload 0x3C
+
+    `dome`, `cloud`, and `sun` are lowercase stems with the extension
+    stripped (`miredome.fbx` -> `miredome`). `radius` is the DOME float
+    at payload 0x0C (engine meters; the viewer does not use it as the
+    on-screen size). `sprites` is the SPRT billboard list from
+    `parse_sky_sprites`.
+    """
+    if path is None or not path.is_file():
+        return None
+    raw = path.read_bytes()
+    chunks = _sky_chunks(raw)
+    if chunks is None:
+        return None
+    sky1 = chunks["SKY1"]
+    dome = chunks["DOME"]
+    version = int.from_bytes(raw[4:8], "little")
+    radius = None
+    if len(dome) >= 16:
+        try:
+            radius_f = struct.unpack_from("<f", dome, 0x0C)[0]
+        except struct.error:
+            radius_f = None
+        if radius_f is not None and radius_f == radius_f and 1.0 <= radius_f <= 10000.0:
+            radius = float(radius_f)
+    return {
+        "version": version,
+        "dome": sky_asset_stem(_zstr(dome, 0x10, 48)),
+        "cloud": sky_asset_stem(_zstr(sky1, 0x54, 40)),
+        "sun": sky_asset_stem(_zstr(sky1, 0x7C, 40)),
+        "radius": radius,
+        "colors": {
+            "sky": _rgba_hex(sky1, 0x00),
+            "zenith": _rgba_hex(sky1, 0x2C),
+            "horizon": _rgba_hex(sky1, 0x3C),
+        },
+        "sprites": parse_sky_sprites(chunks.get("SPRT", b"")),
+    }
+
+
+# SPRT: 12-byte header, then 56-byte records. Confirmed on the version-4
+# files (payload length == 12 + N*56). The name is a 32-byte cstring; the
+# rest is blend mode, an RGBA tint, and size / azimuth / elevation / roll.
+_SPRT_HEADER = 12
+_SPRT_RECORD = 56
+
+
+def _finite(value: float) -> float | None:
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return float(value)
+
+
+def parse_sky_sprites(blob: bytes) -> list[dict]:
+    """Billboards from a SPRT payload. Empty names are skipped.
+
+    `blend` 0 is an alpha disc (Earth). `blend` 1 is additive (moons,
+    galaxies, lens flares). `color` is the record's RGB bytes as #rrggbb.
+    Angles are degrees, as stored.
+    """
+    if not blob or len(blob) < _SPRT_HEADER + _SPRT_RECORD:
+        return []
+    count = (len(blob) - _SPRT_HEADER) // _SPRT_RECORD
+    out: list[dict] = []
+    for i in range(count):
+        rec = blob[_SPRT_HEADER + i * _SPRT_RECORD:
+                   _SPRT_HEADER + (i + 1) * _SPRT_RECORD]
+        name = sky_asset_stem(rec[:32].split(b"\x00", 1)[0].decode("latin1", "replace"))
+        if not name:
+            continue
+        blend = struct.unpack_from("<I", rec, 32)[0]
+        red, green, blue = rec[36], rec[37], rec[38]
+        size, azimuth, elevation, roll = struct.unpack_from("<4f", rec, 40)
+        out.append({
+            "name": name,
+            "blend": int(blend),
+            "color": f"#{red:02x}{green:02x}{blue:02x}",
+            "size": _finite(size),
+            "azimuth": _finite(azimuth),
+            "elevation": _finite(elevation),
+            "roll": _finite(roll),
+        })
+    return out
 
 
 # -----------------------------------------------------------------------
@@ -325,5 +490,6 @@ if __name__ == "__main__":
     print(f"      -> {parse_wat_header(wat) if wat else 'missing'}")
     print(f".SKY: {sky}")
     print(f"      -> {parse_sky_header(sky) if sky else 'missing'}")
+    print(f"      -> {parse_sky(sky) if sky else 'missing'}")
     print(f".TRN: {trn}")
     print(f"      -> {parse_trn_lighting(trn)}")
