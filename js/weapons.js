@@ -706,8 +706,8 @@
             + '<div class="card-body vt-wpn-result-body">' + resultCast(sc)
             + '<div class="vt-wpn-result-main">'
             + '<div class="vt-wpn-groups">'
-            + group('Damage', damageRows, tg ? null : 'Pick a target for time to kill.')
-            + group('Ammo', ammoRows, ammoFoot)
+            + group(tg ? 'Damage vs ' + tg.name : 'Damage', damageRows, tg ? null : 'Pick a target for time to kill.')
+            + group(sh ? 'Ammo \u00b7 ' + sh.name : 'Ammo', ammoRows, ammoFoot)
             + group('Fire and flight', projRows)
             + group('Extras', extraRows, extrasFoot)
             + '</div>'
