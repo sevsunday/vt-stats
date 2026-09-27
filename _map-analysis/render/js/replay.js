@@ -74,8 +74,6 @@ import {
   triggerKillFlash,
   updateKillFlashes,
   clearAllKillFlashes,
-  buildTLockDiamonds,
-  updateTLockDiamonds,
 } from './replay-fx.js';
 import { createCameraController } from './replay-cameras.js?v=wasd-free4';
 import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=names1';
@@ -158,8 +156,6 @@ const STATE = {
   labelsContainer: null,
   beaconsGroup: null,
   beacons: null,
-  tlocks: null,
-  tlocksGroup: null,
   // Combat engagement overlay (red attack beams + under-attack reticles).
   // Lives in scene space (reflected coords), like kill flashes.
   engagements: null,
@@ -448,7 +444,6 @@ async function boot() {
   initTrails();
   initLabels();
   initBeacons();
-  initTLocks();
   initEngagements();
   initPools();
   initStructureOverlays();
@@ -756,13 +751,6 @@ function initBeacons() {
   );
   STATE.beacons = beacons;
   STATE.beaconsGroup = group;
-  STATE.worldGroup.add(group);
-}
-
-function initTLocks() {
-  const { diamonds, group } = buildTLockDiamonds(STATE.actors);
-  STATE.tlocks = diamonds;
-  STATE.tlocksGroup = group;
   STATE.worldGroup.add(group);
 }
 
@@ -2299,12 +2287,7 @@ function renderFrame(dtSec = 0) {
       maxBeams: document.body.classList.contains('replay-compact') ? 10 : undefined,
     });
   }
-  // 5. T-lock diamonds (hostile-locked indicator).
-  if (STATE.tlocks && STATE.tlocks.length) {
-    const wallSec = performance.now() / 1000;
-    updateTLockDiamonds(STATE.tlocks, wallSec);
-  }
-  // 6. Unified event feed + scrap meters + now-building + Elo strip.
+  // 5. Unified event feed + scrap meters + now-building + Elo strip.
   updateReplayHud(STATE.progressSec);
   updateReplayElo(STATE.progressSec);
   // 7. Project labels to screen (camera-dependent; runs after camera update).

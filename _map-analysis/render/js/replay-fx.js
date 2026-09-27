@@ -1,7 +1,7 @@
 /* render/js/replay-fx.js
  *
  * Cinematic effects that aren't actors and aren't camera. Phase 1 ships the
- * spawn beacons only; later phases add T-lock diamonds, kill flashes,
+ * spawn beacons only; later phases add kill flashes,
  * vignette, letterbox, film grain, and chase-cam speed lines.
  *
  * Spawn beacons (Phase 1):
@@ -317,94 +317,6 @@ export function updateKillFlashes(scene, flashes, dtSec) {
       flashes.splice(i, 1);
     }
   }
-}
-
-// ============================================================================
-// T-Lock diamonds (Phase 3)
-//
-// A small diamond billboard floating above each actor whose
-// `metrics.target_lock_pct > 0.4`. Acts as a "this player runs the T-key
-// hot" indicator -- read at distance like Ace Combat's hostile-locked icon.
-//
-// Rendered as an additive-blended diamond mesh that always faces camera
-// (we update its lookAt() to camera every frame via updateTLockDiamonds).
-// ============================================================================
-
-const TLOCK_THRESHOLD = 0.4;
-const TLOCK_OFFSET_Y_M = 24;
-const TLOCK_SIZE_M = 4;
-
-/**
- * Build T-lock diamonds for actors that meet the threshold. Returns
- * { diamonds, group }; caller adds group to scene.
- */
-export function buildTLockDiamonds(actors) {
-  const group = new THREE.Group();
-  group.name = 'replay-tlocks';
-  const diamonds = [];
-  for (const actor of actors) {
-    const tint = (TEAM_TINTS[actor.team] || TEAM_TINTS._);
-    const color = new THREE.Color(tint);
-
-    const geom = new THREE.OctahedronGeometry(TLOCK_SIZE_M);
-    const mat = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      depthTest: false,
-      wireframe: false,
-    });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.name = `tlock-${actor.name}`;
-    mesh.renderOrder = 5;  // above terrain + actors
-    diamonds.push({ actor, mesh, mat });
-    group.add(mesh);
-  }
-  return { diamonds, group };
-}
-
-/**
- * Per-frame update: position above each visible actor + pulse the opacity.
- */
-export function updateTLockDiamonds(diamonds, tSecWall) {
-  // tSecWall is real-time elapsed (for pulse timing). Low-frequency sin so
-  // the diamonds breathe at ~0.5Hz.
-  const pulse = 0.65 + 0.25 * Math.sin(tSecWall * Math.PI);
-  for (const d of diamonds) {
-    if (!d.actor.visible || !d.actor.lastValidPos) {
-      d.mesh.visible = false;
-      continue;
-    }
-    const live = d.actor.trail && Array.isArray(d.actor.trail.target);
-    const on = live
-      ? !!d.actor.curTarget
-      : ((d.actor.targetLockPct || 0) > TLOCK_THRESHOLD);
-    if (!on) {
-      d.mesh.visible = false;
-      continue;
-    }
-    d.mesh.visible = true;
-    d.mesh.position.set(
-      d.actor.lastValidPos.x,
-      d.actor.lastValidPos.y + TLOCK_OFFSET_Y_M,
-      d.actor.lastValidPos.z,
-    );
-    // Slow rotation around Y so the diamond reads as "active".
-    d.mesh.rotation.y += 0.02;
-    d.mat.opacity = pulse;
-  }
-}
-
-export function disposeTLockDiamonds(group) {
-  group.traverse(obj => {
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-      else obj.material.dispose();
-    }
-  });
 }
 
 /**

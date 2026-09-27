@@ -1372,7 +1372,7 @@ All distances computed on the `(x, z)` horizontal plane against the player's per
 | `y` | `number[]` | Per-sample world Y (up/down). Stored but not used by v1 metrics; available for future elevation features |
 | `segments` | `[number, number][]` | Index ranges `[start, end]` (inclusive) split at teleport detections. Frontend draws one polyline per segment; the first sample of each post-teleport segment is excluded from `return_to_base_count` |
 | `hp` / `ammo` | `(number\|null)[]` | **v10.** 0–1 ratios vs the ship's `maxHealth` / `maxAmmo`. `null` when the ship had no resolvable cap |
-| `target` | `number[]` | **v26.** Parallel 0/1 T-lock channel (`PlayerState.has_target`). Pre-v26 JSON has no key (replay falls back to career `target_lock_pct`) |
+| `target` | `number[]` | **v26.** Parallel 0/1 T-lock channel (`PlayerState.has_target`). Still emitted. The 3D replay does not read it (no diamond overlay, no `target_lock_pct` fallback). Pre-v26 JSON has no key |
 | `speed` | `(number\|null)[]` | **v26.** Authored `PlayerState.speed` at 1 dp. Pre-v26 JSON has no key |
 
 ##### Teleport detection

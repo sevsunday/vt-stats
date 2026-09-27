@@ -247,7 +247,6 @@ export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
     lastValidPos: null,
     lastSeenSec: rosterRow.lastSeenSec,
     firstSeenSec: rosterRow.firstSeenSec,
-    targetLockPct: rosterRow.targetLockPct,
     visible: true,
     _tintColor: new THREE.Color(tint.hex),
     _baseEmissiveIntensity: 0.45,
@@ -435,7 +434,6 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
     // match). Read by the floating label bars and the side-roster HUD.
     actor.curHp = interp.hp;
     actor.curAmmo = interp.ammo;
-    actor.curTarget = interp.target;
     actor.curSpeed = interp.speed;
 
     // Heading: atan2 over (x, z). Note +Y up world convention: rotation around
