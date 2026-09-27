@@ -44,7 +44,10 @@ const SHIP_GLYPH = {
   scav:     { kind: 'sphere', args: [4.5, 16, 12], yOffset: 5 },
   service:  { kind: 'sphere', args: [4.5, 16, 12], yOffset: 5 },
   recycler: { kind: 'octa',   args: [7],           yOffset: 6 },
-  pilot:    { kind: 'tetra',  args: [3.2],         yOffset: 3 },
+  // On-foot pilots and camera pods with no catalog mesh. Smaller than the
+  // scavenger sphere (radius 4.5). yOffset matches the radius so it sits
+  // on the ground. Team tint comes from makePrimitiveMesh.
+  pilot:    { kind: 'sphere', args: [2.2, 12, 10], yOffset: 2.2 },
   generic:  { kind: 'pyramid', args: [5, 9, 4],    yOffset: 4 },
 };
 
@@ -85,7 +88,6 @@ function makeGeometry(catKey) {
     case 'box':     return new THREE.BoxGeometry(...style.args);
     case 'sphere':  return new THREE.SphereGeometry(...style.args);
     case 'octa':    return new THREE.OctahedronGeometry(...style.args);
-    case 'tetra':   return new THREE.TetrahedronGeometry(...style.args);
     case 'pyramid': return new THREE.ConeGeometry(style.args[0], style.args[1], style.args[2]);
     default:        return new THREE.SphereGeometry(4, 16, 12);
   }

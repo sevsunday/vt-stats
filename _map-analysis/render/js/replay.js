@@ -44,7 +44,7 @@ import {
   updateActorLabels,
   applyVitalBars,
   applyShipModelMode,
-} from './replay-actors.js?v=replay-hz';
+} from './replay-actors.js?v=pilot-sphere';
 import {
   initModelsPref,
   modelsEnabled,
