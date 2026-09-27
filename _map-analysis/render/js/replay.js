@@ -5,11 +5,9 @@
  * mesh + lighting + fog + minimap decal, then layers per-player actors,
  * spawn beacons, and a transport HUD on top.
  *
- * The terrain-mesh / liquid-plane / lighting code is intentionally a
- * close port of viewer.js rather than a shared import because viewer.js's
- * top-level boot routine isn't structured for module reuse and editing it
- * would risk breaking the standalone 3D viewer page. The plan calls this
- * out explicitly under "Reused (no edits)".
+ * Terrain mesh and lighting stay a close port of viewer.js. Water and lava
+ * come from the shared liquids.js builder (always on when the map has
+ * those cells).
  */
 
 import * as THREE from 'three';
@@ -17,6 +15,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
 import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props1';
+import { mountLiquids, placeLiquid } from './liquids.js?v=liquids1';
 
 import { sampleTerrainHeight } from './objects.js?v=pool-flat';
 import {
@@ -146,6 +145,10 @@ const STATE = {
   terrainTileTextures: null,
   terrainUvsMinimap: null,
   terrainWireframe: null,
+  waterMesh: null,
+  lavaMesh: null,
+  waterBaseY: null,
+  lavaBaseY: null,
   hqOn: false,
   hqLoad: null,
   actorsGroup: null,
@@ -410,6 +413,7 @@ async function boot() {
     : '';
   statusStep(hmCells ? `Terrain mesh · ${hmCells}` : 'Terrain mesh');
   await initFloor(mapData);
+  initLiquids(mapData);
   // Real meshes default on. Hold the log until this match's stems have
   // settled so the first frame is not a pop from primitives to hulls.
   initModelsPref();
@@ -792,6 +796,14 @@ function initPools() {
   STATE.poolsGroup = group;
   STATE.pools = objs;
   STATE.worldGroup.add(group);
+}
+
+function initLiquids(mapData) {
+  const placed = mountLiquids(STATE.worldGroup, mapData, STATE.terrainExaggeration);
+  STATE.waterMesh = placed.waterMesh;
+  STATE.lavaMesh = placed.lavaMesh;
+  STATE.waterBaseY = placed.waterBaseY;
+  STATE.lavaBaseY = placed.lavaBaseY;
 }
 
 async function initProps() {
@@ -1299,6 +1311,9 @@ function applyHeightExaggeration(factor) {
     STATE.terrainWireframe.geometry = new THREE.WireframeGeometry(geom);
     oldGeom.dispose();
   }
+
+  placeLiquid(STATE.waterMesh, STATE.waterBaseY, factor);
+  placeLiquid(STATE.lavaMesh, STATE.lavaBaseY, factor);
 
   // Rebuild beacons so their cylinder anchors track the new visual ground.
   if (STATE.beaconsGroup) {
