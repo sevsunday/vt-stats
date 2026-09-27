@@ -653,7 +653,15 @@ def build_animated_glb(parsed, resolve_tex_key, fps=30.0):
     roots = [i for i, nd in enumerate(nodes) if nd["parent"] < 0]
 
     sc = parsed["scale"] or 1.0
-    if sc != 1.0:
+    # Rigid meshes are parented to these roots, so the header scale reaches
+    # their vertices and the bounds the viewer frames. A skinned mesh is a
+    # sibling of the joint root and its inverse-bind matrices are the unscaled
+    # state matrices: scaling only the joints shrinks the GPU skin while the
+    # attribute bounds (and the welded thumbnail, which does not apply this
+    # scale) stay full size. The Hadean pilot's header scale is 0.125 on a
+    # tree that is already ~2 m, which framed a 25 cm speck. Leave skinned
+    # bind poses unscaled so they match the thumbnail.
+    if sc != 1.0 and not skinned:
         for r in roots:
             gltf_nodes[r]["scale"] = [v * sc for v in gltf_nodes[r]["scale"]]
 

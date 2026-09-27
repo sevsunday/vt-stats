@@ -609,10 +609,30 @@ def _extract_odf_lights(blocks: dict, effect_db: dict) -> list | None:
     return out or None
 
 
+def _odf_is_pilot(blocks, category) -> bool:
+    """True when a linked ODF is a person-class pilot.
+
+    Matches GameObjectClass.classLabel 'person', an inheritanceChain entry
+    'person' (both case-insensitive), or the ODF DB top-level category
+    'Pilot'. Category stays the ODF bucket; this flag is catalog-only.
+    Filename substrings are ignored so holiday props (cookie_tree_pilot,
+    iceball_pilot, ...) stay false — those are wingman-class.
+    """
+    if str(category or "").strip().lower() == "pilot":
+        return True
+    if not isinstance(blocks, dict):
+        return False
+    go = blocks.get("GameObjectClass") or {}
+    if str(go.get("classLabel") or "").strip().lower() == "person":
+        return True
+    chain = blocks.get("inheritanceChain") or []
+    return any(str(entry).strip().lower() == "person" for entry in chain)
+
+
 def enumerate_targets(odf_filter=None):
     """Scan odf.min.json for every geometryName + shotGeometry. Returns a dict
-    stem -> {odfs, primaryOdf, unitName, category, factionCode, factionName,
-    odf_art}."""
+    stem -> {odfs, primaryOdf, unitName, category, isPilot, factionCode,
+    factionName, odf_art}."""
     db = json.loads(ODF_DB.read_text(encoding="utf-8"))
     refs: dict[str, list[dict]] = {}
 
@@ -653,6 +673,19 @@ def enumerate_targets(odf_filter=None):
             return (rank, len(c["odf"]))
         cands_sorted = sorted(cands, key=key)
         primary = cands_sorted[0]
+        # ERROR.ODF is a Hadean-pack placeholder that shares espilo_rifle_skel
+        # and is the shortest name, so the length tie-break would make it the
+        # card label and the loadout default. Prefer the ODF that owns the
+        # geometry stem (espilo.odf); the next-shortest name is the Cerberi
+        # cspilo.odf, which would also mis-faction the card.
+        if primary["odf"].lower() == "error.odf":
+            owned = [
+                c for c in cands_sorted
+                if c["odf"].lower() != "error.odf"
+                and stem.startswith(c["odf"][:-4].lower())
+            ]
+            if owned:
+                primary = owned[0]
         odfs = sorted({c["odf"] for c in cands})
         if odf_filter and not (set(odfs) & odf_filter):
             continue
@@ -717,7 +750,17 @@ def enumerate_targets(odf_filter=None):
             if vsr:
                 default_loadout_odf = min(vsr, key=lambda o: (len(o), o))
             elif stock:
-                default_loadout_odf = stock[0]
+                # Same ERROR.ODF placeholder: it shares unitName "Pilot", so
+                # it would otherwise be the first stock loadout.
+                if any(lo["odf"].lower() == "error.odf" for lo in loadouts):
+                    owned = [
+                        o for o in stock
+                        if o.lower() != "error.odf" and stem.startswith(o[:-4].lower())
+                    ]
+                    rest = [o for o in stock if o.lower() != "error.odf"]
+                    default_loadout_odf = owned[0] if owned else (rest[0] if rest else stock[0])
+                else:
+                    default_loadout_odf = stock[0]
         lights = None
         for c in sorted(uniq_cands,
                         key=lambda c: 0 if c["odf"].endswith("_vsr.odf") else 1):
@@ -737,11 +780,16 @@ def enumerate_targets(odf_filter=None):
             cr = _extract_odf_collision(c["blocks"])
             if cr is not None:
                 collision[c["odf"]] = round(cr, 3)
+        # Person-class across ANY linked ODF. category stays the primary
+        # ODF bucket (ISDF/Hadean pilots are filed under Vehicle).
+        is_pilot = any(
+            _odf_is_pilot(c.get("blocks"), c.get("category")) for c in cands)
         out[stem] = {
             "odfs": odfs,
             "primaryOdf": primary["odf"],
             "unitName": primary["unitName"] or stem,
             "category": primary["category"],
+            "isPilot": is_pilot,
             "factionCode": fcode,
             "factionName": FACTION_NAMES.get(fcode, "Other"),
             "odf_art": {"turretNames": art_turret, "recoilNames": art_recoil,
@@ -1523,6 +1571,7 @@ def process_model(job: dict) -> dict:
             "primaryOdf": job["primaryOdf"],
             "odfs": job["odfs"],
             "category": job["category"],
+            "isPilot": bool(job.get("isPilot")),
             "factionCode": job["factionCode"],
             "factionName": job["factionName"],
             "triangles": tris,
@@ -1579,7 +1628,8 @@ def _outputs_fresh(stem: str, msh_path: Path, want_gallery: bool) -> bool:
 
 def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
     """Reuse a prior index.json entry's geometry stats, refreshing the ODF /
-    category / faction fields from the current enumeration."""
+    category / isPilot / faction fields from the current enumeration.
+    Absent isPilot means false."""
     p = prior.get(stem, {})
     return {
         "stem": stem,
@@ -1591,6 +1641,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "primaryOdf": meta["primaryOdf"],
         "odfs": meta["odfs"],
         "category": meta["category"],
+        "isPilot": bool(meta.get("isPilot")),
         "factionCode": meta["factionCode"],
         "factionName": meta["factionName"],
         "triangles": p.get("triangles", 0),
@@ -1667,10 +1718,20 @@ def main():
         print(f"mod pack: {pack['label']} ({pack['id']}): {len(idx)} .dds")
 
     # Resolve each target to a baked .msh; record the misses.
+    # One explicit alias: the Hadean pilot ODF names espilo_rifle_skel, but
+    # the only real mesh in the VSR dependency root (workshop 2785542655) is
+    # the versioned export espilo_rifle_skel_0.13.msh. The empty
+    # espilo_rifle_skel.msha stub is not indexed. Do not generalize this to
+    # other _0.xx workshop exports.
+    msh_stem_aliases = {"espilo_rifle_skel": "espilo_rifle_skel_0.13"}
     resolved = []
     missing = []
     for stem, meta in sorted(targets.items()):
         mp = msh_index.get(stem)
+        if mp is None:
+            alias = msh_stem_aliases.get(stem)
+            if alias:
+                mp = msh_index.get(alias)
         if mp is None:
             missing.append(stem)
             continue
@@ -1792,6 +1853,18 @@ def main():
             for j in jobs:
                 _handle(process_model(j))
 
+    # Targets whose baked mesh is outside the current VSR roots (the XMAS
+    # pack left assetDependencies, but its GLBs are already committed) stay
+    # in the catalog. Geometry is reused; isPilot / category refresh from
+    # this enumeration. Do not invent entries that were never converted.
+    kept_unresolved = 0
+    for stem in missing:
+        if stem not in prior or stem not in targets:
+            continue
+        manifest.append(_cached_entry(stem, targets[stem], prior))
+        kept_unresolved += 1
+    cached += kept_unresolved
+
     # Assemble + write the manifest.
     manifest.sort(key=lambda e: (e.get("category") or "", e.get("unitName") or "", e["stem"]))
     odf_index = {}
@@ -1849,7 +1922,8 @@ def main():
 
     dt = time.perf_counter() - t0
     print(f"\nwrote {idx_path} -- {len(manifest)} models "
-          f"({cached} cached, {len(jobs) - len(errors)} processed, {len(errors)} failed, "
+          f"({cached - kept_unresolved} cached, {len(jobs) - len(errors)} processed, "
+          f"{len(errors)} failed, {kept_unresolved} kept without a current mesh, "
           f"{animated_count} animated, {teamcolor_count} team-colorable, "
           f"{emissive_count} emissive, {normal_count} normal-mapped, "
           f"{specular_count} roughness-mapped, {modskin_count} with mod skins, "

@@ -274,11 +274,12 @@ let texturePacks = {};
 let activeViewer = null;
 let loadoutEntry = null;   // manifest entry whose loadout panel is on screen
 let ultraCompiled = false;   // per-viewer: whether the Ultra pass chain has compiled
-// faction: single-select string ('all' = no filter), default ISDF.
-// category: multi-select Set (empty = no filter / "All"), default Building+Vehicle.
-const filters = { q: '', faction: 'ISDF', category: new Set(['Building', 'Vehicle']), sort: 'name' };
+// faction: single-select string ('all' = no filter), default All.
+// category: multi-select Set (empty = no filter / "All"), default Building+Pilot+Vehicle.
+const filters = { q: '', faction: 'all', category: new Set(['Building', 'Pilot', 'Vehicle']), sort: 'name' };
 const MODEL_SORTS = new Set(['name', 'faction', 'category', 'triangles-desc', 'triangles-asc']);
-const DEFAULT_MODEL_CATS = ['Building', 'Vehicle'];
+// Sorted form written to the URL is Building,Pilot,Vehicle.
+const DEFAULT_MODEL_CATS = ['Building', 'Pilot', 'Vehicle'];
 let historyWrites = 0;
 let searchReplace = false;
 let searchTimer = 0;
@@ -301,8 +302,9 @@ function modelFilterParams(opts) {
   if (cur.get('embed') === '1') params.set('embed', '1');
   const q = filters.q.trim();
   if (q) params.set('q', q);
-  if (filters.faction === 'all') params.set('faction', 'all');
-  else if (filters.faction && filters.faction !== 'ISDF') params.set('faction', filters.faction);
+  // All is the default, so the param is omitted. ISDF (and every other
+  // faction) is written explicitly.
+  if (filters.faction && filters.faction !== 'all') params.set('faction', filters.faction);
   const cats = [...filters.category].sort();
   const def = DEFAULT_MODEL_CATS.slice().sort().join(',');
   if (!cats.length) params.set('cat', 'all');
@@ -340,10 +342,13 @@ function hydrateModelFilters() {
   if (els.search) els.search.value = filters.q;
   const factions = new Set(manifest.map((m) => m.factionName).filter(Boolean));
   const fac = params.get('faction');
-  if (fac === 'all') filters.faction = 'all';
-  else if (fac && factions.has(fac)) filters.faction = fac;
-  else filters.faction = 'ISDF';
+  // Missing or unknown faction means All. An explicit faction=ISDF still
+  // selects ISDF when that name is in the catalog.
+  if (fac && factions.has(fac)) filters.faction = fac;
+  else filters.faction = 'all';
   const categories = new Set(manifest.map((m) => m.category).filter(Boolean));
+  // Pilot is a real chip even when every pilot is filed under another bucket.
+  if (manifest.some(isPilotModel)) categories.add('Pilot');
   const cat = params.get('cat');
   if (cat === 'all') filters.category = new Set();
   else if (cat) {
@@ -438,9 +443,20 @@ function uniqueSorted(getter) {
   return [...new Set(manifest.map(getter).filter(Boolean))].sort();
 }
 
+// Person-class pilots, plus anything already filed in the Pilot bucket.
+// Do not match holiday props by filename (cookie_tree_pilot, iceball_pilot, ...).
+function isPilotModel(m) {
+  return !!(m && (m.isPilot === true || m.category === 'Pilot'));
+}
+
 function buildChips() {
   const factions = uniqueSorted((m) => m.factionName);
   const categories = uniqueSorted((m) => m.category);
+  // Inject Pilot when a person-class model exists even if none use that bucket.
+  if (manifest.some(isPilotModel) && !categories.includes('Pilot')) {
+    categories.push('Pilot');
+    categories.sort();
+  }
   renderChipGroup(els.factionChips, 'faction', ['All', ...factions]);
   renderChipGroup(els.categoryChips, 'category', ['All', ...categories]);
 }
@@ -497,7 +513,11 @@ function applyFilters() {
   const q = filters.q.trim().toLowerCase();
   let rows = manifest.filter((m) => {
     if (filters.faction !== 'all' && m.factionName !== filters.faction) return false;
-    if (filters.category.size && !filters.category.has(m.category)) return false;
+    if (filters.category.size) {
+      const inBucket = filters.category.has(m.category);
+      const asPilot = filters.category.has('Pilot') && isPilotModel(m);
+      if (!inBucket && !asPilot) return false;
+    }
     if (q) {
       const hay = `${m.unitName} ${m.stem} ${(m.odfs || []).join(' ')}`.toLowerCase();
       if (!hay.includes(q)) return false;
