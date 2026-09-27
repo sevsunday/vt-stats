@@ -5,7 +5,7 @@
  * contract — this module never invents a second breakpoint.
  */
 
-import { getTickRate, tickToSec, usefulInGameNick } from './replay-data.js';
+import { getTickRate, tickToSec } from './replay-data.js';
 
 const FEED_CAP_DESKTOP = 12;
 const FEED_LOOKBACK_SEC = 9;
@@ -266,12 +266,12 @@ function eventPasses(ev, filters) {
 function formatEvent(matchData, ev) {
   const row = ev.row || {};
   if (ev.kind === 'kill') {
-    const killer = usefulInGameNick(row.killer_in_game_nick) || row.killer || 'env';
+    const killer = row.killer || 'env';
     const victimPretty = prettyOdf(matchData, row.victim_odf);
     if (isTeamLabel(row.victim) && victimPretty) {
       return { lead: killer, mid: 'destroyed', tail: victimPretty };
     }
-    const victim = usefulInGameNick(row.victim_in_game_nick) || row.victim || '?';
+    const victim = row.victim || '?';
     const ship = prettyOdf(matchData, row.killer_odf);
     return { lead: killer, mid: 'killed', tail: victim, ship };
   }
@@ -282,16 +282,16 @@ function formatEvent(matchData, ev) {
     return { lead: `T${row.team || '?'}`, mid: verb, tail: name, extra: lane };
   }
   if (ev.kind === 'snipe') {
-    const sniper = usefulInGameNick(row.sniper_in_game_nick) || row.sniper || '?';
-    const victim = usefulInGameNick(row.victim_in_game_nick) || row.victim || '?';
+    const sniper = row.sniper || '?';
+    const victim = row.victim || '?';
     return { lead: sniper, mid: 'sniped', tail: victim };
   }
   if (ev.kind === 'pickup') {
-    const picker = usefulInGameNick(row.picker_in_game_nick) || row.picker || '?';
+    const picker = row.picker || '?';
     return { lead: picker, mid: 'picked up', tail: row.powerup_name || prettyOdf(matchData, row.powerup_odf) };
   }
   if (ev.kind === 'podkill') {
-    const killer = usefulInGameNick(row.killer_in_game_nick) || row.killer || '?';
+    const killer = row.killer || '?';
     return { lead: killer, mid: 'denied', tail: row.powerup_name || prettyOdf(matchData, row.powerup_odf) };
   }
   if (ev.kind === 'beat') {
@@ -320,16 +320,11 @@ function renderRow(matchData, ev) {
 function commanderName(matchData, side) {
   const leaders = (matchData.match && matchData.match.team_leaders) || {};
   const lead = leaders[String(side)];
-  let name = (lead && lead.name) || '';
-  if (!name) {
-    const row = (matchData.leaderboard || []).find((r) => (
-      r.is_commander && (r.faction === side || r.team === side)
-    ));
-    name = (row && row.name) || '';
-  }
-  if (!name) return '';
-  const row = (matchData.leaderboard || []).find((r) => r.name === name);
-  return usefulInGameNick(row && row.in_game_nick) || name;
+  if (lead && lead.name) return lead.name;
+  const row = (matchData.leaderboard || []).find((r) => (
+    r.is_commander && (r.faction === side || r.team === side)
+  ));
+  return (row && row.name) || '';
 }
 
 function labelMeters(matchData) {

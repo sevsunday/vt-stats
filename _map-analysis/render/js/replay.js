@@ -30,10 +30,9 @@ import {
   buildRoster,
   buildKillIndex,
   getTickRate,
-  usefulInGameNick,
   loadReplayTrack,
   applyReplayTrack,
-} from './replay-data.js?v=props1';
+} from './replay-data.js?v=names1';
 import {
   buildActorsGroup,
   updateActors,
@@ -79,7 +78,7 @@ import {
   updateTLockDiamonds,
 } from './replay-fx.js';
 import { createCameraController } from './replay-cameras.js?v=wasd-free4';
-import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=props1';
+import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=names1';
 import {
   buildEngagementLines,
   updateEngagements,
@@ -2506,12 +2505,8 @@ function appendKillTicker(killEntry, killerFactionCode) {
   };
   const li = document.createElement('div');
   li.className = 'kill-ticker-row';
-  // Prefer in-game nick where present (matches the dashboard's renderKillFeed
-  // approach and what the user actually saw on the chat overlay).
-  const killerName = usefulInGameNick(killEntry.killer_in_game_nick)
-                     || killEntry.killer || 'env';
-  const victimName = usefulInGameNick(killEntry.victim_in_game_nick)
-                     || killEntry.victim || '?';
+  const killerName = killEntry.killer || 'env';
+  const victimName = killEntry.victim || '?';
   // Production kill-feed schema doesn't carry a weapon; show the killer's
   // ship ODF resolved through odf_map. Falls back to bare ODF stem.
   const odfMap = (STATE.matchData && STATE.matchData.odf_map) || {};

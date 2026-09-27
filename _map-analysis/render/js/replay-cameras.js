@@ -13,10 +13,12 @@
  *
  * Mode semantics:
  *   - free:     OrbitControls active. Fully user-driven.
- *   - chase:    Lerp behind the focused actor (default ~80m back, +25m up).
+ *   - chase:    Lerp behind the focused actor at the closest allowed
+ *               distance (same rear angle as the old 80m/25m shot).
  *               Scroll or pinch changes distance; drag orbits around the
  *               actor. Offsets reset when Chase is entered or the focus
- *               actor changes. Cinema chase shots ignore those offsets.
+ *               actor changes. Cinema chase shots stay at the wide 80m/25m
+ *               frame and ignore the user offsets.
  *   - topdown:  Snap to overhead at world center, looking straight down.
  *   - cinema:   (Phase 3) auto-director picks shots; falls through to free
  *               for now if cinema isn't wired yet.
@@ -37,10 +39,12 @@ const MOVE_GROUND_CLEAR_M = 8;
 
 const CHASE_BACK_DIST_M  = 80;
 const CHASE_UP_DIST_M    = 25;
-const CHASE_RADIUS_DEFAULT = Math.hypot(CHASE_BACK_DIST_M, CHASE_UP_DIST_M);
-const CHASE_ELEV_DEFAULT = Math.atan2(CHASE_UP_DIST_M, CHASE_BACK_DIST_M);
 const CHASE_RADIUS_MIN = 18;
 const CHASE_RADIUS_MAX = 420;
+// Wide stock frame. Cinema shots use this. Chase itself starts fully zoomed in.
+const CHASE_RADIUS_STOCK = Math.hypot(CHASE_BACK_DIST_M, CHASE_UP_DIST_M);
+const CHASE_RADIUS_DEFAULT = CHASE_RADIUS_MIN;
+const CHASE_ELEV_DEFAULT = Math.atan2(CHASE_UP_DIST_M, CHASE_BACK_DIST_M);
 // Stay above OrbitControls' maxPolarAngle (π/2.05) so a low orbit is not
 // pushed back up on the next controls.update().
 const CHASE_ELEV_MIN = 0.05;
@@ -531,7 +535,7 @@ function updateChase(state, camera, orbitControls) {
  */
 function writeChasePose(state, actor, yaw, outPos, outTgt) {
   const user = state.mode === 'chase';
-  const radius = user ? state.chaseRadius : CHASE_RADIUS_DEFAULT;
+  const radius = user ? state.chaseRadius : CHASE_RADIUS_STOCK;
   const elev = user ? state.chaseElev : CHASE_ELEV_DEFAULT;
   const yawOff = user ? state.chaseOrbitYaw : 0;
   const aim = yaw + yawOff;
