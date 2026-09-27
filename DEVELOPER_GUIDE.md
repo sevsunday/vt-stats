@@ -1753,7 +1753,7 @@ Every Bootstrap utility class and inline-style color the seed used has been swap
 
 ### Cross-page integration
 
-- **Topnav**: every production shell carries an ODF dropdown (ODF Browser, Build Trees, ODF Guide) in the shared topnav cluster.
+- **Topnav**: every production shell carries an ODF dropdown (ODF Browser, Build Trees, ODF Guide, Weapons) in the shared topnav cluster.
 - **Kill-feed cross-link**: each killer/victim ODF chip in `js/app.js` `renderKillFeed()` is wrapped in `<a class="vt-odf-link" href="odf/index.html?odf=<basename>" target="_blank" rel="noopener">`. Basename is the raw `entry.killer_odf` lowercased + `.odf`-stripped + `encodeURIComponent`'d. The `.vt-odf-link` / `.vt-odf-link-fallback` styles live in `css/vtstats-theme.css` (NOT `css/odf-browser.css`) so they apply on the dashboard, which doesn't load the ODF browser stylesheet.
 
 ### VSR Faction Build Trees
@@ -1765,6 +1765,135 @@ The seed's fullscreen build-tree modal lives as its own page at `build/index.htm
 - `initializeCompareModal` rebinds event listeners on every `displayODFData()` call. Each rebind is benign because the underlying DOM elements are also recreated, but it would be cleaner to attach listeners once. Out of scope for v1.
 - Inline `onclick` handlers on dynamically-emitted HTML depend on the global `window.browser` reference. Refactoring these to `addEventListener` was deemed out of scope; the global is preserved.
 - No ARIA focus traps in the compare modal, no `aria-live` on search results, no explicit `role` on ODF list buttons beyond Bootstrap's defaults. Out of scope for v1.
+
+### Weapons Lab (`weapons/index.html`)
+
+A standalone, purely client-side calculator, 4th item of the ODF dropdown. It answers "what does weapon X do to target Y when fired from ship Z": per hit, DPS, sustained DPS, time to kill, ammo per second, shots per tank, range, splash, pulses and charge levels, each labelled with how directly it follows from the ODF. Corpus-wide, picker-unaware, NOT in the pipeline cache key.
+
+| File | Role |
+|---|---|
+| `weapons/index.html` | Shell (canonical topnav, ODF dropdown active), Scenario / Damage matrix pills |
+| `js/weapons-calc.js` | Engine, `window.VTWeaponsCalc`. Pure, no DOM at load |
+| `js/weapons.js` | Page controller: pickers, result card, matrix, URL state |
+| `css/weapons.css` | `.vt-wpn-*` styles (`--kb-*` / `--vt-*` only) |
+| `scripts/build_hud_assets.py` | Standalone. Lifts reticles + hardpoint icons from the local BZ2R install |
+| `data/ui/reticles/*.png` + `index.json` | 100 reticle frames (65 stems), committed |
+| `data/ui/hud/hp_<cat>.png` | The 8 in-game weapon-slot icons, committed |
+| `_investigation/check_weapons_calc.mjs` | Gitignored gate: `node _investigation/check_weapons_calc.mjs` |
+
+#### Data joins
+
+All values in `data/odf.min.json` are strings with inheritance pre-merged; the engine reads every section and key case-insensitively (`addhealth` / `addHealth`) and parses with `parseFloat` (`"170e-3"`, `"1e30"`, `"250.0f"`).
+
+| Need | Source |
+|---|---|
+| Weapon identity | `WeaponClass.wpnName`, `wpnCategory` (4-char prefix, so the legacy `CANNON` reads as `CANN`), `isAssault`, `altName` |
+| Fire rate | First present of `CannonClass` / `LauncherClass` / `TargetingGunClass` / `DispenserClass` / ... (`shotDelay`, `salvoCount`, `salvoDelay`, `shotAlternate`, `firstDelay`, `lockDelay`) |
+| Damage | The `Ordnance` bucket entry named by `WeaponClass.ordName` (identical to the inlined `Ordnance.*` sections, and it carries the ordnance `inheritanceChain`): `OrdnanceClass.damageValue(N..A)`, `ammoCost`, `shotSpeed`, `lifeSpan`; splash `ExplVehicle` / `ExplBuilding` `ExplosionClass`; pulses `PulseShellClass` + `ExplPulse.ExplosionClass`; stuck damage `LeaderRoundClass` |
+| Charge guns | `ChargeGunClass.ordNameN`, `salvoCountN`, `salvoDelayN`, `shotDelayN` (the hold time), `holdRate` |
+| Droppers | `DispenserClass` / `SatchelPackClass.objectClass` → the object in any bucket (the Wasp missile lives in `Misc`) → `MineClass.xplBlast` or `TorpedoClass.xplBlast` → `Explosion` bucket |
+| Shooter | `GameObjectClass.weaponHardN` (category = the node name after an optional `HP_`), `weaponNameN`, `weaponAssaultN`, `maxAmmo`, `addAmmo`. Deployed: `MorphTankClass.maxAmmo` / `addAmmo`, and `switchMask` (right to left, hardpoint 1 = last char, default `11111`) flips a hardpoint to assault and mounts its stock weapon's `altName` |
+| Target | `armorClass` (default `N`), `maxHealth`, `addhealth`; deployed: `MorphTankClass.maxHealth` / `addhealth`. Shield = the `ShieldUpgradeClass.shieldClass` of a mounted `shieldup` weapon (the Dread carries Stasis), or the user's pick for an empty shield slot |
+
+**Damage column:** `S` / `D` / `A` when the target's shield is up, otherwise its `armorClass` `N` / `L` / `H`. Match telemetry agrees: a Snare Trap hit on an armor-N ship with an Absorption shield records `damageValue(A)`.
+
+#### Scope and families
+
+- **Ships and targets**: every Vehicle, Building, and Pilot entry except stems starting with `virtual_class` (placeholders, including silo classes also named Extractor). Constructors build the Power plant, not an extractor, so the extractor ODFs (`ibscav`, `ibscav_vsr`, `fbscav`, `fbscav_vsr`, `extract`) are found by search. There is no Hadean unit named Extractor.
+- **Weapons**: the armory powerups of the ship's faction (`ibarmo_vsr` / `ebarmo_vsr` / `fbstro_vsr`), `weaponName` plus the `altName` twin, plus any weapon that ship mounts. No ship, or a ship with no faction armory, uses the union of the three. The Damage matrix uses that union. An undeployed Warrior's cannons are the stronghold's four: Plasma Cannon, Sonic Blast, Quill, Arc Cannon.
+- **Build-tree walk** (gate only, not a page toggle): from `ibrecy_vsr` / `ebrecym_vsr` / `fbrecy_vsr` using `js/build-tree.js`'s `numbered()` / `armoryItems()` verbatim (case-sensitive `buildItemN`; `ebfact2_vsr` carries both `buildItem7` and `builditem7`), but following `upgradeName` on every entry. Ships = Vehicle entries reached, buildings = Building entries reached, weapons = armory powerups + reached ships' `weaponNameN` + their `altName` links, pilots = Vehicle entries with chain terminal `person` and `vsr` in the stem. Result: 56 ships, 28 buildings, 3 pilots, 123 weapons, 85 families. The page catalog does not add the ships' `weaponNameN` unless that weapon is mounted on the ship being viewed.
+- **Families** are altName pairs whose `isAssault` flags differ, with mutual links paired first (`gminidm` points one-way at `gminigun_a`, which pairs with `gminigun_c`). Twins with different names form one family (Quill / Fang). The key is the combat stem minus `_c` unless that collides with another weapon stem (`giongn_c`, `gslicer_c`, `gtagcr_c`, `gshellgun_c`, `gguardgn_c` keep the suffix); assault-only families use the assault stem. `family()` also accepts any variant stem.
+
+#### Variant and firing group
+
+With a shooter, the matching hardpoints are those of the family's category. The assault twin is used when a matching hardpoint is assault and the twin exists, otherwise the combat one. The Combat / Assault buttons stay enabled only for a twin that has a matching hardpoint, so an override can never produce an impossible mount. With no matching hardpoint the page warns and computes as a hypothetical single mount. The firing group `g` is every matching hardpoint with the chosen variant's flag (same-type hardpoints fire together; `shotAlternate` splits the same total), forced to 1 for pilots and HAND / PACK, and always that full count. Picking a ship selects `defaultWeapon()`: the family of the first hardpoint that has a stock weapon and is not a shield. The Scout opens on Minigun, both guns; the Archer opens on the Howitzer. A shared URL keeps the weapon it names. Deploy keeps the current family when a twin still fits that loadout, and otherwise selects the deployed loadout's first weapon. `weaponMask` is the AI preference and is not used.
+
+**Weapon list filter.** The catalog is the faction armory above, not every weapon ODF. With a ship picked, the Weapon picker lists that faction first, then a muted `Other factions` divider and the other two armories' weapons that fit the same hardpoints (a crate steal or a snipe). `Show all weapons` stays on the home armory and does not add those. A family is listed only when at least one variant fits a hardpoint: `fittingVariants(family, shooter)` applies the same category and combat / assault match as `resolveVariant`, so a listed weapon never lands on the hypothetical-mount warning. When only one twin fits, the row becomes that variant (its name, stem, reticle and a single C / A tag; the Assault Tank sees `Fang` / `gquill_a`); when both fit (pilot hand slots), the row stays the family. Morph tanks follow the Deployed toggle. Category chips for slot types the ship lacks are disabled, except an active one so it can be cleared. A sticky note at the top of the list counts the fits and carries the `Show all weapons` opt-out, which resets on every new ship. View state only (not in the URL); the Damage matrix is never filtered.
+
+#### Formulas
+
+| Quantity | Formula |
+|---|---|
+| Per hit | `damageValue(<column>)` of the resolved ordnance (charge guns: the top level; droppers: the detonation; splash-only ordnance: the splash value) |
+| Cycle | `max(shotDelay, salvoCount × salvoDelay + firstDelay)`; `firstDelay` applies to TAG-style targeting guns only |
+| Shots per second | `salvoCount / cycle` |
+| DPS | `per hit × shots per second × g` |
+| Ammo per second | `ammoCost × shots per second × g`; continuous weapons `ammoCost × g` |
+| Shots / volleys per tank | `floor(maxAmmo / ammoCost)` / `floor(maxAmmo / (ammoCost × salvoCount × g))` |
+| Time to empty | `maxAmmo / (ammo per second − addAmmo)`; never when regen covers the drain |
+| Sustained DPS | `min(DPS, addAmmo / ammoCost × per hit)`; continuous `DPS × min(1, addAmmo / ammo per second)` |
+| Hits / volleys to kill | `ceil(maxHealth / per hit)` / `ceil(hits / (g × salvoCount))` |
+| Time to kill | `(volleys − 1) × cycle`; continuous weapons `maxHealth / DPS` |
+| Ammo used | `hits × ammoCost / maxAmmo` (a warning above 100%) |
+| Net of target repair | `DPS − addhealth` (a warning when the target out-repairs the DPS) |
+| Range | `shotSpeed × lifeSpan`; above 2000 m it reads as lobbed and `aiRange` is shown |
+| Pulses | `floor((lifeSpan − pulseDelay) / pulsePeriod)` × the `ExplPulse` value within its radius, labelled as potential |
+| Arc Cannon | per hit `damageValue × salvoDelay`; DPS `per hit × ARC_HITS_PER_SEC (30) × g` |
+| Damage field | `damageValue` as damage per second within `damageRadius` |
+
+Worked examples the gate pins: Blast (`gblast_c`, Tank) vs Scavenger = 300 per hit, 150 DPS, 10 hits, 18 s, 11 shots per 2200 tank; Chain Gun ×2 (`gchainvsr_c`, Tank) vs Warrior + Absorption = 16 per hit, 320 DPS, 50 ammo/s; Blast on the Assault Tank resolves `gblast_a` = 400 vs H, 10 shots per 3000 tank; a deployed Warrior mounts `gsplasma_a` + `giongn_a` ×2 with `maxAmmo` 2200, `addAmmo` 0, `maxHealth` 3000, `addhealth` 12.
+
+#### Arc Cannon calibration
+
+The guide describes `ArcCannonClass.salvoDelay` as the time between shots, which suggests DPS = `damageValue / salvoDelay` (Arc Stream vs H = 4,000). Match telemetry disagrees: every recorded Arc Stream `DamageDealt` against heavy armor is exactly 40 = `damageValue(H)` 400 × `salvoDelay` 0.1 (Snare Trap events are likewise 0.4 / 0.5 / 0.3), and bursts against a single mobile Scavenger arrive at about 30 events per second on 20 Hz recordings (alternating 1 and 2 per tick). The engine therefore uses per hit = `damageValue × salvoDelay` and `ARC_HITS_PER_SEC = 30`, giving Arc Stream vs H = 1,200 DPS. It stays in the `estimated` tier because the engine timing is not published.
+
+#### Damage kinds and tiers
+
+| Kind | When | Tier |
+|---|---|---|
+| `direct` | cannon / machinegun / mortar / detonator / launchers / targeting whose ordnance carries direct damage, splash or stuck damage | `exact` |
+| `pulse` | ordnance with `PulseShellClass` | `exact` |
+| `charge` | `chargegun`; every level listed, headline = top level | `exact` |
+| `blast` | dispenser or satchel pack whose object has a `MineClass` / `TorpedoClass` `xplBlast` | `exact` |
+| `arc` / `field` | `arccannon` / `damagefield` | `estimated` |
+| `components` | ordnance terminal `spraybomb` / `popper` / `radarpopper` / `laserpopper` / `seismic`; trip, flare and weapon mines; drones; torpedo launchers. Each part with damage is listed with its own values, including weapons fired by a dropped object | `components` |
+| `utility` | shields, jetpacks, blink, phantom / RED field / SITE camera, magnet guns, force fields, day wreckers, zero-damage ordnance (EMP lockdown) | `none` |
+
+Satchel packs resolve like dispensers (their object has a real detonation). Torpedo launchers stay `components` and list the launched object's detonation and blast.
+
+#### Engine class defaults
+
+Applied only when an ODF omits the key, from `docs/reference/odf-properties-guide.md`; every default used surfaces as an assumption.
+
+| Class | Defaults |
+|---|---|
+| Weapons (all) | `salvoCount 1`, `salvoDelay 0`, `shotAlternate false` |
+| `cannon` / `machinegun` / `salvo` | `shotDelay 0.2` (`machinegun` / `mortar` / `chargegun` / `detonator` inherit from `cannon`) |
+| `mortar` | `shotDelay 1.0` |
+| `targeting` | `shotDelay 1.0`, `salvoCount 10`, `salvoDelay 0.2`, `firstDelay 1.0` |
+| Launchers | `shotDelay 0`, `lockDelay 5.0` |
+| `dispenser` / `satchelpack` | `shotDelay 0` / `1.0` |
+| `arccannon` | `salvoDelay 0.1`, `finishDist 100` |
+| `jetpack` / special items / `magnetgun` / `blink` | `ammoCost 1` + `burnTime 10` / `ammoCost 100` per second / `ammoCost 10` per second / `ammoBase 100` + `ammoDist 10` |
+| Ordnance base / `bullet` / `beam` / `grenade` | `ammoCost 0, lifeSpan 1e30, shotSpeed 0` / `1, 5, 200` / `1, 200e-6, 1e6` / `10, 1e30, 50` |
+| Missiles / `pulse` / `magnetshell` / `leader` | `ammoCost 10` / `10, 1e30, 50` + `pulseDelay 1.0`, `pulsePeriod 0.5` / `10, 1e30, 50` / `stickTime 2.0` |
+| Objects | `armorClass N`, `shieldClass N`, `addAmmo 0`, `addhealth 0`, `weaponAssaultN false`, `switchMask 11111` |
+
+#### Reticles and HUD art
+
+`python scripts/build_hud_assets.py [--bz2r PATH] [--force]` parses the HUD sprite table (`bz2r_res/interface/sprite.txt`: `"name" sheet U V W H TW TH 0xFLAGS`), keeps the rows on the ten reticle sheets (`ir_cann ir_mag ir_mort ir_horn ir_shad ir_com ir_rckt sr_cann sr_mort sr_rcksp`), decodes each 512×512 DX10 BC3 sheet with `scripts/object-render/dds_decode.py`, and crops each rect scaled by `sheet width / TW` (×4) into `data/ui/reticles/<name>.png` (lowercased, dot kept: `gmaggun.0.png`). It also converts `baked/HUD/hp/hp_<cat>.dds` into `data/ui/hud/`. Existing PNGs are skipped unless `--force`; `index.json` is rewritten deterministically, so an unchanged install leaves no diff. The VSR config mod ships no sprite overrides, so the stock art is what VSR players see.
+
+`index.json`: `{schema_version: 1, source, table_px: 128, frames: {name: {file, sheet, u, v, w, h, px_w, px_h, stem, frame}}, stems: {stem: [frame names in table order]}}`. A weapon's reticle is `WeaponClass.wpnReticle` lowercased (the malformed `gbolt" / "octagon` on the snare ODFs sanitizes to `gbolt`), resolved as `name` or `name.0`. Its frame strip is every frame of that stem plus any frame named by `lockingReticle` / `lockedReticle` / `armedReticle` / `busyReticle` / `targetReticle` / `wpnReticle1..7`; the field that names a frame becomes its label (TAG: Idle / Locking / Locked; MAG: Level 1..7), launcher stages read Lock 0..3 / A / B. A missing index or image renders a placeholder, never an error.
+
+#### URL contract
+
+All state is written with `history.replaceState`. An empty query string opens `?w=gblast&s=ivtank_vsr&t=ivscav_vsr`. Unknown stems are dropped with a status line.
+
+| Param | Meaning |
+|---|---|
+| `w` | Weapon family key (any variant stem is accepted and normalized) |
+| `v` | `c` / `a`: picks the twin without a ship; with a ship it applies only when that twin has a matching hardpoint |
+| `s`, `sd=1` | Shooter stem, deployed |
+| `t`, `td=1` | Target stem, deployed |
+| `sh` | Target shield `N` / `S` / `D` / `A` (`N` forces no shield on a shielded ship) |
+| `g` | Ignored. The firing group is always every matching hardpoint |
+| `scope` | Ignored. Ships and targets are the full ODF database; weapons are the faction armory |
+| `tab=matrix` | Damage matrix tab |
+| `cat` | Weapon category filter, shared by the weapon picker and the matrix |
+
+#### Assumptions shown on the page
+
+Splash is the maximum value within its radius (no falloff); pulse counts are potential; lock-on time is not in the fire rate; TAG cycles add `firstDelay` and ignore leader flight time, and the leader round's ammo is not included; dropper ammo per drop is the dropped object's `maxAmmo` (engine convention, unverified); mine damage is the full detonation at its centre; charge-gun headlines use the top level; the target's repair rate is not in the kill time; snipes (cockpit kills) are not modeled; arc and field timing are estimates.
 
 ## 13. VTSR-T Methodology {#vtsr-methodology}
 

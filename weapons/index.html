@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default" data-mode="dark" class="h-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Weapons Lab — VT Stats</title>
+  <meta name="description" content="Damage per hit, DPS, time to kill and ammo economics for every Battlezone: Combat Commander weapon against every ship and structure, straight from the ODF database.">
+
+  <link rel="canonical" href="https://vtstats.bz/weapons/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Weapons Lab — VT Stats">
+  <meta property="og:description" content="Damage per hit, DPS, time to kill and ammo economics for every Battlezone: Combat Commander weapon against every ship and structure, straight from the ODF database.">
+  <meta property="og:url" content="https://vtstats.bz/weapons/">
+  <meta property="og:site_name" content="VT Stats">
+
+  <link rel="stylesheet" href="../vendor/bootstrap/css/bootstrap.min.css">
+  <link rel="stylesheet" href="../vendor/bootstrap-icons/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/theme-system.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="../css/layout.css">
+  <link rel="stylesheet" href="../css/vtstats-theme.css">
+  <link rel="stylesheet" href="../css/weapons.css">
+</head>
+<body class="d-flex flex-column h-100">
+
+  <nav class="navbar navbar-expand-md sticky-top border-bottom">
+    <div class="container-fluid px-3 px-md-4 gap-2">
+      <a class="navbar-brand fw-bold" href="../index.html" style="color: var(--kb-text-primary); text-decoration: none;">
+        <i class="bi bi-crosshair me-1" style="color: var(--kb-primary);"></i>VT Stats
+      </a>
+
+      <button class="vt-nav-icon-btn vt-navbar-toggler d-md-none ms-auto" type="button"
+              data-bs-toggle="collapse" data-bs-target="#topnav-collapse"
+              aria-controls="topnav-collapse" aria-expanded="false" aria-label="Toggle navigation">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="collapse navbar-collapse flex-md-grow-0 ms-md-auto order-md-1" id="topnav-collapse">
+        <div class="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 vt-nav-menu">
+          <a href="../index.html" class="vt-nav-icon-btn"
+             title="Open the dashboard" aria-label="Dashboard">
+            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn active" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="ODF" aria-current="page">
+              <i class="bi bi-boxes me-1"></i>ODF <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../odf/"><i class="bi bi-boxes me-2"></i>ODF Browser</a></li>
+              <li><a class="dropdown-item" href="../build/"><i class="bi bi-diagram-3 me-2"></i>Build Trees</a></li>
+              <li><a class="dropdown-item" href="../odf/guide/"><i class="bi bi-journal-text me-2"></i>ODF Guide</a></li>
+              <li><a class="dropdown-item active" href="./" aria-current="page"><i class="bi bi-crosshair2 me-2"></i>Weapons</a></li>
+            </ul>
+          </div>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Models">
+              <i class="bi bi-box me-1"></i>Models <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../models/"><i class="bi bi-box me-2"></i>Game Models</a></li>
+              <li><a class="dropdown-item" href="../lego/"><i class="bi bi-bricks me-2"></i>LEGO</a></li>
+            </ul>
+          </div>
+          <a href="../map/" class="vt-nav-icon-btn"
+             title="Browse the VSR map catalog" aria-label="Maps">
+            <i class="bi bi-map me-1"></i>Maps
+          </a>
+          <div class="dropdown vt-nav-dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="true" aria-label="Ratings and players">
+              <i class="bi bi-trophy me-1"></i>ELO <i class="bi bi-chevron-down vt-nav-caret"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="../elo/"><i class="bi bi-trophy me-2"></i>ELO</a></li>
+              <li><a class="dropdown-item" href="../player/"><i class="bi bi-people me-2"></i>Players</a></li>
+            </ul>
+          </div>
+          <a href="../tools/" class="vt-nav-icon-btn vt-nav-icon-btn--tools"
+             data-vt-tools-link data-vt-tools-live="0"
+             title="Lobby tools (player wheel, coinflip, map roll, team balonce, live session)"
+             aria-label="Tools">
+            <i class="bi bi-controller me-1"></i>Tools
+          </a>
+          <div class="dropdown">
+            <button class="vt-nav-icon-btn" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" title="Change theme" aria-label="Change theme">
+              <i class="bi bi-palette"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" data-theme-menu style="min-width: 260px;"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="vt-wpn-page flex-grow-1">
+    <header class="vt-wpn-head">
+      <h1 class="vt-wpn-title">Weapons Lab</h1>
+      <ul class="nav nav-pills vt-wpn-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="vt-wpn-tab-scenario" data-bs-toggle="pill"
+                  data-bs-target="#vt-wpn-pane-scenario" data-vt-wpn-tab="scenario" type="button" role="tab"
+                  aria-controls="vt-wpn-pane-scenario" aria-selected="true">
+            <i class="bi bi-bullseye me-1"></i>Scenario
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="vt-wpn-tab-matrix" data-bs-toggle="pill"
+                  data-bs-target="#vt-wpn-pane-matrix" data-vt-wpn-tab="matrix" type="button" role="tab"
+                  aria-controls="vt-wpn-pane-matrix" aria-selected="false">
+            <i class="bi bi-grid-3x3 me-1"></i>Damage matrix
+          </button>
+        </li>
+      </ul>
+    </header>
+
+    <p id="vt-wpn-status" class="vt-wpn-status" role="status" hidden></p>
+
+    <div class="tab-content vt-wpn-panes">
+      <section class="tab-pane fade show active" id="vt-wpn-pane-scenario" role="tabpanel"
+               aria-labelledby="vt-wpn-tab-scenario" tabindex="0">
+        <div id="vt-wpn-pickers" class="vt-wpn-pickers"></div>
+        <div id="vt-wpn-result" class="vt-wpn-result" aria-live="polite"></div>
+      </section>
+      <section class="tab-pane fade" id="vt-wpn-pane-matrix" role="tabpanel"
+               aria-labelledby="vt-wpn-tab-matrix" tabindex="0">
+        <div id="vt-wpn-matrix" class="vt-wpn-matrix"></div>
+      </section>
+    </div>
+
+    <footer class="vt-wpn-foot">
+      Numbers are read from the ODF database (<a href="../odf/">ODF Browser</a>); reticles and hardpoint icons come
+      from the BZCC HUD sprite table. Tier badges say how directly each number follows from the ODF.
+    </footer>
+  </main>
+
+  <script src="../vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/theme.js"></script>
+  <script src="../js/weapons-calc.js"></script>
+  <script src="../js/weapons.js"></script>
+  <script src="../js/cursor-settings.js"></script>
+</body>
+</html>
