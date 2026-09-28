@@ -17,7 +17,8 @@ const AUDIO_REF_DISTANCE = 15;     // metres at which a positioned clip plays at
 const AUDIO_ROLLOFF = 1.0;         // inverse-distance rolloff factor
 const AUDIO_MAX_DISTANCE = 2000;
 
-export function createAudio() {
+export function createAudio(opts) {
+    const urls = (opts && opts.urls) || {};
     let ctx = null;
     let master = null;
     let volume = 1;
@@ -49,7 +50,7 @@ export function createAudio() {
         const key = String(name || '').toLowerCase().replace(/\.wav$/, '');
         if (!key) return Promise.resolve(null);
         if (buffers.has(key)) return buffers.get(key);
-        const pending = fetch(AUDIO_BASE + key + '.wav')
+        const pending = fetch(urls[key] || (AUDIO_BASE + key + '.wav'))
             .then((r) => (r.ok ? r.arrayBuffer() : null))
             .then((buf) => (buf ? context().decodeAudioData(buf) : null))
             .catch(() => null);

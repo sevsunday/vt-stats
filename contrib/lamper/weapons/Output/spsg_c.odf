@@ -1,0 +1,45 @@
+[OrdnanceClass]
+classLabel="bullet"
+shotGeometry=NULL
+xplGround="xspsgg_c"
+xplVehicle="xspsgc"
+xplBuilding="xspsgb"
+ammoCost=2.8
+lifeSpan=0.075 // 75m 
+shotSpeed=1000.0
+renderName="spsg_c.render"
+damageValue(N)=20 // none
+damageValue(L)=16 // light
+damageValue(H)=12 // heavy 
+damageValue(A)=20 // absorbtion
+damageValue(S)=16 // standard
+damageValue(D)=12 // deflection
+[Render]
+renderBase="draw_multi"
+renderCount=2
+renderName1="spsg_c.core"
+renderName2="spsg_c.tail"
+[Core]
+renderBase="draw_twirl_trail" //draw_bolt
+textureName="trail2.tga"
+textureBlend="one one modulate"
+startColor="175 255 43 100"
+finishColor="175 255 43 100"
+startRadius=0.1
+finishRadius=0.01
+segmentLength=1.0
+segmentVariance="0.0 0.0 0.0"
+animateTime=0.01
+textureRate=0.01
+[Tail]
+renderBase="draw_twirl_trail"
+textureName="trail2.tga"
+textureBlend="one one modulate"
+startColor="155 0 100 255"
+finishColor="255 0 255 255"
+startRadius=0.05
+finishRadius=0.05
+segmentLength=1.0
+segmentVariance="0.0 0.0 0.0"
+animateTime=0.1
+textureRate=0.01

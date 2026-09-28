@@ -1,0 +1,110 @@
+[GameObjectClass]
+geometryName="missile.xsi"
+geometryScale=1.0
+classLabel="torpedo"
+baseName="grccmi"
+scrapValue=0
+scrapCost=0
+maxHealth=350
+maxAmmo=1000
+unitName="Cruise Missile"
+aiName="TorpedoProcess"
+aiName2="TorpedoProcess"
+explosionName="xcomx"
+effectHard1="hp_emit_1"
+effectName1="ccm.render"
+effectHard2="hp_emit_2"
+effectName2="ccm.flameEmit"
+[CraftClass]
+rangeScan=0.0f
+periodScan=0.0f
+velocJam=0.0f
+[TorpedoClass]
+setAltitude=1.0
+alphaTrack=20.0
+alphaDamp=5.0
+velocForward=50.0
+accelThrust=50.0
+omegaTurn=0.9
+alphaSteer=1.35
+lifeSpan=30.0
+xplBlast="xcomx"
+soundThrust="engine3.wav"
+[render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="ccm.Trail"
+renderName2="ccm.flameEmitter"
+renderName3="ccm.light"
+renderName33="ccm.flare"
+renderName34="ccm.flare2"
+[Trail]
+simulateBase="sim_smoke"
+lifeTime=2.0
+renderBase="draw_trail"
+textureBlend="one one modulate"
+textureName="streak.tga"
+textureRate=0.1
+startColor="255 128 32 255"
+finishColor="255 0 0 0"
+startRadius=1.0
+finishRadius=0.0
+trailTime=3.0
+segmentTime=3.0
+[FlameEmitter]
+renderBase="draw_twirl_trail"
+emitDelay=0.01
+emitDelayVar=0.02
+emitVelocity="0.0 0.0 0.0"
+emitVariance="2.0 2.0 2.0"
+emitInherit="0.0 0.0 0.0"
+emitLife=1.5
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 128 32 255"
+finishColor="255 0 0 0"
+startRadius=0.75
+finishRadius=0.25
+animateTime=1.5
+rotationRate=10.0
+[Flare]
+renderBase="draw_sprite"
+textureName="twin8drk.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=0.75
+finishRadius=0.75
+rotationRate=10.0
+[light]
+simulateBase="sim_null"
+lifeTime=0.0
+renderBase="draw_light"
+startColor="255 20 20 1000"
+finishColor="255 20 20 1000"
+startRadius=40.0
+finishRadius=40.0
+animateTime=0.0
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[render2]
+renderBase="draw_multi"
+renderCount=1
+renderName2="ccm.flameEmit"
+[FlameEmit]
+renderBase="draw_twirl_trail"
+emitDelay=0.001
+emitDelayVar=0.01
+emitVelocity="0.0 0.0 -20.0"
+emitVariance="0.0 0.0 -20.0"
+emitInherit="0.0 0.0 0.0"
+emitLife=0.05
+animateTime=0.05
+textureName="flame2.tga"
+textureBlend="one one modulate"
+startColor="255 128 32 255"
+finishColor="255 0 0 0"
+startRadius=0.95
+finishRadius=0.95
+rotationRate=10.0

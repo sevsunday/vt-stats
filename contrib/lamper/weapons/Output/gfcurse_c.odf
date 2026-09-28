@@ -1,0 +1,68 @@
+[WeaponClass]
+classLabel="cannon"
+altName="gfcurse_a"
+ordName="fcurse_c"
+wpnName="FlameCurse"
+fireSound="gsstb-2.wav"
+wpnReticle="gplasma"
+wpnCategory="CANN"
+isAssault=0
+flashName="gfcurse_c.render"
+aiRange=190
+[CannonClass]
+shotDelay=1.6 // 2/sec
+shotAlternate=0
+[Render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="gfcurse_c.flame"
+renderName2="gfcurse_c.smoke"
+renderName3="gfcurse_c.light"
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="fire.tga" //blast.tga
+textureBlend="one one modulate"
+startColor="255 255 255 255" 
+finishColor="255 100 60 0" 
+startRadius=0.9
+finishRadius=2.3
+animateTime=0.3
+rotationRate=10.0
+emitDelay=0.03
+emitVelocity="0.0 0.0 0.0"
+emitVariance="10.0 10.0 10.0"
+emitLife=0.1
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="smoke.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor= "100 100 100 200" //"153 153 153 128"
+finishColor="153 153 153 0"
+startRadius=2.0
+finishRadius=3.5
+animateTime=0.4
+emitDelay=0.04
+emitVelocity="0.0 0.0 0.3"
+emitVariance="0.6 0.6 0.6"
+emitLife=0.4
+[Light]
+renderBase="draw_light"
+startColor="255 128 20 455" 
+finishColor="255 128 50 0" 
+startRadius=60.0
+finishRadius=60.0
+animateTime=0.3
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[Flash]
+renderBase="draw_sphere"
+textureName="vsmoke.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 "
+startRadius=1.0
+finishRadius=0.5
+animateTime=0.1
+latitudeBands=8
+longitudeSegments=16

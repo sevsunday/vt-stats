@@ -1,0 +1,61 @@
+[OrdnanceClass]
+classLabel="radarmissile"
+shotGeometry="torp.xsi"
+geometryScale=2.0
+xplGround="xtorpx"
+xplVehicle="xtorpx"
+xplBuilding="xtorpx"
+shotSound="otorp.wav"
+renderName="chaser.render"
+lifeSpan=30.0
+shotSpeed=60.0
+ammoCost=160
+damageRadius=0.0
+damageValue(N)=0  // No Armor
+damageValue(L)=1100  // Light Armor
+damageValue(H)=800  // Heavy Armor
+damageValue(A)=1500  // Absorbtion Shield
+damageValue(S)=1100  // Stasis Shield
+damageValue(D)=800  // Deflection Shield
+[MissileClass]
+omegaTurn=1.0
+[Render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="chaser.light"
+renderName2="chaser.smoke"
+renderName3="chaser.flame"
+[Light]
+renderBase="draw_light"
+startColor="255 255 63 520" 
+finishColor="255 255 63 520" 
+startRadius=40.0
+finishRadius=40.0
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="lsmoke.tga"
+textureBlend="one one modulat"
+startColor="5 5 5 150"
+finishColor="0 0 0 0"
+startRadius=0.5
+finishRadius=2.5
+animateTime=1.75
+rotationRate=2.0
+emitDelay=0.004
+emitVelocity="0.0 0.0 -10.0"   //right up forward
+emitVariance="3.0 3.0 3.0"
+emitLife=1.75
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="twin8drk.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"  
+finishColor="255 0 0 0"  
+startRadius=0.5
+finishRadius=0.0
+rotationRate=10.0
+animateTime=0.25
+emitDelay=0.001
+emitVelocity="0.0 0.0 -10.0"
+emitVariance="2.0 2.0 2.0"
+emitLife=0.25

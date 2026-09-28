@@ -1,0 +1,42 @@
+[OrdnanceClass]
+classLabel="bullet"
+shotGeometry=NULL
+xplGround="xaagng_a"
+xplVehicle="xaagnc_a"
+xplBuilding="xaagnb_a"
+renderName="aagn_a.render"
+ammoCost=2.5
+lifeSpan=0.43 // 120m
+shotSpeed=300.0
+damageValue(N)=10.0 // none // 300
+damageValue(L)=10.0 // light // 270
+damageValue(H)=7.5 // heavy // 250
+damageValue(S)=8.0 // standard // 270
+damageValue(D)=3.0 // deflection // 200
+damageValue(A)=15.0 // absorbtion // 300
+[render]
+renderBase="draw_multi"
+renderCount=2
+renderName1="aagn_a.shell"
+renderName2="aagn_a.smoke"
+[shell]
+renderBase="draw_trail"
+textureBlend="one one modulate"
+textureName="aagn_a.tga"
+startColor="255 128 70 255"
+finishColor="255 24 0 255"
+startRadius=0.04
+finishRadius=0.09
+segmentTime=0.02
+animateTime=0.02
+[Smoke]
+renderBase="draw_trail"
+textureName="trail2.tga"
+textureBlend="one one modulate"
+textureRate=0.08
+startColor="255 200 200 40"
+finishColor="255 100 100 0"
+startRadius=0.05
+finishRadius=0.5
+segmentTime=0.16
+animateTime=0.16

@@ -1,0 +1,93 @@
+[ExplosionClass]
+classLabel="explosion"
+particleTypes=2
+particleClass1="xubulb.core"
+particleCount1=1
+particleVeloc1="0.0 0.0 0.0"
+particleClass2="xubulb.ember"
+particleCount2=1
+particleVeloc2="5.0 5.0 5.0"
+particleBias2="0.0 1.0 0.0"
+particleClass3="xubulb.light"
+particleCount3=1
+particleVeloc3="0.0 0.0 0.0"
+explSound="wmgr1.wav"
+damageRadius=0.0
+damageValue(N)=0
+damageValue(L)=0
+damageValue(H)=0
+damageValue(S)=0
+damageValue(D)=0
+damageValue(A)=0
+[Core]
+simulateBase="sim_null"
+lifeTime=0.3
+renderBase="draw_twirl"
+textureName="rstab.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=0.1
+finishRadius=0.75
+animateTime=0.3
+[Ember]
+simulateBase="sim_null"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xubulb.emberP"
+emitDelay=0.033
+emitVelocity="0.0 1.0 0.0"
+emitVariance="5.0 5.0 5.0"
+[EmberP]
+simulateBase="sim_ember"  
+lifeTime=1.0
+renderBase="draw_multi"
+renderCount=2
+renderName1="xubulb.EmberP1"
+renderName2="xubulb.EmberP2"
+[Trail]
+simulateBase="sim_ember"
+lifeTime=1.0
+renderBase="draw_trail"
+textureBlend="one one modulate"
+startColor="255 127 0 255"
+finishColor="255 0 0 0"
+startRadius=0.01
+finishRadius=0.0
+trailTime=1.0
+segmentTime=0.1
+[Light]
+simulateBase="sim_null"
+lifeTime=0.2
+renderBase="draw_light"
+startColor="200 200 50 75"
+finishColor="200 200 50 0"
+startRadius=10.0
+finishRadius=7.5
+animateTime=0.2
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[EmberP1]
+renderBase="draw_light"
+startColor="255 128 25 70"
+finishColor="255 128 25 0"
+startRadius=5.0
+finishRadius=5.0
+animateTime=1.25
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[EmberP2]
+simulateBase="sim_dust"
+lifeTime=1.0
+renderBase="draw_trail"
+textureName="fetrail1.tga"
+textureBlend="one one modulate"
+textureRate=0.04
+startColor="255 255 255 150"
+finishColor="200 100 100 0"
+startRadius=0.08
+finishRadius=0.04
+segmentTime=0.175
+animateTime=0.175

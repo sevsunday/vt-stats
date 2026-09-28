@@ -1,0 +1,71 @@
+[OrdnanceClass]
+classLabel="grenade"
+shotGeometry="ioartl00.xsi"
+shotSound="baz03.wav"
+xplGround="xplaslg"
+xplVehicle="xplaslh"
+xplBuilding="xplaslh"
+xplexpire="xplaslx"
+renderName="plasl.render"
+ammoCost=37.5
+lifeSpan=2.78
+shotSpeed=75.0
+damageValue(N)=300.0 // none 107.5
+damageValue(L)=262.5 // light 53.75
+damageValue(H)=225.0 // heavy 5.375
+damageValue(S)=262.5 // standard
+damageValue(D)=225.0 // deflection
+damageValue(A)=300.0 // absorbtion
+[Render]
+renderBase="draw_multi"
+renderCount=4
+renderName1="plasl.flare"
+renderName2="plasl.smoke"
+renderName3="plasl.flame"
+renderName4="plasl.trail"
+[Flare]
+renderBase="draw_sprite"
+textureName="plasma.tga"
+textureBlend="one one modulate"
+startColor="32 255 128 75" 
+finishColor="0 255 0 0" 
+startRadius=1.6
+finishRadius=1.6
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="flame2.tga"
+textureBlend="one one modulate"
+startColor="32 255 128 75" 
+finishColor="0 255 0 0" 
+startRadius=0.3
+finishRadius=0.75
+animateTime=0.4
+emitDelay=0.01
+emitVelocity="0.0 0.0 0.0"
+emitVariance="1.0 1.0 1.0"
+emitLife=0.4
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="msmoke.tga"
+textureBlend="one one modulate"
+startColor="0 200 0 200"
+finishColor="8 8 8 0"
+startRadius=0.4
+finishRadius=1.5
+animateTime=0.3
+emitDelay=0.01
+emitVelocity="0.0 0.0 0.0"
+emitVariance="1.0 1.0 1.0"
+emitLife=0.3
+rotationRate=2.0
+[Trail]
+renderBase="draw_trail"
+textureName="streak.tga" // trail2
+textureBlend="one one modulate"
+textureRate=0.08
+startColor="32 255 128 50" 
+finishColor="0 255 0 0" 
+startRadius=0.8
+finishRadius=0.2
+segmentTime=2.5
+animateTime=2.5

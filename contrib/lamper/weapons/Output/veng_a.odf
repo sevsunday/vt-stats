@@ -1,0 +1,82 @@
+[OrdnanceClass]
+classLabel="bullet"
+shotGeometry="gatstab.xsi"
+shotSound="O_magb.wav" 
+renderName="veng_a.render"
+xplGround="xvengg_a"
+xplVehicle="xvengc_a"
+xplBuilding="xvengb_a"
+ammoCost=20
+lifeSpan=2.0 // 150m
+shotSpeed=75.0
+damageValue(N)=145 // none // 400
+damageValue(L)=120 // light // 375
+damageValue(H)=80 // heavy // 350
+damageValue(S)=160 // standard // 375
+damageValue(D)=150 // deflection // 333
+damageValue(A)=175 // absorbtion // 400
+[Render]
+renderBase="draw_multi"
+renderCount=4
+renderName1="veng_a.flare"
+renderName2="veng_a.smoke"
+renderName3="veng_a.flame"
+renderName4="veng_a.smoke2"
+[Flare]
+renderBase="draw_sprite"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=3.0
+finishRadius=3.0
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="godlight1.tga"
+textureBlend="one one modulate"
+startColor="255 155 75 255" // "255 63 55 255"
+finishColor="255 155 75 0" // "255 63 55 255"
+startRadius=0.8
+finishRadius=1.5
+animateTime=0.3
+rotationRate=10.0
+emitDelay=0.01
+emitVelocity="0.0 0.0 0.0"
+emitVariance="0.5 0.5 0.5"
+emitLife=0.3
+[Smoke2]
+renderBase="draw_twirl_trail"
+textureName="godlight1.tga"
+textureBlend="one one modulate"
+startColor="255 100 25 255" // "255 63 55 255"
+finishColor="255  25 0" // "255 63 55 255"
+startRadius=0.8
+finishRadius=1.5
+animateTime=0.2
+rotationRate=10.0
+emitDelay=0.005
+emitVelocity="0.0 0.0 0.0"
+emitVariance="0.5 0.5 0.5"
+emitLife=0.2
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="flame.tga"
+textureBlend="one one modulate"
+startColor="255 63 55 255
+finishColor="255 63 0 255
+startRadius=0.50
+finishRadius=0.1
+animateTime=0.3
+rotationRate=10.0
+emitDelay=0.009
+emitVelocity="0.0 0.0 0.0"
+emitVariance="10.0 10.0 10.0"
+emitLife=0.3
+[Light]
+renderBase="draw_sprite"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=2.0
+finishRadius=2.0

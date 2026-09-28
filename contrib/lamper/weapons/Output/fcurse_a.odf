@@ -1,0 +1,74 @@
+[OrdnanceClass]
+classLabel="pulse" //classLabel="bullet"
+shotSound="fflame.wav"
+shotGeometry=NULL
+shotSound="fflame.wav"
+xplGround="xfcurseg_a"
+xplVehicle="xfcursec_a"
+xplBuilding="xfcurseb_a"
+renderName="fcurse_a.render"
+ammoCost=80
+lifeSpan=3.538 // 230 meters
+shotSpeed=65.0
+damageValue(N)=400 // none // 350
+damageValue(L)=300 // light // 250
+damageValue(H)=100 // heavy // 150
+damageValue(S)=300 // standard // 250
+damageValue(D)=500 // deflection // 350
+damageValue(A)=80 // absorbtion // 100
+[PulseShellClass]
+pulseDelay=0.3
+pulsePeriod=0.2
+xplPulse="fcursefire_a"
+[Render]
+renderBase="draw_multi"
+renderCount=4
+renderName1="fcurse_a.flare"
+renderName2="fcurse_a.light"
+renderName3="fcurse_a.flame"
+renderName4="fcurse_a.smoke"
+[Flare]
+renderBase="draw_sprite"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 128 20 160" 
+finishColor="255 0 0 0" 
+startRadius=4.0
+finishRadius=4.0
+[Light]
+renderBase="draw_light"
+startColor="255 128 20 455" 
+finishColor="255 128 50 155" 
+startRadius=60.0
+finishRadius=60.0
+animateTime=3.0
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="fire.tga" //blast.tga
+textureBlend="one one modulate"
+startColor="255 255 255 255" 
+finishColor="255 100 60 0" 
+startRadius=0.8
+finishRadius=1.25
+animateTime=0.3
+rotationRate=10.0
+emitDelay=0.03
+emitVelocity="0.0 0.0 0.0"
+emitVariance="10.0 10.0 10.0"
+emitLife=0.3
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="smoke.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor= "100 100 100 200" //"153 153 153 128"
+finishColor="153 153 153 0"
+startRadius=1.275
+finishRadius=2.4
+animateTime=0.4
+emitDelay=0.04
+emitVelocity="0.0 0.0 0.3"
+emitVariance="0.6 0.6 0.6"
+emitLife=0.4

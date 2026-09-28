@@ -1,0 +1,43 @@
+[OrdnanceClass]
+classLabel="bullet"
+shotGeometry=NULL
+xplGround="xubulg"
+xplVehicle="xubulc"
+xplBuilding="xubulb"
+renderName="mg_c.render"
+ammoCost=1.875 //957
+lifeSpan=0.35 // 105m  
+shotSpeed=300.0
+damageValue(N)=16.5 // none // divide by 2
+damageValue(L)=12.0 // light // 160
+damageValue(H)=7.5 // heavy // 100
+damageValue(S)=12.0 // standard // 160
+damageValue(D)=7.5 // deflection // 100
+damageValue(A)=15.0 // absorbtion // 200
+[render]
+renderBase="draw_multi"
+renderCount=2
+renderName1="mg_c.pinktrail"
+renderName2="mg_c.smoke"
+[PinkTrail]
+renderBase="draw_trail"
+textureBlend="one one modulate"
+textureName="trail.tga"
+textureRate="0.02"
+startColor="255 0 200 255" 
+finishColor="155 55 0 100" 
+startRadius=0.08
+finishRadius=0.0
+segmentTime=0.1
+animateTime=0.35
+[Smoke]
+renderBase="draw_trail"
+textureName="wave2.tga"
+textureBlend="one one modulate"
+textureRate=0.08
+startColor="90 120 90 30"
+finishColor="205 255 205 0"
+startRadius=0.35
+finishRadius=0.8
+segmentTime=0.4
+animateTime=0.02

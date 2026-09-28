@@ -1,0 +1,58 @@
+[OrdnanceClass]
+classLabel="grenade"
+shotGeometry="grenade.xsi"
+GeometryScale=0.125
+xplGround="xdgg"
+xplVehicle="xdgh"
+xplBuilding="xdgh"
+xplExpire="xdgh"  //xdgx
+shotSound="crckt02.wav"
+renderName="mdg.render"
+ammoCost=20 //50
+lifeSpan=1e30
+shotSpeed=65.0
+damageValue(N)=800 // none
+damageValue(L)=700 // light
+damageValue(H)=600 // heavy
+damageValue(S)=700 // standard
+damageValue(D)=600 // deflection
+damageValue(A)=800 // absorbtion
+[BounceBombClass]
+soundBounce="mdg.wav"
+[Render]
+renderBase="draw_multi"
+renderCount=2
+renderName1="mdg.smokeemitter"
+renderName2="mdg.flameemitter"
+[SmokeEmitter]
+renderBase="draw_twirl_trail"
+textureName="smoke.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="0 0 0 200"
+finishColor="0 0 0 0"
+startRadius=1.2
+finishRadius=3.0
+animateTime=2.0
+emitDelay=0.05
+emitDelayVar=0.03
+emitVelocity="0.0 0.0 0.0"
+emitVariance="3.0 3.0 3.0"
+emitInherit="0.2 0.2 0.2"
+emitLife=2.0
+rotationRate=2.0
+[FlameEmitter]
+renderBase="draw_twirl_trail"
+textureName="fire.tga"
+textureBlend="one one modulate"
+startColor="255 255 200 255"
+finishColor="255 0 0 0"
+startRadius=1.0
+finishRadius=0.3
+animateTime=1.0
+emitDelay=0.03
+emitDelayVar=0.02
+emitVelocity="0.0 0.0 0.0"
+emitVariance="3.0 3.0 3.0"
+emitInherit="0.5 0.5 0.5"
+emitLife=1.0
+rotationRate=10.0

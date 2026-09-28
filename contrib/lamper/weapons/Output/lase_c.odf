@@ -1,0 +1,45 @@
+[OrdnanceClass]
+classLabel="beam"
+shotGeometry=NULL
+xplGround="xlaseg"
+xplVehicle="xlasec"
+xplBuilding="xlaseb"
+renderName="lase_c.render"
+ammoCost=4
+lifeSpan=121e-6 // 120m
+shotSpeed=1e6
+damageValue(N)=75 // none // 250
+damageValue(L)=45 // light // 150
+damageValue(H)=15 // heavy // 50
+damageValue(S)=45 // standard // 150
+damageValue(D)=75 // deflection // 250
+damageValue(A)=15 // absorbtion // 50
+[Render]
+renderBase="draw_multi"
+renderCount=2
+renderName1="lase_c.core"
+renderName2="lase_c.tail"
+[Core]
+renderBase="draw_bolt"
+textureName=fetrail1.tga
+textureBlend="one one modulate"
+startColor="255 100 0 255"
+finishColor="255 0 0 0"
+startRadius=0.4
+finishRadius=0.01
+segmentLength=5.0
+segmentVariance="0.0 0.0 0.0"
+animateTime=0.5
+textureRate=0.01
+[Tail]
+renderBase="draw_bolt"
+textureName=fetrail1.tga 
+textureBlend="one one modulate"
+startColor="255 100 0 255"
+finishColor="255 0 0 0"
+startRadius=0.05
+finishRadius=0.1
+segmentLength=5.0
+segmentVariance="0.0 0.0 0.0"
+animateTime=0.5
+textureRate=0.01

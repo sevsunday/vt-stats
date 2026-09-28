@@ -1,0 +1,59 @@
+[OrdnanceClass]
+classLabel="beam"
+shotGeometry=NULL
+xplGround="xarclg"
+xplVehicle="xarclc"
+xplBuilding="xarclb"
+renderName="arcl_c.render"
+ammoCost=11
+lifeSpan=0.0175 // 170m
+shotSpeed=10000
+damageValue(N)=40 // none // 900
+damageValue(L)=30 // light // 640
+damageValue(H)=20 // heavy // 400
+damageValue(S)=25 // standard // 500
+damageValue(D)=40 // deflection // 900
+damageValue(A)=17.5 // absorbtion // 400
+[Render]
+renderBase="draw_multi"
+renderCount=1
+renderName1="arcl_c.beam"
+renderName2="arcl_c.fringe"
+renderName34="arcl_c.sparkle"
+[Beam]
+renderBase="draw_bolt"
+textureName=firetrail.tga //"trail2.tga"
+textureBlend="one one modulate"
+startColor="255 128 0 255"
+finishColor="255 0 0 0"
+rotationRate=0
+startRadius=1.5
+finishRadius=1.5
+segmentLength=5.0
+segmentVariance="0.0 0.0 0.0"
+animateTime=0.1
+textureRate=0.04
+[Fringe]
+renderBase="draw_bolt"
+textureName=Trail2.tga //"trail2.tga"
+textureBlend="one one modulate"
+startColor="255 255 0 255"
+finishColor="255 0 0 0"
+startRadius=0.05
+finishRadius=0.5
+segmentLength=5.0
+segmentVariance="0.1 0.1 0.1"
+animateTime=1.1
+textureRate=0.01
+[Sparkle]
+renderBase="draw_twirl_trail"
+textureName="fire.tga" //flame
+textureblend="one one modulate"
+startColor="255 255 0 255"
+finishColor="255 0 0 0"
+startRadius=0.15
+finishRadius=0.01
+animateTime=1.0
+emitDelay=0.001
+emitVariance="2.0 2.0 2.0"
+emitLife=1.3

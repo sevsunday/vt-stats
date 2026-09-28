@@ -1,0 +1,59 @@
+[OrdnanceClass]
+classLabel="imagemissile"
+shotGeometry="iorckt00.xsi"
+shotSound="smort03.wav"
+xplGround="xionmg"
+xplVehicle="xionmv"
+xplBuilding="xionmb"
+renderName="ionm_c.render"
+ammoCost=25
+lifeSpan=8.0 // 800m
+shotSpeed=100.0
+damageValue(N)=200 // none
+damageValue(L)=180 // light
+damageValue(H)=140 // heavy
+damageValue(S)=180 // standard
+damageValue(D)=140 // deflection
+damageValue(A)=200 // absorbtion
+[MissileClass]
+omegaTurn=0.5
+[Render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="ionm_c.flare"
+renderName2="ionm_c.smoke"
+renderName3="ionm_c.flame"
+[Flare]
+renderBase="draw_sprite"
+textureName="flare.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=1.0
+finishRadius=1.0
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="ionm.tga"
+textureBlend="one one modulate"
+startColor="63 255 0 255"
+finishColor="1 4 0 4"
+startRadius=0.5
+finishRadius=2.0
+animateTime=0.5
+emitDelay=0.01
+emitVelocity="0.0 0.0 0.0"
+emitVariance="3.0 3.0 2.0"
+emitLife=0.5
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="ionm.tga"
+textureBlend="one one modulate"
+startColor="63 255 0 255"
+finishColor="1 4 0 4"
+startRadius=0.2
+finishRadius=0.05
+animateTime=1.05
+emitDelay=0.002
+emitVelocity="0.0 0.0 0.0"
+emitVariance="3.0 3.0 20.0"
+emitLife=1.05

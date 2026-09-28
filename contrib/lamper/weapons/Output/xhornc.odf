@@ -1,0 +1,54 @@
+[ExplosionClass]
+classLabel="explosion"
+particleTypes=3
+particleClass1="xhornc.core"
+particleCount1=1
+particleVeloc1="0.0 0.0 0.0"
+particleClass2="xhornc.puff"
+particleCount2=20
+particleVeloc2="15.0 15.0 15.0"
+particleClass3="xhornc.light"
+particleCount3=1
+particleVeloc3="0.0 0.0 0.0"
+explSound="xhornc.wav"
+damageRadius=10.0
+damageValue(N)=100 // none
+damageValue(L)=50 // light
+damageValue(H)=10 // heavy
+damageValue(S)=50 // standard
+damageValue(D)=100 // deflection
+damageValue(A)=10 // absorbtion
+[Core]
+simulateBase="sim_null"
+lifeTime=1.0
+renderBase="draw_twirl"
+textureName="flame.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=1.0
+finishRadius=10.0
+animateTime=1.0
+[Puff]
+simulateBase="sim_smoke"
+lifeTime=1.0
+renderBase="draw_twirl"
+textureName="flame.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=1.0
+finishRadius=0.1
+animateTime=1.0
+[Light]
+simulateBase="sim_null"
+lifeTime=1.0
+renderBase="draw_light"
+startColor="255 255 63 765"
+finishColor="255 0 0 0"
+startRadius=20.0
+finishRadius=20.0
+animateTime=1.0
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0

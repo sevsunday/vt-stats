@@ -1,0 +1,55 @@
+[ExplosionClass]
+classLabel="explosion"
+explSound="xtagx.wav"
+damageRadius=5.0
+damageValue(N)=50 // none
+damageValue(L)=50 // light
+damageValue(H)=50 // heavy
+damageValue(S)=50 // standard
+damageValue(D)=50 // deflection
+damageValue(A)=50 // absorbtion
+particleTypes=3
+particleClass1="xtagg_c.ring"
+particleCount1=1
+particleVeloc1="0.0 0.0 0.0"
+particleClass2="xtagg_c.chunks"
+particleCount2=6
+particleVeloc2="5.0 5.0 5.0"
+particleBias2="0.0 5.0 0.0"
+particleClass3="xtagg_c.puff"
+particleCount3=1
+particleVeloc3="0.0 0.0 0.0"
+particleBias3="0.0 1.0 0.0"
+[Ring]
+simulateBase="sim_null"
+lifeTime=10.0
+renderBase="draw_planar"
+textureName="grndchar.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="10 10 10 255"
+finishColor="10 10 10 0"
+startRadius=3.0
+finishRadius=3.0
+animateTime=10.0
+[Chunks]
+simulateBase="sim_ember"
+lifeTime=3.0
+renderBase="draw_sprite"
+textureName="dirt.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="0 0 0 255"
+finishColor="0 0 0 0"
+startRadius=0.3
+finishRadius=0.3
+animateTime=3.0
+[Puff]
+simulateBase="sim_smoke"
+lifeTime=4.0
+renderBase="draw_sprite"
+textureName="smoke.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="64 64 64 127"
+finishColor="64 64 64 0"
+startRadius=0.5
+finishRadius=5.0
+animateTime=4.0

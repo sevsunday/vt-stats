@@ -1,0 +1,57 @@
+[ExplosionClass]
+classLabel="explosion"
+particleTypes=3
+particleClass1="xaagng_a.core"
+particleCount1=1
+particleVeloc1="0.0 0.0 0.0"
+particleClass2="xaagng_a.chunks"
+particleCount2=1
+particleVeloc2="5.0 5.0 5.0"
+particleBias2="0.0 5.0 1.0"
+particleClass3="xaagng_a.light"
+particleCount3=1
+particleVeloc3="0.0 0.0 0.0"
+explSound="wmgr2.wav"
+damageRadius=0.0
+damageValue(N)=0
+damageValue(L)=0
+damageValue(H)=0
+damageValue(S)=0
+damageValue(D)=0
+damageValue(A)=0
+[Core]
+simulateBase="sim_null"
+lifeTime=0.7
+renderBase="draw_sprite"
+spriteCenter.x=0.0
+spriteCenter.y=1.0
+textureName="xpuff.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="153 153 153 255"
+finishColor="153 153 153 0"
+startRadius=0.2
+finishRadius=1.25
+animateTime=0.6
+[Chunks]
+simulateBase="sim_ember"
+lifeTime=2.0
+renderBase="draw_sprite"
+textureName="dirt.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="50 50 50 255"
+finishColor="50 50 50 0"
+startRadius=0.15
+finishRadius=0.15
+animateTime=2.0
+[Light]
+simulateBase="sim_null"
+lifeTime=0.15
+renderBase="draw_light"
+startColor="200 200 50 200"
+finishColor="200 200 50 0"
+startRadius=10.0
+finishRadius=7.5
+animateTime=0.15
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0

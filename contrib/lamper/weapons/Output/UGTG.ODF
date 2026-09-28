@@ -1,0 +1,61 @@
+[OrdnanceClass]
+classLabel="beam"
+shotGeometry=NULL
+xplGround="xarclg_a"
+xplVehicle="xarclc_a"
+xplBuilding="xarclb_a"
+renderName="ugtg.render"
+ammoCost=0
+lifeSpan=200e-3 // 200m
+shotSpeed=1e3
+damageValue(N)=851 // none // 800
+damageValue(L)=425.5 // light // 600
+damageValue(H)=212.8 // heavy // 400
+damageValue(S)=425.5 // standard // 500
+damageValue(D)=851 // deflection // 800
+damageValue(A)=212.8 // absorbtion // 350
+kickRadius=2.0
+kickOmega=10.0
+kickVeloc=2.0
+[Render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="ugtg.beam"
+renderName2="ugtg.fringe"
+renderName3="ugtg.sparkle"
+[Beam]
+renderBase="draw_bolt"
+textureName=NULL //"trail2.tga"
+textureBlend="one one modulate"
+startColor="255 63 255 255"
+finishColor="255 0 0 0"
+startRadius=0.35
+finishRadius=0.35
+segmentLength=5.0
+segmentVariance="0.5 0.5 0.5"
+animateTime=1.0
+textureRate=0.01
+[Fringe]
+renderBase="draw_bolt"
+textureName=NULL //"trail2.tga"
+textureBlend="one one modulate"
+startColor="255 63 255 255"
+finishColor="255 0 0 0"
+startRadius=0.05
+finishRadius=0.5
+segmentLength=5.0
+segmentVariance="0.5 0.5 0.5"
+animateTime=1.0
+textureRate=0.01
+[Sparkle]
+renderBase="draw_twirl_trail"
+textureName="flame.tga"
+textureblend="one one modulate"
+startColor="255 63 255 255"
+finishColor="255 0 0 0"
+startRadius=0.15
+finishRadius=0.01
+animateTime=2.0
+emitDelay=0.002
+emitVariance="2.0 2.0 2.0"
+emitLife=2.0

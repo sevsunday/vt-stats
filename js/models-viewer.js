@@ -34,6 +34,61 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const TEX_BASE = '../data/models/textures/';
+
+/* Same cutout rule as _map-analysis/render/js/props.js. Foliage cards sample
+ * an atlas whose empty texels are black RGB with alpha 0; without alphaTest
+ * those cards draw as solid black rectangles. A cutout is bimodal (large
+ * empty field, opaque core, little soft middle). Soft glows and building
+ * trims stay opaque. Keep the thresholds in sync with props.js. */
+const CUTOUT_ALPHA_TEST = 0.15;
+const CUTOUT_SAMPLE_PX = 128;
+const CUTOUT_LOW_MAX = 16;
+const CUTOUT_MID_MAX = 200;
+const CUTOUT_LOW_SHARE = 0.20;
+const CUTOUT_MID_SHARE = 0.40;
+
+let cutoutCanvas = null;
+
+function drawableImage(image) {
+  if (!image) return null;
+  if (typeof HTMLImageElement !== 'undefined' && image instanceof HTMLImageElement) return image;
+  if (typeof HTMLCanvasElement !== 'undefined' && image instanceof HTMLCanvasElement) return image;
+  if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) return image;
+  if (typeof OffscreenCanvas !== 'undefined' && image instanceof OffscreenCanvas) return image;
+  return null;
+}
+
+function imageIsCutout(image) {
+  const sw = image && (image.width || image.videoWidth);
+  const sh = image && (image.height || image.videoHeight);
+  if (!sw || !sh) return false;
+  const scale = Math.min(1, CUTOUT_SAMPLE_PX / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+  if (!cutoutCanvas) cutoutCanvas = document.createElement('canvas');
+  cutoutCanvas.width = w;
+  cutoutCanvas.height = h;
+  const ctx = cutoutCanvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return false;
+  let data;
+  try {
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(image, 0, 0, w, h);
+    data = ctx.getImageData(0, 0, w, h).data;
+  } catch (err) {
+    return false;
+  }
+  const n = data.length / 4;
+  if (!n) return false;
+  let low = 0;
+  let mid = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    const a = data[i];
+    if (a < CUTOUT_LOW_MAX) low++;
+    else if (a < CUTOUT_MID_MAX) mid++;
+  }
+  return (low / n) >= CUTOUT_LOW_SHARE && (mid / n) <= CUTOUT_MID_SHARE;
+}
 // Team-color masks live in a single perf-resolution set (no HQ variant); keyed by
 // the diffuse/material stem so a material name maps straight to its mask.
 const TEX_TEAMCOLOR_BASE = '../data/models/textures/teamcolor/';
@@ -959,8 +1014,71 @@ export class ObjectViewer {
     return gltf;
   }
 
+  /* Perf PNG for this stem under the active texture set. HQ DDS is compressed,
+   * so a cutout read falls back to this drawable copy of the same art. */
+  _perfPngUrl(name) {
+    const descr = this._activeSetDescr();
+    const fromSet = !!(descr && descr.textures && descr.textures.includes(name));
+    const base = fromSet ? `${TEX_MODS_BASE}${descr.id}/` : TEX_BASE;
+    return `${base}perf/${name}.png`;
+  }
+
+  _loadCutoutSample(name) {
+    if (!this._cutoutSamples) this._cutoutSamples = new Map();
+    if (this._cutoutSamples.has(name)) return this._cutoutSamples.get(name);
+    const url = this._perfPngUrl(name);
+    const pending = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+    this._cutoutSamples.set(name, pending);
+    return pending;
+  }
+
+  async _isCutoutTexture(tex, name) {
+    if (tex && tex.userData && tex.userData.cutoutChecked) return !!tex.userData.cutout;
+    if (!this._cutoutByName) this._cutoutByName = new Map();
+    if (name && this._cutoutByName.has(name)) {
+      const known = this._cutoutByName.get(name);
+      if (tex) {
+        tex.userData.cutoutChecked = true;
+        tex.userData.cutout = known;
+      }
+      return known;
+    }
+    let image = drawableImage(tex && tex.image);
+    if (!image && name) image = await this._loadCutoutSample(name);
+    const cutout = !!(image && imageIsCutout(image));
+    if (name) this._cutoutByName.set(name, cutout);
+    if (tex) {
+      tex.userData.cutoutChecked = true;
+      tex.userData.cutout = cutout;
+    }
+    return cutout;
+  }
+
+  async _punchDiffuseCutout(mat, tex) {
+    if (!mat) return;
+    if (!tex) {
+      mat.alphaTest = 0;
+      return;
+    }
+    const cutout = await this._isCutoutTexture(tex, mat.name);
+    if (cutout) {
+      mat.alphaTest = CUTOUT_ALPHA_TEST;
+      mat.transparent = false;
+      mat.depthWrite = true;
+    } else {
+      mat.alphaTest = 0;
+    }
+  }
+
   /* Load + assign the diffuse map for every material from the active set.
-   * Tolerates missing textures (textureless/solid materials keep baseColor). */
+   * Tolerates missing textures (textureless/solid materials keep baseColor).
+   * Cutout atlases (grass, palms, fences) get an alpha test so the empty
+   * texels do not draw as black cards. */
   async _applyTextures(onProgress) {
     const q = this._quality;
     const wf = this._wireframe && this._wireSaved;
@@ -989,6 +1107,7 @@ export class ObjectViewer {
             saved.map = null; // keep baseColorFactor
           }
         }
+        await this._punchDiffuseCutout(mat, tex);
         return;
       }
       if (tex) {
@@ -997,6 +1116,7 @@ export class ObjectViewer {
       } else {
         mat.map = null; // keep baseColorFactor
       }
+      await this._punchDiffuseCutout(mat, tex);
       mat.needsUpdate = true;
     }));
     if (gen !== this._texLoadGen) return;   // superseded mid-flight
@@ -4125,6 +4245,7 @@ export class ObjectViewer {
       if (tex) {
         mat.map = tex;
         mat.color = new THREE.Color(0xffffff);
+        await this._punchDiffuseCutout(mat, tex);
         mat.needsUpdate = true;
       }
     }));

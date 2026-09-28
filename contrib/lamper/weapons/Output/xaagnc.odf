@@ -1,0 +1,112 @@
+[ExplosionClass]
+classLabel="explosion"
+particleTypes=4
+particleClass1="xaagnc.core"
+particleCount1=1
+particleVeloc1="0.0 0.0 0.0"
+particleBias1="0.0 0.0 0.0"
+particleClass2="xaagnc.sparks"
+particleCount2=1
+particleVeloc2="0.0 0.0 0.0"
+particleBias2="0.0 0.0 0.0"
+particleClass3="xaagnc.ember"
+particleCount3=1
+particleVeloc3="5.0 5.0 5.0"
+particleBias3="0.0 1.0 0.0"
+particleClass4="xaagnc.light"
+particleCount4=1
+particleVeloc4="5.0 5.0 5.0"
+particleBias4="0.0 1.0 0.0"
+explSound="wmgr1.wav"
+damageRadius=0.0
+damageValue(N)=0
+damageValue(L)=0
+damageValue(H)=0
+damageValue(S)=0
+damageValue(D)=0
+damageValue(A)=0
+[Core]
+simulateBase="sim_null"
+lifeTime=0.2
+renderBase="draw_twirl"
+textureName="xbullet.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=0.05
+finishRadius=1.0
+animateTime=0.2
+[Sparks]
+simulateBase="sim_null"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xaagnc.sparksP"
+emitDelay=0.033
+emitVelocity="0.0 0.0 0.0"
+emitVariance="45.0 45.0 0.0"
+[SparksP]
+simulateBase="sim_smoke"  
+lifeTime=1.0
+renderBase="draw_multi"
+renderCount=1
+renderName1="xaagnc.SparksP1"
+[Ember]
+simulateBase="sim_null"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xaagnc.emberP"
+emitDelay=0.33
+emitVelocity="0.0 1.0 0.0"
+emitVariance="5.0 5.0 5.0"
+[EmberP]
+simulateBase="sim_ember"  
+lifeTime=1.0
+renderBase="draw_multi"
+renderCount=2
+renderName1="xaagnc.EmberP1"
+renderName2="xaagnc.EmberP2"
+[Light]
+simulateBase="sim_null"
+lifeTime=0.2
+renderBase="draw_light"
+startColor="250 50 2 75"
+finishColor="250 50 2 0"
+startRadius=10.0
+finishRadius=7.5
+animateTime=0.2
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[SparksP1]
+renderBase="draw_light"
+startColor="255 200 25 70"
+finishColor="255 100 25 0"
+startRadius=6.0
+finishRadius=6.0
+animateTime=0.5
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[EmberP1]
+renderBase="draw_light"
+startColor="255 128 25 70"
+finishColor="255 128 25 0"
+startRadius=5.0
+finishRadius=5.0
+animateTime=1.25
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[EmberP2]
+simulateBase="sim_dust"
+lifeTime=1.0
+renderBase="draw_trail"
+textureName="fetrail1.tga"
+textureBlend="one one modulate"
+textureRate=0.04
+startColor="255 255 255 150"
+finishColor="200 100 100 0"
+startRadius=0.08
+finishRadius=0.04
+segmentTime=0.175
+animateTime=0.175

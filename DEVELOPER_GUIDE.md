@@ -1944,6 +1944,38 @@ Gate: `node _investigation/check_weapon_fx.mjs` — every VSR weapon classifies 
 
 Tunables (all viewer-side, none published by the ODFs): `AUDIO_GAIN` / `AUDIO_REF_DISTANCE` / `AUDIO_ROLLOFF` / `AUDIO_MAX_DISTANCE` (`js/fx/odf-audio.js`); `VOLUME_KEY` (`js/weapons-range.js`); `TRAIL_SEGMENT_HZ`, `FX_HALO_RATIO`, `FX_FLARE_BASE` / `FX_FLARE_MAX`, `FX_LIGHT_SCALE`, `SIM_SMOKE_DRAG` / `SIM_SMOKE_RISE` / `SIM_EMBER_DRAG` / `SIM_BOUNCE`, `EMIT_LOD_SCALE`, `FX_PARTICLE_BUDGET` (`js/fx/odf-fx.js`); `CHARGE_STEP_SEC`, `PROX_TRIGGER_M`, `FLASH_EXTRA_SEC` (`js/fx/weapon-sim.js`; the last is the guide's published `+ 0.1 s`, not a tuning).
 
+#### Community weapon packs
+
+Weapons that are not in the stock BZCC / VSR database ship as a per-creator pack. The Weapons Lab merges them at load time so they can be mounted on stock ships and fired at stock targets. The ODF Browser does not list them. Corpus-wide, picker-unaware, not in the pipeline cache key. `scripts/process_stats.py`, `scripts/elo.py`, `scripts/elo_commander.py` and `js/all-matches-aggregator.js` never read a pack.
+
+| Path | Role |
+|---|---|
+| `contrib/README.md` | How to drop a pack |
+| `contrib/<id>/contrib.json` | Manifest: `schema_version` 1, `id` (must match the folder, `^[a-z0-9][a-z0-9_-]*$`), `name`, optional `url`, `description`, `received` |
+| `contrib/<id>/weapons/` | The pack as received. Any subfolders. Never rewritten by the builder |
+| `scripts/build_contrib_weapons.py` | Standalone builder. Not invoked by `process_stats.py` |
+| `data/contrib/index.json` | `{schema_version, built_at, contributors[]}` with paths relative to `data/` |
+| `data/contrib/<id>/odf.min.json` | Pack ODFs only, same 12-bucket shape as `data/odf.min.json`, inheritance and composition refs already expanded |
+| `data/contrib/<id>/fx.json` | Texture / geometry / sound map plus `missing` |
+| `data/contrib/<id>/textures/` , `audio/` | Assets that came from the pack itself |
+
+`python scripts/build_contrib_weapons.py` (`--only <id>`, `--force`, `--bz2r`, `--workshop`) parses the pack with `scripts/odf/build_odf_db.py` (`parse_odf_text`, `process_inheritance`, `expand_refs`, `apply_powerup_push`, `categorize_corpus`) on top of a read-only flatten of `data/odf.min.json`. Stock names are pre-seeded as already expanded, so a pack `ordName` / `xpl*` reference inlines the stock sections and the stock file is never rewritten. An ODF basename that already exists in the stock database is a hard failure. The builder globs `weapons/` recursively and is case-insensitive; when two files share a stem, the later sorted path wins.
+
+**`.dxtbz2` is not bzip2.** `decode_dxtbz2()` in `scripts/object-render/dds_decode.py` reads a 24-byte header — magic `!HSG`, `format` (1 = DXT1/BC1, 5 = DXT5/BC3, 3 treated as BC3 the same way DDS DXT3 is), average colour, mip count, width, height — then mip 0 as raw DXT blocks sized by a leading `u32`. It returns an RGBA image, downscaled when `max_dim` is set (the builder uses 256, the same cap as `build_fx_assets.py`).
+
+**Asset resolution**, for every texture, sound and mesh stem the pack's weapons reach (`walk_refs` + `follow_dispensed`, the same walk as `scripts/build_fx_assets.py`):
+
+1. A file in the pack (`.dxtbz2` / `.dds` / `.tga` / `.png`, or `.wav`) is written to `data/contrib/<id>/textures/<stem>.png` or `audio/<stem>.wav`.
+2. Else an existing `data/fx/textures/<stem>.png` or `data/audio/<stem>.wav` is referenced, not copied.
+3. Else the local BZ2R install and workshop tree are searched and the stock asset is written into those shared directories.
+4. Else the stem is listed under `fx.json` `missing` and printed. The weapon still ships; the range draws or plays without that one asset.
+
+Geometry is never decoded from the pack (packs ship `.xsi` names, not meshes). A stem is recorded only when `data/models/geometry/<stem>.glb` or `data/fx/geometry/<stem>.glb` already exists.
+
+**Page merge.** `js/weapons.js` fetches `data/contrib/index.json` (404-safe: a missing index leaves the lab stock-only) and each pack's `odf.min.json` + `fx.json`. Buckets merge into the stock database with **stock winning** on a name collision (`console.warn`, the pack entry is dropped). `VTWeaponsCalc.init(db, reticles, { packs })` then exposes `packOf(stem)` and a third set on `weaponStemsFor()`, `community`. The VSR build-tree counts (56 / 28 / 3 / 123 / 85) do not move, because pack weapons are not reachable from the recycler roots. The Scenario picker adds a "Community weapons · <name>" group, fit-filtered the same way as the armory, with a creator chip (a link only when the manifest `url` is set). Pack stems render as plain text, not ODF Browser links. The Damage matrix appends the same weapons, adds a sortable Source column, and shows one toggle chip per pack. The shooting range receives the already-merged database; `mergeFxIndex` keeps stock `data/fx/index.json` entries and lets each pack `fx.json` fill gaps only; `createAudio({ urls })` plays a pack wav from `data/contrib/<id>/audio/` and leaves stock clips on `data/audio/`. The range credits line names the contributors.
+
+Lamper (`contrib/lamper/`) is the first pack. Both gates cover the merge: `node _investigation/check_weapons_calc.mjs` (VSR counts unchanged, no stock-name collision, every pack weapon computes, the Lamper Machine Gun vs a heavy target is 7.5) and `node _investigation/check_weapon_fx.mjs` (every pack weapon classifies into exactly one trigger set, and every texture / sound / mesh it reaches is indexed or listed missing).
+
 ## 13. VTSR-T Methodology {#vtsr-methodology}
 
 **VTSR-T** (VT Stats Rating — *Thug*) is the thug-focused rating: an **eight-axis thug composite** (v2.3) plus fine-tuned ELO-style updates (`scripts/elo.py`), with a per-match commander role adjustment (v2.4). The published headline **VTSR-T** is the linear blend below — with $\alpha = 0$ (current ship), **VTSR-T equals Thug ELO** for every player; the JSON wire field stays `vtsr` for a stable contract.

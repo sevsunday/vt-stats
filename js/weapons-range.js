@@ -103,6 +103,24 @@ function applyVolume(pct) {
     if (text) text.textContent = pct + '%';
 }
 
+function mergeFxIndex(stock, extras) {
+    const out = {
+        textures: Object.assign({}, (stock && stock.textures) || {}),
+        geometry: Object.assign({}, (stock && stock.geometry) || {}),
+        sounds: Object.assign({}, (stock && stock.sounds) || {}),
+        credits: ((stock && stock.credits) || []).slice(),
+    };
+    (extras || []).forEach((src) => {
+        if (!src) return;
+        ['textures', 'geometry', 'sounds'].forEach((key) => {
+            Object.keys(src[key] || {}).forEach((stem) => {
+                if (!out[key][stem]) out[key][stem] = src[key][stem];
+            });
+        });
+    });
+    return out;
+}
+
 function assetMaps() {
     const textures = {};
     const geometry = {};
@@ -110,6 +128,16 @@ function assetMaps() {
     Object.keys(idx.textures || {}).forEach((stem) => { textures[stem] = '../data/' + idx.textures[stem].file; });
     Object.keys(idx.geometry || {}).forEach((stem) => { geometry[stem] = '../data/' + idx.geometry[stem].file; });
     return { textures, geometry };
+}
+
+function contribSoundUrls() {
+    const urls = {};
+    const sounds = (fxIndex && fxIndex.sounds) || {};
+    Object.keys(sounds).forEach((stem) => {
+        const file = sounds[stem] && sounds[stem].file;
+        if (file && file.indexOf('audio/') !== 0) urls[stem] = '../data/' + file;
+    });
+    return urls;
 }
 
 function reticleFile(frame) {
@@ -510,7 +538,7 @@ async function loadTarget(snap) {
     floorSize = 0;
 }
 
-export async function mount(container) {
+export async function mount(container, shared) {
     rootEl = container;
     rootEl.innerHTML = ''
         + '<div class="vt-wpn-range-stage">'
@@ -554,13 +582,13 @@ export async function mount(container) {
         + 'Renders, sounds and impact effects are the weapon\'s own ODF effect definitions; damage per hit is the ODF value for this target\'s class.</p>';
 
     const [odf, fxIdx, ret, pits] = await Promise.all([
-        fetch('../data/odf.min.json').then((r) => r.json()),
+        (shared && shared.db) ? Promise.resolve(shared.db) : fetch('../data/odf.min.json').then((r) => r.json()),
         fetch('../data/fx/index.json').then((r) => r.json()).catch(() => null),
         fetch(RETICLE + 'index.json').then((r) => r.json()).catch(() => null),
         fetch(COCKPIT + 'index.json').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     db = odf;
-    fxIndex = fxIdx;
+    fxIndex = mergeFxIndex(fxIdx, shared && shared.fxIndexes);
     reticleIndex = ret;
     cockpitIndex = pits;
 
@@ -584,7 +612,7 @@ export async function mount(container) {
         loadModelTexture: (name) => viewer._loadTexture('perf', name),
         getCamera: () => viewer.camera,
     }));
-    audio = createAudio();
+    audio = createAudio({ urls: contribSoundUrls() });
     sim = createRangeSim({
         fx, audio,
         getMuzzles: muzzles,
@@ -664,6 +692,13 @@ export async function mount(container) {
     if (credits.length && note) {
         note.insertAdjacentHTML('beforeend', ' Effect art also from '
             + credits.map((c) => '<a href="' + esc(c.url) + '">' + esc(c.name) + '</a>').join(', ') + '.');
+    }
+    const people = (shared && shared.contributors) || [];
+    if (people.length && note) {
+        note.insertAdjacentHTML('beforeend', ' Community weapons by '
+            + people.map((p) => (p.url
+                ? '<a href="' + esc(p.url) + '" target="_blank" rel="noopener">' + esc(p.name) + '</a>'
+                : esc(p.name))).join(', ') + '.');
     }
     window.VTWeaponsRange = { sync, destroy, _debug: () => ({ viewer, fx, sim, audio, target, cockpit, slots, activeSlot, hp, maxHp }) };
 }

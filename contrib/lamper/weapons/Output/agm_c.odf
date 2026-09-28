@@ -1,0 +1,68 @@
+[OrdnanceClass]
+classLabel="thermalmissile"
+shotGeometry="iorckt00.xsi"
+shotSound="crckt02.wav"
+renderName="agm_c.render"
+xplGround="xagmg"
+xplVehicle="xagmc"
+xplBuilding="xagmb"
+ammoCost=25
+lifeSpan=1.25 // 120m
+shotSpeed=100.0
+damageValue(N)=20 // none
+damageValue(L)=17 // light
+damageValue(H)=10 // heavy
+damageValue(S)=15 // standard
+damageValue(D)=25 // deflection
+damageValue(A)=10// absorbtion
+[MissileClass]
+omegaTurn=1.1
+velocForward=100.0// powered speed of the missile
+accelThrust=50.0// rate the missile can change speed
+delayTime=0.0// homing delay time (zero turn rate)
+rampTime=0.0// homing ramp time (from zero to full turn rate)
+avoidRange=50.0// terrain obstacle-avoidance range
+avoidStrength=2.0// terrain obstacle-avoidance strength (~2 seems best)
+[ThermalMissileClass]
+coneAngle=0.45
+lockRange=50
+[Render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="agm_c.flare"
+renderName2="agm_c.smoke"
+renderName3="agm_c.flame"
+[Flare]
+renderBase="draw_sprite"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=1.0
+finishRadius=1.0
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="smoke.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="63 255 255 255"
+finishColor="51 51 13 51"
+startRadius=0.2
+finishRadius=0.4
+animateTime=0.2
+emitDelay=0.003
+emitVelocity="0.0 0.0 0.0"
+emitVariance="0.6 0.6 0.6"
+emitLife=0.2
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="tag.tga"
+textureBlend="one one modulate"
+startColor="63 255 255 255"
+finishColor="0 0 0 255"
+startRadius=0.2
+finishRadius=0.02
+animateTime=0.3
+emitDelay=0.0006
+emitVelocity="0.0 0.0 0.0"
+emitVariance="4.0 4.0 4.0"
+emitLife=0.3

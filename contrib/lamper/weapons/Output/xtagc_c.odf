@@ -1,0 +1,77 @@
+[ExplosionClass]
+classLabel="explosion"
+explSound="xtagx.wav"
+damageRadius=5.0
+damageValue(N)=30  // none 
+damageValue(L)=16 // light
+damageValue(H)=1 // heavy
+damageValue(S)=15  // standard
+damageValue(D)=25 // deflection
+damageValue(A)=1 // absorbtion
+particleTypes=4
+particleClass1="xtagc_c.flame"
+particleCount1=2
+particleVeloc1="0.0 0.0 0.0"
+particleClass2="xtagc_c.light"
+particleCount2=1
+particleVeloc2="0.0 0.0 0.0"
+particleClass3="xtagc_c.puff"
+particleCount3=10
+particleVeloc3="8.0 8.0 8.0"
+particleClass4="xtagc_c.core"
+particleCount4=1
+particleVeloc4="2.5 2.5 2.5"
+[flame]
+simulateBase="sim_smoke"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xtagcar_c.flameemit"
+emitDelay=0.1
+emitVelocity="0.0 0.0 0.0"
+emitVariance="0.0 0.0 0.0"
+[flameemit]
+simulateBase="sim_smoke"
+lifeTime=0.2
+renderBase="draw_twirl"
+textureName="flame2.tga"
+textureBlend="one one modulate"
+startColor=" 255 200 100 255"
+finishColor="255 120 0 0"
+startRadius=0.5
+finishRadius=2.5
+animateTime=0.2
+rotationRate=20.0
+[Light]
+simulateBase="sim_null"
+lifeTime=0.5
+renderBase="draw_light"
+startColor="255 255 0 255"
+finishColor="255 0 0 0"
+startRadius=1.4
+finishRadius=0.5
+animateTime=0.5
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[Puff]
+simulateBase="sim_smoke"
+lifeTime=0.8
+renderBase="draw_twirl"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=0.4
+finishRadius=0.01
+animateTime=0.8
+[Core]
+simulateBase="sim_smoke"
+lifeTime=2.0
+renderBase="draw_twirl"
+textureName="smoke.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="200 170 170 255"
+finishColor="10 10 10 0"
+startRadius=0.5
+finishRadius=2.0
+animateTime=2.0

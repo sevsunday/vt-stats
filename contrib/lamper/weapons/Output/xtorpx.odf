@@ -1,0 +1,170 @@
+[ExplosionClass]
+classLabel="explosion"
+explSound="xchrg_xpr.wav"
+damageRadius=35.0
+damageValue(N)=1000
+damageValue(L)=850
+damageValue(H)=710
+damageValue(S)=710
+damageValue(D)=1000
+damageValue(A)=850
+kickRadius=32.5
+kickOmega=6.0
+kickVeloc=6.0
+particleTypes=7
+particleClass1="xtorpx.core"
+particleCount1=1
+particleVeloc1="0.0 0.0 0.0"
+particleBias1="0.0 0.0 0.0"
+particleClass2="xtorpx.light"
+particleCount2=1
+particleVeloc2="0.0 0.0 0.0"
+particleClass3="xtorpx.Smoke"
+particleCount3=20
+particleVeloc3="5.0 5.0 5.0"
+particleClass5="xtorpx.Streamer"
+particleCount5=1
+particleVeloc5="0.0 0.0 0.0"
+particleClass6="xtorpx.embers"
+particleCount6=50
+particleVeloc6="50.0 50.0 50.0"
+particleBias6="0.0 0.0 0.0"
+particleClass7="xtorpx.FShock"
+particleCount7=1
+particleVeloc7="0.0 0.0 0.0"
+particleClass4="xtorpx.Flame"
+particleCount4=30
+particleVeloc4="5.0 5.0 5.0"
+[Core]
+simulateBase="sim_smoke"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xtorpx.coreemit"
+emitDelay=0.0025
+emitVelocity="0.0 0.0 0.0"
+emitVariance="6.0 6.0 6.0"
+[Coreemit]
+simulateBase="sim_smoke"
+lifeTime=1.0
+renderBase="draw_twirl"
+textureName="flame.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"  
+finishColor="255 0 0 0"  
+startRadius=4.0
+finishRadius=0.125
+animateTime=1.0
+rotationRate=0.3
+[FShock]
+simulateBase="sim_null"
+lifeTime=0.1
+renderBase="draw_sphere"
+textureName="xfevring.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 50"
+finishColor="250 250 250 0"
+startRadius=29
+finishRadius=29
+animateTime=0.1
+latitudeBands=8
+longitudeSegments=16
+[Smoke]
+simulateBase="sim_smoke"
+lifeTime=4.5
+renderBase="draw_twirl"
+textureName="smoke.tga"
+textureBlend="srcalpha invsrcalpha modulatealpha"
+startColor="0 0 0 255"
+finishColor="20 20 20 0"
+startRadius=1
+finishRadius=3
+animateTime=4.5
+rotationRate=2
+[Light]
+simulateBase="sim_null"
+lifeTime=1.0
+renderBase="draw_light"
+startColor="255 255 63 5000"  
+finishColor="255 0 0 0"  
+startRadius=40.0
+finishRadius=40.0
+animateTime=1.0
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0
+[Streamers]
+simulateBase="sim_ember"
+lifeTime=0.25
+renderBase="draw_trail"
+textureBlend="one one modulate"
+startColor="255 255 63 255"  
+finishColor="255 0 0 0"  
+startRadius=0.075
+finishRadius=0.0
+trailTime=0.25
+segmentTime=0.25
+[Embers]
+simulateBase="sim_ember"
+lifeTime=4.0
+renderBase="draw_trail"
+textureBlend="one one modulate"
+startColor="255 255 63 255"  
+finishColor="255 0 0 0"  
+startRadius=0.075
+finishRadius=0.0
+trailTime=4.0
+segmentTime=0.45
+[Flame]
+simulateBase="sim_smoke"
+lifeTime=4
+renderBase="draw_twirl"
+textureName="flame2.tga"
+textureBlend="one one modulate"
+startColor="255 200 28 255"
+finishColor="255 0 0 0"
+startRadius=0.5
+finishRadius=3
+animateTime=4
+rotationRate=2
+[Streamer]
+simulateBase="sim_smoke"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xtorpx.emitter"
+emitDelay=0.1
+emitVelocity="0.0 0.0 0.0"
+emitVariance="0.0 0.0 0.0"
+[Emitter]
+simulateBase="sim_null"
+lifeTime=0.1
+renderBase="draw_multi"
+renderCount=1
+renderName1="xtorpx.effects3"
+[effects3]
+simulateBase="sim_ember"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xtorpx.effects3Emit"
+emitDelay=0.002
+emitVelocity="0.0 0.0 0.0"
+emitVariance="200.0 150.0 200.0"
+[effects3Emit]
+simulateBase="sim_ember"
+lifeTime=2.5
+renderBase="draw_multi"
+renderCount=1
+renderName1="xtorpx.render3"
+animateTime=2.5
+[Render3]
+renderBase="draw_multi"
+renderCount=1
+renderName1="xtorpx.light3"
+[Light3]
+simulateBase="sim_null"
+lifeTime=2.5
+renderBase="draw_light"
+startColor="255 255 63 255"  //startColor="255 155 50 75" 
+finishColor="255 0 0 0"   //finishColor="128 0 0 0"
+startRadius=20.0
+finishRadius=20.0
+animateTime=2.5

@@ -233,15 +233,65 @@ def decode_dds(path, max_dim: int | None = None) -> Image.Image:
                 _decode_bc3_block(b, off, out, bx, by, mw, mh)
             off += block_bytes
 
-    img = Image.new("RGBA", (mw, mh))
+    return _image_from_blocks(out, mw, mh, max_dim)
+
+
+def _image_from_blocks(out, w, h, max_dim):
+    img = Image.new("RGBA", (w, h))
     img.putdata(out)
-    if max_dim and max(mw, mh) > max_dim:
-        scale = max_dim / max(mw, mh)
+    if max_dim and max(w, h) > max_dim:
+        scale = max_dim / max(w, h)
         img = img.resize(
-            (max(1, round(mw * scale)), max(1, round(mh * scale))),
+            (max(1, round(w * scale)), max(1, round(h * scale))),
             Image.LANCZOS,
         )
     return img
+
+
+def _decode_bc_mip(data, off, w, h, bc, bc5_signed=False):
+    """Decode one BC mip starting at `off` into an RGBA pixel list."""
+    block_bytes = 8 if bc == 1 else 16
+    out = [(0, 0, 0, 0)] * (w * h)
+    for by in range(0, h, 4):
+        for bx in range(0, w, 4):
+            if bc == 1:
+                _decode_bc1_block(data, off, out, bx, by, w, h)
+            elif bc == 5:
+                _decode_bc5_block(data, off, out, bx, by, w, h, bc5_signed)
+            else:
+                # BC2/BC3 both 16 bytes; we decode the BC3-style (DXT5) alpha.
+                # BC2 (explicit alpha) is rare for diffuse; treat as BC3.
+                _decode_bc3_block(data, off, out, bx, by, w, h)
+            off += block_bytes
+    return out
+
+
+# .dxtbz2 is BZCC's packed effect texture: a 24-byte "!HSG" header, then one
+# raw DXT mip after another, each prefixed by its byte size. Not bzip2.
+# format 1 = DXT1/BC1, 5 = DXT5/BC3, 3 = DXT3 (decoded as BC3, same as DDS).
+_DXTBZ2_MAGIC = b"!HSG"
+_DXTBZ2_BC = {1: 1, 3: 3, 5: 3}
+
+
+def decode_dxtbz2(path, max_dim: int | None = None) -> Image.Image:
+    """Largest mip of a .dxtbz2, as RGBA. `max_dim` downscales after decode."""
+    b = Path(path).read_bytes()
+    if len(b) < 28 or b[:4] != _DXTBZ2_MAGIC:
+        raise UnsupportedDDS("not a dxtbz2 file")
+    fmt, _avg, mips, width, height, mip0 = struct.unpack_from("<6I", b, 4)
+    bc = _DXTBZ2_BC.get(fmt)
+    if bc is None:
+        raise UnsupportedDDS(f"dxtbz2 format {fmt}")
+    if width <= 0 or height <= 0 or mips < 1:
+        raise UnsupportedDDS(f"dxtbz2 header {width}x{height} mips={mips}")
+    block_bytes = 8 if bc == 1 else 16
+    need = _mip_bytes(width, height, block_bytes)
+    if mip0 != need or 28 + mip0 > len(b):
+        raise UnsupportedDDS(
+            f"dxtbz2 mip0 size {mip0}, expected {need} for {width}x{height}"
+        )
+    out = _decode_bc_mip(b, 28, width, height, bc)
+    return _image_from_blocks(out, width, height, max_dim)
 
 
 if __name__ == "__main__":

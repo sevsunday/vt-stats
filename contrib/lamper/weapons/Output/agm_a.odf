@@ -1,0 +1,96 @@
+[OrdnanceClass]
+classLabel="thermalmissile"
+shotGeometry="iorckt00.xsi"
+shotSound="crckt02.wav"
+renderName="agm_a.render"
+xplGround="xhorng"
+xplVehicle="xhornc"
+xplBuilding="xhornb"
+ammoCost=125
+lifeSpan=6.67 // 400.2m
+shotSpeed=60.0
+damageValue(N)=900 // none
+damageValue(L)=800 // light
+damageValue(H)=700 // heavy
+damageValue(S)=800 // standard
+damageValue(D)=700 // deflection
+damageValue(A)=900 // absorbtion
+[MissileClass]
+omegaTurn=1.0
+velocForward=60.0// powered speed of the missile
+accelThrust=50.0// rate the missile can change speed
+delayTime=0.0// homing delay time (zero turn rate)
+rampTime=0.0// homing ramp time (from zero to full turn rate)
+avoidRange=50.0// terrain obstacle-avoidance range
+avoidStrength=2.0// terrain obstacle-avoidance strength (~2 seems best)
+[ThermalMissileClass]
+coneAngle=0.2
+lockRange=50
+[Render]
+renderBase="draw_multi"
+renderCount=5
+renderName1="agm_a.flare"
+renderName2="agm_a.smoke"
+renderName3="agm_a.flame"
+renderName4="agm_a.flame2"
+renderName5="agm_a.flame3"
+[Flare]
+renderBase="draw_sprite"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=5.0
+finishRadius=5.0
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="oyflame.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=1.0
+finishRadius=1.0
+animateTime=0.5
+emitDelay=0.002
+emitVelocity="0.0 0.0 -15.0"
+emitVariance="3.0 3.0 2.0"
+emitLife=0.5
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="spark.tga" //flame
+textureBlend="one one modulate"
+startColor="255 100 25 255"
+finishColor="255 0 0 0"
+startRadius=0.2
+finishRadius=0.01
+animateTime=5.0
+emitDelay=0.05
+emitVelocity="2.0 -5.0 10.0" // "right.0 up.0 0.0" 
+emitVariance="3.0 3.0 2.0"
+emitLife=5.0
+[Flame2]
+renderBase="draw_twirl_trail"
+textureName="spark.tga" //flame
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=0.2
+finishRadius=0.01
+animateTime=5.0
+emitDelay=0.05
+emitVelocity="-2.0 -5.0 10.0" // "right.0 up.0 0.0" 
+emitVariance="3.0 3.0 2.0"
+emitLife=5.0
+[Flame3]
+renderBase="draw_twirl_trail"
+textureName="spark.tga" //flame
+textureBlend="one one modulate"
+startColor="255 100 25 255"
+finishColor="255 0 0 0"
+startRadius=0.2
+finishRadius=0.01
+animateTime=5.0
+emitDelay=0.05
+emitVelocity="0.0 -5.0 10.0" // "right.0 up.0 0.0" 
+emitVariance="3.0 3.0 2.0"
+emitLife=5.0

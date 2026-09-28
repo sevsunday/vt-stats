@@ -1,0 +1,73 @@
+[ExplosionClass]
+classLabel="explosion"
+particleTypes=3
+particleClass1="xfmorth.sparks"
+particleCount1=1
+particleVeloc1="0.0 1.0 0.0"
+particleClass2="xfmorth.flame"
+particleCount2=1
+particleVeloc2="0.0 1.0 0.0"
+particleBias2="0.0 0.0 0.0"
+particleClass3="xfmorth.light"
+particleCount3=1
+particleVeloc3="10.0 10.0 10.0"
+explSound="xhornc.wav"
+damageRadius=10.0
+damageValue(N)=16.5 // none
+damageValue(L)=11.25 // light
+damageValue(H)=7.5 // heavy
+damageValue(S)=11.25 // standard
+damageValue(D)=16.5 // deflection
+damageValue(A)=7.5 // absorbtion
+[Sparks]
+simulateBase="sim_smoke"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xfmorth.SparksEmit"
+emitDelay=0.03
+emitVelocity="1.0 1.0 1.0"
+emitVariance="10.0 10.0 10.0"
+[SparksEmit]
+simulateBase="sim_ember"
+lifeTime=2.0
+renderBase="draw_sprite"
+textureName="tag.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=0.2
+finishRadius=0.02
+animateTime=2.0
+rotationRate=5.0
+[flame]
+simulateBase="sim_smoke"
+lifeTime=0.12
+renderBase="draw_emit"
+emitName="xfmorth.flameemit"
+emitDelay=0.04
+emitVelocity="0.0 5.0 0.0"
+emitVariance="1.0 1.0 1.0"
+[flameemit]
+simulateBase="sim_smoke"
+lifeTime=0.5
+renderBase="draw_twirl"
+textureName="fire.tga"
+textureBlend="one one modulate"
+startColor="255 255 63 255"
+finishColor="255 0 0 0"
+startRadius=1.0
+finishRadius=2.0
+animateTime=0.5
+rotationRate=7.5
+[Light]
+simulateBase="sim_null"
+lifeTime=0.2
+renderBase="draw_light"
+startColor="255 255 63 765"
+finishColor="255 0 0 0"
+startRadius=20.0
+finishRadius=20.0
+animateTime=0.2
+attenuateConstant=0.0
+attenuateLinear=1.0
+attenuateQuadratic=0.0

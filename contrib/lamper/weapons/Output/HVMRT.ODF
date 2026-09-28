@@ -1,0 +1,66 @@
+[OrdnanceClass]
+classLabel = "grenade"
+shotGeometry = "ioartl00.xsi"
+shotSound = "baz03.wav"
+
+xplGround = "xhvmrtg"
+xplVehicle = "xhvmrth"
+xplBuilding = "xhvmrth"
+
+renderName = "hvmrt.render"
+ 
+ammoCost = 20
+lifeSpan = 1e30
+shotSpeed = 65.0
+
+damageValue(N) = 600.0 // none 107.5
+damageValue(L) = 525.0 // light 53.75
+damageValue(H) = 450.0 // heavy 5.375
+damageValue(S) = 525.0 // standard
+damageValue(D) = 450.0 // deflection
+damageValue(A) = 600.0 // absorbtion
+
+[Render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="hvmrt.flare"
+renderName2="hvmrt.smoke"
+renderName3="hvmrt.flame"
+
+[Flare]
+renderBase = "draw_sprite"
+textureName = "lightflare.tga"
+textureBlend = "one one modulate"
+startColor = "255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=2.0
+finishRadius=2.0
+
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="fire.tga"
+textureBlend="one one modulate"
+startColor="255 255 164 25"
+finishColor="18 18 12 1"
+startRadius=1.0
+finishRadius=0.75
+animateTime=1.0
+emitDelay=0.01
+emitVelocity="0.0 0.0 0.0"
+emitVariance="1.0 1.0 1.0"
+emitLife=1.0
+
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="msmoke.tga"
+textureBlend="one one modulate"
+startColor="200 200 200 200"
+finishColor="8 8 8 0"
+startRadius=0.4
+finishRadius=0.9
+animateTime=1.5
+emitDelay=0.01
+emitVelocity="0.0 0.0 0.0"
+emitVariance="1.0 1.0 1.0"
+emitLife=1.5
+rotationRate=2.0

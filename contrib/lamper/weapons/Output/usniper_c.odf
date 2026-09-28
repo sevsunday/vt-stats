@@ -1,0 +1,47 @@
+[OrdnanceClass]
+classLabel="bullet"
+shotGeometry=NULL
+xplGround="xubulg"
+xplVehicle="xubulc"
+xplBuilding="xubulb"
+renderName="usniper_c.render"
+ammoCost=2
+lifeSpan=1.0 // 200m
+shotSpeed=200.0
+damageValue(N)=5
+damageValue(L)=3
+damageValue(H)=0
+damageValue(S)=3
+damageValue(D)=5
+damageValue(A)=3
+[Render]
+renderBase="draw_multi"
+renderCount=3
+renderName1="usniper_c.core"
+renderName2="usniper_c.halo"
+renderName3="usniper_c.trail"
+[Core]
+renderBase="draw_twirl"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=0.5
+finishRadius=0.5
+[Halo]
+renderBase="draw_twirl"
+textureName="bulhit.tga"
+textureBlend="one one modulate"
+startColor="0 0 255 255"
+finishColor="0 0 255 255"
+startRadius=0.2
+finishRadius=0.2
+rotationRate=10.0
+[Trail]
+renderBase="draw_trail"
+textureBlend="one one modulate"
+startColor="0 0 255 127"
+finishColor="0 0 255 0"
+startRadius=0.05
+finishRadius=0.0
+segmentTime=0.1

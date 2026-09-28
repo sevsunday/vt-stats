@@ -311,7 +311,7 @@
         return rows;
     }
 
-    function init(db, reticleIndex) {
+    function init(db, reticleIndex, opts) {
         const buckets = {};
         const byStem = new Map();
         Object.keys(db || {}).forEach((bucket) => {
@@ -333,6 +333,17 @@
         const reticleStems = (reticleIndex && reticleIndex.stems) || {};
         const reticleOrder = new Map();
         if (reticleFrames) Object.keys(reticleFrames).forEach((name, i) => reticleOrder.set(name, i));
+
+        const packs = ((opts && opts.packs) || []).map((pack) => ({
+            id: String(pack.id || ''),
+            name: String(pack.name || pack.id || ''),
+            url: pack.url || null,
+            stems: pack.stems instanceof Set ? pack.stems : new Set(pack.stems || []),
+        })).filter((pack) => pack.id);
+        const packByStem = new Map();
+        packs.forEach((pack) => pack.stems.forEach((stem) => {
+            if (!packByStem.has(stem)) packByStem.set(stem, pack);
+        }));
 
         const variantCache = new Map();
         const variantBuilding = new Set();
@@ -937,7 +948,17 @@
                     arms[code].forEach((stem) => { if (!home.has(stem)) other.add(stem); });
                 });
             }
-            return { home, other };
+            const community = new Set();
+            packs.forEach((pack) => pack.stems.forEach((stem) => {
+                if (weaponRec(stem)) community.add(stem);
+            }));
+            return { home, other, community };
+        }
+
+        function packOf(stem) {
+            const pack = packByStem.get(stemOf(stem));
+            if (!pack || !weaponRec(stem)) return null;
+            return { id: pack.id, name: pack.name, url: pack.url };
         }
 
         function isVirtualStem(stem) {
@@ -1464,7 +1485,7 @@
         }
 
         const ctx = {
-            scope, families, familiesIn, weaponStemsFor, units, family, variant, shooter, target, unitInfo,
+            scope, families, familiesIn, weaponStemsFor, packOf, units, family, variant, shooter, target, unitInfo,
             resolveVariant, fittingVariants, defaultWeapon, compute,
             reticleFrame: (name) => (reticleFrames && reticleFrames[name]) || null,
             hasReticles: !!reticleFrames,

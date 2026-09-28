@@ -1,0 +1,183 @@
+[eb]  //controls how many
+simulateBase="sim_null"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xhvx_emit1.ebe"
+emitDelay=0.1
+emitVelocity="0.0 0.0 0.0"
+emitVariance="0.0 0.0 0.0"
+[ebe]
+simulateBase="sim_null"
+lifeTime=0.1
+renderBase="draw_multi"
+renderCount=3
+renderName1="xhvx_emit1.gf"
+renderName2="xhvx_emit1.ember"
+renderName3="xhvx_emit1.sparks"
+[gf]  //controls how many
+simulateBase="sim_dust"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xhvx_emit1.gndfireEmit"
+emitDelay=0.009
+emitVelocity="0.0 0.0 0.0"
+emitVariance="330.0 330.0 330.0"
+[gndfireEmit]  //maybe extra with one below
+simulateBase="sim_dust"
+lifeTime=1.5
+renderBase="draw_multi"
+renderCount=1
+renderName1="xhvx_emit1.gndfireR"
+[gndfireR]
+renderBase="draw_multi"
+renderCount=2
+renderName1="xhvx_emit1.gflight"
+renderName2="xhvx_emit1.gfflame"
+[gfLight]
+simulateBase="sim_null"
+lifeTime=2.5
+renderBase="draw_light"
+startColor="255 255 63 500" 
+finishColor="255 0 0 0" 
+startRadius=20.0
+finishRadius=20.0
+[gfFlame]
+renderBase="draw_trail"
+textureBlend="one one modulate"
+textureName="mac6.tga"
+startColor="255 128 30 255"
+finishColor="255 128 30 0"
+startRadius=0.75
+finishRadius=0.01
+segmentTime=0.5
+[ember]
+simulateBase="sim_smoke"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xhvx_emit1.emberEmit"
+emitDelay=0.005
+emitVelocity="0.0 15.0 0.0"
+emitVariance="40.0 20.0 40.0"
+[emberEmit]
+simulateBase="sim_ember"
+lifeTime=4.5
+renderBase="draw_multi"
+renderCount=1
+renderName1="xhvx_emit1.emberR"
+[emberR]
+renderBase="draw_multi"
+renderCount=2
+renderName2="xhvx_emit1.emberL"
+renderName1="xhvx_emit1.emberF"
+[emberL]
+simulateBase="sim_smoke"
+lifeTime=2.4
+renderBase="draw_sprite"
+textureName="lightflare.tga"
+textureBlend="one one modulate"
+startColor="255 255 128 255"
+finishColor="255 255 128 50"
+startRadius=1.8
+finishRadius=1.8
+animateTime=2.4
+rotationRate=300
+[emberL0]
+simulateBase="sim_null"
+renderBase="draw_light"
+startColor="255 255 63 150"
+finishColor="255 225 63 0"
+startRadius=20.0
+finishRadius=20.0
+[emberF]
+simulateBase="sim_dust"//dust
+lifeTime=2.4 //2.5
+renderBase="draw_trail"
+textureName="fetrail1.tga"
+textureBlend="one one modulate"
+textureRate=0.04
+startColor="255 255 255 150"
+finishColor="200 100 100 0"
+startRadius=0.5
+finishRadius=0.6
+segmentTime=0.3
+animateTime=0.3
+[sparks] 
+simulateBase="sim_smoke"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xhvx_emit1.sparksEmit"
+emitDelay=0.002
+emitVelocity="0.0 1.0 0.0"
+emitVariance="100.0 100.0 100.0"
+[sparksEmit]
+simulateBase="sim_smoke"
+lifeTime=5.1
+renderBase="draw_multi"
+renderCount=1
+renderName1="xhvx_emit1.sparksR"
+animateTime=5.0
+[sparksR]  //Actual effect renders defined here.
+renderBase="draw_multi"
+renderCount=1
+renderName1="xhvx_emit1.spark"
+[Spark]
+simulateBase="sim_smoke"
+lifeTime=5.0
+renderBase="draw_twirl" //sprite"
+textureName="flame2.tga"
+textureBlend="one one modulate"
+startColor="255 175 80 255"
+finishColor="255 125 30 0"
+startRadius=0.3
+finishRadius=0.3
+animateTime=5.0
+rotationRate=700
+[sparks2] 
+simulateBase="sim_ember"
+lifeTime=0.1
+renderBase="draw_emit"
+emitName="xhvx_emit1.sparksEmit2"
+emitDelay=0.002
+emitVelocity="0.0 1.0 0.0"
+emitVariance="100.0 100.0 100.0"
+[sparksEmit2]
+simulateBase="sim_ember"
+lifeTime=5.1
+renderBase="draw_multi"
+renderCount=1
+renderName1="xhvx_emit1.sparksR2"
+animateTime=5.0
+[sparksR2]  //Actual effect renders defined here.
+renderBase="draw_multi"
+renderCount=1
+renderName1="xhvx_emit1.spark2"
+[Spark2]
+simulateBase="sim_smoke"
+lifeTime=5.0
+renderBase="draw_twirl" //sprite"
+textureName="tag.tga"
+textureBlend="one one modulate"
+startColor="255 175 80 255"
+finishColor="255 125 30 0"
+startRadius=0.3
+finishRadius=0.3
+animateTime=5.0
+rotationRate=700
+[Light3]
+simulateBase="sim_null"
+lifeTime=2.3
+renderBase="draw_light"
+startColor="255 255 63 150"
+finishColor="255 225 63 0"
+startRadius=20.0
+finishRadius=20.0
+animateTime=2.3
+[Flame0]
+renderBase="draw_trail"
+textureBlend="one one modulate"
+textureName="fetrail1.tga"
+startColor="255 255 63 255"
+finishColor="255 255 63 0"
+startRadius=0.75
+finishRadius=0.01
+segmentTime=0.5

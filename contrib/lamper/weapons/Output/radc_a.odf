@@ -1,0 +1,76 @@
+[OrdnanceClass]
+classLabel="pulse"
+shotGeometry="gatstab.xsi"
+shotSound="Ordin_a.wav"
+renderName="radc_a.render"
+xplGround="xradcg_a"
+xplVehicle="xradch_a"
+xplBuilding="xradch_a"
+ammoCost=60
+lifeSpan=1.00 // 200.6m
+shotSpeed=200.0
+shotRadius=-50
+damageValue(N)=210 // none // 140 + 225 +/-
+damageValue(L)=200 // light // 133 + 125 +/-
+damageValue(H)=190 // heavy // 126 + 75 +/-
+damageValue(S)=200 // standard // 133 + 125 +/-
+damageValue(D)=190 // deflection // 126 + 255 +/-
+damageValue(A)=210 // absorbtion // 140 + 75 +/-
+[PulseShellClass]
+pulseDelay=0.15
+pulsePeriod=0.1
+xplPulse="xelpeEmit_a"
+[Render]
+renderBase="draw_multi"
+renderCount=4
+renderName1="radc_a.flare"
+renderName2="radc_a.trail"
+renderName3="radc_a.flame"
+renderName4="radc_a.smoke"
+[Flare]
+renderBase="draw_sprite"
+textureName="radcf.tga"
+textureBlend="one one modulate"
+startColor="255 255 255 255"
+finishColor="255 255 255 255"
+startRadius=1.5
+finishRadius=1.5
+[Trail]
+renderBase="draw_trail"
+textureName="blast.tga" // trail2
+textureBlend="one one modulate" //"srcalpha invsrcalpha modulatealpha" // 
+textureRate=0.004
+startColor="25 153 255 255"
+finishColor="1 6 255 0"
+startRadius=0.008
+finishRadius=1.0
+segmentTime=0.5
+animateTime=0.5
+[Flame]
+renderBase="draw_twirl_trail"
+textureName="radcs.tga"
+textureBlend="one one modulate"
+startColor="25 153 255 255"
+finishColor="0 0 255 0"  //"255 0 255 255"
+startRadius=0.5
+finishRadius=0.02
+animateTime=0.3
+rotationRate=10.0
+emitDelay=0.001
+emitVelocity="0.0 0.0 0.0"
+emitVariance="1.0 1.0 1.0"
+emitLife=0.3
+[Smoke]
+renderBase="draw_twirl_trail"
+textureName="rstab.tga"
+textureBlend="one one modulate"
+startColor="25 153 255 255"
+finishColor="64 63 255 0"
+startRadius=0.2
+finishRadius=1.2
+animateTime=0.4
+rotationRate=10.0
+emitDelay=0.005
+emitVelocity="0.0 0.0 0.0"
+emitVariance="2.0 2.0 2.0"
+emitLife=0.4

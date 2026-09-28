@@ -49,6 +49,7 @@
     };
 
     let ctx = null;
+    let contrib = { packs: [], fxIndexes: [], contributors: [] };
     const state = {
         tab: 'scenario', cat: null,
         w: null, v: null, s: null, sd: false, t: null, td: false, sh: null,
@@ -57,7 +58,7 @@
         weapon: { q: '', showAll: false },
         shooter: { q: '', faction: null },
         target: { q: '', faction: null, buildings: true, pilots: true },
-        matrix: { q: '', mode: 'hit', sort: null, dir: 1 },
+        matrix: { q: '', mode: 'hit', sort: null, dir: 1, pack: null },
         frame: null,
         matrixDirty: true,
     };
@@ -170,6 +171,21 @@
         return '<a href="' + ODF_HREF + encodeURIComponent(stem) + '" target="_blank" rel="noopener" title="Open ' + esc(stem) + ' in the ODF Browser">' + esc(stem) + '</a>';
     }
 
+    // Pack ODFs are not in the ODF Browser. Stock stems keep the cross-link.
+    function stemLabel(stem) {
+        return ctx && ctx.packOf(stem) ? esc(stem) : odfLink(stem);
+    }
+
+    function sourceChip(pack, linked) {
+        if (!pack) return '';
+        const tag = '<span class="vt-wpn-tag" data-source="' + esc(pack.id) + '"'
+            + tipAttr('Community weapon by ' + pack.name) + '>' + esc(pack.name) + '</span>';
+        if (linked && pack.url) {
+            return '<a class="vt-wpn-source-link" href="' + esc(pack.url) + '" target="_blank" rel="noopener">' + tag + '</a>';
+        }
+        return tag;
+    }
+
     function tierBadge(tier, inline) {
         const t = TIER_COPY[tier] || TIER_COPY.none;
         return '<span class="vt-wpn-tier' + (inline ? ' is-inline' : '') + '" data-tier="' + esc(tier) + '"' + tipAttr(t.tip) + '>' + esc(t.label) + '</span>';
@@ -258,11 +274,31 @@
     function weaponRows(sh) {
         const offer = ctx.weaponStemsFor(sh);
         const filtering = fitFilter(sh);
+        const byPack = new Map();
+        (offer.community || []).forEach((stem) => {
+            if (offer.home.has(stem)) return;
+            const pack = ctx.packOf(stem);
+            if (!pack) return;
+            let group = byPack.get(pack.id);
+            if (!group) {
+                group = { pack, stems: new Set() };
+                byPack.set(pack.id, group);
+            }
+            group.stems.add(stem);
+        });
+        const community = [];
+        contrib.packs.forEach((pack) => {
+            const group = byPack.get(pack.id);
+            if (!group) return;
+            const rows = rowsFrom(group.stems, sh, filtering);
+            if (rows.length) community.push({ pack, rows });
+        });
         // Show all stays on the home armory. The other factions appear only
         // when the list is limited to hardpoints the ship can actually fire.
         return {
             home: rowsFrom(offer.home, sh, filtering),
             other: filtering ? rowsFrom(offer.other, sh, true) : [],
+            community,
         };
     }
 
@@ -332,7 +368,8 @@
             const grouped = weaponRows(sh);
             const rows = grouped.home.concat(grouped.other);
             const note = sh ? fitNote(sh, filtering, grouped.home.length) : '';
-            if (!rows.length) {
+            const communityCount = (grouped.community || []).reduce((n, g) => n + g.rows.length, 0);
+            if (!rows.length && !communityCount) {
                 box.innerHTML = note + '<div class="vt-wpn-list-empty">' + (filtering
                     ? 'No weapons fit ' + esc(sh.name) + (state.cat || view.weapon.q ? ' with these filters.' : '.')
                     : 'No weapons match.') + '</div>';
@@ -343,12 +380,14 @@
                 const tags = shown.map((v) => (v === f.assault
                     ? '<span class="vt-wpn-tag is-assault">A</span>'
                     : '<span class="vt-wpn-tag is-combat">C</span>')).join('');
+                const source = ctx.packOf(shown[0].stem);
                 return '<button type="button" class="list-group-item list-group-item-action vt-wpn-row' + (selected ? ' is-selected' : '') + '"'
                     + ' data-pick="weapon" data-key="' + esc(f.key) + '"' + (selected ? ' aria-current="true"' : '') + '>'
                     + reticleMedia((only || f.combat || f.assault).reticle)
                     + '<span class="vt-wpn-row-main"><span class="vt-wpn-row-name">' + esc(name) + '</span>'
                     + '<span class="vt-wpn-stem vt-mono">' + esc(shown.map((v) => v.stem).join(' / ')) + '</span></span>'
                     + '<span class="vt-wpn-row-meta"><span class="vt-wpn-tag">' + esc(CATEGORY_NAMES[f.category] || f.category || 'Other') + '</span>'
+                    + sourceChip(source, false)
                     + '<span class="vt-wpn-tagrow">' + tags + '</span></span>'
                     + '</button>';
             };
@@ -357,7 +396,11 @@
             const otherHtml = grouped.other.length && room > 0
                 ? '<div class="vt-wpn-list-divider">Other factions</div>' + grouped.other.slice(0, room).map(rowHtml).join('')
                 : '';
-            box.innerHTML = note + homeHtml + otherHtml + listOverflow(rows.length);
+            const communityHtml = (grouped.community || []).map(({ pack, rows: packRows }) => (
+                '<div class="vt-wpn-list-divider">Community weapons · ' + esc(pack.name) + '</div>'
+                + packRows.slice(0, LIST_LIMIT).map(rowHtml).join('')
+            )).join('');
+            box.innerHTML = note + homeHtml + otherHtml + communityHtml + listOverflow(rows.length);
             return;
         }
         const units = unitList(kind);
@@ -395,11 +438,13 @@
                 return;
             }
             const v = sc.v;
+            const source = ctx.packOf(v.stem);
             box.innerHTML = '<div class="vt-wpn-selected">' + reticleMedia(v.reticle)
                 + '<div class="vt-wpn-selected-main"><span class="vt-wpn-selected-name">' + esc(sc.fam.label) + '</span>'
-                + '<span class="vt-wpn-stem vt-mono">' + sc.fam.variants.map((x) => odfLink(x.stem)).join(' / ') + '</span>'
+                + '<span class="vt-wpn-stem vt-mono">' + sc.fam.variants.map((x) => stemLabel(x.stem)).join(' / ') + '</span>'
                 + '<span class="vt-wpn-tagrow"><span class="vt-wpn-tag">' + esc(CATEGORY_NAMES[sc.fam.category] || sc.fam.category || 'Other') + '</span>'
                 + '<span class="vt-wpn-tag ' + (v.isAssault ? 'is-assault' : 'is-combat') + '">' + (v.isAssault ? 'Assault' : 'Combat') + ' \u00b7 ' + esc(v.stem) + '</span>'
+                + sourceChip(source, true)
                 + tierBadge(v.damage.tier, true) + '</span></div></div>';
             return;
         }
@@ -702,8 +747,10 @@
                 + (n.warn ? '<i class="bi bi-exclamation-triangle me-1"></i>' : '') + esc(n.text) + '</li>').join('') + '</ul>'
             : '';
 
+        const source = ctx.packOf(v.stem);
         box.innerHTML = '<article class="card vt-wpn-result-card">'
-            + '<div class="card-header vt-wpn-result-head"><h2 class="vt-wpn-headline">' + headline + '</h2>' + tierBadge(r.tier) + '</div>'
+            + '<div class="card-header vt-wpn-result-head"><h2 class="vt-wpn-headline">' + headline + '</h2>'
+            + sourceChip(source, true) + tierBadge(r.tier) + '</div>'
             + '<div class="card-body vt-wpn-result-body">' + resultCast(sc)
             + '<div class="vt-wpn-result-main">'
             + '<div class="vt-wpn-groups">'
@@ -900,6 +947,7 @@
         { key: 'stem', label: 'ODF', sort: 'text' },
         { key: 'cat', label: 'Cat', sort: 'text' },
         { key: 'ca', label: 'C/A', sort: 'text' },
+        { key: 'source', label: 'Source', sort: 'text', tip: 'Stock armory, or the community pack that contributed the weapon' },
         { key: 'rate', label: 'Shots/s', sort: 'num', end: true, tip: 'Shots (or arc hits) per second from one hardpoint' },
         { key: 'ammo', label: 'Ammo/shot', sort: 'num', end: true, tip: 'ammoCost per shot, or per second for continuous weapons' },
         { key: 'range', label: 'Range m', sort: 'num', end: true, tip: 'shotSpeed x lifeSpan; lobbed ordnance sorts last' },
@@ -923,12 +971,15 @@
             values[l] = view.matrix.mode === 'dps' ? (rate != null ? hit * rate : null) : hit;
         });
         const p = v.projectile;
+        const pack = ctx.packOf(v.stem);
         return {
             fam, v, r,
             name: v.name,
             stem: v.stem,
             cat: v.category,
             ca: v.isAssault ? 'A' : 'C',
+            source: pack ? pack.name : 'Stock',
+            packId: pack ? pack.id : null,
             rate,
             ammo: v.ammoMode === 'none' ? null : v.ammoCost,
             ammoPerSecond: v.ammoMode === 'perSecond',
@@ -940,13 +991,17 @@
 
     function matrixRows() {
         const q = view.matrix.q;
-        const stems = ctx.weaponStemsFor(null).home;
+        const offer = ctx.weaponStemsFor(null);
+        const stems = new Set(offer.home);
+        (offer.community || []).forEach((stem) => stems.add(stem));
         const rows = [];
         ctx.familiesIn(stems).forEach((fam) => {
             if (state.cat && fam.category !== state.cat) return;
             fam.variants.forEach((v) => {
                 if (!stems.has(v.stem)) return;
-                if (!matches(q, fam.label + ' ' + v.name + ' ' + v.stem)) return;
+                const pack = ctx.packOf(v.stem);
+                if (view.matrix.pack && (!pack || pack.id !== view.matrix.pack)) return;
+                if (!matches(q, fam.label + ' ' + v.name + ' ' + v.stem + ' ' + (pack ? pack.name : ''))) return;
                 rows.push(matrixRow(fam, v));
             });
         });
@@ -1003,6 +1058,9 @@
                 + '<td class="' + cls('stem').trim() + '"><span class="vt-mono">' + esc(row.stem) + '</span></td>'
                 + '<td class="' + cls('cat').trim() + '">' + esc(CATEGORY_NAMES[row.cat] || row.cat || '\u2014') + '</td>'
                 + '<td class="' + cls('ca').trim() + '"><span class="vt-wpn-tag ' + (v.isAssault ? 'is-assault' : 'is-combat') + '">' + row.ca + '</span></td>'
+                + '<td class="' + cls('source').trim() + '">' + (row.packId
+                    ? '<span class="vt-wpn-tag" data-source="' + esc(row.packId) + '">' + esc(row.source) + '</span>'
+                    : esc(row.source)) + '</td>'
                 + '<td class="vt-mono' + cls('rate') + '">' + matrixCell(row.rate) + '</td>'
                 + '<td class="vt-mono' + cls('ammo') + '">' + (row.ammo == null ? '\u2014' : fmt(row.ammo) + (row.ammoPerSecond ? '/s' : '')) + '</td>'
                 + '<td class="vt-mono' + cls('range') + '">' + (row.lobbed ? 'lobbed' : matrixCell(row.range, 0)) + '</td>'
@@ -1014,7 +1072,8 @@
             + '<div class="card-header vt-wpn-matrix-head">'
             + '<ul class="nav nav-pills vt-econ-log-pills mb-0" role="radiogroup" aria-label="Per hit or DPS">'
             + modeBtn('hit', 'Per hit') + modeBtn('dps', 'DPS (1 hardpoint)') + '</ul>'
-            + '<div class="vt-wpn-chips">' + Calc.CATEGORIES.map((c) => chipButton('data-matrix-cat', c, CATEGORY_NAMES[c], state.cat === c)).join('') + '</div>'
+            + '<div class="vt-wpn-chips">' + Calc.CATEGORIES.map((c) => chipButton('data-matrix-cat', c, CATEGORY_NAMES[c], state.cat === c)).join('')
+            + contrib.packs.map((p) => chipButton('data-matrix-pack', p.id, p.name, view.matrix.pack === p.id)).join('') + '</div>'
             + '<input type="search" class="form-control form-control-sm vt-wpn-search" data-matrix-search placeholder="Search by name or ODF"'
             + ' aria-label="Search the damage matrix" autocomplete="off" value="' + esc(searchValue) + '">'
             + '<span class="vt-wpn-matrix-count">' + rows.length + ' variant' + (rows.length === 1 ? '' : 's') + '</span>'
@@ -1042,6 +1101,12 @@
             const mode = event.target.closest('[data-matrix-mode]');
             if (mode) {
                 view.matrix.mode = mode.dataset.matrixMode;
+                renderMatrix();
+                return;
+            }
+            const packChip = event.target.closest('[data-matrix-pack]');
+            if (packChip) {
+                view.matrix.pack = view.matrix.pack === packChip.dataset.matrixPack ? null : packChip.dataset.matrixPack;
                 renderMatrix();
                 return;
             }
@@ -1102,7 +1167,7 @@
     function slotOptions(sh, hp) {
         if (!sh) return [];
         const stems = ctx.weaponStemsFor(sh);
-        const all = Array.from(stems.home).concat(Array.from(stems.other));
+        const all = Array.from(stems.home).concat(Array.from(stems.other), Array.from(stems.community || []));
         const seen = new Set();
         const out = [];
         all.forEach((stem) => {
@@ -1148,10 +1213,16 @@
 
     let rangeLoading = null;
     function ensureRange() {
+        if (!ctx || !dbRef) return;
         if (!rangeLoading) {
             const el = document.getElementById('vt-wpn-range');
             if (!el) return;
-            rangeLoading = import('../js/weapons-range.js').then((mod) => mod.mount(el));
+            const shared = {
+                db: dbRef,
+                fxIndexes: contrib.fxIndexes,
+                contributors: contrib.contributors,
+            };
+            rangeLoading = import('../js/weapons-range.js').then((mod) => mod.mount(el, shared));
         }
         rangeLoading.then(() => {
             if (ctx && window.VTWeaponsRange && state.tab === 'range') window.VTWeaponsRange.sync(rangeSnapshot());
@@ -1171,7 +1242,7 @@
             btn.addEventListener('shown.bs.tab', () => {
                 state.tab = btn.dataset.vtWpnTab;
                 if (state.tab === 'matrix' && view.matrixDirty) renderMatrix();
-                if (state.tab === 'range') ensureRange();
+                if (state.tab === 'range' && ctx) ensureRange();
                 writeUrl();
             });
         });
@@ -1185,6 +1256,67 @@
             });
         }
         document.addEventListener('error', handleImageError, true);
+    }
+
+    async function loadContrib(db) {
+        const empty = { packs: [], fxIndexes: [], contributors: [] };
+        let index = null;
+        try {
+            const response = await fetch('../data/contrib/index.json', { cache: 'no-cache' });
+            if (response.ok) index = await response.json();
+        } catch (err) {
+            index = null;
+        }
+        const list = (index && Array.isArray(index.contributors)) ? index.contributors : [];
+        if (!list.length) return empty;
+        const loaded = await Promise.all(list.map(async (entry) => {
+            if (!entry || !entry.odf) return null;
+            try {
+                const [odfRes, fxRes] = await Promise.all([
+                    fetch('../data/' + entry.odf, { cache: 'no-cache' }),
+                    entry.fx ? fetch('../data/' + entry.fx, { cache: 'no-cache' }) : Promise.resolve(null),
+                ]);
+                if (!odfRes.ok) throw new Error(entry.odf + ': HTTP ' + odfRes.status);
+                const odf = await odfRes.json();
+                const fx = fxRes && fxRes.ok ? await fxRes.json() : null;
+                return { entry, odf, fx };
+            } catch (err) {
+                console.warn('Community weapon pack skipped:', entry.id || entry.odf, err);
+                return null;
+            }
+        }));
+        const byId = new Map();
+        loaded.forEach((row) => { if (row) byId.set(row.entry.id, row); });
+        const packs = [];
+        const fxIndexes = [];
+        const contributors = [];
+        list.forEach((entry) => {
+            const row = byId.get(entry.id);
+            if (!row) return;
+            const stems = new Set();
+            Object.keys(row.odf).forEach((bucket) => {
+                const entries = row.odf[bucket];
+                if (!entries || typeof entries !== 'object') return;
+                if (!db[bucket] || typeof db[bucket] !== 'object') db[bucket] = {};
+                Object.keys(entries).forEach((name) => {
+                    if (Object.prototype.hasOwnProperty.call(db[bucket], name)) {
+                        console.warn('Community pack ' + entry.id + ' collides with stock ODF ' + name + '; stock kept.');
+                        return;
+                    }
+                    db[bucket][name] = entries[name];
+                    if (bucket === 'Weapon') stems.add(Calc.stemOf(name));
+                });
+            });
+            packs.push({
+                id: entry.id,
+                name: entry.name || entry.id,
+                url: entry.url || null,
+                stems,
+            });
+            if (row.fx) fxIndexes.push(row.fx);
+            contributors.push({ name: entry.name || entry.id, url: entry.url || null });
+        });
+        return { packs, fxIndexes, contributors };
     }
 
     async function fetchJson(url) {
@@ -1220,7 +1352,8 @@
             setStatus('Could not load the ODF database.', true);
             return;
         }
-        ctx = Calc.init(db, reticles);
+        contrib = await loadContrib(db);
+        ctx = Calc.init(db, reticles, { packs: contrib.packs });
         dbRef = db;
         setStatus(reticles ? '' : 'Reticle images are unavailable; showing placeholders.', false);
         validateState();

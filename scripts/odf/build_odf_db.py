@@ -40,14 +40,18 @@ import tracemalloc
 from copy import deepcopy
 from pathlib import Path
 
-try:
-    import psutil
-except ImportError:
-    sys.stderr.write(
-        "ERROR: psutil is required for the RSS watchdog.\n"
-        "Install with: pip install psutil\n"
-    )
-    sys.exit(1)
+def _require_psutil():
+    """Import psutil on demand. The RSS watchdog needs it; importers that only
+    reuse the parser (scripts/build_contrib_weapons.py) do not."""
+    try:
+        import psutil
+    except ImportError:
+        sys.stderr.write(
+            "ERROR: psutil is required for the RSS watchdog.\n"
+            "Install with: pip install psutil\n"
+        )
+        sys.exit(1)
+    return psutil
 
 
 # ---------- Paths ----------
@@ -1265,7 +1269,7 @@ def run_forensic(corpus, n):
     and detailed stats. Returns nothing - prints a report and sys.exits(0).
     """
     tracemalloc.start(25)
-    proc = psutil.Process(os.getpid())
+    proc = _require_psutil().Process(os.getpid())
 
     picks = _forensic_pick_slice(corpus, n)
     print(f"\n[FORENSIC] Slice ({len(picks)} ODFs):")
@@ -1460,7 +1464,7 @@ def abort_with_dump(reason, **ctx):
     hold the process open.
     """
     try:
-        rss_mb = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+        rss_mb = _require_psutil().Process(os.getpid()).memory_info().rss / (1024 * 1024)
     except Exception:
         rss_mb = -1
     sys.stderr.write("\n*** ABORT: " + str(reason) + "\n")
@@ -1481,7 +1485,7 @@ def start_rss_watchdog():
     seconds. If RSS exceeds RSS_HARD_CAP_BYTES, calls abort_with_dump.
     Returns the Thread (caller doesn't need to join - it's a daemon).
     """
-    proc = psutil.Process(os.getpid())
+    proc = _require_psutil().Process(os.getpid())
 
     def _watch():
         while True:
