@@ -1631,7 +1631,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
     category / isPilot / faction fields from the current enumeration.
     Absent isPilot means false."""
     p = prior.get(stem, {})
-    return {
+    out = {
         "stem": stem,
         "glb": f"geometry/{stem}.glb",
         "thumb": f"thumbnails/{stem}.png",
@@ -1665,6 +1665,159 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "snipe": meta.get("snipe"),
         "collisionRadiiByOdf": meta.get("collisionRadiiByOdf"),
     }
+    if p.get("cockpit"):
+        out["cockpit"] = p["cockpit"]
+    return out
+
+
+# ----------------------------- cockpits -----------------------------
+
+
+def _odf_prop(entry, section, key):
+    if not isinstance(entry, dict):
+        return None
+    for sec_name, sec in entry.items():
+        if not isinstance(sec, dict) or sec_name.lower() != section:
+            continue
+        for k, v in sec.items():
+            if str(k).lower() == key and v not in (None, ""):
+                return v
+    return None
+
+
+def _bbox_center(prims):
+    lo = [1e9, 1e9, 1e9]
+    hi = [-1e9, -1e9, -1e9]
+    n = 0
+    for prim in prims:
+        for x, y, z in prim["positions"]:
+            lo[0], hi[0] = min(lo[0], x), max(hi[0], x)
+            lo[1], hi[1] = min(lo[1], y), max(hi[1], y)
+            lo[2], hi[2] = min(lo[2], z), max(hi[2], z)
+            n += 1
+    if not n:
+        return [0, 0, 0]
+    return [round((lo[i] + hi[i]) / 2, 3) for i in range(3)]
+
+
+def run_cockpits(args):
+    """Bake cockpit meshes referenced by the model corpus.
+
+    The mesh origin is not documented. Measured on ivtank_cockpit (printed
+    below): the shooting range parents the GLB to the camera and subtracts this
+    bbox center so the cockpit sits around the eye. Bank clip names are
+    recorded when the ODF declares them; the baked mesh rarely carries the
+    clips, so the range does not play them.
+    """
+    roots = resolve_roots(args.steam_base)
+    msh_index = {}
+    for path, _label in roots:
+        for f in path.rglob("*.msh"):
+            if "cockpit" in f.stem.lower():
+                msh_index.setdefault(f.stem.lower(), f)
+    ws = workshop_content_dir(args.steam_base)
+    if ws:
+        for f in ws.rglob("*.msh"):
+            if "cockpit" in f.stem.lower():
+                msh_index.setdefault(f.stem.lower(), f)
+    dds_index = build_file_index(roots, "dds")
+    mat_index = build_file_index(roots, "material")
+    dds_all = build_workshop_index(ws, "dds")
+    mat_all = build_workshop_index(ws, "material")
+    _worker_init(dds_index, mat_index, dds_all, mat_all, {
+        "handedness": not args.no_handedness_fix,
+        "force": args.force,
+        "verbose": args.verbose,
+    })
+
+    db = json.loads((PROJECT_ROOT / "data" / "odf.min.json").read_text(encoding="utf-8"))
+    by_file = {}
+    for bucket in db.values():
+        if isinstance(bucket, dict):
+            for name, entry in bucket.items():
+                by_file[name.lower()] = entry
+
+    index_path = OUT_DIR / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    out_dir = OUT_DIR / "cockpits"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    mesh_info = {}
+    by_model = {}
+    written = 0
+    for model in index.get("models", []):
+        chosen = None
+        for odf_name in model.get("odfs") or []:
+            entry = by_file.get(str(odf_name).lower())
+            if not entry:
+                continue
+            raw = _odf_prop(entry, "gameobjectclass", "cockpitname") or _odf_prop(entry, "weaponclass", "cockpitname")
+            if not raw:
+                continue
+            cstem = str(raw).strip().strip('"').rsplit(".", 1)[0].lower()
+            scale = _odf_prop(entry, "weaponclass", "cockpitscale") or _odf_prop(entry, "gameobjectclass", "cockpitscale") or 1
+            try:
+                scale = float(scale)
+            except (TypeError, ValueError):
+                scale = 1
+            banks = []
+            for sec_name, sec in entry.items():
+                if not isinstance(sec, dict):
+                    continue
+                if sec_name.lower() not in ("gameobjectclass", "weaponclass"):
+                    continue
+                for k, v in sec.items():
+                    if str(k).lower().startswith("animnamecockpit") and str(v).lower() in ("forward", "neutral", "reverse"):
+                        banks.append(str(v).lower())
+            chosen = (cstem, scale, banks)
+            break
+        if not chosen:
+            continue
+        cstem, scale, banks = chosen
+        src = msh_index.get(cstem)
+        if not src:
+            print(f"cockpit mesh missing: {cstem} ({model['stem']})")
+            continue
+        if cstem not in mesh_info:
+            gb, prims, *_rest = _build_groups(parse_msh(src)[0], src.parent, not args.no_handedness_fix)
+            center = _bbox_center(prims)
+            dest = out_dir / f"{cstem}.glb"
+            if args.force or not dest.is_file():
+                dest.write_bytes(gb.to_bytes(node_name=cstem))
+                written += 1
+            mesh_info[cstem] = {"center": center, "source": str(src)}
+            print(f"cockpit {cstem} center {center} <- {src.name}")
+        by_model[model["stem"]] = {
+            "stem": cstem,
+            "file": f"{cstem}.glb",
+            "center": mesh_info[cstem]["center"],
+            "scale": scale,
+            "bankClips": banks,
+        }
+
+    doc = {
+        "schema_version": 1,
+        "origin": "bbox center; the range parents the mesh to the camera and subtracts center",
+        "models": by_model,
+        "meshes": mesh_info,
+    }
+    (out_dir / "index.json").write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+
+    text = index_path.read_text(encoding="utf-8")
+    text = text.replace('"schema_version": 18,', '"schema_version": 19,', 1)
+    for stem, info in by_model.items():
+        marker = f'      "stem": "{stem}",\n'
+        line = '      "cockpit": ' + json.dumps(info, separators=(", ", ": ")) + ",\n"
+        pattern = re.compile(re.escape(marker) + r'      "cockpit": \{.*?\},\n', re.S)
+        if pattern.search(text):
+            text = pattern.sub(marker + line, text, count=1)
+        elif marker in text:
+            text = text.replace(marker, marker + line, 1)
+        else:
+            print(f"warn: model stem not found in index.json: {stem}")
+    index_path.write_text(text, encoding="utf-8")
+    print(f"cockpits: {len(mesh_info)} meshes, {written} written, {len(by_model)} models")
+    return 0
 
 
 # ----------------------------- main -----------------------------
@@ -1687,7 +1840,11 @@ def main():
     ap.add_argument("--force", action="store_true", help="Reprocess even if cached.")
     ap.add_argument("--jobs", type=int, default=1, help="Parallel worker processes.")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--cockpits", action="store_true",
+                    help="Emit data/models/cockpits and patch index.json. Does not convert the model corpus.")
     args = ap.parse_args()
+    if args.cockpits:
+        return run_cockpits(args)
 
     t0 = time.perf_counter()
     odf_filter = set(args.odf) if args.odf else None
@@ -1897,8 +2054,16 @@ def main():
     lights_count = sum(1 for m in manifest if m.get("lights"))
     snipe_count = sum(1 for m in manifest if (m.get("snipe") or {}).get("canSnipe"))
     collision_count = sum(1 for m in manifest if m.get("collisionRadiiByOdf"))
+    cockpit_doc_path = OUT_DIR / "cockpits" / "index.json"
+    if cockpit_doc_path.is_file():
+        cockpit_doc = json.loads(cockpit_doc_path.read_text(encoding="utf-8"))
+        for m in manifest:
+            info = (cockpit_doc.get("models") or {}).get(m["stem"])
+            if info:
+                m["cockpit"] = info
+    cockpit_count = sum(1 for m in manifest if m.get("cockpit"))
     idx_path.write_text(json.dumps({
-        "schema_version": 18,
+        "schema_version": 19,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -1913,6 +2078,7 @@ def main():
         "lights_count": lights_count,
         "snipe_count": snipe_count,
         "collision_count": collision_count,
+        "cockpit_count": cockpit_count,
         "texture_packs": {p["id"]: {"label": p["label"], "url": p["url"]}
                           for p in MOD_TEXTURE_PACKS},
         "texture_report": texture_report,
