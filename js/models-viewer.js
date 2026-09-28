@@ -4002,6 +4002,7 @@ export class ObjectViewer {
     if (moving) this.renderer.shadowMap.needsUpdate = true;
 
     this.controls.update();
+    if (this._externalTick) this._externalTick(dt);
 
     if (this._onFps) {
       this._fpsAccum += dt;
@@ -4042,8 +4043,111 @@ export class ObjectViewer {
     }
   }
 
+  /* Firing-range hooks. The range keeps its own target prop, muzzle queries
+   * and a per-frame callback without taking over the models page. */
+  setExternalTick(fn) {
+    this._externalTick = typeof fn === 'function' ? fn : null;
+  }
+
+  worldPointOf(name, target = new THREE.Vector3()) {
+    const node = name ? this._findNode(name) : this._model;
+    if (!node) return null;
+    node.updateWorldMatrix(true, false);
+    return target.setFromMatrixPosition(node.matrixWorld);
+  }
+
+  worldForwardOf(name, target = new THREE.Vector3()) {
+    const node = name ? this._findNode(name) : this._model;
+    if (!node) return target.set(0, 0, -1);
+    node.updateWorldMatrix(true, false);
+    return target.set(0, 0, -1).transformDirection(node.matrixWorld);
+  }
+
+  /* Shooting range floor: a wide grid so a target 100+ m out still stands on
+   * something, and a far plane to match. Undone by the next load() via _frame. */
+  setRangeFloor(size, divisions = 60) {
+    this._buildFloor(Math.max(this._baseGridSize(), size), divisions);
+    this.camera.far = Math.max(this.camera.far, size * 6);
+    this.camera.updateProjectionMatrix();
+  }
+
+  setModelVisible(on) {
+    if (this._model) this._model.visible = !!on;
+  }
+
+  /* Turn the turret toward a world point: same frame-correct yaw as
+   * _aimAtPointer, pitch from the elevation to the point. Hull-fixed guns
+   * (no yaw node) are left alone. */
+  aimAtWorldPoint(point) {
+    const yawNode = this._artYawNodes[0] || this._artHeadNode;
+    if (!yawNode && !this._hasPitch()) return false;
+    if (yawNode) {
+      const parent = yawNode.parent;
+      const rest = yawNode.userData._restQuat || yawNode.quaternion;
+      const pivotW = yawNode.getWorldPosition(new THREE.Vector3());
+      const yawAxis = ART_AXIS_Y.clone().applyQuaternion(rest).normalize();
+      const fwd0 = new THREE.Vector3(0, 0, -1).applyQuaternion(rest).normalize();
+      const tgt = parent ? parent.worldToLocal(point.clone()) : point.clone();
+      const piv = parent ? parent.worldToLocal(pivotW.clone()) : pivotW.clone();
+      const dir = tgt.sub(piv);
+      dir.addScaledVector(yawAxis, -dir.dot(yawAxis));
+      fwd0.addScaledVector(yawAxis, -fwd0.dot(yawAxis));
+      if (dir.lengthSq() > 1e-8 && fwd0.lengthSq() > 1e-8) {
+        dir.normalize();
+        fwd0.normalize();
+        const s = new THREE.Vector3().crossVectors(fwd0, dir).dot(yawAxis);
+        const c = fwd0.dot(dir);
+        this._turretYawDeg = this._clampYaw(Math.atan2(s, c) / DEG);
+      }
+    }
+    if (this._hasPitch()) {
+      const pitchNode = this._artPitchNodes[0] || this._artHeadNode || yawNode;
+      const pivotW = pitchNode.getWorldPosition(new THREE.Vector3());
+      const d = point.clone().sub(pivotW);
+      const horiz = Math.hypot(d.x, d.z);
+      this._turretPitchDeg = this._clampPitch(Math.atan2(d.y, Math.max(1e-3, horiz)) / DEG);
+    }
+    this._applyTurret();
+    return true;
+  }
+
+  async loadProp(url) {
+    this.clearProp();
+    const gen = (this._propGen = (this._propGen || 0) + 1);
+    const gltf = await new GLTFLoader().loadAsync(url);
+    if (this.disposed || gen !== this._propGen) return null;   // superseded mid-flight
+    const root = gltf.scene;
+    const mats = [];
+    root.traverse((o) => { if (o.isMesh && o.material) mats.push(o.material); });
+    await Promise.all(mats.map(async (mat) => {
+      if (!mat.name) return;
+      const tex = await this._loadTexture(this._quality === 'hq' ? 'hq' : 'perf', mat.name);
+      if (tex) {
+        mat.map = tex;
+        mat.color = new THREE.Color(0xffffff);
+        mat.needsUpdate = true;
+      }
+    }));
+    if (this.disposed || gen !== this._propGen) return null;
+    this.clearProp();
+    this.scene.add(root);
+    this._prop = root;
+    return root;
+  }
+
+  clearProp() {
+    if (!this._prop) return;
+    this.scene.remove(this._prop);
+    this._prop.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+    });
+    this._prop = null;
+  }
+
   dispose() {
     this.disposed = true;
+    this._externalTick = null;
+    this.clearProp();
     this._clearSnipeMarker();
     this._disposeMixer();
     this.renderer.setAnimationLoop(null);

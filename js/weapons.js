@@ -92,7 +92,8 @@
             const v = p.get(key);
             return v ? Calc.stemOf(v) : null;
         };
-        state.tab = p.get('tab') === 'matrix' ? 'matrix' : 'scenario';
+        const tab = p.get('tab');
+        state.tab = tab === 'matrix' || tab === 'range' ? tab : 'scenario';
         const cat = String(p.get('cat') || '').toUpperCase();
         state.cat = Calc.CATEGORIES.includes(cat) ? cat : null;
         state.w = stem('w');
@@ -116,7 +117,7 @@
         if (state.t) p.set('t', state.t);
         if (state.t && state.td) p.set('td', '1');
         if (state.t && state.sh) p.set('sh', state.sh);
-        if (state.tab === 'matrix') p.set('tab', 'matrix');
+        if (state.tab === 'matrix' || state.tab === 'range') p.set('tab', state.tab);
         if (state.cat) p.set('cat', state.cat);
         const qs = p.toString();
         const next = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
@@ -725,6 +726,7 @@
         });
         renderResult(sc);
         writeUrl();
+        if (window.VTWeaponsRange && ctx) window.VTWeaponsRange.sync(rangeSnapshot());
         return sc;
     }
 
@@ -740,6 +742,7 @@
         renderScenario();
         if (state.tab === 'matrix') renderMatrix();
         else view.matrixDirty = true;
+        if (state.tab === 'range') ensureRange();
     }
 
     function selectRow(kind, key) {
@@ -1081,6 +1084,83 @@
 
     // ---- tabs, boot ---------------------------------------------------
 
+    let dbRef = null;
+
+    function unitProp(stem, key) {
+        if (!dbRef || !stem) return null;
+        const file = stem + '.odf';
+        const buckets = ['Vehicle', 'Building', 'Pilot'];
+        for (let i = 0; i < buckets.length; i++) {
+            const entry = dbRef[buckets[i]] && dbRef[buckets[i]][file];
+            const go = entry && entry.GameObjectClass;
+            if (go && go[key] != null) return go[key];
+        }
+        return null;
+    }
+
+    // Armory weapons that fit one hardpoint: same category, same assault flag.
+    function slotOptions(sh, hp) {
+        if (!sh) return [];
+        const stems = ctx.weaponStemsFor(sh);
+        const all = Array.from(stems.home).concat(Array.from(stems.other));
+        const seen = new Set();
+        const out = [];
+        all.forEach((stem) => {
+            if (seen.has(stem)) return;
+            seen.add(stem);
+            const v = ctx.variant(stem);
+            if (!v || v.category !== hp.category || !!v.isAssault !== !!hp.assault) return;
+            out.push({ stem, name: v.name });
+        });
+        out.sort((a, b) => a.name.localeCompare(b.name) || a.stem.localeCompare(b.stem));
+        return out;
+    }
+
+    function rangeSnapshot() {
+        const sc = currentScenario();
+        if (!sc || !sc.v) return null;
+        const range = sc.r && sc.r.projectile && sc.r.projectile.range;
+        const sh = sc.sh;
+        const tg = sc.tg;
+        return {
+            weaponStem: sc.v.stem,
+            weaponName: sc.v.name,
+            weaponCategory: sc.v.category,
+            scenarioNodes: ((sc.res && sc.res.hardpoints) || []).map((h) => h.node),
+            shooterStem: sh ? sh.stem : null,
+            shooterThumb: sh && sh.thumb,
+            hardpoints: sh ? sh.hardpoints : [],
+            optionsFor: (hp) => slotOptions(sh, hp),
+            maxAmmo: sh ? sh.maxAmmo : 0,
+            regen: sh ? sh.addAmmo : 0,
+            targetStem: tg ? tg.stem : null,
+            targetThumb: tg && tg.thumb,
+            targetKind: tg && tg.kind,
+            targetName: tg ? tg.name : '',
+            targetHp: tg ? tg.maxHealth : 0,
+            targetRegen: tg ? tg.addHealth : 0,
+            targetDeathXpl: tg ? Calc.stemOf(unitProp(tg.stem, 'explosionName') || '') : '',
+            letter: sc.r ? sc.r.letter : 'N',
+            shield: tg ? tg.shieldClass : null,
+            distanceHint: range && range < 2000 ? range : null,
+        };
+    }
+
+    let rangeLoading = null;
+    function ensureRange() {
+        if (!rangeLoading) {
+            const el = document.getElementById('vt-wpn-range');
+            if (!el) return;
+            rangeLoading = import('../js/weapons-range.js').then((mod) => mod.mount(el));
+        }
+        rangeLoading.then(() => {
+            if (ctx && window.VTWeaponsRange && state.tab === 'range') window.VTWeaponsRange.sync(rangeSnapshot());
+        }).catch((err) => {
+            console.error('Shooting range failed to start:', err);
+            setStatus('The shooting range could not start.', true);
+        });
+    }
+
     function showTab(tab) {
         const btn = document.querySelector('[data-vt-wpn-tab="' + tab + '"]');
         if (btn && window.bootstrap) window.bootstrap.Tab.getOrCreateInstance(btn).show();
@@ -1091,6 +1171,7 @@
             btn.addEventListener('shown.bs.tab', () => {
                 state.tab = btn.dataset.vtWpnTab;
                 if (state.tab === 'matrix' && view.matrixDirty) renderMatrix();
+                if (state.tab === 'range') ensureRange();
                 writeUrl();
             });
         });
@@ -1122,7 +1203,7 @@
             + pickerSkeleton('target', 3, 'Target', 'What you shoot at', true);
         wirePickers(pickers);
         wireMatrix(matrix);
-        if (state.tab === 'matrix') showTab('matrix');
+        if (state.tab === 'matrix' || state.tab === 'range') showTab(state.tab);
         setStatus('Loading the ODF database\u2026', false);
         let db;
         let reticles = null;
@@ -1140,6 +1221,7 @@
             return;
         }
         ctx = Calc.init(db, reticles);
+        dbRef = db;
         setStatus(reticles ? '' : 'Reticle images are unavailable; showing placeholders.', false);
         validateState();
         renderAll();

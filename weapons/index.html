@@ -22,6 +22,14 @@
   <link rel="stylesheet" href="../css/layout.css">
   <link rel="stylesheet" href="../css/vtstats-theme.css">
   <link rel="stylesheet" href="../css/weapons.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/addons/"
+    }
+  }
+  </script>
 </head>
 <body class="d-flex flex-column h-100">
 
@@ -115,6 +123,13 @@
             <i class="bi bi-grid-3x3 me-1"></i>Damage matrix
           </button>
         </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="vt-wpn-tab-range" data-bs-toggle="pill"
+                  data-bs-target="#vt-wpn-pane-range" data-vt-wpn-tab="range" type="button" role="tab"
+                  aria-controls="vt-wpn-pane-range" aria-selected="false">
+            <i class="bi bi-crosshair me-1"></i>Shooting range
+          </button>
+        </li>
       </ul>
     </header>
 
@@ -130,11 +145,17 @@
                aria-labelledby="vt-wpn-tab-matrix" tabindex="0">
         <div id="vt-wpn-matrix" class="vt-wpn-matrix"></div>
       </section>
+      <section class="tab-pane fade" id="vt-wpn-pane-range" role="tabpanel"
+               aria-labelledby="vt-wpn-tab-range" tabindex="0">
+        <div id="vt-wpn-range" class="vt-wpn-range"></div>
+      </section>
     </div>
 
     <footer class="vt-wpn-foot">
       Numbers are read from the ODF database (<a href="../odf/">ODF Browser</a>); reticles and hardpoint icons come
-      from the BZCC HUD sprite table. Tier badges say how directly each number follows from the ODF.
+      from the BZCC HUD sprite table. The shooting range plays the weapon's own muzzle, projectile, impact and
+      shield renders from that database and applies its damage values to the target's hull. Tier badges and the
+      range's Data-driven / Approximated chip say how directly each behaviour follows from the ODF.
     </footer>
   </main>
 

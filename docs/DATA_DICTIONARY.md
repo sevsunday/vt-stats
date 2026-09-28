@@ -3781,3 +3781,34 @@ python scripts/map_match_video.py --self-test
 
 `js/video-links.js` → `window.VTVideoLinks` (`ensureLoaded` / `videosFor` / `linkForMatchSec` / `linkForTick`). 404-safe sentinel `window.__vtMatchVideos`. Surfaces: match-banner Watch VOD (dropdown when multiple videos), kill-feed + snipe-feed row icons, storyline key-moments rail, Build Order Log hover icons, 3D replay HUD Watch button, picker **Has VOD** facet (`hasVod` on `pickerState`, URL `?vod=`, no storage-key bump), player-page match-log VOD column. CSS: `.vt-video-link` / `.vt-video-chip` in `css/vtstats-theme.css`.
 
+## 17. Weapons Lab shooting range (display-only)
+
+Not telemetry. Not in the pipeline cache key. Built by standalone scripts, consumed only by the Weapons Lab Shooting range tab (`?tab=range`).
+
+### `data/fx/index.json`
+
+`python scripts/build_fx_assets.py`. `schema_version: 1`.
+
+| Field | Description |
+|---|---|
+| `weapons` | VSR-scope weapon stems the extract walked (123). The walk also follows the separate ODFs each weapon names — dispensed mines and payloads, the leader round, charge-level ordnances, a popper's second stage, non-inlined `xpl*` explosions (`named_refs`, the same set `js/fx/weapon-profile.js` `profileAssets` preloads). |
+| `textures` | stem → `{file, source, credit}`. PNG under `data/fx/textures/`, longest side ≤ 256. |
+| `geometry` | stem → `{file, kind}`. `kind: "model"` points at an existing `data/models/geometry/*.glb`. `kind: "fx"` is a mesh written to `data/fx/geometry/`. |
+| `sounds` | stem → `{file}` under `data/audio/`. Clips already vendored are not rewritten. |
+| `credits` | Workshop packs that supplied art (`id`, `name`, `url`). Forgotten Enemies packs are credited on the tab. |
+| `missing` | Stems referenced but not found. `missing.geometry` is the unbaked `shotGeometry` list; textures and sounds for the VSR scope are empty. |
+
+### Cockpits (`data/models/cockpits/` + `data/models/index.json`)
+
+`python scripts/object-render/convert_msh.py --cockpits`. Index `schema_version` 18 → 19, additive `models[].cockpit`:
+
+| Field | Description |
+|---|---|
+| `stem` | Cockpit mesh stem (`ivtank_cockpit`). |
+| `file` | `data/models/cockpits/<stem>.glb`. |
+| `center` | Bbox center in the GLB, meters, informational. The mesh origin is the pilot's eye (the range parents it to the camera unshifted); `ivtank_cockpit` measures about `[0, 0.03, -1.14]` because the frame extends forward of the eye. |
+| `scale` | ODF `cockpitScale`, else 1. |
+| `bankClips` | `forward` / `neutral` / `reverse` when the ODF declares them. The baked meshes do not carry those clips. |
+
+`data/models/cockpits/index.json` is the same map keyed by model geometry stem, which is what the range fetches. Models with no cockpit mesh omit the field.
+
