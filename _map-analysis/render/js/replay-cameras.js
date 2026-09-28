@@ -37,6 +37,15 @@ const MOVE_SPEED_M_S = 40;
 const MOVE_FAST_MULT = 4;
 const MOVE_GROUND_CLEAR_M = 8;
 
+// Below this camera-to-target distance, pan and scroll-zoom behave as if the
+// camera were this far out. Zoomed-out views stay on the stock curve.
+const CLOSE_FLOOR_DIST_M = 150;
+const ZOOM_STOCK_FRAC = 0.05;
+const ZOOM_MAX_NOTCH_FRAC = 0.35;
+
+const FLY_ELEV_MIN = 20 * Math.PI / 180;
+const FLY_ELEV_MAX = 70 * Math.PI / 180;
+
 const CHASE_BACK_DIST_M  = 80;
 const CHASE_UP_DIST_M    = 25;
 const CHASE_RADIUS_MIN = 18;
@@ -200,10 +209,25 @@ export function createCameraController(camera, orbitControls, mapData) {
     }
   }
 
+  function cameraTargetDist() {
+    return Math.max(camera.position.distanceTo(orbitControls.target), 0.001);
+  }
+
+  // Right-drag and two-finger pan both read panSpeed. Below the floor,
+  // a full-screen drag covers the same ground it would at CLOSE_FLOOR_DIST_M.
+  function applyClosePanFloor() {
+    if (state.mode !== 'free') {
+      if (orbitControls.panSpeed !== 1) orbitControls.panSpeed = 1;
+      return;
+    }
+    orbitControls.panSpeed = Math.max(1, CLOSE_FLOOR_DIST_M / cameraTargetDist());
+  }
+
   /**
    * Per-frame update. dtSec is real-time elapsed since last frame.
    */
   function update(dtSec, actors) {
+    applyClosePanFloor();
     // Drive transition if active.
     if (state.transition) {
       state.transition.elapsed += dtSec;
@@ -246,6 +270,91 @@ export function createCameraController(camera, orbitControls, mapData) {
 
   function setMoveGround(fn) {
     state.move.getGroundY = fn || null;
+  }
+
+  const baseZoomSpeed = orbitControls.zoomSpeed;
+  let zoomSpeedPinned = false;
+
+  // One wheel notch moves at least 5% of max(distance, floor), and never
+  // more than 35% of the current distance. Pinch and middle-drag stay stock
+  // because they do not go through this listener.
+  function zoomSpeedForWheel(event) {
+    // Match OrbitControls._customWheelEvent so zoomSpeed lines up with the
+    // delta that handler actually consumes.
+    let dy = event.deltaY;
+    if (event.deltaMode === 1) dy *= 16;
+    else if (event.deltaMode === 2) dy *= 100;
+    if (event.ctrlKey) dy *= 10;
+    const absDy = Math.abs(dy);
+    if (!absDy) return baseZoomSpeed;
+    const dist = cameraTargetDist();
+    // A 100px notch is the stock wheel step. Smaller trackpad deltas
+    // scale down so they don't each jump a full notch.
+    const notches = absDy / 100;
+    const fullStep = Math.min(
+      ZOOM_STOCK_FRAC * Math.max(dist, CLOSE_FLOOR_DIST_M),
+      ZOOM_MAX_NOTCH_FRAC * dist,
+    );
+    const step = Math.min(fullStep * notches, ZOOM_MAX_NOTCH_FRAC * dist);
+    const ratio = 1 + step / dist;
+    const normalized = absDy * 0.01;
+    if (!(ratio > 1) || !(normalized > 0)) return baseZoomSpeed;
+    return -Math.log(ratio) / (Math.log(0.95) * normalized);
+  }
+
+  function onZoomFloorCapture(event) {
+    if (state.mode !== 'free') return;
+    orbitControls.zoomSpeed = zoomSpeedForWheel(event);
+    zoomSpeedPinned = true;
+  }
+
+  function onZoomFloorRestore() {
+    if (!zoomSpeedPinned) return;
+    orbitControls.zoomSpeed = baseZoomSpeed;
+    zoomSpeedPinned = false;
+  }
+
+  /**
+   * Ease the free camera onto `point`, `distance` meters out, keeping the
+   * current azimuth and clamping elevation to 20–70°. Switches to free
+   * without the overview snap setMode('free') does.
+   */
+  function flyTo(point, distance) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return;
+    const dist = Math.max(Number(distance) || 0, 1);
+    if (state.mode !== 'free') {
+      clearChasePointers();
+      state.mode = 'free';
+      orbitControls.enabled = true;
+    }
+    const startPos = camera.position.clone();
+    const startTgt = orbitControls.target.clone();
+    const offset = startPos.clone().sub(startTgt);
+    if (offset.lengthSq() < 1e-8) offset.set(1, 1, 1);
+    const horiz = Math.hypot(offset.x, offset.z);
+    const azimuth = Math.atan2(offset.x, offset.z);
+    const elev = clamp(Math.atan2(offset.y, Math.max(horiz, 1e-6)), FLY_ELEV_MIN, FLY_ELEV_MAX);
+    const cosE = Math.cos(elev);
+    const endTgt = new THREE.Vector3(point.x, point.y, point.z);
+    const endPos = new THREE.Vector3(
+      endTgt.x + Math.sin(azimuth) * cosE * dist,
+      endTgt.y + Math.sin(elev) * dist,
+      endTgt.z + Math.cos(azimuth) * cosE * dist,
+    );
+    if (state.move.getGroundY) {
+      const ground = state.move.getGroundY(endPos.x, endPos.z);
+      if (ground != null && Number.isFinite(ground)) {
+        const floorY = ground + MOVE_GROUND_CLEAR_M;
+        if (endPos.y < floorY) endPos.y = floorY;
+      }
+    }
+    state.transition = {
+      startPos,
+      startTgt,
+      endPos,
+      endTgt,
+      elapsed: 0,
+    };
   }
 
   function pinchDistance() {
@@ -333,6 +442,11 @@ export function createCameraController(camera, orbitControls, mapData) {
     chaseEl.addEventListener('pointerup', onChasePointerUp);
     chaseEl.addEventListener('pointercancel', onChasePointerUp);
     chaseEl.addEventListener('wheel', onChaseWheel, { passive: false });
+    // Capture runs before OrbitControls' bubble handler; the bubble
+    // listener below is registered after OrbitControls, so it restores
+    // zoomSpeed once that handler has read it.
+    chaseEl.addEventListener('wheel', onZoomFloorCapture, { capture: true });
+    chaseEl.addEventListener('wheel', onZoomFloorRestore);
   }
 
   return {
@@ -340,6 +454,7 @@ export function createCameraController(camera, orbitControls, mapData) {
     getMode: () => state.mode,
     setFocusActor,
     getFocusActor: () => state.focusActor,
+    flyTo,
     update,
     setChaseYaw: y => { state.chaseYaw = y; },
     setCinemaInputs,

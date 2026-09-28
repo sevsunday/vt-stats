@@ -12,9 +12,64 @@ import { sampleTerrainHeight } from './objects.js';
 const GEOM_DIR = '../../data/models/geometry/';
 const PERF_DIR = '../../data/models/textures/perf/';
 
+/* Grass, palms, fences and ruin windows are cards on an atlas whose empty
+ * texels are black RGB with alpha 0. Three.js ignores map alpha until
+ * alphaTest is set, so those cards draw as solid black rectangles. A cutout
+ * atlas is bimodal: a large empty field and an opaque core, with little soft
+ * middle. Soft glows (alpha is a falloff) and building trims (alpha never
+ * hits 0) stay opaque. Keep these thresholds in sync with js/models-viewer.js. */
+const CUTOUT_ALPHA_TEST = 0.15;
+const CUTOUT_SAMPLE_PX = 128;
+const CUTOUT_LOW_MAX = 16;
+const CUTOUT_MID_MAX = 200;
+const CUTOUT_LOW_SHARE = 0.20;
+const CUTOUT_MID_SHARE = 0.40;
+
+let cutoutCanvas = null;
+
 function materialsOf(mesh) {
   if (!mesh.material) return [];
   return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+}
+
+/** True when the image is a hard alpha mask rather than a soft falloff. */
+function imageIsCutout(image) {
+  const sw = image && (image.width || image.videoWidth);
+  const sh = image && (image.height || image.videoHeight);
+  if (!sw || !sh) return false;
+  const scale = Math.min(1, CUTOUT_SAMPLE_PX / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+  if (!cutoutCanvas) cutoutCanvas = document.createElement('canvas');
+  cutoutCanvas.width = w;
+  cutoutCanvas.height = h;
+  const ctx = cutoutCanvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return false;
+  let data;
+  try {
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(image, 0, 0, w, h);
+    data = ctx.getImageData(0, 0, w, h).data;
+  } catch (err) {
+    return false;
+  }
+  const n = data.length / 4;
+  if (!n) return false;
+  let low = 0;
+  let mid = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    const a = data[i];
+    if (a < CUTOUT_LOW_MAX) low++;
+    else if (a < CUTOUT_MID_MAX) mid++;
+  }
+  return (low / n) >= CUTOUT_LOW_SHARE && (mid / n) <= CUTOUT_MID_SHARE;
+}
+
+function punchCutout(mat, tex) {
+  if (!tex || !tex.userData || !tex.userData.cutout) return;
+  mat.alphaTest = CUTOUT_ALPHA_TEST;
+  mat.transparent = false;
+  mat.depthWrite = true;
 }
 
 function loadPerf(loader, cache, name, anisotropy) {
@@ -28,6 +83,7 @@ function loadPerf(loader, cache, name, anisotropy) {
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.RepeatWrapping;
       tex.anisotropy = anisotropy;
+      tex.userData.cutout = imageIsCutout(tex.image);
       tex.needsUpdate = true;
       cache.set(key, tex);
       resolve(tex);
@@ -48,6 +104,7 @@ async function bindPerf(root, loader, cache, anisotropy) {
         if (!tex) return;
         mat.map = tex;
         if (mat.color) mat.color.set(0xffffff);
+        punchCutout(mat, tex);
         mat.needsUpdate = true;
       }));
     }

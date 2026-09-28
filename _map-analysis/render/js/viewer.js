@@ -24,7 +24,7 @@ import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './l
 import { buildObjectsGroup, sampleTerrainHeight } from './objects.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
-import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props1';
+import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props2';
 import { mountLiquids, placeLiquid } from './liquids.js?v=liquids1';
 
 // ---------------- State ----------------

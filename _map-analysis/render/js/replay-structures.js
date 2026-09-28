@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { sampleTerrainHeight } from './objects.js';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
-import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=replay-quality';
+import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=deploy-pose';
 
 const TEAM_TINTS = {
   1: 0x5dadff,   // Team 1 blue
@@ -97,10 +97,11 @@ function teamColor(team) {
   return TEAM_TINTS[team] || TEAM_TINTS._;
 }
 
-/** Catalog mesh when loaded, otherwise the sized box. Hull-bottom yOff is 0 for a mesh. */
-function makeStructureVisual(odf, team, boxSize, boxName) {
+/** Catalog mesh when loaded, otherwise the sized box. Hull-bottom yOff is 0 for a mesh.
+ *  `deployedPose` holds a building's deploy clip on its last frame. */
+function makeStructureVisual(odf, team, boxSize, boxName, deployedPose) {
   if (odf && modelsEnabled() && modelReady(odf)) {
-    const body = cloneModelBody(odf, teamColor(team));
+    const body = cloneModelBody(odf, teamColor(team), deployedPose ? { deployed: true } : null);
     if (body) return { mesh: body, yOff: 0, isModel: true };
   }
   return {
@@ -256,7 +257,7 @@ export function buildStartingRecyclers(matchData, mapData, exaggeration) {
     const odf = FACTION_RECYCLER[code] || null;
     const deploySec = deploySecFor(matchData, side);
     const mobileOdf = deploySec != null ? mobileRecyclerOdf(odf) : null;
-    const deployed = makeStructureVisual(odf, side, RECYCLER_SIZE, `recycler-${side}`);
+    const deployed = makeStructureVisual(odf, side, RECYCLER_SIZE, `recycler-${side}`, true);
     placeStructureMesh(deployed.mesh, hm, c.x, c.z, deployed.isModel, Y_OFF_RECYCLER);
     stampStructureMesh(deployed.mesh, 'Recycler', side);
     group.add(deployed.mesh);
@@ -309,29 +310,77 @@ function isUpgradeOdf(odf) {
 }
 
 // A faction factory upgrade is a new build on the same pad. The base mesh
-// stays in the data (it was never destroyed), so the replay hides it.
+// stays in the data (it was never destroyed), so the replay hides it when
+// the upgrade BUILD finishes. A new base factory (Kiln / ISDF Factory /
+// Xenomator) cannot be queued while one still exists, so a constructor
+// QUEUE of one of those is proof any factory still on screen was already
+// gone — the collector often never emits UnitDestroyed for that removal.
 const FACTORY_UPGRADE_OF = {
   ebfact2_vsr: 'ebfact_vsr',
+  ebfact3_vsr: 'ebfact2_vsr',
+  ebfact4_vsr: 'ebfact3_vsr',
   fbforg_vsr: 'fbkiln_vsr',
 };
+const FACTORY_BASE = new Set([
+  'ibfact_vsr',
+  'ebfact_vsr',
+  'fbkiln_vsr',
+]);
+const FACTORY_STEMS = new Set([
+  ...FACTORY_BASE,
+  ...Object.keys(FACTORY_UPGRADE_OF),
+]);
 const FACTORY_REPLACE_M = 2;
 
 function structStem(odf) {
   return String(odf || '').toLowerCase().replace(/\.odf$/, '');
 }
 
-function applyFactoryReplacements(items) {
-  const upgrades = items.filter((it) => FACTORY_UPGRADE_OF[structStem(it.inst && it.inst.odf)]);
+function factoryStemOf(it) {
+  return structStem(it && it.inst && it.inst.odf);
+}
+
+// Real UnitDestroyed wins. Inference only fills a missing death.
+function factoryHasRealDeath(it) {
+  return it.deathSec != null;
+}
+
+function applyFactoryQueueClears(items, feed, tickRate) {
+  const queues = [];
+  for (const row of feed || []) {
+    if (row.type !== 'queue') continue;
+    if ((row.producer_resolved || row.producer) !== 'constructor') continue;
+    if (!FACTORY_BASE.has(structStem(row.odf))) continue;
+    const team = Number(row.team);
+    if (team !== 1 && team !== 2) continue;
+    queues.push({ team, sec: tickToSec(row.tick || 0, tickRate) });
+  }
+  queues.sort((a, b) => a.sec - b.sec);
+  for (const q of queues) {
+    for (const it of items) {
+      if (factoryHasRealDeath(it)) continue;
+      if (Number(it.team) !== q.team) continue;
+      if (!FACTORY_STEMS.has(factoryStemOf(it))) continue;
+      // The order being queued has not been built yet.
+      if ((it.spawnSec || 0) >= q.sec) continue;
+      if (it.replacedSec != null && it.replacedSec <= q.sec) continue;
+      it.replacedSec = q.sec;
+    }
+  }
+}
+
+function applyFactoryUpgradeBuilds(items) {
+  const upgrades = items.filter((it) => FACTORY_UPGRADE_OF[factoryStemOf(it)]);
   upgrades.sort((a, b) => (a.spawnSec || 0) - (b.spawnSec || 0));
   for (const up of upgrades) {
-    const baseStem = FACTORY_UPGRADE_OF[structStem(up.inst.odf)];
+    const baseStem = FACTORY_UPGRADE_OF[factoryStemOf(up)];
     const matches = [];
     for (const base of items) {
+      if (factoryHasRealDeath(base)) continue;
       if (base.replacedSec != null) continue;
       if (Number(base.team) !== Number(up.team)) continue;
-      if (structStem(base.inst && base.inst.odf) !== baseStem) continue;
+      if (factoryStemOf(base) !== baseStem) continue;
       if ((base.spawnSec || 0) > (up.spawnSec || 0)) continue;
-      if (base.deathSec != null && base.deathSec <= (up.spawnSec || 0)) continue;
       const dx = (base.x || 0) - (up.x || 0);
       const dz = (base.z || 0) - (up.z || 0);
       if (dx * dx + dz * dz > FACTORY_REPLACE_M * FACTORY_REPLACE_M) continue;
@@ -342,6 +391,12 @@ function applyFactoryReplacements(items) {
     // underneath it.
     for (const base of matches) base.replacedSec = up.spawnSec || 0;
   }
+}
+
+function applyFactoryReplacements(items, matchData, tickRate) {
+  const feed = (matchData && matchData.builds && matchData.builds.feed) || [];
+  applyFactoryUpgradeBuilds(items);
+  applyFactoryQueueClears(items, feed, tickRate);
 }
 
 function instanceSize(inst) {
@@ -380,7 +435,7 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
     const opening = isOpeningRecycler(inst);
     const deploySec = opening ? deploySecFor(matchData, inst.team) : null;
     const mobileOdf = deploySec != null ? mobileRecyclerOdf(inst.odf) : null;
-    const deployed = makeStructureVisual(inst.odf, inst.team, instanceSize(inst), `struct-${inst.id || inst.odf}`);
+    const deployed = makeStructureVisual(inst.odf, inst.team, instanceSize(inst), `struct-${inst.id || inst.odf}`, true);
     placeStructureMesh(deployed.mesh, hm, pad.x, pad.z, deployed.isModel, instanceYOff(inst));
     const label = prettyStructName(odfMap, inst.odf);
     stampStructureMesh(deployed.mesh, label, inst.team);
@@ -415,7 +470,7 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
       z: pad.z,
     });
   }
-  applyFactoryReplacements(items);
+  applyFactoryReplacements(items, matchData, tickRate);
   return { group, items, skippedTurrets, usedDerived: true };
 }
 
@@ -438,10 +493,10 @@ export function applyStructureModelMode(items, mapData, exaggeration) {
       : (it.inst ? instanceSize(it.inst) : RECYCLER_SIZE);
     const yOff = it.inst ? instanceYOff(it.inst) : Y_OFF_RECYCLER;
 
-    const swapOne = (oldMesh, nextOdf, name) => {
+    const swapOne = (oldMesh, nextOdf, name, deployedPose) => {
       if (oldMesh && parent) parent.remove(oldMesh);
       disposeMesh(oldMesh);
-      const built = makeStructureVisual(nextOdf, team, boxSize, name);
+      const built = makeStructureVisual(nextOdf, team, boxSize, name, deployedPose);
       placeStructureMesh(built.mesh, hm, it.x, it.z, built.isModel, yOff);
       stampStructureMesh(built.mesh, label, team);
       built.mesh.visible = false;
@@ -450,10 +505,10 @@ export function applyStructureModelMode(items, mapData, exaggeration) {
     };
 
     it.deployedOdf = odf;
-    it.deployedMesh = swapOne(it.deployedMesh || it.mesh, odf, `struct-${odf || team}`);
+    it.deployedMesh = swapOne(it.deployedMesh || it.mesh, odf, `struct-${odf || team}`, true);
     const mobileOdf = it.deploySec != null ? mobileRecyclerOdf(odf) : null;
     if (mobileOdf && modelsEnabled() && modelReady(mobileOdf)) {
-      it.mobileMesh = swapOne(it.mobileMesh, mobileOdf, `struct-${odf || team}-mobile`);
+      it.mobileMesh = swapOne(it.mobileMesh, mobileOdf, `struct-${odf || team}-mobile`, false);
     } else if (it.mobileMesh) {
       if (parent) parent.remove(it.mobileMesh);
       disposeMesh(it.mobileMesh);

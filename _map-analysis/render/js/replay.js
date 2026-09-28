@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildTileFloorMaterial } from './tile-floor.js';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
-import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props1';
+import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props2';
 import { mountLiquids, placeLiquid } from './liquids.js?v=liquids1';
 
 import { sampleTerrainHeight } from './objects.js?v=pool-flat';
@@ -44,7 +44,7 @@ import {
   updateActorLabels,
   applyVitalBars,
   applyShipModelMode,
-} from './replay-actors.js?v=pilot-sphere';
+} from './replay-actors.js?v=deploy-pose';
 import {
   initModelsPref,
   modelsEnabled,
@@ -53,7 +53,7 @@ import {
   activeTextureSet,
   loadTextureCatalog,
   reapplyTextureSet,
-} from './replay-ship-models.js?v=replay-quality';
+} from './replay-ship-models.js?v=deploy-pose';
 import {
   ensureQualityChosen,
   openReplayDialog,
@@ -75,7 +75,7 @@ import {
   updateKillFlashes,
   clearAllKillFlashes,
 } from './replay-fx.js';
-import { createCameraController } from './replay-cameras.js?v=wasd-free4';
+import { createCameraController } from './replay-cameras.js?v=close-floor2';
 import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=names1';
 import {
   buildEngagementLines,
@@ -110,7 +110,7 @@ import {
   findStructureDeaths,
   recyclerPadXZ,
   enemyBaseOf,
-} from './replay-structures.js?v=recycler-pad';
+} from './replay-structures.js?v=deploy-pose';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -2039,7 +2039,21 @@ function onCanvasPointerUp(e) {
   const dy = e.clientY - tapCandidate.y;
   const dt = e.timeStamp - tapCandidate.t;
   tapCandidate = null;
-  if (Math.hypot(dx, dy) > TAP_MAX_MOVE_PX || dt > TAP_MAX_MS) return;
+  if (Math.hypot(dx, dy) > TAP_MAX_MOVE_PX || dt > TAP_MAX_MS) {
+    if (e.pointerType === 'touch') lastCanvasTap = null;
+    return;
+  }
+  if (e.pointerType === 'touch') {
+    if (lastCanvasTap) {
+      const gap = e.timeStamp - lastCanvasTap.t;
+      const tapDist = Math.hypot(e.clientX - lastCanvasTap.x, e.clientY - lastCanvasTap.y);
+      if (gap <= DBL_TAP_MS && tapDist <= DBL_TAP_PX) {
+        lastCanvasTap = null;
+        if (tryFlyAt(e.clientX, e.clientY)) return;
+      }
+    }
+    lastCanvasTap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+  }
   // Structure label on tap: if the tap lands on a building, show its info
   // chip near the tap and swallow the tap (don't toggle chrome).
   const structHit = pickStructureAt(e.clientX, e.clientY);
@@ -2066,26 +2080,155 @@ function onCanvasPointerCancel(e) {
 // the building's pretty ODF name + owning team. Desktop = hover, mobile = tap.
 const _structRaycaster = new THREE.Raycaster();
 const _structPointer = new THREE.Vector2();
+const _focusBox = new THREE.Box3();
+const _focusSphere = new THREE.Sphere();
+const _focusCenter = new THREE.Vector3();
+const _focusProject = new THREE.Vector3();
+const PICK_SHIP_SLOP_PX = 24;
+const DBL_TAP_MS = 300;
+const DBL_TAP_PX = 30;
+const FLY_GUARD_MS = 400;
+const FLY_FIT_RADII = 3;
+const FLY_MIN_DIST_M = 30;
+const FLY_MAX_DIST_M = 250;
+let lastFlyAt = 0;
+let lastCanvasTap = null;
 
-function pickStructureAt(clientX, clientY) {
-  if (!STATE.camera || !STATE.renderer) return null;
+function focusGroups() {
   const groups = [];
+  if (STATE.actorsGroup) groups.push(STATE.actorsGroup);
   if (STATE.structuresGroup) groups.push(STATE.structuresGroup);
   if (STATE.recyclersGroup) groups.push(STATE.recyclersGroup);
-  if (!groups.length) return null;
+  return groups;
+}
+
+function chainVisible(obj) {
+  let node = obj;
+  while (node) {
+    if (node.visible === false) return false;
+    node = node.parent;
+  }
+  return true;
+}
+
+function focusRootOf(obj) {
+  let found = null;
+  let node = obj;
+  while (node) {
+    const ud = node.userData;
+    if (ud && (ud.actorName || ud.pickLabel)) found = node;
+    node = node.parent;
+  }
+  return found;
+}
+
+function describeFocusRoot(root) {
+  const ud = root.userData || {};
+  if (ud.actorName) {
+    const actor = (STATE.actors || []).find((a) => a.name === ud.actorName);
+    if (actor && actor.visible === false) return null;
+    return { kind: 'actor', name: ud.actorName, root };
+  }
+  if (ud.pickLabel) return { kind: 'structure', label: ud.pickLabel, team: ud.team, root };
+  return null;
+}
+
+function measureFocus(root) {
+  _focusBox.makeEmpty();
+  _focusBox.setFromObject(root);
+  if (_focusBox.isEmpty()) {
+    root.getWorldPosition(_focusCenter);
+    return { center: _focusCenter.clone(), radius: 8 };
+  }
+  _focusBox.getCenter(_focusCenter);
+  _focusBox.getBoundingSphere(_focusSphere);
+  const radius = Number.isFinite(_focusSphere.radius) && _focusSphere.radius > 0
+    ? _focusSphere.radius
+    : 8;
+  return { center: _focusCenter.clone(), radius };
+}
+
+// Visible hits only, nearest first. three.js raycasts hidden meshes, and
+// replaced or not-yet-built buildings stay in the scene with visible=false.
+function walkVisibleFocus(clientX, clientY) {
+  if (!STATE.camera || !STATE.renderer) return [];
+  const groups = focusGroups();
+  if (!groups.length) return [];
   const rect = STATE.renderer.domElement.getBoundingClientRect();
-  if (!rect.width || !rect.height) return null;
+  if (!rect.width || !rect.height) return [];
   _structPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   _structPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   _structRaycaster.setFromCamera(_structPointer, STATE.camera);
   const hits = _structRaycaster.intersectObjects(groups, true);
+  const out = [];
+  const seen = new Set();
   for (const h of hits) {
-    let node = h.object;
-    while (node) {
-      const ud = node.userData;
-      if (ud && ud.pickLabel) return { label: ud.pickLabel, team: ud.team };
-      node = node.parent;
-    }
+    if (!chainVisible(h.object)) continue;
+    const root = focusRootOf(h.object);
+    if (!root || seen.has(root) || !chainVisible(root)) continue;
+    seen.add(root);
+    const desc = describeFocusRoot(root);
+    if (desc) out.push(desc);
+  }
+  return out;
+}
+
+function nearestShipSlop(clientX, clientY) {
+  if (!STATE.actors || !STATE.camera || !STATE.renderer) return null;
+  const rect = STATE.renderer.domElement.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  let best = null;
+  let bestD = PICK_SHIP_SLOP_PX;
+  for (const actor of STATE.actors) {
+    if (!actor.visible || !actor.mesh || actor.mesh.visible === false || !actor.lastValidPos) continue;
+    _focusProject.set(actor.lastValidPos.x, actor.lastValidPos.y, actor.lastValidPos.z);
+    _focusProject.project(STATE.camera);
+    if (_focusProject.z < -1 || _focusProject.z > 1) continue;
+    const px = (_focusProject.x * 0.5 + 0.5) * rect.width + rect.left;
+    const py = (-_focusProject.y * 0.5 + 0.5) * rect.height + rect.top;
+    const d = Math.hypot(px - clientX, py - clientY);
+    if (d > bestD) continue;
+    bestD = d;
+    best = { kind: 'actor', name: actor.name, root: actor.mesh };
+  }
+  return best;
+}
+
+function pickFocusTarget(clientX, clientY) {
+  const hits = walkVisibleFocus(clientX, clientY);
+  const chosen = hits[0] || nearestShipSlop(clientX, clientY);
+  if (!chosen || !chosen.root) return null;
+  return Object.assign(chosen, measureFocus(chosen.root));
+}
+
+function flyToFocus(hit) {
+  if (!hit || !hit.center || !STATE.cameraCtl) return false;
+  const now = performance.now();
+  if (now - lastFlyAt < FLY_GUARD_MS) return true;
+  lastFlyAt = now;
+  const dist = Math.max(FLY_MIN_DIST_M, Math.min(FLY_MAX_DIST_M, hit.radius * FLY_FIT_RADII));
+  STATE.cameraCtl.flyTo(hit.center, dist);
+  STATE.focusedName = null;
+  document.querySelectorAll('.roster-row').forEach((li) => li.classList.remove('is-focused'));
+  STATE.cameraCtl.setFocusActor(null);
+  STATE.camMode = 'free';
+  syncViewRows();
+  document.body.classList.remove('replay-chase-active');
+  pushReplayUrlState({ cam: null, focus: null });
+  return true;
+}
+
+function tryFlyAt(clientX, clientY) {
+  const hit = pickFocusTarget(clientX, clientY);
+  if (!hit) return false;
+  return flyToFocus(hit);
+}
+
+function pickStructureAt(clientX, clientY) {
+  const hits = walkVisibleFocus(clientX, clientY);
+  for (const hit of hits) {
+    if (hit.kind === 'actor') return null;
+    if (hit.kind === 'structure') return { label: hit.label, team: hit.team };
   }
   return null;
 }
@@ -2192,6 +2335,9 @@ function wireReplayCanvasChrome() {
   canvas.addEventListener('pointercancel', onCanvasPointerCancel);
   canvas.addEventListener('pointermove', onCanvasPointerMove);
   canvas.addEventListener('pointerleave', hideStructTip);
+  canvas.addEventListener('dblclick', (e) => {
+    if (tryFlyAt(e.clientX, e.clientY)) e.preventDefault();
+  });
 }
 
 // ============================================================================

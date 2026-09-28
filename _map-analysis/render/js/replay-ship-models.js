@@ -460,7 +460,7 @@ async function loadStemNow(spec) {
   const box = new THREE.Box3().setFromObject(wrapper);
   if (Number.isFinite(box.min.y)) wrapper.position.y = -box.min.y;
 
-  const tpl = { wrapper, masks: new Map(), stem: spec.stem };
+  const tpl = { wrapper, masks: new Map(), stem: spec.stem, clips: gltf.animations || [] };
   let painted = await paintTemplate(spec, tpl);
   while (!painted) {
     tpl.painted = true;
@@ -577,8 +577,9 @@ function parallelTraverse(a, b, callback) {
  * Clone the catalog mesh for `odf`. Returns a Group (hull bottom at local
  * y = 0, nose along local +X) or null when that template is not loaded.
  * `teamColor` is a hex string or number; it tints the colorizable panels only.
+ * `opts.deployed` poses a `deploy` clip on its last frame (buildings only).
  */
-export function cloneModelBody(odf, teamColor) {
+export function cloneModelBody(odf, teamColor, opts) {
   const spec = lookupSpec(odf);
   if (!spec) return null;
   const tpl = _templates.get(spec.stem);
@@ -600,5 +601,34 @@ export function cloneModelBody(odf, teamColor) {
     obj.receiveShadow = false;
     obj.userData.sharedGeom = true;
   });
+  if (opts && opts.deployed) poseDeployed(root, tpl.clips);
   return root;
+}
+
+// Frame 0 of `deploy` is the folded hull. Hold the last frame and do not
+// stop the action: three.js restores the bind pose on stop. The template
+// itself stays at rest so ships and mobile hulls are unchanged.
+function poseDeployed(root, clips) {
+  if (!root || !clips || !clips.length) return;
+  const clip = THREE.AnimationClip.findByName(clips, 'deploy');
+  if (!clip || !(clip.duration > 0)) return;
+  const mixer = new THREE.AnimationMixer(root);
+  const action = mixer.clipAction(clip);
+  action.setLoop(THREE.LoopOnce, 1);
+  action.clampWhenFinished = true;
+  action.play();
+  mixer.update(clip.duration);
+  root.updateMatrixWorld(true);
+  root.traverse((obj) => {
+    if (!obj.isSkinnedMesh) return;
+    obj.boundingBox = null;
+    obj.boundingSphere = null;
+    obj.computeBoundingBox();
+    obj.computeBoundingSphere();
+  });
+  const box = new THREE.Box3().setFromObject(root);
+  if (Number.isFinite(box.min.y)) {
+    root.position.y -= box.min.y;
+    root.updateMatrixWorld(true);
+  }
 }
