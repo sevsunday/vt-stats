@@ -1009,7 +1009,7 @@ body.replay-compact .t-menu {
   bottom: calc(var(--vt-transport-height) + 16px);
   right: 12px;
   width: var(--vt-feed-width);
-  max-height: var(--vt-feed-max-h);
+  max-height: var(--vt-feed-visual-h, var(--vt-feed-max-h));
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1022,26 +1022,21 @@ body.replay-compact .t-menu {
   flex: 1 1 auto;
   max-height: none;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: hidden;
   bottom: auto;
   right: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  scrollbar-width: none;
 }
-.event-feed .kill-ticker::-webkit-scrollbar,
 .roster-panel::-webkit-scrollbar {
   width: 6px;
 }
-.event-feed .kill-ticker::-webkit-scrollbar-track,
 .roster-panel::-webkit-scrollbar-track {
   background: transparent;
 }
-.event-feed .kill-ticker::-webkit-scrollbar-thumb,
 .roster-panel::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.16);
   border-radius: 99px;
 }
-.event-feed .kill-ticker::-webkit-scrollbar-thumb:hover,
 .roster-panel::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.28);
 }

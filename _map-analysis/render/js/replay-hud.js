@@ -7,8 +7,11 @@
 
 import { getTickRate, tickToSec } from './replay-data.js';
 
-const FEED_CAP_DESKTOP = 12;
+const FEED_CAP_DESKTOP = 24;
 const FEED_LOOKBACK_SEC = 9;
+const FEED_GAP_SHARE = 0.75;
+const FEED_GAP_PAD = 8;
+const FEED_STACKED_MQ = '(min-height: 700px)';
 const TOAST_MS = 2000;
 const BEAT_TOASTS_ENABLED = false;
 
@@ -583,6 +586,58 @@ function appendNewEvents(tSec) {
   _state.firedTSec = tSec;
 }
 
+let _feedHeightBound = false;
+
+function feedUsesStackedLane() {
+  return window.matchMedia(FEED_STACKED_MQ).matches
+    && !document.body.classList.contains('replay-compact');
+}
+
+function syncFeedHeight() {
+  const root = document.documentElement;
+  if (!feedUsesStackedLane()) {
+    root.style.removeProperty('--vt-feed-visual-h');
+    return;
+  }
+  const roster = document.getElementById('roster-panel');
+  const transport = document.getElementById('transport');
+  if (!roster || !transport) {
+    root.style.removeProperty('--vt-feed-visual-h');
+    return;
+  }
+  const rosterRect = roster.getBoundingClientRect();
+  const transportRect = transport.getBoundingClientRect();
+  if (rosterRect.height < 1 || transportRect.height < 1) {
+    root.style.removeProperty('--vt-feed-visual-h');
+    return;
+  }
+  const available = Math.max(0, transportRect.top - rosterRect.bottom - FEED_GAP_PAD);
+  const visual = Math.round(Math.min(available, available * FEED_GAP_SHARE));
+  if (visual <= 0) {
+    root.style.removeProperty('--vt-feed-visual-h');
+    return;
+  }
+  root.style.setProperty('--vt-feed-visual-h', `${visual}px`);
+}
+
+function bindFeedHeight() {
+  if (_feedHeightBound) {
+    syncFeedHeight();
+    return;
+  }
+  _feedHeightBound = true;
+  const roster = document.getElementById('roster-panel');
+  if (typeof ResizeObserver !== 'undefined' && roster) {
+    const observer = new ResizeObserver(() => syncFeedHeight());
+    observer.observe(roster);
+  }
+  window.addEventListener('resize', syncFeedHeight);
+  const mq = window.matchMedia(FEED_STACKED_MQ);
+  if (typeof mq.addEventListener === 'function') mq.addEventListener('change', syncFeedHeight);
+  else if (typeof mq.addListener === 'function') mq.addListener(syncFeedHeight);
+  syncFeedHeight();
+}
+
 export function initReplayHud(matchData) {
   const hasBuild = !!(matchData.builds && matchData.builds.has_build_data);
   const hasEcon = !!(matchData.economy && matchData.economy.has_resource_data);
@@ -604,6 +659,7 @@ export function initReplayHud(matchData) {
   renderChipBar(hasBuild);
   renderNowBuilding(matchData, 0);
   rebuildFeed(0);
+  bindFeedHeight();
   return _state;
 }
 
