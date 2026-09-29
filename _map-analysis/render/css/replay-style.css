@@ -4,7 +4,7 @@
  * untouched so the non-replay viewer (calibration map) is unaffected.
  *
  * Design surface:
- *   - Compact / expanded top cluster (.replay-chrome)
+ *   - Compact top cluster (.replay-chrome)
  *   - Right-edge aside#roster-panel (bottom sheet in compact)
  *   - Bottom transport bar (footer#transport)
  *   - Faction-tint variables mirroring `--kb-faction-*` from production CSS
@@ -61,6 +61,7 @@ body.directory-mode #now-building,
 body.directory-mode #beat-toast,
 body.directory-mode #elo-strip,
 body.directory-mode #roster-elo,
+body.directory-mode #replay-marquee,
 body.directory-mode #transport,
 body.directory-mode #roster-panel,
 body.directory-mode .replay-chrome,
@@ -91,7 +92,20 @@ body.replay-mode:not(.replay-compact) #btn-play,
 body.replay-mode:not(.replay-compact) #btn-step-fwd {
   order: 1;
 }
-body.replay-mode:not(.replay-compact) .t-time { order: 2; }
+body.replay-mode:not(.replay-compact) .t-time,
+body.replay-mode:not(.replay-compact) #btn-share-time { order: 2; }
+
+#btn-share-time {
+  flex-shrink: 0;
+}
+#btn-share-time svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+#btn-share-time .icon-copied { display: none; }
+#btn-share-time.is-copied .icon-share { display: none; }
+#btn-share-time.is-copied .icon-copied { display: block; }
 body.replay-mode:not(.replay-compact) .scrub-wrap { order: 3; }
 body.replay-mode:not(.replay-compact) .t-speed { order: 4; }
 body.replay-mode:not(.replay-compact) #btn-view,
@@ -126,7 +140,7 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   display: block;
 }
 
-/* Compact / expanded top cluster. Hidden on desktop-in-tab. */
+/* Compact top cluster (Roster / Expand). Hidden on desktop. */
 .replay-chrome {
   display: none;
   position: fixed;
@@ -135,7 +149,7 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
   right: 0;
   z-index: 13;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px;
   pointer-events: none;
@@ -143,26 +157,11 @@ body.replay-mode:not(.replay-compact) #btn-expand { order: 6; }
 .replay-chrome > * {
   pointer-events: auto;
 }
-.replay-title-chip {
-  min-width: 0;
-  flex: 1 1 auto;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 6px 10px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
 .replay-chrome-actions {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 .replay-icon-btn {
   display: inline-flex;
@@ -1742,10 +1741,6 @@ body.replay-chase-active .replay-speedlines {
   font-weight: 500;
 }
 
-body.replay-expanded:not(.replay-compact) {
-  --vt-overlay-top: 64px;
-}
-
 @media (max-height: 699px) {
   body:not(.replay-compact) .event-feed {
     right: calc(var(--vt-roster-width) + 12px);
@@ -1766,24 +1761,6 @@ body.replay-expanded:not(.replay-compact) {
     width: var(--vt-roster-width);
     font-size: 11px;
   }
-}
-
-/* Desktop expand: title chip only (dashboard chrome is gone). */
-body.replay-expanded .replay-chrome {
-  display: flex;
-}
-body.replay-expanded:not(.replay-compact) .replay-chrome {
-  justify-content: center;
-}
-body.replay-expanded:not(.replay-compact) .replay-title-chip {
-  flex: 0 1 300px;
-  max-width: 300px;
-  width: 100%;
-  text-align: center;
-}
-body.replay-expanded:not(.replay-compact) #btn-roster,
-body.replay-expanded:not(.replay-compact) #btn-expand-top {
-  display: none;
 }
 
 /* YouTube-style chrome hide while playing. Scrap meters are deliberately kept
@@ -1849,6 +1826,17 @@ body.replay-chrome-hidden.replay-roster-open .elo-strip {
 }
 .struct-tip-team[data-team="1"] { color: var(--vt-team-1); }
 .struct-tip-team[data-team="2"] { color: var(--vt-team-2); }
+
+/* Ctrl/Cmd drag-select. Sits over the map and labels, under the HUD. */
+.replay-marquee {
+  position: fixed;
+  z-index: 9;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px solid var(--kb-primary, var(--accent));
+  background: color-mix(in srgb, var(--kb-primary, var(--accent)) 22%, transparent);
+}
+.replay-marquee[hidden] { display: none !important; }
 
 /* Compact HUD (phones + coarse-pointer landscape). Driven by body.replay-compact. */
 body.replay-compact {

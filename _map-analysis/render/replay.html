@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>VT Stats - Match Replay (Ace Combat-style)</title>
 <link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/replay-style.css?v=transport-scrub">
+<link rel="stylesheet" href="css/replay-style.css?v=share-time">
 <link rel="stylesheet" href="../../css/replay-quality.css">
 
 <script type="importmap">
@@ -56,6 +56,9 @@
 <!-- Structure hover/tap info chip (building name + owning team). -->
 <div id="struct-tip" class="struct-tip" hidden></div>
 
+<!-- Ctrl/Cmd drag-select rectangle. Painted while the gesture is active. -->
+<div id="replay-marquee" class="replay-marquee" hidden></div>
+
 <!--
   Letterbox bars (Phase 3 wires the toggle, but the DOM is here so the
   L hotkey works against `body.replay-letterboxed` from Phase 2).
@@ -78,12 +81,10 @@
 <div class="replay-speedlines" aria-hidden="true"></div>
 
 <!--
-  Compact / expanded top cluster: truncated match title + Roster/Expand.
-  Hidden on desktop-in-tab (dashboard banner already names the match).
-  Shown in compact always, and as a title-only chip in desktop expand.
+  Compact top cluster: Roster / Expand only.
+  Hidden on desktop (in-tab and fullscreen). Shown in compact always.
 -->
 <header id="replay-chrome" class="replay-chrome">
-  <div class="replay-title-chip" id="match-name">loading...</div>
   <div class="replay-chrome-actions">
     <button type="button" id="btn-roster" class="replay-icon-btn" title="Roster" aria-expanded="false" aria-controls="roster-panel">
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6m-5.784 6A2.24 2.24 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.3 6.3 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1zM4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5"/></svg>
@@ -168,6 +169,10 @@
     <button id="btn-step-fwd" class="t-btn t-btn-icon" title="Step forward 5s (Right)">&#10095;&#10095;</button>
 
     <span class="t-time"><span id="t-cur">0:00</span> / <span id="t-tot">0:00</span></span>
+    <button type="button" id="btn-share-time" class="t-btn t-btn-icon" title="Copy link to this moment" aria-label="Copy link to this moment">
+      <svg class="icon-share" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1 1 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4 4 0 0 1-.128-1.287z"/><path fill="currentColor" d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243z"/></svg>
+      <svg class="icon-copied" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0"/></svg>
+    </button>
     <a id="btn-watch-vod" class="t-btn t-watch-vod" href="#" target="_blank" rel="noopener" hidden
        title="Watch this moment on YouTube"><svg class="t-yt-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8.051 1.999h.089c.822.003 4.987.013 6.11.157a2.29 2.29 0 0 1 1.94 1.93c.313 1.644.313 4.588.313 4.588s0 2.945-.313 4.588a2.29 2.29 0 0 1-1.924 1.924c-1.125.144-5.286.154-6.11.157h-.089c-.822-.003-4.987-.013-6.11-.157A2.29 2.29 0 0 1 .06 11.26C-.253 9.616-.253 6.672-.253 6.672s0-2.945.313-4.588A2.29 2.29 0 0 1 2.24.244C3.365.1 7.526.09 8.35.087zM8 5.206v5.588L12.603 8z"/></svg>Watch</a>
     <button type="button" id="btn-watch-vod-pick" class="t-btn t-watch-vod" hidden
@@ -236,6 +241,6 @@
 </dialog>
 
 <script src="../../js/video-links.js"></script>
-<script type="module" src="js/replay.js?v=grass-cutout4"></script>
+<script type="module" src="js/replay.js?v=share-time"></script>
 </body>
 </html>

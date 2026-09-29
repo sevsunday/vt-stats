@@ -30,6 +30,7 @@ import {
   buildRoster,
   buildKillIndex,
   getTickRate,
+  secToTick,
   loadReplayTrack,
   applyReplayTrack,
 } from './replay-data.js?v=names1';
@@ -455,7 +456,6 @@ async function boot() {
   STATE.fxEvents = getFxEvents(matchData);
   void initReplayElo(matchData, { onFocus: (name) => focusActor(name, true) });
 
-  wireMatchStrip(matchMeta);
   const resolvedFloor = resolveFloorMode(initialFloor);
   wireTransport();
   wireScrubMarkers();
@@ -935,14 +935,6 @@ function addWinnerMarker(container, tick, title) {
   container.appendChild(el);
 }
 
-function wireMatchStrip(matchMeta) {
-  const el = document.getElementById('match-name');
-  if (!el) return;
-  const m = STATE.matchData.match || {};
-  el.textContent = matchMeta.name || m.id || '';
-  el.title = el.textContent;
-}
-
 function resolveFloorMode(initial) {
   const allowed = new Set(['minimap', 'ramp', 'wire', 'tiles']);
   let mode = allowed.has(initial) ? initial : 'ramp';
@@ -1387,6 +1379,9 @@ function wireTransport() {
   if (stepFwd)  stepFwd.addEventListener('click',  () => seekTo(STATE.progressSec + 5));
   if (restartBtn) restartBtn.addEventListener('click', () => seekTo(0));
 
+  const shareBtn = document.getElementById('btn-share-time');
+  if (shareBtn) shareBtn.addEventListener('click', shareReplayMoment);
+
   if (speedDD) {
     speedDD.innerHTML = '';
     for (const s of SPEEDS) {
@@ -1439,6 +1434,72 @@ function wireTransport() {
 
   // Initial play-button label.
   syncPlayButton();
+}
+
+const SHARE_TIME_LABEL = 'Copy link to this moment';
+let shareTimeFlashTimer = null;
+
+function buildReplayShareUrl() {
+  const match = STATE.matchData && STATE.matchData.match;
+  const id = (match && match.id) || params.match;
+  const tick = secToTick(Math.max(0, STATE.progressSec), STATE.tickRate || 20);
+  const url = new URL('/', location.origin);
+  url.searchParams.set('match', id);
+  url.searchParams.set('tab', 'replay');
+  url.searchParams.set('t', String(tick));
+  return url.href.replace(/%3A/gi, ':');
+}
+
+function flashShareTimeButton(ok) {
+  const btn = document.getElementById('btn-share-time');
+  if (!btn) return;
+  btn.classList.toggle('is-copied', !!ok);
+  const label = ok ? 'Link copied' : "Couldn't copy";
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  if (shareTimeFlashTimer) clearTimeout(shareTimeFlashTimer);
+  shareTimeFlashTimer = setTimeout(() => {
+    btn.classList.remove('is-copied');
+    btn.title = SHARE_TIME_LABEL;
+    btn.setAttribute('aria-label', SHARE_TIME_LABEL);
+    shareTimeFlashTimer = null;
+  }, 1500);
+}
+
+async function copyReplayShareUrl(url) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(url);
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = url;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  ta.style.pointerEvents = 'none';
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand('copy');
+  ta.remove();
+  if (!ok) throw new Error('execCommand copy failed');
+}
+
+async function shareReplayMoment() {
+  const url = buildReplayShareUrl();
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  if (coarse && typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ url });
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+    }
+  }
+  try {
+    await copyReplayShareUrl(url);
+    flashShareTimeButton(true);
+  } catch {
+    flashShareTimeButton(false);
+  }
 }
 
 function play() {
@@ -2201,12 +2262,14 @@ function pickFocusTarget(clientX, clientY) {
   return Object.assign(chosen, measureFocus(chosen.root));
 }
 
-function flyToFocus(hit) {
+function flyToFocus(hit, distOverride) {
   if (!hit || !hit.center || !STATE.cameraCtl) return false;
   const now = performance.now();
   if (now - lastFlyAt < FLY_GUARD_MS) return true;
   lastFlyAt = now;
-  const dist = Math.max(FLY_MIN_DIST_M, Math.min(FLY_MAX_DIST_M, hit.radius * FLY_FIT_RADII));
+  const dist = Number.isFinite(distOverride)
+    ? distOverride
+    : Math.max(FLY_MIN_DIST_M, Math.min(FLY_MAX_DIST_M, hit.radius * FLY_FIT_RADII));
   STATE.cameraCtl.flyTo(hit.center, dist);
   STATE.focusedName = null;
   document.querySelectorAll('.roster-row').forEach((li) => li.classList.remove('is-focused'));
@@ -2222,6 +2285,193 @@ function tryFlyAt(clientX, clientY) {
   const hit = pickFocusTarget(clientX, clientY);
   if (!hit) return false;
   return flyToFocus(hit);
+}
+
+// ---- Ctrl/Cmd drag-select ----------------------------------------------
+// Box-select visible ships and buildings, then snap the free camera to the
+// middle of the group. One target uses the double-click distance. Several
+// pull back until the group fits. Capture + stopImmediatePropagation so
+// OrbitControls and the chase rig never see the drag.
+const MARQUEE_MIN_PX = 6;
+const GROUP_FIT_PAD = 1.35;
+const GROUP_POS_PAD_M = 16;
+let marqueeDrag = null;
+
+function isBoxSelectModifier(e) {
+  return !!(e.ctrlKey || e.metaKey);
+}
+
+function paintMarquee() {
+  const el = document.getElementById('replay-marquee');
+  if (!el || !marqueeDrag) return;
+  const left = Math.min(marqueeDrag.x0, marqueeDrag.x1);
+  const top = Math.min(marqueeDrag.y0, marqueeDrag.y1);
+  el.hidden = false;
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+  el.style.width = `${Math.abs(marqueeDrag.x1 - marqueeDrag.x0)}px`;
+  el.style.height = `${Math.abs(marqueeDrag.y1 - marqueeDrag.y0)}px`;
+}
+
+function hideMarquee() {
+  const el = document.getElementById('replay-marquee');
+  if (el) el.hidden = true;
+}
+
+function clientInRect(px, py, box) {
+  const left = Math.min(box.x0, box.x1);
+  const right = Math.max(box.x0, box.x1);
+  const top = Math.min(box.y0, box.y1);
+  const bottom = Math.max(box.y0, box.y1);
+  return px >= left && px <= right && py >= top && py <= bottom;
+}
+
+function projectWorldToClient(x, y, z, rect) {
+  _focusProject.set(x, y, z);
+  _focusProject.project(STATE.camera);
+  if (_focusProject.z < -1 || _focusProject.z > 1) return null;
+  return {
+    px: (_focusProject.x * 0.5 + 0.5) * rect.width + rect.left,
+    py: (-_focusProject.y * 0.5 + 0.5) * rect.height + rect.top,
+  };
+}
+
+function focusTargetsInRect(box) {
+  if (!STATE.camera || !STATE.renderer) return [];
+  const rect = STATE.renderer.domElement.getBoundingClientRect();
+  if (!rect.width || !rect.height) return [];
+  const out = [];
+  const seen = new Set();
+  for (const actor of STATE.actors || []) {
+    if (!actor.visible || !actor.mesh || actor.mesh.visible === false || !actor.lastValidPos) continue;
+    const p = actor.lastValidPos;
+    const screen = projectWorldToClient(p.x, p.y, p.z, rect);
+    if (!screen || !clientInRect(screen.px, screen.py, box)) continue;
+    if (seen.has(actor.name)) continue;
+    seen.add(actor.name);
+    out.push({
+      kind: 'actor',
+      name: actor.name,
+      root: actor.mesh,
+      world: { x: p.x, y: p.y, z: p.z },
+    });
+  }
+  const groups = [];
+  if (STATE.structuresGroup) groups.push(STATE.structuresGroup);
+  if (STATE.recyclersGroup) groups.push(STATE.recyclersGroup);
+  for (const group of groups) {
+    group.traverse((obj) => {
+      const ud = obj.userData;
+      if (!ud || !ud.pickLabel || !chainVisible(obj)) return;
+      if (seen.has(obj)) return;
+      obj.getWorldPosition(_focusCenter);
+      const world = { x: _focusCenter.x, y: _focusCenter.y, z: _focusCenter.z };
+      const screen = projectWorldToClient(world.x, world.y, world.z, rect);
+      if (!screen || !clientInRect(screen.px, screen.py, box)) return;
+      seen.add(obj);
+      out.push({
+        kind: 'structure',
+        label: ud.pickLabel,
+        team: ud.team,
+        root: obj,
+        world,
+      });
+    });
+  }
+  return out;
+}
+
+function groupFitDistance(radius) {
+  const cam = STATE.camera;
+  if (!cam) return FLY_MIN_DIST_M;
+  const halfV = (cam.fov * Math.PI) / 360;
+  const halfH = Math.atan(Math.tan(halfV) * Math.max(cam.aspect, 0.01));
+  const distV = radius / Math.max(Math.tan(halfV), 1e-4);
+  const distH = radius / Math.max(Math.tan(halfH), 1e-4);
+  const dist = Math.max(distV, distH) * GROUP_FIT_PAD;
+  const cap = (STATE.controls && STATE.controls.maxDistance) || 4000;
+  return Math.max(FLY_MIN_DIST_M, Math.min(cap, dist));
+}
+
+function flyToGroup(hits) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const hit of hits) {
+    const w = hit.world;
+    if (!w) continue;
+    minX = Math.min(minX, w.x);
+    minY = Math.min(minY, w.y);
+    minZ = Math.min(minZ, w.z);
+    maxX = Math.max(maxX, w.x);
+    maxY = Math.max(maxY, w.y);
+    maxZ = Math.max(maxZ, w.z);
+  }
+  if (!Number.isFinite(minX)) return false;
+  const center = {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2,
+    z: (minZ + maxZ) / 2,
+  };
+  const radius = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ) / 2 + GROUP_POS_PAD_M;
+  return flyToFocus({ center }, groupFitDistance(radius));
+}
+
+function flyToMarquee(hits) {
+  if (!hits.length) return false;
+  if (hits.length === 1) {
+    return flyToFocus(Object.assign(hits[0], measureFocus(hits[0].root)));
+  }
+  return flyToGroup(hits);
+}
+
+function onMarqueePointerDown(e) {
+  if (e.button !== 0 || e.pointerType === 'touch' || !isBoxSelectModifier(e)) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  marqueeDrag = {
+    id: e.pointerId,
+    x0: e.clientX,
+    y0: e.clientY,
+    x1: e.clientX,
+    y1: e.clientY,
+  };
+  hideStructTip();
+  paintMarquee();
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+}
+
+function onMarqueePointerMove(e) {
+  if (!marqueeDrag || marqueeDrag.id !== e.pointerId) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  marqueeDrag.x1 = e.clientX;
+  marqueeDrag.y1 = e.clientY;
+  paintMarquee();
+}
+
+function finishMarquee(e, apply) {
+  if (!marqueeDrag || marqueeDrag.id !== e.pointerId) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const drag = marqueeDrag;
+  marqueeDrag = null;
+  hideMarquee();
+  try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  if (!apply) return;
+  if (Math.hypot(drag.x1 - drag.x0, drag.y1 - drag.y0) < MARQUEE_MIN_PX) return;
+  flyToMarquee(focusTargetsInRect(drag));
+}
+
+function onMarqueePointerUp(e) {
+  finishMarquee(e, true);
+}
+
+function onMarqueePointerCancel(e) {
+  finishMarquee(e, false);
 }
 
 function pickStructureAt(clientX, clientY) {
@@ -2330,6 +2580,10 @@ function wireReplayCanvasChrome() {
   const canvas = STATE.canvas || document.getElementById('scene');
   if (!canvas) return;
   wireReplayCanvasChrome._bound = true;
+  canvas.addEventListener('pointerdown', onMarqueePointerDown, true);
+  canvas.addEventListener('pointermove', onMarqueePointerMove, true);
+  canvas.addEventListener('pointerup', onMarqueePointerUp, true);
+  canvas.addEventListener('pointercancel', onMarqueePointerCancel, true);
   canvas.addEventListener('pointerdown', onCanvasPointerDown);
   canvas.addEventListener('pointerup', onCanvasPointerUp);
   canvas.addEventListener('pointercancel', onCanvasPointerCancel);
