@@ -67,7 +67,7 @@ import {
   ENHANCED_PACK_IDS,
   LEGO_SET_ID,
   TEXTURE_PACKS,
-} from '../../../js/replay-quality.js?v=lego1';
+} from '../../../js/replay-quality.js?v=fog1';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,
@@ -527,18 +527,14 @@ function initScene(mapData) {
   const lighting = mapData.lighting || {};
   scene.background = new THREE.Color(mapData.skyTint || '#1a2030');
 
-  const hm = mapData.heightmap;
-  const worldExtent = Math.max(
-    hm.cellsX * hm.cellMetersX,
-    hm.cellsZ * hm.cellMetersZ,
-  );
-  const fogColorHex = lighting.fog_color_hex || mapData.skyTint || '#1a2030';
-  // The chase camera is close enough for the .TRN distances. dx11_default_psh
-  // fades across g_FogParams (amount, start, end, curve); THREE.Fog is the
-  // linear start/end half of that. The orbit map viewer keeps a wider fog.
-  const fogStart = Number.isFinite(lighting.fog_start) ? lighting.fog_start : worldExtent * 1.5;
-  const fogEnd = Number.isFinite(lighting.fog_end) ? lighting.fog_end : worldExtent * 3.0;
-  scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
+  if (readSettings().fog) {
+    const hm = mapData.heightmap;
+    const worldExtent = Math.max(hm.cellsX * hm.cellMetersX, hm.cellsZ * hm.cellMetersZ);
+    const fogColorHex = lighting.fog_color_hex || mapData.skyTint || '#1a2030';
+    const fogStart = Number.isFinite(lighting.fog_start) ? lighting.fog_start : worldExtent * 1.5;
+    const fogEnd = Number.isFinite(lighting.fog_end) ? lighting.fog_end : worldExtent * 3.0;
+    scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
+  }
   STATE.scene = scene;
 
   // Reflect the whole world across the Z axis so the replay reads north-up /

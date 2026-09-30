@@ -83,6 +83,7 @@ function blank() {
     modelTier: 'full',
     ground: 'tiles',
     motion: 'smooth',
+    fog: false,
     cache: true,
   };
 }
@@ -128,6 +129,7 @@ function normalize(raw) {
     modelTier,
     ground,
     motion,
+    fog: !!(raw && raw.fog === true),
     cache: raw && raw.cache === false ? false : true,
   };
   next.preset = matchPreset(next);
@@ -166,6 +168,7 @@ export function writeSettings(partial) {
     modelTier: (models === 'reduced' || models === 'full') ? models : cur.modelTier,
     ground: partial && partial.ground != null ? partial.ground : cur.ground,
     motion: partial && partial.motion != null ? partial.motion : cur.motion,
+    fog: partial && partial.fog != null ? !!partial.fog : cur.fog,
     cache: partial && partial.cache != null ? partial.cache : cur.cache,
   });
   storageSet(QUALITY_STORAGE_KEY, JSON.stringify(next));
@@ -311,6 +314,19 @@ export function mountPanel(host) {
   root.appendChild(models.field);
   root.appendChild(ground.field);
   root.appendChild(motion.field);
+
+  const fogLabel = el('label', 'vt-rq-check');
+  const fogBox = document.createElement('input');
+  fogBox.type = 'checkbox';
+  fogBox.dataset.rq = 'fog';
+  fogLabel.appendChild(fogBox);
+  fogLabel.appendChild(document.createTextNode('Fog'));
+  root.appendChild(fogLabel);
+  root.appendChild(el(
+    'p',
+    'vt-rq-hint',
+    'Distance haze from the map. Off keeps the whole field clear.',
+  ));
   root.appendChild(el(
     'p',
     'vt-rq-hint',
@@ -445,6 +461,7 @@ export function mountPanel(host) {
     models.picker.sync();
     ground.picker.sync();
     motion.picker.sync();
+    fogBox.checked = settings.fog === true;
     cacheBox.checked = settings.cache !== false;
     purge.hidden = true;
     const id = TEXTURE_PACKS.some((p) => p.id === textureId) ? textureId : '';
@@ -469,6 +486,7 @@ export function mountPanel(host) {
       models: models.select.value,
       ground: ground.select.value,
       motion: motion.select.value,
+      fog: fogBox.checked,
       cache: cacheBox.checked,
       textureSet: texture ? texture.value : '',
     };
