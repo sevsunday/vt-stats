@@ -55,7 +55,7 @@
         w: null, v: null, s: null, sd: false, t: null, td: false, sh: null,
     };
     const view = {
-        weapon: { q: '', showAll: false },
+        weapon: { q: '', showAll: false, slot: null, loadout: {} },
         shooter: { q: '', faction: null },
         target: { q: '', faction: null, buildings: true, pilots: true },
         matrix: { q: '', mode: 'hit', sort: null, dir: 1, pack: null },
@@ -247,6 +247,141 @@
         return !!sh && !view.weapon.showAll;
     }
 
+    // Same grouping as the shooting-range loadout: one powerup replaces
+    // every hardpoint that shares a category and a combat/assault flag.
+    function slotKey(hp) {
+        return hp.category + (hp.assault ? ':a' : ':c');
+    }
+
+    function hardpointGroups(hardpoints) {
+        const groups = new Map();
+        (hardpoints || []).forEach((hp) => {
+            const key = slotKey(hp);
+            let group = groups.get(key);
+            if (!group) {
+                group = { key, category: hp.category, assault: !!hp.assault, nodes: [], indexes: [], switched: false, names: [] };
+                groups.set(key, group);
+            }
+            group.nodes.push(hp.node);
+            group.indexes.push(hp.index);
+            if (hp.switched) group.switched = true;
+            const mounted = hp.mounted ? ctx.variant(hp.mounted) : null;
+            group.names.push(mounted ? mounted.name : null);
+        });
+        return Array.from(groups.values());
+    }
+
+    function groupLabel(nodes) {
+        const upper = nodes.map((node) => String(node || '').toUpperCase());
+        if (upper.length <= 1) return upper[0] || '';
+        const stripped = upper.map((node) => node.replace(/_\d+$/, ''));
+        const base = stripped.every((node) => node === stripped[0]) ? stripped[0] : upper[0];
+        return base + ' \u00d7' + upper.length;
+    }
+
+    function groupSub(group) {
+        const side = (group.assault ? 'assault' : 'combat') + (group.switched ? ', switched' : '');
+        const override = view.weapon.loadout[group.key];
+        if (override) {
+            const mounted = ctx.variant(override);
+            if (mounted) return side + ' \u00b7 ' + mounted.name;
+        }
+        const named = group.names.filter(Boolean);
+        const unique = Array.from(new Set(named));
+        if (named.length === group.names.length && unique.length === 1) return side + ' \u00b7 ' + unique[0];
+        if (!named.length) return side + ' \u00b7 empty';
+        return side;
+    }
+
+    function activeSlotGroup(sh) {
+        const slot = view.weapon.slot;
+        if (!sh || !slot) return null;
+        return hardpointGroups(sh.hardpoints).find((group) => group.category === slot.category && group.assault === !!slot.assault) || null;
+    }
+
+    function slotId(slot) {
+        return slot.category + (slot.assault ? ':a' : ':c');
+    }
+
+    // A ship always has one group selected. A missing or stale choice falls
+    // back to the first group; clearing the ship is the only way to drop it.
+    function ensureSlot(sh) {
+        if (!sh || !sh.hardpoints || !sh.hardpoints.length) {
+            view.weapon.slot = null;
+            return;
+        }
+        const groups = hardpointGroups(sh.hardpoints);
+        if (!groups.length) {
+            view.weapon.slot = null;
+            return;
+        }
+        const slot = view.weapon.slot;
+        const live = slot && groups.some((group) => group.category === slot.category && group.assault === !!slot.assault);
+        if (live) return;
+        view.weapon.slot = { category: groups[0].category, assault: groups[0].assault };
+        state.cat = groups[0].category;
+    }
+
+    function dropSlot() {
+        if (view.weapon.slot && state.cat === view.weapon.slot.category) state.cat = null;
+        view.weapon.slot = null;
+        view.weapon.loadout = {};
+    }
+
+    function firingGroup(sh) {
+        if (!sh || !state.w) return null;
+        const fam = ctx.family(state.w);
+        if (!fam) return null;
+        const res = ctx.resolveVariant(fam, sh, state.v);
+        const indexes = new Set((res.hardpoints || []).map((hp) => hp.index));
+        if (!indexes.size) return null;
+        return hardpointGroups(sh.hardpoints).find((group) => group.indexes.some((index) => indexes.has(index))) || null;
+    }
+
+    function slotIsFiring(sh) {
+        const slot = view.weapon.slot;
+        const firing = firingGroup(sh);
+        return !!(slot && firing && firing.category === slot.category && firing.assault === !!slot.assault);
+    }
+
+    function listRowSelected(fam, sh) {
+        if (sh && view.weapon.slot) {
+            const id = slotId(view.weapon.slot);
+            const chosen = view.weapon.loadout[id];
+            if (chosen) return fam.variants.some((variant) => variant.stem === chosen);
+            if (slotIsFiring(sh)) return state.w === fam.key;
+            const stock = sh.hardpoints.find((hp) => slotKey(hp) === id && hp.mounted);
+            return !!(stock && fam.variants.some((variant) => variant.stem === stock.mounted));
+        }
+        return state.w === fam.key;
+    }
+
+    // Category chips follow the selected hardpoint. Turning the active chip
+    // off does nothing. Another category the ship has moves the selection.
+    function setCategory(next) {
+        const sh = currentShooter();
+        if (sh && view.weapon.slot) {
+            if (!next) return false;
+            const group = hardpointGroups(sh.hardpoints).find((item) => item.category === next);
+            if (!group) return false;
+            view.weapon.slot = { category: group.category, assault: group.assault };
+            state.cat = next;
+            return true;
+        }
+        state.cat = next;
+        return true;
+    }
+
+    // A pressed hardpoint keeps only that group, so fittingVariants applies
+    // the category and the combat/assault flag together.
+    function slotShooter(sh) {
+        const slot = view.weapon.slot;
+        if (!sh || !slot) return sh;
+        return Object.assign({}, sh, {
+            hardpoints: sh.hardpoints.filter((hp) => hp.category === slot.category && !!hp.assault === !!slot.assault),
+        });
+    }
+
     function categoryRank(cat) {
         const i = Calc.CATEGORIES.indexOf(cat);
         return i < 0 ? Calc.CATEGORIES.length : i;
@@ -272,6 +407,7 @@
     }
 
     function weaponRows(sh) {
+        ensureSlot(sh);
         const offer = ctx.weaponStemsFor(sh);
         const filtering = fitFilter(sh);
         const byPack = new Map();
@@ -286,27 +422,35 @@
             }
             group.stems.add(stem);
         });
+        const slotOn = !!(view.weapon.slot && sh);
+        const listed = slotOn ? slotShooter(sh) : sh;
         const community = [];
         contrib.packs.forEach((pack) => {
             const group = byPack.get(pack.id);
             if (!group) return;
-            const rows = rowsFrom(group.stems, sh, filtering);
+            const rows = rowsFrom(group.stems, listed, filtering || slotOn);
             if (rows.length) community.push({ pack, rows });
         });
         // Show all stays on the home armory. The other factions appear only
         // when the list is limited to hardpoints the ship can actually fire.
+        // The library is every named weapon the armories do not sell. Search
+        // and category chips narrow it; the fit filter does not. A pressed
+        // hardpoint narrows every section, including the library.
         return {
-            home: rowsFrom(offer.home, sh, filtering),
-            other: filtering ? rowsFrom(offer.other, sh, true) : [],
+            home: rowsFrom(offer.home, listed, filtering || slotOn),
+            other: filtering ? rowsFrom(offer.other, listed, true) : [],
             community,
+            library: rowsFrom(offer.library || new Set(), listed, slotOn),
         };
     }
 
     function fitNote(sh, filtering, count) {
-        const ship = esc(sh.name) + (sh.deployed ? ' (deployed)' : '');
+        const slotGroup = activeSlotGroup(sh);
+        const ship = esc(sh.name) + (sh.deployed ? ' (deployed)' : '')
+            + (slotGroup ? ' \u00b7 ' + esc(groupLabel(slotGroup.nodes)) : '');
         const text = filtering
             ? count + (count === 1 ? ' weapon fits ' : ' weapons fit ') + ship
-            : 'Showing all ' + count + ' weapons';
+            : 'Showing all ' + count + ' weapons' + (slotGroup ? ' for ' + esc(groupLabel(slotGroup.nodes)) : '');
         return '<div class="vt-wpn-list-note">'
             + '<span><i class="bi ' + (filtering ? 'bi-funnel-fill' : 'bi-funnel') + '" aria-hidden="true"></i> ' + text + '</span>'
             + '<button type="button" class="btn btn-link vt-wpn-fit-toggle" data-fit-toggle>'
@@ -334,6 +478,7 @@
     }
 
     function renderChips(kind) {
+        if (kind === 'weapon') ensureSlot(currentShooter());
         const box = part(kind, 'chips');
         if (!box) return;
         if (kind === 'weapon') {
@@ -369,14 +514,15 @@
             const rows = grouped.home.concat(grouped.other);
             const note = sh ? fitNote(sh, filtering, grouped.home.length) : '';
             const communityCount = (grouped.community || []).reduce((n, g) => n + g.rows.length, 0);
-            if (!rows.length && !communityCount) {
+            const libraryRows = grouped.library || [];
+            if (!rows.length && !communityCount && !libraryRows.length) {
                 box.innerHTML = note + '<div class="vt-wpn-list-empty">' + (filtering
                     ? 'No weapons fit ' + esc(sh.name) + (state.cat || view.weapon.q ? ' with these filters.' : '.')
                     : 'No weapons match.') + '</div>';
                 return;
             }
             const rowHtml = ({ f, shown, only, name }) => {
-                const selected = state.w === f.key;
+                const selected = listRowSelected(f, sh);
                 const tags = shown.map((v) => (v === f.assault
                     ? '<span class="vt-wpn-tag is-assault">A</span>'
                     : '<span class="vt-wpn-tag is-combat">C</span>')).join('');
@@ -400,7 +546,12 @@
                 '<div class="vt-wpn-list-divider">Community weapons · ' + esc(pack.name) + '</div>'
                 + packRows.slice(0, LIST_LIMIT).map(rowHtml).join('')
             )).join('');
-            box.innerHTML = note + homeHtml + otherHtml + communityHtml + listOverflow(rows.length);
+            const libraryHtml = libraryRows.length
+                ? '<div class="vt-wpn-list-divider">Not in the VSR armory</div>'
+                + libraryRows.slice(0, LIST_LIMIT).map(rowHtml).join('')
+                + (libraryRows.length > LIST_LIMIT ? listOverflow(libraryRows.length) : '')
+                : '';
+            box.innerHTML = note + homeHtml + otherHtml + communityHtml + libraryHtml + listOverflow(rows.length);
             return;
         }
         const units = unitList(kind);
@@ -512,19 +663,23 @@
                 box.innerHTML = '';
                 return;
             }
+            ensureSlot(sh);
             let html = sh.canDeploy ? deploySwitch('shooter', sh.deployed) : '';
-            const firing = new Set(sc.res.hardpoints.map((h) => h.index));
-            html += '<div class="vt-wpn-hps">' + sh.hardpoints.map((hp) => {
-                const icon = HP_ICONS[hp.category];
-                const mounted = hp.mounted ? ctx.variant(hp.mounted) : null;
-                const cls = 'vt-wpn-hp' + (hp.category === sc.fam.category ? ' is-match' : '') + (firing.has(hp.index) ? ' is-firing' : '');
-                const sub = (hp.assault ? 'assault' : 'combat') + (hp.switched ? ', switched' : '') + (mounted ? ' \u00b7 ' + mounted.name : ' \u00b7 empty');
-                const tip = hp.node + ': ' + Calc.categoryLabel(hp.category) + ' hardpoint, ' + (hp.assault ? 'assault' : 'combat')
-                    + (hp.switched ? ' (switchMask flips it when deployed)' : '') + (mounted ? '. Stock weapon ' + mounted.stem : '. No stock weapon');
-                return '<span class="' + cls + '"' + tipAttr(tip) + '>'
+            const pressed = view.weapon.slot;
+            html += '<div class="vt-wpn-hps">' + hardpointGroups(sh.hardpoints).map((group) => {
+                const icon = HP_ICONS[group.category];
+                const selected = !!(pressed && pressed.category === group.category && !!pressed.assault === group.assault);
+                const cls = 'vt-wpn-hp'
+                    + (group.category === sc.fam.category ? ' is-match' : '')
+                    + (selected ? ' is-slot' : '');
+                const label = groupLabel(group.nodes);
+                const tip = group.nodes.join(', ') + ': ' + Calc.categoryLabel(group.category) + ' hardpoint, ' + groupSub(group)
+                    + '. Show weapons that fit this slot.';
+                return '<button type="button" class="' + cls + '" data-hp-slot="' + esc(group.key) + '"'
+                    + ' aria-pressed="' + (selected ? 'true' : 'false') + '"' + tipAttr(tip) + '>'
                     + (icon ? '<img src="' + HUD_BASE + 'hp_' + icon + '.png" alt="" data-fallback-icon="bi-circle">' : '')
-                    + '<span class="vt-wpn-hp-text"><span class="vt-mono">' + esc(hp.node) + '</span>'
-                    + '<span class="vt-wpn-hp-sub">' + esc(sub) + '</span></span></span>';
+                    + '<span class="vt-wpn-hp-text"><span class="vt-mono">' + esc(label) + '</span>'
+                    + '<span class="vt-wpn-hp-sub">' + esc(groupSub(group)) + '</span></span></button>';
             }).join('') + '</div>';
             box.innerHTML = html;
             return;
@@ -684,9 +839,17 @@
         if (g > 1) damageRows.push(statRow('DPS per hardpoint', num(r.dpsPerHardpoint), ex.dpsPerHardpoint));
         if (sh) damageRows.push(statRow('Sustained DPS', num(r.ammo.sustainedDps), ex.sustainedDps, { labelTip: 'What ammo regen alone can keep firing' }));
         if (tg) {
-            damageRows.push(statRow('Time to kill', num(r.ttk.seconds, 1, 's'), ex.ttk, { lead: true }));
-            if (r.ttk.hitsToKill != null) damageRows.push(statRow('Hits to kill', num(r.ttk.hitsToKill, 0), ex.hitsToKill));
-            if (r.ttk.volleys != null && (g > 1 || v.fire.salvoCount > 1)) damageRows.push(statRow('Volleys', num(r.ttk.volleys, 0), ex.volleys));
+            damageRows.push(statRow('Time to kill', num(r.ttk.seconds, 2, 's'), ex.ttk, { lead: true }));
+            if (r.ttk.shotsToKill != null) {
+                damageRows.push(statRow('Shots to kill', num(r.ttk.shotsToKill, 0), ex.shotsToKill, {
+                    labelTip: 'One trigger pull. A salvo, or every hardpoint that fires together, is one shot.',
+                }));
+            }
+            if (r.ttk.hitsToKill != null && r.ttk.hitsToKill !== r.ttk.shotsToKill) {
+                damageRows.push(statRow('Hits to kill', num(r.ttk.hitsToKill, 0), ex.hitsToKill, {
+                    labelTip: 'Damage events. The technical count; a salvo can be several of these.',
+                }));
+            }
             if (r.ttk.tankFraction != null) damageRows.push(statRow('Ammo used', num(r.ttk.tankFraction * 100, 0, '%'), ex.tankFraction));
             if (r.ttk.effectiveDps != null) damageRows.push(statRow('Net of target repair', num(r.ttk.effectiveDps), ex.effectiveDps));
         }
@@ -703,8 +866,17 @@
         }
         ammoRows.push(statRow('Ammo per second', num(r.ammo.perSec), ex.ammoPerSec));
         if (sh) {
-            if (v.ammoMode === 'perShot') ammoRows.push(statRow(cap(unit) + 's per tank', num(r.ammo.shotsPerTank, 0), ex.shotsPerTank));
-            if (v.ammoMode === 'perShot' && (v.fire.salvoCount > 1 || g > 1)) ammoRows.push(statRow('Volleys per tank', num(r.ammo.volleysPerTank, 0), ex.volleysPerTank));
+            if (v.ammoMode === 'perShot') {
+                const roundName = unit === 'shot' ? 'Rounds per tank' : cap(unit) + 's per tank';
+                ammoRows.push(statRow(roundName, num(r.ammo.shotsPerTank, 0), ex.shotsPerTank, unit === 'shot'
+                    ? { labelTip: 'Ordnance rounds the tank can fire. One round is one damage event.' }
+                    : null));
+                if (unit === 'shot' && r.ammo.volleysPerTank != null && r.ammo.volleysPerTank !== r.ammo.shotsPerTank) {
+                    ammoRows.push(statRow('Shots per tank', num(r.ammo.volleysPerTank, 0), ex.volleysPerTank, {
+                        labelTip: 'Trigger pulls the tank can fire. A salvo spends several rounds.',
+                    }));
+                }
+            }
             ammoRows.push(statRow('Time to empty', r.ammo.timeToEmpty === Infinity ? 'never' : num(r.ammo.timeToEmpty, 1, 's'), ex.timeToEmpty));
             ammoRows.push(statRow('Tank', num(sh.maxAmmo, 0), 'maxAmmo of ' + sh.stem + (sh.deployed ? ' (deployed)' : '')));
             ammoRows.push(statRow('Regen', '+' + fmt(sh.addAmmo) + '/s', 'addAmmo of ' + sh.stem + (sh.deployed ? ' (deployed)' : '')));
@@ -720,7 +892,16 @@
             if (p.startDist != null) projRows.push(statRow('Arc reach', fmt(p.startDist) + '\u2013' + fmt(p.range) + ' m', 'ArcCannonClass startDist to finishDist'));
         }
         if (r.cycle != null) projRows.push(statRow('Fire cycle', num(r.cycle, 3, 's'), ex.cycle));
-        if (r.shotsPerSec != null) projRows.push(statRow('Shots per second', num(r.shotsPerSec), ex.shotsPerSec));
+        const splitRate = r.roundsPerShot > 1 || r.alternating;
+        if (splitRate && r.playerShotsPerSec != null) {
+            projRows.push(statRow('Shots per second', num(r.playerShotsPerSec), ex.playerShotsPerSec, {
+                labelTip: 'Trigger pulls per second.',
+            }));
+        }
+        if (r.shotsPerSec != null) {
+            const hitRate = splitRate && g > 1;
+            projRows.push(statRow(splitRate ? (hitRate ? 'Hits per second, each hardpoint' : 'Hits per second') : 'Shots per second', num(r.shotsPerSec), ex.shotsPerSec));
+        }
         if (r.hitsPerSec != null) projRows.push(statRow('Hits per second', num(r.hitsPerSec, 0), ex.shotsPerSec));
         if (v.fire.salvoCount > 1) projRows.push(statRow('Salvo', v.fire.salvoCount + ' \u00d7 ' + fmt(v.fire.salvoDelay) + ' s', 'salvoCount x salvoDelay'));
         if (v.fire.firstDelay > 0) projRows.push(statRow('Leader delay', num(v.fire.firstDelay, 2, 's'), 'TargetingGunClass firstDelay'));
@@ -794,17 +975,39 @@
 
     function selectRow(kind, key) {
         if (kind === 'weapon') {
-            if (state.w === key) return;
-            state.w = key;
-            state.v = null;
-            view.frame = null;
+            const sh = currentShooter();
+            ensureSlot(sh);
+            if (sh && view.weapon.slot) {
+                const fam = ctx.family(key);
+                if (!fam) return;
+                const fitted = ctx.fittingVariants(fam, slotShooter(sh));
+                const variant = fitted[0] || fam.combat || fam.assault;
+                if (!variant) return;
+                const id = slotId(view.weapon.slot);
+                if (view.weapon.loadout[id] === variant.stem && (!slotIsFiring(sh) || state.w === fam.key)) return;
+                view.weapon.loadout[id] = variant.stem;
+                if (slotIsFiring(sh)) {
+                    state.w = fam.key;
+                    state.v = null;
+                    view.frame = null;
+                }
+            } else {
+                if (state.w === key) return;
+                state.w = key;
+                state.v = null;
+                view.frame = null;
+            }
         } else if (kind === 'shooter') {
             if (state.s === key) return;
             state.s = key;
             state.sd = false;
             state.v = null;
             view.weapon.showAll = false;
-            applyShipWeapon(ctx.shooter(key, { deployed: false }));
+            view.weapon.loadout = {};
+            view.weapon.slot = null;
+            const sh = ctx.shooter(key, { deployed: false });
+            applyShipWeapon(sh);
+            ensureSlot(sh);
         } else {
             if (state.t === key) return;
             state.t = key;
@@ -850,11 +1053,29 @@
                 renderWeaponPicker();
                 return;
             }
-            const cat = event.target.closest('[data-cat]');
-            if (cat) {
-                state.cat = state.cat === cat.dataset.cat ? null : cat.dataset.cat;
+            const hpSlot = event.target.closest('[data-hp-slot]');
+            if (hpSlot) {
+                const parts = hpSlot.dataset.hpSlot.split(':');
+                const category = parts[0];
+                const assault = parts[1] === 'a';
+                const slot = view.weapon.slot;
+                const same = !!(slot && slot.category === category && !!slot.assault === assault);
+                if (same) return;
+                view.weapon.slot = { category, assault };
+                state.cat = category;
                 renderChips('weapon');
                 renderList('weapon');
+                renderScenario();
+                view.matrixDirty = true;
+                return;
+            }
+            const cat = event.target.closest('[data-cat]');
+            if (cat) {
+                const next = state.cat === cat.dataset.cat ? null : cat.dataset.cat;
+                if (!setCategory(next)) return;
+                renderChips('weapon');
+                renderList('weapon');
+                renderScenario();
                 view.matrixDirty = true;
                 writeUrl();
                 return;
@@ -894,6 +1115,7 @@
                     state.sd = false;
                     state.v = null;
                     view.weapon.showAll = false;
+                    dropSlot();
                     renderWeaponPicker();
                 } else {
                     state.t = null;
@@ -911,7 +1133,9 @@
                     state.sd = dep.checked;
                     state.v = null;
                     const sh = state.s ? ctx.shooter(state.s, { deployed: state.sd }) : null;
+                    ensureSlot(sh);
                     if (sh && !shipWeaponFits(sh)) applyShipWeapon(sh);
+                    if (view.weapon.slot) state.cat = view.weapon.slot.category;
                     renderWeaponPicker();
                 } else {
                     state.td = dep.checked;
@@ -947,13 +1171,13 @@
         { key: 'stem', label: 'ODF', sort: 'text' },
         { key: 'cat', label: 'Cat', sort: 'text' },
         { key: 'ca', label: 'C/A', sort: 'text' },
-        { key: 'source', label: 'Source', sort: 'text', tip: 'Stock armory, or the community pack that contributed the weapon' },
+        { key: 'source', label: 'Source', sort: 'text', tip: 'Stock armory, a weapon the VSR armories do not sell, or the community pack that contributed the weapon' },
         { key: 'rate', label: 'Shots/s', sort: 'num', end: true, tip: 'Shots (or arc hits) per second from one hardpoint' },
         { key: 'ammo', label: 'Ammo/shot', sort: 'num', end: true, tip: 'ammoCost per shot, or per second for continuous weapons' },
         { key: 'range', label: 'Range m', sort: 'num', end: true, tip: 'shotSpeed x lifeSpan; lobbed ordnance sorts last' },
     ].concat(Calc.LETTERS.map((l) => ({ key: l, label: l, sort: 'num', end: true, cls: 'vt-wpn-col-class', tip: CLASS_NAMES[l] })));
 
-    function matrixRow(fam, v) {
+    function matrixRow(fam, v, inLibrary) {
         const r = ctx.compute({ variant: v, shooter: null, target: null, g: 1 });
         const d = v.damage;
         const rate = r.shotsPerSec != null ? r.shotsPerSec : r.hitsPerSec;
@@ -978,8 +1202,8 @@
             stem: v.stem,
             cat: v.category,
             ca: v.isAssault ? 'A' : 'C',
-            source: pack ? pack.name : 'Stock',
-            packId: pack ? pack.id : null,
+            source: pack ? pack.name : (inLibrary ? 'Not in armory' : 'Stock'),
+            packId: pack ? pack.id : (inLibrary ? 'library' : null),
             rate,
             ammo: v.ammoMode === 'none' ? null : v.ammoCost,
             ammoPerSecond: v.ammoMode === 'perSecond',
@@ -993,16 +1217,22 @@
         const q = view.matrix.q;
         const offer = ctx.weaponStemsFor(null);
         const stems = new Set(offer.home);
+        const library = offer.library || new Set();
         (offer.community || []).forEach((stem) => stems.add(stem));
+        library.forEach((stem) => stems.add(stem));
         const rows = [];
         ctx.familiesIn(stems).forEach((fam) => {
             if (state.cat && fam.category !== state.cat) return;
             fam.variants.forEach((v) => {
                 if (!stems.has(v.stem)) return;
+                const inLibrary = library.has(v.stem);
                 const pack = ctx.packOf(v.stem);
-                if (view.matrix.pack && (!pack || pack.id !== view.matrix.pack)) return;
-                if (!matches(q, fam.label + ' ' + v.name + ' ' + v.stem + ' ' + (pack ? pack.name : ''))) return;
-                rows.push(matrixRow(fam, v));
+                if (view.matrix.pack === 'library') {
+                    if (!inLibrary) return;
+                } else if (view.matrix.pack && (!pack || pack.id !== view.matrix.pack)) return;
+                const sourceLabel = pack ? pack.name : (inLibrary ? 'Not in armory' : 'Stock');
+                if (!matches(q, fam.label + ' ' + v.name + ' ' + v.stem + ' ' + sourceLabel)) return;
+                rows.push(matrixRow(fam, v, inLibrary));
             });
         });
         const key = view.matrix.sort;
@@ -1073,6 +1303,7 @@
             + '<ul class="nav nav-pills vt-econ-log-pills mb-0" role="radiogroup" aria-label="Per hit or DPS">'
             + modeBtn('hit', 'Per hit') + modeBtn('dps', 'DPS (1 hardpoint)') + '</ul>'
             + '<div class="vt-wpn-chips">' + Calc.CATEGORIES.map((c) => chipButton('data-matrix-cat', c, CATEGORY_NAMES[c], state.cat === c)).join('')
+            + chipButton('data-matrix-pack', 'library', 'Not in armory', view.matrix.pack === 'library')
             + contrib.packs.map((p) => chipButton('data-matrix-pack', p.id, p.name, view.matrix.pack === p.id)).join('') + '</div>'
             + '<input type="search" class="form-control form-control-sm vt-wpn-search" data-matrix-search placeholder="Search by name or ODF"'
             + ' aria-label="Search the damage matrix" autocomplete="off" value="' + esc(searchValue) + '">'
@@ -1112,10 +1343,12 @@
             }
             const cat = event.target.closest('[data-matrix-cat]');
             if (cat) {
-                state.cat = state.cat === cat.dataset.matrixCat ? null : cat.dataset.matrixCat;
+                const next = state.cat === cat.dataset.matrixCat ? null : cat.dataset.matrixCat;
+                if (!setCategory(next)) return;
                 renderMatrix();
                 renderChips('weapon');
                 renderList('weapon');
+                renderScenario();
                 writeUrl();
                 return;
             }
@@ -1163,11 +1396,12 @@
         return null;
     }
 
-    // Armory weapons that fit one hardpoint: same category, same assault flag.
+    // Every weapon that fits one hardpoint: armory, community, and the
+    // non-armory library. Same category and the same combat/assault flag.
     function slotOptions(sh, hp) {
         if (!sh) return [];
         const stems = ctx.weaponStemsFor(sh);
-        const all = Array.from(stems.home).concat(Array.from(stems.other), Array.from(stems.community || []));
+        const all = Array.from(stems.home).concat(Array.from(stems.other), Array.from(stems.community || []), Array.from(stems.library || []));
         const seen = new Set();
         const out = [];
         all.forEach((stem) => {
@@ -1195,6 +1429,7 @@
             shooterStem: sh ? sh.stem : null,
             shooterThumb: sh && sh.thumb,
             hardpoints: sh ? sh.hardpoints : [],
+            loadout: Object.assign({}, view.weapon.loadout),
             optionsFor: (hp) => slotOptions(sh, hp),
             maxAmmo: sh ? sh.maxAmmo : 0,
             regen: sh ? sh.addAmmo : 0,

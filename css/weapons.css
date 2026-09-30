@@ -497,10 +497,19 @@ a.vt-wpn-source-link {
     padding: 0.15rem 0.45rem 0.15rem 0.2rem;
     border-radius: 0.45rem;
     border: 1px solid var(--kb-border-subtle);
+    background: transparent;
+    font: inherit;
     font-size: 0.72rem;
     line-height: 1.2;
+    text-align: left;
     color: var(--kb-text-secondary);
     opacity: 0.7;
+    cursor: pointer;
+}
+
+.vt-wpn-hp:focus-visible {
+    outline: 2px solid var(--kb-primary);
+    outline-offset: 2px;
 }
 
 .vt-wpn-hp img {
@@ -522,7 +531,8 @@ a.vt-wpn-source-link {
     opacity: 1;
 }
 
-.vt-wpn-hp.is-firing {
+.vt-wpn-hp.is-firing,
+.vt-wpn-hp.is-slot {
     opacity: 1;
     color: var(--kb-text-primary);
     border-color: var(--kb-primary);

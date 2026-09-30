@@ -4,16 +4,16 @@ overview: Flash Beam was never dropped from an armory menu. The lab only lists w
 todos:
   - id: library-set
     content: Add weaponStemsFor().library in js/weapons-calc.js without changing the VSR armory sets or scope('vsr')
-    status: pending
+    status: completed
   - id: picker-matrix
     content: Append the Not in the VSR armory group to the scenario list and the damage matrix, sharing search and category chips
-    status: pending
+    status: completed
   - id: fx-assets
     content: Extend build_fx_assets.py to the library stems and regenerate missing effect assets
-    status: pending
+    status: completed
   - id: gates-docs
     content: Pin Flash Beam plus unchanged VSR counts in the weapons gate, and update the Weapons Lab scope section in DEVELOPER_GUIDE.md
-    status: pending
+    status: completed
 isProject: false
 ---
 

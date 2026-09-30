@@ -7,10 +7,10 @@ todos:
     status: completed
   - id: ui-labels
     content: Replace Volleys with Shots to kill, keep Hits to kill, and align ammo and shots-per-second labels in weapons.js
-    status: in_progress
+    status: completed
   - id: docs-gate
     content: Update the Weapons Lab formula section and pin the Arc, Salvo, TAG, Gauss, and Sprinkler cases in the calc gate
-    status: pending
+    status: completed
 isProject: false
 ---
 

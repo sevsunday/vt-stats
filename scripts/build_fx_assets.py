@@ -1,8 +1,10 @@
 """Weapon-effect textures, sounds and FX meshes for the Weapons Lab shooting range.
 
 Standalone. Not invoked by process_stats.py. Walks the VSR armory the same way
-js/weapons-calc.js scope('vsr') does, collects every textureName / geomName /
-shotGeometry / *.wav those weapons (and the mines they dispense) reference,
+js/weapons-calc.js scope('vsr') does, plus every other named weapon the
+armories do not sell (weaponStemsFor().library), and collects every
+textureName / geomName / shotGeometry / *.wav those weapons (and the mines
+they dispense) reference,
 and writes:
 
     data/fx/textures/<stem>.png   RGBA, longest side <= 256
@@ -185,6 +187,105 @@ def vsr_weapon_stems(db: dict) -> list[str]:
     return sorted(weapons)
 
 
+def _numbered(obj: dict, prefix: str) -> list[str]:
+    """Case-sensitive buildItemN, matching js/weapons-calc.js numbered()."""
+    if not isinstance(obj, dict):
+        return []
+    rx = re.compile(r"^" + prefix + r"(\d+)$")
+    rows = []
+    for key, value in obj.items():
+        match = rx.match(key)
+        if match and value is not None and str(value).strip():
+            rows.append((int(match.group(1)), str(value).strip()))
+    rows.sort()
+    return [value for _, value in rows]
+
+
+def _armory_children(entry: dict) -> list[str]:
+    """Factory, rig, and armory build items plus upgradeName. Mirrors childNames."""
+    found = []
+    seen = set()
+
+    def add(raw):
+        stem = stem_of(raw)
+        if stem and stem not in seen:
+            seen.add(stem)
+            found.append(stem)
+
+    for raw in _numbered(entry.get("FactoryClass") or {}, "buildItem"):
+        add(raw)
+    for raw in _numbered(entry.get("ConstructionRigClass") or {}, "buildItem"):
+        add(raw)
+    groups = [key for key in entry if re.match(r"^ArmoryGroup\d+$", key)]
+    groups.sort(key=lambda key: int(key[len("ArmoryGroup"):]))
+    for key in groups:
+        group = entry[key]
+        if isinstance(group, dict):
+            for raw in _numbered(group, "buildItem"):
+                add(raw)
+    go = entry.get("GameObjectClass") or {}
+    if isinstance(go, dict) and go.get("upgradeName"):
+        add(go.get("upgradeName"))
+    return found
+
+
+def armory_weapon_stems(db: dict) -> set[str]:
+    """Powerups sold by the three VSR armories, plus altName twins.
+
+    Mirrors weapons-calc armoryByFaction(). Ship mounts are not included;
+    those stay on the VSR walk.
+    """
+    by_stem = {}
+    for bucket, entries in db.items():
+        if not isinstance(entries, dict):
+            continue
+        for name, entry in entries.items():
+            by_stem[stem_of(name)] = (bucket, entry)
+
+    weapons = set()
+    seen = set()
+    stack = list(VSR_ROOTS)
+    while stack:
+        stem = stack.pop()
+        if stem in seen:
+            continue
+        seen.add(stem)
+        hit = by_stem.get(stem)
+        if not hit:
+            continue
+        bucket, entry = hit
+        if bucket == "Powerup":
+            weapon = stem_of(prop_ci(section_ci(entry, "WeaponPowerupClass"), "weaponName"))
+            rec = by_stem.get(weapon) if weapon else None
+            if weapon and rec and rec[0] == "Weapon":
+                weapons.add(weapon)
+                alt = stem_of(prop_ci(section_ci(rec[1], "WeaponClass"), "altName"))
+                alt_rec = by_stem.get(alt) if alt else None
+                if alt and alt_rec and alt_rec[0] == "Weapon":
+                    weapons.add(alt)
+        stack.extend(_armory_children(entry))
+    return weapons
+
+
+def library_weapon_stems(db: dict) -> list[str]:
+    """Named weapons the VSR armories do not sell.
+
+    Mirrors weaponStemsFor(null).library against the stock database
+    (community packs are merged in the page, not here).
+    """
+    armory = armory_weapon_stems(db)
+    library = set()
+    for name, entry in (db.get("Weapon") or {}).items():
+        stem = stem_of(name)
+        if not stem or stem in armory:
+            continue
+        wpn = str(prop_ci(section_ci(entry, "WeaponClass"), "wpnName") or "").replace('"', "'").strip()
+        if not wpn or wpn.upper() == "NULL":
+            continue
+        library.add(stem)
+    return sorted(library)
+
+
 def walk_refs(entry: dict, tex: set, geom: set, snd: set) -> None:
     for sec in entry.values():
         if not isinstance(sec, dict):
@@ -329,19 +430,26 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     db = json.loads(ODF_PATH.read_text(encoding="utf-8"))
-    stems = vsr_weapon_stems(db)
-    if len(stems) < 100:
-        print(f"error: VSR weapon scope resolved only {len(stems)} (expected ~123)", file=sys.stderr)
+    vsr = vsr_weapon_stems(db)
+    if len(vsr) < 100:
+        print(f"error: VSR weapon scope resolved only {len(vsr)} (expected ~123)", file=sys.stderr)
         return 1
+    library = library_weapon_stems(db)
+    stems = sorted(set(vsr) | set(library))
+    weapon_by_stem = {stem_of(name): entry for name, entry in db["Weapon"].items()}
 
     tex, geom, snd = set(), set(), set()
     followed = set()
     for s in stems:
-        entry = db["Weapon"][s + ".odf"]
+        entry = weapon_by_stem.get(s)
+        if entry is None:
+            print(f"warn: no weapon entry {s}", file=sys.stderr)
+            continue
         walk_refs(entry, tex, geom, snd)
         follow_dispensed(db, entry, tex, geom, snd, followed)
 
-    print(f"VSR weapons: {len(stems)}; textures {len(tex)}, geoms {len(geom)}, sounds {len(snd)}")
+    print(f"VSR weapons: {len(vsr)}; library: {len(library)}; effect walk: {len(stems)}")
+    print(f"textures {len(tex)}, geoms {len(geom)}, sounds {len(snd)}")
 
     roots = [args.bz2r, args.workshop]
     files = index_files(roots, {".dds", ".tga", ".png", ".msh", ".wav"})

@@ -206,6 +206,10 @@ function buildSlots(snap, keepUser) {
         if (!g.weapon && hp.mounted && !(prev && prev.has(key))) g.weapon = hp.mounted;
     });
     slots = Array.from(groups.values());
+    const loadout = snap.loadout || {};
+    slots.forEach((slot) => {
+        if (loadout[slot.key]) slot.weapon = loadout[slot.key];
+    });
     const scenarioNodes = new Set(snap.scenarioNodes || []);
     if (snap.weaponStem) {
         slots.forEach((s) => { if (s.nodes.some((n) => scenarioNodes.has(n))) s.weapon = snap.weaponStem; });
@@ -744,9 +748,12 @@ async function doSync(snap) {
     const targetChanged = (!target && !!snap.targetThumb) || (snap.targetThumb || null) !== doSync.targetThumb
         || (snap.targetStem || null) !== doSync.targetStem;
     const scenarioChanged = (snap.weaponStem || null) !== doSync.weaponStem;
+    const loadoutKey = JSON.stringify(snap.loadout || {});
+    const loadoutChanged = loadoutKey !== doSync.loadoutKey;
     doSync.targetThumb = snap.targetThumb || null;
     doSync.targetStem = snap.targetStem || null;
     doSync.weaponStem = snap.weaponStem || null;
+    doSync.loadoutKey = loadoutKey;
     targetLetter = snap.letter || 'N';
     shieldDef = shieldEffectFor(db, targetLetter);
     if (shieldDef && shieldDef.texture) fx.preload({ textures: [shieldDef.texture] });
@@ -756,7 +763,7 @@ async function doSync(snap) {
         buildSlots(snap, false);
         await loadModels(snap);
     } else {
-        if (scenarioChanged) buildSlots(snap, true);
+        if (scenarioChanged || loadoutChanged) buildSlots(snap, true);
         if (targetChanged) await loadTarget(snap);
         else {
             maxHp = snap.targetHp > 0 ? snap.targetHp : maxHp;

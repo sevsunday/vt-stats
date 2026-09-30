@@ -927,9 +927,16 @@
             return byFaction;
         }
 
+        function hasWeaponName(rec) {
+            const name = clean(prop(rec, 'WeaponClass', 'wpnName') || '').trim();
+            return !!name && name.toUpperCase() !== 'NULL';
+        }
+
         // home is the ship's faction armory (the three-armory union when the
         // ship has none), plus whatever it mounts. other is the rest of the
-        // armories, for a weapon taken off a crate or a snipe.
+        // armories, for a weapon taken off a crate or a snipe. library is
+        // every other named weapon: not sold by a VSR armory, not mounted
+        // on this ship, and not a community pack.
         function weaponStemsFor(sh) {
             const arms = armoryByFaction();
             const faction = sh && arms[sh.faction] ? sh.faction : null;
@@ -952,7 +959,16 @@
             packs.forEach((pack) => pack.stems.forEach((stem) => {
                 if (weaponRec(stem)) community.add(stem);
             }));
-            return { home, other, community };
+            const library = new Set();
+            bucket('Weapon').forEach((rec) => {
+                if (!hasWeaponName(rec)) return;
+                const stem = rec.stem;
+                if (community.has(stem)) return;
+                if (arms.i.has(stem) || arms.e.has(stem) || arms.f.has(stem)) return;
+                if (home.has(stem)) return;
+                library.add(stem);
+            });
+            return { home, other, community, library };
         }
 
         function packOf(stem) {
@@ -1252,6 +1268,23 @@
             return SHIELD_NAMES[letter] ? SHIELD_NAMES[letter] + ' shield' : ARMOR_NAMES[letter];
         }
 
+        // One player shot is one trigger pull. shotAlternate rotates a single
+        // barrel (Gauss); otherwise every grouped hardpoint fires on that pull,
+        // and salvoCount rounds leave with it (Arc Cannon's bolts, Salvo Rkt,
+        // TAG's missiles from each gun).
+        function shotGroupPhrase(fire, group, rounds) {
+            if (fire.shotAlternate && group > 1) {
+                const each = fire.salvoCount > 1 ? 'a salvo of ' + fire.salvoCount : 'one round';
+                return 'shotAlternate fires one barrel per pull, ' + each;
+            }
+            if (fire.salvoCount > 1 && group > 1) {
+                return 'one pull is a salvo of ' + fire.salvoCount + ' from each of ' + group + ' hardpoints (' + rounds + ' hits)';
+            }
+            if (fire.salvoCount > 1) return 'one pull is a salvo of ' + fire.salvoCount;
+            if (group > 1) return 'one pull fires all ' + group + ' hardpoints together';
+            return 'one pull fires one round';
+        }
+
         function compute(args) {
             const v = args && args.variant;
             if (!v) throw new Error('compute() needs a variant');
@@ -1266,25 +1299,38 @@
             const explain = {};
             const src = d.directSource || 'the ODF';
             const col = 'damageValue(' + letter + ')';
+            const alternating = !!(f.shotAlternate && g > 1);
+            const roundsPerShot = f.salvoCount * (alternating ? 1 : g);
+            const salvoSpan = f.salvoCount * f.salvoDelay + (f.firstDelay || 0);
 
             let perHit = null;
             let cycle = null;
+            let shotInterval = null;
             let shotsPerSec = null;
+            let playerShotsPerSec = null;
             let hitsPerSec = null;
             let dpsPerHardpoint = null;
 
             if (d.kind === 'direct' || d.kind === 'pulse' || d.kind === 'charge' || d.kind === 'blast') {
                 perHit = d.direct ? d.direct[letter] : null;
-                const salvoTime = f.salvoCount * f.salvoDelay + (f.firstDelay || 0);
-                cycle = Math.max(f.shotDelay, salvoTime);
+                cycle = Math.max(f.shotDelay, salvoSpan);
+                // Alternating guns wait shotDelay/g between pulls (the guide
+                // divides the delay across hardpoints) and still wait out the salvo.
+                shotInterval = alternating ? Math.max(f.shotDelay / g, salvoSpan) : cycle;
                 shotsPerSec = cycle > 0 ? f.salvoCount / cycle : null;
+                playerShotsPerSec = shotInterval > 0 ? 1 / shotInterval : null;
                 if (perHit != null && shotsPerSec != null) dpsPerHardpoint = perHit * shotsPerSec;
                 explain.perHit = col + ' of ' + src + ' = ' + fmt(perHit);
                 explain.cycle = f.firstDelay
                     ? 'max(shotDelay ' + fmt(f.shotDelay) + ', firstDelay ' + fmt(f.firstDelay) + ' + salvoCount ' + f.salvoCount + ' x salvoDelay ' + fmt(f.salvoDelay) + ') = ' + fmt(cycle) + ' s'
                     : 'max(shotDelay ' + fmt(f.shotDelay) + ', salvoCount ' + f.salvoCount + ' x salvoDelay ' + fmt(f.salvoDelay) + ') = ' + fmt(cycle) + ' s';
                 explain.shotsPerSec = shotsPerSec == null ? 'No fire rate in the ODF.'
-                    : 'salvoCount ' + f.salvoCount + ' / cycle ' + fmt(cycle) + ' s = ' + fmt(shotsPerSec);
+                    : 'salvoCount ' + f.salvoCount + ' / cycle ' + fmt(cycle) + ' s = ' + fmt(shotsPerSec) + (g > 1 ? ' per hardpoint' : '');
+                if (playerShotsPerSec != null) {
+                    explain.playerShotsPerSec = alternating
+                        ? '1 / max(shotDelay ' + fmt(f.shotDelay) + ' / ' + g + ', salvo ' + fmt(salvoSpan) + ' s) = ' + fmt(playerShotsPerSec)
+                        : '1 / cycle ' + fmt(cycle) + ' s = ' + fmt(playerShotsPerSec);
+                }
                 if (shotsPerSec == null && perHit) warnings.push('The ODF declares no fire rate (shotDelay 0), so DPS is unknown.');
             } else if (d.kind === 'arc') {
                 perHit = d.direct[letter] * f.salvoDelay;
@@ -1305,7 +1351,7 @@
                     : fmt(perHit) + ' per hit x ' + fmt(shotsPerSec != null ? shotsPerSec : hitsPerSec) + ' hits/s = ' + fmt(dpsPerHardpoint);
                 explain.dps = fmt(dpsPerHardpoint) + ' x ' + g + ' hardpoint' + (g === 1 ? '' : 's') + ' = ' + fmt(dps);
             }
-            if (g > 1 && f.shotAlternate) assumptions.push('These hardpoints fire alternately; the total rate is the same.');
+            if (alternating) assumptions.push('These hardpoints fire alternately, one barrel per pull; the total rate is the same.');
 
             const ammo = {
                 mode: v.ammoMode,
@@ -1328,9 +1374,9 @@
                 if (sh) {
                     if (v.ammoCost > 0) {
                         ammo.shotsPerTank = Math.floor(sh.maxAmmo / v.ammoCost);
-                        ammo.volleysPerTank = Math.floor(sh.maxAmmo / (v.ammoCost * f.salvoCount * g));
+                        ammo.volleysPerTank = Math.floor(sh.maxAmmo / (v.ammoCost * roundsPerShot));
                         explain.shotsPerTank = 'floor(maxAmmo ' + fmt(sh.maxAmmo) + ' / ' + fmt(v.ammoCost) + ') = ' + ammo.shotsPerTank;
-                        explain.volleysPerTank = 'floor(maxAmmo ' + fmt(sh.maxAmmo) + ' / (' + fmt(v.ammoCost) + ' x salvoCount ' + f.salvoCount + ' x ' + g + ')) = ' + ammo.volleysPerTank;
+                        explain.volleysPerTank = 'floor(maxAmmo ' + fmt(sh.maxAmmo) + ' / (' + fmt(v.ammoCost) + ' x ' + roundsPerShot + ' rounds per shot)) = ' + ammo.volleysPerTank;
                     } else {
                         ammo.shotsPerTank = Infinity;
                         ammo.volleysPerTank = Infinity;
@@ -1369,7 +1415,7 @@
                 maxHealth: tg ? tg.maxHealth : null,
                 addHealth: tg ? tg.addHealth : null,
                 hitsToKill: null,
-                volleys: null,
+                shotsToKill: null,
                 seconds: null,
                 tankFraction: null,
                 effectiveDps: null,
@@ -1381,14 +1427,16 @@
                 if (dps <= 0 || (discrete && perHit <= 0)) {
                     warnings.push(v.name + ' deals no damage to ' + letterLabel(letter) + ' (' + col + ' = 0).');
                     ttk.hitsToKill = Infinity;
+                    ttk.shotsToKill = Infinity;
                     ttk.seconds = Infinity;
                 } else if (discrete) {
+                    const interval = shotInterval == null ? cycle : shotInterval;
                     ttk.hitsToKill = Math.ceil(hp / perHit);
-                    ttk.volleys = Math.ceil(ttk.hitsToKill / (g * f.salvoCount));
-                    ttk.seconds = (ttk.volleys - 1) * cycle;
+                    ttk.shotsToKill = Math.ceil(ttk.hitsToKill / roundsPerShot);
+                    ttk.seconds = (ttk.shotsToKill - 1) * (interval || 0);
                     explain.hitsToKill = 'ceil(maxHealth ' + fmt(hp) + ' / ' + fmt(perHit) + ') = ' + ttk.hitsToKill;
-                    explain.volleys = 'ceil(' + ttk.hitsToKill + ' / (' + g + ' x salvoCount ' + f.salvoCount + ')) = ' + ttk.volleys;
-                    explain.ttk = '(volleys ' + ttk.volleys + ' - 1) x cycle ' + fmt(cycle) + ' s = ' + fmt(ttk.seconds) + ' s';
+                    explain.shotsToKill = shotGroupPhrase(f, g, roundsPerShot) + '. ceil(' + ttk.hitsToKill + ' / ' + roundsPerShot + ') = ' + ttk.shotsToKill;
+                    explain.ttk = '(shots ' + ttk.shotsToKill + ' - 1) x ' + (alternating ? 'interval ' : 'cycle ') + fmt(interval) + ' s = ' + fmt(ttk.seconds) + ' s';
                     if (sh && v.ammoMode === 'perShot' && v.ammoCost > 0 && sh.maxAmmo > 0) {
                         ttk.tankFraction = ttk.hitsToKill * v.ammoCost / sh.maxAmmo;
                         explain.tankFraction = ttk.hitsToKill + ' x ' + fmt(v.ammoCost) + ' ammo / maxAmmo ' + fmt(sh.maxAmmo) + ' = ' + fmt(ttk.tankFraction * 100, 0) + '%';
@@ -1456,7 +1504,11 @@
                 g,
                 perHit,
                 cycle,
+                shotInterval,
+                roundsPerShot,
+                alternating,
                 shotsPerSec,
+                playerShotsPerSec,
                 hitsPerSec,
                 dpsPerHardpoint,
                 dps,
