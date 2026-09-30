@@ -326,6 +326,12 @@ function explosionEntry(db, stem) {
  * A stage with no ordnance stays in the list (assault MAG / Laser Stream
  * stage 1) so the count still matches ordnanceCount and a release there
  * fires nothing. */
+function chargeAuthoredVolume(section, key, absent) {
+    const raw = prop(section, key);
+    if (raw == null || raw === '') return absent;
+    return num(raw, absent) * 0.01;
+}
+
 function chargeLevels(map) {
     const cg = sec(map, 'ChargeGunClass');
     if (!cg) return [];
@@ -494,6 +500,14 @@ function buildProfile(entry) {
             ammoCost: num(prop(sec(map, 'DispenserObj.GameObjectClass'), 'maxAmmo'), 0),
         },
         chargeHoldRate: num(prop(sec(map, 'ChargeGunClass'), 'holdRate'), 0),
+        // Hz. The engine does startRate + deltaRate * chargeSeconds, and
+        // chargeSeconds stops at the last stage's shotDelay.
+        chargeStartRate: num(prop(sec(map, 'ChargeGunClass'), 'startRate'), 11025),
+        chargeDeltaRate: num(prop(sec(map, 'ChargeGunClass'), 'deltaRate'), 4000),
+        // Authored volumes are stored times 0.01 (the loader's scale). A
+        // missing key keeps the unscaled default, 1 and 0.
+        chargeStartVolume: chargeAuthoredVolume(sec(map, 'ChargeGunClass'), 'startVolume', 1),
+        chargeDeltaVolume: chargeAuthoredVolume(sec(map, 'ChargeGunClass'), 'deltaVolume', 0),
         detonator: {
             maxCount: Math.min(8, Math.max(1, Math.round(num(prop(det, 'maxCount'), 4)))),
         },

@@ -113,6 +113,7 @@ export function createAudio(opts) {
             source: null,
             panner: null,
             rate,
+            volume: opts && opts.volume != null ? opts.volume : 1,
             at,
             stop() { stopKey(loop ? key : null, this); },
             setPosition(v) {
@@ -130,7 +131,7 @@ export function createAudio(opts) {
             source.loop = loop;
             source.playbackRate.value = handle.rate;
             const gain = audio.createGain();
-            gain.gain.value = opts && opts.gain != null ? opts.gain : AUDIO_GAIN;
+            gain.gain.value = (opts && opts.gain != null ? opts.gain : AUDIO_GAIN) * handle.volume;
             source.connect(gain);
             if (handle.at) {
                 const panner = audio.createPanner();
@@ -175,7 +176,13 @@ export function createAudio(opts) {
         if (handle.source) handle.source.playbackRate.value = rate;
     }
 
-    return { unlock: context, play, stopLoop, setRate, load, setListener, setVolume, getVolume };
+    function setGain(handle, volume) {
+        if (!handle) return;
+        handle.volume = volume;
+        if (handle.gain) handle.gain.gain.value = AUDIO_GAIN * volume;
+    }
+
+    return { unlock: context, play, stopLoop, setRate, setGain, load, setListener, setVolume, getVolume };
 }
 
 export { AUDIO_GAIN, AUDIO_REF_DISTANCE, AUDIO_ROLLOFF, AUDIO_MAX_DISTANCE };

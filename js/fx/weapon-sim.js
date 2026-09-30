@@ -32,6 +32,23 @@ function chargeFrac(levels, t) {
     const full = levels.length ? levels[levels.length - 1].holdTime : 0;
     return full > 0 ? Math.min(1, t / full) : 0;
 }
+
+/* Web Audio playbackRate for the charge whine. Read from chargegun.cpp:
+ * frequency = startRate + deltaRate * chargeSeconds, and chargeSeconds is
+ * clamped to the last stage's shotDelay. startRate is the wav sample rate,
+ * so dividing by it is the playback multiplier. */
+function chargePlayRate(startRate, deltaRate, seconds) {
+    if (!(startRate > 0)) return 1;
+    const t = Math.max(0, seconds);
+    return (startRate + (deltaRate || 0) * t) / startRate;
+}
+
+function chargeWhineVolume(startVolume, deltaVolume, seconds) {
+    // startVolume / deltaVolume are already the loader's 0.01 scale.
+    // The sound setter clamps the result to 0..1 (minss 1.0).
+    const v = (startVolume || 0) + (deltaVolume || 0) * Math.max(0, seconds);
+    return Math.max(0, Math.min(1, v));
+}
 /* Guide, WeaponClass.flashTime = 0.0f: "Time for the flash effect to play
  * ... + 0.1 seconds". So a muzzle flash lives flashTime + 0.1 s, never its
  * render section's own lifeTime (garc_c.flash declares a 5 s, 10 m sphere
@@ -529,7 +546,12 @@ export function createRangeSim(opts) {
         }
         if (id === 'charge') {
             chargeTime = 0;
-            toggleSound = audio.play(profile.fireSound, { loop: true, rate: 0.6, at: shipPos() });
+            toggleSound = audio.play(profile.fireSound, {
+                loop: true,
+                rate: chargePlayRate(profile.chargeStartRate, profile.chargeDeltaRate, 0),
+                volume: chargeWhineVolume(profile.chargeStartVolume, profile.chargeDeltaVolume, 0),
+                at: shipPos(),
+            });
             return;
         }
         if (id === 'arc') {
@@ -1040,11 +1062,16 @@ export function createRangeSim(opts) {
             const levels = profile.charge;
             const n = levels.length || 1;
             const idx = chargeStage(levels, chargeTime);
-            const frac = chargeFrac(levels, chargeTime);
-            if (toggleSound) audio.setRate(toggleSound, 0.6 + frac * 1.1);
-            // holdRate is the drain AT full charge. The ODF does not publish
-            // the ramp, so the rate scales with the armed stage (approximated,
-            // fitted to match telemetry; nothing drains before stage 1).
+            const cap = levels.length ? levels[levels.length - 1].holdTime : 0;
+            const held = cap > 0 ? Math.min(chargeTime, cap) : chargeTime;
+            if (toggleSound) {
+                audio.setRate(toggleSound, chargePlayRate(profile.chargeStartRate, profile.chargeDeltaRate, held));
+                if (audio.setGain) audio.setGain(toggleSound, chargeWhineVolume(profile.chargeStartVolume, profile.chargeDeltaVolume, held));
+            }
+            // Once charge time reaches the last stage the engine drains a flat
+            // holdRate per second, which this ramp equals at the last stage.
+            // The climb up to that is still the telemetry fit (the per-stage
+            // interpolation was not isolated). Nothing drains before stage 1.
             // Running dry ends the hold without a shot.
             if (profile.chargeHoldRate > 0 && idx >= 0) {
                 const rate = profile.chargeHoldRate * ((idx + 1) / n);
@@ -1263,4 +1290,4 @@ export function createRangeSim(opts) {
     };
 }
 
-export { segmentHitsSphere, lobAngle, AUTOFIRE, HOLD_ARCHETYPES, FLASH_EXTRA_SEC };
+export { segmentHitsSphere, lobAngle, AUTOFIRE, HOLD_ARCHETYPES, FLASH_EXTRA_SEC, chargePlayRate };
