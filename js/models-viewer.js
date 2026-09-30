@@ -1263,6 +1263,8 @@ export class ObjectViewer {
       mat.emissiveIntensity = 1;
       mat.needsUpdate = true;
     }));
+    if (this.disposed || gen !== this._emisLoadGen) return;
+    this._syncTreadMapOffsets();
   }
 
   _loadEmissive(setId, name) {
@@ -1320,6 +1322,8 @@ export class ObjectViewer {
       if (tex) mat.normalScale.set(1, gy);
       mat.needsUpdate = true;   // toggles USE_NORMALMAP -> recompile
     }));
+    if (this.disposed || gen !== this._normLoadGen) return;
+    this._syncTreadMapOffsets();
   }
 
   _loadNormal(setId, name) {
@@ -1375,6 +1379,8 @@ export class ObjectViewer {
       mat.roughness = tex ? 1.0 : base;
       mat.needsUpdate = true;   // toggles USE_ROUGHNESSMAP -> recompile
     }));
+    if (this.disposed || gen !== this._specLoadGen) return;
+    this._syncTreadMapOffsets();
   }
 
   _loadSpecular(setId, name) {
@@ -2682,9 +2688,7 @@ export class ObjectViewer {
     this._driveTransition = 0;
     this._driveGait = null;
     this._driveGaitDir = 0;
-    for (const m of this._artTreadMats) {
-      if (m.map) m.map.offset.set(0, 0);
-    }
+    this._syncTreadMapOffsets();
   }
 
   // A model has an aimable joint if it has a turret yaw/pitch node OR a head.
@@ -2977,12 +2981,34 @@ export class ObjectViewer {
     }
   }
 
+  /* Tread motion is a UV scroll on a static mesh. three.js samples map,
+   * normalMap, roughnessMap, and emissiveMap through separate texture
+   * matrices, so every bound tread texture shares this._treadOffset.
+   * Writes are absolute: the textures are cached by stem and shared across
+   * materials. While wireframe is on, the live slots are nulled and the real
+   * textures live in _wireSaved. */
+  _syncTreadMapOffsets() {
+    const y = this._treadOffset;
+    const touch = (tex) => { if (tex) tex.offset.y = y; };
+    this._materials.forEach((m, i) => {
+      if (!m.name || !ART_TREAD_MAT_RE.test(m.name)) return;
+      touch(m.map);
+      touch(m.normalMap);
+      touch(m.roughnessMap);
+      touch(m.emissiveMap);
+      const saved = this._wireSaved && this._wireSaved[i];
+      if (!saved) return;
+      touch(saved.map);
+      touch(saved.normalMap);
+      touch(saved.roughnessMap);
+      touch(saved.emissiveMap);
+    });
+  }
+
   _updateTreads(dt) {
     if (!this._artTreadMats.length || this._driveSpeed === 0) return false;
     this._treadOffset += this._driveSpeed * TREAD_SCROLL_RATE * dt;
-    for (const m of this._artTreadMats) {
-      if (m.map) m.map.offset.y = this._treadOffset;
-    }
+    this._syncTreadMapOffsets();
     return true;
   }
 
@@ -3611,7 +3637,7 @@ export class ObjectViewer {
     this._driveAimPitch = 0;
     this._driveOmega = 0;
     this._treadOffset = 0;
-    for (const m of this._artTreadMats) { if (m.map) m.map.offset.set(0, 0); }
+    this._syncTreadMapOffsets();
     this.setAimMode(false);
   }
 
