@@ -36,6 +36,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { sectionByRef, prefixOf, num as odfNum } from './weapon-profile.js';
 
 const FX_PARTICLE_BUDGET = 700;
+const FX_LIGHT_POOL = 8;   // fixed point lights; a burst borrows a slot instead of changing the count
 const FX_LIGHT_SCALE = 4;
 const FX_FLARE_BASE = 0.9;   // lens-flare core sprite size in metres at intensity 1
 const FX_FLARE_MAX = 2.5;
@@ -87,6 +88,40 @@ export function parseColor(value) {
         a: rawA > 255 ? 1 : Math.min(1, Math.max(0, rawA / 255)),
         intensity: rawA > 255 ? rawA / 255 : 1,
     };
+}
+
+/* BZCC forces a light to 0 at radius R (the guide's blue curve). The dotted
+ * OpenGL curve 1/(Kc + Kl*d + Kq*d^2) does not, so the engine multiplies by
+ * (1 - d/R). Defaults are the LightRenderClass published values. */
+function lightCurve(d, radius, kc, kl, kq) {
+    const R = Math.max(1e-4, radius);
+    if (!(d >= 0) || d >= R) return 0;
+    const denom = kc + kl * d + kq * d * d;
+    const window = 1 - d / R;
+    if (!(denom > 1e-6)) return window;
+    return window / denom;
+}
+
+/* Distance at which the curve falls to half its near-field value, capped by R.
+ * three.js point lights are 1/d^decay (infinite on the hardpoint) and a
+ * uniform light out to the raw radius would light the whole ship. The pooled
+ * light uses decay 0 and this cutoff: the faint tail past half brightness is
+ * dropped so a Kq of 15 stays a small muzzle flash. Fang's flash (R 20, Kq 15)
+ * is bright for about a quarter metre. */
+function lightReach(radius, kc, kl, kq) {
+    const R = Math.max(0.05, radius || 0);
+    const d0 = Math.min(0.05, R * 0.25);
+    const peak = lightCurve(d0, R, kc, kl, kq);
+    if (!(peak > 0)) return R;
+    const target = peak * 0.5;
+    let lo = 0;
+    let hi = R;
+    for (let i = 0; i < 16; i++) {
+        const mid = (lo + hi) * 0.5;
+        if (lightCurve(mid, R, kc, kl, kq) > target) lo = mid;
+        else hi = mid;
+    }
+    return Math.max(0.15, hi);
 }
 
 function blendOf(value) {
@@ -219,8 +254,45 @@ export function createFxRuntime(scene, assets) {
     const root = new THREE.Group();
     root.name = 'vt-fx';
     scene.add(root);
+    /* Point-light count is part of every MeshStandardMaterial program. These
+     * slots are created once, stay visible, and are borrowed by draw_light.
+     * Idle intensity is 0. Hiding a slot would drop the count and recompile. */
+    const lightPool = [];
+    let lightSeq = 0;
+    for (let i = 0; i < FX_LIGHT_POOL; i++) {
+        const pl = new THREE.PointLight(0xffffff, 0, 1, 0);
+        pl.castShadow = false;
+        pl.visible = true;
+        root.add(pl);
+        lightPool.push({ light: pl, busy: false, seq: 0, drop: null });
+    }
     const groundY = 0;
     let budget = FX_PARTICLE_BUDGET;
+
+    /* Borrow a pooled light. A full pool retargets the oldest slot so the
+     * scene never gains a ninth point light. `drop` clears the previous
+     * borrower's reference; it does not remove the light. */
+    function claimLight(drop) {
+        let slot = lightPool.find((s) => !s.busy);
+        if (!slot) {
+            slot = lightPool.reduce((best, s) => (s.seq < best.seq ? s : best));
+            const prev = slot.drop;
+            slot.drop = null;
+            if (prev) prev();
+        }
+        slot.busy = true;
+        slot.seq = ++lightSeq;
+        slot.drop = drop;
+        return slot.light;
+    }
+
+    function freeLight(pl) {
+        const slot = lightPool.find((s) => s.light === pl);
+        if (!slot) return;
+        slot.drop = null;
+        slot.busy = false;
+        pl.intensity = 0;
+    }
 
     function texture(stem) {
         const key = String(stem || '').toLowerCase();
@@ -542,9 +614,18 @@ export function createFxRuntime(scene, assets) {
         const headingOf = (v) => (v && v.lengthSq() > 1e-8 ? Math.atan2(v.x, v.z) : 0);
 
         if (base === 'draw_light') {
-            light = new THREE.PointLight(color, FX_LIGHT_SCALE * start.intensity, Math.max(1, startR), 2);
+            // Guide defaults: Kc 1, Kl 0, Kq 15. Decay stays 0; distance is the
+            // visible reach of that curve, not 1/d^2 out to startRadius.
+            const kc = num(section.attenuateconstant, 1);
+            const kl = num(section.attenuatelinear, 0);
+            const kq = num(section.attenuatequadratic, 15);
+            light = claimLight(() => { light = null; });
+            light.decay = 0;
+            light.color.copy(color);
+            light.distance = lightReach(startR, kc, kl, kq);
+            light.intensity = FX_LIGHT_SCALE * start.intensity * lightCurve(0, Math.max(startR, 0.05), kc, kl, kq);
             light.position.copy(pos);
-            root.add(light);
+            node._lightAtt = { kc, kl, kq };
             if (truthy(section.lensflare, true)) {
                 // The guide: lensFlare draws lightflare.tga and lighthalo.tga at the origin.
                 obj = new THREE.Sprite(new THREE.SpriteMaterial({ color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -704,10 +785,19 @@ export function createFxRuntime(scene, assets) {
                 // startRadius is the model's scale (FX meshes are authored at unit size).
                 obj.scale.setScalar(Math.max(1e-3, radius));
             }
-            if (obj && obj.isSprite && light) {
-                const flare = Math.min(FX_FLARE_MAX, FX_FLARE_BASE * cur.intensity);
+            if (obj && obj.isSprite && base === 'draw_light') {
+                // Lens-flare size follows the colour alpha, and never the raw
+                // light range. Losing the pooled slot must not fall through to
+                // the sprite path, which would draw startRadius (Fang: 20 m)
+                // as a 40 m quad at the muzzle.
+                const att = node._lightAtt;
+                const reach = att ? lightReach(radius, att.kc, att.kl, att.kq) : Math.max(0.15, radius);
+                const flare = Math.min(reach, FX_FLARE_MAX, FX_FLARE_BASE * cur.intensity);
                 obj.scale.set(flare, flare, 1);
-                if (halo) halo.scale.set(flare * FX_HALO_RATIO, flare * FX_HALO_RATIO, 1);
+                if (halo) {
+                    const haloSize = Math.min(reach, flare * FX_HALO_RATIO);
+                    halo.scale.set(haloSize, haloSize, 1);
+                }
             } else if (obj && obj.isSprite) {
                 let sy = radius * 2;
                 if (squish && node.pos.y - groundY < radius) {
@@ -723,9 +813,13 @@ export function createFxRuntime(scene, assets) {
                 obj.scale.setScalar(radius);
             }
             if (light) {
+                const att = node._lightAtt;
+                const reach = att ? lightReach(radius, att.kc, att.kl, att.kq) : Math.max(0.2, radius);
                 setSrgb(light.color, cur);
-                light.intensity = FX_LIGHT_SCALE * cur.intensity * Math.max(0.05, cur.a);
-                light.distance = Math.max(0.5, radius);
+                light.decay = 0;
+                light.distance = reach;
+                light.intensity = FX_LIGHT_SCALE * cur.intensity * Math.max(0, cur.a)
+                    * (att ? lightCurve(0, Math.max(radius, 0.05), att.kc, att.kl, att.kq) : 1);
             }
         }
 
@@ -1091,7 +1185,11 @@ export function createFxRuntime(scene, assets) {
                 disposeOwned(o.geometry);
                 if (o.material && o.material.dispose) o.material.dispose();
             });
-            if (light) root.remove(light);
+            if (light) {
+                const held = light;
+                light = null;
+                freeLight(held);
+            }
         };
         return node;
     }
@@ -1264,6 +1362,11 @@ export function createFxRuntime(scene, assets) {
             shared.circle.dispose();
             shared.circle = null;
         }
+        lightPool.forEach((slot) => {
+            slot.drop = null;
+            slot.busy = false;
+            slot.light.intensity = 0;
+        });
         scene.remove(root);
     }
 
@@ -1291,5 +1394,5 @@ export function createFxRuntime(scene, assets) {
 }
 
 export {
-    FX_PARTICLE_BUDGET, SIM_GRAVITY, TRAIL_SEGMENT_HZ, FX_HALO_RATIO, FX_FLARE_BASE, FX_FLARE_MAX,
+    FX_PARTICLE_BUDGET, FX_LIGHT_POOL, SIM_GRAVITY, TRAIL_SEGMENT_HZ, FX_HALO_RATIO, FX_FLARE_BASE, FX_FLARE_MAX,
 };
