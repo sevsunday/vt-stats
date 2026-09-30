@@ -22,6 +22,7 @@ const COCKPIT = '../data/models/cockpits/';
 const ORBIT_RATE = 0.16;          // rad/s, the hover-around-the-ship view
 const RESPAWN_SEC = 2.5;
 const VOLUME_KEY = 'vt.wpn.range.volume';   // localStorage, 0..100; missing = 100
+const RAVE_PEAK = 0.62;           // CannonClass.raveFlash wash; fades to clear across shotDelay
 const HP_ICONS = { GUN: 'gun', CANN: 'cannon', MORT: 'mortar', ROCK: 'rocket', SPEC: 'special', SHIE: 'shield', HAND: 'hand', PACK: 'pack' };
 // Hardpoint category codes -> display words (same words as SLOT_LABELS in js/models.js).
 const HP_LABELS = { GUN: 'Gun', CANN: 'Cannon', MORT: 'Mortar', ROCK: 'Rocket', SPEC: 'Special', SHIE: 'Shield', HAND: 'Hand', PACK: 'Pack' };
@@ -39,6 +40,12 @@ let cockpitIndex = null;
 let reticleIndex = null;
 let rootEl = null;
 let loop = true;
+let raveEl = null;
+let raveColors = [];
+let raveIndex = -1;
+let raveLeft = 0;
+let raveDur = 0.4;
+let raveShotDelay = 0.4;
 
 let target = null;
 let targetKind = 'ship';
@@ -234,7 +241,44 @@ function applyActiveSlot(keepAmmo) {
     // so no render is ever drawn untextured.
     if (entry) fx.preload(profileAssets(entry, db));
     sim.setWeapon(profile, db, { max: snapshot ? snapshot.maxAmmo : 0, regen: snapshot ? snapshot.regen : 0 }, keepAmmo);
+    raveColors = profile && profile.raveFlash ? (profile.raveColors || []) : [];
+    raveShotDelay = profile && profile.shotDelay > 0 ? profile.shotDelay : 0.4;
+    clearRave();
     renderLoadout();
+}
+
+function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+function clearRave() {
+    raveLeft = 0;
+    raveIndex = -1;
+    if (!raveEl) return;
+    raveEl.hidden = true;
+    raveEl.style.opacity = '0';
+}
+
+function onRaveFlash() {
+    if (reducedMotion() || !raveColors.length || !raveEl) return;
+    raveIndex = (raveIndex + 1) % raveColors.length;
+    const c = raveColors[raveIndex];
+    raveDur = Math.max(0.05, raveShotDelay);
+    raveLeft = raveDur;
+    raveEl.hidden = false;
+    raveEl.style.backgroundColor = 'rgb(' + c.r + ', ' + c.g + ', ' + c.b + ')';
+    raveEl.style.opacity = String(RAVE_PEAK);
+}
+
+function paintRave(dt) {
+    if (!raveEl || raveLeft <= 0) return;
+    raveLeft = Math.max(0, raveLeft - dt);
+    if (raveLeft <= 0 || raveDur <= 0) {
+        raveEl.hidden = true;
+        raveEl.style.opacity = '0';
+        return;
+    }
+    raveEl.style.opacity = String(RAVE_PEAK * (raveLeft / raveDur));
 }
 
 function renderLoadout() {
@@ -338,6 +382,7 @@ function onHit(hit) {
  * equipped weapons, active slot, distance, view and cockpit stay as they are. */
 function resetEngagement() {
     if (sim) sim.resetEngagement();
+    clearRave();
     spaceDown = false;
     hp = maxHp;
     deadFor = 0;
@@ -547,6 +592,7 @@ export async function mount(container, shared) {
     rootEl.innerHTML = ''
         + '<div class="vt-wpn-range-stage">'
         + '<div class="vt-wpn-range-view" data-range-view></div>'
+        + '<div class="vt-wpn-range-rave" data-range-rave hidden aria-hidden="true"></div>'
         + '<div class="vt-wpn-range-hud">'
         + '<img data-range-reticle alt="" class="vt-wpn-range-reticle" hidden>'
         + '<div class="vt-wpn-range-card vt-wpn-range-card-weapon">'
@@ -609,6 +655,7 @@ export async function mount(container, shared) {
         distText: rootEl.querySelector('[data-range-dist-text]'),
     };
 
+    raveEl = rootEl.querySelector('[data-range-rave]');
     const view = rootEl.querySelector('[data-range-view]');
     viewer = new ObjectViewer(view, { quality: 'perf' });
     viewer.controls.enabled = false;
@@ -623,6 +670,7 @@ export async function mount(container, shared) {
         getTarget: targetState,
         onRecoil: () => { if (viewer.fireRecoil) viewer.fireRecoil(); },
         onHit,
+        onRaveFlash,
     });
     viewer.setExternalTick((dt) => {
         if (!loop) return;
@@ -638,6 +686,7 @@ export async function mount(container, shared) {
         audio.setListener(viewer.camera);
         const state = sim.update(dt);
         fx.update(dt);
+        paintRave(dt);
         paintHud(state);
     });
 
@@ -786,6 +835,9 @@ export function destroy() {
     loop = false;
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('keyup', onKeyUp);
+    clearRave();
+    raveEl = null;
+    raveColors = [];
     if (sim) sim.dispose();
     if (fx) fx.dispose();
     if (viewer) viewer.dispose();

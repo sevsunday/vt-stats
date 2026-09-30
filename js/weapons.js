@@ -202,6 +202,19 @@
 
     // ---- scenario -----------------------------------------------------
 
+    // The highlighted reticle is the charge stage. With no pick, the last
+    // stage that has an ordnance stays selected, matching the matrix.
+    function selectedCharge(v) {
+        const levels = v && v.damage && v.damage.levels;
+        if (!levels || !levels.length) return null;
+        if (view.frame) {
+            const hit = levels.find((lv) => lv.reticle && lv.reticle === view.frame);
+            if (hit) return hit;
+        }
+        const armed = levels.filter((lv) => lv.direct);
+        return armed.length ? armed[armed.length - 1] : levels[levels.length - 1];
+    }
+
     function currentScenario() {
         const fam = state.w ? ctx.family(state.w) : null;
         if (!fam) return null;
@@ -209,7 +222,11 @@
         const tg = state.t ? ctx.target(state.t, { deployed: state.td, shield: state.sh }) : null;
         const res = ctx.resolveVariant(fam, sh, state.v);
         const g = res.g;
-        const r = ctx.compute({ variant: res.variant, shooter: sh, target: tg, g });
+        const picked = selectedCharge(res.variant);
+        const r = ctx.compute({
+            variant: res.variant, shooter: sh, target: tg, g,
+            chargeLevel: picked ? picked.level : null,
+        });
         return { fam, sh, tg, res, r, g, v: res.variant };
     }
 
@@ -749,7 +766,9 @@
 
     function reticlePanel(v) {
         const frames = v.reticle.frames;
-        const shown = view.frame && frames.includes(view.frame) ? view.frame : v.reticle.primary;
+        const picked = selectedCharge(v);
+        const chargeFrame = picked && picked.reticle && frames.includes(picked.reticle) ? picked.reticle : null;
+        const shown = view.frame && frames.includes(view.frame) ? view.frame : (chargeFrame || v.reticle.primary);
         let html = reticleMedia(v.reticle, 'lg', shown)
             + '<div class="vt-wpn-reticle-caption">'
             + (v.reticle.primary
@@ -786,14 +805,14 @@
         const r = sc.r;
         let html = '';
         if (r.levels && r.levels.length) {
-            const top = r.levels[r.levels.length - 1].level;
             html += '<div><h4 class="vt-wpn-subhead">Charge levels vs ' + esc(CLASS_NAMES[r.letter]) + '</h4>'
                 + '<div class="table-responsive"><table class="table table-sm vt-wpn-extra-table"><thead><tr>'
                 + '<th>Level</th><th>Ordnance</th><th class="text-end">Hold s</th><th class="text-end">Salvo</th>'
                 + '<th class="text-end">Per hit</th><th class="text-end">Volley</th><th class="text-end">DPS</th><th class="text-end">Ammo / shot</th>'
                 + '</tr></thead><tbody>'
-                + r.levels.map((lv) => '<tr' + (lv.level === top ? ' class="is-headline"' : '') + '><td>' + lv.level + '</td>'
-                    + '<td><span class="vt-mono">' + odfLink(lv.ordName) + '</span></td>'
+                + r.levels.map((lv) => '<tr' + (lv.level === r.chargeLevel ? ' class="is-headline"' : '')
+                    + (lv.reticle ? ' data-frame="' + esc(lv.reticle) + '" tabindex="0"' : '') + '><td>' + lv.level + '</td>'
+                    + '<td>' + (lv.ordName ? '<span class="vt-mono">' + odfLink(lv.ordName) + '</span>' : '\u2014') + '</td>'
                     + '<td class="vt-mono">' + fmt(lv.holdTime) + '</td><td class="vt-mono">' + lv.salvoCount + '</td>'
                     + '<td class="vt-mono">' + fmt(lv.perHit) + '</td><td class="vt-mono">' + fmt(lv.volley) + '</td>'
                     + '<td class="vt-mono">' + fmt(lv.dps) + '</td><td class="vt-mono">' + fmt(lv.ammoCost) + '</td></tr>').join('')
@@ -860,7 +879,7 @@
         if (v.ammoMode === 'perSecond') {
             ammoRows.push(statRow('Cost per second', num(v.ammoCost), 'ammoCost from the ODF, drained while firing'));
         } else if (v.ammoMode === 'perShot') {
-            ammoRows.push(statRow('Cost per ' + unit, num(v.ammoCost), unit === 'drop' ? 'Dispensed object maxAmmo (unverified convention)' : 'ammoCost from the ODF'));
+            ammoRows.push(statRow('Cost per ' + unit, num(r.ammo.perShot), unit === 'drop' ? 'Dispensed object maxAmmo (unverified convention)' : 'ammoCost from the ODF'));
         } else {
             ammoRows.push(statRow('Cost', null, 'This weapon uses no ammo'));
         }
@@ -903,10 +922,11 @@
             projRows.push(statRow(splitRate ? (hitRate ? 'Hits per second, each hardpoint' : 'Hits per second') : 'Shots per second', num(r.shotsPerSec), ex.shotsPerSec));
         }
         if (r.hitsPerSec != null) projRows.push(statRow('Hits per second', num(r.hitsPerSec, 0), ex.shotsPerSec));
-        if (v.fire.salvoCount > 1) projRows.push(statRow('Salvo', v.fire.salvoCount + ' \u00d7 ' + fmt(v.fire.salvoDelay) + ' s', 'salvoCount x salvoDelay'));
-        if (v.fire.firstDelay > 0) projRows.push(statRow('Leader delay', num(v.fire.firstDelay, 2, 's'), 'TargetingGunClass firstDelay'));
-        if (v.fire.lockDelay > 0) projRows.push(statRow('Lock-on', num(v.fire.lockDelay, 2, 's'), 'LauncherClass lockDelay'));
-        if (v.fire.shotVariance > 0) projRows.push(statRow('Spread', num(v.fire.shotVariance, 3, 'rad'), 'shotVariance'));
+        const fire = r.fire || v.fire;
+        if (fire.salvoCount > 1) projRows.push(statRow('Salvo', fire.salvoCount + ' \u00d7 ' + fmt(fire.salvoDelay) + ' s', 'salvoCount x salvoDelay'));
+        if (fire.firstDelay > 0) projRows.push(statRow('Leader delay', num(fire.firstDelay, 2, 's'), 'TargetingGunClass firstDelay'));
+        if (fire.lockDelay > 0) projRows.push(statRow('Lock-on', num(fire.lockDelay, 2, 's'), 'LauncherClass lockDelay'));
+        if (fire.shotVariance > 0) projRows.push(statRow('Spread', num(fire.shotVariance, 3, 'rad'), 'shotVariance'));
         if (!projRows.length) projRows.push(statRow('Projectile', null, 'No ordnance flight data'));
 
         const extraRows = [];
@@ -1483,11 +1503,19 @@
         });
         const result = document.getElementById('vt-wpn-result');
         if (result) {
-            result.addEventListener('click', (event) => {
+            const pickFrame = (event) => {
+                if (event.target.closest('a')) return;
                 const frame = event.target.closest('[data-frame]');
-                if (!frame) return;
+                if (!frame || !frame.dataset.frame) return;
                 view.frame = frame.dataset.frame;
                 renderResult(currentScenario());
+            };
+            result.addEventListener('click', pickFrame);
+            result.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                if (!event.target.closest('[data-frame]')) return;
+                event.preventDefault();
+                pickFrame(event);
             });
         }
         document.addEventListener('error', handleImageError, true);

@@ -93,6 +93,35 @@ function bool(value, fallback) {
     return fallback;
 }
 
+/* CannonClass.raveFlash is an engine screen wash (Rave!, Yule!), not a
+ * render. The ODF names no palette, so the wash cycles the round's own
+ * bright sections. A flag with none of them falls back to Rave!'s triad. */
+const RAVE_COLOR_SECTIONS = ['ordnance.light', 'ordnance.trailr', 'ordnance.trailb'];
+const RAVE_FALLBACK = [
+    { r: 255, g: 63, b: 255 },
+    { r: 255, g: 255, b: 63 },
+    { r: 63, g: 255, b: 255 },
+];
+
+function colorBytes(value) {
+    const parts = String(value == null ? '' : value).trim().split(/\s+/).map(Number);
+    if (parts.length < 3 || parts.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
+    return {
+        r: Math.max(0, Math.min(255, Math.round(parts[0]))),
+        g: Math.max(0, Math.min(255, Math.round(parts[1]))),
+        b: Math.max(0, Math.min(255, Math.round(parts[2]))),
+    };
+}
+
+function raveColorsOf(map) {
+    const colors = [];
+    RAVE_COLOR_SECTIONS.forEach((name) => {
+        const c = colorBytes(prop(sec(map, name), 'startColor'));
+        if (c) colors.push(c);
+    });
+    return colors.length ? colors : RAVE_FALLBACK.map((c) => ({ r: c.r, g: c.g, b: c.b }));
+}
+
 function sectionsOf(entry) {
     const map = new Map();
     if (!entry) return map;
@@ -369,6 +398,7 @@ function buildProfile(entry) {
     // shotDelay lives on CannonClass for cannons, on LauncherClass for the
     // lock-on family and on TargetingGunClass for the TAG cannon.
     const shotDelayRaw = prop(cannon, 'shotDelay') ?? prop(launcher, 'shotDelay') ?? prop(targeting, 'shotDelay');
+    const raveFlash = bool(prop(cannon, 'raveFlash'), false);
     return {
         id,
         label: LABELS[id] || id,
@@ -386,6 +416,8 @@ function buildProfile(entry) {
         shotVariance: num(prop(cannon, 'shotVariance'), 0),
         shotPitch: num(prop(cannon, 'shotPitch'), 0),
         shotAlternate: bool(prop(cannon, 'shotAlternate'), false),
+        raveFlash,
+        raveColors: raveFlash ? raveColorsOf(map) : [],
         lockDelay: num(prop(launcher, 'lockDelay'), 5),
         lockRange: num(prop(launcher, 'lockRange'), 400),
         coneAngle: num(prop(launcher, 'coneAngle'), 0.7),

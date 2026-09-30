@@ -819,6 +819,15 @@ a.vt-wpn-source-link {
     text-align: right;
 }
 
+.vt-wpn-extra-table tr[data-frame] {
+    cursor: pointer;
+}
+
+.vt-wpn-extra-table tr[data-frame]:hover td,
+.vt-wpn-extra-table tr[data-frame]:focus-visible td {
+    background: var(--kb-bg-subtle);
+}
+
 .vt-wpn-extra-table tr.is-headline td {
     color: var(--kb-text-primary);
     font-weight: 650;
@@ -943,6 +952,17 @@ a.vt-wpn-source-link {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+.vt-wpn-range-rave {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-wpn-range-rave { display: none; }
 }
 
 .vt-wpn-range-hud {

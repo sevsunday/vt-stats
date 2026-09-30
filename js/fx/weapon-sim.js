@@ -71,6 +71,7 @@ export function createRangeSim(opts) {
     const onRecoil = opts.onRecoil || function () {};
     const onHit = opts.onHit || function () {};
     const onEvent = opts.onEvent || function () {};
+    const onRaveFlash = opts.onRaveFlash || function () {};
 
     let profile = null;
     let db = null;
@@ -354,6 +355,8 @@ export function createRangeSim(opts) {
         if (!profile.looping) {
             playOnce((extra && extra.sound) || profile.fireSound || (beam ? ordv.shotSound : ''), firstMuzzle.position);
         }
+        // One wash per volley, not per barrel. CannonClass.raveFlash only.
+        if (profile.raveFlash) onRaveFlash();
         return true;
     }
 

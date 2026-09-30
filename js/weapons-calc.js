@@ -541,9 +541,10 @@
             let projectile = null;
             const aiRange = num(wc.airange, null);
 
-            const projectileFor = (o) => {
-                const shotSpeed = ordValue(o, 'OrdnanceClass', 'shotspeed', fire.defaulted);
-                const lifeSpan = ordValue(o, 'OrdnanceClass', 'lifespan', fire.defaulted);
+            const projectileFor = (o, defaulted) => {
+                const reported = defaulted === undefined ? fire.defaulted : defaulted;
+                const shotSpeed = ordValue(o, 'OrdnanceClass', 'shotspeed', reported);
+                const lifeSpan = ordValue(o, 'OrdnanceClass', 'lifespan', reported);
                 const range = shotSpeed != null && lifeSpan != null ? shotSpeed * lifeSpan : null;
                 return {
                     shotSpeed, lifeSpan, range,
@@ -559,48 +560,66 @@
                 const levels = [];
                 for (let i = 1; i <= count; i++) {
                     const o = ordnanceView(cg['ordname' + i], null);
-                    if (!o) continue;
-                    if (o.missing) {
-                        warnings.push('Charge level ' + i + ' ordnance ' + o.stem + ' is not in the ODF database.');
+                    const reticle = resolveFrame(sanitizeReticle(cg['wpnreticle' + i]));
+                    const holdTime = num(cg['shotdelay' + i], 0);
+                    const salvoDelay = num(cg['salvodelay' + i], num(cg.salvodelay, 0));
+                    const shotVariance = num(cg['shotvariance' + i], null);
+                    const rawSalvo = Math.round(num(cg['salvocount' + i], 1));
+                    if (!o || o.missing) {
+                        if (o && o.missing) warnings.push('Charge level ' + i + ' ordnance ' + o.stem + ' is not in the ODF database.');
+                        levels.push({
+                            level: i,
+                            ordName: o ? o.stem : null,
+                            reticle,
+                            salvoCount: Math.max(0, rawSalvo),
+                            salvoDelay,
+                            holdTime,
+                            shotVariance,
+                            direct: null,
+                            ammoCost: null,
+                            splash: null,
+                            splashBuilding: null,
+                            projectile: null,
+                        });
                         continue;
                     }
                     levels.push({
                         level: i,
                         ordName: o.stem,
-                        salvoCount: Math.max(1, Math.round(num(cg['salvocount' + i], 1))),
-                        salvoDelay: num(cg['salvodelay' + i], num(cg.salvodelay, 0)),
-                        holdTime: num(cg['shotdelay' + i], 0),
+                        reticle,
+                        salvoCount: Math.max(1, rawSalvo),
+                        salvoDelay,
+                        holdTime,
+                        shotVariance,
                         direct: dmgValues(o.sec('OrdnanceClass')) || { N: 0, L: 0, H: 0, S: 0, D: 0, A: 0 },
                         ammoCost: ordValue(o, 'OrdnanceClass', 'ammocost', null),
                         splash: explosionOf(o.sec('ExplVehicle.ExplosionClass')),
-                        ord: o,
+                        splashBuilding: explosionOf(o.sec('ExplBuilding.ExplosionClass')),
+                        projectile: projectileFor(o, null),
                     });
                 }
-                if (!levels.length) {
-                    damage = baseDamage('none', 'none');
-                } else {
-                    const top = levels[levels.length - 1];
-                    damage = baseDamage('charge', 'exact');
+                const armed = levels.filter((lv) => lv.direct);
+                damage = baseDamage('charge', armed.length ? 'exact' : 'none');
+                damage.levels = levels;
+                if (armed.length) {
+                    const top = armed[armed.length - 1];
+                    const topView = ordnanceView(top.ordName, null);
                     damage.direct = top.direct;
                     damage.directSource = 'charge level ' + top.level + ' ordnance ' + top.ordName;
                     damage.splash = top.splash;
-                    damage.levels = levels.map((lv) => ({
-                        level: lv.level, ordName: lv.ordName, salvoCount: lv.salvoCount,
-                        salvoDelay: lv.salvoDelay, holdTime: lv.holdTime, direct: lv.direct,
-                        ammoCost: lv.ammoCost,
-                    }));
+                    damage.splashBuilding = top.splashBuilding;
                     fire.shotDelay = top.holdTime;
                     fire.salvoCount = top.salvoCount;
                     fire.salvoDelay = top.salvoDelay;
-                    ord = top.ord;
-                    projectile = projectileFor(top.ord);
+                    if (top.shotVariance != null) fire.shotVariance = top.shotVariance;
+                    ord = topView && !topView.missing ? topView : null;
+                    projectile = ord ? projectileFor(ord) : top.projectile;
                     ammoMode = 'perShot';
                     ammoCost = top.ammoCost;
                     ammoUnit = 'shot';
-                    notes.push('Headline uses the top charge level (' + top.level + '); its cycle is the ' + fmt(top.holdTime) + ' s hold time. Every level is listed below.');
-                    const holdRate = num(cg.holdrate, 100);
-                    if (holdRate > 0) notes.push('Holding a full charge drains ' + fmt(holdRate) + ' ammo per second.');
                 }
+                const holdRate = num(cg.holdrate, 100);
+                if (holdRate > 0) notes.push('Holding a full charge drains ' + fmt(holdRate) + ' ammo per second.');
             } else if (terminal === 'arccannon') {
                 const ac = sec(rec, 'ArcCannonClass') || {};
                 damage = baseDamage('arc', 'estimated');
@@ -1285,17 +1304,83 @@
             return 'one pull fires one round';
         }
 
+        // A requested charge stage is used as written, including a stage whose
+        // ordName is NULL. Omitting chargeLevel keeps the last stage that has
+        // damage, which is what the Damage matrix shows.
+        function chargeStage(v, requested) {
+            const levels = v.damage.levels;
+            const armed = levels.filter((lv) => lv.direct);
+            let lv = null;
+            if (requested != null && requested !== '') {
+                lv = levels.find((row) => row.level === Number(requested)) || null;
+            }
+            if (!lv) lv = armed.length ? armed[armed.length - 1] : levels[levels.length - 1];
+            const fire = Object.assign({}, v.fire, {
+                shotDelay: lv.holdTime,
+                salvoCount: lv.salvoCount,
+                salvoDelay: lv.salvoDelay,
+            });
+            if (lv.shotVariance != null) fire.shotVariance = lv.shotVariance;
+            if (!lv.direct) {
+                return {
+                    level: lv.level,
+                    damage: Object.assign({}, v.damage, {
+                        tier: 'none',
+                        direct: null,
+                        directSource: lv.ordName
+                            ? 'charge level ' + lv.level + ' ordnance ' + lv.ordName
+                            : 'charge level ' + lv.level + ' (no ordnance)',
+                        splash: null,
+                        splashBuilding: null,
+                    }),
+                    fire,
+                    ammoCost: null,
+                    projectile: null,
+                    warning: lv.ordName ? null : 'Charge level ' + lv.level + ' has no ordnance.',
+                    note: null,
+                };
+            }
+            return {
+                level: lv.level,
+                damage: Object.assign({}, v.damage, {
+                    tier: 'exact',
+                    direct: lv.direct,
+                    directSource: 'charge level ' + lv.level + ' ordnance ' + lv.ordName,
+                    splash: lv.splash,
+                    splashBuilding: lv.splashBuilding,
+                }),
+                fire,
+                ammoCost: lv.ammoCost,
+                projectile: lv.projectile,
+                warning: null,
+                note: 'Numbers follow charge level ' + lv.level + ', ordnance ' + lv.ordName + '.',
+            };
+        }
+
         function compute(args) {
             const v = args && args.variant;
             if (!v) throw new Error('compute() needs a variant');
             const sh = args.shooter || null;
             const tg = args.target || null;
             const g = Math.max(1, Math.round(num(args.g, 1)));
-            const d = v.damage;
-            const f = v.fire;
-            const letter = tg ? (tg.shieldClass && tg.shieldClass !== 'N' ? tg.shieldClass : tg.armorClass) : 'N';
             const assumptions = v.notes.slice();
             const warnings = v.warnings.slice();
+            let d = v.damage;
+            let f = v.fire;
+            let shotCost = v.ammoCost;
+            let projectileSrc = v.projectile;
+            let chargeLevel = null;
+            if (d.kind === 'charge' && d.levels && d.levels.length) {
+                const stage = chargeStage(v, args.chargeLevel);
+                d = stage.damage;
+                f = stage.fire;
+                shotCost = stage.ammoCost;
+                projectileSrc = stage.projectile;
+                chargeLevel = stage.level;
+                if (stage.warning) warnings.push(stage.warning);
+                if (stage.note) assumptions.push(stage.note);
+            }
+            const letter = tg ? (tg.shieldClass && tg.shieldClass !== 'N' ? tg.shieldClass : tg.armorClass) : 'N';
             const explain = {};
             const src = d.directSource || 'the ODF';
             const col = 'damageValue(' + letter + ')';
@@ -1356,7 +1441,7 @@
             const ammo = {
                 mode: v.ammoMode,
                 unit: v.ammoUnit,
-                perShot: v.ammoMode === 'perShot' ? v.ammoCost : null,
+                perShot: v.ammoMode === 'perShot' ? shotCost : null,
                 perSec: null,
                 shotsPerTank: null,
                 volleysPerTank: null,
@@ -1365,18 +1450,18 @@
                 maxAmmo: sh ? sh.maxAmmo : null,
                 addAmmo: sh ? sh.addAmmo : null,
             };
-            if (v.ammoMode === 'perShot' && v.ammoCost != null) {
+            if (v.ammoMode === 'perShot' && shotCost != null) {
                 const rate = shotsPerSec;
                 if (rate != null) {
-                    ammo.perSec = v.ammoCost * rate * g;
-                    explain.ammoPerSec = fmt(v.ammoCost) + ' ammo x ' + fmt(rate) + ' shots/s x ' + g + ' = ' + fmt(ammo.perSec);
+                    ammo.perSec = shotCost * rate * g;
+                    explain.ammoPerSec = fmt(shotCost) + ' ammo x ' + fmt(rate) + ' shots/s x ' + g + ' = ' + fmt(ammo.perSec);
                 }
                 if (sh) {
-                    if (v.ammoCost > 0) {
-                        ammo.shotsPerTank = Math.floor(sh.maxAmmo / v.ammoCost);
-                        ammo.volleysPerTank = Math.floor(sh.maxAmmo / (v.ammoCost * roundsPerShot));
-                        explain.shotsPerTank = 'floor(maxAmmo ' + fmt(sh.maxAmmo) + ' / ' + fmt(v.ammoCost) + ') = ' + ammo.shotsPerTank;
-                        explain.volleysPerTank = 'floor(maxAmmo ' + fmt(sh.maxAmmo) + ' / (' + fmt(v.ammoCost) + ' x ' + roundsPerShot + ' rounds per shot)) = ' + ammo.volleysPerTank;
+                    if (shotCost > 0) {
+                        ammo.shotsPerTank = Math.floor(sh.maxAmmo / shotCost);
+                        ammo.volleysPerTank = Math.floor(sh.maxAmmo / (shotCost * roundsPerShot));
+                        explain.shotsPerTank = 'floor(maxAmmo ' + fmt(sh.maxAmmo) + ' / ' + fmt(shotCost) + ') = ' + ammo.shotsPerTank;
+                        explain.volleysPerTank = 'floor(maxAmmo ' + fmt(sh.maxAmmo) + ' / (' + fmt(shotCost) + ' x ' + roundsPerShot + ' rounds per shot)) = ' + ammo.volleysPerTank;
                     } else {
                         ammo.shotsPerTank = Infinity;
                         ammo.volleysPerTank = Infinity;
@@ -1389,15 +1474,15 @@
                             : 'Regen ' + fmt(sh.addAmmo) + '/s covers the ' + fmt(ammo.perSec) + '/s drain.';
                     }
                     if (dps != null && perHit != null) {
-                        ammo.sustainedDps = v.ammoCost > 0 ? Math.min(dps, sh.addAmmo / v.ammoCost * perHit) : dps;
-                        explain.sustainedDps = v.ammoCost > 0
-                            ? 'min(DPS ' + fmt(dps) + ', regen ' + fmt(sh.addAmmo) + ' / ' + fmt(v.ammoCost) + ' x ' + fmt(perHit) + ') = ' + fmt(ammo.sustainedDps)
+                        ammo.sustainedDps = shotCost > 0 ? Math.min(dps, sh.addAmmo / shotCost * perHit) : dps;
+                        explain.sustainedDps = shotCost > 0
+                            ? 'min(DPS ' + fmt(dps) + ', regen ' + fmt(sh.addAmmo) + ' / ' + fmt(shotCost) + ' x ' + fmt(perHit) + ') = ' + fmt(ammo.sustainedDps)
                             : 'No ammo cost: sustained = burst.';
                     }
                 }
-            } else if (v.ammoMode === 'perSecond' && v.ammoCost != null) {
-                ammo.perSec = v.ammoCost * g;
-                explain.ammoPerSec = fmt(v.ammoCost) + ' ammo per second x ' + g + ' = ' + fmt(ammo.perSec);
+            } else if (v.ammoMode === 'perSecond' && shotCost != null) {
+                ammo.perSec = shotCost * g;
+                explain.ammoPerSec = fmt(shotCost) + ' ammo per second x ' + g + ' = ' + fmt(ammo.perSec);
                 if (sh) {
                     const net = ammo.perSec - sh.addAmmo;
                     ammo.timeToEmpty = net > 0 ? sh.maxAmmo / net : Infinity;
@@ -1437,9 +1522,9 @@
                     explain.hitsToKill = 'ceil(maxHealth ' + fmt(hp) + ' / ' + fmt(perHit) + ') = ' + ttk.hitsToKill;
                     explain.shotsToKill = shotGroupPhrase(f, g, roundsPerShot) + '. ceil(' + ttk.hitsToKill + ' / ' + roundsPerShot + ') = ' + ttk.shotsToKill;
                     explain.ttk = '(shots ' + ttk.shotsToKill + ' - 1) x ' + (alternating ? 'interval ' : 'cycle ') + fmt(interval) + ' s = ' + fmt(ttk.seconds) + ' s';
-                    if (sh && v.ammoMode === 'perShot' && v.ammoCost > 0 && sh.maxAmmo > 0) {
-                        ttk.tankFraction = ttk.hitsToKill * v.ammoCost / sh.maxAmmo;
-                        explain.tankFraction = ttk.hitsToKill + ' x ' + fmt(v.ammoCost) + ' ammo / maxAmmo ' + fmt(sh.maxAmmo) + ' = ' + fmt(ttk.tankFraction * 100, 0) + '%';
+                    if (sh && v.ammoMode === 'perShot' && shotCost > 0 && sh.maxAmmo > 0) {
+                        ttk.tankFraction = ttk.hitsToKill * shotCost / sh.maxAmmo;
+                        explain.tankFraction = ttk.hitsToKill + ' x ' + fmt(shotCost) + ' ammo / maxAmmo ' + fmt(sh.maxAmmo) + ' = ' + fmt(ttk.tankFraction * 100, 0) + '%';
                     }
                 } else {
                     ttk.seconds = hp / dps;
@@ -1461,7 +1546,7 @@
                 }
             }
 
-            const p = v.projectile;
+            const p = projectileSrc;
             if (p && p.range != null && p.shotSpeed != null) {
                 explain.range = p.lobbed
                     ? 'shotSpeed ' + fmt(p.shotSpeed) + ' x lifeSpan ' + fmt(p.lifeSpan) + ' is effectively unlimited (lobbed or timed ordnance)'
@@ -1483,11 +1568,12 @@
             } : null;
             const levels = d.levels ? d.levels.map((lv) => {
                 const c = Math.max(lv.holdTime, lv.salvoCount * lv.salvoDelay);
-                const hit = lv.direct[letter];
+                const hit = lv.direct ? lv.direct[letter] : null;
                 return {
-                    level: lv.level, ordName: lv.ordName, salvoCount: lv.salvoCount, holdTime: lv.holdTime,
-                    perHit: hit, volley: hit * lv.salvoCount,
-                    dps: c > 0 ? hit * lv.salvoCount / c * g : null,
+                    level: lv.level, ordName: lv.ordName, reticle: lv.reticle,
+                    salvoCount: lv.salvoCount, holdTime: lv.holdTime,
+                    perHit: hit, volley: hit == null ? null : hit * lv.salvoCount,
+                    dps: hit == null || c <= 0 ? null : hit * lv.salvoCount / c * g,
                     ammoCost: lv.ammoCost,
                 };
             }) : null;
@@ -1502,6 +1588,8 @@
                 letter,
                 letterLabel: letterLabel(letter),
                 g,
+                fire: f,
+                chargeLevel,
                 perHit,
                 cycle,
                 shotInterval,
