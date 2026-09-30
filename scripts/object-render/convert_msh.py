@@ -62,7 +62,7 @@ import msh_thumbnail  # noqa: E402
 from msh_parser import parse_msh, parse_msh_full  # noqa: E402
 from glb_writer import GlbBuilder, build_animated_glb  # noqa: E402
 from dds_decode import decode_dds, UnsupportedDDS  # noqa: E402
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageChops  # noqa: E402
 
 try:
     import bz2_paths  # from _map-analysis/scripts
@@ -446,6 +446,36 @@ def _extract_odf_drive(blocks: dict) -> dict | None:
     return None
 
 
+def _extract_odf_motion(blocks: dict) -> dict | None:
+    """Authored articulation the viewer used to guess: recoilDist1 (metres,
+    negative pulls the barrel in), rollSteer (radians of hull lean), and
+    omegaTurret / alphaTurret (rad/s and rad/s^2; values above 10 are degrees
+    and get normalized the same way drive omegas do)."""
+    recoil = roll = omega = alpha = None
+    if not isinstance(blocks, dict):
+        return None
+    for props in blocks.values():
+        if not isinstance(props, dict):
+            continue
+        pl = {str(k).lower(): v for k, v in props.items()}
+        if recoil is None and "recoildist1" in pl:
+            recoil = _light_float(pl, "recoildist1", None)
+        if roll is None and "rollsteer" in pl:
+            roll = _light_float(pl, "rollsteer", None)
+        if omega is None and "omegaturret" in pl:
+            omega = _normalize_omega(_light_float(pl, "omegaturret", None))
+        if alpha is None and "alphaturret" in pl:
+            alpha = _light_float(pl, "alphaturret", None)
+    if recoil is None and roll is None and omega is None and alpha is None:
+        return None
+    return {
+        "recoilDist": recoil,
+        "rollSteer": roll,
+        "omegaTurret": omega,
+        "alphaTurret": alpha,
+    }
+
+
 def _extract_odf_snipe(blocks: dict) -> dict:
     """Snipe-point eligibility from GameObjectClass.canSnipe. In odf.min.json
     canSnipe is almost only written to turn it OFF (support units, assault
@@ -709,9 +739,13 @@ def enumerate_targets(odf_filter=None):
         # Drive profile: first candidate (primary first) declaring a movement
         # class with speeds wins.
         drive = None
+        motion = None
         for c in cands_sorted:
-            drive = _extract_odf_drive(c["blocks"])
-            if drive:
+            if drive is None:
+                drive = _extract_odf_drive(c["blocks"])
+            if motion is None:
+                motion = _extract_odf_motion(c["blocks"])
+            if drive and motion:
                 break
         # Weapon loadouts: one entry per candidate ODF declaring >= 1 weapon
         # slot (virtual_class_* stubs skipped) -- powers the viewer's variant
@@ -795,6 +829,7 @@ def enumerate_targets(odf_filter=None):
             "odf_art": {"turretNames": art_turret, "recoilNames": art_recoil,
                         "head": art_head},
             "drive": drive,
+            "motion": motion,
             "loadouts": loadouts or None,
             "defaultLoadoutOdf": default_loadout_odf,
             "lights": lights,
@@ -1075,7 +1110,11 @@ def resolve_emissive(msh_dir: Path, tex_key: str, declared_dds: str | None, cach
         return None
     src = Path(src)
     try:
-        pil = decode_dds(src, max_dim=EMISSIVE_MAX_DIM).convert("RGB")
+        # dx11_default_psh flag `e` adds emissive.rgb * emissive.a. The PNG is
+        # RGB, so the alpha is baked in. Existing files stay until a forced re-emit.
+        rgba = decode_dds(src, max_dim=EMISSIVE_MAX_DIM).convert("RGBA")
+        alpha = rgba.getchannel("A")
+        pil = ImageChops.multiply(rgba.convert("RGB"), Image.merge("RGB", (alpha, alpha, alpha)))
     except (UnsupportedDDS, Exception) as e:  # noqa: BLE001
         if _G and _G.get("verbose"):
             print(f"    emissive decode failed {tex_key}: {e}")
@@ -1132,6 +1171,24 @@ def resolve_normal(msh_dir: Path, tex_key: str, declared_dds: str | None, cache:
         _atomic_write_bytes(out_path, _png_bytes(pil))
     cache.add(tex_key)
     return tex_key
+
+
+def _engine_roughness_lut(specular_power: float | None):
+    """True-lighting roughness from dx11_default_psh flag `s`.
+
+    The shader's specular power is 2^(gloss * specularPower). It then uses
+    alpha = sqrt(2 / (power + 2)), and three.js roughness is sqrt(alpha).
+    gloss is the spec map's alpha, 0..1.
+    """
+    power = specular_power if specular_power and specular_power > 0 else 20.0
+    lut = []
+    for v in range(256):
+        gloss = v / 255.0
+        spec_pow = 2.0 ** (gloss * power)
+        alpha = math.sqrt(2.0 / (spec_pow + 2.0))
+        rough = min(1.0, max(SPEC_ROUGHNESS_MIN, math.sqrt(alpha)))
+        lut.append(min(255, max(0, round(rough * 255.0))))
+    return lut
 
 
 def _roughness_lut(specular_power: float | None):
@@ -1211,11 +1268,12 @@ def resolve_specular(msh_dir: Path, tex_key: str, declared_dds: str | None,
         if _G and _G.get("verbose"):
             print(f"    specular decode failed {tex_key}: {e}")
         return None
-    lut = _roughness_lut(specular_power)
+    stylized = _roughness_lut(specular_power)
+    engine = _engine_roughness_lut(specular_power)
     force = _G["force"] if _G else False
-    for out_dir, band in (
-        (TEX_SPECULAR_DIR, decoded.convert("L")),
-        (TEX_SPECULAR_TRUE_DIR, _spec_gloss_band(decoded)),
+    for out_dir, band, lut in (
+        (TEX_SPECULAR_DIR, decoded.convert("L"), stylized),
+        (TEX_SPECULAR_TRUE_DIR, _spec_gloss_band(decoded), engine),
     ):
         out_path = out_dir / f"{tex_key}.png"
         if force or not out_path.exists():
@@ -1589,6 +1647,7 @@ def process_model(job: dict) -> dict:
             "clips": clips,
             "parts": parts,
             "drive": job.get("drive"),
+            "motion": job.get("motion"),
             "loadouts": job.get("loadouts"),
             "defaultLoadoutOdf": job.get("defaultLoadoutOdf"),
             "lights": job.get("lights"),
@@ -1659,6 +1718,7 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "clips": p.get("clips", []),
         "parts": p.get("parts"),
         "drive": meta.get("drive"),
+        "motion": meta.get("motion"),
         "loadouts": meta.get("loadouts"),
         "defaultLoadoutOdf": meta.get("defaultLoadoutOdf"),
         "lights": meta.get("lights"),
@@ -2063,7 +2123,7 @@ def main():
                 m["cockpit"] = info
     cockpit_count = sum(1 for m in manifest if m.get("cockpit"))
     idx_path.write_text(json.dumps({
-        "schema_version": 19,
+        "schema_version": 20,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),

@@ -236,7 +236,7 @@ function buildSlots(snap, keepUser) {
 function applyActiveSlot(keepAmmo) {
     const stem = activeWeapon();
     const entry = stem && db.Weapon && db.Weapon[stem + '.odf'];
-    const profile = entry ? buildProfile(entry) : null;
+    const profile = entry ? buildProfile(entry, db && db.Ordnance) : null;
     // Warm every texture / mesh this weapon can reach before the first shot,
     // so no render is ever drawn untextured.
     if (entry) fx.preload(profileAssets(entry, db));

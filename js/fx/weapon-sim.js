@@ -43,6 +43,30 @@ function chargePlayRate(startRate, deltaRate, seconds) {
     return (startRate + (deltaRate || 0) * t) / startRate;
 }
 
+/* Ammo one charge frame spends. chargegun.cpp caches salvoCount * ammoCost
+ * on each stage. Until the last stage, the frame costs the slope between
+ * this stage's cache and the next one's, over their shotDelay gap. The
+ * opening frame also pays salvoCount times that cache. From the last
+ * stage's shotDelay on, the drain is a flat holdRate per second. A negative
+ * result is a refund (the next salvo costs less than this one). */
+function chargeFrameCost(levels, chargeTime, dt, holdRate) {
+    if (!levels || !levels.length || !(dt > 0)) return 0;
+    let idx = 0;
+    for (let i = 0; i < levels.length; i++) {
+        if (chargeTime + 1e-9 >= levels[i].holdTime) idx = i;
+    }
+    const last = idx >= levels.length - 1;
+    let rate = holdRate || 0;
+    if (!last) {
+        const span = levels[idx + 1].holdTime - levels[idx].holdTime;
+        const delta = (levels[idx + 1].salvoCost || 0) - (levels[idx].salvoCost || 0);
+        rate = span > 1e-6 ? delta / span : 0;
+    }
+    let cost = rate * dt;
+    if (idx === 0 && chargeTime <= 1e-9) cost += (levels[0].salvoCount || 0) * (levels[0].salvoCost || 0);
+    return cost;
+}
+
 function chargeWhineVolume(startVolume, deltaVolume, seconds) {
     // startVolume / deltaVolume are already the loader's 0.01 scale.
     // The sound setter clamps the result to 0..1 (minss 1.0).
@@ -1058,24 +1082,21 @@ export function createRangeSim(opts) {
         if (holding && id === 'charge' && salvoLeft <= 0) {
             // Charging waits out an in-flight salvo (telemetry: the next hold
             // never starts before the previous salvo's last round).
-            chargeTime += stepDt;
             const levels = profile.charge;
-            const n = levels.length || 1;
-            const idx = chargeStage(levels, chargeTime);
+            const cost = chargeFrameCost(levels, chargeTime, stepDt, profile.chargeHoldRate);
+            // Short a frame: the hold stalls. Charge time (and the whine) stay
+            // put and nothing is spent. Running dry before the last stage does
+            // not fire; release still fires whatever stage already armed.
+            if (ammo + 1e-6 >= cost) {
+                if (cost >= 0) spend(cost);
+                else ammo = Math.min(maxAmmo, ammo - cost);
+                chargeTime += stepDt;
+            }
             const cap = levels.length ? levels[levels.length - 1].holdTime : 0;
             const held = cap > 0 ? Math.min(chargeTime, cap) : chargeTime;
             if (toggleSound) {
                 audio.setRate(toggleSound, chargePlayRate(profile.chargeStartRate, profile.chargeDeltaRate, held));
                 if (audio.setGain) audio.setGain(toggleSound, chargeWhineVolume(profile.chargeStartVolume, profile.chargeDeltaVolume, held));
-            }
-            // Once charge time reaches the last stage the engine drains a flat
-            // holdRate per second, which this ramp equals at the last stage.
-            // The climb up to that is still the telemetry fit (the per-stage
-            // interpolation was not isolated). Nothing drains before stage 1.
-            // Running dry ends the hold without a shot.
-            if (profile.chargeHoldRate > 0 && idx >= 0) {
-                const rate = profile.chargeHoldRate * ((idx + 1) / n);
-                if (!spend(rate * stepDt)) releaseHold();
             }
         }
 
@@ -1290,4 +1311,4 @@ export function createRangeSim(opts) {
     };
 }
 
-export { segmentHitsSphere, lobAngle, AUTOFIRE, HOLD_ARCHETYPES, FLASH_EXTRA_SEC, chargePlayRate };
+export { segmentHitsSphere, lobAngle, AUTOFIRE, HOLD_ARCHETYPES, FLASH_EXTRA_SEC, chargePlayRate, chargeFrameCost };

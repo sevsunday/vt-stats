@@ -533,8 +533,11 @@ function initScene(mapData) {
     hm.cellsZ * hm.cellMetersZ,
   );
   const fogColorHex = lighting.fog_color_hex || mapData.skyTint || '#1a2030';
-  const fogStart = worldExtent * 1.5;
-  const fogEnd   = worldExtent * 3.0;
+  // The chase camera is close enough for the .TRN distances. dx11_default_psh
+  // fades across g_FogParams (amount, start, end, curve); THREE.Fog is the
+  // linear start/end half of that. The orbit map viewer keeps a wider fog.
+  const fogStart = Number.isFinite(lighting.fog_start) ? lighting.fog_start : worldExtent * 1.5;
+  const fogEnd = Number.isFinite(lighting.fog_end) ? lighting.fog_end : worldExtent * 3.0;
   scene.fog = new THREE.Fog(new THREE.Color(fogColorHex), fogStart, fogEnd);
   STATE.scene = scene;
 

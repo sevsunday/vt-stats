@@ -619,7 +619,7 @@
                     ammoUnit = 'shot';
                 }
                 const holdRate = num(cg.holdrate, 100);
-                if (holdRate > 0) notes.push('Holding a full charge drains ' + fmt(holdRate) + ' ammo per second.');
+                if (holdRate > 0) notes.push('Holding a full charge drains ' + fmt(holdRate) + ' ammo per second. While the charge is still climbing, the drain slides from one stage\'s salvo cost (salvoCount times the round\'s ammoCost) to the next.');
             } else if (terminal === 'arccannon') {
                 const ac = sec(rec, 'ArcCannonClass') || {};
                 damage = baseDamage('arc', 'estimated');
@@ -776,7 +776,7 @@
                             damage.pulse = pulse;
                             damage.dot = dot;
                             if (damage.splashOnly) notes.push('No direct-hit damage: per hit uses the maximum splash value.');
-                            if (splash || splashBuilding) notes.push('Splash is the maximum value within its radius; no falloff model.');
+                            if (splash || splashBuilding) notes.push('Splash is the full value anywhere inside damageRadius. The engine stores that radius; the per-metre falloff in the damage application was not isolated, so none is applied.');
                             if (pulse) notes.push('Pulse count is the potential over the shell lifetime: floor((lifeSpan - pulseDelay) / pulsePeriod).');
                             if (ord.terminal === 'snipershell') notes.push('A hit on the cockpit kills the pilot outright (snipe); not modeled.');
                         }

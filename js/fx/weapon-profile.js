@@ -332,7 +332,15 @@ function chargeAuthoredVolume(section, key, absent) {
     return num(raw, absent) * 0.01;
 }
 
-function chargeLevels(map) {
+function ordAmmoCost(ordDb, ordName) {
+    if (!ordDb || !ordName) return 0;
+    const key = String(ordName).toLowerCase().replace(/\.odf$/, '') + '.odf';
+    const entry = ordDb[key];
+    if (!entry) return 0;
+    return num(prop(sec(sectionsOf(entry), 'OrdnanceClass'), 'ammoCost'), 0);
+}
+
+function chargeLevels(map, ordDb) {
     const cg = sec(map, 'ChargeGunClass');
     if (!cg) return [];
     const n = Math.max(0, Math.round(num(prop(cg, 'ordnanceCount'), 1)));
@@ -340,14 +348,19 @@ function chargeLevels(map) {
     for (let i = 1; i <= n; i++) {
         const ord = stemOf(prop(cg, 'ordName' + i));
         const rawSalvo = Math.round(num(prop(cg, 'salvoCount' + i), 1));
+        const salvoCount = ord ? Math.max(0, rawSalvo) : 0;
+        const ammoCost = ordAmmoCost(ordDb, ord);
         levels.push({
             level: i,
             ordName: ord || null,
             fireSound: stemOf(prop(cg, 'fireSound' + i)),
             reticle: String(prop(cg, 'wpnReticle' + i) || '').trim().toLowerCase(),
             holdTime: num(prop(cg, 'shotDelay' + i), 0),
-            salvoCount: ord ? Math.max(0, rawSalvo) : 0,
+            salvoCount,
             salvoDelay: num(prop(cg, 'salvoDelay' + i), 0),
+            // The loader caches salvoCount * OrdnanceClass.ammoCost at stage+0x58.
+            ammoCost,
+            salvoCost: salvoCount * ammoCost,
         });
     }
     return levels;
@@ -384,7 +397,7 @@ function classifyId(entry) {
     return 'projectile';
 }
 
-function buildProfile(entry) {
+function buildProfile(entry, ordDb) {
     const map = sectionsOf(entry);
     const id = classifyId(entry);
     const wc = sec(map, 'WeaponClass') || {};
@@ -517,7 +530,7 @@ function buildProfile(entry) {
             expireSound: stemOf(prop(special, 'expireSound')),
             ammoCost: num(prop(special, 'ammoCost'), 0),
         },
-        charge: chargeLevels(map),
+        charge: chargeLevels(map, ordDb),
         ord,
         map,
     };

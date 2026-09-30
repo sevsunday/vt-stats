@@ -727,6 +727,7 @@ function showViewer(entry) {
     .then(() => {
       if (!activeViewer) return;
       activeViewer.setDriveProfile(entry.drive || null);
+      if (activeViewer.setMotion) activeViewer.setMotion(entry.motion || null);
       setupAnimUI();
       setupArticulationUI();
       setupColorsUI();

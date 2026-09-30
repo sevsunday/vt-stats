@@ -107,19 +107,33 @@ const TEX_SPECULAR_TRUE_BASE = '../data/models/textures/specular_true/';
 // emissive,normal,specular}/<stem>.{png,dds}. Which stems each pack covers comes
 // from the manifest's per-model `textureSets` block (no 404 probing).
 const TEX_MODS_BASE = '../data/models/textures/mods/';
-// BZCC normal maps are DirectX-convention (green = Y-down); three.js expects
-// OpenGL (Y-up), so the green channel is flipped via normalScale.y. Flip this
-// to false if grooves read inverted under a sweeping sun (verify on ibgtow00:
-// light from the left must brighten the LEFT edge of a groove).
+// dx11_default_psh flag `n` reconstructs the normal as T*x - B*y + N*z
+// (the shader multiplies the green sample by -1). three.js is OpenGL Y-up,
+// so normalScale.y is -1. Flip this to false if grooves read inverted.
 const NORMAL_FLIP_G = true;
 // ---- Ship lights (ODF lightHard/lightName hardpoint lights) ----------------
-// The manifest `lights` block carries the authored LightClass params (color /
-// range / attenuation / spot cones); intensities are viewer-tuned because the
-// engine's attenuation model doesn't map 1:1 onto three.js physical lights
-// (same precedent as RECOIL_* / TREAD_SCROLL_RATE).
-const SHIPLIGHT_POINT_INTENSITY = 15;  // candela-ish; scaled by authored color magnitude
-const SHIPLIGHT_SPOT_INTENSITY = 80;   // spots spread over a cone + longer ranges
-const SHIPLIGHT_DECAY = 2;             // physical inverse-square falloff
+// LightClass attenuation is att = max(0, 1-(d/range)^2) / (a0 + a1*d + a2*d^2)
+// (dx11_default_psh flag `l`). three.js uses intensity / distance^decay with a
+// hard cutoff at `distance`, so decay follows the dominant term (quadratic -> 2)
+// and the intensity is the old hand scale times 15/a2, which leaves a default
+// quadratic of 15 looking as it did before.
+const SHIPLIGHT_POINT_INTENSITY = 15;
+const SHIPLIGHT_SPOT_INTENSITY = 80;
+const SHIPLIGHT_QUAD_REF = 15;
+
+function shipLightFit(def) {
+  const att = Array.isArray(def.attenuation) ? def.attenuation : [1, 0, 15];
+  const a2 = Number(att[2]) || 0;
+  const a1 = Number(att[1]) || 0;
+  const a0 = Number(att[0]);
+  let decay = 2;
+  let denom = SHIPLIGHT_QUAD_REF;
+  if (a2 > 1e-4) { decay = 2; denom = a2; }
+  else if (a1 > 1e-4) { decay = 1; denom = a1; }
+  else { decay = 0; denom = Number.isFinite(a0) && a0 > 1e-4 ? a0 : 1; }
+  const scale = SHIPLIGHT_QUAD_REF / denom;
+  return { decay, scale };
+}
 // Spot aim axis in glTF node space after the pipeline's Z-mirror. MEASURED on
 // ivscout00/ivtank00: hp_light nodes sit on the nose (world -Z) with identity
 // rotation, so node-local +Z points at the TAIL -- forward is -Z.
@@ -488,13 +502,10 @@ function wrapDeg(d) { return ((d + 180) % 360 + 360) % 360 - 180; }
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
 // ---- Team color (BZCC `_c` mask compositing) --------------------------------
-// The `_c` mask is BC3: alpha = colorizable region (coverage), RGB = shading
-// detail. We tint the masked region with the chosen team color, modulated by the
-// mask luminance (to preserve panel shading) and lifted by TEAM_GAIN so the hue
-// reads near in-game brightness, then blended by the coverage. Recoloring is just
-// a uniform update (no texture reload). Default mix is 0 (off until the user picks
-// a color). The exact engine formula isn't published; TEAM_GAIN is the tuning knob.
-const TEAM_GAIN = 1.6;
+// The `_c` mask is BC3: alpha = colorizable region (coverage), RGB = the
+// replacement colour. dx11_default_psh flag `t` (g_Texture1) blends
+// mix(diffuse, teamColor.rgb * mask.rgb, mask.a * teamColor.a). No luminance
+// lift and no gain. uTeamMix stands in for the team-colour alpha (0 = off).
 const TEAM_DEFAULT_HEX = 0xe23b3b;   // team-1 red, the in-game default
 const TEAM_UNIFORM_DECL =
   'uniform vec3 uTeamColor;\nuniform sampler2D uTeamMask;\nuniform float uTeamMix;\n';
@@ -507,11 +518,9 @@ const TEAM_MAP_FRAG_INJECT = `#include <map_fragment>
   #ifdef USE_MAP
   {
     vec4 vtTeamMask = texture2D( uTeamMask, vMapUv );
-    float vtTeamCov = vtTeamMask.a;
-    float vtTeamShade = dot( vtTeamMask.rgb, vec3( 0.299, 0.587, 0.114 ) );
     diffuseColor.rgb = mix( diffuseColor.rgb,
-                            uTeamColor * vtTeamShade * ${TEAM_GAIN.toFixed(4)},
-                            vtTeamCov * uTeamMix );
+                            uTeamColor * vtTeamMask.rgb,
+                            vtTeamMask.a * uTeamMix );
   }
   #endif`;
 
@@ -1682,15 +1691,16 @@ export class ObjectViewer {
       const color = new THREE.Color(
         (c[0] || 0) / mag, (c[1] || 0) / mag, (c[2] || 0) / mag);
       const range = Math.max(1, Number(def.range) || 20);
+      const fit = shipLightFit(def);
       let light = null;
       let beam = null;
       let pool = null;
       if (def.kind === 'spot') {
         light = new THREE.SpotLight(
-          color, SHIPLIGHT_SPOT_INTENSITY * mag, range,
+          color, SHIPLIGHT_SPOT_INTENSITY * mag * fit.scale, range,
           clamp(Number(def.coneOuter) || 2.0, 0.1, 1.1),
           clamp(1 - (Number(def.coneInner) || 0.5) / (Number(def.coneOuter) || 2.0), 0, 1),
-          SHIPLIGHT_DECAY);
+          fit.decay);
         // Aim along the hardpoint's forward axis with a slight down-tilt
         // (SHIPLIGHT_AIM_DOWN): the target rides the node so the beam follows
         // turret yaw / animation.
@@ -1724,7 +1734,7 @@ export class ObjectViewer {
         pool.visible = false;
         this.scene.add(pool);
       } else {
-        light = new THREE.PointLight(color, SHIPLIGHT_POINT_INTENSITY * mag, range, SHIPLIGHT_DECAY);
+        light = new THREE.PointLight(color, SHIPLIGHT_POINT_INTENSITY * mag * fit.scale, range, fit.decay);
       }
       light.castShadow = false;
       node.add(light);
@@ -2913,7 +2923,13 @@ export class ObjectViewer {
     this._recoilClock = 1e-6;   // > 0 => active (see _updateRecoil)
   }
 
+  setMotion(motion) {
+    this._motion = motion || null;
+  }
+
   _recoilKick() {
+    const authored = this._motion && Number(this._motion.recoilDist);
+    if (Number.isFinite(authored) && authored !== 0) return Math.abs(authored);
     const r = this._radius || 1;
     return clamp(r * RECOIL_KICK_FRAC, RECOIL_KICK_MIN, RECOIL_KICK_MAX);
   }
@@ -3385,8 +3401,12 @@ export class ObjectViewer {
     // for a left turn -- forward is -Z), procedural since the steer pose is
     // baked into zero GLBs.
     const caps = this.getDriveCaps();
+    const roll = this._motion && Number(this._motion.rollSteer);
+    const rollDeg = Number.isFinite(roll)
+      ? (Math.abs(roll) <= 3.2 ? roll * (180 / Math.PI) : roll)
+      : DRIVE_TURN_ROLL;
     const wantLean = ((caps.archetype === 'hover' || caps.archetype === 'morph') && p.animSteer)
-      ? omegaFrac * DRIVE_TURN_ROLL * DEG : 0;
+      ? omegaFrac * rollDeg * DEG : 0;
     this._driveLean += (wantLean - this._driveLean)
       * Math.min(1, 1 - Math.exp(-DRIVE_LEAN_LERP * dt));
     this._spin.quaternion.setFromAxisAngle(ART_AXIS_Y, this._driveYaw);
@@ -4065,11 +4085,13 @@ export class ObjectViewer {
     // angles before applying, so yaw + pitch can move simultaneously and held
     // keys respond on the very next frame (no OS key-repeat delay).
     if (this._keySlewYaw || this._keySlewPitch) {
+      const slew = (this._motion && Number(this._motion.omegaTurret) > 0)
+        ? this._motion.omegaTurret * (180 / Math.PI) : KEY_SLEW_RATE;
       if (this._keySlewYaw) {
-        this._turretYawDeg = this._clampYaw(this._turretYawDeg + this._keySlewYaw * KEY_SLEW_RATE * dt);
+        this._turretYawDeg = this._clampYaw(this._turretYawDeg + this._keySlewYaw * slew * dt);
       }
       if (this._keySlewPitch) {
-        this._turretPitchDeg = this._clampPitch(this._turretPitchDeg + this._keySlewPitch * KEY_SLEW_RATE * dt);
+        this._turretPitchDeg = this._clampPitch(this._turretPitchDeg + this._keySlewPitch * slew * dt);
       }
       if (this._onAim) this._onAim({ yaw: this._turretYawDeg, pitch: this._turretPitchDeg });
       moving = true;
