@@ -15,8 +15,23 @@ import {
 const _up = new THREE.Vector3(0, 1, 0);
 const _aim = new THREE.Vector3();
 const _right = new THREE.Vector3();
-const CHARGE_STEP_SEC = 0.35;   // hold time per charge level (holdRate drains ammo; the step is not published)
 const PROX_TRIGGER_M = 12;      // mine trigger reach when the ODF gives none
+
+/* Index of the last ChargeGun stage whose holdTime (shotDelayN, cumulative)
+ * has elapsed, or -1 while the hold is still under shotDelay1. */
+function chargeStage(levels, t) {
+    let idx = -1;
+    for (let i = 0; i < levels.length; i++) {
+        if (t + 1e-9 >= levels[i].holdTime) idx = i;
+    }
+    return idx;
+}
+
+/* 0..1 across the whole hold, full at the last stage's shotDelayN. */
+function chargeFrac(levels, t) {
+    const full = levels.length ? levels[levels.length - 1].holdTime : 0;
+    return full > 0 ? Math.min(1, t / full) : 0;
+}
 /* Guide, WeaponClass.flashTime = 0.0f: "Time for the flash effect to play
  * ... + 0.1 seconds". So a muzzle flash lives flashTime + 0.1 s, never its
  * render section's own lifeTime (garc_c.flash declares a 5 s, 10 m sphere
@@ -681,15 +696,22 @@ export function createRangeSim(opts) {
         if (id === 'launcher' && holding && lock >= 1) fireLocked();
         if (id === 'multilock' && holding && locks > 0) releaseLocked(locks);
         if (id === 'charge' && holding) {
+            // Release fires the highest stage whose shotDelayN the hold has
+            // reached. A tap under shotDelay1, or a stage with no ordnance
+            // (assault MAG stage 1), fires nothing. The hold drain already
+            // paid for the shot, so the rounds cost nothing, and there is no
+            // cooldown after them — the salvo itself is the only dead time.
             const levels = profile.charge;
-            const idx = levels.length ? Math.min(levels.length - 1, Math.floor(chargeTime / CHARGE_STEP_SEC)) : -1;
+            const idx = chargeStage(levels, chargeTime);
             const level = idx >= 0 ? levels[idx] : null;
-            const ordv = (level && ordnanceEntry(db, level.ordName)) || profile.ord;
-            if (fireMuzzles(ordv, { count: level ? level.salvoCount : 1, sound: level && level.fireSound })) {
-                salvoLeft = level ? Math.max(0, level.salvoCount - 1) : 0;
-                salvoTimer = level ? level.salvoDelay : 0;
-                salvoExtra = { ordv };
-                cooldown = level ? level.shotDelay : profile.shotDelay;
+            const ordv = level && level.ordName ? ordnanceEntry(db, level.ordName) : null;
+            if (level && ordv && level.salvoCount > 0) {
+                if (startSalvo(ordv, {
+                    count: level.salvoCount,
+                    salvoDelay: level.salvoDelay,
+                    sound: level.fireSound,
+                    cost: 0,
+                })) cooldown = 0;
             }
         }
         releaseHold();
@@ -1011,12 +1033,23 @@ export function createRangeSim(opts) {
             } else lock = Math.max(0, lock - stepDt);
         }
 
-        if (holding && id === 'charge') {
+        if (holding && id === 'charge' && salvoLeft <= 0) {
+            // Charging waits out an in-flight salvo (telemetry: the next hold
+            // never starts before the previous salvo's last round).
             chargeTime += stepDt;
-            const levels = profile.charge.length || 1;
-            const frac = Math.min(1, chargeTime / (CHARGE_STEP_SEC * levels));
+            const levels = profile.charge;
+            const n = levels.length || 1;
+            const idx = chargeStage(levels, chargeTime);
+            const frac = chargeFrac(levels, chargeTime);
             if (toggleSound) audio.setRate(toggleSound, 0.6 + frac * 1.1);
-            if (frac >= 1 && profile.chargeHoldRate) spend(profile.chargeHoldRate * stepDt);
+            // holdRate is the drain AT full charge. The ODF does not publish
+            // the ramp, so the rate scales with the armed stage (approximated,
+            // fitted to match telemetry; nothing drains before stage 1).
+            // Running dry ends the hold without a shot.
+            if (profile.chargeHoldRate > 0 && idx >= 0) {
+                const rate = profile.chargeHoldRate * ((idx + 1) / n);
+                if (!spend(rate * stepDt)) releaseHold();
+            }
         }
 
         if (holding && id === 'arc') {
@@ -1100,12 +1133,23 @@ export function createRangeSim(opts) {
         }
 
         if (salvoLeft > 0) {
-            salvoTimer -= stepDt;
-            if (salvoTimer <= 0) {
-                const ordv = (salvoExtra && salvoExtra.ordv) || profile.ord;
-                if (fireMuzzles(ordv, salvoExtra || {})) salvoLeft -= 1;
-                else salvoLeft = 0;
-                salvoTimer = (salvoExtra && salvoExtra.salvoDelay != null) ? salvoExtra.salvoDelay : (profile.salvoDelay || 0.05);
+            const ordv = (salvoExtra && salvoExtra.ordv) || profile.ord;
+            const delay = (salvoExtra && salvoExtra.salvoDelay != null) ? salvoExtra.salvoDelay : (profile.salvoDelay || 0.05);
+            // salvoDelay 0 (MAG stages 1-2) is one tick in-game: dump the
+            // rest of the salvo now instead of one round per frame.
+            if (delay <= 1e-6) {
+                while (salvoLeft > 0) {
+                    if (!fireMuzzles(ordv, salvoExtra || {})) { salvoLeft = 0; break; }
+                    salvoLeft -= 1;
+                }
+                salvoTimer = 0;
+            } else {
+                salvoTimer -= stepDt;
+                if (salvoTimer <= 0) {
+                    if (fireMuzzles(ordv, salvoExtra || {})) salvoLeft -= 1;
+                    else salvoLeft = 0;
+                    salvoTimer = delay;
+                }
             }
         }
         if (salvoLeft <= 0) releaseTotal = 0;
@@ -1145,11 +1189,14 @@ export function createRangeSim(opts) {
                 ? 'Locks ' + locks + ' / ' + profile.targetCount + ' — release to fire'
                 : (lock >= 1 ? 'Locked — release to fire' : 'Locking ' + Math.round(lock * 100) + '%');
         } else if (id === 'charge' && holding) {
-            const n = profile.charge.length || 1;
-            const idx = Math.min(n - 1, Math.floor(chargeTime / CHARGE_STEP_SEC));
-            const level = profile.charge[idx];
+            const levels = profile.charge;
+            const n = levels.length || 1;
+            const idx = chargeStage(levels, chargeTime);
+            const level = idx >= 0 ? levels[idx] : null;
             frame = (level && level.reticle) || profile.reticle;
-            hint = 'Charge ' + (idx + 1) + ' / ' + n + ' — release to fire';
+            hint = idx < 0
+                ? 'Charging...'
+                : 'Charge ' + (idx + 1) + ' / ' + n + ' — release to fire';
         } else if (id === 'multilock' && salvoLeft > 0 && releaseTotal > 0) {
             frame = profile.lockedReticle || profile.reticle;
             hint = 'Releasing ' + (releaseTotal - salvoLeft) + ' of ' + releaseTotal;
@@ -1194,7 +1241,7 @@ export function createRangeSim(opts) {
             maxAmmo,
             lock,
             locks,
-            charge: profile.charge.length ? Math.min(1, chargeTime / (CHARGE_STEP_SEC * profile.charge.length)) : 0,
+            charge: chargeFrac(profile.charge, chargeTime),
             chargeLevels: profile.charge.length,
             hint,
             active: holding || toggled || jetLeft > 0 || armed.length > 0,

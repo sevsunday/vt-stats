@@ -1072,33 +1072,6 @@
     };
   }
 
-  function winsDialHtml(joined) {
-    // The R^W wins ladder is real machinery running at mixer ALPHA = 0
-    // (see critique/decisions/phase-5-wins-blend.md). Its pre-match read
-    // is an independent second opinion, so it renders muted and is never
-    // the headline.
-    // Every rated row on a side shares that side's E, so the first row
-    // carrying a wins block answers for the whole team.
-    let t1 = null;
-    for (const team of [1, 2]) {
-      const hit = (joined.perTeam[team] || [])
-        .find((x) => x.delta.wins && isNum(x.delta.wins.e));
-      if (!hit) continue;
-      t1 = team === 1 ? hit.delta.wins.e : 1 - hit.delta.wins.e;
-      break;
-    }
-    if (!isNum(t1)) return '';
-    const pct1 = Math.round(t1 * 100);
-    const pct2 = 100 - pct1;
-    const side1 = teamPhrase(joined, 1);
-    const side2 = teamPhrase(joined, 2);
-    const tip = `${pct1} is ${side1}'s chance of winning before the match, and ${pct2} is ${side2}'s. The wins ladder keeps a separate rating that only moves when a player's team wins or loses, averages it on each side, and turns the gap into this split. It is a second opinion and does not change anyone's published VTSR-T.`;
-    return `<span class="vt-balonce-chip is-muted" data-bs-toggle="tooltip" data-bs-placement="top"
-      title="${esc(tip)}">
-      <i class="bi bi-activity me-1" aria-hidden="true"></i>Wins ladder saw it
-      <span class="vt-mono">${pct1}/${pct2}</span> for ${esc(side1)}</span>`;
-  }
-
   function zoneVerdictHtml(joined) {
     const verdict = outcomeVerdict(joined);
     const decidedBy = joined.winner.decided_by || null;
@@ -1106,7 +1079,6 @@
       ? `<span class="vt-balonce-provenance" data-bs-toggle="tooltip" data-bs-placement="top"
            title="How this outcome was established.">${esc(decidedByLabel(decidedBy))}</span>`
       : '';
-    const dial = winsDialHtml(joined);
 
     return `
       <div class="vt-balonce-zone vt-balonce-zone--verdict">
@@ -1117,7 +1089,6 @@
           </div>
           ${provenance}
         </div>
-        ${dial ? `<div class="vt-balonce-chiprow">${dial}</div>` : ''}
       </div>`;
   }
 

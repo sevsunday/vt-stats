@@ -321,6 +321,11 @@ function explosionEntry(db, stem) {
     return { map: sectionsOf(entry), headKey: 'explosionclass' };
 }
 
+/* ChargeGunClass.shotDelayN is the cumulative hold that ARMS stage N
+ * (guide default 0.0f), not a cooldown and not a per-stage duration.
+ * A stage with no ordnance stays in the list (assault MAG / Laser Stream
+ * stage 1) so the count still matches ordnanceCount and a release there
+ * fires nothing. */
 function chargeLevels(map) {
     const cg = sec(map, 'ChargeGunClass');
     if (!cg) return [];
@@ -328,14 +333,14 @@ function chargeLevels(map) {
     const levels = [];
     for (let i = 1; i <= n; i++) {
         const ord = stemOf(prop(cg, 'ordName' + i));
-        if (!ord) continue;
+        const rawSalvo = Math.round(num(prop(cg, 'salvoCount' + i), 1));
         levels.push({
             level: i,
-            ordName: ord,
+            ordName: ord || null,
             fireSound: stemOf(prop(cg, 'fireSound' + i)),
             reticle: String(prop(cg, 'wpnReticle' + i) || '').trim().toLowerCase(),
-            shotDelay: num(prop(cg, 'shotDelay' + i), 0.2),
-            salvoCount: Math.max(1, Math.round(num(prop(cg, 'salvoCount' + i), 1))),
+            holdTime: num(prop(cg, 'shotDelay' + i), 0),
+            salvoCount: ord ? Math.max(0, rawSalvo) : 0,
             salvoDelay: num(prop(cg, 'salvoDelay' + i), 0),
         });
     }
