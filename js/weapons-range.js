@@ -22,6 +22,7 @@ const COCKPIT = '../data/models/cockpits/';
 const ORBIT_RATE = 0.16;          // rad/s, the hover-around-the-ship view
 const RESPAWN_SEC = 2.5;
 const VOLUME_KEY = 'vt.wpn.range.volume';   // localStorage, 0..100; missing = 100
+const RAVE_PEAK = 0.62;           // CannonClass.raveFlash wash; fades to clear across shotDelay
 const HP_ICONS = { GUN: 'gun', CANN: 'cannon', MORT: 'mortar', ROCK: 'rocket', SPEC: 'special', SHIE: 'shield', HAND: 'hand', PACK: 'pack' };
 // Hardpoint category codes -> display words (same words as SLOT_LABELS in js/models.js).
 const HP_LABELS = { GUN: 'Gun', CANN: 'Cannon', MORT: 'Mortar', ROCK: 'Rocket', SPEC: 'Special', SHIE: 'Shield', HAND: 'Hand', PACK: 'Pack' };
@@ -39,6 +40,12 @@ let cockpitIndex = null;
 let reticleIndex = null;
 let rootEl = null;
 let loop = true;
+let raveEl = null;
+let raveColors = [];
+let raveIndex = -1;
+let raveLeft = 0;
+let raveDur = 0.4;
+let raveShotDelay = 0.4;
 
 let target = null;
 let targetKind = 'ship';
@@ -212,7 +219,8 @@ function buildSlots(snap, keepActive) {
     });
     slots = Array.from(groups.values());
     // No ship picked (or no fitting hardpoint): still fire the scenario weapon
-    // from a virtual slot at the ship origin.
+    // from a virtual slot at the ship origin. The page's loadout map already
+    // put the scenario weapon on its own group when the ship has one.
     if (snap.weaponStem && !slots.some((s) => s.weapon === snap.weaponStem)) {
         slots.push({
             key: 'virtual', index: slots.length + 1, category: snap.weaponCategory || 'GUN', assault: false,
@@ -237,14 +245,51 @@ function notifyLoadout() {
 function applyActiveSlot(keepAmmo) {
     const stem = activeWeapon();
     const entry = stem && db.Weapon && db.Weapon[stem + '.odf'];
-    const profile = entry ? buildProfile(entry) : null;
+    const profile = entry ? buildProfile(entry, db && db.Ordnance) : null;
     // Fetch this weapon's textures, meshes and sounds, then upload and compile
     // them. Fire stays live while that runs; the stage chip says so.
     const epoch = warmEpoch;
     if (entry) scheduleWarm(profileAssets(entry, db), epoch, 'wpn:' + stem);
     sim.setWeapon(profile, db, { max: snapshot ? snapshot.maxAmmo : 0, regen: snapshot ? snapshot.regen : 0 }, keepAmmo);
+    raveColors = profile && profile.raveFlash ? (profile.raveColors || []) : [];
+    raveShotDelay = profile && profile.shotDelay > 0 ? profile.shotDelay : 0.4;
+    clearRave();
     renderLoadout();
     if (entry) warmOtherSlots(epoch, stem);
+}
+
+function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+function clearRave() {
+    raveLeft = 0;
+    raveIndex = -1;
+    if (!raveEl) return;
+    raveEl.hidden = true;
+    raveEl.style.opacity = '0';
+}
+
+function onRaveFlash() {
+    if (reducedMotion() || !raveColors.length || !raveEl) return;
+    raveIndex = (raveIndex + 1) % raveColors.length;
+    const c = raveColors[raveIndex];
+    raveDur = Math.max(0.05, raveShotDelay);
+    raveLeft = raveDur;
+    raveEl.hidden = false;
+    raveEl.style.backgroundColor = 'rgb(' + c.r + ', ' + c.g + ', ' + c.b + ')';
+    raveEl.style.opacity = String(RAVE_PEAK);
+}
+
+function paintRave(dt) {
+    if (!raveEl || raveLeft <= 0) return;
+    raveLeft = Math.max(0, raveLeft - dt);
+    if (raveLeft <= 0 || raveDur <= 0) {
+        raveEl.hidden = true;
+        raveEl.style.opacity = '0';
+        return;
+    }
+    raveEl.style.opacity = String(RAVE_PEAK * (raveLeft / raveDur));
 }
 
 function renderLoadout() {
@@ -348,6 +393,7 @@ function onHit(hit) {
  * equipped weapons, active slot, distance, view and cockpit stay as they are. */
 function resetEngagement() {
     if (sim) sim.resetEngagement();
+    clearRave();
     spaceDown = false;
     hp = maxHp;
     deadFor = 0;
@@ -557,6 +603,7 @@ export async function mount(container, shared) {
     rootEl.innerHTML = ''
         + '<div class="vt-wpn-range-stage">'
         + '<div class="vt-wpn-range-view" data-range-view></div>'
+        + '<div class="vt-wpn-range-rave" data-range-rave hidden aria-hidden="true"></div>'
         + '<div class="vt-wpn-range-hud">'
         + '<div class="vt-wpn-range-loading" data-range-loading hidden aria-live="polite">'
         + '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>'
@@ -623,6 +670,7 @@ export async function mount(container, shared) {
         distText: rootEl.querySelector('[data-range-dist-text]'),
     };
 
+    raveEl = rootEl.querySelector('[data-range-rave]');
     const view = rootEl.querySelector('[data-range-view]');
     viewer = new ObjectViewer(view, { quality: 'perf' });
     viewer.controls.enabled = false;
@@ -637,6 +685,7 @@ export async function mount(container, shared) {
         getTarget: targetState,
         onRecoil: () => { if (viewer.fireRecoil) viewer.fireRecoil(); },
         onHit,
+        onRaveFlash,
     });
     viewer.setExternalTick((dt) => {
         if (!loop) return;
@@ -652,6 +701,7 @@ export async function mount(container, shared) {
         audio.setListener(viewer.camera);
         const state = sim.update(dt);
         fx.update(dt);
+        paintRave(dt);
         paintHud(state);
     });
 
@@ -886,6 +936,9 @@ export function destroy() {
     onLoadout = null;
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('keyup', onKeyUp);
+    clearRave();
+    raveEl = null;
+    raveColors = [];
     if (sim) sim.dispose();
     if (fx) fx.dispose();
     if (viewer) viewer.dispose();

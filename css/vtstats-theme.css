@@ -2088,6 +2088,37 @@ body::before {
     padding: 1.15rem;
 }
 
+#outcome-read:empty,
+#outcome-after:empty {
+    display: none;
+}
+
+#faction-content:not(.d-none) + #outcome-read:not(:empty) {
+    margin-top: 1.35rem;
+}
+
+/* Played-out is the next chapter after the call, so it keeps a divider. */
+#outcome-after:not(:empty) {
+    margin-top: 1.5rem;
+    padding-top: 1.15rem;
+    border-top: 1px solid var(--kb-border-subtle);
+}
+
+/* Gauge and verdict are one read, so the zone divider stays off here.
+   The margin is the air between the gap chips and the verdict. */
+#outcome-read .vt-balonce-zone + .vt-balonce-zone {
+    margin-top: 1.15rem;
+    padding-top: 0;
+    border-top: none;
+}
+
+.vt-balonce-verdict-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .vt-faction-panel {
     padding: 1rem 1.1rem;
     border-radius: 0;
@@ -2101,10 +2132,12 @@ body::before {
 
 .vt-faction-panel--t1 {
     border-left-color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 8%, color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent));
 }
 
 .vt-faction-panel--t2 {
     border-left-color: var(--kb-accent);
+    background: color-mix(in oklab, var(--kb-accent) 8%, color-mix(in oklab, var(--kb-bg-subtle) 80%, transparent));
 }
 
 .vt-faction-panel:hover {
@@ -2185,14 +2218,33 @@ body::before {
     line-height: 1;
 }
 
+.vt-faction-elo {
+    font-weight: 500;
+    font-size: 0.78em;
+    color: var(--kb-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.vt-faction-elo--t {
+    color: var(--kb-text-muted);
+}
+
+.vt-faction-avg {
+    margin-left: auto;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--kb-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
 .vt-faction-stats {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.45rem;
+    gap: 0.65rem;
 }
 
 .vt-faction-stats + .vt-faction-stats {
-    margin-top: 0.45rem;
+    margin-top: 0.65rem;
 }
 
 .vt-faction-stat {
@@ -2201,7 +2253,7 @@ body::before {
     align-items: flex-start;
     gap: 0.12rem;
     min-width: 0;
-    padding: 0.4rem 0.5rem;
+    padding: 0.55rem 0.65rem;
     background: color-mix(in oklab, var(--kb-bg-muted) 45%, transparent);
     border-left: 2px solid transparent;
     cursor: help;
@@ -2209,10 +2261,12 @@ body::before {
 
 .vt-faction-panel--t1 .vt-faction-stat {
     border-left-color: var(--kb-primary);
+    background: color-mix(in oklab, var(--kb-primary) 16%, transparent);
 }
 
 .vt-faction-panel--t2 .vt-faction-stat {
     border-left-color: var(--kb-accent);
+    background: color-mix(in oklab, var(--kb-accent) 16%, transparent);
 }
 
 .vt-faction-stat-label {
@@ -6670,9 +6724,13 @@ html.vt-cursor-active * {
 
 /* ---------- Settings gear dropdown panel ---------- */
 
-.vt-settings-panel {
+.vt-settings-panel,
+.vt-nav-menu .dropdown-menu.vt-settings-panel {
     min-width: 260px;
     padding: 0.75rem;
+    background: var(--kb-bg-card) !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
 }
 
 .vt-settings-section-title {
@@ -7648,10 +7706,45 @@ html.vt-cursor-active * {
 
 /* The dashboard card names the commander on both end labels
    ("Team 1 (mort) disadv"), so they have to be allowed to shrink.
-   The Tools gauge keeps the short rigid form. */
-#section-balonce .vt-balonce-meter-end {
+   The Tools gauge keeps the short rigid form. Dashboard-only spacing
+   below opens the Outcome card into roster / call / played-out without
+   moving the Tools Team Balonce gauge, which shares these classes. */
+#section-faction .vt-balonce-meter-end {
     flex-shrink: 1;
     min-width: 0;
+}
+
+#section-faction .vt-balonce-meter {
+    margin: 0.85rem 0 0.2rem;
+}
+
+#section-faction .vt-balonce-meter-track {
+    height: 18px;
+    border-radius: 9px;
+}
+
+#section-faction .vt-balonce-meter-footer {
+    margin-top: 0.7rem;
+}
+
+#section-faction .vt-balonce-parts {
+    margin-top: 0.9rem;
+}
+
+#section-faction .vt-balonce-perf {
+    padding: 0.55rem 0.7rem;
+}
+
+#section-faction .vt-balonce-axis-row {
+    margin-bottom: 0.45rem;
+}
+
+#section-faction .vt-balonce-axis-track {
+    height: 9px;
+}
+
+#outcome-after .vt-balonce-chiprow {
+    margin-top: 0.85rem;
 }
 
 .vt-balonce-meter-status {
@@ -7705,12 +7798,6 @@ html.vt-cursor-active * {
     font-size: 0.74rem;
     line-height: 1.35;
 }
-.vt-balonce-chip.is-muted {
-    color: var(--kb-text-muted);
-    background-color: transparent;
-    border-style: dashed;
-}
-
 .vt-balonce-parts {
     display: flex;
     flex-wrap: wrap;
@@ -7988,18 +8075,22 @@ html.vt-cursor-active * {
     border-radius: 8px;
     font-size: 0.9rem;
     font-weight: 600;
-    /* Names the winner ("Model called it - Team 1 (mort) won"), so it has
-       to wrap instead of forcing the card wide. */
+    /* Names the winner, so it has to wrap instead of forcing the card wide. */
     text-wrap: pretty;
 }
 .vt-balonce-call--hit {
     color: var(--kb-success);
     background-color: color-mix(in oklab, var(--kb-success) 15%, transparent);
 }
+.vt-balonce-call--turn {
+    color: var(--kb-info);
+    background-color: color-mix(in oklab, var(--kb-info) 16%, transparent);
+}
 .vt-balonce-call--upset {
     color: var(--kb-warning);
     background-color: color-mix(in oklab, var(--kb-warning) 16%, transparent);
 }
+.vt-balonce-call--even,
 .vt-balonce-call--draw,
 .vt-balonce-call--unknown {
     color: var(--kb-text-muted);

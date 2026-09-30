@@ -3,6 +3,7 @@
  * One flat plane per kind, masked to CellType bits (water 0x02, lava 0x08).
  * The mesh is created visible. Callers do not offer an off switch.
  *
+ * Water shading is a stand-in for dx11_water_psh (env reflection, not a port).
  * The .WAT byte-16 height is absolute meters and is shared by both kinds.
  * Measured 2026-09-26: Remnant water_y 95 sits above 89% of water-cell
  * floors (median bed 88.4 m). cpcauldron lava uses that same plane at 173 m,
@@ -32,8 +33,8 @@ function liquidMaterial(kind, lighting, alphaMap) {
       transparent: true,
       opacity,
       alphaTest: 0.5,
-      metalness: 0.55,
-      roughness: 0.35,
+      metalness: 0.35,
+      roughness: 0.2,
       depthWrite: true,
       polygonOffset: true,
       polygonOffsetFactor: -1,

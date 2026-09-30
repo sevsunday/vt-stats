@@ -27,7 +27,7 @@ import {
   modelsEnabled,
   stemForOdf,
   modelReady,
-} from './replay-ship-models.js?v=deploy-pose';
+} from './replay-ship-models.js?v=lego1';
 
 // ------------------ Constants ------------------
 

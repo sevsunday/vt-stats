@@ -93,6 +93,35 @@ function bool(value, fallback) {
     return fallback;
 }
 
+/* CannonClass.raveFlash is an engine screen wash (Rave!, Yule!), not a
+ * render. The ODF names no palette, so the wash cycles the round's own
+ * bright sections. A flag with none of them falls back to Rave!'s triad. */
+const RAVE_COLOR_SECTIONS = ['ordnance.light', 'ordnance.trailr', 'ordnance.trailb'];
+const RAVE_FALLBACK = [
+    { r: 255, g: 63, b: 255 },
+    { r: 255, g: 255, b: 63 },
+    { r: 63, g: 255, b: 255 },
+];
+
+function colorBytes(value) {
+    const parts = String(value == null ? '' : value).trim().split(/\s+/).map(Number);
+    if (parts.length < 3 || parts.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
+    return {
+        r: Math.max(0, Math.min(255, Math.round(parts[0]))),
+        g: Math.max(0, Math.min(255, Math.round(parts[1]))),
+        b: Math.max(0, Math.min(255, Math.round(parts[2]))),
+    };
+}
+
+function raveColorsOf(map) {
+    const colors = [];
+    RAVE_COLOR_SECTIONS.forEach((name) => {
+        const c = colorBytes(prop(sec(map, name), 'startColor'));
+        if (c) colors.push(c);
+    });
+    return colors.length ? colors : RAVE_FALLBACK.map((c) => ({ r: c.r, g: c.g, b: c.b }));
+}
+
 function sectionsOf(entry) {
     const map = new Map();
     if (!entry) return map;
@@ -292,22 +321,46 @@ function explosionEntry(db, stem) {
     return { map: sectionsOf(entry), headKey: 'explosionclass' };
 }
 
-function chargeLevels(map) {
+/* ChargeGunClass.shotDelayN is the cumulative hold that ARMS stage N
+ * (guide default 0.0f), not a cooldown and not a per-stage duration.
+ * A stage with no ordnance stays in the list (assault MAG / Laser Stream
+ * stage 1) so the count still matches ordnanceCount and a release there
+ * fires nothing. */
+function chargeAuthoredVolume(section, key, absent) {
+    const raw = prop(section, key);
+    if (raw == null || raw === '') return absent;
+    return num(raw, absent) * 0.01;
+}
+
+function ordAmmoCost(ordDb, ordName) {
+    if (!ordDb || !ordName) return 0;
+    const key = String(ordName).toLowerCase().replace(/\.odf$/, '') + '.odf';
+    const entry = ordDb[key];
+    if (!entry) return 0;
+    return num(prop(sec(sectionsOf(entry), 'OrdnanceClass'), 'ammoCost'), 0);
+}
+
+function chargeLevels(map, ordDb) {
     const cg = sec(map, 'ChargeGunClass');
     if (!cg) return [];
     const n = Math.max(0, Math.round(num(prop(cg, 'ordnanceCount'), 1)));
     const levels = [];
     for (let i = 1; i <= n; i++) {
         const ord = stemOf(prop(cg, 'ordName' + i));
-        if (!ord) continue;
+        const rawSalvo = Math.round(num(prop(cg, 'salvoCount' + i), 1));
+        const salvoCount = ord ? Math.max(0, rawSalvo) : 0;
+        const ammoCost = ordAmmoCost(ordDb, ord);
         levels.push({
             level: i,
-            ordName: ord,
+            ordName: ord || null,
             fireSound: stemOf(prop(cg, 'fireSound' + i)),
             reticle: String(prop(cg, 'wpnReticle' + i) || '').trim().toLowerCase(),
-            shotDelay: num(prop(cg, 'shotDelay' + i), 0.2),
-            salvoCount: Math.max(1, Math.round(num(prop(cg, 'salvoCount' + i), 1))),
+            holdTime: num(prop(cg, 'shotDelay' + i), 0),
+            salvoCount,
             salvoDelay: num(prop(cg, 'salvoDelay' + i), 0),
+            // The loader caches salvoCount * OrdnanceClass.ammoCost at stage+0x58.
+            ammoCost,
+            salvoCost: salvoCount * ammoCost,
         });
     }
     return levels;
@@ -344,7 +397,7 @@ function classifyId(entry) {
     return 'projectile';
 }
 
-function buildProfile(entry) {
+function buildProfile(entry, ordDb) {
     const map = sectionsOf(entry);
     const id = classifyId(entry);
     const wc = sec(map, 'WeaponClass') || {};
@@ -369,6 +422,7 @@ function buildProfile(entry) {
     // shotDelay lives on CannonClass for cannons, on LauncherClass for the
     // lock-on family and on TargetingGunClass for the TAG cannon.
     const shotDelayRaw = prop(cannon, 'shotDelay') ?? prop(launcher, 'shotDelay') ?? prop(targeting, 'shotDelay');
+    const raveFlash = bool(prop(cannon, 'raveFlash'), false);
     return {
         id,
         label: LABELS[id] || id,
@@ -386,6 +440,8 @@ function buildProfile(entry) {
         shotVariance: num(prop(cannon, 'shotVariance'), 0),
         shotPitch: num(prop(cannon, 'shotPitch'), 0),
         shotAlternate: bool(prop(cannon, 'shotAlternate'), false),
+        raveFlash,
+        raveColors: raveFlash ? raveColorsOf(map) : [],
         lockDelay: num(prop(launcher, 'lockDelay'), 5),
         lockRange: num(prop(launcher, 'lockRange'), 400),
         coneAngle: num(prop(launcher, 'coneAngle'), 0.7),
@@ -457,6 +513,14 @@ function buildProfile(entry) {
             ammoCost: num(prop(sec(map, 'DispenserObj.GameObjectClass'), 'maxAmmo'), 0),
         },
         chargeHoldRate: num(prop(sec(map, 'ChargeGunClass'), 'holdRate'), 0),
+        // Hz. The engine does startRate + deltaRate * chargeSeconds, and
+        // chargeSeconds stops at the last stage's shotDelay.
+        chargeStartRate: num(prop(sec(map, 'ChargeGunClass'), 'startRate'), 11025),
+        chargeDeltaRate: num(prop(sec(map, 'ChargeGunClass'), 'deltaRate'), 4000),
+        // Authored volumes are stored times 0.01 (the loader's scale). A
+        // missing key keeps the unscaled default, 1 and 0.
+        chargeStartVolume: chargeAuthoredVolume(sec(map, 'ChargeGunClass'), 'startVolume', 1),
+        chargeDeltaVolume: chargeAuthoredVolume(sec(map, 'ChargeGunClass'), 'deltaVolume', 0),
         detonator: {
             maxCount: Math.min(8, Math.max(1, Math.round(num(prop(det, 'maxCount'), 4)))),
         },
@@ -466,7 +530,7 @@ function buildProfile(entry) {
             expireSound: stemOf(prop(special, 'expireSound')),
             ammoCost: num(prop(special, 'ammoCost'), 0),
         },
-        charge: chargeLevels(map),
+        charge: chargeLevels(map, ordDb),
         ord,
         map,
     };

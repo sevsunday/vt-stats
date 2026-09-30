@@ -1,8 +1,8 @@
 /* Replay quality presets, on-device asset cache, and the shared settings panel.
  *
  * The 3D replay iframe and the dashboard Settings gear both use this module.
- * Model look (workshop pack) stays in `vt.replay.textureSet` so the Models
- * menu and this panel stay one setting. Presets do not change it.
+ * Model look (workshop pack, or LEGO) stays in `vt.replay.textureSet` so the
+ * Models menu and this panel stay one setting. Presets do not change it.
  */
 
 export const QUALITY_STORAGE_KEY = 'vt.replay.quality.v1';
@@ -20,6 +20,14 @@ export const PRESETS = {
 /** One choice applies both faction packs. ISDF Redux stays separate. */
 export const ENHANCED_SET_ID = 'enhanced';
 export const ENHANCED_PACK_IDS = ['1581901346', '1554202061'];
+
+/** Brick models where data/lego/odf-map.json has the ODF; stock meshes otherwise. */
+export const LEGO_SET_ID = 'lego';
+export const DARKVALE_CREDIT = {
+  title: 'Darkvale',
+  url: 'https://steamcommunity.com/profiles/76561198136459671',
+  linkTitle: "Darkvale's Steam profile",
+};
 
 export const TEXTURE_PACKS = [
   { id: '', label: 'Stock', title: 'The original game textures', urls: [] },
@@ -47,11 +55,18 @@ export const TEXTURE_PACKS = [
       url: 'https://steamcommunity.com/sharedfiles/filedetails/?id=3365986032',
     }],
   },
+  {
+    id: LEGO_SET_ID,
+    label: 'LEGO',
+    title: "Darkvale's brick models where mapped, stock game models otherwise",
+    urls: [DARKVALE_CREDIT],
+  },
 ];
 
 /** Map a stored pack id onto the current choices. The two enhanced packs collapse to one. */
 export function normalizeTextureSet(id) {
   if (!id) return '';
+  if (id === LEGO_SET_ID) return LEGO_SET_ID;
   if (id === ENHANCED_SET_ID || ENHANCED_PACK_IDS.includes(id)) return ENHANCED_SET_ID;
   return TEXTURE_PACKS.some((p) => p.id === id) ? id : '';
 }
@@ -68,6 +83,7 @@ function blank() {
     modelTier: 'full',
     ground: 'tiles',
     motion: 'smooth',
+    fog: false,
     cache: true,
   };
 }
@@ -113,6 +129,7 @@ function normalize(raw) {
     modelTier,
     ground,
     motion,
+    fog: !!(raw && raw.fog === true),
     cache: raw && raw.cache === false ? false : true,
   };
   next.preset = matchPreset(next);
@@ -151,6 +168,7 @@ export function writeSettings(partial) {
     modelTier: (models === 'reduced' || models === 'full') ? models : cur.modelTier,
     ground: partial && partial.ground != null ? partial.ground : cur.ground,
     motion: partial && partial.motion != null ? partial.motion : cur.motion,
+    fog: partial && partial.fog != null ? !!partial.fog : cur.fog,
     cache: partial && partial.cache != null ? partial.cache : cur.cache,
   });
   storageSet(QUALITY_STORAGE_KEY, JSON.stringify(next));
@@ -296,6 +314,19 @@ export function mountPanel(host) {
   root.appendChild(models.field);
   root.appendChild(ground.field);
   root.appendChild(motion.field);
+
+  const fogLabel = el('label', 'vt-rq-check');
+  const fogBox = document.createElement('input');
+  fogBox.type = 'checkbox';
+  fogBox.dataset.rq = 'fog';
+  fogLabel.appendChild(fogBox);
+  fogLabel.appendChild(document.createTextNode('Fog'));
+  root.appendChild(fogLabel);
+  root.appendChild(el(
+    'p',
+    'vt-rq-hint',
+    'Distance haze from the map. Off keeps the whole field clear.',
+  ));
   root.appendChild(el(
     'p',
     'vt-rq-hint',
@@ -303,7 +334,7 @@ export function mountPanel(host) {
   ));
 
   const texField = el('div', 'vt-rq-field');
-  texField.appendChild(el('span', null, 'Unit textures'));
+  texField.appendChild(el('span', null, 'Unit look'));
   const texList = el('div', 'vt-rq-packs');
   texList.dataset.rq = 'textures';
   const radios = [];
@@ -324,8 +355,9 @@ export function mountPanel(host) {
       link.href = credit.url;
       link.target = '_blank';
       link.rel = 'noopener';
-      link.title = `Workshop page for ${credit.title}`;
-      link.setAttribute('aria-label', `Workshop page for ${credit.title}`);
+      const linkTitle = credit.linkTitle || `Workshop page for ${credit.title}`;
+      link.title = linkTitle;
+      link.setAttribute('aria-label', linkTitle);
       link.innerHTML = STEAM_ICON;
       row.appendChild(link);
     }
@@ -337,7 +369,7 @@ export function mountPanel(host) {
   root.appendChild(el(
     'p',
     'vt-rq-hint',
-    'Texture packs change the look, not the preset. Reduced quality uses a smaller copy of whichever pack is selected.',
+    'Texture packs recolor the game meshes. LEGO uses Darkvale\'s brick models where one is mapped to that unit, and the stock game model otherwise. Reduced quality uses a smaller copy of a texture pack.',
   ));
 
   const cacheLabel = el('label', 'vt-rq-check');
@@ -429,6 +461,7 @@ export function mountPanel(host) {
     models.picker.sync();
     ground.picker.sync();
     motion.picker.sync();
+    fogBox.checked = settings.fog === true;
     cacheBox.checked = settings.cache !== false;
     purge.hidden = true;
     const id = TEXTURE_PACKS.some((p) => p.id === textureId) ? textureId : '';
@@ -453,6 +486,7 @@ export function mountPanel(host) {
       models: models.select.value,
       ground: ground.select.value,
       motion: motion.select.value,
+      fog: fogBox.checked,
       cache: cacheBox.checked,
       textureSet: texture ? texture.value : '',
     };

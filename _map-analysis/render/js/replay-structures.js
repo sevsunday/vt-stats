@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { sampleTerrainHeight } from './objects.js';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
-import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=deploy-pose';
+import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=lego1';
 
 const TEAM_TINTS = {
   1: 0x5dadff,   // Team 1 blue

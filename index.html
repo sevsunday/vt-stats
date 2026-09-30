@@ -327,52 +327,46 @@
           </div>
           <div class="card-body" id="player-profile-content"></div>
         </div>
-        <div class="card mb-4" id="section-faction">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0">Faction Scoreboard</h5>
-              <span id="faction-outcome-badge" class="vt-winner-badge"></span>
-            </div>
-            <button class="btn btn-sm" data-expand="section-faction" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body">
-            <div class="row g-3" id="faction-content"></div>
-          </div>
-        </div>
-        <!-- Balonce Meter (per-match). The community name for a lopsided
-             lobby is "getting PLAYED", so this is the balance gauge plus
-             the prediction it drives: the pre-match read, whether the
-             model called the winner, how the match actually went, and the
-             model's own track record. Rendered by
+        <!-- Outcome: team panels first, then the Balonce read (gauge,
+             verdict), then how it played out. Rendered together so the
+             overview does not repeat the roster. The read is
              js/balonce-meter.js::renderMatchSection() from committed JSON
-             (elo_history + elo_commander_history + validation_summary) --
-             match-global, ALWAYS unfiltered (highlights passthrough
-             contract). Hidden when the match was not rated. -->
-        <div class="card mb-4 d-none" id="section-balonce">
-          <div class="card-header d-flex align-items-center justify-content-between">
+             (elo_history + elo_commander_history) — match-global, ALWAYS
+             unfiltered. Team panels still render when the match was not
+             rated; the read slot stays empty. -->
+        <div class="card mb-4" id="section-faction">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Balonce Meter</h5>
-              <i class="bi bi-info-circle vt-col-info"
+              <h5 class="mb-0">Outcome</h5>
+              <span id="faction-outcome-badge" class="vt-winner-badge"></span>
+              <i class="bi bi-info-circle vt-col-info" id="outcome-info"
                  data-bs-toggle="tooltip" data-bs-placement="bottom"
                  title="How balanced this lobby was before it played, who the rating system favored, and how it actually turned out. The prediction is the same commander-duel formula the ratings themselves use."></i>
             </div>
             <div class="d-flex align-items-center gap-2">
-              <span class="small text-secondary">What-if</span>
-              <ul class="nav nav-pills vt-econ-log-pills mb-0" role="group" aria-label="Open this lobby in Team Balonce">
-                <li class="nav-item">
-                  <a class="nav-link" id="balonce-whatif-then" target="_blank" rel="noopener"
-                     data-bs-toggle="tooltip" data-bs-placement="bottom"
-                     title="Open Team Balonce with this match’s players, teams, and commanders, scored on the ratings they carried into the game.">As played</a>
-                </li>
-                <li class="nav-item">
-                  <a class="nav-link" id="balonce-whatif-now" target="_blank" rel="noopener"
-                     data-bs-toggle="tooltip" data-bs-placement="bottom"
-                     title="Open Team Balonce with this match’s players, teams, and commanders, scored on today’s ratings.">Today</a>
-                </li>
-              </ul>
+              <div id="outcome-whatif" class="d-none align-items-center gap-2">
+                <span class="small text-secondary">What-if</span>
+                <ul class="nav nav-pills vt-econ-log-pills mb-0" role="group" aria-label="Open this lobby in Team Balonce">
+                  <li class="nav-item">
+                    <a class="nav-link" id="balonce-whatif-then" target="_blank" rel="noopener"
+                       data-bs-toggle="tooltip" data-bs-placement="bottom"
+                       title="Open Team Balonce with this match’s players, teams, and commanders, scored on the ratings they carried into the game.">As played</a>
+                  </li>
+                  <li class="nav-item">
+                    <a class="nav-link" id="balonce-whatif-now" target="_blank" rel="noopener"
+                       data-bs-toggle="tooltip" data-bs-placement="bottom"
+                       title="Open Team Balonce with this match’s players, teams, and commanders, scored on today’s ratings.">Today</a>
+                  </li>
+                </ul>
+              </div>
+              <button class="btn btn-sm" data-expand="section-faction" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
             </div>
           </div>
-          <div class="card-body" id="balonce-body"></div>
+          <div class="card-body">
+            <div class="row g-3" id="faction-content"></div>
+            <div id="outcome-read"></div>
+            <div id="outcome-after"></div>
+          </div>
         </div>
         <div class="card mb-4 vt-highlights-card d-none" id="section-highlights">
           <div class="card-header d-flex align-items-center justify-content-between">
@@ -1656,7 +1650,7 @@
               <i class="bi bi-box-arrow-up-right ms-2 small"></i>
             </a>
             <div class="small" style="color: var(--kb-text-muted);">
-              Dashboard, processing pipeline, and theme system.
+              This website's source code.
             </div>
           </div>
 
@@ -1672,15 +1666,27 @@
             </div>
           </div>
 
+          <div class="mb-4">
+            <div class="stat-label mb-1" style="font-size: 0.75rem;">Game session data</div>
+            <a href="https://github.com/Nielk1/MultiplayerSessionList" target="_blank" rel="noopener noreferrer"
+               class="d-inline-flex align-items-center">
+              <i class="bi bi-github me-2"></i>Nielk1/MultiplayerSessionList
+              <i class="bi bi-box-arrow-up-right ms-2 small"></i>
+            </a>
+            <div class="small" style="color: var(--kb-text-muted);">
+              Live Battlezone lobby list. <code>bz2api.js</code> used to query the RakNet server directly and now reads this API instead.
+            </div>
+          </div>
+
           <div class="mb-0">
-            <div class="stat-label mb-1" style="font-size: 0.75rem;">Multiplayer session API</div>
+            <div class="stat-label mb-1" style="font-size: 0.75rem;">Session client</div>
             <a href="https://sevsunday.github.io/bz2api.js/" target="_blank" rel="noopener noreferrer"
                class="d-inline-flex align-items-center">
               <i class="bi bi-braces-asterisk me-2"></i>bz2api.js
               <i class="bi bi-box-arrow-up-right ms-2 small"></i>
             </a>
             <div class="small" style="color: var(--kb-text-muted);">
-              JavaScript library for querying live Battlezone 2: Combat Commander multiplayer session data.
+              In-browser client that turns that API into the Tools and Game Watch session cards.
             </div>
           </div>
         </div>
@@ -2133,7 +2139,8 @@
        so it loads after it, before app.js. -->
   <script src="js/match-elo.js"></script>
   <!-- Balonce Meter: shared win-probability model (VTSR-C commander gap +
-       thug VTSR-T handicap) + the per-match #section-balonce renderer.
+       thug VTSR-T handicap) + the per-match Outcome-card read
+       (#outcome-read / #outcome-after inside #section-faction).
        Also loaded by tools/index.html, where Team Balonce renders the same
        gauge. Owns the shared 404-safe elo_commander_history loader that
        js/match-elo.js delegates to, so it loads before app.js. -->
@@ -2164,7 +2171,7 @@
   <!-- Site-wide custom cursor + Settings gear. Self-bootstrapping; injects a
        gear dropdown into .vt-nav-menu and runs the BZCC cursor overlay. -->
   <script src="js/cursor-settings.js"></script>
-  <script type="module" src="js/replay-quality.js"></script>
+  <script type="module" src="js/replay-quality.js?v=fog1"></script>
   <!-- Shared VTSR-T explainer content + annotated-stage engine (also
        loaded by elo/index.html). Must precede app.js: renderVtsrTeaser()
        reads window.VTSRExplain for the methodology modal body. -->
