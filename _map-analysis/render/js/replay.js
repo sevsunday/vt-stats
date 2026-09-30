@@ -45,7 +45,7 @@ import {
   updateActorLabels,
   applyVitalBars,
   applyShipModelMode,
-} from './replay-actors.js?v=deploy-pose';
+} from './replay-actors.js?v=lego1';
 import {
   initModelsPref,
   modelsEnabled,
@@ -54,7 +54,7 @@ import {
   activeTextureSet,
   loadTextureCatalog,
   reapplyTextureSet,
-} from './replay-ship-models.js?v=deploy-pose';
+} from './replay-ship-models.js?v=lego1';
 import {
   ensureQualityChosen,
   openReplayDialog,
@@ -65,8 +65,9 @@ import {
   SLOW_LOAD_HINT_SEC,
   ENHANCED_SET_ID,
   ENHANCED_PACK_IDS,
+  LEGO_SET_ID,
   TEXTURE_PACKS,
-} from '../../../js/replay-quality.js';
+} from '../../../js/replay-quality.js?v=lego1';
 import {
   buildSpawnBeacons,
   updateSpawnBeacons,
@@ -111,7 +112,7 @@ import {
   findStructureDeaths,
   recyclerPadXZ,
   enemyBaseOf,
-} from './replay-structures.js?v=deploy-pose';
+} from './replay-structures.js?v=lego1';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -1050,8 +1051,9 @@ function buildTextureRows(packs) {
       link.href = credit.url;
       link.target = '_blank';
       link.rel = 'noopener';
-      link.title = `Workshop page for ${credit.title}`;
-      link.setAttribute('aria-label', `Workshop page for ${credit.title}`);
+      const linkTitle = credit.linkTitle || `Workshop page for ${credit.title}`;
+      link.title = linkTitle;
+      link.setAttribute('aria-label', linkTitle);
       link.innerHTML = STEAM_ICON;
       wrap.appendChild(link);
     }
@@ -1064,6 +1066,8 @@ function buildTextureRows(packs) {
     if (ENHANCED_PACK_IDS.includes(pack.id)) continue;
     add(pack.id, packLabel(pack), pack.label, pack.url ? [{ title: pack.label, url: pack.url }] : []);
   }
+  const lego = TEXTURE_PACKS.find((p) => p.id === LEGO_SET_ID);
+  if (lego) add(lego.id, lego.label, lego.title, lego.urls);
   host.appendChild(frag);
   syncTextureRows();
 }
@@ -1157,15 +1161,18 @@ async function onTexturePick(id) {
   closeMenus();
   _texBusy = true;
   syncTextureRows();
-  statusStep('Textures');
+  const legoPick = (id || '') === LEGO_SET_ID;
+  const step = legoPick ? 'LEGO' : 'Textures';
+  statusStep(step);
   try {
     const applied = await reapplyTextureSet(id, (done, total, stem) => {
       if (!total) {
-        statusTick(id ? 'Textures · saved' : 'Textures · stock');
+        if (legoPick) statusTick('LEGO · brick models');
+        else statusTick(id ? 'Textures · saved' : 'Textures · stock');
         return;
       }
       const name = stem ? ` · ${stem}` : '';
-      statusTick(`Textures ${done}/${total}${name}`);
+      statusTick(`${step} ${done}/${total}${name}`);
     });
     if (applied && modelsEnabled()) remountSceneModels(true);
   } catch (err) {

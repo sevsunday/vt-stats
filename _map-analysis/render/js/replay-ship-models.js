@@ -5,7 +5,9 @@
  * needs (ODF lookup against data/models/index.json), assigns perf diffuse,
  * emissive, and team-color maps (stock, or a workshop pack from
  * localStorage `vt.replay.textureSet`), and clones per instance so
- * team-color uniforms are not shared.
+ * team-color uniforms are not shared. `textureSet === "lego"` draws
+ * Darkvale's brick model from data/lego/odf-map.json when that ODF is
+ * mapped and the stock mesh otherwise. Bricks are not team-tinted.
  *
  * Nose is model-local -Z. Actor yaw 0 faces +X, so the wrapper yaws +90 deg
  * after a negative Z scale (three.js applies scale before rotation). The
@@ -15,13 +17,16 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from '../../../vendor/three/addons/loaders/GLTFLoader.js';
+import { LDrawLoader } from '../../../vendor/three/addons/loaders/LDrawLoader.js';
+import { LDrawConditionalLineMaterial } from '../../../vendor/three/addons/materials/LDrawConditionalLineMaterial.js';
 import {
   cachedBlobUrl,
   readSettings,
   normalizeTextureSet,
   ENHANCED_SET_ID,
   ENHANCED_PACK_IDS,
-} from '../../../js/replay-quality.js';
+  LEGO_SET_ID,
+} from '../../../js/replay-quality.js?v=lego1';
 
 export const MODELS_STORAGE_KEY = 'vt.replay.models';
 export const TEXTURE_SET_KEY = 'vt.replay.textureSet';
@@ -59,6 +64,9 @@ const FACTION_ODFS = [
 
 const MODELS_ROOT = new URL('../../../data/models/', import.meta.url);
 const INDEX_URL = new URL('index.json', MODELS_ROOT).href;
+const LEGO_ROOT = new URL('../../../data/lego/', import.meta.url);
+// Used only when the stock mesh for a mapped ODF failed to load.
+const LEGO_FALLBACK_METERS = 12;
 
 const _loader = new GLTFLoader();
 const _texLoader = new THREE.TextureLoader();
@@ -74,6 +82,13 @@ let _packs = [];                // [{id, label, url}]
 let _byOdf = null;              // norm odf -> spec
 let _indexPromise = null;
 let _texGen = 0;
+let _legoByOdf = null;          // norm odf -> {slug, ldr, yaw}
+let _legoCatalogPromise = null;
+const _legoTemplates = new Map(); // slug -> {wrapper, slug}
+const _legoLoads = new Map();
+let _matchOdfs = [];
+let _ldrawReady = null;
+let _parseChain = Promise.resolve();
 
 function assetUrl(rel) {
   return new URL(rel, MODELS_ROOT).href;
@@ -98,8 +113,12 @@ function readTextureSet() {
   return next;
 }
 
+function legoMode() {
+  return _textureSet === LEGO_SET_ID;
+}
+
 function activePackIds() {
-  if (!_textureSet) return [];
+  if (!_textureSet || _textureSet === LEGO_SET_ID) return [];
   if (_textureSet === ENHANCED_SET_ID) return ENHANCED_PACK_IDS;
   return [_textureSet];
 }
@@ -140,27 +159,49 @@ export function setModelsEnabled(on) {
   catch { /* private mode */ }
 }
 
-function lookupSpec(odf) {
-  if (!_byOdf) return null;
+/** Stock stem for a `_vsr` / trailing-`vsr` wire name (`apwrckvsr` → `apwrck.odf`). */
+function odfAlias(odf) {
   const key = normOdf(odf);
-  if (!key) return null;
-  if (_byOdf.has(key)) return _byOdf.get(key);
+  if (!key) return '';
   const bare = key.replace(/\.odf$/, '');
   const stripped = bare.replace(/_vsr$/, '').replace(/vsr$/, '');
-  if (stripped && stripped !== bare) {
-    const alt = stripped + '.odf';
-    if (_byOdf.has(alt)) return _byOdf.get(alt);
-  }
+  if (stripped && stripped !== bare) return stripped + '.odf';
+  return '';
+}
+
+function lookupKeyed(map, odf) {
+  if (!map) return null;
+  const key = normOdf(odf);
+  if (!key) return null;
+  if (map.has(key)) return map.get(key);
+  const alt = odfAlias(key);
+  if (alt && map.has(alt)) return map.get(alt);
   return null;
 }
 
-/** Catalog stem for an ODF, or null when the index has no mesh. */
+function lookupSpec(odf) {
+  return lookupKeyed(_byOdf, odf);
+}
+
+function lookupLego(odf) {
+  return lookupKeyed(_legoByOdf, odf);
+}
+
+/** Catalog stem for an ODF, or `lego:<slug>` when a brick template is loaded. */
 export function stemForOdf(odf) {
+  if (legoMode()) {
+    const rec = lookupLego(odf);
+    if (rec && _legoTemplates.has(rec.slug)) return 'lego:' + rec.slug;
+  }
   const spec = lookupSpec(odf);
   return spec ? spec.stem : null;
 }
 
 export function modelReady(odf) {
+  if (legoMode()) {
+    const rec = lookupLego(odf);
+    if (rec && _legoTemplates.has(rec.slug)) return true;
+  }
   const spec = lookupSpec(odf);
   return !!(spec && _templates.has(spec.stem));
 }
@@ -222,7 +263,8 @@ async function ensureIndex() {
           const p = packs[id] || {};
           return { id, label: p.label || id, url: p.url || '' };
         });
-        if (_textureSet && _textureSet !== ENHANCED_SET_ID && !_packs.some((p) => p.id === _textureSet)) {
+        if (_textureSet && _textureSet !== ENHANCED_SET_ID && _textureSet !== LEGO_SET_ID
+            && !_packs.some((p) => p.id === _textureSet)) {
           _textureSet = '';
         }
         _byOdf = map;
@@ -242,18 +284,33 @@ async function ensureIndex() {
  * list is known (`stem` null), as each stem starts, and as each one settles.
  * A failed stem is skipped; callers fall back to the primitive.
  */
+function pendingLegoJobs(odfs) {
+  const jobs = [];
+  const seen = new Set();
+  for (const odf of odfs) {
+    const rec = lookupLego(odf);
+    if (!rec || seen.has(rec.slug) || _legoTemplates.has(rec.slug)) continue;
+    seen.add(rec.slug);
+    jobs.push({ ...rec, odf });
+  }
+  return jobs;
+}
+
 export async function ensureMatchModels(matchData, onProgress) {
   if (onProgress) onProgress(0, 0, 'catalog');
   await ensureIndex();
+  await ensureLegoCatalog();
+  _matchOdfs = collectMatchOdfs(matchData);
   const specs = [];
   const seen = new Set();
-  for (const odf of collectMatchOdfs(matchData)) {
+  for (const odf of _matchOdfs) {
     const spec = lookupSpec(odf);
     if (!spec || seen.has(spec.stem) || _templates.has(spec.stem)) continue;
     seen.add(spec.stem);
     specs.push(spec);
   }
-  const total = specs.length;
+  const legoJobs = legoMode() ? pendingLegoJobs(_matchOdfs) : [];
+  const total = specs.length + legoJobs.length;
   let done = 0;
   if (onProgress) onProgress(0, total, null);
   if (!total) return;
@@ -264,6 +321,190 @@ export async function ensureMatchModels(matchData, onProgress) {
     done += 1;
     if (onProgress) onProgress(done, total, spec.stem);
   }));
+  for (const job of legoJobs) {
+    if (onProgress) onProgress(done, total, 'lego:' + job.slug);
+    try { await loadLego(job); }
+    catch (err) { console.warn(`lego ${job.slug} failed`, err); }
+    done += 1;
+    if (onProgress) onProgress(done, total, 'lego:' + job.slug);
+  }
+}
+
+function legoUrl(rel) {
+  return new URL(rel, LEGO_ROOT).href;
+}
+
+async function ensureLegoCatalog() {
+  if (_legoByOdf) return;
+  if (!_legoCatalogPromise) {
+    _legoCatalogPromise = Promise.all([
+      fetch(legoUrl('odf-map.json')).then((res) => (res.ok ? res.json() : null)),
+      fetch(legoUrl('index.json')).then((res) => (res.ok ? res.json() : null)),
+    ]).then(([mapDoc, indexDoc]) => {
+      const bySource = new Map();
+      for (const m of (indexDoc && indexDoc.models) || []) {
+        if (m && m.source_file && m.slug && m.ldr) bySource.set(m.source_file, m);
+      }
+      const map = new Map();
+      const byOdf = (mapDoc && mapDoc.by_odf) || {};
+      for (const [odf, ent] of Object.entries(byOdf)) {
+        if (!ent || !ent.source_file) continue;
+        const src = bySource.get(ent.source_file);
+        if (!src) continue;
+        const key = normOdf(odf);
+        if (!key || map.has(key)) continue;
+        const yaw = Number(ent.yaw_deg);
+        map.set(key, {
+          slug: src.slug,
+          ldr: src.ldr,
+          yaw: Number.isFinite(yaw) ? yaw : 0,
+        });
+      }
+      _legoByOdf = map;
+    }).catch((err) => {
+      _legoCatalogPromise = null;
+      _legoByOdf = new Map();
+      console.warn('lego map failed', err);
+    });
+  }
+  await _legoCatalogPromise;
+}
+
+function ldrawLoader() {
+  if (!_ldrawReady) {
+    const loader = new LDrawLoader();
+    loader.smoothNormals = true;
+    loader.setConditionalLineMaterial(LDrawConditionalLineMaterial);
+    _ldrawReady = loader.preloadMaterials(legoUrl('LDConfig.ldr')).then(() => loader);
+  }
+  return _ldrawReady;
+}
+
+function parseLdr(text) {
+  const run = _parseChain.then(async () => {
+    const loader = await ldrawLoader();
+    return new Promise((resolve, reject) => {
+      loader.parse(text, resolve, reject);
+    });
+  });
+  _parseChain = run.then(() => {}, () => {});
+  return run;
+}
+
+function sanitizeLego(root) {
+  const stack = [root];
+  while (stack.length) {
+    const o = stack.pop();
+    if (!o) continue;
+    if (o.isLine || o.isLineSegments || o.isPoints) o.visible = false;
+    if ((o.isMesh || o.isLine || o.isLineSegments || o.isPoints) && o.material == null) {
+      o.visible = false;
+    }
+    if (Array.isArray(o.children)) {
+      if (o.children.includes(null)) o.children = o.children.filter((c) => c != null);
+      for (const c of o.children) stack.push(c);
+    }
+  }
+}
+
+function meshBounds(root) {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  const tmp = new THREE.Box3();
+  let any = false;
+  root.traverse((o) => {
+    if (!o.isMesh || !o.visible || !o.geometry) return;
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    if (!o.geometry.boundingBox || o.geometry.boundingBox.isEmpty()) return;
+    tmp.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+    box.union(tmp);
+    any = true;
+  });
+  if (!any) box.setFromObject(root);
+  return box;
+}
+
+function horizontalExtent(box) {
+  return Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+}
+
+function glbHorizontal(odf) {
+  const spec = lookupSpec(odf);
+  if (!spec) return 0;
+  const tpl = _templates.get(spec.stem);
+  if (!tpl) return 0;
+  const box = new THREE.Box3().setFromObject(tpl.wrapper);
+  const h = horizontalExtent(box);
+  return h > 0.05 ? h : 0;
+}
+
+function loadLego(job) {
+  if (_legoTemplates.has(job.slug)) return Promise.resolve();
+  let pending = _legoLoads.get(job.slug);
+  if (!pending) {
+    pending = loadLegoNow(job).catch((err) => {
+      _legoLoads.delete(job.slug);
+      throw err;
+    });
+    _legoLoads.set(job.slug, pending);
+  }
+  return pending;
+}
+
+async function loadLegoNow(job) {
+  if (_legoTemplates.has(job.slug)) return;
+  const src = await cachedBlobUrl(legoUrl(job.ldr));
+  if (!src) throw new Error(`missing ldr ${job.slug}`);
+  const text = await (await fetch(src)).text();
+  const group = await parseLdr(text);
+  sanitizeLego(group);
+
+  const orient = new THREE.Group();
+  orient.rotation.x = Math.PI;
+  orient.add(group);
+
+  const spun = new THREE.Group();
+  spun.rotation.y = THREE.MathUtils.degToRad(job.yaw || 0);
+  spun.add(orient);
+  spun.updateMatrixWorld(true);
+
+  let box = meshBounds(spun);
+  const legoH = horizontalExtent(box);
+  const target = glbHorizontal(job.odf) || LEGO_FALLBACK_METERS;
+  spun.scale.setScalar(legoH > 1e-4 ? target / legoH : 1);
+  spun.updateMatrixWorld(true);
+  box = meshBounds(spun);
+  spun.position.set(
+    -((box.min.x + box.max.x) / 2),
+    0,
+    -((box.min.z + box.max.z) / 2),
+  );
+
+  const wrapper = new THREE.Group();
+  wrapper.name = `lego-template-${job.slug}`;
+  wrapper.rotation.y = NOSE_YAW;
+  wrapper.scale.set(MODEL_VISUAL_SCALE, MODEL_VISUAL_SCALE, -MODEL_VISUAL_SCALE);
+  wrapper.add(spun);
+  wrapper.updateMatrixWorld(true);
+  box = meshBounds(wrapper);
+  if (Number.isFinite(box.min.y)) wrapper.position.y = -box.min.y;
+  _legoTemplates.set(job.slug, { wrapper, slug: job.slug });
+}
+
+function cloneLegoBody(tpl) {
+  const root = tpl.wrapper.clone(true);
+  root.userData.replayModel = true;
+  root.userData.modelStem = 'lego:' + tpl.slug;
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const srcMats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    const cloned = srcMats.map((mat) => mat.clone());
+    obj.material = Array.isArray(obj.material) ? cloned : cloned[0];
+    obj.castShadow = false;
+    obj.receiveShadow = false;
+    obj.userData.sharedGeom = true;
+  });
+  return root;
 }
 
 function loadTexture(url, colorSpace) {
@@ -489,8 +730,10 @@ export function reapplyTextureSet(id, onProgress) {
 
 async function reapplyTextureSetNow(id, onProgress) {
   await ensureIndex();
+  await ensureLegoCatalog();
   const normalized = normalizeTextureSet(id);
-  const next = !normalized || normalized === ENHANCED_SET_ID || _packs.some((p) => p.id === normalized)
+  const next = !normalized || normalized === ENHANCED_SET_ID || normalized === LEGO_SET_ID
+      || _packs.some((p) => p.id === normalized)
     ? normalized
     : '';
   _textureSet = next;
@@ -500,18 +743,34 @@ async function reapplyTextureSetNow(id, onProgress) {
   if (gen !== _texGen) return false;
 
   const entries = [..._templates.values()];
-  const total = entries.length;
+  const legoJobs = next === LEGO_SET_ID ? pendingLegoJobs(_matchOdfs) : [];
+  const reportLego = next === LEGO_SET_ID;
+  const total = reportLego ? legoJobs.length : entries.length;
   let done = 0;
-  if (onProgress) onProgress(0, total, null);
+  if (!reportLego && onProgress) onProgress(0, total, null);
   await Promise.all(entries.map(async (tpl) => {
     const spec = _specByStem.get(tpl.stem);
     if (spec) {
       try { await paintTemplate(spec, tpl); }
       catch (err) { console.warn(`retexture ${tpl.stem} failed`, err); }
     }
-    done += 1;
-    if (gen === _texGen && onProgress) onProgress(done, total, tpl.stem);
+    if (!reportLego) {
+      done += 1;
+      if (gen === _texGen && onProgress) onProgress(done, total, tpl.stem);
+    }
   }));
+  if (gen !== _texGen) return false;
+  if (reportLego) {
+    if (onProgress) onProgress(0, legoJobs.length, null);
+    for (const job of legoJobs) {
+      if (gen !== _texGen) return false;
+      if (onProgress) onProgress(done, legoJobs.length, 'lego:' + job.slug);
+      try { await loadLego(job); }
+      catch (err) { console.warn(`lego ${job.slug} failed`, err); }
+      done += 1;
+      if (onProgress) onProgress(done, legoJobs.length, 'lego:' + job.slug);
+    }
+  }
   return gen === _texGen;
 }
 
@@ -580,6 +839,11 @@ function parallelTraverse(a, b, callback) {
  * `opts.deployed` poses a `deploy` clip on its last frame (buildings only).
  */
 export function cloneModelBody(odf, teamColor, opts) {
+  if (legoMode()) {
+    const rec = lookupLego(odf);
+    const brick = rec && _legoTemplates.get(rec.slug);
+    if (brick) return cloneLegoBody(brick);
+  }
   const spec = lookupSpec(odf);
   if (!spec) return null;
   const tpl = _templates.get(spec.stem);

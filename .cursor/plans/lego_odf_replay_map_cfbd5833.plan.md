@@ -4,16 +4,16 @@ overview: Add a verified LEGO-to-ODF map, ingest the five new Studio files, and 
 todos:
   - id: ingest-tmp
     content: Move the five tmp .io files into data/lego, rebuild with build_lego.py, delete tmp
-    status: pending
+    status: completed
   - id: odf-map
     content: Write data/lego/odf-map.json (verified stems + Day Wrecker) and a build_lego.py post-pass that checks it against the ODF db and index
-    status: pending
+    status: completed
   - id: replay-lego
     content: Add the LEGO Models-menu choice and clone brick models in replay-ship-models.js with stock-mesh fallback, scale, and yaw
-    status: pending
+    status: completed
   - id: verify
     content: Browser-check LEGO vs Stock/Enhanced/Redux on a match, and set yaw from the ISDF Tank nose
-    status: pending
+    status: completed
 isProject: false
 ---
 

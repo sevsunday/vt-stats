@@ -26,6 +26,9 @@ images is instant. The LDraw parts fetch cache is shared across models/runs.
 
 Standalone — NOT wired into scripts/process_stats.py (mirrors scripts/object-render/).
 
+After the index write, checks data/lego/odf-map.json against the ODF db and the
+index. The map is hand-maintained (this script does not invent ODF links).
+
 Usage:
   python scripts/build_lego.py                 # incremental (default)
   python scripts/build_lego.py --force         # reprocess every model
@@ -69,6 +72,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEGO_DIR = os.path.join(ROOT, "data", "lego")
 INDEX_PATH = os.path.join(LEGO_DIR, "index.json")
 LDCONFIG_PATH = os.path.join(LEGO_DIR, "LDConfig.ldr")
+ODF_MAP_PATH = os.path.join(LEGO_DIR, "odf-map.json")
+ODF_DB_PATH = os.path.join(ROOT, "data", "odf.min.json")
+ODF_MAP_KINDS = {"unit", "structure", "powerup"}
 # Persistent, gitignored, shared across all models + runs.
 CACHE = os.path.join(ROOT, "_lego_cache", "parts")
 
@@ -605,6 +611,84 @@ def process_io(path: str, fname: str, slug: str, name: str, code: str,
     }
 
 
+def _db_unit_name(db: dict, odf: str) -> str | None:
+    """GameObjectClass.unitName for an ODF stem, or None when the db has no row."""
+    want = odf.strip().lower()
+    if not want.endswith(".odf"):
+        want += ".odf"
+    for items in db.values():
+        if not isinstance(items, dict):
+            continue
+        body = items.get(want)
+        if body is None:
+            for key, val in items.items():
+                if str(key).lower() == want:
+                    body = val
+                    break
+        if not isinstance(body, dict):
+            continue
+        goc = body.get("GameObjectClass")
+        if isinstance(goc, dict) and goc.get("unitName"):
+            return str(goc["unitName"])
+    return None
+
+
+def check_odf_map(entries: list[dict]) -> list[str]:
+    """The hand-maintained LEGO→ODF map must agree with disk, the ODF db, and
+    this index. Returns error strings; empty means the map is usable."""
+    if not os.path.isfile(ODF_MAP_PATH):
+        return ["data/lego/odf-map.json is missing"]
+    try:
+        doc = json.load(open(ODF_MAP_PATH, encoding="utf-8"))
+    except Exception as e:          # noqa: BLE001
+        return [f"odf-map.json unreadable: {e}"]
+    errors: list[str] = []
+    if doc.get("schema_version") != 1:
+        errors.append(f"odf-map schema_version {doc.get('schema_version')!r} != 1")
+    credit = doc.get("credit") or {}
+    url = str(credit.get("url") or "")
+    if credit.get("name") != "Darkvale" or "76561198136459671" not in url:
+        errors.append("odf-map credit must name Darkvale and his Steam profile")
+    by = doc.get("by_odf")
+    if not isinstance(by, dict) or not by:
+        errors.append("odf-map by_odf is empty")
+        return errors
+    try:
+        db = json.load(open(ODF_DB_PATH, encoding="utf-8"))
+    except Exception as e:          # noqa: BLE001
+        errors.append(f"odf.min.json unreadable: {e}")
+        return errors
+    indexed = {e.get("source_file") for e in entries if e.get("source_file")}
+    seen_src: set[str] = set()
+    for odf, ent in by.items():
+        where = str(odf)
+        if not isinstance(ent, dict):
+            errors.append(f"{where}: entry is not an object")
+            continue
+        src = str(ent.get("source_file") or "")
+        if not src or not os.path.isfile(os.path.join(LEGO_DIR, src)):
+            errors.append(f"{where}: source_file missing on disk ({src})")
+        elif src not in indexed:
+            errors.append(f"{where}: source_file not in the lego index ({src})")
+        if src:
+            if src in seen_src:
+                errors.append(f"{where}: source_file mapped more than once ({src})")
+            seen_src.add(src)
+        kind = ent.get("kind")
+        if kind not in ODF_MAP_KINDS:
+            errors.append(f"{where}: kind {kind!r} is not unit, structure, or powerup")
+        yaw = ent.get("yaw_deg")
+        if isinstance(yaw, bool) or not isinstance(yaw, (int, float)):
+            errors.append(f"{where}: yaw_deg must be a number")
+        unit = ent.get("unit_name")
+        got = _db_unit_name(db, where)
+        if got is None:
+            errors.append(f"{where}: not in odf.min.json")
+        elif unit != got:
+            errors.append(f"{where}: unit_name {unit!r} != ODF db {got!r}")
+    return errors
+
+
 def refresh_ldconfig(force: bool) -> None:
     if os.path.exists(LDCONFIG_PATH) and not force:
         return
@@ -721,10 +805,18 @@ def main() -> int:
         }, fh, indent=2)
 
     print(f"\nWrote {INDEX_PATH}: {len(entries)} models ({built} built, {cached} cached).")
+    map_errors = check_odf_map(entries)
+    if map_errors:
+        print(f"\nODF MAP FAILURE — {len(map_errors)} problem(s) in odf-map.json:")
+        for msg in map_errors:
+            print(f"   {msg}")
+    else:
+        print(f"odf-map: {len(json.load(open(ODF_MAP_PATH, encoding='utf-8'))['by_odf'])} entries OK")
     if failures:
         print(f"\nCOMPLETENESS FAILURE — {len(failures)} model(s) had unresolved parts:")
         for f in failures:
             print(f"   {f}")
+    if failures or map_errors:
         return 1
     return 0
 
