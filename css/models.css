@@ -247,6 +247,53 @@ body { overflow: hidden; }
 .seg-btn:hover { color: var(--kb-text-primary); }
 .seg-btn.on { background: var(--kb-primary); color: var(--kb-primary-fg); font-weight: 650; }
 
+/* Control-bar dropdown menus (View / Panels). Both are checkbox lists, so the
+   trigger only carries a count of what is currently on. Popper runs in fixed
+   strategy (data-bs-popper-config in the markup) so the horizontally
+   scrollable mobile action row cannot clip the open menu. */
+.viewer-menu { display: inline-flex; }
+.viewer-menu-btn { gap: 0.4rem; }
+.viewer-menu-caret { font-size: 0.65rem; color: var(--kb-text-secondary); }
+.viewer-menu-count {
+  min-width: 1.1rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: var(--kb-primary);
+  color: var(--kb-primary-fg);
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.1rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.viewer-menu-list {
+  min-width: 190px;
+  padding: 0.3rem;
+  border: 1px solid var(--kb-border-default);
+}
+.viewer-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--kb-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.viewer-menu-row:hover { background: var(--kb-bg-subtle); }
+.viewer-menu-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--kb-primary);
+  cursor: pointer;
+}
+/* Crisp lines is a wireframe sub-option, so it sits under its parent row. */
+.viewer-menu-row-sub { padding-left: 1.6rem; }
+
 .stage { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 .stage canvas { display: block; touch-action: none; }
 /* Free-spin grab affordance (set on .stage while Free spin is active). */
@@ -934,6 +981,8 @@ label.light-head { cursor: pointer; }
   .viewer-actions > * { flex: 0 0 auto; }
   /* Larger tap targets. */
   .btn, .seg-btn { padding: 0.55rem 0.8rem; }
+  .viewer-menu-row { padding: 0.55rem 0.55rem; font-size: 0.86rem; }
+  .viewer-menu-row input[type="checkbox"] { width: 17px; height: 17px; }
 
   /* Dock becomes a full-width top sheet; only one pane is open at a time
      (enforced in JS), so panes never stack/overlap on mobile. */

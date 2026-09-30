@@ -149,18 +149,42 @@
           <button class="seg-btn" data-q="perf">Performance</button>
           <button class="seg-btn" data-q="hq">HQ</button>
         </div>
-        <button id="wire-btn" class="btn toggle">Wireframe</button>
-        <button id="wire-hq-btn" class="btn toggle" title="Supersampled hairline wireframe (higher quality, more GPU cost)" hidden>Crisp lines</button>
-        <button id="spin-btn" class="btn toggle">Auto-rotate</button>
-        <button id="freespin-btn" class="btn toggle" title="Lock the camera and click-drag (fling) to spin the model">Free spin</button>
+        <!-- View: the display + camera modes. Crisp lines stays hidden until
+             Wireframe is on; Auto-rotate and Free spin clear each other. -->
+        <div class="dropdown viewer-menu">
+          <button id="view-menu-btn" class="btn viewer-menu-btn" type="button"
+                  data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                  data-bs-popper-config='{"strategy":"fixed"}'
+                  aria-expanded="false" title="Wireframe and the camera spin modes">
+            View<span id="view-menu-count" class="viewer-menu-count" hidden></span><i class="bi bi-chevron-down viewer-menu-caret" aria-hidden="true"></i>
+          </button>
+          <ul id="view-menu-list" class="dropdown-menu viewer-menu-list" aria-labelledby="view-menu-btn">
+            <li><label class="viewer-menu-row" title="Draw the mesh as unlit white lines"><input id="view-wire" type="checkbox">Wireframe</label></li>
+            <li id="view-wire-hq-row" hidden><label class="viewer-menu-row viewer-menu-row-sub" title="Supersampled hairline wireframe (higher quality, more GPU cost)"><input id="view-wire-hq" type="checkbox">Crisp lines</label></li>
+            <li><label class="viewer-menu-row" title="Orbit the camera around the model on its own"><input id="view-spin" type="checkbox">Auto-rotate</label></li>
+            <li><label class="viewer-menu-row" title="Lock the camera and click-drag (fling) to spin the model"><input id="view-freespin" type="checkbox">Free spin</label></li>
+          </ul>
+        </div>
         <button id="fly-btn" class="btn toggle" title="Climb to this craft's ODF flightAltitude (the APC / Bomber / SAV flying ceiling) -- the camera follows it up" hidden>Fly</button>
-        <button id="light-btn" class="btn toggle" aria-expanded="false" title="Show light settings">Light</button>
-        <button id="scene-btn" class="btn toggle" aria-expanded="false" title="Choose a scene / background">Scene</button>
-        <button id="size-btn" class="btn toggle" aria-expanded="false" title="In-game hull size and a print-scale download">3D Print</button>
-        <button id="anim-btn" class="btn toggle" aria-expanded="false" title="Play this model's baked animations" hidden>Animations</button>
-        <button id="parts-btn" class="btn toggle" aria-expanded="false" title="Aim the turret, fire the guns, roll the treads, and show/hide parts" hidden>Parts</button>
-        <button id="colors-btn" class="btn toggle" aria-expanded="false" title="Apply multiplayer team colors" hidden>Colors</button>
-        <button id="textures-btn" class="btn toggle" aria-expanded="false" title="Switch between the stock textures and community re-texture mods" hidden>Textures</button>
+        <!-- Panels: one row per settings pane in the left dock, in dock order.
+             A row is hidden when the loaded model lacks that feature. -->
+        <div class="dropdown viewer-menu">
+          <button id="panels-menu-btn" class="btn viewer-menu-btn" type="button"
+                  data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                  data-bs-popper-config='{"strategy":"fixed"}'
+                  aria-expanded="false" title="Show or hide the settings panels">
+            Panels<span id="panels-menu-count" class="viewer-menu-count" hidden></span><i class="bi bi-chevron-down viewer-menu-caret" aria-hidden="true"></i>
+          </button>
+          <ul id="panels-menu-list" class="dropdown-menu viewer-menu-list" aria-labelledby="panels-menu-btn">
+            <li id="pane-row-light"><label class="viewer-menu-row" title="Sun light, lighting mood, and the ship's own lights"><input id="pane-light" type="checkbox">Light</label></li>
+            <li id="pane-row-anim" hidden><label class="viewer-menu-row" title="Play this model's baked animations"><input id="pane-anim" type="checkbox">Animations</label></li>
+            <li id="pane-row-parts" hidden><label class="viewer-menu-row" title="Aim the turret, fire the guns, roll the treads, and show/hide parts"><input id="pane-parts" type="checkbox">Parts</label></li>
+            <li id="pane-row-colors" hidden><label class="viewer-menu-row" title="Apply multiplayer team colors"><input id="pane-colors" type="checkbox">Colors</label></li>
+            <li id="pane-row-textures" hidden><label class="viewer-menu-row" title="Switch between the stock textures and community re-texture mods"><input id="pane-textures" type="checkbox">Textures</label></li>
+            <li id="pane-row-scene"><label class="viewer-menu-row" title="Choose a scene / background"><input id="pane-scene" type="checkbox">Scene</label></li>
+            <li id="pane-row-size"><label class="viewer-menu-row" title="In-game hull size and a print-scale download"><input id="pane-size" type="checkbox">3D Print</label></li>
+          </ul>
+        </div>
         <button id="reset-btn" class="btn" title="Reset the camera, orientation, toggles, and sun light to defaults">Reset all</button>
         <button id="capture-btn" class="btn" title="Render the 7 canonical angles at HQ + supersampled and download them">Capture HQ</button>
       </div>

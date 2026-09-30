@@ -59,10 +59,27 @@ const els = {
   title: document.getElementById('viewer-title'),
   meta: document.getElementById('viewer-meta'),
   back: document.getElementById('back-btn'),
-  wire: document.getElementById('wire-btn'),
-  wireHq: document.getElementById('wire-hq-btn'),
-  sceneBtn: document.getElementById('scene-btn'),
-  sizeBtn: document.getElementById('size-btn'),
+  viewMenuList: document.getElementById('view-menu-list'),
+  viewMenuCount: document.getElementById('view-menu-count'),
+  wire: document.getElementById('view-wire'),
+  wireHq: document.getElementById('view-wire-hq'),
+  wireHqRow: document.getElementById('view-wire-hq-row'),
+  panelsMenuList: document.getElementById('panels-menu-list'),
+  panelsMenuCount: document.getElementById('panels-menu-count'),
+  paneLight: document.getElementById('pane-light'),
+  paneRowLight: document.getElementById('pane-row-light'),
+  paneAnim: document.getElementById('pane-anim'),
+  paneRowAnim: document.getElementById('pane-row-anim'),
+  paneParts: document.getElementById('pane-parts'),
+  paneRowParts: document.getElementById('pane-row-parts'),
+  paneColors: document.getElementById('pane-colors'),
+  paneRowColors: document.getElementById('pane-row-colors'),
+  paneTextures: document.getElementById('pane-textures'),
+  paneRowTextures: document.getElementById('pane-row-textures'),
+  paneScene: document.getElementById('pane-scene'),
+  paneRowScene: document.getElementById('pane-row-scene'),
+  paneSize: document.getElementById('pane-size'),
+  paneRowSize: document.getElementById('pane-row-size'),
   sizePanel: document.getElementById('size-panel'),
   sizeMX: document.getElementById('size-m-x'),
   sizeMY: document.getElementById('size-m-y'),
@@ -88,13 +105,12 @@ const els = {
   stageProgressFill: document.getElementById('stage-progress-fill'),
   fps: document.getElementById('fps-counter'),
   controlsHint: document.getElementById('controls-hint'),
-  spin: document.getElementById('spin-btn'),
-  freespin: document.getElementById('freespin-btn'),
+  spin: document.getElementById('view-spin'),
+  freespin: document.getElementById('view-freespin'),
   fly: document.getElementById('fly-btn'),
   reset: document.getElementById('reset-btn'),
   capture: document.getElementById('capture-btn'),
   qualitySeg: document.getElementById('quality-seg'),
-  lightBtn: document.getElementById('light-btn'),
   lightPanel: document.getElementById('light-panel'),
   lightOn: document.getElementById('light-on'),
   lightPresetSeg: document.getElementById('light-preset-seg'),
@@ -104,7 +120,6 @@ const els = {
   lightEl: document.getElementById('light-el'),
   lightAzVal: document.getElementById('light-az-val'),
   lightElVal: document.getElementById('light-el-val'),
-  animBtn: document.getElementById('anim-btn'),
   animPanel: document.getElementById('anim-panel'),
   animClips: document.getElementById('anim-clips'),
   animPlay: document.getElementById('anim-play'),
@@ -113,7 +128,6 @@ const els = {
   animLoop: document.getElementById('anim-loop'),
   animSlowmo: document.getElementById('anim-slowmo'),
   animSlowmoVal: document.getElementById('anim-slowmo-val'),
-  partsBtn: document.getElementById('parts-btn'),
   partsPanel: document.getElementById('parts-panel'),
   partsTurret: document.getElementById('parts-turret'),
   partsYawLabel: document.getElementById('parts-yaw-label'),
@@ -141,14 +155,12 @@ const els = {
   driveHud: document.getElementById('drive-hud'),
   partsVisibilitySection: document.getElementById('parts-visibility-section'),
   partsVisibilityRows: document.getElementById('parts-visibility-rows'),
-  colorsBtn: document.getElementById('colors-btn'),
   colorsPanel: document.getElementById('colors-panel'),
   colorSwatches: document.getElementById('color-swatches'),
   colorSwatchesBold: document.getElementById('color-swatches-bold'),
   colorSwatchesMilitary: document.getElementById('color-swatches-military'),
   colorsCustom: document.getElementById('colors-custom'),
   colorsOff: document.getElementById('colors-off'),
-  texturesBtn: document.getElementById('textures-btn'),
   texturesPanel: document.getElementById('textures-panel'),
   texsetRows: document.getElementById('texset-rows'),
   shiplightsRow: document.getElementById('shiplights-row'),
@@ -172,22 +184,46 @@ const SLOT_LABELS = {
   SPEC: 'Special', SHIE: 'Shield', HAND: 'Hand', PACK: 'Pack',
 };
 
+/* ---- Toolbar menus ------------------------------------------------------ */
+/* The control bar carries two dropdowns of checkbox rows instead of a row of
+ * toggle pills: `View` holds the display / camera modes, `Panels` holds one row
+ * per dock pane. Each trigger only has to carry a count of what is on. */
+function syncMenuCount(listEl, countEl) {
+  if (!listEl || !countEl) return;
+  let n = 0;
+  for (const cb of listEl.querySelectorAll('input[type=checkbox]')) {
+    const row = cb.closest('li');
+    if (cb.checked && !(row && row.hidden)) n++;
+  }
+  countEl.textContent = String(n);
+  countEl.hidden = n === 0;
+}
+function syncViewMenu() { syncMenuCount(els.viewMenuList, els.viewMenuCount); }
+function syncPanelsMenu() { syncMenuCount(els.panelsMenuList, els.panelsMenuCount); }
+
 /* ---- Settings-pane dock ------------------------------------------------- */
-/* Every toolbar settings button maps to one pane in the left dock. On desktop
- * any number of panes can be open (stacked); on mobile only one is open at a
- * time. A pane's button is `hidden` when the model lacks that feature (anim /
- * parts / colors), so the dock only ever surfaces applicable panes. */
+/* Every Panels-menu row maps to one pane in the left dock. On desktop any
+ * number of panes can be open (stacked); on mobile only one is open at a
+ * time. A pane's row is `hidden` when the model lacks that feature (anim /
+ * parts / colors), so the menu only ever surfaces applicable panes. */
 const PANES = [
-  { id: 'light', btn: els.lightBtn, panel: els.lightPanel },
-  { id: 'anim', btn: els.animBtn, panel: els.animPanel },
-  { id: 'parts', btn: els.partsBtn, panel: els.partsPanel },
-  { id: 'colors', btn: els.colorsBtn, panel: els.colorsPanel },
-  { id: 'textures', btn: els.texturesBtn, panel: els.texturesPanel },
-  { id: 'scene', btn: els.sceneBtn, panel: els.scenePanel },
-  { id: 'size', btn: els.sizeBtn, panel: els.sizePanel },
+  { id: 'light', row: els.paneRowLight, cb: els.paneLight, panel: els.lightPanel },
+  { id: 'anim', row: els.paneRowAnim, cb: els.paneAnim, panel: els.animPanel },
+  { id: 'parts', row: els.paneRowParts, cb: els.paneParts, panel: els.partsPanel },
+  { id: 'colors', row: els.paneRowColors, cb: els.paneColors, panel: els.colorsPanel },
+  { id: 'textures', row: els.paneRowTextures, cb: els.paneTextures, panel: els.texturesPanel },
+  { id: 'scene', row: els.paneRowScene, cb: els.paneScene, panel: els.scenePanel },
+  { id: 'size', row: els.paneRowSize, cb: els.paneSize, panel: els.sizePanel },
 ];
 const panesMql = window.matchMedia('(max-width: 640px)');
 function isMobilePanes() { return panesMql.matches; }
+
+// The rows are static markup, so wire them once. The checkbox has already
+// flipped by the time `change` fires, and togglePane() reads the pane's own
+// hidden state, so the two always agree.
+for (const p of PANES) {
+  if (p.cb) p.cb.onchange = () => togglePane(p.id);
+}
 
 // Touch devices must hit the scrollport itself. A mouse-only desktop stays
 // pointer-events:none so the gaps between panes still orbit the model.
@@ -199,8 +235,8 @@ function setPaneOpen(id, open) {
   const p = PANES.find((x) => x.id === id);
   if (!p) return;
   p.panel.hidden = !open;
-  p.btn.classList.toggle('on', open);
-  p.btn.setAttribute('aria-expanded', String(open));
+  p.cb.checked = !!open;
+  syncPanelsMenu();
 }
 
 function togglePane(id) {
@@ -219,7 +255,7 @@ function togglePane(id) {
 function applyDefaultPaneState() {
   const mobile = isMobilePanes();
   for (const p of PANES) {
-    const applicable = !p.btn.hidden;
+    const applicable = !p.row.hidden;
     setPaneOpen(p.id, applicable && !mobile);
   }
 }
@@ -761,11 +797,12 @@ function showViewer(entry) {
   els.qualitySeg.hidden = !HQ_AVAILABLE;
   els.capture.hidden = !HQ_AVAILABLE;  // Capture forces HQ, unavailable here
   syncQualitySeg(quality);
-  els.wire.classList.remove('on');
-  els.wireHq.classList.remove('on');
-  els.wireHq.hidden = true;
-  els.spin.classList.remove('on');
-  els.freespin.classList.remove('on');
+  els.wire.checked = false;
+  els.wireHq.checked = false;
+  els.wireHqRow.hidden = true;
+  els.spin.checked = false;
+  els.freespin.checked = false;
+  syncViewMenu();
   els.stage.classList.remove('grabbable');
   els.fly.hidden = true;
   els.fly.classList.remove('on');
@@ -779,11 +816,11 @@ function showViewer(entry) {
   // the model loads and each pane's applicability is known. The sun on/off now
   // lives inside the Light pane (initLightPanel syncs the checkbox).
   setPaneOpen('light', false);
-  els.lightBtn.hidden = false;     // Light pane is always applicable
+  els.paneRowLight.hidden = false;   // Light pane is always applicable
 
-  els.sceneBtn.hidden = false;     // Scene pane is always applicable
+  els.paneRowScene.hidden = false;   // Scene pane is always applicable
   setPaneOpen('scene', false);
-  els.sizeBtn.hidden = false;      // Size pane is always applicable
+  els.paneRowSize.hidden = false;    // Size pane is always applicable
   setPaneOpen('size', false);
   els.ultraToggle.classList.toggle('on', ultraPrefs().on);
   // New viewer instance -> the Ultra passes will need to compile again.
@@ -793,7 +830,7 @@ function showViewer(entry) {
 
   // Animation controls start hidden; setupAnimUI() reveals them once the GLB
   // resolves and reports baked clips.
-  els.animBtn.hidden = true;
+  els.paneRowAnim.hidden = true;
   setPaneOpen('anim', false);
   els.animLoop.classList.remove('on');
   els.animSlowmo.value = '0';
@@ -801,7 +838,7 @@ function showViewer(entry) {
 
   // Parts (articulation) controls start hidden; setupArticulationUI() reveals
   // them once the GLB resolves and reports moveable parts.
-  els.partsBtn.hidden = true;
+  els.paneRowParts.hidden = true;
   setPaneOpen('parts', false);
   els.partsAim.classList.remove('on');
   els.partsKeys.classList.remove('on');
@@ -822,12 +859,12 @@ function showViewer(entry) {
 
   // Team-color controls start hidden; setupColorsUI() reveals them once the GLB
   // resolves and reports team-colorable materials. Each open starts uncolored.
-  els.colorsBtn.hidden = true;
+  els.paneRowColors.hidden = true;
   setPaneOpen('colors', false);
 
   // Texture-set controls start hidden; setupTexturesUI() reveals them when the
   // manifest entry carries mod texture sets. Each open starts on Stock.
-  els.texturesBtn.hidden = true;
+  els.paneRowTextures.hidden = true;
   setPaneOpen('textures', false);
 
   // Ship-lights + True-lighting toggles start hidden; their setup fns reveal
@@ -866,49 +903,46 @@ function showViewer(entry) {
       }
     };
   });
-  els.wire.onclick = () => {
-    applyWireframe(!els.wire.classList.contains('on'));
+  els.wire.onchange = () => {
+    applyWireframe(els.wire.checked);
   };
-  els.wireHq.onclick = () => {
-    const on = !els.wireHq.classList.contains('on');
-    els.wireHq.classList.toggle('on', on);
-    if (activeViewer) activeViewer.setWireHQ(on);
+  els.wireHq.onchange = () => {
+    if (activeViewer) activeViewer.setWireHQ(els.wireHq.checked);
+    syncViewMenu();
   };
-  els.spin.onclick = () => {
-    const on = !els.spin.classList.contains('on');
-    els.spin.classList.toggle('on', on);
+  els.spin.onchange = () => {
+    const on = els.spin.checked;
     if (on) {
       // Auto-rotate (camera) is mutually exclusive with Free spin + Aim + Drive.
       setDriveModeUI(false);
-      els.freespin.classList.remove('on');
+      els.freespin.checked = false;
       els.partsAim.classList.remove('on');
       els.stage.classList.remove('grabbable');
       activeViewer.setFreeSpin(false);
     }
     activeViewer.setAutoRotate(on);
+    syncViewMenu();
     updateControlsHint();
   };
-  els.freespin.onclick = () => {
-    const on = !els.freespin.classList.contains('on');
-    els.freespin.classList.toggle('on', on);
+  els.freespin.onchange = () => {
+    const on = els.freespin.checked;
     if (on) {
       setDriveModeUI(false);
-      els.spin.classList.remove('on');
+      els.spin.checked = false;
       els.partsAim.classList.remove('on');
       activeViewer.setAutoRotate(false);
     }
     activeViewer.setFreeSpin(on);
     els.stage.classList.toggle('grabbable', on);
+    syncViewMenu();
     updateControlsHint();
   };
   els.reset.onclick = () => resetAllViewer();
   els.capture.onclick = () => doCapture(entry);
-  els.lightBtn.onclick = () => togglePane('light');
   els.back.onclick = (ev) => { ev.preventDefault(); goDirectory(); };
 
-  // Animation controls. The "Animations" button toggles the clip panel; the
-  // transport drives the viewer's playback API.
-  els.animBtn.onclick = () => togglePane('anim');
+  // Animation transport drives the viewer's playback API (the Panels menu owns
+  // the pane's visibility).
   els.animPlay.onclick = () => { if (activeViewer) activeViewer.resumeAnim(); };
   els.animPause.onclick = () => { if (activeViewer) activeViewer.pauseAnim(); };
   els.animStop.onclick = () => { if (activeViewer) { activeViewer.stopAnim(); syncClipChips(null); } };
@@ -924,7 +958,6 @@ function showViewer(entry) {
   };
 
   // Parts (articulation): turret aim, fire/recoil, and drive/treads.
-  els.partsBtn.onclick = () => togglePane('parts');
   els.partsYaw.oninput = (e) => {
     const v = parseFloat(e.target.value);
     els.partsYawVal.textContent = `${Math.round(v)}\u00b0`;
@@ -941,8 +974,9 @@ function showViewer(entry) {
     if (on) {
       // Aim-at-cursor is mutually exclusive with auto-rotate + free-spin + drive.
       setDriveModeUI(false);
-      els.spin.classList.remove('on');
-      els.freespin.classList.remove('on');
+      els.spin.checked = false;
+      els.freespin.checked = false;
+      syncViewMenu();
       els.stage.classList.remove('grabbable');
     }
     if (activeViewer) activeViewer.setAimMode(on);
@@ -986,9 +1020,8 @@ function showViewer(entry) {
     activeViewer.setDriveDeployed(on);
   };
 
-  // Team color: the button toggles the floating panel; swatches + the custom
-  // picker apply a hue, Original reverts to the baked diffuse.
-  els.colorsBtn.onclick = () => togglePane('colors');
+  // Team color: swatches + the custom picker apply a hue, Original reverts to
+  // the baked diffuse.
   els.colorsCustom.oninput = (e) => {
     if (activeViewer) activeViewer.setTeamColor(e.target.value);
     syncColorSwatches(e.target.value);
@@ -998,14 +1031,9 @@ function showViewer(entry) {
     syncColorSwatches(null);
   };
 
-  // Texture sets: the button toggles the floating panel; the rows themselves are
-  // (re)built per model by setupTexturesUI().
-  els.texturesBtn.onclick = () => togglePane('textures');
+  // Texture-set rows are (re)built per model by setupTexturesUI().
 
-  // Scene panel. The button toggles the floating panel; the controls drive the
-  // viewer + persistence.
-  els.sceneBtn.onclick = () => togglePane('scene');
-  els.sizeBtn.onclick = () => togglePane('size');
+  // Scene + 3D Print controls drive the viewer + persistence.
   els.sizePresets.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.onclick = () => applySizePreset(btn.dataset.size);
   });
@@ -1119,12 +1147,11 @@ function setupAnimUI() {
   activeViewer.setAnimLoop(false);
   activeViewer.setAnimMinDuration(0);
   if (!clips.length) {
-    els.animBtn.hidden = true;
-    els.animBtn.classList.remove('on');
-    els.animPanel.hidden = true;
+    els.paneRowAnim.hidden = true;
+    setPaneOpen('anim', false);
     return;
   }
-  els.animBtn.hidden = false;
+  els.paneRowAnim.hidden = false;
   clips.forEach((c) => {
     const b = document.createElement('button');
     b.className = 'anim-chip';
@@ -1149,8 +1176,8 @@ function updateControlsHint() {
   if (!activeViewer) { els.controlsHint.hidden = true; return; }
   const aim = !els.partsAim.hidden && els.partsAim.classList.contains('on');
   const keys = !els.partsKeys.hidden && els.partsKeys.classList.contains('on');
-  const freespin = els.freespin.classList.contains('on');
-  const autorot = els.spin.classList.contains('on');
+  const freespin = els.freespin.checked;
+  const autorot = els.spin.checked;
   let items;
   if (driveModeOn) {
     if (driveUsesHoverScheme()) {
@@ -1347,9 +1374,10 @@ function setDriveModeUI(on) {
   els.partsDriveMode.classList.toggle('on', on);
   if (on) {
     // Mutually exclusive with auto-rotate / free-spin / aim-at-cursor (the
-    // viewer also clears them internally; this syncs the buttons).
-    els.spin.classList.remove('on');
-    els.freespin.classList.remove('on');
+    // viewer also clears them internally; this syncs the View menu).
+    els.spin.checked = false;
+    els.freespin.checked = false;
+    syncViewMenu();
     els.partsAim.classList.remove('on');
     els.stage.classList.remove('grabbable');
     // WASD owns the treads/banks while driving; lock the manual slider.
@@ -1415,12 +1443,11 @@ function setupArticulationUI() {
   const any = art.turretYaw || art.turretPitch || art.recoil > 0 || art.treads
     || canDriveMode;
   if (!any) {
-    els.partsBtn.hidden = true;
-    els.partsBtn.classList.remove('on');
-    els.partsPanel.hidden = true;
+    els.paneRowParts.hidden = true;
+    setPaneOpen('parts', false);
     return;
   }
-  els.partsBtn.hidden = false;
+  els.paneRowParts.hidden = false;
 
   // Turret/head section (yaw always, pitch only when a pitch joint exists). A
   // walker head is a single joint aimed in both axes -> relabel "Turret" as
@@ -1519,12 +1546,11 @@ function buildPartVisibilityRows() {
 function setupColorsUI() {
   if (!activeViewer) return;
   if (!activeViewer.hasTeamColor()) {
-    els.colorsBtn.hidden = true;
-    els.colorsBtn.classList.remove('on');
-    els.colorsPanel.hidden = true;
+    els.paneRowColors.hidden = true;
+    setPaneOpen('colors', false);
     return;
   }
-  els.colorsBtn.hidden = false;
+  els.paneRowColors.hidden = false;
 
   // Build the preset swatch rows once (idempotent across opens).
   buildSwatchRow(els.colorSwatches, TEAM_COLOR_PRESETS);
@@ -1562,12 +1588,11 @@ function buildSwatchRow(container, presets) {
 function setupTexturesUI(entry) {
   const sets = modTextureSets(entry);
   if (!activeViewer || !sets.length || !els.texsetRows) {
-    els.texturesBtn.hidden = true;
-    els.texturesBtn.classList.remove('on');
-    els.texturesPanel.hidden = true;
+    els.paneRowTextures.hidden = true;
+    setPaneOpen('textures', false);
     return;
   }
-  els.texturesBtn.hidden = false;
+  els.paneRowTextures.hidden = false;
 
   const totalMats = (entry.textures || []).length || 1;
   els.texsetRows.innerHTML = '';
@@ -1805,9 +1830,10 @@ function resetAllViewer() {
   // Toggles -> off. Wireframe off re-enables the in-pane sun toggle (the light
   // itself is reset to default below via setLightOn).
   applyWireframe(false);
-  els.spin.classList.remove('on');
+  els.spin.checked = false;
   activeViewer.setAutoRotate(false);
-  els.freespin.classList.remove('on');
+  els.freespin.checked = false;
+  syncViewMenu();
   els.stage.classList.remove('grabbable');
   activeViewer.setFreeSpin(false);
   // Fly -> off (resetView() below grounds the model instantly).
@@ -1932,10 +1958,10 @@ function setLightOn(on) {
  * intact and restored when wireframe is turned back off. */
 function applyWireframe(on) {
   if (!activeViewer) return;
-  els.wire.classList.toggle('on', on);
+  els.wire.checked = !!on;
   activeViewer.setWireframe(on);
-  // The "Crisp lines" toggle is only meaningful while wireframe is active.
-  els.wireHq.hidden = !on;
+  // The "Crisp lines" row is only meaningful while wireframe is active.
+  els.wireHqRow.hidden = !on;
   if (on) {
     activeViewer.setLightEnabled(false);
     if (els.lightOn) { els.lightOn.checked = false; els.lightOn.disabled = true; }
@@ -1943,11 +1969,12 @@ function applyWireframe(on) {
   } else {
     // Drop crisp-lines supersampling when leaving wireframe so we never pay
     // the GPU cost in normal lit/textured viewing.
-    els.wireHq.classList.remove('on');
+    els.wireHq.checked = false;
     activeViewer.setWireHQ(false);
     if (els.lightOn) els.lightOn.disabled = false;
     setLightOn(lightPrefs().on);   // restore the persisted on/off preference
   }
+  syncViewMenu();
 }
 
 /* Sync the light panel inputs to the persisted state and wire their handlers to
