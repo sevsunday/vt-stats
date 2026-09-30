@@ -23,6 +23,7 @@ export function createAudio(opts) {
     let master = null;
     let volume = 1;
     const buffers = new Map();
+    const raw = new Map();
     const loops = new Map();
     const listener = { pos: [0, 0, 0], fwd: [0, 0, -1], up: [0, 1, 0], dirty: true };
 
@@ -46,16 +47,56 @@ export function createAudio(opts) {
 
     function getVolume() { return volume; }
 
-    function load(name) {
-        const key = String(name || '').toLowerCase().replace(/\.wav$/, '');
+    function stemKey(name) {
+        return String(name || '').toLowerCase().replace(/\.wav$/, '');
+    }
+
+    /* Fetch only. Decoding waits until an AudioContext is running, which
+     * the browser allows after a gesture. */
+    function fetchBytes(key) {
         if (!key) return Promise.resolve(null);
-        if (buffers.has(key)) return buffers.get(key);
+        if (raw.has(key)) return raw.get(key);
         const pending = fetch(urls[key] || (AUDIO_BASE + key + '.wav'))
             .then((r) => (r.ok ? r.arrayBuffer() : null))
-            .then((buf) => (buf ? context().decodeAudioData(buf) : null))
             .catch(() => null);
+        raw.set(key, pending);
+        return pending;
+    }
+
+    function decodeNow(key) {
+        if (!key) return Promise.resolve(null);
+        if (buffers.has(key)) return buffers.get(key);
+        const pending = fetchBytes(key).then((buf) => {
+            if (!buf) return null;
+            return context().decodeAudioData(buf.slice(0));
+        }).catch(() => null);
         buffers.set(key, pending);
         return pending;
+    }
+
+    function preload(names) {
+        const keys = [];
+        const push = (name) => {
+            const key = stemKey(name);
+            if (key) keys.push(key);
+        };
+        if (names && typeof names.forEach === 'function') names.forEach(push);
+        keys.forEach(fetchBytes);
+        if (ctx && ctx.state === 'running') return Promise.all(keys.map(decodeNow));
+        return Promise.resolve();
+    }
+
+    function load(name) {
+        const key = stemKey(name);
+        if (!key) return Promise.resolve(null);
+        if (buffers.has(key)) return buffers.get(key);
+        return decodeNow(key);
+    }
+
+    function unlock() {
+        const audio = context();
+        raw.forEach((_, key) => { if (!buffers.has(key)) decodeNow(key); });
+        return audio;
     }
 
     function applyListener() {
@@ -104,7 +145,7 @@ export function createAudio(opts) {
     }
 
     function play(name, opts) {
-        const key = String(name || '').toLowerCase().replace(/\.wav$/, '');
+        const key = stemKey(name);
         if (!key) return { stop() {}, setPosition() {} };
         const loop = !!(opts && opts.loop);
         const rate = opts && opts.rate ? opts.rate : 1;
@@ -165,7 +206,7 @@ export function createAudio(opts) {
     }
 
     function stopLoop(name) {
-        const key = String(name || '').toLowerCase().replace(/\.wav$/, '');
+        const key = stemKey(name);
         stopKey(key, loops.get(key));
     }
 
@@ -175,7 +216,7 @@ export function createAudio(opts) {
         if (handle.source) handle.source.playbackRate.value = rate;
     }
 
-    return { unlock: context, play, stopLoop, setRate, load, setListener, setVolume, getVolume };
+    return { unlock, play, stopLoop, setRate, load, preload, setListener, setVolume, getVolume };
 }
 
 export { AUDIO_GAIN, AUDIO_REF_DISTANCE, AUDIO_ROLLOFF, AUDIO_MAX_DISTANCE };

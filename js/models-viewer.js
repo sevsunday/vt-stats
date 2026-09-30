@@ -4231,6 +4231,43 @@ export class ObjectViewer {
     return true;
   }
 
+  /* Upload maps already on the ship and target, compile their programs, and
+   * draw one shadow pass. The shooting range calls this after load / loadProp.
+   * The animation loop keeps running. A model or prop swapped out mid-await
+   * (or a disposed viewer) bails before the extra render. */
+  async warmGpu() {
+    if (this.disposed || !this.renderer || typeof this.renderer.compileAsync !== 'function') return;
+    const model = this._model;
+    const prop = this._prop;
+    const gen = this._propGen || 0;
+    const stale = () => this.disposed || this._model !== model
+      || (this._propGen || 0) !== gen || this._prop !== prop;
+    const textures = [];
+    const seen = new Set();
+    this.scene.traverse((o) => {
+      const list = !o.material ? [] : (Array.isArray(o.material) ? o.material : [o.material]);
+      list.forEach((m) => {
+        ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap'].forEach((k) => {
+          const tex = m[k];
+          if (!tex || !tex.isTexture || seen.has(tex.uuid)) return;
+          seen.add(tex.uuid);
+          textures.push(tex);
+        });
+      });
+    });
+    const batch = 4;
+    for (let i = 0; i < textures.length; i++) {
+      if (stale()) return;
+      try { this.renderer.initTexture(textures[i]); } catch { /* image not ready yet */ }
+      if ((i + 1) % batch === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    if (stale()) return;
+    try { await this.renderer.compileAsync(this.scene, this.camera); } catch { /* compile is best-effort */ }
+    if (stale()) return;
+    this._markShadowDirty();
+    this.renderer.render(this.scene, this.camera);
+  }
+
   async loadProp(url) {
     this.clearProp();
     const gen = (this._propGen = (this._propGen || 0) + 1);

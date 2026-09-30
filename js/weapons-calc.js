@@ -1252,6 +1252,13 @@
             return SHIELD_NAMES[letter] ? SHIELD_NAMES[letter] + ' shield' : ARMOR_NAMES[letter];
         }
 
+        // The damage column for a target: its shield class while a shield is
+        // up, else its armor class.
+        function damageLetter(tg) {
+            if (!tg) return 'N';
+            return tg.shieldClass && tg.shieldClass !== 'N' ? tg.shieldClass : tg.armorClass;
+        }
+
         function compute(args) {
             const v = args && args.variant;
             if (!v) throw new Error('compute() needs a variant');
@@ -1260,7 +1267,7 @@
             const g = Math.max(1, Math.round(num(args.g, 1)));
             const d = v.damage;
             const f = v.fire;
-            const letter = tg ? (tg.shieldClass && tg.shieldClass !== 'N' ? tg.shieldClass : tg.armorClass) : 'N';
+            const letter = damageLetter(tg);
             const assumptions = v.notes.slice();
             const warnings = v.warnings.slice();
             const explain = {};
@@ -1486,7 +1493,7 @@
 
         const ctx = {
             scope, families, familiesIn, weaponStemsFor, packOf, units, family, variant, shooter, target, unitInfo,
-            resolveVariant, fittingVariants, defaultWeapon, compute,
+            resolveVariant, fittingVariants, defaultWeapon, damageLetter, compute,
             reticleFrame: (name) => (reticleFrames && reticleFrames[name]) || null,
             hasReticles: !!reticleFrames,
         };

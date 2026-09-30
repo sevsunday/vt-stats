@@ -10,8 +10,10 @@
  *  - ODF colour bytes are display values (BZ2 has no colour management), so
  *    they are fed to three.js as sRGB and round-trip to the same pixels.
  *  - A render whose texture has not resolved yet is not drawn: the range
- *    preloads every stem the weapon can reach (fx.preload), and a node stays
- *    hidden until its map lands rather than flashing an untextured quad.
+ *    preloads every stem the weapon can reach (fx.preload), then fx.warm
+ *    uploads those images and compiles the effect programs before the first
+ *    shot. A node stays hidden until its map lands rather than flashing an
+ *    untextured quad.
  *  - animateTime defaults to the guide's 1e30 (hold the start values); only
  *    draw_bolt (0.1) and trails (segmentTime) have their own defaults.
  *  - draw_trail ages each cross-section over segmentTime (head = start
@@ -170,6 +172,10 @@ function stepSim(node, dt, groundY) {
 
 /* Ribbon mesh shared by draw_trail / draw_tracer / draw_bolt: TRAIL_POINTS
  * cross-sections of two vertices, RGBA vertex colours. */
+function disposeOwned(geo) {
+    if (geo && !(geo.userData && geo.userData.vtShared)) geo.dispose();
+}
+
 function ribbonGeometry() {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL_POINTS * 6), 3));
@@ -195,6 +201,20 @@ export function createFxRuntime(scene, assets) {
     const texReady = new Map();
     const geomCache = new Map();
     const geomReady = new Map();
+    const uploaded = new Set();
+    const shared = { sphere: null, circle: null };
+    const proto = {
+        built: false,
+        compiled: false,
+        spriteMat: null,
+        basicMat: null,
+        vertMat: null,
+        sprite: null,
+        basicMesh: null,
+        vertMesh: null,
+        ribbonGeo: null,
+    };
+    let warmTail = Promise.resolve();
     const live = [];
     const root = new THREE.Group();
     root.name = 'vt-fx';
@@ -233,14 +253,113 @@ export function createFxRuntime(scene, assets) {
         return pending;
     }
 
-    /* Warm the caches before the first shot. */
+    /* Shared unit meshes. Particles only scale the object, so one geometry
+     * serves every sphere and every disc. Ribbons rewrite their buffers and
+     * keep their own. */
+    function sharedSphere() {
+        if (!shared.sphere) {
+            shared.sphere = new THREE.SphereGeometry(1, 32, 16);
+            shared.sphere.userData.vtShared = true;
+        }
+        return shared.sphere;
+    }
+
+    function sharedCircle() {
+        if (!shared.circle) {
+            shared.circle = new THREE.CircleGeometry(1, 24);
+            shared.circle.userData.vtShared = true;
+        }
+        return shared.circle;
+    }
+
+    /* Warm the file caches before the first shot. Resolves when every
+     * requested image and mesh has settled (missing stems settle as null). */
     function preload(list) {
         const tex = (list && list.textures) || [];
         const geom = (list && list.geometry) || [];
-        tex.forEach((s) => texture(s));
-        geom.forEach((s) => model(s));
-        texture('lightflare');
-        texture('lighthalo');
+        const jobs = [];
+        tex.forEach((s) => jobs.push(texture(s)));
+        geom.forEach((s) => jobs.push(model(s)));
+        jobs.push(texture('lightflare'));
+        jobs.push(texture('lighthalo'));
+        return Promise.all(jobs);
+    }
+
+    /* Compile the three effect programs and upload cached images. Prototype
+     * materials stay alive for the runtime: disposing them drops the program
+     * and the next shot pays the compile again. No renderer means no-op (the
+     * headless gate). */
+    function warm(renderer, camera) {
+        if (!renderer || typeof renderer.compileAsync !== 'function' || typeof renderer.initTexture !== 'function') {
+            return Promise.resolve();
+        }
+        const run = warmTail.then(() => warmBody(renderer, camera), () => warmBody(renderer, camera));
+        warmTail = run.then(() => {}, () => {});
+        return run;
+    }
+
+    async function warmBody(renderer, camera) {
+        await Promise.all([...texCache.values(), ...geomCache.values()]);
+        const texes = [];
+        texReady.forEach((t) => { if (t) texes.push(t); });
+        const batch = 4;
+        for (let i = 0; i < texes.length; i++) {
+            const tex = texes[i];
+            if (uploaded.has(tex.uuid)) continue;
+            try {
+                renderer.initTexture(tex);
+                uploaded.add(tex.uuid);
+            } catch { /* image not decodable yet */ }
+            if ((i + 1) % batch === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+        const sample = texes.find((t) => t && t.image) || null;
+        const compile = ensurePrototypes(sample);
+        if (!compile || !camera) return;
+        root.add(proto.sprite, proto.basicMesh, proto.vertMesh);
+        try {
+            await renderer.compileAsync(root, camera);
+            proto.compiled = true;
+        } finally {
+            root.remove(proto.sprite);
+            root.remove(proto.basicMesh);
+            root.remove(proto.vertMesh);
+        }
+    }
+
+    /* Returns true when the programs still need a compile. */
+    function ensurePrototypes(sample) {
+        if (!proto.built) {
+            proto.spriteMat = new THREE.SpriteMaterial({
+                transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+            });
+            proto.basicMat = new THREE.MeshBasicMaterial({
+                transparent: true, depthWrite: false, side: THREE.DoubleSide,
+            });
+            proto.vertMat = new THREE.MeshBasicMaterial({
+                transparent: true, depthWrite: false, side: THREE.DoubleSide, vertexColors: true,
+            });
+            proto.ribbonGeo = ribbonGeometry();
+            proto.sprite = new THREE.Sprite(proto.spriteMat);
+            proto.basicMesh = new THREE.Mesh(sharedSphere(), proto.basicMat);
+            proto.vertMesh = new THREE.Mesh(proto.ribbonGeo, proto.vertMat);
+            proto.sprite.visible = false;
+            proto.basicMesh.visible = false;
+            proto.vertMesh.visible = false;
+            proto.sprite.frustumCulled = false;
+            proto.basicMesh.frustumCulled = false;
+            proto.vertMesh.frustumCulled = false;
+            proto.built = true;
+        }
+        if (sample && !proto.spriteMat.map) {
+            proto.spriteMat.map = sample;
+            proto.basicMat.map = sample;
+            proto.vertMat.map = sample;
+            proto.spriteMat.needsUpdate = true;
+            proto.basicMat.needsUpdate = true;
+            proto.vertMat.needsUpdate = true;
+            return true;
+        }
+        return !proto.compiled;
     }
 
     /* Bind a texture stem to an object: apply immediately when the stem has
@@ -436,12 +555,12 @@ export function createFxRuntime(scene, assets) {
                 bindTexture('lighthalo', halo, applyMap(halo.material), isDisposed);
             }
         } else if (base === 'draw_sphere') {
-            obj = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), basicMat());
+            obj = new THREE.Mesh(sharedSphere(), basicMat());
             obj.rotation.set(num(section.initialpitch, 0), num(section.initialyaw, 0), num(section.initialroll, 0));
             root.add(obj);
             bindTexture(stem, obj, applyMap(obj.material), isDisposed);
         } else if (base === 'draw_planar') {
-            obj = new THREE.Mesh(new THREE.CircleGeometry(1, 24), basicMat());
+            obj = new THREE.Mesh(sharedCircle(), basicMat());
             obj.rotation.x = -Math.PI / 2;
             root.add(obj);
             bindTexture(stem, obj, applyMap(obj.material), isDisposed);
@@ -966,10 +1085,10 @@ export function createFxRuntime(scene, assets) {
                 if (!o) return;
                 root.remove(o);
                 o.traverse((k) => {
-                    if (k.geometry && k !== o) k.geometry.dispose();
+                    if (k.geometry && k !== o) disposeOwned(k.geometry);
                     if (k.material && k.material.dispose && k !== o) k.material.dispose();
                 });
-                if (o.geometry) o.geometry.dispose();
+                disposeOwned(o.geometry);
                 if (o.material && o.material.dispose) o.material.dispose();
             });
             if (light) root.remove(light);
@@ -1081,7 +1200,7 @@ export function createFxRuntime(scene, assets) {
             color: setSrgb(new THREE.Color(), start), transparent: true, depthWrite: false,
             blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: start.a,
         });
-        const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), mat);
+        const mesh = new THREE.Mesh(sharedSphere(), mat);
         mesh.position.copy(position);
         root.add(mesh);
         let disposed = false;
@@ -1104,7 +1223,7 @@ export function createFxRuntime(scene, assets) {
             dispose() {
                 disposed = true;
                 root.remove(mesh);
-                mesh.geometry.dispose();
+                disposeOwned(mesh.geometry);
                 mat.dispose();
             },
         };
@@ -1128,6 +1247,23 @@ export function createFxRuntime(scene, assets) {
         live.forEach((n) => n.dispose());
         live.length = 0;
         perKey.clear();
+        if (proto.sprite) root.remove(proto.sprite);
+        if (proto.basicMesh) root.remove(proto.basicMesh);
+        if (proto.vertMesh) root.remove(proto.vertMesh);
+        if (proto.spriteMat) proto.spriteMat.dispose();
+        if (proto.basicMat) proto.basicMat.dispose();
+        if (proto.vertMat) proto.vertMat.dispose();
+        disposeOwned(proto.ribbonGeo);
+        if (shared.sphere) {
+            shared.sphere.userData.vtShared = false;
+            shared.sphere.dispose();
+            shared.sphere = null;
+        }
+        if (shared.circle) {
+            shared.circle.userData.vtShared = false;
+            shared.circle.dispose();
+            shared.circle = null;
+        }
         scene.remove(root);
     }
 
@@ -1146,6 +1282,7 @@ export function createFxRuntime(scene, assets) {
         follower,
         shieldPulse,
         preload,
+        warm,
         update,
         dispose,
         setBudget(n) { budget = n; },

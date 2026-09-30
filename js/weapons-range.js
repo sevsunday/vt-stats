@@ -63,6 +63,7 @@ let orbitAngle = 0;
 
 let snapshot = null;
 let shooterKey = '';
+let onLoadout = null;
 /* One slot per hardpoint GROUP: every hardpoint sharing a category and an
  * assault flag mounts the same weapon and fires together, like the game
  * (a weapon powerup replaces the whole group). A combat and an assault
@@ -182,8 +183,13 @@ function muzzles() {
     });
 }
 
-function buildSlots(snap, keepUser) {
-    const prev = keepUser ? new Map(slots.map((s) => [s.key, s.weapon])) : null;
+/* The page owns the loadout (it is in the URL), so `snap.loadout` is the
+ * authority on what each group carries; `hp.mounted` is only the fallback for
+ * a snapshot that carries no map. keepActive holds the firing slot where the
+ * user left it, which no loadout edit should move. */
+function buildSlots(snap, keepActive) {
+    const prevKey = keepActive && slots[activeSlot] ? slots[activeSlot].key : null;
+    const lo = snap.loadout || {};
     const groups = new Map();
     (snap.hardpoints || []).forEach((hp) => {
         const key = groupKeyOf(hp);
@@ -196,41 +202,49 @@ function buildSlots(snap, keepUser) {
                 assault: !!hp.assault,
                 nodes: [],
                 count: 0,
-                weapon: prev && prev.has(key) ? prev.get(key) : (hp.mounted || null),
+                weapon: (Object.prototype.hasOwnProperty.call(lo, key) ? lo[key] : hp.mounted) || null,
                 options: snap.optionsFor ? snap.optionsFor(hp) : [],
             };
             groups.set(key, g);
         }
         g.count += 1;
         if (hp.node && !g.nodes.includes(hp.node)) g.nodes.push(hp.node);
-        if (!g.weapon && hp.mounted && !(prev && prev.has(key))) g.weapon = hp.mounted;
     });
     slots = Array.from(groups.values());
-    const scenarioNodes = new Set(snap.scenarioNodes || []);
-    if (snap.weaponStem) {
-        slots.forEach((s) => { if (s.nodes.some((n) => scenarioNodes.has(n))) s.weapon = snap.weaponStem; });
-        // No ship picked (or no fitting hardpoint): still fire the scenario
-        // weapon from a virtual slot at the ship origin.
-        if (!slots.some((s) => s.weapon === snap.weaponStem)) {
-            slots.push({
-                key: 'virtual', index: slots.length + 1, category: snap.weaponCategory || 'GUN', assault: false,
-                nodes: [null], count: 1, weapon: snap.weaponStem, options: [], virtual: true,
-            });
-        }
+    // No ship picked (or no fitting hardpoint): still fire the scenario weapon
+    // from a virtual slot at the ship origin.
+    if (snap.weaponStem && !slots.some((s) => s.weapon === snap.weaponStem)) {
+        slots.push({
+            key: 'virtual', index: slots.length + 1, category: snap.weaponCategory || 'GUN', assault: false,
+            nodes: [null], count: 1, weapon: snap.weaponStem, options: [], virtual: true,
+        });
     }
-    const first = slots.findIndex((s) => s.weapon === snap.weaponStem);
-    activeSlot = first >= 0 ? first : slots.findIndex((s) => s.weapon);
+    let idx = prevKey ? slots.findIndex((s) => s.key === prevKey && s.weapon) : -1;
+    if (idx < 0 && snap.scenarioKey) idx = slots.findIndex((s) => s.key === snap.scenarioKey && s.weapon);
+    if (idx < 0 && snap.weaponStem) idx = slots.findIndex((s) => s.weapon === snap.weaponStem);
+    if (idx < 0) idx = slots.findIndex((s) => s.weapon);
+    activeSlot = idx;
+}
+
+/* Hand the page every mount so it can put the loadout in the URL. */
+function notifyLoadout() {
+    if (!onLoadout) return;
+    const map = {};
+    slots.forEach((s) => { if (!s.virtual) map[s.key] = s.weapon || null; });
+    onLoadout(map);
 }
 
 function applyActiveSlot(keepAmmo) {
     const stem = activeWeapon();
     const entry = stem && db.Weapon && db.Weapon[stem + '.odf'];
     const profile = entry ? buildProfile(entry) : null;
-    // Warm every texture / mesh this weapon can reach before the first shot,
-    // so no render is ever drawn untextured.
-    if (entry) fx.preload(profileAssets(entry, db));
+    // Fetch this weapon's textures, meshes and sounds, then upload and compile
+    // them. Fire stays live while that runs; the stage chip says so.
+    const epoch = warmEpoch;
+    if (entry) scheduleWarm(profileAssets(entry, db), epoch, 'wpn:' + stem);
     sim.setWeapon(profile, db, { max: snapshot ? snapshot.maxAmmo : 0, regen: snapshot ? snapshot.regen : 0 }, keepAmmo);
     renderLoadout();
+    if (entry) warmOtherSlots(epoch, stem);
 }
 
 function renderLoadout() {
@@ -544,6 +558,9 @@ export async function mount(container, shared) {
         + '<div class="vt-wpn-range-stage">'
         + '<div class="vt-wpn-range-view" data-range-view></div>'
         + '<div class="vt-wpn-range-hud">'
+        + '<div class="vt-wpn-range-loading" data-range-loading hidden aria-live="polite">'
+        + '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>'
+        + 'Loading visuals</div>'
         + '<img data-range-reticle alt="" class="vt-wpn-range-reticle" hidden>'
         + '<div class="vt-wpn-range-card vt-wpn-range-card-weapon">'
         + '<div data-range-weapon class="vt-wpn-range-weapon"></div>'
@@ -591,6 +608,7 @@ export async function mount(container, shared) {
     fxIndex = mergeFxIndex(fxIdx, shared && shared.fxIndexes);
     reticleIndex = ret;
     cockpitIndex = pits;
+    onLoadout = (shared && shared.onLoadout) || null;
 
     hudEls = {
         reticle: rootEl.querySelector('[data-range-reticle]'),
@@ -675,6 +693,9 @@ export async function mount(container, shared) {
                 slots[i].weapon = sel.value || null;
                 if (i === activeSlot || activeSlot < 0 || !slots[activeSlot].weapon) activeSlot = slots[i].weapon ? i : activeSlot;
                 applyActiveSlot(true);
+                // The page rewrites the URL and syncs back, which rebuilds
+                // these slots from the loadout it just recorded.
+                notifyLoadout();
             }
             return;
         }
@@ -728,6 +749,72 @@ function onKeyUp(e) {
 }
 
 let syncChain = Promise.resolve();
+let warmEpoch = 0;
+let warmJobs = 0;
+const warmedKeys = new Set();
+const warmingKeys = new Set();
+
+function paintLoadingChip() {
+    const el = rootEl && rootEl.querySelector('[data-range-loading]');
+    if (el) el.hidden = warmJobs <= 0;
+}
+
+/* A newer sync drops in-flight jobs from the previous one so the chip
+ * cannot stay up after the viewer has moved on. */
+function startWarmEpoch() {
+    warmEpoch += 1;
+    warmJobs = 0;
+    warmingKeys.clear();
+    paintLoadingChip();
+    return warmEpoch;
+}
+
+function retainWarm(epoch) {
+    if (epoch !== warmEpoch) return () => {};
+    warmJobs += 1;
+    paintLoadingChip();
+    let closed = false;
+    return () => {
+        if (closed || epoch !== warmEpoch) return;
+        closed = true;
+        warmJobs -= 1;
+        paintLoadingChip();
+    };
+}
+
+/* File fetch, then GPU upload and program compile. Sounds are fetched here
+ * and decoded on the next unlock. `key` skips a list this page already warmed. */
+function scheduleWarm(list, epoch, key) {
+    if (!list || epoch !== warmEpoch || !fx || !viewer) return;
+    if (key && warmedKeys.has(key)) return;
+    const token = key ? key + '@' + epoch : '';
+    if (token && warmingKeys.has(token)) return;
+    if (token) warmingKeys.add(token);
+    const release = retainWarm(epoch);
+    const fxJob = fx.preload(list).then(() => {
+        if (epoch !== warmEpoch || !viewer) return false;
+        return fx.warm(viewer.renderer, viewer.camera).then(() => true);
+    });
+    const sndJob = audio ? audio.preload(list.sounds) : Promise.resolve();
+    let ok = false;
+    Promise.all([fxJob, sndJob]).then((results) => { ok = results[0] === true; }).catch(() => { ok = false; }).finally(() => {
+        if (token) warmingKeys.delete(token);
+        if (ok && epoch === warmEpoch && key) warmedKeys.add(key);
+        release();
+    });
+}
+
+function warmOtherSlots(epoch, activeStem) {
+    const seen = new Set();
+    if (activeStem) seen.add(activeStem);
+    slots.forEach((s) => {
+        if (!s.weapon || seen.has(s.weapon)) return;
+        seen.add(s.weapon);
+        const entry = db && db.Weapon && db.Weapon[s.weapon + '.odf'];
+        if (!entry) return;
+        scheduleWarm(profileAssets(entry, db), epoch, 'wpn:' + s.weapon);
+    });
+}
 
 /* Scenario changes arrive from several callers; run them one at a time so
  * two model loads never race each other. */
@@ -738,45 +825,65 @@ export function sync(snap) {
 
 async function doSync(snap) {
     if (!viewer || !snap || !db) return;
-    snapshot = snap;
-    const nextShooter = [snap.shooterStem, snap.shooterThumb, (snap.hardpoints || []).map((h) => h.node + ':' + h.mounted).join(',')].join('|');
-    const shooterChanged = nextShooter !== shooterKey;
-    const targetChanged = (!target && !!snap.targetThumb) || (snap.targetThumb || null) !== doSync.targetThumb
-        || (snap.targetStem || null) !== doSync.targetStem;
-    const scenarioChanged = (snap.weaponStem || null) !== doSync.weaponStem;
-    doSync.targetThumb = snap.targetThumb || null;
-    doSync.targetStem = snap.targetStem || null;
-    doSync.weaponStem = snap.weaponStem || null;
-    targetLetter = snap.letter || 'N';
-    shieldDef = shieldEffectFor(db, targetLetter);
-    if (shieldDef && shieldDef.texture) fx.preload({ textures: [shieldDef.texture] });
+    const epoch = startWarmEpoch();
+    const releaseSync = retainWarm(epoch);
+    try {
+        snapshot = snap;
+        const nextShooter = [snap.shooterStem, snap.shooterThumb, (snap.hardpoints || []).map((h) => h.node + ':' + h.mounted).join(',')].join('|');
+        const shooterChanged = nextShooter !== shooterKey;
+        const targetChanged = (!target && !!snap.targetThumb) || (snap.targetThumb || null) !== doSync.targetThumb
+            || (snap.targetStem || null) !== doSync.targetStem;
+        const scenarioChanged = (snap.weaponStem || null) !== doSync.weaponStem;
+        const nextLoadout = Object.keys(snap.loadout || {}).sort()
+            .map((k) => k + '=' + (snap.loadout[k] || '-')).join(',');
+        const loadoutChanged = nextLoadout !== doSync.loadoutKey;
+        doSync.targetThumb = snap.targetThumb || null;
+        doSync.targetStem = snap.targetStem || null;
+        doSync.weaponStem = snap.weaponStem || null;
+        doSync.loadoutKey = nextLoadout;
+        targetLetter = snap.letter || 'N';
+        shieldDef = shieldEffectFor(db, targetLetter);
+        if (shieldDef && shieldDef.texture) fx.preload({ textures: [shieldDef.texture] });
 
-    if (shooterChanged) {
-        shooterKey = nextShooter;
-        buildSlots(snap, false);
-        await loadModels(snap);
-    } else {
-        if (scenarioChanged) buildSlots(snap, true);
-        if (targetChanged) await loadTarget(snap);
-        else {
-            maxHp = snap.targetHp > 0 ? snap.targetHp : maxHp;
-            hpRegen = snap.targetRegen || 0;
-            if (hp > maxHp) hp = maxHp;
+        if (shooterChanged) {
+            shooterKey = nextShooter;
+            buildSlots(snap, false);
+            await loadModels(snap);
+        } else {
+            // A new Scenario weapon takes the trigger; a change to some other
+            // group leaves the firing slot where the user put it.
+            if (scenarioChanged || loadoutChanged) buildSlots(snap, !scenarioChanged);
+            if (targetChanged) await loadTarget(snap);
+            else {
+                maxHp = snap.targetHp > 0 ? snap.targetHp : maxHp;
+                hpRegen = snap.targetRegen || 0;
+                if (hp > maxHp) hp = maxHp;
+            }
         }
+        if (epoch !== warmEpoch || !viewer) return;
+        if (shooterChanged || targetChanged) {
+            try { await viewer.warmGpu(); } catch (err) { console.error('Shooting range GPU warm failed:', err); }
+        }
+        if (epoch !== warmEpoch || !viewer) return;
+        if (snap.distanceHint && snap.distanceHint > 5 && snap.distanceHint < 5000 && (shooterChanged || scenarioChanged)) {
+            distance = Math.max(20, Math.min(400, snap.distanceHint * 0.45));
+            const slider = rootEl.querySelector('[data-range-dist]');
+            if (slider) slider.value = String(Math.round(distance));
+            if (hudEls.distText) hudEls.distText.textContent = Math.round(distance) + ' m';
+        }
+        const cockpitLabel = rootEl.querySelector('[data-range-cockpit-label]');
+        if (cockpitLabel) cockpitLabel.hidden = !(cockpitIndex && cockpitIndex.models && cockpitIndex.models[snap.shooterThumb]);
+        if (deathXpl) scheduleWarm(profileAssets(null, db, [deathXpl]), epoch, 'death:' + deathXpl);
+        if (shieldDef && shieldDef.texture) scheduleWarm({ textures: [shieldDef.texture] }, epoch, 'shield:' + shieldDef.texture);
+        applyActiveSlot(!shooterChanged);
+    } finally {
+        releaseSync();
     }
-    if (snap.distanceHint && snap.distanceHint > 5 && snap.distanceHint < 5000 && (shooterChanged || scenarioChanged)) {
-        distance = Math.max(20, Math.min(400, snap.distanceHint * 0.45));
-        const slider = rootEl.querySelector('[data-range-dist]');
-        if (slider) slider.value = String(Math.round(distance));
-        if (hudEls.distText) hudEls.distText.textContent = Math.round(distance) + ' m';
-    }
-    const cockpitLabel = rootEl.querySelector('[data-range-cockpit-label]');
-    if (cockpitLabel) cockpitLabel.hidden = !(cockpitIndex && cockpitIndex.models && cockpitIndex.models[snap.shooterThumb]);
-    applyActiveSlot(!shooterChanged);
 }
 
 export function destroy() {
     loop = false;
+    onLoadout = null;
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('keyup', onKeyUp);
     if (sim) sim.dispose();

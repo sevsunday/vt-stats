@@ -941,6 +941,28 @@ a.vt-wpn-source-link {
     pointer-events: none;
 }
 
+.vt-wpn-range-loading {
+    position: absolute;
+    top: 0.75rem;
+    left: 50%;
+    z-index: 2;
+    transform: translateX(-50%);
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--kb-bg-body) 74%, transparent);
+    color: var(--kb-text-primary);
+    font-size: 0.8rem;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.vt-wpn-range-loading:not([hidden]) {
+    display: inline-flex;
+}
+
 .vt-wpn-range-reticle {
     position: absolute;
     left: 50%;
@@ -974,6 +996,39 @@ a.vt-wpn-source-link {
 .vt-wpn-range-card-target {
     right: 0.75rem;
     text-align: right;
+}
+
+@media (max-width: 640px) {
+    .vt-wpn-range-stage {
+        min-height: 320px;
+    }
+
+    .vt-wpn-range-hud {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 0.4rem;
+        padding: 0.5rem;
+    }
+
+    .vt-wpn-range-reticle {
+        top: 38%;
+    }
+
+    .vt-wpn-range-card {
+        position: static;
+        min-width: 0;
+        max-width: none;
+        width: 100%;
+    }
+
+    .vt-wpn-range-card-target {
+        text-align: left;
+    }
+
+    .vt-wpn-range-card-target .vt-wpn-range-bar-row {
+        flex-direction: row;
+    }
 }
 
 .vt-wpn-range-weapon strong {

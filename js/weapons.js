@@ -13,7 +13,9 @@
     const HUD_BASE = '../data/ui/hud/';
     const THUMB_BASE = '../data/models/thumbnails/';
     const ODF_HREF = '../odf/?odf=';
-    const DEFAULT_SCENARIO = { w: 'gblast', s: 'ivtank_vsr', t: 'ivscav_vsr' };
+    // No weapon here: an empty URL opens the ship's own stock loadout, so the
+    // landing weapon comes from the ODF (see applyShipWeapon in boot).
+    const DEFAULT_SCENARIO = { s: 'ivtank_vsr', t: 'ivscav_vsr' };
     const LIST_LIMIT = 300;
     const HP_ICONS = {
         GUN: 'gun', CANN: 'cannon', MORT: 'mortar', ROCK: 'rocket',
@@ -53,6 +55,10 @@
     const state = {
         tab: 'scenario', cat: null,
         w: null, v: null, s: null, sd: false, t: null, td: false, sh: null,
+        // Hardpoint groups mounted with something other than the ship's stock
+        // weapon: group key -> stem, or null for an emptied group. The group
+        // holding the Scenario weapon is never in here (that mount is `w`).
+        lo: {},
     };
     const view = {
         weapon: { q: '', showAll: false },
@@ -87,6 +93,34 @@
         el.hidden = !text;
     }
 
+    // Hardpoints sharing a category and an assault flag mount one weapon and
+    // fire together. Same keys as buildSlots() in js/weapons-range.js.
+    function groupKeyOf(hp) {
+        return String(hp.category || 'GUN') + (hp.assault ? ':a' : ':c');
+    }
+
+    function hasLo(key) {
+        return Object.prototype.hasOwnProperty.call(state.lo, key);
+    }
+
+    // One `lo` value: CAT.flag.stem, or CAT.flag.- for an emptied group.
+    // Only characters URLSearchParams leaves unescaped, so the link stays
+    // readable; each group is its own `lo` param.
+    function encodeLo(key, stem) {
+        const [cat, flag] = key.split(':');
+        return cat + '.' + flag + '.' + (stem || '-');
+    }
+
+    function decodeLo(piece) {
+        const bits = String(piece || '').split('.');
+        if (bits.length < 3) return null;
+        const cat = bits[0].toUpperCase();
+        const flag = bits[1].toLowerCase();
+        const stem = bits.slice(2).join('.');
+        if (!Calc.CATEGORIES.includes(cat) || (flag !== 'c' && flag !== 'a')) return null;
+        return { key: cat + ':' + flag, stem: stem === '-' ? null : Calc.stemOf(stem) };
+    }
+
     function readUrl() {
         const p = new URLSearchParams(window.location.search);
         const stem = (key) => {
@@ -106,6 +140,11 @@
         state.td = p.get('td') === '1';
         const sh = String(p.get('sh') || '').toUpperCase();
         state.sh = ['N', 'S', 'D', 'A'].includes(sh) ? sh : null;
+        state.lo = {};
+        p.getAll('lo').forEach((piece) => {
+            const hit = decodeLo(piece);
+            if (hit) state.lo[hit.key] = hit.stem;
+        });
         if (!state.w && !state.s && !state.t) Object.assign(state, DEFAULT_SCENARIO);
     }
 
@@ -115,6 +154,7 @@
         if (state.v) p.set('v', state.v);
         if (state.s) p.set('s', state.s);
         if (state.s && state.sd) p.set('sd', '1');
+        if (state.s) Object.keys(state.lo).sort().forEach((key) => p.append('lo', encodeLo(key, state.lo[key])));
         if (state.t) p.set('t', state.t);
         if (state.t && state.td) p.set('td', '1');
         if (state.t && state.sh) p.set('sh', state.sh);
@@ -135,7 +175,26 @@
         }
         if (state.s && !ctx.shooter(state.s)) { dropped.push('ship ' + state.s); state.s = null; }
         if (state.t && !ctx.target(state.t)) { dropped.push('target ' + state.t); state.t = null; }
-        if (dropped.length) setStatus('Not in the ODF database, ignored: ' + dropped.join(', ') + '.', true);
+        const unfit = [];
+        const sh = currentShooter();
+        Object.keys(state.lo).forEach((key) => {
+            const stem = state.lo[key];
+            if (!sh) { delete state.lo[key]; return; }
+            if (stem == null) return;
+            const v = ctx.variant(stem);
+            const [cat, flag] = key.split(':');
+            if (!v) { dropped.push('weapon ' + stem); delete state.lo[key]; return; }
+            // A mount the engine would refuse: wrong hardpoint type, or the
+            // wrong half of the combat / assault pair.
+            if (v.category !== cat || !!v.isAssault !== (flag === 'a')) {
+                unfit.push(v.stem + ' on a ' + Calc.categoryLabel(cat) + ' hardpoint');
+                delete state.lo[key];
+            }
+        });
+        const notes = [];
+        if (dropped.length) notes.push('Not in the ODF database, ignored: ' + dropped.join(', ') + '.');
+        if (unfit.length) notes.push('Does not fit, ignored: ' + unfit.join(', ') + '.');
+        if (notes.length) setStatus(notes.join(' '), true);
     }
 
     // ---- media --------------------------------------------------------
@@ -211,6 +270,124 @@
         const g = res.g;
         const r = ctx.compute({ variant: res.variant, shooter: sh, target: tg, g });
         return { fam, sh, tg, res, r, g, v: res.variant };
+    }
+
+    // ---- loadout ------------------------------------------------------
+
+    // What each hardpoint group carries out of the box, in hardpoint order.
+    function stockLoadout(sh) {
+        const out = new Map();
+        if (sh) {
+            sh.hardpoints.forEach((hp) => {
+                const key = groupKeyOf(hp);
+                if (!out.has(key) || (!out.get(key) && hp.mounted)) out.set(key, hp.mounted || null);
+            });
+        }
+        return out;
+    }
+
+    // The group the Scenario weapon is mounted on, or null when the ship has
+    // no hardpoint for it (the range then fires it from a virtual slot).
+    function scenarioGroupKey(sh) {
+        const fam = sh && state.w ? ctx.family(state.w) : null;
+        if (!fam) return null;
+        const res = ctx.resolveVariant(fam, sh, state.v);
+        return res.hardpoints.length ? groupKeyOf(res.hardpoints[0]) : null;
+    }
+
+    // Stock, then the `lo` overrides, then the Scenario weapon on its own
+    // group. normalizeLoadout() keeps `lo` off that group, so the calculator
+    // and the shooting range can never disagree about what is mounted.
+    function effectiveLoadout(sh) {
+        const out = stockLoadout(sh);
+        Object.keys(state.lo).forEach((key) => { if (out.has(key)) out.set(key, state.lo[key]); });
+        const sc = scenarioGroupKey(sh);
+        if (sc && state.w && !hasLo(sc)) {
+            const fam = ctx.family(state.w);
+            out.set(sc, ctx.resolveVariant(fam, sh, state.v).variant.stem);
+        }
+        return out;
+    }
+
+    // Point the Scenario weapon at a stem, pinning the combat / assault twin
+    // only when the family would otherwise resolve to the other one.
+    function pickScenarioWeapon(stem, sh) {
+        const fam = stem ? ctx.family(stem) : null;
+        if (!fam) return false;
+        state.w = fam.key;
+        const auto = ctx.resolveVariant(fam, sh, null).variant;
+        state.v = auto && auto.stem === stem ? null : (ctx.variant(stem).isAssault ? 'a' : 'c');
+        view.frame = null;
+        return true;
+    }
+
+    // The Scenario pickers own their own hardpoint group: drop any range
+    // override there so `w` is what gets mounted.
+    function claimScenarioGroup() {
+        const key = scenarioGroupKey(currentShooter());
+        if (key) delete state.lo[key];
+    }
+
+    // The group holding the Scenario weapon was emptied: move `w` to whatever
+    // is still mounted, so the range always has something to fire.
+    function moveScenarioWeapon(sh) {
+        const lo = effectiveLoadout(sh);
+        const next = Array.from(lo.values()).find((stem) => stem && ctx.family(stem));
+        if (!next || !pickScenarioWeapon(next, sh)) { state.w = null; state.v = null; }
+    }
+
+    // Keeps `lo` canonical: only real groups, only mounts that fit, nothing
+    // that merely repeats the stock weapon, and never the Scenario group.
+    function normalizeLoadout() {
+        const sh = currentShooter();
+        if (!sh) {
+            state.lo = {};
+            return;
+        }
+        const stock = stockLoadout(sh);
+        Object.keys(state.lo).forEach((key) => {
+            const stem = state.lo[key];
+            if (!stock.has(key)) { delete state.lo[key]; return; }
+            if (stem == null) return;
+            const v = ctx.variant(stem);
+            const [cat, flag] = key.split(':');
+            if (!v || v.category !== cat || !!v.isAssault !== (flag === 'a')) delete state.lo[key];
+        });
+        // The fold runs before the stock-equality pass below: mounting the
+        // stock weapon back on the Scenario group has to move `w`, not read as
+        // a no-op override.
+        const key = scenarioGroupKey(sh);
+        if (key && hasLo(key)) {
+            const stem = state.lo[key];
+            delete state.lo[key];
+            if (stem) pickScenarioWeapon(stem, sh);
+            else {
+                state.lo[key] = null;
+                moveScenarioWeapon(sh);
+            }
+        }
+        const scenario = scenarioGroupKey(sh);
+        const fam = state.w ? ctx.family(state.w) : null;
+        const armed = fam ? ctx.resolveVariant(fam, sh, state.v).variant.stem : null;
+        Object.keys(state.lo).forEach((k) => {
+            // An override that repeats the stock weapon, or the group `w` just
+            // moved onto, says nothing: keep it out of the link.
+            const same = k === scenario ? armed : stock.get(k);
+            if (state.lo[k] === same) delete state.lo[k];
+        });
+    }
+
+    // Everything the shooting range mounted, straight from its slots.
+    function applyRangeLoadout(map) {
+        const sh = currentShooter();
+        if (!sh) return;
+        const stock = stockLoadout(sh);
+        state.lo = {};
+        Object.keys(map || {}).forEach((key) => {
+            if (stock.has(key)) state.lo[key] = map[key] || null;
+        });
+        renderScenario();
+        renderWeaponPicker();
     }
 
     function pickerSkeleton(kind, step, title, hint, clearable) {
@@ -514,13 +691,18 @@
             }
             let html = sh.canDeploy ? deploySwitch('shooter', sh.deployed) : '';
             const firing = new Set(sc.res.hardpoints.map((h) => h.index));
+            const lo = effectiveLoadout(sh);
             html += '<div class="vt-wpn-hps">' + sh.hardpoints.map((hp) => {
                 const icon = HP_ICONS[hp.category];
-                const mounted = hp.mounted ? ctx.variant(hp.mounted) : null;
+                const stem = lo.get(groupKeyOf(hp));
+                const mounted = stem ? ctx.variant(stem) : null;
+                const stock = hp.mounted ? ctx.variant(hp.mounted) : null;
                 const cls = 'vt-wpn-hp' + (hp.category === sc.fam.category ? ' is-match' : '') + (firing.has(hp.index) ? ' is-firing' : '');
                 const sub = (hp.assault ? 'assault' : 'combat') + (hp.switched ? ', switched' : '') + (mounted ? ' \u00b7 ' + mounted.name : ' \u00b7 empty');
                 const tip = hp.node + ': ' + Calc.categoryLabel(hp.category) + ' hardpoint, ' + (hp.assault ? 'assault' : 'combat')
-                    + (hp.switched ? ' (switchMask flips it when deployed)' : '') + (mounted ? '. Stock weapon ' + mounted.stem : '. No stock weapon');
+                    + (hp.switched ? ' (switchMask flips it when deployed)' : '')
+                    + (mounted ? '. Mounted ' + mounted.stem : '. Empty')
+                    + (stock && (!mounted || stock.stem !== mounted.stem) ? '. Stock weapon ' + stock.stem : '');
                 return '<span class="' + cls + '"' + tipAttr(tip) + '>'
                     + (icon ? '<img src="' + HUD_BASE + 'hp_' + icon + '.png" alt="" data-fallback-icon="bi-circle">' : '')
                     + '<span class="vt-wpn-hp-text"><span class="vt-mono">' + esc(hp.node) + '</span>'
@@ -766,6 +948,7 @@
     }
 
     function renderScenario() {
+        normalizeLoadout();
         const sc = currentScenario();
         ['weapon', 'shooter', 'target'].forEach((kind) => {
             renderSummary(kind, sc);
@@ -785,6 +968,7 @@
     }
 
     function renderAll() {
+        normalizeLoadout();
         renderLists();
         renderScenario();
         if (state.tab === 'matrix') renderMatrix();
@@ -798,11 +982,13 @@
             state.w = key;
             state.v = null;
             view.frame = null;
+            claimScenarioGroup();
         } else if (kind === 'shooter') {
             if (state.s === key) return;
             state.s = key;
             state.sd = false;
             state.v = null;
+            state.lo = {};
             view.weapon.showAll = false;
             applyShipWeapon(ctx.shooter(key, { deployed: false }));
         } else {
@@ -821,15 +1007,14 @@
         renderList('weapon');
     }
 
-    // A new ship opens on its first real weapon. A shared URL is left as
-    // written: this runs only from the ship picker and from a deploy that
-    // leaves the current family with nothing to mount.
+    // A new ship opens on its first real weapon, the stem that hardpoint
+    // actually carries. A shared URL that names a weapon is left as written:
+    // this runs from the ship picker, from a deploy that leaves the current
+    // family with nothing to mount, and on an empty URL.
     function applyShipWeapon(sh) {
         const def = sh ? ctx.defaultWeapon(sh) : null;
-        if (!def) return;
-        state.w = def.key;
-        state.v = null;
-        view.frame = null;
+        if (!def || !pickScenarioWeapon(def.stem, sh)) return;
+        claimScenarioGroup();
         if (state.cat && state.cat !== def.category) state.cat = null;
     }
 
@@ -878,6 +1063,7 @@
             const variantBtn = event.target.closest('[data-variant]');
             if (variantBtn && !variantBtn.disabled) {
                 state.v = variantBtn.dataset.variant || null;
+                claimScenarioGroup();
                 renderScenario();
                 return;
             }
@@ -893,6 +1079,7 @@
                     state.s = null;
                     state.sd = false;
                     state.v = null;
+                    state.lo = {};
                     view.weapon.showAll = false;
                     renderWeaponPicker();
                 } else {
@@ -1124,6 +1311,7 @@
                 state.w = row.dataset.family;
                 state.v = row.dataset.variantFlag;
                 view.frame = null;
+                claimScenarioGroup();
                 renderList('weapon');
                 renderScenario();
                 showTab('scenario');
@@ -1181,17 +1369,23 @@
         return out;
     }
 
+    // The range mirrors the Scenario state, plus the mount of every other
+    // hardpoint group. It also runs with no weapon at all, which is what an
+    // emptied loadout leaves behind.
     function rangeSnapshot() {
         const sc = currentScenario();
-        if (!sc || !sc.v) return null;
-        const range = sc.r && sc.r.projectile && sc.r.projectile.range;
-        const sh = sc.sh;
-        const tg = sc.tg;
+        const sh = sc ? sc.sh : currentShooter();
+        const tg = sc ? sc.tg : (state.t ? ctx.target(state.t, { deployed: state.td, shield: state.sh }) : null);
+        const v = sc ? sc.v : null;
+        const range = sc && sc.r && sc.r.projectile && sc.r.projectile.range;
+        const loadout = {};
+        effectiveLoadout(sh).forEach((stem, key) => { loadout[key] = stem || null; });
         return {
-            weaponStem: sc.v.stem,
-            weaponName: sc.v.name,
-            weaponCategory: sc.v.category,
-            scenarioNodes: ((sc.res && sc.res.hardpoints) || []).map((h) => h.node),
+            weaponStem: v ? v.stem : null,
+            weaponName: v ? v.name : '',
+            weaponCategory: v ? v.category : null,
+            scenarioKey: scenarioGroupKey(sh),
+            loadout,
             shooterStem: sh ? sh.stem : null,
             shooterThumb: sh && sh.thumb,
             hardpoints: sh ? sh.hardpoints : [],
@@ -1205,7 +1399,7 @@
             targetHp: tg ? tg.maxHealth : 0,
             targetRegen: tg ? tg.addHealth : 0,
             targetDeathXpl: tg ? Calc.stemOf(unitProp(tg.stem, 'explosionName') || '') : '',
-            letter: sc.r ? sc.r.letter : 'N',
+            letter: ctx.damageLetter(tg),
             shield: tg ? tg.shieldClass : null,
             distanceHint: range && range < 2000 ? range : null,
         };
@@ -1221,6 +1415,7 @@
                 db: dbRef,
                 fxIndexes: contrib.fxIndexes,
                 contributors: contrib.contributors,
+                onLoadout: applyRangeLoadout,
             };
             rangeLoading = import('../js/weapons-range.js').then((mod) => mod.mount(el, shared));
         }
@@ -1357,6 +1552,10 @@
         dbRef = db;
         setStatus(reticles ? '' : 'Reticle images are unavailable; showing placeholders.', false);
         validateState();
+        // A link that names neither a weapon nor a loadout opens the ship's
+        // own stock weapons. One that names a loadout is honoured as written,
+        // including a loadout with everything stripped off.
+        if (!state.w && !Object.keys(state.lo).length) applyShipWeapon(currentShooter());
         renderAll();
     }
 
