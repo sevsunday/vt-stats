@@ -23,10 +23,14 @@
  * validator ablation, not an assumption.
  *
  * Status bands key off the FAVORITE's win probability:
- *     50-55%  Good game
- *     55-65%  Slight edge
- *     65-80%  PLAYEDathon
- *     80%+    PLAYEDalocalypse
+ *     under 60%  Good game
+ *     60-70%     Slight edge
+ *     70-80%     PLAYEDathon
+ *     80%+       PLAYEDalocalypse
+ *
+ * The dashboard Outcome card uses the same edges for its verdict:
+ * a good game names the winner either way, a slight-edge flip is a
+ * Turn, and Upset starts only once the favorite was at 70% or more.
  *
  * Display-only, end to end. No pipeline changes, no schema bumps, no new
  * emissions — every number here is read from committed JSON
@@ -41,7 +45,7 @@
  *     // shared 404-safe loader (js/match-elo.js delegates to it)
  *     ensureCmdrHistoryLoaded,
  *     // dashboard per-match section
- *     renderMatchSection, destroyMatchSection,
+ *     renderMatchSection, destroyMatchSection, rosterRatings,
  *   }
  */
 (function () {
@@ -68,27 +72,33 @@
   const DEFAULT_CMDR_PROVISIONAL_PRIOR = 5;
 
   /**
-   * Band edges on the FAVORITE's win probability. For calibration
-   * comfort: the legacy raw-sum bands (100 / 300 / 600 delta-VTSR) land
-   * near 53% / 60% / 68% under this logistic, so these thresholds are a
-   * slightly stricter fair-game line rather than a pure relabel.
+   * Band edges on the FAVORITE's win probability. `bandFor` treats `max`
+   * as exclusive, so Good game is under 60% and Slight edge is 60–70%.
    *
    * The label is the ONE status string on both surfaces, and `meterHtml`
-   * is the only place it renders.
+   * is the only place it renders. The Outcome verdict uses the same
+   * edges: Upset starts at 70% (PLAYEDathon).
    */
   const BANDS = [
-    { key: 'green', max: 0.55, label: 'Good game' },
-    { key: 'yellow', max: 0.65, label: 'Slight edge' },
+    { key: 'green', max: 0.60, label: 'Good game' },
+    { key: 'yellow', max: 0.70, label: 'Slight edge' },
     { key: 'orange', max: 0.80, label: 'PLAYEDathon' },
     { key: 'red', max: Infinity, label: 'PLAYEDalocalypse' },
   ];
+
+  /** Favorite probability where a good game ends and a slight edge begins. */
+  const GOOD_GAME_MAX = 0.60;
+
+  /** Favorite probability where Upset begins (PLAYEDathon and above). */
+  const UPSET_MIN = 0.70;
 
   /**
    * Favorite probability at or above which a side is called disadvantaged.
    * Read by the Tools card's `Disadvantaged` team-header badge — nothing
    * in this module consumes it, so do not mistake it for dead code.
+   * Matches the end of Good game so a balanced lobby is not badged.
    */
-  const DISADVANTAGE_PROB = 0.55;
+  const DISADVANTAGE_PROB = 0.60;
 
   /**
    * The ONE `exclusion_reason` that still gets a card, rendered as a
@@ -103,24 +113,6 @@
    * COACHING_EXCLUDE in js/player.js — copy the exclude set, not the z.
    */
   const LUXURY_AXES = new Set(['snipe_bonus', 'target_lock_pct']);
-
-  /** Reliability-strip buckets over the favorite's stored probability. */
-  const RELIABILITY_BUCKETS = [
-    { lo: 0.50, hi: 0.55, label: '50-55%' },
-    { lo: 0.55, hi: 0.65, label: '55-65%' },
-    { lo: 0.65, hi: 0.75, label: '65-75%' },
-    { lo: 0.75, hi: 1.01, label: '75%+' },
-  ];
-
-  /** Minimum duels in a reliability bucket before we draw a bar. */
-  const RELIABILITY_MIN_N = 5;
-
-  /**
-   * How far a bucket's real win rate may sit from the model's own average
-   * claim before the row stops reading as "as predicted". 5 points is
-   * well inside the noise on bucket sizes this corpus produces.
-   */
-  const RELIABILITY_TOLERANCE = 0.05;
 
   const CMDR_HISTORY_URL_CANDIDATES = [
     'data/processed/elo_commander_history.json',
@@ -346,25 +338,6 @@
     };
   }
 
-  // ---------------------------------------------------------------- Track record
-
-  /**
-   * Corpus-wide VTSR-C prediction accuracy from the committed validator
-   * summary. Returns null when the file is absent or pre-dates the
-   * VTSR-C section, so every consumer can omit the claim rather than
-   * invent one.
-   */
-  function trackRecord() {
-    const v = window.__vtValidation;
-    const latest = v && v.latest;
-    if (!latest || !isNum(latest.vtsr_c_accuracy) || !isNum(latest.vtsr_c_n)) return null;
-    return {
-      accuracy: latest.vtsr_c_accuracy,
-      n: latest.vtsr_c_n,
-      logLoss: isNum(latest.vtsr_c_log_loss) ? latest.vtsr_c_log_loss : null,
-    };
-  }
-
   /** Per-axis corpus sign-agreement (how often the winner led that axis). */
   function axisAgreementMap() {
     const v = window.__vtValidation;
@@ -387,48 +360,67 @@
   // every read below comes off `currentData`, never the filtered view.
 
   let _lastMatchId = null;
-  // In-session only: receipts are corpus-wide, so an expand survives
-  // render() innerHTML replaces (commander-history second paint, match
-  // switch). Refresh returns to collapsed.
-  let _receiptsOpen = false;
 
-  function sectionEl() {
-    return document.getElementById('section-balonce');
+  function readEl() {
+    return document.getElementById('outcome-read');
   }
 
-  function hideSection() {
-    const el = sectionEl();
-    if (!el) return;
-    el.classList.add('d-none');
-    // Never let the what-if styling leak into the next match's card.
-    el.classList.remove('vt-balonce-hypothetical');
+  function afterEl() {
+    return document.getElementById('outcome-after');
+  }
+
+  function cardEl() {
+    return document.getElementById('section-faction');
+  }
+
+  function disposeTooltips(root) {
+    if (!root || !window.bootstrap || !bootstrap.Tooltip) return;
+    root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+      const inst = bootstrap.Tooltip.getInstance(node);
+      if (inst) inst.dispose();
+    });
+  }
+
+  function clearRead() {
+    const card = cardEl();
+    if (card) card.classList.remove('vt-balonce-hypothetical');
+    disposeTooltips(readEl());
+    disposeTooltips(afterEl());
+    const read = readEl();
+    const after = afterEl();
+    if (read) read.innerHTML = '';
+    if (after) after.innerHTML = '';
+    const whatIf = document.getElementById('outcome-whatif');
+    if (whatIf) {
+      whatIf.classList.add('d-none');
+      whatIf.classList.remove('d-flex');
+    }
   }
 
   function destroyMatchSection() {
-    // Scoped to the whole CARD, not just the body: the header's info icon
-    // is static markup outside #balonce-body and app.js has no global
-    // tooltip initializer, so this module owns both.
-    const card = sectionEl();
-    if (card) {
-      card.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
-        if (window.bootstrap && bootstrap.Tooltip) {
-          const inst = bootstrap.Tooltip.getInstance(node);
-          if (inst) inst.dispose();
-        }
-      });
-    }
-    hideSection();
+    // Team panels live in the same card and are owned by app.js. This
+    // only clears the Balonce slots and the what-if treatment.
+    clearRead();
     _lastMatchId = null;
   }
 
   function initSectionTooltips() {
-    const card = sectionEl();
-    if (!card || !window.bootstrap || !bootstrap.Tooltip) return;
-    card.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
-      const existing = bootstrap.Tooltip.getInstance(node);
-      if (existing) existing.dispose();
-      new bootstrap.Tooltip(node, { html: node.hasAttribute('data-bs-html') });
+    if (!window.bootstrap || !bootstrap.Tooltip) return;
+    const roots = [readEl(), afterEl(), document.getElementById('outcome-whatif')];
+    const info = document.getElementById('outcome-info');
+    roots.forEach((root) => {
+      if (!root) return;
+      root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+        const existing = bootstrap.Tooltip.getInstance(node);
+        if (existing) existing.dispose();
+        new bootstrap.Tooltip(node, { html: node.hasAttribute('data-bs-html') });
+      });
     });
+    if (info) {
+      const existing = bootstrap.Tooltip.getInstance(info);
+      if (existing) existing.dispose();
+      new bootstrap.Tooltip(info, { html: info.hasAttribute('data-bs-html') });
+    }
   }
 
   // ---- Data join ---------------------------------------------------
@@ -767,90 +759,8 @@
   }
 
   // ---- Zone 1: pre-match -------------------------------------------
-
-  function teamColumnHtml(joined, side) {
-    const row = joined.commanders[side];
-    const before = joined.cmdrBefore[side];
-    const thug = joined.cmdrThugElo[side];
-    const thugMean = side === 1 ? joined.t1Mean : joined.t2Mean;
-    const factionName = ((joined.match.team_factions || {})[String(side)] || {}).name;
-    const badgeCls = side === 1 ? 'badge-f1' : 'badge-f2';
-
-    const cmdrName = row
-      ? playerLinkHtml(row.name, row.steam64)
-      : '<span class="text-muted">No commander identified</span>';
-
-    // Both ratings shown side by side: VTSR-C is the one in the model,
-    // VTSR-T is the commander's own thug rating (display only).
-    const ratingBits = [];
-    if (isNum(before)) {
-      ratingBits.push(`<span class="vt-balonce-rating vt-mono" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Commander rating (VTSR-C) going into this match. This is the term the prediction uses.">VTSR-C ${Math.round(before)}</span>`);
-    } else {
-      ratingBits.push(`<span class="vt-balonce-rating vt-mono is-muted" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="No rated commander games before this match, so the model debuts them at the ${ANCHOR} anchor.">VTSR-C ${ANCHOR}*</span>`);
-    }
-    if (isNum(thug)) {
-      ratingBits.push(`<span class="vt-balonce-rating vt-mono is-secondary" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="This commander\u2019s own thug rating (VTSR-T). Shown for context \u2014 it is not part of the prediction, because VTSR-C already prices in everything that produced their wins.">T ${Math.round(thug)}</span>`);
-    }
-
-    const thugLine = isNum(thugMean)
-      ? `<span class="vt-mono">${Math.round(thugMean)}</span> avg VTSR-T`
-      : '<span class="text-muted">no rated thugs</span>';
-
-    return `
-      <div class="vt-balonce-team" data-team="${side}">
-        <div class="vt-balonce-team-head">
-          <span class="badge ${badgeCls}">${side}</span>
-          <span class="vt-balonce-team-name">${esc(factionName || `Team ${side}`)}</span>
-        </div>
-        <div class="vt-balonce-team-cmdr">
-          <span class="vt-balonce-cmdr-chip">CMDR</span>
-          ${cmdrName}
-        </div>
-        <div class="vt-balonce-team-ratings">${ratingBits.join('')}</div>
-        <div class="vt-balonce-team-thugs" data-bs-toggle="tooltip" data-bs-placement="top"
-             title="Mean pre-match VTSR-T of this side\u2019s rated thugs (the commander is excluded). This is the handicap term.">
-          <i class="bi bi-people-fill me-1" aria-hidden="true"></i>${thugLine}
-        </div>
-      </div>`;
-  }
-
-  /**
-   * What the duel was worth, as a sentence. The K(1-E) / -KE math stays in
-   * the tooltip; the copy says which way each commander's rating would
-   * move and why the two sides are not symmetric.
-   */
-  function stakesHtml(joined) {
-    const duel = joined.duel;
-    if (!duel || !duel.commanders) return '';
-    const lines = [];
-    for (const side of [1, 2]) {
-      const c = duel.commanders[String(side)];
-      if (!c || !isNum(c.k) || !isNum(c.expected)) continue;
-      const name = commanderName(joined, side) || `Team ${side}`;
-      const onWin = c.k * (1 - c.expected);
-      const onLoss = c.k * c.expected;
-      // A near-even call gets no role clause -- calling a 50.4% side "the
-      // favorite" reads as a claim the model never made.
-      const role = c.expected < 0.48 ? 'underdog'
-        : c.expected > 0.52 ? 'favorite'
-          : null;
-      const lossVerb = role === 'underdog' ? 'it only drops' : 'it drops';
-      const tail = role ? ` \u2014 the model had them as the ${role}.` : '.';
-      lines.push(`<div class="vt-balonce-stake" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Commander rating (VTSR-C) riding on this match. A win pays out in proportion to the chance the model gave them of LOSING, and a loss costs in proportion to the chance it gave them of winning \u2014 which is why the underdog always has more to gain than to lose.">
-        If <strong>${esc(name)}</strong> wins, their commander rating goes up about
-        <span class="vt-mono">${fmtSigned(onWin, 1)}</span>. If they lose, ${lossVerb} about
-        <span class="vt-mono">${onLoss.toFixed(1)}</span>${tail}</div>`);
-    }
-    if (!lines.length) return '';
-    return `<div class="vt-balonce-stakes">
-        <div class="vt-balonce-sub">What was on the line</div>
-        ${lines.join('')}
-      </div>`;
-  }
+  // Ratings live on the team panels (rosterRatings). This strip is the
+  // gauge, the favored line, and the two gap chips.
 
   function zonePrematchHtml(joined) {
     const fav = favoriteOf(joined.probT1);
@@ -889,21 +799,15 @@
     return `
       <div class="vt-balonce-zone vt-balonce-zone--prematch">
         <div class="vt-balonce-zone-head">
-          <h6 class="vt-balonce-zone-title">Before the match</h6>
+          <div class="vt-balonce-headline">${headline}</div>
           ${chip}
         </div>
-        <div class="vt-balonce-headline">${headline}</div>
         ${meterHtml({
           probT1: joined.probT1,
           leftLabel: `${teamPhrase(joined, 1)} disadv`,
           rightLabel: `${teamPhrase(joined, 2)} disadv`,
         })}
         <div class="vt-balonce-parts">${parts.join('')}</div>
-        <div class="vt-balonce-teams">
-          ${teamColumnHtml(joined, 1)}
-          ${teamColumnHtml(joined, 2)}
-        </div>
-        ${stakesHtml(joined)}
       </div>`;
   }
 
@@ -1095,11 +999,77 @@
     return joined.winnerTeam === 1 ? joined.probT1 : 1 - joined.probT1;
   }
 
-  function surpriseCopy(bits) {
-    if (bits < 0.7) return 'the favorite held';
-    if (bits < 1.15) return 'a coin-flip lobby';
-    if (bits < 1.7) return 'an upset';
-    return 'a genuine shock';
+  /**
+   * One classification for the verdict chip and its tooltip.
+   * Good game (favorite under 60%) names the winner either way.
+   * A slight edge (60–70%) that flips is a Turn.
+   * Upset starts only when the favorite was at 70% or more.
+   */
+  function outcomeVerdict(joined) {
+    if (joined.isDraw) {
+      return {
+        key: 'draw',
+        label: 'Draw',
+        icon: 'bi-dash-circle',
+        tip: 'The match was recorded as a draw. Both commanders scored half a point.',
+      };
+    }
+    if (!joined.winnerTeam) {
+      return {
+        key: 'unknown',
+        label: 'Outcome unrecorded',
+        icon: 'bi-question-circle',
+        tip: 'No winner was recorded for this match, so there is nothing to score the prediction against.',
+      };
+    }
+
+    const fav = favoriteOf(joined.probT1);
+    const winnerPhrase = teamPhrase(joined, joined.winnerTeam);
+    const won = `${winnerPhrase} won`;
+    const wE = winnerExpected(joined);
+    const bits = (isNum(wE) && wE > 0)
+      ? ` The model gave ${winnerPhrase} a ${fmtPct(wE)} chance. Surprise ${(-Math.log2(wE)).toFixed(2)} bits.`
+      : '';
+
+    const favoriteWon = fav.team != null && fav.team === joined.winnerTeam;
+    if (fav.team == null || fav.prob < GOOD_GAME_MAX) {
+      return {
+        key: 'even',
+        label: won,
+        icon: 'bi-dash-circle',
+        tip: `The pre-match favorite was under 60%, a good game. ${won}.${bits}`,
+      };
+    }
+    if (fav.prob < UPSET_MIN) {
+      if (favoriteWon) {
+        return {
+          key: 'hit',
+          label: `Edge held \u2014 ${won}`,
+          icon: 'bi-check-circle-fill',
+          tip: `The model had a slight edge for ${winnerPhrase}, and they won.${bits}`,
+        };
+      }
+      return {
+        key: 'turn',
+        label: `Turn \u2014 ${won}`,
+        icon: 'bi-arrow-left-right',
+        tip: `The model had a slight edge for ${teamPhrase(joined, fav.team)}, and ${winnerPhrase} won. A slight edge flipping is a turn.${bits}`,
+      };
+    }
+    if (favoriteWon) {
+      return {
+        key: 'hit',
+        label: `Favorite held \u2014 ${won}`,
+        icon: 'bi-check-circle-fill',
+        tip: `The model favored ${winnerPhrase} by a clear margin, and they won.${bits}`,
+      };
+    }
+    return {
+      key: 'upset',
+      label: `Upset \u2014 ${won}`,
+      icon: 'bi-exclamation-triangle-fill',
+      tip: `The model favored ${teamPhrase(joined, fav.team)} by 70% or more, and ${winnerPhrase} won anyway.${bits}`,
+    };
   }
 
   function winsDialHtml(joined) {
@@ -1119,87 +1089,35 @@
     }
     if (!isNum(t1)) return '';
     const pct1 = Math.round(t1 * 100);
+    const pct2 = 100 - pct1;
+    const side1 = teamPhrase(joined, 1);
+    const side2 = teamPhrase(joined, 2);
+    const tip = `${pct1} is ${side1}'s chance of winning before the match, and ${pct2} is ${side2}'s. The wins ladder keeps a separate rating that only moves when a player's team wins or loses, averages it on each side, and turns the gap into this split. It is a second opinion and does not change anyone's published VTSR-T.`;
     return `<span class="vt-balonce-chip is-muted" data-bs-toggle="tooltip" data-bs-placement="top"
-      title="Second opinion: the win/loss ladder (R^W) runs alongside the rating but its blend weight is still zero, so it never moves published VTSR-T. Shown for transparency.">
+      title="${esc(tip)}">
       <i class="bi bi-activity me-1" aria-hidden="true"></i>Wins ladder saw it
-      <span class="vt-mono">${pct1}/${100 - pct1}</span> for ${esc(teamPhrase(joined, 1))}</span>`;
+      <span class="vt-mono">${pct1}/${pct2}</span> for ${esc(side1)}</span>`;
   }
 
   function zoneVerdictHtml(joined) {
-    const fav = favoriteOf(joined.probT1);
+    const verdict = outcomeVerdict(joined);
     const decidedBy = joined.winner.decided_by || null;
-
-    let callKey = 'unknown';
-    let callLabel = 'Outcome unrecorded';
-    let callIcon = 'bi-question-circle';
-    let callTip = 'No winner was recorded for this match, so there is nothing to score the prediction against.';
-    // Shared by the badge and the surprise chip so the two can never
-    // disagree about whether this was an upset.
-    let calledIt = null;
-
-    if (joined.isDraw) {
-      callKey = 'draw';
-      callLabel = 'Draw';
-      callIcon = 'bi-dash-circle';
-      callTip = 'The match was recorded as a draw \u2014 both commanders scored half a point.';
-    } else if (joined.winnerTeam) {
-      const winnerPhrase = teamPhrase(joined, joined.winnerTeam);
-      if (fav.team == null) {
-        // Perfectly even read: there was no call to get right or wrong.
-        callKey = 'draw';
-        callLabel = `Too close to call \u2014 ${winnerPhrase} won`;
-        callIcon = 'bi-dash-circle';
-        callTip = `The model had this lobby dead even, so it did not favor either side. ${winnerPhrase} won.`;
-      } else {
-        calledIt = fav.team === joined.winnerTeam;
-        callKey = calledIt ? 'hit' : 'upset';
-        callLabel = calledIt
-          ? `Model called it \u2014 ${winnerPhrase} won`
-          : `Upset \u2014 ${winnerPhrase} won`;
-        callIcon = calledIt ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill';
-        callTip = calledIt
-          ? `The model favored ${winnerPhrase} before the match, and they are the side that won.`
-          : `The model favored ${teamPhrase(joined, fav.team)}, but ${winnerPhrase} won anyway. Upsets are expected at this accuracy \u2014 the model is right about two times in three, not always.`;
-      }
-    }
-
-    const chips = [];
-    const wE = winnerExpected(joined);
-    if (isNum(wE) && wE > 0) {
-      const bits = -Math.log2(wE);
-      // Name the winner rather than saying "the winner" -- the reader
-      // should not have to work out which side that was.
-      const winnerPhrase = esc(joined.winnerTeam
-        ? teamPhrase(joined, joined.winnerTeam)
-        : 'the winner');
-      const wasUpset = calledIt === false || (calledIt === null && wE < 0.5);
-      const gaveCopy = wasUpset
-        ? `The model only gave ${winnerPhrase} a <span class="vt-mono">${fmtPct(wE)}</span> chance \u2014 and they won anyway`
-        : `The model gave ${winnerPhrase} a <span class="vt-mono">${fmtPct(wE)}</span> chance \u2014 and they won`;
-      chips.push(`<span class="vt-balonce-chip" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="Surprise is measured in bits: minus log2 of the pre-match probability we gave the actual winner. A confident correct call sits near zero; a coin flip is 1 bit.">
-        <i class="bi bi-lightning-charge me-1" aria-hidden="true"></i>${gaveCopy}
-        \u00b7 <span class="vt-mono">${bits.toFixed(2)}</span> bits (${esc(surpriseCopy(bits))})</span>`);
-    }
-    const dial = winsDialHtml(joined);
-    if (dial) chips.push(dial);
-
     const provenance = decidedBy
       ? `<span class="vt-balonce-provenance" data-bs-toggle="tooltip" data-bs-placement="top"
            title="How this outcome was established.">${esc(decidedByLabel(decidedBy))}</span>`
       : '';
+    const dial = winsDialHtml(joined);
 
     return `
       <div class="vt-balonce-zone vt-balonce-zone--verdict">
-        <div class="vt-balonce-zone-head">
-          <h6 class="vt-balonce-zone-title">The call</h6>
+        <div class="vt-balonce-verdict-row">
+          <div class="vt-balonce-call vt-balonce-call--${verdict.key}"
+               data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(verdict.tip)}">
+            <i class="bi ${verdict.icon} me-2" aria-hidden="true"></i>${esc(verdict.label)}
+          </div>
           ${provenance}
         </div>
-        <div class="vt-balonce-call vt-balonce-call--${callKey}"
-             data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(callTip)}">
-          <i class="bi ${callIcon} me-2" aria-hidden="true"></i>${esc(callLabel)}
-        </div>
-        ${chips.length ? `<div class="vt-balonce-chiprow">${chips.join('')}</div>` : ''}
+        ${dial ? `<div class="vt-balonce-chiprow">${dial}</div>` : ''}
       </div>`;
   }
 
@@ -1377,220 +1295,47 @@
       </div>`;
   }
 
-  // ---- Zone 4: receipts --------------------------------------------
-
-  /**
-   * Bucket every stored pre-match probability by the favorite's
-   * confidence and count how often that favorite actually won. Pure
-   * client-side read over `duels[]` — the strip IS the calibration
-   * curve, computed from the same numbers the UI quotes.
-   */
-  function reliabilityBuckets() {
-    const hist = window.__vtCmdrEloHistory;
-    if (!hist || !Array.isArray(hist.duels)) return null;
-    const buckets = RELIABILITY_BUCKETS.map((b) => ({ ...b, n: 0, hits: 0, sumProb: 0 }));
-    let total = 0;
-    let externals = 0;
-    for (const duel of hist.duels) {
-      const c1 = duel.commanders && duel.commanders['1'];
-      const c2 = duel.commanders && duel.commanders['2'];
-      if (!c1 || !c2 || !isNum(c1.expected) || !isNum(c2.expected)) continue;
-      // Draws carry S = 0.5 on both sides: there is no favorite to score.
-      if (c1.score === 0.5 || c2.score === 0.5) continue;
-      const fav = c1.expected >= c2.expected ? c1 : c2;
-      const favProb = Math.max(c1.expected, c2.expected);
-      const won = fav.score === 1;
-      total += 1;
-      if (duel.source === 'f9') externals += 1;
-      for (const b of buckets) {
-        if (favProb >= b.lo && favProb < b.hi) {
-          b.n += 1;
-          b.sumProb += favProb;
-          if (won) b.hits += 1;
-          break;
-        }
-      }
-    }
-    if (!total) return null;
-    return { buckets, total, externals };
-  }
-
-  /**
-   * Plain-language read on a bucket's actual-vs-claimed gap. Inside the
-   * tolerance the model is doing its job; outside it, say which way it
-   * missed rather than leaving the reader to eyeball two percentages.
-   */
-  function reliabilityVerdict(actual, claimed) {
-    const diff = actual - claimed;
-    if (Math.abs(diff) <= RELIABILITY_TOLERANCE) {
-      return { key: 'match', label: 'as predicted', tip: 'landed right on the prediction line' };
-    }
-    return diff > 0
-      ? { key: 'over', label: 'better than predicted', tip: 'finished past the prediction line' }
-      : { key: 'under', label: 'worse than predicted', tip: 'fell short of the prediction line' };
-  }
-
-  function reliabilityHtml() {
-    const data = reliabilityBuckets();
-    if (!data) return '';
-    const rows = data.buckets.map((b) => {
-      if (b.n < RELIABILITY_MIN_N) {
-        return `<div class="vt-balonce-rel-row is-thin">
-          <span class="vt-balonce-rel-label">Said <span class="vt-mono">${esc(b.label)}</span></span>
-          <span class="vt-balonce-rel-track"></span>
-          <span class="vt-balonce-rel-outcome">
-            <span class="text-muted">${b.n === 0
-              ? 'no games yet'
-              : `only ${b.n} game${b.n === 1 ? '' : 's'} so far`}</span>
-          </span>
-        </div>`;
-      }
-      const actual = b.hits / b.n;
-      const claimed = b.sumProb / b.n;
-      const verdict = reliabilityVerdict(actual, claimed);
-      return `<div class="vt-balonce-rel-row" data-bs-toggle="tooltip" data-bs-placement="top"
-        title="The model gave the favored commander ${esc(b.label)} in ${b.n} games, averaging ${fmtPct(claimed)} across them. That commander then won ${b.hits} of the ${b.n}, so the bar ${esc(verdict.tip)}.">
-        <span class="vt-balonce-rel-label">Said <span class="vt-mono">${esc(b.label)}</span></span>
-        <span class="vt-balonce-rel-track">
-          <span class="vt-balonce-rel-fill" style="width: ${(actual * 100).toFixed(1)}%"></span>
-          <span class="vt-balonce-rel-claim" style="left: ${(claimed * 100).toFixed(1)}%" aria-hidden="true"></span>
-        </span>
-        <span class="vt-balonce-rel-outcome">
-          <span class="vt-balonce-rel-value">won <span class="vt-mono">${fmtPct(actual)}</span></span>
-          <span class="vt-balonce-rel-n">of ${b.n} games</span>
-          <span class="vt-balonce-rel-verdict is-${verdict.key}">${esc(verdict.label)}</span>
-        </span>
-      </div>`;
-    }).join('');
-
-    return `<div class="vt-balonce-reliability">
-      <div class="vt-balonce-sub" data-bs-toggle="tooltip" data-bs-placement="top"
-           title="Measured from the ${data.total} pre-match predictions already stored in the commander ladder \u2014 every one of them made before its match was played.">
-        When the model was this confident, here is how often the favored side actually won
-      </div>
-      <div class="vt-balonce-rel-legend">
-        <span class="vt-balonce-rel-key">
-          <span class="vt-balonce-rel-key-bar" aria-hidden="true"></span>what happened
-        </span>
-        <span class="vt-balonce-rel-key">
-          <span class="vt-balonce-rel-key-tick" aria-hidden="true"></span>what the model predicted
-        </span>
-        <span class="vt-balonce-rel-key-note"><span class="vt-mono">${data.total}</span> predictions</span>
-      </div>
-      ${rows}
-    </div>`;
-  }
-
-  /** Inline SVG sparkline of VTSR-C accuracy over validator snapshots. */
-  function accuracySparkHtml() {
-    const v = window.__vtValidation;
-    const hist = (v && Array.isArray(v.history)) ? v.history : [];
-    const pts = hist
-      .filter((h) => h && isNum(h.vtsr_c_accuracy))
-      .map((h) => h.vtsr_c_accuracy);
-    if (pts.length < 3) return '';
-    const min = Math.min(...pts);
-    const max = Math.max(...pts);
-    const span = (max - min) || 1;
-    const W = 120;
-    const H = 28;
-    const coords = pts.map((p, i) => {
-      const x = (i / (pts.length - 1)) * W;
-      const y = H - ((p - min) / span) * (H - 4) - 2;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' ');
-    const first = Math.round(pts[0] * 100);
-    const last = Math.round(pts[pts.length - 1] * 100);
-    return `<span class="vt-balonce-spark" data-bs-toggle="tooltip" data-bs-placement="top"
-      title="Commander-duel prediction accuracy across ${pts.length} validator runs: ${first}% then, ${last}% now. The model gets better as the corpus grows and more outcomes get confirmed.">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Accuracy trend">
-        <polyline points="${coords}" fill="none" stroke="currentColor" stroke-width="1.5"
-                  stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-      <span class="vt-mono">${first}% \u2192 ${last}%</span>
-    </span>`;
-  }
-
-  function zoneReceiptsHtml() {
-    const rec = trackRecord();
-    const rel = reliabilityHtml();
-    const spark = accuracySparkHtml();
-    if (!rec && !rel && !spark) return '';
-
-    // The coin-flip anchor is the whole point of the number: 66% means
-    // nothing to a reader who has no idea what a bad model scores.
-    const headline = rec
-      ? `This model picks the winner <strong>${fmtPct(rec.accuracy)}</strong> of the time across <span class="vt-mono">${rec.n}</span> commander duels \u2014 a coin flip would get 50%.`
-      : 'Prediction track record is unavailable in this build.';
-
-    const provider = (window.__vtCmdrEloHistory || {}).external_provider;
-    const credit = provider && provider.name
-      ? `<div class="vt-balonce-credit">Community games from
-           <a href="${esc(provider.url || '#')}" target="_blank" rel="noopener">${esc(provider.name)}</a>\u2019s
-           match ledger are included in the track record.</div>`
-      : '';
-
-    return `
-      <details class="vt-balonce-zone vt-balonce-zone--receipts"${_receiptsOpen ? ' open' : ''}>
-        <summary class="vt-balonce-zone-head">
-          <h6 class="vt-balonce-zone-title">Does it work?</h6>
-          <i class="bi bi-chevron-down vt-balonce-receipts-chevron" aria-hidden="true"></i>
-        </summary>
-        <div class="vt-balonce-receipts-body">
-          <div class="vt-balonce-receipts-toolbar">
-            <a class="vt-balonce-link" href="elo/index.html?tab=accuracy" target="_blank" rel="noopener">Full accuracy report <i class="bi bi-arrow-right-short" aria-hidden="true"></i></a>
-          </div>
-          <div class="vt-balonce-receipt-headline">${headline} ${spark}</div>
-          ${rel}
-          ${credit}
-        </div>
-      </details>`;
-  }
-
   // ---- Section render ----------------------------------------------
 
   function render(currentData) {
-    const card = sectionEl();
-    const body = document.getElementById('balonce-body');
-    if (!card || !body) return;
+    const read = readEl();
+    const after = afterEl();
+    const card = cardEl();
+    if (!read || !after || !card) return;
 
     const matchId = (currentData && currentData.match && currentData.match.id) || null;
     _lastMatchId = matchId;
 
     const joined = joinMatch(currentData);
     if (!joined.available) {
-      hideSection();
-      body.innerHTML = '';
+      clearRead();
       return;
     }
 
     // Commander history not fetched yet: paint the thug-only read now and
-    // repaint once it lands (or stays null on 404).
+    // repaint once it lands (or stays null on 404). The roster ratings
+    // follow the same join, so refresh those chips too.
     if (window.__vtCmdrEloHistory === undefined) {
       ensureCmdrHistoryLoaded().then(() => {
         if (_lastMatchId === matchId) render(currentData);
       });
     }
 
-    // A cancelled match has a real pre-match read and a real track
-    // record, but no outcome — so the verdict and played-out zones are
-    // replaced by the what-if fork rather than faked.
-    body.innerHTML = (joined.hypothetical
-      ? [
-        zonePrematchHtml(joined),
-        zoneWhatIfHtml(joined),
-        zoneWasGoingHtml(joined),
-        zoneReceiptsHtml(),
-      ]
-      : [
-        zonePrematchHtml(joined),
-        zoneVerdictHtml(joined),
-        zonePlayedHtml(joined),
-        zoneReceiptsHtml(),
-      ]).join('');
+    // Team panels are first. Gauge + verdict sit under them, and how it
+    // played out (or the cancelled what-if) sits under that.
+    read.innerHTML = joined.hypothetical
+      ? zonePrematchHtml(joined)
+      : [zonePrematchHtml(joined), zoneVerdictHtml(joined)].join('');
+    after.innerHTML = joined.hypothetical
+      ? [zoneWhatIfHtml(joined), zoneWasGoingHtml(joined)].join('')
+      : zonePlayedHtml(joined);
     card.classList.toggle('vt-balonce-hypothetical', !!joined.hypothetical);
-    card.classList.remove('d-none');
 
+    const whatIf = document.getElementById('outcome-whatif');
+    if (whatIf) {
+      whatIf.classList.remove('d-none');
+      whatIf.classList.add('d-flex');
+    }
     const whatIfThen = document.getElementById('balonce-whatif-then');
     const whatIfNow = document.getElementById('balonce-whatif-now');
     if (matchId && whatIfThen && whatIfNow) {
@@ -1599,7 +1344,7 @@
       whatIfNow.href = `${base}&ratings=now#vt-tools-balonce`;
     }
 
-    const eloLink = body.querySelector('[data-vt-balonce-elo-link]');
+    const eloLink = after.querySelector('[data-vt-balonce-elo-link]');
     if (eloLink) {
       eloLink.addEventListener('click', (ev) => {
         const btn = document.getElementById('tab-elo-btn');
@@ -1611,17 +1356,41 @@
       });
     }
 
-    // Property-assigned: the details node is new on every render, but
-    // this matches the storyline expander contract so a later refactor
-    // that keeps the node cannot stack listeners.
-    const receipts = body.querySelector('.vt-balonce-zone--receipts');
-    if (receipts) {
-      receipts.ontoggle = () => {
-        _receiptsOpen = !!receipts.open;
-      };
-    }
-
     initSectionTooltips();
+    if (typeof window.vtRefreshOutcomeRoster === 'function') {
+      window.vtRefreshOutcomeRoster();
+    }
+  }
+
+  /**
+   * Pre-match ratings for the Outcome team panels. Match-global: the
+   * player filter does not recompute these. Thug VTSR-T is each rated
+   * row's `before`. Commander VTSR-C is the duel (or reconstructed)
+   * rating the gauge uses; commander VTSR-T is context only. `avgT` is
+   * the mean thug VTSR-T, commander excluded — the handicap term.
+   */
+  function rosterRatings(currentData) {
+    const joined = joinMatch(currentData);
+    if (!joined || !joined.available) return null;
+    const bySteam = new Map();
+    const byName = new Map();
+    for (const team of [1, 2]) {
+      for (const item of (joined.perTeam[team] || [])) {
+        const delta = item.delta;
+        const row = item.row;
+        if (!delta || !row || !isNum(delta.before)) continue;
+        const rec = { t: delta.before };
+        if (row.steam64) bySteam.set(String(row.steam64), rec);
+        if (row.name) byName.set(String(row.name).toLowerCase(), rec);
+      }
+    }
+    return {
+      bySteam,
+      byName,
+      avgT: { 1: joined.t1Mean, 2: joined.t2Mean },
+      cmdrC: joined.cmdrBefore,
+      cmdrT: joined.cmdrThugElo,
+    };
   }
 
   // ---------------------------------------------------------------- Exports
@@ -1638,9 +1407,9 @@
     meterHtml,
     fmtPct,
     cmdrConstants,
-    trackRecord,
     ensureCmdrHistoryLoaded,
     renderMatchSection: render,
     destroyMatchSection,
+    rosterRatings,
   };
 })();

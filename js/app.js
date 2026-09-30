@@ -2837,6 +2837,30 @@
   }
 
   // --- Render Match Data (shared by loadMatch + applyFilter) ---
+  function paintOutcomePanels() {
+    if (!currentData) return;
+    if (filterState.mode === 'player' && filterState.players.length === 1) return;
+    const data = currentFilteredData || currentData;
+    const activeFactions = computeActiveFactions();
+    const isMulti = filterState.mode === 'player' && filterState.players.length >= 2;
+    const t1Selected = isMulti && hasSelectedOnTeam(currentData, '1');
+    const t2Selected = isMulti && hasSelectedOnTeam(currentData, '2');
+    const scoreboardTotals = {
+      '1': t1Selected ? data.faction_totals['1'] : currentData.faction_totals['1'],
+      '2': t2Selected ? data.faction_totals['2'] : currentData.faction_totals['2'],
+    };
+    const scoreboardTeams = {
+      '1': t1Selected ? filterTeamRoster(currentData.match.teams['1'], filterState.players) : currentData.match.teams['1'],
+      '2': t2Selected ? filterTeamRoster(currentData.match.teams['2'], filterState.players) : currentData.match.teams['2'],
+    };
+    renderFactionScoreboard(scoreboardTotals, scoreboardTeams, activeFactions, {
+      multiPlayer: isMulti,
+      t1Subset: t1Selected,
+      t2Subset: t2Selected,
+    });
+  }
+  window.vtRefreshOutcomeRoster = paintOutcomePanels;
+
   function renderMatchData(data) {
     currentFilteredData = data;
     clearReplayTab();
@@ -2855,53 +2879,36 @@
     renderHighlights(currentData.highlights, currentData.match, 'match');
     ensureTooltips(document.getElementById('section-highlights'));
 
-    // Overview: profile card vs faction scoreboard
+    // Overview: profile card vs the Outcome card. A single-player filter
+    // keeps the Balonce read (match-global) and hides only the team panels.
     const $profile = document.getElementById('section-player-profile');
     const $faction = document.getElementById('section-faction');
+    const $panels = document.getElementById('faction-content');
     if (isSingle) {
       $profile.classList.remove('d-none');
-      $faction.classList.add('d-none');
+      if ($panels) $panels.classList.add('d-none');
       renderPlayerProfile(data.leaderboard[0], currentData);
     } else {
       $profile.classList.add('d-none');
       $faction.classList.remove('d-none');
-      // In multi-player mode, per-team: if the team has selected players,
-      // render its subset-aggregated totals + filtered roster; otherwise
-      // fall back to the full unfiltered team totals + full roster, dimmed
-      // with the existing "Filtered out" badge via activeFactions.
-      // Team mode and All Players mode: always pass full unfiltered totals
-      // and the full roster (dim handled by activeFactions for team mode).
-      const activeFactions = computeActiveFactions();
-      const isMulti = filterState.mode === 'player' && filterState.players.length >= 2;
-      const t1Selected = isMulti && hasSelectedOnTeam(currentData, '1');
-      const t2Selected = isMulti && hasSelectedOnTeam(currentData, '2');
-
-      const scoreboardTotals = {
-        '1': t1Selected ? data.faction_totals['1'] : currentData.faction_totals['1'],
-        '2': t2Selected ? data.faction_totals['2'] : currentData.faction_totals['2'],
-      };
-      const scoreboardTeams = {
-        '1': t1Selected ? filterTeamRoster(currentData.match.teams['1'], filterState.players) : currentData.match.teams['1'],
-        '2': t2Selected ? filterTeamRoster(currentData.match.teams['2'], filterState.players) : currentData.match.teams['2'],
-      };
-
-      renderFactionScoreboard(scoreboardTotals, scoreboardTeams, activeFactions, {
-        multiPlayer: isMulti,
-        t1Subset: t1Selected,
-        t2Subset: t2Selected,
-      });
+      if ($panels) $panels.classList.remove('d-none');
+      paintOutcomePanels();
     }
 
-    // Balonce Meter — the pre-match balance read, the prediction it
-    // implies, and how the match actually resolved. Match-global and
-    // ALWAYS unfiltered (highlights passthrough contract): the renderer
-    // takes currentData, never the filtered `data` view, and the player
-    // filter has no effect on it. Self-hides on unrated / excluded /
-    // cancelled matches. Lazy-fetches elo_commander_history.json on
-    // first use and repaints itself once it lands.
+    // Balonce read inside the Outcome card. Match-global and ALWAYS
+    // unfiltered: the renderer takes currentData, never the filtered
+    // view. An unrated match leaves the read empty and the team panels
+    // in place. A single-player filter hides the card only when that
+    // read is empty.
     if (window.VTBalonce) {
       VTBalonce.destroyMatchSection();
       VTBalonce.renderMatchSection(currentData);
+    }
+    if (isSingle) {
+      const read = document.getElementById('outcome-read');
+      const after = document.getElementById('outcome-after');
+      const hasRead = (read && read.childElementCount > 0) || (after && after.childElementCount > 0);
+      $faction.classList.toggle('d-none', !hasRead);
     }
 
     renderLeaderboard(data.leaderboard);
@@ -6180,7 +6187,48 @@
     });
     const isHiddenRosterPlayer = (p) =>
       (p.steam64 && hiddenRosterKeys.has(String(p.steam64))) || (p.name && hiddenRosterKeys.has(p.name));
-    const rosterHtml = (teamList, leaderSlot) => {
+
+    // Pre-match ratings from the Balonce join. Match-global: a player
+    // filter changes which chips show, not these numbers or the average.
+    const ratings = (window.VTBalonce && typeof VTBalonce.rosterRatings === 'function')
+      ? VTBalonce.rosterRatings(currentData)
+      : null;
+    const isRating = (v) => typeof v === 'number' && isFinite(v);
+    const thugRating = (p) => {
+      if (!ratings) return null;
+      const sid = p.steam64 ? String(p.steam64) : '';
+      if (sid && ratings.bySteam.has(sid)) return ratings.bySteam.get(sid).t;
+      const name = p.name ? String(p.name).toLowerCase() : '';
+      if (name && ratings.byName.has(name)) return ratings.byName.get(name).t;
+      return null;
+    };
+    const eloChipHtml = (p, isCmdr, side) => {
+      if (!ratings) return '';
+      if (isCmdr) {
+        const cRaw = ratings.cmdrC[side];
+        const rated = isRating(cRaw);
+        const c = rated ? Math.round(cRaw) : (VTBalonce.ANCHOR || 1500);
+        const cTip = rated
+          ? 'Commander rating (VTSR-C) going into this match. This is the term the prediction uses.'
+          : 'No rated commander games before this match, so the model debuts them at the 1500 anchor.';
+        const tRaw = ratings.cmdrT[side];
+        const t = isRating(tRaw)
+          ? `<span class="vt-faction-elo vt-faction-elo--t vt-mono" data-bs-toggle="tooltip" data-bs-placement="top" title="This commander&#39;s own thug rating (VTSR-T). Shown for context. It is not part of the prediction.">T ${Math.round(tRaw)}</span>`
+          : '';
+        return `<span class="vt-faction-elo vt-mono" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(cTip)}">C ${c}${rated ? '' : '*'}</span>${t}`;
+      }
+      const t = thugRating(p);
+      if (!isRating(t)) return '';
+      return `<span class="vt-faction-elo vt-mono" data-bs-toggle="tooltip" data-bs-placement="top" title="VTSR-T going into this match.">${Math.round(t)}</span>`;
+    };
+    const avgHtml = (side) => {
+      if (!ratings) return '';
+      const v = ratings.avgT[side];
+      if (!isRating(v)) return '';
+      return `<span class="vt-faction-avg vt-mono" data-bs-toggle="tooltip" data-bs-placement="top" title="Mean pre-match VTSR-T of this side&#39;s rated thugs. The commander is excluded. This is the handicap in the gauge.">avg T ${Math.round(v)}</span>`;
+    };
+
+    const rosterHtml = (teamList, leaderSlot, side) => {
       if (!teamList || teamList.length === 0) {
         return '<em class="vt-faction-roster-empty">No players</em>';
       }
@@ -6206,7 +6254,7 @@
         const chipClass = isCmdr
           ? 'vt-faction-player-chip vt-faction-player-chip--cmdr'
           : 'vt-faction-player-chip';
-        return `<span class="${chipClass}">${pip}${vtPlayerLinkHtml(p.name, p.steam64)}${nick}</span>`;
+        return `<span class="${chipClass}">${pip}${vtPlayerLinkHtml(p.name, p.steam64)}${nick}${eloChipHtml(p, isCmdr, side)}</span>`;
       }).join('');
       return `<div class="vt-faction-roster">${chips}</div>`;
     };
@@ -6290,8 +6338,8 @@
     const panelHtml = (side, totals, roster, leaderSlot, teamClass, muted, winnerClass, facBadge, trophy, subsetNote) => `
       <div class="col-md-6">
         <div class="vt-faction-panel ${teamClass}${muted ? ' vt-faction-panel--muted' : ''}${winnerClass}">
-          <h6 class="vt-faction-heading"><span>Team ${side}</span>${facBadge}${trophy}${subsetNote}${muted ? mutedNote : ''}</h6>
-          ${rosterHtml(roster, leaderSlot)}
+          <h6 class="vt-faction-heading"><span>Team ${side}</span>${facBadge}${trophy}${subsetNote}${muted ? mutedNote : ''}${avgHtml(side)}</h6>
+          ${rosterHtml(roster, leaderSlot, side)}
           ${combatStats(totals)}
           ${econStats(side)}
         </div>
@@ -6302,7 +6350,7 @@
       ${panelHtml('2', f2, teams['2'], 6, 'vt-faction-panel--t2', t2Muted, t2Winner, t2FacBadge, t2WinnerTrophy, t2SubsetNote)}
     `;
 
-    // Outcome pill in the Faction Scoreboard card header. We deliberately
+    // Outcome pill in the card header. We deliberately
     // only surface the "unclear" variant here -- clean_win / contested
     // outcomes are already conveyed by the winning team's panel trophy
     // icon above (and the dedicated kill-feed badge on the Combat tab).

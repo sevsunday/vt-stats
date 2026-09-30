@@ -51,10 +51,10 @@
  * leaving the roster, or refresh. Nothing is written to localStorage.
  *
  * Balonce Meter bands (on the FAVORITE's win probability):
- *     50-55%  Good game
- *     55-65%  Slight edge
- *     65-80%  PLAYEDathon
- *     80%+    PLAYEDalocalypse
+ *     under 60%  Good game
+ *     60-70%     Slight edge
+ *     70-80%     PLAYEDathon
+ *     80%+       PLAYEDalocalypse
  *
  * Provisional anchoring (mirrored from player-resolver):
  *   - Unrated / custom entries anchored at VTSR 1500 (and VTSR-C 1500)
@@ -75,7 +75,7 @@
    * from the module so the two surfaces cannot drift.
    */
   function disadvantageProb() {
-    return (window.VTBalonce && window.VTBalonce.DISADVANTAGE_PROB) || 0.55;
+    return (window.VTBalonce && window.VTBalonce.DISADVANTAGE_PROB) || 0.60;
   }
 
   /** Anchor used for unrated players on either ladder. */
