@@ -23,6 +23,78 @@ const GRENADE_LABELS = new Set(['grenade', 'bouncebomb', 'mortar_c']);
 const BEAM_LABELS = new Set(['beam', 'laser_a', 'laser_c', 'heavylaser', 'arcbolt']);
 const SNIPER_LABELS = new Set(['snipershell', 'snipe', 'esnipe', 'ssnipe']);
 
+// Guide class defaults for keys an ODF omits, by engine class label, walked up
+// the parent chain. The same tables as js/weapons-calc.js; the FX gate fails
+// if they drift apart.
+const WEAPON_DEFAULTS = {
+    weapon: { salvocount: 1, salvodelay: 0, shotvariance: 0, firstdelay: 0, lockdelay: 0 },
+    cannon: { shotdelay: 0.2 },
+    salvo: { shotdelay: 0.2 },
+    mortar: { shotdelay: 1.0 },
+    targeting: { shotdelay: 1.0, salvocount: 10, salvodelay: 0.2, firstdelay: 1.0 },
+    launcher: { shotdelay: 0, lockdelay: 5.0 },
+    dispenser: { shotdelay: 0 },
+    satchelpack: { shotdelay: 1.0 },
+    arccannon: { salvodelay: 0.1, finishdist: 100, startdist: 10 },
+    jetpack: { ammocost: 1.0, burntime: 10.0 },
+    specialitem: { ammocost: 100 },
+    magnetgun: { ammocost: 10 },
+    blink: { ammobase: 100, ammodist: 10 },
+};
+const WEAPON_PARENT = {
+    cannon: 'weapon', machinegun: 'cannon', mortar: 'cannon', chargegun: 'cannon',
+    detonator: 'cannon', salvo: 'weapon', targeting: 'weapon', launcher: 'weapon',
+    imagelauncher: 'launcher', thermallauncher: 'launcher', radarlauncher: 'launcher',
+    multilauncher: 'launcher', torpedolauncher: 'launcher', dispenser: 'weapon',
+    satchelpack: 'weapon', arccannon: 'weapon', damagefield: 'weapon', jetpack: 'weapon',
+    specialitem: 'weapon', imagerefract: 'specialitem', radardamper: 'specialitem',
+    terrainexpose: 'specialitem', forcefield: 'specialitem', magnetgun: 'weapon',
+    blink: 'weapon', shieldup: 'weapon', daywrecker: 'weapon',
+};
+const ORD_DEFAULTS = {
+    ordnance: { ammocost: 0, lifespan: 1e30, shotspeed: 0 },
+    bullet: { ammocost: 1, lifespan: 5, shotspeed: 200 },
+    beam: { ammocost: 1, lifespan: 200e-6, shotspeed: 1e6 },
+    grenade: { ammocost: 10, lifespan: 1e30, shotspeed: 50 },
+    missile: { ammocost: 10 },
+    pulse: { ammocost: 10, lifespan: 1e30, shotspeed: 50, pulsedelay: 1.0, pulseperiod: 0.5 },
+    magnetshell: { ammocost: 10, lifespan: 1e30, shotspeed: 50 },
+    leader: { sticktime: 2.0 },
+};
+const ORD_PARENT = {
+    bullet: 'ordnance', beam: 'bullet', grenade: 'bullet', bouncebomb: 'grenade',
+    popper: 'grenade', radarpopper: 'grenade', laserpopper: 'grenade', spraybomb: 'grenade',
+    missile: 'bullet', thermalmissile: 'missile', imagemissile: 'missile',
+    lasermissile: 'missile', radarmissile: 'missile', pulse: 'bullet',
+    magnetshell: 'bullet', snipershell: 'bullet', leader: 'bullet', lockdown: 'bullet',
+    anchor: 'leader', seismic: 'ordnance',
+};
+// Engine class sections an inlined round can carry, most derived first: they
+// name the class when the ODF's classLabel is a parent ODF ("atstab_c").
+const ORD_CLASS_SECTIONS = [
+    ['thermalmissileclass', 'thermalmissile'], ['imagemissileclass', 'imagemissile'],
+    ['lasermissileclass', 'lasermissile'], ['radarmissileclass', 'radarmissile'],
+    ['missileclass', 'missile'], ['pulseshellclass', 'pulse'], ['magnetshellclass', 'magnetshell'],
+    ['snipershellclass', 'snipershell'], ['anchorrocketclass', 'anchor'], ['leaderroundclass', 'leader'],
+    ['bouncebombclass', 'bouncebomb'], ['spraybombclass', 'spraybomb'], ['radarpopperclass', 'radarpopper'],
+    ['laserpopperclass', 'laserpopper'], ['popperclass', 'popper'], ['lockshellclass', 'lockdown'],
+    ['grenadeclass', 'grenade'], ['beamclass', 'beam'], ['bulletclass', 'bullet'],
+];
+// Arc Stream hits measured in match telemetry (js/weapons-calc.js ARC_HITS_PER_SEC).
+const ARC_HITS_PER_SEC = 30;
+
+function classDefault(table, parents, terminal, key) {
+    let t = terminal;
+    const seen = new Set();
+    while (t && !seen.has(t)) {
+        seen.add(t);
+        if (table[t] && table[t][key] != null) return table[t][key];
+        t = parents[t];
+    }
+    const base = table.weapon || table.ordnance;
+    return base && base[key] != null ? base[key] : null;
+}
+
 const HONESTY = {
     projectile: 'data-driven',
     beam: 'data-driven',
@@ -200,18 +272,24 @@ function prop(section, key) {
 /* Last path segment of a render reference ("minigun_c.BulletTrail" -> the
  * inlined section whose name ends with that header). Sections under
  * `preferPrefix` win, so an ExplVehicle "Light" is not confused with the
- * ExplGround one. */
+ * ExplGround one. A section borrowed from another ODF (mergeCrossRefs) is
+ * reached only through its own file name. */
 function sectionByRef(map, ref, preferPrefix) {
-    const tail = stemOf(String(ref || '').split('.').pop());
+    const parts = String(ref || '').trim().replace(/"/g, '').toLowerCase().split('.');
+    const tail = stemOf(parts.pop());
     if (!tail) return null;
     if (preferPrefix) {
         const direct = map.get(preferPrefix + tail);
         if (direct) return direct;
     }
+    if (parts.length) {
+        const merged = map.get(XREF_PREFIX + parts.join('.') + '.' + tail);
+        if (merged) return merged;
+    }
     let best = null;
     let bestName = '';
     map.forEach((section, name) => {
-        if (name.split('.').pop() !== tail) return;
+        if (name.startsWith(XREF_PREFIX) || name.split('.').pop() !== tail) return;
         if (!best || name.length < bestName.length) {
             best = section;
             bestName = name;
@@ -220,13 +298,123 @@ function sectionByRef(map, ref, preferPrefix) {
     return best;
 }
 
+/* "file.section" names a section of another ODF (BZCC reads
+ * renderName = "shellgun_c.render" from shellgun_c.odf). The database
+ * inlines only a weapon's own ordnance and explosions, so a name the tree
+ * cannot resolve is copied in from the named file under xref.<file>., with
+ * everything it names in turn; its children then resolve inside it like an
+ * inlined ordnance. Names that already resolve are left alone. */
+const XREF_PREFIX = 'xref.';
+const SECTION_REF_KEY = /^(rendername\d*|renderbase|emitname|particleclass\d+|flashname)$/;
+const XREF_BUCKETS = ['Ordnance', 'Weapon', 'Explosion', 'Effect', 'Misc', 'Mine'];
+const XREF_MAX_SECTIONS = 500;   // sections borrowed per tree; a runaway guard, never reached by the corpus
+const bucketIndex = new WeakMap();
+
+function bucketEntry(db, file) {
+    for (const name of XREF_BUCKETS) {
+        const bucket = db && db[name];
+        if (!bucket) continue;
+        if (bucket[file + '.odf']) return bucket[file + '.odf'];
+        let index = bucketIndex.get(bucket);
+        if (!index) {
+            index = new Map(Object.keys(bucket).map((k) => [k.toLowerCase(), k]));
+            bucketIndex.set(bucket, index);
+        }
+        const key = index.get(file + '.odf');
+        if (key) return bucket[key];
+    }
+    return null;
+}
+
+function refParts(value) {
+    const parts = String(value == null ? '' : value).trim().replace(/"/g, '').toLowerCase().split('.');
+    const tail = stemOf(parts.pop());
+    return { file: parts.join('.'), tail };
+}
+
+function mergeCrossRefs(map, db) {
+    if (!map || !db) return map;
+    const files = new Map();
+    const fileMap = (file) => {
+        if (!files.has(file)) {
+            const entry = bucketEntry(db, file);
+            files.set(file, entry ? sectionsOf(entry) : null);
+        }
+        return files.get(file);
+    };
+    const queue = Array.from(map.values());
+    let borrowedCount = 0;
+    while (queue.length) {
+        const section = queue.shift();
+        const borrowed = !!section.__xfile;
+        Object.keys(section).forEach((key) => {
+            if (!SECTION_REF_KEY.test(key)) return;
+            const value = section[key];
+            const ref = refParts(value);
+            if (!ref.tail || ref.tail.startsWith('draw_')) return;
+            // A borrowed section's own names point back into its file.
+            const file = ref.file || (borrowed ? section.__xfile : '');
+            if (!file) return;
+            const xkey = XREF_PREFIX + file + '.' + ref.tail;
+            if (map.has(xkey)) return;
+            if (!borrowed && sectionByRef(map, value, key === 'flashname' ? '' : prefixOf(section.__key))) return;
+            if (borrowed && !ref.file && map.has(prefixOf(section.__key) + ref.tail)) return;
+            const fm = fileMap(file);
+            const inner = file === section.__xfile ? prefixOf(section.__xsrc) : '';
+            const src = fm && sectionByRef(fm, ref.tail, inner);
+            if (!src || borrowedCount >= XREF_MAX_SECTIONS) return;
+            borrowedCount += 1;
+            const copy = Object.assign({}, src, { __key: xkey, __xfile: file, __xsrc: src.__key });
+            map.set(xkey, copy);
+            queue.push(copy);
+        });
+    }
+    return map;
+}
+
+/* The sections mergeCrossRefs borrows for `entry`, for asset preloading. */
+function crossRefSections(entry, db) {
+    const out = [];
+    mergeCrossRefs(sectionsOf(entry), db).forEach((section, key) => {
+        if (key.startsWith(XREF_PREFIX)) out.push(section);
+    });
+    return out;
+}
+
+/* Engine class of a round: the Ordnance bucket record's chain when there is
+ * one, else the most derived class section it carries, else its classLabel
+ * when that is an engine class. */
+function ordTerminal(map, prefix, chain, label, terminal) {
+    if (terminal) return terminal;
+    if (chain.length) return chain[chain.length - 1];
+    const hit = ORD_CLASS_SECTIONS.find(([name]) => map.get(prefix + name));
+    if (hit) return hit[1];
+    return ORD_DEFAULTS[label] || ORD_PARENT[label] ? label : null;
+}
+
+/* Engine class of an Ordnance-bucket round by name, for inlined copies of it. */
+function ordTerminalOf(ordDb, stem) {
+    const key = stemOf(stem);
+    if (!key || !ordDb) return null;
+    let entry = ordDb[key + '.odf'];
+    if (!entry) {
+        const found = Object.keys(ordDb).find((k) => k.toLowerCase() === key + '.odf');
+        entry = found ? ordDb[found] : null;
+    }
+    const chain = chainOf(entry, 'inheritanceChain');
+    return chain.length ? chain[chain.length - 1] : null;
+}
+
 /* Read an ordnance at `prefix` inside `map`: 'ordnance.' for the weapon's
  * inlined round, 'ordnance.launchord.' for a popper's second stage,
- * 'dispenserobj.payload.' for a seeker, '' for an Ordnance-bucket entry. */
-function ordnanceOf(map, entry, prefix = 'ordnance.', chainKey = 'Ordnance.inheritanceChain') {
+ * 'dispenserobj.payload.' for a seeker, '' for an Ordnance-bucket entry.
+ * `terminal` names its engine class when the caller resolved it. */
+function ordnanceOf(map, entry, prefix = 'ordnance.', chainKey = 'Ordnance.inheritanceChain', terminal = null) {
     const ord = sec(map, prefix + 'OrdnanceClass') || {};
     const chain = chainOf(entry, chainKey);
     const label = String(prop(ord, 'classLabel') || chain[chain.length - 1] || '').toLowerCase();
+    const cls = ordTerminal(map, prefix, chain, label, terminal);
+    const d = (key) => classDefault(ORD_DEFAULTS, ORD_PARENT, cls, key);
     const missile = sec(map, prefix + 'MissileClass') || {};
     const thermal = sec(map, prefix + 'ThermalMissileClass') || {};
     const pulse = sec(map, prefix + 'PulseShellClass') || {};
@@ -238,8 +426,12 @@ function ordnanceOf(map, entry, prefix = 'ordnance.', chainKey = 'Ordnance.inher
     const spray = sec(map, prefix + 'SprayBombClass') || {};
     const pop = sec(map, prefix + 'RadarPopperClass') || sec(map, prefix + 'PopperClass')
         || sec(map, prefix + 'LaserPopperClass') || {};
-    const life = num(prop(ord, 'lifeSpan'), 1e30);
-    const speed = num(prop(ord, 'shotSpeed'), 0);
+    const life = num(prop(ord, 'lifeSpan'), d('lifespan'));
+    const speed = num(prop(ord, 'shotSpeed'), d('shotspeed'));
+    const isA = (name) => {
+        for (let t = cls, n = 0; t && n < 12; t = ORD_PARENT[t], n++) if (t === name) return true;
+        return false;
+    };
     const set = new Set(chain.concat(label));
     return {
         map,
@@ -250,13 +442,16 @@ function ordnanceOf(map, entry, prefix = 'ordnance.', chainKey = 'Ordnance.inher
         damage: damageValues(ord),
         pulseXpl: stemOf(prop(pulse, 'xplPulse')),
         xplDone: stemOf(prop(leader, 'xplDone')),
-        ammoCost: num(prop(ord, 'ammoCost'), 1),
+        ammoCost: num(prop(ord, 'ammoCost'), d('ammocost')),
         lifeSpan: life,
         shotSpeed: speed,
+        // OrdnanceClass bounds on how far ahead an aimer leads a moving target.
+        leadMin: num(prop(ord, 'LeadPositionMinTime'), 0),
+        leadMax: num(prop(ord, 'LeadPositionMaxTime'), 60),
         shotSound: stemOf(prop(ord, 'shotSound')),
         shotGeometry: stemOf(prop(ord, 'shotGeometry')),
         shotScale: num(prop(ord, 'shotScale'), 1),
-        shotRadius: num(prop(ord, 'shotRadius'), 0.4),
+        shotRadius: num(prop(ord, 'shotRadius'), 0),
         renderRef: prop(ord, 'renderName') || prop(ord, 'rendername') || '',
         xplGround: stemOf(prop(ord, 'xplGround')),
         xplVehicle: stemOf(prop(ord, 'xplVehicle')),
@@ -267,22 +462,41 @@ function ordnanceOf(map, entry, prefix = 'ordnance.', chainKey = 'Ordnance.inher
         rateWaver: num(prop(missile, 'rateWaver'), 0),
         delayTime: num(prop(missile, 'delayTime'), 0),
         rampTime: num(prop(missile, 'rampTime'), 0),
-        seekCone: num(prop(thermal, 'coneAngle'), 0.35),
-        pulseDelay: num(prop(pulse, 'pulseDelay'), 1),
-        pulsePeriod: num(prop(pulse, 'pulsePeriod'), 0.5),
-        stickTime: num(prop(leader, 'stickTime'), 0),
-        accelDrag: num(prop(anchor, 'accelDrag'), 0),
-        fieldRadius: num(prop(magnet, 'fieldRadius'), 0),
-        killRadius: num(prop(sniper, 'killRadius'), 0),
-        bounceRatio: num(prop(bounce, 'bounceRatio'), 0),
+        seekCone: num(prop(thermal, 'coneAngle'), 0.314159),
+        pulseDelay: num(prop(pulse, 'pulseDelay'), d('pulsedelay')),
+        pulsePeriod: num(prop(pulse, 'pulsePeriod'), d('pulseperiod')),
+        stickTime: num(prop(leader, 'stickTime'), d('sticktime') || 0),
+        accelDrag: num(prop(anchor, 'accelDrag'), 10),
+        fieldRadius: num(prop(magnet, 'fieldRadius'), 20),
+        killRadius: num(prop(sniper, 'killRadius'), 1),
+        bounceRatio: num(prop(bounce, 'bounceRatio'), isA('spraybomb') ? 0.1 : (isA('bouncebomb') ? 0.5 : 0)),
+        buildSprayOnHit: bool(prop(spray, 'BuildSprayOnHit'), true),
+        // SprayBombClass: a contact whose kind is in this mask (16 terrain,
+        // 1 | 2 | 4 the three object kinds, 8 anything else) ends the bounce at
+        // once; only then does ExplodeOnHit detonate the bomb.
+        hitExplodeTypes: Math.round(num(prop(spray, 'HitExplodeTypes'), 0)),
+        explodeOnHit: bool(prop(spray, 'ExplodeOnHit'), false),
         bounceSound: stemOf(prop(bounce, 'bounceSound') || prop(bounce, 'soundBounce')),
         payloadName: stemOf(prop(spray, 'payloadName')),
         launchOrd: stemOf(prop(pop, 'launchOrd')),
         launchXpl: stemOf(prop(pop, 'launchXpl')),
+        // The popper round's own ShotVariance, applied to its launch. No ODF
+        // sets it; the engine default is 0.
+        popperVariance: Math.abs(num(prop(pop, 'shotVariance'), 0)),
+        // Popper launch timing (engine defaults; no VSR ODF sets them): once
+        // the round is falling with a target, salvoCount <= 0 launches at once,
+        // otherwise salvoCount rounds after initDelay, salvoDelay apart.
+        // PopperClass finds its own target within scanRange.
+        popSalvoCount: Math.round(num(prop(pop, 'salvoCount'), 0)),
+        popSalvoDelay: num(prop(pop, 'salvoDelay'), 0),
+        popInitDelay: num(prop(pop, 'initDelay'), 0),
+        popScanRange: sec(map, prefix + 'PopperClass') ? num(prop(pop, 'scanRange'), 100) : Infinity,
         isMissile: [...set].some((s) => MISSILE_LABELS.has(s) || s.includes('missile')) || !!sec(map, prefix + 'MissileClass'),
         isPopper: [...set].some((s) => POPPER_LABELS.has(s)) || !!sec(map, prefix + 'RadarPopperClass') || !!sec(map, prefix + 'PopperClass'),
         isSpray: [...set].some((s) => SPRAY_LABELS.has(s) || s.includes('spray')) || !!sec(map, prefix + 'SprayBombClass'),
-        isGrenade: [...set].some((s) => GRENADE_LABELS.has(s) || s === 'grenade'),
+        // Every GrenadeClass round falls: plain grenades and the bounce, spray
+        // and popper bombs built on it.
+        isGrenade: [...set].some((s) => GRENADE_LABELS.has(s) || s === 'grenade') || isA('grenade'),
         isBeam: BEAM_LABELS.has(label) || (life > 0 && life < 0.002 && speed >= 1e5),
         isSniper: [...set].some((s) => SNIPER_LABELS.has(s)) || !!sec(map, prefix + 'SniperShellClass'),
         isPulse: label === 'pulse' || set.has('pulse') || !!sec(map, prefix + 'PulseShellClass'),
@@ -303,7 +517,7 @@ function ordnanceEntry(db, stem) {
         entry = found ? bucket[found] : null;
     }
     if (!entry) return null;
-    const map = sectionsOf(entry);
+    const map = mergeCrossRefs(sectionsOf(entry), db);
     return ordnanceOf(map, entry, '', 'inheritanceChain');
 }
 
@@ -318,7 +532,7 @@ function explosionEntry(db, stem) {
         entry = found ? bucket[found] : null;
     }
     if (!entry) return null;
-    return { map: sectionsOf(entry), headKey: 'explosionclass' };
+    return { map: mergeCrossRefs(sectionsOf(entry), db), headKey: 'explosionclass' };
 }
 
 /* ChargeGunClass.shotDelayN is the cumulative hold that ARMS stage N
@@ -337,7 +551,9 @@ function ordAmmoCost(ordDb, ordName) {
     const key = String(ordName).toLowerCase().replace(/\.odf$/, '') + '.odf';
     const entry = ordDb[key];
     if (!entry) return 0;
-    return num(prop(sec(sectionsOf(entry), 'OrdnanceClass'), 'ammoCost'), 0);
+    const chain = chainOf(entry, 'inheritanceChain');
+    return num(prop(sec(sectionsOf(entry), 'OrdnanceClass'), 'ammoCost'),
+        classDefault(ORD_DEFAULTS, ORD_PARENT, chain[chain.length - 1] || null, 'ammocost'));
 }
 
 function chargeLevels(map, ordDb) {
@@ -358,6 +574,7 @@ function chargeLevels(map, ordDb) {
             holdTime: num(prop(cg, 'shotDelay' + i), 0),
             salvoCount,
             salvoDelay: num(prop(cg, 'salvoDelay' + i), 0),
+            shotVariance: num(prop(cg, 'shotVariance' + i), 0),
             // The loader caches salvoCount * OrdnanceClass.ammoCost at stage+0x58.
             ammoCost,
             salvoCost: salvoCount * ammoCost,
@@ -397,8 +614,10 @@ function classifyId(entry) {
     return 'projectile';
 }
 
-function buildProfile(entry, ordDb) {
-    const map = sectionsOf(entry);
+/* `db` (the whole database, optional) lets render, flash and particle names
+ * that point into another ODF resolve; without it they resolve as inlined. */
+function buildProfile(entry, ordDb, db) {
+    const map = mergeCrossRefs(sectionsOf(entry), db);
     const id = classifyId(entry);
     const wc = sec(map, 'WeaponClass') || {};
     const cannon = sec(map, 'CannonClass') || {};
@@ -418,10 +637,12 @@ function buildProfile(entry, ordDb) {
     const chain = chainOf(entry, 'inheritanceChain');
     const term = chain[chain.length - 1] || '';
     const looping = term === 'machinegun' || num(prop(cannon, 'soundPerShot'), term === 'machinegun' ? 0 : 1) === 0;
-    const ord = ordnanceOf(map, entry);
+    const ord = ordnanceOf(map, entry, 'ordnance.', 'Ordnance.inheritanceChain', ordTerminalOf(ordDb, prop(wc, 'ordName')));
+    const wd = (key) => classDefault(WEAPON_DEFAULTS, WEAPON_PARENT, term, key);
     // shotDelay lives on CannonClass for cannons, on LauncherClass for the
     // lock-on family and on TargetingGunClass for the TAG cannon.
     const shotDelayRaw = prop(cannon, 'shotDelay') ?? prop(launcher, 'shotDelay') ?? prop(targeting, 'shotDelay');
+    const multiLaunch = !!sec(map, 'MultiLauncherClass') || term === 'multilauncher';
     const raveFlash = bool(prop(cannon, 'raveFlash'), false);
     return {
         id,
@@ -434,7 +655,10 @@ function buildProfile(entry, ordDb) {
         flashRef: prop(wc, 'flashName') || '',
         flashTime: num(prop(wc, 'flashTime'), 0),   // how long the muzzle flash render lives (0 = its own animateTime)
         looping,
-        shotDelay: num(shotDelayRaw, term === 'mortar' ? 1 : 0.2),
+        shotDelay: num(shotDelayRaw, wd('shotdelay') || 0),
+        // A fresh press waits this long before the first shot (CannonClass and
+        // DispenserClass loaders, clamped at 0; default 0).
+        initialShotDelay: Math.max(0, num(prop(cannon, 'InitialShotDelay') ?? prop(disp, 'InitialShotDelay'), 0)),
         salvoCount: Math.max(1, Math.round(num(prop(cannon, 'salvoCount'), 1))),
         salvoDelay: num(prop(cannon, 'salvoDelay'), 0),
         shotVariance: num(prop(cannon, 'shotVariance'), 0),
@@ -442,11 +666,14 @@ function buildProfile(entry, ordDb) {
         shotAlternate: bool(prop(cannon, 'shotAlternate'), false),
         raveFlash,
         raveColors: raveFlash ? raveColorsOf(map) : [],
-        lockDelay: num(prop(launcher, 'lockDelay'), 5),
-        lockRange: num(prop(launcher, 'lockRange'), 400),
-        coneAngle: num(prop(launcher, 'coneAngle'), 0.7),
-        targetCount: Math.max(1, Math.round(num(prop(multi, 'targetCount') || prop(launcher, 'targetCount'), 1))),
-        loseAngle: num(prop(multi, 'loseAngle'), 1.2),
+        lockDelay: num(prop(launcher, 'lockDelay'), wd('lockdelay') || 0),
+        // An omitted lockRange is the round's own reach, shotSpeed x lifeSpan
+        // (read from the LauncherClass loader; the guide's 0 is not the engine's).
+        lockRange: num(prop(launcher, 'lockRange'), ord.shotSpeed * ord.lifeSpan),
+        coneAngle: num(prop(launcher, 'coneAngle'), 1.5707),
+        targetCount: Math.max(1, Math.round(num(prop(multi, 'targetCount'),
+            num(prop(launcher, 'targetCount'), multiLaunch ? 5 : 1)))),
+        loseAngle: num(prop(multi, 'loseAngle'), 1.5707),
         lockingSound: stemOf(prop(launcher, 'lockingSound')),
         lockedSound: stemOf(prop(launcher, 'lockedSound')),
         lockingReticle: String(prop(launcher, 'lockingReticle') || prop(targeting, 'lockingReticle') || '').trim().toLowerCase(),
@@ -457,13 +684,15 @@ function buildProfile(entry, ordDb) {
         leaderName: stemOf(prop(targeting, 'leaderName')),
         leaderSound: stemOf(prop(targeting, 'leaderSound')),
         firstDelay: num(prop(targeting, 'firstDelay'), 1),
-        tagSalvo: Math.max(1, Math.round(num(prop(targeting, 'salvoCount'), 1))),
+        tagSalvo: Math.max(1, Math.round(num(prop(targeting, 'salvoCount'), 10))),
         tagSalvoDelay: num(prop(targeting, 'salvoDelay'), 0.2),
         arc: {
             startDist: num(prop(arc, 'startDist'), 10),
             finishDist: num(prop(arc, 'finishDist'), 100),
             travelVeloc: num(prop(arc, 'travelVeloc'), 20),
             coneAngle: num(prop(arc, 'coneAngle'), 0.1),
+            salvoDelay: num(prop(arc, 'salvoDelay'), 0.1),
+            hitsPerSec: ARC_HITS_PER_SEC,
             ammoCost: num(prop(arc, 'ammoCost'), 0),
             activeSound: stemOf(prop(arc, 'activeSound')),
             xplGround: stemOf(prop(arc, 'xplGround')),
@@ -472,7 +701,7 @@ function buildProfile(entry, ordDb) {
         blink: {
             ammoBase: num(prop(blink, 'ammoBase'), 100),
             ammoDist: num(prop(blink, 'ammoDist'), 10),
-            shotDelay: num(prop(blink, 'shotDelay'), 0.5),
+            shotDelay: num(prop(blink, 'shotDelay'), 0),
             xplEnter: stemOf(prop(blink, 'xplEnter')),
             xplExit: stemOf(prop(blink, 'xplExit')),
             groundSprite: String(prop(blink, 'groundSprite') || '').trim().toLowerCase(),
@@ -502,12 +731,12 @@ function buildProfile(entry, ordDb) {
         },
         field: {
             ammoCost: num(prop(field, 'ammoCost'), 0),
-            damageRadius: num(prop(field, 'damageRadius'), 8),
+            damageRadius: num(prop(field, 'damageRadius'), 0),
             activeSound: stemOf(prop(field, 'activeSound')),
         },
         dispenser: {
             objectClass: stemOf(prop(disp, 'objectClass')),
-            shotDelay: num(prop(disp, 'shotDelay'), 0.5),
+            shotDelay: num(prop(disp, 'shotDelay'), 0),
             // Engine convention (unverified, mirrors the calculator): a drop costs
             // the dropped object's maxAmmo.
             ammoCost: num(prop(sec(map, 'DispenserObj.GameObjectClass'), 'maxAmmo'), 0),
@@ -528,7 +757,7 @@ function buildProfile(entry, ordDb) {
         special: {
             activeSound: stemOf(prop(special, 'activeSound')),
             expireSound: stemOf(prop(special, 'expireSound')),
-            ammoCost: num(prop(special, 'ammoCost'), 0),
+            ammoCost: num(prop(special, 'ammoCost'), 100),
         },
         charge: chargeLevels(map, ordDb),
         ord,
@@ -633,6 +862,12 @@ function profileAssets(entry, db, seedExplosions, onEntry) {
         const node = queue.shift();
         addRefs(node);
         scanNames(node);
+        const borrowed = db ? crossRefSections(node, db) : [];
+        if (borrowed.length) {
+            const sections = Object.fromEntries(borrowed.map((s) => [s.__key, s]));
+            addRefs(sections);
+            scanNames(sections);
+        }
     }
     return { textures, geometry, sounds };
 }
@@ -640,5 +875,6 @@ function profileAssets(entry, db, seedExplosions, onEntry) {
 export {
     ARCHETYPES, HONESTY, LABELS, LETTERS, sectionsOf, sectionByRef, prefixOf, stemOf, num,
     classifyId, buildProfile, collectRefs, profileAssets, ordnanceOf, ordnanceEntry, explosionEntry,
-    damageValues, shieldEffectFor,
+    damageValues, shieldEffectFor, ordTerminalOf, mergeCrossRefs,
+    WEAPON_DEFAULTS, WEAPON_PARENT, ORD_DEFAULTS, ORD_PARENT, ARC_HITS_PER_SEC,
 };

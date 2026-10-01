@@ -4,16 +4,16 @@ overview: Add a Shooting Range weapon-switch mode that weaves two or more mounte
 todos:
   - id: weave-module
     content: "Add js/weapons-weave.js: longest-cycle schedule, range gate, closing, flight-time TTK, MDM cap, using existing per-hit math"
-    status: pending
+    status: completed
   - id: sim-slots
     content: Per-slot cooldowns in weapon-sim.js without clearing other weapons' rounds; MDM maxCount, hold-to-lob, impact detonate vs building bounce
-    status: pending
+    status: completed
   - id: range-ui
     content: Range checkboxes, switch toggle, order ribbon, TTK readout, closing motion, Detonate button
-    status: pending
+    status: completed
   - id: gates-docs
     content: Pin the Xares, tank, and MDM cases in check_weapon_weave.mjs; run the FX gate; document the rules in DEVELOPER_GUIDE.md
-    status: pending
+    status: completed
 isProject: false
 ---
 

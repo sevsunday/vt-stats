@@ -1348,3 +1348,250 @@ a.vt-wpn-source-link {
     font-size: 0.85rem;
     margin: 0.5rem 0 0;
 }
+
+/* Weapon switch: one colour per loadout slot, shared by the card key, the
+ * priority list, the ribbon and the damage split. */
+.is-c0 { --vt-weave-c: var(--kb-primary); }
+.is-c1 { --vt-weave-c: var(--kb-info); }
+.is-c2 { --vt-weave-c: var(--kb-warning); }
+.is-c3 { --vt-weave-c: var(--kb-success); }
+.is-c4 { --vt-weave-c: var(--kb-danger); }
+
+.vt-wpn-range-slot.is-weave .vt-wpn-range-slot-key {
+    color: var(--kb-text-primary);
+    background: color-mix(in oklab, var(--vt-weave-c) 28%, transparent);
+}
+
+.vt-wpn-range-slot.is-picked {
+    border-color: color-mix(in oklab, var(--kb-primary) 55%, var(--kb-border-subtle));
+    color: var(--kb-text-primary);
+}
+
+.vt-wpn-range-slot.is-firing {
+    border-color: var(--kb-primary);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--kb-primary) 40%, transparent);
+}
+
+.vt-wpn-range-slot-pick {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+.vt-wpn-range-slot-why {
+    font-size: 0.75rem;
+    line-height: 1.3;
+    color: var(--kb-text-muted);
+}
+
+.vt-wpn-range-weave {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-radius: 0.75rem;
+    background: var(--kb-bg-card);
+}
+
+.vt-wpn-range-weave[hidden] {
+    display: none;
+}
+
+.vt-wpn-range-weave-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+}
+
+.vt-wpn-range-num {
+    width: 5.5rem;
+}
+
+.vt-wpn-range-weave-hint {
+    color: var(--kb-text-muted);
+    font-size: 0.8rem;
+}
+
+[data-range-weave-body] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.vt-wpn-range-weave-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.vt-wpn-range-weave-title {
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--kb-text-muted);
+}
+
+.vt-wpn-range-weave-swatch {
+    flex: 0 0 auto;
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 999px;
+    background: var(--vt-weave-c, var(--kb-text-muted));
+}
+
+.vt-wpn-range-weave-order {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.vt-wpn-range-weave-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.6rem;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--kb-border-subtle);
+    border-left: 3px solid var(--vt-weave-c, var(--kb-border-subtle));
+    border-radius: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.vt-wpn-range-weave-item[draggable="true"] {
+    cursor: grab;
+}
+
+.vt-wpn-range-weave-item.is-dragging {
+    opacity: 0.5;
+}
+
+.vt-wpn-range-weave-item.is-drop {
+    outline: 2px dashed var(--kb-primary);
+    outline-offset: 1px;
+}
+
+.vt-wpn-range-weave-item.is-firing {
+    background: color-mix(in oklab, var(--vt-weave-c, var(--kb-primary)) 12%, transparent);
+}
+
+.vt-wpn-range-weave-name {
+    font-weight: 600;
+    color: var(--kb-text-primary);
+}
+
+.vt-wpn-range-weave-meta {
+    font-size: 0.78rem;
+    color: var(--kb-text-secondary);
+}
+
+.vt-wpn-range-weave-role {
+    font-size: 0.78rem;
+    color: var(--kb-text-muted);
+}
+
+.vt-wpn-range-weave-moves {
+    display: inline-flex;
+    margin-left: auto;
+}
+
+.vt-wpn-range-weave-move {
+    padding: 0 0.3rem;
+    color: var(--kb-text-secondary);
+}
+
+.vt-wpn-range-weave-ribbon {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.35rem;
+}
+
+.vt-wpn-range-weave-run {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--vt-weave-c) 55%, transparent);
+    background: color-mix(in oklab, var(--vt-weave-c) 16%, transparent);
+    color: var(--kb-text-primary);
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.vt-wpn-range-weave-mark {
+    padding: 0.05rem 0.45rem;
+    margin-right: 0.3rem;
+    border: 1px dashed var(--kb-border-subtle);
+    border-radius: 999px;
+    color: var(--kb-text-muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.vt-wpn-range-weave-sep {
+    color: var(--kb-text-muted);
+    font-size: 0.7rem;
+}
+
+.vt-wpn-range-weave-end {
+    margin-left: 0.25rem;
+    color: var(--kb-text-muted);
+    font-size: 0.8rem;
+}
+
+.vt-wpn-range-weave-ttk {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.vt-wpn-range-weave-ttk .vt-wpn-tier {
+    margin-left: 0;
+}
+
+.vt-wpn-range-weave-ttk-value {
+    font-size: 1.35rem;
+    color: var(--kb-text-primary);
+}
+
+.vt-wpn-range-weave-ttk-none {
+    font-weight: 600;
+    color: var(--kb-warning);
+}
+
+.vt-wpn-range-weave-from,
+.vt-wpn-range-weave-compare,
+.vt-wpn-range-weave-live {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--kb-text-secondary);
+}
+
+.vt-wpn-range-weave-live {
+    color: var(--kb-text-muted);
+}
+
+.vt-wpn-range-weave-split {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 1.1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+}
+
+.vt-wpn-range-weave-split li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}

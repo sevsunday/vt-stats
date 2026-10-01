@@ -37,6 +37,15 @@
         magnetgun: { ammocost: 10 },
         blink: { ammobase: 100, ammodist: 10 },
     };
+    // velocForward, "maximum forward velocity from Thrusting" (guide class
+    // defaults). A deployed morph tank reads MorphTankClass, which falls back
+    // to HoverCraftClass; pilots run at PersonClass velocForwardRun.
+    const DRIVE_SECTIONS = [
+        ['HoverCraftClass', 'velocforward', 20],
+        ['TrackedVehicleClass', 'velocforward', 10],
+        ['WalkerClass', 'velocforward', 4],
+        ['PersonClass', 'velocforwardrun', null],
+    ];
     const WEAPON_PARENT = {
         cannon: 'weapon', machinegun: 'cannon', mortar: 'cannon', chargegun: 'cannon',
         detonator: 'cannon', salvo: 'weapon', targeting: 'weapon', launcher: 'weapon',
@@ -454,6 +463,10 @@
                 shotAlternate: bool(merged.shotalternate, false),
                 shotVariance: val('shotvariance', false) || 0,
                 firstDelay: terminal === 'targeting' ? (val('firstdelay', true) || 0) : 0,
+                // Read by the CannonClass and DispenserClass loaders (clamped at 0):
+                // a fresh press waits it out before the first shot.
+                initialShotDelay: Math.max(0, num(prop(rec, 'CannonClass', 'initialShotDelay')
+                    ?? prop(rec, 'DispenserClass', 'initialShotDelay'), 0)),
                 lockDelay: isLauncher ? (val('lockdelay', true) || 0) : 0,
                 lockRange: num(merged.lockrange, null),
                 targetCount: num(merged.targetcount, null),
@@ -791,6 +804,11 @@
                 }
             }
 
+            if (fire.initialShotDelay > 0) {
+                const timed = ['direct', 'pulse', 'charge', 'blast'].includes(damage.kind);
+                notes.push('Each fresh trigger press waits InitialShotDelay (' + fmt(fire.initialShotDelay) + ' s) before the first shot.'
+                    + (timed ? ' Time to kill includes it; DPS does not.' : ''));
+            }
             fire.defaulted.forEach((d) => {
                 notes.push('Uses the engine class default ' + d.key + ' = ' + fmt(d.value) + ' (not set in the ODF).');
             });
@@ -1160,6 +1178,19 @@
             return info;
         }
 
+        function driveSpeed(rec, deployed) {
+            const order = deployed ? [['MorphTankClass', 'velocforward', null]].concat(DRIVE_SECTIONS) : DRIVE_SECTIONS;
+            for (let i = 0; i < order.length; i++) {
+                const v = num(prop(rec, order[i][0], order[i][1]), null);
+                if (v != null && v > 0) return { speed: v, source: order[i][0] + '.' + (order[i][1] === 'velocforwardrun' ? 'velocForwardRun' : 'velocForward') };
+            }
+            for (let i = 0; i < DRIVE_SECTIONS.length; i++) {
+                const [name, , fallback] = DRIVE_SECTIONS[i];
+                if (fallback != null && sec(rec, name)) return { speed: fallback, source: name + ' default' };
+            }
+            return null;
+        }
+
         function shooter(stem, opts) {
             const rec = bucket('Vehicle').get(stemOf(stem)) || bucket('Pilot').get(stemOf(stem));
             if (!rec) return null;
@@ -1173,6 +1204,7 @@
                 maxAmmo = num(mt.maxammo, maxAmmo);
                 addAmmo = num(mt.addammo, addAmmo);
             }
+            const drive = driveSpeed(rec, deployed);
             return {
                 stem: rec.stem,
                 name: info.name,
@@ -1183,6 +1215,8 @@
                 deployed,
                 maxAmmo,
                 addAmmo,
+                velocForward: drive ? drive.speed : null,
+                velocSource: drive ? drive.source : null,
                 hardpoints: parseHardpoints(rec, deployed),
             };
         }
@@ -1217,6 +1251,8 @@
                 bakedShield: info.bakedShield,
                 maxHealth,
                 addHealth,
+                // GameObjectClass allowMDMCollisionDetonation (guide default -1 = auto).
+                mdmRule: Math.round(num(go.allowmdmcollisiondetonation, -1)),
             };
         }
 
@@ -1523,12 +1559,14 @@
                     ttk.seconds = Infinity;
                 } else if (discrete) {
                     const interval = shotInterval == null ? cycle : shotInterval;
+                    const initial = f.initialShotDelay || 0;
                     ttk.hitsToKill = Math.ceil(hp / perHit);
                     ttk.shotsToKill = Math.ceil(ttk.hitsToKill / roundsPerShot);
-                    ttk.seconds = (ttk.shotsToKill - 1) * (interval || 0);
+                    ttk.seconds = initial + (ttk.shotsToKill - 1) * (interval || 0);
                     explain.hitsToKill = 'ceil(maxHealth ' + fmt(hp) + ' / ' + fmt(perHit) + ') = ' + ttk.hitsToKill;
                     explain.shotsToKill = shotGroupPhrase(f, g, roundsPerShot) + '. ceil(' + ttk.hitsToKill + ' / ' + roundsPerShot + ') = ' + ttk.shotsToKill;
-                    explain.ttk = '(shots ' + ttk.shotsToKill + ' - 1) x ' + (alternating ? 'interval ' : 'cycle ') + fmt(interval) + ' s = ' + fmt(ttk.seconds) + ' s';
+                    explain.ttk = (initial > 0 ? 'InitialShotDelay ' + fmt(initial) + ' s + ' : '')
+                        + '(shots ' + ttk.shotsToKill + ' - 1) x ' + (alternating ? 'interval ' : 'cycle ') + fmt(interval) + ' s = ' + fmt(ttk.seconds) + ' s';
                     if (sh && v.ammoMode === 'perShot' && shotCost > 0 && sh.maxAmmo > 0) {
                         ttk.tankFraction = ttk.hitsToKill * shotCost / sh.maxAmmo;
                         explain.tankFraction = ttk.hitsToKill + ' x ' + fmt(shotCost) + ' ammo / maxAmmo ' + fmt(sh.maxAmmo) + ' = ' + fmt(ttk.tankFraction * 100, 0) + '%';
@@ -1631,9 +1669,48 @@
             };
         }
 
+        // One mounted hardpoint group for the shooting range's weapon switch:
+        // compute() for that group (key "CAT:c" / "CAT:a"), cut down to the
+        // numbers js/weapons-weave.js schedules with.
+        function weaveInput(stem, sh, tg, key) {
+            const v = variant(stem);
+            if (!v) return null;
+            const [cat, flag] = String(key || '').split(':');
+            const forced = (sh && sh.kind === 'pilot') || v.category === 'HAND' || v.category === 'PACK';
+            const group = sh ? sh.hardpoints.filter((hp) => hp.category === cat && !!hp.assault === (flag === 'a')) : [];
+            const g = forced ? 1 : Math.max(1, group.length);
+            const r = compute({ variant: v, shooter: sh, target: tg, g });
+            const p = r.projectile;
+            return {
+                stem: v.stem,
+                name: v.name,
+                category: v.category,
+                isAssault: v.isAssault,
+                g,
+                tier: r.tier,
+                kind: r.kind,
+                letter: r.letter,
+                perHit: r.perHit,
+                fire: {
+                    shotDelay: r.fire.shotDelay,
+                    salvoCount: r.fire.salvoCount,
+                    salvoDelay: r.fire.salvoDelay,
+                    shotAlternate: !!r.fire.shotAlternate,
+                    shotVariance: r.fire.shotVariance || 0,
+                },
+                alternating: r.alternating,
+                roundsPerShot: r.roundsPerShot,
+                shotInterval: r.shotInterval,
+                ammoMode: v.ammoMode,
+                ammoPerShot: r.ammo.perShot,
+                projectile: p ? { shotSpeed: p.shotSpeed, lifeSpan: p.lifeSpan, range: p.range, lobbed: !!p.lobbed, aiRange: p.aiRange } : null,
+                warnings: r.warnings.slice(),
+            };
+        }
+
         const ctx = {
             scope, families, familiesIn, weaponStemsFor, packOf, units, family, variant, shooter, target, unitInfo,
-            resolveVariant, fittingVariants, defaultWeapon, damageLetter, compute,
+            resolveVariant, fittingVariants, defaultWeapon, damageLetter, compute, weaveInput,
             reticleFrame: (name) => (reticleFrames && reticleFrames[name]) || null,
             hasReticles: !!reticleFrames,
         };
@@ -1653,6 +1730,9 @@
         FACTIONS,
         TIERS,
         ARC_HITS_PER_SEC,
-        _testables: { numbered, armoryItems, childNames, sanitizeReticle, num, bool, normCategory, defaultFor },
+        _testables: {
+            numbered, armoryItems, childNames, sanitizeReticle, num, bool, normCategory, defaultFor,
+            WEAPON_DEFAULTS, WEAPON_PARENT, ORD_DEFAULTS, ORD_PARENT,
+        },
     };
 })(typeof window !== 'undefined' ? window : globalThis);

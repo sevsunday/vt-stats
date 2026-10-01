@@ -52,6 +52,7 @@ const TRAIL_POINTS = 32;
 const TRAIL_SEGMENT_HZ = 20;  // nominal trail-segment cadence: textureRate repeats the texture this often per second of trail age
 const TRAIL_FALLBACK_SEC = 0.6;
 const EMIT_LOD_SCALE = 2;
+const EMIT_CATCHUP_MAX = 8;   // emissions one emitter may owe in a single frame before the backlog is dropped
 const STATIC_MAX_TRIS = 200;
 const HOLD = 1e30;
 const SRGB = THREE.SRGBColorSpace;
@@ -170,9 +171,20 @@ function vec3(spec, out) {
     return out;
 }
 
+/* One entry of the game's 4096-float random table, which the engine fills
+ * with -1 + 0.2 * (ten uniforms on [0, 1)): mean 0, range [-1, 1), standard
+ * deviation 0.183. ODF variances (shot spread, emitter and explosion
+ * particles, emit delay) scale entries of this table. */
+function tableRand() {
+    let sum = 0;
+    for (let i = 0; i < 10; i++) sum += Math.random();
+    return -1 + 0.2 * sum;
+}
+
+/* `spec` times a fresh table entry per axis. */
 function randVec(spec, out) {
     vec3(spec, out);
-    out.set(out.x * (Math.random() * 2 - 1), out.y * (Math.random() * 2 - 1), out.z * (Math.random() * 2 - 1));
+    out.set(out.x * tableRand(), out.y * tableRand(), out.z * tableRand());
     return out;
 }
 
@@ -254,6 +266,7 @@ export function createFxRuntime(scene, assets) {
     const root = new THREE.Group();
     root.name = 'vt-fx';
     scene.add(root);
+    const protoGroup = new THREE.Group();
     /* Point-light count is part of every MeshStandardMaterial program. These
      * slots are created once, stay visible, and are borrowed by draw_light.
      * Idle intensity is 0. Hiding a slot would drop the count and recompile. */
@@ -387,14 +400,16 @@ export function createFxRuntime(scene, assets) {
         const sample = texes.find((t) => t && t.image) || null;
         const compile = ensurePrototypes(sample);
         if (!compile || !camera) return;
-        root.add(proto.sprite, proto.basicMesh, proto.vertMesh);
+        // compileAsync polls every material it compiled and throws, never
+        // settling, when one is disposed meanwhile (a live round expiring), so
+        // it gets only the prototypes. The scene supplies the lights: light
+        // counts are part of every program key.
+        protoGroup.add(proto.sprite, proto.basicMesh, proto.vertMesh);
         try {
-            await renderer.compileAsync(root, camera);
+            await renderer.compileAsync(protoGroup, camera, scene);
             proto.compiled = true;
         } finally {
-            root.remove(proto.sprite);
-            root.remove(proto.basicMesh);
-            root.remove(proto.vertMesh);
+            protoGroup.remove(proto.sprite, proto.basicMesh, proto.vertMesh);
         }
     }
 
@@ -588,7 +603,10 @@ export function createFxRuntime(scene, assets) {
             sim: simBase,
             emitAcc: 0,
             emitNext: 0,
-            spin: (Math.random() * 2 - 1) * num(section.rotationrate, 0),
+            // Spin rate rotationBias + rotationRate x a table entry, from a
+            // random starting angle when rotationRate is set.
+            spin: num(section.rotationbias, 0) + num(section.rotationrate, 0) * tableRand(),
+            spinStart: num(section.rotationrate, 0) ? Math.random() * Math.PI * 2 : 0,
             released: false,
             _follow: null,
             _followVel: null,
@@ -753,7 +771,10 @@ export function createFxRuntime(scene, assets) {
         const staticInner = num(section.innerradius, 0);
         const staticOuter = Math.max(staticInner, num(section.outerradius, 0));
         const staticSeg = segmentTime > 0 ? segmentTime : (animate < HOLD ? animate : 0.4);
-        node.emitNext = emitDelay + Math.random() * emitDelayVar;
+        // An emitter schedules each emission emitDelay + emitDelayVar x a
+        // table entry after the one before.
+        const nextEmitDelay = () => Math.max(0, emitDelay + emitDelayVar * tableRand());
+        node.emitNext = emits || base === 'draw_static' ? nextEmitDelay() : emitDelay + Math.random() * emitDelayVar;
 
         const currentRadius = () => {
             const u = Math.min(1, node.age / animate);
@@ -808,7 +829,7 @@ export function createFxRuntime(scene, assets) {
                     obj.center.set(0.5, Math.max(0, Math.min(1, (node.pos.y - groundY) / h)));
                 } else if (squish) obj.center.set(0.5, 0.5);
                 obj.scale.set(radius * 2, sy, 1);
-                if (node.spin) obj.material.rotation = node.spin * node.age;
+                if (node.spin || node.spinStart) obj.material.rotation = node.spinStart + node.spin * node.age;
             } else if (obj && (base === 'draw_sphere' || base === 'draw_planar')) {
                 obj.scale.setScalar(radius);
             }
@@ -898,17 +919,13 @@ export function createFxRuntime(scene, assets) {
             writeRibbon(list, node._followVel || node.vel);
         }
 
-        /* Hitscan path from a to b, built ONCE per render the way the guide
-         * describes draw_bolt ("a series of trail segments with variance in
-         * direction between segments"): from each vertex the next segment
-         * heads for the impact point along normalize((b - p) + jitter) for
-         * segmentLength, with jitter uniform +-segmentVariance per axis in the
-         * emitter frame (x side, y up, z along), and the last vertex is b.
-         * Adding the jitter to the UNNORMALIZED remaining vector is what gives
-         * the in-game profile: +-2 on 80 m of remaining bolt is ~1.4 degrees
-         * (tight at the barrel), +-2 on the last 8 m is ~14 degrees (electric
-         * at the target). 0 0 0 (Gauss, Blast) is a straight beam; a render
-         * with no segmentLength is one straight segment. */
+        /* Hitscan path from a to b, built ONCE per render the way the engine
+         * lays draw_bolt: a vertex every segmentLength along the straight line,
+         * each offset by segmentVariance times a table entry per axis in the
+         * segment frame (x side, y up, z along), with a and b exact. The
+         * offset is the same size along the whole bolt. 0 0 0 (Gauss, Blast)
+         * is a straight beam; a render with no segmentLength is one straight
+         * segment. */
         function boltPath(a, b) {
             const total = b.clone().sub(a);
             const len = total.length();
@@ -927,23 +944,12 @@ export function createFxRuntime(scene, assets) {
             const maxSegs = TRAIL_POINTS - 1;
             let step = segLength > 0 ? segLength : len;
             if (len / step > maxSegs) step = len / maxSegs;
-            const jitter = segVar.x > 0 || segVar.y > 0 || segVar.z > 0;
-            const p = a.clone();
-            const rem = new THREE.Vector3();
-            const head = new THREE.Vector3();
-            for (let i = 0; i < maxSegs - 1; i++) {
-                rem.copy(b).sub(p);
-                if (rem.length() <= step * 1.0001) break;   // the last segment lands on b
-                head.copy(rem);
-                if (jitter) {
-                    head.addScaledVector(side, (Math.random() * 2 - 1) * segVar.x)
-                        .addScaledVector(up2, (Math.random() * 2 - 1) * segVar.y)
-                        .addScaledVector(dir, (Math.random() * 2 - 1) * segVar.z);
-                    if (head.lengthSq() < 1e-8) head.copy(rem);
-                }
-                head.normalize();
-                p.addScaledVector(head, step);
-                pts.push(p.clone());
+            for (let k = 1; k * step < len - 1e-6 && pts.length < maxSegs; k++) {
+                const p = a.clone().addScaledVector(dir, k * step);
+                p.addScaledVector(side, tableRand() * segVar.x)
+                    .addScaledVector(up2, tableRand() * segVar.y)
+                    .addScaledVector(dir, tableRand() * segVar.z);
+                pts.push(p);
             }
             pts.push(b.clone());
             return pts;
@@ -1004,15 +1010,21 @@ export function createFxRuntime(scene, assets) {
             geo.attributes.color.needsUpdate = true;
         }
 
-        /* draw_static: emit triangles into the shell, age them over segmentTime. */
+        /* draw_static: emit triangles into the shell, age them over segmentTime.
+         * Timing and direction are the engine's (each spark at a uniform
+         * heading and an elevation of a table entry x pi); where a spark sits
+         * between innerRadius and outerRadius and how it is turned are not
+         * confirmed, so those stay uniform. */
         function layoutStatic(dt) {
             node.emitAcc += dt;
-            while (node.emitAcc >= node.emitNext && tris.length < STATIC_MAX_TRIS) {
+            let owed = 0;
+            while (node.emitAcc >= node.emitNext && owed < EMIT_CATCHUP_MAX && tris.length < STATIC_MAX_TRIS) {
+                owed += 1;
                 node.emitAcc -= node.emitNext;
-                node.emitNext = Math.max(0.001, emitDelay + Math.random() * emitDelayVar);
-                const dir = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
-                if (dir.lengthSq() < 1e-6) dir.set(0, 1, 0);
-                dir.normalize();
+                node.emitNext = nextEmitDelay();
+                const heading = Math.random() * Math.PI * 2;
+                const elev = tableRand() * Math.PI;
+                const dir = new THREE.Vector3(Math.cos(elev) * Math.sin(heading), Math.sin(elev), Math.cos(elev) * Math.cos(heading));
                 const r = staticInner + Math.random() * (staticOuter - staticInner);
                 const ax = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
                 const ay = new THREE.Vector3().crossVectors(ax, dir);
@@ -1020,7 +1032,7 @@ export function createFxRuntime(scene, assets) {
                 ay.normalize();
                 tris.push({ c: dir.multiplyScalar(r), ax, ay, t0: node.age });
             }
-            if (node.emitAcc > node.emitNext) node.emitAcc = 0;
+            if (node.emitAcc >= node.emitNext) node.emitAcc = 0;
             for (let i = tris.length - 1; i >= 0; i--) {
                 if (node.age - tris[i].t0 >= staticSeg) tris.splice(i, 1);
             }
@@ -1116,8 +1128,8 @@ export function createFxRuntime(scene, assets) {
                     obj.rotation.x += num(section.addpitch, 0) * dt;
                     obj.rotation.y += num(section.addyaw, 0) * dt;
                     obj.rotation.z += num(section.addroll, 0) * dt;
-                } else if (base === 'draw_planar' && node.spin) {
-                    obj.rotation.z = node.spin * node.age;
+                } else if (base === 'draw_planar' && (node.spin || node.spinStart)) {
+                    obj.rotation.z = node.spinStart + node.spin * node.age;
                 }
             }
             if (halo) halo.position.copy(node.pos);
@@ -1132,14 +1144,18 @@ export function createFxRuntime(scene, assets) {
             }
             if (emits && !node.released) {
                 node.emitAcc += dt;
-                if (node.emitAcc >= node.emitNext) {
-                    node.emitAcc = 0;
-                    node.emitNext = emitDelay + Math.random() * emitDelayVar;
+                let owed = 0;
+                while (node.emitAcc >= node.emitNext && owed < EMIT_CATCHUP_MAX) {
+                    owed += 1;
+                    node.emitAcc -= node.emitNext;
+                    node.emitNext = nextEmitDelay();
                     const ref = section.emitname;
                     const childSec = ref ? sectionByRef(map, ref, prefix) : section;
                     if (childSec) {
+                        // emitVelocity / emitPosBias are the base; only the
+                        // variances are scaled by table entries.
                         const childVel = new THREE.Vector3();
-                        randVec(section.emitvelocity, childVel);
+                        vec3(section.emitvelocity, childVel);
                         const extra = new THREE.Vector3();
                         randVec(section.emitvariance, extra);
                         childVel.add(extra);
@@ -1151,6 +1167,8 @@ export function createFxRuntime(scene, assets) {
                         }
                         const jitter = new THREE.Vector3();
                         randVec(section.emitposvariance, jitter);
+                        const bias = new THREE.Vector3();
+                        jitter.add(vec3(section.emitposbias, bias));
                         const childBase = String(childSec.renderbase || 'draw_twirl').toLowerCase();
                         const forced = Object.assign({}, childSec, {
                             renderbase: childSec === section || childBase === 'draw_emit' || childBase === 'draw_twirl_trail'
@@ -1161,6 +1179,7 @@ export function createFxRuntime(scene, assets) {
                         spawn(map, forced, { position: node.pos.clone().add(jitter), velocity: childVel }, depth + 1);
                     }
                 }
+                if (node.emitAcc >= node.emitNext) node.emitAcc = 0;
             }
             // Lifetime: explicit lifeTime (or staticTime) ends any node; a trail
             // that reaches it, or was released, drains its sections first.
@@ -1224,7 +1243,7 @@ export function createFxRuntime(scene, assets) {
         for (let i = 1; i <= n; i++) {
             const section = sectionByRef(map, head['particleclass' + i], prefix);
             if (!section) continue;
-            const count = Math.min(8, Math.max(1, Math.round(num(head['particlecount' + i], 1))));
+            const count = Math.max(1, Math.round(num(head['particlecount' + i], 1)));
             const bias = new THREE.Vector3();
             vec3(head['particlebias' + i], bias);
             const inh = new THREE.Vector3();
@@ -1345,9 +1364,6 @@ export function createFxRuntime(scene, assets) {
         live.forEach((n) => n.dispose());
         live.length = 0;
         perKey.clear();
-        if (proto.sprite) root.remove(proto.sprite);
-        if (proto.basicMesh) root.remove(proto.basicMesh);
-        if (proto.vertMesh) root.remove(proto.vertMesh);
         if (proto.spriteMat) proto.spriteMat.dispose();
         if (proto.basicMat) proto.basicMat.dispose();
         if (proto.vertMat) proto.vertMat.dispose();
@@ -1395,4 +1411,5 @@ export function createFxRuntime(scene, assets) {
 
 export {
     FX_PARTICLE_BUDGET, FX_LIGHT_POOL, SIM_GRAVITY, TRAIL_SEGMENT_HZ, FX_HALO_RATIO, FX_FLARE_BASE, FX_FLARE_MAX,
+    tableRand, randVec,
 };
