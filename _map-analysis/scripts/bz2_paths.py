@@ -124,10 +124,14 @@ def resolve_root_dirs(
     quiet: bool = False,
 ) -> list[tuple[Path, str]]:
     """
-    Returns: ordered list of (Path, label) tuples for map collection.
-    Last-wins precedence is later in this list overrides earlier matches
-    by basename - so put base game first, then VSR config mod, then asset
-    deps in INI order.
+    Returns: ordered list of (Path, label) tuples for map collection, lowest
+    priority first (a later root overrides an earlier match by basename).
+
+    The game's file system adds the VSR config mod, then its asset
+    dependencies in INI order, then the base game, and the first directory
+    added wins a lookup. So the list here is the base game, then the
+    dependencies in reverse INI order, then the VSR config mod (the same
+    order as scripts/odf/build_odf_db.py, so assets match their ODFs).
 
     Hard-fails (sys.exit) if BZ2R or the VSR INI can't be found.
     """
@@ -175,29 +179,30 @@ def resolve_root_dirs(
     _say(f"  BZ2R: {bz2r_dir}")
     _say(f"  VSR config mod: {vsr_dir}  ({mod_name!r})")
 
-    roots: list[tuple[Path, str]] = [
-        (bz2r_dir, "BZ2R (base game)"),
-        (vsr_dir, f"VSR config mod: {mod_name}"),
-    ]
+    roots: list[tuple[Path, str]] = [(bz2r_dir, "BZ2R (base game)")]
+    config_root = (vsr_dir, f"VSR config mod: {mod_name}")
 
     if no_deps:
         _say("  --no-deps: skipping asset dependency resolution.")
-        return roots
+        return roots + [config_root]
 
     deps_raw = workshop_section.get("assetDependencies", "")
     dep_ids = [s.strip() for s in deps_raw.split(",") if s.strip()]
     missing: list[tuple[str, str, Path]] = []
+    dep_roots: list[tuple[Path, str]] = []
     for wid in dep_ids:
         dep_path = workshop_dir / wid
         label = _get_mod_label(wid, ini_data)
         if not dep_path.is_dir():
             missing.append((wid, label, dep_path))
             continue
-        roots.append((dep_path, f"dep {wid}: {label}"))
+        dep_roots.append((dep_path, f"dep {wid}: {label}"))
     if missing:
         _say(f"  WARN: {len(missing)} asset dep(s) not on disk (skipped):")
         for wid, label, p in missing:
             _say(f"    - {wid} ({label}): {p}")
+    roots.extend(reversed(dep_roots))
+    roots.append(config_root)
     _say(f"  Total roots: {len(roots)}")
     return roots
 

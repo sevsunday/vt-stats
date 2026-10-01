@@ -12,9 +12,9 @@ and writes:
     data/audio/<stem>.wav         only the clips not already vendored
     data/fx/index.json            stem -> file, plus workshop credits
 
-Existing outputs are skipped unless --force. Sources are the local BZ2R
-install and the subscribed workshop tree (Forgotten Enemies packs supply
-most of the effect art the stock install does not).
+Existing outputs are skipped unless --force. Sources are searched in the
+game's order (the VSR config mod, its asset dependencies in INI order, the
+BZ2R install), then the rest of the subscribed workshop tree as a fallback.
 
     python scripts/build_fx_assets.py
     python scripts/build_fx_assets.py --force
@@ -31,10 +31,12 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS / "object-render"))
+sys.path.insert(0, str(SCRIPTS / "odf"))
 
 from dds_decode import decode_dds  # noqa: E402
 from glb_writer import GlbBuilder  # noqa: E402
 from msh_parser import MshError, parse_msh  # noqa: E402
+from build_odf_db import VSR_MOD_ID, parse_mod_ini  # noqa: E402
 
 REPO = SCRIPTS.parent
 ODF_PATH = REPO / "data" / "odf.min.json"
@@ -330,17 +332,40 @@ def named_refs(entry: dict) -> list[str]:
     return out
 
 
+SECTION_REF_RE = re.compile(r"^(rendername\d*|renderbase|emitname|particleclass\d+|flashname)$", re.I)
+
+
+def section_ref_files(entry: dict) -> list[str]:
+    """Files named by "file.section" render, flash, emitter and particle names
+    (renderName = "shellgun_c.render" is the [render] section of shellgun_c.odf).
+    The range borrows such sections when the entry's own tree lacks them
+    (js/fx/weapon-profile.js mergeCrossRefs), so their assets ship too."""
+    out = []
+    for sec in entry.values():
+        if not isinstance(sec, dict):
+            continue
+        for k, v in sec.items():
+            if not isinstance(v, str) or not SECTION_REF_RE.match(str(k)):
+                continue
+            parts = v.strip().replace('"', "").lower().split(".")
+            if len(parts) < 2 or not parts[-1] or parts[-1].startswith("draw_"):
+                continue
+            out.append(".".join(parts[:-1]))
+    return out
+
+
 def follow_dispensed(db: dict, weapon: dict, tex, geom, snd, seen: set) -> None:
-    """Mines, payloads, leader rounds, charge ordnances and explosions are
-    separate ODFs; the weapon entry only names them."""
-    pending = named_refs(weapon)
+    """Mines, payloads, leader rounds, charge ordnances, explosions and the
+    files named by "file.section" render names are separate ODFs; the weapon
+    entry only names them."""
+    pending = named_refs(weapon) + section_ref_files(weapon)
     while pending:
         s = pending.pop()
         if s in seen:
             continue
         seen.add(s)
         entry = None
-        for bucket in ("Mine", "Misc", "Ordnance", "Explosion", "Effect"):
+        for bucket in ("Mine", "Misc", "Ordnance", "Explosion", "Effect", "Weapon"):
             hit = db.get(bucket, {}).get(s + ".odf")
             if hit:
                 entry = hit
@@ -348,11 +373,26 @@ def follow_dispensed(db: dict, weapon: dict, tex, geom, snd, seen: set) -> None:
         if not entry:
             continue
         walk_refs(entry, tex, geom, snd)
-        pending.extend(named_refs(entry))
+        pending.extend(named_refs(entry) + section_ref_files(entry))
+
+
+def search_roots(bz2r: Path, workshop: Path) -> list[Path]:
+    """Directories in the game's lookup order, first match wins: the VSR
+    config mod, its asset dependencies in INI order, then the base game.
+    The rest of the workshop tree follows as a fallback for art outside
+    that set."""
+    roots = []
+    ini = workshop / VSR_MOD_ID / f"{VSR_MOD_ID}.ini"
+    if ini.is_file():
+        deps = parse_mod_ini(ini).get("WORKSHOP", {}).get("assetDependencies", "")
+        roots.append(workshop / VSR_MOD_ID)
+        roots.extend(workshop / wid.strip() for wid in deps.split(",") if wid.strip())
+    roots += [bz2r, workshop]
+    return roots
 
 
 def index_files(roots: list[Path], exts: set[str]) -> dict[str, Path]:
-    """stem -> first path. BZ2R is listed before workshop so stock wins."""
+    """stem -> the first path across `roots` (first wins)."""
     out = {}
     for root in roots:
         if not root.is_dir():
@@ -451,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"VSR weapons: {len(vsr)}; library: {len(library)}; effect walk: {len(stems)}")
     print(f"textures {len(tex)}, geoms {len(geom)}, sounds {len(snd)}")
 
-    roots = [args.bz2r, args.workshop]
+    roots = search_roots(args.bz2r, args.workshop)
     files = index_files(roots, {".dds", ".tga", ".png", ".msh", ".wav"})
 
     TEX_DIR.mkdir(parents=True, exist_ok=True)
