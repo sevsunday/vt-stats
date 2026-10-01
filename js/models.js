@@ -30,7 +30,8 @@ const SCENE_BG_KEY = 'vt.obj.scene.bg';   // 'dark' (default) | 'light'
 const TURN_SENS_KEY = 'vt.obj.drive.turnSens';   // Drive Mode turn response (25..100 %)
 const GRID_KEY = 'vt.obj.grid';
 const AXES_KEY = 'vt.obj.axes';
-const COLLISION_KEY = 'vt.obj.collision';   // collision-radius ring (off default)
+const COLLISION_KEY = 'vt.obj.collision';   // collision bounds overlay (off default)
+const PATHING_KEY = 'vt.obj.pathing';       // AI pathing radius circle (off default)
 const SCENE_BG_VALUES = ['dark', 'light'];
 const ULTRA_KEY = 'vt.obj.ultra';          // single Ultra-rendering toggle
 const ULTRA_AO_KEY = 'vt.obj.ultra.ao';    // legacy AO-only key (migration source)
@@ -98,6 +99,9 @@ const els = {
   sceneGrid: document.getElementById('scene-grid'),
   sceneAxes: document.getElementById('scene-axes'),
   sceneCollision: document.getElementById('scene-collision'),
+  sceneCollisionVal: document.getElementById('scene-collision-val'),
+  scenePathing: document.getElementById('scene-pathing'),
+  scenePathingVal: document.getElementById('scene-pathing-val'),
   ultraToggle: document.getElementById('ultra-toggle'),
   stageLoading: document.getElementById('stage-loading'),
   stageLoadingLabel: document.getElementById('stage-loading-label'),
@@ -447,14 +451,16 @@ function scenePrefs() {
   const grid = localStorage.getItem(GRID_KEY);
   const axes = localStorage.getItem(AXES_KEY);
   const collision = localStorage.getItem(COLLISION_KEY);
+  const pathing = localStorage.getItem(PATHING_KEY);
   return {
     // Dark background is the default; light only when the user opts in.
     bg: SCENE_BG_VALUES.includes(bg) ? bg : 'dark',
     // Grid/axes default ON when unset.
     grid: grid === null ? true : grid === '1',
     axes: axes === null ? true : axes === '1',
-    // Collision ring is opt-in (off by default).
+    // Collision overlays are opt-in (off by default).
     collision: collision === '1',
+    pathing: pathing === '1',
   };
 }
 
@@ -771,11 +777,13 @@ function showViewer(entry) {
       setupShipLightsUI();
       setupTrueLightingUI();
       setupSnipeUI();
-      // Collision-radius ground ring: data + initial size from the default
-      // loadout variant (or the primary ODF when unarmed), visibility from pref.
+      // Collision overlays: the .msh bounds (box + bounding sphere) and the ODF
+      // AI pathing circle, sized for the default loadout variant (or the
+      // primary ODF when unarmed). Visibility from prefs.
       activeViewer.setCollisionData(entry.collisionRadiiByOdf || null, entry.radius);
-      activeViewer.setCollisionRadiusForOdf(entry.defaultLoadoutOdf || entry.primaryOdf);
-      activeViewer.setCollisionVisible(scene.collision);
+      activeViewer.setPathingRadiusForOdf(entry.defaultLoadoutOdf || entry.primaryOdf);
+      activeViewer.setCollisionBoundsVisible(scene.collision);
+      activeViewer.setPathingVisible(scene.pathing);
       // Fly toggle: only for craft with an ODF flightAltitude ceiling.
       els.fly.hidden = !activeViewer.hasFlightMode();
       // Now that each pane's applicability (button visibility) is known, lay out
@@ -1068,7 +1076,11 @@ function showViewer(entry) {
   };
   els.sceneCollision.onchange = () => {
     localStorage.setItem(COLLISION_KEY, els.sceneCollision.checked ? '1' : '0');
-    if (activeViewer) activeViewer.setCollisionVisible(els.sceneCollision.checked);
+    if (activeViewer) activeViewer.setCollisionBoundsVisible(els.sceneCollision.checked);
+  };
+  els.scenePathing.onchange = () => {
+    localStorage.setItem(PATHING_KEY, els.scenePathing.checked ? '1' : '0');
+    if (activeViewer) activeViewer.setPathingVisible(els.scenePathing.checked);
   };
   els.ultraToggle.onclick = () => {
     const on = !els.ultraToggle.classList.contains('on');
@@ -1127,7 +1139,43 @@ function syncScenePanel() {
   syncSceneBgSeg(st.bgMode);
   els.sceneGrid.checked = st.grid;
   els.sceneAxes.checked = st.axes;
-  els.sceneCollision.checked = activeViewer.getCollisionVisible();
+  els.sceneCollision.checked = activeViewer.getCollisionBoundsVisible();
+  els.scenePathing.checked = activeViewer.getPathingVisible();
+  syncCollisionReadouts();
+}
+
+// Meters to 3 significant digits so the readout fits its row:
+// 7 -> "7.0", 3.947 -> "3.95", 35.76 -> "35.8", 191.95 -> "192".
+function fmtMeters(m) {
+  if (m >= 100) return m.toFixed(0);
+  if (m >= 10) return m.toFixed(1);
+  return m.toFixed(2).replace(/(\.\d)0$/, '$1');
+}
+
+/* Radius readouts on the two collision rows: the bounding sphere, and the
+ * pathing circle resolved for the current loadout variant. */
+function syncCollisionReadouts() {
+  if (!activeViewer) return;
+  const s = activeViewer.getCollisionSphereRadius();
+  els.sceneCollisionVal.textContent = s.meters > 0 ? `r ${fmtMeters(s.meters)} m` : '—';
+  let sphereTip = s.meters > 0
+    ? 'Bounding sphere radius: half the diagonal of the box around the visible model, as the .msh bakes it'
+    : '';
+  if (s.meters > 0 && s.baked > 0 && Math.abs(s.meters / s.baked - 1) > 0.005) {
+    sphereTip += `. The .msh header's own value is ${fmtMeters(s.baked)} m, baked at the model's rest pose and native scale`;
+  }
+  els.sceneCollisionVal.title = sphereTip;
+  const p = activeViewer.getPathingRadius();
+  const odf = p.odf || 'This model';
+  if (p.source === 'odf') {
+    els.scenePathingVal.textContent = p.meters > 0 ? `${fmtMeters(p.meters)} m` : 'none';
+    els.scenePathingVal.title = p.meters > 0
+      ? `collisionRadius from ${odf}`
+      : `${odf} sets collisionRadius to 0`;
+  } else {
+    els.scenePathingVal.textContent = p.meters > 0 ? `${fmtMeters(p.meters)} m default` : '—';
+    els.scenePathingVal.title = `${odf} does not set collisionRadius, so the engine default applies: 0.75 \u00d7 the bounding sphere`;
+  }
 }
 
 function syncSceneBgSeg(bg) {
@@ -1690,7 +1738,8 @@ function setupLoadoutUI(entry) {
   els.loadoutVariant.onchange = () => {
     renderLoadoutRows(els.loadoutVariant.value);
     if (activeViewer) {
-      activeViewer.setCollisionRadiusForOdf(els.loadoutVariant.value || entry.primaryOdf);
+      activeViewer.setPathingRadiusForOdf(els.loadoutVariant.value || entry.primaryOdf);
+      syncCollisionReadouts();
     }
   };
   // Hide the dropdown chrome only when there's nothing to choose between AND
@@ -1913,18 +1962,20 @@ function resetAllViewer() {
   initLightPanel({ ...LIGHT_DEFAULT });   // re-sync slider values + handlers
   setLightOn(LIGHT_DEFAULT.on);           // panel dim + viewer + persist
 
-  // Display -> dark background, grid + axes on, collision ring off + re-sized
-  // to the default variant.
+  // Display -> dark background, grid + axes on, collision overlays off + the
+  // pathing circle re-sized to the default variant.
   localStorage.setItem(SCENE_BG_KEY, 'dark');
   localStorage.setItem(GRID_KEY, '1');
   localStorage.setItem(AXES_KEY, '1');
   localStorage.setItem(COLLISION_KEY, '0');
+  localStorage.setItem(PATHING_KEY, '0');
   activeViewer.setBackgroundMode('dark');
   activeViewer.setGridVisible(true);
   activeViewer.setAxesVisible(true);
-  activeViewer.setCollisionRadiusForOdf(
+  activeViewer.setPathingRadiusForOdf(
     (loadoutEntry && loadoutEntry.defaultLoadoutOdf) || (loadoutEntry && loadoutEntry.primaryOdf));
-  activeViewer.setCollisionVisible(false);
+  activeViewer.setCollisionBoundsVisible(false);
+  activeViewer.setPathingVisible(false);
   syncScenePanel();
   els.sizeBox.checked = false;
   activeViewer.setHullBoxVisible(false);

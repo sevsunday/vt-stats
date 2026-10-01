@@ -24,6 +24,10 @@ Block (x blockCount)
   BlockInfo { key:u32 (per-mesh hash), size:u32 (= filesize-52) }
   name      : u16 len-incl-null + ascii   (e.g. "mainbody")
   Sphere    { radius:f32, matrix:4x4 f32, width/height/breadth:f32 }
+              box around the VISIBLE geometry (__h / __c nodes excluded):
+              matrix.posit = box center, width/height/breadth = half-extents,
+              radius = half the box diagonal (the engine collision sphere;
+              verified on 638/638 corpus models)
   MSH_Header{ dummy:f32, scale:f32, indexed/moveAnim/oldPipe/isSingleGeometry/skinned:u32 }
   vertices[]      : u32 count + Vec3 f32[count]
   normals[]       : u32 count + Vec3 f32[count]
@@ -84,6 +88,7 @@ viewer can drive the named nodes/materials interactively (see the project README
 
 ## Render flags worth honoring
 
-`RS_HIDDEN = 0x400` (collision/helper geometry -- skip), `RS_2SIDED = 0x200`
+`RS_COLLIDABLE = 0x100` (`__c`, authored collision hull -- skip),
+`RS_HIDDEN = 0x400` (`__h`, helper geometry -- skip), `RS_2SIDED = 0x200`
 (disable backface culling for that group). All four proof units use flag
 `0x650000` (a blend mode), none hidden.

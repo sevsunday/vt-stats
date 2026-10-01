@@ -359,9 +359,15 @@
           <span class="light-label">Axes</span>
           <input id="scene-axes" type="checkbox" />
         </label>
-        <label class="light-row scene-check">
-          <span class="light-label">Collision radius</span>
+        <label class="light-row scene-check scene-readout" title="The engine's collision sphere and the box it is built from. Both are baked into the .msh around the visible model; the ODF does not set them.">
+          <span class="light-label">Collision bounds</span>
+          <span id="scene-collision-val" class="light-val"></span>
           <input id="scene-collision" type="checkbox" />
+        </label>
+        <label class="light-row scene-check scene-readout" title="ODF collisionRadius: a flat circle the AI uses for avoidance and path planning. Defaults to 0.75 &times; the bounding sphere and follows the Loadout variant.">
+          <span class="light-label">AI pathing radius</span>
+          <span id="scene-pathing-val" class="light-val"></span>
+          <input id="scene-pathing" type="checkbox" />
         </label>
         <div class="light-row scene-ultra-head"><span>Ultra quality</span></div>
         <div class="scene-ultra">

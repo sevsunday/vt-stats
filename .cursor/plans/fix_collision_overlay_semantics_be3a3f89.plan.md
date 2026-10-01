@@ -4,19 +4,19 @@ overview: "BlackDragon is right: the Models Browser draws the ODF `collisionRadi
 todos:
   - id: viewer-split-overlays
     content: "js/models-viewer.js: split overlay into Collision bounds (MSH sphere r = entry.radius + hull box, parented to _spin) and Pathing ring (ODF value / 0.75 default / explicit 0 -> none, scene-rooted); new API names; update drive / capture / dispose / load sites and comments"
-    status: pending
+    status: completed
   - id: models-js-wiring
     content: "js/models.js: PATHING_KEY pref, setup calls, two onchange handlers, syncScenePanel, Reset all, loadout-variant onchange -> setPathingRadiusForOdf, radius readouts"
-    status: pending
+    status: completed
   - id: html-rows
     content: "models/index.html: replace the Collision radius row with Collision bounds + AI pathing radius rows with tooltips"
-    status: pending
+    status: completed
   - id: docs
     content: Update project-overview.mdc, AGENTS.md, DEVELOPER_GUIDE.md section 17.3, FORMAT.md Sphere struct note, optional convert_msh.py docstring
-    status: pending
+    status: completed
   - id: verify
     content: Browser-verify ivtank00 / ivtankdm / ibrecy00 / ibgtow00 / ivscout00 across free spin, drive, HQ Capture, Reset all; console half-diagonal check
-    status: pending
+    status: completed
 isProject: false
 ---
 

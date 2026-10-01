@@ -804,6 +804,21 @@ label.light-head { cursor: pointer; }
   accent-color: var(--kb-primary);
   cursor: pointer;
 }
+/* Collision rows carry a live radius readout between the label and the box. */
+.scene-readout { gap: 8px; }
+.scene-readout .light-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scene-readout .light-val {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--kb-text-muted);
+}
 .scene-ultra-head {
   color: var(--kb-text-secondary);
   font-weight: 600;
