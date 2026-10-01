@@ -627,12 +627,17 @@ export function createRangeSim(opts) {
             else spawnProjectile(muzzle, aimDir(muzzle, ordv, extra && extra.gravity, null, cone), ordv, extra);
         });
         if (!fired) return false;
-        const sound = (extra && extra.sound) || profile.fireSound || (beam ? ordv.shotSound : '');
-        if (profile.looping) holdFireLoop(sound, list.length);
-        else {
-            // Another weapon took the trigger: a machine gun's loop ends here.
-            stopFireLoop();
-            playOnce(sound, firstMuzzle.position);
+        // A same-tick dump (salvoDelay 0) already played the report on the
+        // opening round. Later pellets stay silent so the copies don't stack.
+        // Spaced salvos leave muteReport unset and play once per round.
+        if (!(extra && extra.muteReport)) {
+            const sound = (extra && extra.sound) || profile.fireSound || (beam ? ordv.shotSound : '');
+            if (profile.looping) holdFireLoop(sound, list.length);
+            else {
+                // Another weapon took the trigger: a machine gun's loop ends here.
+                stopFireLoop();
+                playOnce(sound, firstMuzzle.position);
+            }
         }
         // One wash per volley, not per barrel. CannonClass.raveFlash only.
         if (profile.raveFlash) onRaveFlash(profile);
@@ -1812,10 +1817,11 @@ export function createRangeSim(opts) {
             const delay = (salvoExtra && salvoExtra.salvoDelay != null) ? salvoExtra.salvoDelay : (profile.salvoDelay || 0);
             // salvoDelay 0 is one tick in-game (MAG stages 1-2, the Burst Gun
             // and Pummel pellets): dump the rest of the salvo now instead of
-            // one round per frame.
+            // one round per frame. The opening round already played fireSound.
             if (delay <= 1e-6) {
+                const quiet = Object.assign({}, salvoExtra || {}, { muteReport: true });
                 while (salvoLeft > 0) {
-                    if (!fireMuzzles(ordv, salvoExtra || {})) { salvoLeft = 0; break; }
+                    if (!fireMuzzles(ordv, quiet)) { salvoLeft = 0; break; }
                     salvoLeft -= 1;
                 }
                 salvoTimer = 0;
