@@ -124,6 +124,15 @@ function surface(kind) {
     return 'explvehicle';
 }
 
+/* The range builds a fresh profile on every apply, so the same remote
+ * detonator is recognised by its WeaponClass ordName and wpnName. */
+function sameDetonator(a, b) {
+    if (!a || !b || a.id !== 'detonator' || b.id !== 'detonator') return false;
+    const wa = (a.map && a.map.get('weaponclass')) || {};
+    const wb = (b.map && b.map.get('weaponclass')) || {};
+    return wa.ordname === wb.ordname && wa.wpnname === wb.wpnname;
+}
+
 function segmentHitsSphere(a, b, center, radius) {
     const abx = b.x - a.x;
     const aby = b.y - a.y;
@@ -312,6 +321,9 @@ export function createRangeSim(opts) {
     }
 
     function setWeapon(next, database, ammoState, keepAmmo) {
+        // Changing weapon sets a remote detonator's armed shells off. A
+        // re-apply of the same detonator clears them with the engagement.
+        if (armed.length && !sameDetonator(next, profile)) detonateArmed();
         weave = null;
         reachGate = null;
         clearEngagement();
@@ -326,16 +338,24 @@ export function createRangeSim(opts) {
      * for each pull. cfg = { slots: [{ key, stem, profile, desc }] in the
      * user's order, switchSec, closing: { speed, stop } | null }. Rounds in
      * flight and the cooldown of every group that stays survive a change of
-     * the set; entering the mode clears the engagement like a weapon swap. */
+     * the set. A remote detonator's armed shells burst when their group
+     * leaves it or mounts another weapon. Entering the mode bursts them too,
+     * then clears the engagement like a weapon swap. */
     function setWeave(cfg, database, ammoState, keepAmmo) {
         db = database || db;
         reachGate = null;
         const prev = weave;
-        if (!prev) clearEngagement();
+        if (!prev) {
+            detonateArmed();
+            clearEngagement();
+        }
+        const kept = new Set();
         const slots = ((cfg && cfg.slots) || []).filter((c) => c && c.profile && c.desc).map((c) => {
             const old = prev && prev.slots.find((s) => s.key === c.key && s.stem === c.stem);
+            if (old) kept.add(c.key);
             return { key: c.key, stem: c.stem, profile: c.profile, desc: c.desc, cooldown: old ? old.cooldown : 0, barrel: old ? old.barrel : 0 };
         });
+        if (prev) detonateArmed((shot) => !kept.has(shot.slotKey));
         const currentKey = prev && prev.current >= 0 && prev.slots[prev.current] ? prev.slots[prev.current].key : null;
         weave = {
             slots,
@@ -677,19 +697,23 @@ export function createRangeSim(opts) {
         return true;
     }
 
-    function detonateAll() {
-        armed.forEach((shot) => {
+    /* Armed MDM shells burst where they are: their ground explosion, with
+     * splash inside its damageRadius. `which(shot)` picks the shells; all by
+     * default. */
+    function detonateArmed(which) {
+        armed.filter((shot) => !which || which(shot)).forEach((shot) => {
+            armed.splice(armed.indexOf(shot), 1);
+            if (shot.dead) return;
             const head = explode(shot.ordv, 'ground', shot.pos, null);
             applyDamage(shot.ordv, head, 'ground', shot.pos, getTarget());
             shot.kill();
         });
-        armed.length = 0;
     }
 
     /* Detonate button: every armed MDM shell bursts where it is. */
     function detonate() {
         if (!armed.length) return false;
-        detonateAll();
+        detonateArmed();
         return true;
     }
 
@@ -941,7 +965,7 @@ export function createRangeSim(opts) {
         onEvent('trigger');
         // A fresh press with shells armed detonates them; holding lobs more.
         if (id === 'detonator' && armed.length) {
-            detonateAll();
+            detonateArmed();
             return;
         }
         if (id === 'phantom' || id === 'damper' || id === 'site') {
@@ -1178,6 +1202,9 @@ export function createRangeSim(opts) {
 
     function fireSlot(i, now) {
         const s = weave.slots[i];
+        // The switch to another group sets the last one's armed MDM shells off.
+        const left = weave.current >= 0 && weave.current !== i ? weave.slots[weave.current] : null;
+        if (left) detonateArmed((shot) => shot.slotKey === left.key);
         profile = s.profile;
         cooldown = Math.max(0, s.cooldown);
         barrel = s.barrel;

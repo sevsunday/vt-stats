@@ -494,6 +494,17 @@
             return blast ? Object.assign({ stem: xpl }, blast) : null;
         }
 
+        // A remotely detonated round plays its ground explosion: the inlined
+        // ExplGround section, else the Explosion entry its xplGround names.
+        function groundBlastOf(ord) {
+            if (!ord || ord.missing) return null;
+            const inline = explosionOf(ord.sec('ExplGround.ExplosionClass'));
+            if (inline) return inline;
+            const xpl = refStem((ord.sec('OrdnanceClass') || {}).xplground);
+            const xrec = xpl ? bucket('Explosion').get(xpl) : null;
+            return xrec ? explosionOf(sec(xrec, 'ExplosionClass')) : null;
+        }
+
         function objectComponents(obj) {
             const name = objectName(obj);
             const rows = componentsOf(obj, name);
@@ -821,6 +832,9 @@
                 twin,
                 altName,
                 terminal,
+                // SpecialItemClass is "toggled on and off": Fire switches it,
+                // and ammoCost drains every second it is on.
+                toggle: SPECIAL_ITEM_TERMINALS.has(terminal),
                 fire,
                 damage,
                 reticle: reticleOf(rec),
@@ -1439,16 +1453,19 @@
             let hitsPerSec = null;
             let dpsPerHardpoint = null;
 
-            if (d.kind === 'direct' || d.kind === 'pulse' || d.kind === 'charge' || d.kind === 'blast') {
-                perHit = d.direct ? d.direct[letter] : null;
+            const timed = d.kind === 'direct' || d.kind === 'pulse' || d.kind === 'charge' || d.kind === 'blast';
+            // Rounds and drops with no single per-hit number (mines, flares,
+            // poppers, EMP rounds) still fire on that cycle, and the ammo rows
+            // need it. Per-use items (blink, jetpack) stay unrated.
+            const rated = timed || ((v.ammoUnit === 'shot' || v.ammoUnit === 'drop')
+                && Math.max(f.shotDelay, salvoSpan) > 0);
+            if (rated) {
                 cycle = Math.max(f.shotDelay, salvoSpan);
                 // Alternating guns wait shotDelay/g between pulls (the guide
                 // divides the delay across hardpoints) and still wait out the salvo.
                 shotInterval = alternating ? Math.max(f.shotDelay / g, salvoSpan) : cycle;
                 shotsPerSec = cycle > 0 ? f.salvoCount / cycle : null;
                 playerShotsPerSec = shotInterval > 0 ? 1 / shotInterval : null;
-                if (perHit != null && shotsPerSec != null) dpsPerHardpoint = perHit * shotsPerSec;
-                explain.perHit = col + ' of ' + src + ' = ' + fmt(perHit);
                 explain.cycle = f.firstDelay
                     ? 'max(shotDelay ' + fmt(f.shotDelay) + ', firstDelay ' + fmt(f.firstDelay) + ' + salvoCount ' + f.salvoCount + ' x salvoDelay ' + fmt(f.salvoDelay) + ') = ' + fmt(cycle) + ' s'
                     : 'max(shotDelay ' + fmt(f.shotDelay) + ', salvoCount ' + f.salvoCount + ' x salvoDelay ' + fmt(f.salvoDelay) + ') = ' + fmt(cycle) + ' s';
@@ -1459,6 +1476,11 @@
                         ? '1 / max(shotDelay ' + fmt(f.shotDelay) + ' / ' + g + ', salvo ' + fmt(salvoSpan) + ' s) = ' + fmt(playerShotsPerSec)
                         : '1 / cycle ' + fmt(cycle) + ' s = ' + fmt(playerShotsPerSec);
                 }
+            }
+            if (timed) {
+                perHit = d.direct ? d.direct[letter] : null;
+                if (perHit != null && shotsPerSec != null) dpsPerHardpoint = perHit * shotsPerSec;
+                explain.perHit = col + ' of ' + src + ' = ' + fmt(perHit);
                 if (shotsPerSec == null && perHit) warnings.push('The ODF declares no fire rate (shotDelay 0), so DPS is unknown.');
             } else if (d.kind === 'arc') {
                 perHit = d.direct[letter] * f.salvoDelay;
@@ -1497,7 +1519,7 @@
                 const rate = shotsPerSec;
                 if (rate != null) {
                     ammo.perSec = shotCost * rate * g;
-                    explain.ammoPerSec = fmt(shotCost) + ' ammo x ' + fmt(rate) + ' shots/s x ' + g + ' = ' + fmt(ammo.perSec);
+                    explain.ammoPerSec = fmt(shotCost) + ' ammo x ' + fmt(rate) + (v.ammoUnit === 'drop' ? ' drops' : ' shots') + '/s x ' + g + ' = ' + fmt(ammo.perSec);
                 }
                 if (sh) {
                     if (shotCost > 0) {
@@ -1669,18 +1691,31 @@
             };
         }
 
-        // One mounted hardpoint group for the shooting range's weapon switch:
-        // compute() for that group (key "CAT:c" / "CAT:a"), cut down to the
-        // numbers js/weapons-weave.js schedules with.
-        function weaveInput(stem, sh, tg, key) {
+        // The stem one hardpoint group carries (key "CAT:c" / "CAT:a"), fired
+        // from every hardpoint in that group. Same-type hardpoints fire
+        // together; a pilot, and HAND / PACK, fire one.
+        function computeGroup(stem, sh, tg, key, opts) {
             const v = variant(stem);
             if (!v) return null;
             const [cat, flag] = String(key || '').split(':');
             const forced = (sh && sh.kind === 'pilot') || v.category === 'HAND' || v.category === 'PACK';
-            const group = sh ? sh.hardpoints.filter((hp) => hp.category === cat && !!hp.assault === (flag === 'a')) : [];
-            const g = forced ? 1 : Math.max(1, group.length);
-            const r = compute({ variant: v, shooter: sh, target: tg, g });
+            const hardpoints = sh ? sh.hardpoints.filter((hp) => hp.category === cat && !!hp.assault === (flag === 'a')) : [];
+            const g = forced ? 1 : Math.max(1, hardpoints.length);
+            const r = compute({
+                variant: v, shooter: sh, target: tg, g,
+                chargeLevel: opts && opts.chargeLevel != null ? opts.chargeLevel : null,
+            });
+            return { variant: v, hardpoints, g, r };
+        }
+
+        // One mounted hardpoint group for the shooting range's weapon switch:
+        // computeGroup() cut down to the numbers js/weapons-weave.js schedules with.
+        function weaveInput(stem, sh, tg, key) {
+            const m = computeGroup(stem, sh, tg, key);
+            if (!m) return null;
+            const { variant: v, g, r } = m;
             const p = r.projectile;
+            const blast = groundBlastOf(v.ordnance ? ordnanceView(v.ordnance, weaponRec(v.stem)) : null);
             return {
                 stem: v.stem,
                 name: v.name,
@@ -1704,13 +1739,16 @@
                 ammoMode: v.ammoMode,
                 ammoPerShot: r.ammo.perShot,
                 projectile: p ? { shotSpeed: p.shotSpeed, lifeSpan: p.lifeSpan, range: p.range, lobbed: !!p.lobbed, aiRange: p.aiRange } : null,
+                // The round's ground explosion against this target, for an MDM
+                // shell set off by a weapon switch.
+                burst: blast ? { value: blast.values[r.letter] || 0, radius: blast.radius } : null,
                 warnings: r.warnings.slice(),
             };
         }
 
         const ctx = {
             scope, families, familiesIn, weaponStemsFor, packOf, units, family, variant, shooter, target, unitInfo,
-            resolveVariant, fittingVariants, defaultWeapon, damageLetter, compute, weaveInput,
+            resolveVariant, fittingVariants, defaultWeapon, damageLetter, compute, computeGroup, weaveInput,
             reticleFrame: (name) => (reticleFrames && reticleFrames[name]) || null,
             hasReticles: !!reticleFrames,
         };

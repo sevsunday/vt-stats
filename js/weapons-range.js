@@ -91,7 +91,7 @@ const SWITCH_MAX_SEC = 1;
 const RIBBON_RUNS = 18;
 const PLAN_HORIZON_MIN = PLAN_MAX_SEC / 60;
 let weaveOn = false;
-const weavePicks = new Map();   // slot key -> the user's tick; untouched keys count as ticked
+const weavePicks = new Map();   // slot key -> the user's tick; see isPicked() for untouched keys
 let weaveOrder = [];            // slot keys in the user's order, which breaks equal cycles
 let weaveDescs = [];            // per slot: weaveWeapon() of its mount
 let switchSec = TURN_SEC;
@@ -360,8 +360,12 @@ function refreshWeave() {
     weaveOrder = weaveOrder.filter((k) => keys.includes(k)).concat(keys.filter((k) => !weaveOrder.includes(k)));
 }
 
+/* A group the user has not touched starts ticked, except a mortar group,
+ * which joins the switch only once ticked. */
 function isPicked(key) {
-    return weavePicks.has(key) ? weavePicks.get(key) : true;
+    if (weavePicks.has(key)) return weavePicks.get(key);
+    const slot = slots.find((s) => s.key === key);
+    return !(slot && slot.category === 'MORT');
 }
 
 /* Ticked, schedulable groups in the user's order. */
@@ -503,6 +507,7 @@ function planInputs(descs) {
             maxHealth: snapshot ? snapshot.targetHp : 0,
             building: !!snapshot && snapshot.targetKind === 'building',
             mdmRule: snapshot && snapshot.targetMdm != null ? snapshot.targetMdm : -1,
+            radius: targetRadius,
         },
     };
 }
@@ -680,10 +685,20 @@ function weaveNotes(entries, plan, base, single) {
     }
     const mdm = descs.filter((d) => d.cap > 0);
     if (mdm.length) {
+        const b = mdm[0].burst;
+        const blast = b && b.radius > 0 ? ' (its ground explosion: ' + fmtNum(b.value, 0) + ' within ' + fmtNum(b.radius, 0) + ' m)' : '';
         note(mdm.map((d) => d.name).join(', ') + ': up to ' + mdm[0].cap + ' shells armed at once (maxCount). A shell bursts on contact with a ship or turret and bounces off buildings (allowMDMCollisionDetonation default). '
-            + (single ? 'Fire again or press Detonate to burst the rest.' : 'The switch never detonates; use Detonate.'));
-        if (base.target.building) {
-            warn('MDM shells bounce off ' + tg + ' and do no damage until you ' + (single ? 'fire again or press Detonate' : 'press Detonate') + '; the kill time leaves them out.');
+            + (single ? 'Fire again, press Detonate or change weapon to burst the rest.' : 'Changing weapon bursts every armed shell where it is' + blast + '.'));
+        if (single && base.target.building) {
+            warn('MDM shells bounce off ' + tg + ' and do no damage until they burst; the kill time leaves them out.');
+        }
+        if (!single) {
+            descs.forEach((d, i) => {
+                const pw = plan.weapons[i];
+                if (!d.cap || !pw || !pw.bursts) return;
+                warn(d.name + ': ' + pw.bursts + (pw.bursts === 1 ? ' shell bursts' : ' shells burst') + ' on a switch, '
+                    + (pw.burstDealt > 0 ? 'dealing ' + fmtNum(pw.burstDealt, 0) + ' in all.' : 'and none of them hurt ' + tg + '.'));
+            });
         }
     }
     const pulse = descs.filter((d) => d.pulse);

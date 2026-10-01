@@ -61,7 +61,9 @@
         lo: {},
     };
     const view = {
-        weapon: { q: '', showAll: false, slot: null, loadout: {} },
+        // slot: the selected hardpoint group. virtual: the Not mounted chip is
+        // selected instead (slot stays null), because `w` has no group here.
+        weapon: { q: '', showAll: false, slot: null, virtual: false, loadout: {} },
         shooter: { q: '', faction: null },
         target: { q: '', faction: null, buildings: true, pilots: true },
         matrix: { q: '', mode: 'hit', sort: null, dir: 1, pack: null },
@@ -277,8 +279,8 @@
     function currentScenario() {
         const fam = state.w ? ctx.family(state.w) : null;
         if (!fam) return null;
-        const sh = state.s ? ctx.shooter(state.s, { deployed: state.sd }) : null;
-        const tg = state.t ? ctx.target(state.t, { deployed: state.td, shield: state.sh }) : null;
+        const sh = currentShooter();
+        const tg = currentTarget();
         const res = ctx.resolveVariant(fam, sh, state.v);
         const g = res.g;
         const picked = selectedCharge(res.variant);
@@ -287,6 +289,36 @@
             chargeLevel: picked ? picked.level : null,
         });
         return { fam, sh, tg, res, r, g, v: res.variant };
+    }
+
+    // What the result card and the Weapon summary show: the selected chip.
+    // The group holding `w` is the Scenario weapon itself, so the variant
+    // pills and charge stages keep working there. Any other group shows what
+    // it carries, fired by every hardpoint in it. Not mounted is `w` on one
+    // hypothetical mount. The shooting range keeps currentScenario().
+    function shownScenario() {
+        const sc = currentScenario();
+        const sh = sc ? sc.sh : currentShooter();
+        if (!sh) return sc;
+        if (view.weapon.virtual) {
+            return sc && Object.assign({}, sc, { slotTag: { label: 'Not mounted', category: sc.v.category, virtual: true } });
+        }
+        const slot = view.weapon.slot;
+        const key = slot ? slotId(slot) : null;
+        const group = key ? hardpointGroups(sh.hardpoints).find((item) => item.key === key) : null;
+        if (!group) return sc;
+        const slotTag = { label: groupLabel(group.nodes), category: group.category, virtual: false };
+        if (sc && key === scenarioGroupKey(sh)) return Object.assign({}, sc, { slotTag });
+        const tg = sc ? sc.tg : currentTarget();
+        const stem = effectiveLoadout(sh).get(key) || null;
+        const v = stem ? ctx.variant(stem) : null;
+        if (!v) return { empty: true, sh, tg, slotTag };
+        const picked = selectedCharge(v);
+        const m = ctx.computeGroup(v.stem, sh, tg, key, { chargeLevel: picked ? picked.level : null });
+        return {
+            fam: ctx.family(v.stem), sh, tg, v, r: m.r, g: m.g, slotTag, fixed: true,
+            res: { variant: v, hardpoints: m.hardpoints, warnings: [], mountable: { c: false, a: false } },
+        };
     }
 
     // ---- loadout ------------------------------------------------------
@@ -440,6 +472,10 @@
         return state.s ? ctx.shooter(state.s, { deployed: state.sd }) : null;
     }
 
+    function currentTarget() {
+        return state.t ? ctx.target(state.t, { deployed: state.td, shield: state.sh }) : null;
+    }
+
     function fitFilter(sh) {
         return !!sh && !view.weapon.showAll;
     }
@@ -502,28 +538,63 @@
         return slot.category + (slot.assault ? ':a' : ':c');
     }
 
-    // A ship always has one group selected. A missing or stale choice falls
-    // back to the first group; clearing the ship is the only way to drop it.
+    // `w` when this ship has no group for it (a Damage matrix row, a link, or
+    // the last weapon kept on an unarmed ship), with the resolver's warning.
+    function unmountedScenario(sh) {
+        const fam = sh && state.w ? ctx.family(state.w) : null;
+        if (!fam) return null;
+        const res = ctx.resolveVariant(fam, sh, state.v);
+        return res.hardpoints.length ? null : { variant: res.variant, warning: res.warnings.join(' ') };
+    }
+
+    // A ship always has one chip selected. A missing or stale choice falls
+    // back to the group of the same category (a deploy flips its flag), then
+    // the group holding `w`, then Not mounted when `w` has no group here, then
+    // the first group. Clearing the ship is the only way to drop it.
     function ensureSlot(sh) {
-        if (!sh || !sh.hardpoints || !sh.hardpoints.length) {
-            view.weapon.slot = null;
-            return;
-        }
-        const groups = hardpointGroups(sh.hardpoints);
+        const groups = sh && sh.hardpoints ? hardpointGroups(sh.hardpoints) : [];
         if (!groups.length) {
             view.weapon.slot = null;
+            view.weapon.virtual = false;
             return;
+        }
+        const unmounted = unmountedScenario(sh);
+        if (view.weapon.virtual) {
+            if (unmounted) {
+                state.cat = unmounted.variant.category;
+                return;
+            }
+            view.weapon.virtual = false;
         }
         const slot = view.weapon.slot;
         const live = slot && groups.some((group) => group.category === slot.category && group.assault === !!slot.assault);
         if (live) return;
-        view.weapon.slot = { category: groups[0].category, assault: groups[0].assault };
-        state.cat = groups[0].category;
+        const home = scenarioGroupKey(sh);
+        const pick = (slot && groups.find((group) => group.category === slot.category))
+            || (home && groups.find((group) => group.key === home));
+        if (!pick && !slot && unmounted) {
+            view.weapon.virtual = true;
+            state.cat = unmounted.variant.category;
+            return;
+        }
+        const chosen = pick || groups[0];
+        view.weapon.slot = { category: chosen.category, assault: chosen.assault };
+        state.cat = chosen.category;
+    }
+
+    // Select the chip holding `w`, or Not mounted when this ship has no group
+    // for it. Runs after `w` is picked from the weapon list with no group
+    // selected, from a Damage matrix row, or with the variant pills.
+    function focusScenarioSlot() {
+        view.weapon.slot = null;
+        view.weapon.virtual = false;
+        ensureSlot(currentShooter());
     }
 
     function dropSlot() {
-        if (view.weapon.slot && state.cat === view.weapon.slot.category) state.cat = null;
+        if (view.weapon.virtual || (view.weapon.slot && state.cat === view.weapon.slot.category)) state.cat = null;
         view.weapon.slot = null;
+        view.weapon.virtual = false;
         view.weapon.loadout = {};
     }
 
@@ -563,10 +634,11 @@
     // off does nothing. Another category the ship has moves the selection.
     function setCategory(next) {
         const sh = currentShooter();
-        if (sh && view.weapon.slot) {
+        if (sh && (view.weapon.slot || view.weapon.virtual)) {
             if (!next) return false;
             const group = hardpointGroups(sh.hardpoints).find((item) => item.category === next);
             if (!group) return false;
+            view.weapon.virtual = false;
             view.weapon.slot = { category: group.category, assault: group.assault };
             state.cat = next;
             return true;
@@ -791,6 +863,10 @@
                 box.innerHTML = emptySelection('Pick a weapon below.');
                 return;
             }
+            if (sc.empty) {
+                box.innerHTML = emptySelection('Nothing is mounted on ' + sc.slotTag.label + '. Pick a weapon below to mount one.');
+                return;
+            }
             const v = sc.v;
             const source = ctx.packOf(v.stem);
             box.innerHTML = '<div class="vt-wpn-selected">' + reticleMedia(v.reticle)
@@ -839,52 +915,83 @@
                 : 'Morph: deployed health and repair rate.') + '</span></div>';
     }
 
+    // `w` has no group on this ship: one hypothetical mount, the way the
+    // shooting range fires it from a virtual slot.
+    function notMountedChip(sh, unmounted) {
+        const v = unmounted.variant;
+        const icon = HP_ICONS[v.category];
+        const selected = !!view.weapon.virtual;
+        const tip = (unmounted.warning || sh.name + ' has no hardpoint for ' + v.name + '.')
+            + ' The numbers assume one hypothetical mount, the way the shooting range fires it from a virtual slot.';
+        return '<button type="button" class="vt-wpn-hp is-virtual' + (selected ? ' is-slot' : '') + '" data-hp-slot="virtual"'
+            + ' aria-pressed="' + (selected ? 'true' : 'false') + '"' + tipAttr(tip) + '>'
+            + (icon ? '<img src="' + HUD_BASE + 'hp_' + icon + '.png" alt="" data-fallback-icon="bi-circle">' : '')
+            + '<span class="vt-wpn-hp-text"><span>Not mounted</span>'
+            + '<span class="vt-wpn-hp-sub">' + esc(v.name) + '</span></span></button>';
+    }
+
+    // The ship's deploy switch and hardpoint chips render with or without a
+    // weapon: an emptied loadout still needs its chips.
+    function renderShipControls(box, sc) {
+        const sh = currentShooter();
+        if (!sh) {
+            box.innerHTML = '';
+            return;
+        }
+        ensureSlot(sh);
+        let html = sh.canDeploy ? deploySwitch('shooter', sh.deployed) : '';
+        const pressed = view.weapon.slot;
+        const shownCat = sc && sc.v ? sc.v.category : (pressed ? pressed.category : null);
+        const unmounted = unmountedScenario(sh);
+        html += '<div class="vt-wpn-hps">' + hardpointGroups(sh.hardpoints).map((group) => {
+            const icon = HP_ICONS[group.category];
+            const selected = !!(pressed && pressed.category === group.category && !!pressed.assault === group.assault);
+            const cls = 'vt-wpn-hp'
+                + (group.category === shownCat ? ' is-match' : '')
+                + (selected ? ' is-slot' : '');
+            const label = groupLabel(group.nodes);
+            const tip = group.nodes.join(', ') + ': ' + Calc.categoryLabel(group.category) + ' hardpoint, ' + groupSub(group)
+                + '. Show its numbers and the weapons that fit it.';
+            return '<button type="button" class="' + cls + '" data-hp-slot="' + esc(group.key) + '"'
+                + ' aria-pressed="' + (selected ? 'true' : 'false') + '"' + tipAttr(tip) + '>'
+                + (icon ? '<img src="' + HUD_BASE + 'hp_' + icon + '.png" alt="" data-fallback-icon="bi-circle">' : '')
+                + '<span class="vt-wpn-hp-text"><span class="vt-mono">' + esc(label) + '</span>'
+                + '<span class="vt-wpn-hp-sub">' + esc(groupSub(group)) + '</span></span></button>';
+        }).join('') + (unmounted ? notMountedChip(sh, unmounted) : '') + '</div>';
+        box.innerHTML = html;
+    }
+
     function renderControls(kind, sc) {
         const box = part(kind, 'controls');
         if (!box) return;
+        if (kind === 'shooter') {
+            renderShipControls(box, sc);
+            return;
+        }
         if (!sc) {
             box.innerHTML = '';
             return;
         }
         if (kind === 'weapon') {
+            if (sc.empty) {
+                box.innerHTML = '';
+                return;
+            }
+            // Another group's mount: its hardpoint already decided the twin.
+            const fixed = !!sc.fixed;
             const m = sc.res.mountable;
-            const opts = [['', 'Auto', true], ['c', 'Combat', m.c], ['a', 'Assault', m.a]];
+            const opts = [['', 'Auto', !fixed], ['c', 'Combat', !fixed && m.c], ['a', 'Assault', !fixed && m.a]];
+            const current = fixed ? (sc.v.isAssault ? 'a' : 'c') : (state.v || '');
             box.innerHTML = '<div class="vt-wpn-control"><span class="vt-wpn-control-label">Variant</span>'
                 + '<ul class="nav nav-pills vt-econ-log-pills mb-0" role="radiogroup" aria-label="Combat or assault variant">'
                 + opts.map(([val, label, enabled]) => {
-                    const active = (state.v || '') === val;
+                    const active = current === val;
                     return '<li class="nav-item"><button type="button" class="nav-link' + (active ? ' active' : '') + '" data-variant="' + val + '"'
                         + ' role="radio" aria-checked="' + (active ? 'true' : 'false') + '"'
                         + (enabled ? '' : ' disabled') + '>' + label + '</button></li>';
                 }).join('')
-                + '</ul><span class="vt-wpn-picker-hint">Resolved: <span class="vt-mono">' + esc(sc.v.stem) + '</span></span></div>';
-            return;
-        }
-        if (kind === 'shooter') {
-            const sh = sc.sh;
-            if (!sh) {
-                box.innerHTML = '';
-                return;
-            }
-            ensureSlot(sh);
-            let html = sh.canDeploy ? deploySwitch('shooter', sh.deployed) : '';
-            const pressed = view.weapon.slot;
-            html += '<div class="vt-wpn-hps">' + hardpointGroups(sh.hardpoints).map((group) => {
-                const icon = HP_ICONS[group.category];
-                const selected = !!(pressed && pressed.category === group.category && !!pressed.assault === group.assault);
-                const cls = 'vt-wpn-hp'
-                    + (group.category === sc.fam.category ? ' is-match' : '')
-                    + (selected ? ' is-slot' : '');
-                const label = groupLabel(group.nodes);
-                const tip = group.nodes.join(', ') + ': ' + Calc.categoryLabel(group.category) + ' hardpoint, ' + groupSub(group)
-                    + '. Show weapons that fit this slot.';
-                return '<button type="button" class="' + cls + '" data-hp-slot="' + esc(group.key) + '"'
-                    + ' aria-pressed="' + (selected ? 'true' : 'false') + '"' + tipAttr(tip) + '>'
-                    + (icon ? '<img src="' + HUD_BASE + 'hp_' + icon + '.png" alt="" data-fallback-icon="bi-circle">' : '')
-                    + '<span class="vt-wpn-hp-text"><span class="vt-mono">' + esc(label) + '</span>'
-                    + '<span class="vt-wpn-hp-sub">' + esc(groupSub(group)) + '</span></span></button>';
-            }).join('') + '</div>';
-            box.innerHTML = html;
+                + '</ul><span class="vt-wpn-picker-hint">' + (fixed ? 'Set by ' + esc(sc.slotTag.label) + ': ' : 'Resolved: ')
+                + '<span class="vt-mono">' + esc(sc.v.stem) + '</span></span></div>';
             return;
         }
         const tg = sc.tg;
@@ -968,12 +1075,21 @@
         return html;
     }
 
-    function resultCast(sc) {
+    function resultCast(sc, tg) {
         let html = '<div class="vt-wpn-cast">';
         if (sc.sh) html += castFigure(thumbMedia(sc.sh, 'lg'), esc(sc.sh.name));
         html += '<div class="vt-wpn-cast-item vt-wpn-reticle-panel">' + reticlePanel(sc.v) + '</div>';
-        if (sc.tg) html += castFigure(thumbMedia(sc.tg, 'lg'), esc(sc.tg.name));
+        if (tg) html += castFigure(thumbMedia(tg, 'lg'), esc(tg.name));
         return html + '</div>';
+    }
+
+    // The chip the card is about, as it reads in the ship card.
+    function slotTagHtml(tag) {
+        if (!tag) return '';
+        const icon = HP_ICONS[tag.category];
+        return '<span class="vt-wpn-tag vt-wpn-slot-tag' + (tag.virtual ? ' is-virtual' : '') + '">'
+            + (icon ? '<img src="' + HUD_BASE + 'hp_' + icon + '.png" alt="" data-fallback-icon="bi-circle">' : '')
+            + '<span' + (tag.virtual ? '' : ' class="vt-mono"') + '>' + esc(tag.label) + '</span></span>';
     }
 
     function classStrip(r) {
@@ -1025,8 +1141,19 @@
             box.innerHTML = '<div class="card"><div class="card-body vt-wpn-empty">Pick a weapon to see its numbers.</div></div>';
             return;
         }
-        const { v, sh, tg, r, g } = sc;
+        if (sc.empty) {
+            box.innerHTML = '<article class="card vt-wpn-result-card">'
+                + '<div class="card-header vt-wpn-result-head"><h2 class="vt-wpn-headline">Empty hardpoint on ' + esc(sc.sh.name) + '</h2>'
+                + slotTagHtml(sc.slotTag) + '</div>'
+                + '<div class="card-body vt-wpn-empty">Nothing is mounted here. Pick a weapon in step 1 to mount one.</div></article>';
+            return;
+        }
+        const { v, sh, r, g } = sc;
         const d = v.damage;
+        // A weapon that deals no damage reads by its ammo, and the target does
+        // not change it. A charge stage with no ordnance keeps the damage layout.
+        const noDamage = r.tier === 'none' && r.kind !== 'charge';
+        const tg = noDamage ? null : sc.tg;
         const letterText = r.letter + ', ' + fmt(tg ? tg.maxHealth : 0, 0) + ' HP';
         const headline = esc(v.name) + ' <span class="vt-mono">(' + esc(v.stem) + ')</span>'
             + (sh ? ' \u00d7' + g + ' from ' + esc(sh.name) : '')
@@ -1060,35 +1187,57 @@
         }
 
         const unit = v.ammoUnit || 'shot';
+        // A no-damage item leads with the number it is read by: how long a
+        // toggle runs, or how many uses / drops / rounds a tank holds.
+        const lead = !noDamage ? null
+            : (v.ammoMode === 'perSecond' ? 'empty' : (v.ammoMode === 'perShot' ? 'tank' : 'none'));
         const ammoRows = [];
+        let leadRow = null;
+        const addAmmo = (key, html) => {
+            if (key === lead) leadRow = html;
+            else ammoRows.push(html);
+        };
         const ammoFoot = sh ? null : 'Pick your ship for tank and regen numbers.';
-        if (v.ammoMode === 'perSecond') {
-            ammoRows.push(statRow('Cost per second', num(v.ammoCost), 'ammoCost from the ODF, drained while firing'));
+        const emptyTip = v.toggle ? 'Switched on from a full tank, with regen running.'
+            : (v.ammoMode === 'perSecond' ? 'Trigger held from a full tank, with regen running.'
+                : 'Firing nonstop from a full tank, with regen running.');
+        if (lead === 'none') {
+            ammoRows.push(statRow('Ammo', 'none', 'This weapon spends no ammo', { lead: true }));
+        } else if (v.ammoMode === 'perSecond') {
+            ammoRows.push(statRow('Cost per second', num(v.ammoCost), 'ammoCost from the ODF, drained ' + (v.toggle ? 'every second it is on' : 'while firing')));
         } else if (v.ammoMode === 'perShot') {
             ammoRows.push(statRow('Cost per ' + unit, num(r.ammo.perShot), unit === 'drop' ? 'Dispensed object maxAmmo (unverified convention)' : 'ammoCost from the ODF'));
         } else {
             ammoRows.push(statRow('Cost', null, 'This weapon uses no ammo'));
         }
-        ammoRows.push(statRow('Ammo per second', num(r.ammo.perSec), ex.ammoPerSec));
+        // A no-damage item drops the rate rows it has no number for.
+        if (lead !== 'none' && (!noDamage || r.ammo.perSec != null)) ammoRows.push(statRow('Ammo per second', num(r.ammo.perSec), ex.ammoPerSec));
         if (sh) {
             if (v.ammoMode === 'perShot') {
                 const roundName = unit === 'shot' ? 'Rounds per tank' : cap(unit) + 's per tank';
-                ammoRows.push(statRow(roundName, num(r.ammo.shotsPerTank, 0), ex.shotsPerTank, unit === 'shot'
+                addAmmo('tank', statRow(roundName, num(r.ammo.shotsPerTank, 0), ex.shotsPerTank, Object.assign({ lead: lead === 'tank' }, unit === 'shot' && !noDamage
                     ? { labelTip: 'Ordnance rounds the tank can fire. One round is one damage event.' }
-                    : null));
+                    : null)));
                 if (unit === 'shot' && r.ammo.volleysPerTank != null && r.ammo.volleysPerTank !== r.ammo.shotsPerTank) {
                     ammoRows.push(statRow('Shots per tank', num(r.ammo.volleysPerTank, 0), ex.volleysPerTank, {
                         labelTip: 'Trigger pulls the tank can fire. A salvo spends several rounds.',
                     }));
                 }
             }
-            ammoRows.push(statRow('Time to empty', r.ammo.timeToEmpty === Infinity ? 'never' : num(r.ammo.timeToEmpty, 1, 's'), ex.timeToEmpty));
+            if (lead !== 'none' && (!noDamage || r.ammo.timeToEmpty != null)) {
+                addAmmo('empty', statRow('Time to empty', r.ammo.timeToEmpty === Infinity ? 'never' : num(r.ammo.timeToEmpty, 1, 's'), ex.timeToEmpty, {
+                    lead: lead === 'empty', labelTip: emptyTip,
+                }));
+            }
             ammoRows.push(statRow('Tank', num(sh.maxAmmo, 0), 'maxAmmo of ' + sh.stem + (sh.deployed ? ' (deployed)' : '')));
             ammoRows.push(statRow('Regen', '+' + fmt(sh.addAmmo) + '/s', 'addAmmo of ' + sh.stem + (sh.deployed ? ' (deployed)' : '')));
         }
+        if (leadRow) ammoRows.unshift(leadRow);
 
         const p = r.projectile;
+        const fire = r.fire || v.fire;
         const projRows = [];
+        if (v.toggle) projRows.push(statRow('Trigger', 'Toggle', 'SpecialItemClass: Fire switches it on and off, and ammoCost drains every second it is on.'));
         if (p) {
             if (p.shotSpeed != null) projRows.push(statRow('Speed', num(p.shotSpeed, 1, 'm/s'), 'shotSpeed of the ordnance'));
             if (p.lifeSpan != null) projRows.push(statRow('Lifespan', p.lifeSpan > 1e20 ? 'unlimited' : num(p.lifeSpan, 3, 's'), 'lifeSpan of the ordnance'));
@@ -1097,6 +1246,7 @@
             if (p.startDist != null) projRows.push(statRow('Arc reach', fmt(p.startDist) + '\u2013' + fmt(p.range) + ' m', 'ArcCannonClass startDist to finishDist'));
         }
         if (r.cycle != null) projRows.push(statRow('Fire cycle', num(r.cycle, 3, 's'), ex.cycle));
+        else if (unit === 'use' && fire.shotDelay > 0) projRows.push(statRow('Cooldown', num(fire.shotDelay, 2, 's'), 'shotDelay of ' + (fire.section || 'the weapon')));
         const splitRate = r.roundsPerShot > 1 || r.alternating;
         if (splitRate && r.playerShotsPerSec != null) {
             projRows.push(statRow('Shots per second', num(r.playerShotsPerSec), ex.playerShotsPerSec, {
@@ -1105,10 +1255,11 @@
         }
         if (r.shotsPerSec != null) {
             const hitRate = splitRate && g > 1;
-            projRows.push(statRow(splitRate ? (hitRate ? 'Hits per second, each hardpoint' : 'Hits per second') : 'Shots per second', num(r.shotsPerSec), ex.shotsPerSec));
+            const rateName = splitRate ? (hitRate ? 'Hits per second, each hardpoint' : 'Hits per second')
+                : (unit === 'drop' ? 'Drops per second' : 'Shots per second');
+            projRows.push(statRow(rateName, num(r.shotsPerSec), ex.shotsPerSec));
         }
         if (r.hitsPerSec != null) projRows.push(statRow('Hits per second', num(r.hitsPerSec, 0), ex.shotsPerSec));
-        const fire = r.fire || v.fire;
         if (fire.salvoCount > 1) projRows.push(statRow('Salvo', fire.salvoCount + ' \u00d7 ' + fmt(fire.salvoDelay) + ' s', 'salvoCount x salvoDelay'));
         if (fire.firstDelay > 0) projRows.push(statRow('Leader delay', num(fire.firstDelay, 2, 's'), 'TargetingGunClass firstDelay'));
         if (fire.lockDelay > 0) projRows.push(statRow('Lock-on', num(fire.lockDelay, 2, 's'), 'LauncherClass lockDelay'));
@@ -1135,13 +1286,14 @@
             : '';
 
         const source = ctx.packOf(v.stem);
+        const damageFoot = r.kind === 'components' ? 'Each damage part is listed below.' : (tg ? null : 'Pick a target for time to kill.');
         box.innerHTML = '<article class="card vt-wpn-result-card">'
             + '<div class="card-header vt-wpn-result-head"><h2 class="vt-wpn-headline">' + headline + '</h2>'
-            + sourceChip(source, true) + tierBadge(r.tier) + '</div>'
-            + '<div class="card-body vt-wpn-result-body">' + resultCast(sc)
+            + slotTagHtml(sc.slotTag) + sourceChip(source, true) + tierBadge(r.tier) + '</div>'
+            + '<div class="card-body vt-wpn-result-body">' + resultCast(sc, tg)
             + '<div class="vt-wpn-result-main">'
             + '<div class="vt-wpn-groups">'
-            + group(tg ? 'Damage vs ' + tg.name : 'Damage', damageRows, tg ? null : 'Pick a target for time to kill.')
+            + (noDamage ? '' : group(tg ? 'Damage vs ' + tg.name : 'Damage', damageRows, damageFoot))
             + group(sh ? 'Ammo \u00b7 ' + sh.name : 'Ammo', ammoRows, ammoFoot)
             + group('Fire and flight', projRows)
             + group('Extras', extraRows, extrasFoot)
@@ -1154,7 +1306,8 @@
 
     function renderScenario() {
         normalizeLoadout();
-        const sc = currentScenario();
+        ensureSlot(currentShooter());
+        const sc = shownScenario();
         ['weapon', 'shooter', 'target'].forEach((kind) => {
             renderSummary(kind, sc);
             renderControls(kind, sc);
@@ -1206,6 +1359,7 @@
                 state.v = null;
                 view.frame = null;
                 claimScenarioGroup();
+                focusScenarioSlot();
             }
         } else if (kind === 'shooter') {
             if (state.s === key) return;
@@ -1216,6 +1370,7 @@
             view.weapon.showAll = false;
             view.weapon.loadout = {};
             view.weapon.slot = null;
+            view.weapon.virtual = false;
             const sh = ctx.shooter(key, { deployed: false });
             applyShipWeapon(sh);
             ensureSlot(sh);
@@ -1227,6 +1382,7 @@
         }
         renderList(kind);
         if (kind === 'shooter') renderWeaponPicker();
+        else if (kind === 'weapon') renderChips('weapon');
         renderScenario();
     }
 
@@ -1265,14 +1421,22 @@
             }
             const hpSlot = event.target.closest('[data-hp-slot]');
             if (hpSlot) {
-                const parts = hpSlot.dataset.hpSlot.split(':');
-                const category = parts[0];
-                const assault = parts[1] === 'a';
-                const slot = view.weapon.slot;
-                const same = !!(slot && slot.category === category && !!slot.assault === assault);
-                if (same) return;
-                view.weapon.slot = { category, assault };
-                state.cat = category;
+                if (hpSlot.dataset.hpSlot === 'virtual') {
+                    if (view.weapon.virtual) return;
+                    view.weapon.slot = null;
+                    view.weapon.virtual = true;
+                    ensureSlot(currentShooter());
+                } else {
+                    const parts = hpSlot.dataset.hpSlot.split(':');
+                    const category = parts[0];
+                    const assault = parts[1] === 'a';
+                    const slot = view.weapon.slot;
+                    const same = !!(slot && slot.category === category && !!slot.assault === assault);
+                    if (same) return;
+                    view.weapon.virtual = false;
+                    view.weapon.slot = { category, assault };
+                    state.cat = category;
+                }
                 renderChips('weapon');
                 renderList('weapon');
                 renderScenario();
@@ -1310,6 +1474,8 @@
             if (variantBtn && !variantBtn.disabled) {
                 state.v = variantBtn.dataset.variant || null;
                 claimScenarioGroup();
+                focusScenarioSlot();
+                renderWeaponPicker();
                 renderScenario();
                 return;
             }
@@ -1345,8 +1511,8 @@
                     state.sd = dep.checked;
                     state.v = null;
                     const sh = state.s ? ctx.shooter(state.s, { deployed: state.sd }) : null;
-                    ensureSlot(sh);
                     if (sh && !shipWeaponFits(sh)) applyShipWeapon(sh);
+                    ensureSlot(sh);
                     if (view.weapon.slot) state.cat = view.weapon.slot.category;
                     renderWeaponPicker();
                 } else {
@@ -1570,7 +1736,8 @@
                 state.v = row.dataset.variantFlag;
                 view.frame = null;
                 claimScenarioGroup();
-                renderList('weapon');
+                focusScenarioSlot();
+                renderWeaponPicker();
                 renderScenario();
                 showTab('scenario');
             }
@@ -1634,7 +1801,7 @@
     function rangeSnapshot() {
         const sc = currentScenario();
         const sh = sc ? sc.sh : currentShooter();
-        const tg = sc ? sc.tg : (state.t ? ctx.target(state.t, { deployed: state.td, shield: state.sh }) : null);
+        const tg = sc ? sc.tg : currentTarget();
         const v = sc ? sc.v : null;
         const range = sc && sc.r && sc.r.projectile && sc.r.projectile.range;
         const loadout = {};
@@ -1712,7 +1879,7 @@
                 const frame = event.target.closest('[data-frame]');
                 if (!frame || !frame.dataset.frame) return;
                 view.frame = frame.dataset.frame;
-                renderResult(currentScenario());
+                renderResult(shownScenario());
             };
             result.addEventListener('click', pickFrame);
             result.addEventListener('keydown', (event) => {

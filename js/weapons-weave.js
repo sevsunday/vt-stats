@@ -143,6 +143,7 @@ export function weaveWeapon(o) {
         homing: archetype === 'missile',
         pulse: calc.kind === 'pulse',
         cap: archetype === 'detonator' ? Math.max(1, Math.round(profile.detonator.maxCount)) : 0,
+        burst: archetype === 'detonator' && calc.burst ? { value: calc.burst.value, radius: calc.burst.radius } : null,
         tier: calc.tier === 'estimated' || lob || archetype === 'missile' ? 'estimated' : 'exact',
         warnings: (calc.warnings || []).slice(),
     });
@@ -163,6 +164,35 @@ export function flightTime(w, d) {
         return d / (v * Math.cos(0.5 * Math.asin(Math.max(0, s))));
     }
     return w.shotSpeed > 0 ? d / w.shotSpeed : 0;
+}
+
+/* How far a shell `tau` seconds out of the barrel is from the centre of a
+ * target `d` metres away, on flightTime()'s arc. It closes the ground at a
+ * steady rate, at the lob's height above the launch. From the flight time on
+ * it lies at the target (0). */
+export function shellGap(w, d, tau) {
+    const total = flightTime(w, d);
+    if (!Number.isFinite(total)) return d;
+    const t = Math.max(0, tau);
+    if (!(total > 0) || t >= total) return 0;
+    let rise = 0;
+    if (w.lob) {
+        const v = w.shotSpeed;
+        const g = w.gravity;
+        const pitch = w.shotPitch > 0 ? w.shotPitch : 0.5 * Math.asin(Math.min(1, g * d / (v * v)));
+        rise = v * Math.sin(pitch) * t - 0.5 * g * t * t;
+    }
+    return Math.hypot(d * (1 - t / total), rise);
+}
+
+/* A shell burst `gap` metres from the target's centre: the ground
+ * explosion's damageValue anywhere inside damageRadius plus the target's
+ * radius (the live range's test), no falloff. */
+export function burstDamage(w, gap, target) {
+    const b = w.burst;
+    if (!b || !(b.radius > 0) || !(b.value > 0)) return 0;
+    const reach = b.radius + (target && target.radius > 0 ? target.radius : 0);
+    return gap <= reach + EPS ? b.value : 0;
 }
 
 /* Indices of `weapons` (user order), longest cycle first, the user's order
@@ -265,10 +295,11 @@ export function allInRangeAt(weapons, distance, closing) {
 }
 
 /* One engagement from Fire at t = 0: pulls in decide() order, each round
- * landing after its flight, until the hull reaches 0.
+ * landing after its flight, until the hull reaches 0. A pull of another
+ * weapon bursts the last one's armed MDM shells where they are.
  *
  * o = { weapons: [desc], switchSec, distance, closing: { speed, stop } | null,
- *       ammo: { max, regen, start }, target: { maxHealth, building, mdmRule },
+ *       ammo: { max, regen, start }, target: { maxHealth, building, mdmRule, radius },
  *       notBefore } */
 export function planWeave(o) {
     const weapons = (o.weapons || []).filter((w) => w && !w.excluded);
@@ -279,7 +310,7 @@ export function planWeave(o) {
         reason: null,
         firstShotAt: null,
         pulls: [],
-        weapons: weapons.map((w) => ({ key: w.key, name: w.name, pulls: 0, rounds: 0, damage: 0, ammo: 0, firstAt: null })),
+        weapons: weapons.map((w) => ({ key: w.key, name: w.name, pulls: 0, rounds: 0, damage: 0, ammo: 0, bursts: 0, burstDealt: 0, firstAt: null })),
         ammoUsed: 0,
     };
     if (!weapons.length) {
@@ -293,7 +324,10 @@ export function planWeave(o) {
         stop: o.closing ? o.closing.stop || 0 : 0,
     };
     const deal = weapons.map((w) => roundDamage(w, target));
-    const lethal = hp0 > 0 && deal.some((x) => x > 0);
+    const contact = mdmDetonates(target);
+    // Only a change of weapon bursts an MDM shell, so a lone MDM never does.
+    const switching = weapons.length > 1;
+    const lethal = hp0 > 0 && weapons.some((w, k) => deal[k] > 0 || (switching && w.cap && burstDamage(w, 0, target) > 0));
     const horizon = lethal ? PLAN_MAX_SEC : PREVIEW_SEC;
     const maxAmmo = o.ammo && o.ammo.max > 0 ? o.ammo.max : 0;
     const s = {
@@ -306,7 +340,27 @@ export function planWeave(o) {
     };
     const st = { now: 0, freeAt: 0, current: -1, ammo: o.ammo && o.ammo.start != null ? o.ammo.start : maxAmmo };
     const pending = [];
+    // Armed MDM shells the target bounced (a building): they lie beside it.
+    const resting = [];
     let hp = hp0;
+    const burstShells = (k, t) => {
+        const w = weapons[k];
+        [pending, resting].forEach((list) => {
+            for (let n = list.length - 1; n >= 0; n--) {
+                const shell = list[n];
+                if (shell.i !== k || !shell.frees) continue;
+                list.splice(n, 1);
+                s.weapons[k].armed -= 1;
+                out.weapons[k].bursts += 1;
+                const dmg = burstDamage(w, shellGap(w, shell.d0, t - shell.t0), target);
+                if (lethal && dmg > 0 && hp > EPS) {
+                    hp -= dmg;
+                    out.weapons[k].damage += dmg;
+                    out.weapons[k].burstDealt += dmg;
+                }
+            }
+        });
+    };
     let steps = 0;
     while (steps++ < PLAN_MAX_STEPS) {
         const dec = decide(Object.assign({}, s, st));
@@ -344,6 +398,14 @@ export function planWeave(o) {
             break;
         }
         const i = dec.index;
+        if (st.current >= 0 && st.current !== i) {
+            burstShells(st.current, tPull);
+            if (lethal && hp <= EPS) {
+                out.ttk = tPull;
+                out.reason = 'killed';
+                break;
+            }
+        }
         const w = weapons[i];
         const slot = s.weapons[i];
         const rec = out.weapons[i];
@@ -361,10 +423,11 @@ export function planWeave(o) {
                     out.ammoUsed += w.ammoPerRound;
                 }
                 volley += 1;
+                const d = distanceAt(motion, tr);
+                const round = { t: tr + flightTime(w, d), i, dmg: deal[i], frees: !!w.cap, t0: tr, d0: d };
                 if (w.cap) slot.armed += 1;
-                if (!w.cap || mdmDetonates(target)) {
-                    pending.push({ t: tr + flightTime(w, distanceAt(motion, tr)), i, dmg: deal[i], frees: !!w.cap });
-                }
+                if (w.cap && !contact) resting.push(round);
+                else pending.push(round);
             }
             if (!volley) break;
             fired += volley;
