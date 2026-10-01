@@ -141,7 +141,11 @@ STATSGATE_SESSIONS_DIR = STATSGATE_DIR / "sessions"
 # 53 -> 54: native-rate 3D replay sidecar
 # data/processed/replay/<id>.bin.gz. The 1 Hz positioning trail is
 # unchanged (ratings, heatmaps, dashboard). No match.schema_version bump.
-PIPELINE_VERSION = 54
+# 54 -> 55: a weapon only weapon mines carry reads as the player weapon that
+# puts the mine down (build_mine_weapon_owners): the Flame Mine's fireball
+# was "Fireball" / "Wasp", the Snare Field's "Snare Trap", the Spore mine's
+# "Wasp". Display names only; ratings unmoved.
+PIPELINE_VERSION = 55
 
 # Collector usually omits UnitDestroyed for gun-tower / turret-class
 # vehicles. Flip this + bump PIPELINE_VERSION when upstream starts
@@ -1702,6 +1706,56 @@ def _odf_stem(odf_string):
     return re.sub(r"\.odf$", "", odf_string or "", flags=re.IGNORECASE).lower()
 
 
+WEAPON_SLOT_FIELD = re.compile(r"^weaponName\d+$", re.IGNORECASE)
+
+
+def build_mine_weapon_owners(odf_db):
+    """Weapon stem -> wpnName of the player weapon that puts its mine down.
+
+    A weapon that only weapon mines carry (every GameObjectClass mounting it
+    has classLabel weaponmine) is never in a player's hands, and its own
+    wpnName misleads: VSR names the Flame Mine's fireball weapon "Wasp",
+    the name of a real torpedo. Its damage reads as the weapon the player
+    fired instead, found where that weapon's entry inlines the mine
+    (DispenserObj.GameObjectClass, ...Payload.GameObjectClass, any depth).
+    The shallowest inline wins; two different names at that depth keep the
+    mine weapon's own name.
+    """
+    mine_carried, other_carried = set(), set()
+    owners = defaultdict(list)  # weapon stem -> [(inline depth, owner wpnName)]
+    for bucket, items in (odf_db or {}).items():
+        if not isinstance(items, dict):
+            continue
+        for odf_key, entry in items.items():
+            if not isinstance(entry, dict):
+                continue
+            owner = ""
+            if bucket == "Weapon":
+                owner = ((entry.get("WeaponClass") or {}).get("wpnName") or "").strip()
+            for block, props in entry.items():
+                if not isinstance(props, dict) or block.rsplit(".", 1)[-1].lower() != "gameobjectclass":
+                    continue
+                label = next((v for k, v in props.items() if k.lower() == "classlabel"), "")
+                is_mine = str(label).strip().lower() == "weaponmine"
+                for field, val in props.items():
+                    if not WEAPON_SLOT_FIELD.match(field) or not isinstance(val, str) or not val.strip():
+                        continue
+                    carried = _odf_stem(val)
+                    (mine_carried if is_mine else other_carried).add(carried)
+                    if is_mine and owner and "." in block:
+                        owners[carried].append((block.count("."), owner))
+    out = {}
+    for carried in mine_carried - other_carried:
+        found = owners.get(carried)
+        if not found:
+            continue
+        depth = min(d for d, _ in found)
+        names = {n for d, n in found if d == depth}
+        if len(names) == 1:
+            out[carried] = names.pop()
+    return out
+
+
 def _common_prefix_len(a, b):
     n = 0
     for x, y in zip(a, b):
@@ -1753,6 +1807,7 @@ def build_child_odf_reverse_map(odf_db):
     refs = {}
     unit_named = set()
     weapons = {}  # stem -> (wpnName, ordnance stem)
+    mine_owners = build_mine_weapon_owners(odf_db)
     for bucket, items in (odf_db or {}).items():
         if not isinstance(items, dict):
             continue
@@ -1798,30 +1853,35 @@ def build_child_odf_reverse_map(odf_db):
             claimants = [c for c in claimants if c[0] == fewest]
             names = {c[2] for c in claimants}
         if len(names) == 1:
-            resolved[child] = claimants[0][2]
-            continue
-        # Sibling weapons sharing one asset (xbazxpl_c is both the Rocket's
-        # and the Burst Gun EX's impact blast). Name similarity breaks it.
-        target = child[1:] if child.startswith("x") else child
-        scored = [
-            (_common_prefix_len(target, w[1:] if w.startswith("g") else w), n)
-            for _h, w, n, _o in claimants
-        ]
-        if max(score for score, _ in scored) < 2:
+            winner = claimants[0][2]
+        else:
+            # Sibling weapons sharing one asset (xbazxpl_c is both the Rocket's
+            # and the Burst Gun EX's impact blast). Name similarity breaks it.
+            target = child[1:] if child.startswith("x") else child
             scored = [
-                (_common_prefix_len(target, o) if o else 0, n)
-                for _h, _w, n, o in claimants
+                (_common_prefix_len(target, w[1:] if w.startswith("g") else w), n)
+                for _h, w, n, _o in claimants
             ]
-        best = max(score for score, _ in scored)
-        pool = [n for score, n in scored if score == best] if best >= 2 else [
-            n for _score, n in scored
-        ]
-        if len(set(pool)) == 1:
-            resolved[child] = pool[0]
-            continue
-        tally = Counter(pool)
-        top = max(tally.values())
-        resolved[child] = sorted(n for n, c in tally.items() if c == top)[0]
+            if max(score for score, _ in scored) < 2:
+                scored = [
+                    (_common_prefix_len(target, o) if o else 0, n)
+                    for _h, _w, n, o in claimants
+                ]
+            best = max(score for score, _ in scored)
+            pool = [n for score, n in scored if score == best] if best >= 2 else [
+                n for _score, n in scored
+            ]
+            if len(set(pool)) == 1:
+                winner = pool[0]
+            else:
+                tally = Counter(pool)
+                top = max(tally.values())
+                winner = sorted(n for n, c in tally.items() if c == top)[0]
+        # Claims vote under each weapon's own name; the result reads as a
+        # mine's owner only when every claimant carrying it is that owner's
+        # mine weapon, so a shared asset keeps the name it always had.
+        owner = {mine_owners.get(w) for _h, w, n, _o in claimants if n == winner}
+        resolved[child] = owner.pop() if len(owner) == 1 and None not in owner else winner
 
     # Generic explosions no weapon happens to reference still get their name.
     for stem, name in GENERIC_EXPLOSION_NAMES.items():
@@ -1829,7 +1889,7 @@ def build_child_odf_reverse_map(odf_db):
     # A hitscan weapon declares `ordName = NULL`, so the wire reports the
     # WEAPON's own ODF as the ordnance (garcvsr_a -> "Arc Stream").
     for stem, (name, _ord) in weapons.items():
-        resolved[stem] = name
+        resolved[stem] = mine_owners.get(stem) or name
     return resolved
 
 
@@ -1840,26 +1900,45 @@ def build_weapon_name_resolver(odf_db):
     by_leader_name = {}
     dispenser_to_wpn = {}
 
-    for wpn in (odf_db.get("Weapon") or {}).values():
+    # A key (ordnance, dispensed object, leader) reads as a mine's owner only
+    # while every weapon naming it is that owner's mine weapon; a key a
+    # player weapon shares (the Spire's `mbolt`, `NULL`) keeps the old rule.
+    mine_owners = build_mine_weapon_owners(odf_db)
+    key_owners = defaultdict(set)
+    for wpn_key, wpn in (odf_db.get("Weapon") or {}).items():
+        if not (wpn.get("WeaponClass", {}) or {}).get("wpnName"):
+            continue
+        owner = mine_owners.get(_odf_stem(wpn_key))
+        for kind, key in (("ord", (wpn.get("WeaponClass") or {}).get("ordName")),
+                          ("obj", (wpn.get("DispenserClass") or {}).get("objectClass")),
+                          ("lead", (wpn.get("TargetingGunClass") or {}).get("leaderName"))):
+            if key:
+                key_owners[(kind, key)].add(owner)
+
+    for wpn_key, wpn in (odf_db.get("Weapon") or {}).items():
         wc = wpn.get("WeaponClass", {})
         dc = wpn.get("DispenserClass", {})
         tg = wpn.get("TargetingGunClass", {})
         name = wc.get("wpnName")
         if not name:
             continue
+        owner = mine_owners.get(_odf_stem(wpn_key))
+
+        def display(kind, key):
+            return owner if owner and key_owners[(kind, key)] == {owner} else name
 
         ord_name = wc.get("ordName")
         if ord_name:
-            by_ord_name[ord_name] = name
+            by_ord_name[ord_name] = display("ord", ord_name)
 
         obj_class = dc.get("objectClass")
         if obj_class:
-            by_object_class[obj_class] = name
-            dispenser_to_wpn[obj_class] = name
+            by_object_class[obj_class] = display("obj", obj_class)
+            dispenser_to_wpn[obj_class] = display("obj", obj_class)
 
         leader = tg.get("leaderName")
         if leader:
-            by_leader_name[leader] = name
+            by_leader_name[leader] = display("lead", leader)
 
     by_explosion = {}
     for veh_key, veh in (odf_db.get("Vehicle") or {}).items():
