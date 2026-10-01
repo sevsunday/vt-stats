@@ -690,6 +690,55 @@ def parse_msh_full(path) -> dict | None:
                           "vert_to_state": vert_to_state, "state_mats": state_mats}}
 
 
+def hidden_terrain_tris(path) -> list[tuple]:
+    """Triangles of the hidden `terrain` nodes (`terrain__h`) in engine-local
+    model space: ((x, y, z), (x, y, z), (x, y, z)) each, NOT Z-negated.
+
+    The engine snaps the heightfield under a terrain-owning object to this
+    surface. Vertices are placed exactly as `_parse_block` places drawable
+    nodes: inverse-bind state matrix when present, else the node.matrix chain."""
+    path = Path(path)
+    if b"terrain" not in path.read_bytes().lower():
+        return []
+    full = parse_msh_full(path)
+    if not full:
+        return []
+    nodes = full["nodes"]
+    state_mats = full["block"]["state_mats"]
+    tris = []
+    for idx, node in enumerate(nodes):
+        if not (node["flags"] & RS_HIDDEN) or node["name"].lower() != "terrain":
+            continue
+        si = node["state_index"]
+        if 0 <= si < len(state_mats):
+            def xpos(p, m=state_mats[si]):
+                return _inv_bind_pos(p, m)
+        else:
+            chain = []
+            j = idx
+            while j != -1:
+                chain.append(nodes[j]["matrix"])
+                j = nodes[j]["parent"]
+
+            def xpos(p, c=chain):
+                for mm in c:
+                    p = _xform_pos(p, mm)
+                return p
+        verts = node["verts"]
+        indices = node["indices"]
+        vert_start = 0
+        index_start = 0
+        for (vc, ic, _mat, _tex) in node["groups"]:
+            grp = indices[index_start:index_start + ic]
+            for t in range(0, len(grp) - 2, 3):
+                corner_ids = [vert_start + grp[t + k] for k in range(3)]
+                if max(corner_ids) < len(verts):
+                    tris.append(tuple(xpos(verts[vi][0]) for vi in corner_ids))
+            vert_start += vc
+            index_start += ic
+    return tris
+
+
 if __name__ == "__main__":
     import sys
     import json

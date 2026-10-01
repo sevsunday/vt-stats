@@ -29,7 +29,7 @@ import json
 import sys
 from pathlib import Path
 
-from _ter_full import parse_ter_full, read_trn_height_setting
+from _ter_full import parse_ter_full
 from _wat_sky import (
     parse_wat_header,
     parse_sky_header,
@@ -80,9 +80,6 @@ def find_first_file(map_dir: Path, *patterns: str) -> Path | None:
     return None
 
 
-# read_trn_height_setting moved to _ter_full.py (now the single source).
-
-
 def build_objects(stem: str) -> tuple[list[dict], str]:
     """Pull objects from calibration/map_data/<stem>.json (BZN-derived list with
     UIDs). Returns (objects, map_name).
@@ -128,12 +125,7 @@ def build_output(stem: str) -> dict:
     if ter_path is None:
         raise FileNotFoundError(f"no .TER in {map_dir}")
 
-    height_setting = read_trn_height_setting(trn_path)
-    # Keep the .TER metadata (tile bounds, version) but don't trust its
-    # height bytes -- the format is partially undecoded (see render/README.md
-    # "Notes / known limitations"). We synthesize a low-amplitude heightmap
-    # from the minimap PNG instead.
-    ter = parse_ter_full(ter_path, height_setting)
+    ter = parse_ter_full(ter_path)
     if ter is None:
         raise RuntimeError(f"failed to parse {ter_path}")
 
@@ -218,6 +210,10 @@ def build_output(stem: str) -> dict:
             "alpha3_png_rel":  f"{stem}.alpha3.png",
             "src_cells_x":     src_w,
             "src_cells_z":     src_h,
+            # Texture frame: texel k is centred on .TER vertex k, which sits
+            # at 2 * (GridMin + k). Not the heightmap sample frame.
+            "world_min":       {"x": ter.texel_frame_min[0], "z": ter.texel_frame_min[1]},
+            "world_max":       {"x": ter.texel_frame_max[0], "z": ter.texel_frame_max[1]},
             "info_map_b64":    info_map_b64,
             "info_cluster_size": 16,
             "info_cluster_cols": ter.info_cluster_cols,
@@ -230,17 +226,17 @@ def build_output(stem: str) -> dict:
         print(f"warning: failed to bake tile-composite assets for {stem}: {e}",
               file=sys.stderr)
 
-    # Heightmap comes from the full .TER decode per the bz2terraineditor
-    # source: cluster-based, 16x16 cells per cluster, row-major clusters
-    # with per-channel compression flags, float32 heights in absolute
-    # meters. We box-downsample 1024x1024 -> 256x256 for browser meshes.
-    # Output int16 is centered on midpoint via base_offset; viewer recovers
-    # meters via `int16 * scale + base_offset`.
+    # Heights are the .TER's own float32 engine meters, box-downsampled to one
+    # sample every 8 m and carried as int16 around the midpoint: meters =
+    # int16 * scale + base_offset_m. Renderers draw them 1:1. world_origin is
+    # sample 0's position (the centre of the source vertices it averages), so
+    # sample (i, j) sits at world_origin + (i, j) * cell_meters and the mesh
+    # spans (cells - 1) cells.
     hm_cells_x = ter.cells_x
     hm_cells_z = ter.cells_z
     hm_bytes = ter.heights_le_bytes
     hm_scale = ter.scale
-    hm_base_offset_m = ter.height_setting  # midpoint of measured height range
+    hm_base_offset_m = ter.base_offset_m
     decode_method = "ter_v5_cluster_float32"
     heights_b64 = base64.b64encode(hm_bytes).decode("ascii")
 
@@ -256,37 +252,13 @@ def build_output(stem: str) -> dict:
     lava_ratio = ter.lava_cells / max(1, ter.total_cells)
     has_visible_lava = lava_ratio >= LIQUID_VISIBILITY_THRESHOLD
 
-    # default_exaggeration: heuristic to give every map a visually
-    # interesting default Y. We aim for ~12% visual slope at 1x by dividing
-    # the desired ratio by the natural ratio. Clamped so mountainous maps
-    # (Hubris) don't end up at 0.1x and flat maps don't blow up to 10x.
-    world_extent_x = ter.world_max_x - ter.world_min_x
-    world_extent_z = ter.world_max_z - ter.world_min_z
-    world_extent_m = max(world_extent_x, world_extent_z)
-    height_range_m = max(1.0, ter.height_max_m - ter.height_min_m)
-    natural_slope = height_range_m / world_extent_m
-    TARGET_VISUAL_SLOPE = 0.12
-    default_exaggeration = TARGET_VISUAL_SLOPE / max(0.001, natural_slope)
-    default_exaggeration = max(0.5, min(3.0, default_exaggeration))
-    default_exaggeration = round(default_exaggeration * 10) / 10  # 0.1 step
-
-    # Heightmap world extent matches the .TER tile bounds (full terrain mesh
-    # spans -1024..+1024 typically). The viewer UV-maps the minimap PNG
-    # only onto the calibrated playable subregion.
-    hm_world_min_x = ter.world_min_x
-    hm_world_min_z = ter.world_min_z
-    hm_world_max_x = ter.world_max_x
-    hm_world_max_z = ter.world_max_z
-    cell_m_x = (hm_world_max_x - hm_world_min_x) / hm_cells_x
-    cell_m_z = (hm_world_max_z - hm_world_min_z) / hm_cells_z
-
     # Per-cell CellType bitmap at render resolution. One byte per output cell,
     # bits per CellType.cs. Used by the viewer as an alphaMap on the
     # water/lava planes so liquids only render on flagged cells.
     cell_types_b64 = base64.b64encode(ter.cell_type_bytes).decode("ascii")
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "map_stem": stem,
         "map_name": map_name,
         "heightmap": {
@@ -300,9 +272,9 @@ def build_output(stem: str) -> dict:
             "base_offset_m": hm_base_offset_m,
             "height_min_m": ter.height_min_m,
             "height_max_m": ter.height_max_m,
-            "cell_meters_x": cell_m_x,
-            "cell_meters_z": cell_m_z,
-            "world_origin": {"x": hm_world_min_x, "z": hm_world_min_z},
+            "cell_meters_x": ter.sample_spacing_m,
+            "cell_meters_z": ter.sample_spacing_m,
+            "world_origin": {"x": ter.sample_origin_x, "z": ter.sample_origin_z},
             "ter_version": ter.version,
             "decode_method": decode_method,
         },
@@ -331,7 +303,6 @@ def build_output(stem: str) -> dict:
         "defaults": {
             "has_visible_water": has_visible_water,
             "has_visible_lava":  has_visible_lava,
-            "default_exaggeration": default_exaggeration,
         },
         "world_rect": world_rect,
         "minimap_png_rel": minimap_rel,

@@ -1,8 +1,9 @@
 """Definitive `.TER` decoder.
 
-Format reference: `_map-analysis/archive/bz2terraineditor-master/.../Terrain.cs`.
-Validated against 5 maps (Europa Night, Hubris, Ebola, 310, Quagmire) -- every
-byte in every file is accounted for. See `_verify_format.py` for the smoke test.
+Format reference: `_map-analysis/reference-repos/bz2terraineditor-master/.../Terrain.cs`.
+Every byte of every corpus `.TER` is accounted for, and the decoded heights
+are checked against the engine and the map authoring data by
+`scripts/verify_terrain_scale.py`.
 
 ## Format spec (Version 5, the universal version in our corpus)
 
@@ -36,43 +37,40 @@ For each cluster (cy outer, cx inner, both stepping by CLUSTER_SIZE):
 7. Cell:    256 bytes if haveCell   else 1 byte broadcast
 8. Info:    1 x uint32 LE per cluster
 
-### Heights are in METERS (float32 absolute world altitude)
+### Heights are engine meters (float32 absolute world altitude)
 
-Validated values:
-- Europa Night basin: 24-180m, plateau: 300m
-- Hubris: sea level around 0m, max 600m peak
-- Ebola: water level 0m, max 197m
-- 310: basin 28-150m
-- Quagmire: 95-300m mostly
+No scale factor applies. The `.TRN` `[Size] Height` value is not a height
+scale: the engine's terrain Y bounds (`GetTerrainMinY/MaxY`, recorded in
+every session header) are exactly `[min(TER min, Height), max(TER max,
+Height)]`, with Height = 0 when the `.TRN` has no `[Size]` section.
 
-### What we use vs ignore for the 3D POC
+### Sample positions
 
-Used:
-- Heightmap (float32 -> downsampled to 256x256 -> int16 for transport)
-- CellType is decoded but not yet rendered (planned: tint water cells blue,
-  flag cliff/lava for the viewer)
-
-Ignored for now (could enable richer rendering later):
-- ColorMap: per-cell baked vertex color
-- AlphaMap1/2/3: terrain texture blend weights
-- InfoMap: per-cluster tile indices, visibility, ownership
+Source sample `k` is a terrain vertex at world `2 * (GridMin + k)`. The
+engine's X/Z bounds are `2 * GridMin .. 2 * GridMax`.
 
 ### Output
 
-We emit a downsampled heightmap at 256x256 (each output cell = 4x4 input
-cells, box-averaged). 256x256 matches the engine's MetersPerGrid=8
-resolution and keeps browser meshes lean. The original 1024x1024 float32
-data could be exposed later if a use case demands it.
+Heights are box-averaged by `DOWNSAMPLE_FACTOR` (4) to keep browser meshes
+lean, so output sample `o` is the mean of source vertices `4o .. 4o+3`
+and sits at their mean position, `2 * GridMin + 3 + 8 * o`
+(`TerFull.sample_origin_*`, `TerFull.sample_spacing_m`). Color, alpha,
+CellType and InfoMap stay at source resolution. They are per-vertex like the
+heights, so texel `k` is centred on vertex `k` and the texture frame runs
+from `2 * GridMin - 1` to `2 * GridMax - 1` (`TerFull.texel_frame_*`).
 """
 from __future__ import annotations
 
 import struct
+import sys
+from array import array
 from dataclasses import dataclass
 from pathlib import Path
 
 
 CLUSTER_SIZE = 16          # v >= 4
 DOWNSAMPLE_FACTOR = 4      # 1024x1024 source -> 256x256 output
+TER_CELL_METERS = 2.0      # one TER grid unit
 
 
 @dataclass
@@ -86,11 +84,12 @@ class TerFull:
     tile_max_x: int
     tile_max_z: int
     version: int
+    downsample_factor: int    # source samples averaged per output sample, per axis
     heights_le_bytes: bytes   # cells_x * cells_z * 2 bytes (int16 LE)
-    height_setting: float     # quantization range: int16 -> meters via scale
+    base_offset_m: float      # meters = int16 * scale + base_offset_m
     scale: float              # meters per int16 unit
-    height_min_m: float       # actual min height in decoded data
-    height_max_m: float       # actual max height in decoded data
+    height_min_m: float       # min of the downsampled heights
+    height_max_m: float       # max of the downsampled heights
     # Per-cell CellType bytes at OUTPUT resolution (cells_x * cells_z bytes).
     # Each byte is the OR of all bits set in any source cell of the 4x4 block
     # that downsampled into it. Bits per CellType.cs:
@@ -127,27 +126,45 @@ class TerFull:
 
     @property
     def world_min_x(self) -> float:
-        return float(self.tile_min_x) * 2.0
+        return float(self.tile_min_x) * TER_CELL_METERS
 
     @property
     def world_min_z(self) -> float:
-        return float(self.tile_min_z) * 2.0
+        return float(self.tile_min_z) * TER_CELL_METERS
 
     @property
     def world_max_x(self) -> float:
-        return float(self.tile_max_x) * 2.0
+        return float(self.tile_max_x) * TER_CELL_METERS
 
     @property
     def world_max_z(self) -> float:
-        return float(self.tile_max_z) * 2.0
+        return float(self.tile_max_z) * TER_CELL_METERS
 
     @property
-    def cell_meters_x(self) -> float:
-        return (self.world_max_x - self.world_min_x) / self.cells_x if self.cells_x else 0.0
+    def sample_spacing_m(self) -> float:
+        """World distance between neighbouring output height samples."""
+        return TER_CELL_METERS * self.downsample_factor
 
     @property
-    def cell_meters_z(self) -> float:
-        return (self.world_max_z - self.world_min_z) / self.cells_z if self.cells_z else 0.0
+    def sample_origin_x(self) -> float:
+        """World X of output sample 0, the mean of the vertices it averages."""
+        return self.world_min_x + TER_CELL_METERS * (self.downsample_factor - 1) / 2.0
+
+    @property
+    def sample_origin_z(self) -> float:
+        return self.world_min_z + TER_CELL_METERS * (self.downsample_factor - 1) / 2.0
+
+    @property
+    def texel_frame_min(self) -> tuple[float, float]:
+        """World (x, z) where source-resolution textures start: half a cell
+        before vertex 0, so every texel is centred on its vertex."""
+        return (self.world_min_x - TER_CELL_METERS / 2.0,
+                self.world_min_z - TER_CELL_METERS / 2.0)
+
+    @property
+    def texel_frame_max(self) -> tuple[float, float]:
+        return (self.world_max_x - TER_CELL_METERS / 2.0,
+                self.world_max_z - TER_CELL_METERS / 2.0)
 
 
 @dataclass
@@ -406,11 +423,9 @@ def _downsample_celltypes(src: list[bytes], factor: int, out_w: int, out_h: int)
     return bytes(out)
 
 
-def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull | None:
+def parse_ter_full(path: Path) -> TerFull | None:
     """Decode .TER and return a downsampled int16 heightmap suitable for
-    transport to the browser. `height_setting` is no longer used --
-    heights come from the actual file in float32 meters; we quantize
-    using each map's measured max height."""
+    transport to the browser, plus the source-resolution paint channels."""
     raw = path.read_bytes()
     try:
         (heightmap_2d, cell_types_2d, color_rows,
@@ -441,26 +456,16 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
     # reduction so a single water/lava cell within a 4x4 block survives.
     cell_type_bytes = _downsample_celltypes(cell_types_2d, factor, out_w, out_h)
 
-    # Find the actual height range so we can quantize tightly.
     flat = [v for row in down for v in row]
     h_min = min(flat)
     h_max = max(flat)
-    span = max(1e-6, h_max - h_min)
 
-    # Quantize to int16 (signed). int16 unit = span/65535 meters.
-    # We store `(h - h_min) * 65535 / span - 32768`, which maps
-    # [h_min..h_max] to [-32768..+32767]. Recovery is
-    # `meters = (int16 + 32768) * span / 65535 + h_min`.
-    # But the existing viewer assumes a simple linear scale `meters = int16 * scale`,
-    # so to keep that contract we instead anchor at zero: scale = h_max / 32767
-    # (or -h_min / -32768 -- pick the tighter side). This loses some precision
-    # but keeps the viewer code simple.
-    # Use a symmetric quantization centered on midpoint:
+    # Symmetric int16 quantization around the midpoint of the range:
+    # meters = int16 * scale + midpoint, accurate to scale / 2. The scale is a
+    # transport unit only; it never changes the recovered meters.
     midpoint = (h_min + h_max) * 0.5
     half_range = max(abs(h_max - midpoint), abs(h_min - midpoint), 1e-3)
-    scale = half_range / 32767.0   # meters per int16 unit
-    # Plus a base offset so int16=0 represents `midpoint` meters.
-    # The viewer will be told about this offset via `base_offset_m`.
+    scale = half_range / 32767.0
 
     out = bytearray(out_w * out_h * 2)
     for y in range(out_h):
@@ -483,8 +488,9 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
         tile_max_x=grid_max_x,
         tile_max_z=grid_max_z,
         version=5,
+        downsample_factor=factor,
         heights_le_bytes=bytes(out),
-        height_setting=midpoint,
+        base_offset_m=midpoint,
         scale=scale,
         height_min_m=h_min,
         height_max_m=h_max,
@@ -506,17 +512,69 @@ def parse_ter_full(path: Path, height_setting: float | None = None) -> TerFull |
     )
 
 
-def read_trn_height_setting(trn_path: Path | None) -> float:
-    """Legacy compatibility: returns the .TRN [Size] Height for callers
-    that want it. The actual .TER decoder doesn't need this -- heights
-    come from the file directly in absolute meters."""
-    DEFAULT = 100.0
+def decode_v5_heights(raw: bytes) -> tuple[array, int, int, tuple[int, int, int, int], int]:
+    """Heights only, as one row-major float32 array (row 0 = GridMinZ).
+
+    Walks the same cluster layout as `_decode_v5` but skips the paint
+    channels instead of scattering them, so a 2048 x 2048 map decodes in a
+    fraction of a second. Returns `(heights, width, height, (GridMinX,
+    GridMinZ, GridMaxX, GridMaxZ), bytes_consumed)`.
+    """
+    if raw[:4] != b'TERR':
+        raise ValueError('bad magic')
+    version = int.from_bytes(raw[4:8], 'little')
+    if version != 5:
+        raise ValueError(f'unsupported version {version} (need 5)')
+    grid_min_x = int.from_bytes(raw[8:10], 'little', signed=True)
+    grid_min_z = int.from_bytes(raw[10:12], 'little', signed=True)
+    grid_max_x = int.from_bytes(raw[12:14], 'little', signed=True)
+    grid_max_z = int.from_bytes(raw[14:16], 'little', signed=True)
+    width = grid_max_x - grid_min_x
+    height = grid_max_z - grid_min_z
+    if width % CLUSTER_SIZE != 0 or height % CLUSTER_SIZE != 0:
+        raise ValueError(f'dimensions {width}x{height} not multiple of {CLUSTER_SIZE}')
+
+    n = CLUSTER_SIZE
+    cells_per_cluster = n * n
+    heights = array('f', bytes(4 * width * height))
+    offset = 16
+    for cy in range(0, height, n):
+        for cx in range(0, width, n):
+            flags = raw[offset]
+            offset += 1
+            if flags & 0x01:
+                block = array('f')
+                block.frombytes(raw[offset:offset + cells_per_cluster * 4])
+                if sys.byteorder == 'big':
+                    block.byteswap()
+                offset += cells_per_cluster * 4
+                for yy in range(n):
+                    row = (cy + yy) * width + cx
+                    heights[row:row + n] = block[yy * n:(yy + 1) * n]
+            else:
+                h, = struct.unpack_from('<f', raw, offset)
+                offset += 4
+                fill = array('f', [h]) * n
+                for yy in range(n):
+                    row = (cy + yy) * width + cx
+                    heights[row:row + n] = fill
+            offset += cells_per_cluster * 3 if flags & 0x02 else 3
+            for bit in (0x04, 0x08, 0x10, 0x20):
+                offset += cells_per_cluster if flags & bit else 1
+            offset += 4
+    return heights, width, height, (grid_min_x, grid_min_z, grid_max_x, grid_max_z), offset
+
+
+def read_trn_size_height(trn_path: Path | None) -> float | None:
+    """The `.TRN` `[Size] Height` value, or None when the file or key is
+    absent. Not a height scale: the engine counts it inside its terrain Y
+    bounds (see the module docstring)."""
     if trn_path is None or not trn_path.is_file():
-        return DEFAULT
+        return None
     try:
         text = trn_path.read_text(encoding='utf-8', errors='replace')
-    except Exception:
-        return DEFAULT
+    except OSError:
+        return None
     in_size = False
     for raw in text.splitlines():
         line = raw.split('//', 1)[0].strip()
@@ -528,15 +586,13 @@ def read_trn_height_setting(trn_path: Path | None) -> float:
             k, v = line.split('=', 1)
             if k.strip().lower() == 'height':
                 try:
-                    val = float(v.strip().strip('"'))
-                    return val if val > 0 else DEFAULT
+                    return float(v.strip().strip('"'))
                 except ValueError:
-                    return DEFAULT
-    return DEFAULT
+                    return None
+    return None
 
 
 if __name__ == '__main__':
-    import sys
     if len(sys.argv) < 2:
         print('usage: python _ter_full.py path/to/X.TER', file=sys.stderr)
         raise SystemExit(2)
@@ -548,11 +604,12 @@ if __name__ == '__main__':
     print(f'output grid:   {t.cells_x} x {t.cells_z}')
     print(f'world bounds:  X[{t.world_min_x:.0f}..{t.world_max_x:.0f}] '
           f'Z[{t.world_min_z:.0f}..{t.world_max_z:.0f}]')
-    print(f'cell meters:   {t.cell_meters_x:.2f} x {t.cell_meters_z:.2f}')
+    print(f'samples:       every {t.sample_spacing_m:.0f} m from '
+          f'({t.sample_origin_x:.0f}, {t.sample_origin_z:.0f})')
     print(f'height meters: min={t.height_min_m:.2f}  max={t.height_max_m:.2f}  '
-          f'midpoint={t.height_setting:.2f}')
+          f'midpoint={t.base_offset_m:.2f}')
     print(f'int16 scale:   {t.scale:.6g} m/unit  (recovers meters as '
-          f'`int16 * scale + {t.height_setting:.2f}`)')
+          f'`int16 * scale + {t.base_offset_m:.2f}`)')
     pct = lambda n: 100.0 * n / max(1, t.total_cells)
     print(f'cell types:    total={t.total_cells:,}')
     print(f'  flat:        {t.flat_cells:>9,}  ({pct(t.flat_cells):5.1f}%)')

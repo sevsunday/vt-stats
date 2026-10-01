@@ -345,14 +345,16 @@ wired vs what's deferred. Use as a roadmap when extending the toolset.
 * Mission script DLL references (`*.dll`)
 
 ### `.ter` (heightmap)
-**Status: header + heights decoded; trailer bytes pending**
+**Status: fully decoded** (`scripts/_ter_full.py`, every byte accounted for)
 
-* Magic `TERR` + version (`uint32 LE`)
-* Cell bounds (universal `(-512,-512) -> (+512,+512)` = 1024x1024 cells
-  at 2m/cell)
-* Per-cell `int16 LE` height
-* Per-cell texture/lighting bytes (2 trailing bytes per cell) — not
-  yet decoded
+* Magic `TERR` + version (`uint32 LE`, 5 across the corpus)
+* Grid bounds `GridMinX/Z .. GridMaxX/Z` in 2 m units (e.g. `-512..+512`
+  = 1024x1024 vertices); vertex `k` sits at world `2 * (GridMin + k)`
+* 16x16 clusters with per-channel compression flags: float32 height,
+  RGB color, three texture-blend alphas, CellType bits, one InfoMap word
+* Heights are float32 engine meters. No `.TRN` value scales them; the
+  `[Size] Height` value only widens the engine's terrain Y bounds.
+  `python scripts/verify_terrain_scale.py` checks this on every map.
 * Min/max/mean/stdev heights
 
 ### `.trn` (terrain config)
@@ -493,8 +495,8 @@ slice of it forward.
 
 ### What we have natively
 
-* Heightmap: full per-cell `int16` grid from `.ter` (1024x1024 cells
-  x 2m = 2048m mesh)
+* Heightmap: full float32 grid from `.ter` (1024x1024 vertices x 2 m =
+  2048 m), in engine meters
 * Water plane height: `float32` from `.wat` byte 16
 * Sky tint: floats from `.sky` header (first ~50 `float32`s, decode TBD)
 * Object positions + ODF metadata: from `.bzn` + ODF DB cross-ref
@@ -510,11 +512,13 @@ slice of it forward.
 
 ### Suggested implementation
 
+The shipped contract is `data/render/<stem>.3d.json`, documented in
+[render/README.md](render/README.md). The original sketch:
+
 ```python
 # render_map_3d.py - emits a per-map _3d.json that render3d.html consumes
 {
-  "heightmap": [[h00, h01, ...], [h10, h11, ...], ...],  # 1024x1024 int16
-  "height_scale": 0.00305,  # multiply by Height/32767 for meters
+  "heightmap": [[h00, h01, ...], [h10, h11, ...], ...],  # engine meters
   "world_extent": {"min_x": -1024, "min_z": -1024, "max_x": 1024, "max_z": 1024},
   "water_y": 10.0,
   "sky_tint": "#a8b4c2",  # derived from .sky header floats

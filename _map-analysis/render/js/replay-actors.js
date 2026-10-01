@@ -9,14 +9,11 @@
  * flashes; the buildActor() return type is structured so those additions
  * slot in without rewiring.
  *
- * Y-axis math (per the plan's "unfair advantage" section): trail.y[] is
- * absolute BZ2 engine altitude; the terrain mesh stores y RELATIVE to the
- * map midpoint (`hm.baseOffsetM`) and applies an exaggeration multiplier.
- * To stay glued to the same mesh-relative Y space we apply:
+ * Y-axis math: trail.y[] is absolute BZ2 engine altitude and the terrain
+ * mesh stores the same meters RELATIVE to the map midpoint
+ * (`hm.baseOffsetM`), so
  *
- *   yWorld = (interpY - hm.baseOffsetM) * terrainExaggeration
- *
- * Mirror of viewer.js's water-plane scaling (~line 776-778).
+ *   yWorld = interpY - hm.baseOffsetM
  */
 
 import * as THREE from 'three';
@@ -193,14 +190,14 @@ export function applyShipModelMode(actors, opts) {
  *   {
  *     name, displayName, team, factionCode, glyphCategory,
  *     mesh:        THREE.Group,           // top-level scene anchor
- *     glyph:       THREE.Mesh,            // body primitive (scaled by exaggeration)
+ *     glyph:       THREE.Mesh,            // body primitive
  *     visible:     true,                  // mirror of mesh.visible
  *     trail:       (positioning.trail),   // ref to source data
  *     headingRad:  0,                     // last derived heading
  *     prevPos:     {x, y, z} | null,      // for finite-difference heading
  *   }
  */
-export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
+export function buildActor(rosterRow, opts = {}) {
   // Ship-at-tick tracker (optional). When provided, the actor's initial
   // ship is the tracker's pre-event guess (faction starting scout),
   // making the glyph + label honest about what the player is in at t=0.
@@ -266,13 +263,13 @@ export function buildActor(rosterRow, terrainExaggeration, opts = {}) {
  * starting scout for its faction rather than the whole-match `primary_ship`
  * aggregate. Live updates are still driven per-frame by `updateActors`.
  */
-export function buildActorsGroup(roster, terrainExaggeration, opts = {}) {
+export function buildActorsGroup(roster, opts = {}) {
   const group = new THREE.Group();
   group.name = 'replay-actors';
   const actors = [];
   for (const row of roster) {
     if (!row.trail) continue;
-    const actor = buildActor(row, terrainExaggeration, opts);
+    const actor = buildActor(row, opts);
     actors.push(actor);
     group.add(actor.mesh);
   }
@@ -354,9 +351,8 @@ const HEADING_TAU_SEC      = 0.058;
 
 /**
  * Move every actor to its interpolated position at `tSec`. Call this once
- * per frame. `hm` is the heightmap from loadMapData(); `terrainExaggeration`
- * is the multiplier applied to relative heights so the actor stays glued to
- * the visually-scaled terrain mesh.
+ * per frame. `hm` is the heightmap from loadMapData(); its baseOffsetM puts
+ * the recorded altitude in the terrain mesh's Y space.
  *
  * Heading is derived from a low-passed finite difference on the trail's
  * (x, z) so the glyph yaw faces the direction of travel without flickering.
@@ -378,7 +374,7 @@ const HEADING_TAU_SEC      = 0.058;
  *                    the actor's state mutates -- caller uses this to
  *                    keep the roster ship cell in sync with reality.
  */
-export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
+export function updateActors(actors, tSec, hm, opts = {}) {
   const baseOffsetM = (hm && hm.baseOffsetM) || 0;
   const dtSec = (opts.dtSec > 0) ? opts.dtSec : (1 / 60);
   const headingAlpha = 1 - Math.exp(-dtSec / HEADING_TAU_SEC);
@@ -424,8 +420,7 @@ export function updateActors(actors, tSec, hm, terrainExaggeration, opts = {}) {
       continue;
     }
 
-    const y = (interp.y - baseOffsetM) * terrainExaggeration;
-    const yPos = y + actor.yOffset;
+    const yPos = interp.y - baseOffsetM + actor.yOffset;
     // The actor mesh lives inside the world-reflect group (scale.z = -1), so
     // its position is set in RAW local coords. lastValidPos, however, is
     // consumed in world space (DOM label projection, chase/cinema camera,
@@ -534,7 +529,7 @@ export function buildTrailsGroup(actors) {
  *
  * Trails respect actor.visible. Hidden actors hide their trail too.
  */
-export function updateTrails(actors, tSec, hm, terrainExaggeration) {
+export function updateTrails(actors, tSec, hm) {
   const baseOffsetM = (hm && hm.baseOffsetM) || 0;
   for (const actor of actors) {
     if (!actor.trailObj) continue;
@@ -551,7 +546,7 @@ export function updateTrails(actors, tSec, hm, terrainExaggeration) {
     const tint      = actor.trailObj.tint;
 
     for (let i = 0; i < n; i++) {
-      const yWorld = (window.y[i] - baseOffsetM) * terrainExaggeration;
+      const yWorld = window.y[i] - baseOffsetM;
       positions[i * 3]     = window.x[i];
       positions[i * 3 + 1] = yWorld + 1.5;          // float just above terrain
       positions[i * 3 + 2] = window.z[i];

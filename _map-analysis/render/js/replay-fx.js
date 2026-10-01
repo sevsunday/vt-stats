@@ -13,7 +13,7 @@
  */
 
 import * as THREE from 'three';
-import { sampleTerrainHeight } from './objects.js';
+import { sampleTerrainHeight } from './objects.js?v=terrain1';
 
 const BEACON_HEIGHT_M    = 220;     // tall enough to be visible above ridges
 const BEACON_RADIUS_M    = 4.5;
@@ -40,7 +40,7 @@ const TEAM_TINTS = {
  *     opacity:    number,
  *   }
  */
-function buildBeacon(rosterRow, hm, terrainExaggeration) {
+function buildBeacon(rosterRow, hm) {
   if (!rosterRow.spawn) return null;
   const tint = TEAM_TINTS[rosterRow.team] || TEAM_TINTS._;
   const color = new THREE.Color(tint);
@@ -64,7 +64,7 @@ function buildBeacon(rosterRow, hm, terrainExaggeration) {
   // Anchor the beacon at terrain height beneath the spawn point. We sample
   // the terrain (not the actor's first-tick y) so the beacon stays glued to
   // the visible ground, mirroring viewer.js's static-object placement.
-  const groundY = sampleTerrainHeight(hm, rosterRow.spawn.x, rosterRow.spawn.z) * terrainExaggeration;
+  const groundY = sampleTerrainHeight(hm, rosterRow.spawn.x, rosterRow.spawn.z);
   cylinder.position.set(rosterRow.spawn.x, groundY + BEACON_HEIGHT_M * 0.5, rosterRow.spawn.z);
 
   // Top-facing glow disc, gives the beacon a sharper "vertical light" silhouette.
@@ -104,13 +104,13 @@ function buildBeacon(rosterRow, hm, terrainExaggeration) {
 /**
  * Build all spawn beacons. Returns { beacons, group }; caller adds group to scene.
  */
-export function buildSpawnBeacons(roster, hm, terrainExaggeration) {
+export function buildSpawnBeacons(roster, hm) {
   const group = new THREE.Group();
   group.name = 'replay-spawn-beacons';
   const beacons = [];
   for (const row of roster) {
     if (!row.spawn) continue;
-    const beacon = buildBeacon(row, hm, terrainExaggeration);
+    const beacon = buildBeacon(row, hm);
     if (beacon) {
       beacons.push(beacon);
       group.add(beacon.mesh);

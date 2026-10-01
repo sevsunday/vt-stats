@@ -107,7 +107,9 @@ render/
   js/
     viewer.js                Three.js scene composition + render loop
     loader.js                fetch + base64 decode
-    objects.js               per-kind primitive factories + height sampler
+    objects.js               per-kind primitive factories + height samplers
+    terrain-owners.js        terrain surface: 8 m grid, 2 m tunnel blocks, cuts
+    props.js                 placed scenery and tunnel pieces
   vendor/three/              Three.js r170 ES modules (vendored, ~1.3 MB)
     three.module.js
     addons/controls/OrbitControls.js
@@ -124,6 +126,7 @@ scripts/                     PIPELINE (lives at project root, not under
                              (auto-bootstrap of vsrmaplist + tiles)
   extract_tile_textures.py   tier-3 tile texture extractor (Steam-only)
   _ter_full.py               full-grid .TER decoder
+  verify_terrain_scale.py    proves every .3d.json is 1:1 engine meters
   _wat_sky.py                .WAT + .SKY header decoders
   _corpus_stats.py           dev utility (corpus-wide audits)
   _paths.py                  shared path constants (canonical home)
@@ -157,33 +160,45 @@ changing calibration, or improving the extractor.
 
 ## Data contract: `<stem>.3d.json`
 
+Schema 4, written by `scripts/extract_3d.py`. `js/loader.js` rejects any
+other version.
+
 ```jsonc
 {
-  "schema_version": 1,
+  "schema_version": 4,
   "map_stem": "vsreuronig",
   "map_name": "VSR: Europa Night",
 
   "heightmap": {
-    "cells_x": 1024, "cells_z": 789,
+    "cells_x": 256, "cells_z": 256,           // 8 m samples
+    "src_cells_x": 1024, "src_cells_z": 1024,  // 2 m .TER vertices
     "encoding": "int16_le_base64",
-    "data": "...",                          // ~2 MB base64
-    "scale": 0.00305185,                    // multiply int16 -> meters
-    "cell_meters_x": 2.0, "cell_meters_z": 2.6,
-    "world_origin": { "x": -1024, "z": -1024 },
-    "ter_version": 5, "ter_stride": 4
+    "data": "...",
+    "scale": 0.0029949,                        // meters = int16 * scale + base_offset_m
+    "base_offset_m": 201.865,
+    "height_min_m": 103.73, "height_max_m": 300.0,
+    "cell_meters_x": 8.0, "cell_meters_z": 8.0,
+    "world_origin": { "x": -1021, "z": -1021 }, // sample (0, 0) = 2 * GridMin + 3
+    "ter_version": 5, "decode_method": "ter_v5_cluster_float32"
   },
+  "cell_types_map": { "cells_x": 256, "cells_z": 256, "encoding": "uint8_base64", "data": "..." },
+  "defaults": { "has_visible_water": false, "has_visible_lava": false },
 
   "world_rect": {                            // hand-calibrated; from calibration/configs/
     "min": { "x": -667, "z": -627 },
     "max": { "x":  578, "z":  627 }
   },
+  "tile_composite": {
+    "color_png_rel": "vsreuronig.color.png",   // + alpha1/2/3, info_map_b64, tile names
+    "world_min": { "x": -1025, "z": -1025 },   // texel k centred on .TER vertex k
+    "world_max": { "x":  1023, "z":  1023 }
+  },
 
   "minimap_png_rel": "../../../data/maps/vsreuronig.png",
   "minimap_dim": [128, 128],
 
-  "water_y": 10.0,
+  "water_y_raw": 10.0,
   "sky_tint": "#14191e",
-  "sky_rgb_float": [0.078, 0.098, 0.118],
 
   "objects": [
     { "uid": "scrap_pool#0", "kind": "scrap_pool",
@@ -193,6 +208,116 @@ changing calibration, or improving the extractor.
   "object_count_by_kind": { "scrap_pool": 7, "spawn_point": 2, "loose_scrap": 42 }
 }
 ```
+
+**Vertical scale is 1:1.** The `.TER` stores float32 engine meters at every
+2 m vertex. The extract box-averages them to one sample every 8 m and carries
+them as int16; `scale` is a transport unit only, accurate to `scale / 2`.
+Both renderers draw the heights unscaled around `base_offset_m`, and actors,
+structures, props, liquids and the camera floor use the same meters. There is
+no height slider and no per-map default. The `.TRN` `[Size] Height` value is
+not a scale either: the engine counts it inside its terrain Y bounds.
+
+**Frames.** `.TER` vertex `k` sits at world `2 * (GridMin + k)`. Sample
+`(i, j)` is the mean of vertices `4i .. 4i+3` and sits at
+`world_origin + (i, j) * cell_meters`, so the mesh spans `(cells - 1) * 8` m
+from `world_origin` and each `cell_types_map` texel is centred on its sample.
+The source-resolution color, alpha and InfoMap textures map through
+`tile_composite.world_min .. world_max`, which centres texel `k` on vertex `k`.
+
+**Verification.** `python scripts/verify_terrain_scale.py` checks every map
+against sources that do not depend on the renderer: the `.3d.json` heights
+against a fresh box average of the raw `.TER`, the frames and schema, the
+engine terrain bounds of every recorded session
+(`y = [min(TER min, H), max(TER max, H)]`, `x/z = 2 * GridMin .. 2 * GridMax`),
+BZN-placed scrap pools on the `.TER` surface, v4 build positions, and a
+corpus-wide frame test. Run it after any `.TER`, `_ter_full.py` or
+`extract_3d.py` change.
+
+## Props sidecar and terrain ownership: `<stem>.props.json`
+
+Written by `scripts/extract_props.py` (standalone; rerun after a models
+index regen or a `.TER` change). Schema 3:
+
+```jsonc
+{
+  "schema_version": 3,
+  "map_stem": "vsroverlook",
+  "props": [ { "stem": "pbtunn03", "x": -112, "y": 50, "z": 48, "yaw": 180 } ],
+  "pieces": {
+    "pbtunn03": {
+      "bboxMin": [-48, 0, -16], "bboxMax": [48, 60, 16],   // engine-local
+      "emissive": ["pbintf00"],
+      "terrainPatch": { "minX": -48, "minZ": -16, "step": 2, "cols": 49, "rows": 17, "heights": [] },
+      "tunnels": [ { "x0": -16, "x1": 16, "z0": -16, "z1": 16, "y0": 0, "y1": 60, "edge": "twfw" } ]
+    }
+  },
+  // Only on maps that place a terrain-patch piece. World metres, row 0 = z0.
+  "terrainHires": [
+    { "x0": -184, "z0": 8, "step": 2, "cols": 73, "rows": 41,
+      "encoding": "int16_le_base64", "scale": 0.0016, "base_offset_m": 102.5,
+      "data": "..." }                       // abs metres = int16 * scale + base_offset_m
+  ]
+}
+```
+
+`terrainHires` blocks are the source 2 m `.TER` heights (`_ter_full._decode_v5`)
+around every placed patch piece: the rotated footprint plus `HIRES_MARGIN_M`
+(24 m), clamped to the TER, rounded out to the 2 m lattice. Blocks closer than
+`HIRES_MERGE_GAP_M` (16 m, two 8 m cells) on both axes merge, so their
+transition rings never share a cell.
+
+**Coordinates.** Everything is engine numerics (+X east, +Z north, metres).
+Piece geometry is local to the pivot. A row with pivot `P` and yaw `θ` maps
+local `(lx, lz)` to `wx = P.x + lx·cosθ + lz·sinθ`, `wz = P.z − lx·sinθ + lz·cosθ`.
+Props are placed with `rotation.y = θ` and `scale.z = −1` because
+`convert_msh.py` negates Z in every GLB. The replay mirrors the whole world
+(`worldGroup.scale.z = −1`); that is never compensated per object.
+
+**Why.** The `.TER` sheet has no tunnel in it: over an underpass it holds the
+roof players drive on, and inside an entrance it holds the mapmaker's sculpt.
+A tunnel is placed `i76building` props. Each ODF lists its passable cells
+(`tunnelNN X0/Z0/DX/DZ` in 8 m terrain squares from the mesh's min-X / north
+edge, `tunnelNNEdge` N,E,S,W with `w` wall, `t` terrain, `f` next piece).
+Entrance meshes carry a hidden `terrain` node (`terrain__h`); the engine snaps
+the heightfield under the piece to it.
+
+**What the renderer does.** `buildTerrainSurface()` in `js/terrain-owners.js`
+builds the whole terrain as one indexed mesh, called from both `initFloor()`:
+
+1. Grid: 8 m vertex `(ix, iz)` at `worldOrigin + (ix, iz) * cellMeters`,
+   exactly 8 m apart. Each 8 m value is the mean of a 4 x 4 block of 2 m
+   vertices, and the extract's `world_origin` is already that block's
+   centroid, 3 m in from the first `.TER` vertex (see "Frames" above).
+2. Snap: vertices inside a piece's footprint take the bilinear
+   `terrainPatch` value (the gate's patch already carries the back-wall top
+   across its `f` side).
+3. Refine: the 8 m cells inside each `terrainHires` block are replaced by the
+   block's own 2 m lattice (snapped too). The block edge runs along 8 m
+   lines, holds the 8 m nodes plus the lattice positions along it, and joins
+   the lattice through a 1 m zipper strip; each 8 m cell sharing an edge with
+   the block is fanned through those edge vertices. No T-junctions, one
+   vertex per seam point, so normals are continuous and the 8 m cells next
+   to the block carry the 8 m to 2 m transition.
+4. Triangulate: every cell splits along the diagonal whose ends are closer
+   in height (ties keep NW-SE), so cliff edges follow the mesh on both
+   sides of a piece.
+5. Cut: inside each tunnel rect, drop triangles whose height range reaches
+   into the piece's vertical span. A plateau over a tube never does, so the
+   roof stays.
+
+`hm.surface` keeps the result. `sampleTerrainHeight()` (`js/objects.js`) reads
+it on the drawn triangles, so pools, props, structures, FX and the camera
+floor sit on the surface that is drawn; `sampleSheetHeight()` is the raw
+`.TER` sheet, which the camera uses to tell a tube (sheet above it) from open
+sky. The camera ground query returns the tube floor and ceiling when the
+reference point is inside a rect, within its span, and under the sheet.
+
+Every prop sits at its authored BZN height, as in the game: authors sink
+rocks, palms and ruin walls on purpose (Oasis buries `rbruin08` 13.5 m,
+Beyond sinks all its scenery 1 m). A row without a height is snapped to the
+drawn surface. `OWNERSHIP_SCOPE` in the extractor limits rects and patches to tunnel pieces
+(generic props whose cells open onto another piece, bridges included);
+`"all"` would also flatten under pools and buildings.
 
 ## v1 vs v2 scope split
 
@@ -215,9 +340,9 @@ changing calibration, or improving the extractor.
 ### Heightmap decode: full `.TER` v5 cluster format
 
 Sourced from the BZ2 Terrain Editor's
-[`Terrain.cs`](../archive/bz2terraineditor-master/bz2terraineditor-master/BZ2TerrainEditor/Terrain.cs).
-Validated against 5 maps (Europa Night, Hubris, Ebola, 310, Quagmire);
-every byte in every file is accounted for in our decoder.
+[`Terrain.cs`](../reference-repos/bz2terraineditor-master/bz2terraineditor-master/BZ2TerrainEditor/Terrain.cs).
+Every byte of every corpus `.TER` is accounted for by the decoder, and
+`scripts/verify_terrain_scale.py` checks the heights against the engine.
 
 **File header (16 bytes)**:
 - `[0..3]`   uint32 LE: magic `0x52524554` ('TERR')
@@ -236,7 +361,7 @@ every byte in every file is accounted for in our decoder.
 3. **Color**: 256 x RGB (3 bytes each) if `haveColor` else 1 broadcast.
 4. **Alpha1/2/3**: 256 bytes each if their flag is set else 1 broadcast.
 5. **Cell type** (cliff / water / building / lava / sloped, see
-   [`CellType.cs`](../archive/bz2terraineditor-master/bz2terraineditor-master/BZ2TerrainEditor/CellType.cs)):
+   [`CellType.cs`](../reference-repos/bz2terraineditor-master/bz2terraineditor-master/BZ2TerrainEditor/CellType.cs)):
    256 bytes if `haveCell` else 1 broadcast.
 6. **Info map**: 1 uint32 LE per cluster (tile indices + cluster
    visibility + owner team + build type per the Terrain.cs comment).
@@ -253,8 +378,7 @@ everywhere).
   MetersPerGrid=8 resolution and keeps browser meshes lean.
 - Quantize to int16 LE around the per-map midpoint so the mesh sits
   visually centered at y=0. The viewer recovers meters via
-  `int16 * scale + base_offset` and adds a vertical-exaggeration
-  multiplier on top.
+  `int16 * scale + base_offset` and draws them 1:1.
 - Emitted as `data/render/<stem>.3d.json` alongside the calibrated minimap,
   object positions, sky tint, and water plane height (the .WAT byte-16
   float, suppressed by default per the v1 contract).
@@ -283,8 +407,9 @@ that engine-internal depth, mostly hidden under the terrain.
 
 ### Heightmap covers full `.TER` world bounds
 
-The minimap-derived heightmap mesh spans the entire `.TER` world bounds
-(typically `+/- 1024 m`, i.e. the full 2048 x 2048 m terrain). The
+The heightmap mesh spans the `.TER` world bounds (typically `+/- 1024 m`,
+i.e. the full 2048 x 2048 m terrain), inset by the 3 m centroid offset at
+the min edge and 5 m at the max edge. The
 calibrated `world_rect` is used only to UV-map the minimap texture
 onto the playable region of that mesh -- everything outside the
 playable area gets the texture's edge pixels clamped (looks fine since

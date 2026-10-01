@@ -7,7 +7,7 @@ Parses a Battlezone: Combat Commander map directory (containing some subset of
   - terrain bounds (origin, width/depth, m/grid, height range) from .TRN
   - NetVars / mission name from .inf
   - description text from .des
-  - heightmap stats from .TER (TERR magic, BE float32 grid)
+  - heightmap stats from .TER (float32 engine meters, via scripts/_ter_full.py)
 
 Outputs a structured JSON document and prints a human-readable summary.
 
@@ -29,6 +29,11 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Iterable
+
+_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.append(str(_SCRIPTS_DIR))
+from _ter_full import TER_CELL_METERS, decode_v5_heights  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -692,101 +697,37 @@ def parse_trn(path: Path) -> tuple[TerrainBounds | None, str]:
         return None, "parse_error"
 
 
-def parse_ter(
-    path: Path,
-    expected_meters_per_grid: float | None = None,
-    height_setting: float | None = None,
-) -> HeightmapStats | None:
-    """Decode a `.TER` heightmap.
+def parse_ter(path: Path) -> HeightmapStats | None:
+    """Height statistics from a `.TER`, decoded by `scripts/_ter_full.py`.
 
-    Layout (empirically reverse-engineered from BZ:CC v5 .TER files):
-
-        offset 0x00  magic "TERR" (4 bytes)
-        offset 0x04  uint32 LE  -> version (observed: 5)
-        offset 0x08  int16 LE x4 -> tile_min_x, tile_min_z, tile_max_x, tile_max_z
-                                     (cell counts in TER's 2 m units, signed)
-        offset 0x10  int16 LE per cell -> raw signed height
-                      scaled by `Height` (from .TRN, default 100) / 32767
-                      so the on-disk values map to roughly -100..+100 m
-                      around a per-map base altitude carried elsewhere.
-        ...trailer with per-cell texture indices and lighting data
-           (not decoded here; ~1.08 extra bytes per cell + small footer)
-
-    Returns None on magic/version mismatch or unusable dimensions.
+    The `.TER` stores float32 engine meters per 2 m vertex, so no `.TRN`
+    value scales them. Returns None when the file is missing or not a v5 TER.
     """
     if not path.exists():
         return None
-    raw = path.read_bytes()
-    if len(raw) < 32 or raw[:4] != b"TERR":
+    try:
+        heights, cells_x, cells_z, _bounds, _used = decode_v5_heights(path.read_bytes())
+    except ValueError:
         return None
-    version = int.from_bytes(raw[4:8], "little")
-    tile_min_x = int.from_bytes(raw[8:10], "little", signed=True)
-    tile_min_z = int.from_bytes(raw[10:12], "little", signed=True)
-    tile_max_x = int.from_bytes(raw[12:14], "little", signed=True)
-    tile_max_z = int.from_bytes(raw[14:16], "little", signed=True)
-    cells_x = tile_max_x - tile_min_x
-    cells_z = tile_max_z - tile_min_z
-    if cells_x <= 0 or cells_z <= 0:
+    total_cells = len(heights)
+    if not total_cells:
         return None
-    body = raw[16:]
-
-    # Empirically, each cell occupies 4 bytes: int16 LE height plus 2 bytes
-    # of per-cell auxiliary data (texture/blend indices, lighting nibbles).
-    # Verified by minimizing the mean |h(x+1) - h(x)| across rows: stride=4
-    # was ~2.5x smoother than 2 or 3 on `vsreuronig.TER`.
-    cell_stride = 4
-    if cells_x * cells_z * cell_stride > len(body):
-        # The TER body in real BZ:CC files is sometimes shorter than the
-        # header-declared cells_x*cells_z*4 would require. Clamp cells_z to
-        # whatever the body actually fits at stride 4.
-        max_rows = len(body) // (cells_x * cell_stride)
-        if max_rows <= 0:
-            cell_stride = 3
-            max_rows = len(body) // (cells_x * cell_stride)
-        if max_rows <= 0:
-            cell_stride = 2
-            max_rows = len(body) // (cells_x * cell_stride)
-        if max_rows <= 0:
-            return None
-        cells_z = max_rows
-    total_cells = cells_x * cells_z
-
-    scale = (height_setting or 100.0) / 32767.0
-    heights: list[float] = []
-    sample_stride = max(1, total_cells // 16384)  # cap stat samples at ~16k
-    for i in range(0, total_cells, sample_stride):
-        o = i * cell_stride
-        if o + 2 > len(body):
-            break
-        v = int.from_bytes(body[o:o + 2], "little", signed=True)
-        heights.append(v * scale)
-    if not heights:
-        return None
-    mean = sum(heights) / len(heights)
-    var = sum((h - mean) ** 2 for h in heights) / len(heights)
-    stdev = var ** 0.5
-    cell_meters = None
-    if expected_meters_per_grid is not None:
-        # .TRN MetersPerGrid is usually 8.0 with a 2048m map => 256 "grids".
-        # The .TER is finer, with cells_x cells over the same span; per-cell
-        # spacing is therefore (width_m / cells_x).
-        if cells_x > 0:
-            cell_meters = (expected_meters_per_grid * (cells_x // 256)) if False else None
-            # Better: derive from world width if we have it. The caller passes
-            # MetersPerGrid; we don't have width here, so leave None for now.
+    sample_stride = max(1, total_cells // 16384)  # mean/stdev over ~16k samples
+    sample = heights[::sample_stride]
+    mean = sum(sample) / len(sample)
+    var = sum((h - mean) ** 2 for h in sample) / len(sample)
     return HeightmapStats(
         cells_x=cells_x,
         cells_z=cells_z,
-        cell_meters=cell_meters,
+        cell_meters=TER_CELL_METERS,
         min_height=min(heights),
         max_height=max(heights),
         mean_height=mean,
-        stdev_height=stdev,
+        stdev_height=var ** 0.5,
         sample_layout=(
-            f"TERR v{version}; {cells_x}x{cells_z} cells, stride={cell_stride} bytes; "
-            f"heights = int16 LE at byte 0 of each cell, scaled by {scale:.6g} "
-            f"(Height={height_setting or 100.0:g}); "
-            f"sampled {len(heights)} of {total_cells} cells"
+            f"TERR v5; {cells_x}x{cells_z} vertices at {TER_CELL_METERS:g} m; "
+            f"float32 engine meters; min/max over every vertex, "
+            f"mean/stdev over {len(sample)} samples"
         ),
     )
 
@@ -892,13 +833,7 @@ def analyze_map_dir(map_dir: Path) -> MapReport:
     # ----- .TER
     ter_path = _find_one(files, ".ter")
     if ter_path:
-        mpg = report.terrain_bounds.meters_per_grid if report.terrain_bounds else None
-        hset = report.terrain_bounds.height_max_setting if report.terrain_bounds else None
-        report.heightmap = parse_ter(
-            ter_path,
-            expected_meters_per_grid=mpg,
-            height_setting=hset,
-        )
+        report.heightmap = parse_ter(ter_path)
 
     return report
 
@@ -942,7 +877,7 @@ def summarize(report: MapReport) -> str:
         out.append(f"  extent:           {tb.width:g} x {tb.depth:g} meters")
         out.append(f"  meters_per_grid:  {tb.meters_per_grid:g}")
         if tb.height_max_setting is not None:
-            out.append(f"  height setting:   {tb.height_max_setting:g}")
+            out.append(f"  [Size] Height:    {tb.height_max_setting:g}")
         if tb.tile_textures:
             out.append(f"  tile textures:    {', '.join(tb.tile_textures)}")
         out.append("")

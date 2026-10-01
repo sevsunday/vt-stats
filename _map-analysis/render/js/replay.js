@@ -12,12 +12,13 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildTileFloorMaterial } from './tile-floor.js';
+import { buildTileFloorMaterial } from './tile-floor.js?v=terrain1';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
-import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props2';
-import { mountLiquids, placeLiquid } from './liquids.js?v=liquids1';
+import { buildPropsGroup } from './props.js?v=terrain1';
+import { mountLiquids } from './liquids.js?v=terrain1';
+import { buildTerrainSurface, buildTunnelIndex, tunnelAt } from './terrain-owners.js?v=3';
 
-import { sampleTerrainHeight } from './objects.js?v=pool-flat';
+import { sampleSheetHeight, sampleTerrainHeight } from './objects.js?v=terrain1';
 import {
   readReplayUrlParams,
   pushReplayUrlState,
@@ -33,7 +34,7 @@ import {
   secToTick,
   loadReplayTrack,
   applyReplayTrack,
-} from './replay-data.js?v=names1';
+} from './replay-data.js?v=terrain1';
 import {
   buildActorsGroup,
   updateActors,
@@ -45,7 +46,7 @@ import {
   updateActorLabels,
   applyVitalBars,
   applyShipModelMode,
-} from './replay-actors.js?v=lego1';
+} from './replay-actors.js?v=terrain1';
 import {
   initModelsPref,
   modelsEnabled,
@@ -72,19 +73,18 @@ import {
   buildSpawnBeacons,
   updateSpawnBeacons,
   setBeaconVisibility,
-  disposeSpawnBeacons,
   triggerKillFlash,
   updateKillFlashes,
   clearAllKillFlashes,
-} from './replay-fx.js';
-import { createCameraController } from './replay-cameras.js?v=close-floor2';
-import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=names1';
+} from './replay-fx.js?v=terrain1';
+import { createCameraController } from './replay-cameras.js?v=tunnel1';
+import { killsAtTick, killsInWindow, buildEngagementIndex } from './replay-data.js?v=terrain1';
 import {
   buildEngagementLines,
   updateEngagements,
   clearEngagementHighlights,
 } from './replay-engagements.js';
-import { buildObjectsGroup } from './objects.js?v=pool-flat';
+import { buildObjectsGroup } from './objects.js?v=terrain1';
 import { bootReplayDirectory } from './replay-directory.js';
 import { showResultsScreen, hideResultsScreen, isResultsShowing } from './replay-results.js';
 import { buildShipTracker } from './replay-ship-tracker.js';
@@ -112,7 +112,7 @@ import {
   findStructureDeaths,
   recyclerPadXZ,
   enemyBaseOf,
-} from './replay-structures.js?v=lego1';
+} from './replay-structures.js?v=terrain1';
 import { initReplayElo, updateReplayElo, rebuildReplayElo, acceptParentElo } from './replay-elo.js';
 
 // ============================================================================
@@ -136,8 +136,7 @@ const STATE = {
   // Scene objects
   worldGroup: null,
   terrainMesh: null,
-  terrainBaseHeights: null,
-  terrainExaggeration: 1.5,
+  terrainSurface: null,
   terrainRampMat: null,
   terrainMinimapMat: null,
   terrainTileMat: null,
@@ -146,8 +145,6 @@ const STATE = {
   terrainWireframe: null,
   waterMesh: null,
   lavaMesh: null,
-  waterBaseY: null,
-  lavaBaseY: null,
   hqOn: false,
   hqLoad: null,
   actorsGroup: null,
@@ -168,7 +165,7 @@ const STATE = {
   // are intentionally excluded -- the latter is already represented by the
   // spawn beacon layer, the former has no pickup data so we'd be drawing
   // markers of unknown current state. Pools never move, so this group is
-  // built once at boot and rebuilt only when the exaggeration slider moves.
+  // built once at boot.
   poolsGroup: null,
   pools: null,
   poolsVisible: true,
@@ -372,9 +369,6 @@ async function boot() {
     );
   }
   STATE.mapData = mapData;
-  if (mapData.defaults && Number.isFinite(mapData.defaults.defaultExaggeration)) {
-    STATE.terrainExaggeration = mapData.defaults.defaultExaggeration;
-  }
 
   // Ground comes from the quality preset. `?floor=` still wins for this view.
   statusStep('Map manifest');
@@ -591,36 +585,38 @@ function initLights(mapData) {
 
 async function initFloor(mapData) {
   const hm = mapData.heightmap;
-  const worldW = hm.cellsX * hm.cellMetersX;
-  const worldD = hm.cellsZ * hm.cellMetersZ;
-  const centerX = hm.worldOriginX + worldW * 0.5;
-  const centerZ = hm.worldOriginZ + worldD * 0.5;
+  // One mesh: the 8 m grid at its exact spacing, the 2 m blocks stitched in
+  // around tunnel pieces, and the tunnel cuts. hm.surface also drives
+  // sampleTerrainHeight, so everything placed later sits on this surface.
+  const surface = buildTerrainSurface(hm, mapData.props, mapData.terrainHires);
+  hm.surface = surface;
+  STATE.terrainSurface = surface;
+  console.info('terrain surface', surface.stats);
 
-  const geom = new THREE.PlaneGeometry(worldW, worldD, hm.cellsX - 1, hm.cellsZ - 1);
-  geom.rotateX(-Math.PI / 2);
-  geom.translate(centerX, 0, centerZ);
-
-  const positions = geom.attributes.position;
-  const colors = new Float32Array(positions.count * 3);
-  const baseHeights = new Float32Array(positions.count);
+  const baseHeights = surface.base;
+  const positions = surface.positions;
+  const count = baseHeights.length;
+  const colors = new Float32Array(count * 3);
   let minH = Infinity, maxH = -Infinity;
-  for (let i = 0; i < positions.count; i++) {
-    const h = hm.heights[i] * hm.scale;
-    baseHeights[i] = h;
+  for (let i = 0; i < count; i++) {
+    const h = baseHeights[i];
     if (h < minH) minH = h;
     if (h > maxH) maxH = h;
   }
-  STATE.terrainBaseHeights = baseHeights;
   const rampRange = Math.max(1, maxH - minH);
-  for (let i = 0; i < positions.count; i++) {
+  for (let i = 0; i < count; i++) {
     const t = (baseHeights[i] - minH) / rampRange;
     const c = heightRampColor(t);
     colors[i * 3]     = c.r;
     colors[i * 3 + 1] = c.g;
     colors[i * 3 + 2] = c.b;
-    positions.setY(i, baseHeights[i] * STATE.terrainExaggeration);
+    positions[i * 3 + 1] = baseHeights[i];
   }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('uv', new THREE.BufferAttribute(surface.uvs, 2));
   geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geom.setIndex(new THREE.BufferAttribute(surface.index, 1));
   geom.computeVertexNormals();
 
   const rampMat = new THREE.MeshStandardMaterial({
@@ -723,7 +719,6 @@ function initActors() {
   const odfMap = (STATE.matchData && STATE.matchData.odf_map) || {};
   const { actors, group } = buildActorsGroup(
     STATE.roster,
-    STATE.terrainExaggeration,
     { shipTracker: STATE.shipTracker, odfMap },
   );
   STATE.actors = actors;
@@ -746,9 +741,7 @@ function initLabels() {
 }
 
 function initBeacons() {
-  const { beacons, group } = buildSpawnBeacons(
-    STATE.roster, STATE.mapData.heightmap, STATE.terrainExaggeration,
-  );
+  const { beacons, group } = buildSpawnBeacons(STATE.roster, STATE.mapData.heightmap);
   STATE.beacons = beacons;
   STATE.beaconsGroup = group;
   STATE.worldGroup.add(group);
@@ -771,13 +764,7 @@ function initPools() {
   const allObjs = (STATE.mapData && STATE.mapData.objects) || [];
   const objs = allObjs.filter(o => o && o.kind === 'scrap_pool');
   if (objs.length === 0) return;
-  const baseHm = STATE.mapData.heightmap;
-  // buildObjectsGroup samples terrain via sampleTerrainHeight(hm, x, z).
-  // The exaggeration slider scales the visible terrain by multiplying
-  // hm.scale, so we hand the same scaled-view shim to keep markers glued
-  // to the lifted terrain (mirrors initBeacons's exaggeration argument).
-  const scaledHm = { ...baseHm, scale: baseHm.scale * STATE.terrainExaggeration };
-  const group = buildObjectsGroup({ ...STATE.mapData, heightmap: scaledHm, objects: objs });
+  const group = buildObjectsGroup({ ...STATE.mapData, objects: objs });
   group.name = 'replay-pools';
   group.visible = STATE.poolsVisible;
   STATE.poolsGroup = group;
@@ -786,39 +773,17 @@ function initPools() {
 }
 
 function initLiquids(mapData) {
-  const placed = mountLiquids(STATE.worldGroup, mapData, STATE.terrainExaggeration);
+  const placed = mountLiquids(STATE.worldGroup, mapData);
   STATE.waterMesh = placed.waterMesh;
   STATE.lavaMesh = placed.lavaMesh;
-  STATE.waterBaseY = placed.waterBaseY;
-  STATE.lavaBaseY = placed.lavaBaseY;
 }
 
 async function initProps() {
   const props = (STATE.mapData && STATE.mapData.props) || [];
   if (!props.length || !STATE.mapData.heightmap) return;
-  const group = await buildPropsGroup(
-    props,
-    STATE.mapData.heightmap,
-    STATE.terrainExaggeration,
-    STATE.renderer,
-    true,
-  );
+  const group = await buildPropsGroup(props, STATE.mapData.heightmap, STATE.renderer);
   STATE.propsGroup = group;
   STATE.worldGroup.add(group);
-}
-
-function disposePools() {
-  if (!STATE.poolsGroup) return;
-  STATE.worldGroup.remove(STATE.poolsGroup);
-  STATE.poolsGroup.traverse(obj => {
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const m of mats) m.dispose();
-    }
-  });
-  STATE.poolsGroup = null;
-  STATE.pools = null;
 }
 
 // ============================================================================
@@ -855,16 +820,23 @@ function initCamera(mapData) {
   STATE.controls = controls;
 
   STATE.cameraCtl = createCameraController(cam, controls, { ...mapData, worldRect: wr });
-  STATE.cameraCtl.setMoveGround((x, zCam) => {
+  // Scene-unit floor (and ceiling inside a tunnel) under (x, zCam) for a
+  // reference height refSceneY: the followed ship in chase, else the camera.
+  STATE.tunnelIndex = buildTunnelIndex(mapData.props);
+  STATE.cameraCtl.setMoveGround((x, zCam, refSceneY) => {
     const hm = mapData.heightmap;
     if (!hm || !hm.cellMetersX || !hm.cellMetersZ) return null;
     const wz = -zCam;
     const u = (x - hm.worldOriginX) / hm.cellMetersX;
     const v = (wz - hm.worldOriginZ) / hm.cellMetersZ;
     if (u < 0 || v < 0 || u >= hm.cellsX - 1 || v >= hm.cellsZ - 1) return null;
-    const abs = sampleTerrainHeight(hm, x, wz);
     const base = hm.baseOffsetM || 0;
-    return (abs - base) * (STATE.terrainExaggeration || 1);
+    const ground = sampleTerrainHeight(hm, x, wz);  // drawn surface, metres above baseOffsetM
+    const sheet = sampleSheetHeight(hm, x, wz);      // raw .TER: the roof over a tube
+    const refAbs = Number.isFinite(refSceneY) ? refSceneY + base : ground + base;
+    const t = tunnelAt(STATE.tunnelIndex, x, wz, refAbs, sheet + base);
+    if (t) return { floor: t.floorAbs - base, ceiling: t.ceilAbs - base };
+    return { floor: ground, ceiling: null };
   });
   STATE.camMode = 'free';
   // Cinema needs read access to the kill index + current playback time.
@@ -1106,8 +1078,8 @@ function toggleMenu(which) {
 
 function remountSceneModels(force) {
   applyShipModelMode(STATE.actors, force ? { force: true } : undefined);
-  applyStructureModelMode(STATE.structures, STATE.mapData, STATE.terrainExaggeration);
-  applyStructureModelMode(STATE.recyclers, STATE.mapData, STATE.terrainExaggeration);
+  applyStructureModelMode(STATE.structures, STATE.mapData);
+  applyStructureModelMode(STATE.recyclers, STATE.mapData);
 }
 
 function wireMenus() {
@@ -1277,44 +1249,6 @@ function loadHqFloor() {
   });
 }
 
-// Re-apply height exaggeration to the terrain mesh, wireframe, and beacons.
-// Actors get the new factor on their next frame because updateActors() reads
-// STATE.terrainExaggeration directly.
-function applyHeightExaggeration(factor) {
-  STATE.terrainExaggeration = factor;
-  const geom = STATE.terrainMesh.geometry;
-  const pos = geom.attributes.position;
-  const base = STATE.terrainBaseHeights;
-  for (let i = 0; i < pos.count; i++) {
-    pos.setY(i, base[i] * factor);
-  }
-  pos.needsUpdate = true;
-  geom.computeVertexNormals();
-
-  if (STATE.terrainWireframe) {
-    const oldGeom = STATE.terrainWireframe.geometry;
-    STATE.terrainWireframe.geometry = new THREE.WireframeGeometry(geom);
-    oldGeom.dispose();
-  }
-
-  placeLiquid(STATE.waterMesh, STATE.waterBaseY, factor);
-  placeLiquid(STATE.lavaMesh, STATE.lavaBaseY, factor);
-
-  // Rebuild beacons so their cylinder anchors track the new visual ground.
-  if (STATE.beaconsGroup) {
-    STATE.worldGroup.remove(STATE.beaconsGroup);
-    disposeSpawnBeacons(STATE.beaconsGroup);
-  }
-  initBeacons();
-
-  // Same story for scrap-pool markers -- their y is sampled from the
-  // (now-scaled) heightmap, so they need to be rebuilt in lockstep.
-  disposePools();
-  initPools();
-  initStructureOverlays();
-  applyPropsExaggeration(STATE.propsGroup, factor);
-}
-
 function disposeStructureOverlays() {
   if (STATE.recyclersGroup) {
     STATE.worldGroup.remove(STATE.recyclersGroup);
@@ -1335,17 +1269,13 @@ function disposeStructureOverlays() {
 
 function initStructureOverlays() {
   disposeStructureOverlays();
-  const derived = buildStructuresLayer(
-    STATE.matchData, STATE.mapData, STATE.terrainExaggeration,
-  );
+  const derived = buildStructuresLayer(STATE.matchData, STATE.mapData);
   if (derived && derived.items && derived.items.length) {
     STATE.structuresGroup = derived.group;
     STATE.structures = derived.items;
     STATE.worldGroup.add(derived.group);
   } else {
-    const rec = buildStartingRecyclers(
-      STATE.matchData, STATE.mapData, STATE.terrainExaggeration,
-    );
+    const rec = buildStartingRecyclers(STATE.matchData, STATE.mapData);
     STATE.recyclersGroup = rec.group;
     STATE.recyclers = rec.items;
     STATE.worldGroup.add(rec.group);
@@ -2643,7 +2573,6 @@ function renderFrame(dtSec = 0) {
       STATE.actors,
       STATE.progressSec,
       STATE.mapData.heightmap,
-      STATE.terrainExaggeration,
       {
         shipTracker: STATE.shipTracker,
         odfMap,
@@ -2656,7 +2585,7 @@ function renderFrame(dtSec = 0) {
   }
   // 2. Update trails (reads trail.t/x/y/z directly, terrain-relative Y).
   if (STATE.trails && STATE.trailsVisible) {
-    updateTrails(STATE.actors, STATE.progressSec, STATE.mapData.heightmap, STATE.terrainExaggeration);
+    updateTrails(STATE.actors, STATE.progressSec, STATE.mapData.heightmap);
   }
   // 3. Spawn beacons.
   if (STATE.beacons) {
@@ -2795,7 +2724,6 @@ function structureFor(vs, tSec, shooterPos) {
   const tick = tSec * (STATE.tickRate || 20);
   const wantOdf = normStructOdf(vs.odf);
   const hm = STATE.mapData && STATE.mapData.heightmap;
-  const scaledHm = hm ? { ...hm, scale: hm.scale * STATE.terrainExaggeration } : null;
   let best = null;
   let bestD = Infinity;
   for (const inst of insts) {
@@ -2809,7 +2737,7 @@ function structureFor(vs, tSec, shooterPos) {
       : { x: inst.x, z: inst.z };
     const wx = pad.x;
     const wz = -pad.z;  // reflected world Z
-    const wy = (scaledHm ? sampleTerrainHeight(scaledHm, pad.x, pad.z) : 0) + 8;
+    const wy = (hm ? sampleTerrainHeight(hm, pad.x, pad.z) : 0) + 8;
     if (shooterPos) {
       const dx = wx - shooterPos.x;
       const dz = wz - shooterPos.z;
@@ -2840,7 +2768,7 @@ function fireWindowFx(lo, hi) {
     if (drop.tSec <= Math.max(lo, STATE.armoryFiredTSec)) continue;
     if (drop.tSec > hi) break;
     STATE.armoryDrops.push(triggerArmoryDrop(
-      STATE.worldGroup, drop, STATE.mapData && STATE.mapData.heightmap, STATE.terrainExaggeration,
+      STATE.worldGroup, drop, STATE.mapData && STATE.mapData.heightmap,
     ));
   }
   STATE.armoryFiredTSec = hi;

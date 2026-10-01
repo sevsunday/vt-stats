@@ -4,9 +4,10 @@
  *
  * Scene layout (world coords match BZ2 conventions: +X east, +Z north,
  * +Y up):
- *   - Terrain mesh: PlaneGeometry sized to the .TER world bounds, rotated
- *     flat, vertex Y from the decoded heightmap, vertex color from a
- *     procedural height ramp. Used as the base "ground" surface.
+ *   - Terrain mesh: the 8 m heightmap grid with 2 m blocks stitched in
+ *     around tunnel pieces (terrain-owners.js), vertex Y from the decoded
+ *     heights, vertex color from a procedural height ramp. Used as the base
+ *     "ground" surface.
  *   - Minimap decal: smaller PlaneGeometry sized to the calibrated
  *     world_rect, textured with the iondriver minimap PNG, slightly
  *     elevated to avoid z-fighting with the terrain. Toggled by the HUD.
@@ -20,12 +21,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createCameraController } from './replay-cameras.js';
-import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=props1';
-import { buildObjectsGroup, sampleTerrainHeight } from './objects.js';
-import { buildTileFloorMaterial } from './tile-floor.js';
+import { readUrlParams, loadMapData, loadManifest, loadTilesManifest } from './loader.js?v=terrain1';
+import { buildObjectsGroup } from './objects.js?v=terrain1';
+import { buildTileFloorMaterial } from './tile-floor.js?v=terrain1';
 import { attachSky, detachSky, syncSky } from './sky-dome.js?v=sky-hq';
-import { applyPropsExaggeration, buildPropsGroup } from './props.js?v=props2';
-import { mountLiquids, placeLiquid } from './liquids.js?v=liquids1';
+import { buildPropsGroup } from './props.js?v=terrain1';
+import { mountLiquids } from './liquids.js?v=terrain1';
+import { buildTerrainSurface } from './terrain-owners.js?v=3';
 
 // ---------------- State ----------------
 
@@ -39,8 +41,6 @@ const STATE = {
   mapData: null,
   terrainMesh: null,            // base mesh (renders with either material)
   terrainWireframe: null,       // wireframe overlay
-  terrainBaseHeights: null,     // Float32Array of unscaled heights (meters)
-  terrainExaggeration: 1.5,     // current Y multiplier (real .TER heights = lower default)
   terrainRampMat: null,         // material: vertex-color height ramp
   terrainMinimapMat: null,      // material: iondriver minimap as texture (tier 1)
   terrainTileMat: null,         // material: BZ:CC tile composite (tier 3, lazy)
@@ -49,8 +49,6 @@ const STATE = {
   terrainUvsFull: null,         // UV array for tile mode (full heightmap extent)
   waterMesh: null,
   lavaMesh: null,
-  waterBaseY: null,
-  lavaBaseY: null,
   objectsGroup: null,
   propsGroup: null,
   // embed=1 is the empty map-page scene: mirrored world, tiles, pools, bases, loose.
@@ -244,14 +242,6 @@ async function mountMap(stem) {
   const data = await loadMapData(stem);
   if (STATE.scene) disposeMounted();
   STATE.mapData = data;
-
-  // The overhead photo uses real relief. The interactive viewer keeps
-  // the per-map exaggeration default.
-  if (STATE.topdown) {
-    STATE.terrainExaggeration = 1;
-  } else if (data.defaults && typeof data.defaults.defaultExaggeration === 'number') {
-    STATE.terrainExaggeration = data.defaults.defaultExaggeration;
-  }
 
   setStatus('building scene...');
   initScene(data);
@@ -502,46 +492,39 @@ function initLights(data) {
 async function initFloor(data) {
   const hm = data.heightmap;
 
-  // World-space rectangle that the heightmap covers.
-  const worldW = hm.cellsX * hm.cellMetersX;
-  const worldD = hm.cellsZ * hm.cellMetersZ;
-  const centerX = hm.worldOriginX + worldW * 0.5;
-  const centerZ = hm.worldOriginZ + worldD * 0.5;
+  // One mesh: the 8 m grid at its exact spacing, the 2 m blocks stitched in
+  // around tunnel pieces, and the tunnel cuts. Heights are engine metres
+  // relative to the map midpoint (`int16 * scale`, baseOffset removed), so
+  // the mesh sits around y=0 at true vertical scale.
+  // hm.surface also drives sampleTerrainHeight for everything placed later.
+  const surface = buildTerrainSurface(hm, data.props, data.terrainHires);
+  hm.surface = surface;
+  console.info('terrain surface', surface.stats);
 
-  const geom = new THREE.PlaneGeometry(worldW, worldD, hm.cellsX - 1, hm.cellsZ - 1);
-  geom.rotateX(-Math.PI / 2);
-  geom.translate(centerX, 0, centerZ);
-
-  const positions = geom.attributes.position;
-  const colors = new Float32Array(positions.count * 3);
-  // Build a flat array of UNSCALED heights in meters; the viewer applies
-  // the current exaggeration multiplier on top whenever the HUD slider
-  // changes. Heights recover absolute meters via `int16 * scale + baseOffset`.
-  // We re-center on the midpoint by subtracting baseOffset so the mesh
-  // sits around y=0 regardless of the map's absolute altitude.
-  const baseHeights = new Float32Array(positions.count);
+  const baseHeights = surface.base;
+  const positions = surface.positions;
+  const count = baseHeights.length;
+  const colors = new Float32Array(count * 3);
   let minH = Infinity, maxH = -Infinity;
-  for (let i = 0; i < positions.count; i++) {
-    // Raw int16 * scale gives the OFFSET from midpoint in meters (since
-    // we already subtracted midpoint at encode time). That's what we want
-    // for centered mesh display.
-    const h = hm.heights[i] * hm.scale;
-    baseHeights[i] = h;
+  for (let i = 0; i < count; i++) {
+    const h = baseHeights[i];
     if (h < minH) minH = h;
     if (h > maxH) maxH = h;
   }
-  STATE.terrainBaseHeights = baseHeights;
   const rampRange = Math.max(1, maxH - minH);
-  for (let i = 0; i < positions.count; i++) {
+  for (let i = 0; i < count; i++) {
     const t = (baseHeights[i] - minH) / rampRange;
     const c = heightRampColor(t);
     colors[i * 3]     = c.r;
     colors[i * 3 + 1] = c.g;
     colors[i * 3 + 2] = c.b;
-    // Apply initial exaggeration.
-    positions.setY(i, baseHeights[i] * STATE.terrainExaggeration);
+    positions[i * 3 + 1] = baseHeights[i];
   }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('uv', new THREE.BufferAttribute(surface.uvs, 2));
   geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geom.setIndex(new THREE.BufferAttribute(surface.index, 1));
   geom.computeVertexNormals();
 
   // The terrain mesh has TWO materials we swap between:
@@ -647,11 +630,9 @@ async function buildTileMaterial(data) {
 }
 
 function initLiquids(data) {
-  const placed = mountLiquids(contentParent(), data, STATE.terrainExaggeration);
+  const placed = mountLiquids(contentParent(), data);
   STATE.waterMesh = placed.waterMesh;
   STATE.lavaMesh = placed.lavaMesh;
-  STATE.waterBaseY = placed.waterBaseY;
-  STATE.lavaBaseY = placed.lavaBaseY;
 }
 
 // ---------------- Objects ----------------
@@ -669,24 +650,15 @@ async function initProps(data) {
   const props = (data && data.props) || [];
   if (!props.length) return;
   const parent = contentParent();
-  const group = await buildPropsGroup(
-    props,
-    data.heightmap,
-    STATE.terrainExaggeration,
-    STATE.renderer,
-    parent === STATE.worldGroup,
-  );
+  const group = await buildPropsGroup(props, data.heightmap, STATE.renderer);
   STATE.propsGroup = group;
   parent.add(group);
 }
 
 function initObjects(data) {
-  // Build objects against the SCALED heightmap view so initial Y positions
-  // line up with the exaggerated terrain mesh. Embed keeps pools, the two
-  // team bases, and the spawn-time loose layout; no ships or players.
-  const scaledHm = makeScaledHeightmapView(data.heightmap, STATE.terrainExaggeration);
-  const scaledData = { ...data, heightmap: scaledHm, objects: sceneObjects(data) };
-  const group = buildObjectsGroup(scaledData);
+  // Embed keeps pools, the two team bases, and the spawn-time loose layout;
+  // no ships or players.
+  const group = buildObjectsGroup({ ...data, objects: sceneObjects(data) });
   STATE.objectsGroup = group;
   contentParent().add(group);
 }
@@ -711,10 +683,10 @@ function initTopdownCamera(data) {
   //   u = (x - minX) / width
   //   v = (maxZ - z) / depth
   // The overlay JSON's view is that rect: the padded square around every
-  // marker. Maps with no markers frame the whole heightmap.
+  // marker. Maps with no markers frame the whole terrain mesh.
   const hm = data.heightmap;
-  let width = hm.cellsX * hm.cellMetersX;
-  let depth = hm.cellsZ * hm.cellMetersZ;
+  let width = (hm.cellsX - 1) * hm.cellMetersX;
+  let depth = (hm.cellsZ - 1) * hm.cellMetersZ;
   let minX = hm.worldOriginX;
   let minZ = hm.worldOriginZ;
   const stemKey = (data.stem || '').toLowerCase();
@@ -879,16 +851,6 @@ function wireEmbedControls() {
   }
   mirrorToggle('embed-objects', 'toggle-objects');
 
-  const exag = document.getElementById('embed-exag');
-  const hudExag = document.getElementById('height-exag');
-  if (exag && hudExag) {
-    exag.value = hudExag.value;
-    exag.addEventListener('input', () => {
-      hudExag.value = exag.value;
-      hudExag.dispatchEvent(new Event('input'));
-    });
-  }
-
   const reset = document.getElementById('embed-reset');
   if (reset) {
     reset.addEventListener('click', () => {
@@ -1018,19 +980,6 @@ function wireHud(data) {
     if (STATE.objectsGroup) STATE.objectsGroup.visible = e.target.checked;
   });
 
-  // Height-exaggeration slider. Sync to per-map default applied at boot.
-  const slider = $('height-exag');
-  const sliderVal = $('height-exag-val');
-  if (slider) {
-    slider.value = String(STATE.terrainExaggeration);
-    sliderVal.textContent = `${STATE.terrainExaggeration.toFixed(1)}x`;
-    slider.addEventListener('input', e => {
-      const f = parseFloat(e.target.value);
-      sliderVal.textContent = `${f.toFixed(1)}x`;
-      applyHeightExaggeration(f);
-    });
-  }
-
   // Reset camera.
   $('reset-camera').addEventListener('click', () => {
     const span = Math.max(wr.width, wr.depth);
@@ -1039,69 +988,6 @@ function wireHud(data) {
     );
     STATE.controls.target.set(wr.centerX, 0, wr.centerZ);
     STATE.controls.update();
-  });
-}
-
-function applyHeightExaggeration(factor) {
-  STATE.terrainExaggeration = factor;
-  if (!STATE.terrainMesh || !STATE.terrainBaseHeights) return;
-  // Re-write the terrain mesh Y values, recompute normals, refresh the
-  // wireframe geometry to match, and re-place all objects so they sit
-  // on the new surface.
-  const geom = STATE.terrainMesh.geometry;
-  const pos = geom.attributes.position;
-  const base = STATE.terrainBaseHeights;
-  for (let i = 0; i < pos.count; i++) {
-    pos.setY(i, base[i] * factor);
-  }
-  pos.needsUpdate = true;
-  geom.computeVertexNormals();
-
-  // Rebuild wireframe from the updated geometry. WireframeGeometry doesn't
-  // share vertices with its source, so we replace it.
-  if (STATE.terrainWireframe) {
-    const oldGeom = STATE.terrainWireframe.geometry;
-    STATE.terrainWireframe.geometry = new THREE.WireframeGeometry(geom);
-    oldGeom.dispose();
-  }
-
-  placeLiquid(STATE.waterMesh, STATE.waterBaseY, factor);
-  placeLiquid(STATE.lavaMesh, STATE.lavaBaseY, factor);
-
-  // Re-place objects: rebuild the group from scratch with a scaled
-  // heightmap view so the bilinear terrain sampler reads correct Y.
-  if (STATE.objectsGroup) {
-    const wasVisible = STATE.objectsGroup.visible;
-    contentParent().remove(STATE.objectsGroup);
-    disposeGroup(STATE.objectsGroup);
-    const scaledHmView = makeScaledHeightmapView(STATE.mapData.heightmap, factor);
-    const newMapData = {
-      ...STATE.mapData,
-      heightmap: scaledHmView,
-      objects: sceneObjects(STATE.mapData),
-    };
-    STATE.objectsGroup = buildObjectsGroup(newMapData);
-    STATE.objectsGroup.visible = wasVisible;
-    contentParent().add(STATE.objectsGroup);
-  }
-  applyPropsExaggeration(STATE.propsGroup, factor);
-}
-
-function makeScaledHeightmapView(hm, factor) {
-  // Shallow-copy the heightmap with a SCALED `scale` so the sampler in
-  // objects.js multiplies through and gives the exaggerated Y. We keep
-  // the typed array untouched.
-  return { ...hm, scale: hm.scale * factor };
-}
-
-function disposeGroup(group) {
-  group.traverse(obj => {
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      const m = obj.material;
-      if (Array.isArray(m)) m.forEach(mm => mm.dispose());
-      else m.dispose();
-    }
   });
 }
 

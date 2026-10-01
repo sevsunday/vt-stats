@@ -10,8 +10,8 @@
  * above 97% of lava-cell floors. LIQUID_SURFACE_BIAS_M lifts the sheet off
  * a coplanar shoreline so the masked cells read from above.
  *
- * Geometry is built at Y = 0. position.y = baseY * exaggeration, so the
- * height slider applies the offset once.
+ * Geometry is built at Y = 0 and placed at baseY, the liquid height minus
+ * hm.baseOffsetM: the same 1:1 meters as the terrain mesh.
  */
 
 import * as THREE from 'three';
@@ -77,10 +77,14 @@ export function buildLiquidMesh(data, kind) {
   const yRaw = (data.waterY != null ? data.waterY : data.waterYRaw) + LIQUID_SURFACE_BIAS_M;
   const baseY = yRaw - (hm.baseOffsetM || 0);
 
+  // The cell-type mask has one texel per heightmap sample; centre each texel
+  // on its sample.
+  const originX = hm.worldOriginX - hm.cellMetersX * 0.5;
+  const originZ = hm.worldOriginZ - hm.cellMetersZ * 0.5;
   const worldW = hm.cellsX * hm.cellMetersX;
   const worldD = hm.cellsZ * hm.cellMetersZ;
-  const centerX = hm.worldOriginX + worldW * 0.5;
-  const centerZ = hm.worldOriginZ + worldD * 0.5;
+  const centerX = originX + worldW * 0.5;
+  const centerZ = originZ + worldD * 0.5;
 
   // Three's alphaMap shader reads the green channel. Replicate the mask
   // into RGBA so that sample is the mask regardless of Three version.
@@ -114,8 +118,8 @@ export function buildLiquidMesh(data, kind) {
   const pos = geom.attributes.position;
   const uvs = new Float32Array(pos.count * 2);
   for (let i = 0; i < pos.count; i++) {
-    uvs[i * 2] = (pos.getX(i) - hm.worldOriginX) / worldW;
-    uvs[i * 2 + 1] = (pos.getZ(i) - hm.worldOriginZ) / worldD;
+    uvs[i * 2] = (pos.getX(i) - originX) / worldW;
+    uvs[i * 2 + 1] = (pos.getZ(i) - originZ) / worldD;
   }
   geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 
@@ -127,32 +131,16 @@ export function buildLiquidMesh(data, kind) {
   return { mesh, baseY };
 }
 
-export function placeLiquid(mesh, baseY, factor) {
-  if (!mesh || baseY == null) return;
-  const f = Number.isFinite(factor) ? factor : 1;
-  mesh.position.y = baseY * f;
-}
-
-/** Build both sheets, parent them, and place them at `factor`. */
-export function mountLiquids(parent, data, factor) {
-  const placed = {
-    waterMesh: null,
-    lavaMesh: null,
-    waterBaseY: null,
-    lavaBaseY: null,
-  };
+/** Build both sheets, place them, and parent them. */
+export function mountLiquids(parent, data) {
+  const placed = { waterMesh: null, lavaMesh: null };
   for (const kind of ['water', 'lava']) {
     const built = buildLiquidMesh(data, kind);
     if (!built) continue;
-    placeLiquid(built.mesh, built.baseY, factor);
+    built.mesh.position.y = built.baseY;
     parent.add(built.mesh);
-    if (kind === 'water') {
-      placed.waterMesh = built.mesh;
-      placed.waterBaseY = built.baseY;
-    } else {
-      placed.lavaMesh = built.mesh;
-      placed.lavaBaseY = built.baseY;
-    }
+    if (kind === 'water') placed.waterMesh = built.mesh;
+    else placed.lavaMesh = built.mesh;
   }
   return placed;
 }

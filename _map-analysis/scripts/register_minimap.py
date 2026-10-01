@@ -149,13 +149,17 @@ def load_height_image(stem: str) -> tuple[Image.Image, dict]:
     if peak > 1e-6:
         mag = mag / peak
     img = Image.fromarray((np.clip(mag, 0, 1) * 255).astype(np.uint8), "L").convert("RGB")
-    ox = float(hm["world_origin"]["x"])
-    oz = float(hm["world_origin"]["z"])
+    # world_origin is the centre of sample (0, 0); pixel edges sit half a
+    # sample outside it.
+    mx = float(hm["cell_meters_x"])
+    mz = float(hm["cell_meters_z"])
+    ox = float(hm["world_origin"]["x"]) - mx / 2.0
+    oz = float(hm["world_origin"]["z"]) - mz / 2.0
     bounds = {
         "minx": ox,
         "minz": oz,
-        "maxx": ox + float(hm["cell_meters_x"]) * cx,
-        "maxz": oz + float(hm["cell_meters_z"]) * cz,
+        "maxx": ox + mx * cx,
+        "maxz": oz + mz * cz,
     }
     return img, bounds
 

@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-m = json.loads(Path(__file__).resolve().parent.parent.joinpath('data/_manifest.json').read_text())
+m = json.loads(Path(__file__).resolve().parent.parent.joinpath('data/render/_manifest.json').read_text())
 maps = m['maps']
 
 water = [e for e in maps if e['has_visible_water']]
@@ -32,14 +32,3 @@ print(f'SMALL maps (<700 cells/axis, {len(small)}):')
 for e in small[:10]:
     print(f'  {e["stem"]:<22s} {e["name"]:<28s} {e["src_cells_x"]}x{e["src_cells_z"]}')
 if len(small) > 10: print(f'  ... +{len(small)-10} more')
-
-print()
-print(f'Auto-exaggeration distribution:')
-from collections import Counter
-hist = Counter()
-for e in maps:
-    band = round((e.get('default_exaggeration') or 0) * 2) / 2  # 0.5 buckets
-    hist[band] += 1
-for band in sorted(hist):
-    bar = '#' * hist[band]
-    print(f'  {band:>4.1f}x: {hist[band]:>3} {bar}')

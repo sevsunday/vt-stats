@@ -11,15 +11,23 @@
  * MapData shape:
  *   {
  *     stem, name,
- *     heightmap: { cellsX, cellsZ, heights: Int16Array, scale,
+ *     heightmap: { cellsX, cellsZ, heights: Int16Array, scale, baseOffsetM,
  *                  cellMetersX, cellMetersZ, worldOriginX, worldOriginZ,
- *                  terVersion, terStride },
+ *                  terVersion },
  *     worldRect: { minX, minZ, maxX, maxZ, width, depth, centerX, centerZ },
  *     minimapRel, minimapDim,
  *     waterY, skyTint, skyRgbFloat,
+ *     props: [ { stem, x, y, z, yaw, piece } ],
+ *     terrainHires: [ { x0, z0, step, cols, rows, heights: Float32Array } ],
  *     objects: [ { uid, kind, objClass, x, z } ],
  *     counts: { scrap_pool: N, ... }
  *   }
+ *
+ * Heights are engine meters, drawn 1:1: meters = int16 * scale + baseOffsetM.
+ * Heightmap vertex (ix, iz) sits at worldOrigin + (ix, iz) * cellMeters; the
+ * extract already places worldOrigin at the centroid of the 2 m .TER block
+ * each 8 m value averages. Full-resolution textures use their own frame,
+ * tileComposite.world_min / world_max.
  */
 
 // Render-pipeline output dir. Was `./data` pre-2026-05; the 3D-extract
@@ -105,11 +113,11 @@ export async function fetchJsonWithProgress(url, onProgress) {
 }
 
 export async function loadMapData(stem, onProgress) {
-  const url = `${DATA_DIR}/${stem}.3d.json`;
+  const url = `${DATA_DIR}/${stem}.3d.json?v=schema4`;
   const raw = await fetchJsonWithProgress(url, onProgress);
-  if (raw.schema_version !== 3) {
+  if (raw.schema_version !== 4) {
     throw new Error(`unsupported schema_version ${raw.schema_version} `
-                    + `(expected 3; re-run extract_3d.py --all to refresh)`);
+                    + `(expected 4; re-run extract_3d.py --all to refresh)`);
   }
 
   // Decode the heightmap base64 -> Int16Array (LE on every supported
@@ -141,6 +149,8 @@ export async function loadMapData(stem, onProgress) {
   const depth  = wr.max.z - wr.min.z;
   const centerX = (wr.min.x + wr.max.x) * 0.5;
   const centerZ = (wr.min.z + wr.max.z) * 0.5;
+
+  const sidecar = await loadPropsSidecar(raw.map_stem);
 
   return {
     stem: raw.map_stem,
@@ -181,7 +191,8 @@ export async function loadMapData(stem, onProgress) {
     skyRgbFloat:  raw.sky_rgb_float,
     // 404-safe. Colors drive the gradient; assets may be null.
     sky:          await loadSkySidecar(raw.map_stem),
-    props:        await loadPropsSidecar(raw.map_stem),
+    props:        sidecar.props,
+    terrainHires: sidecar.terrainHires,
     lighting:     raw.lighting || {},
     objects:      (raw.objects || []).map(o => ({
       uid:      o.uid,
@@ -196,23 +207,48 @@ export async function loadMapData(stem, onProgress) {
     defaults:     {
       hasVisibleWater:     !!(raw.defaults && raw.defaults.has_visible_water),
       hasVisibleLava:      !!(raw.defaults && raw.defaults.has_visible_lava),
-      defaultExaggeration: (raw.defaults && raw.defaults.default_exaggeration) || 1.5,
     },
   };
 }
 
-/** Scenery and pool meshes. Empty when the extract has not been run. */
+/** Scenery and pool meshes plus the 2 m terrain blocks around tunnel pieces.
+ *  Empty when the extract has not been run. Each row carries its stem's
+ *  `piece` (bounds, emissive maps, tunnel rects, terrain patch) or null on a
+ *  schema-1 sidecar; `terrainHires` heights are absolute metres. */
 export async function loadPropsSidecar(stem) {
-  if (!stem) return [];
+  const empty = { props: [], terrainHires: [] };
+  if (!stem) return empty;
   try {
-    const res = await fetch(`${DATA_DIR}/${stem}.props.json?v=props1`);
-    if (!res.ok) return [];
+    const res = await fetch(`${DATA_DIR}/${stem}.props.json?v=props3`);
+    if (!res.ok) return empty;
     const doc = await res.json();
-    return Array.isArray(doc.props) ? doc.props : [];
+    if (!Array.isArray(doc.props)) return empty;
+    const pieces = doc.pieces || {};
+    return {
+      props: doc.props.map(r => ({ ...r, piece: pieces[r.stem] || null })),
+      terrainHires: decodeHiresBlocks(doc.terrainHires),
+    };
   } catch (e) {
     console.warn('props sidecar', e);
-    return [];
+    return empty;
   }
+}
+
+function decodeHiresBlocks(blocks) {
+  const out = [];
+  for (const b of Array.isArray(blocks) ? blocks : []) {
+    const n = b && b.cols * b.rows;
+    if (!n || b.encoding !== 'int16_le_base64' || !(b.step > 0)) {
+      console.warn('terrainHires: skipping malformed block', b);
+      continue;
+    }
+    const q = decodeInt16LEBase64(b.data, n);
+    if (q.length < n) continue;
+    const heights = new Float32Array(n);
+    for (let i = 0; i < n; i++) heights[i] = q[i] * b.scale + b.base_offset_m;
+    out.push({ x0: b.x0, z0: b.z0, step: b.step, cols: b.cols, rows: b.rows, heights });
+  }
+  return out;
 }
 
 /** Per-map sky sidecar. Null when the extract has not been run. */

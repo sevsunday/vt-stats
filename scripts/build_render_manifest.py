@@ -75,7 +75,6 @@ def main() -> int:
             "has_visible_water": defaults.get("has_visible_water", False),
             "has_visible_lava":  defaults.get("has_visible_lava", False),
             "has_tier3":         has_tier3,
-            "default_exaggeration": defaults.get("default_exaggeration", 1.5),
         })
 
     out = {
@@ -92,8 +91,7 @@ def main() -> int:
               f"{e['src_cells_x']}x{e['src_cells_z']} "
               f"h[{h_min:.0f}..{h_max:.0f}]m  "
               f"water={e['has_visible_water']} lava={e['has_visible_lava']} "
-              f"tier3={e['has_tier3']} "
-              f"exag={e['default_exaggeration']}x")
+              f"tier3={e['has_tier3']}")
 
     n_tier3 = sum(1 for e in entries if e["has_tier3"])
     print(f"\ntier-3 ready: {n_tier3} / {len(entries)} maps")

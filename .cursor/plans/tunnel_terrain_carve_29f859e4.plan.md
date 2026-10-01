@@ -4,22 +4,22 @@ overview: Specification for rendering BZCC tunnels in the 3D replay and map view
 todos:
   - id: bake-terrain-patch
     content: msh_parser.hidden_terrain_tris() + convert_msh terrainPatch (fresh + cached paths), index schema 20, `python scripts/object-render/convert_msh.py --no-render`
-    status: pending
+    status: completed
   - id: bake-pieces
     content: extract_props.py sidecar schema 2 `pieces` block (engine-local bbox, tunnels, terrainPatch, emissive), `python scripts/extract_props.py`
-    status: pending
+    status: completed
   - id: fix-prop-transform
     content: loader.js attaches `piece`; props.js scale.z=-1, rotation.y=+yaw, authored y for owning pieces, emissive binding; remove mirrorYaw from both callers
-    status: pending
+    status: completed
   - id: terrain-ownership
     content: terrain-owners.js (localOf, buildTunnelIndex, tunnelAt, applyTerrainOwnership) wired into replay.js and viewer.js initFloor
-    status: pending
+    status: completed
   - id: camera-tunnel-aware
     content: replay.js ground callback returns {floor, ceiling} from tunnelAt; replay-cameras.js passes refY and caps under the ceiling at its three call sites
-    status: pending
+    status: completed
   - id: verify
     content: Expected counters on Overlook (64 dropped triangles, 130 snapped vertices), ground-level screenshots on both maps, no-tunnel map unchanged, slider check, cache-bust + README
-    status: pending
+    status: completed
 isProject: false
 ---
 

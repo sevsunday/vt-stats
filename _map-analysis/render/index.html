@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>VT Stats - 3D Map Render</title>
-<link rel="stylesheet" href="css/style.css?v=topdown1">
+<link rel="stylesheet" href="css/style.css?v=terrain1">
 
 <script type="importmap">
 {
@@ -68,16 +68,6 @@
   </section>
 
   <section class="hud-section">
-    <h2>Height exaggeration</h2>
-    <div class="slider-row">
-      <input type="range" id="height-exag" min="0.5" max="6" step="0.1" value="1.5">
-      <span class="val" id="height-exag-val">1.5x</span>
-    </div>
-    <div class="hint">Real heights from `.TER` byte 0 channel. Bump
-      for steeper hills, drop for flatter view.</div>
-  </section>
-
-  <section class="hud-section">
     <h2>Counts</h2>
     <div id="counts" class="counts">&mdash;</div>
   </section>
@@ -124,7 +114,6 @@
     <button type="button" id="embed-more-btn" aria-expanded="false" aria-controls="embed-more-menu">More</button>
     <div id="embed-more-menu" class="embed-drop-menu" hidden>
       <label><input type="checkbox" id="embed-objects" checked> Pools and spawns</label>
-      <label class="embed-exag">Height <input type="range" id="embed-exag" min="0.5" max="6" step="0.1" value="1.5"></label>
     </div>
   </div>
   <button type="button" id="embed-reset" title="Reset camera">Reset</button>
@@ -132,6 +121,6 @@
 <div id="embed-bar" class="hidden"></div>
 <div id="status">loading map data...</div>
 
-<script type="module" src="js/viewer.js?v=grass-cutout1"></script>
+<script type="module" src="js/viewer.js?v=terrain1"></script>
 </body>
 </html>

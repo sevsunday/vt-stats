@@ -122,7 +122,7 @@ export function createCameraController(camera, orbitControls, mapData) {
     // WASD / QE slide the free-orbit camera and its target together.
     move: {
       keys: new Set(),
-      getGroundY: null,
+      getGround: null,
     },
   };
 
@@ -268,8 +268,10 @@ export function createCameraController(camera, orbitControls, mapData) {
     else state.move.keys.delete(code);
   }
 
+  /** `fn(x, z, refY)` -> `{ floor, ceiling }` in scene units, or null off
+   *  the map. `ceiling` is non-null only inside a tunnel holding refY. */
   function setMoveGround(fn) {
-    state.move.getGroundY = fn || null;
+    state.move.getGround = fn || null;
   }
 
   const baseZoomSpeed = orbitControls.zoomSpeed;
@@ -341,13 +343,7 @@ export function createCameraController(camera, orbitControls, mapData) {
       endTgt.y + Math.sin(elev) * dist,
       endTgt.z + Math.cos(azimuth) * cosE * dist,
     );
-    if (state.move.getGroundY) {
-      const ground = state.move.getGroundY(endPos.x, endPos.z);
-      if (ground != null && Number.isFinite(ground)) {
-        const floorY = ground + MOVE_GROUND_CLEAR_M;
-        if (endPos.y < floorY) endPos.y = floorY;
-      }
-    }
+    endPos.y = clampToGround(state, endPos.x, endPos.z, endPos.y, point.y, MOVE_GROUND_CLEAR_M);
     state.transition = {
       startPos,
       startTgt,
@@ -662,7 +658,7 @@ function writeChasePose(state, actor, yaw, outPos, outTgt) {
     fp.y + height,
     fp.z + Math.sin(aim) * horiz,
   );
-  if (user) liftChaseAboveGround(state, outPos);
+  if (user) outPos.y = clampToGround(state, outPos.x, outPos.z, outPos.y, fp.y, CHASE_GROUND_CLEAR_M);
   const ahead = CHASE_LOOKAHEAD_M * Math.max(0, Math.cos(yawOff));
   outTgt.set(
     fp.x + Math.cos(yaw) * ahead,
@@ -671,12 +667,22 @@ function writeChasePose(state, actor, yaw, outPos, outTgt) {
   );
 }
 
-function liftChaseAboveGround(state, pos) {
-  if (!state.move.getGroundY) return;
-  const ground = state.move.getGroundY(pos.x, pos.z);
-  if (ground == null || !Number.isFinite(ground)) return;
-  const floor = ground + CHASE_GROUND_CLEAR_M;
-  if (pos.y < floor) pos.y = floor;
+/**
+ * `y` held at least `clear` above the floor under (x, z) and, inside a
+ * tunnel, at least `clear` below its ceiling (shrunk to half the passage
+ * when it is lower than 2 * clear). `refY` picks whose tunnel applies.
+ */
+function clampToGround(state, x, z, y, refY, clear) {
+  if (!state.move.getGround) return y;
+  const g = state.move.getGround(x, z, refY);
+  if (!g || !Number.isFinite(g.floor)) return y;
+  let c = clear;
+  if (g.ceiling != null && Number.isFinite(g.ceiling)) {
+    c = Math.min(clear, Math.max(0, (g.ceiling - g.floor) / 2));
+    if (y > g.ceiling - c) y = g.ceiling - c;
+  }
+  if (y < g.floor + c) y = g.floor + c;
+  return y;
 }
 
 function clamp(v, lo, hi) {
@@ -725,22 +731,20 @@ function slideFree(state, camera, orbitControls, dtSec, dir, right, up) {
   mx *= s;
   my *= s;
   mz *= s;
+  const refY = camera.position.y;
   camera.position.x += mx;
   camera.position.y += my;
   camera.position.z += mz;
   orbitControls.target.x += mx;
   orbitControls.target.y += my;
   orbitControls.target.z += mz;
-  if (state.move.getGroundY) {
-    const ground = state.move.getGroundY(camera.position.x, camera.position.z);
-    if (ground != null && Number.isFinite(ground)) {
-      const floor = ground + MOVE_GROUND_CLEAR_M;
-      const lift = floor - camera.position.y;
-      if (lift > 0) {
-        camera.position.y += lift;
-        orbitControls.target.y += lift;
-      }
-    }
+  const y = clampToGround(
+    state, camera.position.x, camera.position.z, camera.position.y, refY, MOVE_GROUND_CLEAR_M,
+  );
+  const shift = y - camera.position.y;
+  if (shift) {
+    camera.position.y += shift;
+    orbitControls.target.y += shift;
   }
 }
 

@@ -1,6 +1,6 @@
 /* render/js/objects.js
  *
- * Per-kind primitive factories + a bilinear terrain-height sampler.
+ * Per-kind primitive factories + the terrain-height samplers.
  *
  * For the POC we don't try to look up real .fbx / .xsi meshes (those live
  * in the game asset pak). Each object kind gets a distinctive Three.js
@@ -13,10 +13,12 @@
  *
  * Exports:
  *   - sampleTerrainHeight(heightmap, worldX, worldZ) -> meters
+ *   - sampleSheetHeight(heightmap, worldX, worldZ) -> meters
  *   - buildObjectsGroup(mapData) -> THREE.Group
  */
 
 import * as THREE from 'three';
+import { sampleSurfaceHeight } from './terrain-owners.js?v=3';
 
 // ---------------- Constants ----------------
 
@@ -38,13 +40,25 @@ const LOOSE_SCRAP_STYLE = {
 // ---------------- Terrain height sampler ----------------
 
 /**
- * Bilinear sample of the heightmap at world coords (wx, wz). Returns meters.
- *
- * Heightmap memory layout: row-major, row index 0 = north edge (worldOriginZ).
- * Cell (cx, cz) spans world X in
- *   [worldOriginX + cx * cellMetersX, worldOriginX + (cx+1) * cellMetersX].
+ * Height of the drawn terrain at world coords (wx, wz), in meters above
+ * hm.baseOffsetM. Once initFloor() has set `hm.surface` this follows the mesh
+ * triangles, tunnel snaps and 2 m blocks included; before that it is the raw
+ * sheet.
  */
 export function sampleTerrainHeight(hm, wx, wz) {
+  if (!hm.surface) return sampleSheetHeight(hm, wx, wz);
+  const h = sampleSurfaceHeight(hm.surface, wx, wz);
+  return h == null ? 0 : h;
+}
+
+/**
+ * Bilinear sample of the raw .TER sheet at world coords (wx, wz). Returns
+ * meters. Over a tunnel this is the roof, not the tube floor.
+ *
+ * Heightmap memory layout: row-major, row index 0 = south edge (worldOriginZ).
+ * Vertex (cx, cz) sits at worldOrigin + (cx, cz) * cellMeters.
+ */
+export function sampleSheetHeight(hm, wx, wz) {
   const u = (wx - hm.worldOriginX) / hm.cellMetersX;
   const v = (wz - hm.worldOriginZ) / hm.cellMetersZ;
   if (u < 0 || v < 0 || u >= hm.cellsX - 1 || v >= hm.cellsZ - 1) {

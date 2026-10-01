@@ -10,7 +10,7 @@
 import * as THREE from 'three';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 
-import { loadTilesManifest } from './loader.js';
+import { loadTilesManifest } from './loader.js?v=terrain1';
 import { cachedBlobUrl } from '../../../js/replay-quality.js';
 
 // One terrain cluster is 16 cells x 2 m = 32 m. Same UV for every
@@ -175,9 +175,10 @@ export async function buildTileFloorMaterial(renderer, data) {
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
   for (const t of tiles) t.anisotropy = maxAniso;
 
-  const hm = data.heightmap;
-  const worldW = hm.cellsX * hm.cellMetersX;
-  const worldD = hm.cellsZ * hm.cellMetersZ;
+  // One texel per 2 m .TER vertex (InfoMap: per 16-vertex cluster). The
+  // extract's world_min / world_max frame centres each texel on its vertex.
+  const frameMin = new THREE.Vector2(tc.world_min.x, tc.world_min.z);
+  const frameSize = new THREE.Vector2(tc.world_max.x - tc.world_min.x, tc.world_max.z - tc.world_min.z);
   const mat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     map: color,
@@ -192,8 +193,8 @@ export async function buildTileFloorMaterial(renderer, data) {
     uInfoMap:             { value: infoTex },
     uTileMetersPerRepeat: { value: TILE_METERS_PER_REPEAT },
     uColorTintStrength:   { value: COLOR_TINT_STRENGTH },
-    uHeightmapOriginXZ:   { value: new THREE.Vector2(hm.worldOriginX, hm.worldOriginZ) },
-    uHeightmapSize:       { value: new THREE.Vector2(worldW, worldD) },
+    uTexelFrameMin:       { value: frameMin },
+    uTexelFrameSize:      { value: frameSize },
   };
   for (let i = 0; i < numTiles; i++) {
     tileUniforms[`uTile${i}`] = { value: tiles[i] };
@@ -231,15 +232,15 @@ export async function buildTileFloorMaterial(renderer, data) {
         uniform sampler2D uInfoMap;
 ${tileDecls}        uniform float uTileMetersPerRepeat;
         uniform float uColorTintStrength;
-        uniform vec2 uHeightmapOriginXZ;
-        uniform vec2 uHeightmapSize;
+        uniform vec2 uTexelFrameMin;
+        uniform vec2 uTexelFrameSize;
 
         vec3 sampleTileByIdx(int idx, vec2 uv) {
 ${tileSwitch}          return vec3(1.0);
         }
       `)
       .replace('#include <map_fragment>', `
-        vec2 hmUv = (vTileLocalPos.xz - uHeightmapOriginXZ) / uHeightmapSize;
+        vec2 hmUv = (vTileLocalPos.xz - uTexelFrameMin) / uTexelFrameSize;
         vec2 tileUv = vTileLocalPos.xz / uTileMetersPerRepeat;
 
         vec4 info = texture2D(uInfoMap, hmUv) * 255.0;

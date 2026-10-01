@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { sampleTerrainHeight } from './objects.js';
+import { sampleTerrainHeight } from './objects.js?v=terrain1';
 import { tickToSec } from './replay-data.js';
 import { recyclerDeathSec } from './replay-hud.js';
 import { cloneModelBody, modelReady, modelsEnabled } from './replay-ship-models.js?v=lego1';
@@ -48,10 +48,8 @@ const STRUCTURE_GROUND_LIFT = 0.35;
 const POOL_SNAP_M = 8;
 const DROP_DURATION = 1.15;
 
-function scaledHm(mapData, exaggeration) {
-  const base = mapData && mapData.heightmap;
-  if (!base) return null;
-  return { ...base, scale: base.scale * exaggeration };
+function heightmapOf(mapData) {
+  return (mapData && mapData.heightmap) || null;
 }
 
 function placeY(hm, x, z, yOff) {
@@ -244,8 +242,8 @@ function syncRecyclerForm(it, tSec, alive) {
   it.alive = alive;
 }
 
-export function buildStartingRecyclers(matchData, mapData, exaggeration) {
-  const hm = scaledHm(mapData, exaggeration);
+export function buildStartingRecyclers(matchData, mapData) {
+  const hm = heightmapOf(mapData);
   const group = new THREE.Group();
   group.name = 'replay-recyclers';
   const items = [];
@@ -411,12 +409,12 @@ function instanceYOff(inst) {
     : Y_OFF_BUILDING;
 }
 
-export function buildStructuresLayer(matchData, mapData, exaggeration) {
+export function buildStructuresLayer(matchData, mapData) {
   const block = matchData.structures;
   if (!block || !Array.isArray(block.instances) || !block.instances.length) {
     return null;
   }
-  const hm = scaledHm(mapData, exaggeration);
+  const hm = heightmapOf(mapData);
   const tickRate = (matchData.match && matchData.match.tick_rate) || 20;
   const group = new THREE.Group();
   group.name = 'replay-structures';
@@ -479,9 +477,9 @@ export function buildStructuresLayer(matchData, mapData, exaggeration) {
  * replaces the box; turning the toggle off puts the sized box back.
  * Hull bottom stays on the terrain sample.
  */
-export function applyStructureModelMode(items, mapData, exaggeration) {
+export function applyStructureModelMode(items, mapData) {
   if (!items) return;
-  const hm = scaledHm(mapData, exaggeration);
+  const hm = heightmapOf(mapData);
   for (const it of items) {
     const odf = (it.inst && it.inst.odf) || it.deployedOdf;
     const team = it.team != null ? it.team : it.side;
@@ -590,10 +588,10 @@ export function collectArmoryDrops(matchData) {
   return out;
 }
 
-export function triggerArmoryDrop(scene, drop, hm, exaggeration) {
+export function triggerArmoryDrop(scene, drop, hm) {
   const code = drop.team === 2 ? '_' : '_';
   const color = new THREE.Color(0xffd24a);
-  const yGround = hm ? sampleTerrainHeight({ ...hm, scale: hm.scale * exaggeration }, drop.x, drop.z) : 0;
+  const yGround = hm ? sampleTerrainHeight(hm, drop.x, drop.z) : 0;
   const startY = yGround + 42;
   const geom = new THREE.ConeGeometry(2.2, 7, 8);
   const mat = new THREE.MeshBasicMaterial({

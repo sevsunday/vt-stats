@@ -52,15 +52,25 @@ def _extent(stem: str) -> tuple[float, float, float, float] | None:
     try:
         cells_x = int(hm["cells_x"])
         cells_z = int(hm["cells_z"])
+        src_x = int(hm["src_cells_x"])
+        src_z = int(hm["src_cells_z"])
         mx = float(hm["cell_meters_x"])
         mz = float(hm["cell_meters_z"])
         origin = hm["world_origin"]
-        min_x = float(origin["x"])
-        min_z = float(origin["z"])
+        ox = float(origin["x"])
+        oz = float(origin["z"])
     except (KeyError, TypeError, ValueError):
         return None
-    width = cells_x * mx
-    depth = cells_z * mz
+    if src_x <= 0 or src_z <= 0:
+        return None
+    # The engine's terrain bounds: .TER vertex 0 to GridMax. world_origin is
+    # the centre of the first 8 m sample's block of .TER vertices.
+    step_x = mx * cells_x / src_x
+    step_z = mz * cells_z / src_z
+    min_x = ox - (mx - step_x) / 2.0
+    min_z = oz - (mz - step_z) / 2.0
+    width = src_x * step_x
+    depth = src_z * step_z
     if width <= 0 or depth <= 0:
         return None
     return min_x, min_z, width, depth

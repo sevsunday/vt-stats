@@ -59,7 +59,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "object-render"))
 sys.path.insert(0, str(PROJECT_ROOT / "_map-analysis" / "scripts"))
 
 import msh_thumbnail  # noqa: E402
-from msh_parser import parse_msh, parse_msh_full  # noqa: E402
+from msh_parser import hidden_terrain_tris, parse_msh, parse_msh_full  # noqa: E402
 from glb_writer import GlbBuilder, build_animated_glb  # noqa: E402
 from dds_decode import decode_dds, UnsupportedDDS  # noqa: E402
 from PIL import Image, ImageChops  # noqa: E402
@@ -96,6 +96,10 @@ DECODE_MAX_DIM = 1024    # decode-once size (downscaled to perf + reused for gal
 # `.material` [solid] section (observed range 1..~50; no bias when undeclared).
 SPEC_ROUGHNESS_K = 0.6   # contrast exponent (lower = shinier overall)
 SPEC_ROUGHNESS_MIN = 0.05
+
+# Grid spacing of the baked `terrainPatch` (the hidden terrain__h surface).
+# Matches the .TER cell size, so every heightfield vertex lands on a node.
+TERRAIN_PATCH_STEP = 2.0
 
 # Workshop texture-override packs surfaced as alternate "texture sets" in the
 # Models Browser. Each pack is a pure DDS overlay keyed by the same texture
@@ -496,10 +500,11 @@ def _extract_odf_snipe(blocks: dict) -> dict:
 
 
 def _extract_odf_collision(blocks: dict):
-    """Authored collisionRadius from GameObjectClass (the AI-avoidance / path-
-    planning footprint, per docs/reference/odf-properties-guide.md). Returns the
-    explicit float when declared, else None -- the viewer derives the engine
-    default (boundingSphere * 0.75) from the already-shipped `radius`."""
+    """Authored collisionRadius from GameObjectClass: a flat AI-avoidance /
+    path-planning circle (docs/reference/odf-properties-guide.md), NOT the
+    collision sphere -- that is the .msh bounding sphere, shipped as `radius`.
+    Returns the explicit float when declared, else None -- the viewer then
+    applies the engine default, 0.75 x the bounding sphere."""
     go = blocks.get("GameObjectClass", {}) or {}
     go_l = {str(k).lower(): v for k, v in go.items()}
     return _odf_float(go_l, "collisionradius")
@@ -659,10 +664,12 @@ def _odf_is_pilot(blocks, category) -> bool:
     return any(str(entry).strip().lower() == "person" for entry in chain)
 
 
-def enumerate_targets(odf_filter=None):
+def enumerate_targets(odf_filter=None, prior_primary=None):
     """Scan odf.min.json for every geometryName + shotGeometry. Returns a dict
     stem -> {odfs, primaryOdf, unitName, category, isPilot, factionCode,
-    factionName, odf_art}."""
+    factionName, odf_art}. `prior_primary` (stem -> primaryOdf from the
+    published index) keeps a mesh's primary ODF while that ODF still names
+    the mesh."""
     db = json.loads(ODF_DB.read_text(encoding="utf-8"))
     refs: dict[str, list[dict]] = {}
 
@@ -716,6 +723,12 @@ def enumerate_targets(odf_filter=None):
             ]
             if owned:
                 primary = owned[0]
+        # A later ODF sharing the mesh (VSR's Cerberi pilot on the Scion pilot
+        # mesh, its flame-mine fireball on the Splinter shell) must not
+        # relabel the card.
+        kept = (prior_primary or {}).get(stem)
+        if kept and kept != primary["odf"]:
+            primary = next((c for c in cands_sorted if c["odf"] == kept), primary)
         odfs = sorted({c["odf"] for c in cands})
         if odf_filter and not (set(odfs) & odf_filter):
             continue
@@ -807,8 +820,8 @@ def enumerate_targets(odf_filter=None):
         snipe = _extract_odf_snipe(primary["blocks"])
         # Collision radius (AI-avoidance footprint): sparse per-ODF map of the
         # ODFs that explicitly declare one. The viewer follows the loadout
-        # variant select and falls back to boundingSphere * 0.75 (the engine
-        # default) from the shipped `radius` for any ODF not in this map.
+        # variant select and falls back to the engine default (0.75 x the
+        # bounding sphere) for any ODF not in this map.
         collision = {}
         for c in uniq_cands:
             cr = _extract_odf_collision(c["blocks"])
@@ -837,6 +850,74 @@ def enumerate_targets(odf_filter=None):
             "collisionRadiiByOdf": collision or None,
         }
     return out
+
+
+def _extract_terrain_patch(msh_path: Path) -> dict | None:
+    """Rasterize the hidden `terrain` node (terrain__h) onto a TERRAIN_PATCH_STEP
+    grid in engine-local metres (NOT Z-negated). Row 0 = minZ, col 0 = minX;
+    each value is the highest surface y over that grid point, null where no
+    triangle covers it. None when the mesh carries no such node."""
+    tris = hidden_terrain_tris(msh_path)
+    if not tris:
+        return None
+    step = TERRAIN_PATCH_STEP
+    xs = [v[0] for t in tris for v in t]
+    zs = [v[2] for t in tris for v in t]
+    # 1e-4 of a step absorbs float noise from the inverse-bind transform.
+    min_x = math.floor(min(xs) / step + 1e-4) * step
+    max_x = math.ceil(max(xs) / step - 1e-4) * step
+    min_z = math.floor(min(zs) / step + 1e-4) * step
+    max_z = math.ceil(max(zs) / step - 1e-4) * step
+    cols = int(round((max_x - min_x) / step)) + 1
+    rows = int(round((max_z - min_z) / step)) + 1
+    heights = [None] * (cols * rows)
+    tol = 1e-6
+    for (x1, y1, z1), (x2, y2, z2), (x3, y3, z3) in tris:
+        det = (z2 - z3) * (x1 - x3) + (x3 - x2) * (z1 - z3)
+        if abs(det) < 1e-9:
+            continue  # vertical in XZ, no footprint
+        c_lo = max(0, math.floor((min(x1, x2, x3) - min_x) / step - 1e-4))
+        c_hi = min(cols - 1, math.ceil((max(x1, x2, x3) - min_x) / step + 1e-4))
+        r_lo = max(0, math.floor((min(z1, z2, z3) - min_z) / step - 1e-4))
+        r_hi = min(rows - 1, math.ceil((max(z1, z2, z3) - min_z) / step + 1e-4))
+        for r in range(r_lo, r_hi + 1):
+            z = min_z + r * step
+            for c in range(c_lo, c_hi + 1):
+                x = min_x + c * step
+                a = ((z2 - z3) * (x - x3) + (x3 - x2) * (z - z3)) / det
+                b = ((z3 - z1) * (x - x3) + (x1 - x3) * (z - z3)) / det
+                g = 1.0 - a - b
+                if a < -tol or b < -tol or g < -tol:
+                    continue
+                h = a * y1 + b * y2 + g * y3
+                i = r * cols + c
+                if heights[i] is None or h > heights[i]:
+                    heights[i] = h
+    out = []
+    for h in heights:
+        if h is not None:
+            h = round(h, 3) + 0.0
+            h = int(h) if h.is_integer() else h
+        out.append(h)
+    return {
+        "minX": min_x, "minZ": min_z, "step": step, "cols": cols, "rows": rows,
+        "heights": out,
+    }
+
+
+def _dumps_index(doc: dict) -> str:
+    """json.dumps(doc, indent=2) with every terrainPatch.heights array written on
+    one line, so the patches don't add a line per grid point to index.json."""
+    blobs = []
+    models = []
+    for m in doc.get("models", []):
+        tp = m.get("terrainPatch")
+        if tp and isinstance(tp.get("heights"), list):
+            blobs.append(json.dumps(tp["heights"], separators=(",", ":")))
+            m = {**m, "terrainPatch": {**tp, "heights": f"@@heights:{len(blobs) - 1}@@"}}
+        models.append(m)
+    text = json.dumps({**doc, "models": models}, indent=2)
+    return re.sub(r'"@@heights:(\d+)@@"', lambda mm: blobs[int(mm.group(1))], text)
 
 
 def build_file_index(roots, ext):
@@ -1184,7 +1265,11 @@ def _engine_roughness_lut(specular_power: float | None):
     lut = []
     for v in range(256):
         gloss = v / 255.0
-        spec_pow = 2.0 ** (gloss * power)
+        # The shader's float32 power overflows to infinity (alpha 0, roughness
+        # at the floor); a Python float raises at 2^1024 (specularPower 1024
+        # on the Service Bay), so that exponent takes the same infinity.
+        exponent = gloss * power
+        spec_pow = 2.0 ** exponent if exponent < 1024 else math.inf
         alpha = math.sqrt(2.0 / (spec_pow + 2.0))
         rough = min(1.0, max(SPEC_ROUGHNESS_MIN, math.sqrt(alpha)))
         lut.append(min(255, max(0, round(rough * 255.0))))
@@ -1653,6 +1738,7 @@ def process_model(job: dict) -> dict:
             "lights": job.get("lights"),
             "snipe": job.get("snipe"),
             "collisionRadiiByOdf": job.get("collisionRadiiByOdf"),
+            "terrainPatch": job.get("terrainPatch"),
             "_glb_bytes": len(glb_bytes),
         }
     except Exception as e:  # noqa: BLE001 - resilient over ~700 models
@@ -1724,6 +1810,8 @@ def _cached_entry(stem: str, meta: dict, prior: dict) -> dict:
         "lights": meta.get("lights"),
         "snipe": meta.get("snipe"),
         "collisionRadiiByOdf": meta.get("collisionRadiiByOdf"),
+        # A stem kept without a current mesh keeps its prior patch.
+        "terrainPatch": meta["terrainPatch"] if "terrainPatch" in meta else p.get("terrainPatch"),
     }
     if p.get("cockpit"):
         out["cockpit"] = p["cockpit"]
@@ -1908,7 +1996,14 @@ def main():
 
     t0 = time.perf_counter()
     odf_filter = set(args.odf) if args.odf else None
-    targets = enumerate_targets(odf_filter)
+    prior_primary = {}
+    if (OUT_DIR / "index.json").exists():
+        try:
+            published = json.loads((OUT_DIR / "index.json").read_text(encoding="utf-8"))
+            prior_primary = {m["stem"]: m.get("primaryOdf") for m in published.get("models", []) if "stem" in m}
+        except (json.JSONDecodeError, KeyError):
+            prior_primary = {}
+    targets = enumerate_targets(odf_filter, prior_primary)
     print(f"enumerated {len(targets)} unique mesh stems from {ODF_DB.name}")
 
     roots = resolve_roots(args.steam_base)
@@ -1952,8 +2047,14 @@ def main():
         if mp is None:
             missing.append(stem)
             continue
+        try:
+            meta["terrainPatch"] = _extract_terrain_patch(mp)
+        except Exception as e:  # noqa: BLE001 - a bad helper node must not sink the run
+            meta["terrainPatch"] = None
+            print(f"  terrain patch failed for {stem}: {e!r}")
         resolved.append((stem, meta, mp))
-    print(f"resolved {len(resolved)} meshes, {len(missing)} missing (no baked .msh)")
+    print(f"resolved {len(resolved)} meshes, {len(missing)} missing (no baked .msh), "
+          f"{sum(1 for _s, m, _p in resolved if m.get('terrainPatch'))} with a terrain patch")
     if args.verbose and missing:
         print("  missing:", ", ".join(sorted(missing)))
 
@@ -2114,6 +2215,7 @@ def main():
     lights_count = sum(1 for m in manifest if m.get("lights"))
     snipe_count = sum(1 for m in manifest if (m.get("snipe") or {}).get("canSnipe"))
     collision_count = sum(1 for m in manifest if m.get("collisionRadiiByOdf"))
+    terrain_patch_count = sum(1 for m in manifest if m.get("terrainPatch"))
     cockpit_doc_path = OUT_DIR / "cockpits" / "index.json"
     if cockpit_doc_path.is_file():
         cockpit_doc = json.loads(cockpit_doc_path.read_text(encoding="utf-8"))
@@ -2122,8 +2224,8 @@ def main():
             if info:
                 m["cockpit"] = info
     cockpit_count = sum(1 for m in manifest if m.get("cockpit"))
-    idx_path.write_text(json.dumps({
-        "schema_version": 20,
+    idx_path.write_text(_dumps_index({
+        "schema_version": 21,
         "anim_format_version": ANIM_FORMAT_VERSION,
         "texture_format_version": TEXTURE_FORMAT_VERSION,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -2138,13 +2240,14 @@ def main():
         "lights_count": lights_count,
         "snipe_count": snipe_count,
         "collision_count": collision_count,
+        "terrain_patch_count": terrain_patch_count,
         "cockpit_count": cockpit_count,
         "texture_packs": {p["id"]: {"label": p["label"], "url": p["url"]}
                           for p in MOD_TEXTURE_PACKS},
         "texture_report": texture_report,
         "models": manifest,
         "odf_index": odf_index,
-    }, indent=2), encoding="utf-8")
+    }), encoding="utf-8")
 
     dt = time.perf_counter() - t0
     print(f"\nwrote {idx_path} -- {len(manifest)} models "
@@ -2154,7 +2257,7 @@ def main():
           f"{emissive_count} emissive, {normal_count} normal-mapped, "
           f"{specular_count} roughness-mapped, {modskin_count} with mod skins, "
           f"{loadout_count} with loadouts, {lights_count} with lights, "
-          f"{collision_count} with collision radii)")
+          f"{collision_count} with collision radii, {terrain_patch_count} with terrain patches)")
     print(f"textures: {texture_report['models_textured']} textured, "
           f"{texture_report['models_no_texture']} without "
           f"({texture_report['models_unresolved_refs']} have unresolved refs, "
