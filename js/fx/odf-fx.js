@@ -285,7 +285,14 @@ export function createFxRuntime(scene, assets) {
         root.add(pl);
         lightPool.push({ light: pl, busy: false, seq: 0, drop: null });
     }
-    const groundY = 0;
+    // Ground height under (x, z). The shooting range has a flat floor at
+    // y = 0; the Game Explorer passes its terrain sampler.
+    const groundAtOpt = assets && typeof assets.groundY === 'function' ? assets.groundY : null;
+    const groundAt = (x, z) => {
+        if (!groundAtOpt) return 0;
+        const y = groundAtOpt(x, z);
+        return Number.isFinite(y) ? y : 0;
+    };
     let budget = FX_PARTICLE_BUDGET;
 
     /* Borrow a pooled light. A full pool retargets the oldest slot so the
@@ -636,7 +643,7 @@ export function createFxRuntime(scene, assets) {
         const vel = opts.velocity ? opts.velocity.clone() : new THREE.Vector3();
         // sim_dust "spawns on the Ground" (the guide): a free particle's origin
         // is the floor, wherever the emitter sat. An attached render keeps its host.
-        if (simBase === 'sim_dust' && opts.free !== false && !segment) pos.y = groundY;
+        if (simBase === 'sim_dust' && opts.free !== false && !segment) pos.y = groundAt(pos.x, pos.z);
         const terrain = num(section.useterraincolor, 0);
         let obj = null;
         let light = null;
@@ -881,12 +888,13 @@ export function createFxRuntime(scene, assets) {
                 }
             } else if (obj && obj.isSprite) {
                 let sy = radius * 2;
-                if (squish && node.pos.y - groundY < radius) {
+                const floorHere = squish ? groundAt(node.pos.x, node.pos.z) : 0;
+                if (squish && node.pos.y - floorHere < radius) {
                     // BottomInteractsWithTerrain: keep the top where it is and
                     // squash the sprite so its bottom rests on the ground.
-                    const h = Math.max(0.02, node.pos.y - groundY + radius);
+                    const h = Math.max(0.02, node.pos.y - floorHere + radius);
                     sy = h;
-                    obj.center.set(0.5, Math.max(0, Math.min(1, (node.pos.y - groundY) / h)));
+                    obj.center.set(0.5, Math.max(0, Math.min(1, (node.pos.y - floorHere) / h)));
                 } else if (squish) obj.center.set(0.5, 0.5);
                 obj.scale.set(radius * 2, sy, 1);
                 if (node.spin || node.spinStart) obj.material.rotation = node.spinStart + node.spin * node.age;
@@ -1174,10 +1182,12 @@ export function createFxRuntime(scene, assets) {
                 const t = opts.duration > 0 ? Math.min(1, node.age / opts.duration) : 1;
                 node.pos.copy(segment[0]).lerp(segment[1], t);
                 node._followVel = segment[1].clone().sub(segment[0]).multiplyScalar(opts.duration > 0 ? 1 / opts.duration : 0);
-            } else if (node.sim && node.sim !== 'sim_null' && !segment && !node.released) stepSim(node, dt, groundY);
+            } else if (node.sim && node.sim !== 'sim_null' && !segment && !node.released) {
+                stepSim(node, dt, groundAt(node.pos.x, node.pos.z));
+            }
             look();
             if (obj && !isRibbon && base !== 'draw_static') {
-                if (base === 'draw_planar') obj.position.set(node.pos.x, groundY + 0.03, node.pos.z);
+                if (base === 'draw_planar') obj.position.set(node.pos.x, groundAt(node.pos.x, node.pos.z) + 0.03, node.pos.z);
                 else obj.position.copy(node.pos);
                 if (inner) {
                     inner.rotation.x += num(section.addpitch, 0) * dt;

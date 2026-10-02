@@ -296,6 +296,41 @@ function pendingLegoJobs(odfs) {
   return jobs;
 }
 
+/**
+ * Load catalog meshes for an arbitrary ODF list (the Game Explorer places
+ * units that are not in a match timeline). Same loader as ensureMatchModels;
+ * already-loaded stems are skipped. A failed stem is skipped.
+ */
+export async function ensureOdfs(odfs, onProgress) {
+  if (onProgress) onProgress(0, 0, 'catalog');
+  await ensureIndex();
+  const specs = [];
+  const seen = new Set();
+  for (const odf of odfs || []) {
+    const spec = lookupSpec(odf);
+    if (!spec || seen.has(spec.stem) || _templates.has(spec.stem)) continue;
+    seen.add(spec.stem);
+    specs.push(spec);
+  }
+  const total = specs.length;
+  let done = 0;
+  if (onProgress) onProgress(0, total, null);
+  await Promise.all(specs.map(async (spec) => {
+    if (onProgress) onProgress(done, total, spec.stem);
+    try { await loadStem(spec); }
+    catch (err) { console.warn(`model ${spec.stem} failed`, err); }
+    done += 1;
+    if (onProgress) onProgress(done, total, spec.stem);
+  }));
+}
+
+/** Animation clips of a loaded template, or [] if that ODF is not loaded. */
+export function templateClips(odf) {
+  const spec = lookupSpec(odf);
+  const tpl = spec && _templates.get(spec.stem);
+  return (tpl && tpl.clips) || [];
+}
+
 export async function ensureMatchModels(matchData, onProgress) {
   if (onProgress) onProgress(0, 0, 'catalog');
   await ensureIndex();

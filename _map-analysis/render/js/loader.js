@@ -35,7 +35,13 @@
 // migrated to `data/render/` at the project root so they live alongside
 // every other pipeline output. Resolved relative to the document URL
 // (replay.html / index.html) inside `_map-analysis/render/`.
-const DATA_DIR = '../../data/render';
+// Resolved from this module, not the document, so a page outside
+// `_map-analysis/render/` (the Game Explorer) fetches the same files.
+const DATA_ROOT = new URL('../../../data/render/', import.meta.url);
+
+function dataUrl(rel) {
+  return new URL(rel, DATA_ROOT).href;
+}
 
 export function readUrlParams() {
   const url = new URL(location.href);
@@ -54,7 +60,7 @@ export function readUrlParams() {
  */
 export async function loadManifest() {
   try {
-    const res = await fetch(`${DATA_DIR}/_manifest.json`);
+    const res = await fetch(dataUrl('_manifest.json'));
     if (!res.ok) return [];
     const raw = await res.json();
     return raw.maps || [];
@@ -113,7 +119,7 @@ export async function fetchJsonWithProgress(url, onProgress) {
 }
 
 export async function loadMapData(stem, onProgress) {
-  const url = `${DATA_DIR}/${stem}.3d.json?v=schema4`;
+  const url = dataUrl(`${stem}.3d.json?v=schema4`);
   const raw = await fetchJsonWithProgress(url, onProgress);
   if (raw.schema_version !== 4) {
     throw new Error(`unsupported schema_version ${raw.schema_version} `
@@ -219,7 +225,7 @@ export async function loadPropsSidecar(stem) {
   const empty = { props: [], terrainHires: [] };
   if (!stem) return empty;
   try {
-    const res = await fetch(`${DATA_DIR}/${stem}.props.json?v=props3`);
+    const res = await fetch(dataUrl(`${stem}.props.json?v=props3`));
     if (!res.ok) return empty;
     const doc = await res.json();
     if (!Array.isArray(doc.props)) return empty;
@@ -255,7 +261,7 @@ function decodeHiresBlocks(blocks) {
 export async function loadSkySidecar(stem) {
   if (!stem) return null;
   try {
-    const res = await fetch(`${DATA_DIR}/${stem}.sky.json?v=sky-sprites2`);
+    const res = await fetch(dataUrl(`${stem}.sky.json?v=sky-sprites2`));
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
@@ -270,7 +276,7 @@ let _tilesManifestCache = null;
 export async function loadTilesManifest() {
   if (_tilesManifestCache !== null) return _tilesManifestCache;
   try {
-    const res = await fetch(`${DATA_DIR}/tiles/_manifest.json`);
+    const res = await fetch(dataUrl('tiles/_manifest.json'));
     if (!res.ok) {
       _tilesManifestCache = { tiles: [], byName: {}, missing: [] };
       return _tilesManifestCache;

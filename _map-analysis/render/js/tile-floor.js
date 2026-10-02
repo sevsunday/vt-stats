@@ -13,6 +13,13 @@ import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { loadTilesManifest } from './loader.js?v=terrain1';
 import { cachedBlobUrl } from '../../../js/replay-quality.js';
 
+// Module-relative (not document-relative) so the Game Explorer can reuse this.
+const RENDER_ROOT = new URL('../../../data/render/', import.meta.url);
+
+function renderUrl(rel) {
+  return new URL(rel, RENDER_ROOT).href;
+}
+
 // One terrain cluster is 16 cells x 2 m = 32 m. Same UV for every
 // texture, including 1024 px variants. Do not scale by image pixel size.
 const TILE_METERS_PER_REPEAT = 32.0;
@@ -29,7 +36,7 @@ async function loadTexture(url) {
 }
 
 async function loadAtlasPng(rel, opts = {}) {
-  const tex = await loadTexture(`../../data/render/${rel}`);
+  const tex = await loadTexture(renderUrl(rel));
   tex.colorSpace = opts.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   tex.flipY = false;
   tex.magFilter = THREE.LinearFilter;
@@ -41,7 +48,7 @@ async function loadAtlasPng(rel, opts = {}) {
 }
 
 async function loadTileFromManifestEntry(entry) {
-  const url = `../../data/render/tiles/${entry.filename}`;
+  const url = renderUrl(`tiles/${entry.filename}`);
   const src = await cachedBlobUrl(url);
   if (!src) throw new Error(entry.filename || 'tile');
   return new Promise((resolve, reject) => {

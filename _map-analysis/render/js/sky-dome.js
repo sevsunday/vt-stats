@@ -14,7 +14,13 @@ import * as THREE from 'three';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { GLTFLoader } from '../../../vendor/three/addons/loaders/GLTFLoader.js';
 
-const DATA_DIR = '../../data/render';
+// Module-relative so the Game Explorer (a different document URL) resolves
+// the same sky files the replay does.
+const DATA_ROOT = new URL('../../../data/render/', import.meta.url);
+
+function dataUrl(rel) {
+  return new URL(rel, DATA_ROOT).href;
+}
 // Inside the camera far plane (8000) and well outside the playfield.
 const SKY_RADIUS = 2800;
 
@@ -118,7 +124,7 @@ function tuneDds(tex, anisotropy) {
 }
 
 function loadDds(rel, anisotropy) {
-  const url = `${DATA_DIR}/${rel}`;
+  const url = dataUrl(rel);
   return new Promise((resolve, reject) => {
     new DDSLoader().load(url, (tex) => {
       tuneDds(tex, anisotropy);
@@ -262,7 +268,7 @@ function addSkySprites(rig, sprites, textures) {
 }
 
 function loadGlb(rel) {
-  const url = `${DATA_DIR}/${rel}`;
+  const url = dataUrl(rel);
   return new Promise((resolve, reject) => {
     new GLTFLoader().load(url, resolve, undefined, reject);
   });

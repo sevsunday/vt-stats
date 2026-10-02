@@ -148,6 +148,10 @@ export function createAudio(opts) {
         const key = stemKey(name);
         if (!key) return { stop() {}, setPosition() {} };
         const loop = !!(opts && opts.loop);
+        // A looping clip normally replaces an earlier loop of the same stem
+        // (one machine gun, one loop). `multi` keeps independent loops per
+        // caller: two ships idling on the same engine wav.
+        const multi = !!(opts && opts.multi);
         const rate = opts && opts.rate ? opts.rate : 1;
         const at = opts && opts.at ? { x: opts.at.x, y: opts.at.y, z: opts.at.z } : null;
         const handle = {
@@ -156,7 +160,7 @@ export function createAudio(opts) {
             rate,
             volume: opts && opts.volume != null ? opts.volume : 1,
             at,
-            stop() { stopKey(loop ? key : null, this); },
+            stop() { stopKey(loop && !multi ? key : null, this); },
             setPosition(v) {
                 if (!v) return;
                 this.at = { x: v.x, y: v.y, z: v.z };
@@ -191,7 +195,7 @@ export function createAudio(opts) {
             source.start();
             handle.source = source;
             handle.gain = gain;
-            if (loop) {
+            if (loop && !multi) {
                 stopKey(key, loops.get(key));
                 loops.set(key, handle);
             }

@@ -16,9 +16,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../../../vendor/three/addons/loaders/GLTFLoader.js';
 import { sampleTerrainHeight } from './objects.js?v=terrain1';
 
-const GEOM_DIR = '../../data/models/geometry/';
-const PERF_DIR = '../../data/models/textures/perf/';
-const EMISSIVE_DIR = '../../data/models/textures/emissive/';
+// Module-relative so a page outside the replay folder still finds the GLBs.
+const MODELS_ROOT = new URL('../../../data/models/', import.meta.url);
+const GEOM_DIR = new URL('geometry/', MODELS_ROOT).href;
+const PERF_DIR = new URL('textures/perf/', MODELS_ROOT).href;
+const EMISSIVE_DIR = new URL('textures/emissive/', MODELS_ROOT).href;
 
 /* Grass, palms, fences and ruin windows are cards on an atlas whose empty
  * texels are black RGB with alpha 0. Three.js ignores map alpha until

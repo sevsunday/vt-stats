@@ -243,7 +243,47 @@ export function createRangeSim(opts) {
     const fx = opts.fx;
     const audio = opts.audio;
     const getMuzzles = opts.getMuzzles;
-    const getTarget = opts.getTarget;
+    const getTargetOpt = opts.getTarget || function () { return null; };
+    const getTargetsOpt = opts.getTargets || null;
+    // With getTargets, the aim target (what the gunner points at: a locked
+    // unit, or a ghost point on the terrain) can differ from the hit list.
+    const getAimTargetOpt = opts.getAimTarget || null;
+    // Absent => the range's flat floor at y = 0. Present => terrain height in
+    // the same space as shot positions (the Game Explorer).
+    const groundYOpt = opts.groundY || null;
+    // A player's lobbed round leaves along the aim direction (plus shotPitch)
+    // and drops under gravity, the way the game fires a mortar where you
+    // point. Absent, the gunner solves the lob onto the target (the range, AI).
+    const lobDirectOpt = opts.lobDirect;
+    const lobDirect = () => (typeof lobDirectOpt === 'function' ? !!lobDirectOpt() : !!lobDirectOpt);
+    function targetsNow() {
+        if (!getTargetsOpt) {
+            const t = getTargetOpt();
+            return t && t.position ? [t] : [];
+        }
+        return (getTargetsOpt() || []).filter((t) => t && t.position);
+    }
+    function getTarget() {
+        if (!getTargetsOpt) return getTargetOpt();
+        if (getAimTargetOpt) {
+            const t = getAimTargetOpt();
+            return t && t.position ? t : null;
+        }
+        const list = targetsNow();
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].alive !== false) return list[i];
+        }
+        return null;
+    }
+    function floorY(x, z) {
+        if (!groundYOpt) return 0;
+        const y = groundYOpt(x, z);
+        return Number.isFinite(y) ? y : 0;
+    }
+    function crossedFloor(prev, pos) {
+        if (!groundYOpt) return prev.y > 0.05 && pos.y <= 0.05;
+        return prev.y > floorY(prev.x, prev.z) + 0.05 && pos.y <= floorY(pos.x, pos.z) + 0.05;
+    }
     const onRecoil = opts.onRecoil || function () {};
     const onHit = opts.onHit || function () {};
     const onEvent = opts.onEvent || function () {};
@@ -528,6 +568,16 @@ export function createRangeSim(opts) {
      * Rkt (10 x (90 + 75)) kill a Scavenger in 2 salvos; the game takes 4
      * (10 x 90 = 900 a salvo against 3,000 HP). */
     function applyDamage(ordv, head, kind, pos, target) {
+        // A ground burst reaches every live target inside its radius. The
+        // shooting range never passes getTargets, so this branch stays dark
+        // there and the single-target path below is unchanged.
+        if (kind === 'ground' && getTargetsOpt) {
+            let total = 0;
+            const list = targetsNow();
+            for (let i = 0; i < list.length; i++) total += applyDamage(ordv, head, 'splash', pos, list[i]);
+            return total;
+        }
+        if (kind === 'splash') kind = 'ground';
         if (!target || !target.alive) return 0;
         const letter = target.letter || 'N';
         const table = ordv.damage || {};
@@ -540,7 +590,7 @@ export function createRangeSim(opts) {
                 dmg = damageValues(head)[letter] || 0;
             }
         }
-        if (dmg > 0) onHit({ damage: dmg, kind, position: pos.clone(), letter });
+        if (dmg > 0) onHit({ damage: dmg, kind, position: pos.clone(), letter, id: target.id || null });
         return dmg;
     }
 
@@ -611,6 +661,10 @@ export function createRangeSim(opts) {
         if (!target || !target.alive) return applyCone(forward, variance, lift);
         _aim.copy(target.position).sub(muzzle.position);
         const flat = Math.hypot(_aim.x, _aim.z);
+        if (gravity && lobDirect()) {
+            if (_aim.lengthSq() < 1e-4) return applyCone(forward, variance, shotPitch);
+            return applyCone(_aim.normalize(), variance, shotPitch);
+        }
         if (gravity) {
             const speed = ordv.shotSpeed || 0;
             const rise = target.position.y - muzzle.position.y;
@@ -689,7 +743,29 @@ export function createRangeSim(opts) {
         const dir = applyCone(aim.normalize(), variance, shotPitch);
         let dist = reach;
         let kind = null;
-        if (live) {
+        let hitTarget = target;
+        if (getTargetsOpt) {
+            hitTarget = null;
+            let bestD = dist;
+            const list = targetsNow();
+            for (let i = 0; i < list.length; i++) {
+                const cand = list[i];
+                if (cand.alive === false) continue;
+                const radius = cand.radius || 0;
+                const toCentre = cand.position.clone().sub(origin);
+                const along = toCentre.dot(dir);
+                const miss2 = toCentre.lengthSq() - along * along;
+                if (along > 0 && miss2 <= radius * radius) {
+                    const d = along - Math.sqrt(Math.max(0, radius * radius - miss2));
+                    if (d >= 0 && d <= bestD) {
+                        bestD = d;
+                        hitTarget = cand;
+                        kind = cand.kind || 'vehicle';
+                    }
+                }
+            }
+            if (hitTarget) dist = bestD;
+        } else if (live) {
             const radius = target.radius || 0;
             const toCentre = target.position.clone().sub(origin);
             const along = toCentre.dot(dir);
@@ -699,10 +775,25 @@ export function createRangeSim(opts) {
                 kind = target.kind || 'vehicle';
             }
         }
-        if (!kind && dir.y < -1e-6) {
+        if (!kind && dir.y < -1e-6 && !groundYOpt) {
             const toFloor = (0.05 - origin.y) / dir.y;
             if (toFloor >= 0 && toFloor <= dist) {
                 dist = toFloor;
+                kind = 'ground';
+            }
+        }
+        if (!kind && groundYOpt && dir.y < -1e-4) {
+            let lo = 0;
+            let hi = dist;
+            for (let step = 0; step < 8; step++) {
+                const mid = (lo + hi) * 0.5;
+                const p = origin.clone().addScaledVector(dir, mid);
+                if (p.y > floorY(p.x, p.z) + 0.05) lo = mid;
+                else hi = mid;
+            }
+            const p = origin.clone().addScaledVector(dir, hi);
+            if (p.y <= floorY(p.x, p.z) + 0.35 && hi < dist - 1e-3) {
+                dist = hi;
                 kind = 'ground';
             }
         }
@@ -712,7 +803,7 @@ export function createRangeSim(opts) {
             ordv.shotSpeed > 0 ? dist / ordv.shotSpeed : 0);
         if (!kind) return;
         const head = explode(ordv, kind, hit, null);
-        applyDamage(ordv, head, kind, hit, target);
+        applyDamage(ordv, head, kind, hit, kind === 'ground' ? target : hitTarget);
     }
 
     /* Trigger pull: the first round now, salvoCount - 1 more at salvoDelay
@@ -809,7 +900,7 @@ export function createRangeSim(opts) {
     function dropObject(muzzle, prefix, objMap, opts) {
         const o = opts || {};
         const pos = muzzle.position.clone();
-        pos.y = o.ground === false ? pos.y : 0.15;
+        pos.y = o.ground === false ? pos.y : floorY(pos.x, pos.z) + 0.15;
         const go = objMap.get(prefix + 'gameobjectclass') || {};
         const mine = objMap.get(prefix + 'mineclass') || {};
         // Proximity and trip mines trigger on an enemy inside triggerRadius
@@ -1021,7 +1112,7 @@ export function createRangeSim(opts) {
             const muzzle = muzzles()[0];
             const target = getTarget();
             const dest = target ? target.position.clone() : muzzle.position.clone().addScaledVector(muzzle.forward, 40);
-            dest.y = 0.2;
+            dest.y = floorY(dest.x, dest.z) + 0.2;
             const dist = dest.distanceTo(muzzle.position);
             if (!spend(profile.blink.ammoBase + profile.blink.ammoDist * dist)) return;
             fx.explosionAt(profile.map, 'explenter.explosionclass', muzzle.position.clone(), null)
@@ -1392,7 +1483,7 @@ export function createRangeSim(opts) {
         const building = ordv.map.get(payloadPrefix + 'spraybuildingclass');
         if (building) {
             field.sprayer = true;
-            field.altitude = num(building.setaltitude, 2);
+            field.altitude = floorY(field.pos.x, field.pos.z) + num(building.setaltitude, 2);
             field.pos.y = Math.max(field.pos.y, field.altitude);
             field.place();
         }
@@ -1465,10 +1556,10 @@ export function createRangeSim(opts) {
             shot.kill();
             return;
         }
-        if (shot.bouncer && shot.pos.y < 0.15 && shot.vel.y < 0) {
+        if (shot.bouncer && shot.pos.y < floorY(shot.pos.x, shot.pos.z) + 0.15 && shot.vel.y < 0) {
             // BounceBomb / SprayBomb on the ground: reflect, scale by
             // bounceRatio, and stop once slower than BOUNCE_REST_SPEED.
-            shot.pos.y = 0.15;
+            shot.pos.y = floorY(shot.pos.x, shot.pos.z) + 0.15;
             shot.vel.y = -shot.vel.y;
             shot.vel.multiplyScalar(shot.bounce);
             shot.bounces += 1;
@@ -1504,10 +1595,22 @@ export function createRangeSim(opts) {
                 }
             }
         }
-        const target = getTarget();
+        let target = null;
         let hit = null;
-        if (target && target.alive && segmentHitsSphere(shot.prev, shot.pos, target.position, target.radius || 0)) hit = target.kind || 'vehicle';
-        else if (shot.prev.y > 0.05 && shot.pos.y <= 0.05) hit = 'ground';
+        const sphereList = getTargetsOpt ? targetsNow() : [getTarget()].filter(Boolean);
+        for (let si = 0; si < sphereList.length; si++) {
+            const cand = sphereList[si];
+            if (cand.alive === false) continue;
+            if (segmentHitsSphere(shot.prev, shot.pos, cand.position, cand.radius || 0)) {
+                target = cand;
+                hit = cand.kind || 'vehicle';
+                break;
+            }
+        }
+        if (!hit && crossedFloor(shot.prev, shot.pos)) {
+            hit = 'ground';
+            target = getTarget();
+        }
         if (shot.popper && popperUpdate(shot, target, dt)) return;
         if (shot.armedBomb) {
             // MDM shells stay armed until they touch a ship, a fresh press (or
@@ -1597,7 +1700,7 @@ export function createRangeSim(opts) {
             return;
         }
         if (field.seeker && armed) {
-            field.pos.y = field.seekAltitude;
+            field.pos.y = floorY(field.pos.x, field.pos.z) + field.seekAltitude;
             field.vel.set(0, 0, 0);
             if (live && field.pos.distanceTo(target.position) <= field.seekRange) {
                 const to = target.position.clone().sub(field.pos);

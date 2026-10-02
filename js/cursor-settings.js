@@ -132,6 +132,19 @@
     return overlayEl;
   }
 
+  // Pointer lock (Game Explorer control mode) hides the OS cursor but this
+  // overlay is a DOM sprite, so it would keep spinning at the lock point.
+  function pointerCaptured() {
+    return !!document.pointerLockElement;
+  }
+
+  function showOverlay(on) {
+    if (!overlayEl) return;
+    const visible = on && !pointerCaptured();
+    overlayEl.classList.toggle('is-suppressed', !visible);
+    overlayEl.style.opacity = visible ? '1' : '0';
+  }
+
   function wireMouse() {
     if (mouseWired) return;
     mouseWired = true;
@@ -141,15 +154,24 @@
       if (overlayEl) overlayEl.style.opacity = '0';
     });
     document.addEventListener('mouseenter', () => {
-      if (overlayEl && isActive()) overlayEl.style.opacity = '1';
+      if (overlayEl && isActive() && !pointerCaptured()) showOverlay(true);
+    });
+    document.addEventListener('pointerlockchange', () => {
+      if (!overlayEl) return;
+      if (pointerCaptured()) showOverlay(false);
+      else if (isActive() && hasMoved) showOverlay(true);
     });
   }
 
   function onMouseMove(e) {
     if (!overlayEl || !isActive()) return;
+    if (pointerCaptured()) {
+      showOverlay(false);
+      return;
+    }
     if (!hasMoved) {
       hasMoved = true;
-      overlayEl.style.opacity = '1';
+      showOverlay(true);
     }
     overlayEl.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
   }
@@ -176,9 +198,9 @@
     if (active) {
       ensureOverlay();
       wireMouse();
-      overlayEl.style.opacity = hasMoved ? '1' : '0';
+      showOverlay(hasMoved);
     } else if (overlayEl) {
-      overlayEl.style.opacity = '0';
+      showOverlay(false);
     }
   }
 
