@@ -299,9 +299,6 @@
           <button class="nav-link" id="tab-weapons-btn" data-bs-toggle="pill" data-bs-target="#tab-weapons" type="button" role="tab" aria-controls="tab-weapons" aria-selected="false">Weapons &amp; Accuracy</button>
         </li>
         <li class="nav-item" role="presentation">
-          <button class="nav-link" id="tab-assets-btn" data-bs-toggle="pill" data-bs-target="#tab-assets" type="button" role="tab" aria-controls="tab-assets" aria-selected="false">Assets</button>
-        </li>
-        <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-positioning-btn" data-bs-toggle="pill" data-bs-target="#tab-positioning" type="button" role="tab" aria-controls="tab-positioning" aria-selected="false">Movemint</button>
         </li>
         <!-- Storyline tab (match.schema_version 22). Hidden unless the
@@ -635,26 +632,23 @@
       <!-- Tab: Combat -->
       <div class="tab-pane fade" id="tab-combat" role="tabpanel" aria-labelledby="tab-combat-btn">
         <div class="row g-4 mb-4">
-          <div class="col-lg-7">
-            <div class="card h-100" id="section-timeline">
+          <div class="col-lg-6">
+            <div class="card h-100" id="section-faction-radar">
               <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Combat Timeline</h5>
                 <div class="d-flex align-items-center gap-2">
-                  <button class="btn btn-sm btn-outline-secondary" id="timeline-zoom-reset" type="button"
-                          title="Reset zoom" aria-label="Reset zoom">
-                    <i class="bi bi-arrow-counterclockwise"></i>
-                  </button>
-                  <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-secondary active" data-timeline-mode="player">Players</button>
-                    <button class="btn btn-outline-secondary" data-timeline-mode="faction">Teams</button>
-                  </div>
-                  <button class="btn btn-sm" data-expand="section-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                  <h5 class="mb-0">Team Performance</h5>
+                  <i class="bi bi-info-circle vt-col-info"
+                     data-vt-radar-info="per-match"
+                     data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
+                     data-bs-custom-class="vt-katex-tooltip"
+                     title="Loading&hellip;"></i>
                 </div>
+                <button class="btn btn-sm" data-expand="section-faction-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
               </div>
-              <div class="card-body"><div class="chart-container"><canvas id="timeline-chart"></canvas></div></div>
+              <div class="card-body"><div class="chart-container"><canvas id="faction-radar-canvas"></canvas></div></div>
             </div>
           </div>
-          <div class="col-lg-5">
+          <div class="col-lg-6">
             <div class="card h-100" id="section-weapon-meta">
               <div class="card-header d-flex align-items-center justify-content-between">
                 <h5 class="mb-0">Weapon Meta</h5>
@@ -664,29 +658,21 @@
             </div>
           </div>
         </div>
-        <div class="card mb-4" id="section-faction-radar">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2">
-              <h5 class="mb-0">Team Performance Radar</h5>
-              <i class="bi bi-info-circle vt-col-info"
-                 data-vt-radar-info="per-match"
-                 data-bs-toggle="tooltip" data-bs-placement="bottom" data-bs-html="true"
-                 data-bs-custom-class="vt-katex-tooltip"
-                 title="Loading&hellip;"></i>
-            </div>
-            <button class="btn btn-sm" data-expand="section-faction-radar" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="faction-radar-canvas"></canvas></div></div>
-        </div>
         <div class="row g-4 mb-4">
           <div class="col-lg-6">
             <div class="card h-100" id="section-kill-feed">
-              <div class="card-header d-flex align-items-center justify-content-between">
+              <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2">
                   <h5 class="mb-0">Kill Feed</h5>
                   <span id="kill-feed-winner-badge" class="vt-winner-badge"></span>
                 </div>
-                <button class="btn btn-sm" data-expand="section-kill-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                <div class="d-flex align-items-center gap-2">
+                  <input type="search" id="kill-feed-search"
+                         class="form-control form-control-sm vt-econ-log-search"
+                         placeholder="Type to filter..." aria-label="Filter kill feed"
+                         autocomplete="off">
+                  <button class="btn btn-sm" data-expand="section-kill-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
               </div>
               <div class="card-body" id="kill-feed-content"></div>
             </div>
@@ -701,39 +687,54 @@
             </div>
           </div>
         </div>
-        <!-- Snipe Feed + Powerup/Crate Destruction Breakdown (Phase 3). Both
-             auto-hide via .vt-hide when their respective feeds are empty. -->
-        <div class="row g-4 mb-4" id="section-snipe-destruction-row">
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-snipe-feed">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Snipe Feed</h5>
-                <i class="bi bi-info-circle vt-col-info"
-                   data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                   title="<strong>Snipe Feed</strong> &mdash; pilot snipes (UnitSniped events) for this match. Card hides when no snipes occurred."></i>
-                <button class="btn btn-sm" data-expand="section-snipe-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-              </div>
-              <div class="card-body" id="snipe-feed-content"></div>
+        <!-- Snipe Feed auto-hides via .vt-hide when the feed is empty. -->
+        <div class="card mb-4" id="section-snipe-feed">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Snipe Feed</h5>
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-info-circle vt-col-info"
+                 data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
+                 title="<strong>Snipe Feed</strong> &mdash; pilot snipes (UnitSniped events) for this match. Card hides when no snipes occurred."></i>
+              <button class="btn btn-sm" data-expand="section-snipe-feed" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
             </div>
           </div>
-          <div class="col-lg-6">
-            <div class="card h-100" id="section-powerup-destructions">
-              <div class="card-header d-flex align-items-center justify-content-between">
-                <h5 class="mb-0">Powerup Destruction Breakdown</h5>
-                <i class="bi bi-info-circle vt-col-info"
-                   data-bs-toggle="tooltip" data-bs-placement="top" data-bs-html="true"
-                   title="<strong>Powerup/Crate Destruction</strong> &mdash; powerup pods/crates a real player destroyed before someone could pick them up. Effectively denying the enemy economy. Sourced from unit_destroyed events with non-zero killer_team and a known powerup ODF. Card hides when zero destructions."></i>
-                <button class="btn btn-sm" data-expand="section-powerup-destructions" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+          <div class="card-body" id="snipe-feed-content"></div>
+        </div>
+        <div class="card mb-4" id="section-timeline">
+          <div class="card-header d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Combat Timeline</h5>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-sm btn-outline-secondary" id="timeline-zoom-reset" type="button"
+                      title="Reset zoom" aria-label="Reset zoom">
+                <i class="bi bi-arrow-counterclockwise"></i>
+              </button>
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary active" data-timeline-mode="player">Players</button>
+                <button class="btn btn-outline-secondary" data-timeline-mode="faction">Teams</button>
               </div>
-              <div class="card-body" id="powerup-destructions-content"><div class="chart-container"><canvas id="powerup-destructions-chart"></canvas></div></div>
+              <button class="btn btn-sm" data-expand="section-timeline" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
             </div>
           </div>
+          <div class="card-body"><div class="chart-container"><canvas id="timeline-chart"></canvas></div></div>
         </div>
       </div>
 
       <!-- Tab: Rivalries -->
       <div class="tab-pane fade" id="tab-rivalries" role="tabpanel" aria-labelledby="tab-rivalries-btn">
-        <div class="card mb-4" id="section-rivalry-radar">
+        <div class="row g-4 mb-4 vt-rivalry-split">
+          <div class="col-lg-4">
+            <div class="vt-rivalry-menu-slot h-100">
+              <div class="card h-100" id="section-rivalries">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                  <h5 class="mb-0">Top Rivalries</h5>
+                  <button class="btn btn-sm" data-expand="section-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+                </div>
+                <div class="card-body" id="rivalries-container"></div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-8">
+        <div class="card h-100" id="section-rivalry-radar">
           <div class="card-header d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">
               <h5 class="mb-0">Rivalry Comparison</h5>
@@ -795,6 +796,8 @@
             <p class="small mt-2 mb-0 d-none vt-radar-hint" id="rivalry-radar-hint">Pick two different players to compare.</p>
           </div>
         </div>
+          </div>
+        </div>
         <div class="card mb-4" id="section-heatmap">
           <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0">Rivalry Heatmap</h5>
@@ -803,13 +806,6 @@
           <div class="card-body table-responsive">
             <table id="heatmap" class="table table-sm align-middle text-center mb-0"></table>
           </div>
-        </div>
-        <div class="card mb-4" id="section-rivalries">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Top Rivalries</h5>
-            <button class="btn btn-sm" data-expand="section-rivalries" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body" id="rivalries-container"></div>
         </div>
         <div class="card mb-4" id="section-kill-heatmap">
           <div class="card-header d-flex align-items-center justify-content-between">
@@ -852,48 +848,40 @@
             </table>
           </div>
         </div>
+        <div class="card mb-4" id="section-weapon-range">
+          <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <h5 class="mb-0">Weapon Engagement Range</h5>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="weapon-range-unit" role="radiogroup" aria-label="Engagement range unit">
+                <li class="nav-item">
+                  <button class="nav-link active" type="button" role="radio" aria-checked="true" data-range-unit="m">Meters</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link" type="button" role="radio" aria-checked="false" data-range-unit="pct">% of max</button>
+                </li>
+              </ul>
+              <ul class="nav nav-pills vt-econ-log-pills mb-0" id="weapon-range-channel" role="radiogroup" aria-label="Engagement range channel">
+                <li class="nav-item">
+                  <button class="nav-link" type="button" role="radio" aria-checked="false" data-range-channel="pvp">PvP</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link" type="button" role="radio" aria-checked="false" data-range-channel="pve">PvE</button>
+                </li>
+                <li class="nav-item">
+                  <button class="nav-link active" type="button" role="radio" aria-checked="true" data-range-channel="both">Both</button>
+                </li>
+              </ul>
+              <button class="btn btn-sm" data-expand="section-weapon-range" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
+            </div>
+          </div>
+          <div class="card-body"><div class="chart-container"><canvas id="weapon-range-chart"></canvas></div></div>
+        </div>
         <div class="card mb-4" id="section-weapon-accuracy">
           <div class="card-header d-flex align-items-center justify-content-between">
             <h5 class="mb-0">Weapon Accuracy Ranking</h5>
             <button class="btn btn-sm" data-expand="section-weapon-accuracy" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
           </div>
           <div class="card-body"><div class="chart-container-sm"><canvas id="weapon-accuracy-chart"></canvas></div></div>
-        </div>
-        <div class="card mb-4" id="section-weapon-range">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Weapon Engagement Range</h5>
-            <div class="d-flex align-items-center gap-2">
-              <div class="btn-group btn-group-sm" role="group" aria-label="Engagement range unit" id="weapon-range-unit">
-                <button class="btn btn-outline-secondary active" type="button" data-range-unit="m">Meters</button>
-                <button class="btn btn-outline-secondary" type="button" data-range-unit="pct">% of max</button>
-              </div>
-              <div class="btn-group btn-group-sm" role="group" aria-label="Engagement range channel" id="weapon-range-channel">
-                <button class="btn btn-outline-secondary" type="button" data-range-channel="pvp">PvP</button>
-                <button class="btn btn-outline-secondary" type="button" data-range-channel="pve">PvE</button>
-                <button class="btn btn-outline-secondary active" type="button" data-range-channel="both">Both</button>
-              </div>
-              <button class="btn btn-sm" data-expand="section-weapon-range" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-            </div>
-          </div>
-          <div class="card-body"><div class="chart-container"><canvas id="weapon-range-chart"></canvas></div></div>
-        </div>
-        <div class="card mb-4" id="section-hit-targets">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">Hit Distribution by Target</h5>
-            <button class="btn btn-sm" data-expand="section-hit-targets" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body" id="hit-targets-content"></div>
-        </div>
-      </div>
-
-      <!-- Tab: Assets -->
-      <div class="tab-pane fade" id="tab-assets" role="tabpanel" aria-labelledby="tab-assets-btn">
-        <div class="card mb-4" id="section-asset-damage">
-          <div class="card-header d-flex align-items-center justify-content-between">
-            <h5 class="mb-0">AI / Structure Damage</h5>
-            <button class="btn btn-sm" data-expand="section-asset-damage" title="Fullscreen"><i class="bi bi-arrows-fullscreen"></i></button>
-          </div>
-          <div class="card-body" id="asset-damage-content"></div>
         </div>
       </div>
 

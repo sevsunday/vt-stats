@@ -614,6 +614,22 @@ function classifyId(entry) {
     return 'projectile';
 }
 
+/* LauncherClass.targetReticle names the first lock-stage crosshair. A trailing
+ * ".k" is that start index (gshadow.1 → .1 .2 .3); a bare stem starts at .0,
+ * which is what the ODF guide describes. N ≤ 1, or no targetReticle, means
+ * the crosshair stays on wpnReticle. */
+function stageFramesOf(targetReticle, stages) {
+    const raw = String(targetReticle || '').trim().toLowerCase();
+    const n = Math.round(stages);
+    if (!raw || !(n > 1)) return [];
+    const numbered = /^(.*)\.(\d+)$/.exec(raw);
+    const stem = numbered ? numbered[1] : raw;
+    const start = numbered ? Number(numbered[2]) : 0;
+    const frames = [];
+    for (let i = 0; i < n; i++) frames.push(stem + '.' + (start + i));
+    return frames;
+}
+
 /* `db` (the whole database, optional) lets render, flash and particle names
  * that point into another ODF resolve; without it they resolve as inlined. */
 function buildProfile(entry, ordDb, db) {
@@ -671,8 +687,12 @@ function buildProfile(entry, ordDb, db) {
         // (read from the LauncherClass loader; the guide's 0 is not the engine's).
         lockRange: num(prop(launcher, 'lockRange'), ord.shotSpeed * ord.lifeSpan),
         coneAngle: num(prop(launcher, 'coneAngle'), 1.5707),
-        targetCount: Math.max(1, Math.round(num(prop(multi, 'targetCount'),
-            num(prop(launcher, 'targetCount'), multiLaunch ? 5 : 1)))),
+        // Two different targetCounts. MultiLauncherClass is how many locks the
+        // weapon can hold (guide default 5). LauncherClass is how many
+        // targetReticle stages the crosshair uses (0 when the ODF omits it).
+        lockCount: Math.max(1, Math.round(num(prop(multi, 'targetCount'), multiLaunch ? 5 : 1))),
+        lockStages: Math.max(0, Math.round(num(prop(launcher, 'targetCount'), 0))),
+        stageFrames: stageFramesOf(prop(launcher, 'targetReticle'), num(prop(launcher, 'targetCount'), 0)),
         loseAngle: num(prop(multi, 'loseAngle'), 1.5707),
         lockingSound: stemOf(prop(launcher, 'lockingSound')),
         lockedSound: stemOf(prop(launcher, 'lockedSound')),

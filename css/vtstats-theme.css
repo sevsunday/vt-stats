@@ -1703,9 +1703,7 @@ body::before {
     color: var(--kb-danger);
 }
 
-/* Used by Phase 3 cards (Snipe Feed, Powerup/Crate Destruction Breakdown) to fully
-   hide a card+grid-column when its data is empty, so the surrounding row
-   layout collapses cleanly. */
+/* Used by the Snipe Feed card to fully hide itself when the feed is empty. */
 .vt-hide {
     display: none !important;
 }
@@ -2643,17 +2641,80 @@ body::before {
    Larger doughnut charts, more whitespace
    ============================================================================ */
 
-#rivalries-container .rivalry-card,
+/* All Matches global rivalries keep the roomy doughnut cards.
+   The per-match Top Rivalries list is a compact sidebar selector. */
 #global-rivalries-container .rivalry-card {
     padding: 1.25rem;
     margin-bottom: 1rem;
     border-radius: 10px;
 }
 
-#rivalries-container .rivalry-card canvas,
 #global-rivalries-container .rivalry-card canvas {
     width: 100px !important;
     height: 100px !important;
+}
+
+#rivalries-container .rivalry-card {
+    padding: 0.35rem 0.55rem;
+    margin-bottom: 0.35rem;
+    gap: 0.45rem;
+    border-radius: 8px;
+}
+
+#rivalries-container .rivalry-card:last-child {
+    margin-bottom: 0;
+}
+
+#rivalries-container .rivalry-card canvas {
+    width: 44px !important;
+    height: 44px !important;
+}
+
+#rivalries-container .vt-rivalry-menu-names {
+    font-size: 0.82rem;
+    line-height: 1.25;
+}
+
+#rivalries-container .vt-rivalry-menu-split {
+    color: var(--kb-text-secondary);
+    line-height: 1.2;
+}
+
+#rivalries-container .vt-rivalry-vs {
+    color: var(--kb-text-muted);
+    font-weight: 500;
+}
+
+/* Desktop: the sidebar fills the comparison card and scrolls inside it.
+   The chart column sets the row height; the menu is taken out of flow
+   so a long list cannot stretch the page. */
+@media (min-width: 992px) {
+    .vt-rivalry-split > .col-lg-4 {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .vt-rivalry-menu-slot {
+        position: relative;
+        flex: 1 1 auto;
+        width: 100%;
+        min-height: 0;
+    }
+
+    #section-rivalries {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        margin-bottom: 0;
+    }
+
+    #section-rivalries > .card-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
 }
 
 /* ============================================================================
@@ -3569,7 +3630,7 @@ body.vt-replay-expand-active .tab-content {
 
 .vt-info-banner {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.6rem;
     padding: 0.75rem 1rem;
     border-radius: 8px;
@@ -3583,7 +3644,6 @@ body.vt-replay-expand-active .tab-content {
 .vt-info-banner > i.bi {
     color: var(--kb-info);
     font-size: 1.1rem;
-    margin-top: 0.15rem;
     flex-shrink: 0;
 }
 

@@ -1091,7 +1091,9 @@ function paintHud(state) {
     if (!rootEl || !state) return;
     const img = hudEls.reticle;
     if (img) {
-        const file = cameraMode === 'fp' ? reticleFile(state.reticleFrame || state.reticle) : '';
+        const file = cameraMode === 'fp'
+            ? (reticleFile(state.reticleFrame) || reticleFile(state.reticle))
+            : '';
         if (file !== lastReticle) {
             lastReticle = file;
             if (file) { img.hidden = false; img.src = file; } else img.hidden = true;
@@ -1136,7 +1138,7 @@ function paintHud(state) {
         hudEls.lock.hidden = !show;
         if (show && hudEls.lockFill) {
             const frac = state.archetype === 'multilock'
-                ? (state.locks + Math.min(1, state.lock)) / Math.max(1, state.chargeLevels || 1, state.locks + 1)
+                ? (state.locks + Math.min(1, state.lock)) / Math.max(1, state.lockCount || 1)
                 : Math.min(1, state.lock);
             hudEls.lockFill.style.width = (Math.max(0, Math.min(1, frac)) * 100).toFixed(0) + '%';
         }

@@ -1038,14 +1038,39 @@
         return fmt(value, digits) + (unit === '%' ? '%' : ' ' + unit);
     }
 
+    /* Stage k of a launcher crosshair: targetReticle is stage 1, and the ODF
+     * increments that suffix targetCount times. lockingReticle / lockedReticle
+     * stay labelled by the key — they are not crosshair stages. */
+    function stageLabel(v, frame) {
+        const n = v.fire && v.fire.targetCount;
+        if (!(n > 1) || !v.reticle) return '';
+        let startName = '';
+        Object.keys(v.reticle.roles).forEach((name) => {
+            if (v.reticle.roles[name] === 'target') startName = name;
+        });
+        if (!startName) return '';
+        const start = /^(.*)\.(\d+)$/.exec(startName);
+        const stem = start ? start[1] : startName;
+        const origin = start ? Number(start[2]) : 0;
+        const hit = /^(.*)\.(\d+)$/.exec(frame);
+        if (!hit || hit[1] !== stem) return '';
+        const index = Number(hit[2]) - origin;
+        return index >= 0 && index < n ? 'Stage ' + (index + 1) : '';
+    }
+
     function frameLabel(v, frame) {
         const r = v.reticle;
         const role = r.roles[frame];
         const hasLocking = Object.values(r.roles).includes('locking');
+        if (role === 'locking') return 'lockingReticle';
+        if (role === 'locked') return 'lockedReticle';
         if (role && role !== 'target') return cap(role);
+        const stage = stageLabel(v, frame);
+        if (stage) return stage;
         const meta = ctx.reticleFrame(frame);
         const suffix = meta ? meta.frame : null;
-        const lockish = v.fire.lockDelay > 0 || /launcher/.test(v.terminal || '');
+        const staged = !!(v.fire && v.fire.targetCount > 1 && Object.values(r.roles).includes('target'));
+        const lockish = !staged && (v.fire.lockDelay > 0 || /launcher/.test(v.terminal || ''));
         if (suffix != null && lockish) return 'Lock ' + suffix.toUpperCase();
         if (frame === r.primary) return hasLocking ? 'Idle' : (TOGGLE_TERMINALS.has(v.terminal) ? 'Idle' : 'Default');
         if (suffix === '1' && TOGGLE_TERMINALS.has(v.terminal)) return 'Active';

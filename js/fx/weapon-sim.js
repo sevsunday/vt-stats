@@ -244,6 +244,7 @@ export function createRangeSim(opts) {
     let barrel = 0;
     let lock = 0;
     let locks = 0;
+    let lockInCone = false;   // target was inside lockRange + coneAngle this step
     let lockSound = null;
     let chargeTime = 0;
     let arcDist = 0;
@@ -279,7 +280,7 @@ export function createRangeSim(opts) {
     function blankHud() {
         return {
             archetype: '', label: '', honesty: 'data-driven', name: '', reticle: '', reticleFrame: '',
-            ammo: 0, maxAmmo: 0, lock: 0, locks: 0, charge: 0, chargeLevels: 0, hint: '', active: false,
+            ammo: 0, maxAmmo: 0, lock: 0, locks: 0, lockCount: 0, charge: 0, chargeLevels: 0, hint: '', active: false,
         };
     }
 
@@ -1288,6 +1289,7 @@ export function createRangeSim(opts) {
         holding = false;
         lock = 0;
         locks = 0;
+        lockInCone = false;
         chargeTime = 0;
         flushHeldField();
         heldFlashLeft = 0;
@@ -1665,6 +1667,7 @@ export function createRangeSim(opts) {
         }
 
         const id = profile.id;
+        lockInCone = false;
         if (holding && (id === 'launcher' || id === 'multilock')) {
             const muzzle = muzzles()[0];
             const target = getTarget();
@@ -1676,14 +1679,15 @@ export function createRangeSim(opts) {
                 const ang = Math.acos(Math.max(-1, Math.min(1, to.dot(muzzle.forward.clone().normalize()))));
                 inCone = dist <= profile.lockRange && ang <= profile.coneAngle;
             }
+            lockInCone = inCone;
             if (inCone) {
                 lock = profile.lockDelay > 0 ? lock + stepDt / profile.lockDelay : 1;
                 if (lock >= 1) {
-                    if (id === 'multilock' && locks < profile.targetCount) {
+                    if (id === 'multilock' && locks < profile.lockCount) {
                         locks += 1;
                         lock = 0;
                         playOnce(profile.lockedSound);
-                        if (locks >= profile.targetCount && lockSound) { lockSound.stop(); lockSound = null; }
+                        if (locks >= profile.lockCount && lockSound) { lockSound.stop(); lockSound = null; }
                     } else if (id === 'launcher') {
                         if (lock !== 1) playOnce(profile.lockedSound);
                         lock = 1;
@@ -1858,17 +1862,33 @@ export function createRangeSim(opts) {
         return hud;
     }
 
+    /* Crosshair while a lock-on weapon is held. targetReticle stages (.1 .2
+     * while locking, .3 once locked for the Shadower) — never the square
+     * lockingReticle / lockedReticle sprites, which are target markers. The
+     * pre-lock stages split evenly across lockDelay; that split is not in
+     * the ODF. */
+    function lockCrosshair() {
+        const frames = profile.stageFrames || [];
+        const n = frames.length;
+        if (n <= 1) return profile.reticle;
+        const full = profile.id === 'multilock' ? locks >= profile.lockCount : lock >= 1;
+        if (full) return frames[n - 1];
+        if (lockInCone || lock > 0 || (profile.id === 'multilock' && locks > 0)) {
+            const stage = 1 + Math.floor(Math.min(Math.max(lock, 0), 0.999) * (n - 1));
+            return frames[stage - 1];
+        }
+        return profile.reticle;
+    }
+
     function readHud() {
         if (!profile) return blankHud();
         const id = profile.id;
         let frame = profile.reticle;
         let hint = '';
         if ((id === 'launcher' || id === 'multilock') && holding) {
-            const locked = id === 'launcher' ? lock >= 1 : locks > 0;
-            frame = locked ? (profile.lockedReticle || profile.reticle) : (profile.lockingReticle || profile.reticle);
-            if (profile.targetReticle && id === 'multilock' && locks > 0) frame = profile.targetReticle.replace(/\.\d+$/, '') + '.' + Math.min(9, locks);
+            frame = lockCrosshair();
             hint = id === 'multilock'
-                ? 'Locks ' + locks + ' / ' + profile.targetCount + ' — release to fire'
+                ? 'Locks ' + locks + ' / ' + profile.lockCount + ' — release to fire'
                 : (lock >= 1 ? 'Locked — release to fire' : 'Locking ' + Math.round(lock * 100) + '%');
         } else if (id === 'charge' && holding) {
             const levels = profile.charge;
@@ -1880,7 +1900,7 @@ export function createRangeSim(opts) {
                 ? 'Charging...'
                 : 'Charge ' + (idx + 1) + ' / ' + n + ' — release to fire';
         } else if (id === 'multilock' && salvoLeft > 0 && releaseTotal > 0) {
-            frame = profile.lockedReticle || profile.reticle;
+            frame = profile.reticle;
             hint = 'Releasing ' + (releaseTotal - salvoLeft) + ' of ' + releaseTotal;
         } else if (id === 'detonator') {
             const cap = profile.detonator.maxCount;
@@ -1937,6 +1957,7 @@ export function createRangeSim(opts) {
             maxAmmo,
             lock,
             locks,
+            lockCount: profile.lockCount || 0,
             charge: chargeFrac(profile.charge, chargeTime),
             chargeLevels: profile.charge.length,
             hint,

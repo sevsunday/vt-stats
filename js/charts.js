@@ -740,11 +740,12 @@ function renderPlayerWeapons(canvasId, leaderboard, weaponMeta) {
 
 // --- Doughnut: Mini rivalry chart ---
 
-function renderRivalryDoughnut(container, rivalry) {
+function renderRivalryDoughnut(container, rivalry, size) {
   const t = getThemeColors();
+  const px = size || 100;
   const canvas = document.createElement('canvas');
-  canvas.width = 100;
-  canvas.height = 100;
+  canvas.width = px;
+  canvas.height = px;
   container.appendChild(canvas);
   const ctx = canvas.getContext('2d');
 
@@ -1123,56 +1124,6 @@ function renderVehicleKills(canvasId, vehicleData) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   const labels = vehicleData.map(v => v.name);
   const values = vehicleData.map(v => v.count);
-
-  const chart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [rankedBarDataset(values)],
-    },
-    plugins: [rankedBarPlugin],
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          ...glassTooltipConfig,
-          callbacks: {
-            label: (item) => `${item.raw} destroyed`,
-          },
-        },
-      },
-      scales: {
-        x: { beginAtZero: true },
-        y: { ticks: { font: { size: 11 } } },
-      },
-    },
-  });
-  activeCharts.push(chart);
-  return chart;
-}
-
-// --- Powerup/Crate Destruction Breakdown (Phase 3) ---
-//
-// Bar chart mirror of renderVehicleKills, but counts powerup pods/crates
-// destroyed by real players (killer_team != 0). Card visibility is
-// managed by app.js renderPowerupDestructions() which hides the card
-// when the byOdf list is empty.
-function renderPowerupDestructionsChart(canvasId, byOdf) {
-  if (!byOdf || byOdf.length === 0) return null;
-  applyThemeDefaults();
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return null;
-  const ctx = canvas.getContext('2d');
-  // The pipeline emits powerup_destructions.by_odf[].name suffixed with
-  // " Powerup" (via powerup_display_name) so the same field can be
-  // used outside this chart without losing the disambiguation. The
-  // chart's card title already says "Powerup Destruction Breakdown",
-  // so the suffix is redundant noise on the y-axis -- strip it here.
-  const labels = byOdf.map(v => (v.name || '').replace(/ Powerup$/, ''));
-  const values = byOdf.map(v => v.count);
 
   const chart = new Chart(ctx, {
     type: 'bar',

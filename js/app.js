@@ -108,7 +108,6 @@
     combat:      'tab-combat-btn',
     rivalries:   'tab-rivalries-btn',
     weapons:     'tab-weapons-btn',
-    assets:      'tab-assets-btn',
     positioning: 'tab-positioning-btn',
     storyline:   'tab-storyline-btn',
     replay:      'tab-replay-btn',
@@ -2167,11 +2166,18 @@
   // Weapon Engagement Range channel toggle (PvP / PvE / Both). Re-renders the
   // range strip and the accuracy-table range fingerprint + envelope against
   // the stashed (already filtered) leaderboard. No-op until the tab rendered.
+  function markRangePill(selector, attr, value) {
+    document.querySelectorAll(selector).forEach(b => {
+      const on = b.getAttribute(attr) === value;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  }
+
   document.querySelectorAll('#weapon-range-channel [data-range-channel]').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#weapon-range-channel [data-range-channel]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
       weaponRangeChannel = btn.dataset.rangeChannel;
+      markRangePill('#weapon-range-channel [data-range-channel]', 'data-range-channel', weaponRangeChannel);
       rerenderWeaponRangeSurfaces();
     });
   });
@@ -2181,9 +2187,8 @@
   // are unit-agnostic, but re-rendering the table is harmless and cheap.
   document.querySelectorAll('#weapon-range-unit [data-range-unit]').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#weapon-range-unit [data-range-unit]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
       weaponRangeUnit = btn.dataset.rangeUnit;
+      markRangePill('#weapon-range-unit [data-range-unit]', 'data-range-unit', weaponRangeUnit);
       if (weaponsTabLeaderboard && tabRendered['#tab-weapons']) {
         const edges = currentData && currentData.match && currentData.match.distance_bin_edges;
         renderWeaponRange('weapon-range-chart', weaponsTabLeaderboard, weaponRangeChannel, edges, weaponRangeOpts());
@@ -2194,6 +2199,28 @@
   // Combat Timeline: Reset Zoom button. Walks activeCharts to find the
   // timeline-chart instance and calls plugin-zoom's resetZoom() helper.
   // No-op when the plugin isn't loaded or no timeline chart exists.
+  // Kill Feed find bar. The input lives in the card header, so re-rendering
+  // #kill-feed-content cannot steal focus. Query is in-memory only and
+  // resets on match switch (loadMatch), not on player-filter changes.
+  let killFeedQueryTimer = null;
+  const killFeedSearch = document.getElementById('kill-feed-search');
+  if (killFeedSearch) {
+    killFeedSearch.addEventListener('input', () => {
+      clearTimeout(killFeedQueryTimer);
+      killFeedQueryTimer = setTimeout(() => {
+        if (!currentData || !currentData.match || !tabRendered['#tab-combat']) return;
+        const view = currentFilteredData || currentData;
+        renderKillFeed(view.kills, currentData.match.tick_rate, currentData.match.tick_range[0]);
+      }, 120);
+    });
+    killFeedSearch.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !killFeedSearch.value) return;
+      e.preventDefault();
+      killFeedSearch.value = '';
+      killFeedSearch.dispatchEvent(new Event('input'));
+    });
+  }
+
   const timelineZoomResetBtn = document.getElementById('timeline-zoom-reset');
   if (timelineZoomResetBtn) {
     timelineZoomResetBtn.addEventListener('click', () => {
@@ -2926,7 +2953,6 @@
       renderKillFeed(data.kills, currentData.match.tick_rate, currentData.match.tick_range[0]);
       renderVehicleKills('vehicle-kills-chart', currentData.kills.by_vehicle);
       renderSnipeFeed(data.snipes, currentData.match.tick_rate, currentData.match.tick_range[0]);
-      renderPowerupDestructions('powerup-destructions-chart', data.powerup_destructions);
     });
 
     registerTabRenderer('#tab-rivalries', () => {
@@ -2964,8 +2990,7 @@
         unitGroup.style.display = hasPct ? '' : 'none';
         if (!hasPct && weaponRangeUnit !== 'm') {
           weaponRangeUnit = 'm';
-          unitGroup.querySelectorAll('[data-range-unit]').forEach(b =>
-            b.classList.toggle('active', b.dataset.rangeUnit === 'm'));
+          markRangePill('#weapon-range-unit [data-range-unit]', 'data-range-unit', 'm');
         }
       }
       if (rangeCard) {
@@ -2976,11 +3001,6 @@
           rangeCard.style.display = 'none';
         }
       }
-      renderHitTargets(data.leaderboard);
-    });
-
-    registerTabRenderer('#tab-assets', () => {
-      renderAssetDamage(data.asset_damage, data.faction_totals);
     });
 
     // Per-match Elo tab: always registered (empty-state when the match
@@ -3110,6 +3130,8 @@
     // on its own top_rivalries[0]. Preserved across filter changes.
     rivalryRadarPair = { a: null, b: null };
     rivalryRadarCustom = false;
+    const killSearch = document.getElementById('kill-feed-search');
+    if (killSearch) killSearch.value = '';
 
     // Fire ELO load in parallel with the match-JSON fetch so the
     // per-match VTSR-T Δ column has data ready by the time the
@@ -6678,32 +6700,32 @@
       const card = document.createElement('div');
       const isActive = active && active.a && active.b &&
         ((active.a === r.a && active.b === r.b) || (active.a === r.b && active.b === r.a));
-      card.className = 'rivalry-card vt-rivalry-card--interactive d-flex align-items-center gap-3 p-3 mb-3 rounded' +
+      card.className = 'rivalry-card vt-rivalry-card--interactive d-flex align-items-center rounded' +
         (isActive ? ' is-active' : '');
       card.setAttribute('role', 'button');
       card.setAttribute('tabindex', '0');
       card.dataset.rivalryPair = `${r.a}|${r.b}`;
       const info = document.createElement('div');
-      info.className = 'flex-grow-1';
+      info.className = 'flex-grow-1 min-w-0';
       // Phase 8: per-match rivalries don't carry steam64 directly
       // (the pipeline keys rivalry_matrix by name); reverse-lookup
       // against header.s64_to_nick so we can still cross-link.
       const aSid = r.a_steam64 || vtSteam64FromName(r.a);
       const bSid = r.b_steam64 || vtSteam64FromName(r.b);
       info.innerHTML = `
-        <div class="fw-bold mb-1">${vtPlayerLinkHtml(r.a, aSid)} <span style="color:var(--kb-text-muted)">vs</span> ${vtPlayerLinkHtml(r.b, bSid)}</div>
-        <div class="small" style="color:var(--kb-text-secondary)">
-          <span style="color:var(--kb-primary)">${esc(r.a)}</span> dealt ${fmt(r.a_to_b)} &nbsp;|&nbsp;
-          <span style="color:var(--kb-accent)">${esc(r.b)}</span> dealt ${fmt(r.b_to_a)}
+        <div class="fw-semibold vt-rivalry-menu-names">${vtPlayerLinkHtml(r.a, aSid)} <span class="vt-rivalry-vs">vs</span> ${vtPlayerLinkHtml(r.b, bSid)}</div>
+        <div class="small vt-rivalry-menu-split">
+          <span style="color:var(--kb-primary)">${fmt(r.a_to_b)}</span>
+          <span class="vt-rivalry-vs">·</span>
+          <span style="color:var(--kb-accent)">${fmt(r.b_to_a)}</span>
         </div>
-        <div class="small" style="color:var(--kb-text-muted)">Total: ${fmt(r.total)}</div>
       `;
       card.appendChild(info);
       const chartWrap = document.createElement('div');
-      chartWrap.className = 'd-flex align-items-center';
+      chartWrap.className = 'd-flex align-items-center flex-shrink-0';
       card.appendChild(chartWrap);
       container.appendChild(card);
-      renderRivalryDoughnut(chartWrap, r);
+      renderRivalryDoughnut(chartWrap, r, 44);
     });
   }
 
@@ -6819,11 +6841,23 @@
   function syncRivalryCardActive() {
     const cards = document.querySelectorAll('#rivalries-container .vt-rivalry-card--interactive');
     const a = rivalryRadarPair.a, b = rivalryRadarPair.b;
+    let activeCard = null;
     cards.forEach(card => {
       const [ca, cb] = (card.dataset.rivalryPair || '').split('|');
       const match = a && b && ((ca === a && cb === b) || (ca === b && cb === a));
       card.classList.toggle('is-active', !!match);
+      if (match) activeCard = card;
     });
+    if (!activeCard) return;
+    const scroller = document.getElementById('rivalries-container');
+    if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 1) return;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const cardRect = activeCard.getBoundingClientRect();
+    if (cardRect.top < scrollerRect.top) {
+      scroller.scrollTop -= (scrollerRect.top - cardRect.top);
+    } else if (cardRect.bottom > scrollerRect.bottom) {
+      scroller.scrollTop += (cardRect.bottom - scrollerRect.bottom);
+    }
   }
 
   // --- Accuracy Table ---
@@ -7074,6 +7108,25 @@
     badgeEl.innerHTML = `<i class="bi bi-question-circle me-1"></i>Outcome unclear${adjMark}`;
   }
 
+  // Case-insensitive kill-feed find. Matches the text the row actually
+  // shows: names, in-game nicks, ship/ODF labels, assist names, the
+  // pilot badge, and the m:ss clock.
+  function killFeedEntryMatches(entry, query, odfName, tickRate, minTick) {
+    const sec = tickRate > 0 ? (entry.tick - minTick) / tickRate : 0;
+    const ts = `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+    const bits = [
+      entry.killer, entry.victim,
+      entry.killer_in_game_nick, entry.victim_in_game_nick,
+      odfName(entry.killer_odf), odfName(entry.victim_odf),
+      ts,
+    ];
+    if (entry.is_pilot_victim) bits.push('pilot');
+    if (Array.isArray(entry.assists)) {
+      entry.assists.forEach(a => { if (a && a.name) bits.push(a.name); });
+    }
+    return bits.some(v => v && String(v).toLowerCase().includes(query));
+  }
+
   function renderKillFeed(kills, tickRate, minTick) {
     const container = document.getElementById('kill-feed-content');
     // Winner badge in the card header. Reads passthrough fields from
@@ -7107,6 +7160,14 @@
       // not in odf_map, which shouldn't happen post-Commit-1).
       return s.replace(/\.odf$/i, '').replace(/_/g, ' ');
     };
+    const query = (document.getElementById('kill-feed-search')?.value || '').trim().toLowerCase();
+    const feed = query
+      ? kills.feed.filter(entry => killFeedEntryMatches(entry, query, odfName, tickRate, minTick))
+      : kills.feed;
+    if (feed.length === 0) {
+      container.innerHTML = '<p style="color:var(--kb-text-muted)">No kills match this filter.</p>';
+      return;
+    }
     // Optional in-feed milestone marker at the winner's decided_at_tick.
     // Filter-safe: read from currentData.match.winner.decided_at_tick
     // (passthrough) rather than scanning the (possibly-narrowed) feed for
@@ -7124,7 +7185,7 @@
 
     let html = '<div style="max-height:320px;overflow-y:auto;">';
     let milestoneRendered = false;
-    kills.feed.forEach(entry => {
+    feed.forEach(entry => {
       // Insert milestone divider before the first feed entry whose tick
       // exceeds the decided_at_tick. (The kill_feed is already
       // chronological from the pipeline.) If every entry is earlier than
@@ -7266,27 +7327,6 @@
     container.innerHTML = html;
   }
 
-  // --- Powerup/Crate Destruction Breakdown (Phase 3) ---
-  // Mirrors renderVehicleKills; auto-hides the card when zero destructions.
-  function renderPowerupDestructions(canvasId, powerupDestructions) {
-    const card = document.getElementById('section-powerup-destructions');
-    const byOdf = (powerupDestructions && powerupDestructions.by_odf) || [];
-    if (byOdf.length === 0) {
-      if (card) card.classList.add('vt-hide');
-      return;
-    }
-    if (card) {
-      card.classList.remove('vt-hide');
-      // Init the card's info-circle tooltip(s). Idempotent; needed
-      // because the card is initially hidden via .vt-hide and Bootstrap
-      // skips hidden elements during page-wide tooltip auto-init.
-      ensureTooltips(card);
-    }
-    if (typeof renderPowerupDestructionsChart === 'function') {
-      renderPowerupDestructionsChart(canvasId, byOdf);
-    }
-  }
-
   // --- Kill Rivalry Heatmap ---
   function renderKillHeatmap(matrix, names) {
     const container = document.getElementById('kill-heatmap-content');
@@ -7331,67 +7371,6 @@
     });
     html += '</tbody>';
     table.innerHTML = html;
-  }
-
-  // --- Hit Distribution by Target ---
-  function renderHitTargets(leaderboard) {
-    const container = document.getElementById('hit-targets-content');
-    const players = leaderboard.filter(p => p.hit_targets && Object.keys(p.hit_targets).length > 0);
-    if (players.length === 0) {
-      container.innerHTML = '<p style="color:var(--kb-text-muted)">No per-target hit data available.</p>';
-      return;
-    }
-    let html = '<table class="table table-sm table-hover align-middle mb-0" style="font-size:0.8rem;">';
-    html += '<thead><tr><th>Player</th><th>Target</th><th class="text-end">Hits</th><th class="text-end">Damage</th><th class="text-end">Dmg/Hit</th><th class="text-end">% of Hits</th></tr></thead><tbody>';
-    players.forEach(p => {
-      const totalHits = Object.values(p.hit_targets).reduce((s, v) => s + (v.hits || 0), 0);
-      const entries = Object.entries(p.hit_targets).slice(0, 3);
-      entries.forEach(([target, data], idx) => {
-        const hits = data.hits || 0;
-        const dmg = data.damage || 0;
-        const dph = hits > 0 ? (dmg / hits).toFixed(1) : '—';
-        const pct = totalHits > 0 ? ((hits / totalHits) * 100).toFixed(1) : '0';
-        const playerCell = idx === 0 ? `<td class="fw-semibold" rowspan="${entries.length}">${esc(p.name)}</td>` : '';
-        html += `<tr>${playerCell}<td>${esc(target)}</td><td class="text-end">${hits.toLocaleString()}</td><td class="text-end">${fmt(dmg)}</td><td class="text-end">${dph}</td><td class="text-end">${pct}%</td></tr>`;
-      });
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
-  }
-
-  // --- Asset Damage ---
-  function renderAssetDamage(assetData, factionTotals) {
-    const container = document.getElementById('asset-damage-content');
-    if (!assetData || Object.keys(assetData.by_player).length === 0) {
-      container.innerHTML = '<p style="color:var(--kb-text-muted)">No AI/structure damage recorded.</p>';
-      return;
-    }
-    const f1a = assetData.by_faction['1'] || { dealt: 0, received: 0 };
-    const f2a = assetData.by_faction['2'] || { dealt: 0, received: 0 };
-
-    let html = `
-      <div class="row g-3 mb-3">
-        <div class="col-md-6">
-          <div class="p-2 rounded" style="background:var(--kb-bg-subtle);border-left:3px solid var(--kb-primary);">
-            <strong style="color:var(--kb-primary)">Team 1 Assets:</strong> Dealt ${fmt(f1a.dealt)} | Lost ${fmt(f1a.received)}
-          </div>
-        </div>
-        <div class="col-md-6">
-          <div class="p-2 rounded" style="background:var(--kb-bg-subtle);border-left:3px solid var(--kb-accent);">
-            <strong style="color:var(--kb-accent)">Team 2 Assets:</strong> Dealt ${fmt(f2a.dealt)} | Lost ${fmt(f2a.received)}
-          </div>
-        </div>
-      </div>
-      <table class="table table-sm table-hover mb-0" style="font-size:0.85rem;">
-        <thead><tr><th>Player</th><th class="text-end">AI/Structure Dealt</th><th class="text-end">AI/Structure Lost</th></tr></thead>
-        <tbody>`;
-
-    const players = Object.entries(assetData.by_player).sort((a, b) => b[1].dealt - a[1].dealt);
-    players.forEach(([name, d]) => {
-      html += `<tr><td>${esc(name)}</td><td class="text-end">${fmt(d.dealt)}</td><td class="text-end">${fmt(d.received)}</td></tr>`;
-    });
-    html += '</tbody></table>';
-    container.innerHTML = html;
   }
 
   // --- All Matches ---
@@ -9296,6 +9275,7 @@
     // to drive the compare-mode radar.
     const rivCard = e.target.closest('[data-rivalry-pair]');
     if (rivCard && rivCard.closest('#rivalries-container')) {
+      if (e.target.closest('a')) return;
       const [a, b] = (rivCard.dataset.rivalryPair || '').split('|');
       if (a && b && currentFilteredData) {
         rivalryRadarPair = { a, b };
@@ -9344,6 +9324,7 @@
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const rivCard = e.target.closest && e.target.closest('[data-rivalry-pair]');
     if (rivCard && rivCard.closest('#rivalries-container')) {
+      if (e.target.closest('a')) return;
       e.preventDefault();
       const [a, b] = (rivCard.dataset.rivalryPair || '').split('|');
       if (a && b && currentFilteredData) {
