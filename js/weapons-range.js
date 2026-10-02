@@ -54,6 +54,7 @@ let target = null;
 let targetKind = 'ship';
 let targetRadius = 6;
 let targetLift = 0;
+let targetCom = null;   // hp_com node, the engine's lock-circle anchor; null = mesh origin
 let targetName = '';
 let targetLetter = 'N';
 let hp = 0;
@@ -1100,7 +1101,12 @@ function paintLockCircles(state) {
         return;
     }
     const rect = stage.getBoundingClientRect();
-    const p = target.position.clone().project(viewer.camera);
+    // The engine centres the ring on the target's hp_com hardpoint (005661EC),
+    // and on the object's own transform when that node is absent.
+    const anchor = targetCom
+        ? targetCom.getWorldPosition(_v)
+        : _v.copy(target.position);
+    const p = anchor.project(viewer.camera);
     if (p.z > 1) {
         box.replaceChildren();
         return;
@@ -1196,9 +1202,18 @@ async function loadModels(snap) {
     orbitAngle = Math.PI * 0.75;
 }
 
+function findHpCom(root) {
+    let found = null;
+    root.traverse((o) => {
+        if (!found && o.name && o.name.toLowerCase() === 'hp_com') found = o;
+    });
+    return found;
+}
+
 async function loadTarget(snap) {
     viewer.clearProp();
     target = null;
+    targetCom = null;
     const url = snap.targetThumb ? GEOM + snap.targetThumb + '.glb' : '';
     if (url) {
         target = await viewer.loadProp(url);
@@ -1208,6 +1223,7 @@ async function loadTarget(snap) {
             box.getSize(size);
             targetRadius = Math.max(3, size.length() * 0.35);
             targetLift = -box.min.y;
+            targetCom = findHpCom(target);
         }
     }
     targetKind = snap.targetKind || 'ship';
