@@ -1267,6 +1267,9 @@
             if (p.shotSpeed != null) projRows.push(statRow('Speed', num(p.shotSpeed, 1, 'm/s'), 'shotSpeed of the ordnance'));
             if (p.lifeSpan != null) projRows.push(statRow('Lifespan', p.lifeSpan > 1e20 ? 'unlimited' : num(p.lifeSpan, 3, 's'), 'lifeSpan of the ordnance'));
             if (p.range != null) projRows.push(statRow('Range', p.lobbed ? 'lobbed' : num(p.range, 0, 'm'), ex.range));
+            if (p.lockRange > 0 && /launcher/.test(v.terminal || '')) {
+                projRows.push(statRow('Lock range', num(p.lockRange, 0, 'm'), 'LauncherClass lockRange'));
+            }
             if (p.aiRange != null) projRows.push(statRow('AI range', num(p.aiRange, 0, 'm'), 'WeaponClass aiRange'));
             if (p.startDist != null) projRows.push(statRow('Arc reach', fmt(p.startDist) + '\u2013' + fmt(p.range) + ' m', 'ArcCannonClass startDist to finishDist'));
         }
@@ -1858,6 +1861,11 @@
             letter: ctx.damageLetter(tg),
             shield: tg ? tg.shieldClass : null,
             distanceHint: range && range < 2000 ? range : null,
+            // LauncherClass lockRange, only for the lock-on family. The range
+            // places the target just inside it instead of at the missile's reach.
+            lockHint: v && /launcher/.test(v.terminal || '') && sc && sc.r && sc.r.projectile
+                && sc.r.projectile.lockRange > 0
+                ? sc.r.projectile.lockRange : null,
         };
     }
 

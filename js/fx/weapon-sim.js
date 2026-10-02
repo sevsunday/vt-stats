@@ -118,6 +118,32 @@ const AUTOFIRE = new Set(['projectile', 'mortar', 'popper', 'spray', 'missile', 
 const HOLD_ARCHETYPES = new Set(['launcher', 'multilock', 'charge', 'arc', 'static', 'magnet', 'blink', 'detonator',
     'phantom', 'damper', 'site', 'jetpack', 'shield']);
 
+/* Lock-circle geometry from the decrypted launcher (0061E41B / 006214F4).
+ * Screen pixels, after the target is projected. D3DCOLOR AARRGGBB. */
+const LOCK_COLOR_LOCKING = '#ffff00';
+const LOCK_COLOR_LOCKED = '#ff0000';
+const LOCK_RADIUS_FAR = 128;
+const LOCK_RADIUS_NEAR = 16;
+const LOCK_RADIUS_DROP = 112;
+const LOCK_STACK_STEP = 3;
+
+function lockCircleRadius(progress, locked) {
+    if (locked) return LOCK_RADIUS_NEAR;
+    const p = Math.max(0, Math.min(1, progress));
+    return LOCK_RADIUS_FAR - LOCK_RADIUS_DROP * p;
+}
+
+function lockStackRadius(ordinal) {
+    return LOCK_RADIUS_NEAR + LOCK_STACK_STEP * ordinal;
+}
+
+/* Default target distance for a lock-on weapon: just inside lockRange,
+ * never past the range slider's 400 m cap. */
+const LOCK_RANGE_DIST_MAX = 400;
+function lockStartDistance(lockRange) {
+    return Math.min(LOCK_RANGE_DIST_MAX, lockRange * 0.9);
+}
+
 function surface(kind) {
     if (kind === 'ground') return 'explground';
     if (kind === 'building') return 'explbuilding';
@@ -280,7 +306,8 @@ export function createRangeSim(opts) {
     function blankHud() {
         return {
             archetype: '', label: '', honesty: 'data-driven', name: '', reticle: '', reticleFrame: '',
-            ammo: 0, maxAmmo: 0, lock: 0, locks: 0, lockCount: 0, charge: 0, chargeLevels: 0, hint: '', active: false,
+            ammo: 0, maxAmmo: 0, lock: 0, locks: 0, lockCount: 0, markers: [],
+            charge: 0, chargeLevels: 0, hint: '', active: false,
         };
     }
 
@@ -1681,7 +1708,13 @@ export function createRangeSim(opts) {
             }
             lockInCone = inCone;
             if (inCone) {
-                lock = profile.lockDelay > 0 ? lock + stepDt / profile.lockDelay : 1;
+                // Launcher ctor: stageTime = lockDelay / targetCount, and the
+                // lock completes after (targetCount - 1) stages (0061E6CD).
+                const stages = profile.lockStages > 1 ? profile.lockStages : 0;
+                const acquire = profile.lockDelay > 0
+                    ? (stages > 1 ? profile.lockDelay * (stages - 1) / stages : profile.lockDelay)
+                    : 0;
+                lock = acquire > 0 ? lock + stepDt / acquire : 1;
                 if (lock >= 1) {
                     if (id === 'multilock' && locks < profile.lockCount) {
                         locks += 1;
@@ -1862,11 +1895,9 @@ export function createRangeSim(opts) {
         return hud;
     }
 
-    /* Crosshair while a lock-on weapon is held. targetReticle stages (.1 .2
-     * while locking, .3 once locked for the Shadower) — never the square
-     * lockingReticle / lockedReticle sprites, which are target markers. The
-     * pre-lock stages split evenly across lockDelay; that split is not in
-     * the ODF. */
+    /* Crosshair while a lock-on weapon is held. The engine adds lockState
+     * (0 .. targetCount-2 while locking, targetCount-1 once locked) to the
+     * targetReticle sprite (0061E5B7). */
     function lockCrosshair() {
         const frames = profile.stageFrames || [];
         const n = frames.length;
@@ -1874,10 +1905,39 @@ export function createRangeSim(opts) {
         const full = profile.id === 'multilock' ? locks >= profile.lockCount : lock >= 1;
         if (full) return frames[n - 1];
         if (lockInCone || lock > 0 || (profile.id === 'multilock' && locks > 0)) {
-            const stage = 1 + Math.floor(Math.min(Math.max(lock, 0), 0.999) * (n - 1));
-            return frames[stage - 1];
+            const stage = Math.min(n - 1, Math.floor(Math.max(lock, 0) * (n - 1)));
+            return frames[lock >= 1 ? n - 1 : stage];
         }
         return profile.reticle;
+    }
+
+    /* Screen-space lock circles. 0061E41B draws one on the current target,
+     * radius 128 - 112*progress while locking and 16 once locked; the flush
+     * (005C42C4) projects the target and strokes a 32-segment circle.
+     * MultiLauncher (006214F4) adds one circle per completed lock, radius
+     * 16 + 3*k with k the 1-based count of locks on that same target.
+     * Colours are the D3DCOLOR globals those draws pass: 0xFFFFFF00 yellow
+     * while locking, 0xFFFF0000 red once locked. */
+    function lockMarkers() {
+        const id = profile.id;
+        if (id !== 'launcher' && id !== 'multilock') return [];
+        const out = [];
+        if (id === 'multilock') {
+            for (let k = 1; k <= locks; k++) {
+                out.push({ radius: lockStackRadius(k), color: LOCK_COLOR_LOCKED, locked: true });
+            }
+        }
+        const live = holding && (lockInCone || lock > 0);
+        if (live && !(id === 'multilock' && locks >= profile.lockCount)) {
+            const locked = id !== 'multilock' && lock >= 1;
+            const p = Math.max(0, Math.min(1, lock));
+            out.push({
+                radius: lockCircleRadius(p, locked),
+                color: locked ? LOCK_COLOR_LOCKED : LOCK_COLOR_LOCKING,
+                locked,
+            });
+        }
+        return out;
     }
 
     function readHud() {
@@ -1958,6 +2018,7 @@ export function createRangeSim(opts) {
             lock,
             locks,
             lockCount: profile.lockCount || 0,
+            markers: lockMarkers(),
             charge: chargeFrac(profile.charge, chargeTime),
             chargeLevels: profile.charge.length,
             hint,
@@ -1987,4 +2048,5 @@ export function createRangeSim(opts) {
 export {
     segmentHitsSphere, lobAngle, applyCone, engineDir, flareDir, sprayDir, waverRates, flareFieldFactor, sprayHitEnds,
     AUTOFIRE, HOLD_ARCHETYPES, FLASH_EXTRA_SEC, OFFSCREEN_CULL_M, BOUNCE_REST_SPEED, chargePlayRate, chargeFrameCost,
+    lockCircleRadius, lockStackRadius, lockStartDistance, LOCK_COLOR_LOCKING, LOCK_COLOR_LOCKED,
 };

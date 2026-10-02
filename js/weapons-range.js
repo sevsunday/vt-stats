@@ -12,7 +12,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ObjectViewer } from './models-viewer.js';
 import { createFxRuntime, SIM_GRAVITY } from './fx/odf-fx.js';
 import { createAudio } from './fx/odf-audio.js';
-import { createRangeSim } from './fx/weapon-sim.js';
+import { createRangeSim, lockStartDistance } from './fx/weapon-sim.js';
 import { buildProfile, profileAssets, shieldEffectFor, explosionEntry, stemOf } from './fx/weapon-profile.js';
 import {
     weaveWeapon, planWeave, priorityOrder, allInRangeAt, TURN_SEC, CLOSE_STOP_M, PLAN_MAX_SEC,
@@ -1087,6 +1087,43 @@ function floatDamage(amount, position) {
     window.setTimeout(() => el.remove(), 950);
 }
 
+/* One circle per lock, centred on the projected target. Radii are the
+ * engine's screen pixels (128 shrinking to 16, plus 3 px per stacked
+ * multi-lock). */
+function paintLockCircles(state) {
+    const box = hudEls.locks;
+    if (!box) return;
+    const markers = (state && state.markers) || [];
+    const stage = rootEl.querySelector('.vt-wpn-range-stage');
+    if (!markers.length || !target || !viewer || !stage) {
+        box.replaceChildren();
+        return;
+    }
+    const rect = stage.getBoundingClientRect();
+    const p = target.position.clone().project(viewer.camera);
+    if (p.z > 1) {
+        box.replaceChildren();
+        return;
+    }
+    const x = (p.x + 1) / 2 * rect.width;
+    const y = (1 - (p.y + 1) / 2) * rect.height;
+    while (box.children.length < markers.length) {
+        const el = document.createElement('div');
+        el.className = 'vt-wpn-range-lock-ring';
+        box.appendChild(el);
+    }
+    while (box.children.length > markers.length) box.lastChild.remove();
+    markers.forEach((m, i) => {
+        const el = box.children[i];
+        const d = Math.max(2, m.radius * 2);
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.width = d + 'px';
+        el.style.height = d + 'px';
+        el.style.borderColor = m.color;
+    });
+}
+
 function paintHud(state) {
     if (!rootEl || !state) return;
     const img = hudEls.reticle;
@@ -1133,6 +1170,7 @@ function paintHud(state) {
             el.classList.toggle('is-firing', !!firing && (el.dataset.slotKey === firing || el.dataset.weaveKey === firing));
         });
     }
+    paintLockCircles(state);
     if (hudEls.lock) {
         const show = (state.archetype === 'launcher' || state.archetype === 'multilock') && state.active;
         hudEls.lock.hidden = !show;
@@ -1194,6 +1232,7 @@ export async function mount(container, shared) {
         + '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>'
         + 'Loading visuals</div>'
         + '<img data-range-reticle alt="" class="vt-wpn-range-reticle" hidden>'
+        + '<div data-range-locks class="vt-wpn-range-locks"></div>'
         + '<div class="vt-wpn-range-card vt-wpn-range-card-weapon">'
         + '<div data-range-weapon class="vt-wpn-range-weapon"></div>'
         + '<div class="vt-wpn-range-bar-row"><span class="vt-wpn-range-bar-label">Ammo</span>'
@@ -1260,6 +1299,7 @@ export async function mount(container, shared) {
 
     hudEls = {
         reticle: rootEl.querySelector('[data-range-reticle]'),
+        locks: rootEl.querySelector('[data-range-locks]'),
         weapon: rootEl.querySelector('[data-range-weapon]'),
         ammoFill: rootEl.querySelector('[data-range-ammo-fill]'),
         ammoText: rootEl.querySelector('[data-range-ammo-text]'),
@@ -1626,8 +1666,10 @@ async function doSync(snap) {
         }
         if (epoch !== warmEpoch || !viewer) return;
         if (shooterChanged || targetChanged) applyDistanceFloor();
-        if (snap.distanceHint && snap.distanceHint > 5 && snap.distanceHint < 5000 && (shooterChanged || scenarioChanged)) {
-            startDistance = Math.max(minDistance(), Math.min(400, snap.distanceHint * 0.45));
+        const hint = snap.lockHint > 0 ? lockStartDistance(snap.lockHint) : snap.distanceHint;
+        const hintScale = snap.lockHint > 0 ? 1 : 0.45;
+        if (hint && hint > 5 && hint < 5000 && (shooterChanged || scenarioChanged)) {
+            startDistance = Math.max(minDistance(), Math.min(400, hint * hintScale));
             distance = startDistance;
             const slider = rootEl.querySelector('[data-range-dist]');
             if (slider) slider.value = String(Math.round(startDistance));
