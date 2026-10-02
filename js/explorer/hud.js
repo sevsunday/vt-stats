@@ -2,11 +2,12 @@
  *
  * Bottom-left: the 260 x 140 radar dish (Play_CockpitRadarWidth/Height),
  * heading-up, compass letters on the rim, player diamond at centre.
- * Bottom-right: StatusPanel (90 x 90, 138 px in from the edge): the left
- * half of a tall oval, segmented, open to the right. Hull on the top half
- * (HULLGAUGE green / yellow / red by state) and ammo on the bottom half
- * (AMMOGAUGE blue), both filling from 9 o'clock out to 12 and 6 o'clock,
- * with the numbers in the open half. Right of it: WeaponPanel (128 x 70),
+ * Bottom-right: StatusPanel (138 px in from the edge; the game's box is
+ * 90 x 90, ours is GAUGE_W x GAUGE_H): the left half of a wide oval,
+ * segmented, open to the right. Hull on the top half (HULLGAUGE green /
+ * yellow / red by state) and ammo on the bottom half (AMMOGAUGE blue),
+ * both filling from 9 o'clock out to 12 and 6 o'clock, with the numbers
+ * just right of the open ends. Right of it: WeaponPanel (128 x 70),
  * four 16 px pill rows of icon badge, name and shots left. Colours come
  * from the harvested bzgame_init_color palette as scoped custom properties;
  * CSS falls back to theme tokens.
@@ -21,10 +22,17 @@ const RADAR_H = 140;
 const RADAR_DEFAULT_RANGE = 300;   // CraftClass.rangeScan when the ODF has none
 const HP_ICONS = { GUN: 'gun', CANN: 'cannon', MORT: 'mortar', ROCK: 'rocket', SPEC: 'special', SHIE: 'shield', HAND: 'hand', PACK: 'pack' };
 const SLOT_WORDS = { GUN: 'Gun', CANN: 'Cannon', MORT: 'Mortar', ROCK: 'Rocket', SPEC: 'Special', SHIE: 'Shield', HAND: 'Hand', PACK: 'Pack' };
-// Gauge geometry in the 90 x 90 StatusPanel box.
-const GAUGE_CX = 45;
+// Gauge geometry in the StatusPanel box. The viewBox is GAUGE_W x GAUGE_H
+// and .vt-xp-gaugepanel in css/explorer.css is the same box in px, so one
+// unit here is one (scaled) px there. The oval is drawn wide: with the
+// 13 px stroke its outer box is about 1.3x as wide as tall, so the "C"
+// reads as an elongated arc, and the number column sits in the box to
+// the right of the open ends.
+const GAUGE_W = 164;
+const GAUGE_H = 90;
+const GAUGE_CX = 116;
 const GAUGE_CY = 45;
-const GAUGE_RX = 32;          // tall oval: the drawn arc is its left half
+const GAUGE_RX = 108;         // wide oval: the drawn arc is its left half
 const GAUGE_RY = 40;
 const GAUGE_OPEN = 90;        // ends at 12 and 6 o'clock: a half oval, open to the right
 const TOAST_MS = 1200;
@@ -94,7 +102,7 @@ export function createHud(root, reticles, hudArt) {
 
   // ---- status "C" gauge + weapon panel ---------------------------------------
   const statusPanel = el('div', 'vt-xp-gaugepanel');
-  const svg = svgEl('svg', { viewBox: '0 0 90 90', class: 'vt-xp-gauge' });
+  const svg = svgEl('svg', { viewBox: `0 0 ${GAUGE_W} ${GAUGE_H}`, class: 'vt-xp-gauge' });
   const arc = (a0, a1) => ellipseArcPath(GAUGE_CX, GAUGE_CY, GAUGE_RX, GAUGE_RY, a0, a1);
   const trackTop = svgEl('path', { class: 'vt-xp-gauge-track', d: arc(180, GAUGE_OPEN) });
   const trackBot = svgEl('path', { class: 'vt-xp-gauge-track', d: arc(180, 360 - GAUGE_OPEN) });

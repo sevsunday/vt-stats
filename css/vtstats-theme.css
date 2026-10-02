@@ -104,6 +104,23 @@ code, pre, .font-monospace {
     letter-spacing: -0.02em;
 }
 
+/* Theme foreground for the "VT Stats" brand link. Bootstrap's own
+   .navbar-brand colour is near-black, which only shows on a shell that
+   omits the inline colour the other pages carry (the Game Explorer). The
+   :hover / :focus pair outranks Bootstrap's hover rule so the title stays
+   put on hover; the crosshair icon takes the primary tint like every
+   other shell. */
+.navbar-brand,
+.navbar-brand:hover,
+.navbar-brand:focus {
+    color: var(--kb-text-primary);
+    text-decoration: none;
+}
+
+.navbar-brand > .bi {
+    color: var(--kb-primary);
+}
+
 /* ============================================================================
    MIGRATED INLINE STYLES
    Moved from index.html <style> block for modularity

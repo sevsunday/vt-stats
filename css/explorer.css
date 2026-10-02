@@ -42,6 +42,19 @@
   z-index: 2;
 }
 
+/* "Beta" chip beside the brand: main.css's warning badge (amber, dark
+ * text) sized for the navbar. The brand drops its margin-end (me-0) so
+ * the container's gap alone separates the two. */
+.vt-xp-beta {
+  align-self: center;
+  padding: 0.3em 0.55em;
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* ---- cockpit overlay ---------------------------------------------------- */
 
 .vt-xp-hud {
@@ -70,11 +83,15 @@
   height: calc(140px * var(--vt-xp-scale));
 }
 
+/* The box is the SVG viewBox (GAUGE_W x GAUGE_H in js/explorer/hud.js) in
+ * scaled px, so one viewBox unit is one px * scale. Anchored at the same
+ * right edge as the game's 90-wide panel, it grows leftward and stays
+ * clear of the weapon pills. */
 .vt-xp-gaugepanel {
   position: absolute;
   right: calc(138px * var(--vt-xp-scale));
   bottom: calc(4px * var(--vt-xp-scale));
-  width: calc(90px * var(--vt-xp-scale));
+  width: calc(164px * var(--vt-xp-scale));
   height: calc(90px * var(--vt-xp-scale));
 }
 
@@ -86,7 +103,7 @@
   overflow: visible;
 }
 
-/* Left half of a tall oval: a dark track under tick-dashed fills. */
+/* Left half of a wide oval: a dark track under tick-dashed fills. */
 .vt-xp-gauge-track {
   fill: none;
   stroke: color-mix(in srgb, var(--kb-bg-body) 60%, transparent);
@@ -107,12 +124,13 @@
 .vt-xp-gauge-hull.is-bad { stroke: var(--vt-xp-hull-bad); }
 .vt-xp-gauge-ammo { stroke: var(--vt-xp-ammo); }
 
-/* Numbers sit in the open right half, clear of the stroke. */
+/* Numbers sit just right of the open ends (GAUGE_CX + the half stroke),
+ * clear of the arc. */
 .vt-xp-hull-text,
 .vt-xp-ammo-text {
   position: absolute;
-  left: calc(52px * var(--vt-xp-scale));
-  width: calc(46px * var(--vt-xp-scale));
+  left: calc(123px * var(--vt-xp-scale));
+  width: calc(40px * var(--vt-xp-scale));
   text-align: left;
   font-family: var(--vt-font-mono, ui-monospace, monospace);
   font-size: calc(12px * var(--vt-xp-scale));
