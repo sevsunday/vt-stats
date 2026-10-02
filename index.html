@@ -324,13 +324,13 @@
           </div>
           <div class="card-body" id="player-profile-content"></div>
         </div>
-        <!-- Outcome: team panels first, then the Balonce read (gauge,
-             verdict), then how it played out. Rendered together so the
-             overview does not repeat the roster. The read is
-             js/balonce-meter.js::renderMatchSection() from committed JSON
-             (elo_history + elo_commander_history) — match-global, ALWAYS
-             unfiltered. Team panels still render when the match was not
-             rated; the read slot stays empty. -->
+        <!-- Outcome: team panels first, then a closed Balonce & Elo
+             disclosure (gauge, verdict, how it played out). Rendered
+             together so the overview does not repeat the roster. The read
+             is js/balonce-meter.js::renderMatchSection() from committed
+             JSON (elo_history + elo_commander_history) — match-global,
+             ALWAYS unfiltered. Team panels still render when the match
+             was not rated; the disclosure hides while both slots are empty. -->
         <div class="card mb-4" id="section-faction">
           <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
             <div class="d-flex align-items-center gap-2">
@@ -361,8 +361,14 @@
           </div>
           <div class="card-body">
             <div class="row g-3" id="faction-content"></div>
-            <div id="outcome-read"></div>
-            <div id="outcome-after"></div>
+            <details class="vt-balonce-fold" id="outcome-elo-fold">
+              <summary>
+                <span class="vt-balonce-fold-label">Balonce &amp; Elo</span>
+                <i class="bi bi-chevron-down vt-balonce-fold-chevron" aria-hidden="true"></i>
+              </summary>
+              <div id="outcome-read"></div>
+              <div id="outcome-after"></div>
+            </details>
           </div>
         </div>
         <div class="card mb-4 vt-highlights-card d-none" id="section-highlights">

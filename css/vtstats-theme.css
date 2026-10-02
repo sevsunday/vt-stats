@@ -2091,8 +2091,76 @@ body::before {
     display: none;
 }
 
-#faction-content:not(.d-none) + #outcome-read:not(:empty) {
+/* The gauge, verdict, and played-out read start closed. The disclosure
+   hides when both slots are empty so an unrated match shows only the
+   team panels. */
+#faction-content:not(.d-none) + #outcome-elo-fold {
     margin-top: 1.35rem;
+}
+
+#outcome-elo-fold:not(:has(#outcome-read:not(:empty), #outcome-after:not(:empty))) {
+    display: none;
+}
+
+#outcome-elo-fold > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 2.25rem;
+    margin: 0;
+    padding: 0.15rem 0;
+    list-style: none;
+    cursor: pointer;
+}
+
+#outcome-elo-fold > summary::-webkit-details-marker {
+    display: none;
+}
+
+#outcome-elo-fold > summary::marker {
+    content: none;
+}
+
+#outcome-elo-fold > summary:hover .vt-balonce-fold-label,
+#outcome-elo-fold > summary:hover .vt-balonce-fold-chevron {
+    color: var(--kb-text-primary);
+}
+
+#outcome-elo-fold > summary:focus {
+    outline: none;
+}
+
+#outcome-elo-fold > summary:focus-visible {
+    outline: 2px solid var(--kb-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.vt-balonce-fold-label {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--kb-text-secondary);
+}
+
+.vt-balonce-fold-chevron {
+    font-size: 0.9rem;
+    color: var(--kb-text-secondary);
+    flex-shrink: 0;
+    transition: transform var(--vt-anim-duration, 150ms) var(--vt-anim-ease, ease);
+}
+
+#outcome-elo-fold[open] .vt-balonce-fold-chevron {
+    transform: rotate(180deg);
+}
+
+#outcome-elo-fold[open] > summary {
+    margin-bottom: 0.85rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vt-balonce-fold-chevron { transition: none; }
 }
 
 /* Played-out is the next chapter after the call, so it keeps a divider. */
