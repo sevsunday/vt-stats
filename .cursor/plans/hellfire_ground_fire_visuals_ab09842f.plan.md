@@ -4,28 +4,28 @@ overview: Make the Shooting range draw the Hellfire's burning ground field by (1
 todos:
   - id: fx-emit-unforce
     content: "odf-fx.js: spawn named emit children as their own class; keep forced twirl only for twirl_trail self-emission; emitInherit from node.vel"
-    status: in_progress
+    status: completed
   - id: fx-emit-immediate
     content: "odf-fx.js: first emission immediate (emitNext = 0) for draw_emit / draw_twirl_trail"
-    status: pending
+    status: completed
   - id: fx-multi-carrier
     content: "odf-fx.js: simulated draw_multi becomes a carrier node; kids ride it via setOrigin and release when it dies"
-    status: pending
+    status: completed
   - id: fx-dust-depth-cull
     content: "odf-fx.js: sim_dust spawns on ground, depth guard 5 -> 8, cull() skips host-attached nodes; update header comment"
-    status: pending
+    status: completed
   - id: profile-effectname
     content: "weapon-profile.js SECTION_REF_KEY + build_fx_assets.py SECTION_REF_RE: add effectname\\d*"
-    status: pending
+    status: completed
   - id: gate
     content: "check_weapon_fx.mjs: REF_KEY, Hellfire pins, headless fx-runtime assertions (flames present, no emitter drawn as sprite, emit-once, carrier death, budget)"
-    status: pending
+    status: completed
   - id: docs
     content: DEVELOPER_GUIDE render rules + AGENTS.md / project-overview.mdc clause
-    status: pending
+    status: completed
   - id: verify
     content: Run gate; browser-check both Hellfires plus Plasma/Tower and a mortar impact in the range
-    status: pending
+    status: completed
 isProject: false
 ---
 

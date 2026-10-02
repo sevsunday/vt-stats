@@ -21,7 +21,13 @@
  *    until the last section ages out.
  *  - draw_geom scales the mesh by startRadius directly and points its local
  *    -Z along the emitter's forward / the round's velocity.
- *  - draw_emit draws nothing itself (EmitRender is not a ColorRender).
+ *  - draw_emit draws nothing itself (EmitRender is not a ColorRender). Its first
+ *    emission is immediate, then every emitDelay; a child named by emitName is
+ *    spawned as its own class (own simulateBase, lifeTime and emitter). Only a
+ *    twirl trail's self-emission is a puff of the trail, lasting emitLife.
+ *    emitDelay longer than lifeTime is the ODF "emit once" idiom. A draw_multi
+ *    with a simulateBase is one particle: the children ride it and die with it.
+ *    sim_dust snaps a free particle onto the ground at birth.
  *  - draw_bolt is laid ONCE per render and only fades: each segment heads
  *    for the impact point along normalize(remaining + jitter), jitter uniform
  *    +-segmentVariance per axis in the emitter frame (boltPath). Tight at the
@@ -465,9 +471,15 @@ export function createFxRuntime(scene, assets) {
     }
 
     function cull() {
+        // Host-attached nodes (free: false) are a mine's own emitters and the
+        // children riding a simulated draw_multi. Overflow drops the oldest
+        // free sprite instead, so the chain that feeds them stays up.
         while (live.length > budget) {
-            const oldest = live.shift();
-            if (oldest) oldest.dispose();
+            const i = live.findIndex((n) => n && !n.host && !n.dead);
+            if (i < 0) break;
+            const oldest = live.splice(i, 1)[0];
+            oldest.dispose();
+            forget(oldest);
         }
     }
 
@@ -509,9 +521,11 @@ export function createFxRuntime(scene, assets) {
         return out.normalize();
     }
 
-    /* Spawn one render section. opts: position, velocity, segment [a, b]. */
+    /* Spawn one render section. opts: position, velocity, segment [a, b],
+     * free: false when the render rides a host. depth is only a cycle guard
+     * (Hellfire's ember chain is six deep); it is not an LOD cutoff. */
     function spawn(map, section, opts, depth) {
-        if (!section || depth > 5) return null;
+        if (!section || depth > 8) return null;
         let base = String(section.renderbase || '').toLowerCase();
         const prefix = prefixOf(section.__key);
         if (base && !base.startsWith('draw_')) {
@@ -529,12 +543,49 @@ export function createFxRuntime(scene, assets) {
             console.warn('odf-fx: unknown renderBase ' + base + ' drawn as a sprite');
         }
         if (base === 'draw_multi') {
+            const o = opts || {};
+            const multiSim = String(section.simulatebase || '').toLowerCase();
+            // A draw_multi with a simulateBase is one particle (Hellfire's
+            // fire3, a mortar blast's secondaryrender). The carrier steps the
+            // sim and owns the lifetime; the children ride it. An attached
+            // render (free: false) or a beam stays a group that follows setOrigin.
+            const carried = !!(multiSim && multiSim !== 'sim_null' && o.free !== false && !o.segment);
+            const carrier = carried ? adopt(createNode(map, section, 'draw_emit', prefix, o, depth)) : null;
             const kids = [];
             const n = Math.round(num(section.rendercount, 0));
+            const childOpts = carrier
+                ? { position: carrier.pos, velocity: carrier.vel, free: false }
+                : o;
             for (let i = 1; i <= n; i++) {
                 const child = sectionByRef(map, section['rendername' + i], prefix);
-                const node = child && child !== section ? spawn(map, child, opts, depth + 1) : null;
+                const node = child && child !== section ? spawn(map, child, childOpts, depth + 1) : null;
                 if (node) kids.push(node);
+            }
+            if (carrier) {
+                let dropped = false;
+                const place = () => kids.forEach((k) => k.setOrigin && k.setOrigin(carrier.pos, carrier.vel));
+                place();
+                const step = carrier.update;
+                carrier.update = function update(dt) {
+                    step(dt);
+                    if (carrier.dead) {
+                        // Life ran out: trails drain, everything else stops.
+                        // dispose() below is what a removed host does instead.
+                        if (!dropped) {
+                            dropped = true;
+                            kids.forEach((k) => (k.release ? k.release() : k.dispose()));
+                        }
+                    } else place();
+                };
+                const drop = carrier.dispose;
+                carrier.dispose = function dispose() {
+                    drop();
+                    if (!dropped) {
+                        dropped = true;
+                        kids.forEach((k) => k.dispose());
+                    }
+                };
+                return carrier;
             }
             return {
                 setOrigin(pos, vel) { kids.forEach((k) => k.setOrigin && k.setOrigin(pos, vel)); },
@@ -583,6 +634,9 @@ export function createFxRuntime(scene, assets) {
         const color = setSrgb(new THREE.Color(), start);
         const pos = opts.position ? opts.position.clone() : new THREE.Vector3();
         const vel = opts.velocity ? opts.velocity.clone() : new THREE.Vector3();
+        // sim_dust "spawns on the Ground" (the guide): a free particle's origin
+        // is the floor, wherever the emitter sat. An attached render keeps its host.
+        if (simBase === 'sim_dust' && opts.free !== false && !segment) pos.y = groundY;
         const terrain = num(section.useterraincolor, 0);
         let obj = null;
         let light = null;
@@ -600,6 +654,7 @@ export function createFxRuntime(scene, assets) {
             vel,
             key: String(section.__key || base),
             maxCount,
+            host: opts.free === false,   // rides a round, a mine, or a simulated draw_multi
             sim: simBase,
             emitAcc: 0,
             emitNext: 0,
@@ -756,8 +811,13 @@ export function createFxRuntime(scene, assets) {
         // emitDelay; the range runs the doubled step.
         const emitDelay = num(section.emitdelay, HOLD) * EMIT_LOD_SCALE;
         const emitDelayVar = Math.max(0, num(section.emitdelayvar, 0)) * EMIT_LOD_SCALE;
+        // emitDelay past the emitter's own life is the ODF "emit once" idiom
+        // (1.1 s on a 1.0 s sim_dust, 1e6 on a 0.1 s puff): one child at birth.
+        // The bare default (1e30, scaled past HOLD) still means "does not emit".
+        const emitOnce = explicitLife != null && explicitLife < emitDelay && !!section.emitname;
         const emits = (base === 'draw_emit' || base === 'draw_twirl_trail')
-            && emitDelay > 0 && emitDelay < 20;
+            && emitDelay > 0 && emitDelay < HOLD
+            && (emitDelay < 20 || emitOnce);
         const emitLife = num(section.emitlife, 0.45);
         const tracerLength = num(section.tracerlength, 10);
         const segLength = num(section.segmentlength, 0);
@@ -771,10 +831,10 @@ export function createFxRuntime(scene, assets) {
         const staticInner = num(section.innerradius, 0);
         const staticOuter = Math.max(staticInner, num(section.outerradius, 0));
         const staticSeg = segmentTime > 0 ? segmentTime : (animate < HOLD ? animate : 0.4);
-        // An emitter schedules each emission emitDelay + emitDelayVar x a
-        // table entry after the one before.
+        // The engine emits on the first update, then waits emitDelay + 
+        // emitDelayVar x a table entry. draw_static keeps its own first wait.
         const nextEmitDelay = () => Math.max(0, emitDelay + emitDelayVar * tableRand());
-        node.emitNext = emits || base === 'draw_static' ? nextEmitDelay() : emitDelay + Math.random() * emitDelayVar;
+        node.emitNext = emits ? 0 : (base === 'draw_static' ? nextEmitDelay() : emitDelay + Math.random() * emitDelayVar);
 
         const currentRadius = () => {
             const u = Math.min(1, node.age / animate);
@@ -1159,24 +1219,35 @@ export function createFxRuntime(scene, assets) {
                         const extra = new THREE.Vector3();
                         randVec(section.emitvariance, extra);
                         childVel.add(extra);
-                        if (node._followVel) {
+                        // A free emitter (sim_dust, sim_spray) has velocity of
+                        // its own; an attached one inherits the host's.
+                        const inherited = node._followVel || node.vel;
+                        if (inherited) {
                             const inherit = new THREE.Vector3();
                             vec3(section.emitinherit, inherit);
                             childVel.add(new THREE.Vector3(
-                                node._followVel.x * inherit.x, node._followVel.y * inherit.y, node._followVel.z * inherit.z));
+                                inherited.x * inherit.x, inherited.y * inherit.y, inherited.z * inherit.z));
                         }
                         const jitter = new THREE.Vector3();
                         randVec(section.emitposvariance, jitter);
                         const bias = new THREE.Vector3();
                         jitter.add(vec3(section.emitposbias, bias));
-                        const childBase = String(childSec.renderbase || 'draw_twirl').toLowerCase();
-                        const forced = Object.assign({}, childSec, {
-                            renderbase: childSec === section || childBase === 'draw_emit' || childBase === 'draw_twirl_trail'
-                                ? 'draw_twirl' : childSec.renderbase,
-                            lifetime: String(emitLife),
-                            emitdelay: '1e30',
-                        });
-                        spawn(map, forced, { position: node.pos.clone().add(jitter), velocity: childVel }, depth + 1);
+                        const at = { position: node.pos.clone().add(jitter), velocity: childVel };
+                        if (!ref || childSec === section) {
+                            // Twirl-trail self-emission: a puff of THIS section.
+                            // emitLife is TwirlTrailClass's, not EmitRender's.
+                            const forced = Object.assign({}, section, {
+                                renderbase: 'draw_twirl',
+                                lifetime: String(emitLife),
+                                emitdelay: '1e30',
+                            });
+                            spawn(map, forced, at, depth + 1);
+                        } else {
+                            // A named child is its own render. Forcing a nested
+                            // draw_emit into an untextured twirl is what drew
+                            // Hellfire's ground fire as white squares.
+                            spawn(map, childSec, at, depth + 1);
+                        }
                     }
                 }
                 if (node.emitAcc >= node.emitNext) node.emitAcc = 0;

@@ -332,13 +332,15 @@ def named_refs(entry: dict) -> list[str]:
     return out
 
 
-SECTION_REF_RE = re.compile(r"^(rendername\d*|renderbase|emitname|particleclass\d+|flashname)$", re.I)
+SECTION_REF_RE = re.compile(
+    r"^(rendername\d*|renderbase|emitname|particleclass\d+|flashname|effectname\d*)$", re.I)
 
 
 def section_ref_files(entry: dict) -> list[str]:
-    """Files named by "file.section" render, flash, emitter and particle names
-    (renderName = "shellgun_c.render" is the [render] section of shellgun_c.odf).
-    The range borrows such sections when the entry's own tree lacks them
+    """Files named by "file.section" render, flash, emitter, particle and
+    effect names (renderName = "shellgun_c.render" is the [render] section of
+    shellgun_c.odf; effectName1 = "hfire2.render" is hfire2.odf). The range
+    borrows such sections when the entry's own tree lacks them
     (js/fx/weapon-profile.js mergeCrossRefs), so their assets ship too."""
     out = []
     for sec in entry.values():

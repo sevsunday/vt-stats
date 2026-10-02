@@ -299,13 +299,15 @@ function sectionByRef(map, ref, preferPrefix) {
 }
 
 /* "file.section" names a section of another ODF (BZCC reads
- * renderName = "shellgun_c.render" from shellgun_c.odf). The database
- * inlines only a weapon's own ordnance and explosions, so a name the tree
- * cannot resolve is copied in from the named file under xref.<file>., with
- * everything it names in turn; its children then resolve inside it like an
- * inlined ordnance. Names that already resolve are left alone. */
+ * renderName = "shellgun_c.render" from shellgun_c.odf, and a mine's
+ * effectName1 = "hfire2.render" from hfire2.odf). The database inlines only
+ * a weapon's own ordnance and explosions, so a name the tree cannot resolve
+ * is copied in from the named file under xref.<file>., with everything it
+ * names in turn; its children then resolve inside it like an inlined
+ * ordnance. Names that already resolve are left alone. A file-less name
+ * (dusttrail, emit_redblink) is not a cross-file ref and is left untouched. */
 const XREF_PREFIX = 'xref.';
-const SECTION_REF_KEY = /^(rendername\d*|renderbase|emitname|particleclass\d+|flashname)$/;
+const SECTION_REF_KEY = /^(rendername\d*|renderbase|emitname|particleclass\d+|flashname|effectname\d*)$/;
 const XREF_BUCKETS = ['Ordnance', 'Weapon', 'Explosion', 'Effect', 'Misc', 'Mine'];
 const XREF_MAX_SECTIONS = 500;   // sections borrowed per tree; a runaway guard, never reached by the corpus
 const bucketIndex = new WeakMap();
