@@ -60,7 +60,7 @@ SITE_URL = "https://vtstats.bz"
 # v17 adds ODF Guide to that dropdown.
 # v18 adds the Commander profile pane (VTSR-C pill).
 # v19 adds Weapons (the /weapons/ Weapons Lab) to the ODF dropdown.
-PLAYER_TEMPLATE_VERSION = 19
+PLAYER_TEMPLATE_VERSION = 20
 
 # Pre-gen stub path within the repo. Each player slug becomes
 # `player/<slug>/index.html`. The directory is created if missing,
