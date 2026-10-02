@@ -1,0 +1,466 @@
+/* Game Explorer. Theme tokens only; the cockpit overlay takes its accent
+ * colours from the harvested in-game palette through --vt-xp-* properties
+ * set by js/explorer/hud.js, with theme fallbacks here. */
+
+.vt-xp-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  background: var(--kb-bg-body);
+  overflow: hidden;
+}
+
+/* Absolute so the canvas never sizes the stage; the stage is whatever the
+ * viewport leaves under the topnav. */
+#xp-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* The reticle is the pointer while the mouse is captured. */
+#xp-canvas.is-locked {
+  cursor: none;
+}
+
+.vt-xp-status {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  margin: 0;
+  padding: 0.2rem 0.55rem;
+  font-family: var(--vt-font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border-subtle);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ---- cockpit overlay ---------------------------------------------------- */
+
+.vt-xp-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Game palette, overwritten from data/ui/explorer/palette.json. */
+  --vt-xp-hud-text: var(--kb-text-primary);
+  --vt-xp-hull-ok: var(--kb-success);
+  --vt-xp-hull-warn: var(--kb-warning);
+  --vt-xp-hull-bad: var(--kb-danger);
+  --vt-xp-ammo: var(--kb-info);
+  --vt-xp-radar: var(--kb-info);
+  --vt-xp-panel: color-mix(in srgb, var(--kb-info) 50%, transparent);
+  /* bzgame_*.cfg pixel geometry, scaled for modern displays. */
+  --vt-xp-scale: 1.35;
+  font-family: var(--vt-font-system, system-ui, sans-serif);
+  color: var(--vt-xp-hud-text);
+}
+
+.vt-xp-radar {
+  position: absolute;
+  left: calc(8px * var(--vt-xp-scale));
+  bottom: calc(8px * var(--vt-xp-scale));
+  width: calc(260px * var(--vt-xp-scale));
+  height: calc(140px * var(--vt-xp-scale));
+}
+
+.vt-xp-gaugepanel {
+  position: absolute;
+  right: calc(138px * var(--vt-xp-scale));
+  bottom: calc(4px * var(--vt-xp-scale));
+  width: calc(90px * var(--vt-xp-scale));
+  height: calc(90px * var(--vt-xp-scale));
+}
+
+.vt-xp-gauge {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Left half of a tall oval: a dark track under tick-dashed fills. */
+.vt-xp-gauge-track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--kb-bg-body) 60%, transparent);
+  stroke-width: 13;
+  stroke-linecap: butt;
+}
+
+.vt-xp-gauge-hull,
+.vt-xp-gauge-ammo {
+  fill: none;
+  stroke-width: 13;
+  stroke-linecap: butt;
+  stroke-dasharray: 4.2 1.3;
+}
+
+.vt-xp-gauge-hull { stroke: var(--vt-xp-hull-ok); }
+.vt-xp-gauge-hull.is-warn { stroke: var(--vt-xp-hull-warn); }
+.vt-xp-gauge-hull.is-bad { stroke: var(--vt-xp-hull-bad); }
+.vt-xp-gauge-ammo { stroke: var(--vt-xp-ammo); }
+
+/* Numbers sit in the open right half, clear of the stroke. */
+.vt-xp-hull-text,
+.vt-xp-ammo-text {
+  position: absolute;
+  left: calc(52px * var(--vt-xp-scale));
+  width: calc(46px * var(--vt-xp-scale));
+  text-align: left;
+  font-family: var(--vt-font-mono, ui-monospace, monospace);
+  font-size: calc(12px * var(--vt-xp-scale));
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--vt-xp-hud-text);
+  text-shadow: 0 0 2px var(--kb-bg-body);
+}
+
+.vt-xp-hull-text { top: calc(50% - 13px * var(--vt-xp-scale)); }
+.vt-xp-ammo-text { top: calc(50% + 2px * var(--vt-xp-scale)); }
+
+.vt-xp-weapons {
+  position: absolute;
+  right: calc(5px * var(--vt-xp-scale));
+  bottom: calc(5px * var(--vt-xp-scale));
+  width: calc(128px * var(--vt-xp-scale));
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--vt-xp-scale));
+}
+
+/* Pill rows: a circular icon badge overlapping the left edge, name, shots. */
+.vt-xp-wpn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(3px * var(--vt-xp-scale));
+  height: calc(16px * var(--vt-xp-scale));
+  margin-left: calc(8px * var(--vt-xp-scale));
+  padding: 0 calc(5px * var(--vt-xp-scale)) 0 calc(12px * var(--vt-xp-scale));
+  border-radius: calc(8px * var(--vt-xp-scale));
+  background: color-mix(in srgb, var(--kb-bg-body) 62%, transparent);
+  color: var(--vt-xp-hud-text);
+  font-size: calc(9px * var(--vt-xp-scale));
+  line-height: 1;
+  opacity: 0.92;
+}
+
+.vt-xp-wpn.is-on {
+  opacity: 1;
+  background: var(--vt-xp-hull-ok);
+  color: var(--kb-bg-body);
+}
+
+.vt-xp-wpn.is-on .vt-xp-wpn-name,
+.vt-xp-wpn.is-on .vt-xp-wpn-shots {
+  text-shadow: none;
+}
+
+.vt-xp-wpn.is-empty {
+  opacity: 0.5;
+}
+
+.vt-xp-wpn-badge {
+  position: absolute;
+  left: calc(-8px * var(--vt-xp-scale));
+  top: calc(-1px * var(--vt-xp-scale));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(18px * var(--vt-xp-scale));
+  height: calc(18px * var(--vt-xp-scale));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kb-bg-body) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vt-xp-hud-text) 45%, transparent);
+}
+
+.vt-xp-wpn.is-on .vt-xp-wpn-badge {
+  border-color: var(--vt-xp-hull-ok);
+}
+
+.vt-xp-wpn-badge img {
+  width: calc(13px * var(--vt-xp-scale));
+  height: calc(13px * var(--vt-xp-scale));
+  object-fit: contain;
+}
+
+.vt-xp-wpn-name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vt-xp-wpn-shots {
+  min-width: calc(26px * var(--vt-xp-scale));
+  text-align: right;
+  font-family: var(--vt-font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.vt-xp-wpn.is-empty .vt-xp-wpn-shots {
+  font-size: calc(11px * var(--vt-xp-scale));
+}
+
+.vt-xp-reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4.5rem;
+  height: 4.5rem;
+  transform: translate(-50%, -50%);
+  object-fit: contain;
+}
+
+.vt-xp-target {
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  min-height: 1.4rem;
+  font-family: var(--vt-font-mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  color: var(--vt-xp-hull-bad);
+  text-shadow: 0 0 2px var(--kb-bg-body);
+}
+
+.vt-xp-chip {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-xp-chip-dead {
+  top: 46%;
+  color: var(--kb-danger);
+}
+
+.vt-xp-chip-toast {
+  top: 38%;
+  font-family: var(--vt-font-mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+}
+
+.vt-xp-hint {
+  position: absolute;
+  left: 50%;
+  top: 0.75rem;
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: 52rem;
+  padding: 0.2rem 1.6rem 0.2rem 0.6rem;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--kb-text-muted);
+  background: color-mix(in srgb, var(--kb-bg-card) 70%, transparent);
+  pointer-events: auto;
+}
+
+.vt-xp-hint-close {
+  position: absolute;
+  right: 0.25rem;
+  top: 0;
+  padding: 0 0.3rem;
+  line-height: 1.4;
+  color: var(--kb-text-muted);
+  background: none;
+  border: 0;
+}
+
+/* ---- drawers ------------------------------------------------------------ */
+
+.vt-xp-palette,
+.vt-xp-build {
+  position: absolute;
+  top: 2.6rem;
+  bottom: 1rem;
+  left: 1rem;
+  width: min(22rem, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  overflow: hidden;
+  pointer-events: auto;
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border-subtle);
+  color: var(--kb-text-primary);
+  z-index: 3;
+}
+
+.vt-xp-panel-titlerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vt-xp-palette-title {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vt-xp-close {
+  width: 1.6rem;
+  height: 1.6rem;
+  line-height: 1;
+  font-size: 1.1rem;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-subtle);
+  border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-xp-close:hover {
+  color: var(--kb-text-primary);
+  border-color: var(--kb-primary);
+}
+
+.vt-xp-search {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.3rem 0.45rem;
+  color: var(--kb-text-primary);
+  background: var(--kb-bg-subtle);
+  border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-xp-team,
+.vt-xp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.vt-xp-team-btn,
+.vt-xp-chip-btn,
+.vt-xp-chip:where(button),
+.vt-xp-card {
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-subtle);
+  border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-xp-chips .vt-xp-chip,
+.vt-xp-team-btn {
+  position: static;
+  transform: none;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-subtle);
+  border: 1px solid var(--kb-border-subtle);
+}
+
+.vt-xp-palette-list .vt-xp-chip {
+  position: static;
+  transform: none;
+  align-self: flex-start;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+.vt-xp-team-btn.is-on,
+.vt-xp-chip.is-on,
+.vt-xp-card.is-on {
+  color: var(--kb-text-primary);
+  border-color: var(--kb-primary);
+}
+
+.vt-xp-palette-list {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.vt-xp-card {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  text-align: left;
+}
+
+.vt-xp-card img {
+  width: 2.4rem;
+  height: 2.4rem;
+  object-fit: contain;
+}
+
+.vt-xp-card-name {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--kb-text-primary);
+}
+
+.vt-xp-card-meta {
+  display: block;
+  font-family: var(--vt-font-mono, ui-monospace, monospace);
+  font-size: 0.68rem;
+  color: var(--kb-text-muted);
+}
+
+.vt-xp-card > span:not(.vt-xp-card-add) {
+  min-width: 0;
+}
+
+.vt-xp-card-name {
+  flex: 1;
+}
+
+/* Quick add: drops the unit in front of the player without arming. */
+.vt-xp-card-add {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  line-height: 1.4rem;
+  text-align: center;
+  font-size: 1rem;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: 50%;
+}
+
+.vt-xp-card:hover .vt-xp-card-add,
+.vt-xp-card-add:hover {
+  color: var(--kb-text-primary);
+  border-color: var(--kb-primary);
+}
+
+.vt-xp-palette-note,
+.vt-xp-scrap,
+.vt-xp-empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--kb-text-muted);
+}
+
+.vt-xp-card:disabled {
+  opacity: 0.45;
+}
+
+@media (max-width: 900px) {
+  .vt-xp-hud { --vt-xp-scale: 1; }
+  .vt-xp-hint { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vt-xp-chip { transition: none; }
+}

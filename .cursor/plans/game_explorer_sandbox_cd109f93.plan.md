@@ -4,55 +4,55 @@ overview: A new standalone `/explorer/` page that lets the user drive any VSR sh
 todos:
   - id: p0-gates
     content: "Phase 0: run verify_terrain_scale.py + check_weapon_fx.mjs + check_weapon_weave.mjs green; snapshot odf_engine_props.md physics key lists into the physics module comments"
-    status: pending
+    status: completed
   - id: m1-shell
     content: "M1: explorer/index.html (canonical topnav, root-vendor import map, stage + HUD DOM) + css/explorer.css + js/explorer/main.js URL/boot/loop"
-    status: pending
+    status: completed
   - id: m1-world
     content: "M1: js/explorer/world.js adapter over replay loader/terrain-owners/objects/tile-floor/props/liquids/sky with identical ?v= specifiers; groundAt/normalAt/tunnelAt/cellTypeAt/spawns"
-    status: pending
+    status: completed
   - id: m1-models-export
     content: "M1: additive ensureOdfs() export in replay-ship-models.js for on-demand catalog loads"
-    status: pending
+    status: completed
   - id: m1-shipctl
     content: "M1: js/explorer/ship-controller.js port (node map, articulation, bank poses, team color, maps, ship lights w/ terrain pools, snipe marker, hardpoint queries, deploy)"
-    status: pending
+    status: completed
   - id: m1-physics
     content: "M1: js/explorer/physics.js fixed-step hover force model (LIFT_SPRING/DAMP, accelThrust/Brake/DragStop, alphaTrack, airborne mults, jump) + tracked/walker/pilot kinematics + cliff/water/bounds rules"
-    status: pending
+    status: completed
   - id: m1-camera
     content: "M1: js/explorer/camera.js chase (free look, wheel, ground clamp), first person + cockpit, free orbit; input scheme + touch gate"
-    status: pending
+    status: completed
   - id: m2-sim-targets
     content: "M2: additive opts.getTargets() in js/fx/weapon-sim.js with single-target fallback; both weapon gates stay green"
-    status: pending
+    status: completed
   - id: m2-combat
     content: "M2: js/explorer/combat.js (sim per shooter, FX runtime, positional audio, ammo/regen, reticle frames) + snipe-eject on hp_eyepoint hits"
-    status: pending
+    status: completed
   - id: m3-units
     content: "M3: js/explorer/units.js registry (hp/armor/explosionName death), gun-tower turret AI (detectRange/omegaTurret/alphaTurret/yaw limits), sphere collisions + guide damage formula, enter/exit ship"
-    status: pending
+    status: completed
   - id: m3-palette
     content: "M3: js/explorer/palette.js Add-object drawer (odf.min.json Vehicle/Building, chips, thumbnails, team, terrain-raycast placement, yaw drag)"
-    status: pending
+    status: completed
   - id: m4-hud-assets
     content: "M4: scripts/build_explorer_hud_assets.py -> data/ui/explorer (gauge, radar, wire, icons, sprite dots, bzgame_init_color palette)"
-    status: pending
+    status: completed
   - id: m4-hud
     content: "M4: js/explorer/hud.js game-faithful HUD (gauges, weapon strip, radar, target wire panel, readouts) on scoped --vt-hud-* tokens; quality settings"
-    status: pending
+    status: completed
   - id: nav-stubs
     content: "Topnav: Game Explorer in the Models dropdown on all shells + both templates; bump PLAYER_TEMPLATE_VERSION / MAP_TEMPLATE_VERSION; regenerate stubs once"
-    status: pending
+    status: completed
   - id: m6-gate
     content: "M6: _investigation/check_explorer_physics.mjs headless gate (settle altitude, top speeds vs ODF + telemetry envelopes, drag stop, cliff block, collision formula, multi-target parity)"
-    status: pending
+    status: completed
   - id: m6-docs
     content: "M6: DEVELOPER_GUIDE.md section + file map, AGENTS.md, project-overview.mdc, README.md"
-    status: pending
+    status: completed
   - id: m5-economy
     content: "M5 (post-v1): build system — producer menus via build-tree walk, scrap bank 40+20/pool with measured regen bands, buildTime, charge-at-START, one-order-per-producer, armory drops, pool upgrades, power/requireText gates"
-    status: pending
+    status: completed
 isProject: false
 ---
 
