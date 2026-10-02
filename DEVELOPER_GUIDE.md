@@ -2747,8 +2747,9 @@ with $R^C$ = commander VTSR-C (anchor when unrated), $T$ = **mean THUG VTSR-T** 
 **Dashboard side** (the Outcome card `#section-faction`, ahead of Match Highlights). Match-global and ALWAYS unfiltered (highlights passthrough contract — the renderer takes `currentData`, never the filtered view). A single-player filter hides the team panels and keeps the read. The card is one surface:
 
 1. **Team panels** — roster, combat, and scrap, always first. Thug chips show pre-match VTSR-T. Commander chips show VTSR-C and VTSR-T. The heading shows avg T, via `rosterRatings()`.
-2. **Read** (`#outcome-read`) — favored headline, gauge, commander-gap and thug-gap chips, then the verdict chip (provenance beside it).
-3. **How it actually played out** (`#outcome-after`) — per-team mean performance vs expected, the top axis gaps (winner − loser) annotated with corpus sign-agreement from `validation_summary.latest_detail.axis_outcome`, the econ composite framed as *recorded, not scored* ($\alpha_c = 1$), and commander VTSR-C movement (`before → after` and the signed change). Luxury axes are excluded per the v2.10 copy contract.
+2. **Balonce & Elo** (`#outcome-elo-fold`) — a `<details>` that starts closed. The summary is the label plus a chevron (down when closed, up when open). Items 3 and 4 live inside it. The disclosure hides when both slots are empty. Opening it survives a match switch in the same visit; a refresh starts closed again.
+3. **Read** (`#outcome-read`) — favored headline, gauge, commander-gap and thug-gap chips, then the verdict chip (provenance beside it).
+4. **How it actually played out** (`#outcome-after`) — per-team mean performance vs expected, the top axis gaps (winner − loser) annotated with corpus sign-agreement from `validation_summary.latest_detail.axis_outcome`, the econ composite framed as *recorded, not scored* ($\alpha_c = 1$), and commander VTSR-C movement (`before → after` and the signed change). Luxury axes are excluded per the v2.10 copy contract.
 
 The per-commander stakes block ("What was on the line") and the "Does it work?" receipts are not on this card. Corpus accuracy stays on the ELO page.
 
