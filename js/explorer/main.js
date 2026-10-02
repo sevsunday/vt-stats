@@ -2,9 +2,12 @@
 
 import * as THREE from 'three';
 import { loadWorld } from './world.js';
+import { loadManifest } from '../../_map-analysis/render/js/loader.js?v=terrain1';
 import {
-  loadModelIndex, loadOdfDb, loadReticles, loadExplorerHud, modelForOdf, stemOf, dataUrl,
+  loadModelIndex, loadOdfDb, loadReticles, loadExplorerHud, loadMapRegistry,
+  modelForOdf, stemOf, unitNameOf, dataUrl,
 } from './catalog.js';
+import { createFinder, readPref, writePref, PREF_MAP, PREF_SHIP } from './nav-search.js';
 import { createCameraRig } from './camera.js';
 import { createUnits } from './units.js';
 import { createCombat } from './combat.js';
@@ -14,10 +17,81 @@ import { createHud } from './hud.js';
 import { createEconomy } from './economy.js';
 import { profileFrom, bodyVelocity } from './physics.js';
 
+const SITE_MAP = 'vsreuronig';
+const SITE_SHIP = 'ivtank_vsr';
+const DRIVEABLE = new Set(['hover', 'tracked', 'morph', 'walker']);
+const SHIP_SKIP = /virtual_class|cpu|insane/i;
+const SHIP_FACTIONS = [['all', 'All'], ['i', 'ISDF'], ['e', 'Hadean'], ['f', 'Scion'], ['c', 'Cerberi']];
+
 const params = new URLSearchParams(location.search);
-const mapStem = (params.get('map') || 'vsreuronig').toLowerCase();
-const shipOdf = params.get('ship') || 'ivtank_vsr';
 const team = Number(params.get('team')) === 2 ? 2 : 1;
+
+/** URL param, then the saved default, then the site default. */
+function resolveChoice(param, prefKey, site) {
+  const fromUrl = params.get(param);
+  if (fromUrl) return { value: String(fromUrl).trim().toLowerCase(), source: 'url' };
+  const pref = readPref(prefKey);
+  if (pref) return { value: pref, source: 'pref' };
+  return { value: site, source: 'site' };
+}
+
+function stripTitlePrefixes(raw) {
+  let title = String(raw || '');
+  while (true) {
+    const next = title.replace(/^[A-Za-z0-9]+:\s*/, '');
+    if (next === title) break;
+    title = next;
+  }
+  return title.trim();
+}
+
+function buildMapRows(manifest, registry) {
+  const reg = registry && typeof registry === 'object' ? registry : {};
+  return (manifest || []).map((entry) => {
+    const id = String(entry.stem || '').toLowerCase();
+    const info = reg[id] && typeof reg[id] === 'object' ? reg[id] : {};
+    const raw = info.title || entry.name || id;
+    const name = stripTitlePrefixes(raw) || id;
+    const bits = [];
+    if (info.author) bits.push(String(info.author));
+    if (info.pools) bits.push(String(info.pools) + ' pools');
+    if (info.formatted_size) bits.push(String(info.formatted_size));
+    return {
+      id,
+      name,
+      meta: bits.join(' · '),
+      thumb: info.image_path ? dataUrl(String(info.image_path)) : '',
+      vsr: /vsr/i.test(id) || /vsr/i.test(String(raw)),
+      search: (name + ' ' + id + ' ' + raw).toLowerCase(),
+    };
+  }).filter((row) => row.id);
+}
+
+function buildShipRows(db, index) {
+  const table = (db && db.Vehicle) || {};
+  const rows = [];
+  Object.keys(table).forEach((filename) => {
+    if (SHIP_SKIP.test(filename)) return;
+    const data = table[filename];
+    const go = data.GameObjectClass || {};
+    if (!go.geometryName && !go.unitName) return;
+    const model = modelForOdf(index, filename);
+    const archetype = model && model.drive && model.drive.archetype;
+    if (!DRIVEABLE.has(archetype)) return;
+    const id = stemOf(filename);
+    const name = unitNameOf({ data, filename });
+    rows.push({
+      id,
+      name,
+      meta: id,
+      thumb: model.thumb ? dataUrl('models/' + model.thumb) : '',
+      faction: (filename[0] || '').toLowerCase(),
+      vsr: /vsr/i.test(filename),
+      search: (name + ' ' + id + ' ' + filename).toLowerCase(),
+    });
+  });
+  return rows;
+}
 const spawnIndex = Number(params.get('spawn') || 0);
 
 const VOLUME_KEY = 'vt.xp.volume';      // 0..100
@@ -62,8 +136,9 @@ function cssColor(name, fallback) {
 
 async function boot() {
   say('Loading catalogs\u2026');
-  const [index, db, reticles, hudArt] = await Promise.all([
+  const [index, db, reticles, hudArt, manifest, registry] = await Promise.all([
     loadModelIndex(), loadOdfDb(), loadReticles(), loadExplorerHud(),
+    loadManifest(), loadMapRegistry(),
   ]);
   const catalog = {
     db,
@@ -72,18 +147,90 @@ async function boot() {
     reticles,
   };
 
+  let mapChoice = resolveChoice('map', PREF_MAP, SITE_MAP);
+  let shipChoice = resolveChoice('ship', PREF_SHIP, SITE_SHIP);
+  let mapStem = mapChoice.value;
+  let shipOdf = stemOf(shipChoice.value);
+  let rig = null;
+  let units = null;
+  let hud = null;
+  let mapFallbackNote = '';
+
+  function note(text) {
+    if (hud) hud.toast(text);
+    else say(text);
+  }
+
+  const mapMount = document.querySelector('[data-xp-finder="map"]');
+  const shipMount = document.querySelector('[data-xp-finder="ship"]');
+  const mapFinder = mapMount ? createFinder(mapMount, {
+    id: 'map',
+    icon: 'bi-map',
+    placeholder: 'Search maps',
+    rows: buildMapRows(manifest, registry),
+    currentId: mapStem,
+    defaultId: readPref(PREF_MAP),
+    onOpen() { if (rig) rig.releaseLock(); },
+    onPick(row) { goToMap(row.id); },
+    onDefault(id, row) {
+      writePref(PREF_MAP, id);
+      note(id ? ('Default map: ' + row.name) : 'Default map cleared');
+    },
+  }) : null;
+  const shipFinder = shipMount ? createFinder(shipMount, {
+    id: 'ship',
+    icon: 'bi-joystick',
+    placeholder: 'Search ships',
+    rows: buildShipRows(db, index),
+    currentId: shipOdf,
+    defaultId: readPref(PREF_SHIP),
+    factions: SHIP_FACTIONS,
+    onOpen() { if (rig) rig.releaseLock(); },
+    onPick(row) {
+      if (rig) rig.requestLock();
+      swapShip(row.id);
+    },
+    onDefault(id, row) {
+      writePref(PREF_SHIP, id);
+      note(id ? ('Default ship: ' + row.name) : 'Default ship cleared');
+    },
+  }) : null;
+
+  function goToMap(stem) {
+    const url = new URL(location.href);
+    const current = units && units.player();
+    url.searchParams.set('map', stem);
+    url.searchParams.set('ship', current ? stemOf(current.odf) : shipOdf);
+    url.searchParams.set('team', String(current ? current.team : team));
+    url.searchParams.delete('spawn');
+    location.assign(url.href);
+  }
+
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = false;
 
   say('Loading ' + mapStem + '\u2026');
-  const world = await loadWorld(mapStem, renderer, { tiles: true, fog: true });
-  const rig = createCameraRig(world.camera, canvas, world);
+  let world;
+  try {
+    world = await loadWorld(mapStem, renderer, { tiles: true, fog: true });
+  } catch (err) {
+    if (mapChoice.source !== 'pref' || mapStem === SITE_MAP) throw err;
+    writePref(PREF_MAP, '');
+    if (mapFinder) mapFinder.setDefault('');
+    mapFallbackNote = 'Saved map unavailable, loading the site default';
+    mapStem = SITE_MAP;
+    mapChoice = { value: SITE_MAP, source: 'site' };
+    if (mapFinder) mapFinder.setCurrent(SITE_MAP);
+    say('Loading ' + SITE_MAP + '\u2026');
+    world = await loadWorld(SITE_MAP, renderer, { tiles: true, fog: true });
+  }
+  rig = createCameraRig(world.camera, canvas, world);
   resize(renderer, rig);
   window.addEventListener('resize', () => resize(renderer, rig));
 
-  const units = createUnits(world, catalog);
+  units = createUnits(world, catalog);
   say('Loading weapons\u2026');
   // Scene-space ground: shots and effects live outside the mirrored group.
   const groundScene = (x, z) => world.probe(x, -z, 0).height;
@@ -95,7 +242,8 @@ async function boot() {
     splashUrl: splashFile ? dataUrl('ui/explorer/' + splashFile) : null,
   });
 
-  const hud = createHud(stage, reticles, hudArt);
+  hud = createHud(stage, reticles, hudArt);
+  if (mapFallbackNote) hud.toast(mapFallbackNote);
   const palette = createPalette(stage, catalog);
   const economy = createEconomy(stage, catalog, units);
 
@@ -159,7 +307,17 @@ async function boot() {
   }
 
   say('Loading ' + shipOdf + '\u2026');
-  const player = await spawnPlayer(lastSpawn);
+  let player = await spawnPlayer(lastSpawn);
+  if (!player && shipChoice.source === 'pref' && shipOdf !== SITE_SHIP) {
+    writePref(PREF_SHIP, '');
+    if (shipFinder) shipFinder.setDefault('');
+    hud.toast('Saved ship unavailable');
+    shipOdf = SITE_SHIP;
+    shipChoice = { value: SITE_SHIP, source: 'site' };
+    lastSpawn.odf = SITE_SHIP;
+    if (shipFinder) shipFinder.setCurrent(SITE_SHIP);
+    player = await spawnPlayer(lastSpawn);
+  }
   if (!player) {
     say('No mesh for ' + shipOdf);
     return;
@@ -174,7 +332,10 @@ async function boot() {
     const pilot = await units.spawn(spec);
     if (!pilot) return;
     combat.arm(pilot);
-    if (wasPlayer) takeControl(pilot);
+    if (wasPlayer) {
+      takeControl(pilot);
+      syncUrl(pilot);
+    }
   });
   units.setOnDeath((unit) => {
     effects.drop(unit);
@@ -307,16 +468,51 @@ async function boot() {
   async function respawn() {
     const me = units.player();
     if (me && me.alive) return;
-    await spawnPlayer(lastSpawn);
+    const unit = await spawnPlayer(lastSpawn);
+    if (unit) syncUrl(unit);
     rig.requestLock();
+  }
+
+  /** Replace the driven hull in place. Spawn first so a missing mesh
+   * leaves the current one where it is. */
+  async function swapShip(odf) {
+    if (!units || !units.player()) {
+      note('Ship not ready');
+      return;
+    }
+    const me = units.player();
+    const spec = {
+      odf,
+      x: me.body.x,
+      z: me.body.z,
+      yaw: me.body.yaw || 0,
+      team: me.team,
+    };
+    const unit = await units.spawn(spec);
+    if (!unit) {
+      note('No mesh for ' + odf);
+      return;
+    }
+    effects.drop(me);
+    combat.drop(me.id);
+    units.remove(me);
+    takeControl(unit);
+    lastSpawn.odf = odf;
+    lastSpawn.x = spec.x;
+    lastSpawn.z = spec.z;
+    lastSpawn.yaw = spec.yaw;
+    lastSpawn.team = spec.team;
+    syncUrl(unit);
   }
 
   function syncUrl(current) {
     const url = new URL(location.href);
+    shipOdf = stemOf(current.odf);
     url.searchParams.set('map', mapStem);
-    url.searchParams.set('ship', stemOf(current.odf));
+    url.searchParams.set('ship', shipOdf);
     url.searchParams.set('team', String(current.team));
     if (url.search !== location.search) history.replaceState(null, '', url);
+    if (shipFinder) shipFinder.setCurrent(shipOdf);
   }
 
   say(world.mapData.name || mapStem);

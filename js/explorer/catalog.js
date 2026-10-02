@@ -19,6 +19,7 @@ let indexP = null;
 let odfP = null;
 let reticleP = null;
 let hudP = null;
+let registryP = null;
 
 export function loadModelIndex() {
   if (!indexP) indexP = loadJson('models/index.json');
@@ -42,6 +43,14 @@ export function loadExplorerHud() {
     hudP = loadJson('ui/explorer/index.json').catch(() => null);
   }
   return hudP;
+}
+
+/** Map-browser registry (title, author, thumbnail). Missing file degrades
+ * to an empty object so the finder can still list stems from the render
+ * manifest. */
+export function loadMapRegistry() {
+  if (!registryP) registryP = loadJson('map-registry.json').catch(() => ({}));
+  return registryP;
 }
 
 export function normOdf(name) {

@@ -55,6 +55,196 @@
   text-transform: uppercase;
 }
 
+/* Map and ship finders. On a phone they wrap onto their own row under the
+ * brand (order-1); from md up they sit in the gap before the menu. */
+.vt-xp-navsearch {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.vt-xp-finder {
+  position: relative;
+  flex: 1 1 8rem;
+  min-width: 0;
+  max-width: 16rem;
+}
+
+.vt-xp-finder-field {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
+  background: var(--kb-bg-subtle);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: 999px;
+}
+
+.vt-xp-finder-field:focus-within {
+  border-color: var(--kb-primary);
+}
+
+.vt-xp-finder-icon {
+  color: var(--kb-text-muted);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.vt-xp-finder-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--kb-text-primary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.vt-xp-finder-input::placeholder {
+  color: var(--kb-text-muted);
+}
+
+.vt-xp-finder-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.vt-xp-finder-menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  min-width: 16rem;
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 420px);
+  overflow: hidden;
+  background: var(--kb-bg-card);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: 0.5rem;
+  box-shadow: var(--vt-shadow-elevation-2);
+}
+
+.vt-xp-finder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.4rem 0.45rem 0;
+}
+
+.vt-xp-finder-chip {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.68rem;
+  color: var(--kb-text-secondary);
+  background: var(--kb-bg-subtle);
+  border: 1px solid var(--kb-border-subtle);
+  border-radius: 999px;
+}
+
+.vt-xp-finder-chip.is-on {
+  color: var(--kb-text-primary);
+  border-color: var(--kb-primary);
+}
+
+.vt-xp-finder-list {
+  overflow: auto;
+  padding: 0.25rem 0;
+}
+
+.vt-xp-finder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.45rem;
+  cursor: pointer;
+}
+
+.vt-xp-finder-row.is-on {
+  background: var(--kb-bg-subtle);
+}
+
+.vt-xp-finder-row img,
+.vt-xp-finder-thumb {
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  object-fit: contain;
+  background: var(--kb-bg-subtle);
+  border-radius: 0.25rem;
+}
+
+.vt-xp-finder-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.vt-xp-finder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--kb-text-primary);
+}
+
+.vt-xp-finder-row.is-current .vt-xp-finder-name {
+  font-weight: 650;
+}
+
+.vt-xp-finder-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--vt-font-mono, ui-monospace, monospace);
+  font-size: 0.66rem;
+  color: var(--kb-text-muted);
+}
+
+.vt-xp-finder-pin {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  line-height: 1;
+  color: var(--kb-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0.25rem;
+}
+
+.vt-xp-finder-pin.is-on,
+.vt-xp-finder-pin:hover {
+  color: var(--kb-warning);
+}
+
+.vt-xp-finder-empty,
+.vt-xp-finder-foot {
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.68rem;
+  color: var(--kb-text-muted);
+}
+
+.vt-xp-finder-foot {
+  border-top: 1px solid var(--kb-border-subtle);
+}
+
+@media (max-width: 767.98px) {
+  .vt-xp-navsearch {
+    flex-basis: 100%;
+  }
+
+  .vt-xp-finder {
+    max-width: none;
+  }
+}
+
 /* ---- cockpit overlay ---------------------------------------------------- */
 
 .vt-xp-hud {
